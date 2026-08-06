@@ -48,6 +48,11 @@ final class LoginStrings {
   String get privacyPolicy => isEnglish ? 'Privacy Policy' : '《隐私政策》';
   String get login => isEnglish ? 'Sign in' : '登录';
   String get loggingIn => isEnglish ? 'Signing in...' : '登录中...';
+  String get or => isEnglish ? 'or' : '或';
+  String get googleLogin =>
+      isEnglish ? 'Continue with Google' : '使用 Google 登录';
+  String get googleLoginCancelled =>
+      isEnglish ? 'Google sign-in was cancelled' : '已取消 Google 登录';
   String get noAccount => isEnglish ? "Don't have an account?" : '还没有账号？';
   String get registerNow => isEnglish ? 'Register' : '立即注册';
   String get countryPickerTitle =>

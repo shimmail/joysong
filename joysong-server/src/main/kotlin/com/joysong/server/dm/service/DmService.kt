@@ -7,6 +7,7 @@ import com.joysong.server.dm.entity.DmConversationEntity
 import com.joysong.server.dm.entity.DmMessageEntity
 import com.joysong.server.dm.repository.DmConversationRepository
 import com.joysong.server.dm.repository.DmMessageRepository
+import com.joysong.server.identity.service.IdentityAuthorizationService
 import com.joysong.server.notification.service.NotificationService
 import com.joysong.server.user.repository.UserRepository
 import org.springframework.data.domain.PageRequest
@@ -24,7 +25,8 @@ class DmService(
     private val conversationRepository: DmConversationRepository,
     private val messageRepository: DmMessageRepository,
     private val notificationService: NotificationService,
-    private val userRepository: UserRepository
+    private val userRepository: UserRepository,
+    private val identityAuthorizationService: IdentityAuthorizationService
 ) {
 
     /**
@@ -33,7 +35,7 @@ class DmService(
     fun getConversations(userId: String): List<DmConversationResponse> {
         return conversationRepository.findByUserAIdOrUserBIdOrderByLastMessageAtDesc(userId, userId)
             .filter { it.userAId != "CS_ADMIN" && it.userBId != "CS_ADMIN" }
-            .map { it.toResponse() }
+            .map { it.toResponseFor(userId) }
     }
 
     /**
@@ -49,7 +51,7 @@ class DmService(
 
         val existing = conversationRepository.findByUserAIdAndUserBId(userAId, userBId)
         if (existing != null) {
-            return existing.toResponse()
+            return existing.toResponseFor(userId)
         }
 
         val conversation = DmConversationEntity(
@@ -60,9 +62,9 @@ class DmService(
             updatedAt = LocalDateTime.now()
         )
         return try {
-            conversationRepository.save(conversation).toResponse()
+            conversationRepository.save(conversation).toResponseFor(userId)
         } catch (e: org.springframework.dao.DataIntegrityViolationException) {
-            conversationRepository.findByUserAIdAndUserBId(userAId, userBId)!!.toResponse()
+            conversationRepository.findByUserAIdAndUserBId(userAId, userBId)!!.toResponseFor(userId)
         }
     }
 
@@ -109,11 +111,19 @@ class DmService(
         require(messageType in setOf(MESSAGE_TYPE_TEXT, MESSAGE_TYPE_IMAGE)) { "不支持的消息类型" }
         if (messageType == MESSAGE_TYPE_IMAGE) require(content.startsWith("http")) { "图片地址无效" }
 
-        val conversation = conversationRepository.findById(conversationId).orElse(null)
+        // 首条消息限制的检查与写入必须在同一个会话行锁内完成，避免并发请求同时通过。
+        val conversation = conversationRepository.findByIdForUpdate(conversationId)
             ?: throw IllegalArgumentException("会话不存在")
 
         if (conversation.userAId != senderId && conversation.userBId != senderId) {
             throw IllegalArgumentException("无权发送消息到该会话")
+        }
+
+        val receiverId = conversation.otherParticipant(senderId)
+        if (!identityAuthorizationService.hasActiveProfessionalRole(receiverId)) {
+            val receiverHasReplied = messageRepository.existsByConversationIdAndSenderId(conversationId, receiverId)
+            val senderAlreadySent = messageRepository.existsByConversationIdAndSenderId(conversationId, senderId)
+            require(receiverHasReplied || !senderAlreadySent) { "请等待对方回复后再发送消息" }
         }
 
         // 创建消息
@@ -142,7 +152,6 @@ class DmService(
         conversationRepository.save(conversation)
 
         // 给接收方创建通知
-        val receiverId = if (conversation.userAId == senderId) conversation.userBId else conversation.userAId
         val notificationContent = if (messageType == MESSAGE_TYPE_IMAGE) IMAGE_MESSAGE_SUMMARY else content
         val truncatedContent = if (notificationContent.length > 50) notificationContent.substring(0, 50) else notificationContent
         notificationService.createNotification(
@@ -196,5 +205,24 @@ class DmService(
         }
 
         messageRepository.delete(message)
+    }
+
+    private fun DmConversationEntity.otherParticipant(userId: String): String = when (userId) {
+        userAId -> userBId
+        userBId -> userAId
+        else -> throw IllegalArgumentException("无权访问该会话")
+    }
+
+    private fun DmConversationEntity.toResponseFor(currentUserId: String): DmConversationResponse {
+        val otherUserId = otherParticipant(currentUserId)
+        val otherUserHasSent = messageRepository.existsByConversationIdAndSenderId(id, otherUserId)
+        val firstMessageLimitApplies =
+            !identityAuthorizationService.hasActiveProfessionalRole(otherUserId) && !otherUserHasSent
+        val waitingForReply = firstMessageLimitApplies &&
+            messageRepository.existsByConversationIdAndSenderId(id, currentUserId)
+        return toResponse(
+            firstMessageLimitApplies = firstMessageLimitApplies,
+            waitingForReply = waitingForReply
+        )
     }
 }

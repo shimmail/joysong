@@ -27,11 +27,15 @@ Android 客户端                          服务端
 
 ### 1.2 Google Cloud Console 配置
 
+https://console.cloud.google.com/apis/credentials?project=citric-pager-502807-s3
+
+https://console.cloud.google.com/auth/clients/1074438635273-6pqsacnv472k03gq8f3bssf43hrch9lq.apps.googleusercontent.com?project=citric-pager-502807-s3
+
 #### 创建 OAuth 客户端（需要两个）
 
 | 客户端 | 类型 | 用途 | 关键配置 |
 |--------|------|------|----------|
-| 客户端 1 | **Android** | 绑定包名和 SHA-1 | 包名 `com.joysong.app`，SHA-1 通过 `gradlew signingReport` 获取 |
+| 客户端 1 | **Android** | 绑定包名和 SHA-1 | 包名 `com.joysong.app`，SHA-1 7E:84:A6:FB:A9:E6:AE:CD:9D:8E:B5:2F:51:F8:F3:EA:76:9A:D1:DB |
 | 客户端 2 | **Web 应用** | 登录验证（核心） | 授权来源和重定向 URI 填 `http://localhost:8080` |
 
 > **⚠️ 重要：** `requestIdToken()` **必须**使用 Web 应用类型的客户端 ID，不能使用 Android 类型的，否则登录失败。
@@ -368,7 +372,7 @@ implementation("com.aliyun:tea-openapi:0.3.2")
 | 配置项 | 值 |
 |--------|-----|
 | Android 包名 | `com.joysong.app` |
-| Debug SHA-1 | `AC:F0:C0:18:C2:66:DF:87:72:20:8C:56:EE:BE:97:63:3E:36:E9:3F` |
+| Debug SHA-1 | 7E:84:A6:FB:A9:E6:AE:CD:9D:8E:B5:2F:51:F8:F3:EA:76:9A:D1:DB（debug版） |
 | Web 客户端 ID | `1074438635273-5pqevlkgfmmb910dkjm7vvhikoui5oh9.apps.googleusercontent.com` |
 | 代理地址 | `http://127.0.0.1:7890`（Clash） |
 | Google Cloud 项目 | `citric-pager-502807-s3` |

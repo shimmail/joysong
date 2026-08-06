@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:joysong_flutter/core/files/app_file_picker.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/network/api_client.dart';
 import 'package:joysong_flutter/features/account_security/data/account_security_api.dart';
@@ -32,6 +33,7 @@ import 'package:joysong_flutter/features/identity/data/identity_repository_impl.
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
 import 'package:joysong_flutter/features/messaging/data/messaging_remote_data_source.dart';
 import 'package:joysong_flutter/features/messaging/data/messaging_repository_impl.dart';
+import 'package:joysong_flutter/features/messaging/data/secure_messaging_preferences_store.dart';
 import 'package:joysong_flutter/features/messaging/domain/messaging_models.dart';
 import 'package:joysong_flutter/features/messaging/domain/messaging_repository.dart';
 import 'package:joysong_flutter/features/messaging/presentation/messaging_controllers.dart';
@@ -64,6 +66,7 @@ class AppShell extends StatefulWidget {
     this.languageTagProvider,
     this.allowPreviewData = false,
     this.currentUserId = '',
+    this.onSwitchAccount,
     this.onLogout,
     super.key,
   });
@@ -74,6 +77,7 @@ class AppShell extends StatefulWidget {
   final LanguageTagProvider? languageTagProvider;
   final bool allowPreviewData;
   final String currentUserId;
+  final Future<void> Function(BuildContext context)? onSwitchAccount;
   final Future<void> Function()? onLogout;
 
   @override
@@ -81,6 +85,8 @@ class AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<AppShell> {
+  final GlobalKey<NavigatorState> _contentNavigatorKey =
+      GlobalKey<NavigatorState>();
   int _selectedIndex = 0;
   DiscoverContentType _discoverType = DiscoverContentType.all;
   HomeRepository? _homeRepository;
@@ -98,6 +104,9 @@ class _AppShellState extends State<AppShell> {
   AgentChatController? _agentChatController;
   AgentPlanController? _agentPlanController;
 
+  NavigatorState get _contentNavigator =>
+      _contentNavigatorKey.currentState ?? Navigator.of(context);
+
   @override
   void initState() {
     super.initState();
@@ -109,7 +118,8 @@ class _AppShellState extends State<AppShell> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.apiClient != widget.apiClient ||
         oldWidget.apiRoot != widget.apiRoot ||
-        oldWidget.accessTokenProvider != widget.accessTokenProvider) {
+        oldWidget.accessTokenProvider != widget.accessTokenProvider ||
+        oldWidget.currentUserId != widget.currentUserId) {
       _createDependencies();
     }
   }
@@ -151,7 +161,21 @@ class _AppShellState extends State<AppShell> {
       ApiMessagingRemoteDataSource(apiClient),
     );
     _notificationController = NotificationController(_messagingRepository!);
-    _messagingController = MessagingHubController(_messagingRepository!);
+    _notificationController!.addListener(_handleNotificationStateChanged);
+    unawaited(_notificationController!.refresh());
+    _messagingController = MessagingHubController(
+      _messagingRepository!,
+      currentUserId: widget.currentUserId,
+      preferencesStore: SecureMessagingPreferencesStore(),
+      peerLoader: (userId) async {
+        final profile = await _socialRepository!.getPublicUserProfile(userId);
+        return MessagingPeer(
+          id: profile.id,
+          name: profile.nickname,
+          avatar: profile.avatar,
+        );
+      },
+    );
 
     final apiRoot = widget.apiRoot;
     final accessTokenProvider = widget.accessTokenProvider;
@@ -174,6 +198,7 @@ class _AppShellState extends State<AppShell> {
   void _disposeControllers() {
     _ordersController?.dispose();
     _socialController?.dispose();
+    _notificationController?.removeListener(_handleNotificationStateChanged);
     _notificationController?.dispose();
     _messagingController?.dispose();
     _agentChatController?.dispose();
@@ -184,6 +209,12 @@ class _AppShellState extends State<AppShell> {
     _messagingController = null;
     _agentChatController = null;
     _agentPlanController = null;
+  }
+
+  void _handleNotificationStateChanged() {
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   @override
@@ -198,8 +229,9 @@ class _AppShellState extends State<AppShell> {
           profileRepository: _profileRepository,
           allowPreviewData: widget.allowPreviewData,
           onSearch: () => _openDiscover(DiscoverContentType.all),
+          unreadNotificationCount: _notificationController?.unreadCount ?? 0,
           onNotifications:
-              _notificationController == null ? null : _openNotifications,
+              _messagingController == null ? null : _openMessagesTab,
           onOpenItem: _openHomeItem,
           onViewAll: _openHomeSection,
         ),
@@ -210,13 +242,22 @@ class _AppShellState extends State<AppShell> {
           onBookProject: _bookingRepository == null ? null : _openBooking,
           socialController: _socialController,
           onOpenUser: _openPublicUser,
+          onConsultDoctor: _openDoctorChat,
+          onOpenAi: _openAiChat,
         ),
-        if (_agentChatController != null && _agentPlanController != null)
-          AgentChatPage(
-            chatController: _agentChatController!,
-            planController: _agentPlanController!,
-            onOpenCatalogItem: _openAgentCatalogItem,
-            onHumanChat: _openAgentHumanChat,
+        if (_messagingController != null)
+          MessagingCenterPage(
+            controller: _messagingController!,
+            currentUserId: widget.currentUserId,
+            onOpenDm: (conversation) => _openDmThread(
+              conversation,
+              title: _messagingController?.peerFor(conversation)?.name,
+            ),
+            onOpenCustomerService: _openCustomerServiceThread,
+            onOpenUser: _openPublicUser,
+            onOpenAi: _openAiChat,
+            onOpenSystemMessages: () => _openNotificationCategory(false),
+            onOpenActivityMessages: () => _openNotificationCategory(true),
           )
         else
           const AssistantPage(),
@@ -227,12 +268,12 @@ class _AppShellState extends State<AppShell> {
           onOrders: _ordersController == null ? null : _openOrders,
           onDiaries: _socialController == null ? null : _openSocial,
           onJourney: _showJourneyComingSoon,
-          onMessages: _messagingController == null ? null : _openMessages,
           onCustomerService:
               _messagingController == null ? null : _openCustomerService,
           onAccountSecurity:
               widget.apiClient == null ? null : _openAccountSecurity,
           onOpenFavorite: _discoverRepository == null ? null : _openFavorite,
+          onSwitchAccount: widget.onSwitchAccount,
           onLogout: widget.onLogout,
         ),
       ];
@@ -267,7 +308,7 @@ class _AppShellState extends State<AppShell> {
       final institutionId = _text(item.raw['institutionId']);
       final projectId = _text(item.raw['projectId']);
       if (institutionId != null && projectId != null) {
-        Navigator.of(context).push(
+        _contentNavigator.push(
           MaterialPageRoute<void>(
             builder: (_) => DiscoverDetailPage(
               repository: repository,
@@ -278,6 +319,8 @@ class _AppShellState extends State<AppShell> {
               onBookProject: _bookingRepository == null ? null : _openBooking,
               socialController: _socialController,
               onOpenUser: _openPublicUser,
+              onConsultDoctor: _openDoctorChat,
+              onOpenAi: _openAiChat,
             ),
           ),
         );
@@ -298,7 +341,7 @@ class _AppShellState extends State<AppShell> {
       HomeSectionKind.doctor => DiscoverContentType.doctor,
       HomeSectionKind.banner => DiscoverContentType.all,
     };
-    Navigator.of(context).push(
+    _contentNavigator.push(
       MaterialPageRoute<void>(
         builder: (_) => DiscoverDetailPage(
           repository: repository,
@@ -307,6 +350,8 @@ class _AppShellState extends State<AppShell> {
           onBookProject: _bookingRepository == null ? null : _openBooking,
           socialController: _socialController,
           onOpenUser: _openPublicUser,
+          onConsultDoctor: _openDoctorChat,
+          onOpenAi: _openAiChat,
         ),
       ),
     );
@@ -321,7 +366,7 @@ class _AppShellState extends State<AppShell> {
   }) {
     final repository = _discoverRepository;
     if (repository == null || id.trim().isEmpty) return;
-    Navigator.of(context).push<void>(MaterialPageRoute(
+    _contentNavigator.push<void>(MaterialPageRoute(
       builder: (_) => DiscoverDetailPage(
         repository: repository,
         type: type,
@@ -337,6 +382,8 @@ class _AppShellState extends State<AppShell> {
         onBookProject: _bookingRepository == null ? null : _openBooking,
         socialController: _socialController,
         onOpenUser: _openPublicUser,
+        onConsultDoctor: _openDoctorChat,
+        onOpenAi: _openAiChat,
       ),
     ));
   }
@@ -352,7 +399,7 @@ class _AppShellState extends State<AppShell> {
       );
       if (!mounted) return;
       final diary = diaryFromDiscover(detail);
-      await Navigator.of(context).push<void>(MaterialPageRoute(
+      await _contentNavigator.push<void>(MaterialPageRoute(
         builder: (_) => DiaryDetailPage(
           controller: socialController,
           diary: diary,
@@ -394,7 +441,7 @@ class _AppShellState extends State<AppShell> {
       _ => null,
     };
     if (type == null) return;
-    Navigator.of(context).push<void>(MaterialPageRoute(
+    _contentNavigator.push<void>(MaterialPageRoute(
       builder: (_) => DiscoverDetailPage(
         repository: repository,
         type: type,
@@ -404,8 +451,27 @@ class _AppShellState extends State<AppShell> {
         onBookProject: _bookingRepository == null ? null : _openBooking,
         socialController: _socialController,
         onOpenUser: _openPublicUser,
+        onConsultDoctor: _openDoctorChat,
+        onOpenAi: _openAiChat,
       ),
     ));
+  }
+
+  void _openAiChat() {
+    final chatController = _agentChatController;
+    final planController = _agentPlanController;
+    _contentNavigator.push<void>(
+      MaterialPageRoute(
+        builder: (_) => chatController != null && planController != null
+            ? AgentChatPage(
+                chatController: chatController,
+                planController: planController,
+                onOpenCatalogItem: _openAgentCatalogItem,
+                onHumanChat: _openAgentHumanChat,
+              )
+            : const AssistantPage(),
+      ),
+    );
   }
 
   Future<void> _openAgentHumanChat(AgentCatalogItem item) async {
@@ -454,12 +520,41 @@ class _AppShellState extends State<AppShell> {
       institutionId: target.institutionId,
       projectId: target.projectId,
     );
-    await Navigator.of(context).push<void>(
+    await controller.load();
+    if (!mounted) {
+      controller.dispose();
+      return;
+    }
+    if (controller.project == null || controller.errorMessage != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(context.localized(
+            '暂时无法获取该机构项目的预约信息，请稍后重试',
+            'Booking information for this institution service is temporarily unavailable. Please try again later.',
+          )),
+        ),
+      );
+      controller.dispose();
+      return;
+    }
+    if (controller.doctors.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(context.localized(
+            '该机构项目尚未配置可预约医生，因此暂时无法预约。请联系机构或稍后再试',
+            'This institution service has no bookable doctors assigned yet. Please contact the institution or try again later.',
+          )),
+        ),
+      );
+      controller.dispose();
+      return;
+    }
+    await _contentNavigator.push<void>(
       MaterialPageRoute(
         builder: (_) => BookingPage(
           controller: controller,
           onOrderCreated: (order) {
-            Navigator.of(context).pop();
+            _contentNavigator.pop();
             _openOrderDetail(order);
           },
         ),
@@ -473,7 +568,7 @@ class _AppShellState extends State<AppShell> {
     if (controller == null) {
       return;
     }
-    await Navigator.of(context).push<void>(
+    await _contentNavigator.push<void>(
       MaterialPageRoute(
         builder: (_) => OrdersPage(
           controller: controller,
@@ -497,12 +592,12 @@ class _AppShellState extends State<AppShell> {
         ApiAccountSecurityRemoteDataSource(apiClient),
       ),
     );
-    await Navigator.of(context).push<void>(
+    await _contentNavigator.push<void>(
       MaterialPageRoute(
         builder: (_) => AccountSecurityPage(
           controller: controller,
           onSessionInvalidated: () {
-            Navigator.of(context).popUntil((route) => route.isFirst);
+            _contentNavigator.popUntil((route) => route.isFirst);
             final logout = widget.onLogout;
             if (logout != null) unawaited(logout());
           },
@@ -528,7 +623,7 @@ class _AppShellState extends State<AppShell> {
       FavoriteTargetType.unknown => null,
     };
     if (type == null) return;
-    await Navigator.of(context).push<void>(
+    await _contentNavigator.push<void>(
       MaterialPageRoute(
         builder: (_) => DiscoverDetailPage(
           repository: repository,
@@ -537,6 +632,8 @@ class _AppShellState extends State<AppShell> {
           onBookProject: _bookingRepository == null ? null : _openBooking,
           socialController: _socialController,
           onOpenUser: _openPublicUser,
+          onConsultDoctor: _openDoctorChat,
+          onOpenAi: _openAiChat,
         ),
       ),
     );
@@ -548,7 +645,7 @@ class _AppShellState extends State<AppShell> {
       return;
     }
     final controller = OrderDetailController(repository, orderId: order.id);
-    await Navigator.of(context).push<void>(
+    await _contentNavigator.push<void>(
       MaterialPageRoute(
         builder: (_) => OrderDetailPage(
           controller: controller,
@@ -564,7 +661,7 @@ class _AppShellState extends State<AppShell> {
     if (controller == null) {
       return;
     }
-    await Navigator.of(context).push<void>(
+    await _contentNavigator.push<void>(
       MaterialPageRoute(
         builder: (_) => SocialPage(
           controller: controller,
@@ -591,11 +688,16 @@ class _AppShellState extends State<AppShell> {
     if (repository == null || controller == null || userId.trim().isEmpty) {
       return;
     }
-    await Navigator.of(context).push<void>(MaterialPageRoute(
+    await _contentNavigator.push<void>(MaterialPageRoute(
       builder: (_) => PublicUserPage(
         userId: userId,
         repository: repository,
         socialController: controller,
+        currentUserId: widget.currentUserId,
+        onMessage: (profile) => _openDirectMessage(
+          userId,
+          title: profile.nickname,
+        ),
         onOpenProject: (institutionId, projectId) => _openDiaryAssociation(
           DiscoverContentType.project,
           projectId,
@@ -609,11 +711,53 @@ class _AppShellState extends State<AppShell> {
     ));
   }
 
+  Future<void> _openDoctorChat(DiscoverItem doctor) => _openDirectMessage(
+        doctor.id,
+        title: doctor.title,
+      );
+
+  Future<void> _openDirectMessage(
+    String targetId, {
+    String? title,
+  }) async {
+    final repository = _messagingRepository;
+    final id = targetId.trim();
+    if (repository == null || id.isEmpty) return;
+    if (id == widget.currentUserId.trim()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(context.localized(
+            '不能给自己发送私信',
+            'You cannot message yourself.',
+          )),
+        ),
+      );
+      return;
+    }
+    try {
+      final conversation = await repository.createDmConversation(id);
+      if (!mounted) return;
+      await _openDmThread(conversation, title: title);
+      await _messagingController?.refresh();
+    } on Object {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(context.localized(
+            '暂时无法发起私信，请稍后重试',
+            'Unable to start this conversation. Please try again.',
+          )),
+        ),
+      );
+    }
+  }
+
   Future<void> _openDiaryEditor(
     SocialController controller, {
     Diary? diary,
   }) {
-    return Navigator.of(context).push<void>(
+    return _contentNavigator.push<void>(
       MaterialPageRoute(
         builder: (_) => DiaryEditorPage(
           controller: controller,
@@ -625,15 +769,40 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  Future<void> _openNotifications() async {
-    final controller = _notificationController;
-    if (controller == null) {
-      return;
+  void _openMessagesTab() {
+    setState(() => _selectedIndex = 2);
+    final notificationController = _notificationController;
+    if (notificationController != null) {
+      unawaited(notificationController.refresh());
     }
-    await Navigator.of(context).push<void>(
+    final messagingController = _messagingController;
+    if (messagingController != null) {
+      unawaited(messagingController.refresh());
+    }
+  }
+
+  Future<void> _openNotificationCategory(bool activity) async {
+    final controller = _notificationController;
+    if (controller == null) return;
+    final english = Localizations.localeOf(context).languageCode == 'en';
+    await _contentNavigator.push<void>(
       MaterialPageRoute(
         builder: (_) => NotificationPage(
           controller: controller,
+          title: activity
+              ? (english ? 'Activity messages' : '活动消息')
+              : (english ? 'System messages' : '系统消息'),
+          filter: (notification) {
+            final type = notification.type.trim().toLowerCase();
+            final isActivity = const {
+              'activity',
+              'promotion',
+              'marketing',
+              'campaign',
+              'offer',
+            }.contains(type);
+            return activity ? isActivity : !isActivity;
+          },
           onOpenNotification: _openNotificationTarget,
         ),
       ),
@@ -643,7 +812,11 @@ class _AppShellState extends State<AppShell> {
   void _openNotificationTarget(AppNotification notification) {
     final targetId = notification.targetId.trim();
     if (targetId.isEmpty) return;
-    final type = notification.targetType.toLowerCase();
+    final type = notification.targetType.trim().toLowerCase();
+    if (type == 'dm_conversation') {
+      unawaited(_openDmConversation(targetId));
+      return;
+    }
     if (type == 'user') {
       _openPublicUser(targetId);
       return;
@@ -662,7 +835,7 @@ class _AppShellState extends State<AppShell> {
     };
     final repository = _discoverRepository;
     if (discoverType == null || repository == null) return;
-    Navigator.of(context).push<void>(MaterialPageRoute(
+    _contentNavigator.push<void>(MaterialPageRoute(
       builder: (_) => DiscoverDetailPage(
         repository: repository,
         type: discoverType,
@@ -670,14 +843,39 @@ class _AppShellState extends State<AppShell> {
         onBookProject: _bookingRepository == null ? null : _openBooking,
         socialController: _socialController,
         onOpenUser: _openPublicUser,
+        onConsultDoctor: _openDoctorChat,
+        onOpenAi: _openAiChat,
       ),
     ));
+  }
+
+  Future<void> _openDmConversation(String conversationId) async {
+    final repository = _messagingRepository;
+    if (repository == null) return;
+    try {
+      final conversations = await repository.getDmConversations();
+      final conversation =
+          conversations.where((item) => item.id == conversationId).firstOrNull;
+      if (!mounted || conversation == null) return;
+      final peer = _messagingController?.peerFor(conversation);
+      await _openDmThread(conversation, title: peer?.name);
+    } on Object {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(context.localized(
+            '暂时无法打开该私信，请稍后重试',
+            'Unable to open this conversation. Please try again.',
+          )),
+        ),
+      );
+    }
   }
 
   Future<void> _openCustomerService() async {
     final controller = _messagingController;
     if (controller == null) return;
-    await Navigator.of(context).push<void>(MaterialPageRoute(
+    await _contentNavigator.push<void>(MaterialPageRoute(
       builder: (_) => CustomerServicePage(
         onOnlineChat: () async {
           final conversation = await controller.openCustomerService();
@@ -688,43 +886,143 @@ class _AppShellState extends State<AppShell> {
     ));
   }
 
-  Future<void> _openMessages() async {
-    final controller = _messagingController;
-    if (controller == null) {
-      return;
-    }
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        builder: (_) => MessagingCenterPage(
-          controller: controller,
-          currentUserId: widget.currentUserId,
-          onOpenDm: _openDmThread,
-          onOpenCustomerService: _openCustomerServiceThread,
-          onOpenUser: _openPublicUser,
-        ),
-      ),
-    );
-  }
-
-  Future<void> _openDmThread(DmConversation conversation) async {
+  Future<void> _openDmThread(
+    DmConversation conversation, {
+    String? title,
+  }) async {
     final repository = _messagingRepository;
     if (repository == null) {
       return;
     }
+    final otherUserId = conversation.otherUserId(widget.currentUserId);
+    final currentUserFallback = context.localized('我', 'Me');
+    final peers = await Future.wait<MessagingPeer>([
+      _loadCurrentMessagingPeer(currentUserFallback),
+      _loadOtherMessagingPeer(otherUserId, fallbackName: title),
+    ]);
+    if (!mounted) return;
+    unawaited(_messagingController?.clearUnread(conversation.id));
     final controller = DmThreadController(
       repository: repository,
       conversationId: conversation.id,
+      currentUserId: widget.currentUserId,
+      firstMessageLimitApplies: conversation.firstMessageLimitApplies,
+      waitingForReply: conversation.waitingForReply,
     );
-    await Navigator.of(context).push<void>(
+    await _contentNavigator.push<void>(
       MaterialPageRoute(
         builder: (_) => DmThreadPage(
           controller: controller,
           currentUserId: widget.currentUserId,
-          title: conversation.otherUserId(widget.currentUserId),
+          myPeer: peers[0],
+          otherPeer: peers[1],
+          onOtherAvatarTap:
+              otherUserId.isEmpty ? null : () => _openPublicUser(otherUserId),
+          onPickImage: _pickAndUploadDmImage,
+          onTranslate: _translateDmMessage,
+          title:
+              title?.trim().isNotEmpty == true ? title!.trim() : peers[1].name,
         ),
       ),
     );
     controller.dispose();
+    await _messagingController?.refresh();
+  }
+
+  Future<MessagingPeer> _loadCurrentMessagingPeer(String fallbackName) async {
+    try {
+      final profile = await _profileRepository?.getProfile();
+      if (profile != null) {
+        return MessagingPeer(
+          id: profile.id,
+          name: profile.nickname,
+          avatar: profile.avatar,
+        );
+      }
+    } on Object {
+      // The thread remains available when profile loading fails.
+    }
+    return MessagingPeer(
+      id: widget.currentUserId,
+      name: fallbackName,
+    );
+  }
+
+  Future<MessagingPeer> _loadOtherMessagingPeer(
+    String userId, {
+    String? fallbackName,
+  }) async {
+    final cached = _messagingController?.peers[userId];
+    if (cached != null) return cached;
+    try {
+      final profile = await _socialRepository?.getPublicUserProfile(userId);
+      if (profile != null) {
+        final peer = MessagingPeer(
+          id: profile.id,
+          name: profile.nickname,
+          avatar: profile.avatar,
+        );
+        _messagingController?.peers[userId] = peer;
+        return peer;
+      }
+    } on Object {
+      // Fall back to the route title or user id when the profile is private.
+    }
+    final name = fallbackName?.trim();
+    return MessagingPeer(
+      id: userId,
+      name: name?.isNotEmpty == true ? name! : userId,
+    );
+  }
+
+  Future<String?> _pickAndUploadDmImage() async {
+    final controller = _socialController;
+    if (controller == null) return null;
+    try {
+      final selected = await const AppFilePicker().pickImage();
+      if (selected == null) return null;
+      final result = await controller.uploadPublicMedia(
+        PublicMediaDraft(
+          bytes: selected.bytes,
+          fileName: selected.fileName,
+          mimeType: selected.mimeType,
+          purpose: PublicMediaPurpose.directMessage,
+        ),
+      );
+      if (!result.succeeded || result.value?.trim().isEmpty != false) {
+        throw StateError(result.message ?? '图片上传失败');
+      }
+      return result.value!.trim();
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(context.localized(
+              '图片发送失败，请稍后重试',
+              'Unable to send the image. Please try again.',
+            )),
+          ),
+        );
+      }
+      return null;
+    }
+  }
+
+  Future<String?> _translateDmMessage(String text) async {
+    final repository = _socialRepository;
+    if (repository is! SocialTranslationRepository) return null;
+    final translationRepository = repository as SocialTranslationRepository;
+    try {
+      final english = Localizations.localeOf(context).languageCode == 'en';
+      final translation = await translationRepository.translateText(
+        text: text,
+        targetLanguage: english ? 'zh-CN' : 'en',
+        contentType: 'direct_message',
+      );
+      return translation.translatedText;
+    } on Object {
+      return null;
+    }
   }
 
   Future<void> _openCustomerServiceThread(
@@ -734,58 +1032,124 @@ class _AppShellState extends State<AppShell> {
     if (repository == null) {
       return;
     }
+    final currentUserFallback = context.localized('我', 'Me');
+    final customerServiceName = context.localized('平台客服', 'Customer Service');
+    final myPeer = await _loadCurrentMessagingPeer(currentUserFallback);
+    if (!mounted) return;
+    final serviceUserId = conversation.userAId == widget.currentUserId
+        ? conversation.userBId
+        : conversation.userAId;
+    final customerServicePeer = MessagingPeer(
+      id: serviceUserId.isEmpty ? 'CS_ADMIN' : serviceUserId,
+      name: customerServiceName,
+    );
     final controller = CustomerServiceThreadController(
       repository: repository,
       conversationId: conversation.id,
     );
-    await Navigator.of(context).push<void>(
+    await _contentNavigator.push<void>(
       MaterialPageRoute(
         builder: (_) => CustomerServiceThreadPage(
           controller: controller,
           currentUserId: widget.currentUserId,
+          myPeer: myPeer,
+          otherPeer: customerServicePeer,
+          onPickImage: _pickAndUploadDmImage,
         ),
       ),
     );
     controller.dispose();
+    await _messagingController?.refresh();
   }
 
   @override
   Widget build(BuildContext context) {
     final english = Localizations.localeOf(context).languageCode == 'en';
-    return Scaffold(
-      body: SafeArea(
-        bottom: false,
-        child: IndexedStack(index: _selectedIndex, children: _pages),
+    final authenticatedRouteFactory = Navigator.of(
+      context,
+      rootNavigator: true,
+    ).widget.onGenerateRoute;
+    return WillPopScope(
+      onWillPop: () async {
+        if (_contentNavigator.canPop()) {
+          _contentNavigator.pop();
+          return false;
+        }
+        return true;
+      },
+      child: Scaffold(
+        body: SafeArea(
+          bottom: false,
+          child: Navigator(
+            key: _contentNavigatorKey,
+            pages: [
+              MaterialPage<void>(
+                key: const ValueKey('shell-content-root'),
+                child: IndexedStack(index: _selectedIndex, children: _pages),
+              ),
+            ],
+            onGenerateRoute: authenticatedRouteFactory,
+            onPopPage: (route, result) => route.didPop(result),
+          ),
+        ),
+        bottomNavigationBar: _KeyboardAwareBottomNavigation(
+          english: english,
+          selectedIndex: _selectedIndex,
+          onDestinationSelected: _selectDestination,
+        ),
       ),
-      bottomNavigationBar: NavigationBar(
-        indicatorColor: Colors.transparent,
-        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-        selectedIndex: _selectedIndex,
-        onDestinationSelected: (index) =>
-            setState(() => _selectedIndex = index),
-        destinations: [
-          NavigationDestination(
-            icon: const Icon(Icons.home_outlined),
-            selectedIcon: const Icon(Icons.home),
-            label: english ? 'Home' : '首页',
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.search_outlined),
-            selectedIcon: const Icon(Icons.search_rounded),
-            label: english ? 'Discover' : '发现',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.chat_bubble_outline_rounded),
-            selectedIcon: Icon(Icons.chat_bubble_rounded),
-            label: 'AI',
-          ),
-          NavigationDestination(
-            icon: const Icon(Icons.person_outline),
-            selectedIcon: const Icon(Icons.person),
-            label: english ? 'Profile' : '我的',
-          ),
-        ],
-      ),
+    );
+  }
+
+  void _selectDestination(int index) {
+    _contentNavigator.popUntil((route) => route.isFirst);
+    setState(() => _selectedIndex = index);
+  }
+}
+
+class _KeyboardAwareBottomNavigation extends StatelessWidget {
+  const _KeyboardAwareBottomNavigation({
+    required this.english,
+    required this.selectedIndex,
+    required this.onDestinationSelected,
+  });
+
+  final bool english;
+  final int selectedIndex;
+  final ValueChanged<int> onDestinationSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    if (MediaQuery.viewInsetsOf(context).bottom > 0) {
+      return const SizedBox.shrink();
+    }
+    return NavigationBar(
+      indicatorColor: Colors.transparent,
+      labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+      selectedIndex: selectedIndex,
+      onDestinationSelected: onDestinationSelected,
+      destinations: [
+        NavigationDestination(
+          icon: const Icon(Icons.home_outlined),
+          selectedIcon: const Icon(Icons.home),
+          label: english ? 'Home' : '首页',
+        ),
+        NavigationDestination(
+          icon: const Icon(Icons.search_outlined),
+          selectedIcon: const Icon(Icons.search_rounded),
+          label: english ? 'Discover' : '发现',
+        ),
+        NavigationDestination(
+          icon: const Icon(Icons.forum_outlined),
+          selectedIcon: const Icon(Icons.forum_rounded),
+          label: english ? 'Messages' : '消息',
+        ),
+        NavigationDestination(
+          icon: const Icon(Icons.person_outline),
+          selectedIcon: const Icon(Icons.person),
+          label: english ? 'Profile' : '我的',
+        ),
+      ],
     );
   }
 }
@@ -800,6 +1164,26 @@ class _AppShellState extends State<AppShell> {
     return (
       institutionId: directInstitution,
       projectId: directProject ?? item.id,
+    );
+  }
+  final detailInstitutionProject = raw['institutionProject'];
+  final detailInstitution = raw['institution'];
+  final detailProject = raw['project'];
+  final detailInstitutionId = detailInstitutionProject is Map
+      ? _text(detailInstitutionProject['institutionId'])
+      : null;
+  final nestedInstitutionId =
+      detailInstitution is Map ? _text(detailInstitution['id']) : null;
+  final detailProjectId = detailInstitutionProject is Map
+      ? _text(detailInstitutionProject['projectId'])
+      : null;
+  final nestedProjectId =
+      detailProject is Map ? _text(detailProject['id']) : null;
+  final resolvedInstitutionId = detailInstitutionId ?? nestedInstitutionId;
+  if (resolvedInstitutionId != null) {
+    return (
+      institutionId: resolvedInstitutionId,
+      projectId: detailProjectId ?? nestedProjectId ?? item.id,
     );
   }
   final entries = raw['institutionProjects'];

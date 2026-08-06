@@ -135,6 +135,7 @@ class _IdentityOverviewView extends StatelessWidget {
     final role = await showModalBottomSheet<IdentityRoleType>(
       context: context,
       showDragHandle: true,
+      constraints: const BoxConstraints(maxWidth: 420),
       builder: (context) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,

@@ -10,10 +10,14 @@ class NotificationPage extends StatefulWidget {
   const NotificationPage({
     required this.controller,
     this.onOpenNotification,
+    this.title,
+    this.filter,
     super.key,
   });
   final NotificationController controller;
   final ValueChanged<AppNotification>? onOpenNotification;
+  final String? title;
+  final bool Function(AppNotification notification)? filter;
 
   @override
   State<NotificationPage> createState() => _NotificationPageState();
@@ -33,7 +37,8 @@ class _NotificationPageState extends State<NotificationPage> {
       animation: widget.controller,
       builder: (context, _) => Scaffold(
         appBar: AppBar(
-          title: Text(strings.notifications(widget.controller.unreadCount)),
+          title: Text(widget.title ??
+              strings.notifications(widget.controller.unreadCount)),
           actions: [
             TextButton(
               onPressed: widget.controller.unreadCount == 0
@@ -48,6 +53,7 @@ class _NotificationPageState extends State<NotificationPage> {
           child: _NotificationList(
             controller: widget.controller,
             onOpenNotification: widget.onOpenNotification,
+            filter: widget.filter,
           ),
         ),
       ),
@@ -59,17 +65,22 @@ class _NotificationList extends StatelessWidget {
   const _NotificationList({
     required this.controller,
     this.onOpenNotification,
+    this.filter,
   });
   final NotificationController controller;
   final ValueChanged<AppNotification>? onOpenNotification;
+  final bool Function(AppNotification notification)? filter;
 
   @override
   Widget build(BuildContext context) {
     final strings = _strings(context);
-    if (controller.isLoading && controller.items.isEmpty) {
+    final items = filter == null
+        ? controller.items
+        : controller.items.where(filter!).toList(growable: false);
+    if (controller.isLoading && items.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (controller.errorMessage != null && controller.items.isEmpty) {
+    if (controller.errorMessage != null && items.isEmpty) {
       return ListView(
         children: [
           const SizedBox(height: 160),
@@ -83,7 +94,7 @@ class _NotificationList extends StatelessWidget {
         ],
       );
     }
-    if (controller.items.isEmpty) {
+    if (items.isEmpty) {
       return ListView(
         children: [
           const SizedBox(height: 160),
@@ -93,10 +104,10 @@ class _NotificationList extends StatelessWidget {
     }
     return ListView.separated(
       padding: const EdgeInsets.all(16),
-      itemCount: controller.items.length,
+      itemCount: items.length,
       separatorBuilder: (_, __) => const SizedBox(height: 8),
       itemBuilder: (context, index) {
-        final item = controller.items[index];
+        final item = items[index];
         return Card(
           elevation: 0,
           color: item.isRead
@@ -224,6 +235,9 @@ class MessagingCenterPage extends StatefulWidget {
     this.onOpenDm,
     this.onOpenCustomerService,
     this.onOpenUser,
+    this.onOpenAi,
+    this.onOpenSystemMessages,
+    this.onOpenActivityMessages,
     super.key,
   });
 
@@ -232,22 +246,31 @@ class MessagingCenterPage extends StatefulWidget {
   final ValueChanged<DmConversation>? onOpenDm;
   final ValueChanged<CustomerServiceConversation>? onOpenCustomerService;
   final ValueChanged<String>? onOpenUser;
+  final VoidCallback? onOpenAi;
+  final VoidCallback? onOpenSystemMessages;
+  final VoidCallback? onOpenActivityMessages;
 
   @override
   State<MessagingCenterPage> createState() => _MessagingCenterPageState();
 }
 
 class _MessagingCenterPageState extends State<MessagingCenterPage> {
+  Timer? _refreshTimer;
+
   @override
   void initState() {
     super.initState();
     unawaited(widget.controller.refresh());
+    _refreshTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => unawaited(widget.controller.refresh()),
+    );
   }
 
-  Future<void> _openCustomerService() async {
-    final conversation = await widget.controller.openCustomerService();
-    if (!mounted || conversation == null) return;
-    widget.onOpenCustomerService?.call(conversation);
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -262,6 +285,35 @@ class _MessagingCenterPageState extends State<MessagingCenterPage> {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              _MessageCenterEntry(
+                key: const Key('message-center-yanyan'),
+                icon: Icons.auto_awesome_rounded,
+                title: '颜颜',
+                subtitle: strings.isEnglish
+                    ? 'Your medical aesthetics AI assistant'
+                    : '你的医美 AI 助手',
+                badge: 'AI',
+                onTap: widget.onOpenAi,
+              ),
+              _MessageCenterEntry(
+                key: const Key('message-center-system'),
+                icon: Icons.campaign_outlined,
+                title: strings.isEnglish ? 'System messages' : '系统消息',
+                subtitle: strings.isEnglish
+                    ? 'Account, order and service updates'
+                    : '账号、订单与服务通知',
+                onTap: widget.onOpenSystemMessages,
+              ),
+              _MessageCenterEntry(
+                key: const Key('message-center-activity'),
+                icon: Icons.local_activity_outlined,
+                title: strings.isEnglish ? 'Activity messages' : '活动消息',
+                subtitle: strings.isEnglish
+                    ? 'Offers and campaign updates'
+                    : '优惠活动与平台动态',
+                onTap: widget.onOpenActivityMessages,
+              ),
+              const SizedBox(height: 16),
               if (widget.controller.errorMessage case final error?)
                 ListTile(
                   leading: const Icon(Icons.error_outline),
@@ -271,96 +323,89 @@ class _MessagingCenterPageState extends State<MessagingCenterPage> {
                     child: Text(strings.retry),
                   ),
                 ),
-              Text(
-                strings.customerService,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              if (widget.controller.isLoading &&
-                  widget.controller.customerServiceConversations.isEmpty)
-                ListTile(
-                  key: const Key('customer-service-loading'),
-                  leading: const CircleAvatar(
-                    child: Icon(Icons.support_agent),
-                  ),
-                  title: Text(strings.customerService),
-                  subtitle: Text(strings.creatingConversation),
-                  trailing: const SizedBox.square(
-                    dimension: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
+              if (widget.controller.customerServiceConversations.any(
+                (item) => item.lastMessage?.trim().isNotEmpty == true,
+              ))
+                Text(
+                  strings.customerService,
+                  style: Theme.of(context).textTheme.titleMedium,
                 ),
-              for (final item in widget.controller.customerServiceConversations)
+              for (final item
+                  in widget.controller.customerServiceConversations.where(
+                (item) => item.lastMessage?.trim().isNotEmpty == true,
+              ))
                 ListTile(
                   key: ValueKey('customer-service-${item.id}'),
                   leading: const CircleAvatar(child: Icon(Icons.support_agent)),
                   title: Text(strings.customerService),
-                  subtitle: Text(item.lastMessage ?? strings.startConsultation),
-                  trailing: _UnreadBadge(count: item.unreadCount),
+                  subtitle: Text(item.lastMessage!),
+                  trailing: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        _compactTime(item.lastMessageAt),
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      _UnreadBadge(count: item.unreadCount),
+                    ],
+                  ),
                   onTap: () => widget.onOpenCustomerService?.call(item),
                 ),
-              if (!widget.controller.isLoading &&
-                  widget.controller.customerServiceConversations.isEmpty)
-                ListTile(
-                  key: const Key('customer-service-start'),
-                  leading: const CircleAvatar(
-                    child: Icon(Icons.support_agent),
-                  ),
-                  title: Text(strings.customerService),
-                  subtitle: Text(
-                    widget.controller.customerServiceErrorMessage == null
-                        ? strings.customerServiceReady
-                        : strings.localizedError(
-                            widget.controller.customerServiceErrorMessage!,
-                          ),
-                  ),
-                  trailing: widget.controller.isOpeningCustomerService
-                      ? const SizedBox.square(
-                          dimension: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.chevron_right),
-                  onTap: widget.controller.isOpeningCustomerService
-                      ? null
-                      : _openCustomerService,
-                ),
-              const SizedBox(height: 16),
+              if (widget.controller.customerServiceConversations.any(
+                (item) => item.lastMessage?.trim().isNotEmpty == true,
+              ))
+                const SizedBox(height: 16),
               Text(
                 strings.directMessages,
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               for (final item in widget.controller.dmConversations)
-                ListTile(
-                  leading: GestureDetector(
-                    onTap: widget.onOpenUser == null
-                        ? null
-                        : () => widget.onOpenUser!(
-                              item.otherUserId(widget.currentUserId),
-                            ),
-                    child: const CircleAvatar(
-                      child: Icon(Icons.person_outline),
-                    ),
-                  ),
-                  title: Text(_userLabel(
-                    item.otherUserId(widget.currentUserId),
-                    strings,
-                  )),
-                  subtitle: Text(item.lastMessage ?? strings.noMessages),
-                  trailing: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(_compactTime(item.lastMessageAt),
-                          style: Theme.of(context).textTheme.bodySmall),
-                      _UnreadBadge(
-                        count: item.unreadFor(widget.currentUserId),
+                Builder(builder: (context) {
+                  final peer = widget.controller.peerFor(item);
+                  final otherId = item.otherUserId(widget.currentUserId);
+                  return _ConversationActionCard(
+                    key: ValueKey('dm-${item.id}'),
+                    isPinned: widget.controller.isPinned(item.id),
+                    onMarkUnread: () => widget.controller.markUnread(item.id),
+                    onTogglePin: () => widget.controller.togglePin(item.id),
+                    onDelete: () => widget.controller.hideConversation(item.id),
+                    onOpen: () {
+                      widget.controller.clearUnread(item.id);
+                      widget.onOpenDm?.call(item);
+                    },
+                    child: _ConversationTile(
+                      leading: GestureDetector(
+                        onTap: widget.onOpenUser == null
+                            ? null
+                            : () => widget.onOpenUser!(otherId),
+                        child: CircleAvatar(
+                          foregroundImage:
+                              peer?.avatar.trim().isNotEmpty == true
+                                  ? NetworkImage(peer!.avatar)
+                                  : null,
+                          child: peer?.avatar.trim().isNotEmpty == true
+                              ? null
+                              : const Icon(Icons.person_outline),
+                        ),
                       ),
-                    ],
-                  ),
-                  onTap: () => widget.onOpenDm?.call(item),
-                ),
+                      title: peer?.name.trim().isNotEmpty == true
+                          ? peer!.name
+                          : _userLabel(otherId, strings),
+                      subtitle: item.lastMessage ?? strings.noMessages,
+                      time: _compactTime(item.lastMessageAt),
+                      unreadCount: item.unreadFor(widget.currentUserId),
+                      isLocallyUnread:
+                          widget.controller.isLocallyUnread(item.id),
+                      isPinned: widget.controller.isPinned(item.id),
+                    ),
+                  );
+                }),
               if (!widget.controller.isLoading &&
                   widget.controller.dmConversations.isEmpty &&
-                  widget.controller.customerServiceConversations.isEmpty)
+                  widget.controller.customerServiceConversations.every(
+                    (item) => item.lastMessage?.trim().isEmpty ?? true,
+                  ))
                 Padding(
                   padding: const EdgeInsets.only(top: 100),
                   child: Center(child: Text(strings.noMessages)),
@@ -373,35 +418,420 @@ class _MessagingCenterPageState extends State<MessagingCenterPage> {
   }
 }
 
+class _MessageCenterEntry extends StatelessWidget {
+  const _MessageCenterEntry({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.badge,
+    this.onTap,
+    super.key,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String? badge;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => Card(
+        elevation: 0,
+        child: ListTile(
+          onTap: onTap,
+          leading: CircleAvatar(child: Icon(icon)),
+          title: Row(
+            children: [
+              Flexible(child: Text(title)),
+              if (badge != null) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    badge!,
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color:
+                              Theme.of(context).colorScheme.onPrimaryContainer,
+                        ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          subtitle: Text(subtitle),
+          trailing: const Icon(Icons.chevron_right),
+        ),
+      );
+}
+
+class _ConversationTile extends StatelessWidget {
+  const _ConversationTile({
+    required this.leading,
+    required this.title,
+    required this.subtitle,
+    required this.time,
+    required this.unreadCount,
+    required this.isLocallyUnread,
+    required this.isPinned,
+  });
+
+  final Widget leading;
+  final String title;
+  final String subtitle;
+  final String time;
+  final int unreadCount;
+  final bool isLocallyUnread;
+  final bool isPinned;
+
+  @override
+  Widget build(BuildContext context) => Material(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        clipBehavior: Clip.antiAlias,
+        child: ListTile(
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+          leading: leading,
+          title: Row(
+            children: [
+              Flexible(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (isPinned) ...[
+                const SizedBox(width: 4),
+                const Icon(
+                  Icons.push_pin_outlined,
+                  size: 15,
+                  color: Color(0xffff9800),
+                ),
+              ],
+            ],
+          ),
+          subtitle: Text(
+            subtitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          trailing: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(time, style: Theme.of(context).textTheme.bodySmall),
+              const SizedBox(height: 4),
+              _UnreadBadge(
+                count: unreadCount,
+                showDot: isLocallyUnread,
+              ),
+            ],
+          ),
+        ),
+      );
+}
+
+class _ConversationActionCard extends StatefulWidget {
+  const _ConversationActionCard({
+    required this.child,
+    required this.isPinned,
+    required this.onMarkUnread,
+    required this.onTogglePin,
+    required this.onDelete,
+    required this.onOpen,
+    super.key,
+  });
+
+  final Widget child;
+  final bool isPinned;
+  final VoidCallback onMarkUnread;
+  final VoidCallback onTogglePin;
+  final VoidCallback onDelete;
+  final VoidCallback onOpen;
+
+  @override
+  State<_ConversationActionCard> createState() =>
+      _ConversationActionCardState();
+}
+
+class _ConversationActionCardState extends State<_ConversationActionCard> {
+  static const _actionWidth = 80.0;
+  static const _actionsWidth = _actionWidth * 3;
+  double _offset = 0;
+
+  void _close() {
+    if (_offset == 0) return;
+    setState(() => _offset = 0);
+  }
+
+  void _togglePin() {
+    _close();
+    widget.onTogglePin();
+  }
+
+  void _markUnread() {
+    _close();
+    widget.onMarkUnread();
+  }
+
+  Future<void> _requestDelete() async {
+    _close();
+    final strings = _strings(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(strings.deleteConversation),
+        content: Text(strings.deleteConversationConfirm),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(strings.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(strings.delete),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) widget.onDelete();
+  }
+
+  Future<void> _showActions() async {
+    final strings = _strings(context);
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(
+                Icons.push_pin_outlined,
+                color: Color(0xffff9800),
+              ),
+              title: Text(
+                widget.isPinned ? strings.unpinChat : strings.pinChat,
+              ),
+              onTap: () => Navigator.pop(context, 'pin'),
+            ),
+            ListTile(
+              leading: const Icon(
+                Icons.mark_email_unread_outlined,
+                color: Color(0xff2196f3),
+              ),
+              title: Text(strings.markUnread),
+              onTap: () => Navigator.pop(context, 'unread'),
+            ),
+            ListTile(
+              leading: const Icon(
+                Icons.delete_outline,
+                color: Color(0xfff44336),
+              ),
+              title: Text(
+                strings.delete,
+                style: const TextStyle(color: Color(0xfff44336)),
+              ),
+              onTap: () => Navigator.pop(context, 'delete'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    switch (action) {
+      case 'pin':
+        _togglePin();
+        break;
+      case 'unread':
+        _markUnread();
+        break;
+      case 'delete':
+        await _requestDelete();
+        break;
+      default:
+        break;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: SizedBox(
+            height: 76,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _ConversationActionButton(
+                          width: _actionWidth,
+                          color: const Color(0xff2196f3),
+                          icon: Icons.mark_email_unread_outlined,
+                          label: _strings(context).markUnread,
+                          onTap: _markUnread,
+                        ),
+                        _ConversationActionButton(
+                          width: _actionWidth,
+                          color: const Color(0xffff9800),
+                          icon: Icons.push_pin_outlined,
+                          label: widget.isPinned
+                              ? _strings(context).unpinChat
+                              : _strings(context).pinChat,
+                          onTap: _togglePin,
+                        ),
+                        _ConversationActionButton(
+                          width: _actionWidth,
+                          color: const Color(0xfff44336),
+                          icon: Icons.delete_outline,
+                          label: _strings(context).delete,
+                          onTap: () => unawaited(_requestDelete()),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOut,
+                  transform: Matrix4.translationValues(_offset, 0, 0),
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onTap: () {
+                      if (_offset != 0) {
+                        _close();
+                      } else {
+                        widget.onOpen();
+                      }
+                    },
+                    onLongPress: () => unawaited(_showActions()),
+                    onHorizontalDragUpdate: (details) {
+                      setState(() {
+                        _offset = (_offset + details.delta.dx)
+                            .clamp(-_actionsWidth, 0)
+                            .toDouble();
+                      });
+                    },
+                    onHorizontalDragEnd: (_) {
+                      setState(() {
+                        _offset =
+                            _offset <= -_actionsWidth / 2 ? -_actionsWidth : 0;
+                      });
+                    },
+                    child: widget.child,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+}
+
+class _ConversationActionButton extends StatelessWidget {
+  const _ConversationActionButton({
+    required this.width,
+    required this.color,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final double width;
+  final Color color;
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+        width: width,
+        height: double.infinity,
+        child: Material(
+          color: color,
+          child: InkWell(
+            onTap: onTap,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, color: Colors.white, size: 20),
+                const SizedBox(height: 3),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+}
+
 class DmThreadPage extends StatelessWidget {
   const DmThreadPage({
     required this.controller,
     required this.currentUserId,
+    required this.myPeer,
+    required this.otherPeer,
     this.title,
+    this.onOtherAvatarTap,
+    this.onPickImage,
+    this.onTranslate,
     super.key,
   });
 
   final DmThreadController controller;
   final String currentUserId;
+  final MessagingPeer myPeer;
+  final MessagingPeer otherPeer;
   final String? title;
+  final VoidCallback? onOtherAvatarTap;
+  final Future<String?> Function()? onPickImage;
+  final Future<String?> Function(String text)? onTranslate;
 
   @override
   Widget build(BuildContext context) => _ThreadScaffold<DmMessage>(
-        title: title ?? _strings(context).directMessageTitle,
+        title: title ??
+            (otherPeer.name.trim().isEmpty
+                ? _strings(context).directMessageTitle
+                : otherPeer.name),
         controller: controller,
         items: () => controller.pager.items,
         isLoading: () => controller.pager.isLoading,
         hasMore: () => controller.pager.hasMore,
         error: () => controller.pager.errorMessage ?? controller.sendError,
         loadInitial: controller.initialize,
+        refresh: controller.refresh,
         loadOlder: controller.pager.loadOlder,
         send: controller.send,
+        pickImage: onPickImage,
+        sendImage: controller.sendImage,
+        translate: onTranslate,
+        isSending: () => controller.isSending,
         contentOf: (item) => item.content,
         createdAtOf: (item) => item.createdAt,
         typeOf: (item) => item.messageType,
         idOf: (item) => item.id,
         delete: controller.deleteMessage,
         isMine: (item) => item.senderId == currentUserId,
+        myPeer: myPeer,
+        otherPeer: otherPeer,
+        onOtherAvatarTap: onOtherAvatarTap,
+        waitingForReply: () => controller.waitingForReply,
       );
 }
 
@@ -409,11 +839,17 @@ class CustomerServiceThreadPage extends StatelessWidget {
   const CustomerServiceThreadPage({
     required this.controller,
     required this.currentUserId,
+    required this.myPeer,
+    required this.otherPeer,
+    this.onPickImage,
     super.key,
   });
 
   final CustomerServiceThreadController controller;
   final String currentUserId;
+  final MessagingPeer myPeer;
+  final MessagingPeer otherPeer;
+  final Future<String?> Function()? onPickImage;
 
   @override
   Widget build(BuildContext context) => _ThreadScaffold<CustomerServiceMessage>(
@@ -424,13 +860,19 @@ class CustomerServiceThreadPage extends StatelessWidget {
         hasMore: () => controller.pager.hasMore,
         error: () => controller.pager.errorMessage ?? controller.sendError,
         loadInitial: controller.initialize,
+        refresh: controller.refresh,
         loadOlder: controller.pager.loadOlder,
         send: controller.send,
+        pickImage: onPickImage,
+        sendImage: controller.sendImage,
+        isSending: () => controller.isSending,
         contentOf: (item) => item.content,
         createdAtOf: (item) => item.createdAt,
         typeOf: (item) => item.messageType,
         idOf: (item) => item.id,
         isMine: (item) => item.senderId == currentUserId,
+        myPeer: myPeer,
+        otherPeer: otherPeer,
       );
 }
 
@@ -443,14 +885,23 @@ class _ThreadScaffold<T> extends StatefulWidget {
     required this.hasMore,
     required this.error,
     required this.loadInitial,
+    required this.refresh,
     required this.loadOlder,
     required this.send,
+    required this.isSending,
     required this.contentOf,
     required this.createdAtOf,
     required this.typeOf,
     required this.idOf,
     required this.isMine,
     this.delete,
+    this.pickImage,
+    this.sendImage,
+    this.translate,
+    this.myPeer,
+    this.otherPeer,
+    this.onOtherAvatarTap,
+    this.waitingForReply,
   });
 
   final String title;
@@ -460,32 +911,84 @@ class _ThreadScaffold<T> extends StatefulWidget {
   final bool Function() hasMore;
   final String? Function() error;
   final Future<void> Function() loadInitial;
+  final Future<void> Function() refresh;
   final Future<void> Function() loadOlder;
   final Future<void> Function(String content) send;
+  final bool Function() isSending;
   final String Function(T item) contentOf;
   final String Function(T item) createdAtOf;
   final String Function(T item) typeOf;
   final String Function(T item) idOf;
   final bool Function(T item) isMine;
   final Future<void> Function(String messageId)? delete;
+  final Future<String?> Function()? pickImage;
+  final Future<void> Function(String imageUrl)? sendImage;
+  final Future<String?> Function(String text)? translate;
+  final MessagingPeer? myPeer;
+  final MessagingPeer? otherPeer;
+  final VoidCallback? onOtherAvatarTap;
+  final bool Function()? waitingForReply;
 
   @override
   State<_ThreadScaffold<T>> createState() => _ThreadScaffoldState<T>();
 }
 
-class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>> {
+class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
+    with WidgetsBindingObserver {
   final _input = TextEditingController();
+  final _scrollController = ScrollController();
+  final Map<String, String> _translations = <String, String>{};
+  final Set<String> _translating = <String>{};
+  final Set<String> _showingTranslations = <String>{};
+  Timer? _refreshTimer;
+  bool _isPickingImage = false;
 
   @override
   void initState() {
     super.initState();
-    unawaited(widget.loadInitial());
+    WidgetsBinding.instance.addObserver(this);
+    widget.controller.addListener(_handleControllerUpdate);
+    unawaited(widget.loadInitial().then((_) => _scrollToLatest()));
+    _refreshTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => unawaited(widget.refresh()),
+    );
   }
 
   @override
   void dispose() {
+    _refreshTimer?.cancel();
+    widget.controller.removeListener(_handleControllerUpdate);
+    WidgetsBinding.instance.removeObserver(this);
+    _scrollController.dispose();
     _input.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) unawaited(widget.refresh());
+  }
+
+  void _handleControllerUpdate() {
+    if (!mounted) return;
+    if (!_scrollController.hasClients ||
+        _scrollController.position.maxScrollExtent -
+                _scrollController.position.pixels <
+            140) {
+      _scrollToLatest();
+    }
+  }
+
+  void _scrollToLatest() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+      );
+    });
   }
 
   @override
@@ -504,6 +1007,7 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>> {
               ),
             Expanded(
               child: ListView.builder(
+                controller: _scrollController,
                 padding: const EdgeInsets.all(16),
                 itemCount: widget.items().length + (widget.hasMore() ? 1 : 0),
                 itemBuilder: (context, index) {
@@ -517,91 +1021,150 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>> {
                   final item = widget.items()[index - offset];
                   final mine = widget.isMine(item);
                   final messageType = widget.typeOf(item).toUpperCase();
-                  return Align(
-                    alignment:
-                        mine ? Alignment.centerRight : Alignment.centerLeft,
-                    child: GestureDetector(
-                      onLongPress: () => _showMessageActions(item, mine),
-                      child: Container(
-                        margin: const EdgeInsets.symmetric(vertical: 4),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 10,
+                  final messageId = widget.idOf(item);
+                  final translation = _translations[messageId];
+                  final showingTranslation =
+                      _showingTranslations.contains(messageId);
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: Column(
+                      children: [
+                        _MessageTimePill(
+                          value: _fullTime(widget.createdAtOf(item)),
                         ),
-                        decoration: BoxDecoration(
-                          color: mine
-                              ? Theme.of(context).colorScheme.primaryContainer
-                              : Theme.of(context)
-                                  .colorScheme
-                                  .surfaceContainerLow,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: mine
-                              ? CrossAxisAlignment.end
-                              : CrossAxisAlignment.start,
+                        const SizedBox(height: 6),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: mine
+                              ? MainAxisAlignment.end
+                              : MainAxisAlignment.start,
                           children: [
-                            if (messageType == 'IMAGE')
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(12),
-                                child: Image.network(
-                                  widget.contentOf(item),
-                                  width: 220,
-                                  height: 180,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) => const SizedBox(
-                                    width: 180,
-                                    height: 120,
-                                    child: Icon(Icons.broken_image_outlined),
+                            if (!mine) ...[
+                              _PeerAvatar(
+                                peer: widget.otherPeer,
+                                onTap: widget.onOtherAvatarTap,
+                              ),
+                              const SizedBox(width: 8),
+                            ],
+                            Flexible(
+                              child: GestureDetector(
+                                onLongPress: () =>
+                                    _showMessageActions(item, mine),
+                                child: Container(
+                                  constraints:
+                                      const BoxConstraints(maxWidth: 280),
+                                  padding: messageType == 'IMAGE'
+                                      ? EdgeInsets.zero
+                                      : const EdgeInsets.symmetric(
+                                          horizontal: 14,
+                                          vertical: 11,
+                                        ),
+                                  decoration: BoxDecoration(
+                                    color: mine
+                                        ? Theme.of(context).colorScheme.primary
+                                        : Theme.of(context)
+                                            .colorScheme
+                                            .surfaceContainerLow,
+                                    borderRadius: BorderRadius.only(
+                                      topLeft: const Radius.circular(16),
+                                      topRight: const Radius.circular(16),
+                                      bottomLeft:
+                                          Radius.circular(mine ? 16 : 4),
+                                      bottomRight:
+                                          Radius.circular(mine ? 4 : 16),
+                                    ),
                                   ),
+                                  child: messageType == 'IMAGE'
+                                      ? GestureDetector(
+                                          onTap: () => _openImage(
+                                            widget.contentOf(item),
+                                          ),
+                                          child: ClipRRect(
+                                            borderRadius:
+                                                BorderRadius.circular(14),
+                                            child: Image.network(
+                                              widget.contentOf(item),
+                                              width: 220,
+                                              height: 180,
+                                              fit: BoxFit.cover,
+                                              errorBuilder: (_, __, ___) =>
+                                                  const SizedBox(
+                                                width: 180,
+                                                height: 120,
+                                                child: Icon(
+                                                  Icons.broken_image_outlined,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        )
+                                      : Text(
+                                          showingTranslation &&
+                                                  translation != null
+                                              ? translation
+                                              : widget.contentOf(item),
+                                          style: TextStyle(
+                                            color: mine
+                                                ? Theme.of(context)
+                                                    .colorScheme
+                                                    .onPrimary
+                                                : Theme.of(context)
+                                                    .colorScheme
+                                                    .onSurface,
+                                          ),
+                                        ),
                                 ),
-                              )
-                            else
-                              Text(widget.contentOf(item)),
-                            const SizedBox(height: 4),
-                            Text(
-                              _compactTime(widget.createdAtOf(item)),
-                              style: Theme.of(context).textTheme.labelSmall,
+                              ),
                             ),
+                            if (mine) ...[
+                              const SizedBox(width: 8),
+                              _PeerAvatar(peer: widget.myPeer),
+                            ],
                           ],
                         ),
-                      ),
+                        if (_translating.contains(messageId))
+                          Padding(
+                            padding: EdgeInsets.only(
+                              top: 4,
+                              left: mine ? 0 : 44,
+                              right: mine ? 44 : 0,
+                            ),
+                            child: Row(
+                              mainAxisAlignment: mine
+                                  ? MainAxisAlignment.end
+                                  : MainAxisAlignment.start,
+                              children: [
+                                const SizedBox.square(
+                                  dimension: 12,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 1.5,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  strings.translating,
+                                  style: Theme.of(context).textTheme.labelSmall,
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
                     ),
                   );
                 },
               ),
             ),
-            SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _input,
-                        maxLength: 5000,
-                        decoration: InputDecoration(
-                          hintText: strings.messageHint,
-                          counterText: '',
-                        ),
-                      ),
-                    ),
-                    IconButton.filled(
-                      tooltip: strings.send,
-                      onPressed: widget.isLoading()
-                          ? null
-                          : () {
-                              final text = _input.text;
-                              if (text.trim().isEmpty) return;
-                              _input.clear();
-                              unawaited(widget.send(text));
-                            },
-                      icon: const Icon(Icons.send),
-                    ),
-                  ],
-                ),
-              ),
+            _MessageComposer(
+              input: _input,
+              isLoading: widget.isLoading(),
+              isSending: widget.isSending(),
+              isPickingImage: _isPickingImage,
+              waitingForReply: widget.waitingForReply?.call() ?? false,
+              canPickImage:
+                  widget.pickImage != null && widget.sendImage != null,
+              onPickImage: _pickAndSendImage,
+              onSend: _sendText,
+              strings: strings,
             ),
           ],
         ),
@@ -609,26 +1172,70 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>> {
     );
   }
 
+  Future<void> _sendText() async {
+    if (widget.waitingForReply?.call() ?? false) return;
+    final text = _input.text;
+    if (text.trim().isEmpty) return;
+    _input.clear();
+    await widget.send(text);
+    if (!mounted) return;
+    if (widget.error() != null) {
+      _input.text = text;
+      _input.selection = TextSelection.collapsed(
+        offset: _input.text.length,
+      );
+    }
+  }
+
   Future<void> _showMessageActions(T item, bool mine) async {
     final strings = _strings(context);
+    final messageId = widget.idOf(item);
+    final isText = widget.typeOf(item).toUpperCase() == 'TEXT';
+    final showingTranslation = _showingTranslations.contains(messageId);
+    final hasTranslation = _translations.containsKey(messageId);
     final action = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
       builder: (context) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          if (widget.typeOf(item).toUpperCase() == 'TEXT')
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
             ListTile(
               leading: const Icon(Icons.copy_outlined),
               title: Text(strings.copy),
               onTap: () => Navigator.pop(context, 'copy'),
             ),
-          if (mine && widget.delete != null)
             ListTile(
-              leading: const Icon(Icons.delete_outline),
-              title: Text(strings.delete),
-              onTap: () => Navigator.pop(context, 'delete'),
+              enabled: false,
+              leading: const Icon(Icons.format_quote_outlined),
+              title: Text(strings.quote),
             ),
-        ]),
+            if (isText && widget.translate != null)
+              ListTile(
+                enabled: !_translating.contains(messageId),
+                leading: const Icon(Icons.translate),
+                title: Text(
+                  hasTranslation && showingTranslation
+                      ? strings.showOriginal
+                      : strings.translate,
+                ),
+                onTap: () => Navigator.pop(context, 'translate'),
+              ),
+            ListTile(
+              enabled: false,
+              leading: const Icon(Icons.undo_outlined),
+              title: Text(strings.unsend),
+            ),
+            if (mine && widget.delete != null)
+              ListTile(
+                leading: const Icon(Icons.delete_outline),
+                title: Text(strings.delete),
+                textColor: Theme.of(context).colorScheme.error,
+                iconColor: Theme.of(context).colorScheme.error,
+                onTap: () => Navigator.pop(context, 'delete'),
+              ),
+          ],
+        ),
       ),
     );
     if (!mounted) return;
@@ -638,18 +1245,292 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>> {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(strings.copied)));
       }
+    } else if (action == 'translate') {
+      await _translateMessage(item);
     } else if (action == 'delete') {
-      await widget.delete?.call(widget.idOf(item));
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(strings.deleteMessage),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(strings.cancel),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(strings.delete),
+            ),
+          ],
+        ),
+      );
+      if (confirmed == true) {
+        await widget.delete?.call(widget.idOf(item));
+      }
     }
+  }
+
+  Future<void> _pickAndSendImage() async {
+    final pickImage = widget.pickImage;
+    final sendImage = widget.sendImage;
+    if (pickImage == null || sendImage == null || _isPickingImage) return;
+    setState(() => _isPickingImage = true);
+    try {
+      final url = await pickImage();
+      if (url?.trim().isNotEmpty == true) await sendImage(url!.trim());
+    } finally {
+      if (mounted) setState(() => _isPickingImage = false);
+    }
+  }
+
+  Future<void> _translateMessage(T item) async {
+    final translate = widget.translate;
+    final messageId = widget.idOf(item);
+    if (_translations.containsKey(messageId)) {
+      setState(() {
+        if (!_showingTranslations.remove(messageId)) {
+          _showingTranslations.add(messageId);
+        }
+      });
+      return;
+    }
+    if (translate == null || !_translating.add(messageId)) return;
+    setState(() {});
+    try {
+      final translated = await translate(widget.contentOf(item));
+      if (!mounted) return;
+      if (translated?.trim().isNotEmpty == true) {
+        setState(() {
+          _translations[messageId] = translated!.trim();
+          _showingTranslations.add(messageId);
+        });
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_strings(context).translationFailed)),
+        );
+      }
+    } finally {
+      _translating.remove(messageId);
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _openImage(String url) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => Scaffold(
+          backgroundColor: Colors.black,
+          appBar: AppBar(
+            backgroundColor: Colors.black,
+            foregroundColor: Colors.white,
+          ),
+          body: Center(
+            child: InteractiveViewer(
+              minScale: 0.8,
+              maxScale: 5,
+              child: Image.network(url, fit: BoxFit.contain),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
-class _UnreadBadge extends StatelessWidget {
-  const _UnreadBadge({required this.count});
-  final int count;
+class _MessageTimePill extends StatelessWidget {
+  const _MessageTimePill({required this.value});
+
+  final String value;
+
   @override
-  Widget build(BuildContext context) =>
-      count <= 0 ? const SizedBox.shrink() : Badge(label: Text('$count'));
+  Widget build(BuildContext context) {
+    if (value.isEmpty) return const SizedBox.shrink();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        value,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+      ),
+    );
+  }
+}
+
+class _PeerAvatar extends StatelessWidget {
+  const _PeerAvatar({this.peer, this.onTap});
+
+  final MessagingPeer? peer;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final avatar = peer?.avatar.trim() ?? '';
+    final name = peer?.name.trim() ?? '';
+    final isCustomerService = peer?.id.trim().toUpperCase() == 'CS_ADMIN';
+    final content = CircleAvatar(
+      radius: 18,
+      backgroundColor: isCustomerService
+          ? Theme.of(context).colorScheme.primaryContainer
+          : null,
+      foregroundImage: avatar.isEmpty ? null : NetworkImage(avatar),
+      child: avatar.isNotEmpty
+          ? null
+          : isCustomerService
+              ? Icon(
+                  Icons.support_agent_rounded,
+                  size: 21,
+                  color: Theme.of(context).colorScheme.onPrimaryContainer,
+                )
+              : Text(name.isEmpty ? '?' : name.substring(0, 1)),
+    );
+    if (onTap == null) return content;
+    return GestureDetector(onTap: onTap, child: content);
+  }
+}
+
+class _MessageComposer extends StatelessWidget {
+  const _MessageComposer({
+    required this.input,
+    required this.isLoading,
+    required this.isSending,
+    required this.isPickingImage,
+    required this.waitingForReply,
+    required this.canPickImage,
+    required this.onPickImage,
+    required this.onSend,
+    required this.strings,
+  });
+
+  final TextEditingController input;
+  final bool isLoading;
+  final bool isSending;
+  final bool isPickingImage;
+  final bool waitingForReply;
+  final bool canPickImage;
+  final VoidCallback onPickImage;
+  final VoidCallback onSend;
+  final MessagingStrings strings;
+
+  @override
+  Widget build(BuildContext context) => Material(
+        color: Theme.of(context).colorScheme.surface,
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (waitingForReply)
+                Container(
+                  width: double.infinity,
+                  color: const Color(0xfffff3e0),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  child: Row(
+                    children: [
+                      const Text('⏳'),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          strings.rateLimitHint,
+                          style: const TextStyle(
+                            color: Color(0xffe65100),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    if (canPickImage)
+                      IconButton(
+                        tooltip: strings.chooseImage,
+                        onPressed:
+                            waitingForReply || isSending || isPickingImage
+                                ? null
+                                : onPickImage,
+                        icon: isPickingImage
+                            ? const SizedBox.square(
+                                dimension: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.add_photo_alternate_outlined),
+                      ),
+                    Expanded(
+                      child: TextField(
+                        controller: input,
+                        enabled: !waitingForReply,
+                        minLines: 1,
+                        maxLines: 4,
+                        maxLength: 2000,
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: (_) => onSend(),
+                        decoration: InputDecoration(
+                          hintText: waitingForReply
+                              ? strings.waitingForReply
+                              : strings.messageHint,
+                          counterText: '',
+                          filled: true,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(22),
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton.filled(
+                      tooltip: strings.send,
+                      onPressed: waitingForReply || isLoading || isSending
+                          ? null
+                          : onSend,
+                      icon: isSending
+                          ? const SizedBox.square(
+                              dimension: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.send),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+}
+
+class _UnreadBadge extends StatelessWidget {
+  const _UnreadBadge({required this.count, this.showDot = false});
+  final int count;
+  final bool showDot;
+  @override
+  Widget build(BuildContext context) {
+    if (count > 0) {
+      return Badge(label: Text(count >= 100 ? '99+' : '$count'));
+    }
+    return showDot
+        ? Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.error,
+              shape: BoxShape.circle,
+            ),
+          )
+        : const SizedBox.shrink();
+  }
 }
 
 MessagingStrings _strings(BuildContext context) => MessagingStrings(
@@ -672,6 +1553,17 @@ String _compactTime(String? value) {
     return '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
   }
   return '${date.month}/${date.day}';
+}
+
+String _fullTime(String? value) {
+  final date = DateTime.tryParse(value ?? '')?.toLocal();
+  if (date == null) {
+    final fallback = (value ?? '').replaceFirst('T', ' ');
+    return fallback.length > 16 ? fallback.substring(0, 16) : fallback;
+  }
+  String two(int part) => part.toString().padLeft(2, '0');
+  return '${date.year}-${two(date.month)}-${two(date.day)} '
+      '${two(date.hour)}:${two(date.minute)}';
 }
 
 String _userLabel(String id, MessagingStrings strings) {

@@ -162,11 +162,18 @@ class DiscoverDetailService(
         val project = projectRepository.findById(projectId).orElse(null) ?: return null
         val institution = institutionRepository.findById(institutionId).orElse(null) ?: return null
         val diaries = diaryRepository.findPublishedByProjectId(projectId)
+        val doctorIds = doctorProjectRepository.findByInstitutionProjectId(ip.id)
+            .map { it.doctorId }
+            .filter { it.isNotBlank() }
+            .distinct()
+        val doctorsById = doctorRepository.findAllById(doctorIds).associateBy { it.id }
+        val doctors = doctorIds.mapNotNull(doctorsById::get)
         return InstitutionProjectDetailDto(
-            ip.toResponse(),
-            institutionProjectDetailResolver.resolve(ip, project).toResponse(),
-            institution.toResponse(),
-            diaries.map { it.toResponse() }
+            institutionProject = ip.toResponse(),
+            project = institutionProjectDetailResolver.resolve(ip, project).toResponse(),
+            institution = institution.toResponse(),
+            diaries = diaries.map { it.toResponse() },
+            doctors = doctors.map { it.toResponse() }
         )
     }
 

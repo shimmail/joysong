@@ -132,6 +132,12 @@ final class AuthRepositoryImpl implements AuthRepository {
   @override
   Future<AuthTokens?> readTokens() => _tokenStore.read();
 
+  @override
+  Future<void> activateTokens(AuthTokens tokens) => _tokenStore.save(tokens);
+
+  @override
+  Future<void> clearLocalTokens() => _tokenStore.clear();
+
   Future<AuthSession> _saveSession(AuthSession session) async {
     await _tokenStore.save(session.tokens);
     return session;

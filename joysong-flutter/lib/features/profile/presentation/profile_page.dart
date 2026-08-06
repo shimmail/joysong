@@ -22,10 +22,10 @@ class ProfilePage extends StatefulWidget {
     this.onOrders,
     this.onDiaries,
     this.onJourney,
-    this.onMessages,
     this.onCustomerService,
     this.onAccountSecurity,
     this.onOpenFavorite,
+    this.onSwitchAccount,
     this.onLogout,
     super.key,
   });
@@ -36,10 +36,10 @@ class ProfilePage extends StatefulWidget {
   final VoidCallback? onOrders;
   final VoidCallback? onDiaries;
   final VoidCallback? onJourney;
-  final VoidCallback? onMessages;
   final VoidCallback? onCustomerService;
   final VoidCallback? onAccountSecurity;
   final Future<void> Function(FavoriteItem item)? onOpenFavorite;
+  final Future<void> Function(BuildContext context)? onSwitchAccount;
   final Future<void> Function()? onLogout;
 
   @override
@@ -112,20 +112,11 @@ class _ProfilePageState extends State<ProfilePage> {
           _MenuCard(
             items: [
               _MenuItem(
-                icon: Icons.forum_outlined,
-                title: context.localized('消息中心', 'Message center'),
-                subtitle: context.localized(
-                  '通知、私信与客服消息',
-                  'Notifications, direct messages and support',
-                ),
-                onTap: widget.onMessages,
-              ),
-              _MenuItem(
                 icon: Icons.support_agent_outlined,
                 title: context.localized('联系客服', 'Customer service'),
                 subtitle:
                     context.localized('咨询服务与订单问题', 'Service and order support'),
-                onTap: widget.onCustomerService ?? widget.onMessages,
+                onTap: widget.onCustomerService,
               ),
               _MenuItem(
                 icon: Icons.help_center_outlined,
@@ -178,6 +169,25 @@ class _ProfilePageState extends State<ProfilePage> {
             ],
           ),
           const SizedBox(height: 12),
+          if (widget.onSwitchAccount != null) ...[
+            SizedBox(
+              height: 48,
+              child: FilledButton.tonalIcon(
+                key: const Key('switch-account-button'),
+                onPressed: () => widget.onSwitchAccount?.call(context),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Theme.of(context).colorScheme.surface,
+                  foregroundColor: Theme.of(context).colorScheme.onSurface,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                icon: const Icon(Icons.switch_account_rounded, size: 20),
+                label: Text(context.localized('切换账号', 'Switch account')),
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
           SizedBox(
             height: 48,
             child: FilledButton.tonalIcon(
@@ -250,7 +260,7 @@ class _ProfilePageState extends State<ProfilePage> {
     Navigator.of(context).push<void>(
       MaterialPageRoute(
         builder: (_) => HelpAndFeedbackPage(
-          onCustomerService: widget.onCustomerService ?? widget.onMessages,
+          onCustomerService: widget.onCustomerService,
         ),
       ),
     );

@@ -12,7 +12,11 @@ data class DmConversationResponse(
     val userAUnread: Int,
     val userBUnread: Int,
     val createdAt: String,
-    val updatedAt: String
+    val updatedAt: String,
+    /** 当前是否仍处于首条消息申请阶段：对方是普通用户，且从未在该会话发送消息。 */
+    val firstMessageLimitApplies: Boolean = false,
+    /** 首条消息申请阶段中，当前用户是否已经发送消息并正在等待对方回复。 */
+    val waitingForReply: Boolean = false
 )
 
 data class DmMessageResponse(
@@ -34,7 +38,10 @@ data class CreateDmConversationRequest(
     val targetId: String
 )
 
-fun DmConversationEntity.toResponse(): DmConversationResponse {
+fun DmConversationEntity.toResponse(
+    firstMessageLimitApplies: Boolean = false,
+    waitingForReply: Boolean = false
+): DmConversationResponse {
     return DmConversationResponse(
         id = id,
         userAId = userAId,
@@ -44,7 +51,9 @@ fun DmConversationEntity.toResponse(): DmConversationResponse {
         userAUnread = userAUnread,
         userBUnread = userBUnread,
         createdAt = createdAt.toString(),
-        updatedAt = updatedAt.toString()
+        updatedAt = updatedAt.toString(),
+        firstMessageLimitApplies = firstMessageLimitApplies,
+        waitingForReply = waitingForReply
     )
 }
 

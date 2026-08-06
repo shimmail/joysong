@@ -12,6 +12,7 @@ import 'package:joysong_flutter/features/auth/data/auth_remote_data_source.dart'
 import 'package:joysong_flutter/features/auth/data/auth_repository_impl.dart';
 import 'package:joysong_flutter/features/auth/data/login_preferences_store.dart';
 import 'package:joysong_flutter/features/auth/data/secure_token_store.dart';
+import 'package:joysong_flutter/features/auth/data/saved_account_store.dart';
 import 'package:joysong_flutter/features/auth/domain/auth_repository.dart';
 import 'package:joysong_flutter/features/auth/domain/token_store.dart';
 import 'package:joysong_flutter/features/auth/presentation/auth_controller.dart';
@@ -73,6 +74,9 @@ class _JoysongAppState extends State<JoysongApp> {
           (usesDefaultDependencies
               ? SecureLoginPreferencesStore(storage: secureStorage)
               : null),
+      savedAccountStore: usesDefaultDependencies
+          ? SecureSavedAccountStore(storage: secureStorage)
+          : null,
       messageResolver: (chinese, english) =>
           _localeController.language == AppLanguage.english ? english : chinese,
     );

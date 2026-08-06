@@ -9,12 +9,16 @@ import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 
 interface NotificationRepository : JpaRepository<NotificationEntity, String> {
-    fun findByUserIdOrderByCreatedAtDesc(userId: String, pageable: Pageable): List<NotificationEntity>
-    fun countByUserIdAndIsRead(userId: String, isRead: Boolean): Long
-    fun findByIdAndUserId(id: String, userId: String): NotificationEntity?
+    fun findByUserIdAndDeletedAtIsNullOrderByCreatedAtDesc(
+        userId: String,
+        pageable: Pageable
+    ): List<NotificationEntity>
+
+    fun countByUserIdAndIsReadAndDeletedAtIsNull(userId: String, isRead: Boolean): Long
+    fun findByIdAndUserIdAndDeletedAtIsNull(id: String, userId: String): NotificationEntity?
 
     @Modifying
-    @Query("UPDATE NotificationEntity n SET n.isRead = true WHERE n.userId = :userId AND n.isRead = false")
+    @Query("UPDATE NotificationEntity n SET n.isRead = true WHERE n.userId = :userId AND n.isRead = false AND n.deletedAt IS NULL")
     fun markAllAsReadByUserId(userId: String): Int
 
     // ========== 管理员查询 ==========

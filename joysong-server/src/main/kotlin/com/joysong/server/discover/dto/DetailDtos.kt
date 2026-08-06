@@ -51,7 +51,8 @@ data class InstitutionProjectDetailDto(
     val institutionProject: InstitutionProjectResponse,
     val project: ProjectResponse,
     val institution: InstitutionResponse,
-    val diaries: List<DiaryResponse> = emptyList()
+    val diaries: List<DiaryResponse> = emptyList(),
+    val doctors: List<DoctorResponse> = emptyList()
 )
 
 data class InstitutionProjectWithProject(

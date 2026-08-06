@@ -39,7 +39,7 @@ enum ReportTargetType {
   final String wireValue;
 }
 
-enum PublicMediaPurpose { diary, review, avatar }
+enum PublicMediaPurpose { diary, review, avatar, directMessage }
 
 enum MediaPrivacy { publicContent, privateIdentityMaterial }
 

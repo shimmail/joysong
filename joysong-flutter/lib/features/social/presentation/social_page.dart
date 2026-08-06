@@ -7,12 +7,13 @@ import 'package:joysong_flutter/core/files/app_file_picker.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
+import 'package:joysong_flutter/features/discover/presentation/discover_content_card.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
 import 'package:joysong_flutter/features/orders/domain/orders_repository.dart';
 import 'package:joysong_flutter/features/social/domain/content_safety.dart';
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
 import 'package:joysong_flutter/features/social/presentation/diary_detail_page.dart';
-import 'package:joysong_flutter/features/social/presentation/diary_media_grid.dart';
+import 'package:joysong_flutter/features/social/presentation/diary_share.dart';
 import 'package:joysong_flutter/features/social/presentation/social_controller.dart';
 
 typedef DiaryImagePicker = Future<PublicMediaDraft?> Function();
@@ -1077,79 +1078,63 @@ final class _DiaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        key: Key('open-diary-${diary.id}'),
-        onTap: onOpen,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child:
-                        Text(diary.title, style: theme.textTheme.titleMedium),
-                  ),
-                  _StatusChip(status: diary.status),
-                  PopupMenuButton<String>(
-                    tooltip: context.localized('更多操作', 'More actions'),
-                    onSelected: (value) {
-                      if (value == 'edit') {
-                        onEdit?.call();
-                      } else if (value == 'delete') {
-                        onDelete();
-                      }
-                    },
-                    itemBuilder: (_) => [
-                      if (onEdit != null)
-                        PopupMenuItem(
-                            value: 'edit',
-                            child: Text(context.localized('编辑', 'Edit'))),
-                      PopupMenuItem(
-                          value: 'delete',
-                          child: Text(context.localized('删除', 'Delete'))),
-                    ],
-                  ),
-                ],
-              ),
-              if (diary.images.isNotEmpty ||
-                  diary.beforeImages.isNotEmpty ||
-                  diary.afterImages.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                DiaryMediaGrid(
-                  images: diary.images,
-                  beforeImages: diary.beforeImages,
-                  afterImages: diary.afterImages,
-                  height: 220,
-                  borderRadius: BorderRadius.circular(10),
+    return DiaryPreviewCard(
+      key: Key('open-diary-${diary.id}'),
+      title: diary.title,
+      content: diary.content,
+      authorName: diary.authorName,
+      authorAvatar: diary.authorAvatar,
+      publishDate: diary.publishDate.isNotEmpty
+          ? diary.publishDate
+          : diary.createdAt?.toIso8601String() ?? '',
+      projectName: diary.projectName,
+      images: diary.images,
+      beforeImages: diary.beforeImages,
+      afterImages: diary.afterImages,
+      likeCount: diary.likeCount,
+      favoriteCount: diary.favoriteCount,
+      commentCount: diary.commentCount,
+      isLiked: diary.isLiked,
+      isFavorited: false,
+      onTap: onOpen,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _StatusChip(status: diary.status),
+          PopupMenuButton<String>(
+            tooltip: context.localized('更多操作', 'More actions'),
+            onSelected: (value) {
+              if (value == 'share') {
+                shareDiary(context, diary);
+              } else if (value == 'edit') {
+                onEdit?.call();
+              } else if (value == 'delete') {
+                onDelete();
+              }
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'share',
+                child: Row(
+                  children: [
+                    const Icon(Icons.share_outlined, size: 20),
+                    const SizedBox(width: 12),
+                    Text(context.localized('分享', 'Share')),
+                  ],
                 ),
-              ],
-              const SizedBox(height: 8),
-              Text(
-                diary.content,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodyMedium,
               ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 16,
-                children: [
-                  _Count(icon: Icons.favorite_border, value: diary.likeCount),
-                  _Count(
-                      icon: Icons.chat_bubble_outline,
-                      value: diary.commentCount),
-                  _Count(
-                      icon: Icons.bookmark_border, value: diary.favoriteCount),
-                ],
+              if (onEdit != null)
+                PopupMenuItem(
+                  value: 'edit',
+                  child: Text(context.localized('编辑', 'Edit')),
+                ),
+              PopupMenuItem(
+                value: 'delete',
+                child: Text(context.localized('删除', 'Delete')),
               ),
             ],
           ),
-        ),
+        ],
       ),
     );
   }
@@ -1168,27 +1153,6 @@ final class _StatusChip extends StatelessWidget {
       label: Text(published
           ? context.localized('已发布', 'Published')
           : context.localized('私密', 'Private')),
-    );
-  }
-}
-
-final class _Count extends StatelessWidget {
-  const _Count({required this.icon, required this.value});
-  final IconData icon;
-  final int value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      label: '$value',
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 18),
-          const SizedBox(width: 4),
-          Text('$value'),
-        ],
-      ),
     );
   }
 }

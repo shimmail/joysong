@@ -81,14 +81,30 @@ final class DiscoverItem {
         'address',
         'authorName',
       ]),
-      imageUrl: _firstImage(source, mediaUrlResolver: mediaUrlResolver),
-      meta: _firstText(source, const [
-        'city',
-        'category',
-        'institutionName',
-        'department',
-        'publishDate',
-      ]),
+      imageUrl: type == DiscoverContentType.project
+          ? _firstProjectImage(
+              source,
+              mediaUrlResolver: mediaUrlResolver,
+            )
+          : _firstImage(source, mediaUrlResolver: mediaUrlResolver),
+      meta: _firstText(
+        source,
+        type == DiscoverContentType.diary
+            ? const [
+                'publishDate',
+                'publishedAt',
+                'publishTime',
+                'createdAt',
+                'createdDate',
+              ]
+            : const [
+                'city',
+                'category',
+                'institutionName',
+                'department',
+                'publishDate',
+              ],
+      ),
       raw: Map.unmodifiable(source),
     );
   }
@@ -165,10 +181,12 @@ String _firstImage(
 }) {
   for (final key in const [
     'coverImage',
+    'coverImageUrl',
     'avatar',
     'logo',
     'imageUrl',
     'images',
+    'imageUrls',
   ]) {
     final value = map[key];
     final candidates = value is List
@@ -180,6 +198,31 @@ String _firstImage(
         return mediaUrlResolver?.resolve(normalized) ?? normalized;
       }
     }
+  }
+  return '';
+}
+
+String _firstProjectImage(
+  Map<String, Object?> map, {
+  PublicMediaUrlResolver? mediaUrlResolver,
+}) {
+  final projectImage = _firstImage(
+    map,
+    mediaUrlResolver: mediaUrlResolver,
+  );
+  if (projectImage.isNotEmpty) return projectImage;
+  final institutionProjects = map['institutionProjects'];
+  if (institutionProjects is! List) return '';
+  for (final value in institutionProjects) {
+    if (value is! Map) continue;
+    final entry = value.map(
+      (key, value) => MapEntry(key.toString(), value),
+    );
+    final image = _firstImage(
+      entry,
+      mediaUrlResolver: mediaUrlResolver,
+    );
+    if (image.isNotEmpty) return image;
   }
   return '';
 }

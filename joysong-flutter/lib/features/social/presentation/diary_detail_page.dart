@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:joysong_flutter/features/social/data/comment_collapse_store.dart';
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
 import 'package:joysong_flutter/features/social/presentation/diary_media_grid.dart';
+import 'package:joysong_flutter/features/social/presentation/diary_share.dart';
 import 'package:joysong_flutter/features/social/presentation/favorite_action_button.dart';
 import 'package:joysong_flutter/features/social/presentation/report_action_button.dart';
 import 'package:joysong_flutter/features/social/presentation/social_controller.dart';
@@ -84,6 +85,12 @@ final class _DiaryDetailPageState extends State<DiaryDetailPage> {
       appBar: AppBar(
         title: Text(_english ? 'Diary details' : '日记详情'),
         actions: [
+          IconButton(
+            key: const Key('diary-share'),
+            tooltip: _english ? 'Share diary' : '分享日记',
+            onPressed: () => shareDiary(context, widget.diary),
+            icon: const Icon(Icons.share_outlined),
+          ),
           ReportActionButton(
             key: const Key('diary-report'),
             controller: widget.controller,
@@ -191,38 +198,73 @@ final class _DiaryDetailPageState extends State<DiaryDetailPage> {
     final busy = widget.controller.isBusy(
       'engagement:diary:${widget.diary.id}',
     );
+    final inactiveColor = Theme.of(context).colorScheme.onSurfaceVariant;
+    const likedColor = Color(0xffe53935);
+    const savedColor = Color(0xffffc107);
+    final loadedCommentCount =
+        widget.controller.commentsFor(widget.diary.id).length;
+    final commentCount = loadedCommentCount > widget.diary.commentCount
+        ? loadedCommentCount
+        : widget.diary.commentCount;
     return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        IconButton(
-          key: const Key('diary-like'),
-          tooltip: status.active
+        Semantics(
+          button: true,
+          label: status.active
               ? (_english ? 'Unlike' : '取消点赞')
               : (_english ? 'Like' : '点赞'),
-          onPressed: busy
-              ? null
-              : () async {
-                  final result = await widget.controller.toggleLike(
-                    LikeTargetType.diary,
-                    widget.diary.id,
-                    initial: initial,
-                  );
-                  if (!result.succeeded && mounted) {
-                    _showFailure(
-                      _english
-                          ? 'Unable to update the like. Please try again.'
-                          : '点赞失败，请重试',
+          child: InkWell(
+            key: const Key('diary-like'),
+            borderRadius: BorderRadius.circular(20),
+            onTap: busy
+                ? null
+                : () async {
+                    final result = await widget.controller.toggleLike(
+                      LikeTargetType.diary,
+                      widget.diary.id,
+                      initial: initial,
                     );
-                  }
-                },
-          icon: Icon(
-            status.active ? Icons.favorite : Icons.favorite_border,
-            color: status.active ? Colors.red : null,
+                    if (!result.succeeded && mounted) {
+                      _showFailure(
+                        _english
+                            ? 'Unable to update the like. Please try again.'
+                            : '点赞失败，请重试',
+                      );
+                    }
+                  },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AnimatedScale(
+                    scale: status.active ? 1.15 : 1,
+                    duration: const Duration(milliseconds: 180),
+                    child: Icon(
+                      status.active
+                          ? Icons.favorite
+                          : Icons.favorite_border,
+                      size: 24,
+                      color: status.active ? likedColor : inactiveColor,
+                    ),
+                  ),
+                  if (status.count > 0) ...[
+                    const SizedBox(width: 4),
+                    Text(
+                      '${status.count}',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: status.active ? likedColor : inactiveColor,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
           ),
         ),
-        if (status.count > 0) ...[
-          Text('${status.count}'),
-          const SizedBox(width: 4),
-        ],
+        const SizedBox(width: 16),
         FavoriteActionButton(
           controller: widget.controller,
           type: FavoriteTargetType.diary,
@@ -230,16 +272,53 @@ final class _DiaryDetailPageState extends State<DiaryDetailPage> {
           targetName: widget.diary.title,
           targetImage: widget.diary.coverImage.isNotEmpty
               ? widget.diary.coverImage
-              : (widget.diary.images.isEmpty ? '' : widget.diary.images.first),
+              : (widget.diary.images.isEmpty
+                  ? ''
+                  : widget.diary.images.first),
+          compact: true,
+          showCount: true,
+          activeColor: savedColor,
         ),
-        Icon(Icons.chat_bubble_outline, size: 18),
-        const SizedBox(width: 5),
-        Text(
-          '${widget.controller.commentsFor(widget.diary.id).length}',
-          semanticsLabel: _english ? 'Loaded comments' : '已加载评论数',
+        const SizedBox(width: 16),
+        Semantics(
+          button: true,
+          label: _english ? 'Write a comment' : '发表评论',
+          child: InkWell(
+            key: const Key('diary-comment'),
+            borderRadius: BorderRadius.circular(20),
+            onTap: _startComment,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.chat_bubble_outline,
+                    size: 24,
+                    color: inactiveColor,
+                  ),
+                  if (commentCount > 0) ...[
+                    const SizedBox(width: 4),
+                    Text(
+                      '$commentCount',
+                      style: TextStyle(fontSize: 13, color: inactiveColor),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
         ),
       ],
     );
+  }
+
+  void _startComment() {
+    _replyTrigger++;
+    if (_replyTarget != null) {
+      setState(() => _replyTarget = null);
+    }
+    unawaited(_focusComposer(_replyTrigger));
   }
 
   Widget _buildComment(Comment comment) {
@@ -795,11 +874,39 @@ final class _DiaryHeader extends StatelessWidget {
                       : null,
                 ),
                 const SizedBox(width: 10),
-                Expanded(child: Text(diary.authorName)),
-                if (diary.publishDate.isNotEmpty)
-                  Text(
-                    diary.publishDate,
-                    style: theme.textTheme.bodySmall,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(diary.authorName),
+                      if (diary.publishDate.isNotEmpty)
+                        Text(
+                          diary.publishDate,
+                          style: theme.textTheme.bodySmall,
+                        ),
+                    ],
+                  ),
+                ),
+                if (diary.rating > 0)
+                  Semantics(
+                    label: Localizations.localeOf(context).languageCode == 'en'
+                        ? 'Rating ${diary.rating} out of 5'
+                        : '评分 ${diary.rating} 分，满分 5 分',
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.star_rounded,
+                          size: 18,
+                          color: Color(0xffffa000),
+                        ),
+                        const SizedBox(width: 3),
+                        Text(
+                          '${diary.rating}.0',
+                          style: theme.textTheme.titleSmall,
+                        ),
+                      ],
+                    ),
                   ),
                 if (onAuthorTap != null) ...[
                   const SizedBox(width: 4),

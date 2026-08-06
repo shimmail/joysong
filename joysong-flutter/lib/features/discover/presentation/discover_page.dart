@@ -13,7 +13,6 @@ import 'package:joysong_flutter/features/discover/presentation/doctor_detail_vie
 import 'package:joysong_flutter/features/discover/presentation/catalog_project_detail_view.dart';
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
 import 'package:joysong_flutter/features/social/presentation/diary_detail_page.dart';
-import 'package:joysong_flutter/features/social/presentation/diary_media_grid.dart';
 import 'package:joysong_flutter/features/social/presentation/favorite_action_button.dart';
 import 'package:joysong_flutter/features/social/presentation/report_action_button.dart';
 import 'package:joysong_flutter/features/social/presentation/social_controller.dart';
@@ -24,6 +23,8 @@ class DiscoverPage extends StatefulWidget {
     this.onBookProject,
     this.socialController,
     this.onOpenUser,
+    this.onConsultDoctor,
+    this.onOpenAi,
     this.initialType = DiscoverContentType.all,
     super.key,
   });
@@ -32,6 +33,8 @@ class DiscoverPage extends StatefulWidget {
   final ValueChanged<DiscoverItem>? onBookProject;
   final SocialController? socialController;
   final ValueChanged<String>? onOpenUser;
+  final ValueChanged<DiscoverItem>? onConsultDoctor;
+  final VoidCallback? onOpenAi;
   final DiscoverContentType initialType;
 
   @override
@@ -243,6 +246,8 @@ class _DiscoverPageState extends State<DiscoverPage>
                   onBookProject: widget.onBookProject,
                   socialController: widget.socialController,
                   onOpenUser: widget.onOpenUser,
+                  onConsultDoctor: widget.onConsultDoctor,
+                  onOpenAi: widget.onOpenAi,
                 ),
             ],
           ),
@@ -346,6 +351,7 @@ class _DiscoverFilters extends StatelessWidget {
                 context: context,
                 isScrollControlled: true,
                 useSafeArea: true,
+                constraints: const BoxConstraints(maxWidth: 420),
                 builder: (_) => _FilterSheet(
                   options: options,
                   categories: categories,
@@ -598,6 +604,8 @@ class _DiscoveryResultsPane extends StatefulWidget {
     this.onBookProject,
     this.socialController,
     this.onOpenUser,
+    this.onConsultDoctor,
+    this.onOpenAi,
   });
 
   final DiscoverRepository? repository;
@@ -609,6 +617,8 @@ class _DiscoveryResultsPane extends StatefulWidget {
   final ValueChanged<DiscoverItem>? onBookProject;
   final SocialController? socialController;
   final ValueChanged<String>? onOpenUser;
+  final ValueChanged<DiscoverItem>? onConsultDoctor;
+  final VoidCallback? onOpenAi;
 
   @override
   State<_DiscoveryResultsPane> createState() => _DiscoveryResultsPaneState();
@@ -698,6 +708,7 @@ class _DiscoveryResultsPaneState extends State<_DiscoveryResultsPane> {
             .toList(),
         onRefresh: () async {},
         onOpen: _openDetail,
+        onInstitutionProjectOpen: _openInstitutionProject,
       );
     }
     return ListenableBuilder(
@@ -721,6 +732,7 @@ class _DiscoveryResultsPaneState extends State<_DiscoveryResultsPane> {
               isLoadingMore: controller.isLoadingMore,
               onRefresh: () => _load(refresh: true),
               onOpen: _openDetail,
+              onInstitutionProjectOpen: _openInstitutionProject,
             ),
         };
       },
@@ -765,9 +777,34 @@ class _DiscoveryResultsPaneState extends State<_DiscoveryResultsPane> {
           onBookProject: widget.onBookProject,
           socialController: widget.socialController,
           onOpenUser: widget.onOpenUser,
+          onConsultDoctor: widget.onConsultDoctor,
+          onOpenAi: widget.onOpenAi,
         ),
       ),
     );
+  }
+
+  void _openInstitutionProject(String institutionId, String projectId) {
+    final repository = widget.repository;
+    if (repository == null ||
+        institutionId.trim().isEmpty ||
+        projectId.trim().isEmpty) {
+      return;
+    }
+    Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => DiscoverDetailPage(
+        repository: repository,
+        type: DiscoverContentType.project,
+        id: projectId.trim(),
+        institutionId: institutionId.trim(),
+        projectId: projectId.trim(),
+        onBookProject: widget.onBookProject,
+        socialController: widget.socialController,
+        onOpenUser: widget.onOpenUser,
+        onConsultDoctor: widget.onConsultDoctor,
+        onOpenAi: widget.onOpenAi,
+      ),
+    ));
   }
 
   void _openDiaryAssociation(
@@ -793,6 +830,8 @@ class _DiscoveryResultsPaneState extends State<_DiscoveryResultsPane> {
         onBookProject: widget.onBookProject,
         socialController: widget.socialController,
         onOpenUser: widget.onOpenUser,
+        onConsultDoctor: widget.onConsultDoctor,
+        onOpenAi: widget.onOpenAi,
       ),
     ));
   }
@@ -852,6 +891,7 @@ class _DiscoverList extends StatelessWidget {
     required this.items,
     required this.onRefresh,
     required this.onOpen,
+    required this.onInstitutionProjectOpen,
     this.isLoadingMore = false,
   });
 
@@ -860,6 +900,8 @@ class _DiscoverList extends StatelessWidget {
   final bool isLoadingMore;
   final Future<void> Function() onRefresh;
   final ValueChanged<DiscoverItem> onOpen;
+  final void Function(String institutionId, String projectId)
+      onInstitutionProjectOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -885,7 +927,12 @@ class _DiscoverList extends StatelessWidget {
             );
           }
           final item = items[index];
-          return DiscoverContentCard(item: item, onTap: () => onOpen(item));
+          return DiscoverContentCard(
+            key: ValueKey('discover-${item.type.name}-${item.id}'),
+            item: item,
+            onTap: () => onOpen(item),
+            onInstitutionProjectTap: onInstitutionProjectOpen,
+          );
         },
       ),
     );
@@ -903,6 +950,8 @@ class DiscoverDetailPage extends StatefulWidget {
     this.projectId,
     this.socialController,
     this.onOpenUser,
+    this.onConsultDoctor,
+    this.onOpenAi,
     super.key,
   });
 
@@ -915,6 +964,8 @@ class DiscoverDetailPage extends StatefulWidget {
   final String? projectId;
   final SocialController? socialController;
   final ValueChanged<String>? onOpenUser;
+  final ValueChanged<DiscoverItem>? onConsultDoctor;
+  final VoidCallback? onOpenAi;
 
   @override
   State<DiscoverDetailPage> createState() => _DiscoverDetailPageState();
@@ -959,6 +1010,8 @@ class _DiscoverDetailPageState extends State<DiscoverDetailPage> {
           onBookProject: widget.onBookProject,
           socialController: widget.socialController,
           onOpenUser: widget.onOpenUser,
+          onConsultDoctor: widget.onConsultDoctor,
+          onOpenAi: widget.onOpenAi,
         ),
       ),
     );
@@ -1018,6 +1071,7 @@ class _DiscoverDetailPageState extends State<DiscoverDetailPage> {
                   : switch (item!.type) {
                       DiscoverContentType.project => CatalogProjectDetailView(
                           item: item,
+                          socialController: widget.socialController,
                           onBook: widget.onBookProject,
                           onInstitutionTap: (id) =>
                               _openRelated(DiscoverContentType.institution, id),
@@ -1040,6 +1094,8 @@ class _DiscoverDetailPageState extends State<DiscoverDetailPage> {
                                 onBookProject: widget.onBookProject,
                                 socialController: widget.socialController,
                                 onOpenUser: widget.onOpenUser,
+                                onConsultDoctor: widget.onConsultDoctor,
+                                onOpenAi: widget.onOpenAi,
                               ),
                             ),
                           ),
@@ -1060,10 +1116,16 @@ class _DiscoverDetailPageState extends State<DiscoverDetailPage> {
                                 onBookProject: widget.onBookProject,
                                 socialController: widget.socialController,
                                 onOpenUser: widget.onOpenUser,
+                                onConsultDoctor: widget.onConsultDoctor,
+                                onOpenAi: widget.onOpenAi,
                               ),
                             ),
                           ),
                           onDiaryTap: _openDiary,
+                          onConsult: widget.onConsultDoctor == null
+                              ? null
+                              : () => widget.onConsultDoctor!(item),
+                          onAiChat: widget.onOpenAi,
                           onViewAllProjects: () =>
                               _openAllRelatedGroup(item, 'institutionProjects'),
                           onViewAllDiaries: () =>
@@ -1085,6 +1147,8 @@ class _DiscoverDetailPageState extends State<DiscoverDetailPage> {
                                 onBookProject: widget.onBookProject,
                                 socialController: widget.socialController,
                                 onOpenUser: widget.onOpenUser,
+                                onConsultDoctor: widget.onConsultDoctor,
+                                onOpenAi: widget.onOpenAi,
                               ),
                             ),
                           ),
@@ -1143,6 +1207,8 @@ class _DiscoverDetailPageState extends State<DiscoverDetailPage> {
                   onBookProject: widget.onBookProject,
                   socialController: widget.socialController,
                   onOpenUser: widget.onOpenUser,
+                  onConsultDoctor: widget.onConsultDoctor,
+                  onOpenAi: widget.onOpenAi,
                 ),
               ));
             } else {
@@ -1224,6 +1290,8 @@ class _DiscoverDetailPageState extends State<DiscoverDetailPage> {
           onBookProject: widget.onBookProject,
           socialController: widget.socialController,
           onOpenUser: widget.onOpenUser,
+          onConsultDoctor: widget.onConsultDoctor,
+          onOpenAi: widget.onOpenAi,
         ),
       ));
     }
@@ -1317,88 +1385,331 @@ class _AllRelatedContentPage extends StatelessWidget {
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (_, index) {
                     final entry = group.value[index];
-                    final title = _rawText(entry['title'],
-                        fallback: _rawText(entry['name'],
-                            fallback: _rawText(entry['projectName'],
-                                fallback: _rawText(entry['nickname'],
-                                    fallback: context.localized(
-                                        '未命名', 'Untitled')))));
-                    final subtitle = _rawText(entry['description'],
-                        fallback: _rawText(entry['summary'],
-                            fallback: _rawText(entry['content'],
-                                fallback: _rawText(entry['institutionName']))));
-                    final reviewId = group.key == 'reviews'
-                        ? _rawText(
-                            entry['id'],
-                            fallback: _rawText(entry['reviewId']),
-                          )
-                        : '';
                     if (group.key == 'diaries') {
-                      return Card(
-                        clipBehavior: Clip.antiAlias,
-                        child: InkWell(
-                          onTap: onOpen == null
-                              ? null
-                              : () => onOpen!(group.key, entry),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              DiaryMediaGrid(
-                                images: _rawList(
-                                  entry['imageUrls'] ?? entry['images'],
-                                ),
-                                beforeImages: _rawList(
-                                  entry['beforeImageUrls'] ??
-                                      entry['beforeImages'],
-                                ),
-                                afterImages: _rawList(
-                                  entry['afterImageUrls'] ??
-                                      entry['afterImages'],
-                                ),
-                                height: 220,
-                              ),
-                              ListTile(
-                                title: Text(title),
-                                subtitle: subtitle.isEmpty
-                                    ? null
-                                    : Text(
-                                        subtitle,
-                                        maxLines: 3,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                              ),
-                            ],
-                          ),
-                        ),
+                      return DiaryPreviewCard.fromData(
+                        data: entry,
+                        onTap: () => onOpen?.call(group.key, entry),
                       );
                     }
-                    return Card(
-                        child: ListTile(
-                      onTap: onOpen == null
-                          ? null
-                          : () => onOpen!(group.key, entry),
-                      title: Text(title),
-                      subtitle: subtitle.isEmpty
-                          ? null
-                          : Text(subtitle,
-                              maxLines: 3, overflow: TextOverflow.ellipsis),
-                      trailing: reviewId.isNotEmpty && socialController != null
-                          ? ReportActionButton(
-                              key: Key('review-report-$reviewId'),
-                              controller: socialController!,
-                              type: ReportTargetType.review,
-                              targetId: reviewId,
-                              compact: true,
-                              iconSize: 20,
-                            )
-                          : null,
-                    ));
+                    if (group.key == 'reviews') {
+                      return _AllReviewCard(
+                        entry: entry,
+                        socialController: socialController,
+                      );
+                    }
+                    final item = _relatedDiscoverItem(group.key, entry);
+                    if (item != null) {
+                      return DiscoverContentCard(
+                        key: ValueKey('all-${group.key}-${item.id}'),
+                        item: item,
+                        onTap: () => onOpen?.call(group.key, entry),
+                      );
+                    }
+                    return const SizedBox.shrink();
                   },
                 ),
             ],
           ),
         ),
       );
+}
+
+class _AllReviewCard extends StatelessWidget {
+  const _AllReviewCard({required this.entry, this.socialController});
+
+  final Map<String, Object?> entry;
+  final SocialController? socialController;
+
+  @override
+  Widget build(BuildContext context) {
+    final id = _rawText(entry['id'], fallback: _rawText(entry['reviewId']));
+    final userName = _rawText(
+      entry['userName'],
+      fallback: context.localized('匿名用户', 'Anonymous user'),
+    );
+    final content = _rawText(entry['content']);
+    final avatar = _rawText(
+      entry['userAvatar'],
+      fallback: _rawText(
+        entry['avatarUrl'],
+        fallback: _rawText(entry['avatar']),
+      ),
+    );
+    final projectName = _rawText(
+      entry['projectName'],
+      fallback: _rawText(entry['serviceName']),
+    );
+    final createdAt = _rawText(entry['createdAt']);
+    final rating = _rawInt(entry['rating']);
+    final tags = _rawList(entry['tags']);
+    final images = _rawList(entry['imageUrls'] ?? entry['images']);
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 20,
+                  foregroundImage:
+                      avatar.isEmpty ? null : NetworkImage(avatar),
+                  child: Text(userName.characters.first),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(userName,
+                          style: const TextStyle(fontWeight: FontWeight.w700)),
+                      if (createdAt.isNotEmpty)
+                        Text(
+                          createdAt.length >= 10
+                              ? createdAt.substring(0, 10)
+                              : createdAt,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                    ],
+                  ),
+                ),
+                if (rating > 0)
+                  Text(
+                    '★ ${rating.toStringAsFixed(1)}',
+                    style: const TextStyle(
+                      color: Color(0xffffa000),
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                if (id.isNotEmpty && socialController != null)
+                  ReportActionButton(
+                    key: Key('review-report-$id'),
+                    controller: socialController!,
+                    type: ReportTargetType.review,
+                    targetId: id,
+                    compact: true,
+                    iconSize: 20,
+                  ),
+              ],
+            ),
+            if (content.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text(content, style: const TextStyle(height: 1.45)),
+            ],
+            if (projectName.isNotEmpty) ...[
+              const SizedBox(height: 7),
+              Text(
+                projectName,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+            ],
+            if (tags.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final tag in tags)
+                    Chip(
+                      label: Text(tag),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                ],
+              ),
+            ],
+            if (images.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 84,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: images.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  itemBuilder: (_, index) => ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.network(
+                      images[index],
+                      width: 84,
+                      height: 84,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+DiscoverItem? _relatedDiscoverItem(
+  String key,
+  Map<String, Object?> entry,
+) {
+  final type = switch (key) {
+    'doctors' => DiscoverContentType.doctor,
+    'institutions' => DiscoverContentType.institution,
+    'projects' || 'institutionProjects' => DiscoverContentType.project,
+    _ => null,
+  };
+  if (type == null) return null;
+  final doctor = _relatedMap(entry['doctor']);
+  final institution = _relatedMap(entry['institution']);
+  final project = _relatedMap(entry['project']);
+  final institutionProject = _relatedMap(entry['institutionProject']);
+  final source = <String, Object?>{
+    ..._nonEmptyRelatedValues(doctor),
+    ..._nonEmptyRelatedValues(institution),
+    ..._nonEmptyRelatedValues(project),
+    ..._nonEmptyRelatedValues(institutionProject),
+    ..._nonEmptyRelatedValues(entry),
+  };
+  if (type == DiscoverContentType.doctor) {
+    final doctorName = _rawText(
+      entry['doctorName'],
+      fallback: _rawText(
+        doctor['doctorName'],
+        fallback: _rawText(doctor['name'], fallback: _rawText(entry['name'])),
+      ),
+    );
+    if (doctorName.isNotEmpty) source['name'] = doctorName;
+    final doctorAvatar = _rawText(
+      entry['doctorAvatar'],
+      fallback: _rawText(
+        entry['avatarUrl'],
+        fallback: _rawText(
+          doctor['doctorAvatar'],
+          fallback: _rawText(doctor['avatarUrl']),
+        ),
+      ),
+    );
+    if (doctorAvatar.isNotEmpty) source['avatar'] = doctorAvatar;
+    final doctorInstitution = _rawText(
+      entry['institutionName'],
+      fallback: _rawText(
+        doctor['institutionName'],
+        fallback: _rawText(institution['name']),
+      ),
+    );
+    if (doctorInstitution.isNotEmpty) {
+      source['institutionName'] = doctorInstitution;
+    }
+    source['isVerified'] = entry['isVerified'] ??
+        doctor['isVerified'] ??
+        entry['verified'] ??
+        doctor['verified'] ??
+        entry['certified'] ??
+        doctor['certified'];
+    source['specialties'] = entry['specialties'] ??
+        doctor['specialties'] ??
+        entry['specialty'] ??
+        doctor['specialty'] ??
+        entry['tags'] ??
+        doctor['tags'];
+  } else if (type == DiscoverContentType.institution) {
+    final institutionName = _rawText(
+      entry['institutionName'],
+      fallback: _rawText(
+        institution['name'],
+        fallback: _rawText(entry['name']),
+      ),
+    );
+    if (institutionName.isNotEmpty) source['name'] = institutionName;
+    source['isVerified'] = entry['isVerified'] ??
+        institution['isVerified'] ??
+        entry['verified'] ??
+        institution['verified'];
+  } else if (type == DiscoverContentType.project) {
+    final projectName = _rawText(
+      entry['projectName'],
+      fallback: _rawText(
+        institutionProject['name'],
+        fallback: _rawText(project['name'], fallback: _rawText(entry['name'])),
+      ),
+    );
+    if (projectName.isNotEmpty) source['projectName'] = projectName;
+  }
+  final id = switch (type) {
+    DiscoverContentType.doctor =>
+      _rawText(source['doctorId'], fallback: _rawText(source['id'])),
+    DiscoverContentType.institution =>
+      _rawText(source['institutionId'], fallback: _rawText(source['id'])),
+    DiscoverContentType.project =>
+      _rawText(source['projectId'], fallback: _rawText(source['id'])),
+    _ => '',
+  };
+  if (id.isEmpty) return null;
+  final title = _rawText(
+    source['projectName'],
+    fallback: _rawText(
+      source['name'],
+      fallback: _rawText(
+        source['nickname'],
+        fallback: type == DiscoverContentType.doctor ? 'Doctor' : 'Untitled',
+      ),
+    ),
+  );
+  final imageUrl = _relatedFirstImage(source);
+  final subtitle = _rawText(
+    source['description'],
+    fallback: _rawText(
+      source['bio'],
+      fallback: _rawText(source['specialties']),
+    ),
+  );
+  final meta = switch (type) {
+    DiscoverContentType.doctor => _rawText(
+        source['title'],
+        fallback: _rawText(source['institutionName']),
+      ),
+    DiscoverContentType.institution => _rawText(source['city']),
+    DiscoverContentType.project => _rawText(
+        source['category'],
+        fallback: _rawText(source['institutionName']),
+      ),
+    _ => '',
+  };
+  return DiscoverItem(
+    id: id,
+    type: type,
+    title: title,
+    subtitle: subtitle,
+    imageUrl: imageUrl,
+    meta: meta,
+    raw: Map.unmodifiable(source),
+  );
+}
+
+Map<String, Object?> _nonEmptyRelatedValues(Map<String, Object?> source) => {
+      for (final entry in source.entries)
+        if (entry.value != null && entry.value.toString().trim().isNotEmpty)
+          entry.key: entry.value,
+    };
+
+String _relatedFirstImage(Map<String, Object?> source) {
+  for (final key in const [
+    'avatar',
+    'avatarUrl',
+    'doctorAvatar',
+    'userAvatar',
+    'coverImage',
+    'coverImageUrl',
+    'logo',
+    'imageUrl',
+    'imageUrls',
+    'images',
+  ]) {
+    final values = _rawList(source[key]);
+    if (values.isNotEmpty) return values.first;
+  }
+  return '';
 }
 
 Map<String, List<Map<String, Object?>>> _relatedGroups(

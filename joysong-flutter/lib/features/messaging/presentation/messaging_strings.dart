@@ -24,6 +24,11 @@ final class MessagingStrings {
   String get directMessageTitle => pick('私信', 'Direct message');
   String get loadEarlier => pick('加载更早消息', 'Load earlier messages');
   String get messageHint => pick('输入消息', 'Type a message');
+  String get waitingForReply => pick('等待对方回复…', 'Waiting for a reply…');
+  String get rateLimitHint => pick(
+        '对方关注或回复你之前，24小时内最多只能发1条消息',
+        'You can send only one message within 24 hours until they follow you or reply.',
+      );
   String get send => pick('发送', 'Send');
   String get onlineService => pick('在线客服', 'Online support');
   String get onlineServiceDescription =>
@@ -41,6 +46,22 @@ final class MessagingStrings {
   String get copied => pick('已复制', 'Copied');
   String get delete => pick('删除', 'Delete');
   String get deleteMessage => pick('删除这条消息？', 'Delete this message?');
+  String get chooseImage => pick('发送图片', 'Send image');
+  String get translate => pick('翻译', 'Translate');
+  String get translating => pick('正在翻译…', 'Translating…');
+  String get showOriginal => pick('查看原文', 'Show original');
+  String get quote => pick('引用', 'Quote');
+  String get unsend => pick('撤回', 'Unsend');
+  String get markUnread => pick('标为未读', 'Mark as unread');
+  String get pinChat => pick('置顶聊天', 'Pin chat');
+  String get unpinChat => pick('取消置顶', 'Unpin chat');
+  String get deleteConversation => pick('确认删除', 'Delete conversation?');
+  String get deleteConversationConfirm => pick(
+        '删除此聊天（仅在本地隐藏，不删除历史记录）',
+        'Hide this chat locally? Its history will not be deleted.',
+      );
+  String get translationFailed =>
+      pick('翻译失败，请稍后重试', 'Translation failed. Try again later.');
   String get cancel => pick('取消', 'Cancel');
   String get imageMessage => pick('[图片]', '[Image]');
   String get sending => pick('发送中…', 'Sending…');

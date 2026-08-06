@@ -57,6 +57,18 @@ class TimeCursorPager<T> extends ChangeNotifier {
     }
   }
 
+  Future<void> refreshNewest() async {
+    if (_isLoading) return;
+    try {
+      final page = await _loader(limit: pageSize);
+      _items = _deduplicate([..._items, ...page]);
+      _errorMessage = null;
+      notifyListeners();
+    } on Object {
+      // Silent polling failures must not replace an already usable thread.
+    }
+  }
+
   void addNewest(T item) {
     _items = _deduplicate([..._items, item]);
     _errorMessage = null;

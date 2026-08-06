@@ -21,9 +21,8 @@ export default function ImageUpload({ value, onChange, folder = 'general' }: Ima
 
     setLoading(true);
     try {
-      const res = await api.post('/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      // 让浏览器自动附加 multipart boundary，手动设置 Content-Type 可能导致服务端无法解析文件。
+      const res = await api.post('/upload', formData);
       const url = res.data?.data?.url || res.data?.url;
       if (url) {
         onChange?.(url);

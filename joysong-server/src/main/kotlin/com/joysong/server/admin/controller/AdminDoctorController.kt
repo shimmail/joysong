@@ -115,6 +115,7 @@ data class DoctorAdminRequest(
     /** 新增医生时必填，并直接作为医生档案主键。 */
     val userId: String? = null,
     val name: String = "", val title: String = "", val bio: String = "", val avatar: String = "",
+    val contactPhone: String = "",
     val rating: BigDecimal = BigDecimal("4.5"), val reviewCount: Int = 0, val specialties: String = "",
     val isVerified: Boolean = false, val consultationCount: Int = 0, val credentials: String = "",
     /** 医生主页公开展示图片；默认空，与 identity_applications/private_files 认证材料隔离。 */
@@ -125,6 +126,7 @@ data class DoctorAdminRequest(
 ) {
     fun requiredUserId(): String = requireNotNull(userId?.trim()?.takeIf { it.isNotEmpty() }) { "userId 不能为空" }
     fun toEntity(userId: String) = DoctorEntity(id = userId, name = name, title = title, bio = bio, avatar = avatar,
+        contactPhone = contactPhone,
         rating = rating, reviewCount = reviewCount, specialties = specialties, isVerified = isVerified,
         consultationCount = consultationCount, credentials = credentials, credentialImages = credentialImages,
         caseCount = caseCount, certificationTags = certificationTags)
@@ -136,13 +138,15 @@ data class InstitutionSummary(val id: String, val name: String)
 
 data class DoctorAdminResponse(
     val id: String, val userId: String, val name: String, val title: String, val bio: String, val avatar: String,
+    val contactPhone: String,
     val institutionId: String, val institutionName: String, val rating: BigDecimal, val reviewCount: Int,
     val specialties: String, val isVerified: Boolean, val consultationCount: Int, val credentials: String,
     val credentialImages: String, val caseCount: Int, val certificationTags: String,
     val institutions: List<InstitutionSummary>, val primaryInstitution: InstitutionSummary?, val institutionCount: Int
 ) {
     constructor(doctor: DoctorEntity, institutions: List<InstitutionSummary>, primary: InstitutionSummary?) : this(
-        doctor.id, doctor.id, doctor.name, doctor.title, doctor.bio, doctor.avatar, doctor.institutionId, doctor.institutionName,
+        doctor.id, doctor.id, doctor.name, doctor.title, doctor.bio, doctor.avatar, doctor.contactPhone,
+        doctor.institutionId, doctor.institutionName,
         doctor.rating, doctor.reviewCount, doctor.specialties, doctor.isVerified, doctor.consultationCount,
         doctor.credentials, doctor.credentialImages, doctor.caseCount, doctor.certificationTags,
         institutions, primary, institutions.size

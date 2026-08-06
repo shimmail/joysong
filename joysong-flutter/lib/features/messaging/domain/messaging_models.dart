@@ -60,6 +60,8 @@ class DmConversation {
     required this.userBUnread,
     required this.createdAt,
     required this.updatedAt,
+    this.firstMessageLimitApplies = false,
+    this.waitingForReply = false,
   });
 
   final String id;
@@ -71,6 +73,8 @@ class DmConversation {
   final int userBUnread;
   final String createdAt;
   final String updatedAt;
+  final bool firstMessageLimitApplies;
+  final bool waitingForReply;
 
   String otherUserId(String currentUserId) =>
       userAId == currentUserId ? userBId : userAId;
@@ -90,8 +94,22 @@ class DmConversation {
       userBUnread: _integer(map['userBUnread']),
       createdAt: _text(map['createdAt']),
       updatedAt: _text(map['updatedAt']),
+      firstMessageLimitApplies: _boolean(map['firstMessageLimitApplies']),
+      waitingForReply: _boolean(map['waitingForReply']),
     );
   }
+}
+
+class MessagingPeer {
+  const MessagingPeer({
+    required this.id,
+    required this.name,
+    this.avatar = '',
+  });
+
+  final String id;
+  final String name;
+  final String avatar;
 }
 
 class DmMessage {
@@ -222,4 +240,11 @@ int _integer(Object? value) => switch (value) {
       final num number => number.toInt(),
       final String text => int.tryParse(text) ?? 0,
       _ => 0,
+    };
+
+bool _boolean(Object? value) => switch (value) {
+      final bool boolean => boolean,
+      final num number => number != 0,
+      final String text => text.toLowerCase() == 'true' || text.trim() == '1',
+      _ => false,
     };

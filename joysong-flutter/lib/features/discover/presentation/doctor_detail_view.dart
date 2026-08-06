@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
-import 'package:joysong_flutter/features/social/presentation/diary_media_grid.dart';
+import 'package:joysong_flutter/features/discover/presentation/catalog_detail_shared.dart';
+import 'package:joysong_flutter/features/discover/presentation/discover_content_card.dart';
 
 /// Doctor-specific body for [DiscoverItem] details.
 ///
@@ -14,6 +15,8 @@ class DoctorDetailView extends StatelessWidget {
     this.onInstitutionTap,
     this.onProjectTap,
     this.onDiaryTap,
+    this.onConsult,
+    this.onAiChat,
     this.onViewAllProjects,
     this.onViewAllDiaries,
     super.key,
@@ -23,6 +26,8 @@ class DoctorDetailView extends StatelessWidget {
   final ValueChanged<String>? onInstitutionTap;
   final void Function(String institutionId, String projectId)? onProjectTap;
   final ValueChanged<String>? onDiaryTap;
+  final VoidCallback? onConsult;
+  final VoidCallback? onAiChat;
   final VoidCallback? onViewAllProjects;
   final VoidCallback? onViewAllDiaries;
 
@@ -216,26 +221,10 @@ class DoctorDetailView extends StatelessWidget {
                             ),
                           )
                         else
-                          SizedBox(
-                            height: 220,
-                            child: ListView.separated(
-                              scrollDirection: Axis.horizontal,
-                              itemCount: diaries.length,
-                              separatorBuilder: (_, __) =>
-                                  const SizedBox(width: 10),
-                              itemBuilder: (_, index) => _DoctorDiaryCard(
-                                data: diaries[index],
-                                onTap: onDiaryTap == null
-                                    ? null
-                                    : () {
-                                        final id = _text(
-                                          diaries[index],
-                                          const ['id', 'diaryId'],
-                                        );
-                                        if (id.isNotEmpty) onDiaryTap!(id);
-                                      },
-                              ),
-                            ),
+                          DiaryPreviewRail(
+                            diaries: diaries,
+                            onDiaryTap: onDiaryTap,
+                            maxItems: 5,
                           ),
                       ],
                     ),
@@ -284,9 +273,8 @@ class DoctorDetailView extends StatelessWidget {
           ),
         ),
         _DoctorBottomBar(
-          onConsult: projects.isEmpty
-              ? null
-              : _projectTap(projects.first, onProjectTap),
+          onConsult: onConsult,
+          onAiChat: onAiChat,
         ),
       ],
     );
@@ -411,23 +399,6 @@ class _DoctorHeader extends StatelessWidget {
             Text(context.isEnglish ? '$caseCount cases' : '案例 $caseCount'),
             if (rating > 0) Text('★ ${rating.toStringAsFixed(1)}'),
           ]),
-          const SizedBox(height: 14),
-          FilledButton.icon(
-            onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(context.localized(
-                  '请从消息页向医生发送私信',
-                  'Open Messages to contact this doctor',
-                )),
-              ),
-            ),
-            style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(44),
-              shape: const StadiumBorder(),
-            ),
-            icon: const Icon(Icons.chat_outlined, size: 18),
-            label: Text(context.localized('发私信', 'Send message')),
-          ),
         ],
       ),
     );
@@ -451,47 +422,11 @@ class _DoctorTabsDelegate extends SliverPersistentHeaderDelegate {
     final labels = context.isEnglish
         ? const ['Credentials', 'Projects', 'Diaries', 'Clinics']
         : const ['资质保险箱', '可预约项目', '用户日记', '出诊机构'];
-    return Material(
-      color: Colors.white,
-      elevation: overlapsContent ? 2 : 0,
-      child: Row(
-        children: [
-          for (var index = 0; index < labels.length; index++)
-            Expanded(
-              child: InkWell(
-                onTap: () => onSectionClick(index),
-                child: Container(
-                  height: 54,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    border: index == 0
-                        ? const Border(
-                            bottom: BorderSide(color: Colors.black, width: 2),
-                          )
-                        : null,
-                  ),
-                  child: Text(
-                    labels[index],
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: context.isEnglish ? 12 : 14,
-                      color:
-                          index == 0 ? Colors.black : const Color(0xff777777),
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
+    return DetailAnchorBar(labels: labels, onTap: onSectionClick);
   }
 
   @override
-  bool shouldRebuild(covariant _DoctorTabsDelegate oldDelegate) =>
-      oldDelegate.onSectionClick != onSectionClick;
+  bool shouldRebuild(covariant _DoctorTabsDelegate oldDelegate) => true;
 }
 
 class _Section extends StatelessWidget {
@@ -722,102 +657,10 @@ class _ProjectTag extends StatelessWidget {
       );
 }
 
-class _DoctorDiaryCard extends StatelessWidget {
-  const _DoctorDiaryCard({required this.data, this.onTap});
-  final Map<String, Object?> data;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final images = _texts(data['imageUrls'] ?? data['images']);
-    final before = _texts(data['beforeImageUrls'] ?? data['beforeImages']);
-    final after = _texts(data['afterImageUrls'] ?? data['afterImages']);
-    final title = _text(data, const ['title']);
-    return SizedBox(
-      width: 280,
-      child: Material(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
-          child: Container(
-            decoration: BoxDecoration(
-              border: Border.all(color: const Color(0xffeeeeee)),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        _text(data, const ['authorName'],
-                            context.localized('用户', 'Patient')),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                    ),
-                    Text(
-                      _text(data, const ['publishDate']),
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Expanded(
-                  child: DiaryMediaGrid(
-                    images: images,
-                    beforeImages: before,
-                    afterImages: after,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  title.isNotEmpty ? title : _text(data, const ['content']),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style:
-                      const TextStyle(height: 1.35, color: Color(0xff666666)),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _LabeledDiaryImage extends StatelessWidget {
-  const _LabeledDiaryImage({required this.label, required this.url});
-  final String label;
-  final String url;
-
-  @override
-  Widget build(BuildContext context) => Stack(
-        fit: StackFit.expand,
-        children: [
-          _NetworkImage(url: url, width: 120, height: 120, radius: 8),
-          Positioned(
-            left: 7,
-            top: 6,
-            child: Text(
-              label,
-              style: const TextStyle(color: Color(0xff777777), fontSize: 11),
-            ),
-          ),
-        ],
-      );
-}
-
 class _DoctorBottomBar extends StatelessWidget {
-  const _DoctorBottomBar({this.onConsult});
+  const _DoctorBottomBar({this.onConsult, this.onAiChat});
   final VoidCallback? onConsult;
+  final VoidCallback? onAiChat;
 
   @override
   Widget build(BuildContext context) => SafeArea(
@@ -829,14 +672,7 @@ class _DoctorBottomBar extends StatelessWidget {
             children: [
               Expanded(
                 child: OutlinedButton(
-                  onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(context.localized(
-                        '可前往 AI 页继续咨询',
-                        'Continue in the AI assistant tab',
-                      )),
-                    ),
-                  ),
+                  onPressed: onAiChat,
                   style: OutlinedButton.styleFrom(
                     minimumSize: const Size.fromHeight(48),
                     foregroundColor: Colors.black,
@@ -855,11 +691,15 @@ class _DoctorBottomBar extends StatelessWidget {
                   style: FilledButton.styleFrom(
                     minimumSize: const Size.fromHeight(48),
                     backgroundColor: Colors.black,
+                    foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14),
                     ),
                   ),
-                  child: Text(context.localized('咨询医生', 'Consult doctor')),
+                  child: Text(
+                    context.localized('咨询医生', 'Consult doctor'),
+                    style: const TextStyle(color: Colors.white),
+                  ),
                 ),
               ),
             ],
@@ -1026,9 +866,8 @@ class _NetworkImage extends StatelessWidget {
 }
 
 class _Tag extends StatelessWidget {
-  const _Tag({required this.label, this.icon});
+  const _Tag({required this.label});
   final String label;
-  final IconData? icon;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -1037,16 +876,7 @@ class _Tag extends StatelessWidget {
           color: const Color(0xfff0f0f0),
           borderRadius: BorderRadius.circular(6),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (icon != null) ...[
-              Icon(icon, size: 14, color: const Color(0xff666666)),
-              const SizedBox(width: 4),
-            ],
-            Text(label, style: Theme.of(context).textTheme.bodySmall),
-          ],
-        ),
+        child: Text(label, style: Theme.of(context).textTheme.bodySmall),
       );
 }
 

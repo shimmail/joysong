@@ -125,6 +125,8 @@ export default function CrudPage({
   const actionColumn = {
     title: '操作',
     key: 'actions',
+    fixed: 'right' as const,
+    width: 112,
     render: (_: any, record: any) => (
       <Space>
         {allowEdit && (canEdit?.(record) ?? true) && <Button icon={<EditOutlined />} size="small" onClick={() => handleEdit(record)} title="编辑" />}

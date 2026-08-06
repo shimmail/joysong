@@ -332,6 +332,7 @@ class _PhoneChangeDialogState extends State<_PhoneChangeDialog> {
     final selected = await showModalBottomSheet<PhoneCountry>(
       context: context,
       showDragHandle: true,
+      constraints: const BoxConstraints(maxWidth: 420),
       builder: (context) => SafeArea(
         child: ListView(
           key: const Key('phone-country-list'),

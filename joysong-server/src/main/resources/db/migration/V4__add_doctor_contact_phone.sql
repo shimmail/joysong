@@ -1,0 +1,2 @@
+ALTER TABLE doctors
+    ADD COLUMN contact_phone VARCHAR(50) NOT NULL DEFAULT '';

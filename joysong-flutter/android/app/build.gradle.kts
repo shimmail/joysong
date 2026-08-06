@@ -48,9 +48,8 @@ android {
 
     buildTypes {
         debug {
-            // Keep development installs isolated from the existing native app
-            // and from release signing/data on physical devices.
-            applicationIdSuffix = ".flutterdev"
+            // Keep the registered OAuth package name in debug builds. Google
+            // Sign-In validates the exact applicationId together with SHA-1.
             versionNameSuffix = "-flutterdev"
         }
         release {

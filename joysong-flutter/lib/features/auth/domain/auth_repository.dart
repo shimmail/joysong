@@ -34,4 +34,8 @@ abstract interface class AuthRepository {
   Future<void> logout();
 
   Future<AuthTokens?> readTokens();
+
+  Future<void> activateTokens(AuthTokens tokens);
+
+  Future<void> clearLocalTokens();
 }

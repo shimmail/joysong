@@ -135,23 +135,30 @@ class _EditProfilePageState extends State<EditProfilePage> {
                         : null,
                   ),
                   const SizedBox(height: 12),
-                  DropdownButtonFormField<ProfileGender>(
-                    key: const Key('profile-gender'),
-                    initialValue: _gender,
-                    decoration: InputDecoration(
-                      labelText: context.localized('性别', 'Gender'),
-                    ),
-                    items: [
-                      for (final gender in ProfileGender.values)
-                        DropdownMenuItem(
-                          value: gender,
-                          child: Text(_genderLabel(context, gender)),
+                  Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 320),
+                      child: DropdownButtonFormField<ProfileGender>(
+                        key: const Key('profile-gender'),
+                        initialValue: _gender,
+                        isExpanded: true,
+                        decoration: InputDecoration(
+                          labelText: context.localized('性别', 'Gender'),
                         ),
-                    ],
-                    onChanged: controller.isSaving
-                        ? null
-                        : (gender) =>
-                            setState(() => _gender = gender ?? _gender),
+                        items: [
+                          for (final gender in ProfileGender.values)
+                            DropdownMenuItem(
+                              value: gender,
+                              child: Text(_genderLabel(context, gender)),
+                            ),
+                        ],
+                        onChanged: controller.isSaving
+                            ? null
+                            : (gender) =>
+                                setState(() => _gender = gender ?? _gender),
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 12),
                   TextFormField(

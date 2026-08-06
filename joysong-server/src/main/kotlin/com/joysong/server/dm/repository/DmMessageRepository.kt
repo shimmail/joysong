@@ -8,6 +8,8 @@ import org.springframework.data.jpa.repository.Query
 import java.time.LocalDateTime
 
 interface DmMessageRepository : JpaRepository<DmMessageEntity, String> {
+    fun existsByConversationIdAndSenderId(conversationId: String, senderId: String): Boolean
+
     fun findByConversationIdOrderByCreatedAtDesc(conversationId: String, pageable: Pageable): List<DmMessageEntity>
     fun findByConversationIdAndCreatedAtBeforeOrderByCreatedAtDesc(
         conversationId: String,

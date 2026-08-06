@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/features/auth/data/login_preferences_store.dart';
+import 'package:joysong_flutter/features/auth/data/saved_account_store.dart';
 import 'package:joysong_flutter/features/auth/domain/auth_models.dart';
 import 'package:joysong_flutter/features/auth/domain/auth_repository.dart';
 
@@ -12,12 +13,15 @@ final class AuthController extends ChangeNotifier {
   AuthController(
     this._repository, {
     LoginPreferencesStore? loginPreferencesStore,
+    SavedAccountStore? savedAccountStore,
     AuthMessageResolver? messageResolver,
   })  : _loginPreferencesStore = loginPreferencesStore,
+        _savedAccountStore = savedAccountStore,
         _messageResolver = messageResolver;
 
   final AuthRepository _repository;
   final LoginPreferencesStore? _loginPreferencesStore;
+  final SavedAccountStore? _savedAccountStore;
   final AuthMessageResolver? _messageResolver;
 
   AuthStatus _status = AuthStatus.restoring;
@@ -26,6 +30,7 @@ final class AuthController extends ChangeNotifier {
   String? _errorMessage;
   AuthUser? _currentUser;
   LoginPreferences _loginPreferences = const LoginPreferences();
+  List<SavedAccount> _savedAccounts = const [];
 
   AuthStatus get status => _status;
 
@@ -37,9 +42,12 @@ final class AuthController extends ChangeNotifier {
 
   LoginPreferences get loginPreferences => _loginPreferences;
 
+  List<SavedAccount> get savedAccounts => List.unmodifiable(_savedAccounts);
+
   Future<void> restoreSession() async {
     _status = AuthStatus.restoring;
     _clearError(notify: false);
+    await _loadSavedAccounts();
 
     AuthTokens? tokens;
     try {
@@ -62,6 +70,7 @@ final class AuthController extends ChangeNotifier {
         final session = await _repository.refreshSession();
         _currentUser = session.user;
         _status = AuthStatus.authenticated;
+        await _rememberSession(session);
       } catch (error) {
         _currentUser = null;
         _status = AuthStatus.unauthenticated;
@@ -140,6 +149,21 @@ final class AuthController extends ChangeNotifier {
             agreementsAccepted: agreementsAccepted,
           ),
         );
+      },
+    );
+  }
+
+  Future<void> loginWithGoogle(
+    String idToken, {
+    bool agreementsAccepted = true,
+  }) {
+    return _runLogin(
+      () => _repository.loginWithGoogle(idToken: idToken),
+      afterSuccess: (_) async {
+        await _loadLoginPreferences();
+        await _persistPreferences(LoginPreferences(
+          agreementsAccepted: agreementsAccepted,
+        ));
       },
     );
   }
@@ -250,6 +274,7 @@ final class AuthController extends ChangeNotifier {
     try {
       final session = await _repository.refreshSession();
       _currentUser = session.user;
+      await _rememberSession(session);
       if (_status != AuthStatus.authenticated) {
         _status = AuthStatus.authenticated;
         notifyListeners();
@@ -293,6 +318,67 @@ final class AuthController extends ChangeNotifier {
     }
   }
 
+  Future<bool> switchAccount(String userId) async {
+    if (_isBusy) return false;
+    SavedAccount? target;
+    for (final account in _savedAccounts) {
+      if (account.userId == userId) target = account;
+    }
+    if (target == null) return false;
+    if (target.userId == _currentUser?.id) return true;
+    _isBusy = true;
+    _clearError(notify: false);
+    notifyListeners();
+    final previousTokens = await _repository.readTokens();
+    final previousUser = _currentUser;
+    try {
+      await _repository.activateTokens(target.tokens);
+      final session = await _repository.refreshSession();
+      _currentUser = session.user;
+      _status = AuthStatus.authenticated;
+      await _rememberSession(session);
+      return true;
+    } catch (error) {
+      if (previousTokens != null) {
+        await _repository.activateTokens(previousTokens);
+      } else {
+        await _repository.clearLocalTokens();
+      }
+      _currentUser = previousUser;
+      _status = previousUser == null
+          ? AuthStatus.unauthenticated
+          : AuthStatus.authenticated;
+      _errorMessage = _messageFor(
+        error,
+        fallback: _text(
+          '账号切换失败，已恢复原账号',
+          'Could not switch accounts. The previous account was restored.',
+        ),
+      );
+      return false;
+    } finally {
+      _isBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> addAnotherAccount() async {
+    if (_isBusy) return;
+    await _repository.clearLocalTokens();
+    _currentUser = null;
+    _status = AuthStatus.unauthenticated;
+    notifyListeners();
+  }
+
+  Future<void> removeSavedAccount(String userId) async {
+    if (userId == _currentUser?.id) return;
+    _savedAccounts = _savedAccounts
+        .where((account) => account.userId != userId)
+        .toList(growable: false);
+    await _savedAccountStore?.save(_savedAccounts);
+    notifyListeners();
+  }
+
   Future<void> _runLogin(
     Future<AuthSession> Function() operation, {
     Future<void> Function(AuthSession session)? afterSuccess,
@@ -307,6 +393,7 @@ final class AuthController extends ChangeNotifier {
       final session = await operation();
       _currentUser = session.user;
       _status = AuthStatus.authenticated;
+      await _rememberSession(session);
       if (afterSuccess != null) {
         try {
           await afterSuccess(session);
@@ -347,6 +434,25 @@ final class AuthController extends ChangeNotifier {
       _preferencesLoaded = true;
       rethrow;
     }
+  }
+
+  Future<void> _loadSavedAccounts() async {
+    _savedAccounts = await _savedAccountStore?.read() ?? const [];
+  }
+
+  Future<void> _rememberSession(AuthSession session) async {
+    final account = SavedAccount(
+      userId: session.user.id,
+      nickname: session.user.nickname,
+      avatar: session.user.avatar,
+      identifier: session.user.phone ?? session.user.email ?? '',
+      tokens: session.tokens,
+    );
+    _savedAccounts = [
+      account,
+      ..._savedAccounts.where((item) => item.userId != account.userId),
+    ].take(5).toList(growable: false);
+    await _savedAccountStore?.save(_savedAccounts);
   }
 
   Future<void> _persistPreferences(LoginPreferences preferences) async {

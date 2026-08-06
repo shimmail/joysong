@@ -117,26 +117,34 @@ class _BookingPageState extends State<BookingPage> {
         if (controller.doctors.isEmpty)
           _SoftPanel(child: Text(context.localized('该项目暂时没有可预约医生', 'No doctors are currently available for this service')))
         else
-          DropdownButtonFormField<BookingDoctor>(
-            key: ValueKey(controller.selectedDoctor?.id),
-            initialValue: controller.selectedDoctor,
-            decoration: InputDecoration(
-              prefixIcon: const Icon(Icons.medical_services_outlined),
-              hintText: context.localized('请选择医生', 'Select a doctor'),
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 320),
+              child: DropdownButtonFormField<BookingDoctor>(
+                key: ValueKey(controller.selectedDoctor?.id),
+                initialValue: controller.selectedDoctor,
+                isExpanded: true,
+                decoration: InputDecoration(
+                  prefixIcon: const Icon(Icons.medical_services_outlined),
+                  hintText: context.localized('请选择医生', 'Select a doctor'),
+                ),
+                items: controller.doctors
+                    .map(
+                      (doctor) => DropdownMenuItem(
+                        value: doctor,
+                        child: Text(
+                          '${doctor.name}${doctor.title.isEmpty ? '' : ' · ${doctor.title}'}',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    )
+                    .toList(),
+                onChanged: controller.isSubmitting
+                    ? null
+                    : (doctor) => controller.selectDoctor(doctor),
+              ),
             ),
-            items: controller.doctors
-                .map(
-                  (doctor) => DropdownMenuItem(
-                    value: doctor,
-                    child: Text(
-                      '${doctor.name}${doctor.title.isEmpty ? '' : ' · ${doctor.title}'}',
-                    ),
-                  ),
-                )
-                .toList(),
-            onChanged: controller.isSubmitting
-                ? null
-                : (doctor) => controller.selectDoctor(doctor),
           ),
         const SizedBox(height: 10),
         _SoftPanel(
@@ -173,39 +181,49 @@ class _BookingPageState extends State<BookingPage> {
         const SizedBox(height: 20),
         _SectionTitle(context.localized('优惠券', 'Coupon')),
         const SizedBox(height: 8),
-        DropdownButtonFormField<UserCoupon?>(
-          key: ValueKey(controller.selectedCoupon?.id),
-          initialValue: controller.selectedCoupon,
-          decoration: InputDecoration(
-            prefixIcon: const Icon(Icons.local_offer_outlined),
-            hintText: controller.coupons.isEmpty
-                ? context.localized('暂无可用优惠券', 'No coupons available')
-                : context.localized('不使用优惠券', 'Do not use a coupon'),
-            suffixIcon: controller.isDiscountLoading
-                ? const Padding(
-                    padding: EdgeInsets.all(14),
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : null,
-          ),
-          items: [
-            DropdownMenuItem<UserCoupon?>(
-              value: null,
-              child: Text(context.localized('不使用优惠券', 'Do not use a coupon')),
-            ),
-            ...controller.coupons.map(
-              (coupon) => DropdownMenuItem<UserCoupon?>(
-                value: coupon,
-                child: Text(
-                    context.isEnglish
-                        ? '${coupon.name} · Minimum ${coupon.minimumAmount.formatted}'
-                        : '${coupon.name} · 满${coupon.minimumAmount.formatted}可用'),
+        Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 320),
+            child: DropdownButtonFormField<UserCoupon?>(
+              key: ValueKey(controller.selectedCoupon?.id),
+              initialValue: controller.selectedCoupon,
+              isExpanded: true,
+              decoration: InputDecoration(
+                prefixIcon: const Icon(Icons.local_offer_outlined),
+                hintText: controller.coupons.isEmpty
+                    ? context.localized('暂无可用优惠券', 'No coupons available')
+                    : context.localized('不使用优惠券', 'Do not use a coupon'),
+                suffixIcon: controller.isDiscountLoading
+                    ? const Padding(
+                        padding: EdgeInsets.all(14),
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : null,
               ),
+              items: [
+                DropdownMenuItem<UserCoupon?>(
+                  value: null,
+                  child: Text(context.localized('不使用优惠券', 'Do not use a coupon')),
+                ),
+                ...controller.coupons.map(
+                  (coupon) => DropdownMenuItem<UserCoupon?>(
+                    value: coupon,
+                    child: Text(
+                      context.isEnglish
+                          ? '${coupon.name} · Minimum ${coupon.minimumAmount.formatted}'
+                          : '${coupon.name} · 满${coupon.minimumAmount.formatted}可用',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+              ],
+              onChanged:
+                  controller.isSubmitting || controller.isDiscountLoading
+                      ? null
+                      : (coupon) => controller.selectCoupon(coupon),
             ),
-          ],
-          onChanged: controller.isSubmitting || controller.isDiscountLoading
-              ? null
-              : (coupon) => controller.selectCoupon(coupon),
+          ),
         ),
         const SizedBox(height: 20),
         _SectionTitle(context.localized('备注', 'Notes')),

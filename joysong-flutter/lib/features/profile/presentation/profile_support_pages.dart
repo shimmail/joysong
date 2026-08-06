@@ -66,6 +66,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
         length: _tabs.length,
         child: TabBar(
           isScrollable: true,
+          tabAlignment: TabAlignment.start,
           padding: EdgeInsets.zero,
           labelPadding: const EdgeInsets.symmetric(horizontal: 18),
           indicatorColor: Theme.of(context).colorScheme.onSurface,

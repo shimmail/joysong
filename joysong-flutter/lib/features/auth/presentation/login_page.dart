@@ -20,6 +20,7 @@ typedef VerificationCodeLoginCallback = Future<void> Function(
   String verificationCode,
 );
 typedef SendVerificationCodeCallback = Future<void> Function(String phone);
+typedef GoogleLoginCallback = Future<bool> Function();
 
 class LoginPage extends StatefulWidget {
   const LoginPage({
@@ -28,6 +29,7 @@ class LoginPage extends StatefulWidget {
     required this.onSendVerificationCode,
     required this.onRegister,
     required this.onForgotPassword,
+    this.onGoogleLogin,
     this.onUserAgreement,
     this.onPrivacyPolicy,
     this.isLoading = false,
@@ -49,6 +51,7 @@ class LoginPage extends StatefulWidget {
   final SendVerificationCodeCallback onSendVerificationCode;
   final VoidCallback onRegister;
   final VoidCallback onForgotPassword;
+  final GoogleLoginCallback? onGoogleLogin;
   final VoidCallback? onUserAgreement;
   final VoidCallback? onPrivacyPolicy;
   final bool isLoading;
@@ -239,6 +242,29 @@ class _LoginPageState extends State<LoginPage> {
       if (mounted) {
         setState(() => _isSendingCode = false);
       }
+    }
+  }
+
+  Future<void> _googleLogin() async {
+    if (_isBusy || widget.onGoogleLogin == null) return;
+    if (!_hasAcceptedAgreements) {
+      setState(() => _localError = _strings.acceptAgreementError);
+      return;
+    }
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      _isSubmitting = true;
+      _localError = null;
+    });
+    try {
+      final completed = await widget.onGoogleLogin!();
+      if (!completed && mounted) {
+        setState(() => _localError = _strings.googleLoginCancelled);
+      }
+    } catch (error) {
+      if (mounted) setState(() => _localError = _readableError(error));
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
     }
   }
 
@@ -601,6 +627,41 @@ class _LoginPageState extends State<LoginPage> {
                                   : Text(strings.login),
                             ),
                           ),
+                          if (widget.onGoogleLogin != null) ...[
+                            const SizedBox(height: 18),
+                            Row(
+                              children: [
+                                const Expanded(child: Divider()),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                  ),
+                                  child: Text(
+                                    strings.or,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: colors.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ),
+                                const Expanded(child: Divider()),
+                              ],
+                            ),
+                            const SizedBox(height: 14),
+                            SizedBox(
+                              height: 50,
+                              child: OutlinedButton.icon(
+                                key: const Key('google-login-button'),
+                                onPressed: _isBusy ? null : _googleLogin,
+                                style: OutlinedButton.styleFrom(
+                                  shape: const StadiumBorder(),
+                                  foregroundColor: colors.onSurface,
+                                  side: BorderSide(color: colors.outline),
+                                ),
+                                icon: const _GoogleMark(),
+                                label: Text(strings.googleLogin),
+                              ),
+                            ),
+                          ],
                           const SizedBox(height: 14),
                           Row(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -627,6 +688,27 @@ class _LoginPageState extends State<LoginPage> {
               ),
             );
           },
+        ),
+      ),
+    );
+  }
+}
+
+class _GoogleMark extends StatelessWidget {
+  const _GoogleMark();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox.square(
+      dimension: 20,
+      child: Center(
+        child: Text(
+          'G',
+          style: TextStyle(
+            color: Color(0xFF4285F4),
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+          ),
         ),
       ),
     );

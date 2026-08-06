@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/presentation/catalog_detail_shared.dart';
+import 'package:joysong_flutter/features/discover/presentation/discover_content_card.dart';
 import 'package:joysong_flutter/features/discover/presentation/rich_content_view.dart';
-import 'package:joysong_flutter/features/social/presentation/diary_media_grid.dart';
+import 'package:joysong_flutter/features/social/domain/social_models.dart';
+import 'package:joysong_flutter/features/social/presentation/favorite_action_button.dart';
+import 'package:joysong_flutter/features/social/presentation/social_controller.dart';
 
 class CatalogProjectDetailView extends StatelessWidget {
   const CatalogProjectDetailView({
@@ -15,6 +19,7 @@ class CatalogProjectDetailView extends StatelessWidget {
     this.onDoctorTap,
     this.onViewAllInstitutions,
     this.onViewAllDiaries,
+    this.socialController,
     super.key,
   });
 
@@ -27,6 +32,7 @@ class CatalogProjectDetailView extends StatelessWidget {
   final ValueChanged<String>? onDoctorTap;
   final VoidCallback? onViewAllInstitutions;
   final VoidCallback? onViewAllDiaries;
+  final SocialController? socialController;
 
   @override
   Widget build(BuildContext context) {
@@ -47,6 +53,19 @@ class CatalogProjectDetailView extends StatelessWidget {
         _text(sources, const ['detailContent', 'content'], '');
     final price = _number(sources, const ['price', 'referencePrice']);
     final originalPrice = _number(sources, const ['originalPrice']);
+    final rating = _number(sources, const ['rating', 'averageRating']);
+    final reviewCount = _integer(sources, const ['reviewCount', 'ratingCount']);
+    final caseCount = _integer(sources, const ['caseCount', 'casesCount']);
+    final institutionSources = [institution, ip, raw];
+    final institutionAddress = [
+      _text(institutionSources, const ['city', 'institutionCity'], ''),
+      _text(institutionSources, const ['address', 'institutionAddress'], ''),
+    ].where((value) => value.isNotEmpty).join(' · ');
+    final institutionPhone = _text(
+      institutionSources,
+      const ['contactPhone', 'institutionPhone', 'phone', 'telephone'],
+      '',
+    );
     final tags = <String>{
       ..._tokens(sources, const ['categoryTags']),
       ..._tokens(sources, const ['tags']),
@@ -89,6 +108,16 @@ class CatalogProjectDetailView extends StatelessWidget {
               originalPrice: originalPrice,
             ),
           ),
+          if (isInstitutionProject)
+            SliverToBoxAdapter(
+              child: _ProjectFacts(
+                rating: rating,
+                reviewCount: reviewCount,
+                caseCount: caseCount,
+                address: institutionAddress,
+                phone: institutionPhone,
+              ),
+            ),
           SliverPersistentHeader(
             pinned: true,
             delegate: _ProjectNavDelegate(labels: labels, onTap: jump),
@@ -168,6 +197,7 @@ class CatalogProjectDetailView extends StatelessWidget {
                                 entry,
                                 item.id,
                                 onInstitutionProjectTap,
+                                socialController,
                               ),
                           ],
                         ),
@@ -185,15 +215,10 @@ class CatalogProjectDetailView extends StatelessWidget {
               ),
               child: diaries.isEmpty
                   ? _Empty(context.localized('暂无用户日记', 'No patient diaries'))
-                  : SizedBox(
-                      height: 220,
-                      child: ListView.separated(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: diaries.length > 5 ? 5 : diaries.length,
-                        separatorBuilder: (_, __) => const SizedBox(width: 10),
-                        itemBuilder: (_, index) =>
-                            _DiaryCard(diaries[index], onDiaryTap),
-                      ),
+                  : DiaryPreviewRail(
+                      diaries: diaries,
+                      onDiaryTap: onDiaryTap,
+                      maxItems: 5,
                     ),
             ),
           ),
@@ -202,7 +227,11 @@ class CatalogProjectDetailView extends StatelessWidget {
               child: CatalogSection(
                 key: keys[3],
                 title: context.localized('所属机构', 'Institution'),
-                child: _InstitutionRow(institution, onInstitutionTap),
+                child: _InstitutionRow(
+                  institution,
+                  onInstitutionTap,
+                  socialController: socialController,
+                ),
               ),
             ),
           const SliverToBoxAdapter(child: SizedBox(height: 18)),
@@ -264,6 +293,98 @@ class CatalogProjectDetailView extends StatelessWidget {
       ));
 }
 
+class _ProjectFacts extends StatelessWidget {
+  const _ProjectFacts({
+    required this.rating,
+    required this.reviewCount,
+    required this.caseCount,
+    required this.address,
+    required this.phone,
+  });
+  final double? rating;
+  final int reviewCount;
+  final int caseCount;
+  final String address;
+  final String phone;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        color: Colors.white,
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+        child: Column(children: [
+          Row(children: [
+            Expanded(child: _ProjectStat(
+              value: rating != null && rating! > 0 ? rating!.toStringAsFixed(1) : '—',
+              label: context.localized('评分', 'Rating'),
+              showStar: true,
+            )),
+            Expanded(child: _ProjectStat(
+              value: '$reviewCount', label: context.localized('评价', 'Reviews'))),
+            Expanded(child: _ProjectStat(
+              value: '$caseCount', label: context.localized('案例', 'Cases'))),
+          ]),
+          if (address.isNotEmpty)
+            _ProjectCopyLine(
+              icon: Icons.location_on_outlined,
+              label: context.localized('机构位置', 'Location'),
+              value: address,
+            ),
+          if (phone.isNotEmpty)
+            _ProjectCopyLine(
+              icon: Icons.phone_outlined,
+              label: context.localized('机构电话', 'Institution phone'),
+              value: phone,
+            ),
+        ]),
+      );
+}
+
+class _ProjectStat extends StatelessWidget {
+  const _ProjectStat({required this.value, required this.label, this.showStar = false});
+  final String value;
+  final String label;
+  final bool showStar;
+  @override
+  Widget build(BuildContext context) => Column(children: [
+        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          if (showStar) ...[
+            const Icon(Icons.star_rounded, size: 18, color: Color(0xffffa000)),
+            const SizedBox(width: 3),
+          ],
+          Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+        ]),
+        const SizedBox(height: 3),
+        Text(label, style: const TextStyle(fontSize: 12, color: Color(0xff777777))),
+      ]);
+}
+
+class _ProjectCopyLine extends StatelessWidget {
+  const _ProjectCopyLine({required this.icon, required this.label, required this.value});
+  final IconData icon;
+  final String label;
+  final String value;
+  @override
+  Widget build(BuildContext context) => InkWell(
+        onTap: () async {
+          await Clipboard.setData(ClipboardData(text: value));
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(context.localized('已复制：$value', 'Copied: $value')),
+          ));
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Row(children: [
+            Icon(icon, size: 20, color: const Color(0xff777777)),
+            const SizedBox(width: 8),
+            Text('$label：', style: const TextStyle(color: Color(0xff777777))),
+            Expanded(child: Text(value, maxLines: 2, overflow: TextOverflow.ellipsis)),
+            const Icon(Icons.copy_rounded, size: 17, color: Color(0xff999999)),
+          ]),
+        ),
+      );
+}
+
 class _ProjectNavDelegate extends SliverPersistentHeaderDelegate {
   _ProjectNavDelegate({required this.labels, required this.onTap});
   final List<String> labels;
@@ -295,10 +416,16 @@ class _TinyTag extends StatelessWidget {
 }
 
 class _InstitutionProjectRow extends StatelessWidget {
-  const _InstitutionProjectRow(this.data, this.projectId, this.onTap);
+  const _InstitutionProjectRow(
+    this.data,
+    this.projectId,
+    this.onTap,
+    this.socialController,
+  );
   final Map<String, Object?> data;
   final String projectId;
   final void Function(String institutionId, String projectId)? onTap;
+  final SocialController? socialController;
   @override
   Widget build(BuildContext context) {
     final institution = _map(data['institution']);
@@ -309,18 +436,25 @@ class _InstitutionProjectRow extends StatelessWidget {
       {...institution, ...data},
       id.isEmpty || onTap == null ? null : (_) => onTap!(id, projectId),
       title: _text([data, institution], const ['institutionName', 'name'], ''),
+      socialController: socialController,
     );
   }
 }
 
 class _InstitutionRow extends StatelessWidget {
-  const _InstitutionRow(this.data, this.onTap, {this.title});
+  const _InstitutionRow(
+    this.data,
+    this.onTap, {
+    this.title,
+    this.socialController,
+  });
   final Map<String, Object?> data;
   final ValueChanged<String>? onTap;
   final String? title;
+  final SocialController? socialController;
   @override
   Widget build(BuildContext context) {
-    final id = _text([data], const ['id', 'institutionId'], '');
+    final id = _text([data], const ['institutionId', 'id'], '');
     final rating = _number([data], const ['rating']);
     return InkWell(
       onTap: id.isEmpty || onTap == null ? null : () => onTap!(id),
@@ -353,8 +487,15 @@ class _InstitutionRow extends StatelessWidget {
               ],
             ]),
           ),
-          Text(context.localized('收藏', 'Save'),
-              style: Theme.of(context).textTheme.bodySmall),
+          if (id.isNotEmpty && socialController != null)
+            FavoriteActionButton(
+              controller: socialController!,
+              type: FavoriteTargetType.institution,
+              targetId: id,
+              targetName: title ?? _text([data], const ['name'], ''),
+              targetImage:
+                  _text([data], const ['coverImage', 'logo'], ''),
+            ),
         ]),
       ),
     );
@@ -369,6 +510,7 @@ class _DoctorRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final id = _text([data], const ['id', 'doctorId'], '');
     final avatar = _text([data], const ['avatar'], '');
+    final phone = _text([data], const ['phone', 'contactPhone', 'telephone'], '');
     return ListTile(
       onTap: id.isEmpty || onTap == null ? null : () => onTap!(id),
       leading: CircleAvatar(
@@ -376,70 +518,35 @@ class _DoctorRow extends StatelessWidget {
         child: avatar.isEmpty ? const Icon(Icons.person_outline) : null,
       ),
       title: Text(_text([data], const ['name'], '')),
-      subtitle: Text(_text([data], const ['title'], '')),
-    );
-  }
-}
-
-class _DiaryCard extends StatelessWidget {
-  const _DiaryCard(this.data, this.onTap);
-  final Map<String, Object?> data;
-  final ValueChanged<String>? onTap;
-  @override
-  Widget build(BuildContext context) {
-    final id = _text([data], const ['id', 'diaryId'], '');
-    final images = _split(data['imageUrls'] ?? data['images']);
-    final before = _split(data['beforeImageUrls'] ?? data['beforeImages']);
-    final after = _split(data['afterImageUrls'] ?? data['afterImages']);
-    return SizedBox(
-      width: 280,
-      child: Card(
-        margin: EdgeInsets.zero,
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: id.isEmpty || onTap == null ? null : () => onTap!(id),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(
-                  _text([data], const ['authorName'],
-                      context.localized('用户', 'Patient')),
-                  style: const TextStyle(fontWeight: FontWeight.w700)),
-              const SizedBox(height: 9),
-              Expanded(
-                child: DiaryMediaGrid(
-                  images: images,
-                  beforeImages: before,
-                  afterImages: after,
-                  borderRadius: BorderRadius.circular(7),
-                ),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(_text([data], const ['title'], '')),
+          if (phone.isNotEmpty)
+            GestureDetector(
+              onTap: () async {
+                await Clipboard.setData(ClipboardData(text: phone));
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text(context.localized(
+                      '已复制医生电话', 'Doctor phone copied')),
+                ));
+              },
+              child: Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.phone_outlined, size: 15),
+                  const SizedBox(width: 4),
+                  Flexible(child: Text(phone)),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.copy_rounded, size: 14),
+                ]),
               ),
-              const SizedBox(height: 8),
-              Text(_text([data], const ['title', 'content'], ''),
-                  maxLines: 2, overflow: TextOverflow.ellipsis),
-            ]),
-          ),
-        ),
+            ),
+        ],
       ),
     );
   }
-}
-
-class _DiaryImage extends StatelessWidget {
-  const _DiaryImage(this.label, this.url);
-  final String label;
-  final String url;
-  @override
-  Widget build(BuildContext context) => Stack(fit: StackFit.expand, children: [
-        CatalogImage(url: url, width: 120, height: 120, radius: 7),
-        Positioned(
-            left: 7,
-            top: 6,
-            child: Text(label,
-                style:
-                    const TextStyle(fontSize: 11, color: Color(0xff777777)))),
-      ]);
 }
 
 class _Empty extends StatelessWidget {
@@ -479,6 +586,17 @@ double? _number(List<Map<String, Object?>> sources, List<String> keys) {
     }
   }
   return null;
+}
+
+int _integer(List<Map<String, Object?>> sources, List<String> keys) {
+  for (final source in sources) {
+    for (final key in keys) {
+      final value = source[key];
+      final parsed = value is num ? value.toInt() : int.tryParse('$value');
+      if (parsed != null) return parsed;
+    }
+  }
+  return 0;
 }
 
 Iterable<String> _tokens(

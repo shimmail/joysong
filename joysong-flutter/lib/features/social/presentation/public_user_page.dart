@@ -13,6 +13,7 @@ final class PublicUserPage extends StatefulWidget {
     required this.userId,
     required this.repository,
     required this.socialController,
+    this.currentUserId = '',
     this.onMessage,
     this.onOpenProject,
     this.onOpenDoctor,
@@ -23,7 +24,8 @@ final class PublicUserPage extends StatefulWidget {
   final String userId;
   final SocialRepository repository;
   final SocialController socialController;
-  final VoidCallback? onMessage;
+  final String currentUserId;
+  final ValueChanged<PublicUserProfile>? onMessage;
   final void Function(String institutionId, String projectId)? onOpenProject;
   final ValueChanged<String>? onOpenDoctor;
   final ValueChanged<String>? onOpenInstitution;
@@ -76,7 +78,10 @@ final class _PublicUserPageState extends State<PublicUserPage> {
   Widget build(BuildContext context) {
     final profile = _profile;
     return Scaffold(
+      backgroundColor: Colors.white,
       appBar: AppBar(
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
         title: Text(_english ? 'Profile' : '用户主页'),
         actions: [
           if (profile != null)
@@ -101,7 +106,10 @@ final class _PublicUserPageState extends State<PublicUserPage> {
                           child: _ProfileHeader(
                         profile: profile!,
                         english: _english,
-                        onMessage: widget.onMessage,
+                        onMessage: widget.userId == widget.currentUserId ||
+                                widget.onMessage == null
+                            ? null
+                            : () => widget.onMessage!(profile),
                       )),
                       SliverPadding(
                         padding: const EdgeInsets.fromLTRB(16, 20, 16, 10),
@@ -165,13 +173,7 @@ final class _ProfileHeader extends StatelessWidget {
     final colors = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [colors.primaryContainer, colors.surface],
-        ),
-      ),
+      color: Colors.white,
       child: Column(children: [
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           CircleAvatar(
@@ -219,9 +221,14 @@ final class _ProfileHeader extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: colors.onSurface,
+                side: BorderSide(color: colors.outline),
+                textStyle: const TextStyle(fontWeight: FontWeight.w600),
+              ),
               onPressed: onMessage,
               icon: const Icon(Icons.chat_bubble_outline),
-              label: Text(english ? 'Message' : '发消息'),
+              label: Text(english ? 'Send message' : '发私信'),
             ),
           ),
         ],

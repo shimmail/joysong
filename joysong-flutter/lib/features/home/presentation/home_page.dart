@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/features/discover/presentation/discover_content_card.dart';
 import 'package:joysong_flutter/features/home/domain/home_models.dart';
-import 'package:joysong_flutter/features/social/presentation/diary_media_grid.dart';
 import 'package:joysong_flutter/features/home/domain/home_repository.dart';
 import 'package:joysong_flutter/features/home/presentation/home_controller.dart';
 import 'package:joysong_flutter/features/profile/domain/profile_repository.dart';
@@ -13,6 +13,7 @@ class HomePage extends StatefulWidget {
     this.onOpenItem,
     this.onSearch,
     this.onNotifications,
+    this.unreadNotificationCount = 0,
     this.onViewAll,
     this.allowPreviewData = false,
     super.key,
@@ -23,6 +24,7 @@ class HomePage extends StatefulWidget {
   final ValueChanged<HomeContent>? onOpenItem;
   final VoidCallback? onSearch;
   final VoidCallback? onNotifications;
+  final int unreadNotificationCount;
   final ValueChanged<HomeSectionKind>? onViewAll;
   final bool allowPreviewData;
 
@@ -92,6 +94,7 @@ class _HomePageState extends State<HomePage> {
         onOpenItem: widget.onOpenItem,
         onSearch: widget.onSearch,
         onNotifications: widget.onNotifications,
+        unreadNotificationCount: widget.unreadNotificationCount,
         nickname: _nickname,
         onViewAll: widget.onViewAll,
       );
@@ -120,6 +123,7 @@ class _HomePageState extends State<HomePage> {
               onOpenItem: widget.onOpenItem,
               onSearch: widget.onSearch,
               onNotifications: widget.onNotifications,
+              unreadNotificationCount: widget.unreadNotificationCount,
               nickname: _nickname,
               onViewAll: widget.onViewAll,
             ),
@@ -136,6 +140,7 @@ class _HomeFeedView extends StatelessWidget {
     this.onOpenItem,
     this.onSearch,
     this.onNotifications,
+    this.unreadNotificationCount = 0,
     this.nickname = '',
     this.onViewAll,
   });
@@ -145,6 +150,7 @@ class _HomeFeedView extends StatelessWidget {
   final ValueChanged<HomeContent>? onOpenItem;
   final VoidCallback? onSearch;
   final VoidCallback? onNotifications;
+  final int unreadNotificationCount;
   final String nickname;
   final ValueChanged<HomeSectionKind>? onViewAll;
 
@@ -160,6 +166,7 @@ class _HomeFeedView extends StatelessWidget {
             child: _GreetingHeader(
               nickname: nickname,
               onNotifications: onNotifications,
+              unreadNotificationCount: unreadNotificationCount,
             ),
           ),
           SliverToBoxAdapter(child: _SearchEntry(onTap: onSearch)),
@@ -236,20 +243,22 @@ class _HomeFeedView extends StatelessWidget {
               ),
             ),
             SliverToBoxAdapter(
-              child: SizedBox(
-                height: 244,
-                child: ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                  scrollDirection: Axis.horizontal,
-                  itemCount: feed.userDiaries.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 12),
-                  itemBuilder: (context, index) {
-                    final item = feed.userDiaries[index];
-                    return _DiaryCard(
-                      item: item,
-                      onTap: () => onOpenItem?.call(item),
-                    );
-                  },
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (var index = 0;
+                        index < feed.userDiaries.length;
+                        index++) ...[
+                      if (index > 0) const SizedBox(width: 12),
+                      _DiaryCard(
+                        item: feed.userDiaries[index],
+                        onTap: () => onOpenItem?.call(feed.userDiaries[index]),
+                      ),
+                    ],
+                  ],
                 ),
               ),
             ),
@@ -300,9 +309,14 @@ class _HomeFeedView extends StatelessWidget {
 }
 
 class _GreetingHeader extends StatelessWidget {
-  const _GreetingHeader({required this.nickname, this.onNotifications});
+  const _GreetingHeader({
+    required this.nickname,
+    required this.unreadNotificationCount,
+    this.onNotifications,
+  });
 
   final String nickname;
+  final int unreadNotificationCount;
   final VoidCallback? onNotifications;
 
   @override
@@ -324,22 +338,28 @@ class _GreetingHeader extends StatelessWidget {
             clipBehavior: Clip.none,
             children: [
               IconButton(
-                tooltip: context.localized('消息通知', 'Notifications'),
+                tooltip: unreadNotificationCount > 0
+                    ? context.localized(
+                        '消息，$unreadNotificationCount 条未读',
+                        'Messages, $unreadNotificationCount unread',
+                      )
+                    : context.localized('消息', 'Messages'),
                 onPressed: onNotifications,
                 icon: const Icon(Icons.notifications_none_rounded),
               ),
-              Positioned(
-                right: 10,
-                top: 10,
-                child: Container(
-                  width: 7,
-                  height: 7,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.error,
-                    shape: BoxShape.circle,
+              if (unreadNotificationCount > 0)
+                Positioned(
+                  right: 10,
+                  top: 10,
+                  child: Container(
+                    width: 7,
+                    height: 7,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.error,
+                      shape: BoxShape.circle,
+                    ),
                   ),
                 ),
-              ),
             ],
           ),
         ],
@@ -872,84 +892,36 @@ class _DiaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final author = item.text(const ['authorName', 'nickname']);
+    final avatar = item.text(
+      const ['authorAvatar', 'avatarUrl', 'avatar'],
+    );
+    final publishDate = item.text(const ['publishDate', 'createdAt']);
     final project = item.text(const ['projectName']);
     final likes = item.count(const ['likeCount']);
+    final favorites = item.count(const ['favoriteCount']);
     final comments = item.count(const ['commentCount']);
     final images = item.values(const ['imageUrls', 'images']);
     final beforeImages = item.values(const ['beforeImageUrls', 'beforeImages']);
     final afterImages = item.values(const ['afterImageUrls', 'afterImages']);
     return SizedBox(
       width: 300,
-      child: Card(
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              DiaryMediaGrid(
-                images: images,
-                beforeImages: beforeImages,
-                afterImages: afterImages,
-                height: 220,
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      item.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleSmall,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      item.subtitle,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        if (author.isNotEmpty)
-                          Expanded(
-                            child: Text(
-                              author,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.labelMedium,
-                            ),
-                          )
-                        else
-                          const Spacer(),
-                        if (project.isNotEmpty) _MiniTag(label: project),
-                        if (likes > 0) ...[
-                          const SizedBox(width: 8),
-                          _CountLabel(
-                              icon: Icons.favorite_border, count: likes),
-                        ],
-                        if (comments > 0) ...[
-                          const SizedBox(width: 8),
-                          _CountLabel(
-                            icon: Icons.chat_bubble_outline,
-                            count: comments,
-                          ),
-                        ],
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
+      child: DiaryPreviewCard(
+        title: item.title,
+        content: item.subtitle,
+        authorName: author,
+        authorAvatar: avatar,
+        publishDate: publishDate,
+        projectName: project,
+        images: images,
+        beforeImages: beforeImages,
+        afterImages: afterImages,
+        likeCount: likes,
+        favoriteCount: favorites,
+        commentCount: comments,
+        isLiked: item.flag(const ['isLiked']),
+        isFavorited: item.flag(const ['isFavorited']),
+        onTap: onTap,
       ),
     );
   }
@@ -1165,53 +1137,6 @@ class _DoctorCard extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-class _MiniTag extends StatelessWidget {
-  const _MiniTag({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(maxWidth: 96),
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.primaryContainer,
-        borderRadius: BorderRadius.circular(5),
-      ),
-      child: Text(
-        label,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: Theme.of(context).textTheme.labelSmall,
-      ),
-    );
-  }
-}
-
-class _CountLabel extends StatelessWidget {
-  const _CountLabel({required this.icon, required this.count});
-
-  final IconData icon;
-  final int count;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.onSurfaceVariant;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 14, color: color),
-        const SizedBox(width: 3),
-        Text(
-          '$count',
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(color: color),
-        ),
-      ],
     );
   }
 }

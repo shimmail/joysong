@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/presentation/catalog_detail_shared.dart';
+import 'package:joysong_flutter/features/discover/presentation/discover_content_card.dart';
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
+import 'package:joysong_flutter/features/social/presentation/favorite_action_button.dart';
 import 'package:joysong_flutter/features/social/presentation/report_action_button.dart';
 import 'package:joysong_flutter/features/social/presentation/social_controller.dart';
-import 'package:joysong_flutter/features/social/presentation/diary_media_grid.dart';
 
 class CatalogInstitutionDetailView extends StatelessWidget {
   const CatalogInstitutionDetailView({
@@ -50,6 +52,10 @@ class CatalogInstitutionDetailView extends StatelessWidget {
       _text(data, const ['city']),
       _text(data, const ['address']),
     ].where((value) => value.isNotEmpty).join(' · ');
+    final phone = _text(data, const ['contactPhone', 'phone', 'telephone']);
+    final rating = _firstNumber(data, const ['rating', 'averageRating']);
+    final reviewCount = _count(data, const ['reviewCount', 'ratingCount']);
+    final caseCount = _count(data, const ['caseCount', 'casesCount']);
     final keys = List.generate(5, (_) => GlobalKey());
     void jump(int index) {
       final target = keys[index].currentContext;
@@ -75,6 +81,15 @@ class CatalogInstitutionDetailView extends StatelessWidget {
                   ? context.localized('安颜认证', 'Verified institution')
                   : '',
               subtitle: address,
+            ),
+          ),
+          SliverToBoxAdapter(
+            child: _InstitutionFacts(
+              rating: rating,
+              reviewCount: reviewCount,
+              caseCount: caseCount,
+              address: address,
+              phone: phone,
             ),
           ),
           SliverToBoxAdapter(child: _FeatureCards(context)),
@@ -106,6 +121,7 @@ class CatalogInstitutionDetailView extends StatelessWidget {
                       projects: projects,
                       institutionId: institutionId,
                       onTap: onProjectTap,
+                      socialController: socialController,
                     ),
             ),
           ),
@@ -121,15 +137,10 @@ class CatalogInstitutionDetailView extends StatelessWidget {
               ),
               child: diaries.isEmpty
                   ? _Empty(context.localized('暂无用户日记', 'No patient diaries'))
-                  : SizedBox(
-                      height: 220,
-                      child: ListView.separated(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: diaries.length > 5 ? 5 : diaries.length,
-                        separatorBuilder: (_, __) => const SizedBox(width: 10),
-                        itemBuilder: (_, index) =>
-                            _DiaryCard(diaries[index], onDiaryTap),
-                      ),
+                  : DiaryPreviewRail(
+                      diaries: diaries,
+                      onDiaryTap: onDiaryTap,
+                      maxItems: 5,
                     ),
             ),
           ),
@@ -174,7 +185,11 @@ class CatalogInstitutionDetailView extends StatelessWidget {
                   : Column(
                       children: [
                         for (final doctor in doctors.take(5))
-                          _DoctorRow(doctor, onDoctorTap),
+                          _DoctorRow(
+                            doctor,
+                            onDoctorTap,
+                            socialController,
+                          ),
                       ],
                     ),
             ),
@@ -196,6 +211,109 @@ class CatalogInstitutionDetailView extends StatelessWidget {
       ),
     ]);
   }
+}
+
+class _InstitutionFacts extends StatelessWidget {
+  const _InstitutionFacts({
+    required this.rating,
+    required this.reviewCount,
+    required this.caseCount,
+    required this.address,
+    required this.phone,
+  });
+  final double rating;
+  final int reviewCount;
+  final int caseCount;
+  final String address;
+  final String phone;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        color: Colors.white,
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+        child: Column(children: [
+          Row(children: [
+            Expanded(
+              child: _FactStat(
+                value: rating > 0 ? rating.toStringAsFixed(1) : '—',
+                label: context.localized('评分', 'Rating'),
+                icon: Icons.star_rounded,
+              ),
+            ),
+            Expanded(
+              child: _FactStat(
+                value: '$reviewCount',
+                label: context.localized('评价', 'Reviews'),
+              ),
+            ),
+            Expanded(
+              child: _FactStat(
+                value: '$caseCount',
+                label: context.localized('案例', 'Cases'),
+              ),
+            ),
+          ]),
+          if (address.isNotEmpty)
+            _CopyableFact(
+              icon: Icons.location_on_outlined,
+              label: context.localized('机构位置', 'Location'),
+              value: address,
+            ),
+          if (phone.isNotEmpty)
+            _CopyableFact(
+              icon: Icons.phone_outlined,
+              label: context.localized('机构电话', 'Institution phone'),
+              value: phone,
+            ),
+        ]),
+      );
+}
+
+class _FactStat extends StatelessWidget {
+  const _FactStat({required this.value, required this.label, this.icon});
+  final String value;
+  final String label;
+  final IconData? icon;
+  @override
+  Widget build(BuildContext context) => Column(children: [
+        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          if (icon != null) ...[
+            Icon(icon, size: 18, color: const Color(0xffffa000)),
+            const SizedBox(width: 3),
+          ],
+          Text(value,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+        ]),
+        const SizedBox(height: 3),
+        Text(label, style: const TextStyle(fontSize: 12, color: Color(0xff777777))),
+      ]);
+}
+
+class _CopyableFact extends StatelessWidget {
+  const _CopyableFact({required this.icon, required this.label, required this.value});
+  final IconData icon;
+  final String label;
+  final String value;
+  @override
+  Widget build(BuildContext context) => InkWell(
+        onTap: () async {
+          await Clipboard.setData(ClipboardData(text: value));
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(context.localized('已复制：$value', 'Copied: $value')),
+          ));
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Row(children: [
+            Icon(icon, size: 20, color: const Color(0xff777777)),
+            const SizedBox(width: 8),
+            Text('$label：', style: const TextStyle(color: Color(0xff777777))),
+            Expanded(child: Text(value, maxLines: 2, overflow: TextOverflow.ellipsis)),
+            const Icon(Icons.copy_rounded, size: 17, color: Color(0xff999999)),
+          ]),
+        ),
+      );
 }
 
 class _InstitutionNavDelegate extends SliverPersistentHeaderDelegate {
@@ -320,11 +438,13 @@ class _FilterableProjectList extends StatefulWidget {
     required this.projects,
     required this.institutionId,
     required this.onTap,
+    required this.socialController,
   });
 
   final List<Map<String, Object?>> projects;
   final String institutionId;
   final void Function(String institutionId, String projectId)? onTap;
+  final SocialController? socialController;
 
   @override
   State<_FilterableProjectList> createState() => _FilterableProjectListState();
@@ -371,6 +491,7 @@ class _FilterableProjectListState extends State<_FilterableProjectList> {
             project,
             widget.institutionId,
             widget.onTap,
+            widget.socialController,
           ),
       ],
     );
@@ -378,10 +499,16 @@ class _FilterableProjectListState extends State<_FilterableProjectList> {
 }
 
 class _ProjectRow extends StatelessWidget {
-  const _ProjectRow(this.data, this.institutionId, this.onTap);
+  const _ProjectRow(
+    this.data,
+    this.institutionId,
+    this.onTap,
+    this.socialController,
+  );
   final Map<String, Object?> data;
   final String institutionId;
   final void Function(String institutionId, String projectId)? onTap;
+  final SocialController? socialController;
   @override
   Widget build(BuildContext context) {
     final id = _text(data, const ['projectId', 'id']);
@@ -436,8 +563,14 @@ class _ProjectRow extends StatelessWidget {
                   ])
                 ],
               ])),
-          Text(context.localized('收藏', 'Save'),
-              style: Theme.of(context).textTheme.bodySmall),
+          if (id.isNotEmpty && socialController != null)
+            FavoriteActionButton(
+              controller: socialController!,
+              type: FavoriteTargetType.project,
+              targetId: id,
+              targetName: _text(data, const ['projectName', 'name']),
+              targetImage: _text(data, const ['coverImage']),
+            ),
         ]),
       ),
     );
@@ -465,50 +598,6 @@ class _ProjectTag extends StatelessWidget {
           ),
         ),
       );
-}
-
-class _DiaryCard extends StatelessWidget {
-  const _DiaryCard(this.data, this.onTap);
-  final Map<String, Object?> data;
-  final ValueChanged<String>? onTap;
-  @override
-  Widget build(BuildContext context) {
-    final id = _text(data, const ['id', 'diaryId']);
-    final images = _split(data['imageUrls'] ?? data['images']);
-    final before = _split(data['beforeImageUrls'] ?? data['beforeImages']);
-    final after = _split(data['afterImageUrls'] ?? data['afterImages']);
-    return SizedBox(
-        width: 280,
-        child: Card(
-            margin: EdgeInsets.zero,
-            clipBehavior: Clip.antiAlias,
-            child: InkWell(
-              onTap: id.isEmpty || onTap == null ? null : () => onTap!(id),
-              child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                            _text(data, const ['authorName'],
-                                fallback: context.localized('用户', 'Patient')),
-                            style:
-                                const TextStyle(fontWeight: FontWeight.w700)),
-                        const SizedBox(height: 9),
-                        Expanded(
-                          child: DiaryMediaGrid(
-                            images: images,
-                            beforeImages: before,
-                            afterImages: after,
-                            borderRadius: BorderRadius.circular(7),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(_text(data, const ['title', 'content']),
-                            maxLines: 2, overflow: TextOverflow.ellipsis),
-                      ])),
-            )));
-  }
 }
 
 class _ReviewCard extends StatelessWidget {
@@ -573,13 +662,15 @@ class _ReviewCard extends StatelessWidget {
 }
 
 class _DoctorRow extends StatelessWidget {
-  const _DoctorRow(this.data, this.onTap);
+  const _DoctorRow(this.data, this.onTap, this.socialController);
   final Map<String, Object?> data;
   final ValueChanged<String>? onTap;
+  final SocialController? socialController;
   @override
   Widget build(BuildContext context) {
     final id = _text(data, const ['id', 'doctorId']);
     final avatar = _text(data, const ['avatar']);
+    final phone = _text(data, const ['phone', 'contactPhone', 'telephone']);
     return ListTile(
         contentPadding: const EdgeInsets.symmetric(vertical: 6),
         onTap: id.isEmpty || onTap == null ? null : () => onTap!(id),
@@ -589,10 +680,43 @@ class _DoctorRow extends StatelessWidget {
             child: avatar.isEmpty ? const Icon(Icons.person_outline) : null),
         title: Text(_text(data, const ['name']),
             style: const TextStyle(fontWeight: FontWeight.w800)),
-        subtitle: Text(_text(data, const ['title', 'bio']),
-            maxLines: 2, overflow: TextOverflow.ellipsis),
-        trailing: Text(context.localized('收藏', 'Save'),
-            style: Theme.of(context).textTheme.bodySmall));
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(_text(data, const ['title', 'bio']),
+                maxLines: 2, overflow: TextOverflow.ellipsis),
+            if (phone.isNotEmpty)
+              GestureDetector(
+                onTap: () async {
+                  await Clipboard.setData(ClipboardData(text: phone));
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(context.localized(
+                        '已复制医生电话', 'Doctor phone copied')),
+                  ));
+                },
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    const Icon(Icons.phone_outlined, size: 15),
+                    const SizedBox(width: 4),
+                    Flexible(child: Text(phone)),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.copy_rounded, size: 14),
+                  ]),
+                ),
+              ),
+          ],
+        ),
+        trailing: id.isEmpty || socialController == null
+            ? null
+            : FavoriteActionButton(
+                controller: socialController!,
+                type: FavoriteTargetType.doctor,
+                targetId: id,
+                targetName: _text(data, const ['name']),
+                targetImage: avatar,
+              ));
   }
 }
 
@@ -670,5 +794,21 @@ List<String> _allProjectTags(List<Map<String, Object?>> projects) {
 
 double _number(Object? value) =>
     value is num ? value.toDouble() : double.tryParse('$value') ?? 0;
+double _firstNumber(Map<String, Object?> data, List<String> keys) {
+  for (final key in keys) {
+    final value = data[key];
+    final parsed = value is num ? value.toDouble() : double.tryParse('$value');
+    if (parsed != null) return parsed;
+  }
+  return 0;
+}
+int _count(Map<String, Object?> data, List<String> keys) {
+  for (final key in keys) {
+    final value = data[key];
+    final parsed = value is num ? value.toInt() : int.tryParse('$value');
+    if (parsed != null) return parsed;
+  }
+  return 0;
+}
 bool _bool(Object? value) =>
     value == true || value == 1 || '$value'.toLowerCase() == 'true';

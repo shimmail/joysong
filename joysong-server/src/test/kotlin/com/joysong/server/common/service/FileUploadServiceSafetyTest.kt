@@ -44,6 +44,25 @@ class FileUploadServiceSafetyTest {
         assertTrue(Files.exists(uploadRoot.resolve("avatars/user-1.png")))
     }
 
+    @Test
+    fun `mislabeled image is stored using its detected format`() {
+        val service = service(ossEnabled = false)
+        val jpegNamedPng = MockMultipartFile(
+            "file",
+            "avatar.png",
+            "image/png",
+            byteArrayOf(
+                0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(),
+                0xE0.toByte(), 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01
+            )
+        )
+
+        val url = service.upload(jpegNamedPng, folder = "avatars", customFileName = "user-2")
+
+        assertTrue(url == "http://localhost:8080/images/avatars/user-2.jpg")
+        assertTrue(Files.exists(uploadRoot.resolve("avatars/user-2.jpg")))
+    }
+
     private fun service(ossEnabled: Boolean) = FileUploadService(
         baseUrl = "http://localhost:8080",
         uploadDirectory = uploadRoot.toString(),

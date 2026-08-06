@@ -79,13 +79,15 @@ final class BookingController extends ChangeNotifier {
         institutionId,
         projectId,
       );
-      final results = await Future.wait<Object>([
-        _repository.getDoctors(detail.id),
-        _repository.getAvailableCoupons(),
-      ]);
       _project = detail;
-      _doctors = results[0] as List<BookingDoctor>;
-      _coupons = results[1] as List<UserCoupon>;
+      _doctors = await _repository.getDoctors(detail.id);
+      try {
+        _coupons = await _repository.getAvailableCoupons();
+      } on Object {
+        // Coupons are optional and must not prevent a valid project with
+        // bookable doctors from entering the booking flow.
+        _coupons = const [];
+      }
       _hasLoaded = true;
     } catch (error) {
       _errorMessage = _messageFor(error, '预约信息加载失败');

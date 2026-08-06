@@ -15,6 +15,9 @@ class FavoriteActionButton extends StatefulWidget {
     required this.targetId,
     required this.targetName,
     this.targetImage = '',
+    this.compact = false,
+    this.showCount = false,
+    this.activeColor = const Color(0xffff9800),
     super.key,
   });
 
@@ -23,6 +26,9 @@ class FavoriteActionButton extends StatefulWidget {
   final String targetId;
   final String targetName;
   final String targetImage;
+  final bool compact;
+  final bool showCount;
+  final Color activeColor;
 
   @override
   State<FavoriteActionButton> createState() => _FavoriteActionButtonState();
@@ -120,13 +126,66 @@ class _FavoriteActionButtonState extends State<FavoriteActionButton> {
           widget.targetId,
         );
         final active = status?.active ?? false;
+        final count = status?.count ?? 0;
         if (_loading || _writing) {
+          if (widget.compact) {
+            return const SizedBox(
+              width: 24,
+              height: 40,
+              child: Center(
+                child: SizedBox.square(
+                  dimension: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            );
+          }
           return const Padding(
             padding: EdgeInsets.symmetric(horizontal: 14),
             child: Center(
               child: SizedBox.square(
                 dimension: 20,
                 child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          );
+        }
+        if (widget.compact) {
+          final inactiveColor = Theme.of(context).colorScheme.onSurfaceVariant;
+          final color = active ? widget.activeColor : inactiveColor;
+          return Semantics(
+            button: true,
+            label: active
+                ? context.localized('取消收藏', 'Remove from favorites')
+                : context.localized('收藏', 'Add to favorites'),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(20),
+              onTap: _toggle,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 180),
+                      child: Icon(
+                        active
+                            ? Icons.bookmark_rounded
+                            : Icons.bookmark_border_rounded,
+                        key: ValueKey(active),
+                        size: 24,
+                        color: color,
+                      ),
+                    ),
+                    if (widget.showCount && count > 0) ...[
+                      const SizedBox(width: 4),
+                      Text(
+                        '$count',
+                        style: TextStyle(fontSize: 13, color: color),
+                      ),
+                    ],
+                  ],
+                ),
               ),
             ),
           );
@@ -144,7 +203,7 @@ class _FavoriteActionButtonState extends State<FavoriteActionButton> {
             child: Icon(
               active ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
               key: ValueKey(active),
-              color: active ? const Color(0xffff9800) : null,
+              color: active ? widget.activeColor : null,
             ),
           ),
         );

@@ -35,11 +35,16 @@ class FileUploadService(
 
         // 校验文件类型
         val originalFilename = file.originalFilename ?: "unknown"
-        val extension = originalFilename.substringAfterLast(".", "").lowercase()
-        if (extension !in allowedExtensions) {
+        val declaredExtension = originalFilename.substringAfterLast(".", "").lowercase()
+        if (declaredExtension !in allowedExtensions) {
             throw IllegalArgumentException("仅支持 jpg、jpeg、png、webp、gif 格式的图片")
         }
-        require(hasValidImageSignature(file.bytes, extension)) { "文件内容与图片格式不匹配" }
+        val bytes = file.bytes
+        val detectedExtension = detectImageExtension(bytes)
+            ?: throw IllegalArgumentException("无法识别图片格式或文件内容已损坏")
+        // 部分图片下载或转存后会保留错误的文件后缀（例如 JPEG 内容被命名为 .png）。
+        // 以文件签名识别出的真实格式保存，既兼容这类合法图片，也避免信任用户提供的后缀。
+        val extension = if (detectedExtension == "jpeg") "jpg" else detectedExtension
 
         // 目录和文件名只允许安全字符，防止通过请求参数写入上传目录之外的位置。
         require(folder.matches(Regex("^[A-Za-z0-9_-]{1,64}$"))) { "上传目录名称不合法" }
@@ -51,8 +56,8 @@ class FileUploadService(
         if (ossEnabled) {
             return uploadToOss(
                 relativePath = relativePath,
-                bytes = file.bytes,
-                contentType = file.contentType ?: "application/octet-stream"
+                bytes = bytes,
+                contentType = imageContentType(extension)
             )
         }
 
@@ -93,17 +98,23 @@ class FileUploadService(
         return url
     }
 
-    private fun hasValidImageSignature(bytes: ByteArray, extension: String): Boolean {
-        if (bytes.size < 12) return false
-        return when (extension) {
-            "jpg", "jpeg" -> bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() && bytes[2] == 0xFF.toByte()
-            "png" -> bytes.copyOfRange(0, 8).contentEquals(
+    private fun detectImageExtension(bytes: ByteArray): String? {
+        if (bytes.size < 12) return null
+        if (bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() && bytes[2] == 0xFF.toByte()) return "jpg"
+        if (bytes.copyOfRange(0, 8).contentEquals(
                 byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
-            )
-            "gif" -> String(bytes, 0, 6, Charsets.US_ASCII) in setOf("GIF87a", "GIF89a")
-            "webp" -> String(bytes, 0, 4, Charsets.US_ASCII) == "RIFF" &&
-                String(bytes, 8, 4, Charsets.US_ASCII) == "WEBP"
-            else -> false
-        }
+            )) return "png"
+        if (String(bytes, 0, 6, Charsets.US_ASCII) in setOf("GIF87a", "GIF89a")) return "gif"
+        if (String(bytes, 0, 4, Charsets.US_ASCII) == "RIFF" &&
+            String(bytes, 8, 4, Charsets.US_ASCII) == "WEBP") return "webp"
+        return null
+    }
+
+    private fun imageContentType(extension: String) = when (extension) {
+        "jpg" -> "image/jpeg"
+        "png" -> "image/png"
+        "gif" -> "image/gif"
+        "webp" -> "image/webp"
+        else -> "application/octet-stream"
     }
 }

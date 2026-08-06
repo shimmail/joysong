@@ -7,15 +7,22 @@ class DiscoverContentCard extends StatelessWidget {
   const DiscoverContentCard({
     required this.item,
     required this.onTap,
+    this.onInstitutionProjectTap,
     super.key,
   });
 
   final DiscoverItem item;
   final VoidCallback onTap;
+  final void Function(String institutionId, String projectId)?
+      onInstitutionProjectTap;
 
   @override
   Widget build(BuildContext context) => switch (item.type) {
-        DiscoverContentType.project => _ProjectCard(item: item, onTap: onTap),
+        DiscoverContentType.project => _ProjectCard(
+            item: item,
+            onTap: onTap,
+            onInstitutionProjectTap: onInstitutionProjectTap,
+          ),
         DiscoverContentType.doctor => _DoctorCard(item: item, onTap: onTap),
         DiscoverContentType.institution =>
           _InstitutionCard(item: item, onTap: onTap),
@@ -25,74 +32,213 @@ class DiscoverContentCard extends StatelessWidget {
       };
 }
 
-class _ProjectCard extends StatelessWidget {
-  const _ProjectCard({required this.item, required this.onTap});
+class _ProjectCard extends StatefulWidget {
+  const _ProjectCard({
+    required this.item,
+    required this.onTap,
+    this.onInstitutionProjectTap,
+  });
   final DiscoverItem item;
   final VoidCallback onTap;
+  final void Function(String institutionId, String projectId)?
+      onInstitutionProjectTap;
+
+  @override
+  State<_ProjectCard> createState() => _ProjectCardState();
+}
+
+class _ProjectCardState extends State<_ProjectCard> {
+  bool _expanded = false;
 
   @override
   Widget build(BuildContext context) {
+    final item = widget.item;
     final data = _primary(item);
     final price = _number(data, const ['price', 'referencePrice']);
     final rating = _number(data, const ['rating']);
     final reviews = _integer(data, const ['reviewCount']);
-    final institutions = item.raw['institutionProjects'];
-    final institutionCount = institutions is List ? institutions.length : 0;
-    return _CardShell(
-      onTap: onTap,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    final institutions = _maps(item.raw['institutionProjects']);
+    return Card(
+      margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      child: Column(
         children: [
-          _Cover(url: item.imageUrl, width: 116, height: 128, icon: Icons.spa),
-          const SizedBox(width: 14),
-          Expanded(
+          InkWell(
+            onTap: widget.onTap,
             child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 3),
-              child: Column(
+              padding: const EdgeInsets.all(12),
+              child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _Title(item.title),
-                  if (item.meta.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    _Muted(item.meta),
-                  ],
-                  if (item.subtitle.isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    _Muted(item.subtitle, maxLines: 2),
-                  ],
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      if (price != null)
-                        Text(
-                          '¥${_money(price)}',
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.primary,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 16,
-                          ),
-                        ),
-                      const Spacer(),
-                      if (rating != null && rating > 0)
-                        _Rating(value: rating, reviews: reviews),
-                    ],
+                  _Cover(
+                    url: _projectCover(item, institutions),
+                    width: 116,
+                    height: 128,
+                    icon: Icons.spa,
                   ),
-                  if (institutionCount > 0) ...[
-                    const SizedBox(height: 5),
-                    Text(
-                      context.isEnglish
-                          ? '$institutionCount institutions available'
-                          : '$institutionCount家机构可预约',
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: Theme.of(context).colorScheme.primary,
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 3),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _Title(item.title),
+                          if (item.meta.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            _Muted(item.meta),
+                          ],
+                          if (item.subtitle.isNotEmpty) ...[
+                            const SizedBox(height: 6),
+                            _Muted(item.subtitle, maxLines: 2),
+                          ],
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              if (price != null)
+                                Text(
+                                  '¥${_money(price)}',
+                                  style: TextStyle(
+                                    color:
+                                        Theme.of(context).colorScheme.primary,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                              const Spacer(),
+                              if (rating != null && rating > 0)
+                                _Rating(value: rating, reviews: reviews),
+                            ],
                           ),
+                        ],
+                      ),
                     ),
-                  ],
+                  ),
                 ],
               ),
             ),
           ),
+          if (institutions.isNotEmpty) ...[
+            const Divider(height: 1),
+            InkWell(
+              onTap: () => setState(() => _expanded = !_expanded),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        context.isEnglish
+                            ? '${institutions.length} available institution projects'
+                            : '${institutions.length}个相关机构项目',
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                              color: Theme.of(context).colorScheme.primary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                      ),
+                    ),
+                    Text(
+                      _expanded
+                          ? context.localized('收起', 'Collapse')
+                          : context.localized('展开', 'Expand'),
+                      style: Theme.of(context).textTheme.labelMedium,
+                    ),
+                    AnimatedRotation(
+                      turns: _expanded ? .5 : 0,
+                      duration: const Duration(milliseconds: 180),
+                      child: const Icon(Icons.keyboard_arrow_down_rounded),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            AnimatedCrossFade(
+              duration: const Duration(milliseconds: 180),
+              crossFadeState: _expanded
+                  ? CrossFadeState.showSecond
+                  : CrossFadeState.showFirst,
+              firstChild: const SizedBox(width: double.infinity),
+              secondChild: Column(
+                children: [
+                  for (final entry in institutions)
+                    _InstitutionProjectEntry(
+                      entry: entry,
+                      onTap: widget.onInstitutionProjectTap,
+                    ),
+                ],
+              ),
+            ),
+          ],
         ],
+      ),
+    );
+  }
+}
+
+class _InstitutionProjectEntry extends StatelessWidget {
+  const _InstitutionProjectEntry({required this.entry, this.onTap});
+
+  final Map<String, Object?> entry;
+  final void Function(String institutionId, String projectId)? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final nested = _map(entry['institutionProject']);
+    final institution = _map(entry['institution']);
+    final data = <String, Object?>{...nested, ...institution, ...entry};
+    final institutionId = _text(data, const ['institutionId']);
+    final projectId = _text(data, const ['projectId']);
+    final name = _text(data, const ['name', 'projectName']);
+    final institutionName = _text(data, const ['institutionName']);
+    final price = _number(data, const ['price']);
+    final cover = _firstImageValue(data);
+    final enabled = institutionId.isNotEmpty &&
+        projectId.isNotEmpty &&
+        onTap != null;
+    return InkWell(
+      onTap: enabled ? () => onTap!(institutionId, projectId) : null,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 8, 10, 8),
+        child: Row(
+          children: [
+            _Cover(
+              url: cover,
+              width: 64,
+              height: 52,
+              icon: Icons.apartment_outlined,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name.isEmpty
+                        ? context.localized('机构项目', 'Institution project')
+                        : name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  if (institutionName.isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    _Muted(institutionName),
+                  ],
+                ],
+              ),
+            ),
+            if (price != null)
+              Text(
+                '¥${_money(price)}',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.primary,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            if (enabled) const Icon(Icons.chevron_right_rounded, size: 20),
+          ],
+        ),
       ),
     );
   }
@@ -248,16 +394,127 @@ class _DiaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final data = _primary(item);
-    final author = _text(data, const ['authorName']);
-    final images = _tokens(data['imageUrls'] ?? data['images']);
-    final beforeImages =
-        _tokens(data['beforeImageUrls'] ?? data['beforeImages']);
-    final afterImages = _tokens(data['afterImageUrls'] ?? data['afterImages']);
+    return DiaryPreviewCard(
+      title: item.title,
+      content: item.subtitle,
+      authorName: _text(data, const ['authorName', 'nickname']),
+      authorAvatar: _text(
+        data,
+        const ['authorAvatar', 'avatarUrl', 'avatar'],
+      ),
+      publishDate: _diaryDate(data, fallback: item.meta),
+      projectName: _text(data, const ['projectName']),
+      images: _tokens(data['imageUrls'] ?? data['images']),
+      beforeImages: _tokens(
+        data['beforeImageUrls'] ?? data['beforeImages'],
+      ),
+      afterImages: _tokens(data['afterImageUrls'] ?? data['afterImages']),
+      likeCount: _integer(data, const ['likeCount']),
+      favoriteCount: _integer(data, const ['favoriteCount']),
+      commentCount: _integer(data, const ['commentCount']),
+      isLiked: _boolean(data['isLiked']),
+      isFavorited: _boolean(data['isFavorited']),
+      onTap: onTap,
+    );
+  }
+}
+
+class DiaryPreviewCard extends StatelessWidget {
+  const DiaryPreviewCard({
+    required this.title,
+    required this.content,
+    required this.authorName,
+    required this.authorAvatar,
+    required this.publishDate,
+    required this.projectName,
+    required this.images,
+    required this.beforeImages,
+    required this.afterImages,
+    required this.likeCount,
+    required this.favoriteCount,
+    required this.commentCount,
+    required this.onTap,
+    this.isLiked = false,
+    this.isFavorited = false,
+    this.trailing,
+    super.key,
+  });
+
+  factory DiaryPreviewCard.fromData({
+    required Map<String, Object?> data,
+    required VoidCallback onTap,
+    Key? key,
+  }) {
+    final nested = data['diary'];
+    final source = nested is Map
+        ? <String, Object?>{
+            ...nested.map((key, value) => MapEntry(key.toString(), value)),
+            ...data,
+          }
+        : data;
+    final images = _tokens(source['imageUrls'] ?? source['images']);
+    final coverImage = _text(source, const ['coverImage', 'imageUrl']);
+    return DiaryPreviewCard(
+      key: key,
+      title: _text(source, const ['title']),
+      content: _text(source, const ['content', 'description', 'summary']),
+      authorName: _text(
+        source,
+        const ['authorName', 'userName', 'nickname'],
+      ),
+      authorAvatar: _text(
+        source,
+        const ['authorAvatar', 'userAvatar', 'avatarUrl', 'avatar'],
+      ),
+      publishDate: _diaryDate(source),
+      projectName: _text(source, const ['projectName']),
+      images: images.isEmpty && coverImage.isNotEmpty ? [coverImage] : images,
+      beforeImages: _tokens(
+        source['beforeImageUrls'] ?? source['beforeImages'],
+      ),
+      afterImages: _tokens(
+        source['afterImageUrls'] ?? source['afterImages'],
+      ),
+      likeCount: _integer(source, const ['likeCount', 'likesCount']),
+      favoriteCount: _integer(
+        source,
+        const ['favoriteCount', 'favoritesCount', 'collectionCount'],
+      ),
+      commentCount: _integer(source, const ['commentCount', 'commentsCount']),
+      isLiked: _boolean(source['isLiked']),
+      isFavorited: _boolean(source['isFavorited']),
+      onTap: onTap,
+    );
+  }
+
+  final String title;
+  final String content;
+  final String authorName;
+  final String authorAvatar;
+  final String publishDate;
+  final String projectName;
+  final List<String> images;
+  final List<String> beforeImages;
+  final List<String> afterImages;
+  final int likeCount;
+  final int favoriteCount;
+  final int commentCount;
+  final bool isLiked;
+  final bool isFavorited;
+  final Widget? trailing;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final initial =
+        authorName.trim().isEmpty ? '?' : authorName.trim().characters.first;
     return _CardShell(
       padding: EdgeInsets.zero,
       onTap: onTap,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           DiaryMediaGrid(
             images: images,
@@ -266,33 +523,130 @@ class _DiaryCard extends StatelessWidget {
             height: 220,
           ),
           Padding(
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                _Title(item.title),
-                if (item.subtitle.isNotEmpty) ...[
+                Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 16,
+                      foregroundImage: authorAvatar.trim().isEmpty
+                          ? null
+                          : NetworkImage(authorAvatar.trim()),
+                      child: authorAvatar.trim().isEmpty ? Text(initial) : null,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            authorName.trim().isEmpty
+                                ? context.localized('用户', 'User')
+                                : authorName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.labelLarge?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (publishDate.isNotEmpty)
+                            Text(
+                              publishDate,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    if (projectName.isNotEmpty) _Tag(projectName),
+                    if (trailing != null) ...[
+                      const SizedBox(width: 6),
+                      trailing!,
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 10),
+                _Title(title),
+                if (content.isNotEmpty) ...[
                   const SizedBox(height: 5),
-                  _Muted(item.subtitle, maxLines: 2),
+                  _Muted(content, maxLines: 2),
                 ],
                 const SizedBox(height: 10),
                 Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    Expanded(child: _Muted(author)),
                     _Counter(
-                      icon: Icons.favorite_border,
-                      value: _integer(data, const ['likeCount']),
+                      icon: isLiked ? Icons.favorite : Icons.favorite_border,
+                      value: likeCount,
+                      activeColor: isLiked ? Colors.red : null,
                     ),
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 14),
+                    _Counter(
+                      icon:
+                          isFavorited ? Icons.bookmark : Icons.bookmark_border,
+                      value: favoriteCount,
+                      activeColor:
+                          isFavorited ? theme.colorScheme.primary : null,
+                    ),
+                    const SizedBox(width: 14),
                     _Counter(
                       icon: Icons.chat_bubble_outline,
-                      value: _integer(data, const ['commentCount']),
+                      value: commentCount,
                     ),
                   ],
                 ),
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class DiaryPreviewRail extends StatelessWidget {
+  const DiaryPreviewRail({
+    required this.diaries,
+    this.onDiaryTap,
+    this.maxItems,
+    this.cardWidth = 300,
+    super.key,
+  });
+
+  final List<Map<String, Object?>> diaries;
+  final ValueChanged<String>? onDiaryTap;
+  final int? maxItems;
+  final double cardWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    final count = maxItems == null || diaries.length <= maxItems!
+        ? diaries.length
+        : maxItems!;
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var index = 0; index < count; index++) ...[
+            if (index > 0) const SizedBox(width: 10),
+            SizedBox(
+              width: cardWidth,
+              child: DiaryPreviewCard.fromData(
+                data: diaries[index],
+                onTap: () {
+                  final id = _text(diaries[index], const ['id', 'diaryId']);
+                  if (id.isNotEmpty) onDiaryTap?.call(id);
+                },
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -495,15 +849,20 @@ class _Rating extends StatelessWidget {
 }
 
 class _Counter extends StatelessWidget {
-  const _Counter({required this.icon, required this.value});
+  const _Counter({required this.icon, required this.value, this.activeColor});
   final IconData icon;
   final int value;
+  final Color? activeColor;
   @override
   Widget build(BuildContext context) => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon,
-              size: 15, color: Theme.of(context).colorScheme.onSurfaceVariant),
+          Icon(
+            icon,
+            size: 15,
+            color:
+                activeColor ?? Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
           const SizedBox(width: 3),
           Text('$value', style: Theme.of(context).textTheme.labelSmall),
         ],
@@ -549,6 +908,25 @@ String _text(Map<String, Object?> data, List<String> keys) {
   return '';
 }
 
+String _diaryDate(Map<String, Object?> data, {String fallback = ''}) {
+  final value = _text(data, const [
+    'publishDate',
+    'publishedAt',
+    'publishTime',
+    'createdAt',
+    'createdDate',
+  ]);
+  final candidate = value.isNotEmpty ? value : fallback.trim();
+  if (candidate.isEmpty) return '';
+  final parsed = DateTime.tryParse(candidate);
+  if (parsed != null) {
+    final month = parsed.month.toString().padLeft(2, '0');
+    final day = parsed.day.toString().padLeft(2, '0');
+    return '${parsed.year}-$month-$day';
+  }
+  return candidate.length >= 10 ? candidate.substring(0, 10) : candidate;
+}
+
 double? _number(Map<String, Object?> data, List<String> keys) {
   for (final key in keys) {
     final value = data[key];
@@ -570,6 +948,50 @@ List<String> _tokens(Object? value) {
       .map((item) => item.toString().trim())
       .where((item) => item.isNotEmpty)
       .toList(growable: false);
+}
+
+List<Map<String, Object?>> _maps(Object? value) {
+  if (value is! List) return const [];
+  return value
+      .whereType<Map>()
+      .map((entry) =>
+          entry.map((key, value) => MapEntry(key.toString(), value)))
+      .toList(growable: false);
+}
+
+Map<String, Object?> _map(Object? value) {
+  if (value is! Map) return const {};
+  return value.map((key, value) => MapEntry(key.toString(), value));
+}
+
+String _projectCover(
+  DiscoverItem item,
+  List<Map<String, Object?>> institutionProjects,
+) {
+  if (item.imageUrl.trim().isNotEmpty) return item.imageUrl.trim();
+  final ownCover = _firstImageValue(item.raw);
+  if (ownCover.isNotEmpty) return ownCover;
+  for (final entry in institutionProjects) {
+    final nested = _map(entry['institutionProject']);
+    final cover = _firstImageValue(<String, Object?>{...nested, ...entry});
+    if (cover.isNotEmpty) return cover;
+  }
+  return '';
+}
+
+String _firstImageValue(Map<String, Object?> data) {
+  for (final key in const [
+    'coverImage',
+    'coverImageUrl',
+    'imageUrl',
+    'images',
+    'imageUrls',
+    'logo',
+  ]) {
+    final values = _tokens(data[key]);
+    if (values.isNotEmpty) return values.first;
+  }
+  return '';
 }
 
 String _money(double value) => value == value.roundToDouble()

@@ -22,7 +22,7 @@ class NotificationService(
      */
     fun getNotifications(userId: String, limit: Int = 50): List<NotificationResponse> {
         val pageable = PageRequest.of(0, limit)
-        return notificationRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable)
+        return notificationRepository.findByUserIdAndDeletedAtIsNullOrderByCreatedAtDesc(userId, pageable)
             .map { it.toResponse() }
     }
 
@@ -30,7 +30,7 @@ class NotificationService(
      * 获取用户未读通知数量
      */
     fun getUnreadCount(userId: String): Long {
-        return notificationRepository.countByUserIdAndIsRead(userId, false)
+        return notificationRepository.countByUserIdAndIsReadAndDeletedAtIsNull(userId, false)
     }
 
     /**
@@ -38,7 +38,7 @@ class NotificationService(
      */
     @Transactional
     fun markAsRead(notificationId: String, userId: String) {
-        val notification = notificationRepository.findByIdAndUserId(notificationId, userId)
+        val notification = notificationRepository.findByIdAndUserIdAndDeletedAtIsNull(notificationId, userId)
             ?: throw IllegalArgumentException("通知不存在或无权访问")
         notification.isRead = true
         notificationRepository.save(notification)

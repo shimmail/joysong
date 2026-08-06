@@ -17,6 +17,8 @@ data class DoctorEntity(
     val title: String = "",
     val bio: String = "",
     val avatar: String = "",
+    /** 医生对外展示的联系电话，不使用账号登录手机号。 */
+    @Column(name = "contact_phone") val contactPhone: String = "",
     @Column(name = "institution_id") val institutionId: String = "",
     @Column(name = "institution_name") val institutionName: String = "",
     val rating: BigDecimal = BigDecimal("4.5"),
