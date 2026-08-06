@@ -1,0 +1,147 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:joysong_flutter/app/app.dart';
+import 'package:joysong_flutter/core/config/app_environment.dart';
+import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/features/auth/domain/auth_models.dart';
+import 'package:joysong_flutter/features/auth/domain/auth_repository.dart';
+import 'package:joysong_flutter/features/profile/presentation/profile_page.dart';
+import 'package:joysong_flutter/features/settings/domain/settings_preferences.dart';
+import 'package:joysong_flutter/features/settings/domain/settings_services.dart';
+
+void main() {
+  testWidgets('app shell switches between primary destinations',
+      (tester) async {
+    await tester.pumpWidget(
+      JoysongApp(
+        environment: AppEnvironment.resolve(platform: AppPlatform.android),
+        authRepository: _AuthenticatedRepository(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('安心变美，从了解开始'), findsOneWidget);
+
+    await tester.tap(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('发现'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('项目'), findsOneWidget);
+
+    await tester.tap(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('我的'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('娇颜颂用户'), findsOneWidget);
+    await tester.drag(
+      find.descendant(
+        of: find.byType(ProfilePage),
+        matching: find.byType(ListView),
+      ),
+      const Offset(0, -420),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.settings_outlined), findsOneWidget);
+  });
+
+  testWidgets('restores persisted appearance mode at the application root',
+      (tester) async {
+    await tester.pumpWidget(
+      JoysongApp(
+        environment: AppEnvironment.resolve(platform: AppPlatform.android),
+        authRepository: _AuthenticatedRepository(),
+        settingsPreferenceStore: _SettingsStore(
+          const SettingsPreferences(
+            appearanceMode: AppAppearanceMode.dark,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode,
+        ThemeMode.dark);
+  });
+
+  testWidgets('restores persisted language at the application root',
+      (tester) async {
+    await tester.pumpWidget(
+      JoysongApp(
+        environment: AppEnvironment.resolve(platform: AppPlatform.android),
+        authRepository: _AuthenticatedRepository(),
+        localePreferenceStore: _LocaleStore('en'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.widget<MaterialApp>(find.byType(MaterialApp)).locale,
+      const Locale('en'),
+    );
+    expect(find.text('Home'), findsOneWidget);
+    expect(find.text('Discover'), findsOneWidget);
+    expect(find.text('Profile'), findsOneWidget);
+  });
+}
+
+class _AuthenticatedRepository extends Fake implements AuthRepository {
+  @override
+  Future<AuthTokens?> readTokens() async => const AuthTokens(
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        tokenType: 'Bearer',
+        expiresIn: 3600,
+      );
+
+  @override
+  Future<AuthSession> refreshSession() async => AuthSession(
+        tokens: (await readTokens())!,
+        user: const AuthUser(
+          id: 'user-1',
+          phone: '+8613800000000',
+          email: null,
+          nickname: '娇颜颂用户',
+          avatar: '',
+          gender: '',
+          city: '',
+          bio: '',
+          birthday: null,
+          role: 'USER',
+          hasPassword: true,
+        ),
+      );
+}
+
+final class _SettingsStore implements SettingsPreferenceStore {
+  _SettingsStore(this.value);
+
+  SettingsPreferences value;
+
+  @override
+  Future<SettingsPreferences> read() async => value;
+
+  @override
+  Future<void> write(SettingsPreferences preferences) async {
+    value = preferences;
+  }
+}
+
+final class _LocaleStore implements LocalePreferenceStore {
+  _LocaleStore(this.value);
+
+  String? value;
+
+  @override
+  Future<String?> readLanguageCode() async => value;
+
+  @override
+  Future<void> writeLanguageCode(String value) async {
+    this.value = value;
+  }
+}

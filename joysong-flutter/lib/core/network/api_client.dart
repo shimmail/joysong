@@ -1,0 +1,484 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
+
+import 'package:joysong_flutter/core/network/api_exception.dart';
+
+typedef AccessTokenProvider = Future<String?> Function();
+typedef UnauthorizedHandler = Future<String?> Function();
+typedef LanguageTagProvider = String Function();
+typedef RequestIdProvider = String Function();
+
+class ApiClient {
+  ApiClient({
+    required Uri apiRoot,
+    AccessTokenProvider? accessTokenProvider,
+    LanguageTagProvider? languageTagProvider,
+    RequestIdProvider? requestIdProvider,
+    String clientName = 'joysong-flutter',
+    HttpClient? httpClient,
+    Duration requestTimeout = const Duration(seconds: 30),
+  })  : _apiRoot = apiRoot,
+        _accessTokenProvider = accessTokenProvider,
+        _languageTagProvider = languageTagProvider,
+        _requestIdProvider = requestIdProvider ?? generateApiRequestId,
+        _clientName = clientName,
+        _httpClient = httpClient ?? HttpClient(),
+        _requestTimeout = requestTimeout;
+
+  final Uri _apiRoot;
+  final AccessTokenProvider? _accessTokenProvider;
+  final LanguageTagProvider? _languageTagProvider;
+  final RequestIdProvider _requestIdProvider;
+  final String _clientName;
+  final HttpClient _httpClient;
+  final Duration _requestTimeout;
+  UnauthorizedHandler? _unauthorizedHandler;
+  Future<String?>? _refreshInFlight;
+
+  Uri get apiRoot => _apiRoot;
+
+  void configureUnauthorizedHandler(UnauthorizedHandler handler) {
+    _unauthorizedHandler = handler;
+  }
+
+  Future<T?> get<T>(
+    String path, {
+    Map<String, Object?> query = const {},
+    required T Function(Object? json) decodeData,
+  }) {
+    return _send<T>(
+      method: 'GET',
+      path: path,
+      query: query,
+      decodeData: decodeData,
+      replayAfterRefresh: true,
+    );
+  }
+
+  Future<T?> post<T>(
+    String path, {
+    Object? body,
+    required T Function(Object? json) decodeData,
+  }) {
+    return _send<T>(
+      method: 'POST',
+      path: path,
+      body: body,
+      decodeData: decodeData,
+    );
+  }
+
+  /// Sends a POST that may be replayed once after refreshing authentication.
+  ///
+  /// Callers must use a stable [idempotencyKey] and the server must enforce it.
+  /// Ordinary writes deliberately do not retry after a 401 because repeating a
+  /// payment, order, upload, or message can create duplicate side effects.
+  Future<T?> postIdempotent<T>(
+    String path, {
+    required String idempotencyKey,
+    Object? body,
+    required T Function(Object? json) decodeData,
+  }) {
+    _validateHeaderToken(idempotencyKey, 'Idempotency-Key');
+    return _send<T>(
+      method: 'POST',
+      path: path,
+      body: body,
+      decodeData: decodeData,
+      replayAfterRefresh: true,
+      idempotencyKey: idempotencyKey,
+    );
+  }
+
+  Future<T?> put<T>(
+    String path, {
+    Object? body,
+    required T Function(Object? json) decodeData,
+  }) {
+    return _send<T>(
+      method: 'PUT',
+      path: path,
+      body: body,
+      decodeData: decodeData,
+    );
+  }
+
+  Future<T?> delete<T>(
+    String path, {
+    Object? body,
+    required T Function(Object? json) decodeData,
+  }) {
+    return _send<T>(
+      method: 'DELETE',
+      path: path,
+      body: body,
+      decodeData: decodeData,
+    );
+  }
+
+  Future<T?> postMultipart<T>(
+    String path, {
+    Map<String, String> fields = const {},
+    required List<MultipartFilePart> files,
+    required T Function(Object? json) decodeData,
+    void Function(int bytesSent, int totalBytes)? onProgress,
+  }) async {
+    final uri = _resolve(path, const {});
+    final requestId = _requestIdProvider();
+    final boundary = '----joysong-${DateTime.now().microsecondsSinceEpoch}-'
+        '${Random.secure().nextInt(1 << 32)}';
+    try {
+      final request = await _httpClient.postUrl(uri).timeout(_requestTimeout);
+      _applyStandardHeaders(request.headers, requestId: requestId);
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      request.headers.set(
+        HttpHeaders.contentTypeHeader,
+        'multipart/form-data; boundary=$boundary',
+      );
+      final token = await _accessTokenProvider?.call();
+      if (token != null && token.isNotEmpty) {
+        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+      }
+      for (final entry in fields.entries) {
+        _validateMultipartToken(entry.key, '字段名');
+        request.add(
+          utf8.encode(
+            '--$boundary\r\n'
+            'Content-Disposition: form-data; name="${entry.key}"\r\n\r\n'
+            '${entry.value}\r\n',
+          ),
+        );
+      }
+      final totalFileBytes = files.fold<int>(
+        0,
+        (total, file) => total + file.bytes.length,
+      );
+      var sentFileBytes = 0;
+      for (final file in files) {
+        _validateMultipartToken(file.fieldName, '文件字段名');
+        _validateMultipartToken(file.fileName, '文件名');
+        _validateMultipartToken(file.contentType, '文件类型');
+        request.add(
+          utf8.encode(
+            '--$boundary\r\n'
+            'Content-Disposition: form-data; name="${file.fieldName}"; '
+            'filename="${file.fileName}"\r\n'
+            'Content-Type: ${file.contentType}\r\n\r\n',
+          ),
+        );
+        const chunkSize = 64 * 1024;
+        for (var offset = 0; offset < file.bytes.length; offset += chunkSize) {
+          final end = offset + chunkSize < file.bytes.length
+              ? offset + chunkSize
+              : file.bytes.length;
+          request.add(file.bytes.sublist(offset, end));
+          sentFileBytes += end - offset;
+          onProgress?.call(sentFileBytes, totalFileBytes);
+          await Future<void>.delayed(Duration.zero);
+        }
+        request.add(const [13, 10]);
+      }
+      request.add(utf8.encode('--$boundary--\r\n'));
+
+      final response = await request.close().timeout(_requestTimeout);
+      final text =
+          await utf8.decoder.bind(response).join().timeout(_requestTimeout);
+      final successfulHttp = response.statusCode >= 200 &&
+          response.statusCode < HttpStatus.multipleChoices;
+      _RawEnvelope? envelope;
+      try {
+        envelope = _decodeEnvelope(text);
+      } on FormatException {
+        if (successfulHttp) {
+          rethrow;
+        }
+      }
+      if (!successfulHttp || envelope == null || envelope.code != 200) {
+        throw ApiException(
+          message: envelope == null || envelope.message.isEmpty
+              ? _localized('上传失败，请稍后重试', 'Upload failed. Try again later.')
+              : _localizedServerMessage(envelope.message),
+          httpStatus: response.statusCode,
+          businessCode: envelope?.code,
+        );
+      }
+      return envelope.hasData ? decodeData(envelope.data) : null;
+    } on ApiException {
+      rethrow;
+    } on TimeoutException catch (error) {
+      throw ApiException(
+        message: _localized('上传超时，请稍后重试', 'Upload timed out. Try again.'),
+        cause: error,
+      );
+    } on SocketException catch (error) {
+      throw ApiException(
+        message: _localized(
+          '网络连接失败，请检查网络',
+          'Network connection failed. Check your connection.',
+        ),
+        cause: error,
+      );
+    } on HttpException catch (error) {
+      throw ApiException(
+        message: _localized(
+          '上传请求失败，请稍后重试',
+          'Upload request failed. Try again later.',
+        ),
+        cause: error,
+      );
+    } on FormatException catch (error) {
+      throw ApiException(
+        message: _localized(
+          '服务响应格式异常',
+          'The server returned an invalid response.',
+        ),
+        cause: error,
+      );
+    }
+  }
+
+  Future<T?> _send<T>({
+    required String method,
+    required String path,
+    Map<String, Object?> query = const {},
+    Object? body,
+    required T Function(Object? json) decodeData,
+    bool replayAfterRefresh = false,
+    bool hasRetried = false,
+    String? idempotencyKey,
+    String? requestId,
+  }) async {
+    final uri = _resolve(path, query);
+    final logicalRequestId = requestId ?? _requestIdProvider();
+    try {
+      final request =
+          await _httpClient.openUrl(method, uri).timeout(_requestTimeout);
+      _applyStandardHeaders(request.headers, requestId: logicalRequestId);
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      if (idempotencyKey != null) {
+        request.headers.set('Idempotency-Key', idempotencyKey);
+      }
+      final token = await _accessTokenProvider?.call();
+      if (token != null && token.isNotEmpty) {
+        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+      }
+      if (body != null) {
+        request.headers.contentType = ContentType.json;
+        request.write(jsonEncode(body));
+      }
+
+      final response = await request.close().timeout(_requestTimeout);
+      final text =
+          await utf8.decoder.bind(response).join().timeout(_requestTimeout);
+      final successfulHttp = response.statusCode >= 200 &&
+          response.statusCode < HttpStatus.multipleChoices;
+      _RawEnvelope? envelope;
+      try {
+        envelope = _decodeEnvelope(text);
+      } on FormatException {
+        if (successfulHttp) {
+          rethrow;
+        }
+      }
+
+      final isUnauthorized = response.statusCode == HttpStatus.unauthorized ||
+          envelope?.code == HttpStatus.unauthorized;
+      if (isUnauthorized && replayAfterRefresh && !hasRetried) {
+        final refreshedToken = await _refreshAuthentication();
+        if (refreshedToken != null && refreshedToken.isNotEmpty) {
+          return _send<T>(
+            method: method,
+            path: path,
+            query: query,
+            body: body,
+            decodeData: decodeData,
+            replayAfterRefresh: replayAfterRefresh,
+            hasRetried: true,
+            idempotencyKey: idempotencyKey,
+            requestId: logicalRequestId,
+          );
+        }
+      }
+
+      if (!successfulHttp || envelope == null || envelope.code != 200) {
+        throw ApiException(
+          message: envelope == null || envelope.message.isEmpty
+              ? _localized('请求失败，请稍后重试', 'Request failed. Try again later.')
+              : _localizedServerMessage(envelope.message),
+          httpStatus: response.statusCode,
+          businessCode: envelope?.code,
+        );
+      }
+      return envelope.hasData ? decodeData(envelope.data) : null;
+    } on ApiException {
+      rethrow;
+    } on TimeoutException catch (error) {
+      throw ApiException(
+        message: _localized('请求超时，请稍后重试', 'Request timed out. Try again.'),
+        cause: error,
+      );
+    } on SocketException catch (error) {
+      throw ApiException(
+        message: _localized(
+          '网络连接失败，请检查网络',
+          'Network connection failed. Check your connection.',
+        ),
+        cause: error,
+      );
+    } on HttpException catch (error) {
+      throw ApiException(
+        message: _localized(
+          '网络请求失败，请稍后重试',
+          'Network request failed. Try again later.',
+        ),
+        cause: error,
+      );
+    } on FormatException catch (error) {
+      throw ApiException(
+        message: _localized(
+          '服务响应格式异常',
+          'The server returned an invalid response.',
+        ),
+        cause: error,
+      );
+    }
+  }
+
+  Future<String?> _refreshAuthentication() {
+    final running = _refreshInFlight;
+    if (running != null) {
+      return running;
+    }
+    final handler = _unauthorizedHandler;
+    if (handler == null) {
+      return Future<String?>.value();
+    }
+    late final Future<String?> operation;
+    operation = Future<String?>.sync(handler).whenComplete(() {
+      if (identical(_refreshInFlight, operation)) {
+        _refreshInFlight = null;
+      }
+    });
+    _refreshInFlight = operation;
+    return operation;
+  }
+
+  void _applyStandardHeaders(
+    HttpHeaders headers, {
+    required String requestId,
+  }) {
+    _validateHeaderToken(requestId, 'X-Request-ID');
+    headers.set('X-Request-ID', requestId);
+    headers.set('X-Client', _clientName);
+    headers.set('X-Client-Platform', Platform.operatingSystem);
+    headers.set(HttpHeaders.acceptLanguageHeader, _languageTag);
+  }
+
+  String get _languageTag {
+    try {
+      final value = _languageTagProvider?.call().trim();
+      return value == null || value.isEmpty ? 'zh-CN' : value;
+    } on Object {
+      return 'zh-CN';
+    }
+  }
+
+  bool get _usesEnglish => _languageTag.toLowerCase().startsWith('en');
+
+  String _localized(String chinese, String english) =>
+      _usesEnglish ? english : chinese;
+
+  String _localizedServerMessage(String message) => switch (message) {
+        'AI_PROVIDER_UNAVAILABLE' => _localized(
+            'AI 服务暂不可用，请稍后重试',
+            'The AI service is temporarily unavailable. Try again later.',
+          ),
+        'PAYMENT_PROVIDER_UNAVAILABLE' => _localized(
+            '支付服务暂不可用，请稍后重试',
+            'The payment service is temporarily unavailable. Try again later.',
+          ),
+        _ => message,
+      };
+
+  Uri _resolve(String path, Map<String, Object?> query) {
+    final normalizedPath = path.startsWith('/') ? path.substring(1) : path;
+    final uri = _apiRoot.resolve(normalizedPath);
+    final parameters = <String, String>{
+      for (final entry in query.entries)
+        if (entry.value != null) entry.key: entry.value.toString(),
+    };
+    return parameters.isEmpty ? uri : uri.replace(queryParameters: parameters);
+  }
+
+  _RawEnvelope _decodeEnvelope(String text) {
+    if (text.trim().isEmpty) {
+      throw const FormatException('响应体为空');
+    }
+    final json = jsonDecode(text);
+    if (json is! Map<String, dynamic>) {
+      throw const FormatException('响应不是 JSON 对象');
+    }
+    final rawCode = json['code'];
+    if (rawCode is! num) {
+      throw const FormatException('响应缺少有效的 code');
+    }
+    return _RawEnvelope(
+      code: rawCode.toInt(),
+      message: json['message']?.toString() ?? '',
+      data: json['data'],
+      hasData: json.containsKey('data'),
+    );
+  }
+
+  void _validateMultipartToken(String value, String label) {
+    if (value.isEmpty || value.contains('\r') || value.contains('\n')) {
+      throw ArgumentError.value(value, label, '$label 格式不正确');
+    }
+  }
+
+  void _validateHeaderToken(String value, String label) {
+    if (value.trim().isEmpty || value.contains('\r') || value.contains('\n')) {
+      throw ArgumentError.value(value, label, '$label 格式不正确');
+    }
+  }
+
+  void close() => _httpClient.close(force: false);
+}
+
+String generateApiRequestId() {
+  final random = Random.secure();
+  final entropy = List<int>.generate(12, (_) => random.nextInt(256));
+  final suffix =
+      entropy.map((value) => value.toRadixString(16).padLeft(2, '0'));
+  return '${DateTime.now().microsecondsSinceEpoch}-${suffix.join()}';
+}
+
+final class MultipartFilePart {
+  const MultipartFilePart({
+    required this.fieldName,
+    required this.fileName,
+    required this.contentType,
+    required this.bytes,
+  });
+
+  final String fieldName;
+  final String fileName;
+  final String contentType;
+  final List<int> bytes;
+}
+
+final class _RawEnvelope {
+  const _RawEnvelope({
+    required this.code,
+    required this.message,
+    required this.data,
+    required this.hasData,
+  });
+
+  final int code;
+  final String message;
+  final Object? data;
+  final bool hasData;
+}

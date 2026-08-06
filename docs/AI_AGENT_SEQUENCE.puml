@@ -1,0 +1,113 @@
+@startuml
+title JoySong AI Agent 高效混合路由主流程
+
+hide footbox
+autonumber
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 100
+skinparam ParticipantPadding 8
+
+actor 用户 as User
+participant "AI页面" as App
+participant "Chat API" as API
+participant "ChatService" as Chat
+participant "上下文解析" as Context
+participant "IntentRouter" as Router
+participant "轻量LLM解析" as Parser
+participant "CatalogService" as Catalog
+participant "DiscoverSearch" as Search
+participant "SafetyService" as Safety
+participant "PlanService" as Plan
+database "JoySong DB" as DB
+participant "回答LLM" as LLM
+
+== 理解与路由 ==
+User -> App: 发送问题
+App -> API: 提交消息
+API -> Chat: sendMessage()
+Chat -> DB: 保存消息并读取短历史
+DB --> Chat: 最近对话
+Chat -> Context: 补全当前查询
+Context --> Chat: contextualQuery
+Chat -> Router: assess(query, contextType)
+Router --> Chat: LocalAssessment
+
+note over Router,Parser
+|= 返回内容 |= 可选值 |
+| intent | GENERAL_CHAT · CATALOG_QA · COMPARISON · PLANNING · DETAIL_SUMMARY · SAFETY_SCREENING |
+| target | INSTITUTION · DOCTOR · PROJECT · INSTITUTION_PROJECT |
+| action | NONE · SHOW_CATALOG · START_PLANNING · COMPLETE_SAFETY_SCREENING |
+| assessment | confidence · ambiguityReasons · requiresLlmParsing |
+end note
+
+alt 高可靠度且无冲突
+    Chat -> Chat: 使用本地决策
+else 低可靠度或复杂问题
+    Chat -> Parser: 解析意图、目标和关键词
+    Parser --> Chat: intent + target + keywords
+    Chat -> Chat: 校验或回退本地决策
+end
+
+== 意图执行 ==
+alt GENERAL_CHAT
+    Chat -> Chat: 不查询目录
+else SAFETY_SCREENING
+    Chat -> Chat: 停止推荐；action=风险筛查
+else PLANNING
+    opt target不为空
+        Chat -> Catalog: 查询规划参考资料
+        Catalog -> Search: search(query, target)
+        Search -> DB: 查询候选数据
+        DB --> Search: 搜索结果
+        Search --> Catalog: 分类结果
+        Catalog --> Chat: 参考资料
+    end
+    Chat -> Chat: action=开始规划
+else DETAIL_SUMMARY
+    Chat -> DB: 按contextType/contextId查询
+    DB --> Chat: 详情及关联资料
+else CATALOG_QA或COMPARISON
+    Chat -> Catalog: promptEvidence(query, target)
+    Catalog -> Search: 统一关键词搜索
+    Search -> DB: 按target查询
+    DB --> Search: 分类数据
+    Search --> Catalog: 搜索结果
+    Catalog -> Catalog: 去重、排序、限量
+    alt COMPARISON
+        Catalog -> Catalog: 保留同类型；生成报告
+    else CATALOG_QA
+        Catalog -> Catalog: 生成发现页卡片
+    end
+    Catalog --> Chat: 数据证据 + 卡片/报告
+end
+
+== 回答与下一步 ==
+Chat -> LLM: 生成一次简短回答
+LLM --> Chat: 回答内容
+Chat -> DB: 保存AI回复
+Chat --> API: message + intent + target + action + cards/report
+API --> App: 返回本轮结果
+
+alt action=风险筛查
+    App --> User: 展示风险筛查入口
+    User -> App: 填写并确认
+    App -> Safety: 提交结构化筛查
+    Safety -> DB: 读取档案并评估
+    DB --> Safety: 档案数据
+    Safety --> App: 风险等级 + nextAction
+else action=开始规划
+    App --> User: 展示规划入口
+    User -> App: 确认档案和筛查
+    App -> Safety: 风险评估
+    Safety --> App: 评估结果
+    opt 允许创建规划
+        App -> Plan: createPlan()
+        Plan -> DB: 读取数据并保存规划
+        DB --> Plan: 档案与项目
+        Plan --> App: 分阶段规划
+    end
+else 无结构化动作
+    App --> User: 展示回答、卡片或报告
+end
+@enduml

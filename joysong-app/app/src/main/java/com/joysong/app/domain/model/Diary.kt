@@ -1,0 +1,31 @@
+package com.joysong.app.domain.model
+
+data class Diary(
+    val id: String,
+    val title: String,
+    val userId: String = "",
+    val authorName: String,
+    val authorAvatar: String = "",
+    val content: String = "",
+    val coverImage: String = "",
+    val images: List<String> = emptyList(),
+    val likeCount: Int = 0,
+    val commentCount: Int = 0,
+    val tags: List<String> = emptyList(),
+    val publishDate: String = "",
+    val doctorId: String = "",
+    val projectId: String = "",
+    val institutionId: String = "",
+    val institutionProjectId: String = "",
+    val beforeImages: String = "",
+    val afterImages: String = "",
+    val orderId: String = "",
+    val projectName: String = "",
+    val doctorName: String = "",
+    val institutionName: String = "",
+    val rating: Int = 0,
+    val status: String = "published",
+    val favoriteCount: Int = 0,
+    val isLiked: Boolean = false,
+    val createdAt: String = ""
+)

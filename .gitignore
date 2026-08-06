@@ -1,0 +1,48 @@
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Gradle
+.gradle/
+.gradle-codex/
+.flutter-cache/
+.android-user-home/
+joysong-app/.android-codex/
+joysong-server/.gradle-user-home/
+build/
+bin/
+local.properties
+
+# Kotlin
+.kotlin/
+
+# Node
+node_modules/
+dist/
+
+# OS
+.DS_Store
+Thumbs.db
+hs_err_pid*.log
+
+# App specific
+joysong-server/data/
+.tmp/
+tools/
+__*.txt
+__*.py
+
+# Test images
+image/
+
+# Qoder
+.qoder/
+
+# Figma
+*.fig
+
+# Environment-specific config
+application-dev.yml
+application-prod.yml
+.env

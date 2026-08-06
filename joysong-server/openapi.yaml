@@ -1,0 +1,2529 @@
+openapi: 3.0.3
+info:
+  title: 娇颜颂 用户端 API
+  description: 娇颜颂医美平台 Android App 用户端接口文档（不含管理后台）
+  version: 1.0.0
+servers:
+- url: http://localhost:8080
+  description: 本地开发环境
+tags:
+- name: 认证模块
+  description: 登录、注册、验证码 — /api/auth
+- name: 用户模块
+  description: 用户资料管理 — /api/user
+- name: 首页模块
+  description: 首页数据 — /api/home
+- name: 发现模块
+  description: 项目/医生/机构/日记/文章浏览 — /api/discover
+- name: 日记模块
+  description: 用户日记管理 — /api/diaries
+- name: 收藏模块
+  description: 收藏管理 — /api/favorites
+- name: 订单模块
+  description: 订单/支付/退款/评价 — /api/orders
+- name: AI聊天模块
+  description: AI 医美咨询会话 — /api/chat
+- name: 文件上传
+  description: 图片文件上传 — /api/upload
+- name: 点赞模块
+  description: 点赞管理 — /api/likes
+- name: 评论模块
+  description: 评论管理 — /api/comments
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 'JWT Token 认证，Header: Authorization: Bearer <token>'
+  schemas:
+    BaseResponse:
+      type: object
+      description: 统一响应包装
+      properties:
+        code:
+          type: integer
+          example: 200
+          description: 状态码，200=成功
+        message:
+          type: string
+          example: success
+        data:
+          description: 响应数据，类型随接口而定
+    LoginRequest:
+      type: object
+      required:
+      - phone
+      - password
+      properties:
+        phone:
+          type: string
+          example: '13800138000'
+          description: 手机号
+        password:
+          type: string
+          example: '123456'
+          description: 密码
+    RegisterRequest:
+      type: object
+      required:
+      - phone
+      - password
+      properties:
+        phone:
+          type: string
+          example: '13800138000'
+        code:
+          type: string
+          example: '1234'
+          description: 验证码
+        password:
+          type: string
+          example: '123456'
+    SendCodeRequest:
+      type: object
+      required:
+      - phone
+      properties:
+        phone:
+          type: string
+          example: '13800138000'
+    LoginWithCodeRequest:
+      type: object
+      required:
+      - phone
+      - code
+      properties:
+        phone:
+          type: string
+          example: '13800138000'
+        code:
+          type: string
+          example: '123456'
+          description: 验证码
+    GoogleLoginRequest:
+      type: object
+      required:
+      - idToken
+      properties:
+        idToken:
+          type: string
+          description: Google ID Token（由客户端 Credential Manager 获取）
+          example: eyJhbGciOiJSUzI1NiIsImtpZCI6Ij...
+    LoginResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          example: eyJhbGciOiJIUzM4NCJ9...
+          description: JWT Token
+        user:
+          $ref: '#/components/schemas/UserDto'
+    UserDto:
+      type: object
+      description: 用户信息
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: c233b71f-5359-414e-8dd8-8deb29a60f92
+        phone:
+          type: string
+          nullable: true
+          example: '13800138000'
+        email:
+          type: string
+          nullable: true
+          example: user@gmail.com
+        nickname:
+          type: string
+          example: 小美
+        avatar:
+          type: string
+          example: https://joysong--images.oss-cn-hangzhou.aliyuncs.com/avatars/xxx.jpg
+        gender:
+          type: string
+          example: 女
+        city:
+          type: string
+          nullable: true
+          example: 上海
+        bio:
+          type: string
+          nullable: true
+          example: 喜欢尝试皮肤管理项目。
+        birthday:
+          type: string
+          nullable: true
+          example: '1995-06-15'
+    UpdateProfileRequest:
+      type: object
+      properties:
+        nickname:
+          type: string
+          nullable: true
+          example: 小美
+        avatar:
+          type: string
+          nullable: true
+          example: https://...
+        gender:
+          type: string
+          nullable: true
+          example: 女
+        city:
+          type: string
+          nullable: true
+          example: 上海
+        bio:
+          type: string
+          nullable: true
+          example: 喜欢尝试皮肤管理项目。
+        birthday:
+          type: string
+          nullable: true
+          example: '1995-06-15'
+    BannerDto:
+      type: object
+      description: 首页轮播图
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          example: 夏日焕肤季
+        subtitle:
+          type: string
+          example: 全场8折起
+        imageUrl:
+          type: string
+          example: https://joysong--images.oss-cn-hangzhou.aliyuncs.com/banners/xxx.jpg
+        accentColor:
+          type: string
+          example: '#E8A0BF'
+        sortOrder:
+          type: integer
+          example: 0
+    ProjectDto:
+      type: object
+      description: 医美项目
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: 玻尿酸填充
+        price:
+          type: number
+          format: double
+          example: 2999.0
+        originalPrice:
+          type: number
+          format: double
+          nullable: true
+          example: 3999.0
+        doctorName:
+          type: string
+          example: 王医生
+        institutionName:
+          type: string
+          example: 上海娇颜颂医美中心
+        coverImage:
+          type: string
+        category:
+          type: string
+          example: 注射美容
+        description:
+          type: string
+        rating:
+          type: number
+          format: float
+          example: 4.8
+        reviewCount:
+          type: integer
+          example: 62
+        tags:
+          type: string
+          example: 玻尿酸,填充,微整
+        createdAt:
+          type: string
+          format: date-time
+        institutionId:
+          type: string
+          format: uuid
+        doctorId:
+          type: string
+          format: uuid
+        encyclopedia:
+          type: string
+          description: 项目百科
+        risks:
+          type: string
+          description: 风险提示
+        images:
+          type: string
+          description: 项目图片，逗号分隔
+        highlights:
+          type: string
+          description: 项目亮点
+        suitableCrowd:
+          type: string
+          description: 适合人群
+        precautions:
+          type: string
+          description: 注意事项
+        serviceProcess:
+          type: string
+          description: 服务流程
+        faq:
+          type: string
+          description: 常见问题
+        salesCount:
+          type: integer
+          example: 128
+        categoryTags:
+          type: string
+    DoctorDto:
+      type: object
+      description: 医生信息
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: 王医生
+        title:
+          type: string
+          example: 主任医师
+        bio:
+          type: string
+        avatar:
+          type: string
+        institutionId:
+          type: string
+          format: uuid
+        institutionName:
+          type: string
+          example: 上海娇颜颂医美中心
+        rating:
+          type: number
+          format: float
+          example: 4.9
+        reviewCount:
+          type: integer
+          example: 86
+        specialties:
+          type: string
+          example: 玻尿酸,肉毒素,注射美容
+        isVerified:
+          type: boolean
+          example: true
+        consultationCount:
+          type: integer
+          example: 320
+        credentials:
+          type: string
+          description: 资质信息
+        credentialImages:
+          type: string
+          description: 资质图片，逗号分隔
+        caseCount:
+          type: integer
+          example: 1500
+        certificationTags:
+          type: string
+    InstitutionDto:
+      type: object
+      description: 医美机构
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: 上海娇颜颂医美中心
+        address:
+          type: string
+        city:
+          type: string
+          example: 上海
+        description:
+          type: string
+        coverImage:
+          type: string
+        rating:
+          type: number
+          format: float
+          example: 4.7
+        reviewCount:
+          type: integer
+          example: 230
+        isVerified:
+          type: boolean
+          example: true
+        images:
+          type: string
+          description: 机构图片，逗号分隔
+        projectCount:
+          type: integer
+          example: 15
+        doctorCount:
+          type: integer
+          example: 8
+        consultationCount:
+          type: integer
+        credentials:
+          type: string
+        establishedYear:
+          type: integer
+          nullable: true
+          example: 2015
+        certificationTime:
+          type: string
+        userCount:
+          type: integer
+        credentialImages:
+          type: string
+        specialties:
+          type: string
+        tags:
+          type: string
+        contactPhone:
+          type: string
+        businessHours:
+          type: string
+          example: 09:00-21:00
+        caseCount:
+          type: integer
+    ArticleDto:
+      type: object
+      description: 专家科普文章
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          example: 玻尿酸填充全攻略
+        authorName:
+          type: string
+          example: 王医生
+        summary:
+          type: string
+        coverImage:
+          type: string
+        publishDate:
+          type: string
+          example: '2024-06-01'
+        content:
+          type: string
+          description: 文章正文
+        readCount:
+          type: integer
+          example: 1520
+        doctorId:
+          type: string
+          format: uuid
+    DiaryDto:
+      type: object
+      description: 用户医美日记
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          example: 我的玻尿酸填充之旅
+        userId:
+          type: string
+          format: uuid
+        authorName:
+          type: string
+          example: 小美
+        authorAvatar:
+          type: string
+        content:
+          type: string
+        coverImage:
+          type: string
+          description: 普通日记图片第一张的兼容字段，不单独存储
+        images:
+          type: string
+          description: 图片URL，逗号分隔
+        imageUrls:
+          type: array
+          description: 普通日记图片URL列表，按上传顺序排列
+          items:
+            type: string
+        likeCount:
+          type: integer
+          example: 42
+        commentCount:
+          type: integer
+          example: 8
+        tags:
+          type: string
+          example: 玻尿酸,填充
+        publishDate:
+          type: string
+          example: '2024-06-15'
+        status:
+          type: string
+          example: published
+        doctorId:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        institutionId:
+          type: string
+          format: uuid
+        beforeImages:
+          type: string
+          description: 术前照片URL，逗号分隔
+        beforeImageUrls:
+          type: array
+          description: 术前照片URL列表，按上传顺序排列
+          items:
+            type: string
+        afterImages:
+          type: string
+          description: 术后照片URL，逗号分隔
+        afterImageUrls:
+          type: array
+          description: 术后照片URL列表，按上传顺序排列
+          items:
+            type: string
+        orderId:
+          type: string
+          format: uuid
+        projectName:
+          type: string
+          example: 玻尿酸填充
+          description: 关联项目名称
+        doctorName:
+          type: string
+          example: 王医生
+          description: 关联医生名称
+        institutionName:
+          type: string
+          example: 上海娇颜颂医美中心
+          description: 关联机构名称
+    PublishDiaryRequest:
+      type: object
+      required:
+      - title
+      - content
+      properties:
+        title:
+          type: string
+          example: 我的玻尿酸填充之旅
+        content:
+          type: string
+          example: 今天去做了玻尿酸填充...
+        images:
+          type: string
+          default: ''
+          description: 图片URL，逗号分隔
+        beforeImages:
+          type: string
+          default: ''
+          description: 术前照片URL，逗号分隔
+        afterImages:
+          type: string
+          default: ''
+          description: 术后照片URL，逗号分隔
+        tags:
+          type: string
+          default: ''
+          description: 标签，逗号分隔
+    FavoriteDto:
+      type: object
+      description: 收藏记录
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        targetType:
+          type: string
+          example: project
+          description: 收藏类型：project/doctor/institution/article/diary
+        targetId:
+          type: string
+          format: uuid
+        targetName:
+          type: string
+          example: 玻尿酸填充
+        targetImage:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    AddFavoriteRequest:
+      type: object
+      required:
+      - targetType
+      - targetId
+      properties:
+        targetType:
+          type: string
+          example: project
+          description: 收藏类型：project/doctor/institution/article/diary
+        targetId:
+          type: string
+          format: uuid
+          description: 目标ID
+    CreateOrderRequest:
+      type: object
+      required:
+      - projectId
+      properties:
+        projectId:
+          type: string
+          format: uuid
+          description: 项目ID
+        quantity:
+          type: integer
+          default: 1
+          example: 1
+        remark:
+          type: string
+          default: ''
+          example: 希望周末预约
+    OrderResponse:
+      type: object
+      description: 订单详情
+      properties:
+        id:
+          type: string
+          format: uuid
+        orderNo:
+          type: string
+          example: ORD20240615001
+          description: 订单编号
+        userId:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        institutionId:
+          type: string
+          format: uuid
+        doctorId:
+          type: string
+          format: uuid
+        projectName:
+          type: string
+          example: 玻尿酸填充
+        institutionName:
+          type: string
+          example: 上海娇颜颂医美中心
+        coverImage:
+          type: string
+        amount:
+          type: number
+          format: double
+          example: 2999.0
+          description: 实付金额
+        originalPrice:
+          type: number
+          format: double
+          example: 3999.0
+          description: 原价
+        status:
+          type: string
+          enum:
+          - PENDING
+          - PAID
+          - COMPLETED
+          - CANCELLED
+          - REFUNDING
+          - REFUNDED
+          description: 订单状态
+        quantity:
+          type: integer
+          example: 1
+        remark:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    PayOrderRequest:
+      type: object
+      required:
+      - method
+      properties:
+        method:
+          type: string
+          example: ALIPAY
+          description: 支付方式：ALIPAY/WECHAT/CARD
+    RefundOrderRequest:
+      type: object
+      required:
+      - reason
+      properties:
+        reason:
+          type: string
+          example: 计划变更
+          description: 退款原因
+        description:
+          type: string
+          default: ''
+          description: 补充说明
+    ReviewOrderRequest:
+      type: object
+      required:
+      - rating
+      - content
+      properties:
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+          example: 5
+          description: 评分 1-5
+        content:
+          type: string
+          example: 效果非常好，医生很专业！
+        tags:
+          type: string
+          default: ''
+          description: 评价标签，逗号分隔
+        images:
+          type: string
+          default: ''
+          description: 评价图片URL，逗号分隔
+    ReviewDto:
+      type: object
+      description: 用户评价
+      properties:
+        id:
+          type: string
+          format: uuid
+        orderId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        projectName:
+          type: string
+        rating:
+          type: integer
+          example: 5
+        content:
+          type: string
+        tags:
+          type: string
+        images:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        targetType:
+          type: string
+        targetId:
+          type: string
+          format: uuid
+    CreateSessionRequest:
+      type: object
+      properties:
+        persona:
+          type: string
+          enum:
+          - BESTIE
+          - CONSULTANT
+          default: BESTIE
+          description: AI角色：BESTIE=闺蜜, CONSULTANT=咨询师
+        contextType:
+          type: string
+          enum:
+          - DOCTOR
+          - PROJECT
+          - GENERAL
+          default: GENERAL
+          description: 上下文类型
+        contextId:
+          type: string
+          default: ''
+          description: 上下文关联ID（医生/项目ID）
+        title:
+          type: string
+          default: ''
+          description: 会话标题
+    ChatSessionResponse:
+      type: object
+      description: 聊天会话
+      properties:
+        id:
+          type: string
+          format: uuid
+        persona:
+          type: string
+          example: BESTIE
+        contextType:
+          type: string
+          example: GENERAL
+        contextId:
+          type: string
+        title:
+          type: string
+          example: 关于玻尿酸的咨询
+        lastMessage:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    SendMessageRequest:
+      type: object
+      required:
+      - content
+      properties:
+        content:
+          type: string
+          example: 玻尿酸填充疼不疼？
+          description: 消息内容
+    ChatMessageResponse:
+      type: object
+      description: 聊天消息
+      properties:
+        id:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum:
+          - user
+          - assistant
+          description: 消息角色
+        content:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    DoctorInstitutionProjectInfo:
+      type: object
+      description: 医生在某机构可提供的具体项目（已合并机构项目独立详情）
+      properties:
+        institutionProjectId:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        projectName:
+          type: string
+        institutionId:
+          type: string
+          format: uuid
+        institutionName:
+          type: string
+        price:
+          type: number
+          format: double
+        originalPrice:
+          type: number
+          format: double
+          nullable: true
+        coverImage:
+          type: string
+        salesCount:
+          type: integer
+        category:
+          type: string
+        description:
+          type: string
+        rating:
+          type: number
+          format: float
+        reviewCount:
+          type: integer
+        tags:
+          type: string
+        slogan:
+          type: string
+        detailContent:
+          type: string
+          nullable: true
+    DoctorDetailDto:
+      type: object
+      description: 医生详情（含关联数据）
+      properties:
+        doctor:
+          $ref: '#/components/schemas/DoctorDto'
+        institutionProjects:
+          type: array
+          description: 医生关联的机构项目列表；名称、分类、简介等均为机构项目优先、项目模板回退后的有效值
+          items:
+            $ref: '#/components/schemas/DoctorInstitutionProjectInfo'
+        diaries:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiaryDto'
+        institution:
+          $ref: '#/components/schemas/InstitutionDto'
+          nullable: true
+          description: 兼容字段：医生主展示机构
+        institutions:
+          type: array
+          description: 医生全部有效出诊机构，主机构排在首位
+          items:
+            $ref: '#/components/schemas/InstitutionDto'
+    ProjectDetailDto:
+      type: object
+      description: 项目详情（含关联数据）
+      properties:
+        project:
+          $ref: '#/components/schemas/ProjectDto'
+        institutions:
+          type: array
+          items:
+            $ref: '#/components/schemas/InstitutionDto'
+        diaries:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiaryDto'
+    InstitutionDetailDto:
+      type: object
+      description: 机构详情（含关联数据）
+      properties:
+        institution:
+          $ref: '#/components/schemas/InstitutionDto'
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectDto'
+        doctors:
+          type: array
+          items:
+            $ref: '#/components/schemas/DoctorDto'
+        diaries:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiaryDto'
+        reviews:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReviewDto'
+    UploadResponse:
+      type: object
+      properties:
+        url:
+          type: string
+          example: https://joysong--images.oss-cn-hangzhou.aliyuncs.com/avatars/abc123.jpg
+          description: 文件访问URL
+    UpdateDiaryRequest:
+      type: object
+      description: 编辑日记请求（所有字段可选）
+      properties:
+        title:
+          type: string
+          nullable: true
+          example: 我的玻尿酸填充之旅（更新）
+        content:
+          type: string
+          nullable: true
+          example: 更新后的日记内容...
+        images:
+          type: string
+          nullable: true
+          description: 图片URL，逗号分隔
+        tags:
+          type: string
+          nullable: true
+          description: 标签，逗号分隔
+        rating:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 5
+          example: 5
+        doctorId:
+          type: string
+          format: uuid
+          nullable: true
+        projectId:
+          type: string
+          format: uuid
+          nullable: true
+        institutionId:
+          type: string
+          format: uuid
+          nullable: true
+        orderId:
+          type: string
+          format: uuid
+          nullable: true
+        beforeImages:
+          type: string
+          nullable: true
+          description: 术前照片URL，逗号分隔
+        afterImages:
+          type: string
+          nullable: true
+          description: 术后照片URL，逗号分隔
+    LikeRequest:
+      type: object
+      required:
+      - targetType
+      - targetId
+      properties:
+        targetType:
+          type: string
+          example: diary
+          description: 点赞目标类型：diary/article/project
+        targetId:
+          type: string
+          format: uuid
+          description: 目标ID
+    LikeResponse:
+      type: object
+      description: 点赞状态
+      properties:
+        liked:
+          type: boolean
+          example: true
+          description: 是否已点赞
+        count:
+          type: integer
+          example: 43
+          description: 总点赞数
+    CommentDto:
+      type: object
+      description: 评论
+      properties:
+        id:
+          type: string
+          format: uuid
+        diaryId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        userName:
+          type: string
+          example: 小美
+        userAvatar:
+          type: string
+        content:
+          type: string
+          example: 效果真好！
+        createdAt:
+          type: string
+          format: date-time
+    PublishCommentRequest:
+      type: object
+      required:
+      - diaryId
+      - content
+      properties:
+        diaryId:
+          type: string
+          format: uuid
+          description: 日记ID
+        content:
+          type: string
+          example: 效果真好！
+          description: 评论内容
+paths:
+  /api/auth/login:
+    post:
+      tags:
+      - 认证模块
+      summary: 手机号密码登录
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/LoginResponse'
+  /api/auth/register:
+    post:
+      tags:
+      - 认证模块
+      summary: 手机号注册
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '200':
+          description: 注册成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/LoginResponse'
+  /api/auth/send-code:
+    post:
+      tags:
+      - 认证模块
+      summary: 发送验证码（Mock）
+      operationId: sendCode
+      description: 开发环境直接返回验证码，生产环境通过短信服务发送
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendCodeRequest'
+      responses:
+        '200':
+          description: 发送成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: object
+                      properties:
+                        message:
+                          type: string
+                          example: 验证码已发送
+                        code:
+                          type: string
+                          example: '123456'
+  /api/auth/login-with-code:
+    post:
+      tags:
+      - 认证模块
+      summary: 验证码登录
+      operationId: loginWithCode
+      description: 用户不存在时自动注册（昵称默认为手机号）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginWithCodeRequest'
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/LoginResponse'
+  /api/auth/login-with-google:
+    post:
+      tags:
+      - 认证模块
+      summary: Google 登录
+      operationId: loginWithGoogle
+      description: 使用 Google ID Token 登录。服务端通过 Google tokeninfo 端点验证 Token 有效性，并校验 audience 字段。用户不存在时自动注册。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GoogleLoginRequest'
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/LoginResponse'
+  /api/user/profile:
+    get:
+      tags:
+      - 用户模块
+      summary: 获取当前用户信息
+      operationId: getProfile
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/UserDto'
+    put:
+      tags:
+      - 用户模块
+      summary: 更新当前用户信息
+      operationId: updateProfile
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/UserDto'
+  /api/user/avatar:
+    put:
+      tags:
+      - 用户模块
+      summary: 更新头像
+      operationId: updateAvatar
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - avatar
+              properties:
+                avatar:
+                  type: string
+                  example: https://joysong--images.oss-cn-hangzhou.aliyuncs.com/avatars/xxx.jpg
+                  description: 头像URL
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/UserDto'
+  /api/user/account:
+    delete:
+      tags:
+      - 用户模块
+      summary: 注销账号（永久删除用户数据）
+      operationId: deleteAccount
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: object
+                      properties:
+                        message:
+                          type: string
+                          example: 账号已注销
+  /api/user/password:
+    put:
+      tags:
+      - 用户模块
+      summary: 修改密码
+      operationId: changePassword
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - oldPassword
+              - newPassword
+              properties:
+                oldPassword:
+                  type: string
+                  example: oldPass123
+                  description: 原密码
+                newPassword:
+                  type: string
+                  example: newPass456
+                  description: 新密码（至少6位）
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: object
+                      properties:
+                        message:
+                          type: string
+                          example: 密码修改成功
+  /api/home/banners:
+    get:
+      tags:
+      - 首页模块
+      summary: Banner 轮播图列表
+      operationId: getBanners
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/BannerDto'
+  /api/home/hot-projects:
+    get:
+      tags:
+      - 首页模块
+      summary: 热门项目列表
+      operationId: getHotProjects
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          institutionProject:
+                            type: object
+                            description: 机构项目关系及可空的独立详情覆盖字段
+                          project:
+                            allOf:
+                            - $ref: '#/components/schemas/ProjectDto'
+                            description: 已应用机构项目覆盖字段的有效详情
+  /api/home/expert-articles:
+    get:
+      tags:
+      - 首页模块
+      summary: 专家科普文章列表
+      operationId: getExpertArticles
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/ArticleDto'
+  /api/home/user-diaries:
+    get:
+      tags:
+      - 首页模块
+      summary: 用户日记列表
+      operationId: getUserDiaries
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/DiaryDto'
+  /api/discover/projects:
+    get:
+      tags:
+      - 发现模块
+      summary: 项目列表
+      operationId: discoverProjects
+      parameters:
+      - name: category
+        in: query
+        schema:
+          type: string
+        description: 项目分类筛选，如：注射美容、皮肤管理
+      - name: city
+        in: query
+        schema:
+          type: string
+        description: 城市筛选，如：上海、北京
+      - name: query
+        in: query
+        schema:
+          type: string
+        description: 关键词模糊搜索
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/ProjectDto'
+  /api/discover/diaries:
+    get:
+      tags:
+      - 发现模块
+      summary: 日记列表
+      operationId: discoverDiaries
+      parameters:
+      - name: query
+        in: query
+        schema:
+          type: string
+        description: 关键词模糊搜索（标题/标签）
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/DiaryDto'
+  /api/discover/doctors:
+    get:
+      tags:
+      - 发现模块
+      summary: 医生列表
+      operationId: discoverDoctors
+      parameters:
+      - name: query
+        in: query
+        schema:
+          type: string
+        description: 关键词模糊搜索（姓名/专长）
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/DoctorDto'
+  /api/discover/institutions:
+    get:
+      tags:
+      - 发现模块
+      summary: 机构列表
+      operationId: discoverInstitutions
+      parameters:
+      - name: query
+        in: query
+        schema:
+          type: string
+        description: 关键词模糊搜索（名称/城市）
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/InstitutionDto'
+  /api/discover/articles:
+    get:
+      tags:
+      - 发现模块
+      summary: 文章列表
+      operationId: discoverArticles
+      parameters:
+      - name: query
+        in: query
+        schema:
+          type: string
+        description: 关键词模糊搜索（标题/作者）
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/ArticleDto'
+  /api/discover/projects/{id}:
+    get:
+      tags:
+      - 发现模块
+      summary: 项目详情
+      operationId: discoverProjectDetail
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ProjectDetailDto'
+        '404':
+          description: 项目不存在
+  /api/discover/diaries/{id}:
+    get:
+      tags:
+      - 发现模块
+      summary: 日记详情
+      operationId: discoverDiaryDetail
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/DiaryDto'
+        '404':
+          description: 日记不存在
+  /api/discover/doctors/{id}:
+    get:
+      tags:
+      - 发现模块
+      summary: 医生详情
+      operationId: discoverDoctorDetail
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/DoctorDetailDto'
+        '404':
+          description: 医生不存在
+  /api/discover/institutions/{id}:
+    get:
+      tags:
+      - 发现模块
+      summary: 机构详情
+      operationId: discoverInstitutionDetail
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/InstitutionDetailDto'
+        '404':
+          description: 机构不存在
+  /api/discover/articles/{id}:
+    get:
+      tags:
+      - 发现模块
+      summary: 文章详情
+      operationId: discoverArticleDetail
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ArticleDto'
+        '404':
+          description: 文章不存在
+  /api/discover/institutions/{id}/projects:
+    get:
+      tags:
+      - 发现模块
+      summary: 机构下的项目列表
+      operationId: discoverInstitutionProjects
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/ProjectDto'
+  /api/discover/institutions/{id}/diaries:
+    get:
+      tags:
+      - 发现模块
+      summary: 机构下的日记列表
+      operationId: discoverInstitutionDiaries
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/DiaryDto'
+  /api/discover/institutions/{id}/doctors:
+    get:
+      tags:
+      - 发现模块
+      summary: 机构下的医生列表
+      operationId: discoverInstitutionDoctors
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/DoctorDto'
+  /api/diaries/my:
+    get:
+      tags:
+      - 日记模块
+      summary: 我的日记列表
+      operationId: getMyDiaries
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/DiaryDto'
+  /api/diaries:
+    post:
+      tags:
+      - 日记模块
+      summary: 发布日记
+      operationId: publishDiary
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublishDiaryRequest'
+      responses:
+        '200':
+          description: 发布成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/DiaryDto'
+        '404':
+          description: 用户不存在
+  /api/favorites:
+    get:
+      tags:
+      - 收藏模块
+      summary: 我的收藏列表
+      operationId: getFavorites
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/FavoriteDto'
+    post:
+      tags:
+      - 收藏模块
+      summary: 添加收藏
+      operationId: addFavorite
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddFavoriteRequest'
+      responses:
+        '200':
+          description: 收藏成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: object
+                      properties:
+                        message:
+                          type: string
+                          example: 收藏成功
+  /api/favorites/{type}/{targetId}:
+    get:
+      tags:
+      - 收藏模块
+      summary: 检查是否已收藏
+      operationId: isFavorite
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: type
+        in: path
+        required: true
+        schema:
+          type: string
+        description: 收藏类型：project/doctor/institution/article/diary
+      - name: targetId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 目标ID
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: boolean
+                      example: true
+    delete:
+      tags:
+      - 收藏模块
+      summary: 取消收藏
+      operationId: removeFavorite
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: type
+        in: path
+        required: true
+        schema:
+          type: string
+        description: 收藏类型：project/doctor/institution/article/diary
+      - name: targetId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 目标ID
+      responses:
+        '200':
+          description: 取消成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: object
+                      properties:
+                        message:
+                          type: string
+                          example: 取消收藏成功
+  /api/orders:
+    post:
+      tags:
+      - 订单模块
+      summary: 创建订单
+      operationId: createOrder
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/OrderResponse'
+    get:
+      tags:
+      - 订单模块
+      summary: 我的订单列表
+      operationId: getOrders
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - PENDING
+          - PAID
+          - COMPLETED
+          - CANCELLED
+          - REFUNDING
+          - REFUNDED
+        description: 按状态筛选（可选）
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/OrderResponse'
+  /api/orders/{id}:
+    get:
+      tags:
+      - 订单模块
+      summary: 订单详情（仅限本人）
+      operationId: getOrderById
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/OrderResponse'
+        '404':
+          description: 订单不存在
+  /api/orders/{id}/pay:
+    post:
+      tags:
+      - 订单模块
+      summary: 支付订单
+      operationId: payOrder
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PayOrderRequest'
+      responses:
+        '200':
+          description: 支付成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseResponse'
+  /api/orders/{id}/refund:
+    post:
+      tags:
+      - 订单模块
+      summary: 申请退款
+      operationId: refundOrder
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefundOrderRequest'
+      responses:
+        '200':
+          description: 退款申请成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseResponse'
+  /api/orders/{id}/review:
+    post:
+      tags:
+      - 订单模块
+      summary: 提交评价
+      operationId: reviewOrder
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewOrderRequest'
+      responses:
+        '200':
+          description: 评价提交成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseResponse'
+  /api/chat/sessions:
+    post:
+      tags:
+      - AI聊天模块
+      summary: 创建聊天会话
+      operationId: createChatSession
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionRequest'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ChatSessionResponse'
+    get:
+      tags:
+      - AI聊天模块
+      summary: 我的会话列表
+      operationId: getChatSessions
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: persona
+        in: query
+        schema:
+          type: string
+          enum:
+          - BESTIE
+          - CONSULTANT
+        description: 按AI角色筛选（可选）
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/ChatSessionResponse'
+  /api/chat/sessions/{id}/messages:
+    post:
+      tags:
+      - AI聊天模块
+      summary: 发送消息
+      operationId: sendMessage
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 会话ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMessageRequest'
+      responses:
+        '200':
+          description: 成功（返回AI回复）
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ChatMessageResponse'
+        '404':
+          description: 会话不存在
+    get:
+      tags:
+      - AI聊天模块
+      summary: 获取会话历史消息
+      operationId: getChatMessages
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 会话ID
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/ChatMessageResponse'
+        '404':
+          description: 会话不存在
+  /api/diaries/{id}:
+    put:
+      tags:
+      - 日记模块
+      summary: 编辑日记
+      operationId: updateDiary
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDiaryRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/DiaryDto'
+        '404':
+          description: 日记不存在
+    delete:
+      tags:
+      - 日记模块
+      summary: 删除日记
+      operationId: deleteDiary
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: object
+                      properties:
+                        message:
+                          type: string
+                          example: 删除成功
+        '404':
+          description: 日记不存在
+  /api/likes:
+    post:
+      tags:
+      - 点赞模块
+      summary: 点赞
+      operationId: like
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LikeRequest'
+      responses:
+        '200':
+          description: 点赞成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: object
+                      properties:
+                        message:
+                          type: string
+                          example: 点赞成功
+  /api/likes/{targetType}/{targetId}:
+    delete:
+      tags:
+      - 点赞模块
+      summary: 取消点赞
+      operationId: unlike
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: targetType
+        in: path
+        required: true
+        schema:
+          type: string
+        description: 目标类型：diary/article/project
+      - name: targetId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 目标ID
+      responses:
+        '200':
+          description: 取消成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: object
+                      properties:
+                        message:
+                          type: string
+                          example: 取消点赞成功
+    get:
+      tags:
+      - 点赞模块
+      summary: 检查点赞状态
+      operationId: getLikeStatus
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: targetType
+        in: path
+        required: true
+        schema:
+          type: string
+        description: 目标类型：diary/article/project
+      - name: targetId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 目标ID
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/LikeResponse'
+  /api/comments:
+    get:
+      tags:
+      - 评论模块
+      summary: 获取评论列表
+      operationId: getComments
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: diaryId
+        in: query
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: 日记ID
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/CommentDto'
+    post:
+      tags:
+      - 评论模块
+      summary: 发表评论
+      operationId: publishComment
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublishCommentRequest'
+      responses:
+        '200':
+          description: 发表成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/CommentDto'
+  /api/comments/{id}:
+    delete:
+      tags:
+      - 评论模块
+      summary: 删除评论
+      operationId: deleteComment
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      type: object
+                      properties:
+                        message:
+                          type: string
+                          example: 删除成功
+        '404':
+          description: 评论不存在
+  /api/upload:
+    post:
+      tags:
+      - 文件上传
+      summary: 上传文件
+      operationId: uploadFile
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: 上传文件，最大 10MB，支持 jpg/jpeg/png/webp/gif
+                folder:
+                  type: string
+                  default: general
+                  description: 存储目录：avatars/banners/articles/diaries/certificates/institutions/projects
+                customFileName:
+                  type: string
+                  description: 自定义文件名（可选）
+      responses:
+        '200':
+          description: 上传成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/UploadResponse'

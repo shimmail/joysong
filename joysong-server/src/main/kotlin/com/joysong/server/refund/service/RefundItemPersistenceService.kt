@@ -1,0 +1,121 @@
+package com.joysong.server.refund.service
+
+import com.joysong.server.payment.domain.PaymentStatus
+import com.joysong.server.payment.provider.ProviderRefundResult
+import com.joysong.server.payment.repository.PaymentRepository
+import com.joysong.server.refund.entity.RefundEntity
+import com.joysong.server.refund.entity.RefundItemEntity
+import com.joysong.server.refund.repository.RefundItemRepository
+import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
+import java.time.LocalDateTime
+import java.util.UUID
+
+@Service
+class RefundItemPersistenceService(
+    private val paymentRepository: PaymentRepository,
+    private val refundItemRepository: RefundItemRepository
+) {
+    /** Short transaction: freezes the allocation before any provider request is sent. */
+    @Transactional(rollbackFor = [Exception::class])
+    fun prepareItems(refund: RefundEntity): List<RefundItemEntity> {
+        val existing = refundItemRepository.findAllByRefundIdOrderByCreatedAtAsc(refund.id)
+        if (existing.isNotEmpty()) return existing
+
+        val target = requireNotNull(refund.requestedAmountMinor) { "REFUND_AMOUNT_SNAPSHOT_MISSING" }
+        require(target > 0) { "REFUND_AMOUNT_NOT_POSITIVE" }
+        val payments = paymentRepository.findAllByOrderIdAndStatusInOrderByCreatedAtAsc(
+            refund.orderId,
+            PaymentStatus.successfulDatabaseValues + PaymentStatus.PARTIALLY_REFUNDED.name
+        )
+        var remaining = target
+        val now = LocalDateTime.now()
+        val items = mutableListOf<RefundItemEntity>()
+        for (payment in payments) {
+            if (remaining == 0L) break
+            val paidMinor = payment.amountMinor ?: continue
+            val refundable = paidMinor - payment.refundedAmountMinor
+            if (refundable <= 0) continue
+            val itemAmount = minOf(refundable, remaining)
+            items += RefundItemEntity(
+                id = UUID.randomUUID().toString(),
+                refundId = refund.id,
+                paymentId = payment.id,
+                provider = payment.provider,
+                currency = payment.currency,
+                amountMinor = itemAmount,
+                requestedAt = now,
+                createdAt = now,
+                updatedAt = now
+            )
+            remaining -= itemAmount
+        }
+        require(remaining == 0L) { "REFUNDABLE_PAYMENT_AMOUNT_INSUFFICIENT" }
+        return refundItemRepository.saveAllAndFlush(items)
+    }
+
+    @Transactional(rollbackFor = [Exception::class])
+    fun applyProviderResult(itemId: String, result: ProviderRefundResult): RefundItemEntity {
+        require(result.status in setOf(
+            PaymentStatus.PROCESSING,
+            PaymentStatus.SUCCEEDED,
+            PaymentStatus.FAILED
+        )) { "UNSUPPORTED_PROVIDER_REFUND_STATUS" }
+        require(result.providerRefundId.isNotBlank()) { "PROVIDER_REFUND_ID_MISSING" }
+        val item = refundItemRepository.findByIdForUpdate(itemId)
+            ?: throw IllegalArgumentException("REFUND_ITEM_NOT_FOUND")
+        if (item.status == PaymentStatus.SUCCEEDED.name) return item
+        val payment = paymentRepository.findByIdForUpdate(item.paymentId)
+            ?: throw IllegalArgumentException("PAYMENT_NOT_FOUND")
+        val now = LocalDateTime.now()
+        val updatedItem = refundItemRepository.save(
+            item.copy(
+                providerRefundId = result.providerRefundId,
+                status = result.status.name,
+                failureCode = result.failureCode,
+                failureMessage = result.failureMessage?.take(500),
+                completedAt = if (result.status == PaymentStatus.SUCCEEDED) now else item.completedAt,
+                updatedAt = now
+            )
+        )
+        if (result.status == PaymentStatus.SUCCEEDED) {
+            val paidMinor = requireNotNull(payment.amountMinor) { "PAYMENT_AMOUNT_MISSING" }
+            val refundedMinor = payment.refundedAmountMinor + item.amountMinor
+            require(refundedMinor <= paidMinor) { "PAYMENT_REFUND_AMOUNT_EXCEEDED" }
+            paymentRepository.save(
+                payment.copy(
+                    refundedAmountMinor = refundedMinor,
+                    status = if (refundedMinor == paidMinor) PaymentStatus.REFUNDED.name
+                    else PaymentStatus.PARTIALLY_REFUNDED.name,
+                    updatedAt = now
+                )
+            )
+        }
+        return updatedItem
+    }
+
+    @Transactional(rollbackFor = [Exception::class])
+    fun markProviderError(itemId: String, status: PaymentStatus, code: String, message: String?) {
+        require(status == PaymentStatus.PROCESSING || status == PaymentStatus.FAILED) {
+            "INVALID_REFUND_ERROR_STATUS"
+        }
+        val item = refundItemRepository.findByIdForUpdate(itemId)
+            ?: throw IllegalArgumentException("REFUND_ITEM_NOT_FOUND")
+        if (item.status == PaymentStatus.SUCCEEDED.name) return
+        refundItemRepository.save(
+            item.copy(
+                status = status.name,
+                failureCode = code.take(100),
+                failureMessage = message?.take(500),
+                updatedAt = LocalDateTime.now()
+            )
+        )
+    }
+
+    fun summarize(refundId: String, target: Long): RefundExecutionOutcome {
+        val completed = refundItemRepository.findAllByRefundIdOrderByCreatedAtAsc(refundId)
+            .filter { it.status == PaymentStatus.SUCCEEDED.name }
+            .sumOf { it.amountMinor }
+        return RefundExecutionOutcome(completed, completed == target)
+    }
+}

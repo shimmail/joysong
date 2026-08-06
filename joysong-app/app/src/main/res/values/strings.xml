@@ -1,0 +1,1054 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App -->
+    <string name="app_name">Joysong</string>
+
+    <!-- Navigation -->
+    <string name="nav_home">Home</string>
+    <string name="nav_discover">Discover</string>
+    <string name="nav_ai">AI</string>
+    <string name="nav_profile">Profile</string>
+
+    <!-- Login / Register -->
+    <string name="login_title">Welcome Back</string>
+    <string name="register_title">Create Account</string>
+    <string name="login_subtitle">Log in to explore the world of aesthetics</string>
+    <string name="register_subtitle">Fill in your info to start your beauty journey</string>
+    <string name="phone_number">Phone Number</string>
+    <string name="verification_code">Verification Code</string>
+    <string name="password">Password</string>
+    <string name="btn_login">Log In</string>
+    <string name="btn_register">Sign Up</string>
+    <string name="agree_terms">I have read and agree to the Terms of Service and Privacy Policy</string>
+    <string name="no_account">Don\'t have an account?</string>
+    <string name="have_account">Already have an account?</string>
+    <string name="go_register">Sign Up</string>
+    <string name="go_login">Log In</string>
+    <string name="other_login_methods">Other Login Methods</string>
+    <string name="one_click_login">One-Click Login</string>
+    <string name="one_click_desc">Unregistered numbers will be auto-registered after verification</string>
+    <string name="phone_login_title">Phone Login</string>
+    <string name="phone_login_subtitle">Unregistered numbers will be auto-registered after verification</string>
+    <string name="phone_hint">Enter phone number</string>
+    <string name="get_code">Get Verification Code</string>
+    <string name="resend_code">Resend (%ds)</string>
+    <string name="input_code_title">Enter Verification Code</string>
+    <string name="code_sent_to">Code sent to %s</string>
+    <string name="no_code_received">Didn\'t receive code?</string>
+    <string name="resend">Resend</string>
+    <string name="i_have_read">I have read and agree to the </string>
+    <string name="terms_of_service">Terms of Service</string>
+    <string name="and"> and </string>
+    <string name="privacy_policy">Privacy Policy</string>
+    <string name="agreement_title">User Agreement and Privacy Protection</string>
+    <string name="agreement_content">Please read and agree to the Terms of Service and Privacy Policy to continue using the app.</string>
+    <string name="disagree">Disagree</string>
+    <string name="agree">Agree</string>
+    <string name="phone_login">Phone Number Login</string>
+    <string name="email_login">Email Login</string>
+    <string name="google_login">Sign in with Google</string>
+    <string name="or">or</string>
+    <string name="password_hint">Enter password</string>
+    <string name="switch_to_code">Switch to Code Login</string>
+    <string name="switch_to_password">Switch to Password Login</string>
+    <string name="remember_password">Remember account and password</string>
+    <string name="forgot_password">Forgot Password?</string>
+    <string name="forgot_password_title">Reset Password</string>
+    <string name="forgot_password_subtitle">Reset your password via phone verification code</string>
+    <string name="btn_reset_password">Reset Password</string>
+    <string name="phone_not_registered">This phone number is not registered</string>
+    <string name="password_length_error">Password must be at least 6 characters</string>
+    <string name="password_mismatch_error">Passwords do not match</string>
+    <string name="error_title">Error</string>
+    <string name="btn_confirm">Confirm</string>
+
+    <!-- Home -->
+    <string name="search_placeholder">Search projects, diaries, doctors…</string>
+    <string name="hot_projects">Hot Projects</string>
+    <string name="expert_articles">Expert Insights</string>
+    <string name="featured_diaries">Featured Diaries</string>
+    <string name="ai_recommend">AI Recommended</string>
+    <string name="recommended_institution_projects">Recommended Institutions</string>
+    <string name="ai_generated">AI Generated</string>
+    <string name="recommended_for_you">Recommended for You</string>
+    <string name="view_all">View All</string>
+    <string name="article_placeholder">Article</string>
+    <string name="diary_placeholder">Diary</string>
+
+    <!-- Discover -->
+    <string name="tab_projects">Projects</string>
+    <string name="tab_diaries">Diaries</string>
+    <string name="tab_doctors">Doctors</string>
+    <string name="tab_articles">Articles</string>
+    <string name="category_all">All</string>
+    <string name="category_facial">Facial Contouring</string>
+    <string name="category_eye">Eye</string>
+    <string name="category_nose">Nose</string>
+    <string name="category_skin">Skin Care</string>
+    <string name="category_anti_aging">Anti-Aging</string>
+    <string name="category_body">Body Contouring</string>
+    <string name="reviews_count">%d reviews</string>
+    <string name="verified_institutions">Verified Institutions</string>
+    <string name="recommended_doctors">Recommended Doctors</string>
+    <string name="discover_all">All</string>
+    <string name="discover_empty_title">No results found</string>
+    <string name="discover_empty_all">No content yet, try adjusting filters</string>
+    <string name="discover_empty_projects">No matching projects</string>
+    <string name="discover_empty_doctors">No matching doctors</string>
+    <string name="discover_empty_institutions">No matching institutions</string>
+    <string name="discover_empty_diaries">No matching diaries</string>
+    <string name="discover_empty_articles">No matching articles</string>
+    <string name="institution_placeholder">Institution</string>
+    <string name="doctor_placeholder">Doctor</string>
+
+    <!-- AI Agent -->
+    <string name="ai_bestie">AI Bestie</string>
+    <string name="ai_consultant">AI Aesthetic Consultant</string>
+    <string name="ai_bestie_desc">Caring companion who understands you</string>
+    <string name="ai_consultant_desc">Professional analysis, scientific beauty</string>
+    <string name="chat_clear">Clear Chat</string>
+    <string name="chat_input_hint">Type your question here…</string>
+    <string name="chat_send">Send</string>
+    <string name="chat_camera">Camera</string>
+    <string name="chat_album">Album</string>
+    <string name="chat_more_features">More Features</string>
+    <string name="dm_waiting_reply">Waiting for a reply…</string>
+    <string name="dm_empty_state">Start your conversation</string>
+    <string name="dm_user_placeholder">User</string>
+    <string name="dm_chat_image">Chat image</string>
+    <string name="dm_quote">Quote</string>
+    <string name="dm_unsend">Unsend</string>
+    <string name="dm_rate_limit_hint">You can send only one text message within 24 hours until they follow you or reply.</string>
+    <string name="chat_more_options">More Options</string>
+    <string name="chat_menu_clear">Clear Chat</string>
+    <string name="chat_menu_history">History</string>
+    <string name="chat_menu_transfer">Transfer to Human</string>
+    <string name="chat_transfer_title">Transfer to Human Support</string>
+    <string name="chat_transfer_message">A human customer service agent will take over this conversation. Continue?</string>
+    <string name="chat_history_title">Chat History</string>
+    <string name="chat_history_message">History records will be available in a future update.</string>
+    <string name="quick_questions_title">Quick Questions</string>
+    <string name="quick_q1">What projects suit me?</string>
+    <string name="quick_q2">How to choose a doctor?</string>
+    <string name="quick_q3">Is it safe?</string>
+    <string name="quick_q4">How much does it cost?</string>
+    <string name="chat_menu_new_session">New Chat</string>
+    <string name="chat_no_sessions">No chat history yet</string>
+    <string name="chat_session_default_title">New Chat</string>
+    <string name="close">Close</string>
+
+    <!-- Profile -->
+    <string name="my_services">My Services</string>
+    <string name="my_orders">My Orders</string>
+    <string name="my_orders_desc">View all order statuses</string>
+    <string name="my_diaries">My Diaries</string>
+    <string name="my_diaries_desc">Manage published diaries</string>
+    <string name="beauty_journey">Beauty Journey</string>
+    <string name="beauty_journey_desc">Pre-op · During · Post-op Records</string>
+    <string name="my_favorites">My Favorites</string>
+    <string name="my_favorites_desc">Saved projects and diaries</string>
+    <string name="social">Social</string>
+    <string name="my_following">Following</string>
+    <string name="my_following_desc">Friends and influencers</string>
+    <string name="my_messages">Messages</string>
+    <string name="my_messages_desc">Chat with friends and doctors</string>
+    <string name="share_diary">Share Diary</string>
+    <string name="share_diary_desc">Share to social platforms</string>
+    <string name="other_section">Other</string>
+    <string name="settings">Settings</string>
+    <string name="settings_desc">Privacy, notifications, language</string>
+    <string name="help_feedback">Help &amp; Feedback</string>
+    <string name="help_feedback_desc">Report issues and contact support</string>
+    <string name="account_security">Account Security</string>
+    <string name="account_security_desc">Change password and bindings</string>
+    <string name="customer_service">Customer Service</string>
+    <string name="customer_service_desc">Contact platform support</string>
+    <string name="about_us">About Us</string>
+    <string name="edit_profile">Edit Profile</string>
+    <string name="crop_avatar">Crop Avatar</string>
+    <string name="crop_hint">Drag &amp; pinch to adjust</string>
+    <string name="image_too_large">Image size must be under 5MB</string>
+    <string name="unsupported_image_format">Only JPG, PNG, WebP formats are supported</string>
+    <string name="nickname">Nickname</string>
+    <string name="bio">Bio</string>
+    <string name="city">City</string>
+    <string name="save">Save</string>
+    <string name="saving">Saving…</string>
+    <string name="birthday">Birthday</string>
+    <string name="gender">Gender</string>
+    <string name="gender_male">Male</string>
+    <string name="gender_female">Female</string>
+    <string name="gender_other">Other</string>
+    <string name="gender_private">Private</string>
+    <string name="select_birthday">Select Birthday</string>
+    <string name="select_gender">Select Gender</string>
+    <string name="logout">Log Out</string>
+    <string name="logout_title">Log Out</string>
+    <string name="logout_message">Are you sure you want to log out?</string>
+    <string name="confirm">Confirm</string>
+    <string name="cancel">Cancel</string>
+
+    <!-- Orders -->
+    <string name="orders_title">My Orders</string>
+    <string name="order_tab_all">All</string>
+    <string name="order_tab_pending_payment">Pending Payment</string>
+    <string name="order_tab_to_use">Pending</string>
+    <string name="order_tab_pending_balance">Balance Due</string>
+    <string name="order_tab_completed">Completed</string>
+    <string name="order_tab_refund">Refund</string>
+    <string name="order_tab_cancelled">Cancelled/Refunded</string>
+    <string name="order_tab_under_review">Under Review</string>
+        <string name="order_tab_rejected">Rejected</string>
+    <string name="order_load_failed">Failed to load</string>
+    <string name="order_empty">No %s orders</string>
+    <string name="order_time">Order Time: %s</string>
+    <string name="appointment_time">Appointment: %s</string>
+    <string name="status_pending_payment">Pending Payment</string>
+    <string name="status_consultation_paid">Consultation Paid</string>
+    <string name="status_verified">Verified</string>
+    <string name="status_balance_paid">Balance Paid</string>
+    <string name="status_pending_completion">Pending Completion</string>
+    <string name="status_pending_remaining">Pending Balance</string>
+    <string name="status_to_use">To Use</string>
+    <string name="status_completed">Completed</string>
+    <string name="status_pending_settlement">Pending Settlement</string>
+    <string name="status_settled">Settled</string>
+    <string name="status_dispute_mediation">Dispute Mediation</string>
+    <string name="status_refunding">Refunding</string>
+    <string name="status_refunded">Refunded</string>
+        <string name="status_refund_rejected">Rejected</string>
+    <string name="status_cancelled">Cancelled</string>
+    <string name="status_paid">Paid</string>
+    <string name="action_pay_now">Pay Now</string>
+    <string name="action_view_code">View Code</string>
+    <string name="action_review">Review</string>
+    <string name="action_view_progress">View Progress</string>
+    <string name="action_closed">Closed</string>
+    <string name="actual_paid_format">Paid ¥%s</string>
+    <string name="pay_remaining_btn">Pay Balance</string>
+    <string name="order_completed_btn">Completed</string>
+    <string name="view_voucher">View Voucher</string>
+    <string name="voucher_code">Verification Code</string>
+    <string name="voucher_hint">Please show to staff</string>
+    <string name="delete_order">Delete Order</string>
+    <string name="delete_order_confirm">Are you sure you want to delete this order?</string>
+    <string name="pending_balance_tag">Balance Due</string>
+    <string name="new_verification_code">Completion Code</string>
+    <string name="apply_after_sale">After-sale</string>
+    <string name="refund_detail">Refund Detail</string>
+    <string name="buy_again">Buy Again</string>
+    <string name="write_diary">Write Diary</string>
+    <string name="order_detail">Order Detail</string>
+    <string name="contact_institution_support">Contact Institution Support</string>
+    <string name="order_not_found">Order not found</string>
+    <string name="use_qr_code">Show this code when you arrive</string>
+    <string name="order_number_format">Order No. %s</string>
+    <string name="order_info">Order Info</string>
+    <string name="order_number">Order Number</string>
+    <string name="order_time_label">Order Time</string>
+    <string name="appointment_time_label">Appointment Time</string>
+    <string name="project_price">Project Price</string>
+    <string name="discount">Discount</string>
+    <string name="deposit">Consultation Fee</string>
+    <string name="actual_payment">Actual Payment</string>
+    <string name="cancel_order">Cancel</string>
+        <string name="cancel_order_confirm">Are you sure you want to cancel this order? The order will be deleted.</string>
+    <string name="apply_refund">Apply Refund</string>
+    <string name="order_closed">Order Closed</string>
+    <string name="desc_pending_payment">Please complete payment within the time limit</string>
+    <string name="desc_paid">Please use the QR code when you arrive</string>
+    <string name="desc_to_use">Please use the QR code when you arrive</string>
+    <string name="desc_completed">We hope you had a great experience</string>
+    <string name="desc_refunding">Refund request is being processed</string>
+    <string name="project_placeholder">Project</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="section_account_security">Account &amp; Security</string>
+    <string name="setting_privacy">Privacy Settings</string>
+    <string name="setting_privacy_desc">Manage personal info permissions</string>
+    <string name="setting_notifications">Notifications</string>
+    <string name="setting_notifications_desc">Push and alert settings</string>
+    <string name="section_app">App</string>
+    <string name="setting_clear_cache">Clear Cache</string>
+    <string name="setting_privacy_policy">Privacy Policy</string>
+    <string name="setting_terms">Terms of Service</string>
+    <string name="setting_about">About Us</string>
+    <string name="setting_language">Language</string>
+    <string name="setting_language_desc">Switch display language</string>
+    <string name="logout_button">Log Out</string>
+    <string name="delete_account">Delete Account</string>
+    <string name="delete_account_title">Delete Account</string>
+    <string name="delete_account_confirm">All account data will be permanently deleted and cannot be recovered. Are you sure you want to delete your account?</string>
+    <string name="confirm_delete">Confirm Delete</string>
+    <string name="language_english">English</string>
+    <string name="language_chinese">中文</string>
+
+    <!-- Detail Pages -->
+    <string name="project_detail">Project Detail</string>
+    <string name="institution_detail">Institution Detail</string>
+    <string name="doctor_detail">Doctor Profile</string>
+    <string name="article_detail">Article Detail</string>
+    <string name="diary_detail">Diary Detail</string>
+    <string name="book_now">Book Now</string>
+    <string name="ai_chat">Chat with AI</string>
+    <string name="institution_info">Institution</string>
+    <string name="doctor_info">Doctor</string>
+    <string name="category_info">Category</string>
+    <string name="project_intro">Project Description</string>
+    <string name="institution_intro">About Institution</string>
+    <string name="doctor_specialties">Expertise</string>
+    <string name="doctor_bio">About Doctor</string>
+    <string name="tags">Tags</string>
+    <string name="rating_score">%s pts</string>
+    <string name="like_count" formatted="false">Likes %d · Comments %d</string>
+    <string name="like_button">Like</string>
+    <string name="diary_images">Diary Photos</string>
+
+    <!-- Common -->
+    <string name="loading">Loading…</string>
+    <string name="error_retry">Failed to load, tap to retry</string>
+    <string name="retry">Retry</string>
+    <string name="no_content">No content yet</string>
+    <string name="unknown">Unknown</string>
+    <string name="not_logged_in">Not logged in</string>
+    <string name="back">Back</string>
+    <string name="currency_format">¥%s</string>
+
+    <!-- Customer Service -->
+    <string name="cs_online_chat">Online Chat</string>
+    <string name="cs_online_chat_desc">Chat with customer service in real time</string>
+    <string name="cs_phone">Phone Support</string>
+    <string name="cs_phone_desc">9:00–18:00 on working days</string>
+    <string name="cs_help_center">Help Center</string>
+    <string name="cs_help_center_desc">Common questions and solutions</string>
+    <string name="cs_title">We are here to help</string>
+    <string name="cs_subtitle">If you have any questions, please contact us</string>
+    <string name="cs_hours">Service hours: 9:00–22:00 every day</string>
+    <string name="cs_chat_title">Customer Service</string>
+    <string name="cs_chat_desc">Platform customer service at your service</string>
+
+    <!-- CS Quick Questions -->
+    <string name="cs_quick_q1">My order has an issue</string>
+    <string name="cs_quick_q2">How to request a refund?</string>
+    <string name="cs_quick_q3">Booking consultation</string>
+    <string name="cs_quick_q4">Complaints &amp; suggestions</string>
+
+    <!-- Help & Feedback -->
+    <string name="faq_title">Frequently Asked Questions</string>
+    <string name="faq_1_question">How do I make an appointment?</string>
+    <string name="faq_1_answer">Select a project and institution on the home page, then follow the prompts to complete the appointment.</string>
+    <string name="faq_2_question">How do I apply for a refund?</string>
+    <string name="faq_2_answer">Go to Order Details and tap "Apply Refund" to submit your refund request.</string>
+    <string name="faq_3_question">Is the doctor information authentic?</string>
+    <string name="faq_3_answer">All doctors and institutions on the platform are certified by real-name verification.</string>
+    <string name="faq_4_question">How do I change my bound phone number?</string>
+    <string name="faq_4_answer">Go to Account Security and select Bind Phone Number to change it.</string>
+    <string name="feedback_title">Feedback</string>
+    <string name="feedback_hint">Describe the issue or suggestion you encountered…</string>
+    <string name="submit_feedback">Submit Feedback</string>
+
+    <!-- About Us -->
+    <string name="app_version">Version %s</string>
+    <string name="about_intro_title">About Joysong</string>
+    <string name="about_intro_content">Joysong is a one-stop aesthetic service platform connecting you with certified institutions, professional doctors, and real user diaries to make your beauty journey safer and more transparent.</string>
+    <string name="contact_us">Contact Us</string>
+    <string name="contact_email">support@joysong.com</string>
+    <string name="contact_phone">400–123–4567</string>
+    <string name="copyright">© 2024 Joysong. All rights reserved.</string>
+
+    <!-- Account Security -->
+    <string name="security_official_verification">Official Verification</string>
+    <string name="security_official_verification_desc">Verify as a doctor, consultant, or institution representative</string>
+    <string name="security_change_password">Change Password</string>
+    <string name="security_change_password_desc">Regularly update your password to keep your account safe</string>
+    <string name="security_modify_phone">Change Phone Number</string>
+    <string name="security_bind_phone_desc">Used for login and retrieving password</string>
+    <string name="security_bind_email">Bind Email</string>
+    <string name="security_bind_email_desc">Receive notifications and account alerts</string>
+    <string name="security_switch_account">Switch Account</string>
+    <string name="security_switch_account_desc">Quick switch to another saved account</string>
+    <string name="switch_account_title">Switch Account</string>
+    <string name="add_new_account">Add New Account</string>
+        <string name="switching_account">Switching...</string>
+        <string name="switch_failed">Switch failed, please try again</string>
+    <string name="remove_account_title">Remove Account</string>
+    <string name="remove_account_confirm">Remove %1$s from saved accounts?</string>
+    <string name="bind_phone_desc">Please enter your phone number and verification code to bind.</string>
+    <string name="bind_email_desc">Please enter your email and verification code to bind.</string>
+    <string name="email_hint">Enter email address</string>
+    <string name="confirm_bind">Confirm Binding</string>
+    <string name="binding">Binding…</string>
+
+    <!-- Change Password -->
+    <string name="change_password_subtitle">For account security, please change your password regularly</string>
+    <string name="old_password_hint">Enter current password</string>
+    <string name="new_password_hint">Enter new password (min 6 characters)</string>
+    <string name="confirm_password_hint">Confirm new password</string>
+    <string name="confirm_change_password">Confirm Change</string>
+    <string name="old_password_empty">Please enter current password</string>
+    <string name="new_password_too_short">Password must be at least 6 characters</string>
+    <string name="password_mismatch">Passwords do not match</string>
+    <string name="old_password_incorrect">Current password is incorrect</string>
+    <string name="identity_verify_subtitle">A verification code will be sent to your bound phone number to change your password.</string>
+    <string name="identity_verify_phone_hint">Please enter the phone number associated with your account</string>
+    <string name="phone_mismatch">Phone number does not match the account</string>
+    <string name="set_password_title">Set Password</string>
+    <string name="btn_set_password">Set Password</string>
+
+    <!-- My Diaries -->
+    <string name="my_diaries_empty">No diaries yet, tap + to share your journey</string>
+    <string name="publish_diary">Publish Diary</string>
+    <string name="publish_diary_images_hint">Tap to upload before and after photos</string>
+    <string name="publish_before_image">Before</string>
+    <string name="publish_after_image">After</string>
+    <string name="publish_diary_title">Diary Title</string>
+    <string name="publish_diary_title_hint">Give your diary a title…</string>
+    <string name="publish_diary_content">Diary Content</string>
+    <string name="publish_diary_content_hint">Share your experience and feelings…</string>
+    <string name="publish_diary_tags">Tags</string>
+    <string name="custom_tag_placeholder">Add custom tag</string>
+    <string name="publish_diary_button">Publish Now</string>
+    <string name="publishing">Publishing…</string>
+    <string name="edit">Edit</string>
+    <string name="edit_diary">Edit Diary</string>
+    <string name="delete_diary">Delete Diary</string>
+    <string name="delete_diary_confirm">Are you sure you want to delete this diary? This action cannot be undone.</string>
+    <string name="save_changes">Save Changes</string>
+    <string name="tag_pre_op">Pre-op</string>
+    <string name="tag_post_op">Post-op</string>
+    <string name="tag_recovery">Recovery</string>
+    <string name="tag_review">Review</string>
+
+    <!-- Favorites -->
+    <string name="fav_projects">Projects</string>
+    <string name="fav_institutions">Institutions</string>
+    <string name="fav_doctors">Doctors</string>
+    <string name="fav_diaries">Diaries</string>
+    <string name="fav_articles">Articles</string>
+    <string name="favorites_empty">No favorites yet</string>
+    <string name="remove_favorite">Remove favorite</string>
+
+    <!-- Refund -->
+    <string name="refund_reason_label">Refund Reason</string>
+    <string name="refund_reason_changed_mind">Changed my mind</string>
+    <string name="refund_reason_doctor_issue">Doctor or schedule issue</string>
+    <string name="refund_reason_institution_issue">Institution service issue</string>
+    <string name="refund_reason_other">Other reasons</string>
+    <string name="refund_description_label">Refund Description (Optional)</string>
+    <string name="refund_description_hint">Please describe your refund reason in detail…</string>
+    <string name="submit_refund">Submit Refund</string>
+
+    <!-- Review -->
+    <string name="review_rating_label">Overall Rating</string>
+    <string name="review_tags_label">Service Tags</string>
+    <string name="review_tag_service">Good service</string>
+    <string name="review_tag_effect">Great effect</string>
+    <string name="review_tag_environment">Nice environment</string>
+    <string name="review_tag_price">Good value</string>
+    <string name="review_content_label">Review Content</string>
+    <string name="review_content_hint">Share your real experience to help others…</string>
+    <string name="submit_review">Submit Review</string>
+    <string name="submitting">Submitting…</string>
+
+    <!-- Discover Sub-pages (UI v2) -->
+    <string name="tab_qualification">Qualifications</string>
+    <string name="tab_bookable_projects">Bookable Projects</string>
+    <string name="tab_user_reviews">User Reviews</string>
+    <string name="tab_core_doctors">Core Doctors</string>
+    <string name="tab_user_diaries">User Diaries</string>
+    <string name="tab_clinic_affiliations">Clinic Affiliations</string>
+    <string name="tab_project_guide">Project Guide</string>
+    <string name="tab_potential_risks">Potential Risks</string>
+    <string name="tab_certified_institutions">Certified Institutions</string>
+
+    <string name="institution_strength">Institution Strength</string>
+    <string name="doctor_strength">Doctor Strength</string>
+    <string name="doctor_profile_materials">Qualifications</string>
+    <string name="doctor_self_provided_materials">Doctor-uploaded, not platform-verified</string>
+    <string name="featured_projects">Featured Projects</string>
+    <string name="consult_institution">Consult Institution</string>
+    <string name="consult_doctor">Consult Doctor</string>
+    <string name="chat_with_ai">Chat with AI</string>
+    <string name="an_yan_certified">AnYan Certified</string>
+    <string name="save_item">Save</string>
+    <string name="all_count">All (%d)</string>
+    <string name="consult_count">Consult %d</string>
+    <string name="project_count">Projects %d</string>
+    <string name="doctor_count">Doctors %d</string>
+
+    <string name="risk_warning_title">Risks &amp; Side Effects</string>
+    <string name="risk_warning_subtitle">Please read the following carefully</string>
+    <string name="risk_mechanism">Mechanism of Action</string>
+    <string name="risk_suitable">Suitable Population</string>
+    <string name="risk_contraindicated">Contraindicated Groups</string>
+    <string name="risk_recovery">Recovery Period</string>
+    <string name="risk_reference_price">Reference Pricing</string>
+    <string name="expand_all">Expand All</string>
+
+    <string name="related_project">Related Project</string>
+    <string name="related_doctor">Related Doctor</string>
+    <string name="related_institution">Related Institution</string>
+    <string name="diary_disclaimer">Project uploaded by user; Joysong only provides display service, for reference only.</string>
+    <string name="comments_title">Comments (%d)</string>
+    <string name="comment_input_hint">Say something…</string>
+    <string name="likes_count">Likes %s</string>
+    <string name="saves_count">Saves %s</string>
+    <string name="comment_count_fmt">Comments %d</string>
+
+    <string name="more_articles">More Science Articles</string>
+    <string name="reading_time">Read %d min</string>
+    <string name="published_time">Published %s</string>
+
+    <string name="avg_price">Avg. Price ¥%s</string>
+    <string name="category_avg_price">Category Avg. Price</string>
+
+    <!-- Appointment -->
+    <string name="appointment_title">Book Appointment</string>
+    <string name="appointment_name_label">Name</string>
+    <string name="appointment_name_hint">Please enter your name</string>
+    <string name="appointment_phone_label">Phone Number</string>
+    <string name="appointment_phone_hint">Please enter phone number</string>
+    <string name="appointment_phone_note">The platform will share your phone number with the merchant for appointment and verification services.</string>
+    <string name="appointment_remark_label">Notes</string>
+    <string name="appointment_remark_hint">If you have special requirements, please note here…</string>
+    <string name="consultation_fee">Consultation Fee</string>
+    <string name="final_payment">Final Payment</string>
+    <string name="actual_pay_label">Payment (Consultation Fee): ¥%d</string>
+    <string name="go_to_pay">Go to Pay</string>
+
+    <!-- Payment -->
+    <string name="payment_title">Pay Order (Consultation Fee)</string>
+    <string name="remaining_time">Remaining: %s</string>
+    <string name="payment_includes">Includes: 1 item consultation fee</string>
+    <string name="select_payment_method">Select Payment Method</string>
+    <string name="pay_alipay">Alipay</string>
+    <string name="pay_alipay_desc">Alipay secure payment</string>
+    <string name="pay_wechat">WeChat Pay</string>
+    <string name="pay_wechat_desc">Faster and safer, chosen by millions</string>
+    <string name="confirm_pay">Confirm Payment</string>
+
+    <!-- Appointment Success -->
+    <string name="appointment_success_title">Appointment Successful</string>
+    <string name="appointment_success_subtitle">Thank you for your appointment, looking forward to meeting you!</string>
+    <string name="appointment_info_institution">Booking Institution: %s</string>
+    <string name="appointment_info_doctor">Booking Doctor: %s</string>
+    <string name="appointment_info_time">Booking Time: %s</string>
+    <string name="view_order">View Order</string>
+    <string name="back_to_home">Back to Home</string>
+
+    <!-- Payment extra -->
+    <string name="payment_success">Payment Successful</string>
+    <string name="payment_failed">Payment Failed</string>
+    <string name="payment_processing">Processing…</string>
+    <string name="online_payment">Online Payment</string>
+    <string name="pay_consultation_fee">Pay Consultation Fee</string>
+    <string name="consultation_fee_amount">Consultation Fee: ¥%d</string>
+    <string name="book_appointment">Book Appointment</string>
+
+    <!-- Project Detail Sections -->
+    <string name="section_encyclopedia">Encyclopedia Guide</string>
+    <string name="section_certified_institutions">Certified Institutions</string>
+    <string name="section_user_diaries">User Diaries</string>
+    <string name="no_encyclopedia">No encyclopedia guide yet</string>
+    <string name="no_risk_info">No risk information yet</string>
+    <string name="no_certified_institutions">No certified institutions yet</string>
+    <string name="no_user_diaries">No user diaries yet</string>
+
+    <!-- Doctor Detail (Tab Layout) -->
+    <string name="doctor_certified_subtitle">Official Certified Practitioner</string>
+    <string name="doctor_review_consult" formatted="false">Reviews %d | Consultations %d</string>
+    <string name="doctor_projects_empty">No bookable projects yet</string>
+    <string name="doctor_diaries_empty">No user diaries yet</string>
+    <string name="doctor_institution_empty">No affiliated institution</string>
+    <string name="doctor_before_image">Before</string>
+    <string name="doctor_after_image">After</string>
+    <string name="doctor_price_format">¥%.0f</string>
+    <string name="doctor_original_price_format">¥%.0f</string>
+
+    <!-- Home Error -->
+    <string name="load_failed_retry">Some content failed to load</string>
+
+    <!-- Institution Detail (Redesigned) -->
+    <string name="view_bookable_institutions">View Bookable Institutions</string>
+    <string name="chat_with_ai_about_project">Chat with AI</string>
+    <string name="institution_reviews_empty">No user reviews yet</string>
+    <string name="institution_doctors_empty">No doctor information yet</string>
+    <string name="institution_projects_empty">No bookable projects yet</string>
+    <string name="professional_doctors">Professional Doctors</string>
+    <string name="advanced_equipment">Advanced Equipment</string>
+    <string name="rich_experience">Rich Experience</string>
+    <string name="international_standards">International Standards</string>
+    <string name="check_qualification">Check Qualifications</string>
+    <string name="project_duration">Duration</string>
+    <string name="distance_format">%.1fkm from you</string>
+    <string name="review_filter_latest">Latest</string>
+    <string name="review_filter_all">All</string>
+    <string name="review_filter_good">Good</string>
+    <string name="review_filter_bad">Bad</string>
+    <string name="review_filter_with_images">With Images</string>
+    <string name="specialty_projects">Specialty Projects</string>
+
+    <!-- Detail Pages V12 -->
+    <string name="established_year_format">[%d] Company Established</string>
+    <string name="certification_time_format">[%s] ISO Certification</string>
+    <string name="user_count_format">[%d] Users Served</string>
+    <string name="no_credential_images">No credential images</string>
+    <string name="case_count_format">Cases %d</string>
+    <string name="sales_count_format">Sales %d</string>
+    <string name="tab_project_encyclopedia">Project Encyclopedia</string>
+    <string name="tab_affiliated_institutions">Affiliated Institutions</string>
+    <string name="tab_bookable_doctors">Bookable Doctors</string>
+    <string name="no_bookable_doctors">No bookable doctors yet</string>
+    <string name="show_all_doctors_count">View all (%d doctors)</string>
+    <string name="encyclopedia_mechanism">Mechanism</string>
+    <string name="encyclopedia_suitable">Suitable For</string>
+    <string name="encyclopedia_contraindicated">Contraindicated</string>
+    <string name="no_suitable_crowd">No suitable population info</string>
+    <string name="no_precautions">No precautions info</string>
+    <string name="project_highlights">Highlights</string>
+    <string name="platform_verified">Platform Verified</string>
+    <string name="user_count_label">Users %d</string>
+
+    <!-- Project Encyclopedia Sub-tabs -->
+    <string name="encyclopedia_service_process">Service Process</string>
+    <string name="encyclopedia_faq">FAQ</string>
+    <string name="no_service_process">No service process info</string>
+    <string name="no_faq">No FAQ content</string>
+
+    <!-- Institution Detail Extra Fields -->
+    <string name="contact_phone_label">Contact Phone</string>
+    <string name="business_hours_label">Business Hours</string>
+    <string name="case_count_plus_format">Cases %d+</string>
+
+    <!-- Entity Picker (Select Doctor/Project/Institution) -->
+    <string name="select_doctor_title">Select Doctor</string>
+    <string name="select_project_title">Select Project</string>
+    <string name="select_institution_title">Select Institution</string>
+    <string name="search_doctor_hint">Search doctor name</string>
+    <string name="search_project_hint">Search project name</string>
+    <string name="search_institution_hint">Search institution name</string>
+    <string name="search_order_hint">Search order</string>
+        <string name="search_history_title">Search History</string>
+        <string name="clear_search_history">Clear history</string>
+    <string name="tab_related_orders">Related Orders</string>
+    <string name="tab_related_projects">Related Projects</string>
+
+    <!-- Publish Diary Extended -->
+    <string name="surgery_rating">Surgery Rating</string>
+    <string name="diary_visibility">Visibility</string>
+    <string name="diary_public">Public</string>
+    <string name="diary_private">Private</string>
+    <string name="optional_hint">Optional</string>
+    <string name="clear_selection">Clear</string>
+    <string name="please_select">Please select</string>
+        <string name="not_associated">Not associated</string>
+    <string name="no_after_images">No after photos</string>
+    <string name="before_photos_label">Before Photos</string>
+    <string name="after_photos_label">After Photos</string>
+    <string name="uploading_image">Uploading…</string>
+    <string name="add_photo">Add</string>
+
+    <!-- Order Detail Extra -->
+    <string name="payment_success_toast">Payment Successful</string>
+    <string name="load_failed">Failed to load</string>
+    <string name="status_pending_deposit">Pending Consultation Fee</string>
+    <string name="status_pending_balance">Pending Balance</string>
+    <string name="voucher_title">Voucher</string>
+    <string name="voucher_generating">Generating voucher…</string>
+    <string name="voucher_show_prompt">Show this voucher at the store</string>
+    <string name="refund_progress_title">Refund Progress</string>
+    <string name="refund_stage_submit">Submit</string>
+    <string name="refund_stage_approved">Approved</string>
+    <string name="refund_stage_success">Refunded</string>
+    <string name="refund_amount_label">Refund Amount</string>
+    <string name="fee_detail_title">Fee Details</string>
+    <string name="project_amount">Project Amount</string>
+    <string name="discount_amount">Discount</string>
+    <string name="amount_paid">Amount Paid</string>
+    <string name="amount_remaining">Amount Remaining</string>
+    <string name="balance_payment">Balance</string>
+    <string name="total_amount">Total</string>
+    <string name="project_discount">Project Discount</string>
+    <string name="go_pay_format">Pay %s</string>
+    <string name="refund_amount_include_fee">Includes consultation fee %s</string>
+    <string name="cancel_refund">Cancel Refund</string>
+    <string name="cancel_refund_confirm">Are you sure you want to cancel the refund request?</string>
+        <string name="refund_status_pending">Refund Under Review</string>
+        <string name="status_under_review">Under Review</string>
+    <string name="refund_status_approved">Refund Approved</string>
+    <string name="refund_status_rejected">Refund Rejected</string>
+    <string name="cancel_refund_success">Refund request cancelled</string>
+        <string name="cancel_application">Cancel Application</string>
+        <string name="cancel_application_confirm">Are you sure you want to cancel the refund application?</string>
+    <string name="order_no_label">Order No.</string>
+    <string name="copy">Copy</string>
+    <string name="copied">Copied</string>
+    <string name="transaction_method">Payment Method</string>
+    <string name="phone_number_label">Phone Number</string>
+    <string name="order_time_info">Order Time</string>
+    <string name="payment_time">Payment Time</string>
+    <string name="order_info_title">Order Info</string>
+    <string name="max_evidence_hint">Max 3 evidence photos</string>
+    <string name="evidence_optional_hint">Optional, up to 3</string>
+    <string name="evidence_image_desc">Evidence Image</string>
+    <string name="upload_evidence">Upload Evidence</string>
+    <string name="delete">Delete</string>
+    <string name="uploading_short">Uploading</string>
+    <string name="add_image_desc">Add Image</string>
+    <string name="select_refund_reason">Select Refund Reason</string>
+    <string name="select_refund_reason_required">Please select a refund reason</string>
+    <string name="submitting_short">Submitting…</string>
+    <string name="submit_application">Submit Application</string>
+    <string name="refund_submitted_success">Refund application submitted</string>
+    <string name="related_order">Related Order</string>
+    <string name="order_no_format">Order No.: %s</string>
+    <string name="max_evidence_3">Max 3 evidence photos</string>
+
+    <!-- Review Order Extra -->
+    <string name="review_order">Review Order</string>
+    <string name="submit_review_short">Submit</string>
+    <string name="updating_short">Updating…</string>
+    <string name="update_review_short">Update</string>
+    <string name="order_load_failed_detail">Failed to load order</string>
+    <string name="submit_failed_retry">Submission failed, please retry</string>
+    <string name="payment_failed_msg">Payment failed</string>
+    <string name="cancel_failed_msg">Cancellation failed</string>
+    <string name="submit_failed_msg">Submission failed</string>
+    <string name="service_rating_label">Service Rating</string>
+    <string name="review_content_title">Review Content</string>
+    <string name="review_content_placeholder">Share your experience…</string>
+    <string name="add_review_images">Add Images</string>
+    <string name="review_image_optional_hint">Optional, up to 6</string>
+    <string name="review_image_desc">Review Image</string>
+    <string name="image_uploading">Uploading images…</string>
+
+    <!-- Refund Reason Options -->
+    <string name="refund_reason_no_interest">Changed my mind</string>
+    <string name="refund_reason_wrong_time">Wrong time</string>
+    <string name="refund_reason_wrong_institution">Wrong institution</string>
+    <string name="refund_reason_wrong_project">Wrong project</string>
+    <string name="refund_reason_wrong_doctor">Wrong doctor</string>
+    <string name="refund_reason_other_option">Other</string>
+        <string name="custom_reason_hint">Please enter the reason for refund</string>
+        <string name="custom_reason_required">Please enter the reason for refund</string>
+
+    <!-- Diary Extra -->
+    <string name="diary_favorites">Favorites</string>
+    <string name="diary_comments">Comments</string>
+    <string name="select_doctor">Link Doctor</string>
+    <string name="select_project">Link Project</string>
+    <string name="select_institution">Link Institution</string>
+    <string name="select_order">Link Order</string>
+
+    <!-- Detail Page UI Enhancements -->
+    <string name="city_address_format">%s · %s</string>
+    <string name="project_doctor_institution">%1$s · %2$s</string>
+    <string name="institution_about_label">About Institution</string>
+
+    <!-- Diary Detail Interactions -->
+    <string name="comments_section">Comments</string>
+    <string name="no_comments">No comments yet</string>
+    <string name="write_comment">Write a comment...</string>
+    <string name="send">Send</string>
+    <string name="delete_comment">Delete comment</string>
+    <string name="confirm_delete_comment">Delete this comment?</string>
+    <string name="reply">Reply</string>
+    <string name="reply_to">Reply to %s</string>
+    <string name="view_replies">View %d replies</string>
+    <string name="collapse_replies">Collapse replies</string>
+    <string name="action_like">Like</string>
+    <string name="action_unlike">Unlike</string>
+    <string name="action_collapse">Collapse</string>
+    <string name="action_dislike">Dislike</string>
+    <string name="action_uncollapse">Uncollapse</string>
+    <string name="write_reply">Write a reply...</string>
+    <string name="liked">Liked</string>
+    <string name="favorited">Favorited</string>
+
+    <!-- Diary Card UI -->
+    <string name="full_text">…Full text</string>
+    <string name="before_label">Before</string>
+    <string name="after_label">After</string>
+
+    <!-- Institution Project Detail -->
+    <string name="institution_project_detail">Institution Project</string>
+    <string name="reference_price_format">Ref. ¥%.0f</string>
+    <string name="reference_price_label_format">Ref. Avg. ¥%d</string>
+    <string name="view_more_detail">View More Details</string>
+    <string name="view_institution_detail">View Institution Detail</string>
+    <string name="book_project">Book Project</string>
+    <string name="btn_close">Close</string>
+    <string name="no_detail_content">No detailed information available</string>
+    <string name="project_info_sheet_title">Project Details</string>
+    <string name="encyclopedia_detail">Project Details</string>
+    <string name="encyclopedia_risk">Risk Info</string>
+    <string name="encyclopedia_suitable_contraindicated">Suitability</string>
+
+    <!-- Institution Detail – Bookable Project Card -->
+    <string name="inst_project_price_format">¥%.0f</string>
+    <string name="inst_project_original_price_format">¥%.0f</string>
+    <string name="no_filter_results">No results found</string>
+
+    <!-- Misc -->
+    <string name="collapse_text">Collapse</string>
+    <string name="show_all_count">View all %d</string>
+    <string name="avg_rating_summary">Overall Rating</string>
+    <string name="show_all_diaries_count">View all %d diaries</string>
+    <string name="diary_rating_stats">Diary Rating Stats</string>
+    <string name="risk_disclaimer">The above information is compiled from authoritative medical aesthetics institutions and professional advice. Please consult for personalized recommendations.</string>
+    <string name="recovery_cycle">Recovery Period</string>
+    <string name="fav_tab_all">All</string>
+    <string name="show_all_institutions_count">All (%d institutions)</string>
+
+    <!-- All List Screens -->
+    <string name="all_diaries_title">All Diaries</string>
+        <string name="all_reviews_title">All Reviews</string>
+    <string name="all_projects_title">All Projects</string>
+    <string name="all_institutions_title">All Institutions</string>
+    <string name="all_doctors_title">All Doctors</string>
+    <string name="no_doctors">No doctors yet</string>
+    <string name="no_projects">No projects yet</string>
+
+    <!-- Project Filter -->
+    <string name="filter_title">Filter</string>
+    <string name="filter_reset">Reset</string>
+    <string name="filter_confirm">Confirm</string>
+    <string name="filter_category">Project Category</string>
+    <string name="filter_tags">Project Tags</string>
+    <string name="filter_city">City</string>
+    <string name="filter_no_selection">No filters applied</string>
+    <string name="filter_expand">Expand</string>
+    <string name="filter_collapse">Collapse</string>
+    <string name="filter_count_format">%d selected</string>
+    <string name="expand_institutions">Show %d institutions</string>
+    <string name="collapse_institutions">Hide institutions</string>
+    <string name="view_institution_projects">View %d institution projects</string>
+    <string name="collapse_institution_projects">Collapse</string>
+    <string name="messages_title">Messages</string>
+    <string name="msg_bestie_preview">Nice to meet you 👋</string>
+    <string name="msg_consultant_preview">Professional analysis, scientific beauty</string>
+        <string name="msg_cs_preview">Platform customer service at your service</string>
+    <string name="hello_format">Hello! %s</string>
+    <string name="comment_collapsed">This content has been collapsed. Subsequent comments will be optimized for you.</string>
+
+    <!-- Report -->
+    <string name="report">Report</string>
+    <string name="report_reason">Reason</string>
+    <string name="report_reason_spam">Spam / Advertising</string>
+    <string name="report_reason_porn">Pornographic / Vulgar</string>
+    <string name="report_reason_abuse">Verbal Abuse / Harassment</string>
+    <string name="report_reason_fake">False / Misleading Info</string>
+    <string name="report_reason_political">Politically Sensitive</string>
+    <string name="report_reason_copyright">Copyright Infringement</string>
+    <string name="report_reason_other">Other</string>
+    <string name="report_description">Additional Info</string>
+    <string name="report_description_hint">Please describe the issue…</string>
+    <string name="report_description_required">Please provide a description for \"Other\" reason</string>
+    <string name="report_submit">Submit</string>
+    <string name="report_success">Report submitted, thank you</string>
+    <string name="report_already">You have already reported this content</string>
+    <string name="report_reason_required">Please select a reason</string>
+
+    <!-- Booking Confirm -->
+    <string name="booking_confirm_title">Book Appointment</string>
+    <string name="booking_fee_breakdown">Consultation ¥%d · Balance ¥%d</string>
+    <string name="booking_select_doctor">Select Doctor</string>
+    <string name="booking_remark_label">Remark</string>
+    <string name="booking_remark_placeholder">Any special requirements, please note here…</string>
+    <string name="coupon_label">Coupon</string>
+    <string name="coupon_select_placeholder">Select coupon</string>
+    <string name="booking_price_summary_title">Price Summary</string>
+    <string name="booking_project_price">Project Price</string>
+    <string name="booking_coupon_discount">Coupon Discount</string>
+    <string name="booking_consultation_fee_label">Consultation Fee</string>
+    <string name="booking_remaining_label">Balance</string>
+    <string name="booking_online_tag">Online</string>
+    <string name="booking_instore_tag">In-store</string>
+    <string name="booking_total_label">Total</string>
+    <!-- removed: booking_pay_in_store -->
+    <string name="booking_actual_payment_label">Amount Due Now</string>
+    <!-- removed: booking_actual_is_consultation -->
+    <string name="booking_go_to_pay">Go to Pay</string>
+    <string name="booking_creating_order">Creating order…</string>
+    <string name="select_appointment_time">Select Appointment Time</string>
+    <string name="confirm_booking">Confirm Booking</string>
+
+    <!-- Coupon List -->
+    <string name="my_coupons_title">My Coupons</string>
+    <string name="coupon_tab_all">All</string>
+    <string name="coupon_tab_available">Available</string>
+    <string name="coupon_tab_used">Used</string>
+    <string name="coupon_tab_expired">Expired</string>
+    <string name="coupon_empty">No Coupons</string>
+    <string name="coupon_percentage_format">%d%% off</string>
+    <string name="coupon_type_percentage">Percentage</string>
+    <string name="coupon_type_fixed">Fixed</string>
+    <string name="coupon_min_amount_format">Min. spend ¥%d</string>
+    <string name="coupon_valid_until">Valid until %s</string>
+    <string name="coupon_used_at">Used %s</string>
+    <string name="coupon_use_now">Use Now</string>
+
+    <!-- Booking Time Input -->
+    <string name="appointment_time_format_error">Please use format: yyyy-MM-dd HH:mm</string>
+    <string name="appointment_time_hint">Tap to select date and time</string>
+    <string name="select_time">Select Time</string>
+
+    <!-- Order detail -->
+    <string name="operation_success">Operation successful</string>
+    <string name="order_deleted">Order deleted</string>
+    <string name="order_cancelled_toast">Order cancelled</string>
+    <string name="verified_time_format">Verified at: %s</string>
+    <string name="waiting_service_full_paid">Fully paid, waiting for the institution to perform the service</string>
+    <string name="settlement_info">Settlement Info</string>
+    <string name="settlement_total_amount">Total Amount</string>
+    <string name="settlement_platform_fee">Platform Service Fee</string>
+    <string name="settlement_institution_share">Institution Share</string>
+    <string name="settlement_consultant_commission">Consultant Commission</string>
+    <string name="settlement_doctor_income">Doctor Income</string>
+    <string name="settlement_status">Settlement Status</string>
+    <string name="settlement_time">Settlement Time</string>
+
+    <!-- Review Edit/Delete -->
+    <string name="review_edit">Edit Review</string>
+    <string name="review_delete">Delete Review</string>
+    <string name="review_delete_confirm_title">Delete Review?</string>
+    <string name="review_delete_confirm_msg">This action cannot be undone. Are you sure?</string>
+    <string name="update_review">Update Review</string>
+    <string name="review_updated">Review updated</string>
+    <string name="review_deleted">Review deleted</string>
+    <string name="view_review">View Review</string>
+    <string name="review_info_title">My Review</string>
+    <string name="dm_first_message_confirm_title">Send message?</string>
+    <string name="dm_first_message_confirm_message">After sending this message, you cannot send another until the recipient replies. Continue?</string>
+    <string name="dm_first_message_confirm_button">Send</string>
+
+    <!-- AI planning agent -->
+    <string name="agent_title">AI Aesthetic Planning Assistant</string>
+    <string name="agent_subtitle">Supports informed decisions; does not replace an in-person medical consultation</string>
+    <string name="agent_create_plan">Create plan</string>
+    <string name="agent_edit_profile">Edit profile</string>
+    <string name="agent_back_to_chat">Back to chat</string>
+    <string name="agent_step_profile">Needs</string>
+    <string name="agent_step_safety">Safety</string>
+    <string name="agent_step_plan">Plan</string>
+    <string name="agent_welcome">Hi, I’m your aesthetic decision assistant. Feel free to ask about a concern, treatment, or clinic. When you want a complete plan, I’ll help you confirm the necessary details.</string>
+    <string name="agent_context_hint">You’re viewing “%1$s”. Ask me about how it works, risks, who it may suit, and how to compare options.</string>
+    <string name="agent_thinking">Thinking…</string>
+    <string name="agent_chat_hint">Ask about a concern or treatment</string>
+    <string name="agent_send">Send</string>
+    <string name="agent_copy_reply">Copy</string>
+    <string name="agent_delete_reply">Delete</string>
+    <string name="agent_reply_copied">Reply copied</string>
+    <string name="agent_error_delete_message">Could not delete this reply</string>
+    <string name="agent_more">More</string>
+    <string name="agent_view_history">View chat history</string>
+    <string name="agent_view_plan_history">View previous plans</string>
+    <string name="agent_new_chat">New conversation</string>
+    <string name="agent_clear_chat">Clear conversation</string>
+    <string name="agent_clear_chat_confirm">Clear all messages in this conversation? This cannot be undone.</string>
+    <string name="agent_cancel">Cancel</string>
+    <string name="agent_delete">Delete</string>
+    <string name="agent_clear_all">Clear all</string>
+    <string name="agent_delete_history">Delete conversation</string>
+    <string name="agent_delete_history_confirm">Delete this conversation and all of its messages? This cannot be undone.</string>
+    <string name="agent_clear_history">Clear conversation history</string>
+    <string name="agent_clear_history_confirm">Delete all AI assistant conversations and their messages? This cannot be undone.</string>
+    <string name="agent_delete_plan">Delete plan</string>
+    <string name="agent_delete_plan_confirm">Delete this plan? This cannot be undone.</string>
+    <string name="agent_clear_plans">Clear previous plans</string>
+    <string name="agent_clear_plans_confirm">Delete all previous plans? This cannot be undone.</string>
+    <string name="agent_error_delete_history">Could not delete the conversation</string>
+    <string name="agent_error_clear_history">Could not clear conversation history</string>
+    <string name="agent_error_delete_plan">Could not delete the plan</string>
+    <string name="agent_error_clear_plans">Could not clear previous plans</string>
+    <string name="agent_no_chat_history">No previous conversations</string>
+    <string name="agent_no_plan_history">No previous plans</string>
+    <string name="agent_error_load_history">Could not load conversation history</string>
+    <string name="agent_error_clear_chat">Could not clear this conversation</string>
+    <string name="agent_report_dimensions">Compared by: %1$s</string>
+    <string name="agent_list_separator">, </string>
+    <string name="agent_view_details">View details</string>
+    <string name="agent_human_consult">Chat with a person</string>
+    <string name="agent_plan_prompt_title">Would you like a complete plan?</string>
+    <string name="agent_plan_prompt_body">I’ll first confirm your budget, acceptable downtime, and essential safety information, then create a phased plan with reasons.</string>
+    <string name="agent_start_plan">Start planning</string>
+    <string name="agent_safety_prompt_title">Check safety information first</string>
+    <string name="agent_safety_prompt_body">This may affect whether a treatment is appropriate. Complete a short safety screening before considering recommendations or booking.</string>
+    <string name="agent_start_screening">Start safety screening</string>
+    <string name="agent_profile_title">Understand you before discussing treatments</string>
+    <string name="agent_profile_desc">All fields below are optional and may be entered in English or Chinese. More detail improves matching; missing information will never be guessed.</string>
+    <string name="agent_goals">What would you like to improve? (optional)</string>
+    <string name="agent_goals_help">Free text is welcome. Separate multiple goals with commas, e.g. skin texture, acne marks, facial contour</string>
+    <string name="agent_city">City you expect to travel to (optional)</string>
+    <string name="agent_budget_max">Budget limit in CNY (optional)</string>
+    <string name="agent_downtime">Downtime in days (optional)</string>
+    <string name="agent_pain_tolerance">Pain tolerance (optional)</string>
+    <string name="agent_pain_unspecified">Not specified</string>
+    <string name="agent_pain_low">Prefer minimal pain</string>
+    <string name="agent_pain_medium">Mild to moderate is fine</string>
+    <string name="agent_pain_high">More noticeable is acceptable</string>
+    <string name="agent_preferences">Preferences (optional)</string>
+    <string name="agent_preferences_help">Free text, e.g. natural-looking, English-speaking service, quick recovery</string>
+    <string name="agent_excluded">Treatments you do not want (optional)</string>
+    <string name="agent_profile_consent">I agree to save these decision preferences and understand I can update or delete them</string>
+    <string name="agent_save_screen">Save and continue to safety screening</string>
+    <string name="agent_safety_title">Pre-planning safety screening</string>
+    <string name="agent_safety_desc">These answers are not used for remote diagnosis. They only determine whether recommendations should pause for professional review.</string>
+    <string name="agent_risk_pregnant">Pregnant or breastfeeding</string>
+    <string name="agent_risk_skin">Currently have an active skin condition</string>
+    <string name="agent_risk_allergy">History of severe allergic reactions</string>
+    <string name="agent_risk_medication">Taking medication that may affect treatment safety</string>
+    <string name="agent_risk_recent">Recently had a related aesthetic treatment</string>
+    <string name="agent_risk_guarantee">Expect guaranteed results or zero risk</string>
+    <string name="agent_risk_distress">Appearance concerns are causing strong, persistent distress</string>
+    <string name="agent_safety_confirm">I confirm that I have answered the safety screening truthfully</string>
+    <string name="agent_generate_plan">Generate my plan</string>
+    <string name="agent_plan_version">Plan version %1$d</string>
+    <string name="agent_plan_ready">Initial screening completed using platform data</string>
+    <string name="agent_plan_review">More information or human review is needed</string>
+    <string name="agent_reassess">Reassess</string>
+    <string name="agent_budget_value">Budget limit: ¥%1$d</string>
+    <string name="agent_no_guess">The available platform data did not match your goals, so the Agent did not make a speculative recommendation.</string>
+    <string name="agent_continue_chat">Continue asking about this plan</string>
+    <string name="agent_reason">Why it was suggested</string>
+    <string name="agent_expected">What it may help with</string>
+    <string name="agent_limits">Limitations</string>
+    <string name="agent_risks">What to consider</string>
+    <string name="agent_confirm_in_person">Confirm during consultation</string>
+    <string name="agent_confidence_high">Stronger evidence</string>
+    <string name="agent_confidence_medium">Moderate evidence</string>
+    <string name="agent_confidence_low">Initial match</string>
+    <string name="agent_next_step">Recommended next step</string>
+    <string name="agent_next_step_body">Take the shortlist to a licensed medical institution. Confirm clinician credentials, product or device specifications, total cost, contraindications, and aftercare. Do not purchase based only on an online plan.</string>
+    <string name="agent_safety_block_title">Pause treatment planning</string>
+    <string name="agent_safety_block_body">The current information requires professional review, so the Agent will not recommend a specific treatment.</string>
+    <string name="agent_urgent_help">If you have acute or significant symptoms, seek care at a licensed medical institution promptly.</string>
+    <string name="agent_repeat_screen">Review the screening again</string>
+    <string name="agent_history">Plan history</string>
+    <string name="agent_candidate_count">%1$d candidates</string>
+    <string name="agent_loading">Preparing your plan…</string>
+    <string name="agent_error_goals">Add at least one improvement goal</string>
+    <string name="agent_error_city">Enter your city</string>
+    <string name="agent_error_budget">Enter a valid budget limit</string>
+    <string name="agent_error_downtime">Enter acceptable downtime from 0 to 365 days</string>
+    <string name="agent_error_pain">Select your pain tolerance</string>
+    <string name="agent_error_consent">Confirm permission to use the profile</string>
+    <string name="agent_error_screening_confirm">Confirm that you answered the safety screening truthfully</string>
+    <string name="agent_error_load_profile">Could not load your needs profile</string>
+    <string name="agent_error_confirm_profile">Could not confirm your profile</string>
+    <string name="agent_error_save_profile">Could not save your profile</string>
+    <string name="agent_error_create_plan">Could not generate the plan</string>
+    <string name="agent_error_assessment">Could not complete the safety assessment</string>
+    <string name="agent_missing_field">More information is needed: %1$s</string>
+    <!-- AI translation -->
+    <string name="translate_with_ai">Translate with AI</string>
+    <string name="translating">Translating…</string>
+    <string name="ai_translation">AI translation</string>
+    <string name="original_text">Original</string>
+    <string name="show_original">Show original</string>
+    <string name="show_translation">Show translation</string>
+    <string name="translate_message">Translate</string>
+    <string name="retry_translation">Retry</string>
+    <string name="translation_failed">Translation failed</string>
+</resources>
