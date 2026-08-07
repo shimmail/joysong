@@ -82,6 +82,7 @@ class FileUploadService(
         val metadata = ObjectMetadata().apply {
             contentLength = bytes.size.toLong()
             this.contentType = contentType
+            cacheControl = "public, max-age=3600"
         }
         ByteArrayInputStream(bytes).use { input ->
             client.putObject(ossBucketName, relativePath, input, metadata)

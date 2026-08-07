@@ -382,7 +382,12 @@ class _MessagingCenterPageState extends State<MessagingCenterPage> {
                         child: CircleAvatar(
                           foregroundImage:
                               peer?.avatar.trim().isNotEmpty == true
-                                  ? NetworkImage(peer!.avatar)
+                                  ? _resizedNetworkImage(
+                                      context,
+                                      peer!.avatar,
+                                      logicalWidth: 40,
+                                      logicalHeight: 40,
+                                    )
                                   : null,
                           child: peer?.avatar.trim().isNotEmpty == true
                               ? null
@@ -1082,17 +1087,24 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
                                           child: ClipRRect(
                                             borderRadius:
                                                 BorderRadius.circular(14),
-                                            child: Image.network(
-                                              widget.contentOf(item),
-                                              width: 220,
-                                              height: 180,
-                                              fit: BoxFit.cover,
-                                              errorBuilder: (_, __, ___) =>
-                                                  const SizedBox(
-                                                width: 180,
-                                                height: 120,
-                                                child: Icon(
-                                                  Icons.broken_image_outlined,
+                                            child: ConstrainedBox(
+                                              constraints: const BoxConstraints(
+                                                maxWidth: 260,
+                                                maxHeight: 320,
+                                              ),
+                                              child: Image.network(
+                                                widget.contentOf(item),
+                                                fit: BoxFit.contain,
+                                                filterQuality:
+                                                    FilterQuality.medium,
+                                                gaplessPlayback: true,
+                                                errorBuilder: (_, __, ___) =>
+                                                    const SizedBox(
+                                                  width: 180,
+                                                  height: 120,
+                                                  child: Icon(
+                                                    Icons.broken_image_outlined,
+                                                  ),
                                                 ),
                                               ),
                                             ),
@@ -1377,7 +1389,14 @@ class _PeerAvatar extends StatelessWidget {
       backgroundColor: isCustomerService
           ? Theme.of(context).colorScheme.primaryContainer
           : null,
-      foregroundImage: avatar.isEmpty ? null : NetworkImage(avatar),
+      foregroundImage: avatar.isEmpty
+          ? null
+          : _resizedNetworkImage(
+              context,
+              avatar,
+              logicalWidth: 36,
+              logicalHeight: 36,
+            ),
       child: avatar.isNotEmpty
           ? null
           : isCustomerService
@@ -1392,6 +1411,21 @@ class _PeerAvatar extends StatelessWidget {
     return GestureDetector(onTap: onTap, child: content);
   }
 }
+
+int _physicalPixels(BuildContext context, double logicalPixels) =>
+    (logicalPixels * MediaQuery.devicePixelRatioOf(context)).ceil();
+
+ImageProvider<Object> _resizedNetworkImage(
+  BuildContext context,
+  String url, {
+  required double logicalWidth,
+  required double logicalHeight,
+}) =>
+    ResizeImage.resizeIfNeeded(
+      _physicalPixels(context, logicalWidth),
+      _physicalPixels(context, logicalHeight),
+      NetworkImage(url),
+    );
 
 class _MessageComposer extends StatelessWidget {
   const _MessageComposer({

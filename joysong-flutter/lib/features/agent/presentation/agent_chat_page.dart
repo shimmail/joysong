@@ -2,25 +2,36 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/features/agent/domain/agent_models.dart';
-import 'package:joysong_flutter/features/agent/presentation/agent_catalog_cards.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_chat_controller.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_plan_controller.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_plan_view.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_profile_safety_page.dart';
 
+enum _AgentMenuAction {
+  profile,
+  history,
+  plans,
+  newChat,
+  clearCurrent,
+  deleteCurrent,
+  clearAll,
+}
+
 class AgentChatPage extends StatefulWidget {
   const AgentChatPage({
     required this.chatController,
     required this.planController,
-    this.onOpenCatalogItem,
-    this.onHumanChat,
+    this.initialContextType,
+    this.initialContextId,
+    this.initialContextName,
     super.key,
   });
 
   final AgentChatController chatController;
   final AgentPlanController planController;
-  final AgentCatalogItemAction? onOpenCatalogItem;
-  final AgentCatalogItemAction? onHumanChat;
+  final ChatContextType? initialContextType;
+  final String? initialContextId;
+  final String? initialContextName;
 
   @override
   State<AgentChatPage> createState() => _AgentChatPageState();
@@ -29,30 +40,57 @@ class AgentChatPage extends StatefulWidget {
 class _AgentChatPageState extends State<AgentChatPage> {
   final _inputController = TextEditingController();
   final _scrollController = ScrollController();
+  Timer? _scrollDebounce;
+  bool _stickToBottom = true;
 
   @override
   void initState() {
     super.initState();
     widget.chatController.addListener(_scrollToEnd);
-    unawaited(widget.chatController.loadSessions());
+    _scrollController.addListener(_trackScrollPosition);
+    unawaited(_initializeChat());
+  }
+
+  Future<void> _initializeChat() async {
+    await widget.chatController.loadSessions();
+    final contextType = widget.initialContextType;
+    final contextId = widget.initialContextId?.trim() ?? '';
+    final contextName = widget.initialContextName?.trim() ?? '';
+    if (contextType != null && contextId.isNotEmpty && contextName.isNotEmpty) {
+      await widget.chatController.startContextSummary(
+        contextType: contextType,
+        contextId: contextId,
+        contextName: contextName,
+      );
+    }
   }
 
   @override
   void dispose() {
     widget.chatController.removeListener(_scrollToEnd);
+    _scrollDebounce?.cancel();
+    _scrollController.removeListener(_trackScrollPosition);
     _inputController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
 
+  void _trackScrollPosition() {
+    if (!_scrollController.hasClients) return;
+    _stickToBottom = _scrollController.position.extentAfter < 140;
+  }
+
   void _scrollToEnd() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scrollController.hasClients) return;
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOut,
-      );
+    if (!_stickToBottom) return;
+    // Streaming responses may emit many tokens per second. Coalescing their
+    // scroll requests avoids repeatedly restarting an animation every frame.
+    _scrollDebounce ??= Timer(const Duration(milliseconds: 80), () {
+      _scrollDebounce = null;
+      if (!mounted || !_stickToBottom) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_scrollController.hasClients) return;
+        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+      });
     });
   }
 
@@ -65,33 +103,56 @@ class _AgentChatPageState extends State<AgentChatPage> {
         final english = Localizations.localeOf(context).languageCode == 'en';
         return Scaffold(
           appBar: AppBar(
-            title: Text(english ? 'Aesthetic AI' : '医美 AI'),
+            title: const Text('颜颜'),
             actions: [
-              IconButton(
-                tooltip: english ? 'Profile & safety' : '档案与安全筛查',
-                onPressed: () => Navigator.of(context).push<void>(
-                  MaterialPageRoute(
-                    builder: (_) => AgentProfileSafetyPage(
-                      controller: widget.planController,
-                    ),
+              PopupMenuButton<_AgentMenuAction>(
+                tooltip: english ? 'More options' : '更多操作',
+                icon: const Icon(Icons.more_vert),
+                onSelected: (action) => _handleMenuAction(action, english),
+                itemBuilder: (context) => [
+                  _menuItem(
+                    _AgentMenuAction.profile,
+                    Icons.health_and_safety_outlined,
+                    english ? 'Profile & safety' : '档案与安全筛查',
                   ),
-                ),
-                icon: const Icon(Icons.health_and_safety_outlined),
-              ),
-              IconButton(
-                tooltip: english ? 'History' : '历史会话',
-                onPressed: () => _showHistory(state.sessions),
-                icon: const Icon(Icons.history),
-              ),
-              IconButton(
-                tooltip: english ? 'My plans' : '我的方案',
-                onPressed: _showPlans,
-                icon: const Icon(Icons.assignment_outlined),
-              ),
-              IconButton(
-                tooltip: english ? 'New chat' : '新会话',
-                onPressed: widget.chatController.startNewSession,
-                icon: const Icon(Icons.add_comment_outlined),
+                  _menuItem(
+                    _AgentMenuAction.history,
+                    Icons.history,
+                    english ? 'Chat history' : '历史会话',
+                  ),
+                  _menuItem(
+                    _AgentMenuAction.plans,
+                    Icons.assignment_outlined,
+                    english ? 'My plans' : '我的方案',
+                  ),
+                  _menuItem(
+                    _AgentMenuAction.newChat,
+                    Icons.add_comment_outlined,
+                    english ? 'New chat' : '新会话',
+                  ),
+                  const PopupMenuDivider(),
+                  _menuItem(
+                    _AgentMenuAction.clearCurrent,
+                    Icons.delete_sweep_outlined,
+                    english ? 'Clear current messages' : '清空当前消息',
+                    enabled: state.activeSession != null &&
+                        state.messages.isNotEmpty,
+                  ),
+                  _menuItem(
+                    _AgentMenuAction.deleteCurrent,
+                    Icons.delete_outline,
+                    english ? 'Delete current chat' : '删除当前会话',
+                    enabled: state.activeSession != null,
+                    destructive: true,
+                  ),
+                  _menuItem(
+                    _AgentMenuAction.clearAll,
+                    Icons.delete_forever_outlined,
+                    english ? 'Clear all history' : '清空全部历史',
+                    enabled: state.sessions.isNotEmpty,
+                    destructive: true,
+                  ),
+                ],
               ),
             ],
           ),
@@ -110,6 +171,7 @@ class _AgentChatPageState extends State<AgentChatPage> {
                     ? _EmptyChat(english: english)
                     : ListView.builder(
                         controller: _scrollController,
+                        cacheExtent: 600,
                         padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                         itemCount: state.messages.length +
                             (state.hasOlderMessages ? 1 : 0),
@@ -132,20 +194,6 @@ class _AgentChatPageState extends State<AgentChatPage> {
                         },
                       ),
               ),
-              if (state.latestTurn?.catalogReport case final report?)
-                AgentCatalogReportCard(
-                  report: report,
-                  onOpen: widget.onOpenCatalogItem,
-                  onHumanChat: widget.onHumanChat,
-                )
-              else if (state.latestTurn?.catalogItems.isNotEmpty ?? false)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: AgentCatalogReferenceList(
-                    items: state.latestTurn!.catalogItems,
-                    onOpen: widget.onOpenCatalogItem,
-                  ),
-                ),
               _Composer(
                 inputController: _inputController,
                 isBusy: state.deliveryState.isBusy,
@@ -165,38 +213,199 @@ class _AgentChatPageState extends State<AgentChatPage> {
     );
   }
 
+  PopupMenuItem<_AgentMenuAction> _menuItem(
+    _AgentMenuAction value,
+    IconData icon,
+    String label, {
+    bool enabled = true,
+    bool destructive = false,
+  }) =>
+      PopupMenuItem(
+        value: value,
+        enabled: enabled,
+        child: Row(
+          children: [
+            Icon(
+              icon,
+              size: 20,
+              color: destructive ? Theme.of(context).colorScheme.error : null,
+            ),
+            const SizedBox(width: 12),
+            Text(
+              label,
+              style: destructive
+                  ? TextStyle(color: Theme.of(context).colorScheme.error)
+                  : null,
+            ),
+          ],
+        ),
+      );
+
+  Future<void> _handleMenuAction(
+    _AgentMenuAction action,
+    bool english,
+  ) async {
+    switch (action) {
+      case _AgentMenuAction.profile:
+        await Navigator.of(context).push<void>(
+          MaterialPageRoute(
+            builder: (_) => AgentProfileSafetyPage(
+              controller: widget.planController,
+            ),
+          ),
+        );
+      case _AgentMenuAction.history:
+        await _showHistory(widget.chatController.state.sessions);
+      case _AgentMenuAction.plans:
+        await _showPlans();
+      case _AgentMenuAction.newChat:
+        widget.chatController.startNewSession();
+      case _AgentMenuAction.clearCurrent:
+        await _confirmClearCurrent(english);
+      case _AgentMenuAction.deleteCurrent:
+        final session = widget.chatController.state.activeSession;
+        if (session != null) await _confirmDeleteSession(session);
+      case _AgentMenuAction.clearAll:
+        await _confirmClearAll(english);
+    }
+  }
+
   Future<void> _showHistory(List<ChatSession> sessions) async {
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      builder: (context) => SafeArea(
+      builder: (sheetContext) => SafeArea(
         child: sessions.isEmpty
-            ? const Padding(
-                padding: EdgeInsets.all(24),
-                child: Text('暂无历史会话'),
+            ? Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(
+                  Localizations.localeOf(context).languageCode == 'en'
+                      ? 'No chat history'
+                      : '暂无历史会话',
+                ),
               )
             : ListView(
                 shrinkWrap: true,
                 children: [
                   for (final session in sessions)
                     ListTile(
-                      title:
-                          Text(session.title.isEmpty ? '未命名会话' : session.title),
+                      title: Text(
+                        session.title.isEmpty
+                            ? Localizations.localeOf(context).languageCode ==
+                                    'en'
+                                ? 'Untitled chat'
+                                : '未命名会话'
+                            : session.title,
+                      ),
                       subtitle: Text(
                         session.lastMessage,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                       onTap: () {
-                        Navigator.pop(context);
+                        Navigator.pop(sheetContext);
                         unawaited(widget.chatController.openSession(session));
                       },
+                      trailing: IconButton(
+                        tooltip:
+                            Localizations.localeOf(context).languageCode == 'en'
+                                ? 'Delete chat'
+                                : '删除会话',
+                        icon: const Icon(Icons.delete_outline),
+                        onPressed: () async {
+                          final deleted = await _confirmDeleteSession(session);
+                          if (deleted && sheetContext.mounted) {
+                            Navigator.pop(sheetContext);
+                          }
+                        },
+                      ),
                     ),
                 ],
               ),
       ),
     );
   }
+
+  Future<bool> _confirmDeleteSession(ChatSession session) async {
+    final english = Localizations.localeOf(context).languageCode == 'en';
+    final confirmed = await _confirmDestructiveAction(
+      title: english ? 'Delete this chat?' : '删除这条历史会话？',
+      message: english
+          ? 'This chat and all of its messages will be permanently deleted.'
+          : '该会话及其中的全部消息将被永久删除。',
+      confirmLabel: english ? 'Delete' : '删除',
+      cancelLabel: english ? 'Cancel' : '取消',
+    );
+    if (!confirmed) return false;
+    try {
+      await widget.chatController.deleteSession(session);
+      return true;
+    } on Object {
+      return false;
+    }
+  }
+
+  Future<void> _confirmClearCurrent(bool english) async {
+    final confirmed = await _confirmDestructiveAction(
+      title: english ? 'Clear current messages?' : '清空当前消息？',
+      message: english
+          ? 'All messages in this chat will be permanently deleted.'
+          : '当前会话中的全部消息将被永久删除。',
+      confirmLabel: english ? 'Clear' : '清空',
+      cancelLabel: english ? 'Cancel' : '取消',
+    );
+    if (!confirmed) return;
+    try {
+      await widget.chatController.clearActiveMessages();
+    } on Object {
+      // The controller exposes the localized request error in the page banner.
+    }
+  }
+
+  Future<void> _confirmClearAll(bool english) async {
+    final confirmed = await _confirmDestructiveAction(
+      title: english ? 'Clear all chat history?' : '清空全部历史？',
+      message: english
+          ? 'Every chat and message with 颜颜 will be permanently deleted.'
+          : '与颜颜的全部会话和消息将被永久删除。',
+      confirmLabel: english ? 'Clear all' : '全部清空',
+      cancelLabel: english ? 'Cancel' : '取消',
+    );
+    if (!confirmed) return;
+    try {
+      await widget.chatController.clearSessions();
+    } on Object {
+      // The controller exposes the localized request error in the page banner.
+    }
+  }
+
+  Future<bool> _confirmDestructiveAction({
+    required String title,
+    required String message,
+    required String confirmLabel,
+    required String cancelLabel,
+  }) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text(cancelLabel),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              style: TextButton.styleFrom(
+                foregroundColor: Theme.of(context).colorScheme.error,
+              ),
+              child: Text(confirmLabel),
+            ),
+          ],
+        ),
+      ) ??
+      false;
 
   Future<void> _showPlans() async {
     unawaited(widget.planController.load());

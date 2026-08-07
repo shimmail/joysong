@@ -4,6 +4,7 @@ import com.joysong.server.diary.entity.DiaryEntity
 import com.joysong.server.diary.entity.dto.PublishDiaryRequest
 import com.joysong.server.diary.entity.dto.UpdateDiaryRequest
 import com.joysong.server.diary.repository.DiaryRepository
+import com.joysong.server.diary.repository.DiaryShareRepository
 import com.joysong.server.doctor.repository.DoctorRepository
 import com.joysong.server.institution.repository.InstitutionProjectRepository
 import com.joysong.server.institution.repository.InstitutionRepository
@@ -27,7 +28,8 @@ class DiaryService(
     private val institutionRepository: InstitutionRepository,
     private val institutionProjectRepository: InstitutionProjectRepository,
     private val institutionProjectDetailResolver: InstitutionProjectDetailResolver,
-    private val orderRepository: OrderRepository
+    private val orderRepository: OrderRepository,
+    private val diaryShareRepository: DiaryShareRepository
 ) {
 
     /**
@@ -183,7 +185,11 @@ class DiaryService(
             beforeImages = request.beforeImages ?: diary.beforeImages,
             afterImages = request.afterImages ?: diary.afterImages
         )
-        return diaryRepository.save(updated)
+        val saved = diaryRepository.save(updated)
+        if (saved.status != "published") {
+            diaryShareRepository.revokeActiveByDiaryId(id, java.time.LocalDateTime.now())
+        }
+        return saved
     }
 
     private fun validateText(title: String, content: String) {
@@ -230,6 +236,7 @@ class DiaryService(
         CacheEvict(cacheNames = ["home"], allEntries = true),
         CacheEvict(cacheNames = ["discover"], allEntries = true)
     ])
+    @Transactional
     fun deleteDiary(userId: String, id: String): Any {
         val diary = diaryRepository.findById(id).orElse(null)
             ?: return mapOf("error" to "日记不存在", "code" to 404)
@@ -238,6 +245,7 @@ class DiaryService(
             return mapOf("error" to "无权删除他人日记", "code" to 403)
         }
 
+        diaryShareRepository.revokeActiveByDiaryId(id, java.time.LocalDateTime.now())
         diaryRepository.delete(diary)
         return mapOf("message" to "删除日记成功")
     }
@@ -259,14 +267,25 @@ class DiaryService(
         CacheEvict(cacheNames = ["home"], allEntries = true),
         CacheEvict(cacheNames = ["discover"], allEntries = true)
     ])
-    fun adminSave(entity: DiaryEntity): DiaryEntity = diaryRepository.save(entity)
+    @Transactional
+    fun adminSave(entity: DiaryEntity): DiaryEntity {
+        val saved = diaryRepository.save(entity)
+        if (saved.status != "published") {
+            diaryShareRepository.revokeActiveByDiaryId(saved.id, java.time.LocalDateTime.now())
+        }
+        return saved
+    }
 
     @Caching(evict = [
         CacheEvict(cacheNames = ["diaries"], allEntries = true),
         CacheEvict(cacheNames = ["home"], allEntries = true),
         CacheEvict(cacheNames = ["discover"], allEntries = true)
     ])
-    fun adminDeleteById(id: String) = diaryRepository.deleteById(id)
+    @Transactional
+    fun adminDeleteById(id: String) {
+        diaryShareRepository.revokeActiveByDiaryId(id, java.time.LocalDateTime.now())
+        diaryRepository.deleteById(id)
+    }
 
     fun findByAuthorName(authorName: String): List<DiaryEntity> = diaryRepository.findByAuthorName(authorName)
 

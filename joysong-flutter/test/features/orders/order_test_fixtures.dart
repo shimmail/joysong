@@ -1,12 +1,14 @@
 import 'package:joysong_flutter/features/orders/domain/money.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
 import 'package:joysong_flutter/features/orders/domain/orders_repository.dart';
+import 'package:joysong_flutter/features/orders/domain/payment_models.dart';
 
 Order sampleOrder({
   String id = 'order-1',
   OrderStatus status = OrderStatus.pendingPayment,
   RefundStatus refundStatus = RefundStatus.none,
   String? verifyCode,
+  bool hasReview = false,
 }) =>
     Order(
       id: id,
@@ -30,9 +32,32 @@ Order sampleOrder({
       quantity: 1,
       remark: '',
       verifyCode: verifyCode,
-      hasReview: false,
+      hasReview: hasReview,
       createdAt: DateTime(2026, 8, 6, 10),
       appointmentTime: DateTime(2026, 8, 8, 14, 30),
+    );
+
+PaymentAttempt samplePaymentAttempt({
+  String id = 'payment-1',
+  String orderId = 'order-1',
+  PaymentType paymentType = PaymentType.consultationFee,
+  PaymentProvider provider = PaymentProvider.demo,
+  PaymentStatus status = PaymentStatus.succeeded,
+  PaymentNextAction? nextAction,
+}) =>
+    PaymentAttempt(
+      id: id,
+      orderId: orderId,
+      paymentType: paymentType,
+      provider: provider,
+      paymentMethod: provider == PaymentProvider.demo ? 'ONLINE' : 'CARD',
+      currency: 'CNY',
+      amountMinor: 10000,
+      status: status,
+      providerPaymentId: 'provider-payment-1',
+      nextAction: nextAction,
+      createdAt: DateTime(2026, 8, 7, 12),
+      updatedAt: DateTime(2026, 8, 7, 12, 0, 1),
     );
 
 Map<String, Object?> sampleOrderJson({
@@ -72,10 +97,16 @@ class FakeOrdersRepository implements OrdersRepository {
   List<Order> orders = [sampleOrder()];
   int getOrdersCalls = 0;
   int actionCalls = 0;
+  int paymentCalls = 0;
   int? lastOffset;
   int? lastLimit;
   OrderStatus? lastStatus;
   Future<Order>? actionFuture;
+  PaymentAttempt? paymentAttempt;
+  String? lastPaymentIdempotencyKey;
+  PaymentType? lastPaymentType;
+  PaymentProvider? lastPaymentProvider;
+  bool? lastPaymentRefresh;
   String? lastRefundReason;
   String? lastRefundDescription;
   String? lastRefundEvidenceUrl;
@@ -96,6 +127,59 @@ class FakeOrdersRepository implements OrdersRepository {
   @override
   Future<Order> getOrder(String id) async =>
       orders.firstWhere((order) => order.id == id);
+
+  @override
+  Future<PaymentAttempt> createPaymentAttempt(
+    String orderId, {
+    required PaymentType paymentType,
+    required PaymentProvider provider,
+    required String paymentMethod,
+    required String idempotencyKey,
+  }) async {
+    paymentCalls += 1;
+    lastPaymentType = paymentType;
+    lastPaymentProvider = provider;
+    lastPaymentIdempotencyKey = idempotencyKey;
+    return paymentAttempt ??
+        samplePaymentAttempt(
+          orderId: orderId,
+          paymentType: paymentType,
+          provider: provider,
+        );
+  }
+
+  @override
+  Future<PaymentAttempt> getPayment(
+    String paymentId, {
+    bool refresh = false,
+  }) async {
+    paymentCalls += 1;
+    lastPaymentRefresh = refresh;
+    return paymentAttempt ?? samplePaymentAttempt(id: paymentId);
+  }
+
+  @override
+  Future<PaymentAttempt> confirmPayment(
+    String paymentId, {
+    required String idempotencyKey,
+  }) async {
+    paymentCalls += 1;
+    lastPaymentIdempotencyKey = idempotencyKey;
+    return paymentAttempt ?? samplePaymentAttempt(id: paymentId);
+  }
+
+  @override
+  Future<PaymentAttempt> getLatestPayment(
+    String orderId, {
+    required PaymentType paymentType,
+    bool refresh = false,
+  }) async {
+    paymentCalls += 1;
+    lastPaymentType = paymentType;
+    lastPaymentRefresh = refresh;
+    return paymentAttempt ??
+        samplePaymentAttempt(orderId: orderId, paymentType: paymentType);
+  }
 
   @override
   Future<Order> payConsultation(String id) {

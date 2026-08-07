@@ -9,6 +9,7 @@ import com.joysong.server.report.entity.dto.ReportRequest
 import com.joysong.server.report.entity.dto.ReportResponse
 import com.joysong.server.report.repository.ReportRepository
 import com.joysong.server.review.repository.ReviewRepository
+import com.joysong.server.review.service.ReviewService
 import com.joysong.server.user.repository.UserRepository
 import org.springframework.stereotype.Service
 
@@ -19,7 +20,8 @@ class ReportService(
     private val reviewRepository: ReviewRepository,
     private val commentRepository: CommentRepository,
     private val userRepository: UserRepository,
-    private val objectMapper: ObjectMapper
+    private val objectMapper: ObjectMapper,
+    private val reviewService: ReviewService
 ) {
 
     fun submitReport(userId: String, request: ReportRequest): Any {
@@ -140,7 +142,7 @@ class ReportService(
     fun adminDeleteTarget(targetType: String, targetId: String) {
         when (targetType) {
             "diary" -> diaryRepository.deleteById(targetId)
-            "review" -> reviewRepository.deleteById(targetId)
+            "review" -> reviewService.adminDeleteById(targetId)
             "comment" -> commentRepository.deleteById(targetId)
         }
         reportRepository.findByTargetTypeAndTargetId(targetType, targetId).forEach { report ->

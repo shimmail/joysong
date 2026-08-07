@@ -7,6 +7,7 @@ data class DoctorDetailDto(
     val doctor: DoctorResponse,
     val institutionProjects: List<DoctorInstitutionProjectInfo> = emptyList(),
     val diaries: List<DiaryResponse> = emptyList(),
+    val reviews: List<ReviewResponse> = emptyList(),
     /** 兼容字段：当前主机构。 */
     val institution: InstitutionResponse? = null,
     /** 医生全部有效出诊机构，主机构排在首位。 */
@@ -38,7 +39,8 @@ data class DoctorInstitutionProjectInfo(
 data class ProjectDetailDto(
     val project: ProjectResponse,
     val institutionProjects: List<InstitutionProjectWithInstitution> = emptyList(),
-    val diaries: List<DiaryResponse> = emptyList()
+    val diaries: List<DiaryResponse> = emptyList(),
+    val reviews: List<ReviewResponse> = emptyList()
 )
 
 data class InstitutionProjectWithInstitution(
@@ -52,7 +54,8 @@ data class InstitutionProjectDetailDto(
     val project: ProjectResponse,
     val institution: InstitutionResponse,
     val diaries: List<DiaryResponse> = emptyList(),
-    val doctors: List<DoctorResponse> = emptyList()
+    val doctors: List<DoctorResponse> = emptyList(),
+    val reviews: List<ReviewResponse> = emptyList()
 )
 
 data class InstitutionProjectWithProject(

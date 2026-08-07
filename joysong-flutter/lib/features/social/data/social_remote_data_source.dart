@@ -10,6 +10,7 @@ abstract interface class SocialRemoteDataSource {
   Future<Diary> publishDiary(DiaryDraft draft);
   Future<Diary> updateDiary(String id, DiaryUpdate update);
   Future<void> deleteDiary(String id);
+  Future<String> createDiaryShareUrl(String id);
   Future<List<Comment>> getComments(
     String diaryId, {
     required int offset,
@@ -116,6 +117,18 @@ final class ApiSocialRemoteDataSource
 
   @override
   Future<void> deleteDiary(String id) => _delete('diaries/${_segment(id)}');
+
+  @override
+  Future<String> createDiaryShareUrl(String id) async {
+    final value = await _apiClient.post<String>(
+      'diaries/${_segment(id)}/share',
+      decodeData: (json) {
+        final map = _map(json, '分享链接');
+        return _requiredString(map['url'] ?? map['shareUrl'], 'url');
+      },
+    );
+    return _requireData(value, '分享链接响应');
+  }
 
   @override
   Future<List<Comment>> getComments(

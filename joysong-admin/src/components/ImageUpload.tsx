@@ -9,9 +9,15 @@ interface ImageUploadProps {
   value?: string;
   onChange?: (value: string) => void;
   folder?: string;
+  recommendedSize?: string;
 }
 
-export default function ImageUpload({ value, onChange, folder = 'general' }: ImageUploadProps) {
+export default function ImageUpload({
+  value,
+  onChange,
+  folder = 'general',
+  recommendedSize,
+}: ImageUploadProps) {
   const [loading, setLoading] = useState(false);
 
   const handleUpload = async (file: RcFile) => {
@@ -65,6 +71,15 @@ export default function ImageUpload({ value, onChange, folder = 'general' }: Ima
           {value}
         </div>
       )}
+      <div style={{ marginTop: 4, fontSize: 12, color: '#999' }}>
+        推荐尺寸：{recommendedSize || recommendedSizeForFolder(folder)}；上传原图，页面按比例裁剪展示
+      </div>
     </div>
   );
+}
+
+function recommendedSizeForFolder(folder: string): string {
+  if (folder === 'banners') return '1920 × 720 px（约 8:3）';
+  if (folder === 'avatars') return '400 × 400 px（1:1）';
+  return '1200 × 800 px（3:2）';
 }

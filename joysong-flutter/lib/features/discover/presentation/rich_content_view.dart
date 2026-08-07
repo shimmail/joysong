@@ -10,11 +10,13 @@ class RichContentView extends StatelessWidget {
   const RichContentView({
     required this.content,
     this.textStyle,
+    this.onImageTap,
     super.key,
   });
 
   final String content;
   final TextStyle? textStyle;
+  final ValueChanged<String>? onImageTap;
 
   @override
   Widget build(BuildContext context) {
@@ -30,12 +32,17 @@ class RichContentView extends StatelessWidget {
           if (part.imageUrl != null)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 10),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Image.network(
-                  part.imageUrl!,
-                  fit: BoxFit.fitWidth,
-                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+              child: GestureDetector(
+                onTap: onImageTap == null
+                    ? null
+                    : () => onImageTap!(part.imageUrl!),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.network(
+                    part.imageUrl!,
+                    fit: BoxFit.fitWidth,
+                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                  ),
                 ),
               ),
             )
@@ -53,6 +60,11 @@ class RichContentView extends StatelessWidget {
     );
   }
 }
+
+List<String> richContentImageUrls(String content) => _contentParts(content)
+    .map((part) => part.imageUrl)
+    .whereType<String>()
+    .toList(growable: false);
 
 final class _ContentPart {
   const _ContentPart.text(this.markup) : imageUrl = null;

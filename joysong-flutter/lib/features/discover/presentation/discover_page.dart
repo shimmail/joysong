@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:joysong_flutter/core/network/optimized_network_image.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
@@ -11,6 +12,7 @@ import 'package:joysong_flutter/features/discover/presentation/article_detail_vi
 import 'package:joysong_flutter/features/discover/presentation/catalog_institution_detail_view.dart';
 import 'package:joysong_flutter/features/discover/presentation/doctor_detail_view.dart';
 import 'package:joysong_flutter/features/discover/presentation/catalog_project_detail_view.dart';
+import 'package:joysong_flutter/features/discover/presentation/catalog_review_section.dart';
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
 import 'package:joysong_flutter/features/social/presentation/diary_detail_page.dart';
 import 'package:joysong_flutter/features/social/presentation/favorite_action_button.dart';
@@ -34,7 +36,7 @@ class DiscoverPage extends StatefulWidget {
   final SocialController? socialController;
   final ValueChanged<String>? onOpenUser;
   final ValueChanged<DiscoverItem>? onConsultDoctor;
-  final VoidCallback? onOpenAi;
+  final ValueChanged<DiscoverItem>? onOpenAi;
   final DiscoverContentType initialType;
 
   @override
@@ -618,7 +620,7 @@ class _DiscoveryResultsPane extends StatefulWidget {
   final SocialController? socialController;
   final ValueChanged<String>? onOpenUser;
   final ValueChanged<DiscoverItem>? onConsultDoctor;
-  final VoidCallback? onOpenAi;
+  final ValueChanged<DiscoverItem>? onOpenAi;
 
   @override
   State<_DiscoveryResultsPane> createState() => _DiscoveryResultsPaneState();
@@ -965,7 +967,7 @@ class DiscoverDetailPage extends StatefulWidget {
   final SocialController? socialController;
   final ValueChanged<String>? onOpenUser;
   final ValueChanged<DiscoverItem>? onConsultDoctor;
-  final VoidCallback? onOpenAi;
+  final ValueChanged<DiscoverItem>? onOpenAi;
 
   @override
   State<DiscoverDetailPage> createState() => _DiscoverDetailPageState();
@@ -1082,6 +1084,11 @@ class _DiscoverDetailPageState extends State<DiscoverDetailPage> {
                               _openAllRelatedGroup(item, 'institutionProjects'),
                           onViewAllDiaries: () =>
                               _openAllRelatedGroup(item, 'diaries'),
+                          onViewAllReviews: () =>
+                              _openAllRelatedGroup(item, 'reviews'),
+                          onAiChat: widget.onOpenAi == null
+                              ? null
+                              : () => widget.onOpenAi!(item),
                           onInstitutionProjectTap: (institutionId, projectId) =>
                               Navigator.of(context).push<void>(
                             MaterialPageRoute(
@@ -1125,11 +1132,16 @@ class _DiscoverDetailPageState extends State<DiscoverDetailPage> {
                           onConsult: widget.onConsultDoctor == null
                               ? null
                               : () => widget.onConsultDoctor!(item),
-                          onAiChat: widget.onOpenAi,
+                          onAiChat: widget.onOpenAi == null
+                              ? null
+                              : () => widget.onOpenAi!(item),
                           onViewAllProjects: () =>
                               _openAllRelatedGroup(item, 'institutionProjects'),
                           onViewAllDiaries: () =>
                               _openAllRelatedGroup(item, 'diaries'),
+                          onViewAllReviews: () =>
+                              _openAllRelatedGroup(item, 'reviews'),
+                          socialController: widget.socialController,
                         ),
                       DiscoverContentType.institution =>
                         CatalogInstitutionDetailView(
@@ -1163,6 +1175,9 @@ class _DiscoverDetailPageState extends State<DiscoverDetailPage> {
                               _openAllRelatedGroup(item, 'reviews'),
                           onViewAllDoctors: () =>
                               _openAllRelatedGroup(item, 'doctors'),
+                          onAiChat: widget.onOpenAi == null
+                              ? null
+                              : () => widget.onOpenAi!(item),
                         ),
                       DiscoverContentType.article =>
                         ArticleDetailView(item: item),
@@ -1237,11 +1252,16 @@ class _DiscoverDetailPageState extends State<DiscoverDetailPage> {
     final entries = _relatedGroups(item.raw)[key];
     if (entries == null || entries.isEmpty) return;
     Navigator.of(context).push<void>(MaterialPageRoute(
-      builder: (_) => _AllRelatedContentPage(
-        groups: {key: entries},
-        onOpen: _openRelatedEntry,
-        socialController: widget.socialController,
-      ),
+      builder: (_) => key == 'reviews'
+          ? _AllReviewsPage(
+              reviews: entries,
+              socialController: widget.socialController,
+            )
+          : _AllRelatedContentPage(
+              groups: {key: entries},
+              onOpen: _openRelatedEntry,
+              socialController: widget.socialController,
+            ),
     ));
   }
 
@@ -1325,10 +1345,10 @@ class _GenericDetailView extends StatelessWidget {
         if (item.imageUrl.isNotEmpty)
           ClipRRect(
             borderRadius: BorderRadius.circular(16),
-            child: Image.network(
-              item.imageUrl,
+            child: OptimizedNetworkImage(
+              url: item.imageUrl,
+              width: double.infinity,
               height: 220,
-              fit: BoxFit.cover,
               errorBuilder: (_, __, ___) => const SizedBox.shrink(),
             ),
           ),
@@ -1348,6 +1368,58 @@ class _GenericDetailView extends StatelessWidget {
               : item.subtitle,
         ),
       ],
+    );
+  }
+}
+
+class _AllReviewsPage extends StatefulWidget {
+  const _AllReviewsPage({required this.reviews, this.socialController});
+
+  final List<Map<String, Object?>> reviews;
+  final SocialController? socialController;
+
+  @override
+  State<_AllReviewsPage> createState() => _AllReviewsPageState();
+}
+
+class _AllReviewsPageState extends State<_AllReviewsPage> {
+  CatalogReviewFilter _filter = CatalogReviewFilter.all;
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = filterCatalogReviews(widget.reviews, _filter);
+    return Scaffold(
+      appBar: AppBar(title: Text(context.localized('全部评价', 'All reviews'))),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: CatalogReviewFilters(
+              value: _filter,
+              onChanged: (value) => setState(() => _filter = value),
+            ),
+          ),
+          Expanded(
+            child: filtered.isEmpty
+                ? Center(
+                    child: Text(context.localized(
+                      '暂无符合条件的评价',
+                      'No matching reviews',
+                    )),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                    itemCount: filtered.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (_, index) => CatalogReviewCard(
+                      review: filtered[index],
+                      socialController: widget.socialController,
+                    ),
+                  ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1455,7 +1527,14 @@ class _AllReviewCard extends StatelessWidget {
                 CircleAvatar(
                   radius: 20,
                   foregroundImage:
-                      avatar.isEmpty ? null : NetworkImage(avatar),
+                      avatar.isEmpty
+                          ? null
+                          : optimizedNetworkImageProvider(
+                              context,
+                              avatar,
+                              width: 40,
+                              height: 40,
+                            ),
                   child: Text(userName.characters.first),
                 ),
                 const SizedBox(width: 10),
@@ -1531,11 +1610,10 @@ class _AllReviewCard extends StatelessWidget {
                   separatorBuilder: (_, __) => const SizedBox(width: 8),
                   itemBuilder: (_, index) => ClipRRect(
                     borderRadius: BorderRadius.circular(8),
-                    child: Image.network(
-                      images[index],
+                    child: OptimizedNetworkImage(
+                      url: images[index],
                       width: 84,
                       height: 84,
-                      fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                     ),
                   ),

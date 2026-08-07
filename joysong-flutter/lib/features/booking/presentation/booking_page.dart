@@ -36,26 +36,54 @@ class _BookingPageState extends State<BookingPage> {
   }
 
   Future<void> _pickAppointment() async {
-    final now = DateTime.now();
-    final initial = widget.controller.appointmentTime ??
-        now.add(const Duration(days: 1, hours: 1));
+    final now = _beijingNow();
+    final currentSelection = widget.controller.appointmentTime;
+    final fallbackTime = now.add(const Duration(hours: 1));
+    final initial = currentSelection != null && currentSelection.isAfter(now)
+        ? currentSelection
+        : fallbackTime;
+    final today = DateUtils.dateOnly(now);
+    final lastDate = DateUtils.dateOnly(now.add(const Duration(days: 365)));
+    final initialDate = DateUtils.dateOnly(initial).isAfter(lastDate)
+        ? lastDate
+        : DateUtils.dateOnly(initial).isBefore(today)
+            ? today
+            : DateUtils.dateOnly(initial);
     final date = await showDatePicker(
       context: context,
-      initialDate: initial,
-      firstDate: now,
-      lastDate: now.add(const Duration(days: 365)),
-      helpText: context.localized('选择预约日期', 'Select appointment date'),
+      initialDate: initialDate,
+      firstDate: today,
+      lastDate: lastDate,
+      currentDate: today,
+      initialEntryMode: DatePickerEntryMode.calendarOnly,
+      helpText: context.localized('选择预约日期（北京时间）', 'Select date (Beijing time)'),
+      cancelText: context.localized('取消', 'Cancel'),
+      confirmText: context.localized('下一步', 'Next'),
     );
     if (date == null || !mounted) return;
-    final time = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.fromDateTime(initial),
-      helpText: context.localized('选择预约时间', 'Select appointment time'),
+    final time = await _showScrollingTimePicker(
+      context,
+      initial: TimeOfDay.fromDateTime(
+        currentSelection != null && DateUtils.isSameDay(currentSelection, date)
+            ? currentSelection
+            : initial,
+      ),
     );
-    if (time == null) return;
-    widget.controller.selectAppointmentTime(
-      DateTime(date.year, date.month, date.day, time.hour, time.minute),
-    );
+    if (time == null || !mounted) return;
+    final appointment =
+        DateTime(date.year, date.month, date.day, time.hour, time.minute);
+    if (!appointment.isAfter(_beijingNow())) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(context.localized(
+            '预约时间必须晚于当前北京时间',
+            'Appointment time must be later than Beijing time',
+          )),
+        ),
+      );
+      return;
+    }
+    widget.controller.selectAppointmentTime(appointment);
   }
 
   Future<void> _submit() async {
@@ -117,14 +145,13 @@ class _BookingPageState extends State<BookingPage> {
         if (controller.doctors.isEmpty)
           _SoftPanel(child: Text(context.localized('该项目暂时没有可预约医生', 'No doctors are currently available for this service')))
         else
-          Align(
-            alignment: AlignmentDirectional.centerStart,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 320),
-              child: DropdownButtonFormField<BookingDoctor>(
+          DropdownButtonFormField<BookingDoctor>(
                 key: ValueKey(controller.selectedDoctor?.id),
                 initialValue: controller.selectedDoctor,
                 isExpanded: true,
+                borderRadius: BorderRadius.circular(12),
+                menuMaxHeight: 320,
+                dropdownColor: Theme.of(context).colorScheme.surface,
                 decoration: InputDecoration(
                   prefixIcon: const Icon(Icons.medical_services_outlined),
                   hintText: context.localized('请选择医生', 'Select a doctor'),
@@ -133,9 +160,17 @@ class _BookingPageState extends State<BookingPage> {
                     .map(
                       (doctor) => DropdownMenuItem(
                         value: doctor,
-                        child: Text(
-                          '${doctor.name}${doctor.title.isEmpty ? '' : ' · ${doctor.title}'}',
-                          overflow: TextOverflow.ellipsis,
+                        child: Row(
+                          children: [
+                            _DoctorAvatar(doctor: doctor, radius: 18),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                '${doctor.name}${doctor.title.isEmpty ? '' : ' · ${doctor.title}'}',
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     )
@@ -143,8 +178,6 @@ class _BookingPageState extends State<BookingPage> {
                 onChanged: controller.isSubmitting
                     ? null
                     : (doctor) => controller.selectDoctor(doctor),
-              ),
-            ),
           ),
         const SizedBox(height: 10),
         _SoftPanel(
@@ -162,7 +195,9 @@ class _BookingPageState extends State<BookingPage> {
           ),
         ),
         const SizedBox(height: 20),
-        _SectionTitle(context.localized('预约时间', 'Appointment time')),
+        _SectionTitle(
+          context.localized('预约时间（北京时间 UTC+8）', 'Appointment time (Beijing UTC+8)'),
+        ),
         const SizedBox(height: 8),
         _SoftPanel(
           child: ListTile(
@@ -181,14 +216,13 @@ class _BookingPageState extends State<BookingPage> {
         const SizedBox(height: 20),
         _SectionTitle(context.localized('优惠券', 'Coupon')),
         const SizedBox(height: 8),
-        Align(
-          alignment: AlignmentDirectional.centerStart,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 320),
-            child: DropdownButtonFormField<UserCoupon?>(
+        DropdownButtonFormField<UserCoupon?>(
               key: ValueKey(controller.selectedCoupon?.id),
               initialValue: controller.selectedCoupon,
               isExpanded: true,
+              borderRadius: BorderRadius.circular(12),
+              menuMaxHeight: 320,
+              dropdownColor: Theme.of(context).colorScheme.surface,
               decoration: InputDecoration(
                 prefixIcon: const Icon(Icons.local_offer_outlined),
                 hintText: controller.coupons.isEmpty
@@ -222,8 +256,6 @@ class _BookingPageState extends State<BookingPage> {
                   controller.isSubmitting || controller.isDiscountLoading
                       ? null
                       : (coupon) => controller.selectCoupon(coupon),
-            ),
-          ),
         ),
         const SizedBox(height: 20),
         _SectionTitle(context.localized('备注', 'Notes')),
@@ -256,6 +288,167 @@ class _BookingPageState extends State<BookingPage> {
     );
   }
 }
+
+class _DoctorAvatar extends StatelessWidget {
+  const _DoctorAvatar({required this.doctor, this.radius = 20});
+
+  final BookingDoctor doctor;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    final avatar = doctor.avatar.trim();
+    return CircleAvatar(
+      radius: radius,
+      foregroundImage: avatar.isEmpty ? null : NetworkImage(avatar),
+      onForegroundImageError: avatar.isEmpty ? null : (_, __) {},
+      child: avatar.isEmpty
+          ? const Icon(Icons.person_outline_rounded)
+          : null,
+    );
+  }
+}
+
+Future<TimeOfDay?> _showScrollingTimePicker(
+  BuildContext context, {
+  required TimeOfDay initial,
+}) {
+  return showModalBottomSheet<TimeOfDay>(
+    context: context,
+    showDragHandle: true,
+    builder: (_) => _ScrollingTimePicker(initial: initial),
+  );
+}
+
+class _ScrollingTimePicker extends StatefulWidget {
+  const _ScrollingTimePicker({required this.initial});
+
+  final TimeOfDay initial;
+
+  @override
+  State<_ScrollingTimePicker> createState() => _ScrollingTimePickerState();
+}
+
+class _ScrollingTimePickerState extends State<_ScrollingTimePicker> {
+  // A multiple of 2, 12 and 60 keeps every looping column aligned.
+  static const _baseIndex = 1200;
+  late int _period;
+  late int _hour;
+  late int _minute;
+  late final FixedExtentScrollController _periodController;
+  late final FixedExtentScrollController _hourController;
+  late final FixedExtentScrollController _minuteController;
+
+  @override
+  void initState() {
+    super.initState();
+    _period = widget.initial.period == DayPeriod.am ? 0 : 1;
+    _hour = widget.initial.hourOfPeriod == 0
+        ? 12
+        : widget.initial.hourOfPeriod;
+    _minute = widget.initial.minute;
+    _periodController = FixedExtentScrollController(initialItem: _period);
+    _hourController = FixedExtentScrollController(initialItem: _baseIndex + _hour - 1);
+    _minuteController = FixedExtentScrollController(initialItem: _baseIndex + _minute);
+  }
+
+  @override
+  void dispose() {
+    _periodController.dispose();
+    _hourController.dispose();
+    _minuteController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final english = context.isEnglish;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(context.localized('选择预约时间（北京时间 UTC+8）', 'Select time (Beijing UTC+8)'),
+                style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 220,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _wheel(
+                    _periodController,
+                    2,
+                    (value) => _period = value,
+                    (value) => value == 0
+                        ? (english ? 'AM' : '上午')
+                        : (english ? 'PM' : '下午'),
+                    looping: false,
+                  ),
+                  _wheel(_hourController, 12, (value) => _hour = value % 12 + 1,
+                      (value) => '${value % 12 + 1}'),
+                  _wheel(_minuteController, 60, (value) => _minute = value % 60,
+                      (value) => (value % 60).toString().padLeft(2, '0')),
+                ],
+              ),
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(onPressed: () => Navigator.pop(context), child: Text(context.localized('取消', 'Cancel'))),
+                FilledButton(onPressed: () => Navigator.pop(context, TimeOfDay(hour: (_hour % 12) + (_period == 1 ? 12 : 0), minute: _minute)), child: Text(context.localized('确定', 'Confirm'))),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _wheel(
+    FixedExtentScrollController controller,
+    int count,
+    ValueChanged<int> onChanged,
+    String Function(int) label, {
+    bool looping = true,
+  }) {
+    return SizedBox(
+      width: 82,
+      child: ListWheelScrollView.useDelegate(
+        controller: controller,
+        itemExtent: 48,
+        diameterRatio: 1.7,
+        useMagnifier: true,
+        magnification: 1.12,
+        overAndUnderCenterOpacity: 0.45,
+        physics: const FixedExtentScrollPhysics(),
+        onSelectedItemChanged: onChanged,
+        childDelegate: looping
+            ? ListWheelChildLoopingListDelegate(
+                children: [
+                  for (var i = 0; i < count; i++)
+                    Center(
+                      child: Text(label(i),
+                          style: Theme.of(context).textTheme.titleMedium),
+                    ),
+                ],
+              )
+            : ListWheelChildListDelegate(
+                children: [
+                  for (var i = 0; i < count; i++)
+                    Center(
+                      child: Text(label(i),
+                          style: Theme.of(context).textTheme.titleMedium),
+                    ),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+DateTime _beijingNow() => DateTime.now().toUtc().add(const Duration(hours: 8));
 
 class _ProjectCard extends StatelessWidget {
   const _ProjectCard({required this.project});

@@ -80,6 +80,29 @@ void main() {
 
     expect(await dataSource.getOrderReview('order-1'), isNull);
   });
+
+  test('updates a review with the complete editable payload', () async {
+    client.responseData = _reviewJson();
+
+    await dataSource.updateReview(
+      'review-1',
+      const ReviewDraft(
+        rating: 4,
+        content: '修改后的评价',
+        tags: ['专业', '耐心'],
+        images: ['https://img/one.jpg', 'https://img/two.jpg'],
+      ),
+    );
+
+    expect(client.lastMethod, 'PUT');
+    expect(client.lastPath, 'reviews/review-1');
+    expect(client.lastBody, {
+      'rating': 4,
+      'content': '修改后的评价',
+      'tags': '专业,耐心',
+      'images': 'https://img/one.jpg,https://img/two.jpg',
+    });
+  });
 }
 
 final class _FakeApiClient extends ApiClient {

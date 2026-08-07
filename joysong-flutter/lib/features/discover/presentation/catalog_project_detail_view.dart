@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/core/network/optimized_network_image.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/presentation/catalog_detail_shared.dart';
+import 'package:joysong_flutter/features/discover/presentation/catalog_review_section.dart';
 import 'package:joysong_flutter/features/discover/presentation/discover_content_card.dart';
 import 'package:joysong_flutter/features/discover/presentation/rich_content_view.dart';
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
@@ -19,6 +21,8 @@ class CatalogProjectDetailView extends StatelessWidget {
     this.onDoctorTap,
     this.onViewAllInstitutions,
     this.onViewAllDiaries,
+    this.onViewAllReviews,
+    this.onAiChat,
     this.socialController,
     super.key,
   });
@@ -32,6 +36,8 @@ class CatalogProjectDetailView extends StatelessWidget {
   final ValueChanged<String>? onDoctorTap;
   final VoidCallback? onViewAllInstitutions;
   final VoidCallback? onViewAllDiaries;
+  final VoidCallback? onViewAllReviews;
+  final VoidCallback? onAiChat;
   final SocialController? socialController;
 
   @override
@@ -43,6 +49,7 @@ class CatalogProjectDetailView extends StatelessWidget {
     final institutionProjects = _maps(raw['institutionProjects']);
     final diaries = _maps(raw['diaries']);
     final doctors = _maps(raw['doctors']);
+    final reviews = _maps(raw['reviews']);
     final isInstitutionProject = ip.isNotEmpty;
     final sources = [ip, project, raw];
     final name = _text(sources, const ['name', 'projectName'], item.title);
@@ -75,7 +82,7 @@ class CatalogProjectDetailView extends StatelessWidget {
       ..._tokens(sources, const ['coverImage']),
       if (item.imageUrl.isNotEmpty) item.imageUrl,
     }.toList(growable: false);
-    final keys = List.generate(4, (_) => GlobalKey());
+    final keys = List.generate(5, (_) => GlobalKey());
     void jump(int index) {
       final target = keys[index].currentContext;
       if (target == null) return;
@@ -87,11 +94,11 @@ class CatalogProjectDetailView extends StatelessWidget {
 
     final labels = isInstitutionProject
         ? (context.isEnglish
-            ? const ['Guide', 'Doctors', 'Diaries', 'Institution']
-            : const ['项目百科', '可预约医生', '用户日记', '所属机构'])
+            ? const ['Guide', 'Doctors', 'Diaries', 'Reviews', 'Institution']
+            : const ['项目百科', '可预约医生', '用户日记', '用户评价', '所属机构'])
         : (context.isEnglish
-            ? const ['Guide', 'Institutions', 'Diaries']
-            : const ['项目攻略', '认证机构', '用户日记']);
+            ? const ['Guide', 'Institutions', 'Diaries', 'Reviews']
+            : const ['项目攻略', '认证机构', '用户日记', '用户评价']);
 
     return Column(children: [
       Expanded(
@@ -222,10 +229,28 @@ class CatalogProjectDetailView extends StatelessWidget {
                     ),
             ),
           ),
+          SliverToBoxAdapter(
+            child: CatalogSection(
+              key: keys[3],
+              title: context.localized('用户评价', 'Patient reviews'),
+              trailing: TextButton(
+                onPressed: reviews.isEmpty ? null : onViewAllReviews,
+                child: Text(context.isEnglish
+                    ? 'All (${reviews.length})'
+                    : '全部 (${reviews.length})'),
+              ),
+              child: CatalogReviewPreview(
+                reviews: reviews,
+                socialController: socialController,
+                onViewAll: onViewAllReviews,
+                showHeader: false,
+              ),
+            ),
+          ),
           if (isInstitutionProject)
             SliverToBoxAdapter(
               child: CatalogSection(
-                key: keys[3],
+                key: keys[4],
                 title: context.localized('所属机构', 'Institution'),
                 child: _InstitutionRow(
                   institution,
@@ -255,7 +280,7 @@ class CatalogProjectDetailView extends StatelessWidget {
             : null,
         tertiaryLabel: context.localized(
             isInstitutionProject ? '与AI聊聊' : '与AI聊此项目', 'Chat with AI'),
-        onTertiary: () => _aiHint(context),
+        onTertiary: onAiChat,
       ),
     ]);
   }
@@ -286,11 +311,6 @@ class CatalogProjectDetailView extends StatelessWidget {
     );
   }
 
-  void _aiHint(BuildContext context) =>
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(context.localized(
-            '可前往 AI 页继续咨询', 'Continue in the AI assistant tab')),
-      ));
 }
 
 class _ProjectFacts extends StatelessWidget {
@@ -379,7 +399,11 @@ class _ProjectCopyLine extends StatelessWidget {
             const SizedBox(width: 8),
             Text('$label：', style: const TextStyle(color: Color(0xff777777))),
             Expanded(child: Text(value, maxLines: 2, overflow: TextOverflow.ellipsis)),
-            const Icon(Icons.copy_rounded, size: 17, color: Color(0xff999999)),
+            Icon(
+              Icons.copy_rounded,
+              size: 17,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ]),
         ),
       );
@@ -514,7 +538,14 @@ class _DoctorRow extends StatelessWidget {
     return ListTile(
       onTap: id.isEmpty || onTap == null ? null : () => onTap!(id),
       leading: CircleAvatar(
-        foregroundImage: avatar.isEmpty ? null : NetworkImage(avatar),
+        foregroundImage: avatar.isEmpty
+            ? null
+            : optimizedNetworkImageProvider(
+                context,
+                avatar,
+                width: 40,
+                height: 40,
+              ),
         child: avatar.isEmpty ? const Icon(Icons.person_outline) : null,
       ),
       title: Text(_text([data], const ['name'], '')),
@@ -556,7 +587,12 @@ class _Empty extends StatelessWidget {
   Widget build(BuildContext context) => SizedBox(
       height: 110,
       child: Center(
-          child: Text(text, style: const TextStyle(color: Color(0xff999999)))));
+          child: Text(
+        text,
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+      )));
 }
 
 Map<String, Object?> _map(Object? value) => value is Map

@@ -9,6 +9,7 @@ import com.joysong.server.chat.entity.ChatMessageEntity
 import com.joysong.server.chat.entity.ChatSessionEntity
 import com.joysong.server.chat.repository.ChatMessageRepository
 import com.joysong.server.chat.repository.ChatSessionRepository
+import com.joysong.server.agent.service.AgentText
 import com.joysong.server.doctor.repository.DoctorRepository
 import com.joysong.server.doctor.service.DoctorInstitutionService
 import com.joysong.server.institution.repository.InstitutionRepository
@@ -82,6 +83,8 @@ class ChatService(
     @Value("\${openai.model:gpt-4.1-mini}") private val openaiModel: String,
     @Value("\${openai.stream-enabled:false}") private val streamEnabled: Boolean,
     @Value("\${openai.intent-parser-enabled:true}") private val intentParserEnabled: Boolean,
+    @Value("\${openai.fast-reasoning-effort:none}") private val fastReasoningEffort: String,
+    @Value("\${openai.complex-reasoning-effort:low}") private val complexReasoningEffort: String,
     @Value("\${openai.demo-fallback-enabled:false}") private val demoFallbackEnabled: Boolean
 ) {
     private val logger = LoggerFactory.getLogger(ChatService::class.java)
@@ -94,7 +97,9 @@ class ChatService(
         val persona = request.persona.trim().uppercase()
         val contextType = request.contextType.trim().uppercase()
         require(persona in setOf("BESTIE", "CONSULTANT")) { "不支持的 AI 角色" }
-        require(contextType in setOf("GENERAL", "DOCTOR", "PROJECT", "INSTITUTION")) { "不支持的会话上下文" }
+        require(contextType in setOf("GENERAL", "DOCTOR", "PROJECT", "INSTITUTION", "INSTITUTION_PROJECT")) {
+            "不支持的会话上下文"
+        }
         require(contextType == "GENERAL" || request.contextId.isNotBlank()) { "该会话上下文必须提供 contextId" }
         require(request.contextId.length <= 100) { "contextId 过长" }
         require(request.title.length <= 100) { "会话标题不能超过 100 字" }
@@ -151,14 +156,16 @@ class ChatService(
         onDelta: (String) -> Unit
     ): ChatTurnResult {
         check(streamEnabled) { "AI streaming is disabled" }
-        return sendMessageInternal(sessionId, userId, request) { messages -> callLLMStreaming(messages, onDelta) }
+        return sendMessageInternal(sessionId, userId, request) { messages, profile ->
+            callLLMStreaming(messages, profile, onDelta)
+        }
     }
 
     private fun sendMessageInternal(
         sessionId: String,
         userId: String,
         request: SendMessageRequest,
-        llmCaller: (List<Map<String, String>>) -> LlmCallResult
+        llmCaller: (List<Map<String, String>>, GenerationProfile) -> LlmCallResult
     ): ChatTurnResult {
         val content = request.content.trim()
         require(content.isNotEmpty()) { "消息内容不能为空" }
@@ -229,6 +236,7 @@ class ChatService(
             parsedRoute != null -> agentIntentRouter.validatedDecision(parsedRoute.intent, parsedRoute.queryTarget)
             else -> routeAssessment.decision
         }
+        val generationProfile = generationProfile(intentDecision.intent)
         val catalogSearchQuery = listOf(contextualQuery, parsedRoute?.keywords.orEmpty().joinToString(" "))
             .filter { it.isNotBlank() }
             .joinToString(" ")
@@ -242,7 +250,7 @@ class ChatService(
         )
         val databaseDurationMs = elapsedMs(databaseStartedAt)
         llmMessages.add(mapOf("role" to "system", "content" to promptBuild.prompt))
-        historyMessages.forEach { msg ->
+        historyMessages.takeLast(generationProfile.historyMessageLimit).forEach { msg ->
             llmMessages.add(mapOf(
                 "role" to msg.role.lowercase(),
                 "content" to msg.content
@@ -255,7 +263,7 @@ class ChatService(
         }
 
         // 5. 调用 LLM API
-        val llmResult = llmCaller(llmMessages)
+        val llmResult = llmCaller(llmMessages, generationProfile)
         val aiContent = naturalizeUserFacingLanguage(llmResult.content)
 
         // 6. 保存 AI 响应消息
@@ -301,11 +309,16 @@ class ChatService(
             logger.info("AI_TRACE traceId={} sessionId={} intent={} db={} llmStatus={} totalMs={} answerLength={}", traceId, sessionId, intentDecision.intent.name, promptBuild.databaseSearched, llmResult.httpStatus, elapsedMs(totalStartedAt), aiContent.length)
         }.onFailure { logger.warn("AI trace save failed traceId={}: {}", traceId, it.message) }
 
+        val currentContextItems = currentContextCatalogItems(session.contextType, session.contextId)
         val visibleReport = promptBuild.evidence.report?.takeIf {
             intentDecision.intent == AgentIntent.COMPARISON && it.items.isNotEmpty()
         }
         val visibleItems = if (visibleReport == null) {
-            promptBuild.evidence.report?.items.orEmpty().take(4)
+            when {
+                isDetailContext(session.contextType) && currentContextItems.isNotEmpty() ->
+                    currentContextItems
+                else -> promptBuild.evidence.report?.items.orEmpty().take(4)
+            }
         } else emptyList()
         return ChatTurnResult(
             message = aiMessage,
@@ -379,7 +392,10 @@ class ChatService(
     /**
      * 调用 OpenAI Chat Completions API
      */
-    private fun callLLM(messages: List<Map<String, String>>): LlmCallResult {
+    private fun callLLM(
+        messages: List<Map<String, String>>,
+        profile: GenerationProfile = generationProfile(AgentIntent.GENERAL_CHAT)
+    ): LlmCallResult {
         val startedAt = System.nanoTime()
         // Demo replies are opt-in for local development. Production must not
         // persist a fabricated assistant answer as if it came from a model.
@@ -396,14 +412,15 @@ class ChatService(
                 setBearerAuth(openaiApiKey)
                 contentType = MediaType.APPLICATION_JSON
             }
-            val body = mapOf(
+            val body = mutableMapOf<String, Any>(
                 "model" to openaiModel,
                 "messages" to messages,
                 "temperature" to 0.25,
-                "max_tokens" to 600,
+                "max_tokens" to profile.maxOutputTokens,
                 // FastAIToken 当前可能不支持稳定 SSE；确认兼容后再改为 true。
                 "stream" to false
             )
+            reasoningEffort(profile)?.let { body["reasoning_effort"] = it }
             val response = restTemplate.exchange(url, HttpMethod.POST, HttpEntity(body, headers), Map::class.java)
             val responseBody = response.body
             val choices = responseBody?.get("choices") as? List<*>
@@ -504,18 +521,23 @@ class ChatService(
     }
 
     /** Reserved SSE path. Disabled by default through OPENAI_STREAM_ENABLED=false. */
-    private fun callLLMStreaming(messages: List<Map<String, String>>, onDelta: (String) -> Unit): LlmCallResult {
+    private fun callLLMStreaming(
+        messages: List<Map<String, String>>,
+        profile: GenerationProfile,
+        onDelta: (String) -> Unit
+    ): LlmCallResult {
         val startedAt = System.nanoTime()
-        if (openaiApiKey.isBlank()) return callLLM(messages)
+        if (openaiApiKey.isBlank()) return callLLM(messages, profile)
         return try {
             val url = "${openaiBaseUrl.trimEnd('/')}/chat/completions"
-            val body = mapOf(
+            val body = mutableMapOf<String, Any>(
                 "model" to openaiModel,
                 "messages" to messages,
                 "temperature" to 0.25,
-                "max_tokens" to 600,
+                "max_tokens" to profile.maxOutputTokens,
                 "stream" to true
             )
+            reasoningEffort(profile)?.let { body["reasoning_effort"] = it }
             var status: Int? = null
             val content = restTemplate.execute(
                 url, HttpMethod.POST,
@@ -610,7 +632,11 @@ class ChatService(
             12. 面向用户时不要使用“命中、命中集、检索结果、字段、记录、数据库返回、召回、实体”等系统或AI术语。自然地说“平台上查到”“平台资料显示”“目前可以看到”“资料中暂未注明”。英文避免使用 hit、retrieval result、database record、field 等内部表达，改用 “I found on the platform”“the profile shows”“the platform does not currently list”。
         """.trimIndent()
         val contextInfo = buildContextInfo(contextType, contextId)
-        val shouldSearch = intentDecision.searchCatalog
+        val detailSessionPolicy = if (isDetailContext(contextType)) """
+            当前处于详情会话。回答时优先围绕当前页面实体，不要跳出到泛泛科普；如果用户追问价格、恢复期、风险、医生或机构，直接基于当前页面给出简短回答。
+        """.trimIndent() else ""
+        val summaryMode = intentDecision.intent == AgentIntent.DETAIL_SUMMARY
+        val shouldSearch = intentDecision.searchCatalog && !summaryMode
         val evidence = if (shouldSearch) {
             agentCatalogService.promptEvidence(
                 query = userQuery,
@@ -620,20 +646,31 @@ class ChatService(
             )
         } else AgentPromptEvidence()
         val databaseContext = evidence.context
-        val evidenceInstruction = if (databaseContext.isBlank()) "" else """
-            【本轮最终平台数据库检索结果】
-            $databaseContext
-            这是本轮搜索完成后的最终命中集，也是回复气泡下方卡片的数据来源，优先级高于此前对话中的任何数据库描述。
-            只能依据这些记录陈述具体机构、医生、项目、城市与价格，不得补造字段。
-            命中集中出现某城市的记录时，禁止声称该城市没有相关记录；没有得到明确的反向检索证据时，也不要主动断言其他城市没有记录。
-            正文只简要总结最相关的1至2点，不逐条复述卡片内容，等待用户继续追问后再展开。
-            上述“命中集、记录、字段”等词只用于内部约束，绝对不要原样写给用户；对外改用自然、生活化的说法。
-        """.trimIndent()
+        val evidenceInstruction = when {
+            summaryMode -> """
+                【本轮详情页总结约束】
+                这是当前页面的简短概括任务。只概括 1 至 2 点，不要逐条罗列价格、评分、标签、机构或医生列表。
+                页面下方会单独展示当前实体卡片，正文不要重复卡片字段。
+            """.trimIndent()
+            databaseContext.isBlank() -> ""
+            else -> """
+                【本轮最终平台数据库检索结果】
+                $databaseContext
+                这是本轮搜索完成后的最终命中集，也是回复气泡下方卡片的数据来源，优先级高于此前对话中的任何数据库描述。
+                只能依据这些记录陈述具体机构、医生、项目、城市与价格，不得补造字段。
+                命中集中出现某城市的记录时，禁止声称该城市没有相关记录；没有得到明确的反向检索证据时，也不要主动断言其他城市没有记录。
+                正文只简要总结最相关的1至2点，不逐条复述卡片内容，等待用户继续追问后再展开。
+                上述“命中集、记录、字段”等词只用于内部约束，绝对不要原样写给用户；对外改用自然、生活化的说法。
+            """.trimIndent()
+        }
         val intentPolicy = when (intentDecision.intent) {
             AgentIntent.SAFETY_SCREENING -> """
                 本轮涉及潜在安全风险。先明确建议暂停自行决策，不推荐具体项目、机构或套餐；
                 简短说明需要向合格医生确认的原因，并最多追问一个会影响安全判断的问题。
                 不作诊断，不弱化孕期、哺乳期、感染、严重过敏、用药或瘢痕风险。
+            """.trimIndent()
+            AgentIntent.DETAIL_SUMMARY -> """
+                本轮是详情页总结。正文只用 1 至 2 句概括当前页面最重要的信息和一个需要留意的点，不要逐条罗列价格、评分、标签、机构或医生列表；页面下方会单独展示可跳转卡片。
             """.trimIndent()
             AgentIntent.PLANNING -> """
                 本轮是规划诉求。先给出简短的方向性建议；缺少健康筛查、预算或恢复期信息时，
@@ -642,7 +679,7 @@ class ChatService(
             else -> ""
         }
         return PromptBuildResult(
-            prompt = listOf(basePrompt, responsePolicy, contextInfo, intentPolicy).filter(String::isNotBlank).joinToString("\n\n"),
+            prompt = listOf(basePrompt, responsePolicy, contextInfo, detailSessionPolicy, intentPolicy).filter(String::isNotBlank).joinToString("\n\n"),
             groundingPrompt = evidenceInstruction,
             databaseSearched = shouldSearch,
             evidence = evidence
@@ -738,13 +775,194 @@ class ChatService(
         }
     }
 
+    private data class GenerationProfile(
+        val historyMessageLimit: Int,
+        val maxOutputTokens: Int,
+        val complexReasoning: Boolean
+    )
+
+    private fun generationProfile(intent: AgentIntent): GenerationProfile = when (intent) {
+        AgentIntent.GENERAL_CHAT -> GenerationProfile(
+            historyMessageLimit = 4,
+            maxOutputTokens = 280,
+            complexReasoning = false
+        )
+        AgentIntent.CATALOG_QA -> GenerationProfile(
+            historyMessageLimit = 4,
+            maxOutputTokens = 420,
+            complexReasoning = false
+        )
+        AgentIntent.DETAIL_SUMMARY -> GenerationProfile(
+            historyMessageLimit = 4,
+            maxOutputTokens = 260,
+            complexReasoning = false
+        )
+        AgentIntent.COMPARISON, AgentIntent.PLANNING, AgentIntent.SAFETY_SCREENING -> GenerationProfile(
+            historyMessageLimit = 6,
+            maxOutputTokens = 600,
+            complexReasoning = true
+        )
+    }
+
+    private fun reasoningEffort(profile: GenerationProfile): String? {
+        if (!openaiModel.trim().lowercase().startsWith("gpt-5")) return null
+        val configured = if (profile.complexReasoning) complexReasoningEffort else fastReasoningEffort
+        return configured.trim().lowercase().takeIf { it in setOf("none", "minimal", "low", "medium", "high") }
+    }
+
     private fun contextDetailSummary(content: String?): String {
-        val plainText = content.orEmpty()
+        val plainText = plainTextContent(content)
+        return plainText.take(800).ifBlank { "未提供" }
+    }
+
+    private fun currentContextCatalogItems(
+        contextType: String,
+        contextId: String
+    ): List<AgentCatalogItemResponse> {
+        val normalizedType = contextType.trim().uppercase()
+        val normalizedId = contextId.trim()
+        if (!isDetailContext(normalizedType) || normalizedId.isBlank()) return emptyList()
+        return try {
+            when (normalizedType) {
+                "PROJECT" -> projectRepository.findById(normalizedId).orElse(null)?.let { project ->
+                    listOf(
+                        AgentCatalogItemResponse(
+                            type = "PROJECT",
+                            id = project.id,
+                            name = project.name,
+                            subtitle = project.category,
+                            summary = project.description.ifBlank { project.slogan },
+                            attributes = linkedMapOf(
+                                AgentText.value("参考价", "Reference price") to "¥${project.referencePrice.toPlainString()}",
+                                AgentText.value("评分", "Rating") to project.rating.toPlainString(),
+                                AgentText.value("评价数", "Reviews") to project.reviewCount.toString(),
+                                AgentText.value("标签", "Tags") to project.tags,
+                                AgentText.value("宣传语", "Slogan") to project.slogan
+                            ).filterValues { it.isNotBlank() },
+                            projectId = project.id
+                        )
+                    )
+                }.orEmpty()
+
+                "INSTITUTION" -> institutionRepository.findById(normalizedId).orElse(null)?.let { institution ->
+                    listOf(
+                        AgentCatalogItemResponse(
+                            type = "INSTITUTION",
+                            id = institution.id,
+                            name = institution.name,
+                            subtitle = institution.city,
+                            summary = institution.description,
+                            attributes = linkedMapOf(
+                                AgentText.value("评分", "Rating") to institution.rating.toPlainString(),
+                                AgentText.value("评价数", "Reviews") to institution.reviewCount.toString(),
+                                AgentText.value("认证", "Verified") to AgentText.value(
+                                    if (institution.isVerified) "已认证" else "未认证",
+                                    if (institution.isVerified) "Verified" else "Not verified"
+                                ),
+                                AgentText.value("医生数", "Doctors") to institution.doctorCount.toString(),
+                                AgentText.value("项目数", "Projects") to institution.projectCount.toString(),
+                                AgentText.value("特色", "Specialties") to institution.specialties,
+                                AgentText.value("地址", "Address") to institution.address
+                            ).filterValues { it.isNotBlank() },
+                            institutionId = institution.id,
+                            canChatWithHuman = true
+                        )
+                    )
+                }.orEmpty()
+
+                "DOCTOR" -> doctorRepository.findById(normalizedId).orElse(null)?.let { doctor ->
+                    val institutions = doctorInstitutionService.institutionsFor(doctor.id)
+                    val selectedInstitution = institutions.firstOrNull { it.id == doctor.institutionId }
+                        ?: institutions.firstOrNull()
+                    val institutionLabel = institutions.take(2).joinToString("、") { it.name } +
+                        if (institutions.size > 2) AgentText.value("等${institutions.size}家", " +${institutions.size - 2}") else ""
+                    listOf(
+                        AgentCatalogItemResponse(
+                            type = "DOCTOR",
+                            id = doctor.id,
+                            name = doctor.name,
+                            subtitle = listOf(doctor.title, institutionLabel.ifBlank { doctor.institutionName })
+                                .filter { it.isNotBlank() }
+                                .joinToString(" · "),
+                            summary = doctor.bio,
+                            attributes = linkedMapOf(
+                                AgentText.value("评分", "Rating") to doctor.rating.toPlainString(),
+                                AgentText.value("评价数", "Reviews") to doctor.reviewCount.toString(),
+                                AgentText.value("认证", "Verified") to AgentText.value(
+                                    if (doctor.isVerified) "已认证" else "未认证",
+                                    if (doctor.isVerified) "Verified" else "Not verified"
+                                ),
+                                AgentText.value("专长", "Specialties") to doctor.specialties,
+                                AgentText.value("资质", "Credentials") to doctor.credentials,
+                                AgentText.value("出诊机构", "Clinics") to institutions.joinToString("、") { it.name }
+                            ).filterValues { it.isNotBlank() },
+                            institutionId = selectedInstitution?.id,
+                            canChatWithHuman = selectedInstitution != null
+                        )
+                    )
+                }.orEmpty()
+
+                "INSTITUTION_PROJECT" -> {
+                    val offering = institutionProjectRepository.findById(normalizedId).orElse(null)?.takeIf { it.isActive }
+                    if (offering == null) {
+                        emptyList()
+                    } else {
+                        val project = projectRepository.findById(offering.projectId).orElse(null)
+                        val institution = institutionRepository.findById(offering.institutionId).orElse(null)
+                        if (project == null || institution == null) {
+                            emptyList()
+                        } else {
+                            val effective = institutionProjectDetailResolver.resolve(offering, project)
+                            listOf(
+                                AgentCatalogItemResponse(
+                                    type = "INSTITUTION_PROJECT",
+                                    id = offering.id,
+                                    name = "${institution.name} · ${effective.name}",
+                                    subtitle = listOf(institution.city, effective.category)
+                                        .filter { it.isNotBlank() }
+                                        .joinToString(" · "),
+                                    summary = effective.description,
+                                    attributes = linkedMapOf(
+                                        AgentText.value("机构价格", "Clinic price") to "¥${offering.price.toPlainString()}",
+                                        AgentText.value("项目参考价", "Reference price") to "¥${project.referencePrice.toPlainString()}",
+                                        AgentText.value("评分", "Rating") to effective.rating.toPlainString(),
+                                        AgentText.value("评价数", "Review count") to effective.reviewCount.toString(),
+                                        AgentText.value("标签", "Tags") to effective.tags,
+                                        AgentText.value("宣传语", "Slogan") to effective.slogan,
+                                        AgentText.value("详情摘要", "Detail summary") to cardDetailSummary(effective.detailContent),
+                                        AgentText.value("销量", "Sales") to offering.salesCount.toString(),
+                                        AgentText.value("机构认证", "Clinic verified") to AgentText.value(
+                                            if (institution.isVerified) "已认证" else "未认证",
+                                            if (institution.isVerified) "Verified" else "Not verified"
+                                        )
+                                    ).filterValues { it.isNotBlank() },
+                                    institutionId = institution.id,
+                                    projectId = project.id,
+                                    canChatWithHuman = true
+                                )
+                            )
+                        }
+                    }
+                }
+
+                else -> emptyList()
+            }
+        } catch (e: Exception) {
+            logger.warn("构建当前上下文卡片失败: contextType=$normalizedType, contextId=$normalizedId, error=${e.message}")
+            emptyList()
+        }
+    }
+
+    private fun cardDetailSummary(content: String?): String = plainTextContent(content).take(220)
+
+    private fun plainTextContent(content: String?): String =
+        content.orEmpty()
             .replace(Regex("<[^>]+>"), " ")
             .replace("&nbsp;", " ")
             .replace("&#160;", " ")
             .replace(Regex("\\s+"), " ")
             .trim()
-        return plainText.take(800).ifBlank { "未提供" }
-    }
+
+    private fun isDetailContext(contextType: String): Boolean =
+        contextType.trim().uppercase() in setOf("PROJECT", "INSTITUTION", "INSTITUTION_PROJECT", "DOCTOR")
 }

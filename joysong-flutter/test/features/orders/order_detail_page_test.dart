@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
 import 'package:joysong_flutter/features/orders/presentation/order_detail_page.dart';
@@ -27,12 +28,24 @@ void main() {
     );
 
     await tester.pumpWidget(
-      MaterialApp(home: OrderDetailPage(controller: controller)),
+      MaterialApp(
+        locale: const Locale('zh'),
+        supportedLocales: const [Locale('en'), Locale('zh')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
+        home: OrderDetailPage(controller: controller),
+      ),
     );
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('order-verification-code')), findsOneWidget);
-    expect(find.text('123456'), findsOneWidget);
+    final verificationCode = find.byKey(
+      const Key('order-verification-code'),
+      skipOffstage: false,
+    );
+    await tester.scrollUntilVisible(verificationCode, 300);
+    expect(verificationCode, findsOneWidget);
+    expect(tester.widget<Text>(verificationCode).data, '123456');
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -120));
+    await tester.pumpAndSettle();
     expect(find.textContaining('用户端不会自行核销'), findsOneWidget);
     expect(find.textContaining('专业端核销'), findsNothing);
   });
@@ -52,7 +65,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('pay-balance-button')), findsOneWidget);
+    final payBalanceButton = find.byKey(
+      const Key('pay-balance-button'),
+      skipOffstage: false,
+    );
+    await tester.scrollUntilVisible(payBalanceButton, 300);
+    expect(payBalanceButton, findsOneWidget);
     expect(find.byKey(const Key('pay-consultation-button')), findsNothing);
     expect(find.byKey(const Key('confirm-completion-button')), findsNothing);
   });
@@ -90,7 +108,7 @@ void main() {
     await tester.scrollUntilVisible(reviewButton, 300);
     await tester.tap(reviewButton);
     await tester.pumpAndSettle();
-    expect(find.text('Write a review'), findsNWidgets(2));
+    expect(find.text('Write a review'), findsOneWidget);
     await tester.enterText(
       find.byKey(const Key('review-content-field')),
       'Excellent service',
@@ -104,6 +122,72 @@ void main() {
     expect(socialRepository.reviewDraft?.rating, 4);
     expect(socialRepository.reviewDraft?.content, 'Excellent service');
     expect(find.text('Review submitted'), findsOneWidget);
+  });
+
+  testWidgets('loads and updates an existing review from order details', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final ordersRepository = FakeOrdersRepository()
+      ..orders = [
+        sampleOrder(
+          status: OrderStatus.pendingSettlement,
+          hasReview: true,
+        ),
+      ];
+    final socialRepository = _FakeSocialRepository()
+      ..existingReview = Review(
+        id: 'review-1',
+        orderId: 'order-1',
+        userId: 'user-1',
+        rating: 4,
+        content: 'Original review',
+        tags: const ['clean'],
+        images: const ['https://cdn.example/review.jpg'],
+      );
+    final orderController = OrderDetailController(
+      ordersRepository,
+      orderId: 'order-1',
+    );
+    final socialController = SocialController(socialRepository);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('en'),
+        supportedLocales: const [Locale('en')],
+        home: OrderDetailPage(
+          controller: orderController,
+          socialController: socialController,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final editButton = find.byKey(const Key('edit-review-button'));
+    await tester.scrollUntilVisible(editButton, 300);
+    await tester.tap(editButton);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Edit review'), findsOneWidget);
+    expect(find.text('Original review'), findsOneWidget);
+    expect(find.text('clean'), findsOneWidget);
+    expect(find.byKey(const Key('review-image-preview-0')), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const Key('review-content-field')),
+      'Updated review',
+    );
+    await tester.tap(find.byKey(const Key('review-rating-5')));
+    await tester.tap(find.byKey(const Key('review-submit-button')));
+    await tester.pumpAndSettle();
+
+    expect(socialRepository.updatedReviewId, 'review-1');
+    expect(socialRepository.updatedReviewDraft?.content, 'Updated review');
+    expect(socialRepository.updatedReviewDraft?.rating, 5);
+    expect(socialRepository.reviewOrderId, isNull);
+    expect(find.text('Review updated'), findsOneWidget);
   });
 
   testWidgets('uploads and passes optional refund evidence URL', (
@@ -134,10 +218,7 @@ void main() {
     await tester.scrollUntilVisible(refundButton, 300);
     await tester.tap(refundButton);
     await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const Key('refund-reason-field')),
-      '行程变化',
-    );
+    await tester.tap(find.byKey(const Key('refund-reason-0')));
     await tester.tap(find.text('Add optional evidence'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
@@ -145,7 +226,7 @@ void main() {
     await tester.tap(find.byKey(const Key('refund-submit-button')));
     await tester.pumpAndSettle();
 
-    expect(ordersRepository.lastRefundReason, '行程变化');
+    expect(ordersRepository.lastRefundReason, 'Changed my mind');
     expect(
       ordersRepository.lastRefundEvidenceUrl,
       'https://cdn.example/evidence.jpg',
@@ -154,8 +235,14 @@ void main() {
 }
 
 class _FakeSocialRepository implements SocialRepository {
+  Review? existingReview;
   String? reviewOrderId;
   ReviewDraft? reviewDraft;
+  String? updatedReviewId;
+  ReviewDraft? updatedReviewDraft;
+
+  @override
+  Future<Review?> getOrderReview(String orderId) async => existingReview;
 
   @override
   Future<Review> submitOrderReview(String orderId, ReviewDraft draft) async {
@@ -169,6 +256,25 @@ class _FakeSocialRepository implements SocialRepository {
       content: draft.content,
       tags: draft.tags,
       images: draft.images,
+    );
+  }
+
+  @override
+  Future<Review> updateReview(String reviewId, ReviewDraft draft) async {
+    updatedReviewId = reviewId;
+    updatedReviewDraft = draft;
+    final current = existingReview!;
+    return existingReview = Review(
+      id: current.id,
+      orderId: current.orderId,
+      userId: current.userId,
+      userName: current.userName,
+      doctorId: current.doctorId,
+      rating: draft.rating,
+      content: draft.content,
+      tags: draft.tags,
+      images: draft.images,
+      createdAt: current.createdAt,
     );
   }
 

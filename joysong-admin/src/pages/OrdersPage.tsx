@@ -44,6 +44,7 @@ export default function OrdersPage() {
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
   const [keyword, setKeyword] = useState('');
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [manualVerifyingId, setManualVerifyingId] = useState<string | null>(null);
 
   // 状态变更弹窗
   const [transitionVisible, setTransitionVisible] = useState(false);
@@ -122,6 +123,19 @@ export default function OrdersPage() {
       setLogData([]);
     } finally {
       setLogLoading(false);
+    }
+  };
+
+  const handleManualVerify = async (record: any) => {
+    setManualVerifyingId(record.id);
+    try {
+      await api.post(`/admin/orders/${record.id}/manual-verify`);
+      message.success('机构核销已手动完成');
+      fetchData();
+    } catch (error) {
+      message.error(getApiErrorMessage(error, '手动核销失败'));
+    } finally {
+      setManualVerifyingId(null);
     }
   };
 
@@ -222,9 +236,26 @@ export default function OrdersPage() {
     { title: '创建时间', dataIndex: 'createdAt', width: 160 },
     { title: '预约时间', dataIndex: 'appointmentTime', width: 160 },
     {
-      title: '操作', key: 'actions', width: 200, fixed: 'right' as const,
+      title: '操作', key: 'actions', width: 300, fixed: 'right' as const,
       render: (_: any, record: any) => (
         <Space size="small">
+          {isAdmin && record.status === 'CONSULTATION_PAID' && (
+            <Popconfirm
+              title="手动完成机构核销？"
+              description="仅用于测试，将跳过用户核销码并把订单变更为已核验。"
+              okText="确认核销"
+              cancelText="取消"
+              onConfirm={() => handleManualVerify(record)}
+            >
+              <Button
+                size="small"
+                icon={<SafetyCertificateOutlined />}
+                loading={manualVerifyingId === record.id}
+              >
+                手动核销（测试）
+              </Button>
+            </Popconfirm>
+          )}
           {isAdmin && <Button
             icon={<SwapOutlined />}
             size="small"

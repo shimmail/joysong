@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/core/network/optimized_network_image.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/social/presentation/diary_media_grid.dart';
 
@@ -787,11 +788,10 @@ class _Cover extends StatelessWidget {
     if (url.isEmpty) return fallback;
     return ClipRRect(
       borderRadius: BorderRadius.circular(10),
-      child: Image.network(
-        url,
+      child: OptimizedNetworkImage(
+        url: url,
         width: width,
         height: height,
-        fit: BoxFit.cover,
         errorBuilder: (_, __, ___) => fallback,
       ),
     );

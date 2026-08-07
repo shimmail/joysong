@@ -13,6 +13,8 @@ abstract interface class SocialRepository {
 
   Future<void> deleteDiary(String id);
 
+  Future<String> createDiaryShareUrl(String id);
+
   Future<List<Comment>> getComments(
     String diaryId, {
     int offset = 0,

@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
+import 'package:joysong_flutter/features/social/domain/social_repository.dart';
 import 'package:share_plus/share_plus.dart';
 
-Future<void> shareDiary(BuildContext context, Diary diary) async {
+Future<void> shareDiary(
+  BuildContext context,
+  Diary diary, {
+  required SocialRepository repository,
+}) async {
   final title = diary.title.trim();
   final author = diary.authorName.trim();
   final content = diary.content.trim();
@@ -29,8 +34,9 @@ Future<void> shareDiary(BuildContext context, Diary diary) async {
       : null;
 
   try {
+    final shareUrl = await repository.createDiaryShareUrl(diary.id);
     await Share.share(
-      lines.join('\n\n'),
+      [...lines, shareUrl].join('\n\n'),
       subject: title.isEmpty
           ? context.localized('医美日记', 'Medical aesthetics diary')
           : title,

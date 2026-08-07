@@ -14,6 +14,7 @@ interface Field {
   options?: Option[];
   required?: boolean;
   folder?: string;
+  recommendedSize?: string;
   disabledOnEdit?: boolean;
   help?: string;
   placeholder?: string;
@@ -171,7 +172,7 @@ export default function CrudPage({
                f.type === 'switch' ? <Switch disabled={f.disabled || Boolean(editingId && f.disabledOnEdit)} /> :
                f.type === 'select' ? <Select options={f.options} showSearch optionFilterProp="label" allowClear style={{ width: '100%' }} disabled={f.disabled || Boolean(editingId && f.disabledOnEdit)} placeholder={f.placeholder} /> :
                f.type === 'multi-select' ? <Select mode="multiple" options={f.options} showSearch optionFilterProp="label" allowClear style={{ width: '100%' }} disabled={f.disabled || Boolean(editingId && f.disabledOnEdit)} placeholder={f.placeholder} /> :
-               f.type === 'image' ? <ImageUpload folder={f.folder || f.key} /> :
+               f.type === 'image' ? <ImageUpload folder={f.folder || f.key} recommendedSize={f.recommendedSize} /> :
                f.type === 'multi-image' ? <MultiImageUpload folder={f.folder || f.key} /> :
                <Input disabled={f.disabled || Boolean(editingId && f.disabledOnEdit)} placeholder={f.placeholder} />}
             </Form.Item>

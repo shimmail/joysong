@@ -88,7 +88,11 @@ final class _DiaryDetailPageState extends State<DiaryDetailPage> {
           IconButton(
             key: const Key('diary-share'),
             tooltip: _english ? 'Share diary' : '分享日记',
-            onPressed: () => shareDiary(context, widget.diary),
+            onPressed: () => shareDiary(
+              context,
+              widget.diary,
+              repository: widget.controller.repository,
+            ),
             icon: const Icon(Icons.share_outlined),
           ),
           ReportActionButton(

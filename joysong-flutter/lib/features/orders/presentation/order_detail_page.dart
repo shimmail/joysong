@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/files/app_file_picker.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
+import 'package:joysong_flutter/features/orders/domain/payment_models.dart';
 import 'package:joysong_flutter/features/orders/presentation/orders_controller.dart';
+import 'package:joysong_flutter/features/orders/presentation/payment_action_launcher.dart';
+import 'package:joysong_flutter/features/orders/presentation/payment_controller.dart';
+import 'package:joysong_flutter/features/orders/presentation/payment_page.dart';
+import 'package:joysong_flutter/features/orders/presentation/review_order_controller.dart';
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
 import 'package:joysong_flutter/features/social/presentation/social_controller.dart';
 
@@ -28,6 +33,8 @@ class OrderDetailPage extends StatefulWidget {
 }
 
 class _OrderDetailPageState extends State<OrderDetailPage> {
+  bool _reviewBusy = false;
+
   @override
   void initState() {
     super.initState();
@@ -43,16 +50,16 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('请确认'),
+          title: Text(_isEnglish(context) ? 'Please confirm' : '请确认'),
           content: Text(confirmation),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('暂不'),
+              child: Text(_isEnglish(context) ? 'Not now' : '暂不'),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('确认'),
+              child: Text(_isEnglish(context) ? 'Confirm' : '确认'),
             ),
           ],
         ),
@@ -84,7 +91,10 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     }
   }
 
-  Future<String?> _pickAndUpload(PublicMediaPurpose purpose) async {
+  Future<String?> _pickAndUpload(
+    PublicMediaPurpose purpose, {
+    bool propagateError = false,
+  }) async {
     final uploadImage = widget.uploadImage;
     if (uploadImage != null) return uploadImage(purpose);
     final socialController = widget.socialController;
@@ -102,6 +112,9 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
         ),
       );
       if (result.succeeded) return result.value;
+      if (propagateError) {
+        throw StateError(result.message ?? 'Image upload failed');
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -113,6 +126,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
         );
       }
     } on Object catch (error) {
+      if (propagateError) rethrow;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(error.toString())),
@@ -125,18 +139,26 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
   Future<void> _submitReview() async {
     final socialController = widget.socialController;
     final order = widget.controller.order;
-    if (socialController == null || order == null) return;
+    if (socialController == null || order == null || _reviewBusy) return;
+    setState(() => _reviewBusy = true);
     final draft = await Navigator.of(context).push<ReviewDraft>(
       MaterialPageRoute(
         builder: (_) => ReviewOrderPage(
           order: order,
-          onPickImage: () => _pickAndUpload(PublicMediaPurpose.review),
+          onPickImage: () => _pickAndUpload(
+            PublicMediaPurpose.review,
+            propagateError: true,
+          ),
         ),
       ),
     );
-    if (draft == null || !mounted) return;
+    if (draft == null || !mounted) {
+      if (mounted) setState(() => _reviewBusy = false);
+      return;
+    }
     final result = await socialController.submitOrderReview(order.id, draft);
     if (!mounted) return;
+    setState(() => _reviewBusy = false);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
@@ -146,6 +168,59 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                   (_isEnglish(context)
                       ? 'Review submission failed'
                       : '评价提交失败')),
+        ),
+      ),
+    );
+    if (result.succeeded) await widget.controller.load();
+  }
+
+  Future<void> _editReview() async {
+    final socialController = widget.socialController;
+    final order = widget.controller.order;
+    if (socialController == null || order == null || _reviewBusy) return;
+    setState(() => _reviewBusy = true);
+    final loaded = await socialController.loadOrderReview(order.id);
+    if (!mounted) return;
+    final review = loaded.value;
+    if (!loaded.succeeded || review == null) {
+      setState(() => _reviewBusy = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            loaded.message ??
+                (_isEnglish(context) ? 'Unable to load the review' : '评价加载失败'),
+          ),
+        ),
+      );
+      return;
+    }
+    final draft = await Navigator.of(context).push<ReviewDraft>(
+      MaterialPageRoute(
+        builder: (_) => ReviewOrderPage(
+          order: order,
+          initialReview: review,
+          onPickImage: () => _pickAndUpload(
+            PublicMediaPurpose.review,
+            propagateError: true,
+          ),
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (draft == null) {
+      setState(() => _reviewBusy = false);
+      return;
+    }
+    final result = await socialController.updateReview(review.id, draft);
+    if (!mounted) return;
+    setState(() => _reviewBusy = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          result.succeeded
+              ? (_isEnglish(context) ? 'Review updated' : '评价已修改')
+              : (result.message ??
+                  (_isEnglish(context) ? 'Review update failed' : '评价修改失败')),
         ),
       ),
     );
@@ -222,25 +297,40 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
           onPayBalance: () => _openPayment(order, balance: true),
           onConfirmCompletion: () => _run(
             controller.confirmCompletion,
-            confirmation: '请确认项目服务已经全部完成。确认后将进入完成与结算流程。',
+            confirmation: _isEnglish(context)
+                ? 'Confirm that the service is complete. The order will then enter completion and settlement.'
+                : '请确认项目服务已经全部完成。确认后将进入完成与结算流程。',
           ),
           onCancel: () => _run(
             controller.cancel,
-            confirmation: '待支付订单取消后会从列表移除，确定继续吗？',
+            confirmation: _isEnglish(context)
+                ? 'The unpaid order will be removed from the list after cancellation. Continue?'
+                : '待支付订单取消后会从列表移除，确定继续吗？',
             closesAfterSuccess: true,
           ),
           onRefund: _requestRefund,
           onReview: _submitReview,
+          onEditReview: _editReview,
           canReview: widget.socialController != null &&
-              order.status == OrderStatus.completed &&
+              const {
+                OrderStatus.completed,
+                OrderStatus.pendingSettlement,
+                OrderStatus.settled,
+              }.contains(order.status) &&
               !order.hasReview,
+          canEditReview: widget.socialController != null && order.hasReview,
+          reviewBusy: _reviewBusy,
           onCancelRefund: () => _run(
             controller.cancelRefund,
-            confirmation: '确定撤销当前退款申请吗？',
+            confirmation: _isEnglish(context)
+                ? 'Withdraw the current refund request?'
+                : '确定撤销当前退款申请吗？',
           ),
           onDelete: () => _run(
             controller.delete,
-            confirmation: '删除后订单将不再显示，确定继续吗？',
+            confirmation: _isEnglish(context)
+                ? 'This order will no longer be shown after deletion. Continue?'
+                : '删除后订单将不再显示，确定继续吗？',
             closesAfterSuccess: true,
           ),
         ),
@@ -249,15 +339,34 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
   }
 
   Future<void> _openPayment(Order order, {required bool balance}) async {
-    final paid = await Navigator.of(context).push<bool>(MaterialPageRoute(
-      builder: (_) => OrderPaymentPage(
-        order: order,
-        balance: balance,
-        onPay: balance
-            ? widget.controller.payBalance
-            : widget.controller.payConsultation,
-      ),
-    ));
+    final providers = enabledPaymentProviders();
+    if (providers.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _isEnglish(context)
+                ? 'Payment is not available yet. Please try again later.'
+                : '支付服务暂未开放，请稍后再试。',
+          ),
+        ),
+      );
+      return;
+    }
+    final controller = PaymentController(
+      repository: widget.controller.repository,
+      order: order,
+      paymentType: balance ? PaymentType.balance : PaymentType.consultationFee,
+      providers: providers,
+      actionLauncher: const MobilePaymentActionLauncher(),
+    );
+    bool? paid;
+    try {
+      paid = await Navigator.of(context).push<bool>(MaterialPageRoute(
+        builder: (_) => PaymentPage(controller: controller),
+      ));
+    } finally {
+      controller.dispose();
+    }
     if (paid == true && mounted) await widget.controller.load();
   }
 }
@@ -287,8 +396,16 @@ class _StatusHeader extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(statusLabel,
-                      style: Theme.of(context).textTheme.titleLarge),
+                  Text(
+                    statusLabel,
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          color: _orderStatusColor(
+                            context,
+                            order.status,
+                            order.refundStatus,
+                          ),
+                        ),
+                  ),
                   const SizedBox(height: 3),
                   Text(
                     order.orderNo.isEmpty
@@ -306,6 +423,27 @@ class _StatusHeader extends StatelessWidget {
   }
 }
 
+Color _orderStatusColor(
+  BuildContext context,
+  OrderStatus status,
+  RefundStatus refundStatus,
+) {
+  final colors = Theme.of(context).colorScheme;
+  if (refundStatus == RefundStatus.pending ||
+      refundStatus == RefundStatus.approved) {
+    return refundStatus == RefundStatus.approved
+        ? colors.onSurfaceVariant
+        : colors.tertiary;
+  }
+  return switch (status) {
+    OrderStatus.completed || OrderStatus.settled => Colors.green.shade700,
+    OrderStatus.cancelled || OrderStatus.refunded => colors.onSurfaceVariant,
+    OrderStatus.disputeMediation => colors.error,
+    OrderStatus.pendingPayment || OrderStatus.verified => colors.primary,
+    _ => colors.secondary,
+  };
+}
+
 class _OrderInformation extends StatelessWidget {
   const _OrderInformation({required this.order});
 
@@ -313,20 +451,32 @@ class _OrderInformation extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => _DetailPanel(
-        title: '预约信息',
+        title: _isEnglish(context) ? 'Appointment' : '预约信息',
         children: [
-          _DetailLine(label: '项目', value: order.projectName),
+          _DetailLine(
+            label: _isEnglish(context) ? 'Service' : '项目',
+            value: order.projectName,
+          ),
           if (order.institutionName.isNotEmpty)
-            _DetailLine(label: '机构', value: order.institutionName),
+            _DetailLine(
+              label: _isEnglish(context) ? 'Institution' : '机构',
+              value: order.institutionName,
+            ),
           if (order.doctorName.isNotEmpty)
-            _DetailLine(label: '医生', value: order.doctorName),
+            _DetailLine(
+              label: _isEnglish(context) ? 'Doctor' : '医生',
+              value: order.doctorName,
+            ),
           if (order.appointmentTime != null)
             _DetailLine(
-              label: '预约时间',
+              label: _isEnglish(context) ? 'Appointment time' : '预约时间',
               value: _detailDateTime(order.appointmentTime!),
             ),
           if (order.remark.isNotEmpty)
-            _DetailLine(label: '备注', value: order.remark),
+            _DetailLine(
+              label: _isEnglish(context) ? 'Notes' : '备注',
+              value: order.remark,
+            ),
         ],
       );
 }
@@ -338,18 +488,34 @@ class _PaymentInformation extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => _DetailPanel(
-        title: '费用信息',
+        title: _isEnglish(context) ? 'Payment details' : '费用信息',
         children: [
-          _DetailLine(label: '订单金额', value: order.amount.formatted),
+          _DetailLine(
+            label: _isEnglish(context) ? 'Order total' : '订单金额',
+            value: order.amount.formatted,
+          ),
           if (!order.discountAmount.isZero)
             _DetailLine(
-                label: '优惠金额', value: '-${order.discountAmount.formatted}'),
-          _DetailLine(label: '面诊费', value: order.consultationFee.formatted),
-          _DetailLine(label: '尾款', value: order.remainingAmount.formatted),
-          _DetailLine(label: '已支付', value: order.paidAmount.formatted),
+              label: _isEnglish(context) ? 'Discount' : '优惠金额',
+              value: '-${order.discountAmount.formatted}',
+            ),
+          _DetailLine(
+            label: _isEnglish(context) ? 'Consultation fee' : '面诊费',
+            value: order.consultationFee.formatted,
+          ),
+          _DetailLine(
+            label: _isEnglish(context) ? 'Balance' : '尾款',
+            value: order.remainingAmount.formatted,
+          ),
+          _DetailLine(
+            label: _isEnglish(context) ? 'Paid' : '已支付',
+            value: order.paidAmount.formatted,
+          ),
           const SizedBox(height: 6),
           Text(
-            '支付接口当前仅用于内部流程占位，不代表微信、支付宝等渠道已真实到账。',
+            _isEnglish(context)
+                ? 'The final payment result is confirmed securely by the server. Do not pay again while a payment is processing.'
+                : '支付结果由服务端安全确认。支付处理中请勿重复发起付款。',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
@@ -412,16 +578,25 @@ class _RefundCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => _DetailPanel(
-        title: '退款信息',
+        title: _isEnglish(context) ? 'Refund details' : '退款信息',
         children: [
           _DetailLine(
             label: _isEnglish(context) ? 'Status' : '状态',
             value: _refundStatusText(context, refund.status),
           ),
-          _DetailLine(label: '金额', value: refund.amount.formatted),
-          _DetailLine(label: '原因', value: refund.reason),
+          _DetailLine(
+            label: _isEnglish(context) ? 'Amount' : '金额',
+            value: refund.amount.formatted,
+          ),
+          _DetailLine(
+            label: _isEnglish(context) ? 'Reason' : '原因',
+            value: refund.reason,
+          ),
           if (refund.description.isNotEmpty)
-            _DetailLine(label: '说明', value: refund.description),
+            _DetailLine(
+              label: _isEnglish(context) ? 'Details' : '说明',
+              value: refund.description,
+            ),
         ],
       );
 }
@@ -433,13 +608,19 @@ class _SettlementCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => _DetailPanel(
-        title: '结算进度',
+        title: _isEnglish(context) ? 'Settlement progress' : '结算进度',
         children: [
-          _DetailLine(label: '状态', value: settlement.status),
-          _DetailLine(label: '订单总额', value: settlement.totalAmount.formatted),
+          _DetailLine(
+            label: _isEnglish(context) ? 'Status' : '状态',
+            value: settlement.status,
+          ),
+          _DetailLine(
+            label: _isEnglish(context) ? 'Order total' : '订单总额',
+            value: settlement.totalAmount.formatted,
+          ),
           if (settlement.settledAt != null)
             _DetailLine(
-              label: '结算时间',
+              label: _isEnglish(context) ? 'Settled at' : '结算时间',
               value: _detailDateTime(settlement.settledAt!),
             ),
         ],
@@ -480,7 +661,10 @@ class _OrderActions extends StatelessWidget {
     required this.onCancel,
     required this.onRefund,
     required this.onReview,
+    required this.onEditReview,
     required this.canReview,
+    required this.canEditReview,
+    required this.reviewBusy,
     required this.onCancelRefund,
     required this.onDelete,
   });
@@ -494,7 +678,10 @@ class _OrderActions extends StatelessWidget {
   final VoidCallback onCancel;
   final VoidCallback onRefund;
   final VoidCallback onReview;
+  final VoidCallback onEditReview;
   final bool canReview;
+  final bool canEditReview;
+  final bool reviewBusy;
   final VoidCallback onCancelRefund;
   final VoidCallback onDelete;
 
@@ -553,8 +740,14 @@ class _OrderActions extends StatelessWidget {
         if (canReview)
           FilledButton.tonal(
             key: const Key('submit-review-button'),
-            onPressed: busy ? null : onReview,
+            onPressed: busy || reviewBusy ? null : onReview,
             child: Text(_isEnglish(context) ? 'Write a review' : '去评价'),
+          ),
+        if (canEditReview)
+          FilledButton.tonal(
+            key: const Key('edit-review-button'),
+            onPressed: busy || reviewBusy ? null : onEditReview,
+            child: Text(_isEnglish(context) ? 'Edit review' : '修改评价'),
           ),
         if (order.canDelete)
           TextButton(
@@ -694,160 +887,52 @@ String _refundStatusText(BuildContext context, RefundStatus status) {
 bool _isEnglish(BuildContext context) =>
     Localizations.localeOf(context).languageCode == 'en';
 
-class OrderPaymentPage extends StatefulWidget {
-  const OrderPaymentPage({
-    required this.order,
-    required this.balance,
-    required this.onPay,
-    super.key,
-  });
-
-  final Order order;
-  final bool balance;
-  final Future<bool> Function() onPay;
-
-  @override
-  State<OrderPaymentPage> createState() => _OrderPaymentPageState();
-}
-
-class _OrderPaymentPageState extends State<OrderPaymentPage> {
-  bool _paying = false;
-  bool _succeeded = false;
-
-  Future<void> _pay() async {
-    setState(() => _paying = true);
-    final success = await widget.onPay();
-    if (!mounted) return;
-    setState(() {
-      _paying = false;
-      _succeeded = success;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final english = _isEnglish(context);
-    final amount = widget.balance
-        ? widget.order.remainingAmount
-        : widget.order.consultationFee;
-    if (_succeeded) {
-      return Scaffold(
-        appBar: AppBar(
-          automaticallyImplyLeading: false,
-          title: Text(english ? 'Payment result' : '支付结果'),
-        ),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.check_circle,
-                  size: 76, color: Theme.of(context).colorScheme.primary),
-              const SizedBox(height: 18),
-              Text(english ? 'Payment completed' : '支付完成',
-                  style: Theme.of(context).textTheme.headlineSmall),
-              const SizedBox(height: 8),
-              Text(english
-                  ? 'The order status has been updated.'
-                  : '订单状态已经更新，请按预约时间到店。'),
-              const SizedBox(height: 24),
-              FilledButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: Text(english ? 'Back to order' : '返回订单'),
-              ),
-            ]),
-          ),
-        ),
-      );
-    }
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.balance
-            ? (english ? 'Pay balance' : '支付尾款')
-            : (english ? 'Pay consultation fee' : '支付面诊金')),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          _FlowOrderSummary(order: widget.order),
-          const SizedBox(height: 18),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(children: [
-                Text(english ? 'Amount due' : '应付金额'),
-                const SizedBox(height: 8),
-                Text(amount.formatted,
-                    style: Theme.of(context).textTheme.headlineMedium),
-              ]),
-            ),
-          ),
-          const SizedBox(height: 12),
-          ListTile(
-            leading: const Icon(Icons.shield_outlined),
-            title: Text(english ? 'Payment notice' : '支付说明'),
-            subtitle: Text(english
-                ? 'The current endpoint is a workflow placeholder and does not represent a real third-party charge.'
-                : '当前后端支付接口为流程占位，不代表微信、支付宝等第三方渠道已经真实扣款。'),
-          ),
-        ],
-      ),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: FilledButton(
-            onPressed: _paying ? null : _pay,
-            child: _paying
-                ? const SizedBox.square(
-                    dimension: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : Text('${english ? 'Pay' : '确认支付'} ${amount.formatted}'),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _FlowOrderSummary extends StatelessWidget {
   const _FlowOrderSummary({required this.order});
+
   final Order order;
 
   @override
   Widget build(BuildContext context) => Card(
         child: Padding(
           padding: const EdgeInsets.all(16),
-          child: Row(children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: SizedBox.square(
-                dimension: 64,
-                child: order.coverImage.isEmpty
-                    ? const Icon(Icons.spa_outlined)
-                    : Image.network(
-                        order.coverImage,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) =>
-                            const Icon(Icons.broken_image_outlined),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: SizedBox.square(
+                  dimension: 64,
+                  child: order.coverImage.isEmpty
+                      ? const Icon(Icons.spa_outlined)
+                      : Image.network(
+                          order.coverImage,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) =>
+                              const Icon(Icons.broken_image_outlined),
+                        ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      order.projectName,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    if (order.institutionName.isNotEmpty)
+                      Text(order.institutionName),
+                    if (order.orderNo.isNotEmpty)
+                      Text(
+                        order.orderNo,
+                        style: Theme.of(context).textTheme.bodySmall,
                       ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(order.projectName,
-                      style: Theme.of(context).textTheme.titleMedium),
-                  if (order.institutionName.isNotEmpty)
-                    Text(order.institutionName),
-                  if (order.orderNo.isNotEmpty)
-                    Text(order.orderNo,
-                        style: Theme.of(context).textTheme.bodySmall),
-                ],
-              ),
-            ),
-          ]),
+            ],
+          ),
         ),
       );
 }
@@ -881,14 +966,15 @@ class RefundApplyPage extends StatefulWidget {
 }
 
 class _RefundApplyPageState extends State<RefundApplyPage> {
-  final _reason = TextEditingController();
+  final _customReason = TextEditingController();
   final _description = TextEditingController();
+  int? _selectedReasonIndex;
   String _evidenceUrl = '';
   bool _uploading = false;
 
   @override
   void dispose() {
-    _reason.dispose();
+    _customReason.dispose();
     _description.dispose();
     super.dispose();
   }
@@ -906,6 +992,22 @@ class _RefundApplyPageState extends State<RefundApplyPage> {
   @override
   Widget build(BuildContext context) {
     final english = _isEnglish(context);
+    final reasons = english
+        ? const [
+            'Changed my mind',
+            'Wrong appointment time',
+            'Wrong institution',
+            'Wrong project',
+            'Wrong doctor',
+            'Other',
+          ]
+        : const ['不想去了', '选错时间', '选错机构', '选错项目', '选错医生', '其他'];
+    final selectedReason =
+        _selectedReasonIndex == null ? '' : reasons[_selectedReasonIndex!];
+    final requiresCustomReason = _selectedReasonIndex == reasons.length - 1;
+    final canSubmit = !_uploading &&
+        selectedReason.isNotEmpty &&
+        (!requiresCustomReason || _customReason.text.trim().isNotEmpty);
     return Scaffold(
       appBar: AppBar(title: Text(english ? 'Request a refund' : '申请退款')),
       body: ListView(
@@ -913,22 +1015,68 @@ class _RefundApplyPageState extends State<RefundApplyPage> {
         children: [
           _FlowOrderSummary(order: widget.order),
           const SizedBox(height: 20),
-          TextField(
-            key: const Key('refund-reason-field'),
-            controller: _reason,
-            onChanged: (_) => setState(() {}),
-            maxLength: 100,
-            decoration: InputDecoration(
-              labelText: english ? 'Refund reason (required)' : '退款原因（必填）',
+          Text(
+            english ? 'Refund reason' : '退款原因',
+            style: Theme.of(context)
+                .textTheme
+                .titleMedium
+                ?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          Card(
+            margin: EdgeInsets.zero,
+            clipBehavior: Clip.antiAlias,
+            child: RadioGroup<int>(
+              groupValue: _selectedReasonIndex,
+              onChanged: (value) => setState(() {
+                _selectedReasonIndex = value;
+                if (value != reasons.length - 1) {
+                  _customReason.clear();
+                }
+              }),
+              child: Column(
+                children: [
+                  for (var index = 0; index < reasons.length; index++) ...[
+                    RadioListTile<int>(
+                      key: Key('refund-reason-$index'),
+                      value: index,
+                      title: Text(reasons[index]),
+                      dense: true,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                    ),
+                    if (index != reasons.length - 1)
+                      const Divider(height: 1, indent: 48),
+                  ],
+                ],
+              ),
             ),
           ),
+          if (requiresCustomReason) ...[
+            const SizedBox(height: 14),
+            TextField(
+              key: const Key('refund-custom-reason-field'),
+              controller: _customReason,
+              onChanged: (_) => setState(() {}),
+              maxLines: 2,
+              maxLength: 100,
+              decoration: InputDecoration(
+                labelText: english ? 'Other reason (required)' : '其他原因（必填）',
+                hintText:
+                    english ? 'Please enter your refund reason' : '请输入退款原因',
+              ),
+            ),
+          ],
           const SizedBox(height: 10),
           TextField(
+            key: const Key('refund-description-field'),
             controller: _description,
             maxLines: 3,
             maxLength: 500,
             decoration: InputDecoration(
-              labelText: english ? 'Additional details' : '补充说明',
+              labelText: english ? 'Additional details (optional)' : '退款说明（选填）',
+              hintText: english
+                  ? 'Add any information that may help with the review'
+                  : '可补充有助于审核的信息',
             ),
           ),
           if (widget.canUploadEvidence)
@@ -954,12 +1102,14 @@ class _RefundApplyPageState extends State<RefundApplyPage> {
           padding: const EdgeInsets.all(16),
           child: FilledButton(
             key: const Key('refund-submit-button'),
-            onPressed: _uploading || _reason.text.trim().isEmpty
+            onPressed: !canSubmit
                 ? null
                 : () => Navigator.pop(
                       context,
                       OrderRefundDraft(
-                        reason: _reason.text.trim(),
+                        reason: requiresCustomReason
+                            ? _customReason.text.trim()
+                            : selectedReason,
                         description: _description.text.trim(),
                         evidenceUrl: _evidenceUrl,
                       ),
@@ -976,121 +1126,282 @@ class ReviewOrderPage extends StatefulWidget {
   const ReviewOrderPage({
     required this.order,
     required this.onPickImage,
+    this.initialReview,
+    this.controller,
     super.key,
   });
 
   final Order order;
   final Future<String?> Function() onPickImage;
+  final Review? initialReview;
+  final ReviewOrderController? controller;
 
   @override
   State<ReviewOrderPage> createState() => _ReviewOrderPageState();
 }
 
 class _ReviewOrderPageState extends State<ReviewOrderPage> {
-  final _content = TextEditingController();
-  final _tags = TextEditingController();
-  int _rating = 5;
-  String _imageUrl = '';
-  bool _uploading = false;
+  late final TextEditingController _content;
+  late final TextEditingController _tags;
+  late final ReviewOrderController _controller;
+  late final bool _ownsController;
+
+  @override
+  void initState() {
+    super.initState();
+    _ownsController = widget.controller == null;
+    _controller = widget.controller ??
+        ReviewOrderController(initialReview: widget.initialReview);
+    _content = TextEditingController(text: _controller.content);
+    _tags = TextEditingController(text: _controller.tagsText);
+  }
 
   @override
   void dispose() {
     _content.dispose();
     _tags.dispose();
+    if (_ownsController) _controller.dispose();
     super.dispose();
-  }
-
-  Future<void> _pickImage() async {
-    setState(() => _uploading = true);
-    final url = await widget.onPickImage();
-    if (!mounted) return;
-    setState(() {
-      _uploading = false;
-      if (url != null) _imageUrl = url;
-    });
   }
 
   @override
   Widget build(BuildContext context) {
     final english = _isEnglish(context);
+    final editing = widget.initialReview != null;
     return Scaffold(
-      appBar: AppBar(title: Text(english ? 'Write a review' : '发表评价')),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          _FlowOrderSummary(order: widget.order),
-          const SizedBox(height: 20),
-          Text(english ? 'Rating' : '评分'),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (var value = 1; value <= 5; value++)
-                IconButton(
-                  key: Key('review-rating-$value'),
-                  tooltip: '$value',
-                  onPressed: () => setState(() => _rating = value),
-                  icon: Icon(
-                    value <= _rating ? Icons.star : Icons.star_border,
+      appBar: AppBar(
+        title: Text(
+          editing
+              ? (english ? 'Edit review' : '修改评价')
+              : (english ? 'Write a review' : '发表评价'),
+        ),
+      ),
+      body: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, _) => ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            _FlowOrderSummary(order: widget.order),
+            const SizedBox(height: 20),
+            Text(english ? 'Rating' : '评分'),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (var value = 1; value <= 5; value++)
+                  IconButton(
+                    key: Key('review-rating-$value'),
+                    tooltip: '$value',
+                    onPressed: () => _controller.setRating(value),
+                    icon: Icon(
+                      value <= _controller.rating
+                          ? Icons.star
+                          : Icons.star_border,
+                    ),
+                  ),
+              ],
+            ),
+            TextField(
+              key: const Key('review-content-field'),
+              controller: _content,
+              onChanged: _controller.setContent,
+              maxLines: 4,
+              maxLength: 2000,
+              decoration: InputDecoration(
+                labelText: english ? 'Review (required)' : '评价内容（必填）',
+              ),
+            ),
+            TextField(
+              key: const Key('review-tags-field'),
+              controller: _tags,
+              onChanged: _controller.setTags,
+              decoration: InputDecoration(
+                labelText: english ? 'Tags (separated by spaces)' : '标签（空格分隔）',
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    english ? 'Photos (optional)' : '图片（选填）',
+                    style: Theme.of(context).textTheme.titleSmall,
                   ),
                 ),
+                Text(
+                  '${_controller.imageUrls.length}/${ReviewDraft.maxImageCount}',
+                  key: const Key('review-image-count'),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                for (var index = 0;
+                    index < _controller.imageUrls.length;
+                    index++)
+                  _ReviewImagePreview(
+                    index: index,
+                    url: _controller.imageUrls[index],
+                    english: english,
+                    onRemove: () => _controller.removeImage(
+                      _controller.imageUrls[index],
+                    ),
+                  ),
+                if (_controller.imageUrls.length < ReviewDraft.maxImageCount)
+                  _ReviewImageAddTile(
+                    uploading: _controller.uploading,
+                    english: english,
+                    onTap: _controller.canAddImage
+                        ? () => _controller.pickAndUploadImage(
+                              widget.onPickImage,
+                            )
+                        : null,
+                  ),
+              ],
+            ),
+            if (_controller.uploadFailed) ...[
+              const SizedBox(height: 8),
+              Text(
+                english
+                    ? 'Image upload failed. Please try again.'
+                    : '图片上传失败，请重试。',
+                key: const Key('review-image-upload-error'),
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
             ],
-          ),
-          TextField(
-            key: const Key('review-content-field'),
-            controller: _content,
-            onChanged: (_) => setState(() {}),
-            maxLines: 4,
-            maxLength: 2000,
-            decoration: InputDecoration(
-              labelText: english ? 'Review (required)' : '评价内容（必填）',
+            const SizedBox(height: 8),
+            Text(
+              english
+                  ? 'You can upload up to ${ReviewDraft.maxImageCount} images.'
+                  : '最多可上传 ${ReviewDraft.maxImageCount} 张图片。',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        child: AnimatedBuilder(
+          animation: _controller,
+          builder: (context, _) => Padding(
+            padding: const EdgeInsets.all(16),
+            child: FilledButton(
+              key: const Key('review-submit-button'),
+              onPressed: !_controller.canSubmit
+                  ? null
+                  : () => Navigator.pop(context, _controller.createDraft()),
+              child: Text(
+                editing
+                    ? (english ? 'Save changes' : '保存修改')
+                    : (english ? 'Submit' : '提交评价'),
+              ),
             ),
           ),
-          TextField(
-            controller: _tags,
-            decoration: InputDecoration(
-              labelText: english ? 'Tags (separated by spaces)' : '标签（空格分隔）',
+        ),
+      ),
+    );
+  }
+}
+
+class _ReviewImagePreview extends StatelessWidget {
+  const _ReviewImagePreview({
+    required this.index,
+    required this.url,
+    required this.english,
+    required this.onRemove,
+  });
+
+  final int index;
+  final String url;
+  final bool english;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: 92,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned.fill(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Image.network(
+                url,
+                key: Key('review-image-preview-$index'),
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => ColoredBox(
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  child: const Icon(Icons.broken_image_outlined),
+                ),
+              ),
             ),
           ),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: _uploading
-                ? const SizedBox.square(
-                    dimension: 22,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.add_photo_alternate_outlined),
-            title: Text(
-              _imageUrl.isEmpty
-                  ? (english ? 'Add optional image' : '添加可选图片')
-                  : (english ? 'Image attached' : '已添加图片'),
+          Positioned(
+            right: -8,
+            top: -8,
+            child: IconButton.filled(
+              key: Key('review-image-remove-$index'),
+              visualDensity: VisualDensity.compact,
+              constraints: const BoxConstraints.tightFor(width: 30, height: 30),
+              padding: EdgeInsets.zero,
+              tooltip: english ? 'Remove image' : '删除图片',
+              onPressed: onRemove,
+              icon: const Icon(Icons.close, size: 18),
             ),
-            onTap: _uploading ? null : _pickImage,
           ),
         ],
       ),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: FilledButton(
-            key: const Key('review-submit-button'),
-            onPressed: _uploading || _content.text.trim().isEmpty
-                ? null
-                : () => Navigator.pop(
-                      context,
-                      ReviewDraft(
-                        rating: _rating,
-                        content: _content.text.trim(),
-                        tags: _tags.text
-                            .trim()
-                            .split(RegExp(r'\s+'))
-                            .where((tag) => tag.isNotEmpty)
-                            .toList(),
-                        images: _imageUrl.isEmpty ? const [] : [_imageUrl],
-                      ),
-                    ),
-            child: Text(english ? 'Submit' : '提交评价'),
+    );
+  }
+}
+
+class _ReviewImageAddTile extends StatelessWidget {
+  const _ReviewImageAddTile({
+    required this.uploading,
+    required this.english,
+    required this.onTap,
+  });
+
+  final bool uploading;
+  final bool english;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: 92,
+      child: OutlinedButton(
+        key: const Key('review-image-add-button'),
+        onPressed: onTap,
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.all(8),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
           ),
         ),
+        child: uploading
+            ? Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const SizedBox.square(
+                    dimension: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(english ? 'Uploading' : '上传中'),
+                ],
+              )
+            : Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.add_photo_alternate_outlined),
+                  const SizedBox(height: 6),
+                  Text(english ? 'Add image' : '添加图片'),
+                ],
+              ),
       ),
     );
   }

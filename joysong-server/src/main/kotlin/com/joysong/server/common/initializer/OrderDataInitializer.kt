@@ -25,7 +25,15 @@ class OrderDataInitializer(
 
     @Transactional
     override fun run(args: Array<String>) {
-        if (orderRepository.count() > 0L) return
+        // OrderEntity uses a soft-delete filter, so repository.count() ignores
+        // deleted rows. The demo rows use stable IDs; treating a table that only
+        // contains soft-deleted rows as empty would try to insert those IDs again
+        // and fail with a duplicate-primary-key error.
+        val persistedOrderCount = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM orders",
+            Long::class.java
+        ) ?: 0L
+        if (persistedOrderCount > 0L) return
 
         // ============================================================
         // 订单（6 条，覆盖订单生命周期主要状态）
@@ -52,7 +60,7 @@ class OrderDataInitializer(
                 remainingAmount = BigDecimal("2974.00"),
                 paymentTime = LocalDateTime.of(2026, 7, 9, 10, 31)
             ),
-            // 小红 - 皮秒祛斑（COMPLETED：已完成，已评价）
+            // 小红 - 皮秒祛斑（PENDING_SETTLEMENT：已评价，待结算）
             OrderEntity(
                 id = SeedIds.ORDER_ID_2,
                 userId = SeedIds.USER_ID_2,
@@ -60,7 +68,7 @@ class OrderDataInitializer(
                 institutionName = "北京美丽时光医疗美容",
                 price = BigDecimal("1999.00"),
                 paidAmount = BigDecimal("1999.00"),
-                status = OrderStatusEnum.COMPLETED.value,
+                status = OrderStatusEnum.PENDING_SETTLEMENT.value,
                 createdAt = LocalDateTime.of(2026, 7, 6, 16, 0),
                 appointmentTime = LocalDateTime.of(2026, 7, 7, 10, 0),
                 hasReview = true,
@@ -74,7 +82,10 @@ class OrderDataInitializer(
                 paymentTime = LocalDateTime.of(2026, 7, 6, 16, 1),
                 verifiedAt = LocalDateTime.of(2026, 7, 7, 10, 10),
                 verifyCode = "VRF20260707001",
-                balancePaidAt = LocalDateTime.of(2026, 7, 7, 10, 30)
+                balancePaidAt = LocalDateTime.of(2026, 7, 7, 10, 30),
+                completionRequestedAt = LocalDateTime.of(2026, 7, 7, 11, 0),
+                completedAt = LocalDateTime.of(2026, 7, 7, 11, 30),
+                settlementAt = LocalDateTime.of(2026, 8, 6, 11, 30)
             ),
             // 小丽 - 热玛吉抗衰（PENDING_PAYMENT：待支付面诊金）
             OrderEntity(
@@ -152,6 +163,7 @@ class OrderDataInitializer(
                 status = OrderStatusEnum.PENDING_SETTLEMENT.value,
                 createdAt = LocalDateTime.of(2026, 7, 10, 13, 0),
                 appointmentTime = LocalDateTime.of(2026, 7, 14, 9, 0),
+                hasReview = true,
                 projectId = SeedIds.PROJ_ID_6,
                 institutionId = SeedIds.INST_ID_3,
                 doctorId = SeedIds.DOC_ID_5,
@@ -184,36 +196,63 @@ class OrderDataInitializer(
         )
 
         // ============================================================
-        // 评价（6 条，覆盖 PROJECT/DOCTOR/INSTITUTION 三种维度）
+        // 评价（2 条，一订单一条 canonical 主评价；其他维度从订单关系聚合）
         // ============================================================
         jdbcTemplate.batchUpdate(
             "INSERT IGNORE INTO reviews (id, order_id, user_id, doctor_id, rating, content, tags, images, target_type, target_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
             listOf(
-                // 小美 - 玻尿酸填充项目评价（PROJECT）
-                arrayOf(UUID.randomUUID().toString(), SeedIds.ORDER_ID_1, SeedIds.USER_ID_1, SeedIds.DOC_ID_1, 5,
-                    "效果非常自然！王医生手法很专业，填充苹果肌后脸部饱满了许多，年轻了至少五岁。注射过程不到二十分钟，术后即刻就能看到效果。轻微肿胀三天就消了，完全看不出做过。强烈推荐！",
-                    "效果好,自然,专业,推荐", "https://via.placeholder.com/300x300?text=HyaluronicAcidResult1,https://via.placeholder.com/300x300?text=HyaluronicAcidResult2", "PROJECT", SeedIds.PROJ_ID_1),
-                // 小红 - 皮秒祛斑项目评价（PROJECT）
-                arrayOf(UUID.randomUUID().toString(), SeedIds.ORDER_ID_2, SeedIds.USER_ID_2, SeedIds.DOC_ID_3, 5,
-                    "效果非常好！做完皮秒一个月了，脸上的雀斑淡了百分之八十，肤色也均匀了很多。张医生很专业，术后也跟进得很及时。强烈推荐给有斑点困扰的姐妹！",
-                    "效果好,专业,推荐,无痛", "https://via.placeholder.com/300x300?text=PicoLaserResult1,https://via.placeholder.com/300x300?text=PicoLaserResult2", "PROJECT", SeedIds.PROJ_ID_4),
-                // 小美 - 王医生评价（DOCTOR）
-                arrayOf(UUID.randomUUID().toString(), SeedIds.ORDER_ID_1, SeedIds.USER_ID_1, SeedIds.DOC_ID_1, 5,
-                    "王医生是注射美容方面的专家，面诊时很耐心地给我分析了面部情况，建议的填充方案非常合理。注射手法轻柔精准，几乎没有痛感。术后效果自然，朋友们都说我变好看了但说不出哪里变了，这正是我想要的效果！",
-                    "专业,手法好,耐心,推荐", "https://via.placeholder.com/300x300?text=HyaluronicAcidRecovery1", "DOCTOR", SeedIds.DOC_ID_1),
-                // 小红 - 张医生评价（DOCTOR）
-                arrayOf(UUID.randomUUID().toString(), SeedIds.ORDER_ID_2, SeedIds.USER_ID_2, SeedIds.DOC_ID_3, 5,
-                    "张医生是皮肤科出身，对激光设备非常了解。面诊时给我分析了斑的类型，非常实在，不会夸大效果。术后还专门打电话询问恢复情况，很有责任心。",
-                    "专业,负责,耐心,推荐", "https://via.placeholder.com/300x300?text=PicoLaserRecovery1", "DOCTOR", SeedIds.DOC_ID_3),
-                // 小美 - 上海娇颜颂机构评价（INSTITUTION）
-                arrayOf(UUID.randomUUID().toString(), SeedIds.ORDER_ID_1, SeedIds.USER_ID_1, SeedIds.DOC_ID_1, 5,
-                    "上海娇颜颂的环境非常好，干净整洁，设备也很先进。前台接待热情，等候时间短。护士很贴心，全程陪同。王医生的技术更不用说，非常满意的一次体验，会持续回购！",
-                    "环境好,服务好,专业,推荐", "https://via.placeholder.com/300x300?text=HyaluronicAcidClinic1,https://via.placeholder.com/300x300?text=HyaluronicAcidClinic2", "INSTITUTION", SeedIds.INST_ID_1),
                 // 小红 - 北京美丽时光机构评价（INSTITUTION）
                 arrayOf(UUID.randomUUID().toString(), SeedIds.ORDER_ID_2, SeedIds.USER_ID_2, SeedIds.DOC_ID_3, 5,
                     "北京美丽时光的就诊体验非常棒！预约流程很方便，到店后几乎不用等待。护士很温柔，术后还送了修复面膜，很贴心。已经推荐给闺蜜了！",
-                    "环境好,服务贴心,推荐,专业", "https://via.placeholder.com/300x300?text=PicoClinic1,https://via.placeholder.com/300x300?text=PicoClinic2", "INSTITUTION", SeedIds.INST_ID_2)
+                    "环境好,服务贴心,推荐,专业", "https://via.placeholder.com/300x300?text=PicoClinic1,https://via.placeholder.com/300x300?text=PicoClinic2", "INSTITUTION", SeedIds.INST_ID_2),
+                // 小丽 - 深圳美莱机构评价（INSTITUTION）
+                arrayOf(UUID.randomUUID().toString(), SeedIds.ORDER_ID_6, SeedIds.USER_ID_3, SeedIds.DOC_ID_5, 5,
+                    "鼻综合项目恢复顺利，医生讲解清楚，机构术后回访也很及时，整体体验满意。",
+                    "专业,术后服务好,推荐", "https://via.placeholder.com/300x300?text=RhinoplastyClinic1", "INSTITUTION", SeedIds.INST_ID_3)
             )
+        )
+
+        // 初始化器在 Flyway 之后运行；写入评价后再次校准演示库聚合字段，保证全新库也一致。
+        jdbcTemplate.update(
+            """
+            UPDATE institutions i
+            LEFT JOIN (
+                SELECT target_id AS institution_id, COUNT(*) AS review_count, ROUND(AVG(rating), 1) AS rating
+                FROM reviews
+                WHERE deleted_at IS NULL AND target_type = 'INSTITUTION'
+                GROUP BY target_id
+            ) stats ON stats.institution_id = i.id
+            SET i.review_count = COALESCE(stats.review_count, 0), i.rating = COALESCE(stats.rating, 0.0)
+            WHERE i.deleted_at IS NULL
+            """.trimIndent()
+        )
+        jdbcTemplate.update(
+            """
+            UPDATE doctors d
+            LEFT JOIN (
+                SELECT doctor_id, COUNT(*) AS review_count, ROUND(AVG(rating), 1) AS rating
+                FROM reviews
+                WHERE deleted_at IS NULL AND target_type = 'INSTITUTION' AND doctor_id <> ''
+                GROUP BY doctor_id
+            ) stats ON stats.doctor_id = d.id
+            SET d.review_count = COALESCE(stats.review_count, 0), d.rating = COALESCE(stats.rating, 0.0)
+            WHERE d.deleted_at IS NULL
+            """.trimIndent()
+        )
+        jdbcTemplate.update(
+            """
+            UPDATE institution_projects ip
+            LEFT JOIN (
+                SELECT o.institution_project_id, COUNT(*) AS review_count, ROUND(AVG(r.rating), 1) AS rating
+                FROM reviews r
+                JOIN orders o ON o.id = r.order_id
+                WHERE r.deleted_at IS NULL AND r.target_type = 'INSTITUTION'
+                  AND o.deleted_at IS NULL AND o.institution_project_id <> ''
+                GROUP BY o.institution_project_id
+            ) stats ON stats.institution_project_id = ip.id
+            SET ip.review_count = COALESCE(stats.review_count, 0), ip.rating = COALESCE(stats.rating, 0.0)
+            WHERE ip.deleted_at IS NULL
+            """.trimIndent()
         )
 
         // ============================================================

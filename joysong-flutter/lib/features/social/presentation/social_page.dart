@@ -12,6 +12,7 @@ import 'package:joysong_flutter/features/orders/domain/order_models.dart';
 import 'package:joysong_flutter/features/orders/domain/orders_repository.dart';
 import 'package:joysong_flutter/features/social/domain/content_safety.dart';
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
+import 'package:joysong_flutter/features/social/domain/social_repository.dart';
 import 'package:joysong_flutter/features/social/presentation/diary_detail_page.dart';
 import 'package:joysong_flutter/features/social/presentation/diary_share.dart';
 import 'package:joysong_flutter/features/social/presentation/social_controller.dart';
@@ -95,6 +96,7 @@ final class _SocialPageState extends State<SocialPage> {
                 final diary = controller.diaries[index];
                 return _DiaryCard(
                   diary: diary,
+                  repository: controller.repository,
                   onOpen: () => Navigator.of(context).push<void>(
                     MaterialPageRoute(
                       builder: (_) => DiaryDetailPage(
@@ -1066,12 +1068,14 @@ class _DiaryImageTile extends StatelessWidget {
 final class _DiaryCard extends StatelessWidget {
   const _DiaryCard({
     required this.diary,
+    required this.repository,
     required this.onOpen,
     required this.onDelete,
     this.onEdit,
   });
 
   final Diary diary;
+  final SocialRepository repository;
   final VoidCallback onOpen;
   final VoidCallback? onEdit;
   final VoidCallback onDelete;
@@ -1105,7 +1109,7 @@ final class _DiaryCard extends StatelessWidget {
             tooltip: context.localized('更多操作', 'More actions'),
             onSelected: (value) {
               if (value == 'share') {
-                shareDiary(context, diary);
+                shareDiary(context, diary, repository: repository);
               } else if (value == 'edit') {
                 onEdit?.call();
               } else if (value == 'delete') {

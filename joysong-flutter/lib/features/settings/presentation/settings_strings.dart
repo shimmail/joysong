@@ -104,6 +104,7 @@ final class SettingsStrings {
       };
 
   String themePresetLabel(ThemePreset preset) => switch (preset) {
+        ThemePreset.neutralGray => pick('中性灰', 'Neutral gray'),
         ThemePreset.softRose => pick('柔雾粉', 'Soft rose'),
         ThemePreset.peach => pick('暖杏', 'Warm peach'),
         ThemePreset.sage => pick('薄荷绿', 'Mint green'),

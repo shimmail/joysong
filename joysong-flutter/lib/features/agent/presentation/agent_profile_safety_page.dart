@@ -143,13 +143,12 @@ class _AgentProfileSafetyPageState extends State<AgentProfileSafetyPage> {
                       labelText: _english
                           ? 'Acceptable downtime (days)'
                           : '可接受恢复期（天）')),
-              Align(
-                alignment: AlignmentDirectional.centerStart,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 320),
-                  child: DropdownButtonFormField<String>(
+              DropdownButtonFormField<String>(
                     initialValue: _pain,
                     isExpanded: true,
+                    borderRadius: BorderRadius.circular(12),
+                    menuMaxHeight: 320,
+                    dropdownColor: Theme.of(context).colorScheme.surface,
                     decoration: InputDecoration(
                         labelText: _english ? 'Pain tolerance' : '疼痛耐受'),
                     items: const [
@@ -160,8 +159,6 @@ class _AgentProfileSafetyPageState extends State<AgentProfileSafetyPage> {
                     ],
                     onChanged: (value) =>
                         setState(() => _pain = value ?? _pain),
-                  ),
-                ),
               ),
               TextField(
                   controller: _preferences,

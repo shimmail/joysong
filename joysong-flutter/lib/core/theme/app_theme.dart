@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
 abstract final class AppColors {
-  /// A quieter version of the original Compose pink (`#E8A0BF`).
-  static const primary = Color(0xFFF2C6D6);
+  /// Neutral gray is the default, matching the monochrome product UI.
+  static const primary = Color(0xFF8A8A8A);
   static const primaryDark = Color(0xFFD99AB3);
   static const primaryLight = Color(0xFFF9E4EC);
   static const onPrimary = Color(0xFF442D36);
@@ -16,6 +16,7 @@ abstract final class AppColors {
 }
 
 enum ThemePreset {
+  neutralGray('中性灰', AppColors.primary),
   softRose('柔雾粉', Color(0xFFF2C6D6)),
   peach('暖杏', Color(0xFFF2C7AE)),
   sage('薄荷绿', Color(0xFFBFD8C5)),
@@ -43,34 +44,48 @@ abstract final class AppTheme {
   static ThemeData get dark => darkFor(AppColors.primary);
 
   static ThemeData lightFor(Color seedColor) {
-    final primary = _pastel(seedColor);
+    final isNeutral =
+        seedColor.toARGB32() == AppColors.primary.toARGB32();
+    final pastelPrimary = _pastel(seedColor);
+    final primary = Color.lerp(pastelPrimary, Colors.black, 0.44)!;
     final generated = ColorScheme.fromSeed(
-      seedColor: primary,
+      seedColor: pastelPrimary,
       brightness: Brightness.light,
     );
     final scheme = generated.copyWith(
       primary: primary,
-      onPrimary: AppColors.onPrimary,
-      primaryContainer: Color.lerp(primary, Colors.white, 0.48),
+      onPrimary: Colors.white,
+      primaryContainer: Color.lerp(pastelPrimary, Colors.white, 0.42),
       onPrimaryContainer: AppColors.onPrimary,
-      secondary: AppColors.secondary,
-      onSecondary: const Color(0xFF3D3320),
-      secondaryContainer: AppColors.secondaryLight,
-      onSecondaryContainer: const Color(0xFF342B1C),
-      surface: AppColors.surface,
+      secondary: isNeutral ? const Color(0xFF666666) : AppColors.secondary,
+      onSecondary: isNeutral ? Colors.white : const Color(0xFF3D3320),
+      secondaryContainer:
+          isNeutral ? const Color(0xFFECECEC) : AppColors.secondaryLight,
+      onSecondaryContainer:
+          isNeutral ? const Color(0xFF292929) : const Color(0xFF342B1C),
+      surface: isNeutral ? Colors.white : AppColors.surface,
       onSurface: AppColors.textPrimary,
+      onSurfaceVariant:
+          isNeutral ? const Color(0xFF505050) : const Color(0xFF51484C),
       surfaceContainerLowest: Colors.white,
-      surfaceContainerLow: AppColors.surfaceVariant,
-      surfaceContainer: const Color(0xFFF2EAED),
-      outline: const Color(0xFFD7CDD0),
-      outlineVariant: const Color(0xFFE9E1E4),
+      surfaceContainerLow:
+          isNeutral ? const Color(0xFFF5F5F5) : AppColors.surfaceVariant,
+      surfaceContainer:
+          isNeutral ? const Color(0xFFEEEEEE) : const Color(0xFFF2EAED),
+      outline:
+          isNeutral ? const Color(0xFF737373) : const Color(0xFF756A6E),
+      outlineVariant:
+          isNeutral ? const Color(0xFFD6D6D6) : const Color(0xFFD8CFD2),
     );
     return _base(scheme).copyWith(
-      scaffoldBackgroundColor: AppColors.background,
+      scaffoldBackgroundColor:
+          isNeutral ? Colors.white : AppColors.background,
     );
   }
 
   static ThemeData darkFor(Color seedColor) {
+    final isNeutral =
+        seedColor.toARGB32() == AppColors.primary.toARGB32();
     final primary = _pastel(seedColor);
     final generated = ColorScheme.fromSeed(
       seedColor: primary,
@@ -78,17 +93,24 @@ abstract final class AppTheme {
     );
     final scheme = generated.copyWith(
       primary: primary,
-      onPrimary: AppColors.onPrimary,
+      onPrimary: isNeutral ? Colors.black : AppColors.onPrimary,
       primaryContainer: Color.lerp(primary, Colors.black, 0.62),
-      surface: const Color(0xFF1D191B),
-      onSurface: const Color(0xFFF1E9EC),
-      surfaceContainerLow: const Color(0xFF252023),
-      surfaceContainer: const Color(0xFF2C2629),
-      outline: const Color(0xFF82767A),
-      outlineVariant: const Color(0xFF4A4144),
+      surface:
+          isNeutral ? const Color(0xFF1C1C1C) : const Color(0xFF1D191B),
+      onSurface:
+          isNeutral ? const Color(0xFFF2F2F2) : const Color(0xFFF1E9EC),
+      surfaceContainerLow:
+          isNeutral ? const Color(0xFF242424) : const Color(0xFF252023),
+      surfaceContainer:
+          isNeutral ? const Color(0xFF2B2B2B) : const Color(0xFF2C2629),
+      outline:
+          isNeutral ? const Color(0xFF858585) : const Color(0xFF82767A),
+      outlineVariant:
+          isNeutral ? const Color(0xFF484848) : const Color(0xFF4A4144),
     );
     return _base(scheme).copyWith(
-      scaffoldBackgroundColor: const Color(0xFF181416),
+      scaffoldBackgroundColor:
+          isNeutral ? const Color(0xFF181818) : const Color(0xFF181416),
     );
   }
 
@@ -151,6 +173,9 @@ abstract final class AppTheme {
         labelStyle: typography.bodyMedium?.copyWith(
           color: scheme.outline,
         ),
+        hintStyle: typography.bodyMedium?.copyWith(
+          color: scheme.onSurfaceVariant,
+        ),
         floatingLabelStyle: WidgetStateTextStyle.resolveWith(
           (states) => TextStyle(
             color: states.contains(WidgetState.focused)
@@ -177,7 +202,7 @@ abstract final class AppTheme {
           backgroundColor: scheme.primary,
           foregroundColor: scheme.onPrimary,
           disabledBackgroundColor: scheme.surfaceContainer,
-          disabledForegroundColor: scheme.onSurface.withValues(alpha: 0.42),
+          disabledForegroundColor: scheme.onSurface.withValues(alpha: 0.56),
           elevation: 0,
           minimumSize: const Size(64, 48),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),

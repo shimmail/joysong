@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/core/network/optimized_network_image.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/presentation/catalog_detail_shared.dart';
+import 'package:joysong_flutter/features/discover/presentation/catalog_review_section.dart';
 import 'package:joysong_flutter/features/discover/presentation/discover_content_card.dart';
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
 import 'package:joysong_flutter/features/social/presentation/favorite_action_button.dart';
@@ -19,6 +21,7 @@ class CatalogInstitutionDetailView extends StatelessWidget {
     this.onViewAllDiaries,
     this.onViewAllReviews,
     this.onViewAllDoctors,
+    this.onAiChat,
     this.socialController,
     super.key,
   });
@@ -31,6 +34,7 @@ class CatalogInstitutionDetailView extends StatelessWidget {
   final VoidCallback? onViewAllDiaries;
   final VoidCallback? onViewAllReviews;
   final VoidCallback? onViewAllDoctors;
+  final VoidCallback? onAiChat;
   final SocialController? socialController;
 
   @override
@@ -154,20 +158,12 @@ class CatalogInstitutionDetailView extends StatelessWidget {
                     ? 'All (${reviews.length})'
                     : '全部 (${reviews.length})'),
               ),
-              child: reviews.isEmpty
-                  ? _Empty(context.localized('暂无用户评价', 'No reviews'))
-                  : SizedBox(
-                      height: 180,
-                      child: ListView.separated(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: reviews.length > 5 ? 5 : reviews.length,
-                        separatorBuilder: (_, __) => const SizedBox(width: 10),
-                        itemBuilder: (_, index) => _ReviewCard(
-                          reviews[index],
-                          socialController,
-                        ),
-                      ),
-                    ),
+              child: CatalogReviewPreview(
+                reviews: reviews,
+                socialController: socialController,
+                onViewAll: onViewAllReviews,
+                showHeader: false,
+              ),
             ),
           ),
           SliverToBoxAdapter(
@@ -204,10 +200,7 @@ class CatalogInstitutionDetailView extends StatelessWidget {
               '可从消息页联系机构', 'Open Messages to contact this institution')),
         )),
         secondaryLabel: context.localized('与AI聊聊', 'Chat with AI'),
-        onSecondary: () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(context.localized(
-              '可前往 AI 页继续咨询', 'Continue in the AI assistant tab')),
-        )),
+        onSecondary: onAiChat,
       ),
     ]);
   }
@@ -282,15 +275,18 @@ class _FactStat extends StatelessWidget {
             const SizedBox(width: 3),
           ],
           Text(value,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+              style:
+                  const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
         ]),
         const SizedBox(height: 3),
-        Text(label, style: const TextStyle(fontSize: 12, color: Color(0xff777777))),
+        Text(label,
+            style: const TextStyle(fontSize: 12, color: Color(0xff777777))),
       ]);
 }
 
 class _CopyableFact extends StatelessWidget {
-  const _CopyableFact({required this.icon, required this.label, required this.value});
+  const _CopyableFact(
+      {required this.icon, required this.label, required this.value});
   final IconData icon;
   final String label;
   final String value;
@@ -309,8 +305,14 @@ class _CopyableFact extends StatelessWidget {
             Icon(icon, size: 20, color: const Color(0xff777777)),
             const SizedBox(width: 8),
             Text('$label：', style: const TextStyle(color: Color(0xff777777))),
-            Expanded(child: Text(value, maxLines: 2, overflow: TextOverflow.ellipsis)),
-            const Icon(Icons.copy_rounded, size: 17, color: Color(0xff999999)),
+            Expanded(
+                child:
+                    Text(value, maxLines: 2, overflow: TextOverflow.ellipsis)),
+            Icon(
+              Icons.copy_rounded,
+              size: 17,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ]),
         ),
       );
@@ -556,8 +558,10 @@ class _ProjectRow extends StatelessWidget {
                     if (original > price) ...[
                       const SizedBox(width: 6),
                       Text('¥${catalogMoney(original)}',
-                          style: const TextStyle(
-                              color: Color(0xff999999),
+                          style: TextStyle(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
                               decoration: TextDecoration.lineThrough))
                     ]
                   ])
@@ -607,8 +611,19 @@ class _ReviewCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final reviewId = _text(data, const ['id', 'reviewId']);
+    final rating = _number(data['rating']).clamp(0, 5).toDouble();
+    final content = _text(data, const ['content']);
+    final tags = _split(data['tags']);
+    final images = _split(data['images']);
+    final userName = _text(
+      data,
+      const ['userName'],
+      fallback: context.localized('匿名用户', 'Anonymous'),
+    );
+    final createdAt = _reviewDate(_text(data, const ['createdAt']));
     return SizedBox(
-        width: 270,
+        key: reviewId.isEmpty ? null : Key('review-card-$reviewId'),
+        width: 310,
         child: Card(
           margin: EdgeInsets.zero,
           child: Padding(
@@ -617,17 +632,16 @@ class _ReviewCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(children: [
-                      Expanded(
-                        child: Text(
-                          _text(
-                            data,
-                            const ['projectName'],
-                            fallback:
-                                context.localized('服务评价', 'Service review'),
-                          ),
-                          style: const TextStyle(fontWeight: FontWeight.w800),
+                      Expanded(child: _ReviewRating(rating: rating)),
+                      if (createdAt.isNotEmpty)
+                        Text(
+                          createdAt,
+                          style: Theme.of(context).textTheme.bodySmall,
                         ),
-                      ),
+                      if (createdAt.isNotEmpty &&
+                          socialController != null &&
+                          reviewId.isNotEmpty)
+                        const SizedBox(width: 4),
                       if (socialController != null && reviewId.isNotEmpty)
                         ReportActionButton(
                           key: Key('review-report-$reviewId'),
@@ -638,27 +652,140 @@ class _ReviewCard extends StatelessWidget {
                           iconSize: 19,
                         ),
                     ]),
-                    const SizedBox(height: 8),
-                    Text(_text(data, const ['content']),
-                        maxLines: 4,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            height: 1.45, color: Color(0xff666666))),
+                    const SizedBox(height: 10),
+                    Text(
+                      content.isEmpty
+                          ? context.localized(
+                              '用户未填写文字评价',
+                              'No written review',
+                            )
+                          : content,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        height: 1.45,
+                        color: content.isEmpty
+                            ? Theme.of(context).colorScheme.onSurfaceVariant
+                            : const Color(0xff555555),
+                      ),
+                    ),
+                    if (tags.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        height: 24,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: tags.length,
+                          separatorBuilder: (_, __) => const SizedBox(width: 5),
+                          itemBuilder: (_, index) => _ReviewTag(tags[index]),
+                        ),
+                      ),
+                    ],
+                    if (images.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        height: 66,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: images.length,
+                          separatorBuilder: (_, __) => const SizedBox(width: 7),
+                          itemBuilder: (_, index) => CatalogImage(
+                            key: reviewId.isEmpty
+                                ? null
+                                : Key('review-image-$reviewId-$index'),
+                            url: images[index],
+                            width: 66,
+                            height: 66,
+                            radius: 8,
+                          ),
+                        ),
+                      ),
+                    ],
                     const Spacer(),
                     Row(children: [
+                      CircleAvatar(
+                        radius: 13,
+                        backgroundColor:
+                            Theme.of(context).colorScheme.secondaryContainer,
+                        child: Icon(
+                          Icons.person_outline_rounded,
+                          size: 16,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSecondaryContainer,
+                        ),
+                      ),
+                      const SizedBox(width: 7),
                       Expanded(
-                          child: Text(
-                              _text(data, const ['userName'],
-                                  fallback:
-                                      context.localized('匿名用户', 'Anonymous')),
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.w700))),
-                      Text(_text(data, const ['createdAt']),
-                          style: Theme.of(context).textTheme.bodySmall)
+                        child: Text(
+                          userName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ),
                     ]),
                   ])),
         ));
   }
+}
+
+class _ReviewRating extends StatelessWidget {
+  const _ReviewRating({required this.rating});
+
+  final double rating;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = rating > 0
+        ? context.localized(
+            '${rating.toStringAsFixed(1)}分',
+            '${rating.toStringAsFixed(1)} out of 5',
+          )
+        : context.localized('未评分', 'Not rated');
+    return Semantics(
+      label: label,
+      child: Row(children: [
+        ExcludeSemantics(
+          child: Row(
+            children: List.generate(
+              5,
+              (index) => Icon(
+                index < rating.round()
+                    ? Icons.star_rounded
+                    : Icons.star_border_rounded,
+                size: 17,
+                color: const Color(0xffffa000),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 5),
+        Text(
+          rating > 0 ? rating.toStringAsFixed(1) : '—',
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
+      ]),
+    );
+  }
+}
+
+class _ReviewTag extends StatelessWidget {
+  const _ReviewTag(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+          child: Text(label, style: Theme.of(context).textTheme.labelSmall),
+        ),
+      );
 }
 
 class _DoctorRow extends StatelessWidget {
@@ -676,7 +803,14 @@ class _DoctorRow extends StatelessWidget {
         onTap: id.isEmpty || onTap == null ? null : () => onTap!(id),
         leading: CircleAvatar(
             radius: 30,
-            foregroundImage: avatar.isEmpty ? null : NetworkImage(avatar),
+            foregroundImage: avatar.isEmpty
+                ? null
+                : optimizedNetworkImageProvider(
+                    context,
+                    avatar,
+                    width: 60,
+                    height: 60,
+                  ),
             child: avatar.isEmpty ? const Icon(Icons.person_outline) : null),
         title: Text(_text(data, const ['name']),
             style: const TextStyle(fontWeight: FontWeight.w800)),
@@ -691,8 +825,8 @@ class _DoctorRow extends StatelessWidget {
                   await Clipboard.setData(ClipboardData(text: phone));
                   if (!context.mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(context.localized(
-                        '已复制医生电话', 'Doctor phone copied')),
+                    content: Text(
+                        context.localized('已复制医生电话', 'Doctor phone copied')),
                   ));
                 },
                 child: Padding(
@@ -727,7 +861,12 @@ class _Empty extends StatelessWidget {
   Widget build(BuildContext context) => SizedBox(
       height: 110,
       child: Center(
-          child: Text(text, style: const TextStyle(color: Color(0xff999999)))));
+          child: Text(
+        text,
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+      )));
 }
 
 Map<String, Object?> _map(Object? value) => value is Map
@@ -751,6 +890,15 @@ List<String> _split(Object? value) {
       .map((value) => value.toString().trim())
       .where((value) => value.isNotEmpty)
       .toList(growable: false);
+}
+
+String _reviewDate(String value) {
+  if (value.isEmpty) return '';
+  final parsed = DateTime.tryParse(value);
+  if (parsed == null) return value;
+  final month = parsed.month.toString().padLeft(2, '0');
+  final day = parsed.day.toString().padLeft(2, '0');
+  return '${parsed.year}-$month-$day';
 }
 
 List<String> _projectTags(Map<String, Object?> project) {
@@ -802,6 +950,7 @@ double _firstNumber(Map<String, Object?> data, List<String> keys) {
   }
   return 0;
 }
+
 int _count(Map<String, Object?> data, List<String> keys) {
   for (final key in keys) {
     final value = data[key];
@@ -810,5 +959,6 @@ int _count(Map<String, Object?> data, List<String> keys) {
   }
   return 0;
 }
+
 bool _bool(Object? value) =>
     value == true || value == 1 || '$value'.toLowerCase() == 'true';

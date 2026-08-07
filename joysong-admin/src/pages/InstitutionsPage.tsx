@@ -31,7 +31,7 @@ export default function InstitutionsPage() {
       canEdit={(record) => isAdmin || Boolean(managementContext?.managedInstitutionIds.includes(record.id))}
       fields={[
         { key: 'name', label: '机构名称', required: true },
-        { key: 'coverImage', label: '封面图', type: 'image', folder: 'institutions' },
+        { key: 'coverImage', label: '封面图', type: 'image', folder: 'institutions', recommendedSize: '1200 × 800 px（3:2）' },
         { key: 'address', label: '地址' },
         { key: 'city', label: '城市' },
         { key: 'contactPhone', label: '联系电话' },

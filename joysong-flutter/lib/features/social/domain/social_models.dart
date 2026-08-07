@@ -398,6 +398,9 @@ final class Review {
 }
 
 final class ReviewDraft {
+  static const maxImageCount = 6;
+  static const maxImagesEncodedLength = 2000;
+
   const ReviewDraft({
     required this.rating,
     required this.content,
@@ -416,6 +419,20 @@ final class ReviewDraft {
     }
     if (content.trim().isEmpty) {
       throw ArgumentError.value(content, 'content', '评价内容不能为空');
+    }
+    if (images.length > maxImageCount) {
+      throw ArgumentError.value(
+        images.length,
+        'images',
+        '评价图片不能超过 $maxImageCount 张',
+      );
+    }
+    if (images.join(',').length > maxImagesEncodedLength) {
+      throw ArgumentError.value(
+        images,
+        'images',
+        '评价图片地址总长度不能超过 $maxImagesEncodedLength 个字符',
+      );
     }
     validateCsvValues([...tags, ...images]);
   }

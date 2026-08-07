@@ -1,11 +1,36 @@
 import 'package:joysong_flutter/core/network/api_client.dart';
 import 'package:joysong_flutter/core/network/public_media_url.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
+import 'package:joysong_flutter/features/orders/domain/payment_models.dart';
 
 abstract interface class OrdersRemoteDataSource {
   Future<List<Order>> getOrders({String? status, int offset, int limit});
 
   Future<Order> getOrder(String id);
+
+  Future<PaymentAttempt> createPaymentAttempt(
+    String orderId, {
+    required PaymentType paymentType,
+    required PaymentProvider provider,
+    required String paymentMethod,
+    required String idempotencyKey,
+  });
+
+  Future<PaymentAttempt> getPayment(
+    String paymentId, {
+    bool refresh = false,
+  });
+
+  Future<PaymentAttempt> confirmPayment(
+    String paymentId, {
+    required String idempotencyKey,
+  });
+
+  Future<PaymentAttempt> getLatestPayment(
+    String orderId, {
+    required PaymentType paymentType,
+    bool refresh = false,
+  });
 
   Future<Order> payConsultation(String id);
 
@@ -58,6 +83,70 @@ final class ApiOrdersRemoteDataSource implements OrdersRemoteDataSource {
 
   @override
   Future<Order> getOrder(String id) => _orderPostOrGet(id, method: 'GET');
+
+  @override
+  Future<PaymentAttempt> createPaymentAttempt(
+    String orderId, {
+    required PaymentType paymentType,
+    required PaymentProvider provider,
+    required String paymentMethod,
+    required String idempotencyKey,
+  }) async {
+    final result = await _apiClient.postIdempotent<PaymentAttempt>(
+      'orders/$orderId/payment-attempts',
+      idempotencyKey: idempotencyKey,
+      body: {
+        'paymentType': paymentType.wireValue,
+        'provider': provider.wireValue,
+        'paymentMethod': paymentMethod,
+      },
+      decodeData: PaymentAttempt.fromJson,
+    );
+    return _requiredPayment(result);
+  }
+
+  @override
+  Future<PaymentAttempt> getPayment(
+    String paymentId, {
+    bool refresh = false,
+  }) async {
+    final result = await _apiClient.get<PaymentAttempt>(
+      'payments/$paymentId',
+      query: {'refresh': refresh},
+      decodeData: PaymentAttempt.fromJson,
+    );
+    return _requiredPayment(result);
+  }
+
+  @override
+  Future<PaymentAttempt> confirmPayment(
+    String paymentId, {
+    required String idempotencyKey,
+  }) async {
+    final result = await _apiClient.postIdempotent<PaymentAttempt>(
+      'payments/$paymentId/confirm',
+      idempotencyKey: idempotencyKey,
+      decodeData: PaymentAttempt.fromJson,
+    );
+    return _requiredPayment(result);
+  }
+
+  @override
+  Future<PaymentAttempt> getLatestPayment(
+    String orderId, {
+    required PaymentType paymentType,
+    bool refresh = false,
+  }) async {
+    final result = await _apiClient.get<PaymentAttempt>(
+      'orders/$orderId/payments/latest',
+      query: {
+        'paymentType': paymentType.wireValue,
+        'refresh': refresh,
+      },
+      decodeData: PaymentAttempt.fromJson,
+    );
+    return _requiredPayment(result);
+  }
 
   @override
   Future<Order> payConsultation(String id) =>
@@ -157,6 +246,13 @@ final class ApiOrdersRemoteDataSource implements OrdersRemoteDataSource {
   Order _resolvedOrder(Object? json) => Order.fromJson(
         resolvePublicMediaUrlsInJson(json, resolver: _mediaResolver),
       );
+
+  PaymentAttempt _requiredPayment(PaymentAttempt? payment) {
+    if (payment == null) {
+      throw const FormatException('支付响应 data 为空');
+    }
+    return payment;
+  }
 }
 
 List<Object?> _list(Object? value, String label) {

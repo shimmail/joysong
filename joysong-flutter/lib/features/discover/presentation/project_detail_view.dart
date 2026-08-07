@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/core/network/optimized_network_image.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
+import 'package:joysong_flutter/features/discover/presentation/catalog_detail_shared.dart';
 import 'package:joysong_flutter/features/discover/presentation/rich_content_view.dart';
 
 /// Project detail content shared by ordinary projects and institution projects.
@@ -266,13 +268,28 @@ class _GalleryState extends State<_Gallery> {
           child: PageView.builder(
             itemCount: widget.images.length,
             onPageChanged: (value) => setState(() => _index = value),
-            itemBuilder: (context, index) => Image.network(
-              widget.images[index],
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Container(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                alignment: Alignment.center,
-                child: const Icon(Icons.broken_image_outlined, size: 48),
+            itemBuilder: (context, index) => GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => Navigator.of(context).push<void>(
+                MaterialPageRoute(
+                  builder: (_) => FullscreenImagePager(
+                    images: widget.images,
+                    contentDescription:
+                        context.localized('项目图片', 'Project image'),
+                    initialPage: index,
+                  ),
+                ),
+              ),
+              child: OptimizedNetworkImage(
+                url: widget.images[index],
+                width: double.infinity,
+                height: 260,
+                errorBuilder: (_, __, ___) => Container(
+                  color:
+                      Theme.of(context).colorScheme.surfaceContainerHighest,
+                  alignment: Alignment.center,
+                  child: const Icon(Icons.broken_image_outlined, size: 48),
+                ),
               ),
             ),
           ),

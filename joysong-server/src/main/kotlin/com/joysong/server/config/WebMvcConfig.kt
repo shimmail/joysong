@@ -4,7 +4,9 @@ import org.springframework.context.annotation.Configuration
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
+import org.springframework.http.CacheControl
 import java.nio.file.Path
+import java.time.Duration
 
 @Configuration
 class WebMvcConfig(
@@ -16,5 +18,6 @@ class WebMvcConfig(
         val resourceLocation = Path.of(uploadDirectory).toAbsolutePath().normalize().toUri().toString()
         registry.addResourceHandler("/images/**")
             .addResourceLocations(resourceLocation)
+            .setCacheControl(CacheControl.maxAge(Duration.ofHours(1)).cachePublic())
     }
 }

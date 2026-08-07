@@ -270,7 +270,7 @@ export default function ProjectCollaborationPage() {
         <Form.Item name="serviceDescription" label="个人服务介绍" rules={[{ max: 5000 }]}><Input.TextArea rows={4} /></Form.Item>
         <Form.Item name="serviceTags" label="个人擅长标签" rules={[{ max: 500 }]}><Input placeholder="多个标签使用英文逗号分隔" /></Form.Item>
         <Form.Item name="scheduleNote" label="出诊与排班说明" rules={[{ max: 500 }]}><Input.TextArea rows={3} /></Form.Item>
-        <Form.Item name="coverImage" label="个人项目封面"><ImageUpload folder="doctor-project-profiles" /></Form.Item>
+        <Form.Item name="coverImage" label="个人项目封面"><ImageUpload folder="doctor-project-profiles" recommendedSize="1200 × 800 px（3:2）" /></Form.Item>
         <Form.Item name="images" label="个人案例图集"><MultiImageUpload folder="doctor-project-profiles" /></Form.Item>
       </Form>
     </Modal>

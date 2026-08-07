@@ -9,6 +9,7 @@ class OrdersPage extends StatefulWidget {
   const OrdersPage({
     required this.controller,
     required this.onOrderSelected,
+    this.onEditReview,
     this.title,
     this.initialFilter,
     super.key,
@@ -16,6 +17,7 @@ class OrdersPage extends StatefulWidget {
 
   final OrdersController controller;
   final OrderSelectedCallback onOrderSelected;
+  final Future<void> Function(Order order)? onEditReview;
   final String? title;
   final OrderStatus? initialFilter;
 
@@ -121,6 +123,9 @@ class _OrdersPageState extends State<OrdersPage> {
             key: ValueKey(order.id),
             order: order,
             onTap: () => widget.onOrderSelected(order),
+            onEditReview: order.hasReview && widget.onEditReview != null
+                ? () => widget.onEditReview!(order)
+                : null,
           );
         },
       ),
@@ -260,11 +265,13 @@ class _OrderCard extends StatelessWidget {
   const _OrderCard({
     required this.order,
     required this.onTap,
+    this.onEditReview,
     super.key,
   });
 
   final Order order;
   final VoidCallback onTap;
+  final VoidCallback? onEditReview;
 
   @override
   Widget build(BuildContext context) {
@@ -292,7 +299,11 @@ class _OrderCard extends StatelessWidget {
                         ? _refundStatusLabel(context, order.refundStatus)
                         : _statusLabel(context, order.status),
                     style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          color: Theme.of(context).colorScheme.primary,
+                          color: _orderStatusColor(
+                            context,
+                            order.status,
+                            order.refundStatus,
+                          ),
                         ),
                   ),
                 ],
@@ -359,6 +370,20 @@ class _OrderCard extends StatelessWidget {
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
+              if (onEditReview != null) ...[
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    key: Key('edit-review-card-${order.id}'),
+                    onPressed: onEditReview,
+                    icon: const Icon(Icons.edit_outlined, size: 18),
+                    label: Text(
+                      context.localized('修改评价', 'Edit review'),
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -420,6 +445,27 @@ String _statusLabel(BuildContext context, OrderStatus status) =>
       OrderStatus.refunded => context.localized('已退款', 'Refunded'),
       OrderStatus.unknown => context.localized('未知状态', 'Unknown status'),
     };
+
+Color _orderStatusColor(
+  BuildContext context,
+  OrderStatus status,
+  RefundStatus refundStatus,
+) {
+  final colors = Theme.of(context).colorScheme;
+  if (refundStatus == RefundStatus.pending ||
+      refundStatus == RefundStatus.approved) {
+    return refundStatus == RefundStatus.approved
+        ? colors.onSurfaceVariant
+        : colors.tertiary;
+  }
+  return switch (status) {
+    OrderStatus.completed || OrderStatus.settled => Colors.green.shade700,
+    OrderStatus.cancelled || OrderStatus.refunded => colors.onSurfaceVariant,
+    OrderStatus.disputeMediation => colors.error,
+    OrderStatus.pendingPayment || OrderStatus.verified => colors.primary,
+    _ => colors.secondary,
+  };
+}
 
 String _refundStatusLabel(BuildContext context, RefundStatus status) =>
     switch (status) {

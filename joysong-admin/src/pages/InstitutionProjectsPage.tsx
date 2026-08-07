@@ -265,7 +265,7 @@ export default function InstitutionProjectsPage() {
           <Form.Item name="originalPrice" label="原价" extra="可留空；留空后客户端不显示划线原价">
             <InputNumber style={{ width: '100%' }} min={0} placeholder="留空表示无原价" />
           </Form.Item>
-          <Form.Item name="coverImage" label="封面图"><ImageUpload folder="projects" /></Form.Item>
+          <Form.Item name="coverImage" label="封面图"><ImageUpload folder="projects" recommendedSize="1200 × 800 px（3:2）" /></Form.Item>
           <Form.Item name="images" label="图集"><MultiImageUpload folder="projects" /></Form.Item>
           {isAdmin && <Form.Item name="salesCount" label="销量"><InputNumber style={{ width: '100%' }} min={0} /></Form.Item>}
           <Form.Item name="isActive" label="是否上架" valuePropName="checked"><Switch /></Form.Item>

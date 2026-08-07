@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/core/network/optimized_network_image.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
+import 'package:joysong_flutter/features/discover/presentation/catalog_detail_shared.dart';
 import 'package:joysong_flutter/features/discover/presentation/rich_content_view.dart';
 
 class ArticleDetailView extends StatelessWidget {
@@ -17,17 +19,35 @@ class ArticleDetailView extends StatelessWidget {
     final content = _text(raw, const ['content', 'body', 'contentHtml'],
         fallback: item.subtitle);
     final images = _images(raw);
+    final galleryImages = <String>{
+      if (item.imageUrl.isNotEmpty) item.imageUrl,
+      ...richContentImageUrls(content),
+      ...images,
+    }.toList(growable: false);
     return SelectionArea(
       child: ListView(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
         children: [
           if (item.imageUrl.isNotEmpty)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(18),
-              child: Image.network(item.imageUrl,
+            GestureDetector(
+              onTap: () => Navigator.of(context).push<void>(
+                MaterialPageRoute(
+                  builder: (_) => FullscreenImagePager(
+                    images: galleryImages,
+                    contentDescription:
+                        context.localized('文章图片', 'Article image'),
+                  ),
+                ),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(18),
+                child: OptimizedNetworkImage(
+                  url: item.imageUrl,
+                  width: double.infinity,
                   height: 230,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => const SizedBox.shrink()),
+                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                ),
+              ),
             ),
           const SizedBox(height: 20),
           Text(item.title, style: Theme.of(context).textTheme.headlineSmall),
@@ -35,7 +55,14 @@ class ArticleDetailView extends StatelessWidget {
           Row(children: [
             CircleAvatar(
               radius: 20,
-              foregroundImage: avatar.isEmpty ? null : NetworkImage(avatar),
+              foregroundImage: avatar.isEmpty
+                  ? null
+                  : optimizedNetworkImageProvider(
+                      context,
+                      avatar,
+                      width: 40,
+                      height: 40,
+                    ),
               child: avatar.isEmpty ? const Icon(Icons.person_outline) : null,
             ),
             const SizedBox(width: 10),
@@ -58,15 +85,38 @@ class ArticleDetailView extends StatelessWidget {
             content: content,
             textStyle:
                 Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.75),
+            onImageTap: (image) => Navigator.of(context).push<void>(
+              MaterialPageRoute(
+                builder: (_) => FullscreenImagePager(
+                  images: galleryImages,
+                  contentDescription:
+                      context.localized('文章图片', 'Article image'),
+                  initialPage: galleryImages.indexOf(image),
+                ),
+              ),
+            ),
           ),
-          for (final image
-              in images.where((value) => value != item.imageUrl)) ...[
+          for (final image in galleryImages.skip(
+            item.imageUrl.isEmpty ? 0 : 1,
+          )) ...[
             const SizedBox(height: 18),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: Image.network(image,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => const SizedBox.shrink()),
+            GestureDetector(
+              onTap: () => Navigator.of(context).push<void>(
+                MaterialPageRoute(
+                  builder: (_) => FullscreenImagePager(
+                    images: galleryImages,
+                    contentDescription:
+                        context.localized('文章图片', 'Article image'),
+                    initialPage: galleryImages.indexOf(image),
+                  ),
+                ),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: Image.network(image,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => const SizedBox.shrink()),
+              ),
             ),
           ],
           const SizedBox(height: 24),

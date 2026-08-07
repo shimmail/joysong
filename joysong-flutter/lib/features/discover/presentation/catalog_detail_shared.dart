@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/core/network/optimized_network_image.dart';
 
 class CatalogHero extends StatelessWidget {
   const CatalogHero({
@@ -233,8 +234,8 @@ class _DynamicImagePagerState extends State<DynamicImagePager> {
                           image: true,
                           label: widget.contentDescription,
                           button: true,
-                          child: Image.network(
-                            widget.images[index],
+                          child: OptimizedNetworkImage(
+                            url: widget.images[index],
                             width: width,
                             height: height,
                             fit: BoxFit.fitWidth,
@@ -279,7 +280,11 @@ class _DynamicImagePagerState extends State<DynamicImagePager> {
   Widget _imageFallback(IconData icon) => ColoredBox(
         color: widget.backgroundColor,
         child: Center(
-          child: Icon(icon, size: 48, color: const Color(0xff999999)),
+          child: Icon(
+            icon,
+            size: 48,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
         ),
       );
 
@@ -314,11 +319,17 @@ class _FullscreenImagePagerState extends State<FullscreenImagePager> {
   late final PageController _controller;
   late int _currentPage;
 
+  int get _initialVirtualPage {
+    if (widget.images.length <= 1) return 0;
+    const base = 10000;
+    return base - (base % widget.images.length) + widget.initialPage;
+  }
+
   @override
   void initState() {
     super.initState();
     _currentPage = widget.initialPage;
-    _controller = PageController(initialPage: widget.initialPage);
+    _controller = PageController(initialPage: _initialVirtualPage);
   }
 
   @override
@@ -335,14 +346,16 @@ class _FullscreenImagePagerState extends State<FullscreenImagePager> {
             children: [
               PageView.builder(
                 controller: _controller,
-                itemCount: widget.images.length,
-                onPageChanged: (page) => setState(() => _currentPage = page),
-                itemBuilder: (_, index) => InteractiveViewer(
+                itemCount: widget.images.length == 1 ? 1 : null,
+                onPageChanged: (page) => setState(
+                  () => _currentPage = page % widget.images.length,
+                ),
+                itemBuilder: (_, page) => InteractiveViewer(
                   minScale: 1,
                   maxScale: 5,
                   child: Center(
                     child: Image.network(
-                      widget.images[index],
+                      widget.images[page % widget.images.length],
                       semanticLabel: widget.contentDescription,
                       fit: BoxFit.contain,
                       errorBuilder: (_, __, ___) => const Icon(
@@ -508,7 +521,12 @@ class CatalogSection extends StatelessWidget {
             ]),
             if (subtitle != null && subtitle!.isNotEmpty) ...[
               const SizedBox(height: 4),
-              Text(subtitle!, style: const TextStyle(color: Color(0xff999999))),
+              Text(
+                subtitle!,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
             ],
             const SizedBox(height: 14),
             child,
@@ -575,16 +593,18 @@ class CatalogImage extends StatelessWidget {
         borderRadius: BorderRadius.circular(radius),
       ),
       alignment: Alignment.center,
-      child: Icon(icon, color: const Color(0xffaaaaaa)),
+      child: Icon(
+        icon,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
     );
     if (url.isEmpty) return fallback;
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
-      child: Image.network(
-        url,
+      child: OptimizedNetworkImage(
+        url: url,
         width: width,
         height: height,
-        fit: BoxFit.cover,
         errorBuilder: (_, __, ___) => fallback,
       ),
     );

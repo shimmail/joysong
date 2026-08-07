@@ -32,25 +32,25 @@ class HomeService(
         bannerRepository.findAllByOrderBySortOrderAsc().map { it.toResponse() }
 
     fun getHotProjects(): List<ProjectResponse> =
-        projectRepository.findAll().map { it.toResponse() }
+        projectRepository.findTop8ByOrderBySalesCountDesc().map { it.toResponse() }
 
     fun getExpertArticles(): List<ArticleResponse> =
-        articleRepository.findAll().map { it.toResponse() }
+        articleRepository.findTop6ByOrderByPublishDateDesc().map { it.toResponse() }
 
     fun getUserDiaries(): List<DiaryResponse> =
-        diaryRepository.findPublishedOrderByPublishDateDesc().map { it.toResponse() }
+        diaryRepository.findTop8ByStatusOrderByPublishDateDesc("published").map { it.toResponse() }
 
     /**
      * 首页推荐机构项目：按销量倒序返回前 8 个机构项目，合并项目模板信息
-     * N+1 修复：先批量查出所有关联的 Project 和 Institution，再在内存中组装结果
+     * 仅查询需展示的项目，再批量查出关联的 Project 和 Institution 进行组装。
      */
     fun getRecommendedInstitutionProjects(): List<RecommendedInstitutionProjectDto> {
-        val allInstitutionProjects = institutionProjectRepository.findAll().filter { it.isActive }
-        if (allInstitutionProjects.isEmpty()) return emptyList()
+        val institutionProjects = institutionProjectRepository.findTop8ByIsActiveTrueOrderBySalesCountDesc()
+        if (institutionProjects.isEmpty()) return emptyList()
 
-        // 批量收集所有 projectId 和 institutionId
-        val projectIds = allInstitutionProjects.map { it.projectId }.distinct()
-        val institutionIds = allInstitutionProjects.map { it.institutionId }.distinct()
+        // Only the eight displayed records need their associated data.
+        val projectIds = institutionProjects.map { it.projectId }.distinct()
+        val institutionIds = institutionProjects.map { it.institutionId }.distinct()
 
         // 一次性批量查询 Project 和 Institution，构建 ID -> Entity 映射
         val projectMap: Map<String, ProjectEntity> = projectRepository.findAllById(projectIds)
@@ -59,7 +59,7 @@ class HomeService(
             .associateBy { it.id }
 
         // 在内存中组装结果
-        return allInstitutionProjects.mapNotNull { ip ->
+        return institutionProjects.mapNotNull { ip ->
             val project = projectMap[ip.projectId] ?: return@mapNotNull null
             val institution = institutionMap[ip.institutionId] ?: return@mapNotNull null
             val effective = institutionProjectDetailResolver.resolve(ip, project)
@@ -81,6 +81,6 @@ class HomeService(
                 slogan = effective.slogan,
                 detailContent = effective.detailContent
             )
-        }.sortedByDescending { it.salesCount }.take(8)
+        }
     }
 }

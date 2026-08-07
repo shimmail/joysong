@@ -7,10 +7,19 @@ extension ChatPersonaWire on ChatPersona {
       };
 }
 
-enum ChatContextType { general, doctor, project, institution }
+enum ChatContextType {
+  general,
+  doctor,
+  project,
+  institution,
+  institutionProject,
+}
 
 extension ChatContextTypeWire on ChatContextType {
-  String get wireName => name.toUpperCase();
+  String get wireName => switch (this) {
+        ChatContextType.institutionProject => 'INSTITUTION_PROJECT',
+        _ => name.toUpperCase(),
+      };
 }
 
 class ChatSession {

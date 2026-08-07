@@ -95,6 +95,10 @@ openai:
   stream-enabled: ${OPENAI_STREAM_ENABLED:false}
   # Only ambiguous or complex requests use the extra lightweight JSON classification call.
   intent-parser-enabled: ${OPENAI_INTENT_PARSER_ENABLED:true}
+  # 普通聊天和详情总结优先快速首包；规划、对比、安全判断保留少量推理预算。
+  # 兼容第三方 OpenAI 网关：留空时不发送 reasoning_effort；确认网关支持后可设 none/low。
+  fast-reasoning-effort: ${OPENAI_FAST_REASONING_EFFORT:none}
+  complex-reasoning-effort: ${OPENAI_COMPLEX_REASONING_EFFORT:}
   # Demo output is opt-in only in application-dev.yml.
   demo-fallback-enabled: false
 

@@ -22,6 +22,7 @@ final class SocialController extends ChangeNotifier {
   SocialController(this._repository, {this.currentUserId = ''});
 
   final SocialRepository _repository;
+  SocialRepository get repository => _repository;
   final String currentUserId;
   final Set<String> _busyActions = <String>{};
   final Map<String, List<Comment>> _comments = <String, List<Comment>>{};

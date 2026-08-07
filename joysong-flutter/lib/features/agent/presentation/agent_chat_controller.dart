@@ -103,6 +103,11 @@ class AgentChatController extends ChangeNotifier {
     try {
       final sessions = await _repository.getSessions(persona: persona);
       _emit(_state.copyWith(sessions: sessions, isLoadingSessions: false));
+      // Restore the most recently updated conversation when the page is
+      // recreated, so persisted history is immediately visible.
+      if (sessions.isNotEmpty && _state.activeSession == null) {
+        await openSession(sessions.first);
+      }
     } on Object catch (error) {
       _emit(
         _state.copyWith(
@@ -207,6 +212,135 @@ class AgentChatController extends ChangeNotifier {
     );
   }
 
+  Future<void> startContextSummary({
+    required ChatContextType contextType,
+    required String contextId,
+    required String contextName,
+  }) async {
+    final normalizedId = contextId.trim();
+    final normalizedName = contextName.trim();
+    if (contextType == ChatContextType.general ||
+        normalizedId.isEmpty ||
+        normalizedName.isEmpty) {
+      return;
+    }
+    await cancelSend();
+    final operation = ++_operation;
+    _emit(
+      _state.copyWith(
+        clearActiveSession: true,
+        messages: const [],
+        deliveryState: ChatDeliveryState.sending,
+        hasOlderMessages: false,
+        clearError: true,
+        clearLatestTurn: true,
+      ),
+    );
+    try {
+      final session = await _repository.createSession(
+        persona: persona,
+        contextType: contextType,
+        contextId: normalizedId,
+        title: normalizedName,
+      );
+      if (!_isCurrent(operation)) return;
+      _emit(
+        _state.copyWith(
+          activeSession: session,
+          sessions: [
+            session,
+            ..._state.sessions.where((item) => item.id != session.id),
+          ],
+          deliveryState: ChatDeliveryState.idle,
+        ),
+      );
+      await send('请根据平台数据库信息，简要总结当前详情的关键信息、适合关注的方面和必要风险。');
+    } on Object catch (error) {
+      if (!_isCurrent(operation)) return;
+      _emit(
+        _state.copyWith(
+          deliveryState: ChatDeliveryState.failed,
+          errorMessage: _messageFor(error),
+        ),
+      );
+    }
+  }
+
+  Future<void> deleteSession(ChatSession session) async {
+    await cancelSend();
+    final operation = ++_operation;
+    _emit(_state.copyWith(clearError: true));
+    try {
+      await _repository.deleteSession(session.id);
+      if (!_isCurrent(operation)) return;
+      final isActive = _state.activeSession?.id == session.id;
+      _emit(
+        _state.copyWith(
+          sessions: _state.sessions
+              .where((item) => item.id != session.id)
+              .toList(growable: false),
+          clearActiveSession: isActive,
+          messages: isActive ? const [] : null,
+          hasOlderMessages: isActive ? true : null,
+          deliveryState: isActive ? ChatDeliveryState.idle : null,
+          clearLatestTurn: isActive,
+        ),
+      );
+    } on Object catch (error) {
+      if (!_isCurrent(operation)) return;
+      _emit(_state.copyWith(errorMessage: _messageFor(error)));
+      rethrow;
+    }
+  }
+
+  Future<void> clearActiveMessages() async {
+    final session = _state.activeSession;
+    if (session == null) return;
+    await cancelSend();
+    final operation = ++_operation;
+    _emit(_state.copyWith(clearError: true));
+    try {
+      await _repository.clearMessages(session.id);
+      if (!_isCurrent(operation)) return;
+      _emit(
+        _state.copyWith(
+          messages: const [],
+          hasOlderMessages: false,
+          deliveryState: ChatDeliveryState.idle,
+          clearLatestTurn: true,
+        ),
+      );
+    } on Object catch (error) {
+      if (!_isCurrent(operation)) return;
+      _emit(_state.copyWith(errorMessage: _messageFor(error)));
+      rethrow;
+    }
+  }
+
+  Future<void> clearSessions() async {
+    await cancelSend();
+    final operation = ++_operation;
+    _emit(_state.copyWith(clearError: true));
+    try {
+      await _repository.clearSessions(persona: persona);
+      if (!_isCurrent(operation)) return;
+      _emit(
+        _state.copyWith(
+          sessions: const [],
+          clearActiveSession: true,
+          messages: const [],
+          hasOlderMessages: false,
+          deliveryState: ChatDeliveryState.idle,
+          clearLatestTurn: true,
+        ),
+      );
+    } on Object catch (error) {
+      if (!_isCurrent(operation)) return;
+      _emit(_state.copyWith(errorMessage: _messageFor(error)));
+      rethrow;
+    }
+  }
+
   Future<void> send(String content) async {
     if (_state.deliveryState.isBusy) return;
     final normalized = content.trim();
@@ -268,15 +402,34 @@ class AgentChatController extends ChangeNotifier {
   ) async {
     // This is exactly one POST. Failure is surfaced for an explicit manual
     // retry; neither this controller nor ApiClient replays POST requests.
-    final turn = await _repository.sendMessage(session.id, content);
-    if (!_isCurrent(operation)) return;
+    final temporaryAssistant = _temporaryMessage(session.id, 'ASSISTANT', '');
     _emit(
       _state.copyWith(
-        messages: _deduplicate([..._state.messages, turn.message]),
-        deliveryState: ChatDeliveryState.completed,
-        latestTurn: turn,
+        messages: [..._state.messages, temporaryAssistant],
+        deliveryState: ChatDeliveryState.sending,
       ),
     );
+    try {
+      final turn = await _repository.sendMessage(session.id, content);
+      if (!_isCurrent(operation)) {
+        _removeMessage(temporaryAssistant.id);
+        return;
+      }
+      _replaceMessage(temporaryAssistant.id, turn.message);
+      _emit(
+        _state.copyWith(
+          deliveryState: ChatDeliveryState.completed,
+          latestTurn: turn,
+        ),
+      );
+    } on Object {
+      // Do not leave an empty "正在思考" bubble after a failed POST. The
+      // outer send() handler exposes the actual failure in the status banner.
+      if (_isCurrent(operation)) {
+        _removeMessage(temporaryAssistant.id);
+      }
+      rethrow;
+    }
   }
 
   Future<void> _sendStreaming(
@@ -403,6 +556,16 @@ class AgentChatController extends ChangeNotifier {
           for (final message in _state.messages)
             if (message.id == messageId) replacement else message,
         ]),
+      ),
+    );
+  }
+
+  void _removeMessage(String messageId) {
+    _emit(
+      _state.copyWith(
+        messages: _state.messages
+            .where((message) => message.id != messageId)
+            .toList(growable: false),
       ),
     );
   }

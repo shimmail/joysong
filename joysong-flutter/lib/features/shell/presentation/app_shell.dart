@@ -103,6 +103,7 @@ class _AppShellState extends State<AppShell> {
   MessagingHubController? _messagingController;
   AgentChatController? _agentChatController;
   AgentPlanController? _agentPlanController;
+  int _unreadNotificationCount = 0;
 
   NavigatorState get _contentNavigator =>
       _contentNavigatorKey.currentState ?? Navigator.of(context);
@@ -126,6 +127,7 @@ class _AppShellState extends State<AppShell> {
 
   void _createDependencies() {
     _disposeControllers();
+    _unreadNotificationCount = 0;
     final apiClient = widget.apiClient;
     if (apiClient == null) {
       _homeRepository = null;
@@ -190,7 +192,13 @@ class _AppShellState extends State<AppShell> {
           ),
         ),
       );
-      _agentChatController = AgentChatController(repository: agentRepository);
+      // Match the completed native app flow and the server default:
+      // POST one message and wait for the normal JSON response. The reserved
+      // SSE endpoint is disabled unless OPENAI_STREAM_ENABLED is explicitly on.
+      _agentChatController = AgentChatController(
+        repository: agentRepository,
+        streamingEnabled: false,
+      );
       _agentPlanController = AgentPlanController(agentRepository);
     }
   }
@@ -212,8 +220,9 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _handleNotificationStateChanged() {
-    if (mounted) {
-      setState(() {});
+    final nextCount = _notificationController?.unreadCount ?? 0;
+    if (mounted && nextCount != _unreadNotificationCount) {
+      setState(() => _unreadNotificationCount = nextCount);
     }
   }
 
@@ -229,7 +238,7 @@ class _AppShellState extends State<AppShell> {
           profileRepository: _profileRepository,
           allowPreviewData: widget.allowPreviewData,
           onSearch: () => _openDiscover(DiscoverContentType.all),
-          unreadNotificationCount: _notificationController?.unreadCount ?? 0,
+          unreadNotificationCount: _unreadNotificationCount,
           onNotifications:
               _messagingController == null ? null : _openMessagesTab,
           onOpenItem: _openHomeItem,
@@ -431,69 +440,39 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
-  void _openAgentCatalogItem(AgentCatalogItem item) {
-    final repository = _discoverRepository;
-    if (repository == null || item.id.isEmpty) return;
-    final type = switch (item.type.toUpperCase()) {
-      'DOCTOR' => DiscoverContentType.doctor,
-      'INSTITUTION' => DiscoverContentType.institution,
-      'PROJECT' || 'INSTITUTION_PROJECT' => DiscoverContentType.project,
-      _ => null,
-    };
-    if (type == null) return;
-    _contentNavigator.push<void>(MaterialPageRoute(
-      builder: (_) => DiscoverDetailPage(
-        repository: repository,
-        type: type,
-        id: item.projectId ?? item.id,
-        institutionId: item.institutionId,
-        projectId: item.projectId,
-        onBookProject: _bookingRepository == null ? null : _openBooking,
-        socialController: _socialController,
-        onOpenUser: _openPublicUser,
-        onConsultDoctor: _openDoctorChat,
-        onOpenAi: _openAiChat,
-      ),
-    ));
-  }
-
-  void _openAiChat() {
+  void _openAiChat([DiscoverItem? detail]) {
     final chatController = _agentChatController;
     final planController = _agentPlanController;
+    final context = detail == null ? null : _agentContextFor(detail);
     _contentNavigator.push<void>(
       MaterialPageRoute(
         builder: (_) => chatController != null && planController != null
             ? AgentChatPage(
                 chatController: chatController,
                 planController: planController,
-                onOpenCatalogItem: _openAgentCatalogItem,
-                onHumanChat: _openAgentHumanChat,
+                initialContextType: context?.$1,
+                initialContextId: context?.$2,
+                initialContextName: context?.$3,
               )
             : const AssistantPage(),
       ),
     );
   }
 
-  Future<void> _openAgentHumanChat(AgentCatalogItem item) async {
-    final repository = _messagingRepository;
-    if (repository == null) return;
-    final targetId = item.type.toUpperCase() == 'DOCTOR'
-        ? item.id
-        : item.institutionId ?? item.id;
-    if (targetId.isEmpty) return;
-    try {
-      final conversation = await repository.createDmConversation(targetId);
-      if (!mounted) return;
-      await _openDmThread(conversation);
-    } on Object {
-      if (!mounted) return;
-      final english = Localizations.localeOf(context).languageCode == 'en';
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(english
-            ? 'Unable to start a consultation. Please try again.'
-            : '暂时无法发起咨询，请稍后重试'),
-      ));
+  (ChatContextType, String, String) _agentContextFor(DiscoverItem detail) {
+    final institutionProject = detail.raw['institutionProject'];
+    if (institutionProject is Map) {
+      final id = institutionProject['id']?.toString().trim() ?? '';
+      if (id.isNotEmpty) {
+        return (ChatContextType.institutionProject, id, detail.title);
+      }
     }
+    final type = switch (detail.type) {
+      DiscoverContentType.doctor => ChatContextType.doctor,
+      DiscoverContentType.institution => ChatContextType.institution,
+      _ => ChatContextType.project,
+    };
+    return (type, detail.id, detail.title);
   }
 
   Future<void> _openBooking(DiscoverItem item) async {
@@ -573,9 +552,71 @@ class _AppShellState extends State<AppShell> {
         builder: (_) => OrdersPage(
           controller: controller,
           onOrderSelected: _openOrderDetail,
+          onEditReview: _openOrderReviewEditor,
         ),
       ),
     );
+  }
+
+  Future<void> _openOrderReviewEditor(Order order) async {
+    final socialController = _socialController;
+    if (socialController == null) return;
+    final loaded = await socialController.loadOrderReview(order.id);
+    if (!mounted) return;
+    final review = loaded.value;
+    if (!loaded.succeeded || review == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            loaded.message ??
+                context.localized('评价加载失败', 'Unable to load the review'),
+          ),
+        ),
+      );
+      return;
+    }
+    final draft = await _contentNavigator.push<ReviewDraft>(
+      MaterialPageRoute(
+        builder: (_) => ReviewOrderPage(
+          order: order,
+          initialReview: review,
+          onPickImage: _pickAndUploadReviewImage,
+        ),
+      ),
+    );
+    if (draft == null || !mounted) return;
+    final result = await socialController.updateReview(review.id, draft);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          result.succeeded
+              ? context.localized('评价已修改', 'Review updated')
+              : (result.message ??
+                  context.localized('评价修改失败', 'Review update failed')),
+        ),
+      ),
+    );
+    if (result.succeeded) await _ordersController?.refresh();
+  }
+
+  Future<String?> _pickAndUploadReviewImage() async {
+    final controller = _socialController;
+    if (controller == null) return null;
+    final selected = await const AppFilePicker().pickImage();
+    if (selected == null) return null;
+    final result = await controller.uploadPublicMedia(
+      PublicMediaDraft(
+        bytes: selected.bytes,
+        fileName: selected.fileName,
+        mimeType: selected.mimeType,
+        purpose: PublicMediaPurpose.review,
+      ),
+    );
+    if (!result.succeeded || result.value?.trim().isEmpty != false) {
+      throw StateError(result.message ?? '图片上传失败');
+    }
+    return result.value!.trim();
   }
 
   void _showJourneyComingSoon() {
@@ -654,6 +695,7 @@ class _AppShellState extends State<AppShell> {
       ),
     );
     controller.dispose();
+    await _ordersController?.refresh();
   }
 
   Future<void> _openSocial() async {
@@ -773,7 +815,10 @@ class _AppShellState extends State<AppShell> {
     setState(() => _selectedIndex = 2);
     final notificationController = _notificationController;
     if (notificationController != null) {
-      unawaited(notificationController.refresh());
+      // Opening the notification entry acknowledges the current notification
+      // badge. The controller updates the local count immediately after the
+      // server confirms the operation.
+      unawaited(notificationController.markAllRead());
     }
     final messagingController = _messagingController;
     if (messagingController != null) {

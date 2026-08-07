@@ -82,7 +82,6 @@ data class DiaryResponse(
     val beforeImageUrls: List<String>,
     val afterImages: String,
     val afterImageUrls: List<String>,
-    val orderId: String,
     val rating: Int,
     val favoriteCount: Int
 )
@@ -218,7 +217,6 @@ fun DiaryEntity.toResponse() = DiaryResponse(
     beforeImageUrls = beforeImageUrls,
     afterImages = afterImages,
     afterImageUrls = afterImageUrls,
-    orderId = orderId,
     rating = rating,
     favoriteCount = favoriteCount
 )

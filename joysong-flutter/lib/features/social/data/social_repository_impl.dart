@@ -61,6 +61,12 @@ final class SocialRepositoryImpl
   }
 
   @override
+  Future<String> createDiaryShareUrl(String id) {
+    _requireId(id, 'id');
+    return _remoteDataSource.createDiaryShareUrl(id);
+  }
+
+  @override
   Future<List<Comment>> getComments(
     String diaryId, {
     int offset = 0,

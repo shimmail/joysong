@@ -139,7 +139,7 @@ export default function ProjectsPage() {
           <Form.Item name="referencePrice" label="参考均价"><InputNumber style={{ width: '100%' }} min={0} /></Form.Item>
           <Form.Item name="slogan" label="宣传语"><Input placeholder="简短宣传语" /></Form.Item>
           <Form.Item name="salesCount" label="销量"><InputNumber style={{ width: '100%' }} min={0} /></Form.Item>
-          <Form.Item name="coverImage" label="封面图"><ImageUpload folder="projects" /></Form.Item>
+          <Form.Item name="coverImage" label="封面图"><ImageUpload folder="projects" recommendedSize="1200 × 800 px（3:2）" /></Form.Item>
           <Form.Item name="images" label="项目图集"><MultiImageUpload folder="projects" /></Form.Item>
           <Form.Item name="category" label="分类"><Input /></Form.Item>
           <Form.Item name="description" label="项目介绍"><Input.TextArea rows={3} /></Form.Item>

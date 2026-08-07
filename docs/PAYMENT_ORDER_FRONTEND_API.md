@@ -690,3 +690,28 @@ sequenceDiagram
 4. 渠道日账单下载、差异处理、监控与告警。
 
 在这些能力完成前，生产环境不应向用户展示尚未实现的支付渠道。
+
+### 13.1 Flutter Android/iOS 当前实现（2026-08-07）
+
+Flutter 双端已从旧的 `pay-consultation`、`pay-balance` 流程迁移到统一支付前端：
+
+- 创建支付使用 `POST /orders/{id}/payment-attempts`，同一次提交和认证重放复用同一个 `Idempotency-Key`；
+- 支付页以 `PaymentAttemptResponse.status` 为准，`PROCESSING` 轮询 `GET /payments/{paymentId}?refresh=true`，只有服务端返回 `SUCCEEDED` 才显示成功；
+- 支持查询并恢复订单最新一次支付，恢复查询使用 `refresh=true`；真实渠道的 `queryPayment` 必须重新返回可安全恢复的 `nextAction`，否则客户端保持失败关闭并提示刷新，不能新建重复支付；
+- Android 与 iOS 共用支付模型、控制器、页面和中英文文案；
+- `REDIRECT` 使用系统浏览器打开，并校验协议和允许域名；
+- Stripe、微信和支付宝原生 SDK 动作在 SDK、商户信息及服务端渠道适配器完成前安全失败，不会伪造支付成功。
+
+渠道展示采用显式构建配置：
+
+```text
+--dart-define=PAYMENT_PROVIDERS=DEMO
+--dart-define=PAYMENT_REDIRECT_HOSTS=sandbox.paypal.com,paypal.com
+```
+
+- Debug 未配置时默认只启用 `DEMO`；
+- Release 未配置时不展示任何支付渠道；
+- 真实渠道只能在服务端适配器、沙箱密钥和双端 SDK 均完成后加入 `PAYMENT_PROVIDERS`；
+- `PAYMENT_REDIRECT_HOSTS` 在 Release 必须配置，客户端只接受 HTTPS 和白名单域名。
+
+当前仍需服务端补充 `/api/payment-capabilities` 能力发现接口，并持久化或可恢复生成安全的 `nextAction` 数据，避免客户端渠道配置与服务端实际开关发生漂移。

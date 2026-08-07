@@ -156,7 +156,7 @@ class DiscoverController(
 
     @GetMapping("/diaries/{id}")
     fun getDiaryById(@PathVariable id: String): BaseResponse<*> {
-        return diaryRepository.findById(id)
+        return diaryRepository.findPublishedById(id)
             .map { BaseResponse.success(it.toResponse()) }
             .orElse(BaseResponse.error("RESOURCE_NOT_FOUND: Diary not found / 未找到日记", 404))
     }

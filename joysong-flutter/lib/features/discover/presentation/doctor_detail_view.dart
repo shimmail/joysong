@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/core/network/optimized_network_image.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/presentation/catalog_detail_shared.dart';
+import 'package:joysong_flutter/features/discover/presentation/catalog_review_section.dart';
 import 'package:joysong_flutter/features/discover/presentation/discover_content_card.dart';
+import 'package:joysong_flutter/features/social/presentation/social_controller.dart';
 
 /// Doctor-specific body for [DiscoverItem] details.
 ///
@@ -19,6 +22,8 @@ class DoctorDetailView extends StatelessWidget {
     this.onAiChat,
     this.onViewAllProjects,
     this.onViewAllDiaries,
+    this.onViewAllReviews,
+    this.socialController,
     super.key,
   });
 
@@ -30,6 +35,8 @@ class DoctorDetailView extends StatelessWidget {
   final VoidCallback? onAiChat;
   final VoidCallback? onViewAllProjects;
   final VoidCallback? onViewAllDiaries;
+  final VoidCallback? onViewAllReviews;
+  final SocialController? socialController;
 
   @override
   Widget build(BuildContext context) {
@@ -59,11 +66,12 @@ class DoctorDetailView extends StatelessWidget {
     final projects = _maps(item.raw['institutionProjects']);
     final institutions = _maps(item.raw['institutions']);
     final diaries = _maps(item.raw['diaries']);
+    final reviews = _maps(item.raw['reviews']);
 
     final reviewCount = _integer(data['reviewCount']);
     final consultationCount = _integer(data['consultationCount']);
     final caseCount = _integer(data['caseCount']);
-    final sectionKeys = List.generate(4, (_) => GlobalKey());
+    final sectionKeys = List.generate(5, (_) => GlobalKey());
     void openSection(int index) {
       final targetContext = sectionKeys[index].currentContext;
       if (targetContext == null) return;
@@ -204,15 +212,6 @@ class DoctorDetailView extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (rating > 0)
-                          Text(
-                            '★ ${rating.toStringAsFixed(1)} ($reviewCount)',
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleLarge
-                                ?.copyWith(color: const Color(0xff666666)),
-                          ),
-                        const SizedBox(height: 12),
                         if (diaries.isEmpty)
                           _EmptySection(
                             message: context.localized(
@@ -234,6 +233,26 @@ class DoctorDetailView extends StatelessWidget {
               SliverToBoxAdapter(
                 child: KeyedSubtree(
                   key: sectionKeys[3],
+                  child: _Section(
+                    title: context.localized('用户评价', 'Patient reviews'),
+                    trailing: TextButton(
+                      onPressed: reviews.isEmpty ? null : onViewAllReviews,
+                      child: Text(context.isEnglish
+                          ? 'All (${reviews.length})'
+                          : '全部 (${reviews.length})'),
+                    ),
+                    child: CatalogReviewPreview(
+                      reviews: reviews,
+                      socialController: socialController,
+                      onViewAll: onViewAllReviews,
+                      showHeader: false,
+                    ),
+                  ),
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: KeyedSubtree(
+                  key: sectionKeys[4],
                   child: _Section(
                     title: context.localized('出诊机构', 'Clinic affiliations'),
                     child: Column(
@@ -420,8 +439,8 @@ class _DoctorTabsDelegate extends SliverPersistentHeaderDelegate {
   Widget build(
       BuildContext context, double shrinkOffset, bool overlapsContent) {
     final labels = context.isEnglish
-        ? const ['Credentials', 'Projects', 'Diaries', 'Clinics']
-        : const ['资质保险箱', '可预约项目', '用户日记', '出诊机构'];
+        ? const ['Credentials', 'Projects', 'Diaries', 'Reviews', 'Clinics']
+        : const ['资质保险箱', '可预约项目', '用户日记', '用户评价', '出诊机构'];
     return DetailAnchorBar(labels: labels, onTap: onSectionClick);
   }
 
@@ -467,7 +486,9 @@ class _EmptySection extends StatelessWidget {
         child: Center(
           child: Text(
             message,
-            style: const TextStyle(color: Color(0xff999999)),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
         ),
       );
@@ -533,8 +554,10 @@ class _ProjectCard extends StatelessWidget {
                       if (originalPrice > price) ...[
                         const SizedBox(width: 7),
                         Text('¥${_money(originalPrice)}',
-                            style: const TextStyle(
-                                color: Color(0xff999999),
+                            style: TextStyle(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
                                 decoration: TextDecoration.lineThrough)),
                       ],
                     ]),
@@ -771,11 +794,17 @@ class _ImageViewerState extends State<_ImageViewer> {
   late final PageController _controller;
   late int _index;
 
+  int get _initialVirtualPage {
+    if (widget.urls.length <= 1) return 0;
+    const base = 10000;
+    return base - (base % widget.urls.length) + widget.initialIndex;
+  }
+
   @override
   void initState() {
     super.initState();
     _index = widget.initialIndex;
-    _controller = PageController(initialPage: _index);
+    _controller = PageController(initialPage: _initialVirtualPage);
   }
 
   @override
@@ -790,11 +819,12 @@ class _ImageViewerState extends State<_ImageViewer> {
         child: Stack(children: [
           PageView.builder(
             controller: _controller,
-            itemCount: widget.urls.length,
-            onPageChanged: (value) => setState(() => _index = value),
-            itemBuilder: (_, index) => InteractiveViewer(
+            itemCount: widget.urls.length == 1 ? 1 : null,
+            onPageChanged: (value) =>
+                setState(() => _index = value % widget.urls.length),
+            itemBuilder: (_, page) => InteractiveViewer(
               child: Center(
-                child: Image.network(widget.urls[index],
+                child: Image.network(widget.urls[page % widget.urls.length],
                     fit: BoxFit.contain,
                     errorBuilder: (_, __, ___) => const Icon(
                         Icons.broken_image_outlined,
@@ -850,17 +880,20 @@ class _NetworkImage extends StatelessWidget {
         borderRadius: BorderRadius.circular(radius),
       ),
       alignment: Alignment.center,
-      child:
-          const Icon(Icons.medical_services_outlined, color: Color(0xffaaaaaa)),
+      child: Icon(
+        Icons.medical_services_outlined,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
     );
     if (url.isEmpty) return fallback;
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
-      child: Image.network(url,
-          width: width,
-          height: height,
-          fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => fallback),
+      child: OptimizedNetworkImage(
+        url: url,
+        width: width,
+        height: height,
+        errorBuilder: (_, __, ___) => fallback,
+      ),
     );
   }
 }

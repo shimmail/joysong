@@ -92,6 +92,8 @@ final class OrderDetailController extends ChangeNotifier {
   final OrdersRepository _repository;
   final String orderId;
 
+  OrdersRepository get repository => _repository;
+
   Order? _order;
   RefundDetail? _refund;
   Settlement? _settlement;

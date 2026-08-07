@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/core/network/optimized_network_image.dart';
 import 'package:joysong_flutter/features/discover/presentation/discover_content_card.dart';
 import 'package:joysong_flutter/features/home/domain/home_models.dart';
 import 'package:joysong_flutter/features/home/domain/home_repository.dart';
@@ -465,9 +466,10 @@ class _RecommendationBanner extends StatelessWidget {
             fit: StackFit.expand,
             children: [
               if (item.imageUrl.isNotEmpty)
-                Image.network(
-                  item.imageUrl,
-                  fit: BoxFit.cover,
+                OptimizedNetworkImage(
+                  url: item.imageUrl,
+                  width: double.infinity,
+                  height: 150,
                   errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                 ),
               DecoratedBox(
@@ -1169,9 +1171,10 @@ class _ContentImage extends StatelessWidget {
     return SizedBox(
       width: width,
       height: height,
-      child: Image.network(
-        imageUrl,
-        fit: BoxFit.cover,
+      child: OptimizedNetworkImage(
+        url: imageUrl,
+        width: width,
+        height: height,
         errorBuilder: (_, __, ___) => fallback,
       ),
     );

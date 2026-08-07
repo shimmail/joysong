@@ -21,9 +21,17 @@ class AgentIntentRouterTest {
     }
 
     @Test
-    fun `detail context routes to detail summary`() {
+    fun `detail summary request routes to detail summary`() {
         val result = router.decide("帮我简单介绍一下", "DOCTOR")
         assertEquals(AgentIntent.DETAIL_SUMMARY, result.intent)
+        assertTrue(result.searchCatalog)
+    }
+
+    @Test
+    fun `follow up in detail context stays on catalog question path`() {
+        val result = router.decide("恢复期多久", "PROJECT")
+        assertEquals(AgentIntent.CATALOG_QA, result.intent)
+        assertEquals(AgentQueryTarget.PROJECT, result.queryTarget)
         assertTrue(result.searchCatalog)
     }
 

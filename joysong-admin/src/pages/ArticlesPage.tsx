@@ -178,7 +178,7 @@ export default function ArticlesPage() {
             <Input.TextArea rows={2} />
           </Form.Item>
           <Form.Item name="coverImage" label="封面图">
-            <ImageUpload folder="articles" />
+            <ImageUpload folder="articles" recommendedSize="1200 × 800 px（3:2）" />
           </Form.Item>
           <Form.Item name="publishDate" label="发布日期">
             <Input placeholder="如 2025-01-01" />

@@ -24,6 +24,7 @@ import com.joysong.server.institution.service.InstitutionProjectDetailResolver
 import com.joysong.server.project.entity.ProjectEntity
 import com.joysong.server.project.repository.ProjectRepository
 import com.joysong.server.review.dto.ReviewResponse
+import com.joysong.server.review.entity.ReviewEntity
 import com.joysong.server.review.repository.ReviewRepository
 import com.joysong.server.user.repository.UserRepository
 import org.springframework.stereotype.Service
@@ -116,11 +117,15 @@ class DiscoverDetailService(
         // 主机构保留给旧客户端；完整机构列表用于新客户端展示。
         val institutions = doctorInstitutionService.institutionsFor(doctorId)
         val institution = institutions.firstOrNull { it.id == doctor.institutionId } ?: institutions.firstOrNull()
+        val reviews = reviewsWithUsers(
+            reviewRepository.findByDoctorIdAndTargetType(doctorId, "INSTITUTION")
+        )
 
         return DoctorDetailDto(
             doctor = doctor.toResponse(),
             institutionProjects = institutionProjectInfos,
             diaries = diaries.map { it.toResponse() },
+            reviews = reviews,
             institution = institution?.toResponse(),
             institutions = institutions.map { it.toResponse() }
         )
@@ -148,11 +153,15 @@ class DiscoverDetailService(
 
         // 获取项目相关的日记
         val diaries = diaryRepository.findPublishedByProjectId(projectId)
+        val reviews = reviewsWithUsers(
+            institutionProjects.flatMap { reviewRepository.findByInstitutionProjectId(it.id) }
+        )
 
         return ProjectDetailDto(
             project = project.toResponse(),
             institutionProjects = institutionProjectsWithInstitutions,
-            diaries = diaries.map { it.toResponse() }
+            diaries = diaries.map { it.toResponse() },
+            reviews = reviews
         )
     }
 
@@ -168,12 +177,14 @@ class DiscoverDetailService(
             .distinct()
         val doctorsById = doctorRepository.findAllById(doctorIds).associateBy { it.id }
         val doctors = doctorIds.mapNotNull(doctorsById::get)
+        val reviews = reviewsWithUsers(reviewRepository.findByInstitutionProjectId(ip.id))
         return InstitutionProjectDetailDto(
             institutionProject = ip.toResponse(),
             project = institutionProjectDetailResolver.resolve(ip, project).toResponse(),
             institution = institution.toResponse(),
             diaries = diaries.map { it.toResponse() },
-            doctors = doctors.map { it.toResponse() }
+            doctors = doctors.map { it.toResponse() },
+            reviews = reviews
         )
     }
 
@@ -228,13 +239,9 @@ class DiscoverDetailService(
         val diaries = diaryRepository.findPublishedByInstitutionId(institutionId)
 
         // 获取机构的评价列表，并填充用户名
-        val reviewEntities = reviewRepository.findByTargetTypeAndTargetId("INSTITUTION", institutionId)
-        val userIds = reviewEntities.map { it.userId }.distinct()
-        val userMap = userRepository.findAllById(userIds).associateBy { it.id }
-        val reviews = reviewEntities.map { entity ->
-            val userName = userMap[entity.userId]?.nickname ?: ""
-            ReviewResponse.from(entity, userName)
-        }
+        val reviews = reviewsWithUsers(
+            reviewRepository.findByTargetTypeAndTargetId("INSTITUTION", institutionId)
+        )
 
         return InstitutionDetailDto(
             institution = institution.toResponse(),
@@ -259,5 +266,16 @@ class DiscoverDetailService(
 
         val doctorsById = doctorRepository.findAllById(doctorIds).associateBy { it.id }
         return doctorIds.mapNotNull(doctorsById::get)
+    }
+
+    private fun reviewsWithUsers(entities: List<ReviewEntity>): List<ReviewResponse> {
+        if (entities.isEmpty()) return emptyList()
+        val userMap = userRepository.findAllById(entities.map { it.userId }.distinct())
+            .associateBy { it.id }
+        return entities
+            .sortedByDescending { it.createdAt }
+            .map { entity ->
+                ReviewResponse.from(entity, userMap[entity.userId]?.nickname ?: "")
+            }
     }
 }

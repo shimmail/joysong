@@ -101,6 +101,7 @@ class AgentIntentRouter {
     fun decide(query: String, contextType: String): AgentIntentDecision {
         val normalized = query.lowercase()
         val detailContext = contextType.uppercase() in detailContextTypes
+        val detailSummaryRequest = detailContext && detailSummaryTerms.any(normalized::contains)
         val catalogRelated = detailContext || catalogTerms.any(normalized::contains)
         val queryTarget = when {
             institutionProjectTerms.any(normalized::contains) -> AgentQueryTarget.INSTITUTION_PROJECT
@@ -111,7 +112,7 @@ class AgentIntentRouter {
         }
         val intent = when {
             safetyTerms.any(normalized::contains) -> AgentIntent.SAFETY_SCREENING
-            detailContext -> AgentIntent.DETAIL_SUMMARY
+            detailSummaryRequest -> AgentIntent.DETAIL_SUMMARY
             comparisonTerms.any(normalized::contains) -> AgentIntent.COMPARISON
             planningTerms.any(normalized::contains) -> AgentIntent.PLANNING
             catalogRelated -> AgentIntent.CATALOG_QA
@@ -143,6 +144,10 @@ class AgentIntentRouter {
         val doctorTerms = listOf("医生", "医师", "大夫", "doctor", "surgeon", "physician")
         val institutionTerms = listOf("机构", "医院", "诊所", "门诊部", "clinic", "hospital", "institution")
         val projectTerms = listOf("项目", "治疗", "术式", "procedure", "treatment")
+        val detailSummaryTerms = listOf(
+            "总结", "概括", "介绍", "简介", "详情", "当前页面", "当前详情", "这个页面", "这页", "简要", "简短",
+            "summary", "summarize", "overview", "introduce", "about this", "current page", "this page"
+        )
         val safetyTerms = listOf(
             "怀孕", "孕期", "备孕", "哺乳", "严重过敏", "过敏史", "瘢痕体质", "疤痕体质",
             "正在吃药", "正在服药", "皮肤感染", "伤口未愈合", "保证效果", "百分百有效",

@@ -180,7 +180,10 @@ final class BookingController extends ChangeNotifier {
     if (project == null) return _fail('预约项目尚未加载');
     if (doctor == null) return _fail('请选择医生');
     if (time == null) return _fail('请选择预约时间');
-    if (!time.isAfter(DateTime.now())) return _fail('预约时间必须晚于当前时间');
+    final beijingNow = DateTime.now().toUtc().add(const Duration(hours: 8));
+    if (!time.isAfter(beijingNow)) {
+      return _fail('预约时间必须晚于当前北京时间');
+    }
     if (_remark.length > 500) return _fail('订单备注不能超过 500 字');
 
     _isSubmitting = true;

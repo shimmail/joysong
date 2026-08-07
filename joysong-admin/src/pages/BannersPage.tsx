@@ -8,7 +8,7 @@ export default function BannersPage() {
       fields={[
         { key: 'title', label: '标题', required: true },
         { key: 'subtitle', label: '副标题' },
-        { key: 'imageUrl', label: '图片', type: 'image', folder: 'banners' },
+        { key: 'imageUrl', label: '图片', type: 'image', folder: 'banners', recommendedSize: '1920 × 720 px（约 8:3）' },
         { key: 'accentColor', label: '主题色' },
         { key: 'sortOrder', label: '排序', type: 'number' },
       ]}

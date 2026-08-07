@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 
 interface ProjectRepository : JpaRepository<ProjectEntity, String> {
+    fun findTop8ByOrderBySalesCountDesc(): List<ProjectEntity>
     fun findByCategoryContainingOrNameContaining(category: String, name: String): List<ProjectEntity>
     fun findByCategory(category: String): List<ProjectEntity>
     fun findByNameContainingOrCategoryContaining(name: String, category: String): List<ProjectEntity>

@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 
 interface ArticleRepository : JpaRepository<ArticleEntity, String> {
+    fun findTop6ByOrderByPublishDateDesc(): List<ArticleEntity>
     fun findByTitleContainingOrAuthorNameContaining(title: String, authorName: String): List<ArticleEntity>
 
     @Query("SELECT a FROM ArticleEntity a WHERE a.title LIKE %:keyword% OR a.id = :keyword")

@@ -65,6 +65,20 @@ class AdminOrderController(
         }
     }
 
+    /** 管理员跳过核销码手动完成机构核销，仅供测试。 */
+    @PostMapping("/orders/{id}/manual-verify")
+    fun manualVerify(authentication: Authentication, @PathVariable id: String): BaseResponse<*> {
+        val actor = managementAccessService.actor(authentication)
+        if (!actor.isAdmin) throw AccessDeniedException("只有平台管理员可以手动核销订单")
+        return try {
+            BaseResponse.success(orderService.adminManualVerify(id, actor.userId))
+        } catch (e: IllegalArgumentException) {
+            BaseResponse.error<Any>(e.message ?: "手动核销失败")
+        } catch (e: IllegalStateException) {
+            BaseResponse.error<Any>(e.message ?: "订单状态异常")
+        }
+    }
+
     /**
      * 管理员硬删除订单（物理删除）
      * 支持所有状态的订单，使用原生 SQL 绕过 @SQLDelete 执行真正的 DELETE

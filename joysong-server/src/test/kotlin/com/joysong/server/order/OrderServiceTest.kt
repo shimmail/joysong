@@ -23,6 +23,7 @@ import com.joysong.server.project.repository.ProjectRepository
 import com.joysong.server.settlement.entity.SettlementEntity
 import com.joysong.server.settlement.service.SettlementService
 import com.joysong.server.refund.repository.RefundRepository
+import com.joysong.server.review.service.ReviewService
 import io.mockk.*
 import io.mockk.impl.annotations.MockK
 import jakarta.persistence.EntityManager
@@ -48,6 +49,7 @@ class OrderServiceTest {
     @MockK private lateinit var settlementService: SettlementService
     @MockK private lateinit var entityManager: EntityManager
     @MockK private lateinit var refundRepository: RefundRepository
+    @MockK private lateinit var reviewService: ReviewService
     private val institutionProjectDetailResolver = InstitutionProjectDetailResolver()
 
     private lateinit var orderService: OrderService
@@ -89,7 +91,8 @@ class OrderServiceTest {
             settlementService,
             entityManager,
             refundRepository,
-            institutionProjectDetailResolver
+            institutionProjectDetailResolver,
+            reviewService
         )
         // 默认 stub：logTransition 不做任何事
         justRun { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) }
@@ -509,29 +512,56 @@ class OrderServiceTest {
     }
 
     @Test
-    fun `autoCompleteReview 超时自动好评并触发结算`() {
-        val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.COMPLETED.value)
+    fun `adminManualVerify 手动核销会写入核验时间并清除核销码`() {
+        val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.CONSULTATION_PAID.value)
+            .copy(verifyCode = "123456")
         every { orderRepository.findById("o1") } returns Optional.of(order)
         every { orderRepository.save(any()) } answers { firstArg() }
-        every { settlementService.saveSettlement("o1") } returns mockk()
+
+        val result = orderService.adminManualVerify("o1", "admin-1")
+
+        assertEquals(OrderStatusEnum.VERIFIED.value, result.status)
+        assertNotNull(result.verifiedAt)
+        assertNull(result.verifyCode)
+        verify {
+            orderStatusLogService.logTransition(
+                "o1",
+                OrderStatusEnum.CONSULTATION_PAID.value,
+                OrderStatusEnum.VERIFIED.value,
+                "admin-1",
+                "ADMIN",
+                "管理员手动完成机构核销（测试）"
+            )
+        }
+    }
+
+    @Test
+    fun `adminManualVerify 拒绝非面诊金已付订单`() {
+        val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.PENDING_PAYMENT.value)
+        every { orderRepository.findById("o1") } returns Optional.of(order)
+
+        assertThrows<IllegalArgumentException> {
+            orderService.adminManualVerify("o1", "admin-1")
+        }
+        verify(exactly = 0) { orderRepository.save(any()) }
+    }
+
+    @Test
+    fun `autoCompleteReview 超时自动好评并触发结算`() {
+        every { reviewService.submitAutomaticReview("o1") } returns mockk()
 
         orderService.autoCompleteReview("o1")
 
-        val saved = slot<OrderEntity>()
-        verify { orderRepository.save(capture(saved)) }
-        assertEquals(OrderStatusEnum.PENDING_SETTLEMENT.value, saved.captured.status)
-        assertTrue(saved.captured.hasReview)
-        verify { settlementService.saveSettlement("o1") }
+        verify { reviewService.submitAutomaticReview("o1") }
     }
 
     @Test
     fun `autoCompleteReview 不可转换状态跳过`() {
-        val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.PENDING_PAYMENT.value)
-        every { orderRepository.findById("o1") } returns Optional.of(order)
+        every { reviewService.submitAutomaticReview("o1") } returns null
 
         orderService.autoCompleteReview("o1")
 
-        verify(exactly = 0) { orderRepository.save(any()) }
+        verify { reviewService.submitAutomaticReview("o1") }
     }
 
     // ---- 辅助方法 ----

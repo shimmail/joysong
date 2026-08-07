@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/core/network/optimized_network_image.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
+import 'package:joysong_flutter/features/discover/presentation/catalog_detail_shared.dart';
 
 /// Institution-specific detail body used by [DiscoverDetailPage].
 ///
@@ -172,14 +174,28 @@ class _GalleryState extends State<_Gallery> {
           child: PageView.builder(
             itemCount: widget.images.length,
             onPageChanged: (value) => setState(() => _page = value),
-            itemBuilder: (context, index) => Image.network(
-              widget.images[index],
-              fit: BoxFit.cover,
-              semanticLabel: widget.title,
-              errorBuilder: (_, __, ___) => Container(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                alignment: Alignment.center,
-                child: const Icon(Icons.broken_image_outlined, size: 48),
+            itemBuilder: (context, index) => GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => Navigator.of(context).push<void>(
+                MaterialPageRoute(
+                  builder: (_) => FullscreenImagePager(
+                    images: widget.images,
+                    contentDescription:
+                        context.localized('机构图片', 'Institution image'),
+                    initialPage: index,
+                  ),
+                ),
+              ),
+              child: OptimizedNetworkImage(
+                url: widget.images[index],
+                width: double.infinity,
+                height: 260,
+                errorBuilder: (_, __, ___) => Container(
+                  color:
+                      Theme.of(context).colorScheme.surfaceContainerHighest,
+                  alignment: Alignment.center,
+                  child: const Icon(Icons.broken_image_outlined, size: 48),
+                ),
               ),
             ),
           ),
@@ -446,11 +462,10 @@ class _RelatedProjectsState extends State<_RelatedProjects> {
                                       .surfaceContainerHighest,
                                   child: const Icon(Icons.spa_outlined),
                                 )
-                              : Image.network(
-                                  image,
+                              : OptimizedNetworkImage(
+                                  url: image,
                                   width: 82,
-                                  height: double.infinity,
-                                  fit: BoxFit.cover,
+                                  height: 82,
                                   errorBuilder: (_, __, ___) =>
                                       const SizedBox(width: 82),
                                 ),
@@ -587,8 +602,14 @@ class _RelatedDoctors extends StatelessWidget {
                       children: [
                         CircleAvatar(
                           radius: 28,
-                          foregroundImage:
-                              avatar.isEmpty ? null : NetworkImage(avatar),
+                          foregroundImage: avatar.isEmpty
+                              ? null
+                              : optimizedNetworkImageProvider(
+                                  context,
+                                  avatar,
+                                  width: 56,
+                                  height: 56,
+                                ),
                           child: avatar.isEmpty
                               ? const Icon(Icons.person_outline_rounded)
                               : null,
@@ -663,13 +684,25 @@ class _Qualifications extends StatelessWidget {
                 scrollDirection: Axis.horizontal,
                 itemCount: credentialImages.length,
                 separatorBuilder: (_, __) => const SizedBox(width: 10),
-                itemBuilder: (_, index) => ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: Image.network(
-                    credentialImages[index],
-                    width: 140,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                itemBuilder: (context, index) => GestureDetector(
+                  onTap: () => Navigator.of(context).push<void>(
+                    MaterialPageRoute(
+                      builder: (_) => FullscreenImagePager(
+                        images: credentialImages,
+                        contentDescription:
+                            context.localized('机构资质图片', 'Institution credential'),
+                        initialPage: index,
+                      ),
+                    ),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: Image.network(
+                      credentialImages[index],
+                      width: 140,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                    ),
                   ),
                 ),
               ),

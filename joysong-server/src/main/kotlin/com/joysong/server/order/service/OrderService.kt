@@ -4,6 +4,7 @@ import com.joysong.server.common.apiSlice
 import com.joysong.server.coupon.service.CouponService
 import com.joysong.server.refund.entity.RefundEntity
 import com.joysong.server.refund.repository.RefundRepository
+import com.joysong.server.review.service.ReviewService
 import com.joysong.server.discover.repository.DoctorProjectRepository
 import com.joysong.server.doctor.repository.DoctorRepository
 import com.joysong.server.institution.repository.InstitutionProjectRepository
@@ -54,6 +55,7 @@ class OrderService(
     private val entityManager: EntityManager,
     @Lazy private val refundRepository: RefundRepository,
     private val institutionProjectDetailResolver: InstitutionProjectDetailResolver,
+    @Lazy private val reviewService: ReviewService,
     private val refundExecutionService: RefundExecutionService? = null
 ) {
     private val secureRandom = SecureRandom()
@@ -457,38 +459,7 @@ class OrderService(
      */
     @Transactional(rollbackFor = [Exception::class])
     fun autoCompleteReview(orderId: String) {
-        val order = orderRepository.findById(orderId).orElse(null) ?: return
-
-        val currentStatus = OrderStatusEnum.fromValue(order.status)
-            ?: return
-        if (!currentStatus.canTransitionTo(OrderStatusEnum.PENDING_SETTLEMENT)) {
-            log.warn("订单[{}]当前状态[{}]不允许自动好评，跳过", orderId, currentStatus.value)
-            return
-        }
-
-        // 仅在 confirmCompletion 未设置 settlementAt 时才补设，避免覆盖原始结算到期时间
-        val settlementAt = order.settlementAt ?: LocalDateTime.now().plusDays(30)
-        val now = LocalDateTime.now()
-        val updated = orderRepository.save(
-            order.copy(
-                status = OrderStatusEnum.PENDING_SETTLEMENT.value,
-                hasReview = true,
-                settlementAt = settlementAt,
-                completedAt = order.completedAt ?: now,
-                updatedAt = now
-            )
-        )
-        orderStatusLogService.logTransition(
-            orderId = orderId,
-            fromStatus = currentStatus.value,
-            toStatus = OrderStatusEnum.PENDING_SETTLEMENT.value,
-            operatorId = null,
-            operatorType = OPERATOR_TYPE_SYSTEM,
-            remark = "超时自动好评"
-        )
-        log.info("订单[{}]超时自动好评完成", orderId)
-
-        settlementService.saveSettlement(orderId)
+        reviewService.submitAutomaticReview(orderId)
     }
 
     /**
@@ -851,6 +822,41 @@ class OrderService(
             remark = "管理员修改状态"
         )
         log.info("管理员将订单[{}]状态从[{}]更新为[{}]", id, currentStatus.value, targetStatus.value)
+        return updated
+    }
+
+    /**
+     * 管理员手动完成首次到店核销，仅用于后台测试。
+     * 与机构核销保持相同的业务字段，但无需用户提供核销码。
+     */
+    @Transactional(rollbackFor = [Exception::class])
+    fun adminManualVerify(id: String, operatorId: String): OrderEntity {
+        val order = orderRepository.findById(id)
+            .orElseThrow { IllegalArgumentException("订单不存在: $id") }
+        val currentStatus = OrderStatusEnum.fromValue(order.status)
+            ?: throw IllegalStateException("订单当前状态无效: ${order.status}")
+        require(currentStatus == OrderStatusEnum.CONSULTATION_PAID) {
+            "仅面诊金已支付的订单可以手动核销"
+        }
+
+        val now = LocalDateTime.now()
+        val updated = orderRepository.save(
+            order.copy(
+                status = OrderStatusEnum.VERIFIED.value,
+                verifiedAt = now,
+                verifyCode = null,
+                updatedAt = now
+            )
+        )
+        orderStatusLogService.logTransition(
+            orderId = id,
+            fromStatus = currentStatus.value,
+            toStatus = OrderStatusEnum.VERIFIED.value,
+            operatorId = operatorId,
+            operatorType = "ADMIN",
+            remark = "管理员手动完成机构核销（测试）"
+        )
+        log.info("管理员[{}]手动完成订单[{}]机构核销", operatorId, id)
         return updated
     }
 

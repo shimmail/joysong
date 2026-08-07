@@ -7,6 +7,9 @@ import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 
 interface DiaryRepository : JpaRepository<DiaryEntity, String> {
+    @Query("SELECT d FROM DiaryEntity d WHERE d.id = :id AND d.status = 'published'")
+    fun findPublishedById(@Param("id") id: String): java.util.Optional<DiaryEntity>
+    fun findTop8ByStatusOrderByPublishDateDesc(status: String): List<DiaryEntity>
     fun findByTitleContainingOrTagsContaining(title: String, tags: String): List<DiaryEntity>
     fun findByAuthorName(authorName: String): List<DiaryEntity>
     fun findByUserId(userId: String): List<DiaryEntity>
