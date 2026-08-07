@@ -21,6 +21,7 @@ import 'package:joysong_flutter/features/settings/data/settings_preferences_stor
 import 'package:joysong_flutter/features/settings/domain/settings_preferences.dart';
 import 'package:joysong_flutter/features/settings/domain/settings_services.dart';
 import 'package:joysong_flutter/features/settings/presentation/settings_controller.dart';
+import 'package:joysong_flutter/features/social/presentation/public_diary_share_page.dart';
 
 class JoysongApp extends StatefulWidget {
   const JoysongApp({
@@ -50,6 +51,7 @@ class _JoysongAppState extends State<JoysongApp> {
   late final SettingsController _settingsController;
   late final AppLocaleController _localeController;
   late final LanguageTagProvider _languageTagProvider;
+  late final String _startupRouteName;
   ApiClient? _apiClient;
   TokenStore? _tokenStore;
 
@@ -93,6 +95,8 @@ class _JoysongAppState extends State<JoysongApp> {
               : _EphemeralSettingsPreferenceStore()),
       cacheMaintenance: const FlutterImageCacheMaintenance(),
     );
+    _startupRouteName =
+        WidgetsBinding.instance.platformDispatcher.defaultRouteName;
     _apiClient?.configureUnauthorizedHandler(
       _authController.refreshAccessToken,
     );
@@ -155,6 +159,7 @@ class _JoysongAppState extends State<JoysongApp> {
 
   @override
   Widget build(BuildContext context) {
+    final publicShareToken = _publicDiaryShareToken(_startupRouteName);
     return AnimatedBuilder(
       animation: Listenable.merge([
         _themeController,
@@ -180,15 +185,21 @@ class _JoysongAppState extends State<JoysongApp> {
           theme: _themeController.lightTheme,
           darkTheme: _themeController.darkTheme,
           themeMode: _settingsController.appearanceMode.themeMode,
-          home: AuthGate(
-            controller: _authController,
-            apiClient: _apiClient,
-            apiRoot: widget.environment.apiRoot,
-            languageTagProvider: _languageTagProvider,
-            allowPreviewData: widget.environment.flavor != AppFlavor.production,
-            accessTokenProvider: () async =>
-                (await _tokenStore?.read())?.accessToken,
-          ),
+          home: publicShareToken != null
+              ? PublicDiarySharePage(
+                  apiRoot: widget.environment.apiRoot,
+                  token: publicShareToken,
+                )
+              : AuthGate(
+                  controller: _authController,
+                  apiClient: _apiClient,
+                  apiRoot: widget.environment.apiRoot,
+                  languageTagProvider: _languageTagProvider,
+                  allowPreviewData:
+                      widget.environment.flavor != AppFlavor.production,
+                  accessTokenProvider: () async =>
+                      (await _tokenStore?.read())?.accessToken,
+                ),
           onGenerateRoute: (settings) => AppRouter.onGenerateRoute(
             settings,
             themeController: _themeController,
@@ -200,6 +211,46 @@ class _JoysongAppState extends State<JoysongApp> {
       ),
     );
   }
+}
+
+String? _publicDiaryShareToken(String routeName) {
+  final route = routeName.trim();
+  if (route.isEmpty || route == '/') return null;
+  final uri = Uri.tryParse(route);
+  final candidates = <String>[
+    if (uri != null) uri.path,
+    if (uri != null && uri.fragment.isNotEmpty) uri.fragment,
+    if (uri != null && uri.host.isNotEmpty) uri.host,
+    route,
+  ];
+  for (final candidate in candidates) {
+    final segments = candidate
+        .split('/')
+        .where((segment) => segment.isNotEmpty)
+        .toList(growable: false);
+    if (segments.length != 3) continue;
+    if (segments[0] != 's' || segments[1] != 'diary') continue;
+    final token = segments[2].trim();
+    if (token.isNotEmpty) return token;
+  }
+  if (uri != null && uri.scheme == 'joysong') {
+    final segments = <String>[
+      if (uri.host.isNotEmpty) uri.host,
+      ...uri.pathSegments.where((segment) => segment.isNotEmpty),
+    ];
+    if (segments.length == 3 &&
+        segments[0] == 's' &&
+        segments[1] == 'diary' &&
+        segments[2].trim().isNotEmpty) {
+      return segments[2].trim();
+    }
+    if (segments.length == 2 &&
+        segments[0] == 'diary' &&
+        segments[1].trim().isNotEmpty) {
+      return segments[1].trim();
+    }
+  }
+  return null;
 }
 
 final class _EphemeralLocalePreferenceStore implements LocalePreferenceStore {
