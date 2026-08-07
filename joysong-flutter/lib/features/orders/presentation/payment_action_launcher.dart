@@ -49,16 +49,16 @@ final class MobilePaymentActionLauncher implements PaymentActionLauncher {
 bool isAllowedPaymentRedirect(Uri uri) {
   const configured = String.fromEnvironment('PAYMENT_REDIRECT_HOSTS');
   final scheme = uri.scheme.toLowerCase();
-  if (uri.host.isEmpty ||
-      (scheme != 'https' && !(kDebugMode && scheme == 'http'))) {
+  if (uri.host.isEmpty || scheme != 'https') {
     return false;
   }
-  final hosts = configured
+  final hosts = <String>{
+    'checkout.stripe.com',
+    ...configured
       .split(',')
       .map((value) => value.trim().toLowerCase())
-      .where((value) => value.isNotEmpty)
-      .toSet();
-  if (hosts.isEmpty) return kDebugMode;
+      .where((value) => value.isNotEmpty),
+  };
   final host = uri.host.toLowerCase();
   return hosts.any((allowed) => host == allowed || host.endsWith('.$allowed'));
 }

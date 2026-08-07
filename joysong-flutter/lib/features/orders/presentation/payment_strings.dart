@@ -63,7 +63,6 @@ final class PaymentStrings {
 
   String providerLabel(String provider) =>
       switch (provider.trim().toUpperCase()) {
-        'DEMO' => pick('演示支付', 'Demo payment'),
         'STRIPE' => pick('银行卡', 'Card'),
         'PAYPAL' => 'PayPal',
         'WECHAT_PAY' => pick('微信支付', 'WeChat Pay'),

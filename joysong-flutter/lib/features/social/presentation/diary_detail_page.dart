@@ -135,7 +135,12 @@ final class _DiaryDetailPageState extends State<DiaryDetailPage> {
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
       children: [
-        _DiaryHeader(diary: widget.diary, onAuthorTap: widget.onAuthorTap),
+        _DiaryHeader(
+          diary: widget.diary,
+          controller: widget.controller,
+          english: _english,
+          onAuthorTap: widget.onAuthorTap,
+        ),
         if (_hasAssociations) ...[
           const SizedBox(height: 18),
           _DiaryAssociations(
@@ -847,9 +852,16 @@ final class _DiaryDetailPageState extends State<DiaryDetailPage> {
 }
 
 final class _DiaryHeader extends StatelessWidget {
-  const _DiaryHeader({required this.diary, this.onAuthorTap});
+  const _DiaryHeader({
+    required this.diary,
+    required this.controller,
+    required this.english,
+    this.onAuthorTap,
+  });
 
   final Diary diary;
+  final SocialController controller;
+  final bool english;
   final VoidCallback? onAuthorTap;
 
   @override
@@ -934,9 +946,22 @@ final class _DiaryHeader extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 18),
-        Text(diary.title, style: theme.textTheme.headlineSmall),
+        _TranslatedDiaryText(
+          controller: controller,
+          contentId: 'translation:diary-title:${diary.id}',
+          text: diary.title,
+          targetLanguage: english ? 'en' : 'zh-CN',
+          contentType: 'diary_title',
+          style: theme.textTheme.headlineSmall,
+        ),
         const SizedBox(height: 10),
-        SelectableText(diary.content),
+        _TranslatedDiaryText(
+          controller: controller,
+          contentId: 'translation:diary-content:${diary.id}',
+          text: diary.content,
+          targetLanguage: english ? 'en' : 'zh-CN',
+          contentType: 'diary_content',
+        ),
         if (diary.tags.isNotEmpty) ...[
           const SizedBox(height: 12),
           Wrap(
@@ -947,6 +972,79 @@ final class _DiaryHeader extends StatelessWidget {
             ],
           ),
         ],
+      ],
+    );
+  }
+}
+
+final class _TranslatedDiaryText extends StatelessWidget {
+  const _TranslatedDiaryText({
+    required this.controller,
+    required this.contentId,
+    required this.text,
+    required this.targetLanguage,
+    required this.contentType,
+    this.style,
+  });
+
+  final SocialController controller;
+  final String contentId;
+  final String text;
+  final String targetLanguage;
+  final String contentType;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    final translation = controller.translationFor(contentId);
+    final showing = controller.isShowingTranslation(contentId);
+    final busy = controller.isBusy('translation:$contentType:$contentId');
+    final displayed = showing && translation != null
+        ? translation.translatedText
+        : text;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SelectableText(displayed, style: style),
+        if (text.trim().isNotEmpty)
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              key: Key('$contentId-button'),
+              onPressed: busy
+                  ? null
+                  : () async {
+                      if (translation != null) {
+                        controller.toggleTranslationVisibility(contentId);
+                        return;
+                      }
+                      final result = await controller.translateContent(
+                        contentId: contentId,
+                        text: text,
+                        targetLanguage: targetLanguage,
+                        contentType: contentType,
+                      );
+                      if (!context.mounted || result.succeeded) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(result.message ?? '翻译失败，请稍后重试')),
+                      );
+                    },
+              icon: busy
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.translate, size: 17),
+              label: Text(
+                busy
+                    ? '翻译中…'
+                    : translation != null && showing
+                        ? '显示原文'
+                        : '翻译',
+              ),
+            ),
+          ),
       ],
     );
   }

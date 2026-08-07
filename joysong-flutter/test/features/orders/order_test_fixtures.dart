@@ -41,7 +41,7 @@ PaymentAttempt samplePaymentAttempt({
   String id = 'payment-1',
   String orderId = 'order-1',
   PaymentType paymentType = PaymentType.consultationFee,
-  PaymentProvider provider = PaymentProvider.demo,
+  PaymentProvider provider = PaymentProvider.stripe,
   PaymentStatus status = PaymentStatus.succeeded,
   PaymentNextAction? nextAction,
 }) =>
@@ -50,7 +50,7 @@ PaymentAttempt samplePaymentAttempt({
       orderId: orderId,
       paymentType: paymentType,
       provider: provider,
-      paymentMethod: provider == PaymentProvider.demo ? 'ONLINE' : 'CARD',
+      paymentMethod: 'CARD',
       currency: 'CNY',
       amountMinor: 10000,
       status: status,
@@ -182,25 +182,15 @@ class FakeOrdersRepository implements OrdersRepository {
   }
 
   @override
-  Future<Order> payConsultation(String id) {
+  Future<Order> requestVerificationCode(String id) {
     actionCalls += 1;
     return actionFuture ??
-        Future.value(sampleOrder(status: OrderStatus.consultationPaid));
-  }
-
-  @override
-  Future<Order> requestVerificationCode(String id) async {
-    actionCalls += 1;
-    return sampleOrder(
-      status: OrderStatus.consultationPaid,
-      verifyCode: '123456',
-    );
-  }
-
-  @override
-  Future<Order> payBalance(String id) async {
-    actionCalls += 1;
-    return sampleOrder(status: OrderStatus.balancePaid, verifyCode: '654321');
+        Future.value(
+          sampleOrder(
+            status: OrderStatus.consultationPaid,
+            verifyCode: '123456',
+          ),
+        );
   }
 
   @override

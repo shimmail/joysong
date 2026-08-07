@@ -17,7 +17,7 @@ void main() {
       repository: repository,
       order: sampleOrder(),
       paymentType: PaymentType.consultationFee,
-      providers: const [PaymentProvider.demo],
+      providers: const [PaymentProvider.stripe],
       pollingDelays: const [],
     );
     addTearDown(controller.dispose);
@@ -33,7 +33,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Confirm payment'), findsOneWidget);
-    expect(find.text('Demo payment'), findsOneWidget);
+    expect(find.text('Card'), findsOneWidget);
     expect(find.text('Payment failed'), findsOneWidget);
 
     repository.paymentAttempt = samplePaymentAttempt();
@@ -53,7 +53,7 @@ void main() {
       repository: repository,
       order: sampleOrder(),
       paymentType: PaymentType.balance,
-      providers: const [PaymentProvider.demo],
+      providers: const [PaymentProvider.stripe],
       pollingDelays: const [],
     );
     addTearDown(controller.dispose);
@@ -69,7 +69,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('确认支付'), findsOneWidget);
-    expect(find.text('演示支付'), findsOneWidget);
+    expect(find.text('银行卡'), findsOneWidget);
     expect(find.text('支付尾款'), findsOneWidget);
     expect(find.text('支付失败'), findsOneWidget);
   });

@@ -426,7 +426,6 @@ bool _isPending(PaymentStatus status) => const {
     }.contains(status);
 
 String _paymentMethod(PaymentProvider provider) => switch (provider) {
-      PaymentProvider.demo => 'ONLINE',
       PaymentProvider.stripe => 'CARD',
       PaymentProvider.paypal => 'PAYPAL',
       PaymentProvider.wechatPay => 'WECHAT_PAY',

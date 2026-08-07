@@ -13,8 +13,7 @@ class PaymentServiceSafetyTest {
     private fun disabledService() = PaymentService(
         paymentRepository = mockk<PaymentRepository>(),
         orderRepository = mockk<OrderRepository>(),
-        orderStatusLogService = mockk<OrderStatusLogService>(),
-        paymentMode = "disabled"
+        orderStatusLogService = mockk<OrderStatusLogService>()
     )
 
     @Test
@@ -23,7 +22,7 @@ class PaymentServiceSafetyTest {
             disabledService().payConsultationFee("order-1", "user-1")
         }
 
-        assertEquals("PAYMENT_PROVIDER_UNAVAILABLE", error.message)
+        assertEquals("LEGACY_PAYMENT_ENDPOINT_REMOVED", error.message)
     }
 
     @Test
@@ -32,6 +31,6 @@ class PaymentServiceSafetyTest {
             disabledService().payBalance("order-1", "user-1")
         }
 
-        assertEquals("PAYMENT_PROVIDER_UNAVAILABLE", error.message)
+        assertEquals("LEGACY_PAYMENT_ENDPOINT_REMOVED", error.message)
     }
 }

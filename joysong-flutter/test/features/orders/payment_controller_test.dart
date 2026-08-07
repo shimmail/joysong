@@ -9,14 +9,14 @@ import 'package:joysong_flutter/features/orders/presentation/payment_controller.
 import 'order_test_fixtures.dart';
 
 void main() {
-  test('submits one idempotent DEMO attempt and trusts server success',
+    test('trusts only a server-confirmed successful Stripe attempt',
       () async {
     final repository = _PaymentRepository();
     final controller = PaymentController(
       repository: repository,
       order: sampleOrder(),
       paymentType: PaymentType.consultationFee,
-      providers: const [PaymentProvider.demo],
+        providers: const [PaymentProvider.stripe],
       pollingDelays: const [],
     );
 
@@ -36,7 +36,7 @@ void main() {
       repository: repository,
       order: sampleOrder(),
       paymentType: PaymentType.consultationFee,
-      providers: const [PaymentProvider.demo],
+      providers: const [PaymentProvider.stripe],
       pollingDelays: const [],
     );
 
@@ -80,7 +80,7 @@ void main() {
       repository: repository,
       order: sampleOrder(),
       paymentType: PaymentType.consultationFee,
-      providers: const [PaymentProvider.demo],
+      providers: const [PaymentProvider.stripe],
       pollingDelays: const [],
     );
 
@@ -100,7 +100,7 @@ void main() {
       repository: repository,
       order: sampleOrder(),
       paymentType: PaymentType.consultationFee,
-      providers: const [PaymentProvider.demo],
+      providers: const [PaymentProvider.stripe],
       pollingDelays: const [],
     );
 
@@ -152,7 +152,7 @@ void main() {
       repository: repository,
       order: sampleOrder(),
       paymentType: PaymentType.consultationFee,
-      providers: const [PaymentProvider.demo],
+      providers: const [PaymentProvider.stripe],
       pollingDelays: const [],
     );
 
@@ -170,7 +170,7 @@ void main() {
       repository: repository,
       order: sampleOrder(),
       paymentType: PaymentType.consultationFee,
-      providers: const [PaymentProvider.demo],
+      providers: const [PaymentProvider.stripe],
       pollingDelays: const [],
     );
 
@@ -191,7 +191,7 @@ void main() {
       repository: repository,
       order: sampleOrder(),
       paymentType: PaymentType.consultationFee,
-      providers: const [PaymentProvider.demo],
+      providers: const [PaymentProvider.stripe],
       pollingDelays: const [],
     );
 

@@ -1,6 +1,6 @@
 # 订单、支付、退款前端接口接入文档
 
-> 文档版本：2026-08-06  
+> 文档版本：2026-08-07
 > 适用端：Android、iOS/Flutter、机构/医生端、管理后台  
 > 服务端模块：`joysong-server`  
 > 业务流程基准：[`doc/order_dispute_flow.puml`](../doc/order_dispute_flow.puml)  
@@ -21,8 +21,8 @@
 
 | Provider | 枚举值 | 当前状态 | 前端使用建议 |
 | --- | --- | --- | --- |
-| 本地演示 | `DEMO` | 可用，仅 `payment.mode=demo` | 仅开发和联调环境 |
-| Stripe | `STRIPE` | 枚举及适配接口已预留，渠道实现未接入 | 暂不在生产端展示 |
+| 本地演示 | `DEMO` | 已移除 | 禁止展示和调用 |
+| Stripe | `STRIPE` | Hosted Checkout 真实支付已接入 | 配置沙箱/live密钥后展示 |
 | PayPal | `PAYPAL` | 枚举及适配接口已预留，渠道实现未接入 | 暂不在生产端展示 |
 | 微信支付 | `WECHAT_PAY` | 枚举及适配接口已预留，渠道实现未接入 | 暂不在生产端展示 |
 | 支付宝 | `ALIPAY` | 枚举及适配接口已预留，渠道实现未接入 | 暂不在生产端展示 |
@@ -287,16 +287,16 @@ Idempotency-Key: 1a10a1e1-99c1-44e6-ac45-c7b303efa46f
 ```json
 {
   "paymentType": "CONSULTATION_FEE",
-  "provider": "DEMO",
-  "paymentMethod": "ONLINE"
+  "provider": "STRIPE",
+  "paymentMethod": "CARD"
 }
 ```
 
 | 字段 | 可选值/说明 |
 | --- | --- |
 | `paymentType` | `CONSULTATION_FEE`、`BALANCE` |
-| `provider` | `DEMO`、`STRIPE`、`PAYPAL`、`WECHAT_PAY`、`ALIPAY`；当前仅 `DEMO` 已实现 |
-| `paymentMethod` | 最大 50 字符；当前演示值为 `ONLINE`，后续可使用 `CARD`、`PAYPAL` 等渠道值 |
+| `provider` | 当前可用 `STRIPE`；其他枚举未注册时返回 `PAYMENT_PROVIDER_UNAVAILABLE` |
+| `paymentMethod` | Stripe 当前传 `CARD`；服务端实际可用方式由 Stripe Dashboard 管理 |
 
 成功响应：
 
@@ -308,16 +308,16 @@ Idempotency-Key: 1a10a1e1-99c1-44e6-ac45-c7b303efa46f
     "id": "payment-id",
     "orderId": "order-id",
     "paymentType": "CONSULTATION_FEE",
-    "provider": "DEMO",
-    "paymentMethod": "ONLINE",
+    "provider": "STRIPE",
+    "paymentMethod": "CARD",
     "currency": "CNY",
     "amountMinor": 10000,
-    "status": "SUCCEEDED",
-    "providerPaymentId": "demo_payment-id",
+    "status": "REQUIRES_ACTION",
+    "providerPaymentId": "cs_test_xxx",
     "failureCode": null,
     "failureMessage": null,
-    "nextAction": null,
-    "expiresAt": null,
+    "nextAction": {"type":"REDIRECT","url":"https://checkout.stripe.com/c/pay/..."},
+    "expiresAt": "2026-08-07T18:00:00",
     "createdAt": "2026-08-06T15:07:47",
     "updatedAt": "2026-08-06T15:07:47"
   }
@@ -372,7 +372,7 @@ Idempotency-Key: 3e19b6c5-e4ad-4f69-8575-37058bf5cbea
 
 ### 5.4 兼容支付接口
 
-以下接口仅供现有客户端过渡，内部使用 `DEMO` 渠道，不应作为生产境外支付接口：
+以下旧接口已经移除并返回 HTTP `410 Gone`：
 
 ```http
 POST /api/orders/{orderId}/pay-consultation
@@ -680,13 +680,13 @@ sequenceDiagram
 
 ## 13. 当前接入边界
 
-前端可以立即完成 DEMO 环境的订单、两阶段支付、核验、退款和结算状态联调。
+前端可以使用 Stripe test mode 完成真实沙箱支付、查单、回调和退款联调。
 
 统一支付内核、查询/确认接口、客户端下一步动作协议、短事务退款和状态补偿已完成。真实境外支付上线前还需要服务端完成：
 
-1. Stripe/PayPal 渠道 SDK、商户密钥和 webhook 验签；
-2. 各渠道商户配置、回调域名、签名证书和沙箱验收；
-3. Android 与 iOS/Flutter 同步接入支付渠道原生 SDK，并保持同一状态和错误码映射；
+1. Stripe 商户主体、test/live 密钥、Webhook 和返回页配置；
+2. Stripe 沙箱与 live 小额验收；
+3. PayPal、微信、支付宝启用前分别完成渠道适配器、SDK/跳转和验签；
 4. 渠道日账单下载、差异处理、监控与告警。
 
 在这些能力完成前，生产环境不应向用户展示尚未实现的支付渠道。
@@ -705,12 +705,11 @@ Flutter 双端已从旧的 `pay-consultation`、`pay-balance` 流程迁移到统
 渠道展示采用显式构建配置：
 
 ```text
---dart-define=PAYMENT_PROVIDERS=DEMO
---dart-define=PAYMENT_REDIRECT_HOSTS=sandbox.paypal.com,paypal.com
+--dart-define=PAYMENT_PROVIDERS=STRIPE
+--dart-define=PAYMENT_REDIRECT_HOSTS=checkout.stripe.com
 ```
 
-- Debug 未配置时默认只启用 `DEMO`；
-- Release 未配置时不展示任何支付渠道；
+- Debug 与 Release 未配置时均不展示支付渠道；
 - 真实渠道只能在服务端适配器、沙箱密钥和双端 SDK 均完成后加入 `PAYMENT_PROVIDERS`；
 - `PAYMENT_REDIRECT_HOSTS` 在 Release 必须配置，客户端只接受 HTTPS 和白名单域名。
 

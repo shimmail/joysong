@@ -29,7 +29,9 @@ class PaymentWebhookService(
         val payment = paymentRepository.findByProviderAndProviderPaymentId(
             provider.name,
             verified.providerPaymentId
-        )
+        ) ?: verified.localPaymentId?.let { id ->
+            paymentRepository.findById(id).orElse(null)?.takeIf { it.provider == provider.name }
+        }
         val received = paymentEventRepository.saveAndFlush(
             PaymentEventEntity(
                 id = UUID.randomUUID().toString(),
@@ -51,7 +53,8 @@ class PaymentWebhookService(
                 amountMinor = verified.amountMinor,
                 currency = verified.currency,
                 failureCode = verified.failureCode,
-                failureMessage = verified.failureMessage
+                failureMessage = verified.failureMessage,
+                localPaymentId = verified.localPaymentId
             )
             paymentEventRepository.save(
                 received.copy(processingStatus = "PROCESSED", processedAt = LocalDateTime.now())

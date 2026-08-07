@@ -1,7 +1,7 @@
 # 多渠道支付功能落地开发文档
 
-> 文档版本：2026-08-06  
-> 当前阶段：统一支付内核已落地，真实支付渠道适配器待接入  
+> 文档版本：2026-08-07
+> 当前阶段：统一支付内核与 Stripe Hosted Checkout 真实支付已落地
 > 适用范围：`joysong-server`、Android、iOS/Flutter、管理后台  
 > 前端接口手册：[`PAYMENT_ORDER_FRONTEND_API.md`](./PAYMENT_ORDER_FRONTEND_API.md)  
 > 订单流程基准：[`order_dispute_flow.puml`](../doc/order_dispute_flow.puml)
@@ -32,14 +32,14 @@
 | 支付短事务编排 | 已完成 | 创建尝试、渠道调用、结果落库分为三个阶段 |
 | 前端下一步动作 | 已完成 | 统一返回 Stripe/跳转/微信/支付宝 `nextAction` |
 | 支付查询与确认 | 已完成 | 支付详情、订单最新支付、主动刷新、确认接口 |
-| DEMO 渠道 | 已完成 | 仅开发环境同步成功，生产环境安全关闭 |
-| Flutter Android/iOS 支付页 | DEMO 已完成 | 已接统一支付接口、幂等、状态恢复/轮询、双语页面和安全渠道开关 |
+| DEMO 渠道 | 已移除 | 不再注册自动成功网关，旧直付接口返回 HTTP 410 |
+| Flutter Android/iOS 支付页 | Stripe 已完成 | 共用 Hosted Checkout HTTPS 跳转、状态恢复/轮询和双语页面 |
 | 支付异步事件收件箱 | 已完成 | `payment_events` 按渠道事件 ID 防重 |
 | 订单支付状态推进 | 已完成 | 面诊金、尾款成功后按状态机推进 |
 | 退款业务单 | 已完成 | `refunds` 保存审核、原因、金额和原订单状态 |
 | 原路退款拆分 | 已完成 | `refund_items` 按原支付记录分别退款 |
 | 结算金额快照 | 已完成 | 十进制与最小单位双写 |
-| Stripe | 待开发 | 仅保留枚举和适配器入口 |
+| Stripe | 已完成 | Checkout Session 创建/查询、退款、Webhook 验签和事件防重 |
 | PayPal | 待开发 | 仅保留枚举和适配器入口 |
 | 微信支付 | 待开发 | 仅保留枚举和适配器入口 |
 | 支付宝 | 待开发 | 仅保留枚举和适配器入口 |
@@ -49,19 +49,18 @@
 
 ### 2.2 当前可运行范围
 
-- `dev`：`payment.mode=demo`，可以跑通订单创建、面诊金、到店核验、尾款、退款和结算流程；
-- `prod`：`payment.mode=disabled`，所有未接入渠道安全失败，不会产生虚假支付成功；
-- 当前真实资金不会通过 Stripe、PayPal、微信或支付宝划转。
+- `dev`：默认 `payment.mode=disabled`；配置 Stripe test key 后可进行真实沙箱扣款；
+- `prod`：`payment.mode=live`，必须启用 Stripe 并提供完整密钥，否则启动失败；
+- PayPal、微信支付、支付宝仍保持未注册状态，不能仅靠填写枚举启用。
 
 ### 2.3 生产上线前 P0 阻断项
 
 统一内核 P0 已完成。真实渠道启用前仍需解决：
 
-1. 实现对应渠道 SDK/API 适配器以及 webhook 原始报文验签；
-2. 完成渠道专用回调应答格式、商户号/应用 ID 校验；
-3. 增加渠道沙箱集成测试、并发故障恢复测试和日账单对账；
-4. 配置生产密钥、回调地址、渠道开关、限额、监控和告警。
-5. 提供渠道能力发现接口，并保证 `REQUIRES_ACTION` 支付可恢复取得安全的 `nextAction`。
+1. 完成 Stripe 商户主体/KYC、银行结算账户及 live mode 审核；
+2. 配置 live key、Webhook、HTTPS 返回页、监控和告警；
+3. 使用真实小额支付验收支付、取消、异步回调、查单和退款；
+4. 开发渠道日账单对账；PayPal、微信、支付宝启用前分别实现自己的适配器和验签。
 
 ## 3. 渠道策略
 
@@ -69,7 +68,7 @@
 
 | 优先级 | 渠道 | 目标市场 | 服务端模式 |
 | --- | --- | --- | --- |
-| P0 | Stripe | 海外银行卡、Apple Pay、Google Pay、部分本地支付方式 | PaymentIntents + 移动端 PaymentSheet/SDK |
+| P0 | Stripe | 海外银行卡及账户已开通的本地方式 | Hosted Checkout + HTTPS redirect + webhook |
 | P1 | PayPal | 海外 PayPal 钱包用户 | Orders v2 + redirect/SDK + server capture |
 | P1 | 微信支付 | 中国大陆微信用户 | API v3 APP/JSAPI，根据客户端形态选择 |
 | P1 | 支付宝 | 中国大陆支付宝用户 | App 支付 2.0/网页支付 |
@@ -447,32 +446,35 @@ refund-{refundId}-{paymentId}
 
 ## 10. 配置与密钥
 
-### 10.1 目标配置结构
+### 10.1 当前 Stripe 配置结构
 
 ```yaml
 payment:
   mode: live
-  enabled-providers: STRIPE,PAYPAL
   stripe:
+    enabled: ${STRIPE_ENABLED:true}
     secret-key: ${STRIPE_SECRET_KEY}
     webhook-secret: ${STRIPE_WEBHOOK_SECRET}
-    api-version: ${STRIPE_API_VERSION}
-  paypal:
-    environment: ${PAYPAL_ENVIRONMENT:sandbox}
-    client-id: ${PAYPAL_CLIENT_ID}
-    client-secret: ${PAYPAL_CLIENT_SECRET}
-    webhook-id: ${PAYPAL_WEBHOOK_ID}
-  wechat-pay:
-    merchant-id: ${WECHAT_PAY_MCH_ID}
-    app-id: ${WECHAT_PAY_APP_ID}
-    merchant-serial-no: ${WECHAT_PAY_MCH_SERIAL_NO}
-    private-key-path: ${WECHAT_PAY_PRIVATE_KEY_PATH}
-    api-v3-key: ${WECHAT_PAY_API_V3_KEY}
-  alipay:
-    app-id: ${ALIPAY_APP_ID}
-    private-key: ${ALIPAY_APP_PRIVATE_KEY}
-    alipay-public-key: ${ALIPAY_PUBLIC_KEY}
+    success-url: ${STRIPE_SUCCESS_URL}
+    cancel-url: ${STRIPE_CANCEL_URL}
+    api-version: ${STRIPE_API_VERSION:}
 ```
+
+Webhook 地址：`https://<API域名>/api/payment-webhooks/STRIPE`，订阅：
+
+- `checkout.session.completed`
+- `checkout.session.async_payment_succeeded`
+- `checkout.session.async_payment_failed`
+- `checkout.session.expired`
+
+Flutter 发布参数：
+
+```text
+--dart-define=PAYMENT_PROVIDERS=STRIPE
+--dart-define=PAYMENT_REDIRECT_HOSTS=checkout.stripe.com
+```
+
+未传 `PAYMENT_PROVIDERS` 时，Debug 和 Release 均不展示支付渠道，不再回退到 DEMO。
 
 ### 10.2 安全要求
 
@@ -725,7 +727,8 @@ refundItemId, status, failureCode, correlationId
 | 功能 | 文件 |
 | --- | --- |
 | 支付领域和金额 | `payment/domain/PaymentDomain.kt` |
-| 渠道接口和 DEMO | `payment/provider/PaymentGateway.kt` |
+| 渠道接口 | `payment/provider/PaymentGateway.kt` |
+| Stripe 真实适配器 | `payment/provider/StripePaymentGateway.kt` |
 | 支付应用服务 | `payment/service/PaymentService.kt` |
 | 支付事件处理 | `payment/service/PaymentWebhookService.kt` |
 | 支付回调入口 | `payment/controller/PaymentWebhookController.kt` |

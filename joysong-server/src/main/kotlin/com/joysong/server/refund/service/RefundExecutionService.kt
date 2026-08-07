@@ -38,11 +38,7 @@ class RefundExecutionService(
                 val result = if (!item.providerRefundId.isNullOrBlank()) {
                     gateway.queryRefund(item.providerRefundId)
                 } else {
-                    val providerPaymentId = payment.providerPaymentId ?: (
-                        if (provider == PaymentProvider.DEMO) {
-                            payment.providerTransactionId ?: payment.transactionId.takeIf(String::isNotBlank)
-                        } else null
-                    )
+                    val providerPaymentId = payment.providerPaymentId
                         ?: throw IllegalStateException("PROVIDER_PAYMENT_ID_MISSING")
                     gateway.refund(
                         ProviderRefundRequest(

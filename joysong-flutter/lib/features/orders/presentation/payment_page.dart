@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
 import 'package:joysong_flutter/features/orders/domain/payment_models.dart';
@@ -407,7 +406,6 @@ class _OrderSummary extends StatelessWidget {
 }
 
 IconData _providerIcon(PaymentProvider provider) => switch (provider) {
-      PaymentProvider.demo => Icons.science_outlined,
       PaymentProvider.stripe => Icons.credit_card,
       PaymentProvider.paypal => Icons.account_balance_wallet_outlined,
       PaymentProvider.wechatPay => Icons.chat_bubble_outline,
@@ -454,13 +452,12 @@ String _paymentAmount(PaymentAttempt? payment, String fallback) {
 
 List<PaymentProvider> enabledPaymentProviders() {
   const configured = String.fromEnvironment('PAYMENT_PROVIDERS');
-  if (configured.trim().isEmpty) {
-    return kReleaseMode ? const [] : const [PaymentProvider.demo];
-  }
+  if (configured.trim().isEmpty) return const [];
   final values = <PaymentProvider>[];
   for (final item in configured.split(',')) {
     final provider = PaymentProvider.fromWire(item);
-    if (provider != PaymentProvider.unknown && !values.contains(provider)) {
+    if (provider != PaymentProvider.unknown &&
+        !values.contains(provider)) {
       values.add(provider);
     }
   }

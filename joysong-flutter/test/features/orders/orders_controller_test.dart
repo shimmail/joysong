@@ -32,12 +32,14 @@ void main() {
     final controller = OrderDetailController(repository, orderId: 'order-1');
     await controller.load();
 
-    final first = controller.payConsultation();
-    final second = await controller.payConsultation();
+    final first = controller.requestVerificationCode();
+    final second = await controller.requestVerificationCode();
     expect(second, isFalse);
     expect(repository.actionCalls, 1);
 
-    completer.complete(sampleOrder(status: OrderStatus.consultationPaid));
+    completer.complete(
+      sampleOrder(status: OrderStatus.consultationPaid, verifyCode: '123456'),
+    );
     expect(await first, isTrue);
     expect(controller.order?.status, OrderStatus.consultationPaid);
   });

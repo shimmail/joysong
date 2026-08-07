@@ -25,6 +25,7 @@ class ConfigValidator(
     @Value("\${oss.enabled:false}") private val ossEnabled: Boolean,
     @Value("\${aliyun.sms.enabled:false}") private val smsEnabled: Boolean,
     @Value("\${payment.mode:disabled}") private val paymentMode: String,
+    @Value("\${payment.stripe.enabled:false}") private val stripePaymentEnabled: Boolean,
     @Value("\${openai.demo-fallback-enabled:false}") private val aiDemoFallbackEnabled: Boolean,
     @Value("\${security.verification-code.log-for-dev:false}") private val logVerificationCodeForDev: Boolean,
     @Value("\${seed.demo.enabled:false}") private val demoSeedEnabled: Boolean,
@@ -52,8 +53,11 @@ class ConfigValidator(
         val isProduction = environment.activeProfiles.any { it.equals("prod", ignoreCase = true) }
         if (isProduction && !ossEnabled) missing.add("OSS_ENABLED=true")
         if (isProduction && !smsEnabled) missing.add("SMS_ENABLED=true")
-        if (isProduction && paymentMode.equals("demo", ignoreCase = true)) {
-            missing.add("PAYMENT_MODE must not be demo in production")
+        if (isProduction && !paymentMode.equals("live", ignoreCase = true)) {
+            missing.add("PAYMENT_MODE=live")
+        }
+        if (isProduction && !stripePaymentEnabled) {
+            missing.add("STRIPE_ENABLED=true (at least one real payment provider is required)")
         }
         if (isProduction && aiDemoFallbackEnabled) {
             missing.add("OPENAI demo fallback must be disabled in production")

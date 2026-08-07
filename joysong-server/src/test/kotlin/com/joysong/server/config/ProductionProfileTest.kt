@@ -30,7 +30,8 @@ class ProductionProfileTest {
     @Test
     fun `production disables every demo path`() {
         assertEquals(false, properties.getProperty("seed.demo.enabled"))
-        assertEquals("disabled", properties.getProperty("payment.mode"))
+        assertEquals("live", properties.getProperty("payment.mode"))
+        assertEquals("\${STRIPE_ENABLED:true}", properties.getProperty("payment.stripe.enabled"))
         assertEquals(false, properties.getProperty("security.verification-code.log-for-dev"))
         assertEquals(false, properties.getProperty("openai.demo-fallback-enabled"))
     }
@@ -45,10 +46,11 @@ class ProductionProfileTest {
     }
 
     @Test
-    fun `only development profile explicitly enables demo providers`() {
-        assertEquals("demo", developmentProperties.getProperty("payment.mode"))
+    fun `development payment remains disabled until real sandbox credentials are supplied`() {
+        assertEquals("disabled", developmentProperties.getProperty("payment.mode"))
+        assertEquals("\${STRIPE_ENABLED:false}", developmentProperties.getProperty("payment.stripe.enabled"))
         assertEquals(true, developmentProperties.getProperty("security.verification-code.log-for-dev"))
-        assertEquals(true, developmentProperties.getProperty("openai.demo-fallback-enabled"))
+        assertTrue(developmentProperties.getProperty("openai.demo-fallback-enabled").toString().contains("OPENAI_DEMO_FALLBACK_ENABLED"))
         assertEquals(false, developmentProperties.getProperty("oss.enabled"))
         assertEquals(false, developmentProperties.getProperty("aliyun.sms.enabled"))
     }

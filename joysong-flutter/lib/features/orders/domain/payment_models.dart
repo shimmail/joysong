@@ -19,7 +19,6 @@ enum PaymentType {
 }
 
 enum PaymentProvider {
-  demo('DEMO'),
   stripe('STRIPE'),
   paypal('PAYPAL'),
   wechatPay('WECHAT_PAY'),

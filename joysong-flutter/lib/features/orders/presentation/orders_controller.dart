@@ -76,9 +76,7 @@ final class OrdersController extends ChangeNotifier {
 }
 
 enum OrderAction {
-  payConsultation,
   verificationCode,
-  payBalance,
   confirmCompletion,
   cancel,
   refund,
@@ -131,19 +129,9 @@ final class OrderDetailController extends ChangeNotifier {
     }
   }
 
-  Future<bool> payConsultation() => _runOrderAction(
-        OrderAction.payConsultation,
-        () => _repository.payConsultation(orderId),
-      );
-
   Future<bool> requestVerificationCode() => _runOrderAction(
         OrderAction.verificationCode,
         () => _repository.requestVerificationCode(orderId),
-      );
-
-  Future<bool> payBalance() => _runOrderAction(
-        OrderAction.payBalance,
-        () => _repository.payBalance(orderId),
       );
 
   Future<bool> confirmCompletion() => _runOrderAction(

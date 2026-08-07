@@ -15,7 +15,9 @@ import com.joysong.server.refund.service.RefundService
 import com.joysong.server.review.dto.ReviewResponse
 import com.joysong.server.review.service.ReviewService
 import org.springframework.security.core.Authentication
+import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.*
+import org.springframework.web.server.ResponseStatusException
 
 /**
  * 用户端订单控制器
@@ -80,34 +82,14 @@ class OrderController(
     fun payConsultationFee(
         @PathVariable id: String,
         authentication: Authentication
-    ): BaseResponse<*> {
-        val userId = authentication.principal as String
-        return try {
-            paymentService.payConsultationFee(id, userId)
-            val order = orderService.getOrderById(id, userId)
-                ?: return BaseResponse.error<Any>("订单不存在")
-            BaseResponse.success(OrderResponse.from(order))
-        } catch (e: Exception) {
-            paymentError(e, "面诊金支付失败")
-        }
-    }
+    ): Nothing = throw ResponseStatusException(HttpStatus.GONE, "LEGACY_PAYMENT_ENDPOINT_REMOVED")
 
     /** 支付尾款 */
     @PostMapping("/{id}/pay-balance")
     fun payBalance(
         @PathVariable id: String,
         authentication: Authentication
-    ): BaseResponse<*> {
-        val userId = authentication.principal as String
-        return try {
-            paymentService.payBalance(id, userId)
-            val order = orderService.getOrderById(id, userId)
-                ?: return BaseResponse.error<Any>("订单不存在")
-            BaseResponse.success(OrderResponse.from(order))
-        } catch (e: Exception) {
-            paymentError(e, "尾款支付失败")
-        }
-    }
+    ): Nothing = throw ResponseStatusException(HttpStatus.GONE, "LEGACY_PAYMENT_ENDPOINT_REMOVED")
 
     /** 用户展示给机构的首次到店核销码；此接口不会自行推进订单状态。 */
     @PostMapping("/{id}/verification-code")
@@ -198,7 +180,7 @@ class OrderController(
     @GetMapping("/{id}/status-logs")
     fun getStatusLogs(@PathVariable id: String, authentication: Authentication): BaseResponse<*> {
         val userId = authentication.principal as String
-        val order = orderService.getOrderById(id, userId)
+        orderService.getOrderById(id, userId)
             ?: return BaseResponse.error<Any>("订单不存在", 404)
         return BaseResponse.success(orderStatusLogService.listByOrderId(id))
     }
@@ -209,14 +191,7 @@ class OrderController(
         @PathVariable id: String,
         @RequestBody request: PayOrderRequest,
         authentication: Authentication
-    ): BaseResponse<*> {
-        val userId = authentication.principal as String
-        return try {
-            BaseResponse.success(paymentService.payConsultationFee(id, userId))
-        } catch (e: Exception) {
-            paymentError(e, "支付失败")
-        }
-    }
+    ): Nothing = throw ResponseStatusException(HttpStatus.GONE, "LEGACY_PAYMENT_ENDPOINT_REMOVED")
 
     /** 申请退款 */
     @PostMapping("/{id}/refund")

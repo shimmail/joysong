@@ -2,10 +2,8 @@ package com.joysong.server.payment.provider
 
 import com.joysong.server.payment.domain.PaymentProvider
 import com.joysong.server.payment.domain.PaymentStatus
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
 import java.time.LocalDateTime
-import java.util.UUID
 
 data class ProviderCreatePaymentRequest(
     val paymentId: String,
@@ -113,59 +111,10 @@ data class VerifiedProviderEvent(
     val amountMinor: Long? = null,
     val currency: String? = null,
     val failureCode: String? = null,
-    val failureMessage: String? = null
+    val failureMessage: String? = null,
+    /** Local ID copied into provider metadata; used if a webhook races the create response. */
+    val localPaymentId: String? = null
 )
-
-@Component
-class DemoPaymentGateway(
-    @Value("\${payment.mode:disabled}") private val paymentMode: String
-) : PaymentGateway {
-    override val provider: PaymentProvider = PaymentProvider.DEMO
-
-    override fun createPayment(request: ProviderCreatePaymentRequest): ProviderPaymentResult {
-        requireDemoMode("PAYMENT_PROVIDER_UNAVAILABLE")
-        val transactionId = UUID.nameUUIDFromBytes(request.idempotencyKey.toByteArray())
-            .toString().replace("-", "").take(24)
-        return ProviderPaymentResult(
-            status = PaymentStatus.SUCCEEDED,
-            providerPaymentId = "demo_${request.paymentId}",
-            providerTransactionId = transactionId,
-            amountMinor = request.amountMinor,
-            currency = request.currency
-        )
-    }
-
-    override fun queryPayment(providerPaymentId: String): ProviderPaymentResult {
-        requireDemoMode("PAYMENT_QUERY_UNAVAILABLE")
-        return ProviderPaymentResult(
-            status = PaymentStatus.SUCCEEDED,
-            providerPaymentId = providerPaymentId,
-            providerTransactionId = providerPaymentId.removePrefix("demo_").replace("-", "").take(24)
-        )
-    }
-
-    override fun confirmPayment(request: ProviderConfirmPaymentRequest): ProviderPaymentResult =
-        queryPayment(request.providerPaymentId)
-
-    override fun refund(request: ProviderRefundRequest): ProviderRefundResult {
-        requireDemoMode("REFUND_PROVIDER_UNAVAILABLE")
-        return ProviderRefundResult(
-            status = PaymentStatus.SUCCEEDED,
-            providerRefundId = "demo_refund_${request.refundItemId}"
-        )
-    }
-
-    override fun queryRefund(providerRefundId: String): ProviderRefundResult {
-        requireDemoMode("REFUND_QUERY_UNAVAILABLE")
-        return ProviderRefundResult(PaymentStatus.SUCCEEDED, providerRefundId)
-    }
-
-    private fun requireDemoMode(errorCode: String) {
-        if (!paymentMode.equals("demo", ignoreCase = true)) {
-            throw PaymentProviderException(errorCode, retryable = false, outcomeUnknown = false)
-        }
-    }
-}
 
 @Component
 class PaymentGatewayRegistry(gateways: List<PaymentGateway>) {

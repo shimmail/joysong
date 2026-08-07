@@ -32,11 +32,7 @@ abstract interface class OrdersRemoteDataSource {
     bool refresh = false,
   });
 
-  Future<Order> payConsultation(String id);
-
   Future<Order> requestVerificationCode(String id);
-
-  Future<Order> payBalance(String id);
 
   Future<Order> confirmCompletion(String id);
 
@@ -149,15 +145,8 @@ final class ApiOrdersRemoteDataSource implements OrdersRemoteDataSource {
   }
 
   @override
-  Future<Order> payConsultation(String id) =>
-      _orderPostOrGet('$id/pay-consultation');
-
-  @override
   Future<Order> requestVerificationCode(String id) =>
       _orderPostOrGet('$id/verification-code');
-
-  @override
-  Future<Order> payBalance(String id) => _orderPostOrGet('$id/pay-balance');
 
   @override
   Future<Order> confirmCompletion(String id) =>

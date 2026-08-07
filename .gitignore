@@ -6,6 +6,7 @@
 # Gradle
 .gradle/
 .gradle-codex/
+.gradle-codex-*/
 .flutter-cache/
 .android-user-home/
 joysong-app/.android-codex/

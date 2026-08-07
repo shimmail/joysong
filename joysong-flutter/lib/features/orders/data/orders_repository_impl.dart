@@ -68,14 +68,8 @@ final class OrdersRepositoryImpl implements OrdersRepository {
       );
 
   @override
-  Future<Order> payConsultation(String id) => _remote.payConsultation(id);
-
-  @override
   Future<Order> requestVerificationCode(String id) =>
       _remote.requestVerificationCode(id);
-
-  @override
-  Future<Order> payBalance(String id) => _remote.payBalance(id);
 
   @override
   Future<Order> confirmCompletion(String id) => _remote.confirmCompletion(id);

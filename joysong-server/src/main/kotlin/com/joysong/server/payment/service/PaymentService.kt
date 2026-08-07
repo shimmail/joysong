@@ -13,9 +13,7 @@ import com.joysong.server.payment.provider.ProviderConfirmPaymentRequest
 import com.joysong.server.payment.provider.ProviderCreatePaymentRequest
 import com.joysong.server.payment.provider.ProviderPaymentResult
 import com.joysong.server.payment.repository.PaymentRepository
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
-import java.util.UUID
 
 data class PaymentSessionResult(
     val payment: PaymentEntity,
@@ -33,7 +31,6 @@ class PaymentService(
     private val paymentRepository: PaymentRepository,
     private val orderRepository: OrderRepository,
     private val orderStatusLogService: OrderStatusLogService,
-    @Value("\${payment.mode:disabled}") private val paymentMode: String,
     private val paymentGatewayRegistry: PaymentGatewayRegistry = PaymentGatewayRegistry(emptyList()),
     private val paymentPersistenceService: PaymentPersistenceService = PaymentPersistenceService(
         paymentRepository,
@@ -42,7 +39,6 @@ class PaymentService(
     )
 ) {
     companion object {
-        private const val METHOD_ONLINE = "ONLINE"
         private val terminalStatuses = PaymentStatus.successfulDatabaseValues + listOf(
             PaymentStatus.FAILED.name,
             PaymentStatus.CANCELLED.name,
@@ -64,6 +60,8 @@ class PaymentService(
         val normalizedMethod = paymentMethod.trim().uppercase()
         require(normalizedMethod.isNotBlank() && normalizedMethod.length <= 50) { "INVALID_PAYMENT_METHOD" }
 
+        // Reject disabled/unimplemented providers before creating a local attempt.
+        val gateway = paymentGatewayRegistry.require(provider)
         val prepared = paymentPersistenceService.prepareAttempt(
             orderId = orderId,
             userId = userId,
@@ -74,7 +72,6 @@ class PaymentService(
         )
         if (prepared.status in terminalStatuses) return PaymentSessionResult(prepared)
 
-        val gateway = paymentGatewayRegistry.require(provider)
         return try {
             val result = if (prepared.providerPaymentId.isNullOrBlank()) {
                 gateway.createPayment(
@@ -131,27 +128,11 @@ class PaymentService(
     ).payment
 
     fun payConsultationFee(orderId: String, userId: String): PaymentEntity {
-        requireDemoPaymentMode()
-        return createPaymentAttempt(
-            orderId,
-            userId,
-            PaymentType.CONSULTATION_FEE,
-            PaymentProvider.DEMO,
-            METHOD_ONLINE,
-            "legacy-consult-${UUID.randomUUID()}"
-        )
+        throw IllegalStateException("LEGACY_PAYMENT_ENDPOINT_REMOVED")
     }
 
     fun payBalance(orderId: String, userId: String): PaymentEntity {
-        requireDemoPaymentMode()
-        return createPaymentAttempt(
-            orderId,
-            userId,
-            PaymentType.BALANCE,
-            PaymentProvider.DEMO,
-            METHOD_ONLINE,
-            "legacy-balance-${UUID.randomUUID()}"
-        )
+        throw IllegalStateException("LEGACY_PAYMENT_ENDPOINT_REMOVED")
     }
 
     fun getPayment(paymentId: String, userId: String, refresh: Boolean = false): PaymentSessionResult {
@@ -211,10 +192,13 @@ class PaymentService(
         amountMinor: Long? = null,
         currency: String? = null,
         failureCode: String? = null,
-        failureMessage: String? = null
+        failureMessage: String? = null,
+        localPaymentId: String? = null
     ): PaymentEntity {
         val payment = paymentRepository.findByProviderAndProviderPaymentId(provider.name, providerPaymentId)
+            ?: localPaymentId?.let { id -> paymentRepository.findById(id).orElse(null) }
             ?: throw IllegalArgumentException("PAYMENT_NOT_FOUND")
+        require(payment.provider == provider.name) { "PAYMENT_PROVIDER_MISMATCH" }
         require(status == PaymentStatus.SUCCEEDED || status in setOf(
             PaymentStatus.REQUIRES_ACTION,
             PaymentStatus.PROCESSING,
@@ -235,17 +219,6 @@ class PaymentService(
             )
         )
     }
-
-    fun completeProviderPayment(
-        provider: PaymentProvider,
-        providerPaymentId: String,
-        providerTransactionId: String?
-    ): PaymentEntity = handleProviderPaymentEvent(
-        provider,
-        providerPaymentId,
-        providerTransactionId,
-        PaymentStatus.SUCCEEDED
-    )
 
     /** Internal entry point for reconciliation jobs; no user authorization is required. */
     fun reconcilePayment(paymentId: String): PaymentEntity {
@@ -293,9 +266,4 @@ class PaymentService(
 
     private fun providerCreateIdempotencyKey(paymentId: String) = "payment-create-$paymentId"
 
-    private fun requireDemoPaymentMode() {
-        if (!paymentMode.equals("demo", ignoreCase = true)) {
-            throw IllegalStateException("PAYMENT_PROVIDER_UNAVAILABLE")
-        }
-    }
 }

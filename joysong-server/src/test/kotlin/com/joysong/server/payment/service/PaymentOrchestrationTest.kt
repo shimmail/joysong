@@ -103,7 +103,6 @@ class PaymentOrchestrationTest {
         paymentRepository,
         orderRepository,
         orderStatusLogService,
-        "live",
         PaymentGatewayRegistry(listOf(gateway)),
         persistence
     )

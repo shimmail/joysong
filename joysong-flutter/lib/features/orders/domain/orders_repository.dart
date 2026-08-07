@@ -30,11 +30,7 @@ abstract interface class OrdersRepository {
     bool refresh = false,
   });
 
-  Future<Order> payConsultation(String id);
-
   Future<Order> requestVerificationCode(String id);
-
-  Future<Order> payBalance(String id);
 
   Future<Order> confirmCompletion(String id);
 

@@ -82,7 +82,21 @@ final class SocialController extends ChangeNotifier {
     required String text,
     required String targetLanguage,
   }) {
-    return _guarded('translation:comment:$commentId', () async {
+    return translateContent(
+      contentId: commentId,
+      text: text,
+      targetLanguage: targetLanguage,
+      contentType: 'comment',
+    );
+  }
+
+  Future<SocialActionResult<ContentTranslation>> translateContent({
+    required String contentId,
+    required String text,
+    required String targetLanguage,
+    required String contentType,
+  }) {
+    return _guarded('translation:$contentType:$contentId', () async {
       final repository = _repository;
       if (repository is! SocialTranslationRepository) {
         return const SocialActionResult.failure('当前版本暂不支持翻译');
@@ -91,10 +105,10 @@ final class SocialController extends ChangeNotifier {
       final translation = await translationRepository.translateText(
         text: text,
         targetLanguage: targetLanguage,
-        contentType: 'comment',
+        contentType: contentType,
       );
-      _translations[commentId] = translation;
-      _showingTranslations.add(commentId);
+      _translations[contentId] = translation;
+      _showingTranslations.add(contentId);
       return SocialActionResult.success(translation);
     }, fallback: 'AI翻译暂时不可用，请稍后重试');
   }
