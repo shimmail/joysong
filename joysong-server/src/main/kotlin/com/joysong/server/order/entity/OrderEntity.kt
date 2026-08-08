@@ -5,6 +5,7 @@ import org.hibernate.annotations.SQLDelete
 import org.hibernate.annotations.Where
 import java.math.BigDecimal
 import java.time.LocalDateTime
+import com.joysong.server.common.money.CurrencyCode
 
 @Entity
 @Table(name = "orders")
@@ -16,7 +17,7 @@ data class OrderEntity(
     @Column(name = "project_name") val projectName: String,
     @Column(name = "institution_name") val institutionName: String = "",
     @Column(name = "cover_image") val coverImage: String = "",
-    @Column(name = "currency", nullable = false, length = 3, columnDefinition = "char(3)") val currency: String = "CNY",
+    @Column(name = "currency", nullable = false, length = 3, columnDefinition = "char(3)") val currency: String = CurrencyCode.DEFAULT_CODE,
     val price: BigDecimal,
     @Column(name = "total_amount_minor") val totalAmountMinor: Long? = null,
 
@@ -41,6 +42,8 @@ data class OrderEntity(
     @Column(name = "has_review") val hasReview: Boolean = false,
     @Column(name = "project_id") val projectId: String = "",
     @Column(name = "institution_id") val institutionId: String = "",
+    @Column(name = "consultant_id") val consultantId: String = "",
+    @Column(name = "consultant_name") val consultantName: String = "",
     @Column(name = "doctor_id") val doctorId: String = "",
     @Column(name = "consultation_fee") val consultationFee: BigDecimal = BigDecimal.ZERO,
     @Column(name = "consultation_fee_minor") val consultationFeeMinor: Long? = null,

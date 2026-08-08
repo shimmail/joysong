@@ -350,7 +350,7 @@ class _FeatureCards extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
               child: _Feature(
-                  Icons.sentiment_satisfied_alt_outlined,
+                  Icons.precision_manufacturing_outlined,
                   rootContext.localized('先进设备', 'Advanced equipment'),
                   rootContext.localized('国际标准', 'International standards'))),
         ]),
@@ -553,11 +553,11 @@ class _ProjectRow extends StatelessWidget {
                 if (price > 0) ...[
                   const SizedBox(height: 6),
                   Row(children: [
-                    Text('¥${catalogMoney(price)}',
+                    Text('\$${catalogMoney(price)}',
                         style: const TextStyle(fontWeight: FontWeight.w700)),
                     if (original > price) ...[
                       const SizedBox(width: 6),
-                      Text('¥${catalogMoney(original)}',
+                      Text('\$${catalogMoney(original)}',
                           style: TextStyle(
                               color: Theme.of(context)
                                   .colorScheme

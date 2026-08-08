@@ -713,7 +713,7 @@ class ChatService(
             when (contextType.uppercase()) {
                 "PROJECT" -> {
                     projectRepository.findById(contextId).orElse(null)?.let { project ->
-                        val priceText = if (project.referencePrice > java.math.BigDecimal.ZERO) "￥${project.referencePrice}" else "未设定"
+                        val priceText = if (project.referencePrice > java.math.BigDecimal.ZERO) "$${project.referencePrice}" else "未设定"
                         "【当前上下文】用户正在了解医美项目「${project.name}」。\n" +
                             "项目简介：${project.description.ifBlank { "暂无描述" }}\n" +
                             "参考价格：$priceText\n" +
@@ -745,8 +745,8 @@ class ChatService(
                             "评分：${effective?.rating ?: "未提供"}\n" +
                             "评价数：${effective?.reviewCount ?: "未提供"}\n" +
                             "详情内容：${contextDetailSummary(effective?.detailContent)}\n" +
-                            "机构价格：￥${offering.price}\n" +
-                            "原价：${offering.originalPrice?.let { "￥$it" } ?: "未提供"}\n" +
+                            "机构价格：$${offering.price}\n" +
+                            "原价：${offering.originalPrice?.let { "$$it" } ?: "未提供"}\n" +
                             "销量：${offering.salesCount}\n" +
                             "请仅依据以上平台信息给出简短总结，并说明仍需确认的医生、设备或完整费用。"
                     }.orEmpty()
@@ -833,7 +833,7 @@ class ChatService(
                             subtitle = project.category,
                             summary = project.description.ifBlank { project.slogan },
                             attributes = linkedMapOf(
-                                AgentText.value("参考价", "Reference price") to "¥${project.referencePrice.toPlainString()}",
+                                AgentText.value("参考价", "Reference price") to "$${project.referencePrice.toPlainString()}",
                                 AgentText.value("评分", "Rating") to project.rating.toPlainString(),
                                 AgentText.value("评价数", "Reviews") to project.reviewCount.toString(),
                                 AgentText.value("标签", "Tags") to project.tags,
@@ -923,8 +923,8 @@ class ChatService(
                                         .joinToString(" · "),
                                     summary = effective.description,
                                     attributes = linkedMapOf(
-                                        AgentText.value("机构价格", "Clinic price") to "¥${offering.price.toPlainString()}",
-                                        AgentText.value("项目参考价", "Reference price") to "¥${project.referencePrice.toPlainString()}",
+                                        AgentText.value("机构价格", "Clinic price") to "$${offering.price.toPlainString()}",
+                                        AgentText.value("项目参考价", "Reference price") to "$${project.referencePrice.toPlainString()}",
                                         AgentText.value("评分", "Rating") to effective.rating.toPlainString(),
                                         AgentText.value("评价数", "Review count") to effective.reviewCount.toString(),
                                         AgentText.value("标签", "Tags") to effective.tags,

@@ -1071,7 +1071,7 @@ final class _DiaryAssociations extends StatelessWidget {
     _addEntry(
       entries,
       context: context,
-      icon: Icons.medical_services_outlined,
+      icon: Icons.spa_outlined,
       label: english ? 'Project' : '关联项目',
       name: diary.projectName,
       fallback: english ? 'Related project' : '关联项目',

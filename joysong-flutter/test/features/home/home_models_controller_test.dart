@@ -28,7 +28,7 @@ void main() {
     expect(item.id, 'ip-1');
     expect(item.title, '光电项目');
     expect(item.subtitle, '项目说明');
-    expect(item.priceText, '¥1280.00');
+    expect(item.priceText, r'$1280.00');
   });
 
   test('maps uploaded localhost covers to the active Android API host', () {

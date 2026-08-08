@@ -121,6 +121,7 @@ class DiscoverSearchService(
                     detailContent = effective.detailContent,
                     price = offering.price,
                     originalPrice = offering.originalPrice,
+                    currency = offering.currency,
                     coverImage = effective.coverImage,
                     images = effective.images,
                     salesCount = offering.salesCount,
@@ -172,7 +173,7 @@ class DiscoverSearchService(
             ProjectWithInstitutionsResponse(
                 id = project.id, name = project.name, category = project.category,
                 description = project.description, tags = project.tags, categoryTags = project.categoryTags,
-                coverImage = project.coverImage, images = project.images, referencePrice = project.referencePrice,
+                coverImage = project.coverImage, images = project.images, referencePrice = project.referencePrice, currency = project.currency,
                 slogan = project.slogan, detailContent = project.detailContent, salesCount = project.salesCount,
                 rating = project.rating, reviewCount = project.reviewCount, institutionProjects = offerings
             )

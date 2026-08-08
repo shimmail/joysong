@@ -160,7 +160,7 @@ export default function SplitConfigProposalsPage() {
     { title: '机构', width: 180, render: (_: unknown, item: ActiveConfig) => institutionMap.get(projectMap.get(item.institutionProjectId)?.institutionId || '') || '-' },
     { title: '医生', dataIndex: 'doctorId', width: 130, render: (id: string) => doctorMap.get(id) || id },
     { title: '项目', dataIndex: 'institutionProjectId', width: 190, render: (id: string) => projectMap.get(id)?.effectiveName || id },
-    { title: '面诊金', dataIndex: 'consultationFee', width: 100, render: (value: number) => `¥${value}` },
+    { title: '面诊金', dataIndex: 'consultationFee', width: 100, render: (value: number) => `$${value}` },
     { title: '医生/发布者比例', dataIndex: 'commissionRate', width: 130, render: (value: number) => `${value}%` },
     { title: '机构比例', dataIndex: 'institutionRate', width: 100, render: (value: number) => `${value}%` },
   ];
@@ -169,7 +169,7 @@ export default function SplitConfigProposalsPage() {
     { title: '机构', dataIndex: 'institutionName', width: 170 },
     { title: '医生', dataIndex: 'doctorName', width: 120 },
     { title: '项目', dataIndex: 'projectName', width: 180 },
-    { title: '面诊金', dataIndex: 'consultationFee', width: 90, render: (value: number) => `¥${value}` },
+    { title: '面诊金', dataIndex: 'consultationFee', width: 90, render: (value: number) => `$${value}` },
     { title: '医生比例', dataIndex: 'commissionRate', width: 100, render: (value: number) => `${value}%` },
     { title: '机构比例', dataIndex: 'institutionRate', width: 100, render: (value: number) => `${value}%` },
     { title: '发起方', dataIndex: 'proposerSide', width: 90, render: (side: string) => side === 'DOCTOR' ? '医生' : '机构' },
@@ -240,7 +240,7 @@ export default function SplitConfigProposalsPage() {
         {isDualSide && <Form.Item name="proposerSide" label="本次代表哪一方" rules={[{ required: true }]}>
           <Select options={[{ label: '医生方', value: 'DOCTOR' }, { label: '机构方', value: 'INSTITUTION' }]} />
         </Form.Item>}
-        <Form.Item name="consultationFee" label="面诊金" rules={[{ required: true }]}><InputNumber min={0} precision={2} prefix="¥" style={{ width: '100%' }} /></Form.Item>
+        <Form.Item name="consultationFee" label="面诊金" rules={[{ required: true }]}><InputNumber min={0} precision={2} prefix="$" style={{ width: '100%' }} /></Form.Item>
         <Form.Item name="commissionRate" label="医生/项目发布者比例" rules={[{ required: true }]}><InputNumber min={0} max={100} precision={2} addonAfter="%" style={{ width: '100%' }} /></Form.Item>
         <Form.Item name="institutionRate" label="机构分成比例" rules={[{ required: true }]}><InputNumber min={0} max={100} precision={2} addonAfter="%" style={{ width: '100%' }} /></Form.Item>
       </Form>

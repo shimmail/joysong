@@ -1055,7 +1055,7 @@ ALTER TABLE doctor_projects
 -- Orders: immutable money/currency snapshot used to create and verify payments.
 -- ---------------------------------------------------------------------------
 ALTER TABLE orders
-    ADD COLUMN currency CHAR(3) NOT NULL DEFAULT 'CNY' AFTER cover_image,
+    ADD COLUMN currency CHAR(3) NOT NULL DEFAULT 'USD' AFTER cover_image,
     ADD COLUMN total_amount_minor BIGINT NULL AFTER price,
     ADD COLUMN paid_amount_minor BIGINT NULL AFTER paid_amount,
     ADD COLUMN consultation_fee_minor BIGINT NULL AFTER consultation_fee,
@@ -1096,7 +1096,7 @@ ALTER TABLE payments
     MODIFY COLUMN amount DECIMAL(19,4) NOT NULL DEFAULT 0,
     ADD COLUMN provider VARCHAR(30) NOT NULL DEFAULT 'DEMO' AFTER payment_type,
     ADD COLUMN payment_method VARCHAR(50) NULL AFTER provider,
-    ADD COLUMN currency CHAR(3) NOT NULL DEFAULT 'CNY' AFTER payment_method,
+    ADD COLUMN currency CHAR(3) NOT NULL DEFAULT 'USD' AFTER payment_method,
     ADD COLUMN amount_minor BIGINT NULL AFTER currency,
     ADD COLUMN provider_payment_id VARCHAR(150) NULL AFTER transaction_id,
     ADD COLUMN provider_transaction_id VARCHAR(150) NULL AFTER provider_payment_id,
@@ -1169,7 +1169,7 @@ ALTER TABLE refunds
     MODIFY COLUMN refund_amount DECIMAL(19,4) DEFAULT 0,
     MODIFY COLUMN payment_amount DECIMAL(19,4) DEFAULT 0,
     ADD COLUMN refund_no VARCHAR(50) NULL AFTER id,
-    ADD COLUMN currency CHAR(3) NOT NULL DEFAULT 'CNY' AFTER user_id,
+    ADD COLUMN currency CHAR(3) NOT NULL DEFAULT 'USD' AFTER user_id,
     ADD COLUMN requested_amount_minor BIGINT NULL AFTER amount,
     ADD COLUMN refunded_amount_minor BIGINT NOT NULL DEFAULT 0 AFTER requested_amount_minor,
     ADD COLUMN reason_code VARCHAR(50) NULL AFTER reason,
@@ -1249,7 +1249,7 @@ ALTER TABLE settlements
     MODIFY COLUMN institution_amount DECIMAL(19,4) NOT NULL,
     MODIFY COLUMN consultant_amount DECIMAL(19,4) NOT NULL DEFAULT 0,
     MODIFY COLUMN doctor_amount DECIMAL(19,4) NOT NULL,
-    ADD COLUMN currency CHAR(3) NOT NULL DEFAULT 'CNY' AFTER order_id,
+    ADD COLUMN currency CHAR(3) NOT NULL DEFAULT 'USD' AFTER order_id,
     ADD COLUMN total_amount_minor BIGINT NULL AFTER total_amount,
     ADD COLUMN platform_amount_minor BIGINT NULL AFTER platform_amount,
     ADD COLUMN institution_amount_minor BIGINT NULL AFTER institution_amount,

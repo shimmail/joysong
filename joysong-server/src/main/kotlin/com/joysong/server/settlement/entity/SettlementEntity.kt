@@ -42,7 +42,7 @@ class SettlementEntity(
     var doctorAmount: BigDecimal = BigDecimal.ZERO,
 
     @Column(name = "currency", nullable = false, length = 3, columnDefinition = "char(3)")
-    var currency: String = "CNY",
+    var currency: String = com.joysong.server.common.money.CurrencyCode.DEFAULT_CODE,
 
     @Column(name = "total_amount_minor") var totalAmountMinor: Long? = null,
     @Column(name = "platform_amount_minor") var platformAmountMinor: Long? = null,

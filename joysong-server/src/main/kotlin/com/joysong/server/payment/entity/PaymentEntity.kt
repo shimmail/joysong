@@ -3,6 +3,7 @@ package com.joysong.server.payment.entity
 import jakarta.persistence.*
 import java.math.BigDecimal
 import java.time.LocalDateTime
+import com.joysong.server.common.money.CurrencyCode
 
 @Entity
 @Table(name = "payments")
@@ -20,7 +21,7 @@ data class PaymentEntity(
     @Column(name = "payment_type", nullable = false, length = 30) val paymentType: String = "CONSULTATION_FEE",
     @Column(name = "provider", nullable = false, length = 30) val provider: String = "DEMO",
     @Column(name = "payment_method", length = 50) val paymentMethod: String? = null,
-    @Column(name = "currency", nullable = false, length = 3, columnDefinition = "char(3)") val currency: String = "CNY",
+    @Column(name = "currency", nullable = false, length = 3, columnDefinition = "char(3)") val currency: String = CurrencyCode.DEFAULT_CODE,
     @Column(name = "amount_minor") val amountMinor: Long? = null,
     @Column(name = "refunded_amount_minor", nullable = false) val refundedAmountMinor: Long = 0,
     @Column(name = "provider_payment_id", length = 150) val providerPaymentId: String? = null,

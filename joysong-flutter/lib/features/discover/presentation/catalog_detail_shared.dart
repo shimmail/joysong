@@ -79,7 +79,7 @@ class CatalogHero extends StatelessWidget {
                   Row(
                     children: [
                       Text(
-                        '¥${catalogMoney(price!)}',
+                        '\$${catalogMoney(price!)}',
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 20,
@@ -89,7 +89,7 @@ class CatalogHero extends StatelessWidget {
                       if (originalPrice != null && originalPrice! > price!) ...[
                         const SizedBox(width: 8),
                         Text(
-                          '¥${catalogMoney(originalPrice!)}',
+                          '\$${catalogMoney(originalPrice!)}',
                           style: const TextStyle(
                             color: Colors.white70,
                             decoration: TextDecoration.lineThrough,

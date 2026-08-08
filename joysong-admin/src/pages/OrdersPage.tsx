@@ -207,15 +207,15 @@ export default function OrdersPage() {
     { title: '价格', dataIndex: 'price', width: 80 },
     {
       title: '面诊金', dataIndex: 'consultationFee', width: 80,
-      render: (v: number) => v != null ? `¥${v}` : '-',
+      render: (v: number) => v != null ? `$${v}` : '-',
     },
     {
       title: '尾款', dataIndex: 'remainingAmount', width: 80,
-      render: (v: number) => v != null ? `¥${v}` : '-',
+      render: (v: number) => v != null ? `$${v}` : '-',
     },
     {
       title: '优惠金额', dataIndex: 'discountAmount', width: 90,
-      render: (v: number) => v != null ? `¥${v}` : '-',
+      render: (v: number) => v != null ? `$${v}` : '-',
     },
     {
       title: '状态', dataIndex: 'status', width: 130,
@@ -227,7 +227,7 @@ export default function OrdersPage() {
     {
       title: '退款金额', dataIndex: 'refundAmount', width: 90,
       render: (v: number) => {
-        if (v && v > 0) return <Tag color="volcano">¥{v}</Tag>;
+        if (v && v > 0) return <Tag color="volcano">${v}</Tag>;
         return '-';
       },
     },

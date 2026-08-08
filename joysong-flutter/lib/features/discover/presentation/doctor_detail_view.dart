@@ -547,13 +547,13 @@ class _ProjectCard extends StatelessWidget {
                   if (price > 0) ...[
                     const SizedBox(height: 7),
                     Row(children: [
-                      Text('¥${_money(price)}',
+                      Text('\$${_money(price)}',
                           style: const TextStyle(
                               color: Color(0xffe53935),
                               fontWeight: FontWeight.w700)),
                       if (originalPrice > price) ...[
                         const SizedBox(width: 7),
-                        Text('¥${_money(originalPrice)}',
+                        Text('\$${_money(originalPrice)}',
                             style: TextStyle(
                                 color: Theme.of(context)
                                     .colorScheme
