@@ -49,23 +49,23 @@ export default function SettlementsPage() {
     { title: '订单号', dataIndex: 'orderId', width: 180 },
     {
       title: '总金额', dataIndex: 'totalAmount', width: 100,
-      render: (v: number) => v != null ? `¥${v}` : '-',
+      render: (v: number) => v != null ? `$${v}` : '-',
     },
     {
       title: '平台服务费', dataIndex: 'platformFee', width: 110,
-      render: (v: number) => v != null ? `¥${v}` : '-',
+      render: (v: number) => v != null ? `$${v}` : '-',
     },
     {
       title: '机构分成', dataIndex: 'institutionShare', width: 100,
-      render: (v: number) => v != null ? `¥${v}` : '-',
+      render: (v: number) => v != null ? `$${v}` : '-',
     },
     {
       title: '咨询师佣金', dataIndex: 'consultantCommission', width: 110,
-      render: (v: number) => v != null ? `¥${v}` : '-',
+      render: (v: number) => v != null ? `$${v}` : '-',
     },
     {
       title: '医生收入', dataIndex: 'doctorIncome', width: 100,
-      render: (v: number) => v != null ? `¥${v}` : '-',
+      render: (v: number) => v != null ? `$${v}` : '-',
     },
     {
       title: '状态', dataIndex: 'status', width: 100,

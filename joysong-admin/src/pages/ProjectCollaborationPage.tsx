@@ -192,7 +192,7 @@ export default function ProjectCollaborationPage() {
   const projectColumns = [
     { title: '机构', dataIndex: 'institutionId', width: 180, render: (id: string) => institutionNames[id] || id },
     { title: '项目', dataIndex: 'effectiveName', width: 220 },
-    { title: '机构价格', dataIndex: 'price', width: 100, render: (value: number) => `¥${value}` },
+    { title: '机构价格', dataIndex: 'price', width: 100, render: (value: number) => `$${value}` },
     { title: '状态', dataIndex: 'isActive', width: 90, render: (active: boolean) => <Tag color={active ? 'green' : 'default'}>{active ? '已上架' : '已下架'}</Tag> },
     {
       title: '我的参与状态', width: 130,

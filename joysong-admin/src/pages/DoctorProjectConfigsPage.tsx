@@ -193,7 +193,7 @@ export default function DoctorProjectConfigsPage() {
     },
     {
       title: '面诊金', dataIndex: 'consultationFee', width: 100,
-      render: (v: number) => v != null ? `¥${v}` : '-',
+      render: (v: number) => v != null ? `$${v}` : '-',
     },
     {
       title: '咨询师佣金比例', dataIndex: 'commissionRate', width: 120,
@@ -302,7 +302,7 @@ export default function DoctorProjectConfigsPage() {
             />
           </Form.Item>
           <Form.Item name="consultationFee" label="面诊金" rules={[{ required: true, message: '请输入面诊金' }]}>
-            <InputNumber min={0} precision={2} style={{ width: '100%' }} placeholder="请输入面诊金金额" prefix="¥" />
+            <InputNumber min={0} precision={2} style={{ width: '100%' }} placeholder="请输入面诊金金额" prefix="$" />
           </Form.Item>
           <Form.Item name="commissionRate" label="医生/项目发布者佣金比例" rules={[{ required: true, message: '请输入医生佣金比例' }]}>
             <InputNumber min={0} max={100} precision={2} style={{ width: '100%' }} placeholder="如 10.00 表示 10%" addonAfter="%" />

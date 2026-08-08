@@ -251,7 +251,7 @@ String _priceText(Object? value) {
     return '';
   }
   if (value is num && value == value.roundToDouble()) {
-    return '¥${value.toInt()}';
+    return '\$${value.toInt()}';
   }
-  return '¥${value.toString().trim()}';
+  return '\$${value.toString().trim()}';
 }

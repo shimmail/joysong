@@ -85,6 +85,7 @@ class DiscoverDetailService(
                     institutionName = institution?.name ?: "",
                     price = ip.price,
                     originalPrice = ip.originalPrice,
+                    currency = ip.currency,
                     coverImage = effective.coverImage,
                     salesCount = ip.salesCount,
                     category = effective.category,
@@ -105,6 +106,7 @@ class DiscoverDetailService(
                     institutionName = "",
                     price = project.referencePrice,
                     originalPrice = null,
+                    currency = project.currency,
                     coverImage = project.coverImage,
                     salesCount = project.salesCount
                 )
@@ -218,6 +220,7 @@ class DiscoverDetailService(
                 projectName = effective.name,
                 price = ip.price,
                 originalPrice = ip.originalPrice,
+                currency = ip.currency,
                 coverImage = effective.coverImage,
                 description = effective.description,
                 category = effective.category,

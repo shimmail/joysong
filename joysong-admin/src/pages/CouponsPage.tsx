@@ -160,11 +160,11 @@ export default function CouponsPage() {
     },
     {
       title: '折扣值', dataIndex: 'discountValue', width: 90,
-      render: (v: number, record: any) => record.type === 'PERCENTAGE' ? `${v}%` : `¥${v}`,
+      render: (v: number, record: any) => record.type === 'PERCENTAGE' ? `${v}%` : `$${v}`,
     },
     {
       title: '最低消费', dataIndex: 'minSpend', width: 100,
-      render: (v: number) => v ? `¥${v}` : '-',
+      render: (v: number) => v ? `$${v}` : '-',
     },
     {
       title: '已发放/已使用', width: 130,
@@ -304,8 +304,8 @@ export default function CouponsPage() {
           <div style={{ lineHeight: 2 }}>
             <p><b>名称：</b>{detailRecord.name}</p>
             <p><b>类型：</b>{typeLabels[detailRecord.type] || detailRecord.type}</p>
-            <p><b>折扣值：</b>{detailRecord.type === 'PERCENTAGE' ? `${detailRecord.discountValue}%` : `¥${detailRecord.discountValue}`}</p>
-            <p><b>最低消费：</b>{detailRecord.minSpend ? `¥${detailRecord.minSpend}` : '无'}</p>
+            <p><b>折扣值：</b>{detailRecord.type === 'PERCENTAGE' ? `${detailRecord.discountValue}%` : `$${detailRecord.discountValue}`}</p>
+            <p><b>最低消费：</b>{detailRecord.minSpend ? `$${detailRecord.minSpend}` : '无'}</p>
             <p><b>发放总量：</b>{detailRecord.totalQuantity || '不限'}</p>
             <p><b>已发放：</b>{detailRecord.issuedCount ?? 0}</p>
             <p><b>已使用：</b>{detailRecord.usedCount ?? 0}</p>

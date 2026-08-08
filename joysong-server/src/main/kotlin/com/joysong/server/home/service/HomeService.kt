@@ -71,6 +71,7 @@ class HomeService(
                 institutionName = institution.name,
                 price = ip.price,
                 originalPrice = ip.originalPrice,
+                currency = ip.currency,
                 coverImage = effective.coverImage,
                 category = effective.category,
                 salesCount = ip.salesCount,

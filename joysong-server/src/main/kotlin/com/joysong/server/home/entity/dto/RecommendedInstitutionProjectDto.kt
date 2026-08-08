@@ -13,6 +13,7 @@ data class RecommendedInstitutionProjectDto(
     val institutionName: String,
     val price: BigDecimal,
     val originalPrice: BigDecimal?,
+    val currency: String = com.joysong.server.common.money.CurrencyCode.DEFAULT_CODE,
     val coverImage: String,
     val category: String,
     val salesCount: Int,

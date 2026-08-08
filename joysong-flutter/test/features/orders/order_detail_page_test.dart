@@ -11,6 +11,48 @@ import 'package:joysong_flutter/features/social/presentation/social_controller.d
 import 'order_test_fixtures.dart';
 
 void main() {
+  testWidgets('leaves order details after deleting an order', (tester) async {
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repository = FakeOrdersRepository()
+      ..orders = [sampleOrder(status: OrderStatus.cancelled)];
+    final controller = OrderDetailController(repository, orderId: 'order-1');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: Center(
+              child: FilledButton(
+                onPressed: () => Navigator.of(context).push<void>(
+                  MaterialPageRoute(
+                    builder: (_) => OrderDetailPage(controller: controller),
+                  ),
+                ),
+                child: const Text('Open order'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Open order'));
+    await tester.pumpAndSettle();
+
+    final deleteButton = find.byKey(const Key('delete-order-button'));
+    await tester.scrollUntilVisible(deleteButton, 300);
+    await tester.tap(deleteButton);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Confirm'));
+    await tester.pumpAndSettle();
+
+    expect(repository.actionCalls, 1);
+    expect(find.text('Open order'), findsOneWidget);
+    expect(find.byType(OrderDetailPage), findsNothing);
+  });
+
   testWidgets('shows user verification code without professional verify action',
       (
     tester,

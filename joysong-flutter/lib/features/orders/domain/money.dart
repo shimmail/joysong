@@ -79,7 +79,7 @@ final class Money implements Comparable<Money> {
     return negative && unscaled != BigInt.zero ? '-$result' : result;
   }
 
-  String get formatted => '¥${toDecimalString(minimumFractionDigits: 2)}';
+  String get formatted => '\$${toDecimalString(minimumFractionDigits: 2)}';
 
   Money _normalized() {
     var value = unscaled;

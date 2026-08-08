@@ -223,7 +223,7 @@ class _InstitutionProjectTile extends StatelessWidget {
           children: [
             if (price != null)
               Text(
-                '¥${_money(price)}',
+                '\$${_money(price)}',
                 style: TextStyle(
                   color: Theme.of(context).colorScheme.primary,
                   fontWeight: FontWeight.w700,
@@ -339,7 +339,7 @@ class _PriceLine extends StatelessWidget {
       spacing: 10,
       children: [
         Text(
-          '¥${_money(price!)}',
+          '\$${_money(price!)}',
           style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                 color: Theme.of(context).colorScheme.error,
                 fontWeight: FontWeight.w800,
@@ -347,7 +347,7 @@ class _PriceLine extends StatelessWidget {
         ),
         if (originalPrice != null && originalPrice! > price!)
           Text(
-            '¥${_money(originalPrice!)}',
+            '\$${_money(originalPrice!)}',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   decoration: TextDecoration.lineThrough,
                   color: Theme.of(context).colorScheme.onSurfaceVariant,

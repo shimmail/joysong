@@ -98,7 +98,7 @@ class _ProjectCardState extends State<_ProjectCard> {
                             children: [
                               if (price != null)
                                 Text(
-                                  '¥${_money(price)}',
+                                  '\$${_money(price)}',
                                   style: TextStyle(
                                     color:
                                         Theme.of(context).colorScheme.primary,
@@ -231,7 +231,7 @@ class _InstitutionProjectEntry extends StatelessWidget {
             ),
             if (price != null)
               Text(
-                '¥${_money(price)}',
+                '\$${_money(price)}',
                 style: TextStyle(
                   color: Theme.of(context).colorScheme.primary,
                   fontWeight: FontWeight.w700,

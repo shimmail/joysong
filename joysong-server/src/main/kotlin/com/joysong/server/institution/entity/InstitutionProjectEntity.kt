@@ -5,6 +5,7 @@ import org.hibernate.annotations.SQLDelete
 import org.hibernate.annotations.Where
 import java.math.BigDecimal
 import java.time.LocalDateTime
+import com.joysong.server.common.money.CurrencyCode
 
 @Entity
 @Table(name = "institution_projects")
@@ -50,6 +51,9 @@ data class InstitutionProjectEntity(
 
     @Column(name = "original_price", nullable = true)
     val originalPrice: BigDecimal? = null,
+
+    @Column(name = "currency", nullable = false, length = 3, columnDefinition = "char(3)")
+    val currency: String = CurrencyCode.DEFAULT_CODE,
 
     @Column(name = "cover_image")
     val coverImage: String = "",

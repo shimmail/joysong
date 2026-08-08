@@ -123,11 +123,11 @@ export default function RefundsPage() {
     { title: '医生', dataIndex: 'doctorName', width: 100, render: (v: string) => v || '-' },
     {
       title: '退款金额', dataIndex: 'amount', width: 100,
-      render: (v: number) => <span style={{ color: '#f5222d', fontWeight: 600 }}>¥{v}</span>,
+      render: (v: number) => <span style={{ color: '#f5222d', fontWeight: 600 }}>${v}</span>,
     },
     {
       title: '订单金额', dataIndex: 'paymentAmount', width: 100,
-      render: (v: number) => v ? `¥${v}` : '-',
+      render: (v: number) => v ? `$${v}` : '-',
     },
     {
       title: '退款类型', dataIndex: 'refundType', width: 90,
@@ -203,7 +203,7 @@ export default function RefundsPage() {
             <Descriptions column={1} bordered size="small">
               <Descriptions.Item label="订单编号">{approveRecord.orderNo || '-'}</Descriptions.Item>
               <Descriptions.Item label="项目">{approveRecord.projectName || '-'}</Descriptions.Item>
-              <Descriptions.Item label="退款金额"><span style={{ color: '#f5222d', fontWeight: 600 }}>¥{approveRecord.amount}</span></Descriptions.Item>
+              <Descriptions.Item label="退款金额"><span style={{ color: '#f5222d', fontWeight: 600 }}>${approveRecord.amount}</span></Descriptions.Item>
               <Descriptions.Item label="退款原因">{approveRecord.reason}</Descriptions.Item>
             </Descriptions>
           </div>
@@ -222,7 +222,7 @@ export default function RefundsPage() {
       >
         {rejectRecord && (
           <div>
-            <p>拒绝退款：<b>{rejectRecord.orderNo || rejectRecord.orderId}</b>，退款金额 <span style={{ color: '#f5222d' }}>¥{rejectRecord.amount}</span></p>
+            <p>拒绝退款：<b>{rejectRecord.orderNo || rejectRecord.orderId}</b>，退款金额 <span style={{ color: '#f5222d' }}>${rejectRecord.amount}</span></p>
             <p style={{ marginBottom: 8 }}><b>拒绝原因 <span style={{ color: '#f5222d' }}>*</span></b></p>
             <Input.TextArea
               rows={3}
@@ -254,8 +254,8 @@ export default function RefundsPage() {
             <Descriptions.Item label="机构">{detailRecord.institutionName || '-'}</Descriptions.Item>
             <Descriptions.Item label="医生">{detailRecord.doctorName || '-'}</Descriptions.Item>
             <Descriptions.Item label="用户电话">{detailRecord.userPhone || '-'}</Descriptions.Item>
-            <Descriptions.Item label="退款金额"><span style={{ color: '#f5222d', fontWeight: 600 }}>¥{detailRecord.amount}</span></Descriptions.Item>
-            <Descriptions.Item label="订单金额">{detailRecord.paymentAmount ? `¥${detailRecord.paymentAmount}` : '-'}</Descriptions.Item>
+            <Descriptions.Item label="退款金额"><span style={{ color: '#f5222d', fontWeight: 600 }}>${detailRecord.amount}</span></Descriptions.Item>
+            <Descriptions.Item label="订单金额">{detailRecord.paymentAmount ? `$${detailRecord.paymentAmount}` : '-'}</Descriptions.Item>
             <Descriptions.Item label="退款类型">{refundTypeLabels[detailRecord.refundType] || detailRecord.refundType || '全额退款'}</Descriptions.Item>
             <Descriptions.Item label="状态"><Tag color={statusColors[detailRecord.status]}>{statusLabels[detailRecord.status] ?? detailRecord.status}</Tag></Descriptions.Item>
             <Descriptions.Item label="退款原因" span={2}>{detailRecord.reason}</Descriptions.Item>

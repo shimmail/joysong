@@ -1,6 +1,7 @@
 package com.joysong.server.admin.entity.dto
 
 import java.math.BigDecimal
+import com.joysong.server.common.money.CurrencyCode
 
 data class ProjectRequest(
     val name: String = "",
@@ -11,6 +12,7 @@ data class ProjectRequest(
     val coverImage: String = "",
     val images: String = "",
     val referencePrice: BigDecimal = BigDecimal.ZERO,
+    val currency: CurrencyCode = CurrencyCode.DEFAULT,
     val slogan: String = "",
     val detailContent: String? = null,
     val rating: BigDecimal = BigDecimal("4.5"),

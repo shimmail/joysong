@@ -101,6 +101,22 @@ class OrderServiceTest {
     // ---- 创建订单 ----
 
     @Test
+    fun `创建订单 - 缺少医生时拒绝`() {
+        val request = CreateOrderRequest(projectId = "project-1", institutionProjectId = "inst-proj-1")
+
+        every { projectRepository.findById("project-1") } returns Optional.of(testProject)
+        every { institutionProjectRepository.findById("inst-proj-1") } returns Optional.of(testInstitutionProject)
+        every { institutionRepository.findById("inst-1") } returns Optional.of(testInstitution)
+        every { orderRepository.save(any()) } answers { firstArg<OrderEntity>() }
+
+        val error = assertThrows<IllegalArgumentException> {
+            orderService.createOrder("user-1", request)
+        }
+
+        assertEquals("订单必须关联医生", error.message)
+    }
+
+    @Test
     fun `创建订单 - 使用机构项目价格，无面诊金无优惠券`() {
         val request = CreateOrderRequest(projectId = "project-1", institutionProjectId = "inst-proj-1")
 

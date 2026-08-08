@@ -9,7 +9,7 @@ void main() {
     final result = Money.parse('0.10').times(3).subtract(Money.parse('0.20'));
 
     expect(result.toDecimalString(), '0.1');
-    expect(result.formatted, '¥0.10');
+    expect(result.formatted, r'$0.10');
     expect(Money.parse('1.00'), Money.parse('1'));
   });
 

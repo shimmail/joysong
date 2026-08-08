@@ -13,6 +13,7 @@ data class ProjectAdminVo(
     val coverImage: String,
     val images: String,
     val referencePrice: BigDecimal,
+    val currency: String = com.joysong.server.common.money.CurrencyCode.DEFAULT_CODE,
     val slogan: String,
     val detailContent: String?,
     val rating: BigDecimal,

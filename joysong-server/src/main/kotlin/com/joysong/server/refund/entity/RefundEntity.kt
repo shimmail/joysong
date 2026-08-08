@@ -3,6 +3,7 @@ package com.joysong.server.refund.entity
 import jakarta.persistence.*
 import java.math.BigDecimal
 import java.time.LocalDateTime
+import com.joysong.server.common.money.CurrencyCode
 
 @Entity
 @Table(name = "refunds")
@@ -11,7 +12,7 @@ data class RefundEntity(
     @Column(name = "refund_no", length = 50) val refundNo: String? = null,
     @Column(name = "order_id") val orderId: String,
     @Column(name = "user_id") val userId: String,
-    @Column(name = "currency", nullable = false, length = 3, columnDefinition = "char(3)") val currency: String = "CNY",
+    @Column(name = "currency", nullable = false, length = 3, columnDefinition = "char(3)") val currency: String = CurrencyCode.DEFAULT_CODE,
     val amount: BigDecimal,
     @Column(name = "requested_amount_minor") val requestedAmountMinor: Long? = null,
     @Column(name = "refunded_amount_minor", nullable = false) val refundedAmountMinor: Long = 0,

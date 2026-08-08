@@ -252,7 +252,7 @@ class AgentCatalogService(
                     type = "PROJECT", id = project.id, name = project.name, subtitle = project.category,
                     summary = project.description,
                     attributes = linkedMapOf(
-                        AgentText.value("参考价", "Reference price") to "¥${project.referencePrice.toPlainString()}",
+                        AgentText.value("参考价", "Reference price") to "$${project.referencePrice.toPlainString()}",
                         AgentText.value("评分", "Rating") to project.rating.toPlainString(),
                         AgentText.value("标签", "Tags") to project.tags
                     ).filterValues { it.isNotBlank() },
@@ -268,8 +268,8 @@ class AgentCatalogService(
                     subtitle = listOf(institution.city, effective.category).filter { it.isNotBlank() }.joinToString(" · "),
                     summary = effective.description,
                     attributes = linkedMapOf(
-                        AgentText.value("机构价格", "Clinic price") to "¥${offering.price.toPlainString()}",
-                        AgentText.value("项目参考价", "Reference price") to "¥${project.referencePrice.toPlainString()}",
+                        AgentText.value("机构价格", "Clinic price") to "$${offering.price.toPlainString()}",
+                        AgentText.value("项目参考价", "Reference price") to "$${project.referencePrice.toPlainString()}",
                         AgentText.value("评分", "Rating") to effective.rating.toPlainString(),
                         AgentText.value("评价数", "Review count") to effective.reviewCount.toString(),
                         AgentText.value("标签", "Tags") to effective.tags,
