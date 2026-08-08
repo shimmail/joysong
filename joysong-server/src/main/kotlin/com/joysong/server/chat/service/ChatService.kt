@@ -79,7 +79,7 @@ class ChatService(
     @Qualifier("llmRestTemplate") private val restTemplate: RestTemplate,
     @Qualifier("intentParserRestTemplate") private val intentParserRestTemplate: RestTemplate,
     @Value("\${openai.api-key:}") private val openaiApiKey: String,
-    @Value("\${openai.base-url:https://www.fastaitoken.com/v1}") private val openaiBaseUrl: String,
+    @Value("\${openai.base-url:}") private val openaiBaseUrl: String,
     @Value("\${openai.model:gpt-4.1-mini}") private val openaiModel: String,
     @Value("\${openai.stream-enabled:false}") private val streamEnabled: Boolean,
     @Value("\${openai.intent-parser-enabled:true}") private val intentParserEnabled: Boolean,

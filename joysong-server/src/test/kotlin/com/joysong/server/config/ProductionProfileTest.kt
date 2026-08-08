@@ -43,6 +43,7 @@ class ProductionProfileTest {
         assertEquals("\${OSS_BUCKET_NAME}", properties.getProperty("oss.bucket-name"))
         assertEquals("\${SMS_SIGN_NAME}", properties.getProperty("aliyun.sms.sign-name"))
         assertTrue(properties.getProperty("aliyun.sms.template-code").toString().contains("SMS_TEMPLATE_CODE"))
+        assertEquals("\${OPENAI_BASE_URL}", properties.getProperty("openai.base-url"))
     }
 
     @Test

@@ -22,7 +22,7 @@ class TranslationService(
     @Qualifier("llmRestTemplate") private val restTemplate: RestTemplate,
     private val objectMapper: ObjectMapper,
     @Value("\${openai.api-key:}") private val apiKey: String,
-    @Value("\${openai.base-url:https://www.fastaitoken.com/v1}") private val baseUrl: String,
+    @Value("\${openai.base-url:}") private val baseUrl: String,
     @Value("\${translation.model:gpt-5.5}") private val model: String,
     @Value("\${translation.provider:qwen}") private val provider: String = "qwen",
     @Value("\${translation.fallback-provider:openai}") private val fallbackProvider: String = "openai",

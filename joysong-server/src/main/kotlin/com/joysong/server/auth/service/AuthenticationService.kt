@@ -51,6 +51,9 @@ class AuthenticationService(
         }
         // 查找用户（包括已注销的）
         val user = userRepository.findByPhoneIncludeDeleted(phone).map { existing ->
+            if (existing.role == "ADMIN") {
+                throw BadCredentialsException("管理员账号请使用密码登录")
+            }
             if (existing.deletedAt != null) {
                 // 已注销用户重新激活
                 val reactivated = existing.copy(deletedAt = null)

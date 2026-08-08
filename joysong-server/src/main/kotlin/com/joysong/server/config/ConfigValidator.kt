@@ -27,6 +27,7 @@ class ConfigValidator(
     @Value("\${payment.mode:disabled}") private val paymentMode: String,
     @Value("\${payment.stripe.enabled:false}") private val stripePaymentEnabled: Boolean,
     @Value("\${openai.demo-fallback-enabled:false}") private val aiDemoFallbackEnabled: Boolean,
+    @Value("\${openai.base-url:}") private val openAiBaseUrl: String,
     @Value("\${security.verification-code.log-for-dev:false}") private val logVerificationCodeForDev: Boolean,
     @Value("\${seed.demo.enabled:false}") private val demoSeedEnabled: Boolean,
 ) {
@@ -61,6 +62,9 @@ class ConfigValidator(
         }
         if (isProduction && aiDemoFallbackEnabled) {
             missing.add("OPENAI demo fallback must be disabled in production")
+        }
+        if (isProduction && !OpenAiBaseUrlPolicy.isAllowed(openAiBaseUrl)) {
+            missing.add("OPENAI_BASE_URL (approved HTTPS endpoint required)")
         }
         if (isProduction && logVerificationCodeForDev) {
             missing.add("verification-code log-for-dev must be disabled in production")
