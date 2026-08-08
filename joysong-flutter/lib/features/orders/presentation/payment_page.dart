@@ -436,11 +436,10 @@ String _paymentAmount(PaymentAttempt? payment, String fallback) {
       : '${digits.substring(0, digits.length - fractionDigits)}.'
           '${digits.substring(digits.length - fractionDigits)}';
   final symbol = const {
-        'CNY': '¥',
         'USD': r'$',
         'EUR': '€',
         'GBP': '£',
-        'JPY': '¥',
+        'JPY': 'JPY ',
         'HKD': r'HK$',
         'SGD': r'S$',
         'AUD': r'A$',
@@ -448,18 +447,4 @@ String _paymentAmount(PaymentAttempt? payment, String fallback) {
       }[currency] ??
       '$currency ';
   return '${negative ? '-' : ''}$symbol$number';
-}
-
-List<PaymentProvider> enabledPaymentProviders() {
-  const configured = String.fromEnvironment('PAYMENT_PROVIDERS');
-  if (configured.trim().isEmpty) return const [];
-  final values = <PaymentProvider>[];
-  for (final item in configured.split(',')) {
-    final provider = PaymentProvider.fromWire(item);
-    if (provider != PaymentProvider.unknown &&
-        !values.contains(provider)) {
-      values.add(provider);
-    }
-  }
-  return values;
 }

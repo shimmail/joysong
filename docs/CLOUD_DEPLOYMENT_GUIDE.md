@@ -1,4 +1,6 @@
-# Joysong 云服务器部署说明（开发中项目）
+# Joysong 云服务器部署指南（开发中项目）
+
+> 支付相关的测试、Stripe 配置获取和正式上线变量请以 [`支付开发与云服务器部署指南.md`](./支付开发与云服务器部署指南.md) 为准。
 
 > 本文是持续维护的部署基线，不代表当前版本已经可以正式上线。当前推荐先部署测试/预发布环境，正式环境必须完成文末的上线阻断项。
 
@@ -168,9 +170,17 @@ QWEN_API_KEY=<key-if-used>
 QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 QWEN_MODEL=qwen3.7-flash
 
-PAYMENT_MODE=disabled
-STRIPE_ENABLED=false
+STRIPE_SECRET_KEY=sk_live_<from Stripe Dashboard Live mode>
+STRIPE_WEBHOOK_SECRET=whsec_<from the production Webhook Endpoint>
+STRIPE_SUCCESS_URL=https://app.example.com/payment/success?session_id={CHECKOUT_SESSION_ID}
+STRIPE_CANCEL_URL=https://app.example.com/payment/cancel
+STRIPE_API_BASE=https://api.stripe.com
+STRIPE_API_VERSION=
+STRIPE_WEBHOOK_TOLERANCE_SECONDS=300
+STRIPE_PRODUCT_NAME=Joysong medical service
 PAYMENT_RECONCILIATION_ENABLED=true
+PAYMENT_RECONCILIATION_DELAY_MS=60000
+PAYMENT_RECONCILIATION_STALE_SECONDS=120
 ```
 
 ### 5.1 完整可选变量索引
@@ -198,7 +208,7 @@ PAYMENT_RECONCILIATION_ENABLED=true
 
 不要把可选变量的默认值复制到生产密钥文件；生产 profile 的 fail-closed 校验优先于开发默认值。
 
-正式支付前再切换 `PAYMENT_MODE=live`、`STRIPE_ENABLED=true`，并配置 HTTPS webhook、成功页和取消页。不要在测试环境启用真实支付。
+Stripe 的环境由服务端 API key 决定：测试环境使用 `sk_test_...`，正式环境使用 `sk_live_...`。两种环境都必须提供与当前 Stripe webhook endpoint 匹配的 `STRIPE_WEBHOOK_SECRET`；不要在测试环境配置 `sk_live_...`。
 
 ## 6. 数据库准备与迁移
 

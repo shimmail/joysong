@@ -126,15 +126,12 @@ aliyun:
     template-code: ${SMS_TEMPLATE_CODE:}
 
 payment:
-  # No provider is enabled by default. Real payments are activated explicitly per environment.
-  mode: ${PAYMENT_MODE:disabled}
   stripe:
-    enabled: ${STRIPE_ENABLED:false}
     secret-key: ${STRIPE_SECRET_KEY:}
     webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
     # Hosted Checkout returns to these public HTTPS pages. They may be Universal/App Links.
-    success-url: ${STRIPE_SUCCESS_URL:}
-    cancel-url: ${STRIPE_CANCEL_URL:}
+    success-url: ${STRIPE_SUCCESS_URL:https://example.com/payment/success?session_id={CHECKOUT_SESSION_ID}}
+    cancel-url: ${STRIPE_CANCEL_URL:https://example.com/payment/cancel}
     api-base: ${STRIPE_API_BASE:https://api.stripe.com}
     api-version: ${STRIPE_API_VERSION:}
     webhook-tolerance-seconds: ${STRIPE_WEBHOOK_TOLERANCE_SECONDS:300}

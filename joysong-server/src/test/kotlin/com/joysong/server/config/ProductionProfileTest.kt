@@ -2,6 +2,7 @@ package com.joysong.server.config
 
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.springframework.boot.env.YamlPropertySourceLoader
@@ -28,10 +29,10 @@ class ProductionProfileTest {
     }
 
     @Test
-    fun `production disables every demo path`() {
+    fun `production payment environment is selected by the Stripe API key`() {
         assertEquals(false, properties.getProperty("seed.demo.enabled"))
-        assertEquals("live", properties.getProperty("payment.mode"))
-        assertEquals("\${STRIPE_ENABLED:true}", properties.getProperty("payment.stripe.enabled"))
+        assertNull(properties.getProperty("payment.mode"))
+        assertNull(properties.getProperty("payment.stripe.enabled"))
         assertEquals(false, properties.getProperty("security.verification-code.log-for-dev"))
         assertEquals(false, properties.getProperty("openai.demo-fallback-enabled"))
     }
@@ -47,9 +48,9 @@ class ProductionProfileTest {
     }
 
     @Test
-    fun `development payment remains disabled until real sandbox credentials are supplied`() {
-        assertEquals("disabled", developmentProperties.getProperty("payment.mode"))
-        assertEquals("\${STRIPE_ENABLED:false}", developmentProperties.getProperty("payment.stripe.enabled"))
+    fun `development does not override the Stripe API key selected environment`() {
+        assertNull(developmentProperties.getProperty("payment.mode"))
+        assertNull(developmentProperties.getProperty("payment.stripe.enabled"))
         assertEquals(true, developmentProperties.getProperty("security.verification-code.log-for-dev"))
         assertTrue(developmentProperties.getProperty("openai.demo-fallback-enabled").toString().contains("OPENAI_DEMO_FALLBACK_ENABLED"))
         assertEquals(false, developmentProperties.getProperty("oss.enabled"))

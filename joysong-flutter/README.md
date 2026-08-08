@@ -32,8 +32,10 @@ flutter run --dart-define=APP_ENV=development
 开发环境默认地址：Android 模拟器为 `http://10.0.2.2:8080`，iOS 模拟器为 `http://127.0.0.1:8080`。真机或其他环境通过编译参数覆盖：
 
 ```shell
-flutter run --dart-define=API_BASE_URL=http://192.168.1.10:8080
+flutter run --dart-define=APP_ENV=development --dart-define=API_BASE_URL=http://192.168.1.10:8080
 ```
+
+当前海外 USD card 流程固定使用 Stripe Hosted Checkout；Stripe 密钥和 webhook 配置只放在服务端环境变量中，不放入 Flutter 客户端。
 
 生产构建必须同时指定 `APP_ENV=production` 和 HTTPS 的 `API_BASE_URL`。
 

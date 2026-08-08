@@ -68,6 +68,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     }
     final success = await action();
     if (success && mounted && closesAfterSuccess) {
+      Navigator.of(context).pop();
       widget.onOrderRemoved?.call();
     }
   }
@@ -339,24 +340,11 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
   }
 
   Future<void> _openPayment(Order order, {required bool balance}) async {
-    final providers = enabledPaymentProviders();
-    if (providers.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _isEnglish(context)
-                ? 'Payment is not available yet. Please try again later.'
-                : '支付服务暂未开放，请稍后再试。',
-          ),
-        ),
-      );
-      return;
-    }
     final controller = PaymentController(
       repository: widget.controller.repository,
       order: order,
       paymentType: balance ? PaymentType.balance : PaymentType.consultationFee,
-      providers: providers,
+      providers: const [PaymentProvider.stripe],
       actionLauncher: const MobilePaymentActionLauncher(),
     );
     bool? paid;
