@@ -30,6 +30,7 @@ hs_err_pid*.log
 # App specific
 joysong-server/data/
 .tmp/
+.worktrees/
 tools/
 __*.txt
 __*.py
