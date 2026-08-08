@@ -43,7 +43,11 @@ The authoritative order lifecycle remains `doc/order_dispute_flow.puml`. The det
 
 ### 4.1 USD order snapshots
 
+The application uses one global catalog currency: USD. Existing project price, original price, doctor consultation fee, coupon amount, order amount, refund amount, and settlement amount fields are interpreted as USD. No parallel CNY catalog or runtime exchange-rate conversion is introduced.
+
 The order pricing path must persist USD snapshots before payment can be created. Existing hard-coded CNY order creation is a production blocker and must be removed for this launch path.
+
+Existing database values were entered with CNY semantics and must not be relabeled automatically. Before live payments are enabled, an operator must replace all active project prices, doctor consultation fees, and fixed-value coupon amounts with approved USD values. The deployment runbook must include a query and sign-off gate proving this repricing is complete. Historical orders retain their stored currency and amounts; only new USD orders can enter the Stripe flow.
 
 The payment layer must reject any Stripe payment whose persisted order currency is not `USD`. No runtime currency conversion occurs at payment time.
 
@@ -127,6 +131,8 @@ The page displays:
 - a clear status area for ready, opening Checkout, awaiting action, processing, succeeded, failed, cancelled, and expired states.
 
 The page must not calculate exchange rates or render a CNY symbol for this flow.
+
+All catalog, checkout, order, refund, and settlement screens that display the globally redefined monetary fields must render USD consistently. Admin editing forms must label these inputs as USD so operators cannot mistake the unit.
 
 ### 5.3 Hosted Checkout and app lifecycle
 
