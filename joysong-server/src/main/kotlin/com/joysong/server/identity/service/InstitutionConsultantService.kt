@@ -15,7 +15,7 @@ class InstitutionConsultantService(
     fun requireApprovedConsultant(institutionId: String, consultantId: String): InstitutionConsultant =
         listApprovedConsultants(institutionId)
             .firstOrNull { it.id == consultantId }
-            ?: throw IllegalArgumentException("所选咨询师未加入该机构或尚未确认")
+            ?: throw IllegalArgumentException("所选医美顾问未加入该机构或尚未确认")
 
     fun listApprovedConsultants(institutionId: String): List<InstitutionConsultant> =
         jdbcTemplate.query(

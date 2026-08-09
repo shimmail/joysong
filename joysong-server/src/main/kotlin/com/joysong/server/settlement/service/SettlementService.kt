@@ -1,9 +1,9 @@
 package com.joysong.server.settlement.service
 
-import com.joysong.server.config.OrderSplitProperties
 import com.joysong.server.order.dto.OrderStatusEnum
 import com.joysong.server.order.repository.DoctorInstitutionProjectConfigRepository
 import com.joysong.server.order.repository.OrderRepository
+import com.joysong.server.order.service.OrderSplitRatePolicy
 import com.joysong.server.order.service.OrderStatusLogService
 import com.joysong.server.settlement.entity.SettlementEntity
 import com.joysong.server.settlement.repository.SettlementRepository
@@ -26,7 +26,7 @@ import com.joysong.server.payment.domain.Money
 class SettlementService(
     private val settlementRepository: SettlementRepository,
     private val orderRepository: OrderRepository,
-    private val orderSplitProperties: OrderSplitProperties,
+    private val splitRatePolicy: OrderSplitRatePolicy,
     private val doctorInstitutionProjectConfigRepository: DoctorInstitutionProjectConfigRepository,
     private val orderStatusLogService: OrderStatusLogService
 ) {
@@ -39,12 +39,12 @@ class SettlementService(
 
     /**
      * 创建结算记录
-     * 订单确认完成时调用，根据全局配置（平台比例）和医生-机构项目配置（机构比例、佣金比例）计算分账金额
+     * 订单确认完成时调用，根据共享策略和医生-机构项目配置计算分账金额
      *
      * 分账计算规则：
-     * 1. 读取 OrderSplitProperties 获取 platformRate
-     * 2. 读取 DoctorInstitutionProjectConfig 获取 institutionRate、commissionRate
-     * 3. doctorRate = 100 - platformRate - institutionRate - commissionRate
+     * 1. 读取共享策略获取平台与默认机构比例
+     * 2. 读取 DoctorInstitutionProjectConfig 获取机构与医美顾问分账比例
+     * 3. doctorRate = 100 - platformRate - institutionRate - consultantRate
      * 4. 各方金额 = totalAmount × rate / 100，使用 HALF_UP 舍入
      *
      * @param orderId 订单ID
@@ -69,26 +69,21 @@ class SettlementService(
                 order.consultantName.isNotBlank() &&
                 order.doctorId.isNotBlank() &&
                 order.doctorName.isNotBlank()
-        ) { "订单分账信息不完整，缺少机构、机构项目、咨询师或医生快照" }
-
-        val platformRate = orderSplitProperties.platformRate
+        ) { "订单分账信息不完整，缺少机构、机构项目、医美顾问或医生快照" }
 
         // The order snapshot is the sole source of party identities. This lookup only
         // resolves the current rate policy for the frozen doctor/project keys.
         val config = doctorInstitutionProjectConfigRepository
             .findByDoctorIdAndInstitutionProjectId(order.doctorId, order.institutionProjectId)
-        val institutionRate = config?.institutionRate ?: orderSplitProperties.institutionRate
-        val commissionRate = config?.commissionRate ?: BigDecimal.ZERO
-
-        val doctorRate = HUNDRED - platformRate - institutionRate - commissionRate
-        require(doctorRate >= BigDecimal.ZERO) {
-            "分成比例配置异常：平台${platformRate}% + 机构${institutionRate}% + 佣金${commissionRate}% 超过100%"
-        }
+        val rates = splitRatePolicy.resolve(
+            institutionRate = config?.institutionRate ?: splitRatePolicy.defaultInstitutionRate(),
+            consultantRate = config?.commissionRate ?: BigDecimal.ZERO
+        )
 
         val totalAmount = order.price
-        val platformAmount = totalAmount.multiply(platformRate).divide(HUNDRED, SCALE, RoundingMode.HALF_UP)
-        val institutionAmount = totalAmount.multiply(institutionRate).divide(HUNDRED, SCALE, RoundingMode.HALF_UP)
-        val consultantAmount = totalAmount.multiply(commissionRate).divide(HUNDRED, SCALE, RoundingMode.HALF_UP)
+        val platformAmount = totalAmount.multiply(rates.platformRate).divide(HUNDRED, SCALE, RoundingMode.HALF_UP)
+        val institutionAmount = totalAmount.multiply(rates.institutionRate).divide(HUNDRED, SCALE, RoundingMode.HALF_UP)
+        val consultantAmount = totalAmount.multiply(rates.consultantRate).divide(HUNDRED, SCALE, RoundingMode.HALF_UP)
         val doctorAmount = totalAmount - platformAmount - institutionAmount - consultantAmount
 
         val settlement = SettlementEntity(
@@ -104,17 +99,17 @@ class SettlementService(
             institutionAmountMinor = Money.toMinor(institutionAmount, order.currency),
             consultantAmountMinor = Money.toMinor(consultantAmount, order.currency),
             doctorAmountMinor = Money.toMinor(doctorAmount, order.currency),
-            platformRate = platformRate,
-            institutionRate = institutionRate,
-            consultantRate = commissionRate,
-            doctorRate = doctorRate,
+            platformRate = rates.platformRate,
+            institutionRate = rates.institutionRate,
+            consultantRate = rates.consultantRate,
+            doctorRate = rates.doctorRate,
             status = "PENDING",
             settledAt = order.settlementAt
         )
 
         val saved = settlementRepository.save(settlement)
         log.info(
-            "订单[{}]结算记录创建成功: 总额={}, 平台={}, 机构={}, 佣金={}, 医生={}",
+            "订单[{}]结算记录创建成功: 总额={}, 平台={}, 机构={}, 医美顾问={}, 医生={}",
             orderId, totalAmount, platformAmount, institutionAmount, consultantAmount, doctorAmount
         )
         return saved

@@ -47,4 +47,5 @@ image/
 # Environment-specific config
 application-dev.yml
 application-prod.yml
+!joysong-server/src/main/resources/application-prod.yml
 .env

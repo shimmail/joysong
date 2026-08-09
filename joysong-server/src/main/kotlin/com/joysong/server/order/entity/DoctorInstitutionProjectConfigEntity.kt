@@ -9,7 +9,7 @@ import java.time.LocalDateTime
 /**
  * 医生-机构项目价格配置实体
  *
- * 按「不同医生的不同机构项目」维度配置面诊金和佣金比例，由后台管理系统维护。
+ * 按「不同医生的不同机构项目」维度配置面诊金和医美顾问分账比例，由后台管理系统维护。
  *
  * @author joysong
  * @since 2026-07-30
@@ -35,7 +35,7 @@ class DoctorInstitutionProjectConfigEntity(
     @Column(name = "consultation_fee", nullable = false, precision = 10, scale = 2)
     var consultationFee: BigDecimal = BigDecimal.ZERO,
 
-    /** 医生佣金比例（百分比，如 10.00 表示 10%） */
+    /** 医美顾问分账比例（百分比，如 10.00 表示 10%） */
     @Column(name = "commission_rate", nullable = false, precision = 5, scale = 2)
     var commissionRate: BigDecimal = BigDecimal.ZERO,
 

@@ -1,12 +1,16 @@
 import { useEffect, useState } from 'react';
 import {
   Table, Button, Popconfirm, message, Space, Modal, Form,
-  InputNumber, Select,
+  InputNumber, Select, Tag,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import api, { getData } from '../api';
+import { SplitRateFields } from '../components/SplitRateFields';
+import { useOrderSplitPolicy } from '../hooks/useOrderSplitPolicy';
+import { calculateDoctorRate } from '../utils/splitRates';
 
 export default function DoctorProjectConfigsPage() {
+  const policyState = useOrderSplitPolicy();
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -69,6 +73,7 @@ export default function DoctorProjectConfigsPage() {
     setFilteredProjects([]);
     setAllInstitutionProjects([]);
     form.resetFields();
+    form.setFieldsValue({ institutionRate: 40 });
     setFormVisible(true);
   };
 
@@ -175,6 +180,16 @@ export default function DoctorProjectConfigsPage() {
     fetchData();
   };
 
+  const renderDoctorRate = (record: { institutionRate?: number; commissionRate?: number }) => {
+    const doctorRate = calculateDoctorRate(
+      policyState.policy?.platformRate,
+      record.institutionRate,
+      record.commissionRate,
+    );
+    if (doctorRate == null) return '-';
+    return doctorRate < 0 ? <Tag color="red">配置无效</Tag> : `${doctorRate}%`;
+  };
+
   const columns = [
     {
       title: '机构名称', width: 150,
@@ -196,12 +211,16 @@ export default function DoctorProjectConfigsPage() {
       render: (v: number) => v != null ? `$${v}` : '-',
     },
     {
-      title: '咨询师佣金比例', dataIndex: 'commissionRate', width: 120,
+      title: '医美顾问分账比例', dataIndex: 'commissionRate', width: 140,
       render: (v: number) => v != null ? `${v}%` : '-',
     },
     {
       title: '机构分成比例', dataIndex: 'institutionRate', width: 120,
       render: (v: number) => v != null ? `${v}%` : '-',
+    },
+    {
+      title: '医生分账比例', width: 120,
+      render: (_: unknown, record: any) => renderDoctorRate(record),
     },
     {
       title: '操作', key: 'actions', width: 160, fixed: 'right' as const,
@@ -244,6 +263,8 @@ export default function DoctorProjectConfigsPage() {
         onOk={handleFormOk}
         onCancel={() => setFormVisible(false)}
         confirmLoading={submitting}
+        okText={editingRecord ? '保存修改' : '创建配置'}
+        okButtonProps={{ disabled: policyState.loading || Boolean(policyState.error) || !policyState.policy }}
         destroyOnHidden
         width={500}
       >
@@ -304,15 +325,7 @@ export default function DoctorProjectConfigsPage() {
           <Form.Item name="consultationFee" label="面诊金" rules={[{ required: true, message: '请输入面诊金' }]}>
             <InputNumber min={0} precision={2} style={{ width: '100%' }} placeholder="请输入面诊金金额" prefix="$" />
           </Form.Item>
-          <Form.Item name="commissionRate" label="医生/项目发布者佣金比例" rules={[{ required: true, message: '请输入医生佣金比例' }]}>
-            <InputNumber min={0} max={100} precision={2} style={{ width: '100%' }} placeholder="如 10.00 表示 10%" addonAfter="%" />
-          </Form.Item>
-          <Form.Item name="institutionRate" label="合作医疗机构分成比例"
-            rules={[{ required: true, message: '请输入机构分成比例' }]}
-            initialValue={40}>
-            <InputNumber min={0} max={100} precision={2} style={{ width: '100%' }}
-              placeholder="建议 40% 左右" addonAfter="%" />
-          </Form.Item>
+          <SplitRateFields form={form} {...policyState} />
         </Form>
       </Modal>
 

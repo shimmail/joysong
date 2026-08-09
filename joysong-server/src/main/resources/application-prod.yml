@@ -1,0 +1,55 @@
+spring:
+  config:
+    activate:
+      on-profile: prod
+  datasource:
+    # Production must point at a pre-created database. Do not append
+    # createDatabaseIfNotExist=true to DB_URL.
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+  flyway:
+    enabled: true
+    validate-on-migrate: true
+    baseline-on-migrate: false
+    clean-disabled: true
+  devtools:
+    restart:
+      enabled: false
+
+seed:
+  demo:
+    # Deliberately not configurable in the production profile.
+    enabled: false
+    password: ${DEMO_USER_PASSWORD:}
+
+oss:
+  enabled: true
+  endpoint: ${OSS_ENDPOINT}
+  bucket-name: ${OSS_BUCKET_NAME}
+  public-base-url: ${OSS_PUBLIC_BASE_URL:}
+  access-key-id: ${OSS_ACCESS_KEY_ID}
+  access-key-secret: ${OSS_ACCESS_KEY_SECRET}
+
+aliyun:
+  sms:
+    enabled: true
+    access-key-id: ${SMS_ACCESS_KEY_ID}
+    access-key-secret: ${SMS_ACCESS_KEY_SECRET}
+    sign-name: ${SMS_SIGN_NAME}
+    template-code: ${SMS_TEMPLATE_CODE}
+
+security:
+  verification-code:
+    log-for-dev: false
+
+openai:
+  base-url: ${OPENAI_BASE_URL}
+  stream-enabled: ${OPENAI_STREAM_ENABLED:false}
+  # Production must never persist a fabricated assistant response. This is a
+  # literal so a deployment cannot turn demo replies back on accidentally.
+  demo-fallback-enabled: false
