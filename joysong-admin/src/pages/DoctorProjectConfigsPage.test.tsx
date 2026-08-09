@@ -122,7 +122,18 @@ describe('DoctorProjectConfigsPage split rates', () => {
 
     const dialog = screen.getByRole('dialog', { name: '新增配置' });
     expect(within(dialog).getByRole('alert')).toHaveTextContent('分账策略加载失败');
-    expect(screen.getByRole('button', { name: '创建配置' })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: '创建配置' })).toBeDisabled();
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it('disables confirmation while the policy is loading', async () => {
+    policyState.current = { policy: undefined, loading: true, error: undefined };
+    const user = userEvent.setup();
+    render(<DoctorProjectConfigsPage />);
+    await user.click(screen.getByRole('button', { name: /新增配置/ }));
+
+    const dialog = screen.getByRole('dialog', { name: '新增配置' });
+    expect(within(dialog).getByRole('button', { name: '创建配置' })).toBeDisabled();
     expect(mockPost).not.toHaveBeenCalled();
   });
 
