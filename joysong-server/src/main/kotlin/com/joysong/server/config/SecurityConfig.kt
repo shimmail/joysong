@@ -54,7 +54,8 @@ class SecurityConfig(
                         "/api/admin/doctor-institution-project-configs",
                         "/api/admin/doctor-institution-project-config-proposals",
                         "/api/admin/institution-projects",
-                        "/api/admin/institution-project-requests"
+                        "/api/admin/institution-project-requests",
+                        "/api/admin/order-split-policy"
                     ).authenticated()
                     .requestMatchers(HttpMethod.PUT,
                         "/api/admin/doctors/*",
