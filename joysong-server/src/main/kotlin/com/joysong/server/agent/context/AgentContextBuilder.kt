@@ -50,16 +50,19 @@ class AgentContextBuilder(
             ?: throw IllegalArgumentException("会话不存在或无权访问")
         val summary = parseSummary(session.summaryJson)
         val cutoff = LocalDateTime.now().minusDays(messageRetentionDays)
-        val succeeded = messageRepository.findSucceededTurnMessagesBySessionId(sessionId)
-        val expired = succeeded.filter { it.createdAt.isBefore(cutoff) }
-        if (session.summaryJson != serializeSummary(summary) || expired.isNotEmpty()) {
+        val allMessages = messageRepository.findBySessionIdOrderBySequenceNoAsc(sessionId)
+        val expired = allMessages.filter { it.createdAt.isBefore(cutoff) }
+        val overLimit = allMessages.dropLast(recentMessageLimit.coerceAtLeast(0)).toSet()
+        val prune = (expired + overLimit).toSet()
+        if (session.summaryJson != serializeSummary(summary) || prune.isNotEmpty()) {
             persistSummary(session, summary)
         }
-        if (expired.isNotEmpty()) {
-            messageRepository.deleteAll(expired)
+        if (prune.isNotEmpty()) {
+            messageRepository.deleteAll(prune)
         }
+        val succeeded = messageRepository.findSucceededTurnMessagesBySessionId(sessionId)
         val recent = succeeded
-            .filterNot { it in expired }
+            .filterNot { it in prune }
             .sortedBy { it.sequenceNo }
             .takeLast(maxMessages.coerceAtLeast(0).coerceAtMost(recentMessageLimit))
         val bounded = recent.asReversed()
@@ -102,10 +105,10 @@ class AgentContextBuilder(
         )
         persistSummary(session, updated)
 
-        val succeeded = messageRepository.findSucceededTurnMessagesBySessionId(session.id).sortedBy { it.sequenceNo }
+        val allMessages = messageRepository.findBySessionIdOrderBySequenceNoAsc(session.id)
         val cutoff = LocalDateTime.now().minusDays(messageRetentionDays)
-        val overLimit = succeeded.dropLast(recentMessageLimit.coerceAtLeast(0)).toSet()
-        val expired = succeeded.filter { it.createdAt.isBefore(cutoff) }.toSet()
+        val overLimit = allMessages.dropLast(recentMessageLimit.coerceAtLeast(0)).toSet()
+        val expired = allMessages.filter { it.createdAt.isBefore(cutoff) }.toSet()
         val prune = (overLimit + expired).toList()
         if (prune.isNotEmpty()) messageRepository.deleteAll(prune)
     }
