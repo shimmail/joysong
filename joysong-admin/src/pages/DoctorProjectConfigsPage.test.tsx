@@ -137,6 +137,21 @@ describe('DoctorProjectConfigsPage split rates', () => {
     expect(mockPost).not.toHaveBeenCalled();
   });
 
+  it('renders an unavailable doctor rate and disables confirmation when policy is silently absent', async () => {
+    policyState.current = { policy: undefined, loading: false, error: undefined };
+    const user = userEvent.setup();
+    render(<DoctorProjectConfigsPage />);
+
+    const table = await screen.findByRole('table');
+    const configRow = within(table).getByRole('row', { name: /医生 A.*项目 A/ });
+    expect(within(configRow).getByText('-')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /新增配置/ }));
+    const dialog = screen.getByRole('dialog', { name: '新增配置' });
+    expect(within(dialog).getByRole('button', { name: '创建配置' })).toBeDisabled();
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
   it('marks an old config with a negative derived doctor share invalid', async () => {
     mockGet.mockImplementation((url) => {
       const data = url === '/admin/doctor-institution-project-configs'

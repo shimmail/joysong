@@ -136,6 +136,8 @@ describe('SplitConfigProposalsPage split rates', () => {
     const [currentTable, historyTable] = tables;
     expect(within(currentTable).getByRole('columnheader', { name: '医美顾问分账比例' })).toBeInTheDocument();
     expect(within(historyTable).getByRole('columnheader', { name: '医美顾问分账比例' })).toBeInTheDocument();
+    expect(within(currentTable).getByRole('columnheader', { name: '医生分账比例' })).toBeInTheDocument();
+    expect(within(historyTable).getByRole('columnheader', { name: '医生分账比例' })).toBeInTheDocument();
 
     const currentRow = within(currentTable).getByRole('row', { name: /医生 A.*项目 A/ });
     expect(within(currentRow).getByText('20%')).toBeInTheDocument();
