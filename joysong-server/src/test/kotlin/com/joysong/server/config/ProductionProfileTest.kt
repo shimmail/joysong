@@ -14,7 +14,7 @@ class ProductionProfileTest {
         .load("production", ClassPathResource("application-prod.yml"))
         .single()
     private val developmentProperties = YamlPropertySourceLoader()
-        .load("development", ClassPathResource("application-dev.yml"))
+        .load("development", ClassPathResource("application-dev.example.yml"))
         .single()
 
     @Test

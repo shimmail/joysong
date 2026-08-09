@@ -223,7 +223,7 @@ class AdminIdentityService(
             normalizedUserId,
             normalizedInstitutionId,
             "CONSULTANT"
-        ).firstOrNull() ?: throw IllegalStateException("咨询师绑定关系写入失败")
+        ).firstOrNull() ?: throw IllegalStateException("医美顾问绑定关系写入失败")
     }
 
     fun listRoles(status: String?, roleCode: String?, keyword: String?): List<UserRoleAdminView> {

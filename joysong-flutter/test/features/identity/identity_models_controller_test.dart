@@ -6,6 +6,11 @@ import 'package:joysong_flutter/features/identity/domain/identity_repository.dar
 import 'package:joysong_flutter/features/identity/presentation/identity_controller.dart';
 
 void main() {
+  test('uses medical aesthetics consultant product labels', () {
+    expect(IdentityRoleType.fromCode('CONSULTANT').label, '医美顾问');
+    expect(IdentityDocumentType.consultantProof.label, '医美顾问证明');
+  });
+
   test('management capabilities fail closed when booleans are missing', () {
     final context = ManagementContext.fromJson({
       'userId': 'user-1',

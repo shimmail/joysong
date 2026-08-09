@@ -342,6 +342,16 @@ final class _FakeAuthRepository implements AuthRepository {
   Future<AuthTokens?> readTokens() async => tokens;
 
   @override
+  Future<void> activateTokens(AuthTokens value) async {
+    tokens = value;
+  }
+
+  @override
+  Future<void> clearLocalTokens() async {
+    tokens = null;
+  }
+
+  @override
   Future<void> resetPassword({
     required String phone,
     required String code,

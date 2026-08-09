@@ -1,0 +1,26 @@
+# Copy this file to application-dev.yml for local development. The copied file
+# remains ignored so machine-specific values and secrets cannot be committed.
+spring:
+  datasource:
+    password: ${DB_PASSWORD:}
+  jpa:
+    show-sql: true
+
+seed:
+  demo:
+    enabled: true
+    password: ${DEMO_USER_PASSWORD:}
+
+oss:
+  enabled: false
+
+aliyun:
+  sms:
+    enabled: false
+
+openai:
+  demo-fallback-enabled: ${OPENAI_DEMO_FALLBACK_ENABLED:true}
+
+security:
+  verification-code:
+    log-for-dev: true

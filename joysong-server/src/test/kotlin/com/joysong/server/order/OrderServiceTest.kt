@@ -156,7 +156,7 @@ class OrderServiceTest {
     }
 
     @Test
-    fun `创建订单 - 缺少咨询师时拒绝`() {
+    fun `创建订单 - 缺少医美顾问时拒绝`() {
         val error = assertThrows<IllegalArgumentException> {
             orderService.createOrder(
                 "user-1",
@@ -168,7 +168,7 @@ class OrderServiceTest {
             )
         }
 
-        assertEquals("订单必须关联机构咨询师", error.message)
+        assertEquals("订单必须关联医美顾问", error.message)
     }
 
     @Test
@@ -203,7 +203,30 @@ class OrderServiceTest {
     }
 
     @Test
-    fun `创建订单 - 固化机构咨询师和医生快照`() {
+    fun `创建订单 - 医美顾问名称为空时拒绝`() {
+        val request = CreateOrderRequest(
+            projectId = "project-1",
+            institutionProjectId = "inst-proj-1",
+            doctorId = "doctor-1",
+            consultantId = "consultant-1"
+        )
+        every { projectRepository.findById("project-1") } returns Optional.of(testProject)
+        every { institutionProjectRepository.findById("inst-proj-1") } returns Optional.of(testInstitutionProject)
+        every { institutionRepository.findById("inst-1") } returns Optional.of(testInstitution)
+        every { doctorProjectRepository.existsByDoctorIdAndInstitutionProjectId("doctor-1", "inst-proj-1") } returns true
+        every { doctorRepository.findById("doctor-1") } returns Optional.of(DoctorEntity(id = "doctor-1", name = "测试医生"))
+        every { institutionConsultantService.requireApprovedConsultant("inst-1", "consultant-1") } returns
+            InstitutionConsultant("consultant-1", " ")
+
+        val error = assertThrows<IllegalArgumentException> {
+            orderService.createOrder("user-1", request)
+        }
+
+        assertEquals("医美顾问名称不能为空", error.message)
+    }
+
+    @Test
+    fun `创建订单 - 固化医美顾问和医生快照`() {
         val request = CreateOrderRequest(
             projectId = "project-1",
             institutionProjectId = "inst-proj-1",

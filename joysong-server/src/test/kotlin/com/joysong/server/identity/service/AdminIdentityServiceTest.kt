@@ -93,6 +93,17 @@ class AdminIdentityServiceTest {
     }
 
     @Test
+    fun `bindConsultant reports medical beauty consultant binding failure when final membership is absent`() {
+        val fixture = fixture(finalMembershipFound = false)
+
+        val error = assertThrows(IllegalStateException::class.java) {
+            fixture.service.bindConsultant("user-1", "institution-1", "admin-1")
+        }
+
+        assertEquals("医美顾问绑定关系写入失败", error.message)
+    }
+
+    @Test
     fun `bindConsultant concurrent first requests both return the same final membership`() {
         val fixture = fixture()
         val executor = Executors.newFixedThreadPool(2)
@@ -188,7 +199,8 @@ class AdminIdentityServiceTest {
         userRole: String = "USER",
         institutionExists: Boolean = true,
         institutionDeleted: Boolean = false,
-        failMembershipUpsert: Boolean = false
+        failMembershipUpsert: Boolean = false,
+        finalMembershipFound: Boolean = true
     ): Fixture {
         val jdbcTemplate = mockk<JdbcTemplate>()
         val upserts = java.util.Collections.synchronizedList(mutableListOf<SqlCall>())
@@ -236,7 +248,7 @@ class AdminIdentityServiceTest {
                     if (upserts.isEmpty()) preInsertMembershipSelects.incrementAndGet()
                     finalMembershipQueries.incrementAndGet()
                     finalMembershipSql.set(sql)
-                    listOf(rowMapper.mapRow(resultSet(
+                    if (!finalMembershipFound) emptyList() else listOf(rowMapper.mapRow(resultSet(
                         strings = mapOf(
                             "id" to "membership-1",
                             "user_id" to "user-1",

@@ -99,10 +99,10 @@ final class BookingConsultant {
   final String name;
 
   factory BookingConsultant.fromJson(Object? json) {
-    final map = jsonMap(json, '机构咨询师');
+    final map = jsonMap(json, '机构医美顾问');
     return BookingConsultant(
-      id: requiredString(map, 'id', '机构咨询师'),
-      name: stringValue(map['name'], fallback: '机构咨询师'),
+      id: requiredString(map, 'id', '机构医美顾问'),
+      name: stringValue(map['name'], fallback: '医美顾问'),
     );
   }
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/features/booking/presentation/booking_controller.dart';
 import 'package:joysong_flutter/features/booking/presentation/booking_page.dart';
@@ -19,6 +20,9 @@ void main() {
     Order? created;
     await tester.pumpWidget(
       MaterialApp(
+        locale: const Locale('zh'),
+        supportedLocales: const [Locale('en'), Locale('zh')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
         home: BookingPage(
           controller: controller,
           onOrderCreated: (order) => created = order,
@@ -28,6 +32,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('光子嫩肤'), findsOneWidget);
+    expect(find.text('选择医美顾问'), findsOneWidget);
     expect(find.byKey(const Key('booking-consultant-select')), findsOneWidget);
     await tester.scrollUntilVisible(
       find.byKey(const Key('booking-price-disclaimer')),
@@ -47,5 +52,28 @@ void main() {
 
     expect(repository.createCalls, 1);
     expect(created?.id, 'order-1');
+  });
+
+  testWidgets('shows the medical aesthetics consultant empty state', (
+    tester,
+  ) async {
+    final repository = FakeBookingRepository()..consultantResults = [];
+    final controller = BookingController(
+      repository: repository,
+      institutionId: 'institution-1',
+      projectId: 'project-1',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('zh'),
+        supportedLocales: const [Locale('en'), Locale('zh')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
+        home: BookingPage(controller: controller, onOrderCreated: (_) {}),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('该机构暂时没有可预约的医美顾问'), findsOneWidget);
   });
 }

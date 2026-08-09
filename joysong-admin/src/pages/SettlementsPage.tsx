@@ -60,11 +60,11 @@ export default function SettlementsPage() {
       render: (v: number) => v != null ? `$${v}` : '-',
     },
     {
-      title: '咨询师佣金', dataIndex: 'consultantCommission', width: 110,
+      title: '医美顾问分账金额', dataIndex: 'consultantCommission', width: 140,
       render: (v: number) => v != null ? `$${v}` : '-',
     },
     {
-      title: '医生收入', dataIndex: 'doctorIncome', width: 100,
+      title: '医生分账金额', dataIndex: 'doctorIncome', width: 120,
       render: (v: number) => v != null ? `$${v}` : '-',
     },
     {

@@ -56,10 +56,10 @@ class InstitutionDetailView extends StatelessWidget {
                   Expanded(
                     child: Text(
                       item.title,
-                      style:
-                          Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
+                      style: Theme.of(context)
+                          .textTheme
+                          .headlineSmall
+                          ?.copyWith(fontWeight: FontWeight.w700),
                     ),
                   ),
                   if (verified) ...[
@@ -74,17 +74,22 @@ class InstitutionDetailView extends StatelessWidget {
                 const SizedBox(height: 10),
                 Row(
                   children: [
-                    const Icon(Icons.star_rounded,
-                        size: 20, color: Color(0xffffa000)),
+                    const Icon(
+                      Icons.star_rounded,
+                      size: 20,
+                      color: Color(0xffffa000),
+                    ),
                     const SizedBox(width: 4),
                     Text(
                       rating > 0 ? rating.toStringAsFixed(1) : '—',
                       style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
                     if (reviewCount > 0)
-                      Text(context.isEnglish
-                          ? '  ($reviewCount reviews)'
-                          : '  ($reviewCount条评价)'),
+                      Text(
+                        context.isEnglish
+                            ? '  ($reviewCount reviews)'
+                            : '  ($reviewCount条评价)',
+                      ),
                   ],
                 ),
               ],
@@ -180,8 +185,10 @@ class _GalleryState extends State<_Gallery> {
                 MaterialPageRoute(
                   builder: (_) => FullscreenImagePager(
                     images: widget.images,
-                    contentDescription:
-                        context.localized('机构图片', 'Institution image'),
+                    contentDescription: context.localized(
+                      '机构图片',
+                      'Institution image',
+                    ),
                     initialPage: index,
                   ),
                 ),
@@ -191,8 +198,7 @@ class _GalleryState extends State<_Gallery> {
                 width: double.infinity,
                 height: 260,
                 errorBuilder: (_, __, ___) => Container(
-                  color:
-                      Theme.of(context).colorScheme.surfaceContainerHighest,
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
                   alignment: Alignment.center,
                   child: const Icon(Icons.broken_image_outlined, size: 48),
                 ),
@@ -209,8 +215,10 @@ class _GalleryState extends State<_Gallery> {
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 child: Text(
                   '${_page + 1}/${widget.images.length}',
                   style: const TextStyle(color: Colors.white, fontSize: 12),
@@ -238,9 +246,11 @@ class _VerifiedBadge extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.verified_rounded,
-                  size: 16,
-                  color: Theme.of(context).colorScheme.onPrimaryContainer),
+              Icon(
+                Icons.verified_rounded,
+                size: 16,
+                color: Theme.of(context).colorScheme.onPrimaryContainer,
+              ),
               const SizedBox(width: 4),
               Text(label, style: const TextStyle(fontSize: 12)),
             ],
@@ -292,8 +302,11 @@ class _FeatureHighlights extends StatelessWidget {
 }
 
 class _FeatureCard extends StatelessWidget {
-  const _FeatureCard(
-      {required this.icon, required this.title, required this.subtitle});
+  const _FeatureCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
   final IconData icon;
   final String title;
   final String subtitle;
@@ -329,7 +342,7 @@ class _Stats extends StatelessWidget {
       (_integer(data['caseCount']), context.localized('案例', 'Cases')),
       (
         _integer(data['consultationCount']),
-        context.localized('咨询', 'Consultations')
+        context.localized('咨询', 'Consultations'),
       ),
     ].where((item) => item.$1 > 0).toList();
     if (stats.isEmpty) return const SizedBox.shrink();
@@ -339,22 +352,25 @@ class _Stats extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 18),
         child: Row(
           children: stats
-              .map((stat) => Expanded(
-                    child: Column(
-                      children: [
-                        Text('${stat.$1}',
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleLarge
-                                ?.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                )),
-                        const SizedBox(height: 4),
-                        Text(stat.$2,
-                            style: Theme.of(context).textTheme.bodySmall),
-                      ],
-                    ),
-                  ))
+              .map(
+                (stat) => Expanded(
+                  child: Column(
+                    children: [
+                      Text(
+                        '${stat.$1}',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        stat.$2,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+              )
               .toList(),
         ),
       ),
@@ -371,10 +387,12 @@ class _Section extends StatelessWidget {
   Widget build(BuildContext context) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  )),
+          Text(
+            title,
+            style: Theme.of(
+              context,
+            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+          ),
           const SizedBox(height: 12),
           child,
         ],
@@ -457,9 +475,9 @@ class _RelatedProjectsState extends State<_RelatedProjects> {
                           image.isEmpty
                               ? Container(
                                   width: 82,
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .surfaceContainerHighest,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.surfaceContainerHighest,
                                   child: const Icon(Icons.spa_outlined),
                                 )
                               : OptimizedNetworkImage(
@@ -500,9 +518,9 @@ class _RelatedProjectsState extends State<_RelatedProjects> {
                                     Text(
                                       '\$$price',
                                       style: TextStyle(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .primary,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.primary,
                                         fontWeight: FontWeight.w700,
                                       ),
                                     ),
@@ -566,6 +584,7 @@ class _ProjectTag extends StatelessWidget {
           ),
         ),
       );
+}
 
 class _RelatedDoctors extends StatelessWidget {
   const _RelatedDoctors({required this.doctors, this.onTap});
@@ -689,8 +708,10 @@ class _Qualifications extends StatelessWidget {
                     MaterialPageRoute(
                       builder: (_) => FullscreenImagePager(
                         images: credentialImages,
-                        contentDescription:
-                            context.localized('机构资质图片', 'Institution credential'),
+                        contentDescription: context.localized(
+                          '机构资质图片',
+                          'Institution credential',
+                        ),
                         initialPage: index,
                       ),
                     ),
@@ -792,9 +813,9 @@ List<String> _projectTags(Map<String, Object?> project) {
   final tags = <String>{};
   final nested = project['project'];
   if (nested is Map) {
-    tags.addAll(_projectTags(
-      nested.map((key, value) => MapEntry(key.toString(), value)),
-    ));
+    tags.addAll(
+      _projectTags(nested.map((key, value) => MapEntry(key.toString(), value))),
+    );
   }
   for (final key in const [
     'tags',
