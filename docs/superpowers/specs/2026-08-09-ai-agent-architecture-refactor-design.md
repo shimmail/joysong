@@ -26,7 +26,7 @@ JoySong 当前 AI Agent 已支持多轮上下文、混合意图路由、平台�
 
 - 不引入开放式自主工具循环或多 Agent 系统。
 - 不以 LangGraph 或独立 Python 服务重写现有后端。
-- 不使用 LangChain4j 自动记忆；MySQL 仍是会话与业务事实源。
+- 不使用 LangChain4j 的独立内存存储；MySQL 仍是会话与业务事实源。允许通过自定义 `ChatMemoryStore` 使用 LangChain4j 管理受控的短期上下文窗口。
 - 不修改机构、医生、项目、订单等非 Agent 业务表。
 - 不为 Agent 到非 Agent 表增加数据库外键。
 - 不建设完整 Prompt 自动评分平台、大规模 UI 自动化或高并发压测平台。
@@ -41,7 +41,9 @@ JoySong 当前 AI Agent 已支持多轮上下文、混合意图路由、平台�
 
 ### 3.2 LangChain4j
 
-LangChain4j 仅作为 `ModelGateway` 的可选实现，用于模型协议、结构化输出和流式适配。默认先保留原生 OpenAI-compatible 实现，并通过同一组契约测试做兼容性试验。安全、鉴权、事务、工具许可、最大调用次数、超时和降级均由应用代码控制。
+LangChain4j 作为 `ModelGateway` 的可选实现，用于模型协议、结构化输出和流式适配；同时允许通过自定义 `ChatMemoryStore` 管理短期上下文窗口。默认先保留原生 OpenAI-compatible 实现，并通过同一组契约测试做兼容性试验。安全、鉴权、事务、工具许可、最大调用次数、超时和降级均由应用代码控制。
+
+MySQL 是记忆的唯一持久化事实源。自定义 `ChatMemoryStore` 只读写 Agent 会话和消息，不建立第二套持久化状态；由应用代码执行用户与会话隔离、消息顺序、删除同步、敏感数据过滤以及 Token/消息数量上限。用户档案、安全评估、方案和目录事实不进入自动记忆，而由工作流按需加载为结构化上下文。
 
 当前不引入 LangGraph。只有未来出现跨请求人工审批、长任务暂停恢复、多工具循环或断点续跑时，才单独评估图工作流运行时。
 
@@ -55,6 +57,8 @@ AgentTurnOrchestrator
       |
       +-- TurnLifecycleService
       +-- AgentContextBuilder
+      |     `-- AgentChatHistoryPort
+      |           `-- MySqlChatMemoryStore
       +-- AgentRouter
       +-- AgentToolRegistry
       |     +-- CatalogQueryTool
@@ -72,6 +76,8 @@ AgentTurnOrchestrator
 - `AgentTurnOrchestrator`：只负责编排步骤和状态，不直接执行 SQL、HTTP 或维护大段提示词。
 - `TurnLifecycleService`：创建 Turn、分配顺序号、幂等检查、状态迁移和恢复。
 - `AgentContextBuilder`：读取短历史、当前详情上下文和已解析槽位。
+- `AgentChatHistoryPort`：提供与框架无关的短期历史读取边界，使原生网关和 LangChain4j 网关使用同一上下文来源。
+- `MySqlChatMemoryStore`：实现 `AgentChatHistoryPort` 和 LangChain4j `ChatMemoryStore` 适配，以 `agent_messages` 为唯一持久化来源，提供经过隔离、过滤和窗口裁剪的短期消息记忆。
 - `AgentRouter`：执行本地确定性路由；仅在低置信度时调用结构化模型分类。
 - `AgentToolRegistry`：注册受控白名单工具。首期工具均为只读或生成结构化入口，不允许模型任意调用业务写接口。
 - `PromptAssembler`：按版本组装 persona、政策、数据库证据和响应约束。
@@ -173,6 +179,7 @@ PENDING -> RUNNING -> SUCCEEDED
 - 创建 Turn 时原子分配 `sequence_no`。
 - 同一会话存在运行中 Turn 时，新请求等待受控时间或返回稳定的处理中响应，不交叉读取未完成历史。
 - 新客户端传递幂等键；旧客户端未传递时服务端生成，保持接口兼容。
+- 短期记忆只读取已完成 Turn 的消息，并按 Token 预算和最大消息数裁剪；不得把 `RUNNING`、`FAILED` 或 `CANCELLED` Turn 的部分内容加入模型上下文。
 - 最终 ASSISTANT 消息与 Turn 成功状态在同一个短事务提交。
 - 模型成功但最终落库失败时，Turn 保持可恢复终态信息；恢复流程不得无条件重复调用模型。
 - 流式 Token 不逐条写入 MySQL，完成后一次保存完整消息。
@@ -214,6 +221,7 @@ Flutter 使用单一 composition root 和 typed `AgentConfig`。服务端模型�
 
 - Turn 状态迁移与幂等。
 - 同一会话顺序控制。
+- MySQL 记忆的会话隔离、窗口裁剪和删除同步。
 - 安全意图不可被模型降级。
 - 路由失败时本地回退。
 - 方案版本不可重复。
@@ -272,6 +280,7 @@ Flutter 使用单一 composition root 和 typed `AgentConfig`。服务端模型�
 - `ChatService` 不再承担事务、模型协议、Prompt、工具和追踪的全部职责。
 - 外部 LLM 调用期间不存在数据库事务。
 - 同一会话并发请求不会读取未完成历史或产生乱序回复。
+- LangChain4j 短期记忆仅来自 MySQL 中已完成的本会话消息，且删除与窗口限制行为一致。
 - 重复幂等请求不会重复调用模型或生成重复消息。
 - Agent V2 迁移只操作 `agent_*` 表，并通过隔离空数据库验证。
 - 失败执行均产生脱敏 Run 记录，且不会永久停留在 `RUNNING`。
