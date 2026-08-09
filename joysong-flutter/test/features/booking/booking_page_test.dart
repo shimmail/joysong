@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/features/booking/presentation/booking_controller.dart';
 import 'package:joysong_flutter/features/booking/presentation/booking_page.dart';
@@ -19,6 +20,9 @@ void main() {
     Order? created;
     await tester.pumpWidget(
       MaterialApp(
+        locale: const Locale('zh'),
+        supportedLocales: const [Locale('en'), Locale('zh')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
         home: BookingPage(
           controller: controller,
           onOrderCreated: (order) => created = order,
@@ -62,6 +66,9 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        locale: const Locale('zh'),
+        supportedLocales: const [Locale('en'), Locale('zh')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
         home: BookingPage(controller: controller, onOrderCreated: (_) {}),
       ),
     );
