@@ -69,6 +69,7 @@ AgentTurnOrchestrator
       |     +-- OpenAiCompatibleModelGateway
       |     +-- LangChain4jModelGateway (optional)
       +-- AgentDiagnostics
+            `-- AgentDebugRecorder (dev/test only)
 ```
 
 ### 4.1 组件职责
@@ -83,6 +84,7 @@ AgentTurnOrchestrator
 - `PromptAssembler`：按版本组装 persona、政策、数据库证据和响应约束。
 - `ModelGateway`：屏蔽供应商协议、流式实现和结构化响应差异。
 - `AgentDiagnostics`：输出不含对话正文的脱敏结构化日志；不建立独立运行审计表。
+- `AgentDebugRecorder`：仅在 `dev/test` 环境按 `traceId` 生成短期脱敏诊断包，用于步骤回放；生产环境强制禁用。
 
 ### 4.2 隔离边界
 
@@ -140,6 +142,9 @@ assessment 1 -- N plan 1 -- N plan_item
 - 不建立 `agent_runs`、`agent_run_steps` 或新的数据库运行审计表；旧 `agent_tool_audits` 随 Agent V2 数据重建移除。
 - 运行步骤仅输出脱敏结构化应用日志，包含 `trace_id`、步骤、终态、耗时、Token 数量和错误类别。
 - 结构化日志不保存用户对话、健康信息、完整 Prompt、供应商密钥或原始异常体。
+- `dev/test` 可将脱敏后的步骤输入输出写入 `.runtime/agent-debug/<traceId>.json`；文件默认 24 小时清理，目录不得提交 Git。
+- 诊断包可转换为固定目录结果和模拟模型响应的测试 fixture，重放路由、上下文与状态迁移问题。
+- 生产配置必须拒绝启用 `AgentDebugRecorder`，不得在生产文件系统保存诊断包。
 - 用户和会话标识在日志中使用哈希；授权的业务查询接口使用专用 DTO，不返回 JPA Entity。
 - 失败生成内容、流式片段和图片临时文件不长期保存。
 - 用户清空会话后立即从产品界面隐藏，并进入 Agent 数据清理流程；正式档案、评估和方案按各自业务生命周期管理。
@@ -224,6 +229,7 @@ Flutter 使用单一 composition root 和 typed `AgentConfig`。服务端模型�
 - Turn 状态迁移与幂等。
 - 同一会话顺序控制。
 - MySQL 记忆的会话隔离、窗口裁剪和删除同步。
+- `AgentDiagnostics` 脱敏规则与生产环境禁用诊断包。
 - 安全意图不可被模型降级。
 - 路由失败时本地回退。
 - 方案版本不可重复。
@@ -239,6 +245,7 @@ Flutter 使用单一 composition root 和 typed `AgentConfig`。服务端模型�
 - 并发提交不会产生乱序回复。
 - 失败不会留下长事务或永久 `RUNNING` 状态。
 - 原生网关与 LangChain4j 网关运行同一组精简协议用例。
+- 开发态诊断包能够按 `traceId` 生成、重放并在 24 小时后清理，生产配置无法启用。
 
 执行迁移前必须打印解析后的数据库主机和数据库名。`WORKTREE_ID` 从当前 worktree 目录派生，数据库命名为 `myapp_<WORKTREE_ID>`，Docker Compose 项目名为 `myapp-<WORKTREE_ID>`。不得连接共享开发数据库，不得删除或重置名称不以 `myapp_worktree_` 开头的数据库。
 
@@ -272,8 +279,9 @@ Flutter 使用单一 composition root 和 typed `AgentConfig`。服务端模型�
 2. 拆分工作流组件，继续使用原生模型网关。
 3. 启用短事务、Turn 幂等和会话顺序控制。
 4. 统一服务端和客户端 trace/error contract，并以 Turn 最小诊断字段替代数据库运行审计。
-5. 统一 Flutter 依赖组装和 Agent 配置。
-6. 执行 LangChain4j 兼容性试验；只有全部精简协议用例通过后才通过配置灰度启用。
+5. 增加结构化步骤日志和仅 `dev/test` 可用的短期脱敏诊断包。
+6. 统一 Flutter 依赖组装和 Agent 配置。
+7. 执行 LangChain4j 兼容性试验；只有全部精简协议用例通过后才通过配置灰度启用。
 
 每个阶段必须保持可构建、可测试和可单独回退，不要求其他业务同步迁移。
 
@@ -286,6 +294,7 @@ Flutter 使用单一 composition root 和 typed `AgentConfig`。服务端模型�
 - 重复幂等请求不会重复调用模型或生成重复消息。
 - Agent V2 迁移只操作 `agent_*` 表，并通过隔离空数据库验证。
 - 失败执行均更新 Turn 最小诊断字段并输出脱敏结构化日志，且不会永久停留在 `RUNNING`。
+- `dev/test` 可用 `traceId` 生成和重放短期脱敏诊断包，生产环境不能启用该能力。
 - 安全规则仍由本地确定性逻辑控制，模型不能降低风险等级。
 - 现有 REST/SSE 客户端主流程保持兼容。
 - LangChain4j 不通过兼容性测试时，原生模型网关仍可独立完成所有验收场景。
