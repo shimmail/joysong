@@ -4,6 +4,9 @@ import {
 } from 'antd';
 import { CheckOutlined, PlusOutlined, StopOutlined, UndoOutlined } from '@ant-design/icons';
 import api, { getApiErrorMessage, getData, getManagementContext } from '../api';
+import { SplitRateFields } from '../components/SplitRateFields';
+import { useOrderSplitPolicy } from '../hooks/useOrderSplitPolicy';
+import { calculateDoctorRate } from '../utils/splitRates';
 
 interface Institution { id: string; name: string }
 interface Doctor { id: string; name: string; institutions?: Institution[]; institutionId?: string }
@@ -33,6 +36,7 @@ const statusColor: Record<Proposal['status'], string> = {
 };
 
 export default function SplitConfigProposalsPage() {
+  const policyState = useOrderSplitPolicy();
   const context = getManagementContext();
   const isAdmin = context?.platformRole === 'ADMIN';
   const [configs, setConfigs] = useState<ActiveConfig[]>([]);
@@ -156,13 +160,24 @@ export default function SplitConfigProposalsPage() {
     }
   };
 
+  const renderDoctorRate = (item: Pick<ActiveConfig, 'institutionRate' | 'commissionRate'>) => {
+    const doctorRate = calculateDoctorRate(
+      policyState.policy?.platformRate,
+      item.institutionRate,
+      item.commissionRate,
+    );
+    if (doctorRate == null) return '-';
+    return doctorRate < 0 ? <Tag color="red">配置无效</Tag> : `${doctorRate}%`;
+  };
+
   const activeColumns = [
     { title: '机构', width: 180, render: (_: unknown, item: ActiveConfig) => institutionMap.get(projectMap.get(item.institutionProjectId)?.institutionId || '') || '-' },
     { title: '医生', dataIndex: 'doctorId', width: 130, render: (id: string) => doctorMap.get(id) || id },
     { title: '项目', dataIndex: 'institutionProjectId', width: 190, render: (id: string) => projectMap.get(id)?.effectiveName || id },
     { title: '面诊金', dataIndex: 'consultationFee', width: 100, render: (value: number) => `$${value}` },
-    { title: '医生/发布者比例', dataIndex: 'commissionRate', width: 130, render: (value: number) => `${value}%` },
+    { title: '医美顾问分账比例', dataIndex: 'commissionRate', width: 140, render: (value: number) => `${value}%` },
     { title: '机构比例', dataIndex: 'institutionRate', width: 100, render: (value: number) => `${value}%` },
+    { title: '医生分账比例', width: 120, render: (_: unknown, item: ActiveConfig) => renderDoctorRate(item) },
   ];
 
   const proposalColumns = [
@@ -170,8 +185,9 @@ export default function SplitConfigProposalsPage() {
     { title: '医生', dataIndex: 'doctorName', width: 120 },
     { title: '项目', dataIndex: 'projectName', width: 180 },
     { title: '面诊金', dataIndex: 'consultationFee', width: 90, render: (value: number) => `$${value}` },
-    { title: '医生比例', dataIndex: 'commissionRate', width: 100, render: (value: number) => `${value}%` },
+    { title: '医美顾问分账比例', dataIndex: 'commissionRate', width: 140, render: (value: number) => `${value}%` },
     { title: '机构比例', dataIndex: 'institutionRate', width: 100, render: (value: number) => `${value}%` },
+    { title: '医生分账比例', width: 120, render: (_: unknown, item: Proposal) => renderDoctorRate(item) },
     { title: '发起方', dataIndex: 'proposerSide', width: 90, render: (side: string) => side === 'DOCTOR' ? '医生' : '机构' },
     {
       title: '确认进度', width: 180,
@@ -215,7 +231,16 @@ export default function SplitConfigProposalsPage() {
     <h3 style={{ marginTop: 24 }}>协商记录</h3>
     <Table rowKey="id" dataSource={proposals} columns={proposalColumns} loading={loading} size="small" scroll={{ x: 'max-content' }} />
 
-    <Modal title="发起分账提案" open={formOpen} onOk={submit} onCancel={() => setFormOpen(false)} confirmLoading={submitting} okText="提交提案" destroyOnHidden>
+    <Modal
+      title="发起分账提案"
+      open={formOpen}
+      onOk={submit}
+      onCancel={() => setFormOpen(false)}
+      confirmLoading={submitting}
+      okText="提交提案"
+      okButtonProps={{ disabled: policyState.loading || Boolean(policyState.error) || !policyState.policy }}
+      destroyOnHidden
+    >
       <Form form={form} layout="vertical">
         <Form.Item name="institutionId" label="机构" rules={[{ required: true, message: '请选择机构' }]}>
           <Select
@@ -241,8 +266,7 @@ export default function SplitConfigProposalsPage() {
           <Select options={[{ label: '医生方', value: 'DOCTOR' }, { label: '机构方', value: 'INSTITUTION' }]} />
         </Form.Item>}
         <Form.Item name="consultationFee" label="面诊金" rules={[{ required: true }]}><InputNumber min={0} precision={2} prefix="$" style={{ width: '100%' }} /></Form.Item>
-        <Form.Item name="commissionRate" label="医生/项目发布者比例" rules={[{ required: true }]}><InputNumber min={0} max={100} precision={2} addonAfter="%" style={{ width: '100%' }} /></Form.Item>
-        <Form.Item name="institutionRate" label="机构分成比例" rules={[{ required: true }]}><InputNumber min={0} max={100} precision={2} addonAfter="%" style={{ width: '100%' }} /></Form.Item>
+        <SplitRateFields form={form} {...policyState} />
       </Form>
     </Modal>
 
