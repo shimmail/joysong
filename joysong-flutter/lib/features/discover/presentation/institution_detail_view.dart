@@ -56,7 +56,9 @@ class InstitutionDetailView extends StatelessWidget {
                   Expanded(
                     child: Text(
                       item.title,
-                      style: Theme.of(context).textTheme.headlineSmall
+                      style: Theme.of(context)
+                          .textTheme
+                          .headlineSmall
                           ?.copyWith(fontWeight: FontWeight.w700),
                     ),
                   ),
@@ -235,26 +237,26 @@ class _VerifiedBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => DecoratedBox(
-    decoration: BoxDecoration(
-      color: Theme.of(context).colorScheme.primaryContainer,
-      borderRadius: BorderRadius.circular(20),
-    ),
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.verified_rounded,
-            size: 16,
-            color: Theme.of(context).colorScheme.onPrimaryContainer,
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.primaryContainer,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.verified_rounded,
+                size: 16,
+                color: Theme.of(context).colorScheme.onPrimaryContainer,
+              ),
+              const SizedBox(width: 4),
+              Text(label, style: const TextStyle(fontSize: 12)),
+            ],
           ),
-          const SizedBox(width: 4),
-          Text(label, style: const TextStyle(fontSize: 12)),
-        ],
-      ),
-    ),
-  );
+        ),
+      );
 }
 
 class _InfoLine extends StatelessWidget {
@@ -264,13 +266,13 @@ class _InfoLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Row(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Icon(icon, size: 19, color: Theme.of(context).colorScheme.primary),
-      const SizedBox(width: 8),
-      Expanded(child: Text(text, style: const TextStyle(height: 1.4))),
-    ],
-  );
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 19, color: Theme.of(context).colorScheme.primary),
+          const SizedBox(width: 8),
+          Expanded(child: Text(text, style: const TextStyle(height: 1.4))),
+        ],
+      );
 }
 
 class _FeatureHighlights extends StatelessWidget {
@@ -279,24 +281,24 @@ class _FeatureHighlights extends StatelessWidget {
 
   @override
   Widget build(BuildContext _) => Row(
-    children: [
-      Expanded(
-        child: _FeatureCard(
-          icon: Icons.school_outlined,
-          title: context.localized('专业医生', 'Expert doctors'),
-          subtitle: context.localized('经验丰富', 'Experienced team'),
-        ),
-      ),
-      const SizedBox(width: 12),
-      Expanded(
-        child: _FeatureCard(
-          icon: Icons.biotech_outlined,
-          title: context.localized('先进设备', 'Advanced equipment'),
-          subtitle: context.localized('规范服务', 'Quality standards'),
-        ),
-      ),
-    ],
-  );
+        children: [
+          Expanded(
+            child: _FeatureCard(
+              icon: Icons.school_outlined,
+              title: context.localized('专业医生', 'Expert doctors'),
+              subtitle: context.localized('经验丰富', 'Experienced team'),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: _FeatureCard(
+              icon: Icons.biotech_outlined,
+              title: context.localized('先进设备', 'Advanced equipment'),
+              subtitle: context.localized('规范服务', 'Quality standards'),
+            ),
+          ),
+        ],
+      );
 }
 
 class _FeatureCard extends StatelessWidget {
@@ -311,21 +313,21 @@ class _FeatureCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Card(
-    margin: EdgeInsets.zero,
-    child: Padding(
-      padding: const EdgeInsets.all(14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: Theme.of(context).colorScheme.primary),
-          const SizedBox(height: 8),
-          Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 3),
-          Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
-        ],
-      ),
-    ),
-  );
+        margin: EdgeInsets.zero,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icon, color: Theme.of(context).colorScheme.primary),
+              const SizedBox(height: 8),
+              Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 3),
+              Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+            ],
+          ),
+        ),
+      );
 }
 
 class _Stats extends StatelessWidget {
@@ -357,8 +359,8 @@ class _Stats extends StatelessWidget {
                       Text(
                         '${stat.$1}',
                         style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
+                              fontWeight: FontWeight.w700,
+                            ),
                       ),
                       const SizedBox(height: 4),
                       Text(
@@ -383,18 +385,18 @@ class _Section extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text(
-        title,
-        style: Theme.of(
-          context,
-        ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
-      ),
-      const SizedBox(height: 12),
-      child,
-    ],
-  );
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: Theme.of(
+              context,
+            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 12),
+          child,
+        ],
+      );
 }
 
 class _RelatedProjects extends StatefulWidget {
@@ -416,8 +418,8 @@ class _RelatedProjectsState extends State<_RelatedProjects> {
     final projects = _selectedTag.isEmpty
         ? widget.projects
         : widget.projects
-              .where((project) => _projectTags(project).contains(_selectedTag))
-              .toList(growable: false);
+            .where((project) => _projectTags(project).contains(_selectedTag))
+            .toList(growable: false);
     return _Section(
       title: context.localized('可预约项目', 'Available services'),
       child: Column(
@@ -554,11 +556,11 @@ class _ProjectFilterChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ChoiceChip(
-    label: Text(label),
-    selected: selected,
-    onSelected: (_) => onSelected(),
-    visualDensity: VisualDensity.compact,
-  );
+        label: Text(label),
+        selected: selected,
+        onSelected: (_) => onSelected(),
+        visualDensity: VisualDensity.compact,
+      );
 }
 
 class _ProjectTag extends StatelessWidget {
@@ -567,21 +569,21 @@ class _ProjectTag extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => DecoratedBox(
-    decoration: BoxDecoration(
-      color: Theme.of(context).colorScheme.primaryContainer,
-      borderRadius: BorderRadius.circular(5),
-    ),
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 10,
-          color: Theme.of(context).colorScheme.onPrimaryContainer,
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.primaryContainer,
+          borderRadius: BorderRadius.circular(5),
         ),
-      ),
-    ),
-  );
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              color: Theme.of(context).colorScheme.onPrimaryContainer,
+            ),
+          ),
+        ),
+      );
 }
 
 class _RelatedDoctors extends StatelessWidget {
@@ -875,9 +877,9 @@ bool _hasQualifications(Map<String, Object?> data) =>
     _tokens(data['credentialImages']).isNotEmpty;
 
 bool _hasContact(Map<String, Object?> data) => _text(data, const [
-  'contactPhone',
-  'phone',
-  'businessHours',
-  'openingHours',
-  'address',
-]).isNotEmpty;
+      'contactPhone',
+      'phone',
+      'businessHours',
+      'openingHours',
+      'address',
+    ]).isNotEmpty;
