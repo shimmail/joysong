@@ -3,6 +3,8 @@ package com.joysong.server.agent
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.KotlinModule
 import com.joysong.server.agent.context.AgentContextBuilder
+import com.joysong.server.agent.dto.AgentCatalogItemResponse
+import com.joysong.server.agent.dto.AgentCatalogReportResponse
 import com.joysong.server.agent.entity.AgentTurnEntity
 import com.joysong.server.agent.entity.AgentTurnStatus
 import com.joysong.server.agent.orchestration.BeginTurnResult
@@ -31,6 +33,7 @@ import org.springframework.test.context.DynamicPropertySource
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import java.util.concurrent.Executors
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import org.testcontainers.containers.MySQLContainer
 import org.testcontainers.junit.jupiter.Container
@@ -66,6 +69,9 @@ class AgentV2MySqlIntegrationTest {
 
     @Autowired
     private lateinit var lifecycle: TurnLifecycleService
+
+    @Autowired
+    private lateinit var context: AgentContextBuilder
 
     @Test
     fun `empty database migrates to isolated agent v2 schema`() {
@@ -156,17 +162,33 @@ class AgentV2MySqlIntegrationTest {
     }
 
     @Test
-    fun `concurrent workers create at most one running turn for a session`() {
+    fun `barrier controlled concurrent starts create one unique user message and no stranded running turn`() {
         val sessionId = createSession()
         val executor = Executors.newFixedThreadPool(2)
         try {
+            val ready = CountDownLatch(2)
+            val start = CountDownLatch(1)
             val results = listOf("concurrent-1", "concurrent-2").map { key ->
-                executor.submit<BeginTurnResult> { lifecycle.beginTurn(sessionId, "test-user", "hello", key) }
-            }.map { it.get(15, TimeUnit.SECONDS) }
+                executor.submit<BeginTurnResult> {
+                    ready.countDown()
+                    check(start.await(10, TimeUnit.SECONDS))
+                    lifecycle.beginTurn(sessionId, "test-user", "hello", key)
+                }
+            }
+            assertTrue(ready.await(10, TimeUnit.SECONDS))
+            start.countDown()
+            val completed = results.map { it.get(15, TimeUnit.SECONDS) }
 
-            assertEquals(1, results.count { it is BeginTurnResult.Started })
-            assertEquals(1, results.count { it is BeginTurnResult.InProgress })
-            assertEquals(1, jdbcTemplate.queryForObject(
+            assertEquals(1, completed.count { it is BeginTurnResult.Started })
+            assertEquals(1, completed.count { it is BeginTurnResult.InProgress })
+            val started = completed.filterIsInstance<BeginTurnResult.Started>().single()
+            lifecycle.completeTurn(CompleteTurnCommand(started.turnId, "concurrent answer", "GENERAL_CHAT", null, "NONE"))
+            assertEquals(1, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM agent_turns WHERE session_id = ?", Int::class.java, sessionId))
+            assertEquals(1, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM agent_messages WHERE session_id = ? AND role = 'USER'", Int::class.java, sessionId))
+            assertEquals(1, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM agent_messages WHERE session_id = ? AND role = 'ASSISTANT'", Int::class.java, sessionId))
+            assertEquals(2, jdbcTemplate.queryForObject("SELECT COUNT(DISTINCT sequence_no) FROM agent_messages WHERE session_id = ?", Int::class.java, sessionId))
+            assertEquals(2L, jdbcTemplate.queryForObject("SELECT next_sequence_no FROM agent_sessions WHERE id = ?", Long::class.java, sessionId))
+            assertEquals(0, jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM agent_turns WHERE session_id = ? AND status = 'RUNNING'", Int::class.java, sessionId
             ))
         } finally {
@@ -177,13 +199,27 @@ class AgentV2MySqlIntegrationTest {
     @Test
     fun `completed turns allocate monotonic sequences and replay without duplicate messages`() {
         val sessionId = createSession()
+        val item = AgentCatalogItemResponse(
+            type = "PROJECT", id = UUID.randomUUID().toString(), name = "光子嫩肤", subtitle = "皮肤", summary = "改善暗沉",
+            attributes = mapOf("价格" to "1000"), projectId = UUID.randomUUID().toString()
+        )
+        val report = AgentCatalogReportResponse(
+            mode = "PROJECT", title = "项目结果", summary = "对比摘要", items = listOf(item),
+            comparisonDimensions = listOf("价格"), warnings = listOf("需面诊")
+        )
         val first = lifecycle.beginTurn(sessionId, "test-user", "first", "stable-key") as BeginTurnResult.Started
-        lifecycle.completeTurn(CompleteTurnCommand(first.turnId, "first answer", "GENERAL_CHAT", null, "NONE"))
+        lifecycle.completeTurn(CompleteTurnCommand(first.turnId, "first answer", "CATALOG_QA", "PROJECT", "SHOW_CATALOG", listOf(item), report))
         val replay = lifecycle.beginTurn(sessionId, "test-user", "first", "stable-key")
         val second = lifecycle.beginTurn(sessionId, "test-user", "second", "second-key") as BeginTurnResult.Started
         lifecycle.completeTurn(CompleteTurnCommand(second.turnId, "second answer", "GENERAL_CHAT", null, "NONE"))
 
         assertTrue(replay is BeginTurnResult.Replayed)
+        val replayed = (replay as BeginTurnResult.Replayed).turn
+        assertEquals(item, replayed.catalogItems.single())
+        assertEquals(report, replayed.catalogReport)
+        assertEquals("CATALOG_QA", replayed.intent)
+        assertEquals("PROJECT", replayed.queryTarget)
+        assertEquals("SHOW_CATALOG", replayed.nextAction)
         assertEquals(listOf(1L, 2L), jdbcTemplate.queryForList(
             "SELECT sequence_no FROM agent_turns WHERE session_id = ? ORDER BY sequence_no", Long::class.java, sessionId
         ))
@@ -221,6 +257,63 @@ class AgentV2MySqlIntegrationTest {
         ))
     }
 
+    @Test
+    fun `loading inactive session physically removes expired succeeded messages`() {
+        val sessionId = createSession()
+        val oldTurn = insertTurn(sessionId, 1, "old-success", "SUCCEEDED")
+        insertMessage(sessionId, oldTurn, 1, "TEXT")
+        jdbcTemplate.update("UPDATE agent_messages SET created_at = DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 8 DAY) WHERE session_id = ?", sessionId)
+
+        assertTrue(context.load("test-user", sessionId, 20, 1_000).messages.isEmpty())
+        assertEquals(0, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM agent_messages WHERE session_id = ?", Int::class.java, sessionId))
+    }
+
+    @Test
+    fun `context returns messages only from succeeded turns`() {
+        val sessionId = createSession()
+        val succeeded = insertTurn(sessionId, 1, "succeeded", "SUCCEEDED")
+        val running = insertTurn(sessionId, 2, "running", "RUNNING")
+        val failed = insertTurn(sessionId, 3, "failed", "FAILED")
+        insertMessage(sessionId, succeeded, 1, "TEXT", "succeeded-message")
+        insertMessage(sessionId, running, 3, "TEXT", "running-message")
+        insertMessage(sessionId, failed, 5, "TEXT", "failed-message")
+
+        assertEquals(listOf("succeeded-message"), context.load("test-user", sessionId, 20, 1_000).messages.map { it.content })
+    }
+
+    @Test
+    fun `controlled completion and clear serialize through the session lock without deadlock`() {
+        val sessionId = createSession()
+        val started = lifecycle.beginTurn(sessionId, "test-user", "complete", "complete-key") as BeginTurnResult.Started
+        val ready = CountDownLatch(2)
+        val start = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val completion = executor.submit<Throwable?> {
+                ready.countDown()
+                check(start.await(10, TimeUnit.SECONDS))
+                runCatching {
+                    lifecycle.completeTurn(CompleteTurnCommand(started.turnId, "done", "GENERAL_CHAT", null, "NONE"))
+                }.exceptionOrNull()
+            }
+            val clearing = executor.submit<Throwable?> {
+                ready.countDown()
+                check(start.await(10, TimeUnit.SECONDS))
+                runCatching { context.clear("test-user", sessionId) }.exceptionOrNull()
+            }
+            assertTrue(ready.await(10, TimeUnit.SECONDS))
+            start.countDown()
+
+            assertTrue(completion.get(15, TimeUnit.SECONDS)?.let { it is IllegalArgumentException } != false)
+            assertTrue(clearing.get(15, TimeUnit.SECONDS)?.let { it is IllegalArgumentException } != false)
+            assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM agent_turns WHERE session_id = ? AND status = 'RUNNING'", Int::class.java, sessionId
+            ))
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
     private fun createSession(summaryJson: String = "{}") = UUID.randomUUID().toString().also { sessionId ->
         sessionRepository.saveAndFlush(
             ChatSessionEntity(
@@ -233,7 +326,8 @@ class AgentV2MySqlIntegrationTest {
         )
     }
 
-    private fun insertTurn(sessionId: String, sequenceNo: Long, idempotencyKey: String, status: String) {
+    private fun insertTurn(sessionId: String, sequenceNo: Long, idempotencyKey: String, status: String): String {
+        val turnId = UUID.randomUUID().toString()
         jdbcTemplate.update(
             """
             INSERT INTO agent_turns (
@@ -241,19 +335,20 @@ class AgentV2MySqlIntegrationTest {
                 started_at, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6))
             """.trimIndent(),
-            UUID.randomUUID().toString(), sessionId, sequenceNo, idempotencyKey, "b".repeat(64), status,
+            turnId, sessionId, sequenceNo, idempotencyKey, "b".repeat(64), status,
             UUID.randomUUID().toString()
         )
+        return turnId
     }
 
-    private fun insertMessage(sessionId: String, turnId: String, sequenceNo: Long, contentType: String) {
+    private fun insertMessage(sessionId: String, turnId: String, sequenceNo: Long, contentType: String, content: String = "message") {
         jdbcTemplate.update(
             """
             INSERT INTO agent_messages (
                 id, session_id, turn_id, sequence_no, role, content_type, content, metadata_json, created_at
-            ) VALUES (?, ?, ?, ?, 'ASSISTANT', ?, 'message', JSON_OBJECT(), CURRENT_TIMESTAMP(6))
+            ) VALUES (?, ?, ?, ?, 'ASSISTANT', ?, ?, JSON_OBJECT(), CURRENT_TIMESTAMP(6))
             """.trimIndent(),
-            UUID.randomUUID().toString(), sessionId, turnId, sequenceNo, contentType
+            UUID.randomUUID().toString(), sessionId, turnId, sequenceNo, contentType, content
         )
     }
 
