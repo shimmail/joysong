@@ -96,11 +96,13 @@ class TurnLifecycleService(
 
     @Transactional
     fun completeTurn(command: CompleteTurnCommand): ChatTurnResult {
+        val observedTurn = turnRepository.findById(command.turnId).orElse(null) ?: throw IllegalArgumentException("回合不存在")
+        val session = sessionRepository.findByIdForUpdate(observedTurn.sessionId) ?: throw IllegalArgumentException("会话不存在")
         val turn = turnRepository.findByIdForUpdate(command.turnId) ?: throw IllegalArgumentException("回合不存在")
+        check(turn.sessionId == session.id) { "回合与会话不匹配" }
         val existingAssistant = messageRepository.findByTurnIdAndRole(turn.id, "ASSISTANT")
         if (turn.status == AgentTurnStatus.SUCCEEDED && existingAssistant != null) return reconstruct(existingAssistant)
         check(turn.status == AgentTurnStatus.RUNNING) { "回合不是运行状态" }
-        val session = sessionRepository.findByIdForUpdate(turn.sessionId) ?: throw IllegalArgumentException("会话不存在")
         val metadata = metadata(command)
         val assistant = existingAssistant ?: messageRepository.save(
             ChatMessageEntity(

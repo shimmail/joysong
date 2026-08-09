@@ -44,12 +44,22 @@ class AgentContextBuilder(
     @Value("\${agent.message-retention-days:7}") private val messageRetentionDays: Long = 7
 ) : AgentChatHistoryPort {
 
+    @Transactional
     override fun load(userId: String, sessionId: String, maxMessages: Int, maxTokens: Int): AgentContext {
-        val session = sessionRepository.findByIdAndUserIdAndDeletedAtIsNull(sessionId, userId)
+        val session = sessionRepository.findByIdAndUserIdForUpdate(sessionId, userId)
             ?: throw IllegalArgumentException("会话不存在或无权访问")
         val summary = parseSummary(session.summaryJson)
-        val recent = messageRepository.findSucceededTurnMessagesBySessionId(sessionId)
-            .filter { !it.createdAt.isBefore(LocalDateTime.now().minusDays(messageRetentionDays)) }
+        val cutoff = LocalDateTime.now().minusDays(messageRetentionDays)
+        val succeeded = messageRepository.findSucceededTurnMessagesBySessionId(sessionId)
+        val expired = succeeded.filter { it.createdAt.isBefore(cutoff) }
+        if (session.summaryJson != serializeSummary(summary) || expired.isNotEmpty()) {
+            persistSummary(session, summary)
+        }
+        if (expired.isNotEmpty()) {
+            messageRepository.deleteAll(expired)
+        }
+        val recent = succeeded
+            .filterNot { it in expired }
             .sortedBy { it.sequenceNo }
             .takeLast(maxMessages.coerceAtLeast(0).coerceAtMost(recentMessageLimit))
         val bounded = recent.asReversed()
@@ -84,15 +94,13 @@ class AgentContextBuilder(
             nextAction.trim().uppercase().takeIf(validNextActions::contains)
         ).filter { it != "NONE" }
             .joinToString(":")
+            .takeIf(::isValidTopic)
         val updated = current.copy(
             entityRefs = entityRefs.toSortedMap(),
-            unresolvedTopics = (current.unresolvedTopics + topic).filter { it.isNotBlank() }.distinct().takeLast(20),
+            unresolvedTopics = (current.unresolvedTopics + listOfNotNull(topic)).distinct().takeLast(20),
             lastSummarizedSequence = maxOf(current.lastSummarizedSequence, sequenceNo)
         )
-        session.summaryJson = serializeSummary(updated)
-        session.summaryUpdatedAt = LocalDateTime.now()
-        session.updatedAt = LocalDateTime.now()
-        sessionRepository.save(session)
+        persistSummary(session, updated)
 
         val succeeded = messageRepository.findSucceededTurnMessagesBySessionId(session.id).sortedBy { it.sequenceNo }
         val cutoff = LocalDateTime.now().minusDays(messageRetentionDays)
@@ -117,15 +125,20 @@ class AgentContextBuilder(
         } catch (error: Exception) {
             throw IllegalArgumentException("会话摘要格式无效", error)
         }
+        if (root.intValue("schemaVersion", summarySchemaVersion) != summarySchemaVersion) return AgentSessionSummary()
         return AgentSessionSummary(
-            schemaVersion = root.intValue("schemaVersion", 1),
-            goals = root.stringList("goals"),
-            preferences = root.stringList("preferences"),
-            constraints = root.stringList("constraints"),
+            schemaVersion = summarySchemaVersion,
             entityRefs = root.entityRefs(),
-            unresolvedTopics = root.stringList("unresolvedTopics"),
-            lastSummarizedSequence = root.longValue("lastSummarizedSequence", 0)
+            unresolvedTopics = root.stringList("unresolvedTopics").filter(::isValidTopic),
+            lastSummarizedSequence = root.longValue("lastSummarizedSequence", 0).coerceAtLeast(0)
         )
+    }
+
+    private fun persistSummary(session: ChatSessionEntity, summary: AgentSessionSummary) {
+        session.summaryJson = serializeSummary(summary)
+        session.summaryUpdatedAt = LocalDateTime.now()
+        session.updatedAt = LocalDateTime.now()
+        sessionRepository.save(session)
     }
 
     private fun serializeSummary(summary: AgentSessionSummary): String = objectMapper.writeValueAsString(
@@ -146,7 +159,9 @@ class AgentContextBuilder(
 
     private fun JsonNode.entityRefs(): Map<String, List<String>> = get("entityRefs")?.takeIf { it.isObject }
         ?.fields()?.asSequence()?.mapNotNull { (key, value) ->
-            key.trim().uppercase().takeIf(String::isNotBlank)?.let { normalized -> normalized to value.stringListFromNode() }
+            key.trim().uppercase().takeIf(platformEntityTypes::contains)?.let { normalized ->
+                normalized to value.stringListFromNode().filter(::isPlatformEntityId)
+            }
         }?.toMap()?.toSortedMap().orEmpty()
 
     private fun JsonNode.stringListFromNode(): List<String> = takeIf { isArray }
@@ -154,10 +169,32 @@ class AgentContextBuilder(
 
     private fun JsonNode.intValue(name: String, default: Int): Int = get(name)?.takeIf { it.isInt || it.isLong }?.asInt() ?: default
     private fun JsonNode.longValue(name: String, default: Long): Long = get(name)?.takeIf { it.isIntegralNumber }?.asLong() ?: default
-    private fun simpleTokenCount(content: String): Int = content.trim().split(Regex("\\s+")).filter(String::isNotBlank).size
+    private fun simpleTokenCount(content: String): Int = content.codePointCount(0, content.length)
     private fun isPlatformEntityId(value: String): Boolean = runCatching { UUID.fromString(value) }.isSuccess
+    private fun isValidTopic(value: String): Boolean {
+        val parts = value.split(":")
+        val intent = parts.firstOrNull() ?: return false
+        if (intent !in validIntents || parts.size !in 1..3) return false
+        val target = parts.getOrNull(1)?.takeIf(validQueryTargets::contains)
+        val action = when {
+            parts.size == 1 -> null
+            target != null -> parts.getOrNull(2)
+            parts.size == 2 -> parts[1]
+            else -> return false
+        }
+        if (action != null && action !in validNextActions - "NONE") return false
+        if (parts.size == 3 && target == null) return false
+        return when (intent) {
+            "GENERAL_CHAT" -> target == null && action == null
+            "SAFETY_SCREENING" -> target == null && action in setOf(null, "COMPLETE_SAFETY_SCREENING")
+            "PLANNING" -> action in setOf(null, "START_PLANNING")
+            "CATALOG_QA", "COMPARISON", "DETAIL_SUMMARY" -> action in setOf(null, "SHOW_CATALOG")
+            else -> false
+        }
+    }
 
     private companion object {
+        const val summarySchemaVersion = 1
         val validIntents = setOf("GENERAL_CHAT", "CATALOG_QA", "COMPARISON", "PLANNING", "DETAIL_SUMMARY", "SAFETY_SCREENING")
         val validQueryTargets = setOf("INSTITUTION", "DOCTOR", "PROJECT", "INSTITUTION_PROJECT")
         val validNextActions = setOf("NONE", "SHOW_CATALOG", "START_PLANNING", "COMPLETE_SAFETY_SCREENING")

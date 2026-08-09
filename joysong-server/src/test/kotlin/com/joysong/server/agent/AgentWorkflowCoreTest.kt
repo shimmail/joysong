@@ -20,6 +20,7 @@ import io.mockk.mockk
 import io.mockk.runs
 import io.mockk.slot
 import io.mockk.verify
+import io.mockk.verifyOrder
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotEquals
@@ -108,6 +109,7 @@ class AgentWorkflowCoreTest {
     fun `marks successful turn complete once with replay metadata`() {
         val running = turn(status = AgentTurnStatus.RUNNING)
         val assistant = slot<ChatMessageEntity>()
+        every { turns.findById(running.id) } returns java.util.Optional.of(running)
         every { turns.findByIdForUpdate(running.id) } returns running
         every { sessions.findByIdForUpdate("session-1") } returns session()
         every { messages.findByTurnIdAndRole(running.id, "ASSISTANT") } returns null
@@ -123,12 +125,19 @@ class AgentWorkflowCoreTest {
         assertEquals(2, assistant.captured.sequenceNo)
         assertTrue(assistant.captured.metadataJson.contains("CATALOG_QA"))
         assertEquals(AgentTurnStatus.SUCCEEDED, running.status)
+        verifyOrder {
+            turns.findById(running.id)
+            sessions.findByIdForUpdate("session-1")
+            turns.findByIdForUpdate(running.id)
+        }
     }
 
     @Test
     fun `does not duplicate assistant message when completion is repeated`() {
         val succeeded = turn(status = AgentTurnStatus.SUCCEEDED)
         val assistant = ChatMessageEntity(sessionId = "session-1", turnId = succeeded.id, sequenceNo = 2, role = "ASSISTANT", content = "final")
+        every { turns.findById(succeeded.id) } returns java.util.Optional.of(succeeded)
+        every { sessions.findByIdForUpdate("session-1") } returns session()
         every { turns.findByIdForUpdate(succeeded.id) } returns succeeded
         every { messages.findByTurnIdAndRole(succeeded.id, "ASSISTANT") } returns assistant
 
@@ -173,36 +182,105 @@ class AgentWorkflowCoreTest {
     @Test
     fun `loads summary before succeeded messages while respecting count and token limits`() {
         val session = session(summary = """{"schemaVersion":1,"goals":["glow"],"lastSummarizedSequence":2}""")
-        every { sessions.findByIdAndUserIdAndDeletedAtIsNull("session-1", "user-1") } returns session
+        every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns session
+        every { sessions.save(any()) } answers { firstArg() }
         every { messages.findSucceededTurnMessagesBySessionId("session-1") } returns listOf(
             message(1, "USER", "one two"), message(2, "ASSISTANT", "three four"), message(3, "USER", "five six")
         )
 
-        val loaded = context.load("user-1", "session-1", maxMessages = 2, maxTokens = 4)
+        val loaded = context.load("user-1", "session-1", maxMessages = 2, maxTokens = 20)
 
-        assertEquals(AgentSessionSummary(schemaVersion = 1, goals = listOf("glow"), lastSummarizedSequence = 2), loaded.summary)
+        assertEquals(AgentSessionSummary(schemaVersion = 1, lastSummarizedSequence = 2), loaded.summary)
         assertEquals(listOf("ASSISTANT", "USER"), loaded.messages.map { it.role })
         assertEquals(listOf("three four", "five six"), loaded.messages.map { it.content })
     }
 
     @Test
     fun `does not expose unfinished turns or another users session`() {
-        every { sessions.findByIdAndUserIdAndDeletedAtIsNull("session-1", "user-2") } returns null
+        every { sessions.findByIdAndUserIdForUpdate("session-1", "user-2") } returns null
 
         assertThrows(IllegalArgumentException::class.java) { context.load("user-2", "session-1", 20, 100) }
     }
 
     @Test
     fun `does not load succeeded messages older than the configured retention window`() {
-        every { sessions.findByIdAndUserIdAndDeletedAtIsNull("session-1", "user-1") } returns session()
+        val owned = session()
+        val expired = message(1, "USER", "expired", LocalDateTime.now().minusDays(8))
+        every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns owned
+        every { sessions.save(any()) } answers { firstArg() }
+        every { messages.deleteAll(any<Iterable<ChatMessageEntity>>()) } just runs
         every { messages.findSucceededTurnMessagesBySessionId("session-1") } returns listOf(
-            message(1, "USER", "expired", LocalDateTime.now().minusDays(8)),
+            expired,
             message(2, "ASSISTANT", "current")
         )
 
         val loaded = context.load("user-1", "session-1", 20, 100)
 
         assertEquals(listOf("current"), loaded.messages.map { it.content })
+        verify { sessions.save(owned) }
+        verify { messages.deleteAll(match { it.toList().contains(expired) }) }
+    }
+
+    @Test
+    fun `drops polluted stored summary fields and entity references`() {
+        val polluted = session(
+            """{"schemaVersion":1,"goals":["pregnant and allergic"],"preferences":["risk detail"],"constraints":["raw health"],"unresolvedTopics":["FREE_TEXT","CATALOG_QA:PROJECT:SHOW_CATALOG"],"entityRefs":{"UNTRUSTED":["risk"],"PROJECT":["not-a-uuid","123e4567-e89b-12d3-a456-426614174000"]}}"""
+        )
+        every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns polluted
+        every { sessions.save(any()) } answers { firstArg() }
+        every { messages.findSucceededTurnMessagesBySessionId("session-1") } returns emptyList()
+
+        val loaded = context.load("user-1", "session-1", 20, 100)
+
+        assertEquals(
+            AgentSessionSummary(
+                entityRefs = mapOf("PROJECT" to listOf("123e4567-e89b-12d3-a456-426614174000")),
+                unresolvedTopics = listOf("CATALOG_QA:PROJECT:SHOW_CATALOG")
+            ),
+            loaded.summary
+        )
+        assertFalse(polluted.summaryJson.contains("pregnant"))
+        assertFalse(polluted.summaryJson.contains("UNTRUSTED"))
+    }
+
+    @Test
+    fun `drops every field from an unsupported summary schema version`() {
+        val unsupported = session(
+            """{"schemaVersion":99,"unresolvedTopics":["CATALOG_QA:PROJECT:SHOW_CATALOG"],"entityRefs":{"PROJECT":["123e4567-e89b-12d3-a456-426614174000"]}}"""
+        )
+        every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns unsupported
+        every { sessions.save(any()) } answers { firstArg() }
+        every { messages.findSucceededTurnMessagesBySessionId("session-1") } returns emptyList()
+
+        assertEquals(AgentSessionSummary(), context.load("user-1", "session-1", 20, 100).summary)
+        assertFalse(unsupported.summaryJson.contains("123e4567"))
+    }
+
+    @Test
+    fun `drops malformed structured topic slot orders`() {
+        val malformed = session(
+            """{"schemaVersion":1,"unresolvedTopics":["CATALOG_QA:SHOW_CATALOG:START_PLANNING","GENERAL_CHAT:PROJECT:INSTITUTION","CATALOG_QA:PROJECT:SHOW_CATALOG"]}"""
+        )
+        every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns malformed
+        every { sessions.save(any()) } answers { firstArg() }
+        every { messages.findSucceededTurnMessagesBySessionId("session-1") } returns emptyList()
+
+        assertEquals(listOf("CATALOG_QA:PROJECT:SHOW_CATALOG"), context.load("user-1", "session-1", 20, 100).summary.unresolvedTopics)
+    }
+
+    @Test
+    fun `uses a character budget for chinese and no space content`() {
+        every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns session()
+        every { sessions.save(any()) } answers { firstArg() }
+        every { messages.findSucceededTurnMessagesBySessionId("session-1") } returns listOf(
+            message(1, "USER", "短消息"),
+            message(2, "ASSISTANT", "这是没有空格但很长的中文消息"),
+            message(3, "USER", "https://example.com/very-long-unbroken-url-path")
+        )
+
+        val loaded = context.load("user-1", "session-1", 20, 5)
+
+        assertEquals(listOf("短消息"), loaded.messages.map { it.content })
     }
 
     @Test
@@ -254,6 +332,17 @@ class AgentWorkflowCoreTest {
 
         assertFalse(session.summaryJson.contains("untrusted"))
         assertFalse(session.summaryJson.contains("UNTRUSTED_TYPE"))
+    }
+
+    @Test
+    fun `does not write incompatible allowlisted router slots into summary`() {
+        val session = session()
+        every { sessions.save(any()) } answers { firstArg() }
+        every { messages.findSucceededTurnMessagesBySessionId("session-1") } returns emptyList()
+
+        context.updateSummaryAndPrune(session, 1, "GENERAL_CHAT", "PROJECT", "SHOW_CATALOG", emptyList())
+
+        assertFalse(session.summaryJson.contains("GENERAL_CHAT:PROJECT:SHOW_CATALOG"))
     }
 
     private fun session(summary: String = "{}") = ChatSessionEntity(
