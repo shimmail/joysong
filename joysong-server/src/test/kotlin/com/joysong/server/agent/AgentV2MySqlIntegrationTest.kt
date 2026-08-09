@@ -1,7 +1,13 @@
 package com.joysong.server.agent
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.kotlin.KotlinModule
+import com.joysong.server.agent.context.AgentContextBuilder
 import com.joysong.server.agent.entity.AgentTurnEntity
 import com.joysong.server.agent.entity.AgentTurnStatus
+import com.joysong.server.agent.orchestration.BeginTurnResult
+import com.joysong.server.agent.orchestration.CompleteTurnCommand
+import com.joysong.server.agent.orchestration.TurnLifecycleService
 import com.joysong.server.agent.repository.AgentTurnRepository
 import com.joysong.server.chat.entity.ChatSessionEntity
 import com.joysong.server.chat.repository.ChatSessionRepository
@@ -12,6 +18,9 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.test.context.TestConfiguration
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Import
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection
@@ -21,6 +30,8 @@ import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import org.testcontainers.containers.MySQLContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
@@ -41,6 +52,7 @@ import java.util.UUID
 )
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
+@Import(TurnLifecycleService::class, AgentContextBuilder::class, AgentLifecycleTestConfig::class)
 class AgentV2MySqlIntegrationTest {
 
     @Autowired
@@ -51,6 +63,9 @@ class AgentV2MySqlIntegrationTest {
 
     @Autowired
     private lateinit var turnRepository: AgentTurnRepository
+
+    @Autowired
+    private lateinit var lifecycle: TurnLifecycleService
 
     @Test
     fun `empty database migrates to isolated agent v2 schema`() {
@@ -140,6 +155,72 @@ class AgentV2MySqlIntegrationTest {
         )
     }
 
+    @Test
+    fun `concurrent workers create at most one running turn for a session`() {
+        val sessionId = createSession()
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val results = listOf("concurrent-1", "concurrent-2").map { key ->
+                executor.submit<BeginTurnResult> { lifecycle.beginTurn(sessionId, "test-user", "hello", key) }
+            }.map { it.get(15, TimeUnit.SECONDS) }
+
+            assertEquals(1, results.count { it is BeginTurnResult.Started })
+            assertEquals(1, results.count { it is BeginTurnResult.InProgress })
+            assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM agent_turns WHERE session_id = ? AND status = 'RUNNING'", Int::class.java, sessionId
+            ))
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `completed turns allocate monotonic sequences and replay without duplicate messages`() {
+        val sessionId = createSession()
+        val first = lifecycle.beginTurn(sessionId, "test-user", "first", "stable-key") as BeginTurnResult.Started
+        lifecycle.completeTurn(CompleteTurnCommand(first.turnId, "first answer", "GENERAL_CHAT", null, "NONE"))
+        val replay = lifecycle.beginTurn(sessionId, "test-user", "first", "stable-key")
+        val second = lifecycle.beginTurn(sessionId, "test-user", "second", "second-key") as BeginTurnResult.Started
+        lifecycle.completeTurn(CompleteTurnCommand(second.turnId, "second answer", "GENERAL_CHAT", null, "NONE"))
+
+        assertTrue(replay is BeginTurnResult.Replayed)
+        assertEquals(listOf(1L, 2L), jdbcTemplate.queryForList(
+            "SELECT sequence_no FROM agent_turns WHERE session_id = ? ORDER BY sequence_no", Long::class.java, sessionId
+        ))
+        assertEquals(4, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM agent_messages WHERE session_id = ?", Int::class.java, sessionId
+        ))
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM agent_turns WHERE session_id = ? AND status = 'RUNNING'", Int::class.java, sessionId
+        ))
+    }
+
+    @Test
+    fun `terminal lifecycle operations leave no running turn`() {
+        val sessionId = createSession()
+        val failed = lifecycle.beginTurn(sessionId, "test-user", "will fail", "fail-key") as BeginTurnResult.Started
+        lifecycle.failTurn(failed.turnId, "MODEL_TIMEOUT", 10)
+        val cancelled = lifecycle.beginTurn(sessionId, "test-user", "will cancel", "cancel-key") as BeginTurnResult.Started
+        lifecycle.cancelTurn(cancelled.turnId, "CLIENT_CANCELLED", 10)
+
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM agent_turns WHERE session_id = ? AND status = 'RUNNING'", Int::class.java, sessionId
+        ))
+    }
+
+    @Test
+    fun `completed turn pruning persists no more than twenty messages including the current turn`() {
+        val sessionId = createSession()
+        repeat(11) { index ->
+            val started = lifecycle.beginTurn(sessionId, "test-user", "message-$index", "retention-$index") as BeginTurnResult.Started
+            lifecycle.completeTurn(CompleteTurnCommand(started.turnId, "answer-$index", "GENERAL_CHAT", null, "NONE"))
+        }
+
+        assertEquals(20, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM agent_messages WHERE session_id = ?", Int::class.java, sessionId
+        ))
+    }
+
     private fun createSession(summaryJson: String = "{}") = UUID.randomUUID().toString().also { sessionId ->
         sessionRepository.saveAndFlush(
             ChatSessionEntity(
@@ -203,6 +284,12 @@ class AgentV2MySqlIntegrationTest {
             return "myapp_worktree_${worktreeName.replace(Regex("[^A-Za-z0-9]+"), "_")}".lowercase()
         }
     }
+}
+
+@TestConfiguration(proxyBeanMethods = false)
+class AgentLifecycleTestConfig {
+    @Bean
+    fun objectMapper(): ObjectMapper = ObjectMapper().registerModule(KotlinModule.Builder().build())
 }
 
 class ReportingMySqlContainer(imageName: String) :
