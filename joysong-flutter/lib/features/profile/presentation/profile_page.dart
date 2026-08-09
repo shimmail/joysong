@@ -129,8 +129,10 @@ class _ProfilePageState extends State<ProfilePage> {
                 _MenuItem(
                   icon: Icons.verified_user_outlined,
                   title: context.localized('身份认证', 'Identity verification'),
-                  subtitle: context.localized('医生、咨询师与机构法人认证',
-                      'Doctor, consultant and institution verification'),
+                  subtitle: context.localized(
+                    '医生、医美顾问与机构法人认证',
+                    'Doctor, medical aesthetics consultant and institution verification',
+                  ),
                   onTap: _openIdentityCenter,
                 ),
                 _MenuItem(

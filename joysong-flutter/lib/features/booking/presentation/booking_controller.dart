@@ -197,7 +197,7 @@ final class BookingController extends ChangeNotifier {
     final doctor = _selectedDoctor;
     final time = _appointmentTime;
     if (project == null) return _fail('预约项目尚未加载');
-    if (consultant == null) return _fail('请选择机构咨询师');
+    if (consultant == null) return _fail('请选择医美顾问');
     if (doctor == null) return _fail('请选择医生');
     if (time == null) return _fail('请选择预约时间');
     final beijingNow = DateTime.now().toUtc().add(const Duration(hours: 8));

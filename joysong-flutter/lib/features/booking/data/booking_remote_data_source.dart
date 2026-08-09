@@ -77,7 +77,7 @@ final class ApiBookingRemoteDataSource implements BookingRemoteDataSource {
     final result = await _apiClient.get<List<BookingConsultant>>(
       'discover/institutions/$institutionId/consultants',
       decodeData: (json) =>
-          _list(json, '机构咨询师列表').map(BookingConsultant.fromJson).toList(),
+          _list(json, '机构医美顾问列表').map(BookingConsultant.fromJson).toList(),
     );
     return result ?? const [];
   }

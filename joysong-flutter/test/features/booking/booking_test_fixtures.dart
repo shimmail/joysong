@@ -47,6 +47,7 @@ class FakeBookingRepository implements BookingRepository {
   int createCalls = 0;
   CreateOrderCommand? lastCommand;
   Completer<Order>? createCompleter;
+  List<BookingConsultant> consultantResults = [sampleConsultant()];
 
   @override
   Future<List<InstitutionProject>> getInstitutionProjects(
@@ -67,7 +68,7 @@ class FakeBookingRepository implements BookingRepository {
 
   @override
   Future<List<BookingConsultant>> getConsultants(String institutionId) async =>
-      [sampleConsultant()];
+      consultantResults;
 
   @override
   Future<Money> getConsultationFee({
