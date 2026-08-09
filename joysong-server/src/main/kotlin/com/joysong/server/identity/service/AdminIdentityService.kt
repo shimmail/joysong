@@ -146,23 +146,32 @@ class AdminIdentityService(
         val normalizedInstitutionId = institutionId.trim().also { require(it.isNotEmpty()) { "机构不能为空" } }
         val normalizedConfirmerId = confirmerId.trim().also { require(it.isNotEmpty()) { "确认人不能为空" } }
 
-        require(
-            count(
-                "SELECT COUNT(*) FROM users WHERE id = ? AND deleted_at IS NULL AND role = 'USER'",
-                normalizedUserId
-            ) == 1L
-        ) { "用户不存在、已注销或不是普通用户" }
-        require(
-            count("SELECT COUNT(*) FROM institutions WHERE id = ? AND deleted_at IS NULL", normalizedInstitutionId) == 1L
-        ) { "机构不存在或已删除" }
+        val user = jdbcTemplate.query(
+            "SELECT role, deleted_at FROM users WHERE id = ? FOR UPDATE",
+            { rs, _ -> LockedBindingUser(rs.getString("role"), rs.getTimestamp("deleted_at")?.toLocalDateTime()) },
+            normalizedUserId
+        ).firstOrNull() ?: throw IllegalArgumentException("用户不存在")
+        require(user.deletedAt == null) { "用户已注销" }
+        require(user.role == "USER") { "只能绑定普通用户" }
+
+        val institution = jdbcTemplate.query(
+            "SELECT deleted_at FROM institutions WHERE id = ? FOR UPDATE",
+            { rs, _ -> LockedBindingInstitution(rs.getTimestamp("deleted_at")?.toLocalDateTime()) },
+            normalizedInstitutionId
+        ).firstOrNull() ?: throw IllegalArgumentException("机构不存在")
+        require(institution.deletedAt == null) { "机构已删除" }
 
         jdbcTemplate.update(
             """
             INSERT INTO user_roles (user_id, role_code, status, activated_at)
             VALUES (?, ?, 'ACTIVE', NOW())
             ON DUPLICATE KEY UPDATE
-                status = 'ACTIVE', activated_at = NOW(),
-                revoked_at = NULL, revoked_by = NULL, revoke_reason = ''
+                activated_at = IF(status = 'ACTIVE', activated_at, NOW()),
+                revoked_at = IF(status = 'ACTIVE', revoked_at, NULL),
+                revoked_by = IF(status = 'ACTIVE', revoked_by, NULL),
+                revoke_reason = IF(status = 'ACTIVE', revoke_reason, ''),
+                updated_at = IF(status = 'ACTIVE', updated_at, NOW()),
+                status = 'ACTIVE'
             """.trimIndent(),
             normalizedUserId,
             "CONSULTANT"
@@ -174,12 +183,17 @@ class AdminIdentityService(
                 (id, user_id, institution_id, member_role, status, confirmed_by, confirmed_at)
             VALUES (?, ?, ?, ?, 'APPROVED', ?, NOW())
             ON DUPLICATE KEY UPDATE
-                status = 'APPROVED', confirmed_by = VALUES(confirmed_by), confirmed_at = NOW(), revoked_at = NULL
+                confirmed_by = IF(status = 'APPROVED', confirmed_by, ?),
+                confirmed_at = IF(status = 'APPROVED', confirmed_at, NOW()),
+                revoked_at = IF(status = 'APPROVED', revoked_at, NULL),
+                updated_at = IF(status = 'APPROVED', updated_at, NOW()),
+                status = 'APPROVED'
             """.trimIndent(),
             UUID.randomUUID().toString(),
             normalizedUserId,
             normalizedInstitutionId,
             "CONSULTANT",
+            normalizedConfirmerId,
             normalizedConfirmerId
         )
 
@@ -190,7 +204,10 @@ class AdminIdentityService(
             FROM institution_memberships im
             JOIN users u ON u.id = im.user_id
             JOIN institutions i ON i.id = im.institution_id
+            JOIN user_roles ur ON ur.user_id = im.user_id AND ur.role_code = im.member_role
             WHERE im.user_id = ? AND im.institution_id = ? AND im.member_role = ?
+              AND u.deleted_at IS NULL AND u.role = 'USER' AND i.deleted_at IS NULL
+              AND ur.status = 'ACTIVE' AND im.status = 'APPROVED'
             """.trimIndent(),
             { rs, _ ->
                 ConsultantBindingAdminView(
@@ -664,6 +681,8 @@ private data class ReviewTarget(
     val applicationData: JsonNode
 )
 private data class RelationTarget(val userId: String, val institutionId: String, val roleCode: String, val status: String)
+private data class LockedBindingUser(val role: String, val deletedAt: LocalDateTime?)
+private data class LockedBindingInstitution(val deletedAt: LocalDateTime?)
 
 data class IdentityDocumentAdminView(
     val fileId: String,
