@@ -480,6 +480,7 @@ function MembershipSection({ institutionOptions }: { institutionOptions: Institu
   const [bindingConsultant, setBindingConsultant] = useState(false);
   const [consultantForm] = Form.useForm<{ userId: string; institutionId: string }>();
   const consultantCandidatesRequestSequence = useRef(0);
+  const consultantDialogGeneration = useRef(0);
   const selectedMemberRole = Form.useWatch('memberRole', createForm);
 
   const fetchData = async () => {
@@ -533,6 +534,7 @@ function MembershipSection({ institutionOptions }: { institutionOptions: Institu
   };
 
   const openConsultantBinding = async () => {
+    ++consultantDialogGeneration.current;
     const requestSequence = ++consultantCandidatesRequestSequence.current;
     consultantForm.resetFields();
     setConsultantCandidates([]);
@@ -555,10 +557,16 @@ function MembershipSection({ institutionOptions }: { institutionOptions: Institu
   };
 
   const closeConsultantBinding = () => {
+    ++consultantDialogGeneration.current;
     ++consultantCandidatesRequestSequence.current;
     setConsultantCandidates([]);
     setConsultantCandidatesLoading(false);
+    setBindingConsultant(false);
     setConsultantOpen(false);
+  };
+
+  const cancelConsultantBinding = () => {
+    if (!bindingConsultant) closeConsultantBinding();
   };
 
   const consultantUserOptions = useMemo(() => consultantCandidates.map((user) => ({
@@ -567,17 +575,28 @@ function MembershipSection({ institutionOptions }: { institutionOptions: Institu
   })), [consultantCandidates]);
 
   const submitConsultantBinding = async () => {
-    const values = await consultantForm.validateFields();
+    const generation = consultantDialogGeneration.current;
+    let values: { userId: string; institutionId: string };
+    try {
+      values = await consultantForm.validateFields();
+    } catch {
+      return;
+    }
+    if (generation !== consultantDialogGeneration.current) return;
     setBindingConsultant(true);
     try {
       await api.post('/admin/identity/consultants', values);
+      if (generation !== consultantDialogGeneration.current) return;
       message.success('咨询师已添加并绑定机构');
       closeConsultantBinding();
       await fetchData();
     } catch (error) {
+      if (generation !== consultantDialogGeneration.current) return;
       message.error(getApiErrorMessage(error, '添加咨询师失败'));
     } finally {
-      setBindingConsultant(false);
+      if (generation === consultantDialogGeneration.current) {
+        setBindingConsultant(false);
+      }
     }
   };
 
@@ -683,9 +702,13 @@ function MembershipSection({ institutionOptions }: { institutionOptions: Institu
         title="添加咨询师"
         open={consultantOpen}
         confirmLoading={bindingConsultant}
+        closable={!bindingConsultant}
+        maskClosable={!bindingConsultant}
+        keyboard={!bindingConsultant}
+        cancelButtonProps={{ disabled: bindingConsultant }}
         okText="确认添加"
         onOk={() => void submitConsultantBinding()}
-        onCancel={closeConsultantBinding}
+        onCancel={cancelConsultantBinding}
         destroyOnHidden
       >
         <Form form={consultantForm} layout="vertical">
