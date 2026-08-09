@@ -122,13 +122,13 @@ class AdminIdentityServiceMySqlIntegrationTest {
     }
 
     @Test
-    fun `Flyway applies B1 baseline followed by production migrations V2 through V9`() {
+    fun `Flyway applies B1 baseline followed by production migrations V2 through V10`() {
         val history = jdbcTemplate.query(
             "SELECT version, type FROM flyway_schema_history WHERE success = 1 AND version IS NOT NULL ORDER BY installed_rank",
             { rs, _ -> FlywayMigration(rs.getString("version"), rs.getString("type")) }
         )
 
-        assertEquals((1..9).map(Int::toString), history.map(FlywayMigration::version))
+        assertEquals((1..10).map(Int::toString), history.map(FlywayMigration::version))
         assertEquals("SQL_BASELINE", history.single { it.version == "1" }.type)
     }
 
