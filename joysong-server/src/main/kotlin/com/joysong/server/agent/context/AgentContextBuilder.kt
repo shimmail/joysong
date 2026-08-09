@@ -144,7 +144,7 @@ class AgentContextBuilder(
         sessionRepository.save(session)
     }
 
-    private fun serializeSummary(summary: AgentSessionSummary): String = objectMapper.writeValueAsString(
+    fun serializeSummary(summary: AgentSessionSummary): String = objectMapper.writeValueAsString(
         linkedMapOf(
             "schemaVersion" to summary.schemaVersion,
             "goals" to summary.goals,

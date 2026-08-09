@@ -3,8 +3,15 @@ package com.joysong.server.chat.service
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.joysong.server.chat.dto.CreateSessionRequest
 import com.joysong.server.chat.dto.SendMessageRequest
+import com.joysong.server.agent.context.AgentContextBuilder
+import com.joysong.server.agent.context.AgentSessionSummary
 import com.joysong.server.agent.dto.AgentCatalogReportResponse
 import com.joysong.server.agent.dto.AgentCatalogItemResponse
+import com.joysong.server.agent.orchestration.AgentChatException
+import com.joysong.server.agent.orchestration.BeginTurnResult
+import com.joysong.server.agent.orchestration.CompleteTurnCommand
+import com.joysong.server.agent.orchestration.IdempotencyKeyConflictException
+import com.joysong.server.agent.orchestration.TurnLifecycleService
 import com.joysong.server.chat.entity.ChatMessageEntity
 import com.joysong.server.chat.entity.ChatSessionEntity
 import com.joysong.server.chat.repository.ChatMessageRepository
@@ -28,7 +35,6 @@ import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.*
-import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.client.RestTemplate
@@ -53,13 +59,24 @@ private data class LlmCallResult(
     val error: String?
 )
 
+private data class GeneratedTurn(
+    val content: String,
+    val intentDecision: AgentIntentDecision,
+    val promptBuild: PromptBuildResult,
+    val databaseDurationMs: Long,
+    val llmResult: LlmCallResult,
+    val catalogReport: AgentCatalogReportResponse?,
+    val catalogItems: List<AgentCatalogItemResponse>
+)
+
 data class ChatTurnResult(
     val message: ChatMessageEntity,
     val catalogReport: AgentCatalogReportResponse? = null,
     val catalogItems: List<AgentCatalogItemResponse> = emptyList(),
     val intent: String = "GENERAL_CHAT",
     val queryTarget: String? = null,
-    val nextAction: String = "NONE"
+    val nextAction: String = "NONE",
+    val traceId: String? = null
 )
 
 @Service
@@ -75,6 +92,8 @@ class ChatService(
     private val agentCatalogService: AgentCatalogService,
     private val agentIntentRouter: AgentIntentRouter,
     private val agentTraceService: AgentTraceService,
+    private val turnLifecycleService: TurnLifecycleService,
+    private val agentContextBuilder: AgentContextBuilder,
     private val objectMapper: ObjectMapper,
     @Qualifier("llmRestTemplate") private val restTemplate: RestTemplate,
     @Qualifier("intentParserRestTemplate") private val intentParserRestTemplate: RestTemplate,
@@ -141,7 +160,6 @@ class ChatService(
     /**
      * 发送消息并获取 AI 响应
      */
-    @Transactional
     fun sendMessage(
         sessionId: String,
         userId: String,
@@ -156,9 +174,63 @@ class ChatService(
         onDelta: (String) -> Unit
     ): ChatTurnResult {
         check(streamEnabled) { "AI streaming is disabled" }
-        return sendMessageInternal(sessionId, userId, request) { messages, profile ->
+        return sendMessageStreamingInternal(sessionId, userId, request.content, onDelta)
+    }
+
+    private fun sendMessageStreamingInternal(
+        sessionId: String,
+        userId: String,
+        rawContent: String,
+        onDelta: (String) -> Unit
+    ): ChatTurnResult {
+        val content = rawContent.trim()
+        require(content.isNotEmpty()) { "消息内容不能为空" }
+        require(content.length <= 5000) { "消息内容不能超过 5000 字" }
+        val traceId = UUID.randomUUID().toString()
+        val totalStartedAt = System.nanoTime()
+        val session = sessionRepository.findByIdAndUserIdForUpdate(sessionId, userId)
+            ?: throw IllegalArgumentException("会话不存在或无权访问")
+        val sequenceNo = session.nextSequenceNo
+        messageRepository.save(
+            ChatMessageEntity(
+                sessionId = session.id,
+                sequenceNo = sequenceNo * 2 - 1,
+                role = "USER",
+                content = content
+            )
+        )
+        session.nextSequenceNo = sequenceNo + 1
+        val historyMessages = messageRepository.findTop10BySessionIdOrderByCreatedAtDesc(session.id)
+            .reversed()
+            .takeLast(6)
+        val generated = generateTurn(
+            session = session,
+            content = content,
+            historyMessages = historyMessages,
+            summary = null,
+            appendCurrentUser = false
+        ) { messages, profile ->
             callLLMStreaming(messages, profile, onDelta)
         }
+        val assistant = messageRepository.save(
+            ChatMessageEntity(
+                sessionId = session.id,
+                sequenceNo = sequenceNo * 2,
+                role = "ASSISTANT",
+                content = generated.content
+            )
+        )
+        session.updatedAt = LocalDateTime.now()
+        sessionRepository.save(session)
+        recordTrace(traceId, userId, session.id, content, totalStartedAt, generated)
+        return ChatTurnResult(
+            message = assistant,
+            catalogReport = generated.catalogReport,
+            catalogItems = generated.catalogItems,
+            intent = generated.intentDecision.intent.name,
+            queryTarget = generated.intentDecision.queryTarget?.name,
+            nextAction = generated.intentDecision.nextAction.name
+        )
     }
 
     private fun sendMessageInternal(
@@ -170,41 +242,94 @@ class ChatService(
         val content = request.content.trim()
         require(content.isNotEmpty()) { "消息内容不能为空" }
         require(content.length <= 5000) { "消息内容不能超过 5000 字" }
-        val traceId = UUID.randomUUID().toString()
+        val idempotencyKey = request.idempotencyKey?.trim()?.also {
+            require(it.isNotEmpty() && it.length <= 100) { "INVALID_IDEMPOTENCY_KEY" }
+        } ?: UUID.randomUUID().toString()
+        val begin = try {
+            turnLifecycleService.beginTurn(sessionId, userId, content, idempotencyKey)
+        } catch (_: IdempotencyKeyConflictException) {
+            throw AgentChatException.idempotencyConflict()
+        } catch (_: IllegalArgumentException) {
+            throw AgentChatException.sessionNotFound()
+        }
+        return when (begin) {
+            is BeginTurnResult.Replayed -> begin.turn
+            BeginTurnResult.InProgress -> throw AgentChatException.turnInProgress()
+            BeginTurnResult.IdempotencyExpired -> throw AgentChatException.idempotencyExpired()
+            is BeginTurnResult.Started -> executeStartedTurn(begin, sessionId, userId, content, llmCaller)
+        }
+    }
+
+    private fun executeStartedTurn(
+        begin: BeginTurnResult.Started,
+        sessionId: String,
+        userId: String,
+        content: String,
+        llmCaller: (List<Map<String, String>>, GenerationProfile) -> LlmCallResult
+    ): ChatTurnResult {
         val totalStartedAt = System.nanoTime()
-        // 1. 验证 session 归属
+        return try {
+            runStartedTurn(begin, sessionId, userId, content, totalStartedAt, llmCaller)
+        } catch (error: Exception) {
+            val code = when {
+                error is AgentChatException -> error.code
+                error.message == "AI_PROVIDER_UNAVAILABLE" -> "AI_PROVIDER_UNAVAILABLE"
+                else -> "AGENT_CHAT_FAILED"
+            }
+            runCatching { turnLifecycleService.failTurn(begin.turnId, code, elapsedMs(totalStartedAt)) }
+                .onFailure { logger.error("Failed to mark turn {} as failed", begin.turnId, it) }
+            throw AgentChatException(code, begin.traceId)
+        }
+    }
+
+    private fun runStartedTurn(
+        begin: BeginTurnResult.Started,
+        sessionId: String,
+        userId: String,
+        content: String,
+        totalStartedAt: Long,
+        llmCaller: (List<Map<String, String>>, GenerationProfile) -> LlmCallResult
+    ): ChatTurnResult {
+        val context = agentContextBuilder.load(userId, sessionId, 20, 4_000)
         val session = sessionRepository.findByIdAndUserIdAndDeletedAtIsNull(sessionId, userId)
-            ?: throw IllegalArgumentException("会话不存在或无权访问")
-
-        // 2. 保存用户消息
-        val userMessage = ChatMessageEntity(
-            id = UUID.randomUUID().toString(),
-            sessionId = sessionId,
-            role = "USER",
+            ?: throw AgentChatException("SESSION_NOT_FOUND", begin.traceId)
+        val generated = generateTurn(
+            session = session,
             content = content,
-            createdAt = LocalDateTime.now()
+            historyMessages = context.messages,
+            summary = context.summary,
+            appendCurrentUser = true,
+            llmCaller = llmCaller
         )
-        messageRepository.save(userMessage)
+        val completed = turnLifecycleService.completeTurn(
+            CompleteTurnCommand(
+                turnId = begin.turnId,
+                content = generated.content,
+                intent = generated.intentDecision.intent.name,
+                queryTarget = generated.intentDecision.queryTarget?.name,
+                nextAction = generated.intentDecision.nextAction.name,
+                catalogReport = generated.catalogReport,
+                catalogItems = generated.catalogItems,
+                durationMs = elapsedMs(totalStartedAt),
+                fallbackUsed = generated.llmResult.fallbackUsed,
+                modelName = openaiModel
+            )
+        )
+        recordTrace(begin.traceId, userId, sessionId, content, totalStartedAt, generated)
+        return completed
+    }
 
-        // 3. 保留短上下文，减少网关首字延迟与无关历史干扰
-        val historyMessages = messageRepository.findTop10BySessionIdOrderByCreatedAtDesc(sessionId)
-            .reversed()
-            .takeLast(6)
-
-        // 4. 构建 LLM 消息列表
+    private fun generateTurn(
+        session: ChatSessionEntity,
+        content: String,
+        historyMessages: List<ChatMessageEntity>,
+        summary: AgentSessionSummary?,
+        appendCurrentUser: Boolean,
+        llmCaller: (List<Map<String, String>>, GenerationProfile) -> LlmCallResult
+    ): GeneratedTurn {
         val llmMessages = mutableListOf<Map<String, String>>()
         val databaseStartedAt = System.nanoTime()
-        val userHistory = historyMessages.filter { it.role.equals("USER", true) }
-        // The current message was saved before history was loaded and is therefore
-        // the last USER entry. Remove it by position as well as identity; relying on
-        // JPA entity identity alone can accidentally feed the current follow-up back
-        // into contextual keyword resolution.
-        val previousUserQueries = userHistory
-            .let { messages ->
-                if (messages.lastOrNull()?.id == userMessage.id || messages.lastOrNull()?.content == content) {
-                    messages.dropLast(1)
-                } else messages
-            }
+        val previousUserQueries = historyMessages.filter { it.role.equals("USER", true) }
             .map { it.content }
             .takeLast(4)
         val contextualQuery = agentCatalogService.contextualSearchQuery(content, previousUserQueries)
@@ -250,65 +375,24 @@ class ChatService(
         )
         val databaseDurationMs = elapsedMs(databaseStartedAt)
         llmMessages.add(mapOf("role" to "system", "content" to promptBuild.prompt))
+        if (summary != null && summary != AgentSessionSummary()) {
+            llmMessages.add(mapOf("role" to "system", "content" to agentContextBuilder.serializeSummary(summary)))
+        }
         historyMessages.takeLast(generationProfile.historyMessageLimit).forEach { msg ->
             llmMessages.add(mapOf(
                 "role" to msg.role.lowercase(),
                 "content" to msg.content
             ))
         }
+        if (appendCurrentUser) llmMessages.add(mapOf("role" to "user", "content" to content))
         // Keep the completed catalog search closest to generation. This prevents older
         // conversation content from overriding the same result set used by UI cards.
         if (promptBuild.groundingPrompt.isNotBlank()) {
             llmMessages.add(mapOf("role" to "system", "content" to promptBuild.groundingPrompt))
         }
 
-        // 5. 调用 LLM API
         val llmResult = llmCaller(llmMessages, generationProfile)
         val aiContent = naturalizeUserFacingLanguage(llmResult.content)
-
-        // 6. 保存 AI 响应消息
-        val aiMessage = ChatMessageEntity(
-            id = UUID.randomUUID().toString(),
-            sessionId = sessionId,
-            role = "ASSISTANT",
-            content = aiContent,
-            createdAt = LocalDateTime.now()
-        )
-        messageRepository.save(aiMessage)
-
-        // 7. 更新 session 的 updatedAt
-        session.updatedAt = LocalDateTime.now()
-        sessionRepository.save(session)
-
-        runCatching {
-            agentTraceService.save(
-                AgentTraceRecord(
-                    traceId = traceId,
-                    userId = userId,
-                    sessionId = sessionId,
-                    query = content,
-                    intent = intentDecision.intent.name,
-                    databaseSearch = promptBuild.databaseSearched,
-                    detectedKeywords = promptBuild.evidence.detectedKeywords,
-                    detectedConcerns = agentTraceService.detectConcerns(content),
-                    matchedEntityIds = promptBuild.evidence.matchedEntityIds,
-                    llmCalled = llmResult.called,
-                    modelName = openaiModel,
-                    gatewayUrl = openaiBaseUrl,
-                    totalDurationMs = elapsedMs(totalStartedAt),
-                    databaseDurationMs = databaseDurationMs,
-                    llmDurationMs = llmResult.durationMs,
-                    httpStatus = llmResult.httpStatus,
-                    inputTokens = llmResult.inputTokens,
-                    outputTokens = llmResult.outputTokens,
-                    fallbackUsed = llmResult.fallbackUsed,
-                    answerLength = aiContent.length,
-                    errorSummary = llmResult.error
-                )
-            )
-            logger.info("AI_TRACE traceId={} sessionId={} intent={} db={} llmStatus={} totalMs={} answerLength={}", traceId, sessionId, intentDecision.intent.name, promptBuild.databaseSearched, llmResult.httpStatus, elapsedMs(totalStartedAt), aiContent.length)
-        }.onFailure { logger.warn("AI trace save failed traceId={}: {}", traceId, it.message) }
-
         val currentContextItems = currentContextCatalogItems(session.contextType, session.contextId)
         val visibleReport = promptBuild.evidence.report?.takeIf {
             intentDecision.intent == AgentIntent.COMPARISON && it.items.isNotEmpty()
@@ -320,30 +404,68 @@ class ChatService(
                 else -> promptBuild.evidence.report?.items.orEmpty().take(4)
             }
         } else emptyList()
-        return ChatTurnResult(
-            message = aiMessage,
+        return GeneratedTurn(
+            content = aiContent,
+            intentDecision = intentDecision,
+            promptBuild = promptBuild,
+            databaseDurationMs = databaseDurationMs,
+            llmResult = llmResult,
             catalogReport = visibleReport,
-            catalogItems = visibleItems,
-            intent = intentDecision.intent.name,
-            queryTarget = intentDecision.queryTarget?.name,
-            nextAction = intentDecision.nextAction.name
+            catalogItems = visibleItems
         )
+    }
+
+    private fun recordTrace(
+        traceId: String,
+        userId: String,
+        sessionId: String,
+        content: String,
+        totalStartedAt: Long,
+        generated: GeneratedTurn
+    ) {
+        runCatching {
+            agentTraceService.save(
+                AgentTraceRecord(
+                    traceId = traceId,
+                    userId = userId,
+                    sessionId = sessionId,
+                    query = content,
+                    intent = generated.intentDecision.intent.name,
+                    databaseSearch = generated.promptBuild.databaseSearched,
+                    detectedKeywords = generated.promptBuild.evidence.detectedKeywords,
+                    detectedConcerns = agentTraceService.detectConcerns(content),
+                    matchedEntityIds = generated.promptBuild.evidence.matchedEntityIds,
+                    llmCalled = generated.llmResult.called,
+                    modelName = openaiModel,
+                    gatewayUrl = openaiBaseUrl,
+                    totalDurationMs = elapsedMs(totalStartedAt),
+                    databaseDurationMs = generated.databaseDurationMs,
+                    llmDurationMs = generated.llmResult.durationMs,
+                    httpStatus = generated.llmResult.httpStatus,
+                    inputTokens = generated.llmResult.inputTokens,
+                    outputTokens = generated.llmResult.outputTokens,
+                    fallbackUsed = generated.llmResult.fallbackUsed,
+                    answerLength = generated.content.length,
+                    errorSummary = generated.llmResult.error
+                )
+            )
+            logger.info(
+                "AI_TRACE traceId={} sessionId={} intent={} db={} llmStatus={} totalMs={} answerLength={}",
+                traceId,
+                sessionId,
+                generated.intentDecision.intent.name,
+                generated.promptBuild.databaseSearched,
+                generated.llmResult.httpStatus,
+                elapsedMs(totalStartedAt),
+                generated.content.length
+            )
+        }.onFailure { logger.warn("AI trace save failed traceId={}: {}", traceId, it.message) }
     }
 
     /**
      * 删除消息（验证会话归属后删除）
      */
-    @Transactional
-    fun deleteMessage(messageId: String, userId: String) {
-        val message = messageRepository.findById(messageId).orElse(null)
-            ?: throw IllegalArgumentException("消息不存在")
-
-        // 验证消息所属会话归当前用户所有
-        sessionRepository.findByIdAndUserIdAndDeletedAtIsNull(message.sessionId, userId)
-            ?: throw IllegalArgumentException("无权删除该消息")
-
-        messageRepository.delete(message)
-    }
+    fun deleteMessage(messageId: String, userId: String) = turnLifecycleService.deleteTurn(messageId, userId)
 
     /**
      * 获取会话的所有消息
@@ -353,41 +475,14 @@ class ChatService(
         userId: String,
         limit: Int = 100,
         before: LocalDateTime? = null
-    ): List<ChatMessageEntity> {
-        // 验证 session 归属
-        sessionRepository.findByIdAndUserIdAndDeletedAtIsNull(sessionId, userId)
-            ?: throw IllegalArgumentException("会话不存在或无权访问")
-        val pageable = PageRequest.of(0, limit.coerceIn(1, 100))
-        val messages = if (before == null) {
-            messageRepository.findBySessionIdOrderByCreatedAtDesc(sessionId, pageable)
-        } else {
-            messageRepository.findBySessionIdAndCreatedAtBeforeOrderByCreatedAtDesc(sessionId, before, pageable)
-        }
-        return messages.reversed()
-    }
+    ): List<ChatMessageEntity> =
+        agentContextBuilder.load(userId, sessionId, minOf(limit, 20), 4_000).messages
 
-    @Transactional
-    fun clearMessages(sessionId: String, userId: String) {
-        sessionRepository.findByIdAndUserIdAndDeletedAtIsNull(sessionId, userId)
-            ?: throw IllegalArgumentException("会话不存在或无权访问")
-        messageRepository.deleteBySessionId(sessionId)
-    }
+    fun clearMessages(sessionId: String, userId: String) = turnLifecycleService.clearHistory(sessionId, userId)
 
-    @Transactional
-    fun deleteSession(sessionId: String, userId: String) {
-        val session = sessionRepository.findByIdAndUserIdAndDeletedAtIsNull(sessionId, userId)
-            ?: throw IllegalArgumentException("会话不存在或无权访问")
-        messageRepository.deleteBySessionId(sessionId)
-        sessionRepository.delete(session)
-    }
+    fun deleteSession(sessionId: String, userId: String) = turnLifecycleService.deleteSession(sessionId, userId)
 
-    @Transactional
-    fun clearSessions(userId: String, persona: String) {
-        sessionRepository.findByUserIdAndPersonaAndDeletedAtIsNull(userId, normalizePersona(persona)).forEach { session ->
-            messageRepository.deleteBySessionId(session.id)
-            sessionRepository.delete(session)
-        }
-    }
+    fun clearSessions(userId: String, persona: String) = turnLifecycleService.clearSessions(userId, persona)
 
     /**
      * 调用 OpenAI Chat Completions API

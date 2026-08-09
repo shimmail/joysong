@@ -18,4 +18,12 @@ interface ChatSessionRepository : JpaRepository<ChatSessionEntity, String> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select session from ChatSessionEntity session where session.id = :sessionId and session.userId = :userId and session.deletedAt is null")
     fun findByIdAndUserIdForUpdate(sessionId: String, userId: String): ChatSessionEntity?
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select session from ChatSessionEntity session where session.userId = :userId and session.persona = :persona and session.deletedAt is null order by session.id")
+    fun findByUserIdAndPersonaForUpdate(userId: String, persona: String): List<ChatSessionEntity>
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select session from ChatSessionEntity session, ChatMessageEntity message where message.id = :messageId and message.sessionId = session.id and session.userId = :userId and session.deletedAt is null")
+    fun findByMessageIdAndUserIdForUpdate(messageId: String, userId: String): ChatSessionEntity?
 }

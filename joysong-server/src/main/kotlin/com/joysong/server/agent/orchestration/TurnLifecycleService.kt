@@ -60,7 +60,7 @@ class TurnLifecycleService(
             if (existing.requestHash != requestHash) throw IdempotencyKeyConflictException()
             return when (existing.status) {
                 AgentTurnStatus.SUCCEEDED -> messageRepository.findByTurnIdAndRole(existing.id, "ASSISTANT")
-                    ?.let { BeginTurnResult.Replayed(reconstruct(it)) } ?: BeginTurnResult.IdempotencyExpired
+                    ?.let { BeginTurnResult.Replayed(reconstruct(existing, it)) } ?: BeginTurnResult.IdempotencyExpired
                 AgentTurnStatus.RUNNING -> BeginTurnResult.InProgress
                 else -> throw IdempotencyKeyConflictException()
             }
@@ -101,7 +101,7 @@ class TurnLifecycleService(
         val turn = turnRepository.findByIdForUpdate(command.turnId) ?: throw IllegalArgumentException("回合不存在")
         check(turn.sessionId == session.id) { "回合与会话不匹配" }
         val existingAssistant = messageRepository.findByTurnIdAndRole(turn.id, "ASSISTANT")
-        if (turn.status == AgentTurnStatus.SUCCEEDED && existingAssistant != null) return reconstruct(existingAssistant)
+        if (turn.status == AgentTurnStatus.SUCCEEDED && existingAssistant != null) return reconstruct(turn, existingAssistant)
         check(turn.status == AgentTurnStatus.RUNNING) { "回合不是运行状态" }
         val metadata = metadata(command)
         val assistant = existingAssistant ?: messageRepository.save(
@@ -122,7 +122,7 @@ class TurnLifecycleService(
         turn.promptVersion = command.promptVersion
         contextBuilder.updateSummaryAndPrune(session, turn.sequenceNo, command.intent, command.queryTarget, command.nextAction, command.catalogItems)
         turnRepository.save(turn)
-        return reconstruct(assistant)
+        return reconstruct(turn, assistant)
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -130,6 +130,50 @@ class TurnLifecycleService(
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     fun cancelTurn(turnId: String, errorCode: String, durationMs: Long) = finishTurn(turnId, AgentTurnStatus.CANCELLED, errorCode, durationMs)
+
+    @Transactional
+    fun clearHistory(sessionId: String, userId: String) {
+        val session = ownedSessionForUpdate(sessionId, userId)
+        deleteHistory(session.id)
+        session.nextSequenceNo = 1
+        session.summaryJson = "{}"
+        session.summaryUpdatedAt = null
+        session.updatedAt = LocalDateTime.now()
+        sessionRepository.save(session)
+    }
+
+    @Transactional
+    fun deleteSession(sessionId: String, userId: String) {
+        val session = ownedSessionForUpdate(sessionId, userId)
+        deleteHistory(session.id)
+        sessionRepository.delete(session)
+    }
+
+    @Transactional
+    fun deleteTurn(messageId: String, userId: String) {
+        val session = sessionRepository.findByMessageIdAndUserIdForUpdate(messageId, userId)
+            ?: throw IllegalArgumentException("消息不存在或无权访问")
+        val message = messageRepository.findByIdAndSessionId(messageId, session.id)
+            ?: throw IllegalArgumentException("消息不存在")
+        val turnId = message.turnId ?: throw IllegalArgumentException("消息未关联回合")
+        val turn = turnRepository.findByIdForUpdate(turnId)
+            ?.takeIf { it.sessionId == session.id }
+            ?: throw IllegalArgumentException("回合不存在")
+        messageRepository.deleteByTurnId(turn.id)
+        messageRepository.flush()
+        turnRepository.delete(turn)
+    }
+
+    @Transactional
+    fun clearSessions(userId: String, persona: String) {
+        val normalizedPersona = persona.trim().uppercase().also {
+            require(it in setOf("BESTIE", "CONSULTANT")) { "不支持的 AI 角色" }
+        }
+        sessionRepository.findByUserIdAndPersonaForUpdate(userId, normalizedPersona).forEach { session ->
+            deleteHistory(session.id)
+            sessionRepository.delete(session)
+        }
+    }
 
     private fun finishTurn(turnId: String, status: AgentTurnStatus, errorCode: String, durationMs: Long) {
         val turn = turnRepository.findByIdForUpdate(turnId) ?: return
@@ -139,6 +183,17 @@ class TurnLifecycleService(
         turn.totalDurationMs = durationMs
         turn.completedAt = LocalDateTime.now()
         turnRepository.save(turn)
+    }
+
+    private fun ownedSessionForUpdate(sessionId: String, userId: String) =
+        sessionRepository.findByIdAndUserIdForUpdate(sessionId, userId)
+            ?: throw IllegalArgumentException("会话不存在或无权访问")
+
+    private fun deleteHistory(sessionId: String) {
+        messageRepository.deleteBySessionId(sessionId)
+        messageRepository.flush()
+        turnRepository.deleteBySessionId(sessionId)
+        turnRepository.flush()
     }
 
     private fun metadata(command: CompleteTurnCommand): String = objectMapper.writeValueAsString(
@@ -151,7 +206,7 @@ class TurnLifecycleService(
         )
     )
 
-    private fun reconstruct(message: ChatMessageEntity): ChatTurnResult {
+    private fun reconstruct(turn: AgentTurnEntity, message: ChatMessageEntity): ChatTurnResult {
         val metadata = objectMapper.readTree(message.metadataJson.ifBlank { "{}" })
         return ChatTurnResult(
             message = message,
@@ -161,7 +216,8 @@ class TurnLifecycleService(
                 ?.let { objectMapper.treeToValue(it, AgentCatalogReportResponse::class.java) },
             intent = metadata.path("intent").asText("GENERAL_CHAT"),
             queryTarget = metadata.get("queryTarget")?.takeUnless { it.isNull }?.asText(),
-            nextAction = metadata.path("nextAction").asText("NONE")
+            nextAction = metadata.path("nextAction").asText("NONE"),
+            traceId = turn.traceId
         )
     }
 
