@@ -85,6 +85,14 @@ class AdminIdentityController(
         adminIdentityService.listMemberships(institutionId, status, memberRole, keyword)
     )
 
+    @PostMapping("/consultants")
+    fun bindConsultant(
+        authentication: Authentication,
+        @RequestBody request: BindConsultantRequest
+    ): BaseResponse<*> = BaseResponse.success(
+        adminIdentityService.bindConsultant(request.userId, request.institutionId, authentication.adminId())
+    )
+
     @PostMapping("/memberships")
     fun createMembership(@RequestBody request: CreateMembershipRequest): BaseResponse<*> = BaseResponse.success(
         mapOf("id" to adminIdentityService.createMembership(request.userId, request.institutionId, request.memberRole))
@@ -130,3 +138,4 @@ class AdminIdentityController(
 data class IdentityReviewRequest(val decision: String, val reviewNote: String = "")
 data class RevokeIdentityRequest(val reason: String)
 data class CreateMembershipRequest(val userId: String, val institutionId: String, val memberRole: String)
+data class BindConsultantRequest(val userId: String, val institutionId: String)

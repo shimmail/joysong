@@ -140,6 +140,92 @@ class AdminIdentityService(
         }
     }
 
+    @Transactional
+    fun bindConsultant(userId: String, institutionId: String, confirmerId: String): ConsultantBindingAdminView {
+        val normalizedUserId = userId.trim().also { require(it.isNotEmpty()) { "用户 ID 不能为空" } }
+        val normalizedInstitutionId = institutionId.trim().also { require(it.isNotEmpty()) { "机构不能为空" } }
+        val normalizedConfirmerId = confirmerId.trim().also { require(it.isNotEmpty()) { "确认人不能为空" } }
+
+        val user = jdbcTemplate.query(
+            "SELECT role, deleted_at FROM users WHERE id = ? FOR UPDATE",
+            { rs, _ -> LockedBindingUser(rs.getString("role"), rs.getTimestamp("deleted_at")?.toLocalDateTime()) },
+            normalizedUserId
+        ).firstOrNull() ?: throw IllegalArgumentException("用户不存在")
+        require(user.deletedAt == null) { "用户已注销" }
+        require(user.role == "USER") { "只能绑定普通用户" }
+
+        val institution = jdbcTemplate.query(
+            "SELECT deleted_at FROM institutions WHERE id = ? FOR UPDATE",
+            { rs, _ -> LockedBindingInstitution(rs.getTimestamp("deleted_at")?.toLocalDateTime()) },
+            normalizedInstitutionId
+        ).firstOrNull() ?: throw IllegalArgumentException("机构不存在")
+        require(institution.deletedAt == null) { "机构已删除" }
+
+        jdbcTemplate.update(
+            """
+            INSERT INTO user_roles (user_id, role_code, status, activated_at)
+            VALUES (?, ?, 'ACTIVE', NOW())
+            ON DUPLICATE KEY UPDATE
+                activated_at = IF(status = 'ACTIVE', activated_at, NOW()),
+                revoked_at = IF(status = 'ACTIVE', revoked_at, NULL),
+                revoked_by = IF(status = 'ACTIVE', revoked_by, NULL),
+                revoke_reason = IF(status = 'ACTIVE', revoke_reason, ''),
+                updated_at = IF(status = 'ACTIVE', updated_at, NOW()),
+                status = 'ACTIVE'
+            """.trimIndent(),
+            normalizedUserId,
+            "CONSULTANT"
+        )
+
+        jdbcTemplate.update(
+            """
+            INSERT INTO institution_memberships
+                (id, user_id, institution_id, member_role, status, confirmed_by, confirmed_at)
+            VALUES (?, ?, ?, ?, 'APPROVED', ?, NOW())
+            ON DUPLICATE KEY UPDATE
+                confirmed_by = IF(status = 'APPROVED', confirmed_by, ?),
+                confirmed_at = IF(status = 'APPROVED', confirmed_at, NOW()),
+                revoked_at = IF(status = 'APPROVED', revoked_at, NULL),
+                updated_at = IF(status = 'APPROVED', updated_at, NOW()),
+                status = 'APPROVED'
+            """.trimIndent(),
+            UUID.randomUUID().toString(),
+            normalizedUserId,
+            normalizedInstitutionId,
+            "CONSULTANT",
+            normalizedConfirmerId,
+            normalizedConfirmerId
+        )
+
+        return jdbcTemplate.query(
+            """
+            SELECT im.id, im.user_id, u.nickname AS user_name, im.institution_id, i.name AS institution_name,
+                   im.member_role, im.status
+            FROM institution_memberships im
+            JOIN users u ON u.id = im.user_id
+            JOIN institutions i ON i.id = im.institution_id
+            JOIN user_roles ur ON ur.user_id = im.user_id AND ur.role_code = im.member_role
+            WHERE im.user_id = ? AND im.institution_id = ? AND im.member_role = ?
+              AND u.deleted_at IS NULL AND u.role = 'USER' AND i.deleted_at IS NULL
+              AND ur.status = 'ACTIVE' AND im.status = 'APPROVED'
+            """.trimIndent(),
+            { rs, _ ->
+                ConsultantBindingAdminView(
+                    userId = rs.getString("user_id"),
+                    userName = rs.getString("user_name"),
+                    institutionId = rs.getString("institution_id"),
+                    institutionName = rs.getString("institution_name"),
+                    membershipId = rs.getString("id"),
+                    roleCode = rs.getString("member_role"),
+                    status = rs.getString("status")
+                )
+            },
+            normalizedUserId,
+            normalizedInstitutionId,
+            "CONSULTANT"
+        ).firstOrNull() ?: throw IllegalStateException("咨询师绑定关系写入失败")
+    }
+
     fun listRoles(status: String?, roleCode: String?, keyword: String?): List<UserRoleAdminView> {
         val normalizedStatus = status.normalizedFilter(ROLE_STATUSES, "身份状态")
         val normalizedRole = roleCode.normalizedRoleFilter()
@@ -595,6 +681,8 @@ private data class ReviewTarget(
     val applicationData: JsonNode
 )
 private data class RelationTarget(val userId: String, val institutionId: String, val roleCode: String, val status: String)
+private data class LockedBindingUser(val role: String, val deletedAt: LocalDateTime?)
+private data class LockedBindingInstitution(val deletedAt: LocalDateTime?)
 
 data class IdentityDocumentAdminView(
     val fileId: String,
@@ -652,6 +740,16 @@ data class InstitutionMembershipAdminView(
     val revokedAt: LocalDateTime?,
     val createdAt: LocalDateTime?,
     val updatedAt: LocalDateTime?
+)
+
+data class ConsultantBindingAdminView(
+    val userId: String,
+    val userName: String,
+    val institutionId: String,
+    val institutionName: String,
+    val membershipId: String,
+    val roleCode: String,
+    val status: String
 )
 
 data class DoctorPracticeAdminView(

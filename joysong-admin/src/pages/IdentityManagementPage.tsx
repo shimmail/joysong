@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
   Card,
@@ -31,6 +31,14 @@ import {
 } from '../identity';
 
 type InstitutionOption = { label: string; value: string };
+
+type ConsultantCandidate = {
+  id: string;
+  nickname?: string;
+  phone?: string;
+  role: string;
+  deletedAt?: string | null;
+};
 
 type IdentityDocument = {
   fileId: string;
@@ -466,6 +474,13 @@ function MembershipSection({ institutionOptions }: { institutionOptions: Institu
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createForm] = Form.useForm<{ userId: string; institutionId: string; memberRole: string }>();
+  const [consultantCandidates, setConsultantCandidates] = useState<ConsultantCandidate[]>([]);
+  const [consultantOpen, setConsultantOpen] = useState(false);
+  const [consultantCandidatesLoading, setConsultantCandidatesLoading] = useState(false);
+  const [bindingConsultant, setBindingConsultant] = useState(false);
+  const [consultantForm] = Form.useForm<{ userId: string; institutionId: string }>();
+  const consultantCandidatesRequestSequence = useRef(0);
+  const consultantDialogGeneration = useRef(0);
   const selectedMemberRole = Form.useWatch('memberRole', createForm);
 
   const fetchData = async () => {
@@ -515,6 +530,73 @@ function MembershipSection({ institutionOptions }: { institutionOptions: Institu
       message.error(getApiErrorMessage(error, '创建机构成员关系失败'));
     } finally {
       setCreating(false);
+    }
+  };
+
+  const openConsultantBinding = async () => {
+    ++consultantDialogGeneration.current;
+    const requestSequence = ++consultantCandidatesRequestSequence.current;
+    consultantForm.resetFields();
+    setConsultantCandidates([]);
+    setConsultantOpen(true);
+    setConsultantCandidatesLoading(true);
+    try {
+      const response = await api.get('/admin/users');
+      if (requestSequence !== consultantCandidatesRequestSequence.current) return;
+      setConsultantCandidates(getData<ConsultantCandidate[]>(response)
+        .filter((user) => user.role === 'USER' && !user.deletedAt));
+    } catch (error) {
+      if (requestSequence !== consultantCandidatesRequestSequence.current) return;
+      setConsultantCandidates([]);
+      message.error(getApiErrorMessage(error, '普通用户候选加载失败'));
+    } finally {
+      if (requestSequence === consultantCandidatesRequestSequence.current) {
+        setConsultantCandidatesLoading(false);
+      }
+    }
+  };
+
+  const closeConsultantBinding = () => {
+    ++consultantDialogGeneration.current;
+    ++consultantCandidatesRequestSequence.current;
+    setConsultantCandidates([]);
+    setConsultantCandidatesLoading(false);
+    setBindingConsultant(false);
+    setConsultantOpen(false);
+  };
+
+  const cancelConsultantBinding = () => {
+    if (!bindingConsultant) closeConsultantBinding();
+  };
+
+  const consultantUserOptions = useMemo(() => consultantCandidates.map((user) => ({
+    label: `${user.nickname || '未命名用户'} · ${user.phone || '无手机号'} · ${user.id}`,
+    value: user.id,
+  })), [consultantCandidates]);
+
+  const submitConsultantBinding = async () => {
+    const generation = consultantDialogGeneration.current;
+    let values: { userId: string; institutionId: string };
+    try {
+      values = await consultantForm.validateFields();
+    } catch {
+      return;
+    }
+    if (generation !== consultantDialogGeneration.current) return;
+    setBindingConsultant(true);
+    try {
+      await api.post('/admin/identity/consultants', values);
+      if (generation !== consultantDialogGeneration.current) return;
+      message.success('咨询师已添加并绑定机构');
+      closeConsultantBinding();
+      await fetchData();
+    } catch (error) {
+      if (generation !== consultantDialogGeneration.current) return;
+      message.error(getApiErrorMessage(error, '添加咨询师失败'));
+    } finally {
+      if (generation === consultantDialogGeneration.current) {
+        setBindingConsultant(false);
+      }
     }
   };
 
@@ -571,7 +653,15 @@ function MembershipSection({ institutionOptions }: { institutionOptions: Institu
   ];
 
   return (
-    <Card title="机构成员管理" extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => void openCreate()}>新增任职关系</Button>}>
+    <Card
+      title="机构成员管理"
+      extra={(
+        <Space>
+          <Button icon={<PlusOutlined />} onClick={() => void openCreate()}>新增任职关系</Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => void openConsultantBinding()}>添加咨询师</Button>
+        </Space>
+      )}
+    >
       <Space wrap style={{ marginBottom: 16 }}>
         <Select allowClear showSearch optionFilterProp="label" placeholder="全部机构" value={institutionId} onChange={setInstitutionId} style={{ width: 200 }} options={institutionOptions} />
         <Select allowClear placeholder="全部状态" value={status} onChange={setStatus} style={{ width: 130 }} options={relationStatusOptions} />
@@ -601,6 +691,34 @@ function MembershipSection({ institutionOptions }: { institutionOptions: Institu
               options={userOptions}
               disabled={!selectedMemberRole}
               placeholder={selectedMemberRole ? '选择已通过身份审核的用户' : '请先选择任职身份'}
+            />
+          </Form.Item>
+          <Form.Item name="institutionId" label="所属机构" rules={[{ required: true, message: '请选择机构' }]}>
+            <Select showSearch optionFilterProp="label" options={institutionOptions} placeholder="请选择机构" />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal
+        title="添加咨询师"
+        open={consultantOpen}
+        confirmLoading={bindingConsultant}
+        closable={!bindingConsultant}
+        maskClosable={!bindingConsultant}
+        keyboard={!bindingConsultant}
+        cancelButtonProps={{ disabled: bindingConsultant }}
+        okText="确认添加"
+        onOk={() => void submitConsultantBinding()}
+        onCancel={cancelConsultantBinding}
+        destroyOnHidden
+      >
+        <Form form={consultantForm} layout="vertical">
+          <Form.Item name="userId" label="普通用户" rules={[{ required: true, message: '请选择普通用户' }]}>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              options={consultantUserOptions}
+              loading={consultantCandidatesLoading}
+              placeholder="搜索昵称、手机号或用户 ID"
             />
           </Form.Item>
           <Form.Item name="institutionId" label="所属机构" rules={[{ required: true, message: '请选择机构' }]}>
