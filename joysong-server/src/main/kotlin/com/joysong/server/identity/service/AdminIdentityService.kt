@@ -140,6 +140,75 @@ class AdminIdentityService(
         }
     }
 
+    @Transactional
+    fun bindConsultant(userId: String, institutionId: String, confirmerId: String): ConsultantBindingAdminView {
+        val normalizedUserId = userId.trim().also { require(it.isNotEmpty()) { "用户 ID 不能为空" } }
+        val normalizedInstitutionId = institutionId.trim().also { require(it.isNotEmpty()) { "机构不能为空" } }
+        val normalizedConfirmerId = confirmerId.trim().also { require(it.isNotEmpty()) { "确认人不能为空" } }
+
+        require(
+            count(
+                "SELECT COUNT(*) FROM users WHERE id = ? AND deleted_at IS NULL AND role = 'USER'",
+                normalizedUserId
+            ) == 1L
+        ) { "用户不存在、已注销或不是普通用户" }
+        require(
+            count("SELECT COUNT(*) FROM institutions WHERE id = ? AND deleted_at IS NULL", normalizedInstitutionId) == 1L
+        ) { "机构不存在或已删除" }
+
+        jdbcTemplate.update(
+            """
+            INSERT INTO user_roles (user_id, role_code, status, activated_at)
+            VALUES (?, ?, 'ACTIVE', NOW())
+            ON DUPLICATE KEY UPDATE
+                status = 'ACTIVE', activated_at = NOW(),
+                revoked_at = NULL, revoked_by = NULL, revoke_reason = ''
+            """.trimIndent(),
+            normalizedUserId,
+            "CONSULTANT"
+        )
+
+        jdbcTemplate.update(
+            """
+            INSERT INTO institution_memberships
+                (id, user_id, institution_id, member_role, status, confirmed_by, confirmed_at)
+            VALUES (?, ?, ?, ?, 'APPROVED', ?, NOW())
+            ON DUPLICATE KEY UPDATE
+                status = 'APPROVED', confirmed_by = VALUES(confirmed_by), confirmed_at = NOW(), revoked_at = NULL
+            """.trimIndent(),
+            UUID.randomUUID().toString(),
+            normalizedUserId,
+            normalizedInstitutionId,
+            "CONSULTANT",
+            normalizedConfirmerId
+        )
+
+        return jdbcTemplate.query(
+            """
+            SELECT im.id, im.user_id, u.nickname AS user_name, im.institution_id, i.name AS institution_name,
+                   im.member_role, im.status
+            FROM institution_memberships im
+            JOIN users u ON u.id = im.user_id
+            JOIN institutions i ON i.id = im.institution_id
+            WHERE im.user_id = ? AND im.institution_id = ? AND im.member_role = ?
+            """.trimIndent(),
+            { rs, _ ->
+                ConsultantBindingAdminView(
+                    userId = rs.getString("user_id"),
+                    userName = rs.getString("user_name"),
+                    institutionId = rs.getString("institution_id"),
+                    institutionName = rs.getString("institution_name"),
+                    membershipId = rs.getString("id"),
+                    roleCode = rs.getString("member_role"),
+                    status = rs.getString("status")
+                )
+            },
+            normalizedUserId,
+            normalizedInstitutionId,
+            "CONSULTANT"
+        ).firstOrNull() ?: throw IllegalStateException("咨询师绑定关系写入失败")
+    }
+
     fun listRoles(status: String?, roleCode: String?, keyword: String?): List<UserRoleAdminView> {
         val normalizedStatus = status.normalizedFilter(ROLE_STATUSES, "身份状态")
         val normalizedRole = roleCode.normalizedRoleFilter()
@@ -652,6 +721,16 @@ data class InstitutionMembershipAdminView(
     val revokedAt: LocalDateTime?,
     val createdAt: LocalDateTime?,
     val updatedAt: LocalDateTime?
+)
+
+data class ConsultantBindingAdminView(
+    val userId: String,
+    val userName: String,
+    val institutionId: String,
+    val institutionName: String,
+    val membershipId: String,
+    val roleCode: String,
+    val status: String
 )
 
 data class DoctorPracticeAdminView(
