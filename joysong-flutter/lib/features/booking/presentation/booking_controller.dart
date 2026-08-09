@@ -18,8 +18,10 @@ final class BookingController extends ChangeNotifier {
 
   InstitutionProject? _project;
   List<BookingDoctor> _doctors = const [];
+  List<BookingConsultant> _consultants = const [];
   List<UserCoupon> _coupons = const [];
   BookingDoctor? _selectedDoctor;
+  BookingConsultant? _selectedConsultant;
   UserCoupon? _selectedCoupon;
   DiscountQuote? _discountQuote;
   Money _consultationFee = Money.zero;
@@ -36,8 +38,10 @@ final class BookingController extends ChangeNotifier {
 
   InstitutionProject? get project => _project;
   List<BookingDoctor> get doctors => _doctors;
+  List<BookingConsultant> get consultants => _consultants;
   List<UserCoupon> get coupons => _coupons;
   BookingDoctor? get selectedDoctor => _selectedDoctor;
+  BookingConsultant? get selectedConsultant => _selectedConsultant;
   UserCoupon? get selectedCoupon => _selectedCoupon;
   DiscountQuote? get discountQuote => _discountQuote;
   Money get consultationFee => _consultationFee;
@@ -60,6 +64,7 @@ final class BookingController extends ChangeNotifier {
       !_isSubmitting &&
       !_isLoading &&
       _project != null &&
+      _selectedConsultant != null &&
       _selectedDoctor != null &&
       _appointmentTime != null;
 
@@ -81,6 +86,7 @@ final class BookingController extends ChangeNotifier {
       );
       _project = detail;
       _doctors = await _repository.getDoctors(detail.id);
+      _consultants = await _repository.getConsultants(institutionId);
       try {
         _coupons = await _repository.getAvailableCoupons();
       } on Object {
@@ -90,6 +96,11 @@ final class BookingController extends ChangeNotifier {
       }
       _hasLoaded = true;
     } catch (error) {
+      _project = null;
+      _doctors = const [];
+      _consultants = const [];
+      _selectedDoctor = null;
+      _selectedConsultant = null;
       _errorMessage = _messageFor(error, '预约信息加载失败');
       _hasLoaded = true;
     } finally {
@@ -127,6 +138,13 @@ final class BookingController extends ChangeNotifier {
         notifyListeners();
       }
     }
+  }
+
+  Future<void> selectConsultant(BookingConsultant? consultant) async {
+    if (_selectedConsultant?.id == consultant?.id) return;
+    _selectedConsultant = consultant;
+    _errorMessage = null;
+    notifyListeners();
   }
 
   Future<void> selectCoupon(UserCoupon? coupon) async {
@@ -175,9 +193,11 @@ final class BookingController extends ChangeNotifier {
   Future<Order?> submit() async {
     if (_isSubmitting) return null;
     final project = _project;
+    final consultant = _selectedConsultant;
     final doctor = _selectedDoctor;
     final time = _appointmentTime;
     if (project == null) return _fail('预约项目尚未加载');
+    if (consultant == null) return _fail('请选择机构咨询师');
     if (doctor == null) return _fail('请选择医生');
     if (time == null) return _fail('请选择预约时间');
     final beijingNow = DateTime.now().toUtc().add(const Duration(hours: 8));
@@ -194,6 +214,7 @@ final class BookingController extends ChangeNotifier {
         CreateOrderCommand(
           projectId: project.projectId,
           institutionProjectId: project.id,
+          consultantId: consultant.id,
           doctorId: doctor.id,
           appointmentTime: time,
           remark: _remark.trim(),

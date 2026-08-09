@@ -59,9 +59,11 @@ final class Order {
     required this.projectId,
     required this.institutionProjectId,
     required this.institutionId,
+    this.consultantId = '',
     required this.doctorId,
     required this.projectName,
     required this.institutionName,
+    this.consultantName = '',
     required this.doctorName,
     required this.coverImage,
     required this.amount,
@@ -87,9 +89,11 @@ final class Order {
   final String projectId;
   final String institutionProjectId;
   final String institutionId;
+  final String consultantId;
   final String doctorId;
   final String projectName;
   final String institutionName;
+  final String consultantName;
   final String doctorName;
   final String coverImage;
   final Money amount;
@@ -142,9 +146,11 @@ final class Order {
       projectId: requiredString(map, 'projectId', '订单'),
       institutionProjectId: stringValue(map['institutionProjectId']),
       institutionId: stringValue(map['institutionId']),
+      consultantId: stringValue(map['consultantId']),
       doctorId: stringValue(map['doctorId']),
       projectName: stringValue(map['projectName'], fallback: '项目'),
       institutionName: stringValue(map['institutionName']),
+      consultantName: stringValue(map['consultantName']),
       doctorName: stringValue(map['doctorName']),
       coverImage: stringValue(map['coverImage']),
       amount: Money.parse(map['amount'] ?? map['price'], field: '订单金额'),

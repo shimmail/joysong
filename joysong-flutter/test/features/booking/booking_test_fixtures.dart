@@ -27,6 +27,11 @@ BookingDoctor sampleDoctor() => const BookingDoctor(
       isVerified: true,
     );
 
+BookingConsultant sampleConsultant() => const BookingConsultant(
+      id: 'consultant-1',
+      name: '李咨询师',
+    );
+
 UserCoupon sampleCoupon() => UserCoupon(
       id: 11,
       couponId: 22,
@@ -59,6 +64,10 @@ class FakeBookingRepository implements BookingRepository {
   @override
   Future<List<BookingDoctor>> getDoctors(String institutionProjectId) async =>
       [sampleDoctor()];
+
+  @override
+  Future<List<BookingConsultant>> getConsultants(String institutionId) async =>
+      [sampleConsultant()];
 
   @override
   Future<Money> getConsultationFee({

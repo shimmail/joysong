@@ -4,7 +4,11 @@ import com.joysong.server.coupon.service.CouponService
 import com.joysong.server.discover.repository.DoctorProjectRepository
 import com.joysong.server.doctor.entity.DoctorEntity
 import com.joysong.server.doctor.repository.DoctorRepository
+import com.joysong.server.doctor.entity.DoctorInstitutionEntity
+import com.joysong.server.doctor.repository.DoctorInstitutionRepository
 import com.joysong.server.identity.service.ManagementActor
+import com.joysong.server.identity.service.InstitutionConsultant
+import com.joysong.server.identity.service.InstitutionConsultantService
 import com.joysong.server.institution.entity.InstitutionEntity
 import com.joysong.server.institution.entity.InstitutionProjectEntity
 import com.joysong.server.institution.repository.InstitutionProjectRepository
@@ -50,6 +54,8 @@ class OrderServiceTest {
     @MockK private lateinit var entityManager: EntityManager
     @MockK private lateinit var refundRepository: RefundRepository
     @MockK private lateinit var reviewService: ReviewService
+    @MockK private lateinit var institutionConsultantService: InstitutionConsultantService
+    @MockK private lateinit var doctorInstitutionRepository: DoctorInstitutionRepository
     private val institutionProjectDetailResolver = InstitutionProjectDetailResolver()
 
     private lateinit var orderService: OrderService
@@ -92,17 +98,34 @@ class OrderServiceTest {
             entityManager,
             refundRepository,
             institutionProjectDetailResolver,
-            reviewService
+            reviewService,
+            institutionConsultantService = institutionConsultantService,
+            doctorInstitutionRepository = doctorInstitutionRepository
         )
         // 默认 stub：logTransition 不做任何事
         justRun { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) }
+        every { institutionConsultantService.requireApprovedConsultant(any(), any()) } returns
+            InstitutionConsultant("consultant-1", "测试咨询师")
+        every { doctorInstitutionProjectConfigRepository.findByDoctorIdAndInstitutionProjectId(any(), any()) } returns null
+        every { doctorInstitutionRepository.findByDoctorIdOrderByCreatedAtAsc(any()) } returns listOf(
+            DoctorInstitutionEntity(
+                id = "doctor-practice-1",
+                doctorId = "doctor-1",
+                institutionId = "inst-1",
+                status = "APPROVED"
+            )
+        )
     }
 
     // ---- 创建订单 ----
 
     @Test
     fun `创建订单 - 缺少医生时拒绝`() {
-        val request = CreateOrderRequest(projectId = "project-1", institutionProjectId = "inst-proj-1")
+        val request = CreateOrderRequest(
+            projectId = "project-1",
+            institutionProjectId = "inst-proj-1",
+            consultantId = "consultant-1"
+        )
 
         every { projectRepository.findById("project-1") } returns Optional.of(testProject)
         every { institutionProjectRepository.findById("inst-proj-1") } returns Optional.of(testInstitutionProject)
@@ -117,8 +140,104 @@ class OrderServiceTest {
     }
 
     @Test
+    fun `创建订单 - 缺少机构项目时拒绝`() {
+        val error = assertThrows<IllegalArgumentException> {
+            orderService.createOrder(
+                "user-1",
+                CreateOrderRequest(
+                    projectId = "project-1",
+                    doctorId = "doctor-1",
+                    consultantId = "consultant-1"
+                )
+            )
+        }
+
+        assertEquals("订单必须关联机构项目", error.message)
+    }
+
+    @Test
+    fun `创建订单 - 缺少咨询师时拒绝`() {
+        val error = assertThrows<IllegalArgumentException> {
+            orderService.createOrder(
+                "user-1",
+                CreateOrderRequest(
+                    projectId = "project-1",
+                    institutionProjectId = "inst-proj-1",
+                    doctorId = "doctor-1"
+                )
+            )
+        }
+
+        assertEquals("订单必须关联机构咨询师", error.message)
+    }
+
+    @Test
+    fun `创建订单 - 医生执业关系已撤销时拒绝`() {
+        every { projectRepository.findById("project-1") } returns Optional.of(testProject)
+        every { institutionProjectRepository.findById("inst-proj-1") } returns Optional.of(testInstitutionProject)
+        every { institutionRepository.findById("inst-1") } returns Optional.of(testInstitution)
+        every { doctorProjectRepository.existsByDoctorIdAndInstitutionProjectId("doctor-1", "inst-proj-1") } returns true
+        every { doctorInstitutionRepository.findByDoctorIdOrderByCreatedAtAsc("doctor-1") } returns listOf(
+            DoctorInstitutionEntity(
+                id = "doctor-practice-1",
+                doctorId = "doctor-1",
+                institutionId = "inst-1",
+                status = "REVOKED",
+                revokedAt = java.time.LocalDateTime.now()
+            )
+        )
+
+        val error = assertThrows<IllegalArgumentException> {
+            orderService.createOrder(
+                "user-1",
+                CreateOrderRequest(
+                    projectId = "project-1",
+                    institutionProjectId = "inst-proj-1",
+                    doctorId = "doctor-1",
+                    consultantId = "consultant-1"
+                )
+            )
+        }
+
+        assertEquals("所选医生未取得该机构有效执业关系", error.message)
+    }
+
+    @Test
+    fun `创建订单 - 固化机构咨询师和医生快照`() {
+        val request = CreateOrderRequest(
+            projectId = "project-1",
+            institutionProjectId = "inst-proj-1",
+            doctorId = "doctor-1",
+            consultantId = "consultant-1"
+        )
+        every { projectRepository.findById("project-1") } returns Optional.of(testProject)
+        every { institutionProjectRepository.findById("inst-proj-1") } returns Optional.of(testInstitutionProject)
+        every { institutionRepository.findById("inst-1") } returns Optional.of(testInstitution)
+        every { doctorProjectRepository.existsByDoctorIdAndInstitutionProjectId("doctor-1", "inst-proj-1") } returns true
+        every { doctorRepository.findById("doctor-1") } returns Optional.of(DoctorEntity(id = "doctor-1", name = "测试医生"))
+        every { institutionConsultantService.requireApprovedConsultant("inst-1", "consultant-1") } returns
+            InstitutionConsultant("consultant-1", "测试咨询师")
+        every { doctorInstitutionProjectConfigRepository.findByDoctorIdAndInstitutionProjectId("doctor-1", "inst-proj-1") } returns null
+        every { orderRepository.save(any()) } answers { firstArg<OrderEntity>().copy(id = "order-new") }
+
+        val result = orderService.createOrder("user-1", request)
+
+        assertEquals("inst-1", result.institutionId)
+        assertEquals("美丽机构", result.institutionName)
+        assertEquals("consultant-1", result.consultantId)
+        assertEquals("测试咨询师", result.consultantName)
+        assertEquals("doctor-1", result.doctorId)
+        assertEquals("测试医生", result.doctorName)
+    }
+
+    @Test
     fun `创建订单 - 使用机构项目价格，无面诊金无优惠券`() {
-        val request = CreateOrderRequest(projectId = "project-1", institutionProjectId = "inst-proj-1")
+        val request = CreateOrderRequest(
+            projectId = "project-1",
+            institutionProjectId = "inst-proj-1",
+            doctorId = "doctor-1",
+            consultantId = "consultant-1"
+        )
 
         every { projectRepository.findById("project-1") } returns Optional.of(testProject)
         every { institutionProjectRepository.findById("inst-proj-1") } returns Optional.of(testInstitutionProject)
@@ -144,19 +263,14 @@ class OrderServiceTest {
     }
 
     @Test
-    fun `创建订单 - 无机构项目时使用项目参考价`() {
-        val request = CreateOrderRequest(projectId = "project-1")
+    fun `创建订单 - 无机构项目时拒绝`() {
+        val request = CreateOrderRequest(projectId = "project-1", doctorId = "doctor-1", consultantId = "consultant-1")
 
-        every { projectRepository.findById("project-1") } returns Optional.of(testProject)
-        every { orderRepository.save(any()) } answers { firstArg<OrderEntity>().copy(id = "order-2") }
+        val error = assertThrows<IllegalArgumentException> {
+            orderService.createOrder("user-1", request)
+        }
 
-        val result = orderService.createOrder("user-1", request)
-
-        assertEquals(BigDecimal("5000.00"), result.amount)
-        assertEquals(BigDecimal.ZERO, result.paidAmount)
-        assertEquals("", result.institutionId)
-        assertEquals("", result.institutionName)
-        assertEquals("project-cover.jpg", result.coverImage)
+        assertEquals("订单必须关联机构项目", error.message)
     }
 
     @Test
@@ -164,7 +278,8 @@ class OrderServiceTest {
         val request = CreateOrderRequest(
             projectId = "project-1",
             institutionProjectId = "inst-proj-1",
-            doctorId = "doctor-1"
+            doctorId = "doctor-1",
+            consultantId = "consultant-1"
         )
         val config = DoctorInstitutionProjectConfigEntity(
             doctorId = "doctor-1",
@@ -189,7 +304,12 @@ class OrderServiceTest {
 
     @Test
     fun `创建订单 - 项目不存在抛出异常`() {
-        val request = CreateOrderRequest(projectId = "non-exist")
+        val request = CreateOrderRequest(
+            projectId = "non-exist",
+            institutionProjectId = "inst-proj-1",
+            doctorId = "doctor-1",
+            consultantId = "consultant-1"
+        )
         every { projectRepository.findById("non-exist") } returns Optional.empty()
 
         assertThrows<IllegalArgumentException> {
@@ -200,11 +320,18 @@ class OrderServiceTest {
     @Test
     fun `创建订单 - 机构项目封面为空时使用项目封面`() {
         val instProjNoImage = testInstitutionProject.copy(coverImage = "")
-        val request = CreateOrderRequest(projectId = "project-1", institutionProjectId = "inst-proj-1")
+        val request = CreateOrderRequest(
+            projectId = "project-1",
+            institutionProjectId = "inst-proj-1",
+            doctorId = "doctor-1",
+            consultantId = "consultant-1"
+        )
 
         every { projectRepository.findById("project-1") } returns Optional.of(testProject)
         every { institutionProjectRepository.findById("inst-proj-1") } returns Optional.of(instProjNoImage)
         every { institutionRepository.findById("inst-1") } returns Optional.of(testInstitution)
+        every { doctorProjectRepository.existsByDoctorIdAndInstitutionProjectId("doctor-1", "inst-proj-1") } returns true
+        every { doctorRepository.findById("doctor-1") } returns Optional.of(DoctorEntity(id = "doctor-1", name = "测试医生"))
         every { orderRepository.save(any()) } answers { firstArg<OrderEntity>().copy(id = "order-4") }
 
         val result = orderService.createOrder("user-1", request)

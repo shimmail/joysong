@@ -61,14 +61,22 @@ class SettlementService(
             return existing
         }
 
+        check(
+            order.institutionId.isNotBlank() &&
+                order.institutionName.isNotBlank() &&
+                order.institutionProjectId.isNotBlank() &&
+                order.consultantId.isNotBlank() &&
+                order.consultantName.isNotBlank() &&
+                order.doctorId.isNotBlank() &&
+                order.doctorName.isNotBlank()
+        ) { "订单分账信息不完整，缺少机构、机构项目、咨询师或医生快照" }
+
         val platformRate = orderSplitProperties.platformRate
 
-        val config = if (order.doctorId.isNotBlank() && order.institutionProjectId.isNotBlank()) {
-            doctorInstitutionProjectConfigRepository
-                .findByDoctorIdAndInstitutionProjectId(order.doctorId, order.institutionProjectId)
-        } else {
-            null
-        }
+        // The order snapshot is the sole source of party identities. This lookup only
+        // resolves the current rate policy for the frozen doctor/project keys.
+        val config = doctorInstitutionProjectConfigRepository
+            .findByDoctorIdAndInstitutionProjectId(order.doctorId, order.institutionProjectId)
         val institutionRate = config?.institutionRate ?: orderSplitProperties.institutionRate
         val commissionRate = config?.commissionRate ?: BigDecimal.ZERO
 

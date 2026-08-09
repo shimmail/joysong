@@ -20,6 +20,8 @@ void main() {
     expect(order.status, OrderStatus.balancePaid);
     expect(order.showsCompletionCode, isTrue);
     expect(order.amount.toDecimalString(), '1280.5');
+    expect(order.consultantId, 'consultant-1');
+    expect(order.consultantName, '李咨询师');
     expect(unknown.status, OrderStatus.unknown);
   });
 

@@ -6,6 +6,7 @@ import com.joysong.server.discover.dto.DoctorResponse
 import com.joysong.server.discover.dto.toResponse
 import com.joysong.server.doctor.entity.DoctorEntity
 import com.joysong.server.doctor.repository.DoctorRepository
+import com.joysong.server.doctor.repository.DoctorInstitutionRepository
 import com.joysong.server.institution.entity.InstitutionProjectEntity
 import com.joysong.server.institution.repository.InstitutionProjectRepository
 import com.joysong.server.institution.service.InstitutionProjectDetailResolver
@@ -19,6 +20,7 @@ class DiscoverService(
     private val projectRepository: ProjectRepository,
     private val doctorProjectRepository: DoctorProjectRepository,
     private val doctorRepository: DoctorRepository,
+    private val doctorInstitutionRepository: DoctorInstitutionRepository,
     private val institutionProjectDetailResolver: InstitutionProjectDetailResolver
 ) {
 
@@ -57,6 +59,15 @@ class DiscoverService(
         val doctorMap: Map<String, DoctorEntity> = doctorRepository.findAllById(doctorIds)
             .associateBy { it.id }
 
-        return doctorProjects.mapNotNull { dp -> doctorMap[dp.doctorId]?.toResponse() }
+        return doctorProjects.mapNotNull { dp ->
+            val activePractice = doctorInstitutionRepository
+                .findByDoctorIdOrderByCreatedAtAsc(dp.doctorId)
+                .any {
+                    it.institutionId == institutionProject.institutionId &&
+                        it.status == "APPROVED" &&
+                        it.revokedAt == null
+                }
+            if (!activePractice) null else doctorMap[dp.doctorId]?.toResponse()
+        }
     }
 }

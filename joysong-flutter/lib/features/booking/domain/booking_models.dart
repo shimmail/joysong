@@ -89,6 +89,25 @@ final class BookingDoctor {
 }
 
 @immutable
+final class BookingConsultant {
+  const BookingConsultant({
+    required this.id,
+    required this.name,
+  });
+
+  final String id;
+  final String name;
+
+  factory BookingConsultant.fromJson(Object? json) {
+    final map = jsonMap(json, '机构咨询师');
+    return BookingConsultant(
+      id: requiredString(map, 'id', '机构咨询师'),
+      name: stringValue(map['name'], fallback: '机构咨询师'),
+    );
+  }
+}
+
+@immutable
 final class UserCoupon {
   const UserCoupon({
     required this.id,
@@ -157,6 +176,7 @@ final class CreateOrderCommand {
   const CreateOrderCommand({
     required this.projectId,
     required this.institutionProjectId,
+    required this.consultantId,
     required this.doctorId,
     required this.appointmentTime,
     this.quantity = 1,
@@ -166,6 +186,7 @@ final class CreateOrderCommand {
 
   final String projectId;
   final String institutionProjectId;
+  final String consultantId;
   final String doctorId;
   final int quantity;
   final String remark;
@@ -175,6 +196,7 @@ final class CreateOrderCommand {
   Map<String, Object?> toJson() => {
         'projectId': projectId,
         'institutionProjectId': institutionProjectId,
+        'consultantId': consultantId,
         'doctorId': doctorId,
         'quantity': quantity,
         'remark': remark,

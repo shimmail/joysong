@@ -11,6 +11,8 @@ import com.joysong.server.institution.repository.InstitutionProjectRepository
 import com.joysong.server.institution.repository.InstitutionRepository
 import com.joysong.server.institution.service.InstitutionProjectDetailResolver
 import com.joysong.server.identity.service.ManagementActor
+import com.joysong.server.identity.service.InstitutionConsultantService
+import com.joysong.server.doctor.repository.DoctorInstitutionRepository
 import com.joysong.server.order.dto.CreateOrderRequest
 import com.joysong.server.order.dto.OrderResponse
 import com.joysong.server.order.dto.OrderStatusEnum
@@ -56,6 +58,8 @@ class OrderService(
     @Lazy private val refundRepository: RefundRepository,
     private val institutionProjectDetailResolver: InstitutionProjectDetailResolver,
     @Lazy private val reviewService: ReviewService,
+    private val institutionConsultantService: InstitutionConsultantService,
+    private val doctorInstitutionRepository: DoctorInstitutionRepository,
     private val refundExecutionService: RefundExecutionService? = null
 ) {
     private val secureRandom = SecureRandom()
@@ -94,57 +98,56 @@ class OrderService(
     fun createOrder(userId: String, request: CreateOrderRequest): OrderResponse {
         require(request.quantity in 1..99) { "项目数量必须在 1-99 之间" }
         require(request.remark.length <= 500) { "订单备注不能超过 500 字" }
+        require(!request.institutionProjectId.isNullOrBlank()) { "订单必须关联机构项目" }
+        require(request.doctorId.isNotBlank()) { "订单必须关联医生" }
+        require(request.consultantId.isNotBlank()) { "订单必须关联机构咨询师" }
         val project = projectRepository.findById(request.projectId)
             .orElseThrow { IllegalArgumentException("项目不存在: ${request.projectId}") }
 
         val orderNo = generateOrderNo()
         val now = LocalDateTime.now()
 
-        val institutionProject = request.institutionProjectId?.takeIf { it.isNotBlank() }?.let {
-            institutionProjectRepository.findById(it).orElseThrow { IllegalArgumentException("机构项目不存在: $it") }
-        }
-        require(institutionProject == null || institutionProject.isActive) { "机构项目已停用，暂不可预约" }
-        require(institutionProject == null || institutionProject.projectId == project.id) { "机构项目与所选项目不一致" }
-        val effectiveProject = institutionProject?.let { institutionProjectDetailResolver.resolve(it, project) } ?: project
+        val institutionProjectId = request.institutionProjectId.trim()
+        val institutionProject = institutionProjectRepository.findById(institutionProjectId)
+            .orElseThrow { IllegalArgumentException("机构项目不存在: $institutionProjectId") }
+        require(institutionProject.isActive) { "机构项目已停用，暂不可预约" }
+        require(institutionProject.projectId == project.id) { "机构项目与所选项目不一致" }
+        val effectiveProject = institutionProjectDetailResolver.resolve(institutionProject, project)
 
-        val unitPrice: BigDecimal
-        val institutionId: String
-        val institutionName: String
-        val coverImage: String
+        val institution = institutionRepository.findById(institutionProject.institutionId)
+            .orElseThrow { IllegalArgumentException("机构不存在: ${institutionProject.institutionId}") }
+        require(institution.name.isNotBlank()) { "机构名称不能为空" }
 
-        if (institutionProject != null) {
-            unitPrice = institutionProject.price
-            institutionId = institutionProject.institutionId
-            institutionName = institutionRepository.findById(institutionId)
-                .map { it.name }.orElse("")
-            coverImage = effectiveProject.coverImage
-        } else {
-            unitPrice = project.referencePrice
-            institutionId = ""
-            institutionName = ""
-            coverImage = project.coverImage
-        }
+        require(
+            doctorProjectRepository.existsByDoctorIdAndInstitutionProjectId(
+                request.doctorId,
+                institutionProject.id
+            )
+        ) { "所选医生未加入该机构项目" }
+        require(
+            doctorInstitutionRepository.findByDoctorIdOrderByCreatedAtAsc(request.doctorId)
+                .any {
+                    it.institutionId == institution.id &&
+                        it.status == "APPROVED" &&
+                        it.revokedAt == null
+                }
+        ) { "所选医生未取得该机构有效执业关系" }
+        val doctor = doctorRepository.findById(request.doctorId)
+            .orElseThrow { IllegalArgumentException("医生不存在") }
+        require(doctor.name.isNotBlank()) { "医生名称不能为空" }
 
-        val doctorName = if (request.doctorId.isNotBlank()) {
-            require(institutionProject != null) { "选择医生时必须同时选择机构项目" }
-            require(
-                doctorProjectRepository.existsByDoctorIdAndInstitutionProjectId(
-                    request.doctorId,
-                    institutionProject.id
-                )
-            ) { "所选医生未加入该机构项目" }
-            doctorRepository.findById(request.doctorId)
-                .orElseThrow { IllegalArgumentException("医生不存在") }
-                .name
-        } else ""
-        val configuredConsultationFee = if (request.doctorId.isNotBlank() && institutionProject != null) {
-            doctorInstitutionProjectConfigRepository
-                .findByDoctorIdAndInstitutionProjectId(request.doctorId, institutionProject.id)
-                ?.consultationFee
-                ?: DEFAULT_CONSULTATION_FEE
-        } else {
-            DEFAULT_CONSULTATION_FEE
-        }
+        val consultant = institutionConsultantService.requireApprovedConsultant(
+            institution.id,
+            request.consultantId
+        )
+        require(consultant.name.isNotBlank()) { "咨询师名称不能为空" }
+
+        val unitPrice = institutionProject.price
+        val coverImage = effectiveProject.coverImage
+        val configuredConsultationFee = doctorInstitutionProjectConfigRepository
+            .findByDoctorIdAndInstitutionProjectId(request.doctorId, institutionProject.id)
+            ?.consultationFee
+            ?: DEFAULT_CONSULTATION_FEE
 
         val originalTotal = unitPrice.multiply(BigDecimal.valueOf(request.quantity.toLong()))
 
@@ -192,7 +195,7 @@ class OrderService(
             id = orderId,
             userId = userId,
             projectName = effectiveProject.name,
-            institutionName = institutionName,
+            institutionName = institution.name,
             coverImage = coverImage,
             currency = com.joysong.server.common.money.CurrencyCode.DEFAULT_CODE,
             price = discountedPrice,
@@ -206,9 +209,11 @@ class OrderService(
             status = OrderStatusEnum.PENDING_PAYMENT.value,
             createdAt = now,
             projectId = project.id,
-            institutionId = institutionId,
+            institutionId = institution.id,
+            consultantId = consultant.id,
+            consultantName = consultant.name,
             doctorId = request.doctorId,
-            doctorName = doctorName,
+            doctorName = doctor.name,
             orderNo = orderNo,
             consultationFee = consultationFee,
             consultationFeeMinor = Money.toMinor(consultationFee, com.joysong.server.common.money.CurrencyCode.DEFAULT_CODE),
@@ -217,7 +222,7 @@ class OrderService(
             pricingCountry = "CN",
             quantity = request.quantity,
             remark = request.remark,
-            institutionProjectId = institutionProject?.id ?: "",
+            institutionProjectId = institutionProject.id,
             appointmentTime = appointmentTime
         )
 
