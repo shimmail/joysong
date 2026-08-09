@@ -191,7 +191,7 @@ class ChatService(
         val session = sessionRepository.findByIdAndUserIdForUpdate(sessionId, userId)
             ?: throw IllegalArgumentException("会话不存在或无权访问")
         val sequenceNo = session.nextSequenceNo
-        messageRepository.save(
+        val userMessage = messageRepository.save(
             ChatMessageEntity(
                 sessionId = session.id,
                 sequenceNo = sequenceNo * 2 - 1,
@@ -203,12 +203,13 @@ class ChatService(
         val historyMessages = messageRepository.findTop10BySessionIdOrderByCreatedAtDesc(session.id)
             .reversed()
             .takeLast(6)
+            .filterNot { it.id == userMessage.id }
         val generated = generateTurn(
             session = session,
             content = content,
             historyMessages = historyMessages,
             summary = null,
-            appendCurrentUser = false
+            appendCurrentUser = true
         ) { messages, profile ->
             callLLMStreaming(messages, profile, onDelta)
         }
