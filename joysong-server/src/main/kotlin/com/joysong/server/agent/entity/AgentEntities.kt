@@ -41,7 +41,6 @@ class AgentAssessmentEntity(
     @JdbcTypeCode(SqlTypes.JSON) @Column(name = "missing_fields_json", columnDefinition = "json") var missingFieldsJson: String,
     @Column(name = "created_at") var createdAt: LocalDateTime = LocalDateTime.now()
 )
-
 @Entity
 @Table(name = "agent_plans")
 class AgentPlanEntity(
@@ -90,33 +89,5 @@ class AgentSafetyEventEntity(
     @JdbcTypeCode(SqlTypes.JSON) @Column(name = "evidence_json", columnDefinition = "json") var evidenceJson: String,
     @Column(name = "agent_action") var agentAction: String,
     @Column(name = "review_status") var reviewStatus: String = "PENDING",
-    @Column(name = "created_at") var createdAt: LocalDateTime = LocalDateTime.now()
-)
-
-data class AgentToolAuditEntity(
-    @Id var id: String,
-    @Column(name = "user_id") var userId: String,
-    @Column(name = "session_id") var sessionId: String? = null,
-    @Column(name = "tool_name") var toolName: String,
-    @Column(name = "request_summary", columnDefinition = "TEXT") var requestSummary: String,
-    @Column(name = "intent") var intent: String? = null,
-    @Column(name = "database_search") var databaseSearch: Boolean = false,
-    @Column(name = "detected_keywords") var detectedKeywords: String = "",
-    @Column(name = "detected_concerns") var detectedConcerns: String = "",
-    @Column(name = "matched_entity_ids", columnDefinition = "TEXT") var matchedEntityIds: String? = null,
-    @Column(name = "llm_called") var llmCalled: Boolean = false,
-    @Column(name = "model_name") var modelName: String = "",
-    @Column(name = "gateway_url") var gatewayUrl: String = "",
-    @Column(name = "result_status") var resultStatus: String,
-    @Column(name = "duration_ms") var durationMs: Long,
-    @Column(name = "total_duration_ms") var totalDurationMs: Long = 0,
-    @Column(name = "database_duration_ms") var databaseDurationMs: Long = 0,
-    @Column(name = "llm_duration_ms") var llmDurationMs: Long = 0,
-    @Column(name = "http_status") var httpStatus: Int? = null,
-    @Column(name = "input_tokens") var inputTokens: Int? = null,
-    @Column(name = "output_tokens") var outputTokens: Int? = null,
-    @Column(name = "fallback_used") var fallbackUsed: Boolean = false,
-    @Column(name = "answer_length") var answerLength: Int = 0,
-    @Column(name = "error_summary") var errorSummary: String? = null,
     @Column(name = "created_at") var createdAt: LocalDateTime = LocalDateTime.now()
 )
