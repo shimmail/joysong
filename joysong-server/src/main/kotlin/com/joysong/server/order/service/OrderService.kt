@@ -100,7 +100,7 @@ class OrderService(
         require(request.remark.length <= 500) { "订单备注不能超过 500 字" }
         require(!request.institutionProjectId.isNullOrBlank()) { "订单必须关联机构项目" }
         require(request.doctorId.isNotBlank()) { "订单必须关联医生" }
-        require(request.consultantId.isNotBlank()) { "订单必须关联机构咨询师" }
+        require(request.consultantId.isNotBlank()) { "订单必须关联医美顾问" }
         val project = projectRepository.findById(request.projectId)
             .orElseThrow { IllegalArgumentException("项目不存在: ${request.projectId}") }
 
@@ -140,7 +140,7 @@ class OrderService(
             institution.id,
             request.consultantId
         )
-        require(consultant.name.isNotBlank()) { "咨询师名称不能为空" }
+        require(consultant.name.isNotBlank()) { "医美顾问名称不能为空" }
 
         val unitPrice = institutionProject.price
         val coverImage = effectiveProject.coverImage
