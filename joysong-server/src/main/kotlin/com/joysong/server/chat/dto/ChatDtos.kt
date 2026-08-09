@@ -40,5 +40,6 @@ data class ChatTurnResponse(
     val catalogItems: List<AgentCatalogItemResponse> = emptyList(),
     val intent: String = "GENERAL_CHAT",
     val queryTarget: String? = null,
-    val nextAction: String = "NONE"
+    val nextAction: String = "NONE",
+    val traceId: String? = null
 )

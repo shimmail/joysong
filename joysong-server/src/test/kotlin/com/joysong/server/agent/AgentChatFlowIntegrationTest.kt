@@ -1,7 +1,10 @@
 package com.joysong.server.agent
 
-import com.fasterxml.jackson.databind.ObjectMapper
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import com.joysong.server.agent.entity.AgentTurnStatus
+import com.joysong.server.agent.diagnostics.AgentOperationLogger
 import com.joysong.server.agent.orchestration.AgentChatException
 import com.joysong.server.agent.orchestration.BeginTurnResult
 import com.joysong.server.agent.orchestration.TurnLifecycleService
@@ -11,8 +14,6 @@ import com.joysong.server.chat.dto.SendMessageRequest
 import com.joysong.server.chat.repository.ChatMessageRepository
 import com.joysong.server.chat.repository.ChatSessionRepository
 import com.joysong.server.chat.service.ChatService
-import com.joysong.server.institution.entity.InstitutionEntity
-import com.joysong.server.institution.repository.InstitutionRepository
 import com.sun.net.httpserver.HttpServer
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
@@ -20,18 +21,32 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
+import org.hamcrest.Matchers.containsString
+import org.hamcrest.Matchers.not
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
+import org.springframework.http.MediaType
+import org.springframework.http.client.SimpleClientHttpRequestFactory
+import org.springframework.security.test.context.support.WithMockUser
 import org.springframework.http.client.ClientHttpRequestInterceptor
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
-import org.springframework.test.util.ReflectionTestUtils
+import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.web.client.RestTemplate
+import org.slf4j.LoggerFactory
 import org.testcontainers.containers.MySQLContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
@@ -42,17 +57,25 @@ import java.time.LocalDateTime
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 @Tag("mysql-integration")
 @Testcontainers
+@AutoConfigureMockMvc
 @SpringBootTest(
-    webEnvironment = SpringBootTest.WebEnvironment.NONE,
+    webEnvironment = SpringBootTest.WebEnvironment.MOCK,
     properties = ["spring.task.scheduling.enabled=false"]
 )
 class AgentChatFlowIntegrationTest {
 
     @Autowired
     private lateinit var chatService: ChatService
+
+    @Autowired
+    private lateinit var agentOperationLogger: AgentOperationLogger
+
+    @Autowired
+    private lateinit var mockMvc: MockMvc
 
     @Autowired
     private lateinit var messageRepository: ChatMessageRepository
@@ -67,12 +90,6 @@ class AgentChatFlowIntegrationTest {
     private lateinit var turnLifecycleService: TurnLifecycleService
 
     @Autowired
-    private lateinit var institutionRepository: InstitutionRepository
-
-    @Autowired
-    private lateinit var objectMapper: ObjectMapper
-
-    @Autowired
     @Qualifier("llmRestTemplate")
     private lateinit var llmRestTemplate: RestTemplate
 
@@ -83,8 +100,13 @@ class AgentChatFlowIntegrationTest {
     fun installTransactionObserver() {
         fakeLlmCalls.set(0)
         fakeLlmStatus.set(200)
+        fakeLlmDelayMs.set(0)
         fakeLlmRequestBodies.clear()
         transactionStates.clear()
+        llmRestTemplate.requestFactory = SimpleClientHttpRequestFactory().apply {
+            setConnectTimeout(1_000)
+            setReadTimeout(100)
+        }
         transactionInterceptor = ClientHttpRequestInterceptor { request, body, execution ->
             transactionStates += TransactionSynchronizationManager.isActualTransactionActive()
             execution.execute(request, body)
@@ -288,75 +310,248 @@ class AgentChatFlowIntegrationTest {
     }
 
     @Test
-    fun `legacy streaming ignores idempotency replay and keeps each delta call in its original transaction`() {
+    @WithMockUser(username = "user-1")
+    fun `HTTP send returns the synchronous reply and trace id`() {
         val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
-        val firstDeltas = mutableListOf<String>()
-        val secondDeltas = mutableListOf<String>()
-        ReflectionTestUtils.setField(chatService, "streamEnabled", true)
+
+        mockMvc.perform(
+            post("/api/chat/sessions/{id}/messages", session.id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"content":"请介绍一下","idempotencyKey":"http-1"}""")
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.message.content").value("测试回复"))
+            .andExpect(jsonPath("$.data.traceId").isNotEmpty)
+    }
+
+    @Test
+    @WithMockUser(username = "user-1")
+    fun `HTTP send returns 404 for an unknown session`() {
+        mockMvc.perform(
+            post("/api/chat/sessions/{id}/messages", "missing")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"content":"hello","idempotencyKey":"http-missing-1"}""")
+        )
+            .andExpect(status().isNotFound)
+            .andExpect(jsonPath("$.message").value("SESSION_NOT_FOUND"))
+    }
+
+    @Test
+    @WithMockUser(username = "user-1")
+    fun `HTTP send returns 409 when an idempotency key is reused for different content`() {
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+        chatService.sendMessage(session.id, "user-1", SendMessageRequest("first", "http-conflict-1"))
+
+        mockMvc.perform(
+            post("/api/chat/sessions/{id}/messages", session.id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"content":"different","idempotencyKey":"http-conflict-1"}""")
+        )
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.message").value("IDEMPOTENCY_KEY_CONFLICT"))
+    }
+
+    @Test
+    @WithMockUser(username = "user-1")
+    fun `HTTP send returns 409 while another turn is running`() {
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+        val running = turnLifecycleService.beginTurn(session.id, "user-1", "running", "http-running-1")
+            as BeginTurnResult.Started
 
         try {
-            val first = chatService.sendMessageStreaming(
-                session.id,
-                "user-1",
-                SendMessageRequest("stream once", "same-stream-key"),
-                firstDeltas::add
+            mockMvc.perform(
+                post("/api/chat/sessions/{id}/messages", session.id)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"content":"next","idempotencyKey":"http-running-2"}""")
             )
-            val second = chatService.sendMessageStreaming(
-                session.id,
-                "user-1",
-                SendMessageRequest("stream once", "same-stream-key"),
-                secondDeltas::add
-            )
-
-            assertEquals(listOf("测试回复"), firstDeltas)
-            assertEquals(listOf("测试回复"), secondDeltas)
-            assertFalse(first.message.id == second.message.id)
-            assertEquals(2, fakeLlmCalls.get())
-            assertEquals(0, turnCount(session.id))
-            assertEquals(
-                listOf(1L, 2L, 3L, 4L),
-                messageRepository.findBySessionIdOrderBySequenceNoAsc(session.id).map { it.sequenceNo }
-            )
-            assertEquals(listOf(true, true), transactionStates)
+                .andExpect(status().isConflict)
+                .andExpect(jsonPath("$.message").value("TURN_IN_PROGRESS"))
         } finally {
-            ReflectionTestUtils.setField(chatService, "streamEnabled", false)
+            turnLifecycleService.failTurn(running.turnId, "TEST_FIXTURE_FINISHED", 0)
         }
     }
 
     @Test
-    fun `legacy streaming does not inherit the previous topic after switching cities`() {
-        val firstCity = InstitutionEntity(id = "sse-city-jing", name = "SSE 京城机构", city = "京")
-        val secondCity = InstitutionEntity(id = "sse-city-hu", name = "SSE 沪城机构", city = "沪")
-        institutionRepository.saveAll(listOf(firstCity, secondCity))
+    @WithMockUser(username = "user-1")
+    fun `HTTP send maps provider 5xx to a redacted 503 response`() {
         val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
-        ReflectionTestUtils.setField(chatService, "streamEnabled", true)
+        fakeLlmStatus.set(500)
 
-        try {
-            chatService.sendMessageStreaming(
-                session.id,
-                "user-1",
-                SendMessageRequest("京 双眼皮项目", "ignored-first-stream-key"),
-                {}
-            )
-            val switched = chatService.sendMessageStreaming(
-                session.id,
-                "user-1",
-                SendMessageRequest("沪 哪些", "ignored-second-stream-key"),
-                {}
-            )
+        mockMvc.perform(
+            post("/api/chat/sessions/{id}/messages", session.id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"content":"private request","idempotencyKey":"http-provider-1"}""")
+        )
+            .andExpect(status().isServiceUnavailable)
+            .andExpect(jsonPath("$.message").value("AI_PROVIDER_UNAVAILABLE"))
+            .andExpect(jsonPath("$.data.traceId").isNotEmpty)
+            .andExpect(content().string(not(containsString("provider-secret-body"))))
+    }
 
-            assertEquals("GENERAL_CHAT", switched.intent)
-            assertEquals(null, switched.queryTarget)
-            val finalRequest = objectMapper.readTree(fakeLlmRequestBodies.last())
-            val currentUserMessages = finalRequest.path("messages")
-                .filter { it.path("role").asText() == "user" && it.path("content").asText() == "沪 哪些" }
-            assertEquals(1, currentUserMessages.size)
-            assertEquals(2, fakeLlmCalls.get())
-            assertEquals(0, turnCount(session.id))
-        } finally {
-            ReflectionTestUtils.setField(chatService, "streamEnabled", false)
-            institutionRepository.deleteAllById(listOf(firstCity.id, secondCity.id))
+    @Test
+    @WithMockUser(username = "user-1")
+    fun `HTTP send maps provider timeout to a redacted 503 response`() {
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+        fakeLlmDelayMs.set(500)
+
+        mockMvc.perform(
+            post("/api/chat/sessions/{id}/messages", session.id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"content":"private timeout request","idempotencyKey":"http-timeout-1"}""")
+        )
+            .andExpect(status().isServiceUnavailable)
+            .andExpect(jsonPath("$.message").value("AI_PROVIDER_TIMEOUT"))
+            .andExpect(jsonPath("$.data.traceId").isNotEmpty)
+            .andExpect(content().string(not(containsString("provider-secret-body"))))
+    }
+
+    @Test
+    @WithMockUser(username = "user-1")
+    fun `HTTP streaming endpoint is disabled synchronously without calling the model`() {
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+        val callsBefore = fakeLlmCalls.get()
+
+        mockMvc.perform(
+            post("/api/chat/sessions/{id}/messages/stream", session.id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"content":"do not stream","idempotencyKey":"http-stream-1"}""")
+        )
+            .andExpect(status().isNotFound)
+            .andExpect(jsonPath("$.message").value("AGENT_STREAMING_DISABLED"))
+
+        assertEquals(callsBefore, fakeLlmCalls.get())
+        assertEquals(0, messageCount(session.id))
+        assertEquals(0, turnCount(session.id))
+    }
+
+    @Test
+    @WithMockUser(username = "user-1")
+    fun `cross-user history deletion and clearing all hide session existence`() {
+        val other = chatService.createSession("user-2", CreateSessionRequest(persona = "CONSULTANT"))
+
+        listOf(
+            get("/api/chat/sessions/{id}/messages", other.id),
+            delete("/api/chat/sessions/{id}", other.id),
+            delete("/api/chat/sessions/{id}/messages", other.id)
+        ).forEach { request ->
+            mockMvc.perform(request)
+                .andExpect(status().isNotFound)
+                .andExpect(jsonPath("$.message").value("SESSION_NOT_FOUND"))
         }
+
+        assertNotNull(sessionRepository.findByIdAndUserIdAndDeletedAtIsNull(other.id, "user-2"))
+    }
+
+    @Test
+    fun `successful completion logs one redacted terminal operation and replay does not duplicate it`() {
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+        val sensitiveContent = "糖尿病 prompt test-key 13800000000 private@example.com Authorization Bearer raw-token"
+        lateinit var traceId: String
+
+        val logs = captureAgentOperationLogs {
+            val first = chatService.sendMessage(
+                session.id,
+                "user-1",
+                SendMessageRequest(sensitiveContent, "log-success-1")
+            )
+            traceId = requireNotNull(first.traceId)
+            val replay = chatService.sendMessage(
+                session.id,
+                "user-1",
+                SendMessageRequest(sensitiveContent, "log-success-1")
+            )
+            assertEquals(first.message.id, replay.message.id)
+        }
+
+        val completionLogs = logs.filter { it.contains("operation=MODEL_COMPLETION") }
+        assertEquals(1, completionLogs.size)
+        val log = completionLogs.single()
+        val turn = turnRepository.findAll().single { it.sessionId == session.id }
+        assertTrue(log.contains("traceId=$traceId"))
+        assertTrue(log.contains("turnId=${turn.id}"))
+        assertTrue(log.contains("terminalStatus=SUCCEEDED"))
+        assertTrue(log.contains("modelName=test-model"))
+        assertTrue(Regex("""durationMs=\d+""").containsMatchIn(log))
+        assertTrue(Regex("""sessionHash=[0-9a-f]{16}""").containsMatchIn(log))
+        assertNoSensitiveLogData(log, sensitiveContent)
+    }
+
+    @Test
+    fun `provider failure logs one redacted terminal operation with stable error code`() {
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+        val sensitiveContent = "糖尿病 prompt test-key 13800000000 private@example.com Authorization Bearer raw-token"
+        fakeLlmStatus.set(500)
+        lateinit var error: AgentChatException
+
+        val logs = captureAgentOperationLogs {
+            error = assertThrows(AgentChatException::class.java) {
+                chatService.sendMessage(
+                    session.id,
+                    "user-1",
+                    SendMessageRequest(sensitiveContent, "log-failure-1")
+                )
+            }
+        }
+
+        val failureLogs = logs.filter { it.contains("operation=MODEL_COMPLETION") }
+        assertEquals(1, failureLogs.size)
+        val log = failureLogs.single()
+        val turn = turnRepository.findAll().single { it.sessionId == session.id }
+        assertTrue(log.contains("traceId=${error.traceId}"))
+        assertTrue(log.contains("turnId=${turn.id}"))
+        assertTrue(log.contains("terminalStatus=FAILED"))
+        assertTrue(log.contains("errorCode=AI_PROVIDER_UNAVAILABLE"))
+        assertTrue(Regex("""durationMs=\d+""").containsMatchIn(log))
+        assertTrue(Regex("""sessionHash=[0-9a-f]{16}""").containsMatchIn(log))
+        assertNoSensitiveLogData(log, sensitiveContent)
+    }
+
+    @Test
+    fun `operation logger rejects sensitive metadata values`() {
+        val sensitive = "Authorization-Bearer-token-private@example.com-13800000000"
+
+        val logs = captureAgentOperationLogs {
+            agentOperationLogger.completed("trace-1", "turn-1", "session-1", 1, sensitive)
+            agentOperationLogger.failed("trace-2", "turn-2", "session-2", 2, sensitive)
+        }
+        val joined = logs.joinToString("\n")
+
+        assertFalse(joined.contains("Authorization", ignoreCase = true))
+        assertFalse(joined.contains("Bearer", ignoreCase = true))
+        assertFalse(joined.contains("token", ignoreCase = true))
+        assertFalse(joined.contains("private@example.com", ignoreCase = true))
+        assertFalse(joined.contains("13800000000"))
+        assertTrue(joined.contains("modelName=redacted"))
+        assertTrue(joined.contains("errorCode=AGENT_INTERNAL_ERROR"))
+    }
+
+    private fun captureAgentOperationLogs(block: () -> Unit): List<String> {
+        val logger = LoggerFactory.getLogger(agentOperationLoggerName) as Logger
+        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        logger.addAppender(appender)
+        return try {
+            block()
+            appender.list.map { it.formattedMessage }
+        } finally {
+            logger.detachAppender(appender)
+            appender.stop()
+        }
+    }
+
+    private fun assertNoSensitiveLogData(log: String, requestContent: String) {
+        listOf(
+            requestContent,
+            "糖尿病",
+            "prompt",
+            "test-key",
+            "13800000000",
+            "private@example.com",
+            "Authorization",
+            "Bearer",
+            "raw-token",
+            "provider-secret-body",
+            "http://127.0.0.1:${fakeLlm.address.port}/v1"
+        ).forEach { sensitive -> assertFalse(log.contains(sensitive, ignoreCase = true)) }
     }
 
     private fun messageCount(sessionId: String) = messageRepository.countBySessionId(sessionId).toInt()
@@ -364,19 +559,23 @@ class AgentChatFlowIntegrationTest {
     private fun turnCount(sessionId: String) = turnRepository.countBySessionId(sessionId).toInt()
 
     companion object {
+        private const val agentOperationLoggerName =
+            "com.joysong.server.agent.diagnostics.AgentOperationLogger"
         private val fakeLlmCalls = AtomicInteger()
         private val fakeLlmStatus = AtomicInteger(200)
+        private val fakeLlmDelayMs = AtomicLong()
         private val fakeLlmRequestBodies = CopyOnWriteArrayList<String>()
-        private val fakeLlmExecutor = Executors.newSingleThreadExecutor()
+        private val fakeLlmExecutor = Executors.newCachedThreadPool()
         private val fakeLlm = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
             createContext("/v1/chat/completions") { exchange ->
                 val requestBody = exchange.requestBody.use { String(it.readAllBytes(), StandardCharsets.UTF_8) }
                 fakeLlmRequestBodies += requestBody
                 fakeLlmCalls.incrementAndGet()
+                Thread.sleep(fakeLlmDelayMs.get())
                 val status = fakeLlmStatus.get()
                 val streaming = Regex("\"stream\"\\s*:\\s*true").containsMatchIn(requestBody)
                 val response = if (status != 200) {
-                    """{"error":{"message":"test failure"}}""".toByteArray(StandardCharsets.UTF_8)
+                    """{"error":{"message":"provider-secret-body test-key 13800000000 private@example.com"}}""".toByteArray(StandardCharsets.UTF_8)
                 } else if (streaming) {
                     """
                         data: {"id":"chatcmpl-test","choices":[{"delta":{"content":"测试回复"},"finish_reason":null}]}
