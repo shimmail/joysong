@@ -4,7 +4,7 @@
 
 **Goal:** 将真人 `CONSULTANT` 的全端产品名称统一为“医美顾问”，移除管理端专用直绑入口，并让项目分账配置从服务端平台比例实时派生且校验医生剩余比例。
 
-**Architecture:** 后端新增单一 `OrderSplitRatePolicy`，统一提供平台比例、四方比例计算和保存前校验，管理员直存、双方提案与最终结算全部复用。管理端通过只读策略接口获取平台比例，用共享表单组件和基点计算显示医美顾问与医生比例；Flutter、服务端提示和正式业务文档只改产品文案，内部 `CONSULTANT` 与 `consultant*` 契约保持不变。
+**Architecture:** 后端新增单一 `OrderSplitRatePolicy`，统一提供平台比例、四方比例计算和保存前校验，管理员直存、双方提案与最终结算全部复用。管理端通过只读策略接口获取平台比例，用共享表单组件和基点计算显示医美顾问与医生比例；Flutter、服务端提示和正式业务文档只改产品文案，内部 `CONSULTANT` 与 `consultant*` 契约保持不变。开发阶段只运行当前任务的聚焦 RED/GREEN 测试，全部功能完成后再通过单一验证门统一执行三端完整编译、静态检查、全量测试和 MySQL 集成测试。
 
 **Tech Stack:** Kotlin 1.9、Spring Boot 3.2、JUnit 5、MockK、React 19、TypeScript 6、Ant Design 6、Vite 8、Vitest 4、Flutter/Dart、Gradle、npm
 
@@ -24,6 +24,7 @@
 - 不新增钱包、提现、支付渠道或实际打款流程。
 - 不修改 AI 医美助手人格。
 - 不修改 `V1__init_schema.sql`、`B1__init_schema.sql` 或任何已执行 Flyway migration；本功能不新增 migration。
+- Task 1～7 只运行各自列出的聚焦 RED/GREEN 测试，不在中途重复执行完整 Gradle suite、`npm run build`、`npm run lint`、`flutter analyze` 或三端全量测试；这些命令统一由 Task 8 的最终验证门执行。
 
 ---
 
@@ -596,15 +597,13 @@ export function validateSplitRates(
 }
 ```
 
-- [ ] **Step 5: Run test, build, and lint**
+- [ ] **Step 5: Run the focused utility test**
 
 ```powershell
 npm test -- src/utils/splitRates.test.ts
-npm run build
-npm run lint
 ```
 
-Expected: utility tests pass; build and lint finish without new errors.
+Expected: the focused utility test passes. Defer full admin tests, TypeScript/Vite build and lint to Task 8.
 
 - [ ] **Step 6: Commit Task 3**
 
@@ -772,15 +771,13 @@ In both current-config and proposal tables, rename the `commissionRate` column t
 
 In `SettlementsPage.tsx`, change “咨询师佣金” to “医美顾问分账金额” and the doctor amount label to “医生分账金额”.
 
-- [ ] **Step 9: Run admin tests, build, and lint**
+- [ ] **Step 9: Run only the Task 4 focused admin tests**
 
 ```powershell
-npm test
-npm run build
-npm run lint
+npm test -- src/hooks/useOrderSplitPolicy.test.ts src/components/SplitRateFields.test.tsx src/pages/DoctorProjectConfigsPage.test.tsx src/pages/SplitConfigProposalsPage.test.tsx
 ```
 
-Expected: all admin tests pass; no TypeScript or lint errors are introduced.
+Expected: the hook, shared fields and both page tests pass. Defer the complete Vitest suite, TypeScript/Vite build and lint to Task 8.
 
 - [ ] **Step 10: Commit Task 4**
 
@@ -844,16 +841,13 @@ The final extra action area must contain only:
 
 Change the page description to “医生、医美顾问、机构法人和机构客服均需审核后才能切换。”
 
-- [ ] **Step 4: Run focused and full admin verification**
+- [ ] **Step 4: Run only the focused identity-page verification**
 
 ```powershell
 npm test -- src/pages/IdentityManagementPage.test.tsx
-npm test
-npm run build
-npm run lint
 ```
 
-Expected: test passes, build/lint pass, and generic membership behavior remains rendered.
+Expected: the focused test passes and generic membership behavior remains rendered. Defer the complete admin test/build/lint verification to Task 8.
 
 - [ ] **Step 5: Commit Task 5**
 
@@ -1038,7 +1032,7 @@ git commit -m "feat: unify medical beauty consultant labels"
 
 ---
 
-### Task 8: Align active documentation and run complete regression verification
+### Task 8: Align active documentation and run the unified compile/regression gate
 
 **Files:**
 - Modify: `docs/FLUTTER_API_CONTRACT.md`
@@ -1074,17 +1068,17 @@ git status --short
 
 Expected: the bounded deprecated user-facing phrases return no matches. The broad `咨询师` scan may match only explicitly reviewed AI persona text and seed/sample user nicknames or comments; every other match must be changed to “医美顾问” or documented as an intentional non-product identifier before proceeding. Matches inside excluded migrations and historical plans are not edited.
 
-- [ ] **Step 3: Run the complete backend suite including MySQL**
+- [ ] **Step 3: Run the unified backend clean compile, full suite, and MySQL verification**
 
 From `joysong-server`:
 
 ```powershell
-.\gradlew.bat test mysqlIntegrationTest --no-daemon --console=plain
+.\gradlew.bat clean test mysqlIntegrationTest --no-daemon --console=plain
 ```
 
-Expected: unit/integration tests and MySQL Testcontainers tests all pass; Docker test containers stop afterward.
+Expected: Kotlin production/test sources compile from a clean state, unit/integration tests and MySQL Testcontainers tests all pass, and Docker test containers stop afterward. Do not proceed to another platform if this command fails; fix the failure, rerun this exact gate, then continue.
 
-- [ ] **Step 4: Run the complete admin suite**
+- [ ] **Step 4: Run the unified admin test, compile, and lint verification**
 
 From `joysong-admin`:
 
@@ -1094,9 +1088,9 @@ npm run build
 npm run lint
 ```
 
-Expected: Vitest, TypeScript/Vite build and lint pass without new warnings or errors.
+Expected: the complete Vitest suite, TypeScript/Vite production build and lint pass without new warnings or errors. If any command fails, fix it and rerun all three commands before continuing.
 
-- [ ] **Step 5: Run the complete Flutter suite**
+- [ ] **Step 5: Run the unified Flutter format, compile-analysis, and full test verification**
 
 From `joysong-flutter`:
 
@@ -1106,7 +1100,7 @@ flutter analyze
 flutter test
 ```
 
-Expected: format check, static analysis and all Flutter tests pass.
+Expected: format check, static analysis/compilation and all Flutter tests pass. If any command fails, fix it and rerun all three commands before continuing.
 
 - [ ] **Step 6: Perform final code review**
 
