@@ -33,6 +33,42 @@ const mockPost = vi.mocked(api.post);
 const institution = { id: 'inst-1', name: '机构 A' };
 const doctor = { id: 'doctor-1', name: '医生 A', institutionId: 'inst-1' };
 const project = { id: 'project-1', institutionId: 'inst-1', effectiveName: '项目 A', doctors: [doctor] };
+const activeConfig = {
+  id: 'config-1',
+  doctorId: doctor.id,
+  institutionProjectId: project.id,
+  consultationFee: 100,
+  commissionRate: 20,
+  institutionRate: 40,
+  createdAt: '2026-08-01T09:00:00',
+  updatedAt: '2026-08-01T09:00:00',
+  deletedAt: null,
+};
+const historicalProposal = {
+  id: 'proposal-1',
+  configId: activeConfig.id,
+  doctorId: doctor.id,
+  doctorName: doctor.name,
+  institutionProjectId: project.id,
+  institutionId: institution.id,
+  institutionName: institution.name,
+  projectName: project.effectiveName,
+  consultationFee: 120,
+  commissionRate: 20.01,
+  institutionRate: 40,
+  proposerUserId: 'institution-user-1',
+  proposerName: '机构管理员 A',
+  proposerSide: 'INSTITUTION',
+  status: 'REJECTED',
+  doctorConfirmedAt: null,
+  institutionConfirmedAt: '2026-08-08T10:00:00',
+  decidedBy: 'user-1',
+  deciderName: '医生 A',
+  decisionNote: '比例合计无效',
+  submittedAt: '2026-08-08T09:00:00',
+  decidedAt: '2026-08-08T11:00:00',
+  updatedAt: '2026-08-08T11:00:00',
+};
 
 beforeAll(() => {
   window.matchMedia = vi.fn().mockImplementation(query => ({
@@ -46,10 +82,12 @@ beforeEach(() => {
   policyState.current = { policy: { platformRate: 40 }, loading: false, error: undefined };
   mockPost.mockResolvedValue({ data: { code: 200, message: 'OK', data: null } });
   mockGet.mockImplementation((url) => {
-    const data = url === '/admin/institutions' ? [institution]
-      : url === '/admin/doctors' ? [doctor]
-        : url === '/admin/institution-projects' ? [project]
-          : [];
+    const data = url === '/admin/doctor-institution-project-configs' ? [activeConfig]
+      : url === '/admin/doctor-institution-project-config-proposals' ? [historicalProposal]
+        : url === '/admin/institutions' ? [institution]
+          : url === '/admin/doctors' ? [doctor]
+            : url === '/admin/institution-projects' ? [project]
+              : [];
     return Promise.resolve({ data: { code: 200, message: 'OK', data } });
   });
 });
@@ -90,6 +128,27 @@ async function openAndCompleteForm() {
 }
 
 describe('SplitConfigProposalsPage split rates', () => {
+  it('shows consultant and derived doctor rates in current and historical groups', async () => {
+    render(<SplitConfigProposalsPage />);
+
+    const tables = await screen.findAllByRole('table');
+    expect(tables).toHaveLength(2);
+    const [currentTable, historyTable] = tables;
+    expect(within(currentTable).getByRole('columnheader', { name: '医美顾问分账比例' })).toBeInTheDocument();
+    expect(within(historyTable).getByRole('columnheader', { name: '医美顾问分账比例' })).toBeInTheDocument();
+
+    const currentRow = within(currentTable).getByRole('row', { name: /医生 A.*项目 A/ });
+    expect(within(currentRow).getByText('20%')).toBeInTheDocument();
+    expect(within(currentRow).getByText('0%')).toBeInTheDocument();
+
+    const historyRow = within(historyTable).getByRole('row', { name: /机构 A.*医生 A.*项目 A/ });
+    expect(within(historyRow).getByText('20.01%')).toBeInTheDocument();
+    const invalidTag = within(historyRow).getByText('配置无效');
+    expect(invalidTag).toBeInTheDocument();
+    expect({ color: getComputedStyle(invalidTag).color, background: getComputedStyle(invalidTag).backgroundColor })
+      .toEqual({ color: 'var(--ant-red-7)', background: 'var(--ant-red-1)' });
+  });
+
   it('submits only compatible editable rate fields', async () => {
     const user = await openAndCompleteForm();
     await user.click(screen.getByRole('button', { name: '提交提案' }));
@@ -125,7 +184,35 @@ describe('SplitConfigProposalsPage split rates', () => {
 
     const dialog = screen.getByRole('dialog', { name: '发起分账提案' });
     expect(within(dialog).getByRole('alert')).toHaveTextContent('分账策略加载失败');
-    expect(screen.getByRole('button', { name: '提交提案' })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: '提交提案' })).toBeDisabled();
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it('disables confirmation while the policy is loading', async () => {
+    policyState.current = { policy: undefined, loading: true, error: undefined };
+    const user = userEvent.setup();
+    render(<SplitConfigProposalsPage />);
+    await user.click(await screen.findByRole('button', { name: /发起分账提案/ }));
+
+    const dialog = screen.getByRole('dialog', { name: '发起分账提案' });
+    expect(within(dialog).getByRole('button', { name: '提交提案' })).toBeDisabled();
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it('renders unavailable derived rates and disables confirmation when policy is silently absent', async () => {
+    policyState.current = { policy: undefined, loading: false, error: undefined };
+    const user = userEvent.setup();
+    render(<SplitConfigProposalsPage />);
+
+    const [currentTable, historyTable] = await screen.findAllByRole('table');
+    const currentRow = within(currentTable).getByRole('row', { name: /医生 A.*项目 A/ });
+    const historyRow = within(historyTable).getByRole('row', { name: /机构 A.*医生 A.*项目 A/ });
+    expect(within(currentRow).getByText('-')).toBeInTheDocument();
+    expect(within(historyRow).getByText('-')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /发起分账提案/ }));
+    const dialog = screen.getByRole('dialog', { name: '发起分账提案' });
+    expect(within(dialog).getByRole('button', { name: '提交提案' })).toBeDisabled();
     expect(mockPost).not.toHaveBeenCalled();
   });
 });
