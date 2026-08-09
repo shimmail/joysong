@@ -2,7 +2,7 @@
 
 ## 1. 背景与目标
 
-JoySong 当前 AI Agent 已支持多轮上下文、混合意图路由、平台目录检索、安全筛查、方案规划、结构化卡片和 OpenAI-compatible 模型调用。主要问题不是能力缺失，而是编排、事务、模型协议、持久化和观测集中在接近千行的 `ChatService` 中，导致职责耦合、外部调用跨数据库长事务、并发消息可能乱序、故障审计缺失，并增加后续扩展成本。
+JoySong 当前 AI Agent 已支持多轮上下文、混合意图路由、平台目录检索、安全筛查、方案规划、结构化卡片和 OpenAI-compatible 模型调用。主要问题不是能力缺失，而是编排、事务、模型协议、持久化和观测集中在接近千行的 `ChatService` 中，导致职责耦合、外部调用跨数据库长事务、并发消息可能乱序、故障定位困难，并增加后续扩展成本。
 
 本次重构目标是：
 
@@ -68,7 +68,7 @@ AgentTurnOrchestrator
       +-- ModelGateway
       |     +-- OpenAiCompatibleModelGateway
       |     +-- LangChain4jModelGateway (optional)
-      +-- AgentTraceRecorder
+      +-- AgentDiagnostics
 ```
 
 ### 4.1 组件职责
@@ -82,7 +82,7 @@ AgentTurnOrchestrator
 - `AgentToolRegistry`：注册受控白名单工具。首期工具均为只读或生成结构化入口，不允许模型任意调用业务写接口。
 - `PromptAssembler`：按版本组装 persona、政策、数据库证据和响应约束。
 - `ModelGateway`：屏蔽供应商协议、流式实现和结构化响应差异。
-- `AgentTraceRecorder`：以独立短事务记录运行与步骤终态。
+- `AgentDiagnostics`：输出不含对话正文的脱敏结构化日志；不建立独立运行审计表。
 
 ### 4.2 隔离边界
 
@@ -97,22 +97,19 @@ AgentTurnOrchestrator
 
 | 分组 | 表 | 职责 |
 | --- | --- | --- |
-| 会话执行 | `agent_sessions` | 用户会话、上下文、当前序号、软删除 |
+| 会话执行 | `agent_sessions` | 用户会话、上下文、当前序号、滚动摘要、软删除 |
 | 会话执行 | `agent_turns` | 一轮请求的顺序、幂等和执行状态 |
-| 会话执行 | `agent_messages` | 用户与助手消息及结构化响应 |
+| 会话执行 | `agent_messages` | 有限保留的近期用户与助手消息及结构化响应 |
 | 用户决策 | `agent_user_profiles` | 当前有效档案及确认版本 |
 | 用户决策 | `agent_assessments` | 档案快照、规则版本、完整度和风险结论 |
 | 用户决策 | `agent_safety_events` | 标准化风险事件和审核状态 |
 | 方案 | `agent_plans` | 基于评估生成的不可变版本化方案 |
 | 方案 | `agent_plan_items` | 方案阶段、项目引用快照与推荐依据 |
-| 运行观测 | `agent_runs` | 一次工作流执行汇总 |
-| 运行观测 | `agent_run_steps` | 路由、检索、模型和降级步骤明细 |
 
 ### 5.2 关系
 
 ```text
 session 1 -- N turn 1 -- N message
-                    `-- 1 run -- N run_step
 
 profile 1 -- N assessment
 assessment 1 -- N safety_event
@@ -125,8 +122,12 @@ assessment 1 -- N plan 1 -- N plan_item
 - `agent_turns(session_id, idempotency_key)` 唯一。
 - 同一会话最多存在一个 `RUNNING` Turn，由数据库约束配合应用锁或会话版本控制实现。
 - Turn 状态限定为 `PENDING`、`RUNNING`、`SUCCEEDED`、`FAILED`、`CANCELLED`。
+- `agent_turns` 保存最小诊断字段：`trace_id`、`error_code`、`fallback_used`、`model_name`、`prompt_version`、`started_at`、`completed_at` 和 `total_duration_ms`。
 - `agent_messages` 包含 `turn_id`、`sequence_no`、`role`、`content_type` 和 `metadata_json`。
-- 卡片和报告写入 `metadata_json`，使历史消息可恢复结构化展示。
+- 卡片和报告写入 `metadata_json`，在近期消息保留窗口内恢复结构化展示。
+- `agent_sessions.summary_json` 保存滚动结构化摘要，至少包含目标、偏好、约束、已确认实体引用、未解决问题、`last_summarized_sequence` 和 `schema_version`；不得包含健康风险原文。
+- 滚动摘要从已验证的路由槽位、用户明确表述和平台实体引用中确定性合并，不额外调用 LLM 生成自由文本摘要。
+- 每个会话原始消息默认最多保留最近 20 条且最长保留 7 天，任一边界到达即可进入清理；保留数量与期限均可配置。
 - JSON 字段使用 MySQL `JSON` 类型，并由数据库有效性与应用 DTO 双重校验。
 - 金额使用 `DECIMAL` 并保存明确币种。
 - `agent_plans(user_id, version)` 唯一，版本删除后不得复用。
@@ -134,12 +135,14 @@ assessment 1 -- N plan 1 -- N plan_item
 - 状态字段使用 `VARCHAR + CHECK`，Kotlin 使用 enum 映射。
 - Agent 对项目、医生和机构只保存无外键引用及必要快照，避免与其他业务迁移耦合。
 
-### 5.4 观测数据隐私
+### 5.4 数据最小化与诊断
 
-- `agent_runs` 仅保存结构化摘要、版本、终态和指标。
-- `agent_run_steps` 保存步骤类型、顺序、状态、耗时、Token、错误类别和受控实体引用。
-- 不保存完整用户对话、健康信息、完整 Prompt、供应商密钥或原始异常体。
-- 用户和会话标识在日志/指标中使用哈希；授权的业务查询接口使用专用 DTO，不返回 JPA Entity。
+- 不建立 `agent_runs`、`agent_run_steps` 或新的数据库运行审计表；旧 `agent_tool_audits` 随 Agent V2 数据重建移除。
+- 运行步骤仅输出脱敏结构化应用日志，包含 `trace_id`、步骤、终态、耗时、Token 数量和错误类别。
+- 结构化日志不保存用户对话、健康信息、完整 Prompt、供应商密钥或原始异常体。
+- 用户和会话标识在日志中使用哈希；授权的业务查询接口使用专用 DTO，不返回 JPA Entity。
+- 失败生成内容、流式片段和图片临时文件不长期保存。
+- 用户清空会话后立即从产品界面隐藏，并进入 Agent 数据清理流程；正式档案、评估和方案按各自业务生命周期管理。
 
 ### 5.5 索引
 
@@ -147,8 +150,6 @@ assessment 1 -- N plan 1 -- N plan_item
 - Turn 顺序：`agent_turns(session_id, sequence_no)`。
 - 待处理执行：`agent_turns(status, created_at)`。
 - 用户方案：`agent_plans(user_id, version)`。
-- 运行查询：`agent_runs(session_id, created_at)`。
-- 步骤查询：`agent_run_steps(run_id, step_order)`。
 - 风险审核：`agent_safety_events(user_id, review_status, created_at)`。
 
 ## 6. 工作流与事务
@@ -165,7 +166,7 @@ assessment 1 -- N plan 1 -- N plan_item
 7. 组装版本化提示词
 8. 事务外调用回答模型
 9. 短事务保存 ASSISTANT 消息并完成 Turn
-10. 独立短事务完成运行审计
+10. 更新会话滚动摘要并输出脱敏结构化日志
 ```
 
 ### 6.2 状态与并发
@@ -180,6 +181,7 @@ PENDING -> RUNNING -> SUCCEEDED
 - 同一会话存在运行中 Turn 时，新请求等待受控时间或返回稳定的处理中响应，不交叉读取未完成历史。
 - 新客户端传递幂等键；旧客户端未传递时服务端生成，保持接口兼容。
 - 短期记忆只读取已完成 Turn 的消息，并按 Token 预算和最大消息数裁剪；不得把 `RUNNING`、`FAILED` 或 `CANCELLED` Turn 的部分内容加入模型上下文。
+- 短期记忆由 `agent_sessions.summary_json` 与保留窗口内的近期消息共同组成；摘要更新失败不得覆盖上一版有效摘要。
 - 最终 ASSISTANT 消息与 Turn 成功状态在同一个短事务提交。
 - 模型成功但最终落库失败时，Turn 保持可恢复终态信息；恢复流程不得无条件重复调用模型。
 - 流式 Token 不逐条写入 MySQL，完成后一次保存完整消息。
@@ -189,7 +191,7 @@ PENDING -> RUNNING -> SUCCEEDED
 - 使用专用有界执行器，不使用 `CompletableFuture` 公共线程池。
 - 客户端断开后取消流读取和后续处理。
 - 终止事件统一包含 `traceId`、错误码和是否可重试。
-- SSE 错误也必须完成失败 Run 记录。
+- SSE 错误也必须把对应 Turn 更新为失败终态并输出结构化错误日志。
 
 ## 7. 错误处理与降级
 
@@ -199,7 +201,7 @@ PENDING -> RUNNING -> SUCCEEDED
 - 回答模型失败时保留已完成的数据库检索结果，并返回稳定的服务暂不可用状态。
 - 不向用户展示网关 URL、供应商原始异常或代理配置。
 - REST 返回正确 HTTP 状态；业务错误体和 SSE 错误事件共享稳定错误码。
-- Trace 使用独立短事务，主流程失败时仍必须记录终态和错误类别。
+- 主流程失败时仍必须在短事务中更新 Turn 终态和错误类别。
 
 ## 8. 版本与配置
 
@@ -232,7 +234,7 @@ Flutter 使用单一 composition root 和 typed `AgentConfig`。服务端模型�
 使用独立工作树数据库和模拟 LLM 网关，验证：
 
 - 全新空数据库可完成 Flyway 迁移。
-- 完整聊天可创建 Turn、消息、Run 和步骤记录。
+- 完整聊天可创建 Turn、近期消息并更新会话滚动摘要。
 - 模型成功、超时、429 和非法结构化响应。
 - 并发提交不会产生乱序回复。
 - 失败不会留下长事务或永久 `RUNNING` 状态。
@@ -269,7 +271,7 @@ Flutter 使用单一 composition root 和 typed `AgentConfig`。服务端模型�
 1. 建立精简测试基线和 Agent V2 数据模型。
 2. 拆分工作流组件，继续使用原生模型网关。
 3. 启用短事务、Turn 幂等和会话顺序控制。
-4. 替换运行审计，统一服务端和客户端 trace/error contract。
+4. 统一服务端和客户端 trace/error contract，并以 Turn 最小诊断字段替代数据库运行审计。
 5. 统一 Flutter 依赖组装和 Agent 配置。
 6. 执行 LangChain4j 兼容性试验；只有全部精简协议用例通过后才通过配置灰度启用。
 
@@ -283,7 +285,7 @@ Flutter 使用单一 composition root 和 typed `AgentConfig`。服务端模型�
 - LangChain4j 短期记忆仅来自 MySQL 中已完成的本会话消息，且删除与窗口限制行为一致。
 - 重复幂等请求不会重复调用模型或生成重复消息。
 - Agent V2 迁移只操作 `agent_*` 表，并通过隔离空数据库验证。
-- 失败执行均产生脱敏 Run 记录，且不会永久停留在 `RUNNING`。
+- 失败执行均更新 Turn 最小诊断字段并输出脱敏结构化日志，且不会永久停留在 `RUNNING`。
 - 安全规则仍由本地确定性逻辑控制，模型不能降低风险等级。
 - 现有 REST/SSE 客户端主流程保持兼容。
 - LangChain4j 不通过兼容性测试时，原生模型网关仍可独立完成所有验收场景。
