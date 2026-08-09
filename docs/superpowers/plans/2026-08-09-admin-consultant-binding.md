@@ -4,7 +4,7 @@
 
 **Goal:** 管理员从现有普通用户中选择用户和机构，一次性授予 `CONSULTANT` 身份并创建或恢复已通过的机构咨询师绑定。
 
-**Architecture:** 复用 `user_roles` 与 `institution_memberships`。服务端由 `AdminIdentityService` 提供一个 `@Transactional` 原子操作，控制器暴露管理员接口；管理端在机构成员卡片增加独立弹窗。Testcontainers 使用真实 MySQL 8.0.39 和生产 Flyway 迁移验证并发事务及物理回滚，原待审核成员绑定流程保持不变。
+**Architecture:** 复用 `user_roles` 与 `institution_memberships`。服务端由 `AdminIdentityService` 提供一个 `@Transactional` 原子操作，控制器暴露管理员接口；管理端在机构成员卡片增加独立弹窗。Testcontainers 使用真实 MySQL 8.0.39，并通过仅供新环境使用的 `B1` baseline 与后续生产迁移验证并发事务及物理回滚；原待审核成员绑定流程保持不变。
 
 **Tech Stack:** Kotlin 1.9.22、Spring Boot 3.2.2、Spring JDBC/Transactions、Flyway、JUnit 5、Testcontainers MySQL、React/TypeScript。
 
@@ -16,7 +16,8 @@
 - 同一事务内将职业身份设为 `ACTIVE`、机构关系设为 `APPROVED`。
 - 顺序及并发重复请求均须幂等。
 - 仅 `/api/admin/**` 的管理员可调用。
-- MySQL 集成测试必须执行生产 Flyway 迁移，不得复制测试专用表结构。
+- MySQL 集成测试必须执行生产 `B1` baseline migration 与后续 Flyway 迁移，不得复制测试专用表结构。
+- 已在共享测试执行的 `V1__init_schema.sql` 不得修改；新空库使用 `B1`，已有 V1 历史的数据库必须保持 checksum 兼容。
 - 并发测试必须证明两个独立事务和两个不同 MySQL 连接在开始屏障释放前均已建立。
 
 ---
@@ -98,11 +99,12 @@ npm run lint
 **Files:**
 - Modify: `joysong-server/build.gradle.kts`
 - Modify: `joysong-server/src/test/kotlin/com/joysong/server/identity/service/AdminIdentityServiceMySqlIntegrationTest.kt`
+- Create: `joysong-server/src/main/resources/db/migration/B1__init_schema.sql`
 - Delete: `joysong-server/src/test/resources/mysql/admin-identity-binding-schema.sql`
 
 **Interfaces:**
 - Consumes: `AdminIdentityService.bindConsultant(userId, institutionId, confirmerId)` 及其默认 `@Transactional(REQUIRED)` 事务语义。
-- Produces: Gradle `mysqlIntegrationTest` 任务；真实 MySQL 8.0.39 上的 Flyway、并发首次绑定、物理回滚和审计幂等验证。
+- Produces: Gradle `mysqlIntegrationTest` 任务；真实 MySQL 8.0.39 上的 `B1` + V2..V9 Flyway、并发首次绑定、物理回滚和审计幂等验证。
 
 - [ ] **Step 1: 先用断言暴露旧测试结构的缺口**
 
@@ -117,11 +119,11 @@ $env:GRADLE_USER_HOME = "$PWD\.tmp\gradle-user-home-codex"
 .\joysong-server\gradlew.bat -p joysong-server mysqlIntegrationTest --no-daemon --console=plain --rerun-tasks
 ```
 
-Expected: Flyway 断言因 `flyway_schema_history` 不存在而失败，并发断言因当前 worker 尚无活动事务而失败；记录确切失败。
+Expected: 第一轮旧测试结构因 `flyway_schema_history` 不存在而失败，并发断言因当前 worker 尚无活动事务而失败；启用 Flyway 后的第二轮 RED 因原始 V1 在空库删除不存在的 `institutions.district` 而失败。两轮失败都必须记录。
 
 - [ ] **Step 3: 完成最小 GREEN 实现**
 
-删除 `@Sql("/mysql/admin-identity-binding-schema.sql")` 和测试 schema；设置 `spring.flyway.enabled=true`、`spring.flyway.locations=classpath:db/migration`、`spring.flyway.baseline-on-migrate=false`、`spring.flyway.validate-on-migrate=true`。注入 `PlatformTransactionManager`，每个 worker 使用 `TransactionTemplate` 与 `PROPAGATION_REQUIRES_NEW`，在事务回调内等待开始屏障后调用 Spring 代理 `service.bindConsultant(...)`。保留类级 `Propagation.NOT_SUPPORTED`，不要修改生产服务传播级别。
+删除 `@Sql("/mysql/admin-identity-binding-schema.sql")` 和测试 schema；设置 `spring.flyway.enabled=true`、`spring.flyway.locations=classpath:db/migration`、`spring.flyway.baseline-on-migrate=false`、`spring.flyway.validate-on-migrate=true`。新增 `B1__init_schema.sql`，以当前 V1 为基线内容，仅在 `institutions` 初始定义中补入随后会被原脚本删除的 `district VARCHAR(100) DEFAULT ''`；原 V1 必须保持不变。断言版本 1 的历史类型为 `SQL_BASELINE` 且随后 V2..V9 均成功。注入 `PlatformTransactionManager`，每个 worker 使用 `TransactionTemplate` 与 `PROPAGATION_REQUIRES_NEW`，在事务回调内等待开始屏障后调用 Spring 代理 `service.bindConsultant(...)`。保留类级 `Propagation.NOT_SUPPORTED`，不要修改生产服务传播级别。
 
 - [ ] **Step 4: 运行聚焦测试确认 GREEN**
 
@@ -132,7 +134,7 @@ $env:GRADLE_USER_HOME = "$PWD\.tmp\gradle-user-home-codex"
 .\joysong-server\gradlew.bat -p joysong-server mysqlIntegrationTest --no-daemon --console=plain --rerun-tasks
 ```
 
-Expected: Flyway V1..V9、两个独立连接的并发绑定、外键失败物理回滚及重复 APPROVED 审计测试全部通过。
+Expected: Flyway `B1` + V2..V9、两个独立连接的并发绑定、外键失败物理回滚及重复 APPROVED 审计测试全部通过。
 
 - [ ] **Step 5: 完整回归验证**
 
@@ -151,6 +153,6 @@ Expected: 普通测试、MySQL 集成测试、管理端构建和 lint 均退出 
 - [ ] **Step 6: 提交**
 
 ```powershell
-git add joysong-server/build.gradle.kts joysong-server/src/test/kotlin/com/joysong/server/identity/service/AdminIdentityServiceMySqlIntegrationTest.kt docs/superpowers/specs/2026-08-09-admin-consultant-binding-design.md docs/superpowers/plans/2026-08-09-admin-consultant-binding.md
+git add joysong-server/build.gradle.kts joysong-server/src/main/resources/db/migration/B1__init_schema.sql joysong-server/src/test/kotlin/com/joysong/server/identity/service/AdminIdentityServiceMySqlIntegrationTest.kt docs/superpowers/specs/2026-08-09-admin-consultant-binding-design.md docs/superpowers/plans/2026-08-09-admin-consultant-binding.md
 git commit -m "test: verify consultant binding on MySQL"
 ```
