@@ -87,7 +87,7 @@ void main() {
     controller.selectAppointmentTime(DateTime.now().add(const Duration(days: 2)));
 
     expect(await controller.submit(), isNull);
-    expect(controller.errorMessage, '请选择机构咨询师');
+    expect(controller.errorMessage, '请选择医美顾问');
     expect(repository.createCalls, 0);
   });
 }

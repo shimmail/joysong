@@ -2,7 +2,7 @@ import 'dart:typed_data';
 
 enum IdentityRoleType {
   doctor('DOCTOR', '医生'),
-  consultant('CONSULTANT', '咨询师'),
+  consultant('CONSULTANT', '医美顾问'),
   institutionLegalRepresentative(
     'INSTITUTION_LEGAL_REPRESENTATIVE',
     '机构法人',
@@ -51,7 +51,7 @@ enum IdentityDocumentType {
   idCardHandheld('ID_CARD_HANDHELD', '手持身份证照片'),
   doctorQualification('DOCTOR_QUALIFICATION', '医师资格证'),
   doctorPracticeCertificate('DOCTOR_PRACTICE_CERTIFICATE', '医师执业证'),
-  consultantProof('CONSULTANT_PROOF', '咨询师证明');
+  consultantProof('CONSULTANT_PROOF', '医美顾问证明');
 
   const IdentityDocumentType(this.code, this.label);
 
