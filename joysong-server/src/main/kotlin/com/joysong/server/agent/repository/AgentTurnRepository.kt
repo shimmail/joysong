@@ -10,6 +10,7 @@ import jakarta.persistence.LockModeType
 interface AgentTurnRepository : JpaRepository<AgentTurnEntity, String> {
     fun findBySessionIdAndIdempotencyKey(sessionId: String, idempotencyKey: String): AgentTurnEntity?
     fun findBySessionIdAndStatus(sessionId: String, status: AgentTurnStatus): AgentTurnEntity?
+    fun countBySessionId(sessionId: String): Long
     fun deleteBySessionId(sessionId: String)
 
     @Query("select turn.sessionId from AgentTurnEntity turn where turn.id = :turnId")

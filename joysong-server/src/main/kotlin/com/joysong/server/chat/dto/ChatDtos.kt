@@ -11,7 +11,8 @@ data class CreateSessionRequest(
 )
 
 data class SendMessageRequest(
-    val content: String
+    val content: String,
+    val idempotencyKey: String? = null
 )
 
 data class ChatSessionResponse(
