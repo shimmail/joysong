@@ -4,6 +4,7 @@ import com.joysong.server.chat.entity.ChatMessageEntity
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.domain.Pageable
 import java.time.LocalDateTime
+import org.springframework.data.jpa.repository.Query
 
 interface ChatMessageRepository : JpaRepository<ChatMessageEntity, String> {
     fun findBySessionIdOrderByCreatedAtAsc(sessionId: String): List<ChatMessageEntity>
@@ -16,4 +17,12 @@ interface ChatMessageRepository : JpaRepository<ChatMessageEntity, String> {
     fun findTop10BySessionIdOrderByCreatedAtDesc(sessionId: String): List<ChatMessageEntity>
     fun findFirstBySessionIdOrderByCreatedAtDesc(sessionId: String): ChatMessageEntity?
     fun deleteBySessionId(sessionId: String)
+
+    @Query("""
+        select message from ChatMessageEntity message
+        join AgentTurnEntity turn on turn.id = message.turnId
+        where message.sessionId = :sessionId and turn.status = com.joysong.server.agent.entity.AgentTurnStatus.SUCCEEDED
+        order by message.sequenceNo asc
+    """)
+    fun findSucceededTurnMessagesBySessionId(sessionId: String): List<ChatMessageEntity>
 }
