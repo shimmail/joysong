@@ -1,5 +1,6 @@
 package com.joysong.server.agent
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.joysong.server.agent.entity.AgentTurnStatus
 import com.joysong.server.agent.orchestration.AgentChatException
 import com.joysong.server.agent.orchestration.BeginTurnResult
@@ -10,6 +11,8 @@ import com.joysong.server.chat.dto.SendMessageRequest
 import com.joysong.server.chat.repository.ChatMessageRepository
 import com.joysong.server.chat.repository.ChatSessionRepository
 import com.joysong.server.chat.service.ChatService
+import com.joysong.server.institution.entity.InstitutionEntity
+import com.joysong.server.institution.repository.InstitutionRepository
 import com.sun.net.httpserver.HttpServer
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
@@ -64,6 +67,12 @@ class AgentChatFlowIntegrationTest {
     private lateinit var turnLifecycleService: TurnLifecycleService
 
     @Autowired
+    private lateinit var institutionRepository: InstitutionRepository
+
+    @Autowired
+    private lateinit var objectMapper: ObjectMapper
+
+    @Autowired
     @Qualifier("llmRestTemplate")
     private lateinit var llmRestTemplate: RestTemplate
 
@@ -74,6 +83,7 @@ class AgentChatFlowIntegrationTest {
     fun installTransactionObserver() {
         fakeLlmCalls.set(0)
         fakeLlmStatus.set(200)
+        fakeLlmRequestBodies.clear()
         transactionStates.clear()
         transactionInterceptor = ClientHttpRequestInterceptor { request, body, execution ->
             transactionStates += TransactionSynchronizationManager.isActualTransactionActive()
@@ -313,6 +323,42 @@ class AgentChatFlowIntegrationTest {
         }
     }
 
+    @Test
+    fun `legacy streaming does not inherit the previous topic after switching cities`() {
+        val firstCity = InstitutionEntity(id = "sse-city-jing", name = "SSE 京城机构", city = "京")
+        val secondCity = InstitutionEntity(id = "sse-city-hu", name = "SSE 沪城机构", city = "沪")
+        institutionRepository.saveAll(listOf(firstCity, secondCity))
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+        ReflectionTestUtils.setField(chatService, "streamEnabled", true)
+
+        try {
+            chatService.sendMessageStreaming(
+                session.id,
+                "user-1",
+                SendMessageRequest("京 双眼皮项目", "ignored-first-stream-key"),
+                {}
+            )
+            val switched = chatService.sendMessageStreaming(
+                session.id,
+                "user-1",
+                SendMessageRequest("沪 哪些", "ignored-second-stream-key"),
+                {}
+            )
+
+            assertEquals("GENERAL_CHAT", switched.intent)
+            assertEquals(null, switched.queryTarget)
+            val finalRequest = objectMapper.readTree(fakeLlmRequestBodies.last())
+            val currentUserMessages = finalRequest.path("messages")
+                .filter { it.path("role").asText() == "user" && it.path("content").asText() == "沪 哪些" }
+            assertEquals(1, currentUserMessages.size)
+            assertEquals(2, fakeLlmCalls.get())
+            assertEquals(0, turnCount(session.id))
+        } finally {
+            ReflectionTestUtils.setField(chatService, "streamEnabled", false)
+            institutionRepository.deleteAllById(listOf(firstCity.id, secondCity.id))
+        }
+    }
+
     private fun messageCount(sessionId: String) = messageRepository.countBySessionId(sessionId).toInt()
 
     private fun turnCount(sessionId: String) = turnRepository.countBySessionId(sessionId).toInt()
@@ -320,10 +366,12 @@ class AgentChatFlowIntegrationTest {
     companion object {
         private val fakeLlmCalls = AtomicInteger()
         private val fakeLlmStatus = AtomicInteger(200)
+        private val fakeLlmRequestBodies = CopyOnWriteArrayList<String>()
         private val fakeLlmExecutor = Executors.newSingleThreadExecutor()
         private val fakeLlm = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
             createContext("/v1/chat/completions") { exchange ->
                 val requestBody = exchange.requestBody.use { String(it.readAllBytes(), StandardCharsets.UTF_8) }
+                fakeLlmRequestBodies += requestBody
                 fakeLlmCalls.incrementAndGet()
                 val status = fakeLlmStatus.get()
                 val streaming = Regex("\"stream\"\\s*:\\s*true").containsMatchIn(requestBody)
