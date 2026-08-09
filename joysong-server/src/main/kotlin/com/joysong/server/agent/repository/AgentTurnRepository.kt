@@ -12,6 +12,9 @@ interface AgentTurnRepository : JpaRepository<AgentTurnEntity, String> {
     fun findBySessionIdAndStatus(sessionId: String, status: AgentTurnStatus): AgentTurnEntity?
     fun deleteBySessionId(sessionId: String)
 
+    @Query("select turn.sessionId from AgentTurnEntity turn where turn.id = :turnId")
+    fun findSessionIdById(turnId: String): String?
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select turn from AgentTurnEntity turn where turn.id = :turnId")
     fun findByIdForUpdate(turnId: String): AgentTurnEntity?

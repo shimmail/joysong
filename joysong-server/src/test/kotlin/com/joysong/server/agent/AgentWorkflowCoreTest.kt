@@ -26,6 +26,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
@@ -38,6 +39,11 @@ class AgentWorkflowCoreTest {
     private val objectMapper = ObjectMapper()
     private val context = AgentContextBuilder(sessions, messages, turns, objectMapper, 20, 7)
     private val lifecycle = TurnLifecycleService(sessions, messages, turns, context, objectMapper)
+
+    @BeforeEach
+    fun defaultMessageCleanupCandidates() {
+        every { messages.findBySessionIdOrderBySequenceNoAsc(any()) } returns emptyList()
+    }
 
     @Test
     fun `begins one running turn with canonical request hash and user message`() {
@@ -109,7 +115,7 @@ class AgentWorkflowCoreTest {
     fun `marks successful turn complete once with replay metadata`() {
         val running = turn(status = AgentTurnStatus.RUNNING)
         val assistant = slot<ChatMessageEntity>()
-        every { turns.findById(running.id) } returns java.util.Optional.of(running)
+        every { turns.findSessionIdById(running.id) } returns "session-1"
         every { turns.findByIdForUpdate(running.id) } returns running
         every { sessions.findByIdForUpdate("session-1") } returns session()
         every { messages.findByTurnIdAndRole(running.id, "ASSISTANT") } returns null
@@ -126,7 +132,7 @@ class AgentWorkflowCoreTest {
         assertTrue(assistant.captured.metadataJson.contains("CATALOG_QA"))
         assertEquals(AgentTurnStatus.SUCCEEDED, running.status)
         verifyOrder {
-            turns.findById(running.id)
+            turns.findSessionIdById(running.id)
             sessions.findByIdForUpdate("session-1")
             turns.findByIdForUpdate(running.id)
         }
@@ -136,7 +142,7 @@ class AgentWorkflowCoreTest {
     fun `does not duplicate assistant message when completion is repeated`() {
         val succeeded = turn(status = AgentTurnStatus.SUCCEEDED)
         val assistant = ChatMessageEntity(sessionId = "session-1", turnId = succeeded.id, sequenceNo = 2, role = "ASSISTANT", content = "final")
-        every { turns.findById(succeeded.id) } returns java.util.Optional.of(succeeded)
+        every { turns.findSessionIdById(succeeded.id) } returns "session-1"
         every { sessions.findByIdForUpdate("session-1") } returns session()
         every { turns.findByIdForUpdate(succeeded.id) } returns succeeded
         every { messages.findByTurnIdAndRole(succeeded.id, "ASSISTANT") } returns assistant
@@ -209,6 +215,10 @@ class AgentWorkflowCoreTest {
         every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns owned
         every { sessions.save(any()) } answers { firstArg() }
         every { messages.deleteAll(any<Iterable<ChatMessageEntity>>()) } just runs
+        every { messages.findBySessionIdOrderBySequenceNoAsc("session-1") } returns listOf(
+            expired,
+            message(2, "ASSISTANT", "current")
+        )
         every { messages.findSucceededTurnMessagesBySessionId("session-1") } returns listOf(
             expired,
             message(2, "ASSISTANT", "current")
@@ -219,6 +229,22 @@ class AgentWorkflowCoreTest {
         assertEquals(listOf("current"), loaded.messages.map { it.content })
         verify { sessions.save(owned) }
         verify { messages.deleteAll(match { it.toList().contains(expired) }) }
+    }
+
+    @Test
+    fun `physically prunes expired failed turn messages while keeping context succeeded only`() {
+        val owned = session()
+        val failedUser = message(1, "USER", "failed request", LocalDateTime.now().minusDays(8))
+        every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns owned
+        every { sessions.save(any()) } answers { firstArg() }
+        every { messages.findBySessionIdOrderBySequenceNoAsc("session-1") } returns listOf(failedUser)
+        every { messages.findSucceededTurnMessagesBySessionId("session-1") } returns emptyList()
+        every { messages.deleteAll(any<Iterable<ChatMessageEntity>>()) } just runs
+
+        val loaded = context.load("user-1", "session-1", 20, 100)
+
+        assertTrue(loaded.messages.isEmpty())
+        verify { messages.deleteAll(match { it.toList() == listOf(failedUser) }) }
     }
 
     @Test
@@ -289,6 +315,7 @@ class AgentWorkflowCoreTest {
         val old = message(1, "USER", "I am pregnant and have severe allergies", LocalDateTime.now().minusDays(8))
         val newer = message(2, "ASSISTANT", "safe response")
         every { messages.findSucceededTurnMessagesBySessionId("session-1") } returns listOf(old, newer)
+        every { messages.findBySessionIdOrderBySequenceNoAsc("session-1") } returns listOf(old, newer)
         every { sessions.save(any()) } answers { firstArg() }
         every { messages.deleteAll(any<Iterable<ChatMessageEntity>>()) } just runs
 
