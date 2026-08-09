@@ -16,6 +16,7 @@ interface ChatMessageRepository : JpaRepository<ChatMessageEntity, String> {
     ): List<ChatMessageEntity>
     fun findTop10BySessionIdOrderByCreatedAtDesc(sessionId: String): List<ChatMessageEntity>
     fun findFirstBySessionIdOrderByCreatedAtDesc(sessionId: String): ChatMessageEntity?
+    fun findByTurnIdAndRole(turnId: String, role: String): ChatMessageEntity?
     fun deleteBySessionId(sessionId: String)
 
     @Query("""
