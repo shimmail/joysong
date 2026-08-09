@@ -41,7 +41,8 @@
 ## 测试
 
 - 服务端覆盖成功授予身份及绑定、多职业身份共存、撤销绑定恢复、重复绑定幂等、已注销账号/管理员账号/不存在机构拒绝。
-- Testcontainers 使用固定的 MySQL 8.0.39/InnoDB，并通过生产 `classpath:db/migration` 执行 Flyway V1 至当前最新版本；不得维护手写的功能子集 schema。
+- Testcontainers 使用固定的 MySQL 8.0.39/InnoDB，并通过生产 `classpath:db/migration` 对空库执行 `B1` baseline migration 后继续执行 V2 至当前最新版本；不得维护测试专用的功能子集 schema。
+- 已在共享环境执行的 `V1__init_schema.sql` 必须保持字节不变，避免 Flyway checksum 漂移。`B1` 表达 V1 完成后的等价结构，只为新环境提供安全起点；已有迁移历史的环境会忽略它。
 - 并发首次绑定测试必须让两个工作线程分别进入独立事务后再释放开始屏障，并确认使用两个不同的 MySQL 连接；服务方法以默认 `REQUIRED` 加入各自事务。
 - 事务中途失败测试在测试管理事务之外触发外键失败，并在服务事务结束后查询数据库，确认角色与成员关系均未留下记录。
 - 管理端通过生产构建验证类型与调用契约。
