@@ -30,7 +30,7 @@ export function validateSplitRates(
   ];
   for (const [label, rate] of entries) {
     if (rate < 0 || rate > 100) return `${label}须在 0～100 之间`;
-    if (Math.abs(rate - fromBasisPoints(toBasisPoints(rate))) > 1e-9) return `${label}最多保留两位小数`;
+    if (rate !== fromBasisPoints(toBasisPoints(rate))) return `${label}最多保留两位小数`;
   }
   return calculateDoctorRate(platformRate, institutionRate, consultantRate)! < 0
     ? '平台、合作医疗机构和医美顾问分账比例合计不能超过 100%'
