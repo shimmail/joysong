@@ -566,6 +566,7 @@ class _ProjectTag extends StatelessWidget {
           ),
         ),
       );
+}
 
 class _RelatedDoctors extends StatelessWidget {
   const _RelatedDoctors({required this.doctors, this.onTap});
