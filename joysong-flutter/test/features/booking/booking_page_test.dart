@@ -28,12 +28,14 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('光子嫩肤'), findsOneWidget);
+    expect(find.byKey(const Key('booking-consultant-select')), findsOneWidget);
     await tester.scrollUntilVisible(
       find.byKey(const Key('booking-price-disclaimer')),
       260,
       scrollable: find.byType(Scrollable).first,
     );
-    expect(find.textContaining('最终价格和优惠由服务端'), findsOneWidget);
+    expect(find.byKey(const Key('booking-price-disclaimer')), findsOneWidget);
+    await controller.selectConsultant(controller.consultants.single);
     await controller.selectDoctor(controller.doctors.single);
     controller.selectAppointmentTime(
       DateTime.now().add(const Duration(days: 2)),

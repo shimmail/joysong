@@ -21,6 +21,7 @@ import com.joysong.server.discover.service.DiscoverSearchService
 import com.joysong.server.institution.repository.InstitutionProjectRepository
 import com.joysong.server.institution.repository.InstitutionRepository
 import com.joysong.server.institution.service.InstitutionProjectDetailResolver
+import com.joysong.server.identity.service.InstitutionConsultantService
 import com.joysong.server.discover.repository.DoctorProjectRepository
 import com.joysong.server.order.repository.DoctorInstitutionProjectConfigRepository
 import com.joysong.server.project.repository.ProjectRepository
@@ -41,7 +42,8 @@ class DiscoverController(
     private val discoverService: DiscoverService,
     private val discoverSearchService: DiscoverSearchService,
     private val configRepository: DoctorInstitutionProjectConfigRepository,
-    private val institutionProjectDetailResolver: InstitutionProjectDetailResolver
+    private val institutionProjectDetailResolver: InstitutionProjectDetailResolver,
+    private val institutionConsultantService: InstitutionConsultantService
 ) {
     @GetMapping("/filter-options")
     fun getFilterOptions(): BaseResponse<*> {
@@ -220,6 +222,10 @@ class DiscoverController(
     fun getInstitutionDoctors(@PathVariable id: String): BaseResponse<*> {
         return BaseResponse.success(discoverDetailService.getInstitutionDoctors(id))
     }
+
+    @GetMapping("/institutions/{id}/consultants")
+    fun getInstitutionConsultants(@PathVariable id: String): BaseResponse<*> =
+        BaseResponse.success(institutionConsultantService.listApprovedConsultants(id))
 
     /**
      * 查询某机构项目关联的医生列表

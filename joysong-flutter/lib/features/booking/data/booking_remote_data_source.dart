@@ -13,6 +13,8 @@ abstract interface class BookingRemoteDataSource {
 
   Future<List<BookingDoctor>> getDoctors(String institutionProjectId);
 
+  Future<List<BookingConsultant>> getConsultants(String institutionId);
+
   Future<Money> getConsultationFee({
     required String doctorId,
     required String institutionProjectId,
@@ -64,6 +66,18 @@ final class ApiBookingRemoteDataSource implements BookingRemoteDataSource {
       'discover/institution-projects/$institutionProjectId/doctors',
       decodeData: (json) =>
           _list(json, '医生列表').map(BookingDoctor.fromJson).toList(),
+    );
+    return result ?? const [];
+  }
+
+  @override
+  Future<List<BookingConsultant>> getConsultants(
+    String institutionId,
+  ) async {
+    final result = await _apiClient.get<List<BookingConsultant>>(
+      'discover/institutions/$institutionId/consultants',
+      decodeData: (json) =>
+          _list(json, '机构咨询师列表').map(BookingConsultant.fromJson).toList(),
     );
     return result ?? const [];
   }

@@ -27,6 +27,10 @@ final class BookingRepositoryImpl implements BookingRepository {
       _remote.getDoctors(institutionProjectId);
 
   @override
+  Future<List<BookingConsultant>> getConsultants(String institutionId) =>
+      _remote.getConsultants(institutionId);
+
+  @override
   Future<Money> getConsultationFee({
     required String doctorId,
     required String institutionProjectId,

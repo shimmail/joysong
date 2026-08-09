@@ -28,7 +28,7 @@ class CurrencyContractTest {
             OrderEntity(id = "o-1", userId = "u-1", projectName = "p", price = BigDecimal.TEN, status = "PENDING")
         )
 
-        val json = jacksonObjectMapper().writeValueAsString(response)
+        val json = jacksonObjectMapper().findAndRegisterModules().writeValueAsString(response)
 
         assertTrue(json.contains("\"currency\":\"USD\""))
     }

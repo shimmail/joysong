@@ -946,21 +946,14 @@ final class _DiaryHeader extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 18),
-        _TranslatedDiaryText(
+        _TranslatedDiarySection(
           controller: controller,
-          contentId: 'translation:diary-title:${diary.id}',
-          text: diary.title,
+          titleContentId: 'translation:diary-title:${diary.id}',
+          title: diary.title,
+          contentContentId: 'translation:diary-content:${diary.id}',
+          content: diary.content,
           targetLanguage: english ? 'en' : 'zh-CN',
-          contentType: 'diary_title',
-          style: theme.textTheme.headlineSmall,
-        ),
-        const SizedBox(height: 10),
-        _TranslatedDiaryText(
-          controller: controller,
-          contentId: 'translation:diary-content:${diary.id}',
-          text: diary.content,
-          targetLanguage: english ? 'en' : 'zh-CN',
-          contentType: 'diary_content',
+          titleStyle: theme.textTheme.headlineSmall,
         ),
         if (diary.tags.isNotEmpty) ...[
           const SizedBox(height: 12),
@@ -977,56 +970,84 @@ final class _DiaryHeader extends StatelessWidget {
   }
 }
 
-final class _TranslatedDiaryText extends StatelessWidget {
-  const _TranslatedDiaryText({
+final class _TranslatedDiarySection extends StatelessWidget {
+  const _TranslatedDiarySection({
     required this.controller,
-    required this.contentId,
-    required this.text,
+    required this.titleContentId,
+    required this.title,
+    required this.contentContentId,
+    required this.content,
     required this.targetLanguage,
-    required this.contentType,
-    this.style,
+    this.titleStyle,
   });
 
   final SocialController controller;
-  final String contentId;
-  final String text;
+  final String titleContentId;
+  final String title;
+  final String contentContentId;
+  final String content;
   final String targetLanguage;
-  final String contentType;
-  final TextStyle? style;
+  final TextStyle? titleStyle;
 
   @override
   Widget build(BuildContext context) {
-    final translation = controller.translationFor(contentId);
-    final showing = controller.isShowingTranslation(contentId);
-    final busy = controller.isBusy('translation:$contentType:$contentId');
-    final displayed = showing && translation != null
-        ? translation.translatedText
-        : text;
+    final titleTranslation = controller.translationFor(titleContentId);
+    final contentTranslation = controller.translationFor(contentContentId);
+    final showingTitle = controller.isShowingTranslation(titleContentId);
+    final showingContent = controller.isShowingTranslation(contentContentId);
+    final busy = controller.isBusy('translation:diary:$titleContentId') ||
+        controller.isBusy('translation:diary:$contentContentId');
+    final hasTranslation = titleTranslation != null || contentTranslation != null;
+    final showing = showingTitle || showingContent;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SelectableText(displayed, style: style),
-        if (text.trim().isNotEmpty)
+        SelectableText(
+          showingTitle && titleTranslation != null
+              ? titleTranslation.translatedText
+              : title,
+          style: titleStyle,
+        ),
+        const SizedBox(height: 10),
+        SelectableText(
+          showingContent && contentTranslation != null
+              ? contentTranslation.translatedText
+              : content,
+        ),
+        if (title.trim().isNotEmpty || content.trim().isNotEmpty)
           Align(
-            alignment: Alignment.centerRight,
-            child: TextButton.icon(
-              key: Key('$contentId-button'),
+            alignment: Alignment.centerLeft,
+            child: IconButton(
+              key: Key('$titleContentId-button'),
+              tooltip: hasTranslation && showing ? '显示原文' : '翻译',
               onPressed: busy
                   ? null
                   : () async {
-                      if (translation != null) {
-                        controller.toggleTranslationVisibility(contentId);
+                      if (hasTranslation) {
+                        controller.toggleTranslationVisibility(titleContentId);
+                        controller.toggleTranslationVisibility(contentContentId);
                         return;
                       }
-                      final result = await controller.translateContent(
-                        contentId: contentId,
-                        text: text,
-                        targetLanguage: targetLanguage,
-                        contentType: contentType,
-                      );
-                      if (!context.mounted || result.succeeded) return;
+                      final requests = <Future<SocialActionResult<ContentTranslation>>>[
+                        if (title.trim().isNotEmpty)
+                          controller.translateContent(
+                            contentId: titleContentId,
+                            text: title,
+                            targetLanguage: targetLanguage,
+                            contentType: 'diary',
+                          ),
+                        if (content.trim().isNotEmpty)
+                          controller.translateContent(
+                            contentId: contentContentId,
+                            text: content,
+                            targetLanguage: targetLanguage,
+                            contentType: 'diary',
+                          ),
+                      ];
+                      final results = await Future.wait(requests);
+                      if (!context.mounted || results.every((r) => r.succeeded)) return;
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(result.message ?? '翻译失败，请稍后重试')),
+                        SnackBar(content: Text(results.firstWhere((r) => !r.succeeded).message ?? '翻译失败，请稍后重试')),
                       );
                     },
               icon: busy
@@ -1036,13 +1057,6 @@ final class _TranslatedDiaryText extends StatelessWidget {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.translate, size: 17),
-              label: Text(
-                busy
-                    ? '翻译中…'
-                    : translation != null && showing
-                        ? '显示原文'
-                        : '翻译',
-              ),
             ),
           ),
       ],

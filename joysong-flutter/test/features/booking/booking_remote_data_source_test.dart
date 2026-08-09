@@ -7,6 +7,19 @@ import 'package:joysong_flutter/features/orders/domain/money.dart';
 import '../orders/order_test_fixtures.dart';
 
 void main() {
+  test('loads institution consultants from discover contract', () async {
+    final client = _FakeApiClient()
+      ..responseData = [
+        {'id': 'consultant-1', 'name': '李咨询师'},
+      ];
+    final dataSource = ApiBookingRemoteDataSource(client);
+
+    final consultants = await dataSource.getConsultants('institution-1');
+
+    expect(consultants.single.id, 'consultant-1');
+    expect(client.lastPath, 'discover/institutions/institution-1/consultants');
+  });
+
   test('loads doctor fee from discover contract', () async {
     final client = _FakeApiClient()
       ..responseData = {'consultationFee': '88.50'};
@@ -34,6 +47,7 @@ void main() {
       CreateOrderCommand(
         projectId: 'project-1',
         institutionProjectId: 'ip-1',
+        consultantId: 'consultant-1',
         doctorId: 'doctor-1',
         userCouponId: 11,
         appointmentTime: appointment,
@@ -44,6 +58,7 @@ void main() {
     final body = client.lastBody! as Map<String, Object?>;
     expect(body['appointmentTime'], '2026-08-08T14:30:00');
     expect(body['userCouponId'], 11);
+    expect(body['consultantId'], 'consultant-1');
     expect(body.containsKey('price'), isFalse);
     expect(body.containsKey('amount'), isFalse);
     expect(body.containsKey('consultationFee'), isFalse);

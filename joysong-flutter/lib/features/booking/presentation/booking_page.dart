@@ -140,6 +140,48 @@ class _BookingPageState extends State<BookingPage> {
           _InlineMessage(message: controller.errorMessage!),
         _ProjectCard(project: project),
         const SizedBox(height: 20),
+        _SectionTitle(context.localized('选择机构咨询师', 'Select an institution consultant')),
+        const SizedBox(height: 8),
+        if (controller.consultants.isEmpty)
+          _SoftPanel(
+            child: Text(
+              context.localized(
+                '该机构暂时没有可预约咨询师',
+                'No institution consultants are currently available',
+              ),
+            ),
+          )
+        else
+          DropdownButtonFormField<BookingConsultant>(
+            key: const Key('booking-consultant-select'),
+            initialValue: controller.selectedConsultant,
+            isExpanded: true,
+            borderRadius: BorderRadius.circular(12),
+            menuMaxHeight: 320,
+            dropdownColor: Theme.of(context).colorScheme.surface,
+            decoration: InputDecoration(
+              prefixIcon: const Icon(Icons.support_agent_outlined),
+              hintText: context.localized(
+                '请选择机构咨询师',
+                'Select an institution consultant',
+              ),
+            ),
+            items: controller.consultants
+                .map(
+                  (consultant) => DropdownMenuItem(
+                    value: consultant,
+                    child: Text(
+                      consultant.name,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                )
+                .toList(),
+            onChanged: controller.isSubmitting
+                ? null
+                : (consultant) => controller.selectConsultant(consultant),
+          ),
+        const SizedBox(height: 20),
         _SectionTitle(context.localized('选择医生', 'Select a doctor')),
         const SizedBox(height: 8),
         if (controller.doctors.isEmpty)

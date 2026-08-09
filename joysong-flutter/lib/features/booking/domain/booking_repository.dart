@@ -12,6 +12,8 @@ abstract interface class BookingRepository {
 
   Future<List<BookingDoctor>> getDoctors(String institutionProjectId);
 
+  Future<List<BookingConsultant>> getConsultants(String institutionId);
+
   Future<Money> getConsultationFee({
     required String doctorId,
     required String institutionProjectId,
