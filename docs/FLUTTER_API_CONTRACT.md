@@ -128,7 +128,7 @@ class ApiEnvelope<T> {
 
 `users.role` 只表示平台权限：
 
-- `USER`：所有注册用户，包括医生、顾问和机构法人
+- `USER`：所有注册用户，包括医生、医美顾问和机构法人
 - `ADMIN`：平台管理员
 
 职业身份在 `user_roles` 中独立维护：
@@ -205,7 +205,7 @@ Flutter 不能依据本地缓存角色自行授权。每次进入专业管理中
 
 - 机构法人：`phone`、`institutionName`、`businessLicenseNo`、`region`、`address`；营业执照、身份证正反面。
 - 医生：`hospitalName`、`department`、`title`、`qualificationNo`、`practiceNo`、`reason`；身份证正反面及手持照、医师资格证、医师执业证。
-- 咨询师：`phone`、`experience`、`proofDescription`、`reason`；身份证正反面、咨询师证明。
+- 医美顾问：`phone`、`experience`、`proofDescription`、`reason`；身份证正反面、医美顾问证明。
 
 同一身份只能存在一个待审核申请。审核通过后才创建职业能力；提交过的文件不能由用户删除。
 
