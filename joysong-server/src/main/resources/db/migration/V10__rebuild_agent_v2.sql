@@ -66,8 +66,7 @@ CREATE TABLE agent_messages (
     CONSTRAINT ck_agent_message_content_type CHECK (content_type IN ('TEXT','CATALOG','REPORT')),
     CONSTRAINT fk_agent_message_session FOREIGN KEY (session_id) REFERENCES agent_sessions(id),
     CONSTRAINT fk_agent_message_turn FOREIGN KEY (turn_id) REFERENCES agent_turns(id),
-    CONSTRAINT uk_agent_message_sequence UNIQUE (session_id, sequence_no),
-    INDEX idx_agent_message_session_sequence (session_id, sequence_no)
+    CONSTRAINT uk_agent_message_sequence UNIQUE (session_id, sequence_no)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE agent_user_profiles (
