@@ -33,7 +33,7 @@ class SettlementEntity(
     @Column(name = "institution_amount", nullable = false, precision = 19, scale = 4)
     var institutionAmount: BigDecimal = BigDecimal.ZERO,
 
-    /** 咨询师佣金 */
+    /** 医美顾问分账 */
     @Column(name = "consultant_amount", nullable = false, precision = 19, scale = 4)
     var consultantAmount: BigDecimal = BigDecimal.ZERO,
 
@@ -63,7 +63,7 @@ class SettlementEntity(
     @Column(name = "institution_rate", nullable = false, precision = 5, scale = 2)
     var institutionRate: BigDecimal = BigDecimal.ZERO,
 
-    /** 咨询师佣金比例（百分比） */
+    /** 医美顾问分账比例（百分比） */
     @Column(name = "consultant_rate", nullable = false, precision = 5, scale = 2)
     var consultantRate: BigDecimal = BigDecimal.ZERO,
 

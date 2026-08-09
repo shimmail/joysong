@@ -15,7 +15,8 @@ private val SPLIT_PROPOSAL_SIDES = setOf("DOCTOR", "INSTITUTION")
 @Service
 class SplitConfigProposalService(
     private val jdbcTemplate: JdbcTemplate,
-    private val managementAccessService: ManagementAccessService
+    private val managementAccessService: ManagementAccessService,
+    private val splitRatePolicy: OrderSplitRatePolicy
 ) {
     fun list(actor: ManagementActor): List<SplitConfigProposalView> {
         val rows = jdbcTemplate.query(
@@ -209,11 +210,10 @@ class SplitConfigProposalService(
 
     private fun validateRates(request: SplitConfigProposalRequest) {
         require(request.consultationFee >= BigDecimal.ZERO) { "面诊金不能为负数" }
-        require(request.commissionRate in BigDecimal.ZERO..BigDecimal("100")) { "医生佣金比例须在 0~100 之间" }
-        require(request.institutionRate in BigDecimal.ZERO..BigDecimal("100")) { "机构分成比例须在 0~100 之间" }
-        require(request.commissionRate + request.institutionRate <= BigDecimal("100")) {
-            "医生佣金与机构分成比例合计不能超过 100%"
-        }
+        splitRatePolicy.resolve(
+            institutionRate = request.institutionRate,
+            consultantRate = request.commissionRate
+        )
     }
 
     private fun resolveSide(actor: ManagementActor, doctorId: String, institutionId: String, requested: String?): String {

@@ -5,6 +5,7 @@ import com.joysong.server.order.dto.OrderStatusEnum
 import com.joysong.server.order.entity.DoctorInstitutionProjectConfigEntity
 import com.joysong.server.order.repository.DoctorInstitutionProjectConfigRepository
 import com.joysong.server.order.service.OrderService
+import com.joysong.server.order.service.OrderSplitRatePolicy
 import com.joysong.server.order.service.OrderStatusLogService
 import com.joysong.server.settlement.repository.SettlementRepository
 import com.joysong.server.identity.service.ManagementAccessService
@@ -31,7 +32,8 @@ class AdminOrderController(
     private val orderStatusLogService: OrderStatusLogService,
     private val settlementRepository: SettlementRepository,
     private val doctorInstitutionProjectConfigRepository: DoctorInstitutionProjectConfigRepository,
-    private val managementAccessService: ManagementAccessService
+    private val managementAccessService: ManagementAccessService,
+    private val splitRatePolicy: OrderSplitRatePolicy
 ) {
 
     companion object {
@@ -150,7 +152,7 @@ class AdminOrderController(
         })
     }
 
-    /** 创建或更新医生-机构项目配置（面诊金 + 佣金比例 + 机构分成比例） */
+    /** 创建或更新医生-机构项目配置（面诊金 + 医美顾问分账比例 + 机构分成比例） */
     @PostMapping("/doctor-institution-project-configs")
     fun upsertConfig(authentication: Authentication, @RequestBody request: UpsertConfigRequest): BaseResponse<*> {
         val actor = managementAccessService.actor(authentication)
@@ -160,15 +162,10 @@ class AdminOrderController(
         require(request.doctorId.isNotBlank()) { "医生ID不能为空" }
         require(request.institutionProjectId.isNotBlank()) { "机构项目ID不能为空" }
         require(request.consultationFee >= BigDecimal.ZERO) { "面诊金不能为负数" }
-        require(request.commissionRate >= BigDecimal.ZERO && request.commissionRate <= BigDecimal("100")) {
-            "佣金比例须在 0~100 之间"
-        }
-        require(request.institutionRate >= BigDecimal.ZERO && request.institutionRate <= BigDecimal("100")) {
-            "机构分成比例须在 0~100 之间"
-        }
-        require(request.commissionRate + request.institutionRate <= BigDecimal("100")) {
-            "医生佣金与机构分成比例合计不能超过 100%"
-        }
+        splitRatePolicy.resolve(
+            institutionRate = request.institutionRate,
+            consultantRate = request.commissionRate
+        )
         managementAccessService.requireSplitConfig(actor, request.doctorId, request.institutionProjectId)
 
         val existing = doctorInstitutionProjectConfigRepository
