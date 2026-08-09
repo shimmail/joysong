@@ -137,6 +137,7 @@ class SplitConfigProposalService(
         }
         val confirmed = lockedTarget(id) ?: error("分账提案不存在")
         if (confirmed.doctorConfirmedAt != null && confirmed.institutionConfirmedAt != null) {
+            splitRatePolicy.resolve(confirmed.institutionRate, confirmed.commissionRate)
             val configId = applyProposal(confirmed)
             jdbcTemplate.update(
                 "UPDATE split_config_proposals SET config_id = ?, status = 'APPROVED', decided_by = ?, decided_at = NOW() WHERE id = ? AND status = 'PENDING'",
