@@ -18,6 +18,10 @@ describe('split rate calculations', () => {
     );
   });
 
+  it('rejects rates with precision beyond two decimal places', () => {
+    expect(validateSplitRates(1.0000000001, 40, 10)).toBe('平台分账比例最多保留两位小数');
+  });
+
   it('fails closed when the platform policy is absent', () => {
     expect(calculateDoctorRate(undefined, 40, 10)).toBeNull();
     expect(validateSplitRates(undefined, 40, 10)).toBe('分账策略尚未加载');
