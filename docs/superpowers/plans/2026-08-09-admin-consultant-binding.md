@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- 不创建账号、不修改密码、不增加表或迁移。
+- 不创建账号、不修改密码、不新增业务表；仅允许新增供新空库使用的 `B1` baseline migration，且不得修改现有 V1 checksum。
 - 用户必须存在、未注销且 `users.role = 'USER'`。
 - 保留用户其他职业身份，只新增或恢复 `CONSULTANT`。
 - 同一事务内将职业身份设为 `ACTIVE`、机构关系设为 `APPROVED`。
@@ -31,7 +31,7 @@
 
 **Interfaces:**
 - `AdminIdentityService.bindConsultant(userId: String, institutionId: String, confirmerId: String): ConsultantBindingAdminView`
-- `POST /api/admin/identity/consultants`，请求 `{ "userId": "...", "institutionId": "..." }`
+- `POST /api/admin/identity/consultants`，请求 `{ "userId": "...", "institutionId": "..." }`，成功结果继续使用现有 `BaseResponse` envelope。
 
 ### TDD 与行为要求
 
@@ -53,6 +53,7 @@
 4. 为关系预生成 UUID，并对 `institution_memberships(user_id, institution_id, member_role)` 执行单条 `INSERT ... ON DUPLICATE KEY UPDATE`：新记录直接为 `APPROVED`；已有记录恢复为 `APPROVED`，写入 `confirmed_by`、`confirmed_at = NOW()` 并清空 `revoked_at`。不得使用“先 SELECT 不存在再 INSERT”的竞态流程。
 5. upsert 后按唯一键查询最终关系并返回；并发情况下如果数据库报告可重试的死锁，则由测试验证当前 Spring/MySQL 行为，必要时增加有界重试，但不得吞掉其他数据库错误。
 6. 返回 `ConsultantBindingAdminView(userId, userName, institutionId, institutionName, membershipId, roleCode = "CONSULTANT", status = "APPROVED")`。
+7. 不得复用待审核流程的 `createMembership`/`approveMembership` 两步调用；直绑必须由本方法在一个事务中完成。
 
 控制器新增 `BindConsultantRequest` 并通过现有 `authentication.adminId()` 传入确认人。
 
@@ -70,13 +71,17 @@ $env:GRADLE_USER_HOME = $gradleHome
 
 **File:** `joysong-admin/src/pages/IdentityManagementPage.tsx`
 
+**Interfaces:**
+- 候选接口 `/admin/users` 至少消费 `id`、`nickname`、`phone`、`role`、`deletedAt` 字段。
+- 绑定接口 `/admin/identity/consultants` 消费 `{ userId: string, institutionId: string }`。
+
 在 `MembershipSection` 中：
 
 1. 增加普通用户候选状态、弹窗状态、提交状态及 `{ userId, institutionId }` 表单。
 2. 打开弹窗时加载 `/admin/users`，仅保留 `role === 'USER' && !deletedAt`。
 3. 用户选项展示昵称、手机号和 ID，支持搜索。
 4. 提交 `/admin/identity/consultants`，成功后关闭弹窗并调用现有 `fetchData()`。
-5. 保留“新增任职关系”，旁边增加“添加咨询师”主按钮。
+5. 保留“新增任职关系”，旁边增加带 `PlusOutlined` 的“添加咨询师”主按钮。
 6. 使用现有错误提示模式、`confirmLoading` 与 `destroyOnHidden`。
 
 先增加能导致 TypeScript 合同检查失败的调用/测试点并确认失败，再完成 UI。运行：
