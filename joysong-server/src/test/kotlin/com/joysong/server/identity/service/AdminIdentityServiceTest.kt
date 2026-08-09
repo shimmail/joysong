@@ -21,6 +21,7 @@ import org.springframework.transaction.interceptor.TransactionInterceptor
 import org.springframework.transaction.support.SimpleTransactionStatus
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 
 class AdminIdentityServiceTest {
 
@@ -142,8 +143,8 @@ class AdminIdentityServiceTest {
     ): Fixture {
         val jdbcTemplate = mockk<JdbcTemplate>()
         val upserts = java.util.Collections.synchronizedList(mutableListOf<SqlCall>())
-        var finalMembershipQueries = 0
-        var preInsertMembershipSelects = 0
+        val finalMembershipQueries = AtomicInteger()
+        val preInsertMembershipSelects = AtomicInteger()
         var membershipRoleCode = ""
         every { jdbcTemplate.queryForObject(any<String>(), Long::class.java, *anyVararg()) } answers {
             when {
@@ -155,7 +156,9 @@ class AdminIdentityServiceTest {
         every { jdbcTemplate.update(any<String>(), *anyVararg()) } answers {
             val sql = firstArg<String>()
             val args = secondArg<Array<*>>().toList()
-            if (sql.contains("FROM institution_memberships") && !sql.contains("INSERT")) preInsertMembershipSelects++
+            if (sql.contains("FROM institution_memberships") && !sql.contains("INSERT")) {
+                preInsertMembershipSelects.incrementAndGet()
+            }
             if (sql.contains("INSERT INTO")) {
                 upserts += SqlCall(sql, args)
                 if (sql.contains("institution_memberships")) {
@@ -172,15 +175,15 @@ class AdminIdentityServiceTest {
                 *anyVararg()
             )
         } answers {
-            finalMembershipQueries++
+            finalMembershipQueries.incrementAndGet()
             listOf(bindingView())
         }
         return Fixture(
             service = AdminIdentityService(jdbcTemplate, ObjectMapper()),
             jdbcTemplate = jdbcTemplate,
             upserts = upserts,
-            finalMembershipQueriesProvider = { finalMembershipQueries },
-            preInsertMembershipSelectsProvider = { preInsertMembershipSelects },
+            finalMembershipQueriesProvider = finalMembershipQueries::get,
+            preInsertMembershipSelectsProvider = preInsertMembershipSelects::get,
             membershipRoleCodeProvider = { membershipRoleCode }
         )
     }
