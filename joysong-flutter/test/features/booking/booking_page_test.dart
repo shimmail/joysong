@@ -62,10 +62,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: BookingPage(
-          controller: controller,
-          onOrderCreated: (_) {},
-        ),
+        home: BookingPage(controller: controller, onOrderCreated: (_) {}),
       ),
     );
     await tester.pumpAndSettle();
