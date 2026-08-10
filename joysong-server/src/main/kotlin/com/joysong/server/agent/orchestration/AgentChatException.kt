@@ -8,6 +8,6 @@ class AgentChatException(
         fun sessionNotFound() = AgentChatException("SESSION_NOT_FOUND")
         fun turnInProgress() = AgentChatException("TURN_IN_PROGRESS")
         fun idempotencyConflict() = AgentChatException("IDEMPOTENCY_KEY_CONFLICT")
-        fun idempotencyExpired() = AgentChatException("IDEMPOTENCY_REPLAY_EXPIRED")
+        fun idempotencyExpired() = AgentChatException("IDEMPOTENCY_EXPIRED")
     }
 }
