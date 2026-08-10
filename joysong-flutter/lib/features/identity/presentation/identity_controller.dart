@@ -228,7 +228,9 @@ final class InstitutionProjectManagementController extends ChangeNotifier {
       _institutionProjects;
   bool get isSaving => _isSaving;
   String? get errorMessage => _errorMessage;
-  bool get canPublish => context.doctorId?.trim().isNotEmpty == true;
+  bool get canPublish =>
+      context.activeRoles.contains(IdentityRoleType.doctor.code) &&
+      context.doctorId?.trim().isNotEmpty == true;
 
   Future<void> load() async {
     if (_status == InstitutionProjectLoadStatus.loading) return;
