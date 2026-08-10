@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:joysong_flutter/core/config/app_environment.dart';
 import 'package:joysong_flutter/core/network/api_client.dart';
 import 'package:joysong_flutter/core/theme/theme_controller.dart';
 import 'package:joysong_flutter/features/account_security/data/account_security_api.dart';
@@ -21,6 +22,7 @@ abstract final class AppRoutes {
 abstract final class AppRouter {
   static Route<void> onGenerateRoute(
     RouteSettings settings, {
+    required AgentConfig agentConfig,
     required ThemeController themeController,
     required SettingsController settingsController,
     ApiClient? apiClient,
@@ -28,7 +30,7 @@ abstract final class AppRouter {
   }) {
     return switch (settings.name) {
       AppRoutes.root => MaterialPageRoute<void>(
-          builder: (_) => const AppShell(),
+          builder: (_) => AppShell(agentConfig: agentConfig),
           settings: settings,
         ),
       AppRoutes.settings => MaterialPageRoute<void>(

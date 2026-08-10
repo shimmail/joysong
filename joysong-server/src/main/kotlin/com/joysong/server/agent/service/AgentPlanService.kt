@@ -6,18 +6,14 @@ import com.joysong.server.agent.dto.AgentPlanItemResponse
 import com.joysong.server.agent.dto.AgentPlanResponse
 import com.joysong.server.agent.entity.AgentPlanEntity
 import com.joysong.server.agent.entity.AgentPlanItemEntity
-import com.joysong.server.agent.entity.AgentToolAuditEntity
 import com.joysong.server.agent.repository.AgentPlanItemRepository
 import com.joysong.server.agent.repository.AgentPlanRepository
-import com.joysong.server.agent.repository.AgentToolAuditRepository
 import com.joysong.server.institution.repository.InstitutionProjectRepository
 import com.joysong.server.institution.service.InstitutionProjectDetailResolver
 import com.joysong.server.project.entity.ProjectEntity
 import com.joysong.server.project.repository.ProjectRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
-import java.time.Duration
-import java.time.Instant
 import java.util.UUID
 
 private data class EffectivePlanOffering(
@@ -29,7 +25,6 @@ private data class EffectivePlanOffering(
 class AgentPlanService(
     private val planRepository: AgentPlanRepository,
     private val itemRepository: AgentPlanItemRepository,
-    private val auditRepository: AgentToolAuditRepository,
     private val projectRepository: ProjectRepository,
     private val institutionProjectRepository: InstitutionProjectRepository,
     private val institutionProjectDetailResolver: InstitutionProjectDetailResolver,
@@ -45,7 +40,6 @@ class AgentPlanService(
         val goals = profileService.readList(assessment.goalSnapshotJson)
         val excluded = profileService.readList(profile.excludedProjectsJson)
 
-        val startedAt = Instant.now()
         val allProjects = projectRepository.findAll()
         val projectMap = allProjects.associateBy { it.id }
         val effectiveOfferingsByProject = institutionProjectRepository.findAll().asSequence()
@@ -66,18 +60,6 @@ class AgentPlanService(
             .sortedWith(compareByDescending<Pair<ProjectEntity, Int>> { it.second }.thenByDescending { it.first.rating })
             .take(5)
             .toList()
-        auditRepository.save(
-            AgentToolAuditEntity(
-                id = UUID.randomUUID().toString(),
-                userId = userId,
-                toolName = "SEARCH_PLATFORM_PROJECTS",
-                requestSummary = objectMapper.writeValueAsString(mapOf("goals" to goals, "destinationCity" to profile.city)),
-                detectedKeywords = (goals + profile.city).filter { it.isNotBlank() }.distinct().joinToString(",").take(1000),
-                resultStatus = "SUCCESS:${candidates.size}",
-                durationMs = Duration.between(startedAt, Instant.now()).toMillis()
-            )
-        )
-
         val version = planRepository.countByUserId(userId).toInt() + 1
         val planStatus = if (candidates.isEmpty()) "NEEDS_HUMAN_REVIEW" else "READY"
         val summary = if (candidates.isEmpty()) {

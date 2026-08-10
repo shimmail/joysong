@@ -130,6 +130,7 @@ assessment 1 -- N plan 1 -- N plan_item
 - `agent_sessions.summary_json` 保存滚动结构化摘要，至少包含目标、偏好、约束、已确认实体引用、未解决问题、`last_summarized_sequence` 和 `schema_version`；不得包含健康风险原文。
 - 滚动摘要从已验证的路由槽位、用户明确表述和平台实体引用中确定性合并，不额外调用 LLM 生成自由文本摘要。
 - 每个会话原始消息默认最多保留最近 20 条且最长保留 7 天，任一边界到达即可进入清理；保留数量与期限均可配置。
+- 幂等重放只在对应 ASSISTANT 消息仍处于保留窗口时返回原结果；消息已清理后，相同幂等键返回稳定的 `IDEMPOTENCY_EXPIRED`，不得再次调用模型。
 - JSON 字段使用 MySQL `JSON` 类型，并由数据库有效性与应用 DTO 双重校验。
 - 金额使用 `DECIMAL` 并保存明确币种。
 - `agent_plans(user_id, version)` 唯一，版本删除后不得复用。

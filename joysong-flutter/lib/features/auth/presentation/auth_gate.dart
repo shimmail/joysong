@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:joysong_flutter/core/config/app_environment.dart';
 import 'package:joysong_flutter/core/network/api_client.dart';
 import 'package:joysong_flutter/features/auth/data/google_identity_provider.dart';
 import 'package:joysong_flutter/features/auth/presentation/auth_action_page.dart';
@@ -9,6 +10,7 @@ import 'package:joysong_flutter/features/shell/presentation/app_shell.dart';
 class AuthGate extends StatelessWidget {
   const AuthGate({
     required this.controller,
+    required this.agentConfig,
     this.apiClient,
     this.apiRoot,
     this.accessTokenProvider,
@@ -18,6 +20,7 @@ class AuthGate extends StatelessWidget {
   });
 
   final AuthController controller;
+  final AgentConfig agentConfig;
   final ApiClient? apiClient;
   final Uri? apiRoot;
   final AccessTokenProvider? accessTokenProvider;
@@ -74,6 +77,7 @@ class AuthGate extends StatelessWidget {
             ),
           AuthStatus.authenticated => AppShell(
               key: ValueKey(controller.currentUser?.id),
+              agentConfig: agentConfig,
               apiClient: apiClient,
               apiRoot: apiRoot,
               accessTokenProvider: accessTokenProvider,
@@ -210,9 +214,8 @@ class _AccountSwitcherSheet extends StatelessWidget {
               const Divider(),
               ListTile(
                 leading: const Icon(Icons.person_add_alt_1_rounded),
-                title: Text(_isEnglish(context)
-                    ? 'Add another account'
-                    : '添加其他账号'),
+                title: Text(
+                    _isEnglish(context) ? 'Add another account' : '添加其他账号'),
                 onTap: onAdd,
               ),
             ]),

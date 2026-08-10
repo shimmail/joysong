@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:joysong_flutter/core/config/app_environment.dart';
 import 'package:joysong_flutter/core/files/app_file_picker.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/network/api_client.dart';
@@ -15,7 +16,6 @@ import 'package:joysong_flutter/features/agent/domain/agent_models.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_chat_controller.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_chat_page.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_plan_controller.dart';
-import 'package:joysong_flutter/features/assistant/presentation/assistant_page.dart';
 import 'package:joysong_flutter/features/booking/data/booking_remote_data_source.dart';
 import 'package:joysong_flutter/features/booking/data/booking_repository_impl.dart';
 import 'package:joysong_flutter/features/booking/domain/booking_repository.dart';
@@ -60,6 +60,7 @@ import 'package:joysong_flutter/features/social/presentation/public_user_page.da
 
 class AppShell extends StatefulWidget {
   const AppShell({
+    required this.agentConfig,
     this.apiClient,
     this.apiRoot,
     this.accessTokenProvider,
@@ -71,6 +72,7 @@ class AppShell extends StatefulWidget {
     super.key,
   });
 
+  final AgentConfig agentConfig;
   final ApiClient? apiClient;
   final Uri? apiRoot;
   final AccessTokenProvider? accessTokenProvider;
@@ -120,6 +122,10 @@ class _AppShellState extends State<AppShell> {
     if (oldWidget.apiClient != widget.apiClient ||
         oldWidget.apiRoot != widget.apiRoot ||
         oldWidget.accessTokenProvider != widget.accessTokenProvider ||
+        oldWidget.languageTagProvider != widget.languageTagProvider ||
+        oldWidget.agentConfig.sseEnabled != widget.agentConfig.sseEnabled ||
+        oldWidget.agentConfig.recentMessageLimit !=
+            widget.agentConfig.recentMessageLimit ||
         oldWidget.currentUserId != widget.currentUserId) {
       _createDependencies();
     }
@@ -192,12 +198,10 @@ class _AppShellState extends State<AppShell> {
           ),
         ),
       );
-      // Match the completed native app flow and the server default:
-      // POST one message and wait for the normal JSON response. The reserved
-      // SSE endpoint is disabled unless OPENAI_STREAM_ENABLED is explicitly on.
       _agentChatController = AgentChatController(
         repository: agentRepository,
-        streamingEnabled: false,
+        streamingEnabled: widget.agentConfig.sseEnabled,
+        recentMessageLimit: widget.agentConfig.recentMessageLimit,
       );
       _agentPlanController = AgentPlanController(agentRepository);
     }
@@ -268,8 +272,13 @@ class _AppShellState extends State<AppShell> {
             onOpenSystemMessages: () => _openNotificationCategory(false),
             onOpenActivityMessages: () => _openNotificationCategory(true),
           )
+        else if (_agentChatController != null && _agentPlanController != null)
+          AgentChatPage(
+            chatController: _agentChatController!,
+            planController: _agentPlanController!,
+          )
         else
-          const AssistantPage(),
+          const SizedBox.shrink(),
         ProfilePage(
           profileRepository: _profileRepository,
           identityRepository: _identityRepository,
@@ -443,18 +452,17 @@ class _AppShellState extends State<AppShell> {
   void _openAiChat([DiscoverItem? detail]) {
     final chatController = _agentChatController;
     final planController = _agentPlanController;
+    if (chatController == null || planController == null) return;
     final context = detail == null ? null : _agentContextFor(detail);
     _contentNavigator.push<void>(
       MaterialPageRoute(
-        builder: (_) => chatController != null && planController != null
-            ? AgentChatPage(
-                chatController: chatController,
-                planController: planController,
-                initialContextType: context?.$1,
-                initialContextId: context?.$2,
-                initialContextName: context?.$3,
-              )
-            : const AssistantPage(),
+        builder: (_) => AgentChatPage(
+          chatController: chatController,
+          planController: planController,
+          initialContextType: context?.$1,
+          initialContextId: context?.$2,
+          initialContextName: context?.$3,
+        ),
       ),
     );
   }
