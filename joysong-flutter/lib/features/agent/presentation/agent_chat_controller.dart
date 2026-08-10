@@ -37,7 +37,6 @@ class AgentChatState {
     this.messages = const [],
     this.deliveryState = ChatDeliveryState.idle,
     this.errorMessage,
-    this.hasOlderMessages = true,
     this.isLoadingSessions = false,
     this.latestTurn,
   });
@@ -47,7 +46,6 @@ class AgentChatState {
   final List<ChatMessage> messages;
   final ChatDeliveryState deliveryState;
   final String? errorMessage;
-  final bool hasOlderMessages;
   final bool isLoadingSessions;
   final ChatTurn? latestTurn;
 
@@ -59,7 +57,6 @@ class AgentChatState {
     ChatDeliveryState? deliveryState,
     String? errorMessage,
     bool clearError = false,
-    bool? hasOlderMessages,
     bool? isLoadingSessions,
     ChatTurn? latestTurn,
     bool clearLatestTurn = false,
@@ -71,7 +68,6 @@ class AgentChatState {
         messages: messages ?? this.messages,
         deliveryState: deliveryState ?? this.deliveryState,
         errorMessage: clearError ? null : errorMessage ?? this.errorMessage,
-        hasOlderMessages: hasOlderMessages ?? this.hasOlderMessages,
         isLoadingSessions: isLoadingSessions ?? this.isLoadingSessions,
         latestTurn: clearLatestTurn ? null : latestTurn ?? this.latestTurn,
       );
@@ -83,7 +79,8 @@ class AgentChatController extends ChangeNotifier {
     this.streamingEnabled = true,
     this.recentMessageLimit = 20,
     this.persona = ChatPersona.consultant,
-  }) : _repository = repository;
+  })  : assert(recentMessageLimit > 0),
+        _repository = repository;
 
   final AgentRepository _repository;
   final bool streamingEnabled;
@@ -126,7 +123,6 @@ class AgentChatController extends ChangeNotifier {
         activeSession: session,
         messages: const [],
         deliveryState: ChatDeliveryState.loadingHistory,
-        hasOlderMessages: true,
         clearError: true,
         clearLatestTurn: true,
       ),
@@ -139,51 +135,8 @@ class AgentChatController extends ChangeNotifier {
       if (!_isCurrent(operation)) return;
       _emit(
         _state.copyWith(
-          messages: _deduplicate(messages),
+          messages: _latest(_deduplicate(messages)),
           deliveryState: ChatDeliveryState.idle,
-          hasOlderMessages: messages.length == recentMessageLimit,
-        ),
-      );
-    } on Object catch (error) {
-      if (!_isCurrent(operation)) return;
-      _emit(
-        _state.copyWith(
-          deliveryState: ChatDeliveryState.failed,
-          errorMessage: _messageFor(error),
-        ),
-      );
-    }
-  }
-
-  Future<void> loadOlderMessages() async {
-    final session = _state.activeSession;
-    if (session == null ||
-        !_state.hasOlderMessages ||
-        _state.deliveryState.isBusy ||
-        _state.deliveryState == ChatDeliveryState.loadingHistory) {
-      return;
-    }
-    final persisted = _state.messages.where((message) => !message.isTemporary);
-    final before = persisted.isEmpty ? null : persisted.first.createdAt;
-    final operation = ++_operation;
-    _emit(
-      _state.copyWith(
-        deliveryState: ChatDeliveryState.loadingHistory,
-        clearError: true,
-      ),
-    );
-    try {
-      final older = await _repository.getMessages(
-        session.id,
-        limit: recentMessageLimit,
-        before: before,
-      );
-      if (!_isCurrent(operation)) return;
-      _emit(
-        _state.copyWith(
-          messages: _deduplicate([...older, ..._state.messages]),
-          deliveryState: ChatDeliveryState.idle,
-          hasOlderMessages: older.length == recentMessageLimit,
         ),
       );
     } on Object catch (error) {
@@ -205,7 +158,6 @@ class AgentChatController extends ChangeNotifier {
         clearActiveSession: true,
         messages: const [],
         deliveryState: ChatDeliveryState.idle,
-        hasOlderMessages: true,
         clearError: true,
         clearLatestTurn: true,
       ),
@@ -231,7 +183,6 @@ class AgentChatController extends ChangeNotifier {
         clearActiveSession: true,
         messages: const [],
         deliveryState: ChatDeliveryState.sending,
-        hasOlderMessages: false,
         clearError: true,
         clearLatestTurn: true,
       ),
@@ -281,7 +232,6 @@ class AgentChatController extends ChangeNotifier {
               .toList(growable: false),
           clearActiveSession: isActive,
           messages: isActive ? const [] : null,
-          hasOlderMessages: isActive ? true : null,
           deliveryState: isActive ? ChatDeliveryState.idle : null,
           clearLatestTurn: isActive,
         ),
@@ -305,7 +255,6 @@ class AgentChatController extends ChangeNotifier {
       _emit(
         _state.copyWith(
           messages: const [],
-          hasOlderMessages: false,
           deliveryState: ChatDeliveryState.idle,
           clearLatestTurn: true,
         ),
@@ -329,7 +278,6 @@ class AgentChatController extends ChangeNotifier {
           sessions: const [],
           clearActiveSession: true,
           messages: const [],
-          hasOlderMessages: false,
           deliveryState: ChatDeliveryState.idle,
           clearLatestTurn: true,
         ),
@@ -375,7 +323,7 @@ class AgentChatController extends ChangeNotifier {
         _state.copyWith(
           activeSession: session,
           sessions: sessions,
-          messages: [..._state.messages, userMessage],
+          messages: _latest([..._state.messages, userMessage]),
         ),
       );
 
@@ -405,7 +353,7 @@ class AgentChatController extends ChangeNotifier {
     final temporaryAssistant = _temporaryMessage(session.id, 'ASSISTANT', '');
     _emit(
       _state.copyWith(
-        messages: [..._state.messages, temporaryAssistant],
+        messages: _latest([..._state.messages, temporaryAssistant]),
         deliveryState: ChatDeliveryState.sending,
       ),
     );
@@ -440,7 +388,7 @@ class AgentChatController extends ChangeNotifier {
     final temporaryAssistant = _temporaryMessage(session.id, 'ASSISTANT', '');
     _emit(
       _state.copyWith(
-        messages: [..._state.messages, temporaryAssistant],
+        messages: _latest([..._state.messages, temporaryAssistant]),
         deliveryState: ChatDeliveryState.streaming,
       ),
     );
@@ -552,10 +500,12 @@ class AgentChatController extends ChangeNotifier {
   void _replaceMessage(String messageId, ChatMessage replacement) {
     _emit(
       _state.copyWith(
-        messages: _deduplicate([
-          for (final message in _state.messages)
-            if (message.id == messageId) replacement else message,
-        ]),
+        messages: _latest(
+          _deduplicate([
+            for (final message in _state.messages)
+              if (message.id == messageId) replacement else message,
+          ]),
+        ),
       ),
     );
   }
@@ -576,6 +526,12 @@ class AgentChatController extends ChangeNotifier {
       for (final message in messages)
         if (seen.add(message.id)) message,
     ];
+  }
+
+  List<ChatMessage> _latest(Iterable<ChatMessage> messages) {
+    final ordered = messages.toList(growable: false);
+    if (ordered.length <= recentMessageLimit) return ordered;
+    return ordered.sublist(ordered.length - recentMessageLimit);
   }
 
   bool _isCurrent(int operation) => !_disposed && operation == _operation;

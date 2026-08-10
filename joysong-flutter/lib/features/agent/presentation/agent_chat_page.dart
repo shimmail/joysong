@@ -173,25 +173,10 @@ class _AgentChatPageState extends State<AgentChatPage> {
                         controller: _scrollController,
                         cacheExtent: 600,
                         padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                        itemCount: state.messages.length +
-                            (state.hasOlderMessages ? 1 : 0),
-                        itemBuilder: (context, index) {
-                          if (state.hasOlderMessages && index == 0) {
-                            return TextButton(
-                              onPressed: state.deliveryState ==
-                                      ChatDeliveryState.loadingHistory
-                                  ? null
-                                  : widget.chatController.loadOlderMessages,
-                              child: Text(
-                                english ? 'Load earlier messages' : '加载更早消息',
-                              ),
-                            );
-                          }
-                          final offset = state.hasOlderMessages ? 1 : 0;
-                          return _ChatBubble(
-                            message: state.messages[index - offset],
-                          );
-                        },
+                        itemCount: state.messages.length,
+                        itemBuilder: (context, index) => _ChatBubble(
+                          message: state.messages[index],
+                        ),
                       ),
               ),
               _Composer(
