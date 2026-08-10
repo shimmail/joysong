@@ -3,15 +3,21 @@ package com.joysong.server.identity.service
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
+import io.mockk.mockk
+import io.mockk.verify
 import org.springframework.security.access.AccessDeniedException
 import java.time.LocalDateTime
 
 class InstitutionMembershipRequestServiceTest {
+    private val relationshipService = mockk<DoctorInstitutionRelationshipService>(relaxed = true)
+
+    private fun service(store: InstitutionMembershipRequestStore = FakeMembershipRequestStore()) =
+        InstitutionMembershipRequestService(store, relationshipService)
 
     @Test
     fun `doctor submits a pending request only for self`() {
         val store = FakeMembershipRequestStore()
-        val service = InstitutionMembershipRequestService(store)
+        val service = service(store)
 
         val request = service.submit(
             doctorActor(),
@@ -29,7 +35,7 @@ class InstitutionMembershipRequestServiceTest {
 
     @Test
     fun `consultant request requires consultant role`() {
-        val service = InstitutionMembershipRequestService(FakeMembershipRequestStore())
+        val service = service()
 
         assertThrows(AccessDeniedException::class.java) {
             service.submit(doctorActor(), MembershipRequestType.CONSULTANT, "institution-1", "申请加入")
@@ -45,7 +51,7 @@ class InstitutionMembershipRequestServiceTest {
         }
         val actor = legalActor("institution-1")
 
-        val requests = InstitutionMembershipRequestService(store).list(actor)
+        val requests = service(store).list(actor)
 
         assertEquals(listOf("managed", "own"), requests.map { it.id }.sorted())
     }
@@ -57,7 +63,7 @@ class InstitutionMembershipRequestServiceTest {
             seed(request("consultant-pending", MembershipRequestType.CONSULTANT, "consultant-2", "institution-2"))
         }
 
-        val requests = InstitutionMembershipRequestService(store).list(adminActor())
+        val requests = service(store).list(adminActor())
 
         assertEquals(listOf("consultant-pending", "doctor-pending"), requests.map { it.id }.sorted())
     }
@@ -69,7 +75,7 @@ class InstitutionMembershipRequestServiceTest {
         }
 
         assertThrows(AccessDeniedException::class.java) {
-            InstitutionMembershipRequestService(store).review(
+            service(store).review(
                 legalActor("institution-1"),
                 MembershipRequestType.DOCTOR,
                 "request-1",
@@ -85,7 +91,7 @@ class InstitutionMembershipRequestServiceTest {
         val store = FakeMembershipRequestStore().apply {
             seed(request("request-1", MembershipRequestType.CONSULTANT, "consultant-1", "institution-1"))
         }
-        val service = InstitutionMembershipRequestService(store)
+        val service = service(store)
 
         listOf(MembershipRequestDecision.REJECTED, MembershipRequestDecision.CHANGES_REQUESTED).forEach { decision ->
             assertThrows(IllegalArgumentException::class.java) {
@@ -110,7 +116,7 @@ class InstitutionMembershipRequestServiceTest {
         }
         val actor = consultantActor()
 
-        val request = InstitutionMembershipRequestService(store).submit(
+        val request = service(store).submit(
             actor,
             MembershipRequestType.CONSULTANT,
             "institution-1",
@@ -121,6 +127,21 @@ class InstitutionMembershipRequestServiceTest {
         assertEquals("PENDING", request.status)
         assertEquals("已补充", request.requestNote)
         assertEquals("", request.reviewNote)
+    }
+
+    @Test
+    fun `legacy doctor join approval applies relationship effects before approving request`() {
+        val store = FakeMembershipRequestStore().apply {
+            seed(request("legacy-join", MembershipRequestType.DOCTOR, "doctor-2", "institution-1"))
+        }
+
+        service(store).review(
+            legalActor("institution-1"), MembershipRequestType.DOCTOR, "legacy-join",
+            MembershipRequestDecision.APPROVED, ""
+        )
+
+        verify { relationshipService.approveJoin("doctor-2", "institution-1", "legal-1") }
+        assertEquals("APPROVED", store.get(MembershipRequestType.DOCTOR, "legacy-join")?.status)
     }
 
     private fun doctorActor() = ManagementActor(

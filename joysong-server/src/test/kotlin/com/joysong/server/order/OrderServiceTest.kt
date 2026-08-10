@@ -5,11 +5,10 @@ import com.joysong.server.discover.repository.DoctorProjectRepository
 import com.joysong.server.discover.entity.DoctorProjectEntity
 import com.joysong.server.doctor.entity.DoctorEntity
 import com.joysong.server.doctor.repository.DoctorRepository
-import com.joysong.server.doctor.entity.DoctorInstitutionEntity
-import com.joysong.server.doctor.repository.DoctorInstitutionRepository
 import com.joysong.server.identity.service.ManagementActor
 import com.joysong.server.identity.service.InstitutionConsultant
 import com.joysong.server.identity.service.InstitutionConsultantService
+import com.joysong.server.identity.service.DoctorInstitutionRelationshipService
 import com.joysong.server.institution.entity.InstitutionEntity
 import com.joysong.server.institution.entity.InstitutionProjectEntity
 import com.joysong.server.institution.repository.InstitutionProjectRepository
@@ -56,7 +55,7 @@ class OrderServiceTest {
     @MockK private lateinit var refundRepository: RefundRepository
     @MockK private lateinit var reviewService: ReviewService
     @MockK private lateinit var institutionConsultantService: InstitutionConsultantService
-    @MockK private lateinit var doctorInstitutionRepository: DoctorInstitutionRepository
+    @MockK private lateinit var doctorInstitutionRelationshipService: DoctorInstitutionRelationshipService
     private val institutionProjectDetailResolver = InstitutionProjectDetailResolver()
 
     private lateinit var orderService: OrderService
@@ -101,7 +100,7 @@ class OrderServiceTest {
             institutionProjectDetailResolver,
             reviewService,
             institutionConsultantService = institutionConsultantService,
-            doctorInstitutionRepository = doctorInstitutionRepository
+            doctorInstitutionRelationshipService = doctorInstitutionRelationshipService
         )
         // 默认 stub：logTransition 不做任何事
         justRun { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) }
@@ -114,14 +113,7 @@ class OrderServiceTest {
             institutionProjectId = "inst-proj-1",
             price = BigDecimal("4500.00")
         )
-        every { doctorInstitutionRepository.findByDoctorIdOrderByCreatedAtAsc(any()) } returns listOf(
-            DoctorInstitutionEntity(
-                id = "doctor-practice-1",
-                doctorId = "doctor-1",
-                institutionId = "inst-1",
-                status = "APPROVED"
-            )
-        )
+        justRun { doctorInstitutionRelationshipService.requireActiveRelationshipForUpdate(any(), any()) }
     }
 
     // ---- 创建订单 ----
@@ -213,18 +205,11 @@ class OrderServiceTest {
         every { projectRepository.findById("project-1") } returns Optional.of(testProject)
         every { institutionProjectRepository.findById("inst-proj-1") } returns Optional.of(testInstitutionProject)
         every { institutionRepository.findById("inst-1") } returns Optional.of(testInstitution)
-        every { doctorProjectRepository.existsByDoctorIdAndInstitutionProjectId("doctor-1", "inst-proj-1") } returns true
-        every { doctorInstitutionRepository.findByDoctorIdOrderByCreatedAtAsc("doctor-1") } returns listOf(
-            DoctorInstitutionEntity(
-                id = "doctor-practice-1",
-                doctorId = "doctor-1",
-                institutionId = "inst-1",
-                status = "REVOKED",
-                revokedAt = java.time.LocalDateTime.now()
-            )
-        )
+        every {
+            doctorInstitutionRelationshipService.requireActiveRelationshipForUpdate("doctor-1", "inst-1")
+        } throws org.springframework.security.access.AccessDeniedException("医生与机构的有效执业关系已失效")
 
-        val error = assertThrows<IllegalArgumentException> {
+        val error = assertThrows<org.springframework.security.access.AccessDeniedException> {
             orderService.createOrder(
                 "user-1",
                 CreateOrderRequest(
@@ -236,7 +221,8 @@ class OrderServiceTest {
             )
         }
 
-        assertEquals("所选医生未取得该机构有效执业关系", error.message)
+        assertEquals("医生与机构的有效执业关系已失效", error.message)
+        verify(exactly = 0) { orderRepository.save(any()) }
     }
 
     @Test
@@ -336,6 +322,28 @@ class OrderServiceTest {
         }
 
         assertEquals("订单必须关联机构项目", error.message)
+    }
+
+    @Test
+    fun `创建订单 - 锁定校验发现医生机构关系失效时不保存订单`() {
+        val request = CreateOrderRequest(
+            projectId = "project-1",
+            institutionProjectId = "inst-proj-1",
+            doctorId = "doctor-1",
+            consultantId = "consultant-1"
+        )
+        every { projectRepository.findById("project-1") } returns Optional.of(testProject)
+        every { institutionProjectRepository.findById("inst-proj-1") } returns Optional.of(testInstitutionProject)
+        every { institutionRepository.findById("inst-1") } returns Optional.of(testInstitution)
+        every {
+            doctorInstitutionRelationshipService.requireActiveRelationshipForUpdate("doctor-1", "inst-1")
+        } throws org.springframework.security.access.AccessDeniedException("医生与机构的有效执业关系已失效")
+
+        assertThrows<org.springframework.security.access.AccessDeniedException> {
+            orderService.createOrder("user-1", request)
+        }
+
+        verify(exactly = 0) { orderRepository.save(any()) }
     }
 
     @Test

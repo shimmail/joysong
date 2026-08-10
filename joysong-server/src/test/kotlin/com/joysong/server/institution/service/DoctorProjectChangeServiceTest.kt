@@ -3,6 +3,7 @@ package com.joysong.server.institution.service
 import com.joysong.server.discover.entity.DoctorProjectEntity
 import com.joysong.server.discover.repository.DoctorProjectRepository
 import com.joysong.server.identity.service.ManagementActor
+import com.joysong.server.identity.service.DoctorInstitutionRelationshipService
 import com.joysong.server.order.repository.DoctorInstitutionProjectConfigRepository
 import io.mockk.every
 import io.mockk.mockk
@@ -22,7 +23,8 @@ class DoctorProjectChangeServiceTest {
     private val jdbcTemplate = mockk<JdbcTemplate>()
     private val doctorProjectRepository = mockk<DoctorProjectRepository>()
     private val configRepository = mockk<DoctorInstitutionProjectConfigRepository>()
-    private val service = DoctorProjectChangeService(jdbcTemplate, doctorProjectRepository, configRepository)
+    private val relationshipService = mockk<DoctorInstitutionRelationshipService>(relaxed = true)
+    private val service = DoctorProjectChangeService(jdbcTemplate, doctorProjectRepository, configRepository, relationshipService)
 
     @Test
     fun `join submission rejects legacy profile fields outside minimal contract`() {
@@ -70,6 +72,7 @@ class DoctorProjectChangeServiceTest {
 
         val binding = slot<DoctorProjectEntity>()
         verify { doctorProjectRepository.save(capture(binding)) }
+        verify { relationshipService.requireActiveRelationshipForUpdate("doctor-1", "institution-1") }
         assertEquals(BigDecimal("880.00"), binding.captured.price)
         assertEquals("service", binding.captured.serviceDescription)
         assertEquals("", binding.captured.serviceTags)
@@ -93,9 +96,8 @@ class DoctorProjectChangeServiceTest {
     @Test
     fun `join approval rejects doctor whose institution relationship was revoked`() {
         stubReviewQueries()
-        every {
-            jdbcTemplate.queryForObject(match<String> { it.contains("doctor_institutions") }, Long::class.java, *anyVararg())
-        } returns 0L
+        every { relationshipService.requireActiveRelationshipForUpdate("doctor-1", "institution-1") } throws
+            org.springframework.security.access.AccessDeniedException("医生与机构的有效执业关系已失效")
 
         assertThrows(org.springframework.security.access.AccessDeniedException::class.java) {
             service.review(legalActor(), "request-1", "APPROVED", "")

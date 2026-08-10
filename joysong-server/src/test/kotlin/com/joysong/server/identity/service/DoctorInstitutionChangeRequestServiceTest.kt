@@ -373,6 +373,22 @@ class DoctorInstitutionRelationshipServiceTest {
     private val service = DoctorInstitutionRelationshipService(jdbcTemplate)
 
     @Test
+    fun `active relationship lock uses for update and rejects a missing row`() {
+        every {
+            jdbcTemplate.queryForList(
+                match<String> { it.contains("doctor_institutions") && it.contains("FOR UPDATE") },
+                String::class.java,
+                "doctor-1",
+                "institution-1"
+            )
+        } returns emptyList()
+
+        assertThrows<AccessDeniedException> {
+            service.requireActiveRelationshipForUpdate("doctor-1", "institution-1")
+        }
+    }
+
+    @Test
     fun `join approval restores relationship selects first primary and never binds projects`() {
         every {
             jdbcTemplate.queryForList(
