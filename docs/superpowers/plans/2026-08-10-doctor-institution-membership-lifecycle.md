@@ -142,9 +142,9 @@ git commit -m "feat: add doctor institution relationship requests"
 
 **Files:**
 - Modify: `joysong-server/src/main/kotlin/com/joysong/server/identity/service/DoctorInstitutionChangeRequestService.kt`
-- Modify: `joysong-server/src/main/kotlin/com/joysong/server/admin/service/AdminIdentityService.kt`
+- Modify: `joysong-server/src/main/kotlin/com/joysong/server/identity/service/AdminIdentityService.kt`
 - Test: `joysong-server/src/test/kotlin/com/joysong/server/identity/service/DoctorInstitutionChangeRequestServiceTest.kt`
-- Test: `joysong-server/src/test/kotlin/com/joysong/server/admin/service/AdminIdentityServiceTest.kt`
+- Test: `joysong-server/src/test/kotlin/com/joysong/server/identity/service/AdminIdentityServiceTest.kt`
 
 **Interfaces:**
 - JOIN approval creates or restores one `APPROVED` `doctor_institutions` row without creating doctor-project bindings.
@@ -186,7 +186,7 @@ Run the two Task 3 test classes. Expected: PASS.
 - [ ] **Step 9: Commit**
 
 ```powershell
-git add joysong-server/src/main/kotlin/com/joysong/server/identity/service/DoctorInstitutionChangeRequestService.kt joysong-server/src/main/kotlin/com/joysong/server/admin/service/AdminIdentityService.kt joysong-server/src/test/kotlin/com/joysong/server/identity/service/DoctorInstitutionChangeRequestServiceTest.kt joysong-server/src/test/kotlin/com/joysong/server/admin/service/AdminIdentityServiceTest.kt
+git add joysong-server/src/main/kotlin/com/joysong/server/identity/service/DoctorInstitutionChangeRequestService.kt joysong-server/src/main/kotlin/com/joysong/server/identity/service/AdminIdentityService.kt joysong-server/src/test/kotlin/com/joysong/server/identity/service/DoctorInstitutionChangeRequestServiceTest.kt joysong-server/src/test/kotlin/com/joysong/server/identity/service/AdminIdentityServiceTest.kt
 git commit -m "feat: apply doctor institution join and leave decisions"
 ```
 
