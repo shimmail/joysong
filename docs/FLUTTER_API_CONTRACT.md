@@ -299,7 +299,7 @@ Flutter 不能依据本地缓存角色自行授权。每次进入专业管理中
 | GET | `/chat/sessions?persona=...` | 会话列表 |
 | POST | `/chat/sessions/{id}/messages` | 非流式发送 |
 | GET | `/chat/sessions/{id}/messages` | 历史消息；Flutter Agent 固定 `limit=20` 且不翻页 |
-| POST | `/chat/sessions/{id}/messages/stream` | 服务端 SSE 能力；Flutter 固定不调用 |
+| POST | `/chat/sessions/{id}/messages/stream` | 禁用的兼容端点；始终返回 HTTP 404 / `AGENT_STREAMING_DISABLED` |
 | DELETE | `/chat/sessions/{id}` | 删除会话 |
 | DELETE | `/chat/sessions?persona=...` | 清理指定 persona 会话 |
 | DELETE | `/chat/sessions/{id}/messages` | 清空会话消息 |
@@ -336,7 +336,7 @@ Flutter 不能依据本地缓存角色自行授权。每次进入专业管理中
 
 ### 9.2 Flutter 固定关闭 SSE
 
-Flutter Agent 的 SSE 配置固定为关闭，运行时仅使用 9.1 中的同步 REST 发送接口。客户端可保留独立 decoder 作为未来兼容性代码，但当前配置不得打开 SSE，也不将流式终态、断线重连或 POST 重放纳入客户端行为。
+Flutter Agent 的 SSE 配置固定为关闭，运行时仅使用 9.1 中的同步 REST 发送接口。`/messages/stream` 不是可用的服务端 SSE 能力，而是始终返回 HTTP 404 / `AGENT_STREAMING_DISABLED` 的禁用兼容端点。客户端可保留独立 decoder 作为未来兼容性代码，但当前配置不得打开 SSE，也不将流式终态、断线重连或 POST 重放纳入客户端行为。
 
 ### 9.3 Agent
 
@@ -348,10 +348,9 @@ Flutter Agent 的 SSE 配置固定为关闭，运行时仅使用 9.1 中的同�
 | POST | `/agent/assessments/{assessmentId}/plans` |
 | GET/DELETE | `/agent/plans` |
 | GET/DELETE | `/agent/plans/{planId}` |
-| GET | `/agent/traces?limit=50` |
 | POST | `/agent/catalog/report` |
 
-Agent 输出是辅助决策，不是医疗诊断。Flutter 必须展示风险、限制、替代方案和需要确认项，不能只展示推荐项目名称。大模型密钥未配置时，接口可能使用规则或降级结果；客户端不要根据 `provider` 文案推断医疗可靠性。
+Agent 调试仅使用受控、脱敏的结构化日志；不存在 traces API，Flutter 不得调用 `/agent/traces`。Agent 输出是辅助决策，不是医疗诊断。Flutter 必须展示风险、限制、替代方案和需要确认项，不能只展示推荐项目名称。大模型密钥未配置时，接口可能使用规则或降级结果；客户端不要根据 `provider` 文案推断医疗可靠性。
 
 ## 10. 订单、支付占位与核销流程
 

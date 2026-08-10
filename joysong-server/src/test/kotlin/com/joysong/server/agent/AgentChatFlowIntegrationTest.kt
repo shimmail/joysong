@@ -58,6 +58,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 @Tag("mysql-integration")
 @Testcontainers
@@ -101,6 +102,7 @@ class AgentChatFlowIntegrationTest {
         fakeLlmCalls.set(0)
         fakeLlmStatus.set(200)
         fakeLlmDelayMs.set(0)
+        fakeLlmContent.set("测试回复")
         fakeLlmRequestBodies.clear()
         transactionStates.clear()
         llmRestTemplate.requestFactory = SimpleClientHttpRequestFactory().apply {
@@ -289,7 +291,7 @@ class AgentChatFlowIntegrationTest {
         val expired = assertThrows(AgentChatException::class.java) {
             chatService.sendMessage(replaySession.id, "user-1", SendMessageRequest("completed", "expired-1"))
         }
-        assertEquals("IDEMPOTENCY_REPLAY_EXPIRED", expired.code)
+        assertEquals("IDEMPOTENCY_EXPIRED", expired.code)
     }
 
     @Test
@@ -403,6 +405,31 @@ class AgentChatFlowIntegrationTest {
             .andExpect(jsonPath("$.message").value("AI_PROVIDER_TIMEOUT"))
             .andExpect(jsonPath("$.data.traceId").isNotEmpty)
             .andExpect(content().string(not(containsString("provider-secret-body"))))
+    }
+
+    @Test
+    @WithMockUser(username = "user-1")
+    fun `HTTP unknown failure persists logs and returns the same internal error code`() {
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+        fakeLlmContent.set("x".repeat(70_000))
+
+        val logs = captureAgentOperationLogs {
+            mockMvc.perform(
+                post("/api/chat/sessions/{id}/messages", session.id)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"content":"trigger database limit","idempotencyKey":"http-internal-1"}""")
+            )
+                .andExpect(status().isInternalServerError)
+                .andExpect(jsonPath("$.message").value("AGENT_INTERNAL_ERROR"))
+                .andExpect(jsonPath("$.data.traceId").isNotEmpty)
+        }
+
+        val failed = turnRepository.findAll().single { it.sessionId == session.id }
+        assertEquals(AgentTurnStatus.FAILED, failed.status)
+        assertEquals("AGENT_INTERNAL_ERROR", failed.errorCode)
+        val failureLog = logs.single { it.contains("operation=MODEL_COMPLETION") }
+        assertTrue(failureLog.contains("terminalStatus=FAILED"))
+        assertTrue(failureLog.contains("errorCode=AGENT_INTERNAL_ERROR"))
     }
 
     @Test
@@ -564,6 +591,7 @@ class AgentChatFlowIntegrationTest {
         private val fakeLlmCalls = AtomicInteger()
         private val fakeLlmStatus = AtomicInteger(200)
         private val fakeLlmDelayMs = AtomicLong()
+        private val fakeLlmContent = AtomicReference("测试回复")
         private val fakeLlmRequestBodies = CopyOnWriteArrayList<String>()
         private val fakeLlmExecutor = Executors.newCachedThreadPool()
         private val fakeLlm = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
@@ -586,7 +614,7 @@ class AgentChatFlowIntegrationTest {
                 } else """
                     {
                       "id": "chatcmpl-test",
-                      "choices": [{"message": {"content": "测试回复"}, "finish_reason": "stop"}],
+                      "choices": [{"message": {"content": "${fakeLlmContent.get()}"}, "finish_reason": "stop"}],
                       "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}
                     }
                 """.trimIndent().toByteArray(StandardCharsets.UTF_8)

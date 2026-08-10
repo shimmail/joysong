@@ -72,7 +72,6 @@ class AgentOperationLogger {
             "TURN_IN_PROGRESS",
             "IDEMPOTENCY_KEY_CONFLICT",
             "IDEMPOTENCY_EXPIRED",
-            "IDEMPOTENCY_REPLAY_EXPIRED",
             "AI_PROVIDER_TIMEOUT",
             "AI_PROVIDER_UNAVAILABLE",
             "AGENT_INTERNAL_ERROR"

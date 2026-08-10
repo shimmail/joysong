@@ -57,7 +57,7 @@ class AgentChatExceptionHandler {
     private fun statusFor(code: String): HttpStatus = when (code) {
         "INVALID_REQUEST", "INVALID_IDEMPOTENCY_KEY" -> HttpStatus.BAD_REQUEST
         "SESSION_NOT_FOUND", "AGENT_STREAMING_DISABLED" -> HttpStatus.NOT_FOUND
-        "TURN_IN_PROGRESS", "IDEMPOTENCY_KEY_CONFLICT", "IDEMPOTENCY_EXPIRED", "IDEMPOTENCY_REPLAY_EXPIRED" ->
+        "TURN_IN_PROGRESS", "IDEMPOTENCY_KEY_CONFLICT", "IDEMPOTENCY_EXPIRED" ->
             HttpStatus.CONFLICT
         "AI_PROVIDER_TIMEOUT", "AI_PROVIDER_UNAVAILABLE" -> HttpStatus.SERVICE_UNAVAILABLE
         else -> HttpStatus.INTERNAL_SERVER_ERROR
@@ -72,7 +72,6 @@ class AgentChatExceptionHandler {
             "TURN_IN_PROGRESS",
             "IDEMPOTENCY_KEY_CONFLICT",
             "IDEMPOTENCY_EXPIRED",
-            "IDEMPOTENCY_REPLAY_EXPIRED",
             "AI_PROVIDER_TIMEOUT",
             "AI_PROVIDER_UNAVAILABLE"
         )

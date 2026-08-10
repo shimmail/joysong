@@ -197,7 +197,7 @@ class ChatService(
                 error is AgentChatException -> error.code
                 error.message == "AI_PROVIDER_TIMEOUT" -> "AI_PROVIDER_TIMEOUT"
                 error.message == "AI_PROVIDER_UNAVAILABLE" -> "AI_PROVIDER_UNAVAILABLE"
-                else -> "AGENT_CHAT_FAILED"
+                else -> "AGENT_INTERNAL_ERROR"
             }
             val durationMs = elapsedMs(totalStartedAt)
             runCatching {
