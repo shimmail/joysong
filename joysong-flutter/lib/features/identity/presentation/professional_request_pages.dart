@@ -373,7 +373,7 @@ class _InstitutionMembershipRequestsPageState
   }
 
   Future<void> _review(InstitutionMembershipRequest request) async {
-    final review = await showProfessionalReviewDialog(context);
+    final review = await showInstitutionMembershipReviewDialog(context);
     if (review == null) return;
     try {
       await widget.repository.reviewInstitutionMembershipRequest(
@@ -715,7 +715,7 @@ class _InstitutionProjectRequestsPageState
   }
 
   Future<void> _review(ProfessionalProjectRequest request) async {
-    final review = await showProfessionalReviewDialog(context);
+    final review = await showProfessionalProjectReviewDialog(context);
     if (review == null) return;
     try {
       await widget.repository.reviewInstitutionProjectRequest(
@@ -966,7 +966,7 @@ class _InstitutionProjectJoinRequestsPageState
   }
 
   Future<void> _review(InstitutionProjectJoinRequest request) async {
-    final review = await showProfessionalReviewDialog(context);
+    final review = await showProfessionalProjectReviewDialog(context);
     if (review == null) return;
     try {
       await widget.repository.reviewInstitutionProjectJoinRequest(
@@ -981,8 +981,35 @@ class _InstitutionProjectJoinRequestsPageState
   }
 }
 
-Future<({String decision, String note})?> showProfessionalReviewDialog(
+Future<({String decision, String note})?> showInstitutionMembershipReviewDialog(
   BuildContext context,
+) =>
+    _showReviewDialog(
+      context,
+      decisions: const [
+        DropdownMenuItem(value: 'APPROVED', child: Text('通过')),
+        DropdownMenuItem(value: 'REJECTED', child: Text('驳回')),
+      ],
+    );
+
+Future<({String decision, String note})?> showProfessionalProjectReviewDialog(
+  BuildContext context,
+) =>
+    _showReviewDialog(
+      context,
+      decisions: const [
+        DropdownMenuItem(value: 'APPROVED', child: Text('通过')),
+        DropdownMenuItem(value: 'REJECTED', child: Text('驳回')),
+        DropdownMenuItem(
+          value: 'CHANGES_REQUESTED',
+          child: Text('要求修改'),
+        ),
+      ],
+    );
+
+Future<({String decision, String note})?> _showReviewDialog(
+  BuildContext context,
+  {required List<DropdownMenuItem<String>> decisions},
 ) async {
   final note = TextEditingController();
   var decision = 'APPROVED';
@@ -996,14 +1023,7 @@ Future<({String decision, String note})?> showProfessionalReviewDialog(
           children: [
             DropdownButtonFormField<String>(
               initialValue: decision,
-              items: const [
-                DropdownMenuItem(value: 'APPROVED', child: Text('通过')),
-                DropdownMenuItem(value: 'REJECTED', child: Text('驳回')),
-                DropdownMenuItem(
-                  value: 'CHANGES_REQUESTED',
-                  child: Text('要求修改'),
-                ),
-              ],
+              items: decisions,
               onChanged: (value) =>
                   setDialogState(() => decision = value ?? 'APPROVED'),
             ),

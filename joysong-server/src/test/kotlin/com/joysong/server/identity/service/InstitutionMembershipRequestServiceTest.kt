@@ -15,22 +15,18 @@ class InstitutionMembershipRequestServiceTest {
         InstitutionMembershipRequestService(store, relationshipService)
 
     @Test
-    fun `doctor submits a pending request only for self`() {
+    fun `legacy doctor submission is rejected in favor of the relationship ledger`() {
         val store = FakeMembershipRequestStore()
         val service = service(store)
 
-        val request = service.submit(
-            doctorActor(),
-            MembershipRequestType.DOCTOR,
-            "institution-1",
-            "希望加入"
-        )
-
-        assertEquals("doctor-1", request.userId)
-        assertEquals("institution-1", request.institutionId)
-        assertEquals(MembershipRequestType.DOCTOR, request.requestType)
-        assertEquals("PENDING", request.status)
-        assertEquals("希望加入", request.requestNote)
+        assertThrows(IllegalArgumentException::class.java) {
+            service.submit(
+                doctorActor(),
+                MembershipRequestType.DOCTOR,
+                "institution-1",
+                "希望加入"
+            )
+        }
     }
 
     @Test
@@ -87,46 +83,28 @@ class InstitutionMembershipRequestServiceTest {
     }
 
     @Test
-    fun `rejection and change request require a review note`() {
+    fun `rejection requires a review note`() {
         val store = FakeMembershipRequestStore().apply {
             seed(request("request-1", MembershipRequestType.CONSULTANT, "consultant-1", "institution-1"))
         }
         val service = service(store)
 
-        listOf(MembershipRequestDecision.REJECTED, MembershipRequestDecision.CHANGES_REQUESTED).forEach { decision ->
-            assertThrows(IllegalArgumentException::class.java) {
-                service.review(adminActor(), MembershipRequestType.CONSULTANT, "request-1", decision, "  ")
-            }
+        assertThrows(IllegalArgumentException::class.java) {
+            service.review(
+                adminActor(),
+                MembershipRequestType.CONSULTANT,
+                "request-1",
+                MembershipRequestDecision.REJECTED,
+                "  "
+            )
         }
     }
 
     @Test
-    fun `applicant can resubmit after changes are requested`() {
-        val store = FakeMembershipRequestStore().apply {
-            seed(
-                request(
-                    id = "request-1",
-                    type = MembershipRequestType.CONSULTANT,
-                    userId = "consultant-1",
-                    institutionId = "institution-1",
-                    status = "CHANGES_REQUESTED",
-                    reviewNote = "请补充说明"
-                )
-            )
+    fun `membership decisions reject changes requested`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            MembershipRequestDecision.parse("CHANGES_REQUESTED")
         }
-        val actor = consultantActor()
-
-        val request = service(store).submit(
-            actor,
-            MembershipRequestType.CONSULTANT,
-            "institution-1",
-            "已补充"
-        )
-
-        assertEquals("request-1", request.id)
-        assertEquals("PENDING", request.status)
-        assertEquals("已补充", request.requestNote)
-        assertEquals("", request.reviewNote)
     }
 
     @Test
