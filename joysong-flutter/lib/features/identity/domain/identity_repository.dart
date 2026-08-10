@@ -12,4 +12,28 @@ abstract interface class IdentityRepository {
   );
 
   Future<ManagementContext> loadManagementContext();
+
+  Future<List<ManagedInstitutionProfile>> listManagedInstitutionProfiles();
+
+  Future<ManagedInstitutionProfile> updateManagedInstitutionProfile(
+    ManagedInstitutionProfileDraft draft,
+  );
+
+  Future<List<ManagementProjectOption>> listManagementProjects();
+
+  Future<ManagementProjectOption> createManagementProject(
+    ManagementProjectDraft draft,
+  );
+
+  Future<List<ManagedInstitutionProject>> listManagedInstitutionProjects();
+
+  Future<ManagedInstitutionProject> createManagedInstitutionProject(
+    ManagedInstitutionProjectDraft draft,
+  );
+
+  Future<ManagedInstitutionProject> updateManagedInstitutionProject(
+    ManagedInstitutionProjectDraft draft,
+  );
+
+  Future<void> submitSplitConfigProposal(SplitConfigProposalDraft draft);
 }

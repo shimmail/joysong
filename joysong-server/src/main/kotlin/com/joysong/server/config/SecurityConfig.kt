@@ -65,6 +65,7 @@ class SecurityConfig(
                     ).authenticated()
                     .requestMatchers(HttpMethod.POST,
                         "/api/admin/articles",
+                        "/api/admin/projects",
                         "/api/admin/institution-projects",
                         "/api/admin/institution-project-requests",
                         "/api/admin/institution-project-requests/*/review",
