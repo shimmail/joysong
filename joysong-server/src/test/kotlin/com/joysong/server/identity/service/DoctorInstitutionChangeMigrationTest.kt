@@ -1,6 +1,7 @@
 package com.joysong.server.identity.service
 
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Test
 
 class DoctorInstitutionChangeMigrationTest {
@@ -24,8 +25,13 @@ class DoctorInstitutionChangeMigrationTest {
         assertContains(normalized, "FROM doctor_institutions")
         assertContains(normalized, "WHEN status = 'CHANGES_REQUESTED' THEN 'REJECTED'")
         assertContains(normalized, "WHEN status = 'REVOKED' THEN 'APPROVED'")
+        assertContains(normalized, "NULLIF(TRIM(COALESCE(review_note, '')), '') IS NULL")
+        assertContains(normalized, "THEN '历史审核未填写原因'")
+        assertContains(normalized, "ELSE COALESCE(review_note, '')")
         assertContains(normalized, "DELETE FROM doctor_institutions WHERE status NOT IN ('APPROVED', 'REVOKED')")
         assertContains(normalized, "UPDATE institution_memberships SET status = 'REJECTED' WHERE status = 'CHANGES_REQUESTED'")
+        assertFalse(normalized.contains("chk_doctor_institutions_status"))
+        assertFalse(normalized.contains("chk_institution_memberships_status"))
 
         listOf(
             "FOREIGN KEY (doctor_id) REFERENCES doctors(id)",
@@ -37,9 +43,7 @@ class DoctorInstitutionChangeMigrationTest {
         listOf(
             "CONSTRAINT chk_doctor_institution_change_requests_action CHECK (action IN ('JOIN', 'LEAVE'))",
             "CONSTRAINT chk_doctor_institution_change_requests_status CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'WITHDRAWN'))",
-            "CONSTRAINT chk_doctor_institution_change_requests_review_note CHECK (status <> 'REJECTED' OR review_note <> '')",
-            "CONSTRAINT chk_doctor_institutions_status CHECK (status IN ('APPROVED', 'REVOKED'))",
-            "CONSTRAINT chk_institution_memberships_status CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'REVOKED'))"
+            "CONSTRAINT chk_doctor_institution_change_requests_review_note CHECK (status <> 'REJECTED' OR review_note <> '')"
         ).forEach { assertContains(normalized, it) }
     }
 

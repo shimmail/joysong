@@ -64,7 +64,12 @@ SELECT
         ELSE status
     END,
     request_note,
-    review_note,
+    CASE
+        WHEN status IN ('REJECTED', 'CHANGES_REQUESTED')
+             AND NULLIF(TRIM(COALESCE(review_note, '')), '') IS NULL
+            THEN '历史审核未填写原因'
+        ELSE COALESCE(review_note, '')
+    END,
     doctor_id,
     confirmed_by,
     created_at,
@@ -83,11 +88,3 @@ WHERE status = 'CHANGES_REQUESTED';
 
 DELETE FROM doctor_institutions
 WHERE status NOT IN ('APPROVED', 'REVOKED');
-
-ALTER TABLE doctor_institutions
-    ADD CONSTRAINT chk_doctor_institutions_status
-        CHECK (status IN ('APPROVED', 'REVOKED'));
-
-ALTER TABLE institution_memberships
-    ADD CONSTRAINT chk_institution_memberships_status
-        CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'REVOKED'));
