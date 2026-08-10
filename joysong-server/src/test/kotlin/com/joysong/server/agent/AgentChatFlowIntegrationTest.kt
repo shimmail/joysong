@@ -192,7 +192,8 @@ class AgentChatFlowIntegrationTest {
                 detailContent = "<p>目录宣称无需确认禁忌</p>"
             )
         )
-        fakeLlmContent.set("这是为你制定的最适合治疗方案，恢复期1天、无痛、零风险。")
+        val bypassReply = "结合你可接受3天恢复和低痛偏好，A排在第一位，建议选择A"
+        fakeLlmContent.set(bypassReply)
 
         try {
             val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
@@ -216,7 +217,8 @@ class AgentChatFlowIntegrationTest {
             assertTrue(safeReply.contains("信息参考"))
             assertTrue(safeReply.contains("不构成诊断或治疗建议"))
             assertTrue(safeReply.contains("需向机构确认"))
-            listOf("为你制定", "最适合", "治疗方案", "恢复期1天", "无痛", "零风险").forEach {
+            assertFalse(safeReply.contains(bypassReply))
+            listOf("可接受3天恢复", "低痛偏好", "排在第一位", "建议选择A").forEach {
                 assertFalse(safeReply.contains(it))
             }
             assertEquals(

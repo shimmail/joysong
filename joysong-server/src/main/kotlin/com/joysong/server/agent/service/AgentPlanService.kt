@@ -228,7 +228,7 @@ class AgentPlanService(
                 projectId = item.projectId,
                 projectName = item.projectName,
                 recommendationType = "REFERENCE",
-                reason = AgentText.value("平台目录中的项目名称、分类或标签与已确认目标存在关键词关联；价格仅用于信息排序，不代表个人适用性。", "Platform catalog names, categories, or tags have a keyword relationship with the confirmed goal; price is used only for information ordering and does not indicate personal suitability."),
+                reason = AgentText.value("平台仅保留该项目的名称与基础目录信息供进一步核对；不代表目标匹配、个人适用性或治疗建议。", "The platform only retains the project name and basic catalog information for further review; this does not indicate goal matching, personal suitability, or treatment advice."),
                 expectedBenefit = AgentText.value("平台目录不能确定实际效果，需由具备资质的医生面诊确认。", "The platform catalog cannot determine actual outcomes; confirm them during an in-person consultation with a qualified clinician."),
                 limitations = AgentText.value("平台资料不能确定个人适用性、治疗参数、恢复期、疼痛程度、禁忌或最终效果。", "Platform information cannot determine personal suitability, treatment parameters, downtime, pain, contraindications, or final outcomes."),
                 risks = listOf(AgentText.value("风险信息：需向机构确认", "Risk information: confirm with the institution")),

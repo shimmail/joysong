@@ -649,29 +649,11 @@ class ChatService(
     }
 
     private fun enforcePlanningBoundary(intent: AgentIntent, content: String): String {
-        if (intent != AgentIntent.PLANNING || !containsUnsafePlanningClaim(content)) return content
-        logger.warn("Unsafe planning model output replaced by deterministic information-reference response")
+        if (intent != AgentIntent.PLANNING) return content
         return AgentText.value(
             "以下仅作为平台信息参考，不构成诊断或治疗建议。平台可展示相关项目名称、价格等结构化资料；个人适用性、恢复期、疼痛程度、禁忌与风险需向机构确认，必要时由具备资质的医生面诊确认。",
             "This is platform information reference only and is not diagnosis or treatment advice. The platform can show structured details such as names and prices; personal suitability, downtime, pain, contraindications, and risks require confirmation with the institution or a qualified clinician."
         )
-    }
-
-    private fun containsUnsafePlanningClaim(content: String): Boolean {
-        val normalized = content.lowercase()
-        val prohibitedClaims = listOf(
-            "最适合", "为你制定", "为您制定", "适合你", "适合您", "推荐你", "推荐您",
-            "治疗方案", "诊疗方案", "个性化方案", "无痛", "不痛", "零风险", "无风险", "无需确认禁忌",
-            "best for you", "suitable for you", "tailored for you", "personalized treatment plan",
-            "treatment plan", "pain-free", "painless", "zero risk", "risk-free"
-        )
-        if (prohibitedClaims.any(normalized::contains)) return true
-        return listOf(
-            Regex("(恢复期|恢复时间).{0,12}[0-9一二三四五六七八九十]+\\s*(小时|天|周|个月)"),
-            Regex("(风险|痛感|疼痛).{0,8}(低|轻微|较小|很小)"),
-            Regex("(downtime|recovery).{0,12}\\d+\\s*(hours?|days?|weeks?)"),
-            Regex("(low|minimal).{0,8}(risk|pain)")
-        ).any { it.containsMatchIn(normalized) }
     }
 
     private fun isProviderTimeout(error: Throwable): Boolean {
