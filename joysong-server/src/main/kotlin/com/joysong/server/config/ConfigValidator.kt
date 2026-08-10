@@ -47,6 +47,9 @@ class ConfigValidator(
         if (dbPassword.isBlank()) missing.add("DB_PASSWORD")
         if (!adminPhone.matches(Regex("^1\\d{10}$"))) missing.add("ADMIN_PHONE (valid mobile number)")
         if (adminPassword.length !in 12..128) missing.add("ADMIN_PASSWORD (12-128 characters)")
+        if (!AiAgentProxyUrlPolicy.isAllowed(aiAgentProperties.proxyUrl)) {
+            missing.add("OPENAI_PROXY_URL (http, https, or socks URL with host and explicit valid port; user-info is not allowed)")
+        }
 
         val isProduction = environment.activeProfiles.any { it.equals("prod", ignoreCase = true) }
         if (isProduction && !ossEnabled) missing.add("OSS_ENABLED=true")

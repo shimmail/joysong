@@ -54,6 +54,6 @@ ai-agent:
   demo-fallback-enabled: false
 
 openai:
-  base-url: ${OPENAI_BASE_URL}
+  base-url: ${OPENAI_BASE_URL:}
   stream-enabled: ${OPENAI_STREAM_ENABLED:false}
   demo-fallback-enabled: false

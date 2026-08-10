@@ -1,6 +1,7 @@
 package com.joysong.server.config
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import org.springframework.http.client.SimpleClientHttpRequestFactory
 import org.springframework.test.util.ReflectionTestUtils
@@ -18,6 +19,29 @@ class RestTemplateConfigTest {
 
         assertProxy(config.agentLlmRestTemplate(properties), Proxy.Type.HTTP, "127.0.0.1", 8899)
         assertProxy(config.agentIntentParserRestTemplate(properties), Proxy.Type.HTTP, "127.0.0.1", 8899)
+        assertProxy(
+            config.agentLlmRestTemplate(AiAgentProperties(proxyUrl = "https://127.0.0.1:8443")),
+            Proxy.Type.HTTP,
+            "127.0.0.1",
+            8443
+        )
+        assertProxy(
+            config.agentLlmRestTemplate(AiAgentProperties(proxyUrl = "socks://127.0.0.1:1080")),
+            Proxy.Type.SOCKS,
+            "127.0.0.1",
+            1080
+        )
+    }
+
+    @Test
+    fun `agent client rejects an invalid proxy without exposing credentials`() {
+        val properties = AiAgentProperties(proxyUrl = "ftp://user:secret@proxy.example.test:8080")
+
+        val error = assertThrows(IllegalStateException::class.java) {
+            config.agentLlmRestTemplate(properties)
+        }
+
+        assertEquals("Invalid OPENAI_PROXY_URL configuration", error.message)
     }
 
     @Test
