@@ -199,16 +199,6 @@ class InstitutionMembershipRequestControllerTest {
     fun `rolling legacy doctor review still rejects changes requested decision`() {
         val legal = legalActor()
         every { accessService.actor(authentication) } returns legal
-        every { doctorService.exists("legacy-doctor-1") } returns false
-        every {
-            legacyService.review(
-                legal,
-                MembershipRequestType.DOCTOR,
-                "legacy-doctor-1",
-                MembershipRequestDecision.CHANGES_REQUESTED,
-                "请修改"
-            )
-        } returns legacyRequest(MembershipRequestType.DOCTOR, "legacy-doctor-1", "CHANGES_REQUESTED")
 
         val error = assertThrows<IllegalArgumentException> {
             controller.review(
@@ -219,7 +209,7 @@ class InstitutionMembershipRequestControllerTest {
             )
         }
 
-        assertEquals("医生机构关系审核仅支持通过或驳回", error.message)
+        assertEquals("不支持的审核决定", error.message)
         verify(exactly = 0) { legacyService.review(any(), any(), any(), any(), any()) }
     }
 

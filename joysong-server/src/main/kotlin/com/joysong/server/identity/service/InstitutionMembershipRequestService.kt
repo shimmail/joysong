@@ -21,8 +21,7 @@ enum class MembershipRequestType {
 
 enum class MembershipRequestDecision {
     APPROVED,
-    REJECTED,
-    CHANGES_REQUESTED;
+    REJECTED;
 
     companion object {
         fun parse(value: String): MembershipRequestDecision = entries.firstOrNull { it.name == value.trim().uppercase() }
@@ -87,6 +86,9 @@ class InstitutionMembershipRequestService(
         institutionId: String,
         requestNote: String
     ): InstitutionMembershipRequestView {
+        require(type != MembershipRequestType.DOCTOR) {
+            "医生机构关系申请请使用新的关系申请接口"
+        }
         requireApplicantRole(actor, type)
         val normalizedInstitutionId = institutionId.trim()
         require(normalizedInstitutionId.isNotEmpty()) { "机构不能为空" }
@@ -118,8 +120,8 @@ class InstitutionMembershipRequestService(
         }
         require(request.status == PENDING) { "只有待审核的机构加入申请可以审核" }
         val normalizedReviewNote = reviewNote.trim()
-        if (decision != MembershipRequestDecision.APPROVED) {
-            require(normalizedReviewNote.isNotEmpty()) { "拒绝或要求修改时必须填写审核意见" }
+        if (decision == MembershipRequestDecision.REJECTED) {
+            require(normalizedReviewNote.isNotEmpty()) { "驳回时必须填写审核意见" }
         }
         if (type == MembershipRequestType.DOCTOR && decision == MembershipRequestDecision.APPROVED) {
             relationshipService.approveJoin(request.userId, request.institutionId, actor.userId)
@@ -137,7 +139,7 @@ class InstitutionMembershipRequestService(
 
     private companion object {
         const val PENDING = "PENDING"
-        val RESUBMITTABLE_STATUSES = setOf("REJECTED", "CHANGES_REQUESTED")
+        val RESUBMITTABLE_STATUSES = setOf("REJECTED")
     }
 }
 

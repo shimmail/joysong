@@ -6,6 +6,7 @@ import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
 import 'package:joysong_flutter/features/identity/presentation/identity_controller.dart';
 import 'package:joysong_flutter/features/identity/presentation/identity_pages.dart';
+import 'package:joysong_flutter/features/identity/presentation/professional_request_pages.dart';
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
 
 void main() {
@@ -250,6 +251,57 @@ void main() {
     expect(find.byIcon(Icons.add_rounded), findsNothing);
   });
 
+  testWidgets('membership reviews offer approve and reject while project reviews retain request changes',
+      (tester) async {
+    final repository = _FakeIdentityRepository()
+      ..membershipRequests = [
+        InstitutionMembershipRequest.fromJson({
+          'id': 'membership-1',
+          'requestType': 'CONSULTANT',
+          'userId': 'consultant-1',
+          'institutionId': 'inst-1',
+          'status': 'PENDING',
+        }),
+      ];
+    const context = ManagementContext(
+      userId: 'legal-1',
+      platformRole: 'USER',
+      activeRoles: ['INSTITUTION_LEGAL_REPRESENTATIVE'],
+      managedInstitutionIds: ['inst-1'],
+      visibleInstitutionIds: ['inst-1'],
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: InstitutionMembershipRequestsPage(
+        repository: repository,
+        context: context,
+        reviewMode: true,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('审核'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('通过'), findsOneWidget);
+    expect(find.text('驳回'), findsOneWidget);
+    expect(find.text('要求修改'), findsNothing);
+
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(
+        builder: (context) => TextButton(
+          onPressed: () => showProfessionalProjectReviewDialog(context),
+          child: const Text('open project review'),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('open project review'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('要求修改'), findsOneWidget);
+  });
+
   testWidgets('legal representative sees only institution profile and review queues',
       (tester) async {
     final repository = _FakeIdentityRepository()
@@ -341,6 +393,7 @@ final class _FakeIdentityRepository implements IdentityRepository {
   var allowManagement = true;
   ManagementContext? managementContext;
   final savedDrafts = <ManagedInstitutionProfileDraft>[];
+  List<InstitutionMembershipRequest> membershipRequests = const [];
   InstitutionProjectJoinRequestDraft? submittedJoinRequest;
 
   @override
@@ -472,7 +525,7 @@ final class _FakeIdentityRepository implements IdentityRepository {
 
   @override
   Future<List<InstitutionMembershipRequest>>
-      listInstitutionMembershipRequests() async => const [];
+      listInstitutionMembershipRequests() async => membershipRequests;
 
   @override
   Future<void> submitInstitutionMembershipRequest({

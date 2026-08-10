@@ -58,6 +58,17 @@ class DoctorInstitutionChangeMigrationTest {
     }
 
     @Test
+    fun `V14 finalizes relationship and consultant membership statuses`() {
+        val migration = requireNotNull(
+            javaClass.getResource("/db/migration/V14__finalize_institution_membership_statuses.sql")
+        ).readText().replace(Regex("\\s+"), " ").trim()
+
+        assertContains(migration, "UPDATE institution_memberships SET status = 'REJECTED' WHERE status = 'CHANGES_REQUESTED'")
+        assertContains(migration, "CONSTRAINT chk_doctor_institutions_status CHECK (status IN ('APPROVED', 'REVOKED'))")
+        assertContains(migration, "CONSTRAINT chk_institution_memberships_status CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'REVOKED'))")
+    }
+
+    @Test
     fun `V13 migrates historical doctor and consultant fixtures in MySQL`() {
         val rootUrl = System.getenv("WORKTREE_MIGRATION_DB_URL")
         assumeTrue(!rootUrl.isNullOrBlank(), "WORKTREE_MIGRATION_DB_URL is not set")
