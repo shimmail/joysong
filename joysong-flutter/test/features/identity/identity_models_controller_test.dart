@@ -50,11 +50,49 @@ void main() {
     expect(controller.context, isNull);
     expect(repository.contextCalls, 2);
   });
+
+  test('institution profile draft normalizes city and omits protected fields',
+      () {
+    final profile = ManagedInstitutionProfile.fromJson({
+      'id': 'inst-1',
+      'name': '悦美医疗美容',
+      'city': '杭州市',
+      'address': '西湖区 1 号',
+      'rating': 4.9,
+      'reviewCount': 128,
+      'isVerified': true,
+    });
+
+    final draft = profile.toDraft().copyWith(city: ' 杭州市 ');
+
+    expect(draft.city, '杭州');
+    expect(draft.toJson(), isNot(contains('rating')));
+    expect(draft.toJson(), isNot(contains('reviewCount')));
+    expect(draft.toJson(), isNot(contains('isVerified')));
+  });
+
+  test('institution profile controller loads and saves managed institution',
+      () async {
+    final repository = _FakeIdentityRepository();
+    final controller = InstitutionProfileController(repository);
+
+    await controller.load();
+    expect(controller.status, InstitutionProfileLoadStatus.ready);
+    expect(controller.profiles.single.id, 'inst-1');
+
+    final saved = await controller.save(
+      controller.profiles.single.toDraft().copyWith(city: '宁波市'),
+    );
+
+    expect(saved, isTrue);
+    expect(repository.savedDrafts.single.city, '宁波');
+  });
 }
 
 final class _FakeIdentityRepository implements IdentityRepository {
   var contextCalls = 0;
   var allowManagement = true;
+  final savedDrafts = <ManagedInstitutionProfileDraft>[];
 
   @override
   Future<void> deletePrivateDraft(String fileId) async {}
@@ -79,6 +117,29 @@ final class _FakeIdentityRepository implements IdentityRepository {
   }
 
   @override
+  Future<List<ManagedInstitutionProfile>>
+      listManagedInstitutionProfiles() async {
+    return [
+      ManagedInstitutionProfile.fromJson({
+        'id': 'inst-1',
+        'name': '悦美医疗美容',
+        'city': '杭州',
+      }),
+    ];
+  }
+
+  @override
+  Future<ManagedInstitutionProfile> updateManagedInstitutionProfile(
+    ManagedInstitutionProfileDraft draft,
+  ) async {
+    savedDrafts.add(draft);
+    return ManagedInstitutionProfile.fromJson({
+      ...draft.toJson(),
+      'id': draft.id,
+    });
+  }
+
+  @override
   Future<IdentityApplication> submitApplication(
     IdentityApplicationDraft application,
   ) {
@@ -88,5 +149,49 @@ final class _FakeIdentityRepository implements IdentityRepository {
   @override
   Future<PrivateIdentityFile> uploadPrivateFile(IdentityFileDraft file) {
     throw UnimplementedError();
+  }
+
+  @override
+  Future<ManagedInstitutionProject> createManagedInstitutionProject(
+    ManagedInstitutionProjectDraft draft,
+  ) async {
+    return ManagedInstitutionProject.fromJson({
+      ...draft.toJson(),
+      'id': 'institution-project-1',
+      'effectiveName': draft.name,
+    });
+  }
+
+  @override
+  Future<ManagementProjectOption> createManagementProject(
+    ManagementProjectDraft draft,
+  ) async {
+    return ManagementProjectOption.fromJson({
+      ...draft.toJson(),
+      'id': 'project-1',
+    });
+  }
+
+  @override
+  Future<List<ManagedInstitutionProject>>
+      listManagedInstitutionProjects() async => const [];
+
+  @override
+  Future<List<ManagementProjectOption>> listManagementProjects() async =>
+      const [];
+
+  @override
+  Future<void> submitSplitConfigProposal(
+      SplitConfigProposalDraft draft) async {}
+
+  @override
+  Future<ManagedInstitutionProject> updateManagedInstitutionProject(
+    ManagedInstitutionProjectDraft draft,
+  ) async {
+    return ManagedInstitutionProject.fromJson({
+      ...draft.toJson(),
+      'id': draft.id ?? 'institution-project-1',
+      'effectiveName': draft.name,
+    });
   }
 }

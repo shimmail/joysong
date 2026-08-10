@@ -146,3 +146,168 @@ final class ManagementController extends ChangeNotifier {
     _errorMessage = null;
   }
 }
+
+enum InstitutionProfileLoadStatus { idle, loading, ready, empty, failure }
+
+final class InstitutionProfileController extends ChangeNotifier {
+  InstitutionProfileController(this._repository);
+
+  final IdentityRepository _repository;
+
+  InstitutionProfileLoadStatus _status = InstitutionProfileLoadStatus.idle;
+  List<ManagedInstitutionProfile> _profiles = const [];
+  bool _isSaving = false;
+  String? _errorMessage;
+
+  InstitutionProfileLoadStatus get status => _status;
+  List<ManagedInstitutionProfile> get profiles => _profiles;
+  bool get isSaving => _isSaving;
+  String? get errorMessage => _errorMessage;
+
+  Future<void> load() async {
+    if (_status == InstitutionProfileLoadStatus.loading) return;
+    _status = InstitutionProfileLoadStatus.loading;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      _profiles = await _repository.listManagedInstitutionProfiles();
+      _status = _profiles.isEmpty
+          ? InstitutionProfileLoadStatus.empty
+          : InstitutionProfileLoadStatus.ready;
+    } catch (_) {
+      _status = InstitutionProfileLoadStatus.failure;
+      _errorMessage = '机构档案加载失败，请重试';
+    }
+    notifyListeners();
+  }
+
+  Future<bool> save(ManagedInstitutionProfileDraft draft) async {
+    if (_isSaving) return false;
+    _isSaving = true;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      final updated = await _repository.updateManagedInstitutionProfile(draft);
+      _profiles = [
+        for (final profile in _profiles)
+          if (profile.id == updated.id) updated else profile,
+      ];
+      return true;
+    } catch (_) {
+      _errorMessage = '机构档案保存失败，请稍后重试';
+      return false;
+    } finally {
+      _isSaving = false;
+      notifyListeners();
+    }
+  }
+}
+
+enum InstitutionProjectLoadStatus { idle, loading, ready, failure }
+
+final class InstitutionProjectManagementController extends ChangeNotifier {
+  InstitutionProjectManagementController(
+    this._repository, {
+    required this.context,
+  });
+
+  final IdentityRepository _repository;
+  final ManagementContext context;
+
+  InstitutionProjectLoadStatus _status = InstitutionProjectLoadStatus.idle;
+  List<ManagedInstitutionProfile> _institutions = const [];
+  List<ManagementProjectOption> _projects = const [];
+  List<ManagedInstitutionProject> _institutionProjects = const [];
+  bool _isSaving = false;
+  String? _errorMessage;
+
+  InstitutionProjectLoadStatus get status => _status;
+  List<ManagedInstitutionProfile> get institutions => _institutions;
+  List<ManagementProjectOption> get projects => _projects;
+  List<ManagedInstitutionProject> get institutionProjects =>
+      _institutionProjects;
+  bool get isSaving => _isSaving;
+  String? get errorMessage => _errorMessage;
+  bool get canPublish => context.doctorId?.trim().isNotEmpty == true;
+
+  Future<void> load() async {
+    if (_status == InstitutionProjectLoadStatus.loading) return;
+    _status = InstitutionProjectLoadStatus.loading;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      final results = await Future.wait([
+        _repository.listManagedInstitutionProfiles(),
+        _repository.listManagementProjects(),
+        _repository.listManagedInstitutionProjects(),
+      ]);
+      _institutions = results[0] as List<ManagedInstitutionProfile>;
+      _projects = results[1] as List<ManagementProjectOption>;
+      _institutionProjects = results[2] as List<ManagedInstitutionProject>;
+      _status = InstitutionProjectLoadStatus.ready;
+    } catch (_) {
+      _status = InstitutionProjectLoadStatus.failure;
+      _errorMessage = '机构项目加载失败，请重试';
+    }
+    notifyListeners();
+  }
+
+  Future<ManagementProjectOption?> createBaseProject(
+    ManagementProjectDraft draft,
+  ) async {
+    if (!canPublish || _isSaving) return null;
+    _isSaving = true;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      final created = await _repository.createManagementProject(draft);
+      _projects = [..._projects, created];
+      return created;
+    } catch (_) {
+      _errorMessage = '项目发布失败，请稍后重试';
+      return null;
+    } finally {
+      _isSaving = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> saveInstitutionProject({
+    required ManagedInstitutionProjectDraft project,
+    required SplitConfigProposalDraft split,
+  }) async {
+    if (!canPublish || _isSaving) return false;
+    _isSaving = true;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      final saved = project.id == null
+          ? await _repository.createManagedInstitutionProject(project)
+          : await _repository.updateManagedInstitutionProject(project);
+      final doctorId = context.doctorId?.trim() ?? '';
+      if (doctorId.isNotEmpty) {
+        await _repository.submitSplitConfigProposal(
+          SplitConfigProposalDraft(
+            doctorId: doctorId,
+            institutionProjectId: saved.id,
+            consultationFee: split.consultationFee,
+            commissionRate: split.commissionRate,
+            institutionRate: split.institutionRate,
+          ),
+        );
+      }
+      _institutionProjects = [
+        saved,
+        for (final item in _institutionProjects)
+          if (item.id != saved.id) item,
+      ];
+      return true;
+    } catch (_) {
+      _errorMessage = '机构项目保存或分账提案提交失败，请稍后重试';
+      return false;
+    } finally {
+      _isSaving = false;
+      notifyListeners();
+    }
+  }
+}
