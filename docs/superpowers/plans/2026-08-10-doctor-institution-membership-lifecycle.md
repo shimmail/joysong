@@ -72,15 +72,17 @@ git commit -m "feat: add doctor institution change request ledger"
 
 **Files:**
 - Create: `joysong-server/src/main/kotlin/com/joysong/server/identity/service/DoctorInstitutionChangeRequestService.kt`
-- Create: `joysong-server/src/main/kotlin/com/joysong/server/identity/controller/DoctorInstitutionChangeRequestController.kt`
-- Modify: `joysong-server/src/main/kotlin/com/joysong/server/config/SecurityConfig.kt`
+- Modify: `joysong-server/src/main/kotlin/com/joysong/server/identity/controller/InstitutionMembershipRequestController.kt`
 - Test: `joysong-server/src/test/kotlin/com/joysong/server/identity/service/DoctorInstitutionChangeRequestServiceTest.kt`
-- Test: `joysong-server/src/test/kotlin/com/joysong/server/identity/controller/DoctorInstitutionChangeRequestControllerTest.kt`
+- Test: `joysong-server/src/test/kotlin/com/joysong/server/identity/controller/InstitutionMembershipRequestControllerTest.kt`
 
 **Interfaces:**
 - Produces enums `DoctorInstitutionAction { JOIN, LEAVE }` and `DoctorInstitutionRequestStatus { PENDING, APPROVED, REJECTED, WITHDRAWN }`.
 - Produces `submit(actor, institutionId, action, requestNote)`, `withdraw(actor, id)`, `list(actor)`, and `review(actor, id, decision, reviewNote)`.
-- Exposes `GET/POST /api/management/doctor-institution-change-requests`, `POST /{id}/withdraw`, and `POST /{id}/review`.
+- Reuses `GET/POST /api/management/institution-membership-requests` and the existing
+  `POST /{requestType}/{id}/review` route. The submit payload gains optional
+  `action`, with DOCTOR defaulting to JOIN for old clients. Only the missing
+  `POST /{requestType}/{id}/withdraw` route is added.
 
 - [ ] **Step 1: Write failing service tests**
 
@@ -102,26 +104,28 @@ Use JdbcTemplate row mapping and transactional methods. Convert duplicate-key in
 
 Run the Task 2 service command. Expected: PASS.
 
-- [ ] **Step 5: Write failing controller and security tests**
+- [ ] **Step 5: Write failing controller dispatch tests**
 
-Assert authenticated doctors can list/submit/withdraw and legal representatives can review, while unauthenticated requests fail and service authorization remains authoritative.
+Assert the existing controller dispatches doctor requests to the new state
+machine and consultant requests to the legacy service. Cover legacy doctor JOIN
+compatibility, unified listing, withdrawal, and legal review. Authentication is
+already covered by the management API catch-all; service authorization remains
+authoritative.
 
-- [ ] **Step 6: Implement controller routes and security matchers**
+- [ ] **Step 6: Extend the existing controller and payload**
 
 Request payloads:
 
 ```kotlin
-data class SubmitDoctorInstitutionChangeRequest(
+data class SubmitInstitutionMembershipRequest(
+    val requestType: String,
     val institutionId: String,
-    val action: String,
+    val action: String? = null,
     val requestNote: String = ""
 )
-
-data class ReviewDoctorInstitutionChangeRequest(
-    val decision: String,
-    val reviewNote: String = ""
-)
 ```
+
+Reuse `ReviewInstitutionMembershipRequest` and `MembershipRequestDecision`.
 
 - [ ] **Step 7: Run controller tests and verify GREEN**
 
@@ -130,7 +134,7 @@ Run both Task 2 test classes. Expected: PASS.
 - [ ] **Step 8: Commit**
 
 ```powershell
-git add joysong-server/src/main/kotlin/com/joysong/server/identity joysong-server/src/main/kotlin/com/joysong/server/config/SecurityConfig.kt joysong-server/src/test/kotlin/com/joysong/server/identity
+git add joysong-server/src/main/kotlin/com/joysong/server/identity joysong-server/src/test/kotlin/com/joysong/server/identity
 git commit -m "feat: add doctor institution relationship requests"
 ```
 
