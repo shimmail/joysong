@@ -29,7 +29,7 @@
 **Interfaces:**
 - Produces table `doctor_institution_change_requests` with action `JOIN|LEAVE` and status `PENDING|APPROVED|REJECTED|WITHDRAWN`.
 - Produces unique generated key `pending_key` for one pending request per doctor and institution.
-- Normalizes historical membership `CHANGES_REQUESTED` to `REJECTED` while retaining notes.
+- Normalizes historical membership `CHANGES_REQUESTED` to `REJECTED` while retaining notes. V13 keeps legacy table status constraints compatible until Task 4 removes the legacy doctor path and adds final V14 constraints.
 
 - [ ] **Step 1: Write a failing migration contract test**
 
@@ -55,7 +55,7 @@ pending_key VARCHAR(150) GENERATED ALWAYS AS (
 ) STORED
 ```
 
-Copy each existing `doctor_institutions` row as a `JOIN` request, mapping `CHANGES_REQUESTED` to `REJECTED`. Keep `APPROVED` and `REVOKED` relationship rows; delete non-active relationship rows after copying. Normalize consultant membership `CHANGES_REQUESTED` to `REJECTED` and update the relevant status checks.
+Copy each existing `doctor_institutions` row as a `JOIN` request, mapping `CHANGES_REQUESTED` to `REJECTED`. Supply a deterministic historical fallback reason when a rejected legacy row has an empty review note. Keep `APPROVED` and `REVOKED` relationship rows; delete non-active relationship rows after copying. Normalize existing consultant membership `CHANGES_REQUESTED` to `REJECTED`, but defer restrictive legacy-table status checks to Task 4 so rolling deployment cannot make old application code fail.
 
 - [ ] **Step 4: Run the focused test and verify GREEN**
 
@@ -190,17 +190,20 @@ git commit -m "feat: apply doctor institution join and leave decisions"
 
 **Files:**
 - Modify: `joysong-server/src/main/kotlin/com/joysong/server/identity/service/InstitutionMembershipRequestService.kt`
+- Create: `joysong-server/src/main/resources/db/migration/V14__finalize_institution_membership_statuses.sql`
 - Modify: `joysong-flutter/lib/features/identity/presentation/professional_request_pages.dart`
 - Test: `joysong-server/src/test/kotlin/com/joysong/server/identity/service/InstitutionMembershipRequestServiceTest.kt`
 - Test: `joysong-flutter/test/features/identity/identity_models_controller_test.dart`
 
 **Interfaces:**
 - Existing consultant join reviews accept only `APPROVED` and `REJECTED`.
+- Doctor submissions are rejected by the legacy membership service and use the Task 2 API exclusively.
+- V14 restricts `doctor_institutions` to relationship states and removes `CHANGES_REQUESTED` from consultant membership storage only after code compatibility exists.
 - Doctor project review dialogs remain unchanged and continue to support `CHANGES_REQUESTED`.
 
 - [ ] **Step 1: Write failing backend and widget assertions**
 
-Assert membership decision parsing rejects `CHANGES_REQUESTED`, rejection requires a note, and the membership review dialog has exactly approve/reject actions while project review dialogs still contain request-changes.
+Assert membership decision parsing rejects `CHANGES_REQUESTED`, doctor submission through the legacy service is rejected, rejection requires a note, and the membership review dialog has exactly approve/reject actions while project review dialogs still contain request-changes. Add migration assertions for final doctor and consultant status checks.
 
 - [ ] **Step 2: Run focused tests and verify RED**
 
@@ -208,7 +211,7 @@ Run the membership service test. If Flutter is available, run the focused widget
 
 - [ ] **Step 3: Split membership and project review dialogs**
 
-Create a membership-specific dialog returning only `APPROVED` or `REJECTED`; retain the existing three-way project dialog. Remove `CHANGES_REQUESTED` from `MembershipRequestDecision.parse`.
+Create a membership-specific dialog returning only `APPROVED` or `REJECTED`; retain the existing three-way project dialog. Remove `CHANGES_REQUESTED` from `MembershipRequestDecision.parse`, reject `DOCTOR` submissions through the old service, and add V14 constraints after normalizing any rows created during rolling deployment.
 
 - [ ] **Step 4: Run focused tests and verify GREEN**
 
@@ -217,7 +220,7 @@ Run the same tests. Expected: PASS, or record Flutter SDK unavailability with th
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add joysong-server/src/main/kotlin/com/joysong/server/identity/service/InstitutionMembershipRequestService.kt joysong-server/src/test/kotlin/com/joysong/server/identity/service/InstitutionMembershipRequestServiceTest.kt joysong-flutter/lib/features/identity/presentation/professional_request_pages.dart joysong-flutter/test/features/identity/identity_models_controller_test.dart
+git add joysong-server/src/main/kotlin/com/joysong/server/identity/service/InstitutionMembershipRequestService.kt joysong-server/src/main/resources/db/migration/V14__finalize_institution_membership_statuses.sql joysong-server/src/test/kotlin/com/joysong/server/identity/service/InstitutionMembershipRequestServiceTest.kt joysong-flutter/lib/features/identity/presentation/professional_request_pages.dart joysong-flutter/test/features/identity/identity_models_controller_test.dart
 git commit -m "refactor: simplify institution membership reviews"
 ```
 
@@ -290,11 +293,11 @@ Use worktree id `worktree_institution_membership_lifecycle`, Compose project `my
 
 - [ ] **Step 2: Verify fresh migration**
 
-Apply `B1`, then `V2` through `V13` to a newly created empty isolated database. Assert the request table, checks, indexes, and foreign keys exist.
+Apply `B1`, then `V2` through `V14` to a newly created empty isolated database. Assert the request table, checks, indexes, and foreign keys exist.
 
 - [ ] **Step 3: Verify historical migration fixture**
 
-Create a second database named `myapp_worktree_institution_membership_lifecycle_history`, migrate only through `V12`, seed pending/approved/rejected/changes-requested/revoked/soft-deleted doctor relationships and consultant memberships, apply `V13`, and assert request history and active relationships match the design.
+Create a second database named `myapp_worktree_institution_membership_lifecycle_history`, migrate only through `V12`, seed pending/approved/rejected/changes-requested/revoked/soft-deleted doctor relationships and consultant memberships including rejected rows with empty notes, apply `V13` and `V14`, and assert request history, fallback reasons, and active relationships match the design.
 
 - [ ] **Step 4: Run related backend tests**
 
