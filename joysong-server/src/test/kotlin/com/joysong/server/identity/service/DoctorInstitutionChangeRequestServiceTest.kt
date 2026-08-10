@@ -294,12 +294,7 @@ class DoctorInstitutionChangeRequestServiceTest {
         assertEquals(DoctorInstitutionAction.LEAVE, DoctorInstitutionAction.parse("Leave"))
         assertThrows<IllegalArgumentException> { DoctorInstitutionAction.parse("LINK") }
         val error = assertThrows<IllegalArgumentException> {
-            service.review(
-                legalActor(setOf("institution-1")),
-                "request-1",
-                MembershipRequestDecision.CHANGES_REQUESTED,
-                "需要修改"
-            )
+            MembershipRequestDecision.parse("CHANGES_REQUESTED")
         }
         assertEquals("不支持的审核决定", error.message)
     }
