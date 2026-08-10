@@ -6,6 +6,7 @@ import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
 import 'package:joysong_flutter/features/identity/presentation/identity_controller.dart';
 import 'package:joysong_flutter/features/identity/presentation/identity_pages.dart';
+import 'package:joysong_flutter/features/social/domain/social_models.dart';
 
 void main() {
   test('uses medical aesthetics consultant product labels', () {
@@ -36,6 +37,10 @@ void main() {
     );
 
     expect(file.validate, throwsArgumentError);
+  });
+
+  test('institution profile images have a public media purpose', () {
+    expect(PublicMediaPurpose.institutionProfile.name, 'institutionProfile');
   });
 
   test('management context is fetched again on every entry', () async {
@@ -73,6 +78,23 @@ void main() {
     expect(draft.toJson(), isNot(contains('isVerified')));
   });
 
+  test('institution profile image fields use backend string contract', () {
+    final profile = ManagedInstitutionProfile.fromJson({
+      'id': 'inst-1',
+      'name': '悦美医疗美容',
+      'credentialImages': 'license-a.jpg, license-b.jpg',
+      'images': 'lobby.jpg,room.jpg',
+    });
+
+    expect(profile.credentialImages, ['license-a.jpg', 'license-b.jpg']);
+    expect(profile.images, ['lobby.jpg', 'room.jpg']);
+
+    final payload = profile.toDraft().toJson();
+
+    expect(payload['credentialImages'], 'license-a.jpg,license-b.jpg');
+    expect(payload['images'], 'lobby.jpg,room.jpg');
+  });
+
   test('institution profile controller loads and saves managed institution',
       () async {
     final repository = _FakeIdentityRepository();
@@ -97,7 +119,10 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     final repository = _FakeIdentityRepository();
-    final pickedImages = ['cover.jpg', 'license.png'];
+    final pickedImages = [
+      'https://cdn.example.com/institutions/cover.jpg',
+      'https://cdn.example.com/institutions/license.png',
+    ];
 
     await tester.pumpWidget(
       MaterialApp(
@@ -125,8 +150,14 @@ void main() {
     await tester.tap(find.text('从相册添加资质图片'));
     await tester.pump();
 
-    expect(find.text('cover.jpg'), findsOneWidget);
-    expect(find.text('license.png'), findsOneWidget);
+    expect(
+      find.text('https://cdn.example.com/institutions/cover.jpg'),
+      findsOneWidget,
+    );
+    expect(
+      find.text('https://cdn.example.com/institutions/license.png'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('legal representative cannot publish institution projects',
