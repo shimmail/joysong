@@ -11,6 +11,7 @@ void main() {
     final controller = AgentChatController(
       repository: repository,
       streamingEnabled: false,
+      recentMessageLimit: 20,
     );
 
     await controller.send('想改善肤质');

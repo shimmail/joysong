@@ -192,6 +192,7 @@ class _JoysongAppState extends State<JoysongApp> {
                 )
               : AuthGate(
                   controller: _authController,
+                  agentConfig: widget.environment.agentConfig,
                   apiClient: _apiClient,
                   apiRoot: widget.environment.apiRoot,
                   languageTagProvider: _languageTagProvider,
@@ -202,6 +203,7 @@ class _JoysongAppState extends State<JoysongApp> {
                 ),
           onGenerateRoute: (settings) => AppRouter.onGenerateRoute(
             settings,
+            agentConfig: widget.environment.agentConfig,
             themeController: _themeController,
             settingsController: _settingsController,
             apiClient: _apiClient,
