@@ -87,19 +87,28 @@ oss:
   bucket-name: ${OSS_BUCKET_NAME:}
   public-base-url: ${OSS_PUBLIC_BASE_URL:}
 
+ai-agent:
+  enabled: ${AI_AGENT_ENABLED:false}
+  api-key: ${OPENAI_API_KEY:}
+  base-url: ${OPENAI_BASE_URL:}
+  model: ${AI_AGENT_MODEL:gpt-5.5}
+  proxy-url: ${OPENAI_PROXY_URL:}
+  turn-lease: ${AI_AGENT_TURN_LEASE_SECONDS:90}s
+  # Only ambiguous or complex requests use the extra lightweight JSON classification call.
+  intent-parser-enabled: ${OPENAI_INTENT_PARSER_ENABLED:true}
+  # Demo output is opt-in only in development.
+  demo-fallback-enabled: ${OPENAI_DEMO_FALLBACK_ENABLED:false}
+
+# OpenAI-compatible settings retained for the independently routed translation fallback.
 openai:
   api-key: ${OPENAI_API_KEY:}
   base-url: ${OPENAI_BASE_URL:}
-  # AI Agent 使用；优先读取 AI_AGENT_MODEL，保留 OPENAI_MODEL 兼容旧部署。
-  model: ${AI_AGENT_MODEL:${OPENAI_MODEL:gpt-5.5}}
   stream-enabled: ${OPENAI_STREAM_ENABLED:false}
-  # Only ambiguous or complex requests use the extra lightweight JSON classification call.
-  intent-parser-enabled: ${OPENAI_INTENT_PARSER_ENABLED:true}
   # 普通聊天和详情总结优先快速首包；规划、对比、安全判断保留少量推理预算。
   # 兼容第三方 OpenAI 网关：留空时不发送 reasoning_effort；确认网关支持后可设 none/low。
   fast-reasoning-effort: ${OPENAI_FAST_REASONING_EFFORT:none}
   complex-reasoning-effort: ${OPENAI_COMPLEX_REASONING_EFFORT:}
-  # Demo output is opt-in only in application-dev.yml.
+  # Retained for existing development profile compatibility; ChatService uses ai-agent.
   demo-fallback-enabled: false
 
 # 翻译与 AI Agent 独立选型。默认使用百炼 qwen3.7-flash；OpenAI 作为可选兜底。
