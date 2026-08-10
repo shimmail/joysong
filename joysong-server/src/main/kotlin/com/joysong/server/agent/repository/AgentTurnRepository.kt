@@ -8,7 +8,10 @@ import org.springframework.data.jpa.repository.Query
 import jakarta.persistence.LockModeType
 
 interface AgentTurnRepository : JpaRepository<AgentTurnEntity, String> {
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     fun findBySessionIdAndIdempotencyKey(sessionId: String, idempotencyKey: String): AgentTurnEntity?
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     fun findBySessionIdAndStatus(sessionId: String, status: AgentTurnStatus): AgentTurnEntity?
     fun countBySessionId(sessionId: String): Long
     fun deleteBySessionId(sessionId: String)

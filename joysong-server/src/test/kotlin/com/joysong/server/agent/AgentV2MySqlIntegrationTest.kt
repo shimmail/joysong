@@ -44,6 +44,9 @@ import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
 import java.nio.file.Paths
 import java.sql.DriverManager
+import java.time.Clock
+import java.time.Duration
+import java.time.LocalDateTime
 import java.util.UUID
 
 @Tag("mysql-integration")
@@ -501,6 +504,64 @@ class AgentV2MySqlIntegrationTest {
         assertThrows(DataAccessException::class.java, block)
     }
 
+    @Test
+    fun `concurrent requests recover one expired turn and create one successor`() {
+        val sessionId = createSession()
+        val expiredTurnId = insertTurn(sessionId, 1, "expired", "RUNNING")
+        jdbcTemplate.update(
+            "UPDATE agent_turns SET started_at = ?, lease_expires_at = ? WHERE id = ?",
+            LocalDateTime.of(2000, 1, 1, 0, 0),
+            LocalDateTime.of(2000, 1, 1, 0, 1),
+            expiredTurnId
+        )
+        jdbcTemplate.update("UPDATE agent_sessions SET next_sequence_no = 2 WHERE id = ?", sessionId)
+        val executor = Executors.newFixedThreadPool(2)
+        val lockExecutor = Executors.newSingleThreadExecutor()
+        val sessionLocked = CountDownLatch(1)
+        val releaseSession = CountDownLatch(1)
+        try {
+            val holder = lockExecutor.submit<Unit> {
+                TransactionTemplate(transactionManager).executeWithoutResult {
+                    jdbcTemplate.queryForObject("SELECT id FROM agent_sessions WHERE id = ? FOR UPDATE", String::class.java, sessionId)
+                    sessionLocked.countDown()
+                    check(releaseSession.await(10, TimeUnit.SECONDS))
+                }
+            }
+            assertTrue(sessionLocked.await(10, TimeUnit.SECONDS))
+            val results = listOf("successor-1", "successor-2").map { key ->
+                executor.submit<BeginTurnResult> {
+                    lifecycle.beginTurn(sessionId, "test-user", "hello", key)
+                }
+            }
+            assertTrue(awaitSessionLockWaiters(2), "both recovery workers must wait on the session row")
+            releaseSession.countDown()
+            holder.get(10, TimeUnit.SECONDS)
+            val completed = results.map { it.get(15, TimeUnit.SECONDS) }
+
+            assertEquals(1, completed.count { it is BeginTurnResult.Started })
+            assertEquals(1, completed.count { it is BeginTurnResult.InProgress })
+            assertEquals(1, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM agent_turns WHERE session_id = ? AND status = 'RUNNING'",
+                Int::class.java,
+                sessionId
+            ))
+            assertEquals("FAILED", jdbcTemplate.queryForObject(
+                "SELECT status FROM agent_turns WHERE id = ?",
+                String::class.java,
+                expiredTurnId
+            ))
+            assertEquals("STALE_RECOVERED", jdbcTemplate.queryForObject(
+                "SELECT error_code FROM agent_turns WHERE id = ?",
+                String::class.java,
+                expiredTurnId
+            ))
+        } finally {
+            releaseSession.countDown()
+            executor.shutdownNow()
+            lockExecutor.shutdownNow()
+        }
+    }
+
     private fun leaseColumnCount(jdbcTemplate: JdbcTemplate): Long = jdbcTemplate.queryForObject(
         """select count(*) from information_schema.columns
            where table_schema = database()
@@ -544,6 +605,12 @@ class AgentV2MySqlIntegrationTest {
 class AgentLifecycleTestConfig {
     @Bean
     fun objectMapper(): ObjectMapper = ObjectMapper().registerModule(KotlinModule.Builder().build())
+
+    @Bean
+    fun clock(): Clock = Clock.systemUTC()
+
+    @Bean("turnLease")
+    fun turnLease(): Duration = Duration.ofMinutes(2)
 }
 
 class ReportingMySqlContainer(imageName: String) :
