@@ -1,8 +1,17 @@
 package com.joysong.server.identity.service
 
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
+import org.springframework.core.io.ClassPathResource
+import org.springframework.dao.DataIntegrityViolationException
+import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.datasource.DriverManagerDataSource
+import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator
+import java.sql.DriverManager
 
 class DoctorInstitutionChangeMigrationTest {
 
@@ -45,6 +54,252 @@ class DoctorInstitutionChangeMigrationTest {
             "CONSTRAINT chk_doctor_institution_change_requests_status CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'WITHDRAWN'))",
             "CONSTRAINT chk_doctor_institution_change_requests_review_note CHECK (status <> 'REJECTED' OR review_note <> '')"
         ).forEach { assertContains(normalized, it) }
+    }
+
+    @Test
+    fun `V13 migrates historical doctor and consultant fixtures in MySQL`() {
+        val rootUrl = System.getenv("WORKTREE_MIGRATION_DB_URL")
+        assumeTrue(!rootUrl.isNullOrBlank(), "WORKTREE_MIGRATION_DB_URL is not set")
+
+        val databaseName = HISTORY_DATABASE
+        assertTrue(databaseName.startsWith("myapp_worktree_"))
+        val targetUrl = rootUrl!!.replace(Regex("/mysql(?:\\?.*)?$"), "/$databaseName")
+        assertFalse(targetUrl == rootUrl)
+
+        DriverManager.getConnection(rootUrl, DB_USER, DB_PASSWORD).use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute("DROP DATABASE IF EXISTS `$databaseName`")
+                statement.execute(
+                    "CREATE DATABASE `$databaseName` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci"
+                )
+            }
+        }
+
+        val dataSource = DriverManagerDataSource(targetUrl, DB_USER, DB_PASSWORD)
+        LEGACY_MIGRATIONS.forEach { applySqlScript(dataSource, it) }
+        val jdbcTemplate = JdbcTemplate(dataSource)
+        seedHistoricalFixtures(jdbcTemplate)
+        applySqlScript(dataSource, V13_MIGRATION)
+
+        val history = jdbcTemplate.query(
+            "SELECT request_note, status, review_note FROM doctor_institution_change_requests"
+        ) { rs, _ ->
+            rs.getString("request_note") to (rs.getString("status") to rs.getString("review_note"))
+        }.toMap()
+        assertEquals(
+            setOf("pending", "approved", "rejected-empty", "changes-requested", "revoked", "soft-deleted"),
+            history.keys
+        )
+        assertEquals("PENDING", history.getValue("pending").first)
+        assertEquals("APPROVED", history.getValue("approved").first)
+        assertEquals("REJECTED", history.getValue("rejected-empty").first)
+        assertEquals("历史审核未填写原因", history.getValue("rejected-empty").second)
+        assertEquals("REJECTED", history.getValue("changes-requested").first)
+        assertEquals("changes reason", history.getValue("changes-requested").second)
+        assertEquals("APPROVED", history.getValue("revoked").first)
+        assertEquals("soft deleted reason", history.getValue("soft-deleted").second)
+
+        assertEquals(
+            setOf("doctor-approved", "doctor-revoked"),
+            jdbcTemplate.queryForList(
+                "SELECT id FROM doctor_institutions ORDER BY id",
+                String::class.java
+            ).toSet()
+        )
+        assertEquals(
+            "REJECTED",
+            jdbcTemplate.queryForObject(
+                "SELECT status FROM institution_memberships WHERE id = ?",
+                String::class.java,
+                CONSULTANT_MEMBERSHIP_ID
+            )
+        )
+
+        assertEquals(
+            "$DOCTOR_ID:$PENDING_INSTITUTION_ID",
+            jdbcTemplate.queryForObject(
+                "SELECT pending_key FROM doctor_institution_change_requests WHERE request_note = 'pending'",
+                String::class.java
+            )
+        )
+        assertThrows(DataIntegrityViolationException::class.java) {
+            jdbcTemplate.update(
+                """
+                INSERT INTO doctor_institution_change_requests
+                    (id, doctor_id, institution_id, action, status, submitted_by)
+                VALUES (?, ?, ?, 'LEAVE', 'PENDING', ?)
+                """.trimIndent(),
+                "duplicate-pending",
+                DOCTOR_ID,
+                PENDING_INSTITUTION_ID,
+                DOCTOR_ID
+            )
+        }
+
+        val foreignKeys = jdbcTemplate.query(
+            """
+            SELECT column_name, referenced_table_name
+            FROM information_schema.KEY_COLUMN_USAGE
+            WHERE table_schema = DATABASE()
+              AND table_name = 'doctor_institution_change_requests'
+              AND referenced_table_name IS NOT NULL
+            """.trimIndent()
+        ) { rs, _ -> rs.getString("column_name") to rs.getString("referenced_table_name") }
+            .toMap()
+        assertEquals(
+            mapOf(
+                "doctor_id" to "doctors",
+                "institution_id" to "institutions",
+                "submitted_by" to "users",
+                "reviewed_by" to "users"
+            ),
+            foreignKeys
+        )
+
+        val generatedColumn = jdbcTemplate.queryForMap(
+            """
+            SELECT extra, generation_expression
+            FROM information_schema.COLUMNS
+            WHERE table_schema = DATABASE()
+              AND table_name = 'doctor_institution_change_requests'
+              AND column_name = 'pending_key'
+            """.trimIndent()
+        )
+        assertTrue(generatedColumn["extra"].toString().contains("STORED GENERATED"))
+        assertTrue(generatedColumn["generation_expression"].toString().contains("PENDING"))
+        assertEquals(
+            0,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT non_unique
+                FROM information_schema.statistics
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'doctor_institution_change_requests'
+                  AND index_name = 'uk_doctor_institution_change_requests_pending'
+                LIMIT 1
+                """.trimIndent(),
+                Int::class.java
+            )
+        )
+    }
+
+    private fun applySqlScript(dataSource: DriverManagerDataSource, path: String) {
+        ResourceDatabasePopulator(ClassPathResource(path)).apply {
+            setContinueOnError(false)
+            setSqlScriptEncoding("UTF-8")
+            execute(dataSource)
+        }
+    }
+
+    private fun seedHistoricalFixtures(jdbcTemplate: JdbcTemplate) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO users (id, password_hash, nickname, role) VALUES
+                (?, 'hash', 'Fixture Doctor', 'USER'),
+                (?, 'hash', 'Fixture Reviewer', 'ADMIN'),
+                (?, 'hash', 'Fixture Consultant', 'CONSULTANT')
+            """.trimIndent(),
+            DOCTOR_ID,
+            REVIEWER_ID,
+            CONSULTANT_ID
+        )
+        jdbcTemplate.update("INSERT INTO doctors (id, name) VALUES (?, 'Fixture Doctor')", DOCTOR_ID)
+        jdbcTemplate.update(
+            """
+            INSERT INTO institutions (id, name) VALUES
+                (?, 'Pending Institution'),
+                (?, 'Approved Institution'),
+                (?, 'Rejected Institution'),
+                (?, 'Changes Institution'),
+                (?, 'Revoked Institution'),
+                (?, 'Soft Deleted Institution')
+            """.trimIndent(),
+            PENDING_INSTITUTION_ID,
+            APPROVED_INSTITUTION_ID,
+            REJECTED_INSTITUTION_ID,
+            CHANGES_INSTITUTION_ID,
+            REVOKED_INSTITUTION_ID,
+            SOFT_DELETED_INSTITUTION_ID
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO doctor_institutions
+                (id, doctor_id, institution_id, is_primary, status, request_note, review_note,
+                 confirmed_by, confirmed_at, created_at, updated_at, deleted_at)
+            VALUES
+                ('doctor-pending', ?, ?, 0, 'PENDING', 'pending', '', NULL, NULL,
+                 '2025-01-01 01:02:03', '2025-01-01 01:02:03', NULL),
+                ('doctor-approved', ?, ?, 1, 'APPROVED', 'approved', 'approved reason', ?,
+                 '2025-02-02 02:03:04', '2025-02-01 01:02:03', '2025-02-02 02:03:04', NULL),
+                ('doctor-rejected-empty', ?, ?, 0, 'REJECTED', 'rejected-empty', '', ?,
+                 '2025-03-03 03:04:05', '2025-03-01 01:02:03', '2025-03-03 03:04:05', NULL),
+                ('doctor-changes', ?, ?, 0, 'CHANGES_REQUESTED', 'changes-requested', 'changes reason', ?,
+                 '2025-04-04 04:05:06', '2025-04-01 01:02:03', '2025-04-04 04:05:06', NULL),
+                ('doctor-revoked', ?, ?, 0, 'REVOKED', 'revoked', 'revoked reason', ?,
+                 '2025-05-05 05:06:07', '2025-05-01 01:02:03', '2025-05-05 05:06:07', NULL),
+                ('doctor-soft-deleted', ?, ?, 0, 'REJECTED', 'soft-deleted', 'soft deleted reason', ?,
+                 '2025-06-06 06:07:08', '2025-06-01 01:02:03', '2025-06-06 06:07:08',
+                 '2025-06-07 07:08:09')
+            """.trimIndent(),
+            DOCTOR_ID,
+            PENDING_INSTITUTION_ID,
+            DOCTOR_ID,
+            APPROVED_INSTITUTION_ID,
+            REVIEWER_ID,
+            DOCTOR_ID,
+            REJECTED_INSTITUTION_ID,
+            REVIEWER_ID,
+            DOCTOR_ID,
+            CHANGES_INSTITUTION_ID,
+            REVIEWER_ID,
+            DOCTOR_ID,
+            REVOKED_INSTITUTION_ID,
+            REVIEWER_ID,
+            DOCTOR_ID,
+            SOFT_DELETED_INSTITUTION_ID,
+            REVIEWER_ID
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO institution_memberships
+                (id, user_id, institution_id, member_role, status, request_note, review_note)
+            VALUES (?, ?, ?, 'CONSULTANT', 'CHANGES_REQUESTED', 'consultant request', 'consultant reason')
+            """.trimIndent(),
+            CONSULTANT_MEMBERSHIP_ID,
+            CONSULTANT_ID,
+            PENDING_INSTITUTION_ID
+        )
+    }
+
+    companion object {
+        private const val DB_USER = "root"
+        private const val DB_PASSWORD = "codex-test"
+        private const val HISTORY_DATABASE = "myapp_worktree_institution_membership_lifecycle_history"
+        private const val V13_MIGRATION = "db/migration/V13__add_doctor_institution_change_requests.sql"
+        private const val DOCTOR_ID = "fixture-doctor"
+        private const val REVIEWER_ID = "fixture-reviewer"
+        private const val CONSULTANT_ID = "fixture-consultant"
+        private const val PENDING_INSTITUTION_ID = "fixture-institution-pending"
+        private const val APPROVED_INSTITUTION_ID = "fixture-institution-approved"
+        private const val REJECTED_INSTITUTION_ID = "fixture-institution-rejected"
+        private const val CHANGES_INSTITUTION_ID = "fixture-institution-changes"
+        private const val REVOKED_INSTITUTION_ID = "fixture-institution-revoked"
+        private const val SOFT_DELETED_INSTITUTION_ID = "fixture-institution-soft-deleted"
+        private const val CONSULTANT_MEMBERSHIP_ID = "fixture-consultant-membership"
+        private val LEGACY_MIGRATIONS = listOf(
+            "db/migration/B1__init_schema.sql",
+            "db/migration/V2__remove_diary_cover_image.sql",
+            "db/migration/V3__add_refund_reason_code_constraint.sql",
+            "db/migration/V4__add_doctor_contact_phone.sql",
+            "db/migration/V5__add_recommended_institution_projects_index.sql",
+            "db/migration/V6__enforce_canonical_order_reviews.sql",
+            "db/migration/V7__create_diary_shares.sql",
+            "db/migration/V8__default_price_currency_to_usd.sql",
+            "db/migration/V9__add_order_consultant_snapshot.sql",
+            "db/migration/V10__rebuild_agent_v2.sql",
+            "db/migration/V11__add_institution_membership_request_notes.sql",
+            "db/migration/V12__add_professional_project_requests.sql"
+        )
     }
 
     private fun assertContains(migration: String, contract: String) {
