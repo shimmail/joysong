@@ -59,7 +59,7 @@ class AgentChatExceptionHandler {
         "SESSION_NOT_FOUND", "AGENT_STREAMING_DISABLED" -> HttpStatus.NOT_FOUND
         "TURN_IN_PROGRESS", "IDEMPOTENCY_KEY_CONFLICT", "IDEMPOTENCY_EXPIRED" ->
             HttpStatus.CONFLICT
-        "AI_PROVIDER_TIMEOUT", "AI_PROVIDER_UNAVAILABLE" -> HttpStatus.SERVICE_UNAVAILABLE
+        "AGENT_DISABLED", "AI_PROVIDER_TIMEOUT", "AI_PROVIDER_UNAVAILABLE" -> HttpStatus.SERVICE_UNAVAILABLE
         else -> HttpStatus.INTERNAL_SERVER_ERROR
     }
 
@@ -72,6 +72,7 @@ class AgentChatExceptionHandler {
             "TURN_IN_PROGRESS",
             "IDEMPOTENCY_KEY_CONFLICT",
             "IDEMPOTENCY_EXPIRED",
+            "AGENT_DISABLED",
             "AI_PROVIDER_TIMEOUT",
             "AI_PROVIDER_UNAVAILABLE"
         )

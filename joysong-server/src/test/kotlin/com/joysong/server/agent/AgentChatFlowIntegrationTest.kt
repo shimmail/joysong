@@ -9,6 +9,7 @@ import com.joysong.server.agent.orchestration.AgentChatException
 import com.joysong.server.agent.orchestration.BeginTurnResult
 import com.joysong.server.agent.orchestration.TurnLifecycleService
 import com.joysong.server.agent.repository.AgentTurnRepository
+import com.joysong.server.config.AiAgentProperties
 import com.joysong.server.chat.dto.CreateSessionRequest
 import com.joysong.server.chat.dto.SendMessageRequest
 import com.joysong.server.chat.repository.ChatMessageRepository
@@ -91,7 +92,10 @@ class AgentChatFlowIntegrationTest {
     private lateinit var turnLifecycleService: TurnLifecycleService
 
     @Autowired
-    @Qualifier("llmRestTemplate")
+    private lateinit var aiAgentProperties: AiAgentProperties
+
+    @Autowired
+    @Qualifier("agentLlmRestTemplate")
     private lateinit var llmRestTemplate: RestTemplate
 
     private val transactionStates = CopyOnWriteArrayList<Boolean>()
@@ -324,6 +328,30 @@ class AgentChatFlowIntegrationTest {
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.data.message.content").value("测试回复"))
             .andExpect(jsonPath("$.data.traceId").isNotEmpty)
+    }
+
+    @Test
+    @WithMockUser(username = "user-1")
+    fun `HTTP send is rejected as AGENT_DISABLED before turn persistence when AI agent is disabled`() {
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+        val turnsBefore = turnRepository.count()
+        val enabledBefore = aiAgentProperties.enabled
+        aiAgentProperties.enabled = false
+
+        try {
+            mockMvc.perform(
+                post("/api/chat/sessions/{id}/messages", session.id)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"content":"disabled request","idempotencyKey":"http-disabled-1"}""")
+            )
+                .andExpect(status().isServiceUnavailable)
+                .andExpect(jsonPath("$.message").value("AGENT_DISABLED"))
+        } finally {
+            aiAgentProperties.enabled = enabledBefore
+        }
+
+        assertEquals(turnsBefore, turnRepository.count())
+        assertEquals(0, fakeLlmCalls.get())
     }
 
     @Test
@@ -649,12 +677,12 @@ class AgentChatFlowIntegrationTest {
             registry.add("admin.bootstrap.password") { "test-admin-password" }
             registry.add("payment.stripe.secret-key") { "sk_test_agent_chat" }
             registry.add("payment.stripe.webhook-secret") { "whsec_agent_chat" }
-            registry.add("openai.base-url") { "http://127.0.0.1:${fakeLlm.address.port}/v1" }
-            registry.add("openai.api-key") { "test-key" }
-            registry.add("openai.model") { "test-model" }
-            registry.add("openai.stream-enabled") { "false" }
-            registry.add("openai.intent-parser-enabled") { "false" }
-            registry.add("openai.demo-fallback-enabled") { "false" }
+            registry.add("ai-agent.enabled") { "true" }
+            registry.add("ai-agent.base-url") { "http://127.0.0.1:${fakeLlm.address.port}/v1" }
+            registry.add("ai-agent.api-key") { "test-key" }
+            registry.add("ai-agent.model") { "test-model" }
+            registry.add("ai-agent.intent-parser-enabled") { "false" }
+            registry.add("ai-agent.demo-fallback-enabled") { "false" }
         }
 
         @JvmStatic
