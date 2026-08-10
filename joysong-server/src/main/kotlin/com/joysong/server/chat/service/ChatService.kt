@@ -321,7 +321,10 @@ class ChatService(
         }
 
         val llmResult = llmCaller(llmMessages, generationProfile)
-        val aiContent = naturalizeUserFacingLanguage(llmResult.content)
+        val aiContent = enforcePlanningBoundary(
+            intent = intentDecision.intent,
+            content = naturalizeUserFacingLanguage(llmResult.content)
+        )
         val currentContextItems = currentContextCatalogItems(session.contextType, session.contextId)
         val visibleReport = promptBuild.evidence.report?.takeIf {
             intentDecision.intent == AgentIntent.COMPARISON && it.items.isNotEmpty()
@@ -564,6 +567,7 @@ class ChatService(
                 这是当前页面的简短概括任务。只概括 1 至 2 点，不要逐条罗列价格、评分、标签、机构或医生列表。
                 页面下方会单独展示当前实体卡片，正文不要重复卡片字段。
             """.trimIndent()
+            intentDecision.intent == AgentIntent.PLANNING -> planningGroundingPrompt(evidence)
             databaseContext.isBlank() -> ""
             else -> """
                 【本轮最终平台数据库检索结果】
@@ -615,6 +619,60 @@ class ChatService(
         .replace("平台数据库", "平台资料")
         .replace("数据库", "平台资料")
         .replace("字段", "资料")
+
+    private fun planningGroundingPrompt(evidence: AgentPromptEvidence): String {
+        val items = evidence.report?.items.orEmpty().take(4).map { item ->
+            linkedMapOf<String, Any?>(
+                "type" to item.type,
+                "id" to item.id,
+                "name" to item.name,
+                "institutionId" to item.institutionId,
+                "projectId" to item.projectId,
+                "attributes" to item.attributes.filterKeys(::isSafePlanningAttribute)
+            ).filterValues { value -> value != null && value != "" && value != emptyMap<String, String>() }
+        }
+        val safeCatalogJson = objectMapper.writeValueAsString(items)
+        return """
+            【本轮规划信息参考】
+            以下 JSON 仅包含平台目录标识、名称和可安全引用的结构化属性：$safeCatalogJson
+            不得使用卡片摘要、简介、宣传语、详情文本或历史消息补充恢复期、疼痛、禁忌、风险、疗效或个人适用性。
+            缺少结构化资料时统一说明“需向机构确认”。这些项目只作为信息参考，不构成诊断或治疗建议。
+        """.trimIndent()
+    }
+
+    private fun isSafePlanningAttribute(label: String): Boolean {
+        val normalized = label.trim().lowercase()
+        return listOf(
+            "参考价", "机构价格", "评分", "评价数", "评价量", "销量", "认证", "医生数", "项目数",
+            "reference price", "clinic price", "rating", "review", "sales", "verified", "doctors", "projects"
+        ).any(normalized::contains)
+    }
+
+    private fun enforcePlanningBoundary(intent: AgentIntent, content: String): String {
+        if (intent != AgentIntent.PLANNING || !containsUnsafePlanningClaim(content)) return content
+        logger.warn("Unsafe planning model output replaced by deterministic information-reference response")
+        return AgentText.value(
+            "以下仅作为平台信息参考，不构成诊断或治疗建议。平台可展示相关项目名称、价格等结构化资料；个人适用性、恢复期、疼痛程度、禁忌与风险需向机构确认，必要时由具备资质的医生面诊确认。",
+            "This is platform information reference only and is not diagnosis or treatment advice. The platform can show structured details such as names and prices; personal suitability, downtime, pain, contraindications, and risks require confirmation with the institution or a qualified clinician."
+        )
+    }
+
+    private fun containsUnsafePlanningClaim(content: String): Boolean {
+        val normalized = content.lowercase()
+        val prohibitedClaims = listOf(
+            "最适合", "为你制定", "为您制定", "适合你", "适合您", "推荐你", "推荐您",
+            "治疗方案", "诊疗方案", "个性化方案", "无痛", "不痛", "零风险", "无风险", "无需确认禁忌",
+            "best for you", "suitable for you", "tailored for you", "personalized treatment plan",
+            "treatment plan", "pain-free", "painless", "zero risk", "risk-free"
+        )
+        if (prohibitedClaims.any(normalized::contains)) return true
+        return listOf(
+            Regex("(恢复期|恢复时间).{0,12}[0-9一二三四五六七八九十]+\\s*(小时|天|周|个月)"),
+            Regex("(风险|痛感|疼痛).{0,8}(低|轻微|较小|很小)"),
+            Regex("(downtime|recovery).{0,12}\\d+\\s*(hours?|days?|weeks?)"),
+            Regex("(low|minimal).{0,8}(risk|pain)")
+        ).any { it.containsMatchIn(normalized) }
+    }
 
     private fun isProviderTimeout(error: Throwable): Boolean {
         var current: Throwable? = error
