@@ -8,6 +8,7 @@ import com.joysong.server.agent.context.AgentSessionSummary
 import com.joysong.server.agent.dto.AgentCatalogReportResponse
 import com.joysong.server.agent.dto.AgentCatalogItemResponse
 import com.joysong.server.agent.orchestration.AgentChatException
+import com.joysong.server.agent.orchestration.AiAgentAvailabilityGuard
 import com.joysong.server.agent.orchestration.BeginTurnResult
 import com.joysong.server.agent.orchestration.CompleteTurnCommand
 import com.joysong.server.agent.orchestration.IdempotencyKeyConflictException
@@ -85,6 +86,7 @@ class ChatService(
     private val turnLifecycleService: TurnLifecycleService,
     private val agentOperationLogger: AgentOperationLogger,
     private val agentContextBuilder: AgentContextBuilder,
+    private val aiAgentAvailabilityGuard: AiAgentAvailabilityGuard,
     private val objectMapper: ObjectMapper,
     @Qualifier("agentLlmRestTemplate") private val restTemplate: RestTemplate,
     @Qualifier("agentIntentParserRestTemplate") private val intentParserRestTemplate: RestTemplate,
@@ -150,7 +152,10 @@ class ChatService(
         sessionId: String,
         userId: String,
         request: SendMessageRequest
-    ): ChatTurnResult = sendMessageInternal(sessionId, userId, request, ::callLLM)
+    ): ChatTurnResult {
+        aiAgentAvailabilityGuard.requireGenerationEnabled()
+        return sendMessageInternal(sessionId, userId, request, ::callLLM)
+    }
 
     private fun sendMessageInternal(
         sessionId: String,
