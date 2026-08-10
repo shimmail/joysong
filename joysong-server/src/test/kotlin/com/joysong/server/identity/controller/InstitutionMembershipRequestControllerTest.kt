@@ -30,16 +30,31 @@ class InstitutionMembershipRequestControllerTest {
     @Test
     fun `list combines consultant legacy requests and doctor ledger without active doctor relationships`() {
         val consultant = legacyRequest(type = MembershipRequestType.CONSULTANT, id = "consultant-1")
-        val activeDoctorRelationship = legacyRequest(type = MembershipRequestType.DOCTOR, id = "relationship-1")
+        val legacyPendingDoctor = legacyRequest(type = MembershipRequestType.DOCTOR, id = "legacy-doctor-1")
+        val activeDoctorRelationship = legacyRequest(
+            type = MembershipRequestType.DOCTOR,
+            id = "relationship-1",
+            status = "APPROVED"
+        )
         every { accessService.actor(authentication) } returns actor
-        every { legacyService.list(actor) } returns listOf(consultant, activeDoctorRelationship)
+        every { legacyService.list(actor) } returns listOf(consultant, legacyPendingDoctor, activeDoctorRelationship)
         every { doctorService.list(actor) } returns listOf(doctorRequest())
 
         val response = controller.list(authentication)
         val data = response.data as List<*>
 
-        assertEquals(listOf("doctor-request-1", "consultant-1"), data.map { (it as InstitutionMembershipRequestResponse).id })
-        assertEquals(listOf("LEAVE", "JOIN"), data.map { (it as InstitutionMembershipRequestResponse).action })
+        assertEquals(
+            listOf("doctor-request-1", "legacy-doctor-1", "consultant-1"),
+            data.map { (it as InstitutionMembershipRequestResponse).id }
+        )
+        assertEquals(
+            listOf("LEAVE", "JOIN", "JOIN"),
+            data.map { (it as InstitutionMembershipRequestResponse).action }
+        )
+        val doctorResponse = data.first() as InstitutionMembershipRequestResponse
+        assertEquals("医生一", doctorResponse.doctorName)
+        assertEquals("机构一", doctorResponse.institutionName)
+        assertEquals(LocalDateTime.of(2026, 8, 10, 10, 0), doctorResponse.submittedAt)
     }
 
     @Test
@@ -105,6 +120,7 @@ class InstitutionMembershipRequestControllerTest {
     fun `review reuses membership decision and dispatches by request type`() {
         val legal = legalActor()
         every { accessService.actor(authentication) } returns legal
+        every { doctorService.exists("doctor-request-1") } returns true
         every {
             doctorService.review(legal, "doctor-request-1", MembershipRequestDecision.REJECTED, "资料不符")
         } returns doctorRequest(status = DoctorInstitutionRequestStatus.REJECTED)
@@ -143,6 +159,68 @@ class InstitutionMembershipRequestControllerTest {
                 ""
             )
         }
+    }
+
+    @Test
+    fun `rolling legacy doctor request remains reviewable through legacy service`() {
+        val legal = legalActor()
+        every { accessService.actor(authentication) } returns legal
+        every { doctorService.exists("legacy-doctor-1") } returns false
+        every {
+            legacyService.review(
+                legal,
+                MembershipRequestType.DOCTOR,
+                "legacy-doctor-1",
+                MembershipRequestDecision.APPROVED,
+                ""
+            )
+        } returns legacyRequest(MembershipRequestType.DOCTOR, "legacy-doctor-1", "APPROVED")
+
+        val response = controller.review(
+            authentication,
+            "DOCTOR",
+            "legacy-doctor-1",
+            ReviewInstitutionMembershipRequest("APPROVED")
+        )
+
+        assertEquals("APPROVED", (response.data as InstitutionMembershipRequestResponse).status)
+        verify(exactly = 1) {
+            legacyService.review(
+                legal,
+                MembershipRequestType.DOCTOR,
+                "legacy-doctor-1",
+                MembershipRequestDecision.APPROVED,
+                ""
+            )
+        }
+    }
+
+    @Test
+    fun `rolling legacy doctor review still rejects changes requested decision`() {
+        val legal = legalActor()
+        every { accessService.actor(authentication) } returns legal
+        every { doctorService.exists("legacy-doctor-1") } returns false
+        every {
+            legacyService.review(
+                legal,
+                MembershipRequestType.DOCTOR,
+                "legacy-doctor-1",
+                MembershipRequestDecision.CHANGES_REQUESTED,
+                "请修改"
+            )
+        } returns legacyRequest(MembershipRequestType.DOCTOR, "legacy-doctor-1", "CHANGES_REQUESTED")
+
+        val error = assertThrows<IllegalArgumentException> {
+            controller.review(
+                authentication,
+                "DOCTOR",
+                "legacy-doctor-1",
+                ReviewInstitutionMembershipRequest("CHANGES_REQUESTED", "请修改")
+            )
+        }
+
+        assertEquals("医生机构关系审核仅支持通过或驳回", error.message)
+        verify(exactly = 0) { legacyService.review(any(), any(), any(), any(), any()) }
     }
 
     @Test

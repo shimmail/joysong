@@ -51,6 +51,18 @@ class InstitutionMembershipRequestServiceTest {
     }
 
     @Test
+    fun `platform admin list includes all rolling legacy requests`() {
+        val store = FakeMembershipRequestStore().apply {
+            seed(request("doctor-pending", MembershipRequestType.DOCTOR, "doctor-2", "institution-1"))
+            seed(request("consultant-pending", MembershipRequestType.CONSULTANT, "consultant-2", "institution-2"))
+        }
+
+        val requests = InstitutionMembershipRequestService(store).list(adminActor())
+
+        assertEquals(listOf("consultant-pending", "doctor-pending"), requests.map { it.id }.sorted())
+    }
+
+    @Test
     fun `legal representative cannot review a request from another institution`() {
         val store = FakeMembershipRequestStore().apply {
             seed(request("request-1", MembershipRequestType.DOCTOR, "doctor-2", "institution-2"))
@@ -204,6 +216,8 @@ private class FakeMembershipRequestStore : InstitutionMembershipRequestStore {
 
     override fun listVisible(userId: String, managedInstitutionIds: Set<String>) = requests.values
         .filter { it.userId == userId || it.institutionId in managedInstitutionIds }
+
+    override fun listAll() = requests.values.toList()
 
     override fun findById(type: MembershipRequestType, id: String) = requests[type to id]
 
