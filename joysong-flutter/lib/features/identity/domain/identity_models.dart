@@ -538,8 +538,8 @@ final class ManagedInstitutionProfileDraft {
         'credentials': credentials.trim(),
         'userCount': userCount,
         'caseCount': caseCount,
-        'credentialImages': credentialImages,
-        'images': images,
+        'credentialImages': _csvText(credentialImages),
+        'images': _csvText(images),
       };
 }
 
@@ -770,9 +770,27 @@ Map<String, Object?> _jsonMap(Object? json, String label) {
 
 List<Object?> _objectList(Object? value) => value is List ? value : const [];
 
-List<String> _stringList(Object? value) => value is List
-    ? value.map((item) => item.toString()).toList(growable: false)
-    : const [];
+List<String> _stringList(Object? value) {
+  if (value is List) {
+    return value
+        .map((item) => item.toString().trim())
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
+  }
+  if (value is String) {
+    return value
+        .split(',')
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
+  }
+  return const [];
+}
+
+String _csvText(Iterable<String> values) => values
+    .map((item) => item.trim())
+    .where((item) => item.isNotEmpty)
+    .join(',');
 
 String _requiredText(Object? value, String field) {
   final result = value?.toString().trim() ?? '';

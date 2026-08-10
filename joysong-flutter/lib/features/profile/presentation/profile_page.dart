@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:joysong_flutter/core/files/app_file_picker.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/routing/app_router.dart';
 import 'package:joysong_flutter/features/auth/domain/auth_models.dart';
@@ -289,9 +290,38 @@ class _ProfilePageState extends State<ProfilePage> {
       MaterialPageRoute(
         builder: (_) => ManagementCenterPage(
           repository: widget.identityRepository!,
+          institutionImagePicker:
+              widget.socialRepository == null ? null : _pickInstitutionImage,
         ),
       ),
     );
+  }
+
+  Future<String?> _pickInstitutionImage() async {
+    final selected = await const AppFilePicker().pickImage();
+    if (selected == null) return null;
+    String? url;
+    await for (final progress in widget.socialRepository!.uploadPublicMedia(
+      PublicMediaDraft(
+        bytes: selected.bytes,
+        fileName: selected.fileName,
+        mimeType: selected.mimeType,
+        purpose: PublicMediaPurpose.institutionProfile,
+      ),
+    )) {
+      if (progress.stage == UploadStage.failed) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(progress.message ?? '图片上传失败')),
+          );
+        }
+        return null;
+      }
+      if (progress.stage == UploadStage.complete) {
+        url = progress.url?.trim();
+      }
+    }
+    return url?.isEmpty == true ? null : url;
   }
 }
 
