@@ -28,8 +28,8 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
-import org.hamcrest.Matchers.containsString
-import org.hamcrest.Matchers.not
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.test.context.SpringBootTest
@@ -44,7 +44,6 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
-import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.transaction.support.TransactionSynchronizationManager
@@ -112,6 +111,7 @@ class AgentChatFlowIntegrationTest {
         fakeLlmStatus.set(200)
         fakeLlmDelayMs.set(0)
         fakeLlmContent.set("测试回复")
+        fakeLlmRawResponse.set(null)
         fakeLlmRequestBodies.clear()
         transactionStates.clear()
         llmRestTemplate.requestFactory = SimpleClientHttpRequestFactory().apply {
@@ -419,6 +419,7 @@ class AgentChatFlowIntegrationTest {
                     .content("""{"content":"disabled request","idempotencyKey":"http-disabled-1"}""")
             )
                 .andExpect(status().isServiceUnavailable)
+                .andExpect(jsonPath("$.code").value(503))
                 .andExpect(jsonPath("$.message").value("AGENT_DISABLED"))
         } finally {
             aiAgentProperties.enabled = enabledBefore
@@ -475,38 +476,47 @@ class AgentChatFlowIntegrationTest {
         }
     }
 
-    @Test
+    @ParameterizedTest(name = "provider status {0} is sanitized")
+    @ValueSource(ints = [401, 429, 500, 503])
     @WithMockUser(username = "user-1")
-    fun `HTTP send maps provider 5xx to a redacted 503 response`() {
-        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
-        fakeLlmStatus.set(500)
+    fun `HTTP provider status failures share one stable redacted contract`(providerStatus: Int) {
+        fakeLlmStatus.set(providerStatus)
 
-        mockMvc.perform(
-            post("/api/chat/sessions/{id}/messages", session.id)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("""{"content":"private request","idempotencyKey":"http-provider-1"}""")
+        assertHttpProviderFailure(
+            idempotencyKey = "http-provider-status-$providerStatus",
+            expectedErrorCode = "AI_PROVIDER_UNAVAILABLE",
+            sensitiveValues = listOf("provider-secret-body", "private@example.com", "13800000000")
         )
-            .andExpect(status().isServiceUnavailable)
-            .andExpect(jsonPath("$.message").value("AI_PROVIDER_UNAVAILABLE"))
-            .andExpect(jsonPath("$.data.traceId").isNotEmpty)
-            .andExpect(content().string(not(containsString("provider-secret-body"))))
+    }
+
+    @ParameterizedTest(name = "provider payload {index} is sanitized")
+    @ValueSource(
+        strings = [
+            "{malformed-provider-secret-body test-key 13800000000 private@example.com",
+            "{\"choices\":[],\"provider_marker\":\"provider-secret-body test-key 13800000000 private@example.com\"}"
+        ]
+    )
+    @WithMockUser(username = "user-1")
+    fun `HTTP malformed or empty provider payloads share one stable redacted contract`(rawResponse: String) {
+        fakeLlmRawResponse.set(rawResponse)
+
+        assertHttpProviderFailure(
+            idempotencyKey = "http-provider-payload-${rawResponse.hashCode()}",
+            expectedErrorCode = "AI_PROVIDER_UNAVAILABLE",
+            sensitiveValues = listOf(rawResponse, "provider-secret-body", "private@example.com", "13800000000")
+        )
     }
 
     @Test
     @WithMockUser(username = "user-1")
     fun `HTTP send maps provider timeout to a redacted 503 response`() {
-        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
         fakeLlmDelayMs.set(500)
 
-        mockMvc.perform(
-            post("/api/chat/sessions/{id}/messages", session.id)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("""{"content":"private timeout request","idempotencyKey":"http-timeout-1"}""")
+        assertHttpProviderFailure(
+            idempotencyKey = "http-timeout-1",
+            expectedErrorCode = "AI_PROVIDER_TIMEOUT",
+            sensitiveValues = listOf("provider-secret-body")
         )
-            .andExpect(status().isServiceUnavailable)
-            .andExpect(jsonPath("$.message").value("AI_PROVIDER_TIMEOUT"))
-            .andExpect(jsonPath("$.data.traceId").isNotEmpty)
-            .andExpect(content().string(not(containsString("provider-secret-body"))))
     }
 
     @Test
@@ -667,6 +677,61 @@ class AgentChatFlowIntegrationTest {
         }
     }
 
+    private fun assertHttpProviderFailure(
+        idempotencyKey: String,
+        expectedErrorCode: String,
+        sensitiveValues: List<String>
+    ) {
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+        lateinit var responseBody: String
+
+        val logs = captureAgentOperationLogs {
+            responseBody = mockMvc.perform(
+                post("/api/chat/sessions/{id}/messages", session.id)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        """{"content":"provider contract request","idempotencyKey":"$idempotencyKey"}"""
+                    )
+            )
+                .andExpect(status().isServiceUnavailable)
+                .andExpect(jsonPath("$.code").value(503))
+                .andExpect(jsonPath("$.message").value(expectedErrorCode))
+                .andExpect(jsonPath("$.data.traceId").isNotEmpty)
+                .andReturn()
+                .response
+                .contentAsString
+        }
+
+        val failed = turnRepository.findAll().single { it.sessionId == session.id }
+        assertEquals(AgentTurnStatus.FAILED, failed.status)
+        assertEquals(expectedErrorCode, failed.errorCode)
+
+        val persistedMessages = messageRepository.findBySessionIdOrderBySequenceNoAsc(session.id)
+        assertEquals(listOf(1L), persistedMessages.map { it.sequenceNo })
+        assertEquals(listOf("USER"), persistedMessages.map { it.role })
+        assertEquals(emptyList<Long>(), chatService.getMessages(session.id, "user-1").map { it.sequenceNo })
+
+        val failureLogs = logs.filter { it.contains("operation=MODEL_COMPLETION") }
+        assertEquals(1, failureLogs.size)
+        assertTrue(failureLogs.single().contains("terminalStatus=FAILED"))
+        assertTrue(failureLogs.single().contains("errorCode=$expectedErrorCode"))
+
+        val valuesThatMustBeRedacted = sensitiveValues + listOf(
+            idempotencyKey,
+            "test-key",
+            "http://127.0.0.1:${fakeLlm.address.port}/v1"
+        )
+        assertRedacted(responseBody, valuesThatMustBeRedacted)
+        assertRedacted(failureLogs.joinToString("\n"), valuesThatMustBeRedacted)
+        assertRedacted(persistedMessages.joinToString("\n") { it.metadataJson }, valuesThatMustBeRedacted)
+    }
+
+    private fun assertRedacted(value: String, sensitiveValues: List<String>) {
+        sensitiveValues.filter(String::isNotEmpty).forEach { sensitive ->
+            assertFalse(value.contains(sensitive, ignoreCase = true), "Sensitive value was exposed: $sensitive")
+        }
+    }
+
     private fun assertNoSensitiveLogData(log: String, requestContent: String) {
         listOf(
             requestContent,
@@ -694,6 +759,7 @@ class AgentChatFlowIntegrationTest {
         private val fakeLlmStatus = AtomicInteger(200)
         private val fakeLlmDelayMs = AtomicLong()
         private val fakeLlmContent = AtomicReference("测试回复")
+        private val fakeLlmRawResponse = AtomicReference<String?>(null)
         private val fakeLlmRequestBodies = CopyOnWriteArrayList<String>()
         private val fakeLlmExecutor = Executors.newCachedThreadPool()
         private val fakeLlm = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
@@ -704,7 +770,10 @@ class AgentChatFlowIntegrationTest {
                 Thread.sleep(fakeLlmDelayMs.get())
                 val status = fakeLlmStatus.get()
                 val streaming = Regex("\"stream\"\\s*:\\s*true").containsMatchIn(requestBody)
-                val response = if (status != 200) {
+                val rawResponse = fakeLlmRawResponse.get()
+                val response = if (rawResponse != null) {
+                    rawResponse.toByteArray(StandardCharsets.UTF_8)
+                } else if (status != 200) {
                     """{"error":{"message":"provider-secret-body test-key 13800000000 private@example.com"}}""".toByteArray(StandardCharsets.UTF_8)
                 } else if (streaming) {
                     """

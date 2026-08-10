@@ -7,6 +7,7 @@ import com.joysong.server.agent.dto.AgentCatalogReportResponse
 import com.joysong.server.agent.entity.AgentTurnEntity
 import com.joysong.server.agent.entity.AgentTurnStatus
 import com.joysong.server.agent.repository.AgentTurnRepository
+import com.joysong.server.agent.service.PlanningCatalogProjection
 import com.joysong.server.chat.entity.ChatMessageEntity
 import com.joysong.server.chat.repository.ChatMessageRepository
 import com.joysong.server.chat.repository.ChatSessionRepository
@@ -128,7 +129,15 @@ class TurnLifecycleService(
         if (turn.status == AgentTurnStatus.SUCCEEDED && existingAssistant != null) return reconstruct(turn, existingAssistant)
         check(turn.status == AgentTurnStatus.RUNNING) { "回合不是运行状态" }
         val now = LocalDateTime.now(clock)
-        val metadata = metadata(command)
+        val persistedCommand = if (command.intent.trim().equals("PLANNING", ignoreCase = true)) {
+            command.copy(
+                catalogItems = PlanningCatalogProjection.projectItems(command.catalogItems),
+                catalogReport = PlanningCatalogProjection.projectReport(command.catalogReport)
+            )
+        } else {
+            command
+        }
+        val metadata = metadata(persistedCommand)
         val assistant = existingAssistant ?: messageRepository.save(
             ChatMessageEntity(
                 sessionId = session.id,
@@ -146,7 +155,14 @@ class TurnLifecycleService(
         turn.fallbackUsed = command.fallbackUsed
         turn.modelName = command.modelName
         turn.promptVersion = command.promptVersion
-        contextBuilder.updateSummaryAndPrune(session, turn.sequenceNo, command.intent, command.queryTarget, command.nextAction, command.catalogItems)
+        contextBuilder.updateSummaryAndPrune(
+            session,
+            turn.sequenceNo,
+            persistedCommand.intent,
+            persistedCommand.queryTarget,
+            persistedCommand.nextAction,
+            persistedCommand.catalogItems
+        )
         turnRepository.save(turn)
         return reconstruct(turn, assistant)
     }

@@ -19,6 +19,7 @@ import com.joysong.server.chat.entity.ChatSessionEntity
 import com.joysong.server.chat.repository.ChatMessageRepository
 import com.joysong.server.chat.repository.ChatSessionRepository
 import com.joysong.server.agent.service.AgentText
+import com.joysong.server.agent.service.PlanningCatalogProjection
 import com.joysong.server.doctor.repository.DoctorRepository
 import com.joysong.server.doctor.service.DoctorInstitutionService
 import com.joysong.server.institution.repository.InstitutionRepository
@@ -621,14 +622,14 @@ class ChatService(
         .replace("字段", "资料")
 
     private fun planningGroundingPrompt(evidence: AgentPromptEvidence): String {
-        val items = evidence.report?.items.orEmpty().take(4).map { item ->
+        val items = PlanningCatalogProjection.projectItems(evidence.report?.items.orEmpty()).take(4).map { item ->
             linkedMapOf<String, Any?>(
                 "type" to item.type,
                 "id" to item.id,
                 "name" to item.name,
                 "institutionId" to item.institutionId,
                 "projectId" to item.projectId,
-                "attributes" to item.attributes.filterKeys(::isSafePlanningAttribute)
+                "attributes" to item.attributes
             ).filterValues { value -> value != null && value != "" && value != emptyMap<String, String>() }
         }
         val safeCatalogJson = objectMapper.writeValueAsString(items)
@@ -638,14 +639,6 @@ class ChatService(
             不得使用卡片摘要、简介、宣传语、详情文本或历史消息补充恢复期、疼痛、禁忌、风险、疗效或个人适用性。
             缺少结构化资料时统一说明“需向机构确认”。这些项目只作为信息参考，不构成诊断或治疗建议。
         """.trimIndent()
-    }
-
-    private fun isSafePlanningAttribute(label: String): Boolean {
-        val normalized = label.trim().lowercase()
-        return listOf(
-            "参考价", "机构价格", "评分", "评价数", "评价量", "销量", "认证", "医生数", "项目数",
-            "reference price", "clinic price", "rating", "review", "sales", "verified", "doctors", "projects"
-        ).any(normalized::contains)
     }
 
     private fun enforcePlanningBoundary(intent: AgentIntent, content: String): String {
