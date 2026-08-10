@@ -13,6 +13,7 @@ import com.joysong.server.agent.orchestration.TurnLifecycleService
 import com.joysong.server.agent.repository.AgentTurnRepository
 import com.joysong.server.chat.entity.ChatSessionEntity
 import com.joysong.server.chat.repository.ChatSessionRepository
+import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -28,6 +29,7 @@ import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection
 import org.springframework.dao.DataAccessException
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.springframework.transaction.annotation.Propagation
@@ -81,12 +83,14 @@ class AgentV2MySqlIntegrationTest {
 
     @Test
     fun `empty database migrates to isolated agent v2 schema`() {
-        assertEquals("myapp_worktree_ai_agent_architecture_refactor", mysql.databaseName)
+        assertEquals(DATABASE_NAME, mysql.databaseName)
         val history = jdbcTemplate.queryForList(
             "SELECT version FROM flyway_schema_history WHERE success = 1 AND version IS NOT NULL ORDER BY installed_rank",
             String::class.java
         )
-        assertEquals((1..10).map(Int::toString), history)
+        assertEquals((1..11).map(Int::toString), history)
+
+        assertEquals(1, leaseColumnCount(jdbcTemplate))
 
         val tables = jdbcTemplate.queryForList(
             """
@@ -104,6 +108,29 @@ class AgentV2MySqlIntegrationTest {
             tables
         )
         assertFalse(tables.any { it in setOf("agent_tool_audits", "agent_runs", "agent_run_steps") })
+    }
+
+    @Test
+    fun `already V10 agent turns schema upgrades with the turn lease column`() {
+        val upgradeFlyway = Flyway.configure()
+            .dataSource(upgradeMysql.jdbcUrl, upgradeMysql.username, upgradeMysql.password)
+            .locations("classpath:db/migration")
+            .target("10")
+            .load()
+        upgradeFlyway.migrate()
+
+        val upgradeJdbcTemplate = JdbcTemplate(
+            DriverManagerDataSource(upgradeMysql.jdbcUrl, upgradeMysql.username, upgradeMysql.password)
+        )
+        assertEquals(0, leaseColumnCount(upgradeJdbcTemplate))
+
+        Flyway.configure()
+            .dataSource(upgradeMysql.jdbcUrl, upgradeMysql.username, upgradeMysql.password)
+            .locations("classpath:db/migration")
+            .load()
+            .migrate()
+
+        assertEquals(1, leaseColumnCount(upgradeJdbcTemplate))
     }
 
     @Test
@@ -474,6 +501,14 @@ class AgentV2MySqlIntegrationTest {
         assertThrows(DataAccessException::class.java, block)
     }
 
+    private fun leaseColumnCount(jdbcTemplate: JdbcTemplate): Long = jdbcTemplate.queryForObject(
+        """select count(*) from information_schema.columns
+           where table_schema = database()
+             and table_name = 'agent_turns'
+             and column_name = 'lease_expires_at'""",
+        Long::class.java
+    )!!
+
     companion object {
         private val DATABASE_NAME = worktreeDatabaseName()
 
@@ -481,6 +516,12 @@ class AgentV2MySqlIntegrationTest {
         @ServiceConnection
         @JvmField
         val mysql = ReportingMySqlContainer("mysql:8.0.39")
+            .withDatabaseName(DATABASE_NAME)
+            .withTmpFs(mapOf("/var/lib/mysql" to "rw"))
+
+        @Container
+        @JvmField
+        val upgradeMysql = ReportingMySqlContainer("mysql:8.0.39")
             .withDatabaseName(DATABASE_NAME)
             .withTmpFs(mapOf("/var/lib/mysql" to "rw"))
 

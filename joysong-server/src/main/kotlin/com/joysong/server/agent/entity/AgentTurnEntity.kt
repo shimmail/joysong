@@ -28,6 +28,7 @@ class AgentTurnEntity(
     @Column(name = "model_name", nullable = false) var modelName: String = "",
     @Column(name = "prompt_version", nullable = false) var promptVersion: String = "",
     @Column(name = "started_at", nullable = false) var startedAt: LocalDateTime = LocalDateTime.now(),
+    @Column(name = "lease_expires_at") var leaseExpiresAt: LocalDateTime? = null,
     @Column(name = "completed_at") var completedAt: LocalDateTime? = null,
     @Column(name = "total_duration_ms", nullable = false) var totalDurationMs: Long = 0,
     @Column(name = "created_at", nullable = false) var createdAt: LocalDateTime = LocalDateTime.now()
