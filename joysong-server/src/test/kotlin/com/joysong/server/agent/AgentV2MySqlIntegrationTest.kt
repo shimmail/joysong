@@ -84,6 +84,9 @@ class AgentV2MySqlIntegrationTest {
     @Autowired
     private lateinit var transactionManager: PlatformTransactionManager
 
+    @Autowired
+    private lateinit var objectMapper: ObjectMapper
+
     @Test
     fun `empty database migrates to isolated agent v2 schema`() {
         assertEquals(DATABASE_NAME, mysql.databaseName)
@@ -312,6 +315,91 @@ class AgentV2MySqlIntegrationTest {
         assertEquals(0, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM agent_turns WHERE session_id = ? AND status = 'RUNNING'", Int::class.java, sessionId
         ))
+    }
+
+    @Test
+    fun `planning completion projects catalog response metadata summary and replay to safe fields`() {
+        val sessionId = createSession()
+        val institutionId = UUID.randomUUID().toString()
+        val projectId = UUID.randomUUID().toString()
+        val item = AgentCatalogItemResponse(
+            type = "INSTITUTION_PROJECT",
+            id = UUID.randomUUID().toString(),
+            name = "光子嫩肤",
+            subtitle = "恢复期1天 subtitle-marker",
+            summary = "无痛零风险 description-marker",
+            attributes = linkedMapOf(
+                "机构价格" to "\$888",
+                "评分" to "4.8",
+                "评分说明" to "零风险 rating-marker",
+                "宣传语" to "无痛 slogan-marker",
+                "详情摘要" to "恢复期1天 detail-marker"
+            ),
+            institutionId = institutionId,
+            projectId = projectId,
+            canChatWithHuman = true
+        )
+        val report = AgentCatalogReportResponse(
+            mode = "SUMMARY",
+            title = "零风险 title-marker",
+            summary = "无痛 report-marker",
+            items = listOf(item),
+            comparisonDimensions = listOf("机构价格", "恢复期1天 dimension-marker"),
+            warnings = listOf("零风险 warning-marker")
+        )
+        val started = lifecycle.beginTurn(sessionId, "test-user", "planning", "planning-safe-key") as BeginTurnResult.Started
+
+        val completed = lifecycle.completeTurn(
+            CompleteTurnCommand(
+                started.turnId,
+                "safe planning answer",
+                "PLANNING",
+                "PROJECT",
+                "SHOW_CATALOG",
+                listOf(item),
+                report
+            )
+        )
+        val replay = lifecycle.beginTurn(sessionId, "test-user", "planning", "planning-safe-key") as BeginTurnResult.Replayed
+
+        val projectedItem = completed.catalogItems.single()
+        assertEquals(item.id, projectedItem.id)
+        assertEquals(item.name, projectedItem.name)
+        assertEquals(institutionId, projectedItem.institutionId)
+        assertEquals(projectId, projectedItem.projectId)
+        assertTrue(projectedItem.canChatWithHuman)
+        assertEquals("", projectedItem.subtitle)
+        assertEquals("", projectedItem.summary)
+        assertEquals(mapOf("机构价格" to "\$888", "评分" to "4.8"), projectedItem.attributes)
+        assertEquals(projectedItem, completed.catalogReport?.items?.single())
+        assertTrue(completed.catalogReport?.comparisonDimensions.orEmpty().isEmpty())
+
+        val persistedMetadata = jdbcTemplate.queryForObject(
+            "SELECT metadata_json FROM agent_messages WHERE turn_id = ? AND role = 'ASSISTANT'",
+            String::class.java,
+            started.turnId
+        ).orEmpty()
+        val persistedSummary = jdbcTemplate.queryForObject(
+            "SELECT summary_json FROM agent_sessions WHERE id = ?",
+            String::class.java,
+            sessionId
+        ).orEmpty()
+        val visiblePayloads = listOf(
+            objectMapper.writeValueAsString(
+                mapOf("catalogItems" to completed.catalogItems, "catalogReport" to completed.catalogReport)
+            ),
+            persistedMetadata,
+            persistedSummary,
+            objectMapper.writeValueAsString(
+                mapOf("catalogItems" to replay.turn.catalogItems, "catalogReport" to replay.turn.catalogReport)
+            )
+        )
+        listOf(
+            "恢复期1天", "无痛", "零风险", "description-marker", "rating-marker",
+            "slogan-marker", "detail-marker", "title-marker", "report-marker", "dimension-marker", "warning-marker"
+        ).forEach { forbidden ->
+            assertTrue(visiblePayloads.none { it.contains(forbidden) }, "must not expose $forbidden")
+        }
     }
 
     @Test
