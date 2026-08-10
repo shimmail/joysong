@@ -1,163 +1,57 @@
 # JoySong AI Agent 测试指南
 
-测试分为三组：快速单元测试、真实后端 API 回归、模拟 LLM 异常测试。建议提交前运行前两组，修改网关或路由代码时再运行第三组。
+本版本验证同步 REST Agent 工作流。SSE 已禁用，因此无需运行流式响应、流式重连或 Android 流式渲染测试。
 
-## 1. 快速单元测试
+## 隔离要求
 
-在 PowerShell 中执行：
-
-```powershell
-cd D:\code\kotlin\joysong\joysong-server
-.\gradlew.bat test --tests com.joysong.server.agent.service.AgentIntentRouterTest
-```
-
-覆盖范围：
-
-- 中英文普通聊天、机构、医生、项目、机构项目和对比意图
-- 高可靠度本地快路径
-- 模糊、多约束问题的 LLM 解析门槛
-- 孕期、哺乳、过敏、感染、服药、瘢痕和效果保证风险
-- 风险优先级、禁止目录搜索和风险筛查动作
-
-测试报告：
-
-```text
-joysong-server/build/reports/tests/test/index.html
-```
-
-运行服务端全部测试：
+所有测试均在当前 worktree 的 `joysong-server` 目录执行。测试或迁移前先打印解析后的数据库 host 与名称；数据库名必须为 `myapp_<WORKTREE_ID>`，Docker Compose 项目名必须为 `myapp-<WORKTREE_ID>`。不得连接共享开发数据库，也不得删除或重置名称不以 `myapp_worktree_` 开头的数据库。
 
 ```powershell
-.\gradlew.bat test
+$env:GRADLE_USER_HOME='D:\code\kotlin\joysong\.tmp\gradle-user-home-codex'
+cd D:\code\kotlin\joysong\.worktrees\ai-agent-architecture-refactor\joysong-server
 ```
 
-## 2. 启动后端
-
-至少配置数据库、JWT 和模型网关环境变量：
+## 定向 JVM 验证
 
 ```powershell
-$env:DB_PASSWORD="数据库密码"
-$env:JWT_SECRET="不少于256位安全强度的密钥"
-$env:OPENAI_API_KEY="模型网关Key"
-$env:OPENAI_BASE_URL="https://www.fastaitoken.com/v1"
-$env:OPENAI_MODEL="gpt-4.1-mini"
-$env:OPENAI_INTENT_PARSER_ENABLED="true"
-
-cd D:\code\kotlin\joysong\joysong-server
-.\gradlew.bat bootRun
+.\gradlew.bat test --offline `
+  --tests '*AgentWorkflowCoreTest' `
+  --tests '*AgentCatalogServiceTest' `
+  --tests '*AgentProfileServiceTest' `
+  --tests '*AgentSafetyServiceTest' `
+  --tests 'com.joysong.server.config.OpenAiBaseUrlPolicyTest'
 ```
 
-## 3. API 全量回归
+该组覆盖同步工作流、目录读取、资料、风险限制和模型 Base URL 策略。
 
-推荐直接传入测试账号的 JWT：
+## Fresh MySQL 集成验证
+
+使用 `--rerun-tasks` 强制执行 fresh Testcontainers MySQL 验证：
 
 ```powershell
-cd D:\code\kotlin\joysong\joysong-server
-.\scripts\ai-agent-regression.ps1 -Token "JWT_TOKEN"
+.\gradlew.bat mysqlIntegrationTest --offline --rerun-tasks `
+  --tests '*AgentV2MySqlIntegrationTest' `
+  --tests '*AgentChatFlowIntegrationTest'
 ```
 
-也可以使用测试账号自动登录：
+该测试必须输出其隔离数据库 host 和名称。检查会话摘要写入、`summary_json`、最近 20 条/7 天上下文窗口、同步 HTTP 响应、可选幂等键及稳定 HTTP 状态。不得以 `agent_tool_audits` 查询或 traces API 作为验收手段。
+
+## 全量 JVM 基线
+
+在定向与 fresh 集成验证通过后，仅运行一次：
 
 ```powershell
-$env:JOYSONG_TEST_PHONE="测试手机号"
-$env:JOYSONG_TEST_PASSWORD="测试密码"
-.\scripts\ai-agent-regression.ps1
+.\gradlew.bat test --offline
 ```
 
-指定其他后端地址：
+允许的已知基线失败仅为四个因缺少忽略的本地配置导致的 `ProductionProfileTest` 失败。任何其他失败均阻塞本次交付，须记录失败类、测试数与证据，不得通过重试掩盖。
+
+## 变更范围检查
 
 ```powershell
-.\scripts\ai-agent-regression.ps1 `
-  -BaseUrl "http://192.168.1.10:8080" `
-  -Token "JWT_TOKEN"
+git diff --check
+git status --short
+git diff --name-only 01a50a5...HEAD
 ```
 
-默认模式验证接口结构、路由、多轮上下文、安全优先级和消息持久化，不强制要求测试数据库一定存在热玛吉数据。
-
-如果测试库已经准备好上海、深圳、热玛吉、医生和机构项目关系数据，启用严格目录断言：
-
-```powershell
-.\scripts\ai-agent-regression.ps1 -Token "JWT_TOKEN" -StrictCatalog
-```
-
-严格模式额外检查：
-
-- 目录问题必须返回卡片或报告
-- 对比报告只能包含一种实体类型
-- 城市切换后不能继续展示旧城市卡片
-- 机构项目应返回真实关联数据
-
-脚本任一用例失败都会以退出码 `1` 结束，适合接入 CI。
-
-## 4. 模拟 LLM 异常
-
-打开第一个 PowerShell 窗口：
-
-```powershell
-cd D:\code\kotlin\joysong\joysong-server
-.\scripts\mock-llm-gateway.ps1 -Scenario valid
-```
-
-第二个窗口使用模拟网关启动后端：
-
-```powershell
-$env:OPENAI_API_KEY="test-key"
-$env:OPENAI_BASE_URL="http://127.0.0.1:18080/v1"
-$env:OPENAI_INTENT_PARSER_ENABLED="true"
-.\gradlew.bat bootRun
-```
-
-第三个窗口运行 API 回归：
-
-```powershell
-.\scripts\ai-agent-regression.ps1 -Token "JWT_TOKEN"
-```
-
-支持的模拟场景：
-
-```powershell
-.\scripts\mock-llm-gateway.ps1 -Scenario valid
-.\scripts\mock-llm-gateway.ps1 -Scenario invalid-json
-.\scripts\mock-llm-gateway.ps1 -Scenario illegal-enum
-.\scripts\mock-llm-gateway.ps1 -Scenario timeout
-.\scripts\mock-llm-gateway.ps1 -Scenario safety-downgrade
-```
-
-预期行为：
-
-| 场景 | 预期结果 |
-|---|---|
-| `valid` | 模糊问题采用结构化解析结果 |
-| `invalid-json` | 放弃解析并回退本地路由 |
-| `illegal-enum` | 拒绝非法枚举并回退 |
-| `timeout` | 约8秒后回退，不出现500/502 |
-| `safety-downgrade` | 本地明确风险不调用解析器，不能被降级 |
-
-切换场景前停止并重新启动模拟网关。
-
-## 5. 测试数据库建议数据
-
-严格模式建议至少准备：
-
-- 上海、深圳各2家机构
-- 热玛吉、玻尿酸、水光针等项目
-- 每个项目至少2条机构项目及价格
-- 上海、深圳各2名医生
-- 正确的 `doctor_projects` 关系
-- 1名没有热玛吉关系的医生用于反向过滤
-- 1个不存在的项目或医生名称用于无结果测试
-
-不要在共享生产数据库运行会清理会话的数据测试。当前回归脚本只创建测试会话和消息，不删除业务目录数据。
-
-## 6. 验收重点
-
-- 明确问题只调用最终回答 LLM，不额外解析意图
-- 模糊问题最多调用一次解析 LLM 和一次回答 LLM
-- 解析超时最多8秒后回退
-- 安全问题不返回机构、项目卡片或对比报告
-- 对比仅包含同一种实体
-- 第二轮正确继承项目和目标，同时替换新城市
-- 新主题能够清除旧目标
-- AI 回复与历史消息成功持久化
-- 中文与英文路由结果一致
-
+本任务只应影响 Agent/chat 计划路径与三份相关文档，不应引入迁移或无关业务模块变更。
