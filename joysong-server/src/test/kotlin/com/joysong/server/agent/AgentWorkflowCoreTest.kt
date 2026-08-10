@@ -78,10 +78,15 @@ class AgentWorkflowCoreTest {
         assertEquals(1, result.sequenceNo)
         assertEquals(2, session.nextSequenceNo)
         assertEquals(AgentTurnStatus.RUNNING, savedTurn.captured.status)
+        assertEquals(LocalDateTime.now(clock), savedTurn.captured.startedAt)
+        assertEquals(LocalDateTime.now(clock), savedTurn.captured.createdAt)
+        assertEquals(LocalDateTime.now(clock).plus(turnLease), savedTurn.captured.leaseExpiresAt)
         assertEquals("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824", savedTurn.captured.requestHash)
         assertEquals(1, savedMessage.captured.sequenceNo)
         assertEquals("USER", savedMessage.captured.role)
         assertEquals("hello", savedMessage.captured.content)
+        assertEquals(LocalDateTime.now(clock), savedMessage.captured.createdAt)
+        assertEquals(LocalDateTime.now(clock), session.updatedAt)
     }
 
     @Test
@@ -161,6 +166,29 @@ class AgentWorkflowCoreTest {
     }
 
     @Test
+    fun `same key stale recovery remains idempotency expired on every retry`() {
+        val now = LocalDateTime.now(clock)
+        val expired = turn(status = AgentTurnStatus.RUNNING).apply {
+            startedAt = now.minusSeconds(5)
+            leaseExpiresAt = now
+        }
+        every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns session()
+        every { turns.findBySessionIdAndIdempotencyKey("session-1", "key-1") } returns expired
+        every { turns.save(expired) } returns expired
+        every { turns.flush() } just runs
+
+        val first = lifecycle.beginTurn("session-1", "user-1", "hello", "key-1")
+        val second = lifecycle.beginTurn("session-1", "user-1", "hello", "key-1")
+
+        assertEquals(BeginTurnResult.IdempotencyExpired, first)
+        assertEquals(BeginTurnResult.IdempotencyExpired, second)
+        assertEquals(AgentTurnStatus.FAILED, expired.status)
+        assertEquals("STALE_RECOVERED", expired.errorCode)
+        verify(exactly = 1) { turns.save(expired) }
+        verify(exactly = 1) { turns.flush() }
+    }
+
+    @Test
     fun `marks successful turn complete once with replay metadata`() {
         val running = turn(status = AgentTurnStatus.RUNNING)
         val assistant = slot<ChatMessageEntity>()
@@ -180,6 +208,8 @@ class AgentWorkflowCoreTest {
         assertEquals(2, assistant.captured.sequenceNo)
         assertTrue(assistant.captured.metadataJson.contains("CATALOG_QA"))
         assertEquals(AgentTurnStatus.SUCCEEDED, running.status)
+        assertEquals(LocalDateTime.now(clock), running.completedAt)
+        assertEquals(LocalDateTime.now(clock), assistant.captured.createdAt)
         verifyOrder {
             turns.findSessionIdById(running.id)
             sessions.findByIdForUpdate("session-1")
@@ -217,12 +247,29 @@ class AgentWorkflowCoreTest {
         assertEquals("MODEL_TIMEOUT", failed.errorCode)
         assertEquals(AgentTurnStatus.CANCELLED, cancelled.status)
         assertEquals("CLIENT_CANCELLED", cancelled.errorCode)
+        assertEquals(LocalDateTime.now(clock), failed.completedAt)
+        assertEquals(LocalDateTime.now(clock), cancelled.completedAt)
         val failTransaction = TurnLifecycleService::class.java.declaredMethods.first { it.name == "failTurn" }
             .getAnnotation(Transactional::class.java)
         val cancelTransaction = TurnLifecycleService::class.java.declaredMethods.first { it.name == "cancelTurn" }
             .getAnnotation(Transactional::class.java)
         assertEquals(Propagation.REQUIRES_NEW, failTransaction.propagation)
         assertEquals(Propagation.REQUIRES_NEW, cancelTransaction.propagation)
+    }
+
+    @Test
+    fun `clearing history writes the injected clock time`() {
+        val session = session()
+        every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns session
+        every { messages.deleteBySessionId("session-1") } just runs
+        every { messages.flush() } just runs
+        every { turns.deleteBySessionId("session-1") } just runs
+        every { turns.flush() } just runs
+        every { sessions.save(session) } returns session
+
+        lifecycle.clearHistory("session-1", "user-1")
+
+        assertEquals(LocalDateTime.now(clock), session.updatedAt)
     }
 
     @Test

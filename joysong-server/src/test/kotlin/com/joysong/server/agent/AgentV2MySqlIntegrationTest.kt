@@ -126,6 +126,29 @@ class AgentV2MySqlIntegrationTest {
             DriverManagerDataSource(upgradeMysql.jdbcUrl, upgradeMysql.username, upgradeMysql.password)
         )
         assertEquals(0, leaseColumnCount(upgradeJdbcTemplate))
+        val legacySessionId = UUID.randomUUID().toString()
+        val legacyTurnId = UUID.randomUUID().toString()
+        upgradeJdbcTemplate.update(
+            """
+            INSERT INTO agent_sessions (
+                id, user_id, persona, context_type, next_sequence_no, summary_json, created_at, updated_at
+            ) VALUES (?, 'legacy-user', 'CONSULTANT', 'GENERAL', 2, JSON_OBJECT(), CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6))
+            """.trimIndent(),
+            legacySessionId
+        )
+        upgradeJdbcTemplate.update(
+            """
+            INSERT INTO agent_turns (
+                id, session_id, sequence_no, idempotency_key, request_hash, status, trace_id,
+                started_at, created_at
+            ) VALUES (?, ?, 1, 'legacy-running', ?, 'RUNNING', ?,
+                DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 1 HOUR), DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 1 HOUR))
+            """.trimIndent(),
+            legacyTurnId,
+            legacySessionId,
+            "a".repeat(64),
+            UUID.randomUUID().toString()
+        )
 
         Flyway.configure()
             .dataSource(upgradeMysql.jdbcUrl, upgradeMysql.username, upgradeMysql.password)
@@ -134,6 +157,20 @@ class AgentV2MySqlIntegrationTest {
             .migrate()
 
         assertEquals(1, leaseColumnCount(upgradeJdbcTemplate))
+        assertEquals(
+            1,
+            upgradeJdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*) FROM agent_turns
+                WHERE id = ?
+                  AND status = 'RUNNING'
+                  AND lease_expires_at IS NOT NULL
+                  AND lease_expires_at <= CURRENT_TIMESTAMP(6)
+                """.trimIndent(),
+                Int::class.java,
+                legacyTurnId
+            )
+        )
     }
 
     @Test

@@ -74,6 +74,11 @@ class TurnLifecycleService(
                 } else {
                     BeginTurnResult.InProgress
                 }
+                AgentTurnStatus.FAILED -> if (existing.errorCode == "STALE_RECOVERED") {
+                    BeginTurnResult.IdempotencyExpired
+                } else {
+                    throw IdempotencyKeyConflictException()
+                }
                 else -> throw IdempotencyKeyConflictException()
             }
         }
@@ -92,7 +97,8 @@ class TurnLifecycleService(
             status = AgentTurnStatus.RUNNING,
             traceId = traceId,
             startedAt = now,
-            leaseExpiresAt = now.plus(turnLease)
+            leaseExpiresAt = now.plus(turnLease),
+            createdAt = now
         )
         turnRepository.save(turn)
         messageRepository.save(
@@ -102,7 +108,8 @@ class TurnLifecycleService(
                 sequenceNo = sequenceNo * 2 - 1,
                 role = "USER",
                 content = canonicalContent,
-                metadataJson = "{}"
+                metadataJson = "{}",
+                createdAt = now
             )
         )
         session.nextSequenceNo = sequenceNo + 1
@@ -120,6 +127,7 @@ class TurnLifecycleService(
         val existingAssistant = messageRepository.findByTurnIdAndRole(turn.id, "ASSISTANT")
         if (turn.status == AgentTurnStatus.SUCCEEDED && existingAssistant != null) return reconstruct(turn, existingAssistant)
         check(turn.status == AgentTurnStatus.RUNNING) { "回合不是运行状态" }
+        val now = LocalDateTime.now(clock)
         val metadata = metadata(command)
         val assistant = existingAssistant ?: messageRepository.save(
             ChatMessageEntity(
@@ -128,11 +136,12 @@ class TurnLifecycleService(
                 sequenceNo = turn.sequenceNo * 2,
                 role = "ASSISTANT",
                 content = command.content,
-                metadataJson = metadata
+                metadataJson = metadata,
+                createdAt = now
             )
         )
         turn.status = AgentTurnStatus.SUCCEEDED
-        turn.completedAt = LocalDateTime.now()
+        turn.completedAt = now
         turn.totalDurationMs = command.durationMs
         turn.fallbackUsed = command.fallbackUsed
         turn.modelName = command.modelName
@@ -155,7 +164,7 @@ class TurnLifecycleService(
         session.nextSequenceNo = 1
         session.summaryJson = "{}"
         session.summaryUpdatedAt = null
-        session.updatedAt = LocalDateTime.now()
+        session.updatedAt = LocalDateTime.now(clock)
         sessionRepository.save(session)
     }
 
@@ -198,7 +207,7 @@ class TurnLifecycleService(
         turn.status = status
         turn.errorCode = errorCode
         turn.totalDurationMs = durationMs
-        turn.completedAt = LocalDateTime.now()
+        turn.completedAt = LocalDateTime.now(clock)
         turnRepository.save(turn)
     }
 
