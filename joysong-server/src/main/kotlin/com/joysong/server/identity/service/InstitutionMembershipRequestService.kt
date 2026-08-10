@@ -77,7 +77,8 @@ interface InstitutionMembershipRequestStore {
 
 @Service
 class InstitutionMembershipRequestService(
-    private val store: InstitutionMembershipRequestStore
+    private val store: InstitutionMembershipRequestStore,
+    private val relationshipService: DoctorInstitutionRelationshipService
 ) {
     @Transactional
     fun submit(
@@ -119,6 +120,9 @@ class InstitutionMembershipRequestService(
         val normalizedReviewNote = reviewNote.trim()
         if (decision != MembershipRequestDecision.APPROVED) {
             require(normalizedReviewNote.isNotEmpty()) { "拒绝或要求修改时必须填写审核意见" }
+        }
+        if (type == MembershipRequestType.DOCTOR && decision == MembershipRequestDecision.APPROVED) {
+            relationshipService.approveJoin(request.userId, request.institutionId, actor.userId)
         }
         return store.review(request, actor.userId, decision, normalizedReviewNote)
     }

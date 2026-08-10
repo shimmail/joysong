@@ -3,6 +3,7 @@ package com.joysong.server.institution.service
 import com.joysong.server.discover.entity.DoctorProjectEntity
 import com.joysong.server.discover.repository.DoctorProjectRepository
 import com.joysong.server.identity.service.ManagementActor
+import com.joysong.server.identity.service.DoctorInstitutionRelationshipService
 import com.joysong.server.order.repository.DoctorInstitutionProjectConfigRepository
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.security.access.AccessDeniedException
@@ -19,7 +20,8 @@ private val PROJECT_CHANGE_DECISIONS = setOf("APPROVED", "REJECTED", "CHANGES_RE
 class DoctorProjectChangeService(
     private val jdbcTemplate: JdbcTemplate,
     private val doctorProjectRepository: DoctorProjectRepository,
-    private val configRepository: DoctorInstitutionProjectConfigRepository
+    private val configRepository: DoctorInstitutionProjectConfigRepository,
+    private val relationshipService: DoctorInstitutionRelationshipService
 ) {
     fun list(actor: ManagementActor): List<DoctorProjectChangeView> {
         val rows = jdbcTemplate.query(
@@ -142,7 +144,9 @@ class DoctorProjectChangeService(
             throw AccessDeniedException("只有所属机构法人可以审核该申请")
         }
         if (normalizedDecision == "APPROVED") {
-            if (target.requestType == "JOIN") requireActiveInstitutionRelationship(target)
+            if (target.requestType == "JOIN") {
+                relationshipService.requireActiveRelationshipForUpdate(target.doctorId, target.institutionId)
+            }
             applyApproved(target)
         }
         val updated = jdbcTemplate.update(
@@ -204,21 +208,6 @@ class DoctorProjectChangeService(
         }
     }
 
-    private fun requireActiveInstitutionRelationship(target: ChangeTarget) {
-        val activeCount = jdbcTemplate.queryForObject(
-            """
-            SELECT COUNT(*) FROM doctor_institutions
-            WHERE doctor_id = ? AND institution_id = ?
-              AND status = 'APPROVED' AND deleted_at IS NULL
-            """.trimIndent(),
-            Long::class.java,
-            target.doctorId,
-            target.institutionId
-        ) ?: 0L
-        if (activeCount == 0L) {
-            throw AccessDeniedException("医生与机构的有效执业关系已失效")
-        }
-    }
 
     private fun ChangeTarget.toEntity(
         createdAt: LocalDateTime = LocalDateTime.now(),

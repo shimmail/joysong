@@ -371,6 +371,23 @@ class JdbcDoctorInstitutionChangeRequestStore(
 class DoctorInstitutionRelationshipService(
     private val jdbcTemplate: JdbcTemplate
 ) {
+    fun requireActiveRelationshipForUpdate(doctorId: String, institutionId: String) {
+        val relationshipId = jdbcTemplate.queryForList(
+            """
+            SELECT id FROM doctor_institutions
+            WHERE doctor_id = ? AND institution_id = ? AND status = 'APPROVED'
+              AND revoked_at IS NULL AND deleted_at IS NULL
+            FOR UPDATE
+            """.trimIndent(),
+            String::class.java,
+            doctorId,
+            institutionId
+        ).firstOrNull()
+        if (relationshipId == null) {
+            throw AccessDeniedException("医生与机构的有效执业关系已失效")
+        }
+    }
+
     @Transactional
     fun approveJoin(doctorId: String, institutionId: String, reviewerId: String) {
         require(lockCertifiedDoctor(doctorId)) { "医生身份已失效" }
