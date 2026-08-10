@@ -11,11 +11,14 @@ import com.joysong.server.chat.entity.ChatMessageEntity
 import com.joysong.server.chat.repository.ChatMessageRepository
 import com.joysong.server.chat.repository.ChatSessionRepository
 import com.joysong.server.chat.service.ChatTurnResult
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
+import java.time.Clock
+import java.time.Duration
 import java.time.LocalDateTime
 import java.util.UUID
 
@@ -48,24 +51,36 @@ class TurnLifecycleService(
     private val messageRepository: ChatMessageRepository,
     private val turnRepository: AgentTurnRepository,
     private val contextBuilder: AgentContextBuilder,
-    private val objectMapper: ObjectMapper
+    private val objectMapper: ObjectMapper,
+    private val clock: Clock,
+    @Qualifier("turnLease")
+    private val turnLease: Duration
 ) {
     @Transactional
     fun beginTurn(sessionId: String, userId: String, content: String, idempotencyKey: String): BeginTurnResult {
         val canonicalContent = content.trim().also { require(it.isNotEmpty()) { "消息内容不能为空" } }
         val session = sessionRepository.findByIdAndUserIdForUpdate(sessionId, userId)
             ?: throw IllegalArgumentException("会话不存在或无权访问")
+        val now = LocalDateTime.now(clock)
         val requestHash = sha256(canonicalContent)
         turnRepository.findBySessionIdAndIdempotencyKey(sessionId, idempotencyKey)?.let { existing ->
             if (existing.requestHash != requestHash) throw IdempotencyKeyConflictException()
             return when (existing.status) {
                 AgentTurnStatus.SUCCEEDED -> messageRepository.findByTurnIdAndRole(existing.id, "ASSISTANT")
                     ?.let { BeginTurnResult.Replayed(reconstruct(existing, it)) } ?: BeginTurnResult.IdempotencyExpired
-                AgentTurnStatus.RUNNING -> BeginTurnResult.InProgress
+                AgentTurnStatus.RUNNING -> if (recoverIfExpired(existing, now)) {
+                    turnRepository.flush()
+                    BeginTurnResult.IdempotencyExpired
+                } else {
+                    BeginTurnResult.InProgress
+                }
                 else -> throw IdempotencyKeyConflictException()
             }
         }
-        if (turnRepository.findBySessionIdAndStatus(sessionId, AgentTurnStatus.RUNNING) != null) return BeginTurnResult.InProgress
+        turnRepository.findBySessionIdAndStatus(sessionId, AgentTurnStatus.RUNNING)?.let { running ->
+            if (!recoverIfExpired(running, now)) return BeginTurnResult.InProgress
+            turnRepository.flush()
+        }
 
         val sequenceNo = session.nextSequenceNo
         val traceId = UUID.randomUUID().toString()
@@ -75,7 +90,9 @@ class TurnLifecycleService(
             idempotencyKey = idempotencyKey,
             requestHash = requestHash,
             status = AgentTurnStatus.RUNNING,
-            traceId = traceId
+            traceId = traceId,
+            startedAt = now,
+            leaseExpiresAt = now.plus(turnLease)
         )
         turnRepository.save(turn)
         messageRepository.save(
@@ -89,7 +106,7 @@ class TurnLifecycleService(
             )
         )
         session.nextSequenceNo = sequenceNo + 1
-        session.updatedAt = LocalDateTime.now()
+        session.updatedAt = now
         sessionRepository.save(session)
         return BeginTurnResult.Started(turn.id, traceId, sequenceNo)
     }
@@ -183,6 +200,17 @@ class TurnLifecycleService(
         turn.totalDurationMs = durationMs
         turn.completedAt = LocalDateTime.now()
         turnRepository.save(turn)
+    }
+
+    private fun recoverIfExpired(turn: AgentTurnEntity, now: LocalDateTime): Boolean {
+        val expiresAt = turn.leaseExpiresAt ?: return false
+        if (expiresAt.isAfter(now)) return false
+        turn.status = AgentTurnStatus.FAILED
+        turn.errorCode = "STALE_RECOVERED"
+        turn.completedAt = now
+        turn.totalDurationMs = Duration.between(turn.startedAt, now).toMillis().coerceAtLeast(0)
+        turnRepository.save(turn)
+        return true
     }
 
     private fun ownedSessionForUpdate(sessionId: String, userId: String) =

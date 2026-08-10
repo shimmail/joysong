@@ -30,7 +30,11 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
+import java.time.Clock
+import java.time.Duration
+import java.time.Instant
 import java.time.LocalDateTime
+import java.time.ZoneOffset
 
 class AgentWorkflowCoreTest {
     private val sessions = mockk<ChatSessionRepository>()
@@ -38,7 +42,17 @@ class AgentWorkflowCoreTest {
     private val turns = mockk<AgentTurnRepository>()
     private val objectMapper = ObjectMapper()
     private val context = AgentContextBuilder(sessions, messages, turns, objectMapper, 20, 7)
-    private val lifecycle = TurnLifecycleService(sessions, messages, turns, context, objectMapper)
+    private val clock = Clock.fixed(Instant.parse("2026-08-10T04:00:00Z"), ZoneOffset.UTC)
+    private val turnLease = Duration.ofMinutes(2)
+    private val lifecycle = TurnLifecycleService(
+        sessions,
+        messages,
+        turns,
+        context,
+        objectMapper,
+        clock = clock,
+        turnLease = turnLease
+    )
 
     @BeforeEach
     fun defaultMessageCleanupCandidates() {
@@ -103,12 +117,47 @@ class AgentWorkflowCoreTest {
     }
 
     @Test
-    fun `returns in progress when the session already has a running turn`() {
+    fun `active running turn remains in progress`() {
+        val running = turn(status = AgentTurnStatus.RUNNING).apply {
+            leaseExpiresAt = LocalDateTime.now(clock).plusSeconds(1)
+        }
         every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns session()
-        every { turns.findBySessionIdAndIdempotencyKey("session-1", "key-1") } returns null
-        every { turns.findBySessionIdAndStatus("session-1", AgentTurnStatus.RUNNING) } returns turn(status = AgentTurnStatus.RUNNING)
+        every { turns.findBySessionIdAndIdempotencyKey("session-1", "key-1") } returns running
 
         assertEquals(BeginTurnResult.InProgress, lifecycle.beginTurn("session-1", "user-1", "hello", "key-1"))
+        assertEquals(AgentTurnStatus.RUNNING, running.status)
+        verify(exactly = 0) { turns.save(any()) }
+    }
+
+    @Test
+    fun `expired running turn is failed and a successor starts`() {
+        val now = LocalDateTime.now(clock)
+        val expired = turn(status = AgentTurnStatus.RUNNING).apply {
+            idempotencyKey = "old-key"
+            startedAt = now.minusSeconds(5)
+            leaseExpiresAt = now
+        }
+        val savedTurns = mutableListOf<AgentTurnEntity>()
+        val currentSession = session()
+        every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns currentSession
+        every { turns.findBySessionIdAndIdempotencyKey("session-1", "new-key") } returns null
+        every { turns.findBySessionIdAndStatus("session-1", AgentTurnStatus.RUNNING) } returns expired
+        every { turns.save(capture(savedTurns)) } answers { firstArg() }
+        every { turns.flush() } just runs
+        every { messages.save(any()) } answers { firstArg() }
+        every { sessions.save(any()) } answers { firstArg() }
+
+        val result = lifecycle.beginTurn("session-1", "user-1", "hello", "new-key")
+
+        assertTrue(result is BeginTurnResult.Started)
+        val successor = savedTurns.last()
+        assertEquals(AgentTurnStatus.FAILED, expired.status)
+        assertEquals("STALE_RECOVERED", expired.errorCode)
+        assertEquals(now, expired.completedAt)
+        assertEquals(5_000, expired.totalDurationMs)
+        assertEquals(AgentTurnStatus.RUNNING, successor.status)
+        assertEquals(now.plus(turnLease), successor.leaseExpiresAt)
+        verify(exactly = 1) { turns.flush() }
     }
 
     @Test
