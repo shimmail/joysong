@@ -8,6 +8,7 @@ import 'package:joysong_flutter/features/identity/presentation/identity_controll
 typedef IdentityFilePicker = Future<IdentityFileDraft?> Function(
   IdentityDocumentType type,
 );
+typedef InstitutionProfileImagePicker = Future<String?> Function();
 
 class IdentityCenterPage extends StatefulWidget {
   const IdentityCenterPage({
@@ -352,10 +353,20 @@ Future<IdentityFileDraft?> _pickIdentityFile(
   );
 }
 
+Future<String?> _pickInstitutionProfileImage() async {
+  final selected = await const AppFilePicker().pickImage();
+  return selected?.fileName.trim();
+}
+
 class ManagementCenterPage extends StatefulWidget {
-  const ManagementCenterPage({required this.repository, super.key});
+  const ManagementCenterPage({
+    required this.repository,
+    this.institutionImagePicker,
+    super.key,
+  });
 
   final IdentityRepository repository;
+  final InstitutionProfileImagePicker? institutionImagePicker;
 
   @override
   State<ManagementCenterPage> createState() => _ManagementCenterPageState();
@@ -411,6 +422,7 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
             ManagementLoadStatus.ready => _ManagementCapabilities(
                 context: _controller.context!,
                 repository: widget.repository,
+                institutionImagePicker: widget.institutionImagePicker,
               ),
           };
         },
@@ -423,10 +435,12 @@ class _ManagementCapabilities extends StatelessWidget {
   const _ManagementCapabilities({
     required this.context,
     required this.repository,
+    this.institutionImagePicker,
   });
 
   final ManagementContext context;
   final IdentityRepository repository;
+  final InstitutionProfileImagePicker? institutionImagePicker;
 
   @override
   Widget build(BuildContext buildContext) {
@@ -569,6 +583,7 @@ class _ManagementCapabilities extends StatelessWidget {
         MaterialPageRoute(
           builder: (_) => ManagedInstitutionProfilesPage(
             repository: repository,
+            imagePicker: institutionImagePicker ?? _pickInstitutionProfileImage,
           ),
         ),
       );
@@ -1073,9 +1088,14 @@ class _ManagedInstitutionProjectEditPageState
 }
 
 class ManagedInstitutionProfilesPage extends StatefulWidget {
-  const ManagedInstitutionProfilesPage({required this.repository, super.key});
+  const ManagedInstitutionProfilesPage({
+    required this.repository,
+    this.imagePicker,
+    super.key,
+  });
 
   final IdentityRepository repository;
+  final InstitutionProfileImagePicker? imagePicker;
 
   @override
   State<ManagedInstitutionProfilesPage> createState() =>
@@ -1158,6 +1178,7 @@ class _ManagedInstitutionProfilesPageState
         builder: (_) => ManagedInstitutionProfileEditPage(
           controller: _controller,
           profile: profile,
+          imagePicker: widget.imagePicker ?? _pickInstitutionProfileImage,
         ),
       ),
     );
@@ -1168,11 +1189,13 @@ class ManagedInstitutionProfileEditPage extends StatefulWidget {
   const ManagedInstitutionProfileEditPage({
     required this.controller,
     required this.profile,
+    required this.imagePicker,
     super.key,
   });
 
   final InstitutionProfileController controller;
   final ManagedInstitutionProfile profile;
+  final InstitutionProfileImagePicker imagePicker;
 
   @override
   State<ManagedInstitutionProfileEditPage> createState() =>
@@ -1229,10 +1252,16 @@ class _ManagedInstitutionProfileEditPageState
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              const _InfoCard(text: '评分、评价数与认证状态由平台管理，此处仅维护公开机构档案。'),
+              const _InfoCard(text: '这是向用户公开展示的信息，请勿填写内部管理或隐私资料。'),
               const SizedBox(height: 16),
               _textField('name', '机构名称', required: true),
-              _textField('coverImage', '封面图 URL'),
+              _imagePickerField(
+                title: '封面图',
+                addLabel: '从相册选择封面图',
+                values: _singleImage('coverImage'),
+                onAdd: () => _pickSingleImage('coverImage'),
+                onDelete: (_) => _setField('coverImage', ''),
+              ),
               _textField('city', '城市', helperText: '填写城市名即可，无需输入“市”'),
               _textField('address', '地址', maxLines: 2),
               _textField('contactPhone', '联系电话'),
@@ -1248,8 +1277,20 @@ class _ManagedInstitutionProfileEditPageState
                   keyboardType: TextInputType.number),
               _textField('caseCount', '案例数',
                   keyboardType: TextInputType.number),
-              _textField('credentialImages', '资质证书图片 URL（逗号分隔）', maxLines: 2),
-              _textField('images', '环境图片 URL（逗号分隔）', maxLines: 2),
+              _imagePickerField(
+                title: '资质证书图片',
+                addLabel: '从相册添加资质图片',
+                values: _csv('credentialImages'),
+                onAdd: () => _pickListImage('credentialImages'),
+                onDelete: (image) => _removeListImage('credentialImages', image),
+              ),
+              _imagePickerField(
+                title: '环境图片',
+                addLabel: '从相册添加环境图片',
+                values: _csv('images'),
+                onAdd: () => _pickListImage('images'),
+                onDelete: (image) => _removeListImage('images', image),
+              ),
               if (widget.controller.errorMessage != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
@@ -1291,6 +1332,84 @@ class _ManagedInstitutionProfileEditPageState
             : null,
       ),
     );
+  }
+
+  Widget _imagePickerField({
+    required String title,
+    required String addLabel,
+    required List<String> values,
+    required Future<void> Function() onAdd,
+    required void Function(String image) onDelete,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Card(
+        margin: EdgeInsets.zero,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 8),
+              if (values.isEmpty)
+                const Text('暂无图片')
+              else
+                for (final image in values)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.image_outlined),
+                    title: Text(
+                      image,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: IconButton(
+                      tooltip: '移除图片',
+                      onPressed: () => onDelete(image),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: onAdd,
+                  icon: const Icon(Icons.photo_library_outlined),
+                  label: Text(addLabel),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  List<String> _singleImage(String name) {
+    final value = _text(name);
+    return value.isEmpty ? const [] : [value];
+  }
+
+  Future<void> _pickSingleImage(String name) async {
+    final image = await widget.imagePicker();
+    if (image == null || image.trim().isEmpty || !mounted) return;
+    setState(() => _setField(name, image));
+  }
+
+  Future<void> _pickListImage(String name) async {
+    final image = await widget.imagePicker();
+    if (image == null || image.trim().isEmpty || !mounted) return;
+    final images = [..._csv(name), image.trim()];
+    setState(() => _setField(name, images.join(',')));
+  }
+
+  void _removeListImage(String name, String image) {
+    final images = _csv(name).where((item) => item != image).toList();
+    setState(() => _setField(name, images.join(',')));
+  }
+
+  void _setField(String name, String value) {
+    _fields[name]!.text = value.trim();
   }
 
   Future<void> _save() async {
