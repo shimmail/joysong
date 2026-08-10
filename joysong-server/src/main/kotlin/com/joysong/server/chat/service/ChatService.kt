@@ -30,6 +30,7 @@ import com.joysong.server.agent.service.AgentIntentDecision
 import com.joysong.server.agent.service.AgentIntentRouter
 import com.joysong.server.agent.service.AgentQueryTarget
 import com.joysong.server.agent.service.AgentPromptEvidence
+import com.joysong.server.config.AiAgentProperties
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
@@ -85,15 +86,11 @@ class ChatService(
     private val agentOperationLogger: AgentOperationLogger,
     private val agentContextBuilder: AgentContextBuilder,
     private val objectMapper: ObjectMapper,
-    @Qualifier("llmRestTemplate") private val restTemplate: RestTemplate,
-    @Qualifier("intentParserRestTemplate") private val intentParserRestTemplate: RestTemplate,
-    @Value("\${openai.api-key:}") private val openaiApiKey: String,
-    @Value("\${openai.base-url:}") private val openaiBaseUrl: String,
-    @Value("\${openai.model:gpt-4.1-mini}") private val openaiModel: String,
-    @Value("\${openai.intent-parser-enabled:true}") private val intentParserEnabled: Boolean,
+    @Qualifier("agentLlmRestTemplate") private val restTemplate: RestTemplate,
+    @Qualifier("agentIntentParserRestTemplate") private val intentParserRestTemplate: RestTemplate,
+    private val aiAgentProperties: AiAgentProperties,
     @Value("\${openai.fast-reasoning-effort:none}") private val fastReasoningEffort: String,
-    @Value("\${openai.complex-reasoning-effort:low}") private val complexReasoningEffort: String,
-    @Value("\${openai.demo-fallback-enabled:false}") private val demoFallbackEnabled: Boolean
+    @Value("\${openai.complex-reasoning-effort:low}") private val complexReasoningEffort: String
 ) {
     private val logger = LoggerFactory.getLogger(ChatService::class.java)
 
@@ -241,10 +238,10 @@ class ChatService(
                 catalogItems = generated.catalogItems,
                 durationMs = durationMs,
                 fallbackUsed = generated.llmResult.fallbackUsed,
-                modelName = openaiModel
+                modelName = aiAgentProperties.model
             )
         )
-        agentOperationLogger.completed(begin.traceId, begin.turnId, sessionId, durationMs, openaiModel)
+        agentOperationLogger.completed(begin.traceId, begin.turnId, sessionId, durationMs, aiAgentProperties.model)
         return completed
     }
 
@@ -279,7 +276,7 @@ class ChatService(
                 requiresLlmParsing = false
             )
         } else localRouteAssessment
-        val parsedRoute = if (intentParserEnabled && routeAssessment.requiresLlmParsing) {
+        val parsedRoute = if (aiAgentProperties.intentParserEnabled && routeAssessment.requiresLlmParsing) {
             parseAmbiguousRoute(content, contextualQuery, routeAssessment.decision)
         } else null
         // Deterministic safety detection can only be preserved or upgraded, never downgraded by a model.
@@ -378,8 +375,8 @@ class ChatService(
     ): LlmCallResult {
         // Demo replies are opt-in for local development. Production must not
         // persist a fabricated assistant answer as if it came from a model.
-        if (openaiApiKey.isBlank()) {
-            if (!demoFallbackEnabled) {
+        if (aiAgentProperties.apiKey.isBlank()) {
+            if (!aiAgentProperties.demoFallbackEnabled) {
                 throw IllegalStateException("AI_PROVIDER_UNAVAILABLE")
             }
             return LlmCallResult(
@@ -389,13 +386,13 @@ class ChatService(
         }
 
         return try {
-            val url = "${openaiBaseUrl.trimEnd('/')}/chat/completions"
+            val url = "${aiAgentProperties.baseUrl.trimEnd('/')}/chat/completions"
             val headers = HttpHeaders().apply {
-                setBearerAuth(openaiApiKey)
+                setBearerAuth(aiAgentProperties.apiKey)
                 contentType = MediaType.APPLICATION_JSON
             }
             val body = mutableMapOf<String, Any>(
-                "model" to openaiModel,
+                "model" to aiAgentProperties.model,
                 "messages" to messages,
                 "temperature" to 0.25,
                 "max_tokens" to profile.maxOutputTokens,
@@ -409,7 +406,7 @@ class ChatService(
             val firstChoice = choices?.firstOrNull() as? Map<*, *>
             val message = firstChoice?.get("message") as? Map<*, *>
             val content = message?.get("content") as? String
-            if (content.isNullOrBlank() && !demoFallbackEnabled) {
+            if (content.isNullOrBlank() && !aiAgentProperties.demoFallbackEnabled) {
                 throw IllegalStateException("AI_PROVIDER_UNAVAILABLE")
             }
             LlmCallResult(
@@ -417,7 +414,7 @@ class ChatService(
                 fallbackUsed = content == null
             )
         } catch (e: Exception) {
-            if (!demoFallbackEnabled) {
+            if (!aiAgentProperties.demoFallbackEnabled) {
                 throw IllegalStateException(if (isProviderTimeout(e)) "AI_PROVIDER_TIMEOUT" else "AI_PROVIDER_UNAVAILABLE")
             }
             // 判断是否为代理/连接层面的错误（代理未配置、代理不可达、无法连接到目标服务器）
@@ -450,12 +447,12 @@ class ChatService(
     )
 
     private fun parseAmbiguousRoute(rawQuery: String, contextualQuery: String, fallback: AgentIntentDecision): ParsedRoute? {
-        if (openaiApiKey.isBlank()) return null
+        if (aiAgentProperties.apiKey.isBlank()) return null
         val startedAt = System.nanoTime()
         return runCatching {
-            val url = "${openaiBaseUrl.trimEnd('/')}/chat/completions"
+            val url = "${aiAgentProperties.baseUrl.trimEnd('/')}/chat/completions"
             val headers = HttpHeaders().apply {
-                setBearerAuth(openaiApiKey)
+                setBearerAuth(aiAgentProperties.apiKey)
                 contentType = MediaType.APPLICATION_JSON
             }
             val instruction = """
@@ -465,7 +462,7 @@ class ChatService(
                 Keywords may contain only useful cities, treatments, categories, tags, clinic names or doctor names from the text. Maximum 8 items. Do not invent IDs or facts.
             """.trimIndent()
             val body = mapOf(
-                "model" to openaiModel,
+                "model" to aiAgentProperties.model,
                 "messages" to listOf(
                     mapOf("role" to "system", "content" to instruction),
                     mapOf("role" to "user", "content" to "Current: $rawQuery\nContextual: $contextualQuery\nLocal fallback: ${fallback.intent}/${fallback.queryTarget}")
@@ -726,7 +723,7 @@ class ChatService(
     }
 
     private fun reasoningEffort(profile: GenerationProfile): String? {
-        if (!openaiModel.trim().lowercase().startsWith("gpt-5")) return null
+        if (!aiAgentProperties.model.trim().lowercase().startsWith("gpt-5")) return null
         val configured = if (profile.complexReasoning) complexReasoningEffort else fastReasoningEffort
         return configured.trim().lowercase().takeIf { it in setOf("none", "minimal", "low", "medium", "high") }
     }

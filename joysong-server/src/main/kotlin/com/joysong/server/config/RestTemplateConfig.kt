@@ -16,10 +16,13 @@ class RestTemplateConfig {
         return createRestTemplate(proxyUrl, 10_000, 60_000)
     }
 
-    @Bean("intentParserRestTemplate")
-    fun intentParserRestTemplate(
-        @Value("\${google.proxy-url:}") proxyUrl: String
-    ): org.springframework.web.client.RestTemplate = createRestTemplate(proxyUrl, 3_000, 8_000)
+    @Bean("agentLlmRestTemplate")
+    fun agentLlmRestTemplate(properties: AiAgentProperties): org.springframework.web.client.RestTemplate =
+        createRestTemplate(properties.proxyUrl, 10_000, 60_000)
+
+    @Bean("agentIntentParserRestTemplate")
+    fun agentIntentParserRestTemplate(properties: AiAgentProperties): org.springframework.web.client.RestTemplate =
+        createRestTemplate(properties.proxyUrl, 3_000, 8_000)
 
     private fun createRestTemplate(
         proxyUrl: String,

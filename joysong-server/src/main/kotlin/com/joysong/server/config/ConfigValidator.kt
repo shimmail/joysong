@@ -24,8 +24,7 @@ class ConfigValidator(
     @Value("\${admin.bootstrap.password:}") private val adminPassword: String,
     @Value("\${oss.enabled:false}") private val ossEnabled: Boolean,
     @Value("\${aliyun.sms.enabled:false}") private val smsEnabled: Boolean,
-    @Value("\${openai.demo-fallback-enabled:false}") private val aiDemoFallbackEnabled: Boolean,
-    @Value("\${openai.base-url:}") private val openAiBaseUrl: String,
+    private val aiAgentProperties: AiAgentProperties,
     @Value("\${security.verification-code.log-for-dev:false}") private val logVerificationCodeForDev: Boolean,
     @Value("\${seed.demo.enabled:false}") private val demoSeedEnabled: Boolean,
 ) {
@@ -52,11 +51,15 @@ class ConfigValidator(
         val isProduction = environment.activeProfiles.any { it.equals("prod", ignoreCase = true) }
         if (isProduction && !ossEnabled) missing.add("OSS_ENABLED=true")
         if (isProduction && !smsEnabled) missing.add("SMS_ENABLED=true")
-        if (isProduction && aiDemoFallbackEnabled) {
+        if (isProduction && aiAgentProperties.demoFallbackEnabled) {
             missing.add("OPENAI demo fallback must be disabled in production")
         }
-        if (isProduction && !OpenAiBaseUrlPolicy.isAllowed(openAiBaseUrl)) {
-            missing.add("OPENAI_BASE_URL (approved HTTPS endpoint required)")
+        if (isProduction && aiAgentProperties.enabled) {
+            if (aiAgentProperties.apiKey.isBlank()) missing.add("OPENAI_API_KEY")
+            if (!OpenAiBaseUrlPolicy.isAllowed(aiAgentProperties.baseUrl)) {
+                missing.add("OPENAI_BASE_URL (approved HTTPS endpoint required)")
+            }
+            if (aiAgentProperties.model.isBlank()) missing.add("AI_AGENT_MODEL")
         }
         if (isProduction && logVerificationCodeForDev) {
             missing.add("verification-code log-for-dev must be disabled in production")
