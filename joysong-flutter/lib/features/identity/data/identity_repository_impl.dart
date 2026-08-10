@@ -73,4 +73,117 @@ final class ApiIdentityRepository implements IdentityRepository {
     }
     return context;
   }
+
+  @override
+  Future<List<ManagedInstitutionProfile>>
+      listManagedInstitutionProfiles() async {
+    return await _apiClient.get<List<ManagedInstitutionProfile>>(
+          '/admin/institutions',
+          decodeData: (json) => _objectList(json)
+              .map(ManagedInstitutionProfile.fromJson)
+              .toList(growable: false),
+        ) ??
+        const [];
+  }
+
+  @override
+  Future<ManagedInstitutionProfile> updateManagedInstitutionProfile(
+    ManagedInstitutionProfileDraft draft,
+  ) async {
+    final result = await _apiClient.put<ManagedInstitutionProfile>(
+      '/admin/institutions/${draft.id}',
+      body: draft.toJson(),
+      decodeData: ManagedInstitutionProfile.fromJson,
+    );
+    if (result == null) {
+      throw const FormatException('机构档案响应为空');
+    }
+    return result;
+  }
+
+  @override
+  Future<List<ManagementProjectOption>> listManagementProjects() async {
+    return await _apiClient.get<List<ManagementProjectOption>>(
+          '/admin/projects',
+          decodeData: (json) => _objectList(json)
+              .map(ManagementProjectOption.fromJson)
+              .toList(growable: false),
+        ) ??
+        const [];
+  }
+
+  @override
+  Future<ManagementProjectOption> createManagementProject(
+    ManagementProjectDraft draft,
+  ) async {
+    final result = await _apiClient.post<ManagementProjectOption>(
+      '/admin/projects',
+      body: draft.toJson(),
+      decodeData: ManagementProjectOption.fromJson,
+    );
+    if (result == null) {
+      throw const FormatException('项目响应为空');
+    }
+    return result;
+  }
+
+  @override
+  Future<List<ManagedInstitutionProject>>
+      listManagedInstitutionProjects() async {
+    return await _apiClient.get<List<ManagedInstitutionProject>>(
+          '/admin/institution-projects',
+          decodeData: (json) => _objectList(json)
+              .map(ManagedInstitutionProject.fromJson)
+              .toList(growable: false),
+        ) ??
+        const [];
+  }
+
+  @override
+  Future<ManagedInstitutionProject> createManagedInstitutionProject(
+    ManagedInstitutionProjectDraft draft,
+  ) async {
+    final result = await _apiClient.post<ManagedInstitutionProject>(
+      '/admin/institution-projects',
+      body: draft.toJson(),
+      decodeData: ManagedInstitutionProject.fromJson,
+    );
+    if (result == null) {
+      throw const FormatException('机构项目响应为空');
+    }
+    return result;
+  }
+
+  @override
+  Future<ManagedInstitutionProject> updateManagedInstitutionProject(
+    ManagedInstitutionProjectDraft draft,
+  ) async {
+    final id = draft.id?.trim();
+    if (id == null || id.isEmpty) {
+      throw ArgumentError('机构项目 id 不能为空');
+    }
+    final result = await _apiClient.put<ManagedInstitutionProject>(
+      '/admin/institution-projects/$id',
+      body: draft.toJson(),
+      decodeData: ManagedInstitutionProject.fromJson,
+    );
+    if (result == null) {
+      throw const FormatException('机构项目响应为空');
+    }
+    return result;
+  }
+
+  @override
+  Future<void> submitSplitConfigProposal(SplitConfigProposalDraft draft) async {
+    if (!draft.canSubmit) {
+      throw ArgumentError('分账提案缺少医生或机构项目');
+    }
+    await _apiClient.post<void>(
+      '/admin/doctor-institution-project-config-proposals',
+      body: draft.toJson(),
+      decodeData: (_) {},
+    );
+  }
 }
+
+List<Object?> _objectList(Object? value) => value is List ? value : const [];

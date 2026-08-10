@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/files/app_file_picker.dart';
+import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
 import 'package:joysong_flutter/features/identity/presentation/identity_controller.dart';
@@ -381,10 +382,10 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('专业管理中心'),
+        title: Text(context.localized('专业管理中心', 'Professional Center')),
         actions: [
           IconButton(
-            tooltip: '刷新权限',
+            tooltip: context.localized('刷新权限', 'Refresh access'),
             onPressed: _controller.enter,
             icon: const Icon(Icons.refresh_rounded),
           ),
@@ -400,11 +401,16 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
             ManagementLoadStatus.denied ||
             ManagementLoadStatus.failure =>
               _IdentityFailure(
-                message: _controller.errorMessage ?? '没有专业管理权限',
+                message: _controller.errorMessage ??
+                    context.localized(
+                      '没有专业管理权限',
+                      'No professional access',
+                    ),
                 onRetry: _controller.enter,
               ),
             ManagementLoadStatus.ready => _ManagementCapabilities(
                 context: _controller.context!,
+                repository: widget.repository,
               ),
           };
         },
@@ -414,66 +420,920 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
 }
 
 class _ManagementCapabilities extends StatelessWidget {
-  const _ManagementCapabilities({required this.context});
+  const _ManagementCapabilities({
+    required this.context,
+    required this.repository,
+  });
 
   final ManagementContext context;
+  final IdentityRepository repository;
 
   @override
   Widget build(BuildContext buildContext) {
-    final capabilities = <({IconData icon, String label, bool enabled})>[
-      (
-        icon: Icons.medical_services_outlined,
-        label: '医生档案',
-        enabled: context.canManageDoctors,
-      ),
+    final isAdmin = context.platformRole == 'ADMIN';
+    final isLegalRepresentative = isAdmin ||
+        context.activeRoles.contains(
+          IdentityRoleType.institutionLegalRepresentative.code,
+        );
+    final isDoctor =
+        isAdmin || context.activeRoles.contains(IdentityRoleType.doctor.code);
+    final isConsultant = isAdmin ||
+        context.activeRoles.contains(IdentityRoleType.consultant.code);
+    final groups = <({
+      IconData icon,
+      String title,
+      String emptyText,
+      List<({IconData icon, String label, bool enabled})> items,
+    })>[
       (
         icon: Icons.apartment_outlined,
-        label: '机构档案',
-        enabled: context.canManageInstitutions,
+        title: buildContext.localized('法人', 'Legal representative'),
+        emptyText: buildContext.localized(
+          '暂无机构法人可用配置',
+          'No legal representative settings available',
+        ),
+        items: [
+          (
+            icon: Icons.apartment_outlined,
+            label: buildContext.localized('机构档案', 'Institution profile'),
+            enabled: isLegalRepresentative && context.canManageInstitutions,
+          ),
+          (
+            icon: Icons.spa_outlined,
+            label: buildContext.localized('机构项目', 'Institution projects'),
+            enabled:
+                isLegalRepresentative && context.canManageInstitutionProjects,
+          ),
+          (
+            icon: Icons.receipt_long_outlined,
+            label: buildContext.localized('专业订单', 'Professional orders'),
+            enabled: isLegalRepresentative && context.canManageOrders,
+          ),
+        ],
       ),
       (
-        icon: Icons.spa_outlined,
-        label: '机构项目',
-        enabled: context.canManageInstitutionProjects,
+        icon: Icons.medical_services_outlined,
+        title: buildContext.localized('医生', 'Doctor'),
+        emptyText: buildContext.localized(
+          '暂无医生可用配置',
+          'No doctor settings available',
+        ),
+        items: [
+          (
+            icon: Icons.medical_services_outlined,
+            label: buildContext.localized('医生档案', 'Doctor profile'),
+            enabled: isDoctor && context.canManageDoctors,
+          ),
+          (
+            icon: Icons.spa_outlined,
+            label: buildContext.localized('机构项目', 'Institution projects'),
+            enabled: isDoctor && context.canManageInstitutionProjects,
+          ),
+          (
+            icon: Icons.article_outlined,
+            label: buildContext.localized('专业文章', 'Professional articles'),
+            enabled: isDoctor && context.canManageArticles,
+          ),
+          (
+            icon: Icons.receipt_long_outlined,
+            label: buildContext.localized('专业订单', 'Professional orders'),
+            enabled: isDoctor && context.canManageOrders,
+          ),
+        ],
       ),
       (
-        icon: Icons.article_outlined,
-        label: '专业文章',
-        enabled: context.canManageArticles,
-      ),
-      (
-        icon: Icons.pie_chart_outline,
-        label: '分账提案',
-        enabled: context.canManageSplitConfigs,
-      ),
-      (
-        icon: Icons.receipt_long_outlined,
-        label: '专业订单',
-        enabled: context.canManageOrders,
+        icon: Icons.support_agent_outlined,
+        title: buildContext.localized('顾问', 'Consultant'),
+        emptyText: buildContext.localized(
+          '暂无顾问可用配置',
+          'No consultant settings available',
+        ),
+        items: [
+          (
+            icon: Icons.receipt_long_outlined,
+            label: buildContext.localized('专业订单', 'Professional orders'),
+            enabled: isConsultant && context.canManageOrders,
+          ),
+        ],
       ),
     ];
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        const _InfoCard(
-          text: '以下能力来自服务端实时权限上下文。客户端不会根据身份名称自行推导权限。',
+        _InfoCard(
+          text: buildContext.localized(
+            '以下能力来自服务端实时权限上下文。客户端不会根据身份名称自行推导权限。',
+            'Capabilities come from the live server access context. The app never infers access from role names alone.',
+          ),
         ),
         const SizedBox(height: 16),
-        for (final capability in capabilities.where((item) => item.enabled))
-          Card(
-            child: ListTile(
-              leading: Icon(capability.icon),
-              title: Text(capability.label),
-              subtitle: const Text('数据范围由服务端逐对象校验'),
-              trailing: const Icon(Icons.chevron_right_rounded),
-              onTap: () => ScaffoldMessenger.of(buildContext).showSnackBar(
-                SnackBar(content: Text('${capability.label}页面正在接入受限接口')),
-              ),
-            ),
+        for (final group in groups) ...[
+          ExpansionTile(
+            leading: Icon(group.icon),
+            title: Text(group.title),
+            initiallyExpanded:
+                group.items.any((capability) => capability.enabled),
+            children: [
+              if (group.items.every((capability) => !capability.enabled))
+                ListTile(
+                  enabled: false,
+                  title: Text(group.emptyText),
+                )
+              else
+                for (final capability
+                    in group.items.where((item) => item.enabled))
+                  ListTile(
+                    leading: Icon(capability.icon),
+                    title: Text(capability.label),
+                    subtitle: Text(
+                      buildContext.localized(
+                        '数据范围由服务端逐对象校验',
+                        'Data scope is checked by the server per record',
+                      ),
+                    ),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () =>
+                        _openCapability(buildContext, capability.label),
+                  ),
+            ],
           ),
+          const Divider(height: 1),
+        ],
       ],
     );
   }
+
+  void _openCapability(BuildContext context, String label) {
+    if (label == '机构档案' || label == 'Institution profile') {
+      Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => ManagedInstitutionProfilesPage(
+            repository: repository,
+          ),
+        ),
+      );
+      return;
+    }
+    if (label == '机构项目' || label == 'Institution projects') {
+      Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => ManagedInstitutionProjectsPage(
+            repository: repository,
+            context: this.context,
+          ),
+        ),
+      );
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('$label页面正在接入受限接口')),
+    );
+  }
+}
+
+class ManagedInstitutionProjectsPage extends StatefulWidget {
+  const ManagedInstitutionProjectsPage({
+    required this.repository,
+    required this.context,
+    super.key,
+  });
+
+  final IdentityRepository repository;
+  final ManagementContext context;
+
+  @override
+  State<ManagedInstitutionProjectsPage> createState() =>
+      _ManagedInstitutionProjectsPageState();
+}
+
+class _ManagedInstitutionProjectsPageState
+    extends State<ManagedInstitutionProjectsPage> {
+  late final InstitutionProjectManagementController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = InstitutionProjectManagementController(
+      widget.repository,
+      context: widget.context,
+    )..load();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+          title: Text(context.localized('机构项目', 'Institution Projects'))),
+      floatingActionButton: ListenableBuilder(
+        listenable: _controller,
+        builder: (context, _) => _controller.canPublish
+            ? FloatingActionButton.extended(
+                onPressed:
+                    _controller.status == InstitutionProjectLoadStatus.ready
+                        ? () => _edit(null)
+                        : null,
+                icon: const Icon(Icons.add_rounded),
+                label: Text(context.localized('发布', 'Publish')),
+              )
+            : const SizedBox.shrink(),
+      ),
+      body: ListenableBuilder(
+        listenable: _controller,
+        builder: (context, _) {
+          return switch (_controller.status) {
+            InstitutionProjectLoadStatus.idle ||
+            InstitutionProjectLoadStatus.loading =>
+              const Center(child: CircularProgressIndicator()),
+            InstitutionProjectLoadStatus.failure => _IdentityFailure(
+                message: _controller.errorMessage ??
+                    context.localized(
+                      '机构项目加载失败',
+                      'Unable to load institution projects',
+                    ),
+                onRetry: _controller.load,
+              ),
+            InstitutionProjectLoadStatus.ready => RefreshIndicator(
+                onRefresh: _controller.load,
+                child: ListView.separated(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(16),
+                  itemCount: _controller.institutionProjects.length +
+                      (_controller.institutionProjects.isEmpty ? 1 : 0),
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    if (_controller.institutionProjects.isEmpty) {
+                      return _InfoCard(
+                        text: context.localized(
+                          '暂无机构项目',
+                          'No institution projects yet',
+                        ),
+                      );
+                    }
+                    final item = _controller.institutionProjects[index];
+                    final institution = _controller.institutions
+                        .where((profile) => profile.id == item.institutionId)
+                        .firstOrNull;
+                    return Card(
+                      child: ListTile(
+                        leading: const Icon(Icons.spa_outlined),
+                        title: Text(item.effectiveName),
+                        subtitle: Text(
+                          [
+                            if (institution != null) institution.name,
+                            '${context.localized('价格', 'Price')} ${item.price}',
+                            item.isActive
+                                ? context.localized('已上架', 'Active')
+                                : context.localized('已下架', 'Inactive'),
+                          ].join(' · '),
+                        ),
+                        trailing: _controller.canPublish
+                            ? const Icon(Icons.edit_outlined)
+                            : null,
+                        onTap:
+                            _controller.canPublish ? () => _edit(item) : null,
+                      ),
+                    );
+                  },
+                ),
+              ),
+          };
+        },
+      ),
+    );
+  }
+
+  Future<void> _edit(ManagedInstitutionProject? project) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => ManagedInstitutionProjectEditPage(
+          controller: _controller,
+          project: project,
+        ),
+      ),
+    );
+  }
+}
+
+class ManagedInstitutionProjectEditPage extends StatefulWidget {
+  const ManagedInstitutionProjectEditPage({
+    required this.controller,
+    this.project,
+    super.key,
+  });
+
+  final InstitutionProjectManagementController controller;
+  final ManagedInstitutionProject? project;
+
+  @override
+  State<ManagedInstitutionProjectEditPage> createState() =>
+      _ManagedInstitutionProjectEditPageState();
+}
+
+class _ManagedInstitutionProjectEditPageState
+    extends State<ManagedInstitutionProjectEditPage> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _newProjectName;
+  late final TextEditingController _newProjectCategory;
+  late final TextEditingController _name;
+  late final TextEditingController _category;
+  late final TextEditingController _description;
+  late final TextEditingController _tags;
+  late final TextEditingController _slogan;
+  late final TextEditingController _detailContent;
+  late final TextEditingController _price;
+  late final TextEditingController _originalPrice;
+  late final TextEditingController _coverImage;
+  late final TextEditingController _images;
+  late final TextEditingController _consultationFee;
+  late final TextEditingController _commissionRate;
+  late final TextEditingController _institutionRate;
+  String? _institutionId;
+  String? _projectId;
+  var _isActive = true;
+
+  bool get _editing => widget.project != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final project = widget.project;
+    _institutionId = project?.institutionId ??
+        widget.controller.context.doctorInstitutionIds.firstOrNull;
+    _projectId = project?.projectId;
+    _isActive = project?.isActive ?? true;
+    _newProjectName = TextEditingController();
+    _newProjectCategory = TextEditingController();
+    _name = TextEditingController(text: project?.name ?? '');
+    _category = TextEditingController(text: project?.category ?? '');
+    _description = TextEditingController(text: project?.description ?? '');
+    _tags = TextEditingController(text: project?.tags ?? '');
+    _slogan = TextEditingController(text: project?.slogan ?? '');
+    _detailContent = TextEditingController(text: project?.detailContent ?? '');
+    _price = TextEditingController(text: (project?.price ?? 0).toString());
+    _originalPrice =
+        TextEditingController(text: project?.originalPrice?.toString() ?? '');
+    _coverImage = TextEditingController(text: project?.coverImage ?? '');
+    _images = TextEditingController(text: project?.images ?? '');
+    _consultationFee = TextEditingController(text: '0');
+    _commissionRate = TextEditingController(text: '0');
+    _institutionRate = TextEditingController(text: '40');
+  }
+
+  @override
+  void dispose() {
+    for (final controller in [
+      _newProjectName,
+      _newProjectCategory,
+      _name,
+      _category,
+      _description,
+      _tags,
+      _slogan,
+      _detailContent,
+      _price,
+      _originalPrice,
+      _coverImage,
+      _images,
+      _consultationFee,
+      _commissionRate,
+      _institutionRate,
+    ]) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final doctorInstitutionIds = widget.controller.context.doctorInstitutionIds;
+    final institutionOptions = widget.controller.institutions
+        .where((institution) => doctorInstitutionIds.contains(institution.id))
+        .toList(growable: false);
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(context.localized(
+          _editing ? '编辑机构项目' : '发布机构项目',
+          _editing ? 'Edit Institution Project' : 'Publish Institution Project',
+        )),
+      ),
+      body: ListenableBuilder(
+        listenable: widget.controller,
+        builder: (context, _) => Form(
+          key: _formKey,
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              _InfoCard(
+                text: context.localized(
+                  '项目和机构项目仅支持认证医生发布；机构下拉框只显示医生本人已绑定机构。分账配置会作为提案提交，需双方确认后生效。',
+                  'Only verified doctors can publish projects. The institution picker only shows institutions bound to this doctor. Split settings are submitted as proposals and take effect after both sides confirm.',
+                ),
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                initialValue: _institutionId,
+                decoration: InputDecoration(
+                  labelText: context.localized('所属机构', 'Institution'),
+                ),
+                items: institutionOptions
+                    .map((item) => DropdownMenuItem(
+                          value: item.id,
+                          child: Text(item.name),
+                        ))
+                    .toList(),
+                onChanged: _editing
+                    ? null
+                    : (value) => setState(() => _institutionId = value),
+                validator: (value) => value == null || value.isEmpty
+                    ? context.localized('请选择所属机构', 'Select an institution')
+                    : null,
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: _projectId,
+                decoration: InputDecoration(
+                  labelText: context.localized('关联公共项目', 'Base project'),
+                ),
+                items: widget.controller.projects
+                    .map((item) => DropdownMenuItem(
+                          value: item.id,
+                          child: Text(item.name),
+                        ))
+                    .toList(),
+                onChanged: _editing
+                    ? null
+                    : (value) => setState(() => _projectId = value),
+              ),
+              if (!_editing) ...[
+                const SizedBox(height: 12),
+                _field(
+                  _newProjectName,
+                  context.localized('新项目名称', 'New project name'),
+                ),
+                _field(
+                  _newProjectCategory,
+                  context.localized('新项目分类', 'New project category'),
+                ),
+              ],
+              const SizedBox(height: 8),
+              Text(
+                context.localized('机构项目独立详情', 'Institution project details'),
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 12),
+              _field(_name, context.localized('独立名称', 'Custom name')),
+              _field(_category, context.localized('独立分类', 'Custom category')),
+              _field(
+                _description,
+                context.localized('独立简介', 'Custom description'),
+                maxLines: 3,
+              ),
+              _field(_tags,
+                  context.localized('标签（逗号分隔）', 'Tags, comma separated')),
+              _field(_slogan, context.localized('宣传语', 'Slogan')),
+              _field(
+                _detailContent,
+                context.localized('详情正文', 'Detail content'),
+                maxLines: 4,
+              ),
+              _field(
+                _price,
+                context.localized('价格', 'Price'),
+                keyboardType: TextInputType.number,
+                required: true,
+              ),
+              _field(
+                _originalPrice,
+                context.localized('原价', 'Original price'),
+                keyboardType: TextInputType.number,
+              ),
+              _field(
+                  _coverImage, context.localized('封面图 URL', 'Cover image URL')),
+              _field(
+                _images,
+                context.localized(
+                    '图集 URL（逗号分隔）', 'Gallery URLs, comma separated'),
+                maxLines: 2,
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(context.localized('是否上架', 'Active')),
+                value: _isActive,
+                onChanged: (value) => setState(() => _isActive = value),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                context.localized('分账管理', 'Split configuration'),
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 12),
+              _field(
+                _consultationFee,
+                context.localized('面诊金', 'Consultation fee'),
+                keyboardType: TextInputType.number,
+              ),
+              _field(
+                _commissionRate,
+                context.localized('医美顾问分账比例（%）', 'Consultant split rate (%)'),
+                keyboardType: TextInputType.number,
+              ),
+              _field(
+                _institutionRate,
+                context.localized('机构分账比例（%）', 'Institution split rate (%)'),
+                keyboardType: TextInputType.number,
+              ),
+              if (widget.controller.errorMessage != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    widget.controller.errorMessage!,
+                    style:
+                        TextStyle(color: Theme.of(context).colorScheme.error),
+                  ),
+                ),
+              const SizedBox(height: 20),
+              FilledButton(
+                onPressed: widget.controller.isSaving ? null : _save,
+                child: Text(widget.controller.isSaving
+                    ? context.localized('保存中…', 'Saving...')
+                    : context.localized('保存并提交分账', 'Save and submit split')),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _field(
+    TextEditingController controller,
+    String label, {
+    int maxLines = 1,
+    TextInputType? keyboardType,
+    bool required = false,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: TextFormField(
+        controller: controller,
+        maxLines: maxLines,
+        keyboardType: keyboardType,
+        decoration: InputDecoration(labelText: label),
+        validator: required
+            ? (value) => (value ?? '').trim().isEmpty
+                ? context.localized('请填写$label', 'Please enter $label')
+                : null
+            : null,
+      ),
+    );
+  }
+
+  Future<void> _save() async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    var projectId = _projectId?.trim() ?? '';
+    if (!_editing && projectId.isEmpty) {
+      final name = _newProjectName.text.trim();
+      if (name.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(context.localized(
+              '请选择公共项目，或填写新项目名称',
+              'Select a base project or enter a new project name',
+            )),
+          ),
+        );
+        return;
+      }
+      final created = await widget.controller.createBaseProject(
+        ManagementProjectDraft(
+          name: name,
+          category: _newProjectCategory.text.trim(),
+          description: _description.text.trim(),
+          tags: _tags.text.trim(),
+          coverImage: _coverImage.text.trim(),
+          referencePrice: _num(_price.text),
+        ),
+      );
+      if (created == null) return;
+      projectId = created.id;
+    }
+    final draft = ManagedInstitutionProjectDraft(
+      id: widget.project?.id,
+      institutionId: _institutionId?.trim() ?? '',
+      projectId: projectId,
+      name: _name.text,
+      category: _category.text,
+      description: _description.text,
+      tags: _tags.text,
+      slogan: _slogan.text,
+      detailContent: _detailContent.text,
+      price: _num(_price.text),
+      originalPrice: _nullableNum(_originalPrice.text),
+      coverImage: _coverImage.text,
+      images: _images.text,
+      isActive: _isActive,
+    );
+    final split = SplitConfigProposalDraft(
+      doctorId: widget.controller.context.doctorId ?? '',
+      institutionProjectId: widget.project?.id ?? 'pending',
+      consultationFee: _num(_consultationFee.text),
+      commissionRate: _num(_commissionRate.text),
+      institutionRate: _num(_institutionRate.text),
+    );
+    if (await widget.controller.saveInstitutionProject(
+          project: draft,
+          split: split,
+        ) &&
+        mounted) {
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(context.localized(
+            '机构项目已保存，分账提案已提交',
+            'Institution project saved and split proposal submitted',
+          )),
+        ),
+      );
+    }
+  }
+
+  num _num(String value) => num.tryParse(value.trim()) ?? 0;
+
+  num? _nullableNum(String value) {
+    final text = value.trim();
+    return text.isEmpty ? null : num.tryParse(text);
+  }
+}
+
+class ManagedInstitutionProfilesPage extends StatefulWidget {
+  const ManagedInstitutionProfilesPage({required this.repository, super.key});
+
+  final IdentityRepository repository;
+
+  @override
+  State<ManagedInstitutionProfilesPage> createState() =>
+      _ManagedInstitutionProfilesPageState();
+}
+
+class _ManagedInstitutionProfilesPageState
+    extends State<ManagedInstitutionProfilesPage> {
+  late final InstitutionProfileController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = InstitutionProfileController(widget.repository)..load();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('机构档案')),
+      body: ListenableBuilder(
+        listenable: _controller,
+        builder: (context, _) {
+          return switch (_controller.status) {
+            InstitutionProfileLoadStatus.idle ||
+            InstitutionProfileLoadStatus.loading =>
+              const Center(child: CircularProgressIndicator()),
+            InstitutionProfileLoadStatus.empty => const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text('当前账号暂无可管理机构'),
+                ),
+              ),
+            InstitutionProfileLoadStatus.failure => _IdentityFailure(
+                message: _controller.errorMessage ?? '机构档案加载失败',
+                onRetry: _controller.load,
+              ),
+            InstitutionProfileLoadStatus.ready => RefreshIndicator(
+                onRefresh: _controller.load,
+                child: ListView.separated(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(16),
+                  itemCount: _controller.profiles.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final profile = _controller.profiles[index];
+                    return Card(
+                      child: ListTile(
+                        leading: const Icon(Icons.apartment_outlined),
+                        title:
+                            Text(profile.name.isEmpty ? '未命名机构' : profile.name),
+                        subtitle: Text(
+                          [
+                            if (profile.city.isNotEmpty) profile.city,
+                            if (profile.address.isNotEmpty) profile.address,
+                          ].join(' · '),
+                        ),
+                        trailing: const Icon(Icons.edit_outlined),
+                        onTap: () => _edit(profile),
+                      ),
+                    );
+                  },
+                ),
+              ),
+          };
+        },
+      ),
+    );
+  }
+
+  Future<void> _edit(ManagedInstitutionProfile profile) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => ManagedInstitutionProfileEditPage(
+          controller: _controller,
+          profile: profile,
+        ),
+      ),
+    );
+  }
+}
+
+class ManagedInstitutionProfileEditPage extends StatefulWidget {
+  const ManagedInstitutionProfileEditPage({
+    required this.controller,
+    required this.profile,
+    super.key,
+  });
+
+  final InstitutionProfileController controller;
+  final ManagedInstitutionProfile profile;
+
+  @override
+  State<ManagedInstitutionProfileEditPage> createState() =>
+      _ManagedInstitutionProfileEditPageState();
+}
+
+class _ManagedInstitutionProfileEditPageState
+    extends State<ManagedInstitutionProfileEditPage> {
+  final _formKey = GlobalKey<FormState>();
+  late final Map<String, TextEditingController> _fields;
+
+  @override
+  void initState() {
+    super.initState();
+    final draft = widget.profile.toDraft();
+    _fields = {
+      'name': TextEditingController(text: draft.name),
+      'coverImage': TextEditingController(text: draft.coverImage),
+      'address': TextEditingController(text: draft.address),
+      'city': TextEditingController(text: draft.city),
+      'contactPhone': TextEditingController(text: draft.contactPhone),
+      'businessHours': TextEditingController(text: draft.businessHours),
+      'establishedYear':
+          TextEditingController(text: draft.establishedYear?.toString() ?? ''),
+      'certificationTime': TextEditingController(text: draft.certificationTime),
+      'description': TextEditingController(text: draft.description),
+      'tags': TextEditingController(text: draft.tags),
+      'specialties': TextEditingController(text: draft.specialties),
+      'credentials': TextEditingController(text: draft.credentials),
+      'userCount': TextEditingController(text: draft.userCount.toString()),
+      'caseCount': TextEditingController(text: draft.caseCount.toString()),
+      'credentialImages':
+          TextEditingController(text: draft.credentialImages.join(',')),
+      'images': TextEditingController(text: draft.images.join(',')),
+    };
+  }
+
+  @override
+  void dispose() {
+    for (final controller in _fields.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('编辑机构档案')),
+      body: ListenableBuilder(
+        listenable: widget.controller,
+        builder: (context, _) => Form(
+          key: _formKey,
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              const _InfoCard(text: '评分、评价数与认证状态由平台管理，此处仅维护公开机构档案。'),
+              const SizedBox(height: 16),
+              _textField('name', '机构名称', required: true),
+              _textField('coverImage', '封面图 URL'),
+              _textField('city', '城市', helperText: '填写城市名即可，无需输入“市”'),
+              _textField('address', '地址', maxLines: 2),
+              _textField('contactPhone', '联系电话'),
+              _textField('businessHours', '营业时间'),
+              _textField('establishedYear', '成立年份',
+                  keyboardType: TextInputType.number),
+              _textField('certificationTime', '认证时间'),
+              _textField('description', '机构介绍', maxLines: 4),
+              _textField('tags', '标签（逗号分隔）'),
+              _textField('specialties', '擅长领域（逗号分隔）'),
+              _textField('credentials', '资质文本', maxLines: 3),
+              _textField('userCount', '用户规模',
+                  keyboardType: TextInputType.number),
+              _textField('caseCount', '案例数',
+                  keyboardType: TextInputType.number),
+              _textField('credentialImages', '资质证书图片 URL（逗号分隔）', maxLines: 2),
+              _textField('images', '环境图片 URL（逗号分隔）', maxLines: 2),
+              if (widget.controller.errorMessage != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    widget.controller.errorMessage!,
+                    style:
+                        TextStyle(color: Theme.of(context).colorScheme.error),
+                  ),
+                ),
+              const SizedBox(height: 20),
+              FilledButton(
+                onPressed: widget.controller.isSaving ? null : _save,
+                child: Text(widget.controller.isSaving ? '保存中…' : '保存档案'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _textField(
+    String name,
+    String label, {
+    bool required = false,
+    int maxLines = 1,
+    TextInputType? keyboardType,
+    String? helperText,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: TextFormField(
+        controller: _fields[name],
+        maxLines: maxLines,
+        keyboardType: keyboardType,
+        decoration: InputDecoration(labelText: label, helperText: helperText),
+        validator: required
+            ? (value) => (value ?? '').trim().isEmpty ? '请填写$label' : null
+            : null,
+      ),
+    );
+  }
+
+  Future<void> _save() async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    final establishedYear = _optionalInt(_fields['establishedYear']!.text);
+    final draft = widget.profile.toDraft().copyWith(
+          name: _text('name'),
+          coverImage: _text('coverImage'),
+          city: _text('city'),
+          address: _text('address'),
+          contactPhone: _text('contactPhone'),
+          businessHours: _text('businessHours'),
+          establishedYear: establishedYear,
+          clearEstablishedYear: establishedYear == null,
+          certificationTime: _text('certificationTime'),
+          description: _text('description'),
+          tags: _text('tags'),
+          specialties: _text('specialties'),
+          credentials: _text('credentials'),
+          userCount: _optionalInt(_fields['userCount']!.text) ?? 0,
+          caseCount: _optionalInt(_fields['caseCount']!.text) ?? 0,
+          credentialImages: _csv('credentialImages'),
+          images: _csv('images'),
+        );
+    if (await widget.controller.save(draft) && mounted) {
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('机构档案已保存')),
+      );
+    }
+  }
+
+  String _text(String name) => _fields[name]!.text.trim();
+
+  int? _optionalInt(String value) => int.tryParse(value.trim());
+
+  List<String> _csv(String name) => _fields[name]!
+      .text
+      .split(',')
+      .map((item) => item.trim())
+      .where((item) => item.isNotEmpty)
+      .toList(growable: false);
 }
 
 class _DocumentTile extends StatelessWidget {
