@@ -157,6 +157,24 @@ class AgentChatFlowIntegrationTest {
     }
 
     @Test
+    fun `planning prompt limits responses to transparent information reference`() {
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+
+        chatService.sendMessage(
+            session.id,
+            "user-1",
+            SendMessageRequest("帮我规划适合自己的项目", "planning-policy-1")
+        )
+
+        val requestBody = fakeLlmRequestBodies.single()
+        assertTrue(requestBody.contains("仅作为信息参考"))
+        assertTrue(requestBody.contains("不构成诊断或治疗建议"))
+        assertTrue(requestBody.contains("不得声称“最适合”“为你制定”或已结合恢复期、疼痛偏好完成排序"))
+        assertTrue(requestBody.contains("不得从简介、宣传语或详情自由文本推断恢复期、疼痛、禁忌或风险事实"))
+        assertTrue(requestBody.contains("需向机构确认"))
+    }
+
+    @Test
     fun `clearing history removes turns and messages and resets the retained session`() {
         val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
         chatService.sendMessage(session.id, "user-1", SendMessageRequest("first", "clear-history-1"))
