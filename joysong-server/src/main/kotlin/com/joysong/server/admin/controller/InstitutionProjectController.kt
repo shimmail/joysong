@@ -69,12 +69,23 @@ class InstitutionProjectController(
     @Transactional
     fun create(authentication: Authentication, @RequestBody request: InstitutionProjectRequest): BaseResponse<InstitutionProjectDto> {
         val actor = managementAccessService.actor(authentication)
-        managementAccessService.requireInstitutionManaged(actor, request.institutionId)
+        val publisherDoctorId = actor.doctorId
+        if (!actor.isAdmin && publisherDoctorId == null) {
+            return BaseResponse.error("只有认证医生可以发布机构项目", 403)
+        }
         validateRequest(request)?.let { return BaseResponse.error(it) }
         if (!institutionRepository.existsById(request.institutionId)) return BaseResponse.error("机构不存在")
+        if (!actor.isAdmin && request.institutionId !in actor.doctorInstitutionIds) {
+            return BaseResponse.error("医生未绑定当前机构，不能发布该机构项目", 403)
+        }
         val project = projectRepository.findById(request.projectId).orElse(null)
             ?: return BaseResponse.error("关联项目不存在")
-        validateDoctorBindings(request.institutionId, request.doctorBindings)?.let { return BaseResponse.error(it, 409) }
+        val doctorBindings = if (actor.isAdmin) {
+            request.doctorBindings
+        } else {
+            listOf(DoctorProjectBinding(doctorId = publisherDoctorId!!))
+        }
+        validateDoctorBindings(request.institutionId, doctorBindings)?.let { return BaseResponse.error(it, 409) }
         if (institutionProjectRepository.findByInstitutionIdAndProjectId(request.institutionId, request.projectId) != null) {
             return BaseResponse.error("该机构已关联此项目")
         }
@@ -99,7 +110,7 @@ class InstitutionProjectController(
             isActive = request.isActive ?: true
         )
         val saved = institutionProjectRepository.save(entity)
-        saveDoctorBindings(saved.id, saved.projectId, request.doctorBindings)
+        saveDoctorBindings(saved.id, saved.projectId, doctorBindings)
         return BaseResponse.success(toDto(saved, project))
     }
 
