@@ -81,13 +81,13 @@ class AgentChatController extends ChangeNotifier {
   AgentChatController({
     required AgentRepository repository,
     this.streamingEnabled = true,
-    this.historyPageSize = 30,
+    this.recentMessageLimit = 20,
     this.persona = ChatPersona.consultant,
   }) : _repository = repository;
 
   final AgentRepository _repository;
   final bool streamingEnabled;
-  final int historyPageSize;
+  final int recentMessageLimit;
   final ChatPersona persona;
 
   AgentChatState _state = const AgentChatState();
@@ -134,14 +134,14 @@ class AgentChatController extends ChangeNotifier {
     try {
       final messages = await _repository.getMessages(
         session.id,
-        limit: historyPageSize,
+        limit: recentMessageLimit,
       );
       if (!_isCurrent(operation)) return;
       _emit(
         _state.copyWith(
           messages: _deduplicate(messages),
           deliveryState: ChatDeliveryState.idle,
-          hasOlderMessages: messages.length == historyPageSize,
+          hasOlderMessages: messages.length == recentMessageLimit,
         ),
       );
     } on Object catch (error) {
@@ -175,7 +175,7 @@ class AgentChatController extends ChangeNotifier {
     try {
       final older = await _repository.getMessages(
         session.id,
-        limit: historyPageSize,
+        limit: recentMessageLimit,
         before: before,
       );
       if (!_isCurrent(operation)) return;
@@ -183,7 +183,7 @@ class AgentChatController extends ChangeNotifier {
         _state.copyWith(
           messages: _deduplicate([...older, ..._state.messages]),
           deliveryState: ChatDeliveryState.idle,
-          hasOlderMessages: older.length == historyPageSize,
+          hasOlderMessages: older.length == recentMessageLimit,
         ),
       );
     } on Object catch (error) {
