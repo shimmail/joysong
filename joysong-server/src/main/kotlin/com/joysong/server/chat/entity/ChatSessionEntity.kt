@@ -1,8 +1,10 @@
 package com.joysong.server.chat.entity
 
 import jakarta.persistence.*
+import org.hibernate.annotations.JdbcTypeCode
 import org.hibernate.annotations.SQLDelete
 import org.hibernate.annotations.Where
+import org.hibernate.type.SqlTypes
 import java.time.LocalDateTime
 import java.util.UUID
 
@@ -29,6 +31,16 @@ data class ChatSessionEntity(
 
     @Column(name = "title")
     var title: String = "",
+
+    @Column(name = "next_sequence_no", nullable = false)
+    var nextSequenceNo: Long = 1,
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "summary_json", columnDefinition = "json", nullable = false)
+    var summaryJson: String = "{}",
+
+    @Column(name = "summary_updated_at")
+    var summaryUpdatedAt: LocalDateTime? = null,
 
     @Column(name = "created_at")
     var createdAt: LocalDateTime = LocalDateTime.now(),

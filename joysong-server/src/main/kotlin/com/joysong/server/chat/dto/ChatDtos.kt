@@ -11,7 +11,8 @@ data class CreateSessionRequest(
 )
 
 data class SendMessageRequest(
-    val content: String
+    val content: String,
+    val idempotencyKey: String? = null
 )
 
 data class ChatSessionResponse(
@@ -39,5 +40,6 @@ data class ChatTurnResponse(
     val catalogItems: List<AgentCatalogItemResponse> = emptyList(),
     val intent: String = "GENERAL_CHAT",
     val queryTarget: String? = null,
-    val nextAction: String = "NONE"
+    val nextAction: String = "NONE",
+    val traceId: String? = null
 )

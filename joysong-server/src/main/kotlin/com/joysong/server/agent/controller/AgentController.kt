@@ -11,7 +11,6 @@ import com.joysong.server.agent.service.AgentCatalogService
 import com.joysong.server.agent.service.AgentAssessmentService
 import com.joysong.server.agent.service.AgentPlanService
 import com.joysong.server.agent.service.AgentProfileService
-import com.joysong.server.agent.service.AgentTraceService
 import com.joysong.server.common.BaseResponse
 import org.springframework.security.core.Authentication
 import org.springframework.web.bind.annotation.GetMapping
@@ -21,7 +20,6 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
-import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 
 @RestController
@@ -30,8 +28,7 @@ class AgentController(
     private val profileService: AgentProfileService,
     private val assessmentService: AgentAssessmentService,
     private val planService: AgentPlanService,
-    private val catalogService: AgentCatalogService,
-    private val traceService: AgentTraceService
+    private val catalogService: AgentCatalogService
 ) {
     @GetMapping("/profile")
     fun getProfile(authentication: Authentication): BaseResponse<AgentProfileResponse> =
@@ -88,14 +85,6 @@ class AgentController(
         planService.clear(authentication.principal as String)
         return BaseResponse.success("ok")
     }
-
-    @GetMapping("/traces")
-    fun listTraces(
-        authentication: Authentication,
-        @RequestParam(defaultValue = "50") limit: Int
-    ): BaseResponse<*> = BaseResponse.success(
-        traceService.listForUser(authentication.principal as String, limit)
-    )
 
     @PostMapping("/catalog/report")
     fun catalogReport(@RequestBody request: AgentCatalogReportRequest): BaseResponse<AgentCatalogReportResponse> =

@@ -69,12 +69,13 @@ class InstitutionProjectController(
     @Transactional
     fun create(authentication: Authentication, @RequestBody request: InstitutionProjectRequest): BaseResponse<InstitutionProjectDto> {
         val actor = managementAccessService.actor(authentication)
-        managementAccessService.requireInstitutionManaged(actor, request.institutionId)
+        managementAccessService.requirePlatformAdmin(actor)
         validateRequest(request)?.let { return BaseResponse.error(it) }
         if (!institutionRepository.existsById(request.institutionId)) return BaseResponse.error("机构不存在")
         val project = projectRepository.findById(request.projectId).orElse(null)
             ?: return BaseResponse.error("关联项目不存在")
-        validateDoctorBindings(request.institutionId, request.doctorBindings)?.let { return BaseResponse.error(it, 409) }
+        val doctorBindings = request.doctorBindings
+        validateDoctorBindings(request.institutionId, doctorBindings)?.let { return BaseResponse.error(it, 409) }
         if (institutionProjectRepository.findByInstitutionIdAndProjectId(request.institutionId, request.projectId) != null) {
             return BaseResponse.error("该机构已关联此项目")
         }
@@ -99,7 +100,7 @@ class InstitutionProjectController(
             isActive = request.isActive ?: true
         )
         val saved = institutionProjectRepository.save(entity)
-        saveDoctorBindings(saved.id, saved.projectId, request.doctorBindings)
+        saveDoctorBindings(saved.id, saved.projectId, doctorBindings)
         return BaseResponse.success(toDto(saved, project))
     }
 
@@ -117,7 +118,7 @@ class InstitutionProjectController(
         val existing = institutionProjectRepository.findById(id).orElse(null)
             ?: return BaseResponse.error("机构项目不存在")
         val actor = managementAccessService.actor(authentication)
-        managementAccessService.requireInstitutionManaged(actor, existing.institutionId)
+        managementAccessService.requirePlatformAdmin(actor)
         validateRequest(request, validateAssociationIds = false)?.let { return BaseResponse.error(it) }
         val project = projectRepository.findById(existing.projectId).orElse(null)
             ?: return BaseResponse.error("关联项目不存在")
@@ -155,7 +156,7 @@ class InstitutionProjectController(
         val existing = institutionProjectRepository.findById(id).orElse(null)
             ?: return BaseResponse.error<Void>("机构项目不存在")
         val actor = managementAccessService.actor(authentication)
-        managementAccessService.requireInstitutionManaged(actor, existing.institutionId)
+        managementAccessService.requirePlatformAdmin(actor)
         val finalStatuses = listOf("CANCELLED", "REFUNDED", "SETTLED")
         if (orderRepository.existsByInstitutionProjectIdAndStatusNotIn(id, finalStatuses)) {
             return BaseResponse.error("该机构项目存在进行中的订单，请先停用并处理订单后再删除", 409)
@@ -188,7 +189,8 @@ class InstitutionProjectController(
                 DoctorProjectEntity(
                     doctorId = binding.doctorId,
                     projectId = projectId,
-                    institutionProjectId = institutionProjectId
+                    institutionProjectId = institutionProjectId,
+                    price = requireNotNull(binding.price) { "医生项目价格不能为空" }
                 )
             }
         doctorProjectRepository.saveAll(entities)
@@ -215,7 +217,10 @@ class InstitutionProjectController(
                 DoctorProjectEntity(
                     doctorId = doctorId,
                     projectId = projectId,
-                    institutionProjectId = institutionProjectId
+                    institutionProjectId = institutionProjectId,
+                    price = requireNotNull(doctorBindings.first { it.doctorId.trim() == doctorId }.price) {
+                        "医生项目价格不能为空"
+                    }
                 )
             }
         )
@@ -224,6 +229,9 @@ class InstitutionProjectController(
     private fun validateDoctorBindings(institutionId: String, bindings: List<DoctorProjectBinding>): String? {
         val doctorIds = bindings.map { it.doctorId.trim() }.filter { it.isNotBlank() }
         if (doctorIds.size != doctorIds.distinct().size) return "同一医生不能重复绑定到机构项目"
+        if (bindings.any { it.doctorId.isNotBlank() && (it.price == null || it.price < BigDecimal.ZERO) }) {
+            return "医生项目价格不能为空且不能小于 0"
+        }
         val doctors = doctorRepository.findAllById(doctorIds).associateBy { it.id }
         if (doctors.size != doctorIds.size) return "存在无效的医生"
         val unbound = doctorIds.firstOrNull { doctorId ->
@@ -261,7 +269,8 @@ class InstitutionProjectController(
                 binding.serviceTags,
                 binding.scheduleNote,
                 binding.coverImage,
-                binding.images
+                binding.images,
+                binding.price
             )
         } }
         return InstitutionProjectDto(
@@ -366,5 +375,6 @@ data class DoctorSummary(
     val serviceTags: String = "",
     val scheduleNote: String = "",
     val coverImage: String = "",
-    val images: String = ""
+    val images: String = "",
+    val price: BigDecimal
 )

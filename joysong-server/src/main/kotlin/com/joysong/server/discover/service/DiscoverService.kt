@@ -67,7 +67,7 @@ class DiscoverService(
                         it.status == "APPROVED" &&
                         it.revokedAt == null
                 }
-            if (!activePractice) null else doctorMap[dp.doctorId]?.toResponse()
+            if (!activePractice) null else doctorMap[dp.doctorId]?.toResponse(dp.price)
         }
     }
 }

@@ -12,6 +12,8 @@
 
 Flutter 不连接数据库，也不调用管理后台网页。用户态和专业身份态都直接调用服务端 REST API。
 
+`AppShell` 是 Flutter 唯一的账号作用域组合根；账号相关的 repository 和 controller 只能由它按当前登录会话创建、复用和销毁。
+
 开发地址建议：
 
 - Android 模拟器：`http://10.0.2.2:8080`
@@ -271,7 +273,7 @@ Flutter 不能依据本地缓存角色自行授权。每次进入专业管理中
 ?limit=30&before=2026-08-05T15:30:00
 ```
 
-`before` 是上一页最早消息的 `createdAt`，ISO-8601 本地时间。服务端返回一页按时间升序排列的消息，客户端按消息 ID 去重。聊天默认 100 条，私信默认 30 条，客服默认 50 条；单页不得超过 100。
+`before` 是上一页最早消息的 `createdAt`，ISO-8601 本地时间。服务端返回一页按时间升序排列的消息，客户端按消息 ID 去重。聊天默认 100 条，私信默认 30 条，客服默认 50 条；单页不得超过 100。Agent 聊天是例外：Flutter 只请求并保留最新 20 条，不使用 `before` 进行永久历史分页。
 
 会话列表等少量接口仍一次返回全部结果。Flutter 首期可以对接，但数据量扩大前需要补服务端游标，不得在客户端伪造 total。
 
@@ -296,8 +298,8 @@ Flutter 不能依据本地缓存角色自行授权。每次进入专业管理中
 | POST | `/chat/sessions` | 创建会话 |
 | GET | `/chat/sessions?persona=...` | 会话列表 |
 | POST | `/chat/sessions/{id}/messages` | 非流式发送 |
-| GET | `/chat/sessions/{id}/messages` | 历史消息，支持 `limit/before` |
-| POST | `/chat/sessions/{id}/messages/stream` | SSE 流式发送 |
+| GET | `/chat/sessions/{id}/messages` | 历史消息；Flutter Agent 固定 `limit=20` 且不翻页 |
+| POST | `/chat/sessions/{id}/messages/stream` | 禁用的兼容端点；始终返回 HTTP 404 / `AGENT_STREAMING_DISABLED` |
 | DELETE | `/chat/sessions/{id}` | 删除会话 |
 | DELETE | `/chat/sessions?persona=...` | 清理指定 persona 会话 |
 | DELETE | `/chat/sessions/{id}/messages` | 清空会话消息 |
@@ -319,17 +321,22 @@ Flutter 不能依据本地缓存角色自行授权。每次进入专业管理中
 - 非 `GENERAL` 必须传 `contextId`
 - 消息 `content` 非空，最多 5,000 字符
 
+同步发送请求：
+
+```json
+{
+  "content": "请给出建议",
+  "idempotencyKey": "optional-client-key"
+}
+```
+
+`idempotencyKey` 是可选字段；不传的旧版客户端仍符合契约。Flutter Agent 对每次发送只调用一次同步 `POST /chat/sessions/{id}/messages`，失败后显示服务端错误，不自动重放 POST。界面只加载和显示最新 20 条消息，没有“加载更早消息”或其他永久历史分页入口。
+
 不要调用旧 `/ai/chat` 或 `/ai/quick-questions`，服务端不存在这些路由。
 
-### 9.2 SSE 协议
+### 9.2 Flutter 固定关闭 SSE
 
-`Content-Type: text/event-stream`，请求仍需 Bearer token。事件：
-
-- `delta`：`data` 为 `{ "content": "增量文本" }`
-- `done`：`data` 为完整 `ChatTurnResponse`
-- `error`：`data` 为 `{ "message": "..." }`
-
-客户端逐个拼接 `delta.content`，收到 `done` 后用完整消息替换临时消息并结束加载。断流后不要自动重放 POST；应保留已显示文本，允许用户手动重试。服务端流式能力受 `OPENAI_STREAM_ENABLED` 和模型配置控制，未启用时使用非流式接口。
+Flutter Agent 的 SSE 配置固定为关闭，运行时仅使用 9.1 中的同步 REST 发送接口。`/messages/stream` 不是可用的服务端 SSE 能力，而是始终返回 HTTP 404 / `AGENT_STREAMING_DISABLED` 的禁用兼容端点。客户端可保留独立 decoder 作为未来兼容性代码，但当前配置不得打开 SSE，也不将流式终态、断线重连或 POST 重放纳入客户端行为。
 
 ### 9.3 Agent
 
@@ -341,10 +348,9 @@ Flutter 不能依据本地缓存角色自行授权。每次进入专业管理中
 | POST | `/agent/assessments/{assessmentId}/plans` |
 | GET/DELETE | `/agent/plans` |
 | GET/DELETE | `/agent/plans/{planId}` |
-| GET | `/agent/traces?limit=50` |
 | POST | `/agent/catalog/report` |
 
-Agent 输出是辅助决策，不是医疗诊断。Flutter 必须展示风险、限制、替代方案和需要确认项，不能只展示推荐项目名称。大模型密钥未配置时，接口可能使用规则或降级结果；客户端不要根据 `provider` 文案推断医疗可靠性。
+Agent 调试仅使用受控、脱敏的结构化日志；不存在 traces API，Flutter 不得调用 `/agent/traces`。Agent 输出是辅助决策，不是医疗诊断。Flutter 必须展示风险、限制、替代方案和需要确认项，不能只展示推荐项目名称。大模型密钥未配置时，接口可能使用规则或降级结果；客户端不要根据 `provider` 文案推断医疗可靠性。
 
 ## 10. 订单、支付占位与核销流程
 
@@ -459,7 +465,7 @@ Flutter 可以完成页面和接口抽象，但生产发布前必须等待支付
 |---|---|---|
 | 微信/支付宝等真实支付与回调 | 未落地 | 保留支付抽象，不宣称真实到账 |
 | 邮箱验证码、邮箱绑定 | 未开放 | 隐藏提交入口 |
-| AI 流式输出 | 依赖模型密钥与开关 | 不可用时回退非流式 |
+| AI 流式输出 | Flutter 固定关闭 | 仅使用同步 REST，不做 SSE 回退或重放 |
 | 短信发送 | 依赖短信供应商配置 | 开发环境可能只记录验证码 |
 | 远程对象存储/CDN | 依赖部署配置 | 使用服务端返回 URL，不假定域名 |
 | iOS 推送/APNs | 尚无稳定契约 | 不纳入首期接口验收 |
@@ -474,8 +480,8 @@ Flutter 可以完成页面和接口抽象，但生产发布前必须等待支付
 - [ ] refresh token 使用安全存储；日志、崩溃上报和调试面板不输出令牌、身份证号或认证文件。
 - [ ] 写操作默认不自动重试；下单、支付、核销、身份申请和分账操作有防重复提交。
 - [ ] multipart 公共图片和私有身份材料使用两个独立客户端方法。
-- [ ] offset/limit 与 before 游标封装成两种分页器，按 ID 去重。
-- [ ] SSE 支持 `delta`、`done`、`error`，断线不自动重放 POST。
+- [ ] offset/limit 与 before 游标封装成两种分页器，按 ID 去重；Agent 聊天仅保留最新 20 条且不翻页。
+- [ ] Agent 仅使用同步 REST，SSE 固定关闭，失败时不自动重放 POST。
 - [ ] 金额使用十进制定点模型；时间按 Asia/Shanghai 兼容解析。
 - [ ] 多身份 UI 始终以 `/identity/overview` 和 `/management/context` 的服务端结果为准。
 - [ ] 不导入、不生成、不引用旧 `openapi.yaml/json`。

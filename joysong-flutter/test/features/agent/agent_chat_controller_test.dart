@@ -6,11 +6,44 @@ import 'package:joysong_flutter/features/agent/domain/agent_repository.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_chat_controller.dart';
 
 void main() {
+  test('openSession keeps only the latest 20 messages', () async {
+    final messages = _messages(25);
+    final controller = AgentChatController(
+      repository: _FakeAgentRepository(messages: messages),
+      streamingEnabled: false,
+      recentMessageLimit: 20,
+    );
+
+    await controller.openSession(_session);
+
+    expect(controller.state.messages.length, 20);
+    expect(controller.state.messages.first.id, messages[5].id);
+    expect(controller.state.messages.last.id, messages[24].id);
+  });
+
+  test('non-streaming send trims the conversation to the latest 20 messages',
+      () async {
+    final messages = _messages(25);
+    final controller = AgentChatController(
+      repository: _FakeAgentRepository(messages: messages),
+      streamingEnabled: false,
+      recentMessageLimit: 20,
+    );
+    await controller.openSession(_session);
+
+    await controller.send('想改善肤质');
+
+    expect(controller.state.messages.length, 20);
+    expect(controller.state.messages.first.id, messages[7].id);
+    expect(controller.state.messages.last.content, '完整答复');
+  });
+
   test('non-streaming sends one POST and reaches completed', () async {
     final repository = _FakeAgentRepository();
     final controller = AgentChatController(
       repository: repository,
       streamingEnabled: false,
+      recentMessageLimit: 20,
     );
 
     await controller.send('想改善肤质');
@@ -124,6 +157,29 @@ ChatTurn _turn(String content) => ChatTurn(
       nextAction: 'NONE',
     );
 
+const _session = ChatSession(
+  id: 'session-1',
+  persona: 'CONSULTANT',
+  contextType: 'GENERAL',
+  contextId: '',
+  title: '会话',
+  lastMessage: '',
+  createdAt: '2026-08-06T10:00:00',
+  updatedAt: '2026-08-06T10:00:00',
+);
+
+List<ChatMessage> _messages(int count) => List.generate(
+      count,
+      (index) => ChatMessage(
+        id: 'message-$index',
+        sessionId: _session.id,
+        role: index.isEven ? 'USER' : 'ASSISTANT',
+        content: '消息 $index',
+        createdAt: '2026-08-06T10:${index.toString().padLeft(2, '0')}:00',
+      ),
+      growable: false,
+    );
+
 class _FakeConnection implements ChatStreamConnection {
   final eventsController = StreamController<ChatStreamEvent>();
   int cancelCalls = 0;
@@ -139,9 +195,10 @@ class _FakeConnection implements ChatStreamConnection {
 }
 
 class _FakeAgentRepository extends Fake implements AgentRepository {
-  _FakeAgentRepository({this.connection});
+  _FakeAgentRepository({this.connection, this.messages = const []});
 
   final _FakeConnection? connection;
+  final List<ChatMessage> messages;
   int createCalls = 0;
   int nonStreamCalls = 0;
   int streamCalls = 0;
@@ -154,16 +211,16 @@ class _FakeAgentRepository extends Fake implements AgentRepository {
     String title = '',
   }) async {
     createCalls++;
-    return const ChatSession(
-      id: 'session-1',
-      persona: 'CONSULTANT',
-      contextType: 'GENERAL',
-      contextId: '',
-      title: '会话',
-      lastMessage: '',
-      createdAt: '2026-08-06T10:00:00',
-      updatedAt: '2026-08-06T10:00:00',
-    );
+    return _session;
+  }
+
+  @override
+  Future<List<ChatMessage>> getMessages(
+    String sessionId, {
+    int limit = 30,
+    String? before,
+  }) async {
+    return messages;
   }
 
   @override
