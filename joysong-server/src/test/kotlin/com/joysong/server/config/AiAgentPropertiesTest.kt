@@ -26,7 +26,7 @@ class AiAgentPropertiesTest {
             .withProperty("ai-agent.base-url", "https://www.fastaitoken.com/v1")
             .withProperty("ai-agent.model", "gpt-5.5")
             .withProperty("ai-agent.proxy-url", "http://127.0.0.1:7890")
-            .withProperty("ai-agent.turn-lease", "45s")
+            .withProperty("ai-agent.turn-lease", "90s")
 
         val properties = Binder.get(environment)
             .bind("ai-agent", Bindable.of(AiAgentProperties::class.java))
@@ -37,7 +37,7 @@ class AiAgentPropertiesTest {
         assertEquals("https://www.fastaitoken.com/v1", properties.baseUrl)
         assertEquals("gpt-5.5", properties.model)
         assertEquals("http://127.0.0.1:7890", properties.proxyUrl)
-        assertEquals(Duration.ofSeconds(45), properties.turnLease)
+        assertEquals(Duration.ofSeconds(90), properties.turnLease)
     }
 
     @Test
@@ -46,15 +46,32 @@ class AiAgentPropertiesTest {
             context.environment.propertySources.addFirst(
                 org.springframework.core.env.MapPropertySource(
                     "test",
-                    mapOf("ai-agent.turn-lease" to "30s")
+                    mapOf("ai-agent.turn-lease" to "90s")
                 )
             )
             context.register(AiAgentConfiguration::class.java)
             context.refresh()
 
-            assertEquals(Duration.ofSeconds(30), context.getBean("turnLease"))
+            assertEquals(Duration.ofSeconds(90), context.getBean("turnLease"))
             assertSame(context.getBean(Clock::class.java), context.getBean(Clock::class.java))
         }
+    }
+
+    @Test
+    fun `runtime configuration rejects a lease that cannot cover serial provider calls`() {
+        val context = AnnotationConfigApplicationContext()
+        context.environment.propertySources.addFirst(
+            org.springframework.core.env.MapPropertySource(
+                "test",
+                mapOf("ai-agent.turn-lease" to "81s")
+            )
+        )
+        context.register(AiAgentConfiguration::class.java)
+
+        val error = assertThrows(Exception::class.java) { context.refresh() }
+
+        assertTrue(error.causeChain().contains("AI_AGENT_TURN_LEASE_SECONDS"))
+        context.close()
     }
 
     @Test
@@ -87,6 +104,23 @@ class AiAgentPropertiesTest {
     @Test
     fun `disabled production accepts blank provider credentials`() {
         val properties = AiAgentProperties(enabled = false)
+
+        assertDoesNotThrow { validator(properties).validate() }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["-1", "0", "81"])
+    fun `production rejects non-positive or under-budget turn leases`(leaseSeconds: String) {
+        val properties = validEnabledProperties().copy(turnLease = Duration.ofSeconds(leaseSeconds.toLong()))
+
+        val error = assertThrows(IllegalStateException::class.java) { validator(properties).validate() }
+
+        assertTrue(error.message.orEmpty().contains("AI_AGENT_TURN_LEASE_SECONDS"))
+    }
+
+    @Test
+    fun `production accepts the explicit minimum safe turn lease`() {
+        val properties = validEnabledProperties().copy(turnLease = Duration.ofSeconds(82))
 
         assertDoesNotThrow { validator(properties).validate() }
     }
@@ -140,4 +174,7 @@ class AiAgentPropertiesTest {
         logVerificationCodeForDev = false,
         demoSeedEnabled = false
     )
+
+    private fun Throwable?.causeChain(): String = generateSequence(this) { it.cause }
+        .joinToString(" ") { it.message.orEmpty() }
 }

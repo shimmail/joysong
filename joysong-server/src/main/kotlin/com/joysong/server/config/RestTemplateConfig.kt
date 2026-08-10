@@ -18,11 +18,19 @@ class RestTemplateConfig {
 
     @Bean("agentLlmRestTemplate")
     fun agentLlmRestTemplate(properties: AiAgentProperties): org.springframework.web.client.RestTemplate =
-        createRestTemplate(properties.proxyUrl, 10_000, 60_000)
+        createRestTemplate(
+            properties.proxyUrl,
+            AiAgentHttpBudget.COMPLETION_CONNECT_TIMEOUT_MS,
+            AiAgentHttpBudget.COMPLETION_READ_TIMEOUT_MS
+        )
 
     @Bean("agentIntentParserRestTemplate")
     fun agentIntentParserRestTemplate(properties: AiAgentProperties): org.springframework.web.client.RestTemplate =
-        createRestTemplate(properties.proxyUrl, 3_000, 8_000)
+        createRestTemplate(
+            properties.proxyUrl,
+            AiAgentHttpBudget.INTENT_CONNECT_TIMEOUT_MS,
+            AiAgentHttpBudget.INTENT_READ_TIMEOUT_MS
+        )
 
     private fun createRestTemplate(
         proxyUrl: String,

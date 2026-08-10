@@ -47,6 +47,9 @@ class ConfigValidator(
         if (dbPassword.isBlank()) missing.add("DB_PASSWORD")
         if (!adminPhone.matches(Regex("^1\\d{10}$"))) missing.add("ADMIN_PHONE (valid mobile number)")
         if (adminPassword.length !in 12..128) missing.add("ADMIN_PASSWORD (12-128 characters)")
+        if (!AiAgentHttpBudget.isTurnLeaseSafe(aiAgentProperties.turnLease)) {
+            missing.add("AI_AGENT_TURN_LEASE_SECONDS (at least 82 seconds; must exceed the 81-second serial HTTP budget)")
+        }
         if (!AiAgentProxyUrlPolicy.isAllowed(aiAgentProperties.proxyUrl)) {
             missing.add("OPENAI_PROXY_URL (http, https, or socks URL with host and explicit valid port; user-info is not allowed)")
         }
