@@ -95,6 +95,70 @@ void main() {
     expect(payload['images'], 'lobby.jpg,room.jpg');
   });
 
+  test('institution project exposes joined doctors from admin response', () {
+    final project = ManagedInstitutionProject.fromJson({
+      'id': 'institution-project-1',
+      'institutionId': 'inst-1',
+      'projectId': 'project-1',
+      'effectiveName': '水光护理',
+      'doctors': [
+        {'id': 'doctor-1', 'name': '已加入医生', 'price': 399},
+      ],
+    });
+
+    expect(project.doctorIds, {'doctor-1'});
+    expect(project.hasDoctor('doctor-1'), isTrue);
+    expect(project.hasDoctor('doctor-2'), isFalse);
+  });
+
+  test('join institution project draft uses exact backend contract', () {
+    const draft = InstitutionProjectJoinRequestDraft(
+      institutionProjectId: ' institution-project-1 ',
+      serviceDescription: ' 擅长面部年轻化 ',
+      priceSuggestion: 699,
+      notes: ' 周末可约 ',
+    );
+
+    expect(draft.toJson(), {
+      'requestType': 'JOIN',
+      'institutionProjectId': 'institution-project-1',
+      'serviceDescription': '擅长面部年轻化',
+      'priceSuggestion': 699,
+      'notes': '周末可约',
+    });
+    expect(draft.validate, returnsNormally);
+    expect(
+      () => const InstitutionProjectJoinRequestDraft(
+        institutionProjectId: 'institution-project-1',
+        serviceDescription: '服务说明',
+        priceSuggestion: -1,
+      ).validate(),
+      throwsArgumentError,
+    );
+  });
+
+  test('join request parses review queue fields', () {
+    final request = InstitutionProjectJoinRequest.fromJson({
+      'id': 'request-1',
+      'doctorId': 'doctor-1',
+      'doctorName': '测试医生',
+      'institutionId': 'inst-1',
+      'institutionName': '悦美医疗美容',
+      'institutionProjectId': 'institution-project-1',
+      'projectName': '水光护理',
+      'requestType': 'JOIN',
+      'serviceDescription': '面部年轻化服务',
+      'priceSuggestion': 699,
+      'notes': '周末可约',
+      'status': 'PENDING',
+      'reviewNote': '',
+    });
+
+    expect(request.requestType, 'JOIN');
+    expect(request.projectName, '水光护理');
+    expect(request.priceSuggestion, 699);
+  });
+
   test('institution profile controller loads and saves managed institution',
       () async {
     final repository = _FakeIdentityRepository();
@@ -185,6 +249,91 @@ void main() {
     expect(find.text('发布'), findsNothing);
     expect(find.byIcon(Icons.add_rounded), findsNothing);
   });
+
+  testWidgets('legal representative sees only institution profile and review queues',
+      (tester) async {
+    final repository = _FakeIdentityRepository()
+      ..managementContext = const ManagementContext(
+        userId: 'user-legal',
+        platformRole: 'USER',
+        activeRoles: ['INSTITUTION_LEGAL_REPRESENTATIVE'],
+        managedInstitutionIds: ['inst-1'],
+        visibleInstitutionIds: ['inst-1'],
+        canManageInstitutions: true,
+        canManageInstitutionProjects: true,
+        canManageOrders: true,
+        canReviewInstitutionRequests: true,
+        canReviewInstitutionProjectRequests: true,
+      );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ManagementCenterPage(repository: repository),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('机构档案'), findsOneWidget);
+    expect(find.text('成员加入审核'), findsOneWidget);
+    expect(find.text('机构项目申请审核'), findsOneWidget);
+    expect(find.text('机构项目加入审核'), findsOneWidget);
+    expect(find.text('机构项目'), findsNothing);
+    expect(find.text('专业订单'), findsNothing);
+  });
+
+  testWidgets('doctor sees self profile and request capabilities', (tester) async {
+    final repository = _FakeIdentityRepository()
+      ..managementContext = const ManagementContext(
+        userId: 'doctor-1',
+        platformRole: 'USER',
+        activeRoles: ['DOCTOR'],
+        doctorId: 'doctor-1',
+        managedInstitutionIds: [],
+        visibleInstitutionIds: [],
+        canManageDoctors: true,
+        canManageArticles: true,
+        canManageOrders: true,
+        canApplyToInstitutions: true,
+        canSubmitPlatformProjectRequests: true,
+        canSubmitInstitutionProjectRequests: true,
+      );
+
+    await tester.pumpWidget(MaterialApp(
+      home: ManagementCenterPage(repository: repository),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('医生档案'), findsOneWidget);
+    expect(find.text('申请加入机构'), findsOneWidget);
+    expect(find.text('申请新增平台项目'), findsOneWidget);
+    expect(find.text('申请新增机构项目'), findsOneWidget);
+    expect(find.text('申请加入机构项目'), findsOneWidget);
+    expect(find.text('机构项目'), findsNothing);
+  });
+
+  testWidgets('consultant sees only institution application and affiliation',
+      (tester) async {
+    final repository = _FakeIdentityRepository()
+      ..managementContext = const ManagementContext(
+        userId: 'consultant-1',
+        platformRole: 'USER',
+        activeRoles: ['CONSULTANT'],
+        managedInstitutionIds: [],
+        visibleInstitutionIds: [],
+        canApplyToInstitutions: true,
+        canViewAffiliations: true,
+      );
+
+    await tester.pumpWidget(MaterialApp(
+      home: ManagementCenterPage(repository: repository),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('申请加入机构'), findsOneWidget);
+    expect(find.text('机构归属'), findsOneWidget);
+    expect(find.text('专业订单'), findsNothing);
+    expect(find.text('机构项目'), findsNothing);
+  });
 }
 
 final class _FakeIdentityRepository implements IdentityRepository {
@@ -192,6 +341,7 @@ final class _FakeIdentityRepository implements IdentityRepository {
   var allowManagement = true;
   ManagementContext? managementContext;
   final savedDrafts = <ManagedInstitutionProfileDraft>[];
+  InstitutionProjectJoinRequestDraft? submittedJoinRequest;
 
   @override
   Future<void> deletePrivateDraft(String fileId) async {}
@@ -301,4 +451,80 @@ final class _FakeIdentityRepository implements IdentityRepository {
       'effectiveName': draft.name,
     });
   }
+
+  @override
+  Future<List<ManagedDoctorProfile>> listManagedDoctorProfiles() async => [
+        ManagedDoctorProfile.fromJson({'id': 'doctor-1', 'name': '测试医生'}),
+      ];
+
+  @override
+  Future<ManagedDoctorProfile> updateManagedDoctorProfile(
+    ManagedDoctorProfileDraft draft,
+  ) async => ManagedDoctorProfile.fromJson({
+        ...draft.toJson(),
+        'id': draft.id,
+      });
+
+  @override
+  Future<List<InstitutionOption>> listInstitutionOptions() async => const [
+        InstitutionOption(id: 'inst-1', name: '悦美医疗美容'),
+      ];
+
+  @override
+  Future<List<InstitutionMembershipRequest>>
+      listInstitutionMembershipRequests() async => const [];
+
+  @override
+  Future<void> submitInstitutionMembershipRequest({
+    required String requestType,
+    required String institutionId,
+    required String requestNote,
+  }) async {}
+
+  @override
+  Future<void> reviewInstitutionMembershipRequest({
+    required String requestType,
+    required String id,
+    required String decision,
+    required String reviewNote,
+  }) async {}
+
+  @override
+  Future<List<ProfessionalProjectRequest>>
+      listProfessionalProjectRequests() async => const [];
+
+  @override
+  Future<void> submitPlatformProjectRequest(
+    PlatformProjectRequestDraft draft,
+  ) async {}
+
+  @override
+  Future<void> submitInstitutionProjectRequest(
+    InstitutionProjectRequestDraft draft,
+  ) async {}
+
+  @override
+  Future<void> reviewInstitutionProjectRequest({
+    required String id,
+    required String decision,
+    required String reviewNote,
+  }) async {}
+
+  @override
+  Future<List<InstitutionProjectJoinRequest>>
+      listInstitutionProjectJoinRequests() async => const [];
+
+  @override
+  Future<void> submitInstitutionProjectJoinRequest(
+    InstitutionProjectJoinRequestDraft draft,
+  ) async {
+    submittedJoinRequest = draft;
+  }
+
+  @override
+  Future<void> reviewInstitutionProjectJoinRequest({
+    required String id,
+    required String decision,
+    required String reviewNote,
+  }) async {}
 }

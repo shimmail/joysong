@@ -89,7 +89,7 @@ class ChatService(
     @Qualifier("intentParserRestTemplate") private val intentParserRestTemplate: RestTemplate,
     @Value("\${openai.api-key:}") private val openaiApiKey: String,
     @Value("\${openai.base-url:}") private val openaiBaseUrl: String,
-    @Value("\${openai.model:gpt-4.1-mini}") private val openaiModel: String,
+    @Value("\${openai.model:gpt-5.5}") private val openaiModel: String,
     @Value("\${openai.intent-parser-enabled:true}") private val intentParserEnabled: Boolean,
     @Value("\${openai.fast-reasoning-effort:none}") private val fastReasoningEffort: String,
     @Value("\${openai.complex-reasoning-effort:low}") private val complexReasoningEffort: String,
