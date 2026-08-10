@@ -12,6 +12,7 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator
 import java.sql.DriverManager
+import java.time.LocalDateTime
 
 class DoctorInstitutionChangeMigrationTest {
 
@@ -63,8 +64,15 @@ class DoctorInstitutionChangeMigrationTest {
 
         val databaseName = HISTORY_DATABASE
         assertTrue(databaseName.startsWith("myapp_worktree_"))
-        val targetUrl = rootUrl!!.replace(Regex("/mysql(?:\\?.*)?$"), "/$databaseName")
+        val mysqlRootPattern = Regex("^jdbc:mysql://([^/]+)/mysql(?:\\?.*)?$")
+        assertTrue(mysqlRootPattern.matches(rootUrl!!), "WORKTREE_MIGRATION_DB_URL must target the /mysql database")
+        val rootMatch = mysqlRootPattern.matchEntire(rootUrl)
+            ?: error("WORKTREE_MIGRATION_DB_URL did not match the MySQL root URL")
+        val resolvedHost = rootMatch.groupValues[1]
+        val targetUrl = rootUrl.replace(Regex("/mysql(?:\\?.*)?$"), "/$databaseName")
         assertFalse(targetUrl == rootUrl)
+        println("MYSQL_HOST=$resolvedHost")
+        println("MYSQL_DATABASE=$databaseName")
 
         DriverManager.getConnection(rootUrl, DB_USER, DB_PASSWORD).use { connection ->
             connection.createStatement().use { statement ->
@@ -82,22 +90,86 @@ class DoctorInstitutionChangeMigrationTest {
         applySqlScript(dataSource, V13_MIGRATION)
 
         val history = jdbcTemplate.query(
-            "SELECT request_note, status, review_note FROM doctor_institution_change_requests"
+            """
+            SELECT request_note, action, status, review_note,
+                   submitted_at, reviewed_at, created_at, updated_at
+            FROM doctor_institution_change_requests
+            """.trimIndent()
         ) { rs, _ ->
-            rs.getString("request_note") to (rs.getString("status") to rs.getString("review_note"))
+            rs.getString("request_note") to LedgerHistory(
+                action = rs.getString("action"),
+                status = rs.getString("status"),
+                reviewNote = rs.getString("review_note"),
+                submittedAt = rs.getTimestamp("submitted_at").toLocalDateTime(),
+                reviewedAt = rs.getTimestamp("reviewed_at")?.toLocalDateTime(),
+                createdAt = rs.getTimestamp("created_at").toLocalDateTime(),
+                updatedAt = rs.getTimestamp("updated_at").toLocalDateTime()
+            )
         }.toMap()
         assertEquals(
             setOf("pending", "approved", "rejected-empty", "changes-requested", "revoked", "soft-deleted"),
             history.keys
         )
-        assertEquals("PENDING", history.getValue("pending").first)
-        assertEquals("APPROVED", history.getValue("approved").first)
-        assertEquals("REJECTED", history.getValue("rejected-empty").first)
-        assertEquals("历史审核未填写原因", history.getValue("rejected-empty").second)
-        assertEquals("REJECTED", history.getValue("changes-requested").first)
-        assertEquals("changes reason", history.getValue("changes-requested").second)
-        assertEquals("APPROVED", history.getValue("revoked").first)
-        assertEquals("soft deleted reason", history.getValue("soft-deleted").second)
+        assertHistoryRow(
+            history,
+            "pending",
+            "PENDING",
+            "",
+            "2025-01-01 01:02:03",
+            null,
+            "2025-01-01 01:02:03",
+            "2025-01-01 01:02:03"
+        )
+        assertHistoryRow(
+            history,
+            "approved",
+            "APPROVED",
+            "approved reason",
+            "2025-02-01 01:02:03",
+            "2025-02-02 02:03:04",
+            "2025-02-01 01:02:03",
+            "2025-02-03 03:04:05"
+        )
+        assertHistoryRow(
+            history,
+            "rejected-empty",
+            "REJECTED",
+            "历史审核未填写原因",
+            "2025-03-01 01:02:03",
+            "2025-03-03 03:04:05",
+            "2025-03-01 01:02:03",
+            "2025-03-03 03:04:05"
+        )
+        assertHistoryRow(
+            history,
+            "changes-requested",
+            "REJECTED",
+            "changes reason",
+            "2025-04-01 01:02:03",
+            "2025-04-03 03:04:05",
+            "2025-04-01 01:02:03",
+            "2025-04-03 03:04:05"
+        )
+        assertHistoryRow(
+            history,
+            "revoked",
+            "APPROVED",
+            "revoked reason",
+            "2025-05-01 01:02:03",
+            "2025-05-02 02:03:04",
+            "2025-05-01 01:02:03",
+            "2025-05-03 03:04:05"
+        )
+        assertHistoryRow(
+            history,
+            "soft-deleted",
+            "REJECTED",
+            "soft deleted reason",
+            "2025-06-01 01:02:03",
+            "2025-06-03 03:04:05",
+            "2025-06-01 01:02:03",
+            "2025-06-03 03:04:05"
+        )
 
         assertEquals(
             setOf("doctor-approved", "doctor-revoked"),
@@ -230,15 +302,15 @@ class DoctorInstitutionChangeMigrationTest {
                 ('doctor-pending', ?, ?, 0, 'PENDING', 'pending', '', NULL, NULL,
                  '2025-01-01 01:02:03', '2025-01-01 01:02:03', NULL),
                 ('doctor-approved', ?, ?, 1, 'APPROVED', 'approved', 'approved reason', ?,
-                 '2025-02-02 02:03:04', '2025-02-01 01:02:03', '2025-02-02 02:03:04', NULL),
+                 '2025-02-02 02:03:04', '2025-02-01 01:02:03', '2025-02-03 03:04:05', NULL),
                 ('doctor-rejected-empty', ?, ?, 0, 'REJECTED', 'rejected-empty', '', ?,
-                 '2025-03-03 03:04:05', '2025-03-01 01:02:03', '2025-03-03 03:04:05', NULL),
+                 '2025-03-02 02:03:04', '2025-03-01 01:02:03', '2025-03-03 03:04:05', NULL),
                 ('doctor-changes', ?, ?, 0, 'CHANGES_REQUESTED', 'changes-requested', 'changes reason', ?,
-                 '2025-04-04 04:05:06', '2025-04-01 01:02:03', '2025-04-04 04:05:06', NULL),
+                 '2025-04-02 02:03:04', '2025-04-01 01:02:03', '2025-04-03 03:04:05', NULL),
                 ('doctor-revoked', ?, ?, 0, 'REVOKED', 'revoked', 'revoked reason', ?,
-                 '2025-05-05 05:06:07', '2025-05-01 01:02:03', '2025-05-05 05:06:07', NULL),
+                 '2025-05-02 02:03:04', '2025-05-01 01:02:03', '2025-05-03 03:04:05', NULL),
                 ('doctor-soft-deleted', ?, ?, 0, 'REJECTED', 'soft-deleted', 'soft deleted reason', ?,
-                 '2025-06-06 06:07:08', '2025-06-01 01:02:03', '2025-06-06 06:07:08',
+                 '2025-06-02 02:03:04', '2025-06-01 01:02:03', '2025-06-03 03:04:05',
                  '2025-06-07 07:08:09')
             """.trimIndent(),
             DOCTOR_ID,
@@ -270,6 +342,39 @@ class DoctorInstitutionChangeMigrationTest {
             PENDING_INSTITUTION_ID
         )
     }
+
+    private fun assertHistoryRow(
+        history: Map<String, LedgerHistory>,
+        requestNote: String,
+        status: String,
+        reviewNote: String,
+        submittedAt: String,
+        reviewedAt: String?,
+        createdAt: String,
+        updatedAt: String
+    ) {
+        val row = history.getValue(requestNote)
+        assertEquals("JOIN", row.action)
+        assertEquals(status, row.status)
+        assertEquals(reviewNote, row.reviewNote)
+        assertEquals(timestamp(submittedAt), row.submittedAt)
+        assertEquals(reviewedAt?.let(::timestamp), row.reviewedAt)
+        assertEquals(timestamp(createdAt), row.createdAt)
+        assertEquals(timestamp(updatedAt), row.updatedAt)
+    }
+
+    private fun timestamp(value: String): LocalDateTime =
+        LocalDateTime.parse(value.replace(' ', 'T'))
+
+    private data class LedgerHistory(
+        val action: String,
+        val status: String,
+        val reviewNote: String,
+        val submittedAt: LocalDateTime,
+        val reviewedAt: LocalDateTime?,
+        val createdAt: LocalDateTime,
+        val updatedAt: LocalDateTime
+    )
 
     companion object {
         private const val DB_USER = "root"
