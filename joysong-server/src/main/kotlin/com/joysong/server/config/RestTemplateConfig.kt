@@ -29,6 +29,9 @@ class RestTemplateConfig {
         connectTimeoutMs: Int,
         readTimeoutMs: Int
     ): org.springframework.web.client.RestTemplate {
+        if (!AiAgentProxyUrlPolicy.isAllowed(proxyUrl)) {
+            throw IllegalStateException("Invalid OPENAI_PROXY_URL configuration")
+        }
         val factory = SimpleClientHttpRequestFactory()
         factory.setConnectTimeout(connectTimeoutMs)
         factory.setReadTimeout(readTimeoutMs)
@@ -36,7 +39,7 @@ class RestTemplateConfig {
         if (proxyUrl.isNotBlank()) {
             val uri = java.net.URI(proxyUrl)
             val proxy = Proxy(
-                if (uri.scheme == "socks") Proxy.Type.SOCKS else Proxy.Type.HTTP,
+                if (uri.scheme.equals("socks", ignoreCase = true)) Proxy.Type.SOCKS else Proxy.Type.HTTP,
                 InetSocketAddress(uri.host, uri.port)
             )
             factory.setProxy(proxy)

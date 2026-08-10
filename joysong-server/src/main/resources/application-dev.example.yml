@@ -18,7 +18,7 @@ aliyun:
   sms:
     enabled: false
 
-openai:
+ai-agent:
   demo-fallback-enabled: ${OPENAI_DEMO_FALLBACK_ENABLED:true}
 
 security:

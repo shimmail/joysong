@@ -5,8 +5,11 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.springframework.boot.context.properties.bind.Bindable
+import org.springframework.boot.context.properties.bind.Binder
 import org.springframework.boot.env.YamlPropertySourceLoader
 import org.springframework.core.io.ClassPathResource
+import org.springframework.core.env.StandardEnvironment
 
 class ProductionProfileTest {
 
@@ -15,6 +18,9 @@ class ProductionProfileTest {
         .single()
     private val developmentProperties = YamlPropertySourceLoader()
         .load("development", ClassPathResource("application-dev.example.yml"))
+        .single()
+    private val applicationProperties = YamlPropertySourceLoader()
+        .load("application", ClassPathResource("application.yml"))
         .single()
 
     @Test
@@ -44,7 +50,7 @@ class ProductionProfileTest {
         assertEquals("\${OSS_BUCKET_NAME}", properties.getProperty("oss.bucket-name"))
         assertEquals("\${SMS_SIGN_NAME}", properties.getProperty("aliyun.sms.sign-name"))
         assertTrue(properties.getProperty("aliyun.sms.template-code").toString().contains("SMS_TEMPLATE_CODE"))
-        assertEquals("\${OPENAI_BASE_URL}", properties.getProperty("openai.base-url"))
+        assertEquals("\${OPENAI_BASE_URL:}", properties.getProperty("openai.base-url"))
     }
 
     @Test
@@ -52,8 +58,23 @@ class ProductionProfileTest {
         assertNull(developmentProperties.getProperty("payment.mode"))
         assertNull(developmentProperties.getProperty("payment.stripe.enabled"))
         assertEquals(true, developmentProperties.getProperty("security.verification-code.log-for-dev"))
-        assertTrue(developmentProperties.getProperty("openai.demo-fallback-enabled").toString().contains("OPENAI_DEMO_FALLBACK_ENABLED"))
         assertEquals(false, developmentProperties.getProperty("oss.enabled"))
         assertEquals(false, developmentProperties.getProperty("aliyun.sms.enabled"))
+    }
+
+    @Test
+    fun `development profile enables demo fallback through typed agent properties`() {
+        val environment = StandardEnvironment().apply {
+            propertySources.remove(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME)
+            propertySources.remove(StandardEnvironment.SYSTEM_PROPERTIES_PROPERTY_SOURCE_NAME)
+            propertySources.addLast(developmentProperties)
+            propertySources.addLast(applicationProperties)
+        }
+
+        val aiAgent = Binder.get(environment)
+            .bind("ai-agent", Bindable.of(AiAgentProperties::class.java))
+            .get()
+
+        assertTrue(aiAgent.demoFallbackEnabled)
     }
 }

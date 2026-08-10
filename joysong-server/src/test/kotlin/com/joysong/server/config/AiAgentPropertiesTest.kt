@@ -2,10 +2,13 @@ package com.joysong.server.config
 
 import org.junit.jupiter.api.Assertions.assertDoesNotThrow
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.boot.context.properties.bind.Bindable
 import org.springframework.boot.context.properties.bind.Binder
 import org.springframework.mock.env.MockEnvironment
@@ -86,6 +89,27 @@ class AiAgentPropertiesTest {
         val properties = AiAgentProperties(enabled = false)
 
         assertDoesNotThrow { validator(properties).validate() }
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+        strings = [
+            "ftp://proxy.example.test:8080",
+            "http:///missing-host:8080",
+            "http://proxy.example.test",
+            "http://proxy.example.test:0",
+            "http://proxy.example.test:65536",
+            "http://user:secret@proxy.example.test:8080",
+            "not a uri"
+        ]
+    )
+    fun `invalid proxy settings fail validation without exposing their value`(proxyUrl: String) {
+        val properties = AiAgentProperties(enabled = false, proxyUrl = proxyUrl)
+
+        val error = assertThrows(IllegalStateException::class.java) { validator(properties).validate() }
+
+        assertTrue(error.message.orEmpty().contains("OPENAI_PROXY_URL"))
+        assertFalse(error.message.orEmpty().contains(proxyUrl))
     }
 
     private fun validEnabledProperties() = AiAgentProperties(
