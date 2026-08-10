@@ -62,6 +62,19 @@ class AiAgentProfileStartupTest {
         }
     }
 
+    @Test
+    fun `enabled production profile fails without an explicitly configured model`() {
+        contextRunner
+            .withPropertyValues(
+                "ai-agent.enabled=true",
+                "ai-agent.api-key=test-key"
+            )
+            .run { context ->
+                assertThat(context).hasFailed()
+                assertThat(context.startupFailure.causeChain()).contains("AI_AGENT_MODEL")
+            }
+    }
+
     @Configuration(proxyBeanMethods = false)
     @Import(
         AiAgentConfiguration::class,
@@ -73,4 +86,7 @@ class AiAgentProfileStartupTest {
         @Bean
         fun objectMapper(): ObjectMapper = ObjectMapper().registerKotlinModule()
     }
+
+    private fun Throwable?.causeChain(): String = generateSequence(this) { it.cause }
+        .joinToString(" ") { it.message.orEmpty() }
 }

@@ -91,7 +91,8 @@ ai-agent:
   enabled: ${AI_AGENT_ENABLED:false}
   api-key: ${OPENAI_API_KEY:}
   base-url: ${OPENAI_BASE_URL:}
-  model: ${AI_AGENT_MODEL:gpt-5.5}
+  model: ${AI_AGENT_MODEL:}
+  # Supported proxy schemes are http:// and socks://. HTTPS proxy endpoints are rejected.
   proxy-url: ${OPENAI_PROXY_URL:}
   turn-lease: ${AI_AGENT_TURN_LEASE_SECONDS:90}s
   # Only ambiguous or complex requests use the extra lightweight JSON classification call.

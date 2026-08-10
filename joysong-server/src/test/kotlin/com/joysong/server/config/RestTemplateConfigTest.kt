@@ -20,17 +20,20 @@ class RestTemplateConfigTest {
         assertProxy(config.agentLlmRestTemplate(properties), Proxy.Type.HTTP, "127.0.0.1", 8899)
         assertProxy(config.agentIntentParserRestTemplate(properties), Proxy.Type.HTTP, "127.0.0.1", 8899)
         assertProxy(
-            config.agentLlmRestTemplate(AiAgentProperties(proxyUrl = "https://127.0.0.1:8443")),
-            Proxy.Type.HTTP,
-            "127.0.0.1",
-            8443
-        )
-        assertProxy(
             config.agentLlmRestTemplate(AiAgentProperties(proxyUrl = "socks://127.0.0.1:1080")),
             Proxy.Type.SOCKS,
             "127.0.0.1",
             1080
         )
+    }
+
+    @Test
+    fun `agent clients reject an HTTPS proxy that the runtime cannot implement`() {
+        val error = assertThrows(IllegalStateException::class.java) {
+            config.agentLlmRestTemplate(AiAgentProperties(proxyUrl = "https://proxy.example.test:8443"))
+        }
+
+        assertEquals("Invalid OPENAI_PROXY_URL configuration", error.message)
     }
 
     @Test

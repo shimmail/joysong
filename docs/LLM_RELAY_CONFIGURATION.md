@@ -7,7 +7,8 @@
 ```dotenv
 OPENAI_API_KEY=替换为中转站密钥
 OPENAI_BASE_URL=https://www.fastaitoken.com/v1
-OPENAI_MODEL=gpt-4.1-mini
+AI_AGENT_MODEL=gpt-5.5
+OPENAI_PROXY_URL=http://proxy.example.internal:8080
 OPENAI_STREAM_ENABLED=false
 ```
 
@@ -19,7 +20,7 @@ Authorization: Bearer {OPENAI_API_KEY}
 Content-Type: application/json
 ```
 
-不要把 `OPENAI_BASE_URL` 配置成完整的 `/chat/completions` 地址，否则会重复拼接路径。API Key 只存在于服务端 Secret 或环境变量，不能提交到 Git、写入 Android 工程或返回给客户端。
+生产启用 Agent 时必须显式设置 `AI_AGENT_MODEL`。`OPENAI_BASE_URL` 必须使用批准的 `https://www.fastaitoken.com` 地址，且不要配置成完整的 `/chat/completions` 地址，否则会重复拼接路径。可选的 `OPENAI_PROXY_URL` 只接受带主机和显式端口的 `http://` 或 `socks://` URL；运行时不支持并会拒绝 `https://` proxy URL。API Key 只存在于服务端 Secret 或环境变量，不能提交到 Git、写入 Android 工程或返回给客户端。
 
 ## 同步响应与错误处理
 
