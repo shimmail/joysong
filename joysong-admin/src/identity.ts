@@ -24,6 +24,7 @@ export function identityStatusLabel(status: string) {
     PENDING: '待审核',
     APPROVED: '已通过',
     REJECTED: '已驳回',
+    CHANGES_REQUESTED: '待修改',
     ACTIVE: '有效',
     REVOKED: '已撤销',
     WITHDRAWN: '已撤回',
@@ -37,6 +38,7 @@ export function identityStatusColor(status: string) {
     APPROVED: 'green',
     ACTIVE: 'green',
     REJECTED: 'red',
+    CHANGES_REQUESTED: 'orange',
     REVOKED: 'default',
     WITHDRAWN: 'default',
   };

@@ -22,9 +22,7 @@ class AdminProjectController(
     @PostMapping("/projects")
     fun createProject(authentication: Authentication, @RequestBody request: ProjectRequest): BaseResponse<*> {
         val actor = managementAccessService.actor(authentication)
-        if (!actor.isAdmin && actor.doctorId == null) {
-            return BaseResponse.error<Any>("只有认证医生可以发布项目", 403)
-        }
+        managementAccessService.requirePlatformAdmin(actor)
         return BaseResponse.success(projectService.adminCreateProject(request))
     }
 

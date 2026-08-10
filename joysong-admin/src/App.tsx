@@ -45,6 +45,7 @@ class ErrorBoundary extends Component<
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage'));
+const ProjectRequestsPage = lazy(() => import('./pages/ProjectRequestsPage'));
 const OrdersPage = lazy(() => import('./pages/OrdersPage'));
 const UsersPage = lazy(() => import('./pages/UsersPage'));
 const BannersPage = lazy(() => import('./pages/BannersPage'));
@@ -84,17 +85,11 @@ function AdminOnlyRoute({ children }: { children: React.ReactNode }) {
     : <Navigate to={getDefaultManagementPath()} replace />;
 }
 
-function InstitutionOwnerRoute({ children }: { children: React.ReactNode }) {
-  const context = getManagementContext();
-  return context?.platformRole === 'ADMIN' || context?.canManageInstitutions
-    ? <>{children}</>
-    : <Navigate to="/project-collaboration" replace />;
-}
-
 function CapabilityRoute({ capability, children }: {
   capability: keyof Pick<ManagementContext,
     'canManageDoctors' | 'canManageInstitutions' | 'canManageInstitutionProjects' |
-    'canManageArticles' | 'canManageSplitConfigs' | 'canManageOrders'>;
+    'canManageArticles' | 'canManageSplitConfigs' | 'canManageOrders' |
+    'canReviewInstitutionProjectRequests'>;
   children: React.ReactNode;
 }) {
   const context = getManagementContext();
@@ -120,6 +115,7 @@ function App() {
         <Route path="/" element={<PrivateRoute><AdminLayout /></PrivateRoute>}>
           <Route index element={<DefaultManagementRoute />} />
           <Route path="projects" element={<AdminOnlyRoute><ProjectsPage /></AdminOnlyRoute>} />
+          <Route path="project-requests" element={<CapabilityRoute capability="canReviewInstitutionProjectRequests"><ProjectRequestsPage /></CapabilityRoute>} />
           <Route path="orders" element={<CapabilityRoute capability="canManageOrders"><OrdersPage /></CapabilityRoute>} />
           <Route path="users" element={<AdminOnlyRoute><UsersPage /></AdminOnlyRoute>} />
           <Route path="users/:id" element={<AdminOnlyRoute><UserDetailPage /></AdminOnlyRoute>} />
@@ -131,8 +127,8 @@ function App() {
           <Route path="diaries" element={<AdminOnlyRoute><DiariesPage /></AdminOnlyRoute>} />
           <Route path="reviews" element={<AdminOnlyRoute><ReviewsPage /></AdminOnlyRoute>} />
           <Route path="payments" element={<AdminOnlyRoute><PaymentsPage /></AdminOnlyRoute>} />
-          <Route path="institution-projects" element={<InstitutionOwnerRoute><InstitutionProjectsPage /></InstitutionOwnerRoute>} />
-          <Route path="project-collaboration" element={<CapabilityRoute capability="canManageInstitutionProjects"><ProjectCollaborationPage /></CapabilityRoute>} />
+          <Route path="institution-projects" element={<AdminOnlyRoute><InstitutionProjectsPage /></AdminOnlyRoute>} />
+          <Route path="project-collaboration" element={<AdminOnlyRoute><ProjectCollaborationPage /></AdminOnlyRoute>} />
           <Route path="refunds" element={<AdminOnlyRoute><RefundsPage /></AdminOnlyRoute>} />
           <Route path="reports" element={<AdminOnlyRoute><ReportsPage /></AdminOnlyRoute>} />
           <Route path="coupons" element={<AdminOnlyRoute><CouponsPage /></AdminOnlyRoute>} />

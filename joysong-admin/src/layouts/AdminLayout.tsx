@@ -61,6 +61,7 @@ const menuGroups: MenuGroup[] = [
     label: '业务管理',
     children: [
       { key: '/projects', icon: <MedicineBoxOutlined />, label: '项目管理' },
+      { key: '/project-requests', icon: <SafetyCertificateOutlined />, label: '项目申请审核' },
       { key: '/institution-projects', icon: <ShoppingCartOutlined />, label: '机构项目管理' },
       { key: '/project-collaboration', icon: <LinkOutlined />, label: '项目协作与审核' },
       { key: '/orders', icon: <FileTextOutlined />, label: '订单管理' },
@@ -127,8 +128,9 @@ export default function AdminLayout() {
   const canShowMenuItem = (key: string) => {
     if (isAdmin) return true;
     if (key === '/doctors') return managementContext?.canManageDoctors;
-    if (key === '/institution-projects') return managementContext?.canManageInstitutions;
-    if (key === '/project-collaboration') return managementContext?.canManageInstitutionProjects;
+    if (key === '/institution-projects') return false;
+    if (key === '/project-requests') return managementContext?.canReviewInstitutionProjectRequests;
+    if (key === '/project-collaboration') return false;
     if (key === '/orders') return managementContext?.canManageOrders;
     if (key === '/institutions') return (managementContext?.visibleInstitutionIds.length || 0) > 0;
     if (key === '/articles') return managementContext?.canManageArticles;

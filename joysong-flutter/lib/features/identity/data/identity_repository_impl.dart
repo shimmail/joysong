@@ -184,6 +184,169 @@ final class ApiIdentityRepository implements IdentityRepository {
       decodeData: (_) {},
     );
   }
+
+  @override
+  Future<List<ManagedDoctorProfile>> listManagedDoctorProfiles() async {
+    return await _apiClient.get<List<ManagedDoctorProfile>>(
+          '/admin/doctors',
+          decodeData: (json) => _objectList(json)
+              .map(ManagedDoctorProfile.fromJson)
+              .toList(growable: false),
+        ) ??
+        const [];
+  }
+
+  @override
+  Future<ManagedDoctorProfile> updateManagedDoctorProfile(
+    ManagedDoctorProfileDraft draft,
+  ) async {
+    final result = await _apiClient.put<ManagedDoctorProfile>(
+      '/admin/doctors/${draft.id}',
+      body: draft.toJson(),
+      decodeData: ManagedDoctorProfile.fromJson,
+    );
+    if (result == null) throw const FormatException('医生档案响应为空');
+    return result;
+  }
+
+  @override
+  Future<List<InstitutionOption>> listInstitutionOptions() async {
+    return await _apiClient.get<List<InstitutionOption>>(
+          '/discover/institutions',
+          query: const {'offset': 0, 'limit': 100},
+          decodeData: (json) => _objectList(json)
+              .map(InstitutionOption.fromJson)
+              .toList(growable: false),
+        ) ??
+        const [];
+  }
+
+  @override
+  Future<List<InstitutionMembershipRequest>>
+      listInstitutionMembershipRequests() async {
+    return await _apiClient.get<List<InstitutionMembershipRequest>>(
+          '/management/institution-membership-requests',
+          decodeData: (json) => _objectList(json)
+              .map(InstitutionMembershipRequest.fromJson)
+              .toList(growable: false),
+        ) ??
+        const [];
+  }
+
+  @override
+  Future<void> submitInstitutionMembershipRequest({
+    required String requestType,
+    required String institutionId,
+    required String requestNote,
+  }) async {
+    await _apiClient.post<void>(
+      '/management/institution-membership-requests',
+      body: {
+        'requestType': requestType,
+        'institutionId': institutionId,
+        'requestNote': requestNote,
+      },
+      decodeData: (_) {},
+    );
+  }
+
+  @override
+  Future<void> reviewInstitutionMembershipRequest({
+    required String requestType,
+    required String id,
+    required String decision,
+    required String reviewNote,
+  }) async {
+    await _apiClient.post<void>(
+      '/management/institution-membership-requests/$requestType/$id/review',
+      body: {'decision': decision, 'reviewNote': reviewNote},
+      decodeData: (_) {},
+    );
+  }
+
+  @override
+  Future<List<ProfessionalProjectRequest>>
+      listProfessionalProjectRequests() async {
+    return await _apiClient.get<List<ProfessionalProjectRequest>>(
+          '/management/project-requests',
+          decodeData: (json) => _objectList(json)
+              .map(ProfessionalProjectRequest.fromJson)
+              .toList(growable: false),
+        ) ??
+        const [];
+  }
+
+  @override
+  Future<void> submitPlatformProjectRequest(
+    PlatformProjectRequestDraft draft,
+  ) async {
+    await _apiClient.post<void>(
+      '/management/project-requests/platform',
+      body: draft.toJson(),
+      decodeData: (_) {},
+    );
+  }
+
+  @override
+  Future<void> submitInstitutionProjectRequest(
+    InstitutionProjectRequestDraft draft,
+  ) async {
+    await _apiClient.post<void>(
+      '/management/project-requests/institutions/${draft.institutionId}',
+      body: draft.toJson(),
+      decodeData: (_) {},
+    );
+  }
+
+  @override
+  Future<void> reviewInstitutionProjectRequest({
+    required String id,
+    required String decision,
+    required String reviewNote,
+  }) async {
+    await _apiClient.post<void>(
+      '/management/project-requests/$id/review',
+      body: {'decision': decision, 'reviewNote': reviewNote},
+      decodeData: (_) {},
+    );
+  }
+
+  @override
+  Future<List<InstitutionProjectJoinRequest>>
+      listInstitutionProjectJoinRequests() async {
+    return await _apiClient.get<List<InstitutionProjectJoinRequest>>(
+          '/admin/institution-project-requests',
+          decodeData: (json) => _objectList(json)
+              .map(InstitutionProjectJoinRequest.fromJson)
+              .toList(growable: false),
+        ) ??
+        const [];
+  }
+
+  @override
+  Future<void> submitInstitutionProjectJoinRequest(
+    InstitutionProjectJoinRequestDraft draft,
+  ) async {
+    draft.validate();
+    await _apiClient.post<void>(
+      '/admin/institution-project-requests',
+      body: draft.toJson(),
+      decodeData: (_) {},
+    );
+  }
+
+  @override
+  Future<void> reviewInstitutionProjectJoinRequest({
+    required String id,
+    required String decision,
+    required String reviewNote,
+  }) async {
+    await _apiClient.post<void>(
+      '/admin/institution-project-requests/$id/review',
+      body: {'decision': decision, 'reviewNote': reviewNote},
+      decodeData: (_) {},
+    );
+  }
 }
 
 List<Object?> _objectList(Object? value) => value is List ? value : const [];

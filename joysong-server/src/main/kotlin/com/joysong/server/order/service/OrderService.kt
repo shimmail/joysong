@@ -118,12 +118,10 @@ class OrderService(
             .orElseThrow { IllegalArgumentException("机构不存在: ${institutionProject.institutionId}") }
         require(institution.name.isNotBlank()) { "机构名称不能为空" }
 
-        require(
-            doctorProjectRepository.existsByDoctorIdAndInstitutionProjectId(
-                request.doctorId,
-                institutionProject.id
-            )
-        ) { "所选医生未加入该机构项目" }
+        val doctorProject = doctorProjectRepository.findByDoctorIdAndInstitutionProjectId(
+            request.doctorId,
+            institutionProject.id
+        ) ?: throw IllegalArgumentException("所选医生未加入该机构项目")
         require(
             doctorInstitutionRepository.findByDoctorIdOrderByCreatedAtAsc(request.doctorId)
                 .any {
@@ -142,7 +140,7 @@ class OrderService(
         )
         require(consultant.name.isNotBlank()) { "医美顾问名称不能为空" }
 
-        val unitPrice = institutionProject.price
+        val unitPrice = doctorProject.price
         val coverImage = effectiveProject.coverImage
         val configuredConsultationFee = doctorInstitutionProjectConfigRepository
             .findByDoctorIdAndInstitutionProjectId(request.doctorId, institutionProject.id)
@@ -274,7 +272,6 @@ class OrderService(
 
     private fun canManageOrder(actor: ManagementActor, order: OrderEntity): Boolean =
         actor.isAdmin ||
-            order.institutionId in actor.managedInstitutionIds ||
             (actor.doctorId != null && order.doctorId == actor.doctorId)
 
     /**
