@@ -1,9 +1,11 @@
 import 'dart:typed_data';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
 import 'package:joysong_flutter/features/identity/presentation/identity_controller.dart';
+import 'package:joysong_flutter/features/identity/presentation/identity_pages.dart';
 
 void main() {
   test('uses medical aesthetics consultant product labels', () {
@@ -87,11 +89,77 @@ void main() {
     expect(saved, isTrue);
     expect(repository.savedDrafts.single.city, '宁波');
   });
+
+  testWidgets('institution profile edit uses public info and album image copy',
+      (tester) async {
+    tester.view.physicalSize = const Size(800, 2200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repository = _FakeIdentityRepository();
+    final pickedImages = ['cover.jpg', 'license.png'];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ManagedInstitutionProfilesPage(
+          repository: repository,
+          imagePicker: () async => pickedImages.removeAt(0),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('悦美医疗美容'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('这是向用户公开展示的信息，请勿填写内部管理或隐私资料。'), findsOneWidget);
+    expect(find.text('评分、评价数与认证状态由平台管理，此处仅维护公开机构档案。'), findsNothing);
+    expect(find.text('封面图 URL'), findsNothing);
+    expect(find.text('资质证书图片 URL（逗号分隔）'), findsNothing);
+    expect(find.text('环境图片 URL（逗号分隔）'), findsNothing);
+    expect(find.text('从相册选择封面图'), findsOneWidget);
+    expect(find.text('从相册添加资质图片'), findsOneWidget);
+    expect(find.text('从相册添加环境图片'), findsOneWidget);
+
+    await tester.tap(find.text('从相册选择封面图'));
+    await tester.pump();
+    await tester.tap(find.text('从相册添加资质图片'));
+    await tester.pump();
+
+    expect(find.text('cover.jpg'), findsOneWidget);
+    expect(find.text('license.png'), findsOneWidget);
+  });
+
+  testWidgets('legal representative cannot publish institution projects',
+      (tester) async {
+    final repository = _FakeIdentityRepository()
+      ..managementContext = const ManagementContext(
+        userId: 'user-legal',
+        platformRole: 'USER',
+        activeRoles: ['INSTITUTION_LEGAL_REPRESENTATIVE'],
+        managedInstitutionIds: ['inst-1'],
+        visibleInstitutionIds: ['inst-1'],
+        canManageInstitutionProjects: true,
+      );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ManagedInstitutionProjectsPage(
+          repository: repository,
+          context: repository.managementContext!,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('发布'), findsNothing);
+    expect(find.byIcon(Icons.add_rounded), findsNothing);
+  });
 }
 
 final class _FakeIdentityRepository implements IdentityRepository {
   var contextCalls = 0;
   var allowManagement = true;
+  ManagementContext? managementContext;
   final savedDrafts = <ManagedInstitutionProfileDraft>[];
 
   @override
@@ -106,7 +174,8 @@ final class _FakeIdentityRepository implements IdentityRepository {
     if (!allowManagement) {
       throw Exception('revoked');
     }
-    return const ManagementContext(
+    return managementContext ??
+        const ManagementContext(
       userId: 'user-1',
       platformRole: 'USER',
       activeRoles: ['DOCTOR'],
@@ -174,7 +243,14 @@ final class _FakeIdentityRepository implements IdentityRepository {
 
   @override
   Future<List<ManagedInstitutionProject>>
-      listManagedInstitutionProjects() async => const [];
+      listManagedInstitutionProjects() async => [
+            ManagedInstitutionProject.fromJson({
+              'id': 'institution-project-1',
+              'institutionId': 'inst-1',
+              'projectId': 'project-1',
+              'effectiveName': '水光护理',
+            }),
+          ];
 
   @override
   Future<List<ManagementProjectOption>> listManagementProjects() async =>
