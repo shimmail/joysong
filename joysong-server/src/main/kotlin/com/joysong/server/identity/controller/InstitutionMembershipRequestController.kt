@@ -30,7 +30,10 @@ class InstitutionMembershipRequestController(
         val actor = managementAccessService.actor(authentication)
         val consultantRequests = requestService.list(actor)
             .asSequence()
-            .filter { it.requestType == MembershipRequestType.CONSULTANT }
+            .filter {
+                it.requestType == MembershipRequestType.CONSULTANT ||
+                    (it.requestType == MembershipRequestType.DOCTOR && it.status == "PENDING")
+            }
             .map(InstitutionMembershipRequestView::toResponse)
         val doctorRequests = doctorRequestService.list(actor).asSequence()
             .map(DoctorInstitutionChangeRequestView::toResponse)
@@ -78,10 +81,21 @@ class InstitutionMembershipRequestController(
         val actor = managementAccessService.actor(authentication)
         val type = MembershipRequestType.parse(requestType)
         val decision = MembershipRequestDecision.parse(request.decision)
+        if (type == MembershipRequestType.DOCTOR) {
+            require(decision == MembershipRequestDecision.APPROVED || decision == MembershipRequestDecision.REJECTED) {
+                "医生机构关系审核仅支持通过或驳回"
+            }
+        }
         return when (type) {
-            MembershipRequestType.DOCTOR -> BaseResponse.success(
-                doctorRequestService.review(actor, id, decision, request.reviewNote).toResponse()
-            )
+            MembershipRequestType.DOCTOR -> if (doctorRequestService.exists(id)) {
+                BaseResponse.success(
+                    doctorRequestService.review(actor, id, decision, request.reviewNote).toResponse()
+                )
+            } else {
+                BaseResponse.success(
+                    requestService.review(actor, type, id, decision, request.reviewNote).toResponse()
+                )
+            }
 
             MembershipRequestType.CONSULTANT -> BaseResponse.success(
                 requestService.review(actor, type, id, decision, request.reviewNote).toResponse()
@@ -126,7 +140,13 @@ data class InstitutionMembershipRequestResponse(
     val createdAt: LocalDateTime,
     val updatedAt: LocalDateTime,
     val deleted: Boolean = false,
-    val action: String = "JOIN"
+    val action: String = "JOIN",
+    val doctorName: String? = null,
+    val institutionName: String? = null,
+    val submittedBy: String? = null,
+    val reviewedBy: String? = null,
+    val submittedAt: LocalDateTime? = null,
+    val reviewedAt: LocalDateTime? = null
 )
 
 private fun InstitutionMembershipRequestView.toResponse() = InstitutionMembershipRequestResponse(
@@ -152,5 +172,11 @@ private fun DoctorInstitutionChangeRequestView.toResponse() = InstitutionMembers
     reviewNote = reviewNote,
     createdAt = createdAt,
     updatedAt = updatedAt,
-    action = action.name
+    action = action.name,
+    doctorName = doctorName,
+    institutionName = institutionName,
+    submittedBy = submittedBy,
+    reviewedBy = reviewedBy,
+    submittedAt = submittedAt,
+    reviewedAt = reviewedAt
 )

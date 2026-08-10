@@ -25,7 +25,8 @@ private val RELATION_STATUSES = setOf("PENDING", "APPROVED", "REVOKED")
 @Service
 class AdminIdentityService(
     private val jdbcTemplate: JdbcTemplate,
-    private val objectMapper: ObjectMapper
+    private val objectMapper: ObjectMapper,
+    private val doctorInstitutionRelationshipService: DoctorInstitutionRelationshipService
 ) {
     private val namedJdbcTemplate = NamedParameterJdbcTemplate(jdbcTemplate)
 
@@ -293,10 +294,7 @@ class AdminIdentityService(
 
         if (normalizedRole == "DOCTOR") {
             jdbcTemplate.update("UPDATE doctors SET is_verified = 0 WHERE id = ?", userId)
-            jdbcTemplate.update(
-                "UPDATE doctor_institutions SET status = 'REVOKED', is_primary = 0, revoked_at = NOW() WHERE doctor_id = ? AND status <> 'REVOKED'",
-                userId
-            )
+            doctorInstitutionRelationshipService.revokeAll(userId, reviewerId)
         } else {
             jdbcTemplate.update(
                 "UPDATE institution_memberships SET status = 'REVOKED', revoked_at = NOW() WHERE user_id = ? AND member_role = ? AND status <> 'REVOKED'",
@@ -515,15 +513,7 @@ class AdminIdentityService(
     fun revokeDoctorPractice(id: String) {
         val target = doctorPracticeTarget(id)
         require(target.status != "REVOKED") { "执业关系已撤销" }
-        jdbcTemplate.update(
-            "UPDATE doctor_institutions SET status = 'REVOKED', is_primary = 0, revoked_at = NOW() WHERE id = ?",
-            id
-        )
-        jdbcTemplate.update(
-            "UPDATE auth_sessions SET active_role = 'USER', active_institution_id = NULL WHERE user_id = ? AND active_role = 'DOCTOR' AND active_institution_id = ?",
-            target.userId,
-            target.institutionId
-        )
+        doctorInstitutionRelationshipService.revoke(target.userId, target.institutionId, null)
     }
 
     private fun documentsFor(applicationId: String): List<IdentityDocumentAdminView> = jdbcTemplate.query(

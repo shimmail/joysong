@@ -63,6 +63,7 @@ interface InstitutionMembershipRequestStore {
     ): InstitutionMembershipRequestView
 
     fun listVisible(userId: String, managedInstitutionIds: Set<String>): List<InstitutionMembershipRequestView>
+    fun listAll(): List<InstitutionMembershipRequestView>
 
     fun findById(type: MembershipRequestType, id: String): InstitutionMembershipRequestView?
 
@@ -95,8 +96,11 @@ class InstitutionMembershipRequestService(
         return store.resubmit(existing, normalizedRequestNote)
     }
 
-    fun list(actor: ManagementActor): List<InstitutionMembershipRequestView> =
+    fun list(actor: ManagementActor): List<InstitutionMembershipRequestView> = if (actor.isAdmin) {
+        store.listAll()
+    } else {
         store.listVisible(actor.userId, actor.managedInstitutionIds)
+    }
 
     @Transactional
     fun review(
@@ -248,6 +252,19 @@ class JdbcInstitutionMembershipRequestStore(
             *args.toTypedArray()
         )
     }
+
+    override fun listAll(): List<InstitutionMembershipRequestView> = jdbcTemplate.query(
+        """
+        SELECT *
+        FROM (
+            ${selectSql(MembershipRequestType.DOCTOR)}
+            UNION ALL
+            ${selectSql(MembershipRequestType.CONSULTANT)}
+        ) membership_requests
+        ORDER BY created_at DESC, id DESC
+        """.trimIndent(),
+        rowMapper
+    )
 
     override fun findById(
         type: MembershipRequestType,
