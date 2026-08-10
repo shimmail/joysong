@@ -23,7 +23,7 @@ Content-Type: application/json
 
 ## 同步响应与错误处理
 
-中转站调用完成后，后端在同一个 REST 响应中返回 Agent 结果及 `summary_json`。客户端按稳定 HTTP 状态处理：`2xx` 为成功，`400` 为无效输入，`404` 为资源不存在，`409` 为幂等冲突，`503` 为上游模型不可用或超时，`500` 为未预期服务端错误。请求体中的 `idempotencyKey` 是可选字段；相同 session 的重复有效键必须复用稳定结果。流式路由固定返回 `404` 和 `AGENT_STREAMING_DISABLED`。
+中转站调用完成后，后端在同一个 REST 响应中返回 Agent 结果。`summary_json` 是 `agent_sessions` 的服务器端持久摘要和上下文构建来源，不在当前 REST response 暴露。客户端按稳定 HTTP 状态处理：`2xx` 为成功，`400` 为无效输入，`404` 为资源不存在，`409` 为幂等冲突，`503` 为上游模型不可用或超时，`500` 为未预期服务端错误。请求体中的 `idempotencyKey` 是可选字段；相同 session 的重复有效键必须复用稳定结果。流式路由固定返回 `404` 和 `AGENT_STREAMING_DISABLED`。
 
 ## 日志与数据保护
 
