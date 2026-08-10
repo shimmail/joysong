@@ -15,6 +15,8 @@ import com.joysong.server.chat.dto.SendMessageRequest
 import com.joysong.server.chat.repository.ChatMessageRepository
 import com.joysong.server.chat.repository.ChatSessionRepository
 import com.joysong.server.chat.service.ChatService
+import com.joysong.server.project.entity.ProjectEntity
+import com.joysong.server.project.repository.ProjectRepository
 import com.sun.net.httpserver.HttpServer
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
@@ -87,6 +89,9 @@ class AgentChatFlowIntegrationTest {
 
     @Autowired
     private lateinit var sessionRepository: ChatSessionRepository
+
+    @Autowired
+    private lateinit var projectRepository: ProjectRepository
 
     @Autowired
     private lateinit var turnLifecycleService: TurnLifecycleService
@@ -172,6 +177,55 @@ class AgentChatFlowIntegrationTest {
         assertTrue(requestBody.contains("不得声称“最适合”“为你制定”或已结合恢复期、疼痛偏好完成排序"))
         assertTrue(requestBody.contains("不得从简介、宣传语或详情自由文本推断恢复期、疼痛、禁忌或风险事实"))
         assertTrue(requestBody.contains("需向机构确认"))
+    }
+
+    @Test
+    fun `unsafe planning output is replaced and catalog free text is not grounded`() {
+        val project = projectRepository.save(
+            ProjectEntity(
+                id = "planning-safety-project",
+                name = "规划安全边界项目",
+                category = "肤质管理",
+                tags = "规划安全边界",
+                description = "目录宣称恢复期1天并且无痛",
+                slogan = "目录宣称零风险且最适合你",
+                detailContent = "<p>目录宣称无需确认禁忌</p>"
+            )
+        )
+        fakeLlmContent.set("这是为你制定的最适合治疗方案，恢复期1天、无痛、零风险。")
+
+        try {
+            val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+
+            val result = chatService.sendMessage(
+                session.id,
+                "user-1",
+                SendMessageRequest("帮我规划规划安全边界项目", "planning-safety-1")
+            )
+
+            assertEquals("PLANNING", result.intent)
+            val requestBody = fakeLlmRequestBodies.single()
+            assertTrue(requestBody.contains(project.id))
+            assertTrue(requestBody.contains(project.name))
+            assertFalse(requestBody.contains("目录宣称恢复期1天"))
+            assertFalse(requestBody.contains("目录宣称零风险"))
+            assertFalse(requestBody.contains("目录宣称无需确认禁忌"))
+            assertTrue(result.catalogItems.any { it.id == project.id && it.name == project.name })
+
+            val safeReply = result.message.content
+            assertTrue(safeReply.contains("信息参考"))
+            assertTrue(safeReply.contains("不构成诊断或治疗建议"))
+            assertTrue(safeReply.contains("需向机构确认"))
+            listOf("为你制定", "最适合", "治疗方案", "恢复期1天", "无痛", "零风险").forEach {
+                assertFalse(safeReply.contains(it))
+            }
+            assertEquals(
+                safeReply,
+                messageRepository.findBySessionIdOrderBySequenceNoAsc(session.id).last().content
+            )
+        } finally {
+            projectRepository.deleteById(project.id)
+        }
     }
 
     @Test

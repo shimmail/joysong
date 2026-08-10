@@ -1,6 +1,5 @@
 package com.joysong.server.agent.service
 
-import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.joysong.server.agent.dto.AgentPlanItemResponse
 import com.joysong.server.agent.dto.AgentPlanResponse
@@ -137,6 +136,7 @@ class AgentPlanService(
     ): Int {
         val searchable = structuredSearchText(project, offerings)
         var score = goals.sumOf { goal -> if (searchable.contains(goal.lowercase())) 4 else relatedTerms(goal).count { searchable.contains(it) } }
+        if (score == 0) return 0
         if (budgetMax != null && (
                 (project.referencePrice > java.math.BigDecimal.ZERO && project.referencePrice <= budgetMax) ||
                     offerings.any { it.price > java.math.BigDecimal.ZERO && it.price <= budgetMax }
@@ -218,29 +218,47 @@ class AgentPlanService(
         assessmentId = assessmentId,
         version = version,
         status = status,
-        summary = summary,
+        summary = safeSummary(summary),
         totalBudgetMin = totalBudgetMin,
         totalBudgetMax = totalBudgetMax,
-        items = items.map { item ->
+        items = items.mapIndexed { index, item ->
             AgentPlanItemResponse(
                 id = item.id,
-                stage = item.stageName,
+                stage = if (index == 0) AgentText.value("信息参考", "Information reference") else AgentText.value("补充参考", "Additional reference"),
                 projectId = item.projectId,
                 projectName = item.projectName,
-                recommendationType = item.recommendationType,
-                reason = item.reason,
-                expectedBenefit = item.expectedBenefit,
-                limitations = item.limitations,
-                risks = readList(item.risksJson),
-                alternatives = readList(item.alternativesJson),
-                requiredConfirmations = readList(item.requiredConfirmationJson),
-                confidence = item.confidence
+                recommendationType = "REFERENCE",
+                reason = AgentText.value("平台目录中的项目名称、分类或标签与已确认目标存在关键词关联；价格仅用于信息排序，不代表个人适用性。", "Platform catalog names, categories, or tags have a keyword relationship with the confirmed goal; price is used only for information ordering and does not indicate personal suitability."),
+                expectedBenefit = AgentText.value("平台目录不能确定实际效果，需由具备资质的医生面诊确认。", "The platform catalog cannot determine actual outcomes; confirm them during an in-person consultation with a qualified clinician."),
+                limitations = AgentText.value("平台资料不能确定个人适用性、治疗参数、恢复期、疼痛程度、禁忌或最终效果。", "Platform information cannot determine personal suitability, treatment parameters, downtime, pain, contraindications, or final outcomes."),
+                risks = listOf(AgentText.value("风险信息：需向机构确认", "Risk information: confirm with the institution")),
+                alternatives = emptyList(),
+                requiredConfirmations = listOf(
+                    AgentText.value("恢复期：需向机构确认", "Downtime: confirm with the institution"),
+                    AgentText.value("疼痛程度：需向机构确认", "Pain level: confirm with the institution"),
+                    AgentText.value("禁忌与风险：需向机构确认", "Contraindications and risks: confirm with the institution")
+                ),
+                confidence = "LOW"
             )
         },
         createdAt = createdAt.toString()
     )
 
-    private fun readList(json: String): List<String> = runCatching {
-        objectMapper.readValue(json, object : TypeReference<List<String>>() {})
-    }.getOrDefault(emptyList())
+    private fun safeSummary(storedSummary: String): String {
+        val hasBoundary = if (AgentText.isChinese()) {
+            storedSummary.contains("信息参考") && storedSummary.contains("不构成诊断或治疗建议")
+        } else {
+            storedSummary.contains("information reference", ignoreCase = true) &&
+                storedSummary.contains("not diagnosis or treatment advice", ignoreCase = true)
+        }
+        val prohibited = listOf(
+            "最适合", "为你制定", "为您制定", "治疗方案", "已结合恢复期", "已结合疼痛",
+            "best for you", "tailored for you", "personalized treatment plan"
+        ).any { storedSummary.contains(it, ignoreCase = true) }
+        if (hasBoundary && !prohibited) return storedSummary
+        return AgentText.value(
+            "以下项目仅作为平台信息参考，不构成诊断或治疗建议。个人适用性、恢复期、疼痛程度、禁忌与风险需向机构或具备资质的医生确认。",
+            "These items are platform information reference only and are not diagnosis or treatment advice. Personal suitability, downtime, pain, contraindications, and risks require confirmation with the institution or a qualified clinician."
+        )
+    }
 }
