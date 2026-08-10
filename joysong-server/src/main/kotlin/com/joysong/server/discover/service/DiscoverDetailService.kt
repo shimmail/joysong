@@ -83,7 +83,7 @@ class DiscoverDetailService(
                     projectName = effective.name,
                     institutionId = ip.institutionId,
                     institutionName = institution?.name ?: "",
-                    price = ip.price,
+                    price = dp.price,
                     originalPrice = ip.originalPrice,
                     currency = ip.currency,
                     coverImage = effective.coverImage,
@@ -104,7 +104,7 @@ class DiscoverDetailService(
                     projectName = project.name,
                     institutionId = "",
                     institutionName = "",
-                    price = project.referencePrice,
+                    price = dp.price,
                     originalPrice = null,
                     currency = project.currency,
                     coverImage = project.coverImage,
@@ -173,7 +173,8 @@ class DiscoverDetailService(
         val project = projectRepository.findById(projectId).orElse(null) ?: return null
         val institution = institutionRepository.findById(institutionId).orElse(null) ?: return null
         val diaries = diaryRepository.findPublishedByProjectId(projectId)
-        val doctorIds = doctorProjectRepository.findByInstitutionProjectId(ip.id)
+        val doctorProjects = doctorProjectRepository.findByInstitutionProjectId(ip.id)
+        val doctorIds = doctorProjects
             .map { it.doctorId }
             .filter { it.isNotBlank() }
             .distinct()
@@ -185,7 +186,9 @@ class DiscoverDetailService(
             project = institutionProjectDetailResolver.resolve(ip, project).toResponse(),
             institution = institution.toResponse(),
             diaries = diaries.map { it.toResponse() },
-            doctors = doctors.map { it.toResponse() },
+            doctors = doctors.map { doctor ->
+                doctor.toResponse(doctorProjects.first { it.doctorId == doctor.id }.price)
+            },
             reviews = reviews
         )
     }
@@ -212,13 +215,16 @@ class DiscoverDetailService(
             .associateBy { it.id }
 
         val projects = institutionProjects.mapNotNull { ip ->
+            val startingPrice = doctorProjectRepository.findActiveByInstitutionProjectId(ip.id)
+                .minOfOrNull { it.price }
+                ?: return@mapNotNull null
             val project = projectMap[ip.projectId] ?: return@mapNotNull null
             val effective = institutionProjectDetailResolver.resolve(ip, project)
             InstitutionProjectInfo(
                 institutionProjectId = ip.id,
                 projectId = ip.projectId,
                 projectName = effective.name,
-                price = ip.price,
+                price = startingPrice,
                 originalPrice = ip.originalPrice,
                 currency = ip.currency,
                 coverImage = effective.coverImage,

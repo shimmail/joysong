@@ -306,6 +306,7 @@ final class ManagementContext {
     required this.activeRoles,
     required this.managedInstitutionIds,
     required this.visibleInstitutionIds,
+    this.doctorInstitutionIds = const [],
     this.doctorId,
     this.canManageDoctors = false,
     this.canManageInstitutions = false,
@@ -313,6 +314,12 @@ final class ManagementContext {
     this.canManageArticles = false,
     this.canManageSplitConfigs = false,
     this.canManageOrders = false,
+    this.canApplyToInstitutions = false,
+    this.canReviewInstitutionRequests = false,
+    this.canSubmitPlatformProjectRequests = false,
+    this.canSubmitInstitutionProjectRequests = false,
+    this.canReviewInstitutionProjectRequests = false,
+    this.canViewAffiliations = false,
   });
 
   factory ManagementContext.fromJson(Object? json) {
@@ -324,6 +331,7 @@ final class ManagementContext {
       doctorId: _nullableText(map['doctorId']),
       managedInstitutionIds: _stringList(map['managedInstitutionIds']),
       visibleInstitutionIds: _stringList(map['visibleInstitutionIds']),
+      doctorInstitutionIds: _stringList(map['doctorInstitutionIds']),
       canManageDoctors: _boolean(map['canManageDoctors']),
       canManageInstitutions: _boolean(map['canManageInstitutions']),
       canManageInstitutionProjects:
@@ -331,6 +339,16 @@ final class ManagementContext {
       canManageArticles: _boolean(map['canManageArticles']),
       canManageSplitConfigs: _boolean(map['canManageSplitConfigs']),
       canManageOrders: _boolean(map['canManageOrders']),
+      canApplyToInstitutions: _boolean(map['canApplyToInstitutions']),
+      canReviewInstitutionRequests:
+          _boolean(map['canReviewInstitutionRequests']),
+      canSubmitPlatformProjectRequests:
+          _boolean(map['canSubmitPlatformProjectRequests']),
+      canSubmitInstitutionProjectRequests:
+          _boolean(map['canSubmitInstitutionProjectRequests']),
+      canReviewInstitutionProjectRequests:
+          _boolean(map['canReviewInstitutionProjectRequests']),
+      canViewAffiliations: _boolean(map['canViewAffiliations']),
     );
   }
 
@@ -340,12 +358,19 @@ final class ManagementContext {
   final String? doctorId;
   final List<String> managedInstitutionIds;
   final List<String> visibleInstitutionIds;
+  final List<String> doctorInstitutionIds;
   final bool canManageDoctors;
   final bool canManageInstitutions;
   final bool canManageInstitutionProjects;
   final bool canManageArticles;
   final bool canManageSplitConfigs;
   final bool canManageOrders;
+  final bool canApplyToInstitutions;
+  final bool canReviewInstitutionRequests;
+  final bool canSubmitPlatformProjectRequests;
+  final bool canSubmitInstitutionProjectRequests;
+  final bool canReviewInstitutionProjectRequests;
+  final bool canViewAffiliations;
 
   bool get hasAnyCapability =>
       canManageDoctors ||
@@ -353,7 +378,520 @@ final class ManagementContext {
       canManageInstitutionProjects ||
       canManageArticles ||
       canManageSplitConfigs ||
-      canManageOrders;
+      canManageOrders ||
+      canApplyToInstitutions ||
+      canReviewInstitutionRequests ||
+      canSubmitPlatformProjectRequests ||
+      canSubmitInstitutionProjectRequests ||
+      canReviewInstitutionProjectRequests ||
+      canViewAffiliations;
+}
+
+final class ManagedInstitutionProfile {
+  const ManagedInstitutionProfile({
+    required this.id,
+    required this.name,
+    this.coverImage = '',
+    this.address = '',
+    this.city = '',
+    this.contactPhone = '',
+    this.businessHours = '',
+    this.establishedYear,
+    this.certificationTime = '',
+    this.description = '',
+    this.tags = '',
+    this.specialties = '',
+    this.credentials = '',
+    this.userCount = 0,
+    this.caseCount = 0,
+    this.credentialImages = const [],
+    this.images = const [],
+  });
+
+  factory ManagedInstitutionProfile.fromJson(Object? json) {
+    final map = _jsonMap(json, '机构档案');
+    return ManagedInstitutionProfile(
+      id: _requiredText(map['id'], '机构 id'),
+      name: map['name']?.toString() ?? '',
+      coverImage: map['coverImage']?.toString() ?? '',
+      address: map['address']?.toString() ?? '',
+      city: _normalizeCity(map['city']?.toString() ?? ''),
+      contactPhone: map['contactPhone']?.toString() ?? '',
+      businessHours: map['businessHours']?.toString() ?? '',
+      establishedYear: _nullableInteger(map['establishedYear']),
+      certificationTime: map['certificationTime']?.toString() ?? '',
+      description: map['description']?.toString() ?? '',
+      tags: map['tags']?.toString() ?? '',
+      specialties: map['specialties']?.toString() ?? '',
+      credentials: map['credentials']?.toString() ?? '',
+      userCount: _integer(map['userCount']),
+      caseCount: _integer(map['caseCount']),
+      credentialImages: _stringList(map['credentialImages']),
+      images: _stringList(map['images']),
+    );
+  }
+
+  final String id;
+  final String name;
+  final String coverImage;
+  final String address;
+  final String city;
+  final String contactPhone;
+  final String businessHours;
+  final int? establishedYear;
+  final String certificationTime;
+  final String description;
+  final String tags;
+  final String specialties;
+  final String credentials;
+  final int userCount;
+  final int caseCount;
+  final List<String> credentialImages;
+  final List<String> images;
+
+  ManagedInstitutionProfileDraft toDraft() => ManagedInstitutionProfileDraft(
+        id: id,
+        name: name,
+        coverImage: coverImage,
+        address: address,
+        city: city,
+        contactPhone: contactPhone,
+        businessHours: businessHours,
+        establishedYear: establishedYear,
+        certificationTime: certificationTime,
+        description: description,
+        tags: tags,
+        specialties: specialties,
+        credentials: credentials,
+        userCount: userCount,
+        caseCount: caseCount,
+        credentialImages: credentialImages,
+        images: images,
+      );
+}
+
+final class ManagedInstitutionProfileDraft {
+  ManagedInstitutionProfileDraft({
+    required this.id,
+    required this.name,
+    this.coverImage = '',
+    this.address = '',
+    String city = '',
+    this.contactPhone = '',
+    this.businessHours = '',
+    this.establishedYear,
+    this.certificationTime = '',
+    this.description = '',
+    this.tags = '',
+    this.specialties = '',
+    this.credentials = '',
+    this.userCount = 0,
+    this.caseCount = 0,
+    this.credentialImages = const [],
+    this.images = const [],
+  }) : city = _normalizeCity(city);
+
+  final String id;
+  final String name;
+  final String coverImage;
+  final String address;
+  final String city;
+  final String contactPhone;
+  final String businessHours;
+  final int? establishedYear;
+  final String certificationTime;
+  final String description;
+  final String tags;
+  final String specialties;
+  final String credentials;
+  final int userCount;
+  final int caseCount;
+  final List<String> credentialImages;
+  final List<String> images;
+
+  ManagedInstitutionProfileDraft copyWith({
+    String? name,
+    String? coverImage,
+    String? address,
+    String? city,
+    String? contactPhone,
+    String? businessHours,
+    int? establishedYear,
+    bool clearEstablishedYear = false,
+    String? certificationTime,
+    String? description,
+    String? tags,
+    String? specialties,
+    String? credentials,
+    int? userCount,
+    int? caseCount,
+    List<String>? credentialImages,
+    List<String>? images,
+  }) {
+    return ManagedInstitutionProfileDraft(
+      id: id,
+      name: name ?? this.name,
+      coverImage: coverImage ?? this.coverImage,
+      address: address ?? this.address,
+      city: city ?? this.city,
+      contactPhone: contactPhone ?? this.contactPhone,
+      businessHours: businessHours ?? this.businessHours,
+      establishedYear:
+          clearEstablishedYear ? null : establishedYear ?? this.establishedYear,
+      certificationTime: certificationTime ?? this.certificationTime,
+      description: description ?? this.description,
+      tags: tags ?? this.tags,
+      specialties: specialties ?? this.specialties,
+      credentials: credentials ?? this.credentials,
+      userCount: userCount ?? this.userCount,
+      caseCount: caseCount ?? this.caseCount,
+      credentialImages: credentialImages ?? this.credentialImages,
+      images: images ?? this.images,
+    );
+  }
+
+  Map<String, Object?> toJson() => {
+        'id': id,
+        'name': name.trim(),
+        'coverImage': coverImage.trim(),
+        'address': address.trim(),
+        'city': city,
+        'contactPhone': contactPhone.trim(),
+        'businessHours': businessHours.trim(),
+        'establishedYear': establishedYear,
+        'certificationTime': certificationTime.trim(),
+        'description': description.trim(),
+        'tags': tags.trim(),
+        'specialties': specialties.trim(),
+        'credentials': credentials.trim(),
+        'userCount': userCount,
+        'caseCount': caseCount,
+        'credentialImages': _csvText(credentialImages),
+        'images': _csvText(images),
+      };
+}
+
+final class ManagedDoctorProfile {
+  const ManagedDoctorProfile({
+    required this.id,
+    required this.name,
+    this.title = '',
+    this.bio = '',
+    this.avatar = '',
+    this.contactPhone = '',
+    this.specialties = '',
+    this.credentials = '',
+    this.credentialImages = '',
+    this.certificationTags = '',
+  });
+
+  factory ManagedDoctorProfile.fromJson(Object? json) {
+    final map = _jsonMap(json, '医生档案');
+    return ManagedDoctorProfile(
+      id: _requiredText(map['id'], '医生 id'),
+      name: map['name']?.toString() ?? '',
+      title: map['title']?.toString() ?? '',
+      bio: map['bio']?.toString() ?? '',
+      avatar: map['avatar']?.toString() ?? '',
+      contactPhone: map['contactPhone']?.toString() ?? '',
+      specialties: map['specialties']?.toString() ?? '',
+      credentials: map['credentials']?.toString() ?? '',
+      credentialImages: map['credentialImages']?.toString() ?? '',
+      certificationTags: map['certificationTags']?.toString() ?? '',
+    );
+  }
+
+  final String id;
+  final String name;
+  final String title;
+  final String bio;
+  final String avatar;
+  final String contactPhone;
+  final String specialties;
+  final String credentials;
+  final String credentialImages;
+  final String certificationTags;
+
+  ManagedDoctorProfileDraft toDraft() => ManagedDoctorProfileDraft(
+        id: id,
+        name: name,
+        title: title,
+        bio: bio,
+        avatar: avatar,
+        contactPhone: contactPhone,
+        specialties: specialties,
+        credentials: credentials,
+        credentialImages: credentialImages,
+        certificationTags: certificationTags,
+      );
+}
+
+final class ManagedDoctorProfileDraft {
+  const ManagedDoctorProfileDraft({
+    required this.id,
+    required this.name,
+    this.title = '',
+    this.bio = '',
+    this.avatar = '',
+    this.contactPhone = '',
+    this.specialties = '',
+    this.credentials = '',
+    this.credentialImages = '',
+    this.certificationTags = '',
+  });
+
+  final String id;
+  final String name;
+  final String title;
+  final String bio;
+  final String avatar;
+  final String contactPhone;
+  final String specialties;
+  final String credentials;
+  final String credentialImages;
+  final String certificationTags;
+
+  Map<String, Object?> toJson() => {
+        'userId': id,
+        'name': name.trim(),
+        'title': title.trim(),
+        'bio': bio.trim(),
+        'avatar': avatar.trim(),
+        'contactPhone': contactPhone.trim(),
+        'specialties': specialties.trim(),
+        'credentials': credentials.trim(),
+        'credentialImages': credentialImages.trim(),
+        'certificationTags': certificationTags.trim(),
+      };
+}
+
+final class ManagementProjectOption {
+  const ManagementProjectOption({
+    required this.id,
+    required this.name,
+    this.category = '',
+    this.description = '',
+    this.tags = '',
+    this.coverImage = '',
+  });
+
+  factory ManagementProjectOption.fromJson(Object? json) {
+    final map = _jsonMap(json, '项目');
+    return ManagementProjectOption(
+      id: _requiredText(map['id'], '项目 id'),
+      name: map['name']?.toString() ?? '',
+      category: map['category']?.toString() ?? '',
+      description: map['description']?.toString() ?? '',
+      tags: map['tags']?.toString() ?? '',
+      coverImage: map['coverImage']?.toString() ?? '',
+    );
+  }
+
+  final String id;
+  final String name;
+  final String category;
+  final String description;
+  final String tags;
+  final String coverImage;
+}
+
+final class ManagementProjectDraft {
+  const ManagementProjectDraft({
+    required this.name,
+    this.category = '',
+    this.description = '',
+    this.tags = '',
+    this.coverImage = '',
+    this.referencePrice = 0,
+  });
+
+  final String name;
+  final String category;
+  final String description;
+  final String tags;
+  final String coverImage;
+  final num referencePrice;
+
+  Map<String, Object?> toJson() => {
+        'name': name.trim(),
+        'category': category.trim(),
+        'description': description.trim(),
+        'tags': tags.trim(),
+        'coverImage': coverImage.trim(),
+        'referencePrice': referencePrice,
+      };
+}
+
+final class ManagedInstitutionProject {
+  const ManagedInstitutionProject({
+    required this.id,
+    required this.institutionId,
+    required this.projectId,
+    required this.effectiveName,
+    this.name = '',
+    this.category = '',
+    this.description = '',
+    this.tags = '',
+    this.slogan = '',
+    this.detailContent = '',
+    this.price = 0,
+    this.originalPrice,
+    this.coverImage = '',
+    this.images = '',
+    this.isActive = true,
+    this.doctorIds = const <String>{},
+  });
+
+  factory ManagedInstitutionProject.fromJson(Object? json) {
+    final map = _jsonMap(json, '机构项目');
+    return ManagedInstitutionProject(
+      id: _requiredText(map['id'], '机构项目 id'),
+      institutionId: _requiredText(map['institutionId'], '机构 id'),
+      projectId: _requiredText(map['projectId'], '项目 id'),
+      effectiveName: map['effectiveName']?.toString() ??
+          map['projectName']?.toString() ??
+          map['name']?.toString() ??
+          '',
+      name: map['name']?.toString() ?? '',
+      category: map['category']?.toString() ?? '',
+      description: map['description']?.toString() ?? '',
+      tags: map['tags']?.toString() ?? '',
+      slogan: map['slogan']?.toString() ?? '',
+      detailContent: map['detailContent']?.toString() ?? '',
+      price: _decimal(map['price']),
+      originalPrice: _nullableDecimal(map['originalPrice']),
+      coverImage: map['coverImage']?.toString() ?? '',
+      images: map['images']?.toString() ?? '',
+      isActive: map['isActive'] != false,
+      doctorIds: _objectList(map['doctors'])
+          .map((doctor) => _jsonMap(doctor, '项目医生'))
+          .map((doctor) => _requiredText(doctor['id'], '医生 id'))
+          .toSet(),
+    );
+  }
+
+  final String id;
+  final String institutionId;
+  final String projectId;
+  final String effectiveName;
+  final String name;
+  final String category;
+  final String description;
+  final String tags;
+  final String slogan;
+  final String detailContent;
+  final num price;
+  final num? originalPrice;
+  final String coverImage;
+  final String images;
+  final bool isActive;
+  final Set<String> doctorIds;
+
+  bool hasDoctor(String? doctorId) {
+    final id = doctorId?.trim() ?? '';
+    return id.isNotEmpty && doctorIds.contains(id);
+  }
+
+  ManagedInstitutionProjectDraft toDraft() => ManagedInstitutionProjectDraft(
+        id: id,
+        institutionId: institutionId,
+        projectId: projectId,
+        name: name,
+        category: category,
+        description: description,
+        tags: tags,
+        slogan: slogan,
+        detailContent: detailContent,
+        price: price,
+        originalPrice: originalPrice,
+        coverImage: coverImage,
+        images: images,
+        isActive: isActive,
+      );
+}
+
+final class ManagedInstitutionProjectDraft {
+  const ManagedInstitutionProjectDraft({
+    this.id,
+    required this.institutionId,
+    required this.projectId,
+    this.name = '',
+    this.category = '',
+    this.description = '',
+    this.tags = '',
+    this.slogan = '',
+    this.detailContent = '',
+    this.price = 0,
+    this.originalPrice,
+    this.coverImage = '',
+    this.images = '',
+    this.isActive = true,
+  });
+
+  final String? id;
+  final String institutionId;
+  final String projectId;
+  final String name;
+  final String category;
+  final String description;
+  final String tags;
+  final String slogan;
+  final String detailContent;
+  final num price;
+  final num? originalPrice;
+  final String coverImage;
+  final String images;
+  final bool isActive;
+
+  Map<String, Object?> toJson({String? doctorId}) => {
+        'institutionId': institutionId,
+        'projectId': projectId,
+        'name': _nullableTrimmed(name),
+        'category': _nullableTrimmed(category),
+        'description': _nullableTrimmed(description),
+        'tags': _nullableTrimmed(tags),
+        'slogan': _nullableTrimmed(slogan),
+        'detailContent': _nullableTrimmed(detailContent),
+        'price': price,
+        'originalPrice': originalPrice,
+        'coverImage': coverImage.trim(),
+        'images': images.trim(),
+        'isActive': isActive,
+        if (doctorId != null && doctorId.trim().isNotEmpty)
+          'doctorBindings': [
+            {'doctorId': doctorId.trim()}
+          ],
+      };
+}
+
+final class SplitConfigProposalDraft {
+  const SplitConfigProposalDraft({
+    required this.doctorId,
+    required this.institutionProjectId,
+    this.consultationFee = 0,
+    this.commissionRate = 0,
+    this.institutionRate = 40,
+    this.proposerSide = 'DOCTOR',
+  });
+
+  final String doctorId;
+  final String institutionProjectId;
+  final num consultationFee;
+  final num commissionRate;
+  final num institutionRate;
+  final String proposerSide;
+
+  bool get canSubmit =>
+      doctorId.trim().isNotEmpty && institutionProjectId.trim().isNotEmpty;
+
+  Map<String, Object?> toJson() => {
+        'doctorId': doctorId.trim(),
+        'institutionProjectId': institutionProjectId.trim(),
+        'consultationFee': consultationFee,
+        'commissionRate': commissionRate,
+        'institutionRate': institutionRate,
+        'proposerSide': proposerSide,
+      };
 }
 
 Map<String, Object?> _jsonMap(Object? json, String label) {
@@ -365,9 +903,265 @@ Map<String, Object?> _jsonMap(Object? json, String label) {
 
 List<Object?> _objectList(Object? value) => value is List ? value : const [];
 
-List<String> _stringList(Object? value) => value is List
-    ? value.map((item) => item.toString()).toList(growable: false)
-    : const [];
+List<String> _stringList(Object? value) {
+  if (value is List) {
+    return value
+        .map((item) => item.toString().trim())
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
+  }
+  if (value is String) {
+    return value
+        .split(',')
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
+  }
+  return const [];
+}
+
+final class InstitutionOption {
+  const InstitutionOption({required this.id, required this.name});
+
+  factory InstitutionOption.fromJson(Object? json) {
+    final map = _jsonMap(json, '机构');
+    return InstitutionOption(
+      id: _requiredText(map['id'], '机构 id'),
+      name: _requiredText(map['name'], '机构名称'),
+    );
+  }
+
+  final String id;
+  final String name;
+}
+
+final class InstitutionMembershipRequest {
+  const InstitutionMembershipRequest({
+    required this.id,
+    required this.requestType,
+    required this.userId,
+    required this.institutionId,
+    required this.status,
+    this.requestNote = '',
+    this.reviewNote = '',
+  });
+
+  factory InstitutionMembershipRequest.fromJson(Object? json) {
+    final map = _jsonMap(json, '机构加入申请');
+    return InstitutionMembershipRequest(
+      id: _requiredText(map['id'], '申请 id'),
+      requestType: _requiredText(map['requestType'], '申请类型'),
+      userId: _requiredText(map['userId'], '申请人'),
+      institutionId: _requiredText(map['institutionId'], '机构'),
+      status: _requiredText(map['status'], '申请状态'),
+      requestNote: map['requestNote']?.toString() ?? '',
+      reviewNote: map['reviewNote']?.toString() ?? '',
+    );
+  }
+
+  final String id;
+  final String requestType;
+  final String userId;
+  final String institutionId;
+  final String status;
+  final String requestNote;
+  final String reviewNote;
+}
+
+final class ProfessionalProjectRequest {
+  const ProfessionalProjectRequest({
+    required this.id,
+    required this.requestType,
+    required this.doctorId,
+    required this.status,
+    this.doctorName = '',
+    this.institutionId,
+    this.institutionName,
+    this.projectId,
+    this.projectName,
+    this.name,
+    this.category,
+    this.description,
+    this.serviceContent,
+    this.priceSuggestion,
+    this.notes,
+    this.reviewNote,
+  });
+
+  factory ProfessionalProjectRequest.fromJson(Object? json) {
+    final map = _jsonMap(json, '项目申请');
+    return ProfessionalProjectRequest(
+      id: _requiredText(map['id'], '申请 id'),
+      requestType: _requiredText(map['requestType'], '申请类型'),
+      doctorId: _requiredText(map['doctorId'], '医生'),
+      doctorName: map['doctorName']?.toString() ?? '',
+      institutionId: _nullableText(map['institutionId']),
+      institutionName: _nullableText(map['institutionName']),
+      projectId: _nullableText(map['projectId']),
+      projectName: _nullableText(map['projectName']),
+      name: _nullableText(map['name']),
+      category: _nullableText(map['category']),
+      description: _nullableText(map['description']),
+      serviceContent: _nullableText(map['serviceContent']),
+      priceSuggestion: _nullableDecimal(map['priceSuggestion']),
+      notes: _nullableText(map['notes']),
+      status: _requiredText(map['status'], '申请状态'),
+      reviewNote: _nullableText(map['reviewNote']),
+    );
+  }
+
+  final String id;
+  final String requestType;
+  final String doctorId;
+  final String doctorName;
+  final String? institutionId;
+  final String? institutionName;
+  final String? projectId;
+  final String? projectName;
+  final String? name;
+  final String? category;
+  final String? description;
+  final String? serviceContent;
+  final num? priceSuggestion;
+  final String? notes;
+  final String status;
+  final String? reviewNote;
+}
+
+final class InstitutionProjectJoinRequest {
+  const InstitutionProjectJoinRequest({
+    required this.id,
+    required this.doctorId,
+    required this.institutionId,
+    required this.institutionProjectId,
+    required this.projectName,
+    required this.requestType,
+    required this.status,
+    required this.priceSuggestion,
+    this.doctorName = '',
+    this.institutionName = '',
+    this.serviceDescription = '',
+    this.notes = '',
+    this.reviewNote = '',
+  });
+
+  factory InstitutionProjectJoinRequest.fromJson(Object? json) {
+    final map = _jsonMap(json, '机构项目加入申请');
+    return InstitutionProjectJoinRequest(
+      id: _requiredText(map['id'], '申请 id'),
+      doctorId: _requiredText(map['doctorId'], '医生 id'),
+      doctorName: map['doctorName']?.toString() ?? '',
+      institutionId: _requiredText(map['institutionId'], '机构 id'),
+      institutionName: map['institutionName']?.toString() ?? '',
+      institutionProjectId:
+          _requiredText(map['institutionProjectId'], '机构项目 id'),
+      projectName: _requiredText(map['projectName'], '项目名称'),
+      requestType: _requiredText(map['requestType'], '申请类型'),
+      serviceDescription: map['serviceDescription']?.toString() ?? '',
+      priceSuggestion: _decimal(map['priceSuggestion']),
+      notes: map['notes']?.toString() ?? '',
+      status: _requiredText(map['status'], '申请状态'),
+      reviewNote: map['reviewNote']?.toString() ?? '',
+    );
+  }
+
+  final String id;
+  final String doctorId;
+  final String doctorName;
+  final String institutionId;
+  final String institutionName;
+  final String institutionProjectId;
+  final String projectName;
+  final String requestType;
+  final String serviceDescription;
+  final num priceSuggestion;
+  final String notes;
+  final String status;
+  final String reviewNote;
+}
+
+final class InstitutionProjectJoinRequestDraft {
+  const InstitutionProjectJoinRequestDraft({
+    required this.institutionProjectId,
+    required this.serviceDescription,
+    required this.priceSuggestion,
+    this.notes = '',
+  });
+
+  final String institutionProjectId;
+  final String serviceDescription;
+  final num priceSuggestion;
+  final String notes;
+
+  void validate() {
+    if (institutionProjectId.trim().isEmpty) {
+      throw ArgumentError('请选择机构项目');
+    }
+    if (serviceDescription.trim().isEmpty) {
+      throw ArgumentError('请填写服务说明');
+    }
+    if (!priceSuggestion.isFinite || priceSuggestion < 0) {
+      throw ArgumentError('价格建议必须明确填写且不能小于 0');
+    }
+  }
+
+  Map<String, Object?> toJson() => {
+        'requestType': 'JOIN',
+        'institutionProjectId': institutionProjectId.trim(),
+        'serviceDescription': serviceDescription.trim(),
+        'priceSuggestion': priceSuggestion,
+        'notes': notes.trim(),
+      };
+}
+
+final class PlatformProjectRequestDraft {
+  const PlatformProjectRequestDraft({
+    required this.name,
+    required this.category,
+    required this.description,
+    this.notes = '',
+  });
+
+  final String name;
+  final String category;
+  final String description;
+  final String notes;
+
+  Map<String, Object?> toJson() => {
+        'name': name.trim(),
+        'category': category.trim(),
+        'description': description.trim(),
+        'notes': notes.trim(),
+      };
+}
+
+final class InstitutionProjectRequestDraft {
+  const InstitutionProjectRequestDraft({
+    required this.institutionId,
+    required this.projectId,
+    required this.serviceContent,
+    required this.priceSuggestion,
+    this.notes = '',
+  });
+
+  final String institutionId;
+  final String projectId;
+  final String serviceContent;
+  final num priceSuggestion;
+  final String notes;
+
+  Map<String, Object?> toJson() => {
+        'projectId': projectId.trim(),
+        'serviceContent': serviceContent.trim(),
+        'priceSuggestion': priceSuggestion,
+        'notes': notes.trim(),
+      };
+}
+
+String _csvText(Iterable<String> values) => values
+    .map((item) => item.trim())
+    .where((item) => item.isNotEmpty)
+    .join(',');
 
 String _requiredText(Object? value, String field) {
   final result = value?.toString().trim() ?? '';
@@ -393,7 +1187,37 @@ int _integer(Object? value) => switch (value) {
       _ => int.tryParse(value?.toString() ?? '') ?? 0,
     };
 
+int? _nullableInteger(Object? value) {
+  final text = value?.toString().trim();
+  if (text == null || text.isEmpty) return null;
+  return int.tryParse(text);
+}
+
 bool _boolean(Object? value) => value == true;
+
+num _decimal(Object? value) => switch (value) {
+      final num number => number,
+      _ => num.tryParse(value?.toString() ?? '') ?? 0,
+    };
+
+num? _nullableDecimal(Object? value) {
+  final text = value?.toString().trim();
+  if (text == null || text.isEmpty) return null;
+  return num.tryParse(text);
+}
+
+String? _nullableTrimmed(String value) {
+  final text = value.trim();
+  return text.isEmpty ? null : text;
+}
+
+String _normalizeCity(String value) {
+  var text = value.trim();
+  while (text.endsWith('市') && text.length > 1) {
+    text = text.substring(0, text.length - 1).trim();
+  }
+  return text;
+}
 
 bool _hasValidSignature(Uint8List bytes, String contentType) {
   if (bytes.length < 12) {

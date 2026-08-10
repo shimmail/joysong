@@ -15,7 +15,10 @@ Flutter 客户端工程，用于逐步替代 `joysong-app`，同时发布 Androi
 - Android 与 iOS 共用 `com.joysong.app` 应用标识，Android 最低版本为 API 26，iOS 最低版本为 13.0。
 - `lib/core` 放置环境、路由、主题和网络边界；`lib/features` 按业务功能组织页面。
 - App Shell 已包含首页、发现、医美 AI、我的四个一级入口。
+- `AppShell` 是唯一的账号作用域组合根，负责创建和销毁当前登录账号使用的 Agent controller。
 - 网络层仅使用 Dart SDK，统一检查 HTTP 状态和 `{code,message,data}`；写操作不自动重试。
+- Agent 聊天仅使用同步 REST，SSE 配置固定关闭；发送请求的 `idempotencyKey` 可选，不传的旧客户端仍然有效。
+- Agent 聊天界面只加载并显示最新 20 条消息，不提供永久历史分页或“加载更早消息”入口。
 - 已建立首批认证模型、真实接口映射、登录/注册/刷新/退出仓储，以及密码/验证码登录组件。
 - 登录状态机已接到应用外层路由；冷启动恢复会话、退出和安全过期均可回到登录页。
 - access/refresh token 作为一个加密会话原子写入 Android Keystore / iOS Keychain；认证仓储已实现 single-flight 刷新，GET 请求刷新后最多重放一次，写操作不自动重试。

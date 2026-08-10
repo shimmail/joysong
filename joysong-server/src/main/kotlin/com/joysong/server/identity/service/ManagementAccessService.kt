@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service
 
 private const val DOCTOR_ROLE = "DOCTOR"
 private const val LEGAL_REP_ROLE = "INSTITUTION_LEGAL_REPRESENTATIVE"
+private const val CONSULTANT_ROLE = "CONSULTANT"
 
 @Service
 class ManagementAccessService(
@@ -40,6 +41,10 @@ class ManagementAccessService(
         }
     }
 
+    fun requirePlatformAdmin(actor: ManagementActor) {
+        if (!actor.isAdmin) throw AccessDeniedException("该操作仅限平台管理员")
+    }
+
     fun requireArticleDoctor(actor: ManagementActor, doctorId: String) {
         requireDoctor(actor, doctorId)
     }
@@ -55,6 +60,9 @@ class ManagementAccessService(
     }
 
     fun requireSplitConfig(actor: ManagementActor, doctorId: String, institutionProjectId: String) {
+        if (!actor.isAdmin) {
+            throw AccessDeniedException("分账配置仅由平台管理员维护")
+        }
         val institutionId = institutionIdForProject(institutionProjectId)
             ?: throw IllegalArgumentException("机构项目不存在")
         val doctorBound = count(
@@ -70,16 +78,7 @@ class ManagementAccessService(
             doctorId,
             institutionProjectId
         ) > 0
-        if (actor.isAdmin) {
-            require(doctorBound) { "医生尚未加入该机构项目，不能配置分账" }
-            return
-        }
-        val allowed = when {
-            actor.doctorId == doctorId -> doctorBound
-            institutionId in actor.managedInstitutionIds -> doctorBound
-            else -> false
-        }
-        if (!allowed) throw AccessDeniedException("无权配置该医生与机构项目的分账信息")
+        require(doctorBound) { "医生尚未加入该机构项目，不能配置分账" }
     }
 
     fun canManageSplitConfig(actor: ManagementActor, doctorId: String, institutionProjectId: String): Boolean =
@@ -113,8 +112,8 @@ class ManagementAccessService(
             String::class.java,
             userId
         ).toSet()
-        if (DOCTOR_ROLE !in activeRoles && LEGAL_REP_ROLE !in activeRoles) {
-            throw AccessDeniedException("账号尚未取得医生或机构法人管理权限")
+        if (activeRoles.intersect(setOf(DOCTOR_ROLE, LEGAL_REP_ROLE, CONSULTANT_ROLE)).isEmpty()) {
+            throw AccessDeniedException("账号尚未取得专业身份管理权限")
         }
 
         val doctorId = userId.takeIf { DOCTOR_ROLE in activeRoles && count(
@@ -144,22 +143,10 @@ class ManagementAccessService(
                 doctorId
             ).toSet()
         } else emptySet()
-        val institutionDoctorIds = managedInstitutionIds.flatMap { institutionId ->
-            jdbcTemplate.queryForList(
-                """
-                SELECT doctor_id
-                FROM doctor_institutions
-                WHERE institution_id = ? AND status = 'APPROVED' AND deleted_at IS NULL
-                """.trimIndent(),
-                String::class.java,
-                institutionId
-            )
-        }.toSet()
         val manageableDoctorIds = buildSet {
             doctorId?.let(::add)
-            addAll(institutionDoctorIds)
         }
-        if (doctorId == null && managedInstitutionIds.isEmpty()) {
+        if (doctorId == null && managedInstitutionIds.isEmpty() && CONSULTANT_ROLE !in activeRoles) {
             throw AccessDeniedException("职业身份已通过，但管理档案或机构归属尚未建立，请联系平台处理")
         }
 
@@ -187,12 +174,19 @@ class ManagementAccessService(
         doctorId = doctorId,
         managedInstitutionIds = managedInstitutionIds.sorted(),
         visibleInstitutionIds = visibleInstitutionIds.sorted(),
+        doctorInstitutionIds = doctorInstitutionIds.sorted(),
         canManageDoctors = isAdmin || manageableDoctorIds.isNotEmpty(),
         canManageInstitutions = isAdmin || managedInstitutionIds.isNotEmpty(),
-        canManageInstitutionProjects = isAdmin || doctorId != null || managedInstitutionIds.isNotEmpty(),
+        canManageInstitutionProjects = isAdmin,
         canManageArticles = isAdmin || manageableDoctorIds.isNotEmpty(),
-        canManageSplitConfigs = isAdmin || doctorId != null || managedInstitutionIds.isNotEmpty(),
-        canManageOrders = isAdmin || doctorId != null || managedInstitutionIds.isNotEmpty()
+        canManageSplitConfigs = isAdmin,
+        canManageOrders = isAdmin || doctorId != null,
+        canApplyToInstitutions = !isAdmin && (doctorId != null || CONSULTANT_ROLE in activeRoles),
+        canReviewInstitutionRequests = isAdmin || managedInstitutionIds.isNotEmpty(),
+        canSubmitPlatformProjectRequests = !isAdmin && doctorId != null,
+        canSubmitInstitutionProjectRequests = !isAdmin && doctorId != null,
+        canReviewInstitutionProjectRequests = isAdmin || managedInstitutionIds.isNotEmpty(),
+        canViewAffiliations = !isAdmin && (doctorId != null || CONSULTANT_ROLE in activeRoles)
     )
 
     private fun count(sql: String, vararg args: Any): Long =
@@ -219,10 +213,17 @@ data class ManagementContextView(
     val doctorId: String?,
     val managedInstitutionIds: List<String>,
     val visibleInstitutionIds: List<String>,
+    val doctorInstitutionIds: List<String>,
     val canManageDoctors: Boolean,
     val canManageInstitutions: Boolean,
     val canManageInstitutionProjects: Boolean,
     val canManageArticles: Boolean,
     val canManageSplitConfigs: Boolean,
-    val canManageOrders: Boolean
+    val canManageOrders: Boolean,
+    val canApplyToInstitutions: Boolean,
+    val canReviewInstitutionRequests: Boolean,
+    val canSubmitPlatformProjectRequests: Boolean,
+    val canSubmitInstitutionProjectRequests: Boolean,
+    val canReviewInstitutionProjectRequests: Boolean,
+    val canViewAffiliations: Boolean
 )

@@ -2,6 +2,7 @@ package com.joysong.server.order
 
 import com.joysong.server.coupon.service.CouponService
 import com.joysong.server.discover.repository.DoctorProjectRepository
+import com.joysong.server.discover.entity.DoctorProjectEntity
 import com.joysong.server.doctor.entity.DoctorEntity
 import com.joysong.server.doctor.repository.DoctorRepository
 import com.joysong.server.doctor.entity.DoctorInstitutionEntity
@@ -107,6 +108,12 @@ class OrderServiceTest {
         every { institutionConsultantService.requireApprovedConsultant(any(), any()) } returns
             InstitutionConsultant("consultant-1", "测试咨询师")
         every { doctorInstitutionProjectConfigRepository.findByDoctorIdAndInstitutionProjectId(any(), any()) } returns null
+        every { doctorProjectRepository.findByDoctorIdAndInstitutionProjectId(any(), any()) } returns DoctorProjectEntity(
+            doctorId = "doctor-1",
+            projectId = "project-1",
+            institutionProjectId = "inst-proj-1",
+            price = BigDecimal("4500.00")
+        )
         every { doctorInstitutionRepository.findByDoctorIdOrderByCreatedAtAsc(any()) } returns listOf(
             DoctorInstitutionEntity(
                 id = "doctor-practice-1",
@@ -118,6 +125,36 @@ class OrderServiceTest {
     }
 
     // ---- 创建订单 ----
+
+    @Test
+    fun `机构法人不能查看所属机构订单`() {
+        val order = OrderEntity(
+            id = "order-1",
+            orderNo = "ORDER-1",
+            userId = "user-1",
+            projectName = "项目一",
+            institutionId = "inst-1",
+            projectId = "project-1",
+            institutionProjectId = "inst-proj-1",
+            doctorId = "doctor-1",
+            price = BigDecimal("100.00"),
+            status = "PAID"
+        )
+        every { orderRepository.findById("order-1") } returns Optional.of(order)
+        val actor = ManagementActor(
+            userId = "legal-1",
+            isAdmin = false,
+            activeRoles = setOf("INSTITUTION_LEGAL_REPRESENTATIVE"),
+            doctorId = null,
+            managedInstitutionIds = setOf("inst-1"),
+            doctorInstitutionIds = emptySet(),
+            manageableDoctorIds = emptySet()
+        )
+
+        assertThrows<org.springframework.security.access.AccessDeniedException> {
+            orderService.requireOrderForManagement(actor, "order-1")
+        }
+    }
 
     @Test
     fun `创建订单 - 缺少医生时拒绝`() {
@@ -254,7 +291,7 @@ class OrderServiceTest {
     }
 
     @Test
-    fun `创建订单 - 使用机构项目价格，无面诊金无优惠券`() {
+    fun `创建订单 - 使用医生机构项目价格并生成订单快照`() {
         val request = CreateOrderRequest(
             projectId = "project-1",
             institutionProjectId = "inst-proj-1",
@@ -265,7 +302,12 @@ class OrderServiceTest {
         every { projectRepository.findById("project-1") } returns Optional.of(testProject)
         every { institutionProjectRepository.findById("inst-proj-1") } returns Optional.of(testInstitutionProject)
         every { institutionRepository.findById("inst-1") } returns Optional.of(testInstitution)
-        every { doctorProjectRepository.existsByDoctorIdAndInstitutionProjectId("doctor-1", "inst-proj-1") } returns true
+        every { doctorProjectRepository.findByDoctorIdAndInstitutionProjectId("doctor-1", "inst-proj-1") } returns DoctorProjectEntity(
+            doctorId = "doctor-1",
+            projectId = "project-1",
+            institutionProjectId = "inst-proj-1",
+            price = BigDecimal("3800.00")
+        )
         every { doctorRepository.findById("doctor-1") } returns Optional.of(DoctorEntity(id = "doctor-1", name = "测试医生"))
         every { orderRepository.save(any()) } answers { firstArg<OrderEntity>().copy(id = "order-1") }
 
@@ -274,11 +316,11 @@ class OrderServiceTest {
         assertEquals("project-1", result.projectId)
         assertEquals("inst-1", result.institutionId)
         assertEquals("美丽机构", result.institutionName)
-        assertEquals(BigDecimal("4500.00"), result.amount)
+        assertEquals(BigDecimal("3800.00"), result.amount)
         assertEquals(BigDecimal.ZERO, result.paidAmount)
         assertEquals(BigDecimal.ZERO, result.consultationFee)
         assertEquals(BigDecimal.ZERO, result.discountAmount)
-        assertEquals(BigDecimal("4500.00"), result.remainingAmount)
+        assertEquals(BigDecimal("3800.00"), result.remainingAmount)
         assertEquals(OrderStatusEnum.PENDING_PAYMENT.value, result.status)
         assertEquals("inst-cover.jpg", result.coverImage)
 
