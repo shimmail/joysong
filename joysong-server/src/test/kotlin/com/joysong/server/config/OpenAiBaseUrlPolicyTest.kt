@@ -1,6 +1,7 @@
 package com.joysong.server.config
 
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -9,6 +10,7 @@ class OpenAiBaseUrlPolicyTest {
     @Test
     fun `production accepts the FastAIToken HTTPS endpoint`() {
         assertTrue(OpenAiBaseUrlPolicy.isAllowed("https://www.fastaitoken.com/v1"))
+        assertTrue(OpenAiBaseUrlPolicy.isAllowed("https://www.fastaitoken.com:443/v1"))
     }
 
     @Test
@@ -17,5 +19,14 @@ class OpenAiBaseUrlPolicyTest {
         assertFalse(OpenAiBaseUrlPolicy.isAllowed("https://api.openai.com/v1"))
         assertFalse(OpenAiBaseUrlPolicy.isAllowed("https://www.fastaitoken.com.evil.test/v1"))
         assertFalse(OpenAiBaseUrlPolicy.isAllowed("http://www.fastaitoken.com/v1"))
+        assertFalse(OpenAiBaseUrlPolicy.isAllowed("https://www.fastaitoken.com:444/v1"))
+    }
+
+    @Test
+    fun `production normalizes surrounding whitespace case default port and trailing slash`() {
+        assertEquals(
+            "https://www.fastaitoken.com/v1",
+            OpenAiBaseUrlPolicy.normalizeAllowed("  HTTPS://WWW.FASTAITOKEN.COM:443/v1/  ")
+        )
     }
 }

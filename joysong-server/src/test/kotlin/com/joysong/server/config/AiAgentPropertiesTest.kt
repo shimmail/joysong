@@ -102,6 +102,17 @@ class AiAgentPropertiesTest {
     }
 
     @Test
+    fun `enabled production stores the normalized approved base URL for runtime use`() {
+        val properties = validEnabledProperties().copy(
+            baseUrl = "  HTTPS://WWW.FASTAITOKEN.COM:443/v1/  "
+        )
+
+        validator(properties).validate()
+
+        assertEquals("https://www.fastaitoken.com/v1", properties.baseUrl)
+    }
+
+    @Test
     fun `disabled production accepts blank provider credentials`() {
         val properties = AiAgentProperties(enabled = false)
 
@@ -133,6 +144,7 @@ class AiAgentPropertiesTest {
             "http://proxy.example.test",
             "http://proxy.example.test:0",
             "http://proxy.example.test:65536",
+            "https://proxy.example.test:8443",
             "http://user:secret@proxy.example.test:8080",
             "not a uri"
         ]

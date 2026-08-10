@@ -83,8 +83,9 @@
 
    ```dotenv
    OPENAI_API_KEY=模型服务密钥
-   OPENAI_BASE_URL=https://你的兼容接口地址/v1
+   OPENAI_BASE_URL=https://www.fastaitoken.com/v1
    AI_AGENT_MODEL=你的Agent模型ID
+   OPENAI_PROXY_URL=http://proxy.example.internal:8080
    TRANSLATION_FALLBACK_PROVIDER=openai
    TRANSLATION_MODEL=你的翻译兜底模型ID
    ```
@@ -176,13 +177,14 @@ AI Agent 独立读取以下变量，不影响 Qwen：
 
 ```dotenv
 OPENAI_API_KEY=中转站或模型服务密钥
-OPENAI_BASE_URL=https://your-relay.example.com/v1
+OPENAI_BASE_URL=https://www.fastaitoken.com/v1
 AI_AGENT_MODEL=gpt-5.5
+OPENAI_PROXY_URL=http://proxy.example.internal:8080
 OPENAI_STREAM_ENABLED=false
 OPENAI_INTENT_PARSER_ENABLED=true
 ```
 
-旧部署仍可使用 `OPENAI_MODEL` 作为 `AI_AGENT_MODEL` 的兼容回退；新部署应优先配置 `AI_AGENT_MODEL`。
+生产启用 Agent 时必须显式配置 `AI_AGENT_MODEL`，服务端不会从 `OPENAI_MODEL` 或仓库默认值回退。可选的 `OPENAI_PROXY_URL` 只支持带显式端口的 `http://` 和 `socks://` URL；`https://` proxy URL 会在启动时被拒绝。
 
 ## 6. OSS 与图片上传
 

@@ -19,6 +19,8 @@ aliyun:
     enabled: false
 
 ai-agent:
+  # Local example only. Production must set AI_AGENT_MODEL explicitly.
+  model: ${AI_AGENT_MODEL:gpt-5.5}
   demo-fallback-enabled: ${OPENAI_DEMO_FALLBACK_ENABLED:true}
 
 security:

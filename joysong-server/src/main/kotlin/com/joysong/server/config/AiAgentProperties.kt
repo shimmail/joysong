@@ -33,7 +33,7 @@ object AiAgentHttpBudget {
 }
 
 object AiAgentProxyUrlPolicy {
-    private val allowedSchemes = setOf("http", "https", "socks")
+    private val allowedSchemes = setOf("http", "socks")
 
     fun isAllowed(value: String): Boolean {
         if (value.isBlank()) return true

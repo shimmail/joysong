@@ -45,7 +45,7 @@ class RestTemplateConfig {
         factory.setReadTimeout(readTimeoutMs)
 
         if (proxyUrl.isNotBlank()) {
-            val uri = java.net.URI(proxyUrl)
+            val uri = java.net.URI(proxyUrl.trim())
             val proxy = Proxy(
                 if (uri.scheme.equals("socks", ignoreCase = true)) Proxy.Type.SOCKS else Proxy.Type.HTTP,
                 InetSocketAddress(uri.host, uri.port)

@@ -51,7 +51,7 @@ class ConfigValidator(
             missing.add("AI_AGENT_TURN_LEASE_SECONDS (at least 82 seconds; must exceed the 81-second serial HTTP budget)")
         }
         if (!AiAgentProxyUrlPolicy.isAllowed(aiAgentProperties.proxyUrl)) {
-            missing.add("OPENAI_PROXY_URL (http, https, or socks URL with host and explicit valid port; user-info is not allowed)")
+            missing.add("OPENAI_PROXY_URL (http or socks URL with host and explicit valid port; user-info is not allowed)")
         }
 
         val isProduction = environment.activeProfiles.any { it.equals("prod", ignoreCase = true) }
@@ -62,8 +62,11 @@ class ConfigValidator(
         }
         if (isProduction && aiAgentProperties.enabled) {
             if (aiAgentProperties.apiKey.isBlank()) missing.add("OPENAI_API_KEY")
-            if (!OpenAiBaseUrlPolicy.isAllowed(aiAgentProperties.baseUrl)) {
+            val normalizedBaseUrl = OpenAiBaseUrlPolicy.normalizeAllowed(aiAgentProperties.baseUrl)
+            if (normalizedBaseUrl == null) {
                 missing.add("OPENAI_BASE_URL (approved HTTPS endpoint required)")
+            } else {
+                aiAgentProperties.baseUrl = normalizedBaseUrl
             }
             if (aiAgentProperties.model.isBlank()) missing.add("AI_AGENT_MODEL")
         }

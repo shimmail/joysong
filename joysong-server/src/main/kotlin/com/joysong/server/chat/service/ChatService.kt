@@ -394,7 +394,7 @@ class ChatService(
         }
 
         return try {
-            val url = "${aiAgentProperties.baseUrl.trimEnd('/')}/chat/completions"
+            val url = providerChatCompletionsUrl()
             val headers = HttpHeaders().apply {
                 setBearerAuth(aiAgentProperties.apiKey)
                 contentType = MediaType.APPLICATION_JSON
@@ -458,7 +458,7 @@ class ChatService(
         if (aiAgentProperties.apiKey.isBlank()) return null
         val startedAt = System.nanoTime()
         return runCatching {
-            val url = "${aiAgentProperties.baseUrl.trimEnd('/')}/chat/completions"
+            val url = providerChatCompletionsUrl()
             val headers = HttpHeaders().apply {
                 setBearerAuth(aiAgentProperties.apiKey)
                 contentType = MediaType.APPLICATION_JSON
@@ -664,6 +664,9 @@ class ChatService(
         }
         return false
     }
+
+    private fun providerChatCompletionsUrl(): String =
+        "${aiAgentProperties.baseUrl.trim().trimEnd('/')}/chat/completions"
 
     private fun <T> hideMissingResource(block: () -> T): T = try {
         block()
