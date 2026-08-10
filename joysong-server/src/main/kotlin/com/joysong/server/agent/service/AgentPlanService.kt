@@ -39,6 +39,8 @@ class AgentPlanService(
         val profile = profileService.requireEntity(userId)
         val goals = profileService.readList(assessment.goalSnapshotJson)
         val excluded = profileService.readList(profile.excludedProjectsJson)
+            .map(String::trim)
+            .filter(String::isNotBlank)
 
         val allProjects = projectRepository.findAll()
         val projectMap = allProjects.associateBy { it.id }
@@ -54,7 +56,9 @@ class AgentPlanService(
             .groupBy({ it.first }, { it.second })
         val candidates = if (goals.isEmpty()) emptyList() else allProjects
             .asSequence()
-            .filterNot { project -> excluded.any { excludedName -> project.name.contains(excludedName, true) } }
+            .filterNot { project ->
+                isExcluded(project, effectiveOfferingsByProject[project.id].orEmpty(), excluded)
+            }
             .map { project -> project to matchScore(project, effectiveOfferingsByProject[project.id].orEmpty(), goals, profile.budgetMax) }
             .filter { it.second > 0 }
             .sortedWith(compareByDescending<Pair<ProjectEntity, Int>> { it.second }.thenByDescending { it.first.rating })
@@ -62,10 +66,24 @@ class AgentPlanService(
             .toList()
         val version = planRepository.countByUserId(userId).toInt() + 1
         val planStatus = if (candidates.isEmpty()) "NEEDS_HUMAN_REVIEW" else "READY"
+        val downtimePreference = profile.acceptableDowntimeDays
+            ?.let { AgentText.value("${it}天", "$it days") }
+            ?: AgentText.value("未提供", "not provided")
+        val painPreference = profile.painTolerance.ifBlank { AgentText.value("未提供", "not provided") }
+        val preferenceSummary = AgentText.value(
+            "可接受恢复期偏好：$downtimePreference；疼痛接受度偏好：$painPreference。",
+            "Acceptable downtime preference: $downtimePreference; pain tolerance preference: $painPreference."
+        )
         val summary = if (candidates.isEmpty()) {
-            AgentText.value("平台现有信息不足以匹配你的目标，本次不生成猜测性推荐，建议补充目标或转人工咨询。", "The available platform data does not match your goals. No speculative recommendation was created; add more detail or request human support.")
+            AgentText.value(
+                "以下内容仅作为信息参考，不构成诊断或治疗建议。平台现有信息不足以整理出与目标相关的候选项目；$preferenceSummary 当前目录缺少结构化恢复期、疼痛、禁忌与风险数据，需向机构或具备资质的医生确认。",
+                "This is for information reference only and is not diagnosis or treatment advice. The platform currently has insufficient information to identify goal-related candidates. $preferenceSummary The catalog lacks structured downtime, pain, contraindication, and risk data; confirm these with the institution or a qualified clinician."
+            )
         } else {
-            AgentText.value("根据你确认的目标、预算和恢复期，生成了分阶段候选方案。具体适用性、剂量和操作方式仍需由具备资质的医生面诊确认。", "A phased shortlist was created from your confirmed goals, budget, and acceptable downtime. Suitability, dosage, and treatment parameters still require an in-person consultation with a qualified clinician.")
+            AgentText.value(
+                "以下候选项目仅作为信息参考，不构成诊断或治疗建议。候选项目按已确认的改善目标、预算和平台目录字段整理；$preferenceSummary 恢复期与疼痛偏好未参与候选排序。当前目录缺少结构化恢复期、疼痛、禁忌与风险数据，需向机构或具备资质的医生确认。",
+                "These candidates are for information reference only and are not diagnosis or treatment advice. They are organized from confirmed goals, budget, and platform catalog fields. $preferenceSummary Downtime and pain preferences did not affect candidate ranking. The catalog lacks structured downtime, pain, contraindication, and risk data; confirm these with the institution or a qualified clinician."
+            )
         }
         val plan = planRepository.save(
             AgentPlanEntity(
@@ -80,8 +98,8 @@ class AgentPlanService(
             )
         )
 
-        val items = candidates.mapIndexed { index, (project, score) ->
-            itemRepository.save(buildItem(plan.id, project, effectiveOfferingsByProject[project.id].orEmpty(), goals, score, index))
+        val items = candidates.mapIndexed { index, (project, _) ->
+            itemRepository.save(buildItem(plan.id, project, effectiveOfferingsByProject[project.id].orEmpty(), goals, index))
         }
         return plan.toResponse(items)
     }
@@ -117,13 +135,7 @@ class AgentPlanService(
         goals: List<String>,
         budgetMax: java.math.BigDecimal?
     ): Int {
-        val searchable = buildString {
-            append("${project.name} ${project.category} ${project.tags} ${project.categoryTags} ${project.description} ${project.slogan}")
-            offerings.forEach { offering ->
-                val detail = offering.detail
-                append(" ${detail.name} ${detail.category} ${detail.tags} ${detail.description} ${detail.slogan} ${plainText(detail.detailContent)}")
-            }
-        }.lowercase()
+        val searchable = structuredSearchText(project, offerings)
         var score = goals.sumOf { goal -> if (searchable.contains(goal.lowercase())) 4 else relatedTerms(goal).count { searchable.contains(it) } }
         if (budgetMax != null && (
                 (project.referencePrice > java.math.BigDecimal.ZERO && project.referencePrice <= budgetMax) ||
@@ -149,46 +161,57 @@ class AgentPlanService(
         project: ProjectEntity,
         offerings: List<EffectivePlanOffering>,
         goals: List<String>,
-        score: Int,
         index: Int
     ): AgentPlanItemEntity {
+        val searchable = structuredSearchText(project, offerings)
         val matchedGoals = goals.filter { goal ->
-            val searchable = buildString {
-                append("${project.name}${project.category}${project.tags}${project.description}${project.slogan}")
-                offerings.forEach {
-                    append("${it.detail.name}${it.detail.category}${it.detail.tags}${it.detail.description}${it.detail.slogan}${plainText(it.detail.detailContent)}")
-                }
-            }.lowercase()
             searchable.contains(goal.lowercase()) || relatedTerms(goal).any(searchable::contains)
         }
-        val effectiveDescription = offerings.asSequence().map { it.detail.description }.firstOrNull { description ->
-            goals.any { goal -> description.contains(goal, true) || relatedTerms(goal).any { description.contains(it, true) } }
-        }.orEmpty().ifBlank { project.description }
         return AgentPlanItemEntity(
             id = UUID.randomUUID().toString(),
             planId = planId,
-            stageName = if (index == 0) AgentText.value("优先了解", "Review first") else AgentText.value("备选比较", "Compare as an alternative"),
+            stageName = if (index == 0) AgentText.value("信息参考", "Information reference") else AgentText.value("补充参考", "Additional reference"),
             projectId = project.id,
             projectName = project.name,
-            recommendationType = if (index == 0) "CONSIDER" else "ALTERNATIVE",
-            reason = AgentText.value("平台项目资料与", "Platform treatment information is related to ") + matchedGoals.ifEmpty { goals }.joinToString(AgentText.value("、", ", ")) + AgentText.value("相关，并结合了你的预算条件。", ", with your budget considered."),
-            expectedBenefit = if (AgentText.isChinese()) effectiveDescription.ifBlank { "可能与已确认的改善目标相关，具体改善程度需面诊判断。" } else "It may relate to your confirmed goal; the degree of improvement requires an in-person consultation.",
-            limitations = AgentText.value("平台资料只能用于项目初筛，不能确定个人适用性、治疗参数或最终效果。", "Platform information supports initial screening only and cannot determine personal suitability, treatment parameters, or final outcomes."),
-            risksJson = objectMapper.writeValueAsString(listOf(AgentText.value("存在个体差异", "Individual results vary"), AgentText.value("可能有恢复期或不良反应", "Downtime or adverse effects may occur"), AgentText.value("需要医生排查禁忌", "A clinician must screen for contraindications"))),
+            recommendationType = "REFERENCE",
+            reason = AgentText.value("平台项目名称、分类或标签与", "Platform project names, categories, or tags are related to ") + matchedGoals.ifEmpty { goals }.joinToString(AgentText.value("、", ", ")) + AgentText.value("；价格在预算范围内时仅用于候选排序。", "; price is used only for candidate ordering when it is within budget."),
+            expectedBenefit = AgentText.value("平台目录只显示该项目与已确认目标存在关键词关联，实际效果需面诊确认。", "The platform catalog only shows a keyword relationship with the confirmed goal; actual outcomes require an in-person consultation."),
+            limitations = AgentText.value("平台资料不能确定个人适用性、治疗参数、恢复期、疼痛程度、禁忌或最终效果。", "Platform information cannot determine personal suitability, treatment parameters, downtime, pain, contraindications, or final outcomes."),
+            risksJson = objectMapper.writeValueAsString(listOf(AgentText.value("风险信息：需向机构确认", "Risk information: confirm with the institution"))),
             alternativesJson = "[]",
-            requiredConfirmationJson = objectMapper.writeValueAsString(listOf(AgentText.value("医生与机构资质", "Clinician and institution credentials"), AgentText.value("产品或设备规格", "Product or device specifications"), AgentText.value("完整费用", "Total cost"), AgentText.value("风险与术后处理", "Risks and aftercare"))),
-            confidence = if (score >= 7) "MEDIUM" else "LOW",
+            requiredConfirmationJson = objectMapper.writeValueAsString(listOf(
+                AgentText.value("恢复期：需向机构确认", "Downtime: confirm with the institution"),
+                AgentText.value("疼痛程度：需向机构确认", "Pain level: confirm with the institution"),
+                AgentText.value("禁忌与风险：需向机构确认", "Contraindications and risks: confirm with the institution"),
+                AgentText.value("医生与机构资质", "Clinician and institution credentials"),
+                AgentText.value("产品或设备规格", "Product or device specifications"),
+                AgentText.value("完整费用", "Total cost")
+            )),
+            confidence = "LOW",
             sortOrder = index
         )
     }
 
-    private fun plainText(content: String?): String = content.orEmpty()
-        .replace(Regex("<[^>]+>"), " ")
-        .replace("&nbsp;", " ")
-        .replace("&#160;", " ")
-        .replace(Regex("\\s+"), " ")
-        .trim()
-        .take(500)
+    private fun structuredSearchText(
+        project: ProjectEntity,
+        offerings: List<EffectivePlanOffering>
+    ): String = buildString {
+        append("${project.name} ${project.category} ${project.tags} ${project.categoryTags}")
+        offerings.forEach { offering ->
+            val detail = offering.detail
+            append(" ${detail.name} ${detail.category} ${detail.tags} ${detail.categoryTags}")
+        }
+    }.lowercase()
+
+    private fun isExcluded(
+        project: ProjectEntity,
+        offerings: List<EffectivePlanOffering>,
+        excludedProjects: List<String>
+    ): Boolean = excludedProjects.any { excluded ->
+        project.id.equals(excluded, ignoreCase = true) ||
+            project.name.equals(excluded, ignoreCase = true) ||
+            offerings.any { it.detail.name.equals(excluded, ignoreCase = true) }
+    }
 
     private fun AgentPlanEntity.toResponse(items: List<AgentPlanItemEntity>) = AgentPlanResponse(
         id = id,
