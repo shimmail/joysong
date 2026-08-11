@@ -273,6 +273,110 @@ class DoctorInstitutionChangeMigrationTest {
         )
     }
 
+    @Test
+    fun `V14 preserves rolling legacy doctor decisions in MySQL`() {
+        val rootUrl = System.getenv("WORKTREE_MIGRATION_DB_URL")
+        assumeTrue(!rootUrl.isNullOrBlank(), "WORKTREE_MIGRATION_DB_URL is not set")
+
+        val databaseName = V14_HISTORY_DATABASE
+        assertTrue(databaseName.startsWith("myapp_worktree_"))
+        val mysqlRootPattern = Regex("^jdbc:mysql://([^/]+)/mysql(?:\\?.*)?$")
+        assertTrue(mysqlRootPattern.matches(rootUrl!!), "WORKTREE_MIGRATION_DB_URL must target the /mysql database")
+        val rootMatch = mysqlRootPattern.matchEntire(rootUrl)
+            ?: error("WORKTREE_MIGRATION_DB_URL did not match the MySQL root URL")
+        val resolvedHost = rootMatch.groupValues[1]
+        val targetUrl = rootUrl.replace(Regex("/mysql(?:\\?.*)?$"), "/$databaseName")
+        assertFalse(targetUrl == rootUrl)
+        println("MYSQL_HOST=$resolvedHost")
+        println("MYSQL_DATABASE=$databaseName")
+
+        DriverManager.getConnection(rootUrl, DB_USER, DB_PASSWORD).use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute("DROP DATABASE IF EXISTS `$databaseName`")
+                statement.execute(
+                    "CREATE DATABASE `$databaseName` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci"
+                )
+            }
+        }
+
+        val dataSource = DriverManagerDataSource(targetUrl, DB_USER, DB_PASSWORD)
+        LEGACY_MIGRATIONS.forEach { applySqlScript(dataSource, it) }
+        val jdbcTemplate = JdbcTemplate(dataSource)
+        seedHistoricalFixtures(jdbcTemplate)
+        applySqlScript(dataSource, V13_MIGRATION)
+        seedRollingLegacyDoctorDecisions(jdbcTemplate)
+        applySqlScript(dataSource, V14_MIGRATION)
+
+        val rollingHistory = jdbcTemplate.query(
+            """
+            SELECT request_note, action, status, review_note,
+                   submitted_at, reviewed_at, created_at, updated_at
+            FROM doctor_institution_change_requests
+            WHERE request_note LIKE 'rolling-%'
+            """.trimIndent()
+        ) { rs, _ ->
+            rs.getString("request_note") to LedgerHistory(
+                action = rs.getString("action"),
+                status = rs.getString("status"),
+                reviewNote = rs.getString("review_note"),
+                submittedAt = rs.getTimestamp("submitted_at").toLocalDateTime(),
+                reviewedAt = rs.getTimestamp("reviewed_at")?.toLocalDateTime(),
+                createdAt = rs.getTimestamp("created_at").toLocalDateTime(),
+                updatedAt = rs.getTimestamp("updated_at").toLocalDateTime()
+            )
+        }.toMap()
+        assertEquals(setOf("rolling-pending", "rolling-rejected-empty", "rolling-changes"), rollingHistory.keys)
+        assertHistoryRow(
+            rollingHistory,
+            "rolling-pending",
+            "PENDING",
+            "",
+            "2026-01-01 01:02:03",
+            null,
+            "2026-01-01 01:02:03",
+            "2026-01-01 01:02:03"
+        )
+        assertHistoryRow(
+            rollingHistory,
+            "rolling-rejected-empty",
+            "REJECTED",
+            "历史审核未填写原因",
+            "2026-02-01 01:02:03",
+            "2026-02-02 02:03:04",
+            "2026-02-01 01:02:03",
+            "2026-02-03 03:04:05"
+        )
+        assertHistoryRow(
+            rollingHistory,
+            "rolling-changes",
+            "REJECTED",
+            "rolling changes reason",
+            "2026-03-01 01:02:03",
+            "2026-03-02 02:03:04",
+            "2026-03-01 01:02:03",
+            "2026-03-03 03:04:05"
+        )
+        assertEquals(
+            0,
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM doctor_institutions WHERE id LIKE 'rolling-%'",
+                Long::class.java
+            )
+        )
+        val constraintError = assertThrows(Exception::class.java) {
+            jdbcTemplate.update(
+                """
+                INSERT INTO doctor_institutions
+                    (id, doctor_id, institution_id, is_primary, status)
+                VALUES ('rolling-invalid', ?, ?, 0, 'PENDING')
+                """.trimIndent(),
+                DOCTOR_ID,
+                ROLLING_PENDING_INSTITUTION_ID
+            )
+        }
+        assertTrue(constraintError.message.orEmpty().contains("chk_doctor_institutions_status"))
+    }
+
     private fun applySqlScript(dataSource: DriverManagerDataSource, path: String) {
         ResourceDatabasePopulator(ClassPathResource(path)).apply {
             setContinueOnError(false)
@@ -361,6 +465,42 @@ class DoctorInstitutionChangeMigrationTest {
         )
     }
 
+    private fun seedRollingLegacyDoctorDecisions(jdbcTemplate: JdbcTemplate) {
+        jdbcTemplate.update(
+            """
+            INSERT INTO institutions (id, name) VALUES
+                (?, 'Rolling Pending Institution'),
+                (?, 'Rolling Rejected Institution'),
+                (?, 'Rolling Changes Institution')
+            """.trimIndent(),
+            ROLLING_PENDING_INSTITUTION_ID,
+            ROLLING_REJECTED_INSTITUTION_ID,
+            ROLLING_CHANGES_INSTITUTION_ID
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO doctor_institutions
+                (id, doctor_id, institution_id, is_primary, status, request_note, review_note,
+                 confirmed_by, confirmed_at, created_at, updated_at, deleted_at)
+            VALUES
+                ('rolling-pending', ?, ?, 0, 'PENDING', 'rolling-pending', '', NULL, NULL,
+                 '2026-01-01 01:02:03', '2026-01-01 01:02:03', NULL),
+                ('rolling-rejected-empty', ?, ?, 0, 'REJECTED', 'rolling-rejected-empty', '', ?,
+                 '2026-02-02 02:03:04', '2026-02-01 01:02:03', '2026-02-03 03:04:05', NULL),
+                ('rolling-changes', ?, ?, 0, 'CHANGES_REQUESTED', 'rolling-changes', 'rolling changes reason', ?,
+                 '2026-03-02 02:03:04', '2026-03-01 01:02:03', '2026-03-03 03:04:05', NULL)
+            """.trimIndent(),
+            DOCTOR_ID,
+            ROLLING_PENDING_INSTITUTION_ID,
+            DOCTOR_ID,
+            ROLLING_REJECTED_INSTITUTION_ID,
+            REVIEWER_ID,
+            DOCTOR_ID,
+            ROLLING_CHANGES_INSTITUTION_ID,
+            REVIEWER_ID
+        )
+    }
+
     private fun assertHistoryRow(
         history: Map<String, LedgerHistory>,
         requestNote: String,
@@ -398,7 +538,9 @@ class DoctorInstitutionChangeMigrationTest {
         private const val DB_USER = "root"
         private const val DB_PASSWORD = "codex-test"
         private const val HISTORY_DATABASE = "myapp_worktree_institution_membership_lifecycle_history"
+        private const val V14_HISTORY_DATABASE = "myapp_worktree_institution_membership_lifecycle_v14_history"
         private const val V13_MIGRATION = "db/migration/V13__add_doctor_institution_change_requests.sql"
+        private const val V14_MIGRATION = "db/migration/V14__finalize_institution_membership_statuses.sql"
         private const val DOCTOR_ID = "fixture-doctor"
         private const val REVIEWER_ID = "fixture-reviewer"
         private const val CONSULTANT_ID = "fixture-consultant"
@@ -408,6 +550,9 @@ class DoctorInstitutionChangeMigrationTest {
         private const val CHANGES_INSTITUTION_ID = "fixture-institution-changes"
         private const val REVOKED_INSTITUTION_ID = "fixture-institution-revoked"
         private const val SOFT_DELETED_INSTITUTION_ID = "fixture-institution-soft-deleted"
+        private const val ROLLING_PENDING_INSTITUTION_ID = "fixture-institution-rolling-pending"
+        private const val ROLLING_REJECTED_INSTITUTION_ID = "fixture-institution-rolling-rejected"
+        private const val ROLLING_CHANGES_INSTITUTION_ID = "fixture-institution-rolling-changes"
         private const val CONSULTANT_MEMBERSHIP_ID = "fixture-consultant-membership"
         private val LEGACY_MIGRATIONS = listOf(
             "db/migration/B1__init_schema.sql",
