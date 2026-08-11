@@ -35,7 +35,7 @@
 | 公开接口 | `/api/discover/**` | 无需认证 |
 | 公开接口 | `/images/**` | 静态图片资源 |
 | 公开接口 | `/actuator/**` | 健康检查 |
-| ADMIN 角色 | `/api/admin/**` | 需要 JWT + `ROLE_ADMIN` |
+| ADMIN 角色 | `/api/admin/**` | 原则上需要 JWT + `ROLE_ADMIN`；本文件明确标注的迁移期 GET 例外仅允许已认证专业用户按 `visibleInstitutionIds` 对象级只读访问 |
 | 需认证 | 其余所有接口 | 需要 JWT Bearer Token |
 
 需要认证的接口，请求头需携带：
@@ -2025,7 +2025,7 @@ Authorization: Bearer <token>
 
 ## 十二、管理后台 `/api/admin`
 
-> 需要 Bearer Token + `ROLE_ADMIN` 角色。
+> 原则上需要 Bearer Token + `ROLE_ADMIN` 角色。迁移期间，仅本章明确标注为“专业端兼容只读”的 GET 路径允许已认证专业用户访问，服务端仍按 `visibleInstitutionIds` 做对象级过滤；所有机构写操作和平台全量 CRUD 均仅限 `ADMIN`。
 
 ### 12.0 POST /api/admin/login
 
@@ -2062,7 +2062,7 @@ Authorization: Bearer <token>
 
 | 方法 | 路径 | 描述 |
 |------|------|------|
-| GET | `/api/admin/projects` | 列出所有项目（支持 `?keyword=X` 模糊搜索，返回 ProjectAdminVo 含 `doctorIds`） |
+| GET | `/api/admin/projects` | `ADMIN` 或迁移期已认证专业用户读取全局项目目录（支持 `?keyword=X` 模糊搜索，返回 ProjectAdminVo 含 `doctorIds`）；该兼容读取不授予项目写权限 |
 | POST | `/api/admin/projects` | 新建项目（自动生成 UUID，支持多医生关联） |
 | PUT | `/api/admin/projects/{id}` | 更新项目（先删旧关联再建新关联） |
 | DELETE | `/api/admin/projects/{id}` | 删除项目（逻辑删除） |
@@ -2177,13 +2177,13 @@ Authorization: Bearer <token>
 
 | 方法 | 路径 | 描述 |
 |------|------|------|
-| GET | `/api/admin/institutions` | 列出所有机构（支持 `?keyword=X` 模糊搜索） |
-| GET | `/api/admin/institutions/{id}` | 机构详情 |
+| GET | `/api/admin/institutions` | `ADMIN` 列出所有机构；迁移期已认证专业用户仅返回 `visibleInstitutionIds` 内机构（支持 `?keyword=X` 模糊搜索） |
+| GET | `/api/admin/institutions/{id}` | `ADMIN` 查看任意机构；迁移期已认证专业用户只能读取 `visibleInstitutionIds` 内机构 |
 | POST | `/api/admin/institutions` | 新建机构（自动生成 UUID） |
 | PUT | `/api/admin/institutions/{id}` | 更新机构 |
 | DELETE | `/api/admin/institutions/{id}` | 删除机构（逻辑删除） |
-| GET | `/api/admin/institutions/{id}/doctors` | 该机构下的医生列表 |
-| GET | `/api/admin/institutions/{id}/projects` | 该机构下的项目列表 |
+| GET | `/api/admin/institutions/{id}/doctors` | `ADMIN` 查看任意机构；迁移期已认证专业用户只能读取 `visibleInstitutionIds` 内机构的医生列表 |
+| GET | `/api/admin/institutions/{id}/projects` | `ADMIN` 查看任意机构；迁移期已认证专业用户只能读取 `visibleInstitutionIds` 内机构的项目列表 |
 
 ---
 
@@ -2294,7 +2294,7 @@ Authorization: Bearer <token>
 | 404 | 404 | 已通过对象边界校验但机构记录不存在 |
 | 500 | 500 | 未预期的服务端错误 |
 
-平台管理员继续使用 `/api/admin/institutions/**` 进行全量机构 CRUD。专业端旧的 `/api/admin/institutions/{id}` PUT 不再用于法人档案编辑；现有专业端旧读路径在后续切换完成前保持兼容。
+平台管理员继续使用 `/api/admin/institutions/**` 进行全量机构 CRUD。`POST/PUT/DELETE /api/admin/institutions...` 等写操作仅限 `ADMIN`。专业端旧的 `/api/admin/institutions/{id}` PUT 不再用于法人档案编辑；现有专业端旧读 GET 路径在后续切换完成前仅向已认证专业用户兼容，并按 `visibleInstitutionIds` 做对象级只读过滤。
 
 ---
 
@@ -2360,7 +2360,7 @@ Authorization: Bearer <token>
 
 | 方法 | 路径 | 描述 |
 |------|------|------|
-| GET | `/api/admin/institution-projects` | 列出机构项目（支持 `?projectId=X` 或 `?institutionId=X` 过滤），返回 BaseResponse 包裹，每项含关联医生摘要 |
+| GET | `/api/admin/institution-projects` | `ADMIN` 查看全量；迁移期已认证专业用户仅查看 `visibleInstitutionIds` 范围内机构项目（支持 `?projectId=X` 或 `?institutionId=X` 过滤），返回 BaseResponse 包裹，每项含关联医生摘要 |
 | POST | `/api/admin/institution-projects` | 新建机构项目，返回 BaseResponse 包裹 |
 | PUT | `/api/admin/institution-projects/{id}` | 更新机构项目，返回 BaseResponse 包裹 |
 | DELETE | `/api/admin/institution-projects/{id}` | 删除机构项目（逻辑删除），返回 BaseResponse 包裹 |
@@ -2724,7 +2724,7 @@ Authorization: Bearer <token>
 | 法人机构档案 | GET | `/api/management/institutions/{institutionId}` | ACTIVE INSTITUTION_LEGAL_REPRESENTATIVE（仅 `managedInstitutionIds`） |
 | 法人机构档案 | PUT | `/api/management/institutions/{institutionId}` | ACTIVE INSTITUTION_LEGAL_REPRESENTATIVE（仅 `managedInstitutionIds`） |
 | 管理 | GET | `/api/admin/stats` | ADMIN |
-| 管理 | GET | `/api/admin/projects` | ADMIN |
+| 管理（迁移期兼容只读） | GET | `/api/admin/projects` | ADMIN 或已认证专业用户（全局项目目录） |
 | 管理 | POST | `/api/admin/projects` | ADMIN |
 | 管理 | PUT | `/api/admin/projects/{id}` | ADMIN |
 | 管理 | DELETE | `/api/admin/projects/{id}` | ADMIN |
@@ -2736,14 +2736,14 @@ Authorization: Bearer <token>
 | 管理（平台管理员兼容） | POST | `/api/admin/doctors` | ADMIN |
 | 管理（平台管理员兼容） | PUT | `/api/admin/doctors/{id}` | ADMIN |
 | 管理（平台管理员兼容） | DELETE | `/api/admin/doctors/{id}` | ADMIN |
-| 管理 | GET | `/api/admin/institutions` | ADMIN |
-| 管理 | GET | `/api/admin/institutions/{id}` | ADMIN |
+| 管理（迁移期兼容只读） | GET | `/api/admin/institutions` | ADMIN 全量；已认证专业用户仅 `visibleInstitutionIds` |
+| 管理（迁移期兼容只读） | GET | `/api/admin/institutions/{id}` | ADMIN 全量；已认证专业用户仅 `visibleInstitutionIds` |
 | 管理 | POST | `/api/admin/institutions` | ADMIN |
 | 管理 | PUT | `/api/admin/institutions/{id}` | ADMIN |
 | 管理 | DELETE | `/api/admin/institutions/{id}` | ADMIN |
-| 管理 | GET | `/api/admin/institutions/{id}/doctors` | ADMIN |
-| 管理 | GET | `/api/admin/institutions/{id}/projects` | ADMIN |
-| 管理 | GET | `/api/admin/institution-projects` | ADMIN |
+| 管理（迁移期兼容只读） | GET | `/api/admin/institutions/{id}/doctors` | ADMIN 全量；已认证专业用户仅 `visibleInstitutionIds` |
+| 管理（迁移期兼容只读） | GET | `/api/admin/institutions/{id}/projects` | ADMIN 全量；已认证专业用户仅 `visibleInstitutionIds` |
+| 管理（迁移期兼容只读） | GET | `/api/admin/institution-projects` | ADMIN 全量；已认证专业用户仅 `visibleInstitutionIds` |
 | 管理 | POST | `/api/admin/institution-projects` | ADMIN |
 | 管理 | PUT | `/api/admin/institution-projects/{id}` | ADMIN |
 | 管理 | DELETE | `/api/admin/institution-projects/{id}` | ADMIN |
