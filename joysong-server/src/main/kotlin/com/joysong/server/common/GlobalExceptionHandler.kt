@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.security.access.AccessDeniedException
 import com.joysong.server.auth.service.InvalidRefreshTokenException
+import com.joysong.server.doctor.service.DoctorProfileNotFoundException
 import java.io.IOException
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
@@ -29,13 +30,22 @@ class GlobalExceptionHandler {
         ResponseEntity.status(HttpStatus.FORBIDDEN)
             .body(BaseResponse.error(e.message ?: "无权执行此操作", 403))
 
+    @ExceptionHandler(DoctorProfileNotFoundException::class)
+    fun handleDoctorProfileNotFound(
+        e: DoctorProfileNotFoundException
+    ): ResponseEntity<BaseResponse<Nothing>> =
+        ResponseEntity.status(HttpStatus.NOT_FOUND)
+            .body(BaseResponse.error(e.message ?: "医生档案不存在", 404))
+
     @ExceptionHandler(IllegalArgumentException::class)
     fun handleIllegalArgument(
         e: IllegalArgumentException,
         request: HttpServletRequest
     ): ResponseEntity<BaseResponse<Nothing>> {
         log.warn("参数错误: {}", e.message)
-        if (request.requestURI.startsWith("/api/admin/")) {
+        if (request.requestURI.startsWith("/api/admin/") ||
+            request.requestURI == "/api/management/doctor-profile"
+        ) {
             return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
                 .body(BaseResponse.error(e.message ?: "请求参数错误", 400))
