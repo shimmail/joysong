@@ -11,6 +11,7 @@ import com.joysong.server.order.service.OrderStatusLogService
 import com.joysong.server.payment.repository.PaymentRepository
 import com.joysong.server.refund.repository.RefundItemRepository
 import com.joysong.server.settlement.entity.SettlementAllocationEntity
+import com.joysong.server.settlement.entity.SettlementAllocationBalanceBucket
 import com.joysong.server.settlement.entity.SettlementAllocationOwnerType
 import com.joysong.server.settlement.entity.SettlementEntity
 import com.joysong.server.settlement.repository.SettlementAllocationRepository
@@ -75,6 +76,7 @@ class SettlementServiceTest {
         assertEquals(BigDecimal("87.67"), settlement.captured.totalAmount)
         assertEquals(4, allocations.captured.count())
         assertEquals(8_767, allocations.captured.sumOf { it.amountMinor })
+        assertTrue(allocations.captured.all { it.balanceBucket == SettlementAllocationBalanceBucket.PENDING })
         assertEquals(
             setOf(
                 SettlementAllocationOwnerType.PLATFORM,

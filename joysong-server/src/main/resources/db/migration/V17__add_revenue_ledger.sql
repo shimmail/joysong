@@ -10,6 +10,7 @@ CREATE TABLE settlement_allocations (
     rate DECIMAL(5,2) NOT NULL,
     amount_minor BIGINT NOT NULL,
     reversed_minor BIGINT NOT NULL DEFAULT 0,
+    balance_bucket VARCHAR(20) NOT NULL DEFAULT 'PENDING',
     status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uk_allocation_settlement_owner (settlement_id, owner_type, owner_id),

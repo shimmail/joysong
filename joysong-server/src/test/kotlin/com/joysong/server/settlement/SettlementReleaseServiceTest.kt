@@ -7,6 +7,7 @@ import com.joysong.server.order.service.OrderScheduledTasks
 import com.joysong.server.order.service.OrderService
 import com.joysong.server.order.service.OrderStatusLogService
 import com.joysong.server.settlement.entity.SettlementAllocationEntity
+import com.joysong.server.settlement.entity.SettlementAllocationBalanceBucket
 import com.joysong.server.settlement.entity.SettlementAllocationOwnerType
 import com.joysong.server.settlement.entity.SettlementAllocationStatus
 import com.joysong.server.settlement.entity.SettlementEntity
@@ -132,6 +133,19 @@ class SettlementReleaseServiceTest {
 
         assertEquals(70, mutations.captured.single().availableDelta)
         assertEquals(-70, mutations.captured.single().pendingDelta)
+        assertEquals(SettlementAllocationStatus.PARTIALLY_REVERSED, partial.status)
+    }
+
+    @Test
+    fun `release persists available bucket without losing partial reversal state`() {
+        val settlement = SettlementEntity(id = 91, orderId = "order-1", status = "PENDING")
+        val partial = allocation(1, 100, reversed = 30, status = SettlementAllocationStatus.PARTIALLY_REVERSED)
+        arrangeRelease(settlement, listOf(partial), pendingSettlementOrder())
+        every { walletLedgerService.apply(any()) } returns emptyList()
+
+        releaseService.release(91, LocalDateTime.of(2026, 8, 11, 3, 0))
+
+        assertEquals(SettlementAllocationBalanceBucket.AVAILABLE, partial.balanceBucket)
         assertEquals(SettlementAllocationStatus.PARTIALLY_REVERSED, partial.status)
     }
 
