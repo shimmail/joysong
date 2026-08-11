@@ -240,6 +240,23 @@ class ManagedInstitutionProfileControllerTest {
 
     @Test
     @WithMockUser(username = "legal-1")
+    fun `institution disappearing during update maps to matching HTTP and body 404`() {
+        every { accessService.actor(any()) } returns legalActor
+        every { profileService.update(legalActor, "institution-1", any()) } throws
+            ManagedInstitutionProfileNotFoundException()
+
+        mockMvc.perform(
+            put("$BASE_PATH/institution-1")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(validPayload())
+        )
+            .andExpect(status().isNotFound)
+            .andExpect(jsonPath("$.code").value(404))
+            .andExpect(jsonPath("$.message").value("机构档案不存在"))
+    }
+
+    @Test
+    @WithMockUser(username = "legal-1")
     fun `unexpected route failure returns safe matching HTTP and body 500`() {
         val secret = "jdbc-secret-marker"
         every { accessService.actor(any()) } returns legalActor

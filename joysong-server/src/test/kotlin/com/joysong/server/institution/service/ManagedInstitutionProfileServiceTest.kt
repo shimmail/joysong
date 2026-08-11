@@ -127,6 +127,22 @@ class ManagedInstitutionProfileServiceTest {
     }
 
     @Test
+    fun `update reports not found when the targeted row disappears before write`() {
+        every {
+            repository.updateManagedProfile(
+                eq("managed"), any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), any(), any()
+            )
+        } returns 0
+
+        assertThrows(ManagedInstitutionProfileNotFoundException::class.java) {
+            service.update(actor(), "managed", command())
+        }
+
+        verify(exactly = 0) { institutionService.evictInstitutionAndDiscoverCaches() }
+    }
+
+    @Test
     fun `update evicts institution caches only after transaction commit`() {
         stubSuccessfulUpdate()
         TransactionSynchronizationManager.initSynchronization()

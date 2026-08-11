@@ -40,24 +40,23 @@ class ManagedInstitutionProfileService(
     ): ManagedInstitutionProfile {
         managementAccessService.requireInstitutionManaged(actor, institutionId)
         val normalized = command.normalized()
-        require(
-            institutionRepository.updateManagedProfile(
-                id = institutionId,
-                name = normalized.name,
-                address = normalized.address,
-                city = normalized.city,
-                description = normalized.description,
-                coverImage = normalized.coverImage,
-                images = normalized.images.joinToString(","),
-                establishedYear = normalized.establishedYear,
-                credentials = normalized.credentials,
-                credentialImages = normalized.credentialImages.joinToString(","),
-                specialties = normalized.specialties.joinToString(","),
-                tags = normalized.tags.joinToString(","),
-                contactPhone = normalized.contactPhone,
-                businessHours = normalized.businessHours
-            ) == 1
-        ) { "机构档案更新失败" }
+        val updatedRows = institutionRepository.updateManagedProfile(
+            id = institutionId,
+            name = normalized.name,
+            address = normalized.address,
+            city = normalized.city,
+            description = normalized.description,
+            coverImage = normalized.coverImage,
+            images = normalized.images.joinToString(","),
+            establishedYear = normalized.establishedYear,
+            credentials = normalized.credentials,
+            credentialImages = normalized.credentialImages.joinToString(","),
+            specialties = normalized.specialties.joinToString(","),
+            tags = normalized.tags.joinToString(","),
+            contactPhone = normalized.contactPhone,
+            businessHours = normalized.businessHours
+        )
+        if (updatedRows == 0) throw ManagedInstitutionProfileNotFoundException()
         evictInstitutionCachesAfterCommit()
         return institutionRepository.findById(institutionId).orElseThrow(::ManagedInstitutionProfileNotFoundException)
             .toProfile()
