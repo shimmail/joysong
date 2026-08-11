@@ -70,7 +70,7 @@ class SettlementReversalService(
 
         val walletBalances = mutableMapOf<WalletKey, WalletBalance>()
         val mutations = mutableListOf<WalletMutation>()
-        allocations.forEach { allocation ->
+        allocations.sortedWith(compareBy({ settlement.currency }, { it.ownerType.name }, { it.ownerId })).forEach { allocation ->
             val target = cumulativeTarget(allocation, allocations, cumulativeRefundedMinor, originalNetPaidMinor)
             val required = target - allocation.reversedMinor
             if (required <= 0) return@forEach
@@ -104,7 +104,13 @@ class SettlementReversalService(
         val hasReversal = allocations.any { it.reversedMinor > 0 }
         if (hasReversal) {
             allocationRepository.saveAll(allocations)
-            settlement.status = if (allocations.all { it.reversedMinor == it.amountMinor }) REVERSED_STATUS else PARTIALLY_REVERSED_STATUS
+            settlement.status = when {
+                allocations.all { it.reversedMinor == it.amountMinor } -> REVERSED_STATUS
+                allocations.any {
+                    it.balanceBucket == SettlementAllocationBalanceBucket.PENDING && it.reversedMinor < it.amountMinor
+                } -> PENDING_STATUS
+                else -> PARTIALLY_REVERSED_STATUS
+            }
             settlement.updatedAt = LocalDateTime.now()
             settlementRepository.save(settlement)
         }
@@ -212,5 +218,6 @@ class SettlementReversalService(
         const val REFUND_SOURCE_TYPE = "REFUND"
         const val PARTIALLY_REVERSED_STATUS = "PARTIALLY_REVERSED"
         const val REVERSED_STATUS = "REVERSED"
+        const val PENDING_STATUS = "PENDING"
     }
 }

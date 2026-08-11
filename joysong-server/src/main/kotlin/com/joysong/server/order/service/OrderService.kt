@@ -442,7 +442,7 @@ class OrderService(
         )
         log.info("订单[{}]用户确认完成, 结算到期时间: {}", orderId, settlementAt)
 
-        settlementService.saveSettlement(orderId)
+        settlementService.saveSettlement(orderId, settlementAt)
         return OrderResponse.from(updated)
     }
 

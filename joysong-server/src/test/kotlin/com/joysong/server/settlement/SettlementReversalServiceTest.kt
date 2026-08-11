@@ -70,6 +70,7 @@ class SettlementReversalServiceTest {
 
         assertEquals(40, allocation.reversedMinor)
         assertEquals(SettlementAllocationStatus.PARTIALLY_REVERSED, allocation.status)
+        verify { settlementRepository.save(match { it.status == "PENDING" }) }
         assertEquals(-40, mutations.captured.single().pendingDelta)
         assertEquals(0, mutations.captured.single().availableDelta)
         assertEquals("refund:reverse:item-1:1", mutations.captured.single().operationKey)

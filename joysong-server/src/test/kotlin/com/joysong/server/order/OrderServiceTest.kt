@@ -570,7 +570,7 @@ class OrderServiceTest {
         val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.PENDING_COMPLETION.value)
         every { orderRepository.findById("o1") } returns Optional.of(order)
         every { orderRepository.save(any()) } answers { firstArg() }
-        every { settlementService.saveSettlement("o1") } returns mockk()
+        every { settlementService.saveSettlement("o1", any()) } returns mockk()
 
         val result = orderService.confirmCompletion("o1", "user-1")
 
@@ -579,7 +579,7 @@ class OrderServiceTest {
         val saved = slot<OrderEntity>()
         verify { orderRepository.save(capture(saved)) }
         assertNotNull(saved.captured.settlementAt)
-        verify { settlementService.saveSettlement("o1") }
+        verify { settlementService.saveSettlement("o1", saved.captured.settlementAt) }
     }
 
     @Test
