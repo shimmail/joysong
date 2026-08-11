@@ -29,6 +29,12 @@ Agent 使用且仅使用以下八张表：
 
 创建 Agent turn 时请求体可选传递 `idempotencyKey`。同一 session 中重复的有效键返回已创建的稳定结果，不应额外创建 turn 或消息；未传该键的调用仍受支持。
 
+## 结构化卡片导航契约
+
+结构化卡片可以使用自身的目录 `id` 以及 `doctorId`、`projectId`、`institutionId` 打开医生、项目或机构详情。这些 ID 表示业务资源，**不能**当作私聊对端用户 ID。
+
+当前 Agent 目录响应没有显式的 `humanUserId`（或等价、经服务端授权的真人账号字段），因此客户端有意隐藏结构化卡片上的“真人咨询”入口。不得使用 doctor、project、institution 或 institution-project ID 猜测/替代聊天用户 ID。后续只有在服务端增加明确的真人用户字段、访问授权语义和对应契约测试后，客户端才能接入并显示该入口。
+
 ## 可观测性与隐私
 
 服务端只记录结构化且脱敏的日志，例如请求关联标识、session/turn 标识、模型标识、耗时、HTTP 状态和结果分类。不得记录 Authorization、API Key、完整提示词、完整回答或原始健康信息。排障通过受控日志与数据库运维流程完成；本版本没有 traces API。
@@ -37,6 +43,6 @@ Agent 使用且仅使用以下八张表：
 
 详细命令见 [`AI_AGENT_TESTING.md`](./AI_AGENT_TESTING.md)。其中 MySQL 集成测试必须使用当前 worktree 的隔离数据库，不能连接共享开发数据库。
 
-生产发布默认设置 `AI_AGENT_ENABLED=false`，完成 V10 preflight、Flyway、readiness、FastAIToken canary 和内部 cohort 观察后再显式启用。灰度、监控、立即停用和 V11 不可删除的操作步骤见 [`AI_AGENT_ROLLOUT.md`](./AI_AGENT_ROLLOUT.md)。自动 cohort 分流和指标聚合不由当前应用实现，需要网关、发布平台和运维监控平台提供。
+生产发布默认设置 `AI_AGENT_ENABLED=false`，先进入维护窗口并停止全部旧写实例，再在同一冻结窗口完成 V10 preflight、单实例 Flyway 和 readiness；迁移完成前不得恢复流量。随后完成 FastAIToken canary 和内部 cohort 观察后再显式启用。灰度、监控、立即停用和 V11 不可删除的操作步骤见 [`AI_AGENT_ROLLOUT.md`](./AI_AGENT_ROLLOUT.md)。自动 cohort 分流和指标聚合不由当前应用实现，需要网关、发布平台和运维监控平台提供。
 
 实现探索保存在 `codex/ai-agent-task3-spike` 分支。该 spike 用于保留实验记录，未合并到本次同步 REST 交付。
