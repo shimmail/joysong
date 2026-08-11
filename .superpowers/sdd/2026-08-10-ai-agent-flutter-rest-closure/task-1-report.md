@@ -90,3 +90,21 @@ interfaces, configuration, tests, and stop UI have been removed.
   - `flutter analyze --no-pub --no-fatal-infos lib/features/agent` exited 0
     with only the pre-existing `cacheExtent` deprecation info;
   - production and focused-test grep found no SSE symbols or `streamCalls`.
+
+## Round 2 review fix
+
+- Reproduced context-page initialization while a shared controller still had a
+  pending REST send. RED failed with an unhandled
+  `StateError('CHAT_SEND_IN_PROGRESS')` escaping from the unawaited
+  `_initializeChat` future through `startContextSummary`.
+- `_initializeChat` now catches only that exact busy state at the context
+  initialization boundary and keeps the existing in-flight session. Other
+  `StateError` values are rethrown.
+- The widget regression test verifies there is no asynchronous Flutter error,
+  the active session remains unchanged, and delivery remains `sending` until
+  the original REST response completes.
+- Round 2 GREEN verification:
+  - `flutter test --no-pub test/features/agent` passed 9/9 tests;
+  - `flutter analyze --no-pub --no-fatal-infos lib/features/agent` exited 0
+    with only the pre-existing `cacheExtent` deprecation info;
+  - `git diff --check` passed.

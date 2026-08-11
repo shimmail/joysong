@@ -63,6 +63,45 @@ void main() {
     chatController.dispose();
     planController.dispose();
   });
+
+  testWidgets(
+      'context initialization preserves an in-flight REST send without an async error',
+      (tester) async {
+    final pendingSend = Completer<ChatTurn>();
+    final repository = _BusyAgentRepository(pendingSend);
+    final chatController = AgentChatController(repository: repository);
+    final planController = AgentPlanController(repository);
+    addTearDown(() {
+      if (!pendingSend.isCompleted) pendingSend.complete(_turn);
+      chatController.dispose();
+      planController.dispose();
+    });
+    final send = chatController.send('正在发送的问题');
+    await tester.pump();
+    expect(chatController.state.activeSession?.id, _session.id);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AgentChatPage(
+          chatController: chatController,
+          planController: planController,
+          initialContextType: ChatContextType.project,
+          initialContextId: 'project-1',
+          initialContextName: '项目一',
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+    expect(chatController.state.activeSession?.id, _session.id);
+    expect(chatController.state.deliveryState, ChatDeliveryState.sending);
+
+    pendingSend.complete(_turn);
+    await send;
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 }
 
 class _BusyAgentRepository extends Fake implements AgentRepository {
