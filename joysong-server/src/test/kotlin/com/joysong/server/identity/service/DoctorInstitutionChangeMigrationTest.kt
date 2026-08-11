@@ -110,7 +110,7 @@ class DoctorInstitutionChangeMigrationTest {
         val history = jdbcTemplate.query(
             """
             SELECT request_note, action, status, review_note,
-                   submitted_at, reviewed_at, created_at, updated_at
+                   reviewed_by, submitted_at, reviewed_at, created_at, updated_at
             FROM doctor_institution_change_requests
             """.trimIndent()
         ) { rs, _ ->
@@ -118,6 +118,7 @@ class DoctorInstitutionChangeMigrationTest {
                 action = rs.getString("action"),
                 status = rs.getString("status"),
                 reviewNote = rs.getString("review_note"),
+                reviewedBy = rs.getString("reviewed_by"),
                 submittedAt = rs.getTimestamp("submitted_at").toLocalDateTime(),
                 reviewedAt = rs.getTimestamp("reviewed_at")?.toLocalDateTime(),
                 createdAt = rs.getTimestamp("created_at").toLocalDateTime(),
@@ -146,7 +147,8 @@ class DoctorInstitutionChangeMigrationTest {
             "2025-02-01 01:02:03",
             "2025-02-02 02:03:04",
             "2025-02-01 01:02:03",
-            "2025-02-03 03:04:05"
+            "2025-02-03 03:04:05",
+            reviewedBy = REVIEWER_ID
         )
         assertHistoryRow(
             history,
@@ -156,7 +158,8 @@ class DoctorInstitutionChangeMigrationTest {
             "2025-03-01 01:02:03",
             "2025-03-03 03:04:05",
             "2025-03-01 01:02:03",
-            "2025-03-03 03:04:05"
+            "2025-03-03 03:04:05",
+            reviewedBy = REVIEWER_ID
         )
         assertHistoryRow(
             history,
@@ -166,7 +169,8 @@ class DoctorInstitutionChangeMigrationTest {
             "2025-04-01 01:02:03",
             "2025-04-03 03:04:05",
             "2025-04-01 01:02:03",
-            "2025-04-03 03:04:05"
+            "2025-04-03 03:04:05",
+            reviewedBy = REVIEWER_ID
         )
         assertHistoryRow(
             history,
@@ -176,7 +180,8 @@ class DoctorInstitutionChangeMigrationTest {
             "2025-05-01 01:02:03",
             "2025-05-02 02:03:04",
             "2025-05-01 01:02:03",
-            "2025-05-03 03:04:05"
+            "2025-05-03 03:04:05",
+            reviewedBy = REVIEWER_ID
         )
         assertHistoryRow(
             history,
@@ -186,7 +191,8 @@ class DoctorInstitutionChangeMigrationTest {
             "2025-06-01 01:02:03",
             "2025-06-03 03:04:05",
             "2025-06-01 01:02:03",
-            "2025-06-03 03:04:05"
+            "2025-06-03 03:04:05",
+            reviewedBy = REVIEWER_ID
         )
 
         assertEquals(
@@ -310,7 +316,7 @@ class DoctorInstitutionChangeMigrationTest {
         val rollingHistory = jdbcTemplate.query(
             """
             SELECT request_note, action, status, review_note,
-                   submitted_at, reviewed_at, created_at, updated_at
+                   reviewed_by, submitted_at, reviewed_at, created_at, updated_at
             FROM doctor_institution_change_requests
             WHERE request_note LIKE 'rolling-%'
             """.trimIndent()
@@ -319,6 +325,7 @@ class DoctorInstitutionChangeMigrationTest {
                 action = rs.getString("action"),
                 status = rs.getString("status"),
                 reviewNote = rs.getString("review_note"),
+                reviewedBy = rs.getString("reviewed_by"),
                 submittedAt = rs.getTimestamp("submitted_at").toLocalDateTime(),
                 reviewedAt = rs.getTimestamp("reviewed_at")?.toLocalDateTime(),
                 createdAt = rs.getTimestamp("created_at").toLocalDateTime(),
@@ -344,7 +351,8 @@ class DoctorInstitutionChangeMigrationTest {
             "2026-02-01 01:02:03",
             "2026-02-02 02:03:04",
             "2026-02-01 01:02:03",
-            "2026-02-03 03:04:05"
+            "2026-02-03 03:04:05",
+            reviewedBy = REVIEWER_ID
         )
         assertHistoryRow(
             rollingHistory,
@@ -354,7 +362,8 @@ class DoctorInstitutionChangeMigrationTest {
             "2026-03-01 01:02:03",
             "2026-03-02 02:03:04",
             "2026-03-01 01:02:03",
-            "2026-03-03 03:04:05"
+            "2026-03-03 03:04:05",
+            reviewedBy = REVIEWER_ID
         )
         assertEquals(
             0,
@@ -375,6 +384,18 @@ class DoctorInstitutionChangeMigrationTest {
             )
         }
         assertTrue(constraintError.message.orEmpty().contains("chk_doctor_institutions_status"))
+        val membershipConstraintError = assertThrows(Exception::class.java) {
+            jdbcTemplate.update(
+                """
+                INSERT INTO institution_memberships
+                    (id, user_id, institution_id, member_role, status)
+                VALUES ('rolling-invalid-membership', ?, ?, 'CONSULTANT', 'CHANGES_REQUESTED')
+                """.trimIndent(),
+                CONSULTANT_ID,
+                ROLLING_PENDING_INSTITUTION_ID
+            )
+        }
+        assertTrue(membershipConstraintError.message.orEmpty().contains("chk_institution_memberships_status"))
     }
 
     private fun applySqlScript(dataSource: DriverManagerDataSource, path: String) {
@@ -509,12 +530,14 @@ class DoctorInstitutionChangeMigrationTest {
         submittedAt: String,
         reviewedAt: String?,
         createdAt: String,
-        updatedAt: String
+        updatedAt: String,
+        reviewedBy: String? = null
     ) {
         val row = history.getValue(requestNote)
         assertEquals("JOIN", row.action)
         assertEquals(status, row.status)
         assertEquals(reviewNote, row.reviewNote)
+        assertEquals(reviewedBy, row.reviewedBy)
         assertEquals(timestamp(submittedAt), row.submittedAt)
         assertEquals(reviewedAt?.let(::timestamp), row.reviewedAt)
         assertEquals(timestamp(createdAt), row.createdAt)
@@ -528,6 +551,7 @@ class DoctorInstitutionChangeMigrationTest {
         val action: String,
         val status: String,
         val reviewNote: String,
+        val reviewedBy: String?,
         val submittedAt: LocalDateTime,
         val reviewedAt: LocalDateTime?,
         val createdAt: LocalDateTime,
