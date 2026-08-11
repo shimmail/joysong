@@ -107,7 +107,9 @@ class ManagedInstitutionProfileService(
         coverImage = coverImage,
         rating = rating,
         reviewCount = reviewCount,
-        isVerified = isVerified
+        isVerified = isVerified,
+        projectCount = projectCount,
+        doctorCount = doctorCount
     )
 
     private fun InstitutionEntity.toProfile() = ManagedInstitutionProfile(
@@ -153,7 +155,9 @@ data class ManagedInstitutionSummary(
     val coverImage: String,
     val rating: BigDecimal,
     val reviewCount: Int,
-    val isVerified: Boolean
+    val isVerified: Boolean,
+    val projectCount: Int = 0,
+    val doctorCount: Int = 0
 )
 
 data class ManagedInstitutionProfile(

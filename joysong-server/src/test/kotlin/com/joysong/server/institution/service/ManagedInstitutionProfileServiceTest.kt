@@ -26,11 +26,16 @@ class ManagedInstitutionProfileServiceTest {
 
     @Test
     fun `list returns only the institutions managed by the actor`() {
-        every { repository.findAll() } returns listOf(institution("managed"), institution("other"))
+        every { repository.findAll() } returns listOf(
+            institution("managed", projectCount = 7, doctorCount = 3),
+            institution("other")
+        )
 
         val profiles = service.list(actor(managedInstitutionIds = setOf("managed")))
 
         assertEquals(listOf("managed"), profiles.map { it.id })
+        assertEquals(7, profiles.single().projectCount)
+        assertEquals(3, profiles.single().doctorCount)
     }
 
     @Test
