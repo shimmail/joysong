@@ -15,6 +15,7 @@ import org.springframework.mock.env.MockEnvironment
 import org.springframework.context.annotation.AnnotationConfigApplicationContext
 import java.time.Clock
 import java.time.Duration
+import java.time.ZoneId
 
 class AiAgentPropertiesTest {
 
@@ -41,7 +42,7 @@ class AiAgentPropertiesTest {
     }
 
     @Test
-    fun `runtime beans expose the configured lease and one stable clock`() {
+    fun `runtime beans expose the configured lease and one stable system default clock`() {
         AnnotationConfigApplicationContext().use { context ->
             context.environment.propertySources.addFirst(
                 org.springframework.core.env.MapPropertySource(
@@ -53,7 +54,9 @@ class AiAgentPropertiesTest {
             context.refresh()
 
             assertEquals(Duration.ofSeconds(90), context.getBean("turnLease"))
-            assertSame(context.getBean(Clock::class.java), context.getBean(Clock::class.java))
+            val clock = context.getBean(Clock::class.java)
+            assertEquals(ZoneId.systemDefault(), clock.zone)
+            assertSame(clock, context.getBean(Clock::class.java))
         }
     }
 
