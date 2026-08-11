@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/features/agent/domain/agent_models.dart';
@@ -46,13 +48,35 @@ class AgentPlanController extends ChangeNotifier {
   AgentPlanState _state = const AgentPlanState();
   AgentPlanState get state => _state;
   bool _disposed = false;
+  Completer<void>? _activeOperation;
+  Future<bool>? _profileLoadInFlight;
 
-  Future<void> loadProfile() => _run(() async {
-        final profile = await _repository.getProfile();
-        _emit(_state.copyWith(profile: profile));
-      });
+  Future<bool> loadProfile() {
+    final inFlight = _profileLoadInFlight;
+    if (inFlight != null) return inFlight;
+    late final Future<bool> request;
+    request = _loadProfileAfterActiveOperation().whenComplete(() {
+      if (identical(_profileLoadInFlight, request)) {
+        _profileLoadInFlight = null;
+      }
+    });
+    _profileLoadInFlight = request;
+    return request;
+  }
 
-  Future<void> load() => _run(() async {
+  Future<bool> _loadProfileAfterActiveOperation() async {
+    while (true) {
+      final operation = _activeOperation;
+      if (operation == null) break;
+      await operation.future;
+    }
+    return _run(() async {
+      final profile = await _repository.getProfile();
+      _emit(_state.copyWith(profile: profile));
+    });
+  }
+
+  Future<bool> load() => _run(() async {
         final results = await Future.wait<Object>([
           _repository.getProfile(),
           _repository.getPlans(),
@@ -65,7 +89,7 @@ class AgentPlanController extends ChangeNotifier {
         );
       });
 
-  Future<void> saveProfile(AgentProfileDraft draft, {bool confirm = false}) =>
+  Future<bool> saveProfile(AgentProfileDraft draft, {bool confirm = false}) =>
       _run(() async {
         var profile = await _repository.updateProfile(draft);
         if (confirm) {
@@ -74,7 +98,7 @@ class AgentPlanController extends ChangeNotifier {
         _emit(_state.copyWith(profile: profile));
       });
 
-  Future<void> assessAndCreatePlan(AgentSafetyScreening screening) =>
+  Future<bool> assessAndCreatePlan(AgentSafetyScreening screening) =>
       _run(() async {
         final assessment = await _repository.createAssessment(screening);
         _emit(_state.copyWith(assessment: assessment));
@@ -94,7 +118,7 @@ class AgentPlanController extends ChangeNotifier {
   void selectPlan(AgentPlan plan) =>
       _emit(_state.copyWith(selectedPlan: plan, clearError: true));
 
-  Future<void> deletePlan(String planId) => _run(() async {
+  Future<bool> deletePlan(String planId) => _run(() async {
         await _repository.deletePlan(planId);
         final remaining =
             _state.plans.where((plan) => plan.id != planId).toList();
@@ -110,12 +134,15 @@ class AgentPlanController extends ChangeNotifier {
         notifyListeners();
       });
 
-  Future<void> _run(Future<void> Function() action) async {
-    if (_state.isLoading) return;
+  Future<bool> _run(Future<void> Function() action) async {
+    if (_state.isLoading) return false;
+    final operation = Completer<void>();
+    _activeOperation = operation;
     _emit(_state.copyWith(isLoading: true, clearError: true));
     try {
       await action();
       _emit(_state.copyWith(isLoading: false));
+      return true;
     } on Object catch (error) {
       _emit(
         _state.copyWith(
@@ -123,6 +150,12 @@ class AgentPlanController extends ChangeNotifier {
           errorMessage: error is ApiException ? error.message : '操作失败，请稍后重试',
         ),
       );
+      return false;
+    } finally {
+      operation.complete();
+      if (identical(_activeOperation, operation)) {
+        _activeOperation = null;
+      }
     }
   }
 

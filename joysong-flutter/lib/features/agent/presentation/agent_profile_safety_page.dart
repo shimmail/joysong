@@ -28,6 +28,9 @@ class _AgentProfileSafetyPageState extends State<AgentProfileSafetyPage> {
   bool _guarantee = false;
   bool _distress = false;
   bool _profileLoaded = false;
+  bool _submitting = false;
+  bool _formDirty = false;
+  int _profileLoadGeneration = 0;
 
   bool get _english => Localizations.localeOf(context).languageCode == 'en';
 
@@ -38,8 +41,15 @@ class _AgentProfileSafetyPageState extends State<AgentProfileSafetyPage> {
   }
 
   Future<void> _loadProfile() async {
-    await widget.controller.loadProfile();
-    if (!mounted || widget.controller.state.errorMessage != null) return;
+    final generation = ++_profileLoadGeneration;
+    final executed = await widget.controller.loadProfile();
+    if (!mounted ||
+        generation != _profileLoadGeneration ||
+        !executed ||
+        widget.controller.state.errorMessage != null ||
+        (_profileLoaded && _formDirty)) {
+      return;
+    }
     final profile = widget.controller.state.profile;
     if (profile == null) return;
     _city.text = profile.city;
@@ -56,6 +66,8 @@ class _AgentProfileSafetyPageState extends State<AgentProfileSafetyPage> {
     setState(() => _profileLoaded = false);
     unawaited(_loadProfile());
   }
+
+  void _markDirty(String _) => _formDirty = true;
 
   @override
   void dispose() {
@@ -79,43 +91,59 @@ class _AgentProfileSafetyPageState extends State<AgentProfileSafetyPage> {
       .toList(growable: false);
 
   Future<void> _submit() async {
+    if (_submitting) return;
     final current = widget.controller.state.profile;
     if (current == null) return;
-    await widget.controller.saveProfile(
-      AgentProfileDraft(
-        city: _city.text.trim(),
-        goals: _tokens(_goals.text),
-        budgetMin:
-            _budgetMin.text.trim().isEmpty ? null : _budgetMin.text.trim(),
-        budgetMax:
-            _budgetMax.text.trim().isEmpty ? null : _budgetMax.text.trim(),
-        acceptableDowntimeDays: int.tryParse(_downtime.text),
-        painTolerance: _pain,
-        preferences: _tokens(_preferences.text),
-        excludedProjects: current.excludedProjects,
-        consentVersion: current.consentVersion,
-      ),
-      confirm: true,
-    );
-    if (widget.controller.state.errorMessage != null || !mounted) return;
-    await widget.controller.assessAndCreatePlan(AgentSafetyScreening(
-      pregnantOrNursing: _pregnant,
-      activeSkinCondition: _skin,
-      severeAllergyHistory: _allergy,
-      takingRelevantMedication: _medication,
-      recentProcedure: _recent,
-      expectsGuaranteedResult: _guarantee,
-      severeDistressAboutAppearance: _distress,
-    ));
-    if (!mounted || widget.controller.state.errorMessage != null) return;
-    final assessment = widget.controller.state.assessment;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(
-      assessment == null
-          ? (_english ? 'Unable to complete assessment' : '评估未完成')
-          : '${_english ? 'Risk level' : '风险等级'}: ${assessment.riskLevel}',
-    )));
-    if (assessment != null) Navigator.pop(context, true);
+    setState(() => _submitting = true);
+    try {
+      final saveExecuted = await widget.controller.saveProfile(
+        AgentProfileDraft(
+          city: _city.text.trim(),
+          goals: _tokens(_goals.text),
+          budgetMin:
+              _budgetMin.text.trim().isEmpty ? null : _budgetMin.text.trim(),
+          budgetMax:
+              _budgetMax.text.trim().isEmpty ? null : _budgetMax.text.trim(),
+          acceptableDowntimeDays: int.tryParse(_downtime.text),
+          painTolerance: _pain,
+          preferences: _tokens(_preferences.text),
+          excludedProjects: current.excludedProjects,
+          consentVersion: current.consentVersion,
+        ),
+        confirm: true,
+      );
+      if (!saveExecuted ||
+          widget.controller.state.errorMessage != null ||
+          !mounted) {
+        return;
+      }
+      final assessmentExecuted =
+          await widget.controller.assessAndCreatePlan(AgentSafetyScreening(
+        pregnantOrNursing: _pregnant,
+        activeSkinCondition: _skin,
+        severeAllergyHistory: _allergy,
+        takingRelevantMedication: _medication,
+        recentProcedure: _recent,
+        expectsGuaranteedResult: _guarantee,
+        severeDistressAboutAppearance: _distress,
+      ));
+      if (!assessmentExecuted ||
+          !mounted ||
+          widget.controller.state.errorMessage != null) {
+        return;
+      }
+      final assessment = widget.controller.state.assessment;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+        assessment == null
+            ? (_english ? 'Unable to complete assessment' : '评估未完成')
+            : '${_english ? 'Risk level' : '风险等级'}: ${assessment.riskLevel}',
+      )));
+      if (assessment != null) Navigator.pop(context, true);
+    } finally {
+      _submitting = false;
+      if (mounted) setState(() {});
+    }
   }
 
   @override
@@ -144,10 +172,12 @@ class _AgentProfileSafetyPageState extends State<AgentProfileSafetyPage> {
                             const SizedBox(height: 12),
                             TextField(
                                 controller: _city,
+                                onChanged: _markDirty,
                                 decoration: InputDecoration(
                                     labelText: _english ? 'City' : '所在城市')),
                             TextField(
                                 controller: _goals,
+                                onChanged: _markDirty,
                                 decoration: InputDecoration(
                                     labelText: _english
                                         ? 'Goals (comma separated)'
@@ -156,6 +186,7 @@ class _AgentProfileSafetyPageState extends State<AgentProfileSafetyPage> {
                               Expanded(
                                   child: TextField(
                                       controller: _budgetMin,
+                                      onChanged: _markDirty,
                                       keyboardType: TextInputType.number,
                                       decoration: InputDecoration(
                                           labelText: _english
@@ -166,6 +197,7 @@ class _AgentProfileSafetyPageState extends State<AgentProfileSafetyPage> {
                                   child: TextField(
                                       controller: _budgetMax,
                                       key: const Key('agent-budget-field'),
+                                      onChanged: _markDirty,
                                       keyboardType: TextInputType.number,
                                       decoration: InputDecoration(
                                           labelText: _english
@@ -174,6 +206,7 @@ class _AgentProfileSafetyPageState extends State<AgentProfileSafetyPage> {
                             ]),
                             TextField(
                                 controller: _downtime,
+                                onChanged: _markDirty,
                                 keyboardType: TextInputType.number,
                                 decoration: InputDecoration(
                                     labelText: _english
@@ -197,11 +230,14 @@ class _AgentProfileSafetyPageState extends State<AgentProfileSafetyPage> {
                                 DropdownMenuItem(
                                     value: 'HIGH', child: Text('High / 高')),
                               ],
-                              onChanged: (value) =>
-                                  setState(() => _pain = value ?? _pain),
+                              onChanged: (value) => setState(() {
+                                _formDirty = true;
+                                _pain = value ?? _pain;
+                              }),
                             ),
                             TextField(
                                 controller: _preferences,
+                                onChanged: _markDirty,
                                 decoration: InputDecoration(
                                     labelText:
                                         _english ? 'Preferences' : '偏好（逗号分隔）')),
@@ -242,8 +278,10 @@ class _AgentProfileSafetyPageState extends State<AgentProfileSafetyPage> {
                                 (v) => _distress = v),
                             const SizedBox(height: 22),
                             FilledButton(
-                              onPressed: state.isLoading ? null : _submit,
-                              child: state.isLoading
+                              onPressed: state.isLoading || _submitting
+                                  ? null
+                                  : _submit,
+                              child: state.isLoading || _submitting
                                   ? const SizedBox.square(
                                       dimension: 20,
                                       child: CircularProgressIndicator(
@@ -289,7 +327,10 @@ class _AgentProfileSafetyPageState extends State<AgentProfileSafetyPage> {
         contentPadding: EdgeInsets.zero,
         title: Text(title),
         value: value,
-        onChanged: (next) => setState(() => assign(next)),
+        onChanged: (next) => setState(() {
+          _formDirty = true;
+          assign(next);
+        }),
       );
 }
 

@@ -132,6 +132,120 @@ void main() {
     expect(assessmentRepository.createAssessmentCalls, 1);
     expect(find.text('评估失败：信息不完整'), findsOneWidget);
   });
+
+  testWidgets(
+      'double submit cannot complete from a stale assessment while save is pending',
+      (tester) async {
+    final pendingSave = Completer<AgentProfile>();
+    final repository = _ProfileRepository(
+      profileResult: Future.value(_profile),
+      saveResult: pendingSave.future,
+    );
+    final controller = AgentPlanController(repository);
+    addTearDown(controller.dispose);
+    await controller.assessAndCreatePlan(const AgentSafetyScreening());
+    expect(controller.state.assessment?.id, 'assessment-1');
+
+    final launcherKey = GlobalKey<_ProfileLauncherState>();
+    await tester.pumpWidget(_routeApp(controller, launcherKey));
+    await tester.tap(find.byKey(const Key('open-agent-profile')));
+    await tester.pumpAndSettle();
+    final submit = await _findSubmit(tester);
+    final button = tester.widget<FilledButton>(submit);
+
+    button.onPressed!();
+    button.onPressed!();
+    await tester.pump();
+
+    expect(repository.updateProfileCalls, 1);
+    expect(repository.createAssessmentCalls, 1);
+    expect(launcherKey.currentState?.result, isNull);
+    expect(find.byType(AgentProfileSafetyPage), findsOneWidget);
+
+    pendingSave.complete(_profile);
+    await tester.pumpAndSettle();
+    expect(repository.createAssessmentCalls, 2);
+    expect(launcherKey.currentState?.result, isTrue);
+  });
+
+  testWidgets('profile loading still executes while a mutation is pending',
+      (tester) async {
+    final pendingSave = Completer<AgentProfile>();
+    final pendingProfile = Completer<AgentProfile>();
+    final repository = _ProfileRepository(
+      profileResult: pendingProfile.future,
+      saveResult: pendingSave.future,
+    );
+    final controller = AgentPlanController(repository);
+    addTearDown(controller.dispose);
+    addTearDown(() {
+      if (!pendingSave.isCompleted) pendingSave.complete(_staleProfile);
+      if (!pendingProfile.isCompleted) pendingProfile.complete(_profile);
+    });
+
+    final save = controller.saveProfile(const AgentProfileDraft());
+    await tester.pumpWidget(_app(controller));
+    await tester.pump();
+
+    expect(repository.getProfileCalls, 0);
+    expect(find.byKey(const Key('agent-budget-field')), findsNothing);
+
+    pendingSave.complete(_staleProfile);
+    await save;
+    await tester.pump();
+
+    expect(repository.getProfileCalls, 1);
+    expect(find.byKey(const Key('agent-budget-field')), findsNothing);
+
+    pendingProfile.complete(_profile);
+    await tester.pumpAndSettle();
+
+    final field = tester.widget<TextField>(
+      find.byKey(const Key('agent-budget-field')),
+    );
+    expect(field.controller?.text, '8000');
+  });
+
+  testWidgets('concurrent retry does not expose a stale profile',
+      (tester) async {
+    final pendingProfile = Completer<AgentProfile>();
+    final repository = _ProfileRepository(
+      profileResults: [
+        () => Future.value(_staleProfile),
+        () => Future<AgentProfile>.error(
+              const ApiException(message: '档案加载失败，请检查网络'),
+            ),
+        () => pendingProfile.future,
+      ],
+    );
+    final controller = AgentPlanController(repository);
+    addTearDown(controller.dispose);
+    addTearDown(() {
+      if (!pendingProfile.isCompleted) pendingProfile.complete(_profile);
+    });
+    await controller.loadProfile();
+
+    await tester.pumpWidget(_app(controller));
+    await tester.pumpAndSettle();
+    final retry = tester.widget<FilledButton>(
+      find.byKey(const Key('agent-profile-retry')),
+    );
+
+    retry.onPressed!();
+    retry.onPressed!();
+    await tester.pump();
+
+    expect(repository.getProfileCalls, 3);
+    expect(find.byKey(const Key('agent-budget-field')), findsNothing);
+
+    pendingProfile.complete(_profile);
+    await tester.pumpAndSettle();
+
+    final field = tester.widget<TextField>(
+      find.byKey(const Key('agent-budget-field')),
+    );
+    expect(field.controller?.text, '8000');
+  });
 }
 
 Widget _app(AgentPlanController controller) => MaterialApp(
@@ -145,14 +259,65 @@ Widget _app(AgentPlanController controller) => MaterialApp(
       home: AgentProfileSafetyPage(controller: controller),
     );
 
+Widget _routeApp(
+  AgentPlanController controller,
+  GlobalKey<_ProfileLauncherState> launcherKey,
+) =>
+    MaterialApp(
+      locale: const Locale('zh'),
+      supportedLocales: const [Locale('zh')],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      home: _ProfileLauncher(key: launcherKey, controller: controller),
+    );
+
+class _ProfileLauncher extends StatefulWidget {
+  const _ProfileLauncher({required this.controller, super.key});
+
+  final AgentPlanController controller;
+
+  @override
+  State<_ProfileLauncher> createState() => _ProfileLauncherState();
+}
+
+class _ProfileLauncherState extends State<_ProfileLauncher> {
+  bool? result;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        body: FilledButton(
+          key: const Key('open-agent-profile'),
+          onPressed: () async {
+            result = await Navigator.of(context).push<bool>(
+              MaterialPageRoute(
+                builder: (_) => AgentProfileSafetyPage(
+                  controller: widget.controller,
+                ),
+              ),
+            );
+            if (mounted) setState(() {});
+          },
+          child: const Text('打开档案'),
+        ),
+      );
+}
+
 Future<void> _tapSubmit(WidgetTester tester) async {
-  final submit = find.text('保存并评估');
+  final submit = await _findSubmit(tester);
+  await tester.tap(submit);
+}
+
+Future<Finder> _findSubmit(WidgetTester tester) async {
+  final label = find.text('保存并评估');
   await tester.scrollUntilVisible(
-    submit,
+    label,
     500,
     scrollable: find.byType(Scrollable).first,
   );
-  await tester.tap(submit);
+  return find.ancestor(of: label, matching: find.byType(FilledButton));
 }
 
 class _ProfileRepository extends Fake implements AgentRepository {
@@ -160,6 +325,7 @@ class _ProfileRepository extends Fake implements AgentRepository {
     Future<AgentProfile>? profileResult,
     List<Future<AgentProfile> Function()>? profileResults,
     this.saveError,
+    this.saveResult,
     this.assessmentError,
   })  : _profileResult = profileResult,
         _profileResults = profileResults ?? const [];
@@ -167,10 +333,12 @@ class _ProfileRepository extends Fake implements AgentRepository {
   final Future<AgentProfile>? _profileResult;
   final List<Future<AgentProfile> Function()> _profileResults;
   final Object? saveError;
+  final Future<AgentProfile>? saveResult;
   final Object? assessmentError;
   int getProfileCalls = 0;
   int getPlansCalls = 0;
   int createAssessmentCalls = 0;
+  int updateProfileCalls = 0;
   AgentProfileDraft? lastSavedProfile;
 
   @override
@@ -188,10 +356,11 @@ class _ProfileRepository extends Fake implements AgentRepository {
   }
 
   @override
-  Future<AgentProfile> updateProfile(AgentProfileDraft draft) async {
+  Future<AgentProfile> updateProfile(AgentProfileDraft draft) {
+    updateProfileCalls++;
     lastSavedProfile = draft;
-    if (saveError case final error?) throw error;
-    return _profile;
+    if (saveError case final error?) return Future.error(error);
+    return saveResult ?? Future.value(_profile);
   }
 
   @override
@@ -220,6 +389,22 @@ const _profile = AgentProfile(
   consentVersion: 'agent-profile-v2',
   confirmedAt: null,
   completenessScore: 80,
+  missingFields: [],
+);
+
+const _staleProfile = AgentProfile(
+  id: 'profile-stale',
+  city: '北京',
+  goals: ['旧目标'],
+  budgetMin: '500',
+  budgetMax: '5000',
+  acceptableDowntimeDays: 1,
+  painTolerance: 'LOW',
+  preferences: ['旧偏好'],
+  excludedProjects: ['project-old'],
+  consentVersion: 'agent-profile-v1',
+  confirmedAt: null,
+  completenessScore: 50,
   missingFields: [],
 );
 
