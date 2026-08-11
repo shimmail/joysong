@@ -34,11 +34,6 @@ interface RevenueIssueRecorder {
     fun recordRecoveryRequired(issue: RecoveryRequiredRevenueIssue)
 }
 
-@Service
-class NoopRevenueIssueRecorder : RevenueIssueRecorder {
-    override fun recordRecoveryRequired(issue: RecoveryRequiredRevenueIssue) = Unit
-}
-
 /** Appends wallet reversals after a provider refund is durably finalized. */
 @Service
 class SettlementReversalService(

@@ -1353,15 +1353,24 @@ CREATE TABLE wallet_ledger_entries (
 CREATE TABLE reconciliation_issues (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     issue_type VARCHAR(50) NOT NULL,
-    source_type VARCHAR(30) NOT NULL,
-    source_id VARCHAR(100) NOT NULL,
+    object_type VARCHAR(30) NOT NULL,
+    object_id VARCHAR(100) NOT NULL,
+    expected_minor BIGINT NOT NULL DEFAULT 0,
+    actual_minor BIGINT NOT NULL DEFAULT 0,
+    currency CHAR(3) NULL,
+    severity VARCHAR(20) NOT NULL DEFAULT 'ERROR',
+    status VARCHAR(20) NOT NULL DEFAULT 'OPEN',
+    occurrence_count BIGINT NOT NULL DEFAULT 1,
+    first_detected_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_detected_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     details TEXT NULL,
     resolved_at DATETIME NULL,
     active_key VARCHAR(255) GENERATED ALWAYS AS (
-        CASE WHEN resolved_at IS NULL THEN CONCAT(issue_type, ':', source_type, ':', source_id) ELSE NULL END
+        CASE WHEN resolved_at IS NULL THEN CONCAT(issue_type, ':', object_type, ':', object_id) ELSE NULL END
     ) STORED,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_reconciliation_issues_active (active_key),
-    KEY idx_reconciliation_issues_unresolved (resolved_at, created_at)
+    KEY idx_reconciliation_issues_unresolved (resolved_at, created_at),
+    KEY idx_reconciliation_issues_status (status, last_detected_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
