@@ -8,8 +8,23 @@
 
 ```powershell
 $env:GRADLE_USER_HOME='D:\code\kotlin\joysong\.tmp\gradle-user-home-codex'
-cd D:\code\kotlin\joysong\.worktrees\ai-agent-architecture-refactor\joysong-server
+cd D:\code\kotlin\joysong\.worktrees\ai-agent-production-hardening\joysong-server
 ```
+
+## V10 部署预检
+
+V10 会重建 Agent 表。正式运行 Flyway 前，使用只读预检确认 V10 是否仍待执行，以及固定清单内的旧 Agent 表是否含数据。数据库密码只能通过 `DB_PASSWORD` 传入；脚本参数和输出均不得包含密码。
+
+```powershell
+$env:DB_PASSWORD='<从密钥管理器注入>'
+.\deploy\preflight-agent-v10.ps1 `
+  -DatabaseHost '<mysql-host>' `
+  -DatabasePort 3306 `
+  -DatabaseName '<database-name>' `
+  -DatabaseUser '<read-only-user>'
+```
+
+脚本在 V10 已执行，或 V10 待执行但旧 Agent 表不存在/为空时返回 `0`。若 V10 待执行且任一旧 Agent 表存在数据，则输出 `V10 migration blocked` 并返回非零；此时不得启动 Flyway，应先制定数据保留/迁移方案。测试调用必须增加 `-TestMode`，且数据库名必须以 `myapp_worktree_` 开头。
 
 ## 定向 JVM 验证
 
@@ -30,6 +45,7 @@ cd D:\code\kotlin\joysong\.worktrees\ai-agent-architecture-refactor\joysong-serv
 
 ```powershell
 .\gradlew.bat mysqlIntegrationTest --offline --rerun-tasks `
+  --tests '*AgentMigrationPreflightTest' `
   --tests '*AgentV2MySqlIntegrationTest' `
   --tests '*AgentChatFlowIntegrationTest'
 ```
