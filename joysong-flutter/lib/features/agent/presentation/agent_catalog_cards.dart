@@ -243,6 +243,7 @@ class AgentComparisonTable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final english = Localizations.localeOf(context).languageCode == 'en';
     final dimensions = report.comparisonDimensions.isNotEmpty
         ? report.comparisonDimensions
         : _allAttributeKeys(report.items);
@@ -263,8 +264,22 @@ class AgentComparisonTable extends StatelessWidget {
                     onTap: onOpen != null && (canOpen?.call(item) ?? true)
                         ? () => onOpen!(item)
                         : null,
-                    child: Text(item.name,
-                        maxLines: 2, overflow: TextOverflow.ellipsis),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          item.name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (!(canOpen?.call(item) ?? true))
+                          Text(
+                            english ? 'Information is incomplete' : '信息暂不完整',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ),
