@@ -643,10 +643,7 @@ class ChatService(
 
     private fun enforcePlanningBoundary(intent: AgentIntent, content: String): String {
         if (intent != AgentIntent.PLANNING) return content
-        return AgentText.value(
-            "以下仅作为平台信息参考，不构成诊断或治疗建议。平台可展示相关项目名称、价格等结构化资料；个人适用性、恢复期、疼痛程度、禁忌与风险需向机构确认，必要时由具备资质的医生面诊确认。",
-            "This is platform information reference only and is not diagnosis or treatment advice. The platform can show structured details such as names and prices; personal suitability, downtime, pain, contraindications, and risks require confirmation with the institution or a qualified clinician."
-        )
+        return PlanningCatalogProjection.safeContent()
     }
 
     private fun isProviderTimeout(error: Throwable): Boolean {

@@ -260,14 +260,18 @@ class TurnLifecycleService(
     )
 
     private fun reconstruct(turn: AgentTurnEntity, message: ChatMessageEntity): ChatTurnResult {
-        val metadata = objectMapper.readTree(message.metadataJson.ifBlank { "{}" })
+        val projectedMessage = PlanningCatalogProjection.projectStoredMessage(message, objectMapper)
+        val metadata = objectMapper.readTree(projectedMessage.metadataJson.ifBlank { "{}" })
+        val intent = metadata.path("intent").asText("GENERAL_CHAT")
+        val catalogItems = metadata.get("catalogItems")?.takeIf { it.isArray }
+            ?.map { objectMapper.treeToValue(it, AgentCatalogItemResponse::class.java) }.orEmpty()
+        val catalogReport = metadata.get("catalogReport")?.takeUnless { it.isNull }
+            ?.let { objectMapper.treeToValue(it, AgentCatalogReportResponse::class.java) }
         return ChatTurnResult(
-            message = message,
-            catalogItems = metadata.get("catalogItems")?.takeIf { it.isArray }
-                ?.map { objectMapper.treeToValue(it, AgentCatalogItemResponse::class.java) }.orEmpty(),
-            catalogReport = metadata.get("catalogReport")?.takeUnless { it.isNull }
-                ?.let { objectMapper.treeToValue(it, AgentCatalogReportResponse::class.java) },
-            intent = metadata.path("intent").asText("GENERAL_CHAT"),
+            message = projectedMessage,
+            catalogItems = catalogItems,
+            catalogReport = catalogReport,
+            intent = intent,
             queryTarget = metadata.get("queryTarget")?.takeUnless { it.isNull }?.asText(),
             nextAction = metadata.path("nextAction").asText("NONE"),
             traceId = turn.traceId
