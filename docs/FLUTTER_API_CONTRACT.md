@@ -423,11 +423,11 @@ Flutter 可以完成页面和接口抽象，但生产发布前必须等待支付
 
 ## 11. 医生与机构专业管理接口
 
-专业入口使用与管理后台相同的受限接口，但所有列表和写操作都由服务端按 `ManagementContext` 做对象级过滤。
+专业入口使用受限接口，服务端按 `ManagementContext` 做对象级过滤。医生本人档案是单资源，不经过管理员医生列表或带 ID 的管理路由。
 
 | 能力 | 接口 |
 |---|---|
-| 医生档案 | `GET /admin/doctors`、`PUT /admin/doctors/{id}` |
+| 医生本人档案 | `GET /management/doctor-profile`、`PUT /management/doctor-profile` |
 | 机构档案 | `GET /admin/institutions`、`PUT /admin/institutions/{id}` |
 | 文章 | `GET/POST /admin/articles`、`PUT/DELETE /admin/articles/{id}` |
 | 机构项目 | `GET/POST /admin/institution-projects`、`PUT/DELETE /admin/institution-projects/{id}` |
@@ -438,15 +438,16 @@ Flutter 可以完成页面和接口抽象，但生产发布前必须等待支付
 
 权限规则：
 
-- 医生可修改自己的医生档案、自己的文章和自己在机构项目中的个人服务资料。
+- 医生仅通过 `/management/doctor-profile` 读取和完整更新自己的单个医生档案；请求不发送 `id` 或 `userId`。PUT 必须带齐 `name`、`title`、`bio`、`avatar`、`contactPhone`、`specialties`、`credentials`、`credentialImages`、`certificationTags` 九个非 null String 字段。`name` 不得为空白，其余八项可用 `""` 清空；缺失或 `null` 为 400。
+- 响应为单个对象而非数组。`id`、`userId`、机构摘要、评分、评价数、认证状态和统计计数是只读平台/关联字段；客户端不得在 PUT 中发送或本地伪造这些字段。
 - 机构法人可修改自己已确认管理的机构、管理其医生和机构项目、审核医生加入/退出/资料修改申请。
 - 医生不能直接修改机构项目价格、销量、评分、评价数或上下架状态。
 - 医生和机构法人都不能修改自己的评分、评价数和认证状态；服务端会保留原值。
-- 医生自主上传的主页证书图片与身份审核材料相互独立。
+- `credentials` 与 `credentialImages` 是医生自主维护的公开展示材料，和私有身份审核材料相互独立；UI 只能使用“医生上传的证书图片/展示材料”等中性文案，不得写“资质保险箱”“查资质”或“平台已核验”。公开图片经 `POST /upload` 上传并使用 `data.url`，多图再以逗号拼接提交。
 - 分账调整通过提案完成，医生方与机构方都确认后才替换当前配置；专业用户不能直接写生效配置。
 - 管理员可查看和管理全量数据，客户端不得把管理员专属页面暴露给专业用户。
 
-管理端的 `/api/admin/**` 前缀是历史命名，不代表专业用户拥有管理员权限。只能调用本节列出的已放行路由；其他 `/admin/**` 需要平台管理员角色。
+`/api/admin/doctors` 及 `/api/admin/doctors/{id}` 保留为平台管理员兼容路由，医生专业中心不得再调用。管理端的 `/api/admin/**` 前缀是历史命名，不代表专业用户拥有管理员权限；其他 `/admin/**` 需要平台管理员角色。
 
 ## 12. 数据表示兼容规则
 

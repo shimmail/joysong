@@ -1928,6 +1928,101 @@ Authorization: Bearer <token>
 
 ---
 
+## 已认证医生本人档案 `/api/management/doctor-profile`
+
+用于已认证医生维护**本人**公开档案。两个接口均需 `Authorization: Bearer {token}`；服务端以实时 `ACTIVE DOCTOR` 身份和当前登录用户推导医生档案，客户端不得在路径或请求体中传递 `id`、`userId`，也不能借此读取或修改其他医生。
+
+### GET /api/management/doctor-profile
+
+请求体：无。
+
+成功响应为单个 `BaseResponse<DoctorProfileView>`，不是数组：
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "id": "doctor-1",
+    "userId": "user-1",
+    "name": "李医生",
+    "title": "主任医师",
+    "bio": "擅长皮肤修复",
+    "avatar": "https://cdn.example.com/doctor/avatar.png",
+    "contactPhone": "13800000000",
+    "specialties": "皮肤修复,注射美容",
+    "credentials": "医生自主填写的公开展示说明",
+    "credentialImages": "https://cdn.example.com/doctor/cert-1.png,https://cdn.example.com/doctor/cert-2.png",
+    "certificationTags": "专家,三甲",
+    "institutionId": "institution-legacy",
+    "institutionName": "示例医美中心",
+    "institutions": [{ "id": "institution-1", "name": "第一医院" }],
+    "primaryInstitution": { "id": "institution-1", "name": "第一医院" },
+    "institutionCount": 1,
+    "rating": 4.8,
+    "reviewCount": 13,
+    "isVerified": true,
+    "consultationCount": 21,
+    "caseCount": 8
+  }
+}
+```
+
+### PUT /api/management/doctor-profile
+
+完整替换九个可编辑字段；请求体必须提供以下九个非 null String 字段，不可传 `id` 或 `userId`：
+
+```json
+{
+  "name": "李医生",
+  "title": "主任医师",
+  "bio": "擅长皮肤修复",
+  "avatar": "https://cdn.example.com/doctor/avatar.png",
+  "contactPhone": "13800000000",
+  "specialties": "皮肤修复,注射美容",
+  "credentials": "医生自主填写的公开展示说明",
+  "credentialImages": "https://cdn.example.com/doctor/cert-1.png,https://cdn.example.com/doctor/cert-2.png",
+  "certificationTags": "专家,三甲"
+}
+```
+
+| 字段 | 数据库映射 | 规则 |
+|---|---|---|
+| name | `doctors.name` | 必传且非空白；首尾空白会去除。 |
+| title | `doctors.title` | 必传 String；`""` 清空，首尾空白会去除。 |
+| bio | `doctors.bio` | 必传 String；`""` 清空，首尾空白会去除。 |
+| avatar | `doctors.avatar` | 必传 String；`""` 清空，首尾空白会去除。 |
+| contactPhone | `doctors.contact_phone` | 必传 String；`""` 清空，首尾空白会去除。 |
+| specialties | `doctors.specialties` | 必传 String；`""` 清空；逗号分隔项会去空白和空项。 |
+| credentials | `doctors.credentials` | 必传 String；`""` 清空，首尾空白会去除。 |
+| credentialImages | `doctors.credential_images` | 必传 String；`""` 清空；逗号分隔 URL 会去空白和空项。 |
+| certificationTags | `doctors.certification_tags` | 必传 String；`""` 清空；逗号分隔项会去空白和空项。 |
+
+任何九字段缺失、为 `null` 或 JSON 格式错误均为 400；除 `name` 外的八个字段传 `""` 是清空该字段的合法方式。成功时返回与 GET 相同的单个完整对象。
+
+下列响应字段由平台或关联关系维护，只读且 PUT 后保持原值：
+
+| 字段 | 含义 |
+|---|---|
+| id、userId | 医生档案和归属用户标识，由服务端确定。 |
+| institutionId、institutionName | 兼容机构摘要。 |
+| institutions、primaryInstitution、institutionCount | 当前已关联机构摘要及数量。 |
+| rating、reviewCount、isVerified | 评分、评价数和平台认证状态。 |
+| consultationCount、caseCount | 平台统计计数。 |
+
+| HTTP / BaseResponse.code | 场景 | `message` |
+|---|---|---|
+| 400 | PUT 缺失/`null` 字段、JSON 不可读或 `name` 空白 | `请求内容格式不正确`；`name` 空白为 `name 不能为空` |
+| 401 | 未登录或令牌失效 | `登录状态已失效，请重新登录` |
+| 403 | 非 ACTIVE DOCTOR、管理员或无有效医生身份 | `当前账号没有有效医生身份` |
+| 404 | ACTIVE DOCTOR 没有对应医生档案 | `医生档案不存在` |
+
+> **公开展示材料：** `credentials` 与 `credentialImages` 都是医生自主填写或上传的公开展示内容，不是私有身份认证材料，也不代表平台已验证。不得在用户界面展示为“资质保险箱”“查资质”或“平台已核验”。
+
+头像和证书展示图片先使用现有 `POST /api/upload` 上传，读取响应中的 `data.url`；多张 `credentialImages` 以逗号拼接 URL 后作为上述完整 PUT 的字段值。私有身份认证材料继续使用身份认证文件接口，不能使用本公开上传流程。
+
+---
+
 ## 十二、管理后台 `/api/admin`
 
 > 需要 Bearer Token + `ROLE_ADMIN` 角色。
@@ -2041,14 +2136,14 @@ Authorization: Bearer <token>
 
 ---
 
-### 12.4 医生管理
+### 12.4 医生管理（平台管理员兼容路由）
 
 | 方法 | 路径 | 描述 |
 |------|------|------|
-| GET | `/api/admin/doctors` | 列出所有医生（支持 `?keyword=X` 模糊搜索） |
-| POST | `/api/admin/doctors` | 新建医生（支持绑定多家机构并指定主展示机构） |
-| PUT | `/api/admin/doctors/{id}` | 更新医生 |
-| DELETE | `/api/admin/doctors/{id}` | 删除医生（逻辑删除） |
+| GET | `/api/admin/doctors` | 平台管理员兼容：列出所有医生（支持 `?keyword=X` 模糊搜索） |
+| POST | `/api/admin/doctors` | 平台管理员兼容：新建医生（支持绑定多家机构并指定主展示机构） |
+| PUT | `/api/admin/doctors/{id}` | 平台管理员兼容：更新指定医生 |
+| DELETE | `/api/admin/doctors/{id}` | 平台管理员兼容：删除指定医生（逻辑删除） |
 
 **请求体（POST/PUT）：**
 
@@ -2512,6 +2607,8 @@ Authorization: Bearer <token>
 | 聊天 | POST | `/api/chat/sessions/{id}/messages` | ✅ |
 | 聊天 | GET | `/api/chat/sessions/{id}/messages` | ✅ |
 | 上传 | POST | `/api/upload` | ✅ |
+| 医生本人档案 | GET | `/api/management/doctor-profile` | ACTIVE DOCTOR（本人） |
+| 医生本人档案 | PUT | `/api/management/doctor-profile` | ACTIVE DOCTOR（本人） |
 | 管理 | GET | `/api/admin/stats` | ADMIN |
 | 管理 | GET | `/api/admin/projects` | ADMIN |
 | 管理 | POST | `/api/admin/projects` | ADMIN |
@@ -2521,10 +2618,10 @@ Authorization: Bearer <token>
 | 管理 | POST | `/api/admin/banners` | ADMIN |
 | 管理 | PUT | `/api/admin/banners/{id}` | ADMIN |
 | 管理 | DELETE | `/api/admin/banners/{id}` | ADMIN |
-| 管理 | GET | `/api/admin/doctors` | ADMIN |
-| 管理 | POST | `/api/admin/doctors` | ADMIN |
-| 管理 | PUT | `/api/admin/doctors/{id}` | ADMIN |
-| 管理 | DELETE | `/api/admin/doctors/{id}` | ADMIN |
+| 管理（平台管理员兼容） | GET | `/api/admin/doctors` | ADMIN |
+| 管理（平台管理员兼容） | POST | `/api/admin/doctors` | ADMIN |
+| 管理（平台管理员兼容） | PUT | `/api/admin/doctors/{id}` | ADMIN |
+| 管理（平台管理员兼容） | DELETE | `/api/admin/doctors/{id}` | ADMIN |
 | 管理 | GET | `/api/admin/institutions` | ADMIN |
 | 管理 | GET | `/api/admin/institutions/{id}` | ADMIN |
 | 管理 | POST | `/api/admin/institutions` | ADMIN |

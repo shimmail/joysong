@@ -1,0 +1,25 @@
+@startuml
+title JoySong 核心角色业务泳道
+
+|普通用户|
+start
+:浏览公开医生和机构资料;
+|医生（ACTIVE DOCTOR）|
+:GET /api/management/doctor-profile;
+:查看本人单个医生档案;
+:PUT /api/management/doctor-profile;
+:完整更新九个公开档案字段;
+note right
+医生专业端：2 个唯一 method/path 端点。
+仅可操作本人档案；不使用 admin 医生路由。
+end note
+|机构法人|
+:管理已确认归属的机构与机构范围请求;
+|平台管理员|
+:使用 /api/admin/doctors 兼容路由管理全量医生;
+:使用 /api/admin/doctors/{id} 兼容路由更新指定医生;
+note right
+管理员兼容路由不授予医生管理员权限。
+end note
+stop
+@enduml
