@@ -1,124 +1,173 @@
 package com.joysong.server.settlement.service
 
 import com.joysong.server.order.dto.OrderStatusEnum
+import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.repository.DoctorInstitutionProjectConfigRepository
 import com.joysong.server.order.repository.OrderRepository
 import com.joysong.server.order.service.OrderSplitRatePolicy
+import com.joysong.server.order.service.OrderSplitRates
 import com.joysong.server.order.service.OrderStatusLogService
-import com.joysong.server.settlement.entity.SettlementEntity
-import com.joysong.server.settlement.repository.SettlementRepository
-import org.slf4j.LoggerFactory
-import org.springframework.stereotype.Service
-import org.springframework.transaction.annotation.Transactional
-import java.math.BigDecimal
-import java.math.RoundingMode
-import java.time.LocalDateTime
 import com.joysong.server.payment.domain.Money
+import com.joysong.server.payment.repository.PaymentRepository
+import com.joysong.server.refund.repository.RefundItemRepository
+import com.joysong.server.settlement.entity.SettlementAllocationEntity
+import com.joysong.server.settlement.entity.SettlementAllocationOwnerType
+import com.joysong.server.settlement.entity.SettlementEntity
+import com.joysong.server.settlement.repository.SettlementAllocationRepository
+import com.joysong.server.settlement.repository.SettlementRepository
+import com.joysong.server.wallet.service.WalletLedgerService
+import com.joysong.server.wallet.service.WalletMutation
+import org.slf4j.LoggerFactory
+import org.springframework.dao.DataIntegrityViolationException
+import org.springframework.stereotype.Service
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.TransactionDefinition
+import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionTemplate
+import java.math.BigDecimal
+import java.time.LocalDateTime
 
-/**
- * 结算分账服务
- * 负责订单确认完成后的分账计算、到期结算处理及结算查询
- *
- * @author joysong
- * @since 2026-07-30
- */
+/** Creates immutable settlement snapshots and their corresponding pending wallet credits. */
 @Service
 class SettlementService(
     private val settlementRepository: SettlementRepository,
+    private val allocationRepository: SettlementAllocationRepository,
     private val orderRepository: OrderRepository,
+    private val paymentRepository: PaymentRepository,
+    private val refundItemRepository: RefundItemRepository,
     private val splitRatePolicy: OrderSplitRatePolicy,
     private val doctorInstitutionProjectConfigRepository: DoctorInstitutionProjectConfigRepository,
-    private val orderStatusLogService: OrderStatusLogService
+    private val settlementAmountAllocator: SettlementAmountAllocator,
+    private val walletLedgerService: WalletLedgerService,
+    private val orderStatusLogService: OrderStatusLogService,
+    private val transactionManager: PlatformTransactionManager? = null
 ) {
-
     companion object {
         private val log = LoggerFactory.getLogger(SettlementService::class.java)
-        private val HUNDRED = BigDecimal("100")
-        private val SCALE = 2
+        private const val PLATFORM_ID = "PLATFORM"
+        private const val PLATFORM_NAME = "平台"
+        private const val SETTLEMENT_ENTRY_TYPE = "SETTLEMENT"
     }
 
     /**
-     * 创建结算记录
-     * 订单确认完成时调用，根据共享策略和医生-机构项目配置计算分账金额
-     *
-     * 分账计算规则：
-     * 1. 读取共享策略获取平台与默认机构比例
-     * 2. 读取 DoctorInstitutionProjectConfig 获取机构与医美顾问分账比例
-     * 3. doctorRate = 100 - platformRate - institutionRate - consultantRate
-     * 4. 各方金额 = totalAmount × rate / 100，使用 HALF_UP 舍入
-     *
-     * @param orderId 订单ID
-     * @return 结算分账记录实体
+     * The outer transaction stays usable after a losing unique-key race. The actual creation
+     * runs in a fresh transaction so a duplicate-key failure can be rolled back before reload.
      */
     @Transactional(rollbackFor = [Exception::class])
-    fun saveSettlement(orderId: String): SettlementEntity {
-        val order = orderRepository.findById(orderId)
-            .orElseThrow { IllegalArgumentException("订单不存在: $orderId") }
-
-        val existing = settlementRepository.findByOrderId(orderId)
-        if (existing != null) {
-            log.warn("订单[{}]已存在结算记录[id={}]，跳过创建", orderId, existing.id)
-            return existing
+    fun saveSettlement(orderId: String): SettlementEntity = try {
+        inNewTransaction { createSettlement(orderId) }
+    } catch (error: DataIntegrityViolationException) {
+        if (error.hasSettlementOrderUniqueViolation()) {
+            settlementRepository.findByOrderId(orderId) ?: throw error
+        } else {
+            throw error
         }
+    }
 
+    private fun createSettlement(orderId: String): SettlementEntity {
+        val order = orderRepository.findByIdForUpdate(orderId)
+            ?: throw IllegalArgumentException("订单不存在: $orderId")
+        settlementRepository.findByOrderId(orderId)?.let { return it }
+
+        validateRecipientSnapshot(order)
+        val netPaidMinor = paymentRepository.sumSucceededAmountMinor(orderId) -
+            refundItemRepository.sumCompletedAmountMinor(orderId)
+        require(netPaidMinor > 0) { "ORDER_NET_PAID_NOT_POSITIVE" }
+
+        val rates = resolveRates(order)
+        val amounts = settlementAmountAllocator.allocate(netPaidMinor, rates)
+        val savedSettlement = settlementRepository.saveAndFlush(
+            SettlementEntity(
+                orderId = orderId,
+                totalAmount = Money.fromMinor(netPaidMinor, order.currency),
+                platformAmount = Money.fromMinor(amounts.platform, order.currency),
+                institutionAmount = Money.fromMinor(amounts.institution, order.currency),
+                consultantAmount = Money.fromMinor(amounts.consultant, order.currency),
+                doctorAmount = Money.fromMinor(amounts.doctor, order.currency),
+                currency = order.currency,
+                totalAmountMinor = netPaidMinor,
+                platformAmountMinor = amounts.platform,
+                institutionAmountMinor = amounts.institution,
+                consultantAmountMinor = amounts.consultant,
+                doctorAmountMinor = amounts.doctor,
+                platformRate = rates.platformRate,
+                institutionRate = rates.institutionRate,
+                consultantRate = rates.consultantRate,
+                doctorRate = rates.doctorRate,
+                status = "PENDING",
+                settledAt = order.settlementAt
+            )
+        )
+        val allocations = allocationRepository.saveAll(
+            listOf(
+                allocation(savedSettlement.id, SettlementAllocationOwnerType.PLATFORM, PLATFORM_ID, PLATFORM_NAME, rates.platformRate, amounts.platform),
+                allocation(savedSettlement.id, SettlementAllocationOwnerType.INSTITUTION, order.institutionId, order.institutionName, rates.institutionRate, amounts.institution),
+                allocation(savedSettlement.id, SettlementAllocationOwnerType.CONSULTANT, order.consultantId, order.consultantName, rates.consultantRate, amounts.consultant),
+                allocation(savedSettlement.id, SettlementAllocationOwnerType.DOCTOR, order.doctorId, order.doctorName, rates.doctorRate, amounts.doctor)
+            )
+        )
+        walletLedgerService.apply(allocations.map { allocation ->
+            WalletMutation(
+                ownerType = allocation.ownerType.name,
+                ownerId = allocation.ownerId,
+                currency = order.currency,
+                allocationId = allocation.id,
+                pendingDelta = allocation.amountMinor,
+                availableDelta = 0,
+                frozenDelta = 0,
+                entryType = SETTLEMENT_ENTRY_TYPE,
+                sourceType = SETTLEMENT_ENTRY_TYPE,
+                sourceId = savedSettlement.id.toString(),
+                operationKey = "settlement:create:${savedSettlement.id}:${allocation.id}"
+            )
+        })
+        log.info("订单[{}]结算快照已创建[id={}, netPaidMinor={}]", orderId, savedSettlement.id, netPaidMinor)
+        return savedSettlement
+    }
+
+    private fun validateRecipientSnapshot(order: OrderEntity) {
         check(
-            order.institutionId.isNotBlank() &&
-                order.institutionName.isNotBlank() &&
+            order.institutionId.isNotBlank() && order.institutionName.isNotBlank() &&
                 order.institutionProjectId.isNotBlank() &&
-                order.consultantId.isNotBlank() &&
-                order.consultantName.isNotBlank() &&
-                order.doctorId.isNotBlank() &&
-                order.doctorName.isNotBlank()
+                order.consultantId.isNotBlank() && order.consultantName.isNotBlank() &&
+                order.doctorId.isNotBlank() && order.doctorName.isNotBlank()
         ) { "订单分账信息不完整，缺少机构、机构项目、医美顾问或医生快照" }
+    }
 
-        // The order snapshot is the sole source of party identities. This lookup only
-        // resolves the current rate policy for the frozen doctor/project keys.
+    private fun resolveRates(order: OrderEntity): OrderSplitRates {
         val config = doctorInstitutionProjectConfigRepository
             .findByDoctorIdAndInstitutionProjectId(order.doctorId, order.institutionProjectId)
-        val rates = splitRatePolicy.resolve(
+        return splitRatePolicy.resolve(
             institutionRate = config?.institutionRate ?: splitRatePolicy.defaultInstitutionRate(),
             consultantRate = config?.commissionRate ?: BigDecimal.ZERO
         )
-
-        val totalAmount = order.price
-        val platformAmount = totalAmount.multiply(rates.platformRate).divide(HUNDRED, SCALE, RoundingMode.HALF_UP)
-        val institutionAmount = totalAmount.multiply(rates.institutionRate).divide(HUNDRED, SCALE, RoundingMode.HALF_UP)
-        val consultantAmount = totalAmount.multiply(rates.consultantRate).divide(HUNDRED, SCALE, RoundingMode.HALF_UP)
-        val doctorAmount = totalAmount - platformAmount - institutionAmount - consultantAmount
-
-        val settlement = SettlementEntity(
-            orderId = orderId,
-            totalAmount = totalAmount,
-            platformAmount = platformAmount,
-            institutionAmount = institutionAmount,
-            consultantAmount = consultantAmount,
-            doctorAmount = doctorAmount,
-            currency = order.currency,
-            totalAmountMinor = order.totalAmountMinor ?: Money.toMinor(totalAmount, order.currency),
-            platformAmountMinor = Money.toMinor(platformAmount, order.currency),
-            institutionAmountMinor = Money.toMinor(institutionAmount, order.currency),
-            consultantAmountMinor = Money.toMinor(consultantAmount, order.currency),
-            doctorAmountMinor = Money.toMinor(doctorAmount, order.currency),
-            platformRate = rates.platformRate,
-            institutionRate = rates.institutionRate,
-            consultantRate = rates.consultantRate,
-            doctorRate = rates.doctorRate,
-            status = "PENDING",
-            settledAt = order.settlementAt
-        )
-
-        val saved = settlementRepository.save(settlement)
-        log.info(
-            "订单[{}]结算记录创建成功: 总额={}, 平台={}, 机构={}, 医美顾问={}, 医生={}",
-            orderId, totalAmount, platformAmount, institutionAmount, consultantAmount, doctorAmount
-        )
-        return saved
     }
 
-    /**
-     * 处理到期结算
-     * 定时任务调用，将到期的结算标记为已完成
-     */
+    private fun allocation(
+        settlementId: Long,
+        ownerType: SettlementAllocationOwnerType,
+        ownerId: String,
+        ownerName: String,
+        rate: BigDecimal,
+        amountMinor: Long
+    ) = SettlementAllocationEntity(
+        settlementId = settlementId,
+        ownerType = ownerType,
+        ownerId = ownerId,
+        ownerName = ownerName,
+        rate = rate,
+        amountMinor = amountMinor
+    )
+
+    private fun <T> inNewTransaction(action: () -> T): T = transactionManager?.let { manager ->
+        TransactionTemplate(manager).apply {
+            propagationBehavior = TransactionDefinition.PROPAGATION_REQUIRES_NEW
+        }.execute { action() } ?: error("结算事务未返回结果")
+    } ?: action()
+
+    private fun Throwable.hasSettlementOrderUniqueViolation(): Boolean = generateSequence(this) { it.cause }
+        .any { it.message?.contains("uk_settlements_order_id", ignoreCase = true) == true }
+
     @Transactional(rollbackFor = [Exception::class])
     fun processDueSettlements() {
         val now = LocalDateTime.now()
@@ -128,8 +177,6 @@ class SettlementService(
             settlement.updatedAt = now
             settlementRepository.save(settlement)
             log.info("结算记录[id={}]已到期完成, 订单ID: {}", settlement.id, settlement.orderId)
-
-            // 同步更新订单状态: PENDING_SETTLEMENT -> SETTLED
             val order = orderRepository.findById(settlement.orderId).orElse(null)
             if (order != null && order.status == OrderStatusEnum.PENDING_SETTLEMENT.value) {
                 orderRepository.save(
@@ -154,13 +201,5 @@ class SettlementService(
         log.info("本次共处理{}条到期结算", dueSettlements.size)
     }
 
-    /**
-     * 查询订单结算详情
-     *
-     * @param orderId 订单ID
-     * @return 结算记录，不存在返回 null
-     */
-    fun getByOrderId(orderId: String): SettlementEntity? {
-        return settlementRepository.findByOrderId(orderId)
-    }
+    fun getByOrderId(orderId: String): SettlementEntity? = settlementRepository.findByOrderId(orderId)
 }
