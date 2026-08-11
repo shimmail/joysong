@@ -92,6 +92,33 @@ class RevenueReconciliationServiceTest {
     }
 
     @Test
+    fun `order net mismatch detections converge on one active issue then resolve`() {
+        val activeOccurrences = mutableMapOf<String, Int>()
+        every { issueRepository.upsertActiveIssue(any(), any(), any(), any(), any(), any(), any(), any()) } answers {
+            val key = "${firstArg<String>()}:${secondArg<String>()}:${thirdArg<String>()}"
+            activeOccurrences[key] = (activeOccurrences[key] ?: 0) + 1
+            1
+        }
+        arrangeSettlement(total = 100, payments = 120, refunds = 10, allocations = allocations())
+        every { ledgerRepository.findAllByAllocationIdOrderByIdAsc(any()) } answers { ledgerForAllocation(firstArg<Long>()) }
+
+        service.reconcileSettlement(1)
+        every { refundItemRepository.sumCompletedAmountMinor("order-1") } returns 0
+        service.reconcileSettlement(1)
+        every { refundItemRepository.sumCompletedAmountMinor("order-1") } returns 20
+        service.reconcileSettlement(1)
+
+        assertEquals(mapOf("ORDER_NET_VS_SETTLEMENT:SETTLEMENT:1" to 2), activeOccurrences)
+        verify(exactly = 1) {
+            issueRepository.upsertActiveIssue("ORDER_NET_VS_SETTLEMENT", "SETTLEMENT", "1", 110, 100, "USD", "ERROR", any())
+        }
+        verify(exactly = 1) {
+            issueRepository.upsertActiveIssue("ORDER_NET_VS_SETTLEMENT", "SETTLEMENT", "1", 120, 100, "USD", "ERROR", any())
+        }
+        verify(exactly = 1) { issueRepository.resolveActiveIssue("ORDER_NET_VS_SETTLEMENT", "SETTLEMENT", "1") }
+    }
+
+    @Test
     fun `repeated allocation mismatch uses the single active issue upsert contract`() {
         arrangeSettlement(total = 100, payments = 100, refunds = 0, allocations = allocations().dropLast(1))
         every { ledgerRepository.findAllByAllocationIdOrderByIdAsc(any()) } returns emptyList()
