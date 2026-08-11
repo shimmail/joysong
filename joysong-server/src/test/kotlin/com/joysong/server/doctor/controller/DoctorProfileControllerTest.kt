@@ -18,6 +18,7 @@ import io.mockk.mockk
 import io.mockk.slot
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
@@ -224,6 +225,22 @@ class DoctorProfileControllerTest {
             .andExpect(status().isNotFound)
             .andExpect(jsonPath("$.code").value(404))
             .andExpect(jsonPath("$.message").value("医生档案不存在"))
+    }
+
+    @Test
+    @WithMockUser(username = "doctor-1")
+    fun `GET maps an unexpected profile failure to a safe HTTP and body 500`() {
+        val secretMarker = "sql-secret-marker"
+        every { accessService.actor(any()) } returns actor
+        every { profileService.get(actor) } throws RuntimeException(secretMarker)
+
+        mockMvc.perform(get("/api/management/doctor-profile"))
+            .andExpect(status().isInternalServerError)
+            .andExpect(jsonPath("$.code").value(500))
+            .andExpect(jsonPath("$.message").value("服务器内部错误"))
+            .andExpect { result ->
+                assertFalse(result.response.contentAsString.contains(secretMarker))
+            }
     }
 
     @Test

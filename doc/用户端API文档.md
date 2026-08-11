@@ -1996,7 +1996,7 @@ Authorization: Bearer <token>
 | specialties | `doctors.specialties` | 必传 String；`""` 清空；逗号分隔项会去空白和空项。 |
 | credentials | `doctors.credentials` | 必传 String；`""` 清空，首尾空白会去除。 |
 | credentialImages | `doctors.credential_images` | 必传 String；`""` 清空；逗号分隔 URL 会去空白和空项。 |
-| certificationTags | `doctors.certification_tags` | 必传 String；`""` 清空；逗号分隔项会去空白和空项。 |
+| certificationTags | `doctors.certification_tags` | 必传 String；`""` 清空；逗号分隔项会去空白和空项。该字段是医生自主维护的“展示标签”，不是平台认证；忽略大小写、空白和标点归一化后，不得包含“平台认证”“官方认证”“安颜认证”“娇颜颂认证”“已认证”“platform verified”“official verified”或等价项目品牌认证声明。普通职称/专科（如“主任医师”）允许使用。 |
 
 任何九字段缺失、为 `null` 或 JSON 格式错误均为 400；除 `name` 外的八个字段传 `""` 是清空该字段的合法方式。成功时返回与 GET 相同的单个完整对象。
 

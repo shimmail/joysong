@@ -180,7 +180,7 @@ class _DoctorProfileFormState extends State<_DoctorProfileForm> {
           ),
           _requestField(
             _tags,
-            context.localized('认证标签', 'Certification tags'),
+            context.localized('展示标签', 'Display tags'),
             fieldKey: const Key('doctor-certification-tags'),
           ),
           Text(
@@ -343,6 +343,17 @@ class _DoctorProfileFormState extends State<_DoctorProfileForm> {
         ),
       );
       if (!mounted) return;
+      setState(() {
+        _name.text = saved.name;
+        _title.text = saved.title;
+        _bio.text = saved.bio;
+        _phone.text = saved.contactPhone;
+        _specialties.text = saved.specialties;
+        _credentials.text = saved.credentials;
+        _tags.text = saved.certificationTags;
+        _avatar = saved.avatar.trim();
+        _credentialImages = _parseCsv(saved.credentialImages);
+      });
       widget.onSaved(saved);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

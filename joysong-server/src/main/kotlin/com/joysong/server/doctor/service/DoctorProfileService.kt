@@ -16,19 +16,19 @@ class DoctorProfileService(
     fun update(actor: ManagementActor, command: DoctorProfileUpdateCommand): DoctorProfileView {
         val doctorId = requireDoctorId(actor)
         require(command.name.isNotBlank()) { "name 不能为空" }
-        val updated = (doctorService.findById(doctorId) ?: throw DoctorProfileNotFoundException())
-            .copy(
-                name = command.name.trim(),
-                title = command.title.trim(),
-                bio = command.bio.trim(),
-                avatar = command.avatar.trim(),
-                contactPhone = command.contactPhone.trim(),
-                specialties = command.specialties.normalizedCommaSeparated(),
-                credentials = command.credentials.trim(),
-                credentialImages = command.credentialImages.normalizedCommaSeparated(),
-                certificationTags = command.certificationTags.normalizedCommaSeparated()
-            )
-        return doctorService.save(updated).toView(actor.userId)
+        val normalized = command.copy(
+            name = command.name.trim(),
+            title = command.title.trim(),
+            bio = command.bio.trim(),
+            avatar = command.avatar.trim(),
+            contactPhone = command.contactPhone.trim(),
+            specialties = command.specialties.normalizedCommaSeparated(),
+            credentials = command.credentials.trim(),
+            credentialImages = command.credentialImages.normalizedCommaSeparated(),
+            certificationTags = command.certificationTags.normalizedCommaSeparated()
+        )
+        normalized.certificationTags.requireAllowedDisplayTags()
+        return doctorService.updateEditableProfile(doctorId, normalized).toView(actor.userId)
     }
 
     private fun profileFor(actor: ManagementActor): DoctorEntity =
@@ -71,6 +71,36 @@ class DoctorProfileService(
 
     private fun String.normalizedCommaSeparated(): String =
         split(',').map(String::trim).filter(String::isNotBlank).joinToString(",")
+
+    private fun String.requireAllowedDisplayTags() {
+        val normalized = lowercase().replace(NON_ALPHANUMERIC, "")
+        require(RESERVED_PLATFORM_TRUST_CLAIMS.none { it in normalized }) {
+            "展示标签不能包含平台或官方认证声明"
+        }
+    }
+
+    private companion object {
+        val NON_ALPHANUMERIC = Regex("[^\\p{L}\\p{N}]")
+        val RESERVED_PLATFORM_TRUST_CLAIMS = listOf(
+            "平台认证",
+            "官方认证",
+            "安颜认证",
+            "娇颜颂认证",
+            "已认证",
+            "platformverified",
+            "platformcertified",
+            "officialverified",
+            "officialcertified",
+            "安颜verified",
+            "安颜certified",
+            "娇颜颂verified",
+            "娇颜颂certified",
+            "joysongverified",
+            "joysongcertified",
+            "jiaoyansongverified",
+            "jiaoyansongcertified"
+        )
+    }
 }
 
 data class DoctorProfileUpdateCommand(

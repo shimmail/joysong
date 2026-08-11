@@ -16,7 +16,7 @@ void main() {
     await tester.pumpWidget(_profileApp(repository));
     await tester.pumpAndSettle();
 
-    await tester.enterText(find.byKey(const Key('doctor-name')), '王医生');
+    await tester.enterText(find.byKey(const Key('doctor-name')), '  王医生  ');
     await tester.enterText(find.byKey(const Key('doctor-bio')), '');
     await tester.tap(find.text('保存'));
     await tester.pumpAndSettle();
@@ -33,7 +33,7 @@ void main() {
       'credentialImages': update.credentialImages,
       'certificationTags': update.certificationTags,
     }, {
-      'name': '王医生',
+      'name': '  王医生  ',
       'title': '主任医师',
       'bio': '',
       'avatar': 'https://cdn.example/doctor/avatar-old.jpg',
@@ -44,6 +44,21 @@ void main() {
           'https://cdn.example/doctor/credential-1.jpg,https://cdn.example/doctor/credential-2.jpg',
       'certificationTags': '主任医师,十年经验',
     });
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('doctor-name')))
+          .controller
+          ?.text,
+      '王医生',
+    );
+    expect(
+      find.text('https://cdn.example/doctor/avatar-server.jpg'),
+      findsOneWidget,
+    );
+    expect(
+      find.text('https://cdn.example/doctor/credential-server.jpg'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('doctor upload choices determine saved public image state',
@@ -99,6 +114,7 @@ void main() {
                 'title': '主任医师',
                 'bio': '专注皮肤管理',
                 'credentials': '执业医师资格',
+                'certificationTags': '十年经验',
                 'isVerified': true,
                 'reviewCount': 12,
                 'consultationCount': 8,
@@ -113,6 +129,9 @@ void main() {
 
     expect(find.text('医生上传的证书图片/展示材料'), findsOneWidget);
     expect(find.text('内容由医生公开上传，仅用于展示，不代表平台认证。'), findsOneWidget);
+    expect(find.text('展示标签'), findsOneWidget);
+    expect(find.text('十年经验'), findsOneWidget);
+    expect(find.text('认证标签'), findsNothing);
     expect(find.text('资质保险箱'), findsNothing);
     expect(find.text('查资质'), findsNothing);
   });
@@ -153,14 +172,14 @@ final class _RecordingIdentityRepository implements IdentityRepository {
     return DoctorSelfProfile(
       id: _profile.id,
       userId: _profile.userId,
-      name: update.name,
-      title: update.title,
-      bio: update.bio,
-      avatar: update.avatar,
-      contactPhone: update.contactPhone,
+      name: update.name.trim(),
+      title: update.title.trim(),
+      bio: update.bio.trim(),
+      avatar: 'https://cdn.example/doctor/avatar-server.jpg',
+      contactPhone: update.contactPhone.trim(),
       specialties: update.specialties,
-      credentials: update.credentials,
-      credentialImages: update.credentialImages,
+      credentials: update.credentials.trim(),
+      credentialImages: 'https://cdn.example/doctor/credential-server.jpg',
       certificationTags: update.certificationTags,
       institutionId: _profile.institutionId,
       institutionName: _profile.institutionName,

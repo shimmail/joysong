@@ -401,6 +401,31 @@ void main() {
     expect(find.text('机构项目'), findsNothing);
   });
 
+  testWidgets('admin without a doctor role does not see the self profile entry',
+      (tester) async {
+    tester.view.physicalSize = const Size(800, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repository = _FakeIdentityRepository()
+      ..managementContext = const ManagementContext(
+        userId: 'admin-1',
+        platformRole: 'ADMIN',
+        activeRoles: [],
+        managedInstitutionIds: [],
+        visibleInstitutionIds: [],
+        canManageDoctors: true,
+      );
+
+    await tester.pumpWidget(MaterialApp(
+      home: ManagementCenterPage(repository: repository),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('医生档案'), findsNothing);
+    expect(find.text('Doctor profile'), findsNothing);
+  });
+
   testWidgets('consultant sees only institution application and affiliation',
       (tester) async {
     final repository = _FakeIdentityRepository()

@@ -515,7 +515,9 @@ class _ManagementCapabilities extends StatelessWidget {
           (
             icon: Icons.medical_services_outlined,
             label: buildContext.localized('医生档案', 'Doctor profile'),
-            enabled: isDoctor && context.canManageDoctors,
+            enabled:
+                context.activeRoles.contains(IdentityRoleType.doctor.code) &&
+                    context.canManageDoctors,
           ),
           (
             icon: Icons.add_business_outlined,

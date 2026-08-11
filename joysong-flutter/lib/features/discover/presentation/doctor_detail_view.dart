@@ -393,6 +393,13 @@ class _DoctorHeader extends StatelessWidget {
           ),
           if (certificationTags.isNotEmpty) ...[
             const SizedBox(height: 8),
+            Text(
+              context.localized('展示标签', 'Display tags'),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+            const SizedBox(height: 5),
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(children: [

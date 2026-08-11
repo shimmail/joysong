@@ -24,51 +24,6 @@ class DoctorProfileServiceTest {
     )
 
     @Test
-    fun `update replaces editable fields normalizes list fields and preserves platform fields`() {
-        val existing = doctor()
-        val doctorService = mockk<DoctorService>()
-        val institutionService = mockk<DoctorInstitutionService>()
-        var saved: DoctorEntity? = null
-        every { doctorService.findById("doctor-1") } returns existing
-        every { doctorService.save(any()) } answers {
-            firstArg<DoctorEntity>().also { saved = it }
-        }
-        every { institutionService.institutionsFor("doctor-1") } returns institutions()
-
-        val view = DoctorProfileService(doctorService, institutionService).update(
-            actor,
-            DoctorProfileUpdateCommand(
-                name = "  李医生  ",
-                title = "  主任医师  ",
-                bio = "  擅长修复  ",
-                avatar = "  avatar.png  ",
-                contactPhone = "  13800000000  ",
-                specialties = " 种植 , , 正畸 , ",
-                credentials = "  医师资格证  ",
-                credentialImages = "  a.png, , b.png  ",
-                certificationTags = "  三甲 , , 专家  "
-            )
-        )
-
-        assertEquals("李医生", view.name)
-        assertEquals("种植,正畸", view.specialties)
-        assertEquals("a.png,b.png", view.credentialImages)
-        assertEquals("三甲,专家", view.certificationTags)
-        assertEquals("主任医师", saved!!.title)
-        assertEquals("擅长修复", saved!!.bio)
-        assertEquals("avatar.png", saved!!.avatar)
-        assertEquals("13800000000", saved!!.contactPhone)
-        assertEquals("医师资格证", saved!!.credentials)
-        assertEquals("institution-legacy", saved!!.institutionId)
-        assertEquals("旧机构", saved!!.institutionName)
-        assertEquals(BigDecimal("4.8"), saved!!.rating)
-        assertEquals(13, saved!!.reviewCount)
-        assertEquals(true, saved!!.isVerified)
-        assertEquals(21, saved!!.consultationCount)
-        assertEquals(8, saved!!.caseCount)
-    }
-
-    @Test
     fun `get returns the full view with institution summaries`() {
         val doctorService = mockk<DoctorService>()
         val institutionService = mockk<DoctorInstitutionService>()
@@ -107,6 +62,50 @@ class DoctorProfileServiceTest {
     }
 
     @Test
+    fun `update accepts ordinary display tags and rejects platform trust claims`() {
+        val doctorService = mockk<DoctorService>()
+        val institutionService = mockk<DoctorInstitutionService>()
+        every { doctorService.updateEditableProfile("doctor-1", any()) } answers {
+            val update = secondArg<DoctorProfileUpdateCommand>()
+            doctor().copy(
+                name = update.name,
+                title = update.title,
+                bio = update.bio,
+                avatar = update.avatar,
+                contactPhone = update.contactPhone,
+                specialties = update.specialties,
+                credentials = update.credentials,
+                credentialImages = update.credentialImages,
+                certificationTags = update.certificationTags
+            )
+        }
+        every { institutionService.institutionsFor("doctor-1") } returns institutions()
+        val service = DoctorProfileService(doctorService, institutionService)
+
+        val ordinary = service.update(
+            actor,
+            command(certificationTags = " 主任医师, 皮肤科 ")
+        )
+        assertEquals("主任医师,皮肤科", ordinary.certificationTags)
+
+        listOf(
+            "平台认证",
+            "官方 认证",
+            "安颜-认证",
+            "已认证",
+            "Platform Verified",
+            "OFFICIAL_verified",
+            "娇颜颂认证",
+            "Joysong Certified"
+        ).forEach { reservedClaim ->
+            val error = assertThrows(IllegalArgumentException::class.java) {
+                service.update(actor, command(certificationTags = reservedClaim))
+            }
+            assertEquals("展示标签不能包含平台或官方认证声明", error.message)
+        }
+    }
+
+    @Test
     fun `non doctor actor is denied`() {
         val service = DoctorProfileService(mockk(relaxed = true), mockk(relaxed = true))
         val nonDoctor = actor.copy(activeRoles = setOf("CONSULTANT"), doctorId = null)
@@ -131,7 +130,10 @@ class DoctorProfileServiceTest {
         assertEquals("医生档案不存在", error.message)
     }
 
-    private fun command(name: String = "李医生") = DoctorProfileUpdateCommand(
+    private fun command(
+        name: String = "李医生",
+        certificationTags: String = "三甲,专家"
+    ) = DoctorProfileUpdateCommand(
         name = name,
         title = "主任医师",
         bio = "擅长修复",
@@ -140,7 +142,7 @@ class DoctorProfileServiceTest {
         specialties = "种植,正畸",
         credentials = "医师资格证",
         credentialImages = "a.png,b.png",
-        certificationTags = "三甲,专家"
+        certificationTags = certificationTags
     )
 
     private fun doctor() = DoctorEntity(

@@ -6,6 +6,7 @@ import org.springframework.cache.annotation.CacheEvict
 import org.springframework.cache.annotation.Cacheable
 import org.springframework.cache.annotation.Caching
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
 
 @Service
 class DoctorService(
@@ -24,6 +25,31 @@ class DoctorService(
         CacheEvict(cacheNames = ["discover"], allEntries = true)
     ])
     fun save(entity: DoctorEntity): DoctorEntity = doctorRepository.save(entity)
+
+    @Transactional
+    @Caching(evict = [
+        CacheEvict(cacheNames = ["doctors"], allEntries = true),
+        CacheEvict(cacheNames = ["discover"], allEntries = true)
+    ])
+    fun updateEditableProfile(
+        id: String,
+        command: DoctorProfileUpdateCommand
+    ): DoctorEntity {
+        val updatedRows = doctorRepository.updateEditableProfile(
+            id = id,
+            name = command.name,
+            title = command.title,
+            bio = command.bio,
+            avatar = command.avatar,
+            contactPhone = command.contactPhone,
+            specialties = command.specialties,
+            credentials = command.credentials,
+            credentialImages = command.credentialImages,
+            certificationTags = command.certificationTags
+        )
+        if (updatedRows == 0) throw DoctorProfileNotFoundException()
+        return doctorRepository.findById(id).orElseThrow(::DoctorProfileNotFoundException)
+    }
 
     @Caching(evict = [
         CacheEvict(cacheNames = ["doctors"], allEntries = true),

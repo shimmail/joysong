@@ -43,9 +43,7 @@ class GlobalExceptionHandler {
         request: HttpServletRequest
     ): ResponseEntity<BaseResponse<Nothing>> {
         log.warn("参数错误: {}", e.message)
-        if (request.requestURI.startsWith("/api/admin/") ||
-            request.requestURI == "/api/management/doctor-profile"
-        ) {
+        if (request.requestURI.usesRealHttpErrorStatus()) {
             return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
                 .body(BaseResponse.error(e.message ?: "请求参数错误", 400))
@@ -59,7 +57,7 @@ class GlobalExceptionHandler {
         request: HttpServletRequest
     ): ResponseEntity<BaseResponse<Nothing>> {
         log.error("服务器错误", e)
-        if (request.requestURI.startsWith("/api/admin/")) {
+        if (request.requestURI.usesRealHttpErrorStatus()) {
             return ResponseEntity
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(BaseResponse.error("服务器内部错误", 500))
@@ -121,7 +119,7 @@ class GlobalExceptionHandler {
 
         log.error("未知错误", e)
         val body = BaseResponse.error<Nothing>("服务器异常，请稍后重试", 500)
-        return if (requestUri.startsWith("/api/admin/")) {
+        return if (requestUri.usesRealHttpErrorStatus()) {
             ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(body)
         } else {
             ResponseEntity.ok(body)
@@ -142,4 +140,7 @@ class GlobalExceptionHandler {
             .status(HttpStatus.BAD_REQUEST)
             .body(BaseResponse.error("请求内容格式不正确", 400))
     }
+
+    private fun String.usesRealHttpErrorStatus(): Boolean =
+        startsWith("/api/admin/") || this == "/api/management/doctor-profile"
 }
