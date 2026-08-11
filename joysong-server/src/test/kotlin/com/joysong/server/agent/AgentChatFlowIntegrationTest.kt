@@ -3,6 +3,7 @@ package com.joysong.server.agent
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.joysong.server.agent.entity.AgentTurnStatus
 import com.joysong.server.agent.diagnostics.AgentOperationLogger
 import com.joysong.server.agent.orchestration.AgentChatException
@@ -12,6 +13,7 @@ import com.joysong.server.agent.repository.AgentTurnRepository
 import com.joysong.server.config.AiAgentProperties
 import com.joysong.server.chat.dto.CreateSessionRequest
 import com.joysong.server.chat.dto.SendMessageRequest
+import com.joysong.server.chat.entity.ChatMessageEntity
 import com.joysong.server.chat.repository.ChatMessageRepository
 import com.joysong.server.chat.repository.ChatSessionRepository
 import com.joysong.server.chat.service.ChatService
@@ -79,6 +81,9 @@ class AgentChatFlowIntegrationTest {
 
     @Autowired
     private lateinit var mockMvc: MockMvc
+
+    @Autowired
+    private lateinit var objectMapper: ObjectMapper
 
     @Autowired
     private lateinit var messageRepository: ChatMessageRepository
@@ -159,6 +164,70 @@ class AgentChatFlowIntegrationTest {
         assertEquals(AgentTurnStatus.SUCCEEDED, turnRepository.findAll().single { it.sessionId == session.id }.status)
         assertEquals(listOf(false), transactionStates)
         assertFalse(TransactionSynchronizationManager.isActualTransactionActive())
+    }
+
+    @Test
+    @WithMockUser(username = "user-1")
+    fun `session list projects historical planning last message without rewriting it`() {
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+        val started = turnLifecycleService.beginTurn(
+            session.id,
+            "user-1",
+            "legacy planning request",
+            "legacy-planning-session-list"
+        ) as BeginTurnResult.Started
+        val turn = turnRepository.findById(started.turnId).orElseThrow().apply {
+            status = AgentTurnStatus.SUCCEEDED
+            completedAt = LocalDateTime.now()
+        }
+        turnRepository.saveAndFlush(turn)
+        val unsafeContent = "Choose Project A because it is perfect for you"
+        val historical = messageRepository.saveAndFlush(
+            ChatMessageEntity(
+                sessionId = session.id,
+                turnId = turn.id,
+                sequenceNo = started.sequenceNo * 2,
+                role = "ASSISTANT",
+                content = unsafeContent,
+                metadataJson = """{
+                    "intent":"PLANNING",
+                    "queryTarget":"PROJECT",
+                    "nextAction":"START_PLANNING",
+                    "catalogItems":[],
+                    "catalogReport":null
+                }""".trimIndent(),
+                createdAt = LocalDateTime.now().plusSeconds(1)
+            )
+        )
+
+        val response = mockMvc.perform(
+            get("/api/chat/sessions")
+                .header("Accept-Language", "en")
+        ).andExpect(status().isOk)
+            .andReturn().response.contentAsString
+        val listed = objectMapper.readTree(response).path("data")
+            .first { it.path("id").asText() == session.id }
+
+        assertEquals(
+            "This is platform information reference only and is not diagnosis or treatment advice. " +
+                "The platform can show structured details such as names and prices; personal suitability, " +
+                "downtime, pain, contraindications, and risks require confirmation with the institution or a qualified clinician.",
+            listed.path("lastMessage").asText()
+        )
+        assertEquals(unsafeContent, messageRepository.findById(historical.id).orElseThrow().content)
+
+        val generalSession = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+        val generalContent = "Ordinary catalog answer"
+        messageRepository.saveAndFlush(
+            ChatMessageEntity(
+                sessionId = generalSession.id,
+                sequenceNo = 1,
+                role = "ASSISTANT",
+                content = generalContent,
+                metadataJson = """{"intent":"CATALOG_QA","catalogItems":[],"catalogReport":null}"""
+            )
+        )
+        assertEquals(generalContent, chatService.getLastMessage(generalSession.id))
     }
 
     @Test
