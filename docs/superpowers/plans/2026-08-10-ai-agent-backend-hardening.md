@@ -4,7 +4,7 @@
 
 **Goal:** Make the synchronous Agent backend recoverable, explicitly enabled, and safely configured for the FastAIToken production relay.
 
-**Architecture:** Preserve V10 and add a forward-only V11 lease column. Centralize provider settings in `AiAgentProperties`, enforce availability before a Turn is created, and keep recovery inside the existing session-locked `beginTurn` transaction.
+**Architecture:** Preserve V10 and add a forward-only lease column (renumbered to V15 during master integration). Centralize provider settings in `AiAgentProperties`, enforce availability before a Turn is created, and keep recovery inside the existing session-locked `beginTurn` transaction.
 
 **Tech Stack:** Kotlin, Spring Boot, Spring Data JPA, Flyway, MySQL 8, JUnit 5, MockK.
 
@@ -22,7 +22,7 @@
 ### Task 1: Add a forward-only Turn lease migration
 
 **Files:**
-- Create: `joysong-server/src/main/resources/db/migration/V11__add_agent_turn_lease.sql`
+- Create: `joysong-server/src/main/resources/db/migration/V15__add_agent_turn_lease.sql`
 - Modify: `joysong-server/src/main/kotlin/com/joysong/server/agent/entity/AgentTurnEntity.kt`
 - Modify: `joysong-server/src/test/kotlin/com/joysong/server/agent/AgentV2MySqlIntegrationTest.kt`
 
@@ -59,7 +59,7 @@ Write-Host "Agent test database name: $env:AGENT_TEST_DB_NAME"
 
 Expected: FAIL because `lease_expires_at` is absent.
 
-- [ ] **Step 3: Add V11 and entity mapping**
+- [ ] **Step 3: Add V15 and entity mapping**
 
 Create the migration:
 
@@ -83,7 +83,7 @@ Run the Step 2 command. Expected: PASS on a new empty database and the already-V
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add joysong-server/src/main/resources/db/migration/V11__add_agent_turn_lease.sql joysong-server/src/main/kotlin/com/joysong/server/agent/entity/AgentTurnEntity.kt joysong-server/src/test/kotlin/com/joysong/server/agent/AgentV2MySqlIntegrationTest.kt
+git add joysong-server/src/main/resources/db/migration/V15__add_agent_turn_lease.sql joysong-server/src/main/kotlin/com/joysong/server/agent/entity/AgentTurnEntity.kt joysong-server/src/test/kotlin/com/joysong/server/agent/AgentV2MySqlIntegrationTest.kt
 git commit -m "feat: add agent turn lease migration"
 ```
 

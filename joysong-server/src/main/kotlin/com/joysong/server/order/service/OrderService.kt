@@ -12,7 +12,7 @@ import com.joysong.server.institution.repository.InstitutionRepository
 import com.joysong.server.institution.service.InstitutionProjectDetailResolver
 import com.joysong.server.identity.service.ManagementActor
 import com.joysong.server.identity.service.InstitutionConsultantService
-import com.joysong.server.doctor.repository.DoctorInstitutionRepository
+import com.joysong.server.identity.service.DoctorInstitutionRelationshipService
 import com.joysong.server.order.dto.CreateOrderRequest
 import com.joysong.server.order.dto.OrderResponse
 import com.joysong.server.order.dto.OrderStatusEnum
@@ -59,7 +59,7 @@ class OrderService(
     private val institutionProjectDetailResolver: InstitutionProjectDetailResolver,
     @Lazy private val reviewService: ReviewService,
     private val institutionConsultantService: InstitutionConsultantService,
-    private val doctorInstitutionRepository: DoctorInstitutionRepository,
+    private val doctorInstitutionRelationshipService: DoctorInstitutionRelationshipService,
     private val refundExecutionService: RefundExecutionService? = null
 ) {
     private val secureRandom = SecureRandom()
@@ -118,20 +118,11 @@ class OrderService(
             .orElseThrow { IllegalArgumentException("机构不存在: ${institutionProject.institutionId}") }
         require(institution.name.isNotBlank()) { "机构名称不能为空" }
 
-        require(
-            doctorProjectRepository.existsByDoctorIdAndInstitutionProjectId(
-                request.doctorId,
-                institutionProject.id
-            )
-        ) { "所选医生未加入该机构项目" }
-        require(
-            doctorInstitutionRepository.findByDoctorIdOrderByCreatedAtAsc(request.doctorId)
-                .any {
-                    it.institutionId == institution.id &&
-                        it.status == "APPROVED" &&
-                        it.revokedAt == null
-                }
-        ) { "所选医生未取得该机构有效执业关系" }
+        val doctorProject = doctorProjectRepository.findByDoctorIdAndInstitutionProjectId(
+            request.doctorId,
+            institutionProject.id
+        ) ?: throw IllegalArgumentException("所选医生未加入该机构项目")
+        doctorInstitutionRelationshipService.requireActiveRelationshipForUpdate(request.doctorId, institution.id)
         val doctor = doctorRepository.findById(request.doctorId)
             .orElseThrow { IllegalArgumentException("医生不存在") }
         require(doctor.name.isNotBlank()) { "医生名称不能为空" }
@@ -142,7 +133,7 @@ class OrderService(
         )
         require(consultant.name.isNotBlank()) { "医美顾问名称不能为空" }
 
-        val unitPrice = institutionProject.price
+        val unitPrice = doctorProject.price
         val coverImage = effectiveProject.coverImage
         val configuredConsultationFee = doctorInstitutionProjectConfigRepository
             .findByDoctorIdAndInstitutionProjectId(request.doctorId, institutionProject.id)
@@ -274,7 +265,6 @@ class OrderService(
 
     private fun canManageOrder(actor: ManagementActor, order: OrderEntity): Boolean =
         actor.isAdmin ||
-            order.institutionId in actor.managedInstitutionIds ||
             (actor.doctorId != null && order.doctorId == actor.doctorId)
 
     /**

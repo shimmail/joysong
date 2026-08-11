@@ -51,33 +51,22 @@ class SecurityConfig(
                         "/api/admin/institutions/**",
                         "/api/admin/articles",
                         "/api/admin/projects",
-                        "/api/admin/doctor-institution-project-configs",
-                        "/api/admin/doctor-institution-project-config-proposals",
                         "/api/admin/institution-projects",
-                        "/api/admin/institution-project-requests",
-                        "/api/admin/order-split-policy"
+                        "/api/admin/institution-project-requests"
                     ).authenticated()
                     .requestMatchers(HttpMethod.PUT,
                         "/api/admin/doctors/*",
                         "/api/admin/institutions/*",
-                        "/api/admin/articles/*",
-                        "/api/admin/institution-projects/*"
+                        "/api/admin/articles/*"
                     ).authenticated()
                     .requestMatchers(HttpMethod.POST,
                         "/api/admin/articles",
-                        "/api/admin/projects",
-                        "/api/admin/institution-projects",
                         "/api/admin/institution-project-requests",
                         "/api/admin/institution-project-requests/*/review",
-                        "/api/admin/institution-project-requests/*/withdraw",
-                        "/api/admin/doctor-institution-project-config-proposals",
-                        "/api/admin/doctor-institution-project-config-proposals/*/confirm",
-                        "/api/admin/doctor-institution-project-config-proposals/*/reject",
-                        "/api/admin/doctor-institution-project-config-proposals/*/withdraw"
+                        "/api/admin/institution-project-requests/*/withdraw"
                     ).authenticated()
                     .requestMatchers(HttpMethod.DELETE,
-                        "/api/admin/articles/*",
-                        "/api/admin/institution-projects/*"
+                        "/api/admin/articles/*"
                     ).authenticated()
                     .requestMatchers("/api/admin/**").hasRole("ADMIN")
                     .requestMatchers("/api/cs/**").authenticated()
