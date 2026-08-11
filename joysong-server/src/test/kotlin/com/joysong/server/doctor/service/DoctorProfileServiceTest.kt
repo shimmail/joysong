@@ -96,7 +96,9 @@ class DoctorProfileServiceTest {
             "Platform Verified",
             "OFFICIAL_verified",
             "娇颜颂认证",
-            "Joysong Certified"
+            "Joysong Certified",
+            "Verified by Joysong",
+            "平台核验"
         ).forEach { reservedClaim ->
             val error = assertThrows(IllegalArgumentException::class.java) {
                 service.update(actor, command(certificationTags = reservedClaim))

@@ -73,32 +73,37 @@ class DoctorProfileService(
         split(',').map(String::trim).filter(String::isNotBlank).joinToString(",")
 
     private fun String.requireAllowedDisplayTags() {
-        val normalized = lowercase().replace(NON_ALPHANUMERIC, "")
-        require(RESERVED_PLATFORM_TRUST_CLAIMS.none { it in normalized }) {
+        require(split(',').none { it.isReservedPlatformTrustClaim() }) {
             "展示标签不能包含平台或官方认证声明"
         }
     }
 
+    private fun String.isReservedPlatformTrustClaim(): Boolean {
+        val normalized = lowercase().replace(NON_ALPHANUMERIC, "")
+        if ("已认证" in normalized) return true
+        return TRUST_CLAIM_SUBJECTS.any { it in normalized } &&
+            TRUST_CLAIM_STATUSES.any { it in normalized }
+    }
+
     private companion object {
         val NON_ALPHANUMERIC = Regex("[^\\p{L}\\p{N}]")
-        val RESERVED_PLATFORM_TRUST_CLAIMS = listOf(
-            "平台认证",
-            "官方认证",
-            "安颜认证",
-            "娇颜颂认证",
-            "已认证",
-            "platformverified",
-            "platformcertified",
-            "officialverified",
-            "officialcertified",
-            "安颜verified",
-            "安颜certified",
-            "娇颜颂verified",
-            "娇颜颂certified",
-            "joysongverified",
-            "joysongcertified",
-            "jiaoyansongverified",
-            "jiaoyansongcertified"
+        val TRUST_CLAIM_SUBJECTS = listOf(
+            "平台",
+            "官方",
+            "platform",
+            "official",
+            "joysong",
+            "安颜",
+            "娇颜颂",
+            "jiaoyansong"
+        )
+        val TRUST_CLAIM_STATUSES = listOf(
+            "认证",
+            "核验",
+            "verified",
+            "certified",
+            "verification",
+            "certification"
         )
     }
 }
