@@ -51,19 +51,19 @@ class AdminInstitutionController(
     @Transactional
     fun updateInstitution(authentication: Authentication, @PathVariable id: String, @RequestBody entity: InstitutionEntity): BaseResponse<*> {
         val actor = managementAccessService.actor(authentication)
-        managementAccessService.requireInstitutionManaged(actor, id)
+        managementAccessService.requirePlatformAdmin(actor)
         val existing = institutionService.findById(id)
             ?: return BaseResponse.error<Any>("机构不存在")
         return BaseResponse.success(institutionService.save(entity.copy(
             id = id,
             createdAt = existing.createdAt,
             deletedAt = existing.deletedAt,
-            rating = if (actor.isAdmin) entity.rating else existing.rating,
-            reviewCount = if (actor.isAdmin) entity.reviewCount else existing.reviewCount,
-            isVerified = if (actor.isAdmin) entity.isVerified else existing.isVerified,
-            projectCount = if (actor.isAdmin) entity.projectCount else existing.projectCount,
-            doctorCount = if (actor.isAdmin) entity.doctorCount else existing.doctorCount,
-            consultationCount = if (actor.isAdmin) entity.consultationCount else existing.consultationCount
+            rating = entity.rating,
+            reviewCount = entity.reviewCount,
+            isVerified = entity.isVerified,
+            projectCount = entity.projectCount,
+            doctorCount = entity.doctorCount,
+            consultationCount = entity.consultationCount
         )))
     }
 

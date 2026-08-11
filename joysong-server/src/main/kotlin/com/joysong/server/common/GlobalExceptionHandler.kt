@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.security.access.AccessDeniedException
 import com.joysong.server.auth.service.InvalidRefreshTokenException
 import com.joysong.server.doctor.service.DoctorProfileNotFoundException
+import com.joysong.server.institution.service.ManagedInstitutionProfileNotFoundException
 import java.io.IOException
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
@@ -36,6 +37,13 @@ class GlobalExceptionHandler {
     ): ResponseEntity<BaseResponse<Nothing>> =
         ResponseEntity.status(HttpStatus.NOT_FOUND)
             .body(BaseResponse.error(e.message ?: "医生档案不存在", 404))
+
+    @ExceptionHandler(ManagedInstitutionProfileNotFoundException::class)
+    fun handleManagedInstitutionProfileNotFound(
+        e: ManagedInstitutionProfileNotFoundException
+    ): ResponseEntity<BaseResponse<Nothing>> =
+        ResponseEntity.status(HttpStatus.NOT_FOUND)
+            .body(BaseResponse.error(e.message ?: "机构档案不存在", 404))
 
     @ExceptionHandler(IllegalArgumentException::class)
     fun handleIllegalArgument(
@@ -142,5 +150,7 @@ class GlobalExceptionHandler {
     }
 
     private fun String.usesRealHttpErrorStatus(): Boolean =
-        startsWith("/api/admin/") || this == "/api/management/doctor-profile"
+        startsWith("/api/admin/") ||
+            this == "/api/management/doctor-profile" ||
+            startsWith("/api/management/institutions")
 }
