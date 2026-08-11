@@ -29,6 +29,10 @@ class SettlementReleaseService(
         check(settlement.status in RELEASABLE_STATUSES) { "不支持的结算状态: ${settlement.status}" }
 
         val allocations = allocationRepository.findAllBySettlementIdOrderByIdAsc(settlementId)
+        val releasableAllocations = allocations.filter {
+            it.balanceBucket == SettlementAllocationBalanceBucket.PENDING && it.amountMinor > it.reversedMinor
+        }
+        if (releasableAllocations.isEmpty()) return
         val order = orderRepository.findByIdForUpdate(settlement.orderId)
             ?: throw IllegalStateException("订单不存在: ${settlement.orderId}")
         check(order.status == OrderStatusEnum.PENDING_SETTLEMENT.value) {
@@ -36,7 +40,7 @@ class SettlementReleaseService(
         }
 
         walletLedgerService.apply(
-            allocations.mapNotNull { allocation ->
+            releasableAllocations.mapNotNull { allocation ->
                 val remaining = allocation.amountMinor - allocation.reversedMinor
                 if (remaining <= 0) {
                     null

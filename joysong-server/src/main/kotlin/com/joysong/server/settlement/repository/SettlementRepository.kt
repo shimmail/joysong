@@ -31,7 +31,10 @@ interface SettlementRepository : JpaRepository<SettlementEntity, Long> {
 
     @Query(
         "SELECT s.id FROM SettlementEntity s " +
-        "WHERE s.status IN :statuses AND s.settledAt <= :settledAt ORDER BY s.id ASC"
+            "WHERE s.status IN :statuses AND s.settledAt <= :settledAt " +
+            "AND EXISTS (SELECT a.id FROM SettlementAllocationEntity a " +
+            "WHERE a.settlementId = s.id AND a.balanceBucket = com.joysong.server.settlement.entity.SettlementAllocationBalanceBucket.PENDING " +
+            "AND a.amountMinor > a.reversedMinor) ORDER BY s.id ASC"
     )
     fun findDueSettlementIds(
         @Param("statuses") statuses: Set<String>,
