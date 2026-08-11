@@ -14,6 +14,7 @@ import com.joysong.server.wallet.repository.WalletLedgerEntryRepository
 import com.joysong.server.wallet.repository.WalletRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.math.BigInteger
 
 data class ReconciliationResult(
     val objectType: String,
@@ -44,10 +45,8 @@ class RevenueReconciliationService(
             .orElseThrow { IllegalArgumentException("SETTLEMENT_NOT_FOUND") }
         val mismatches = linkedSetOf<String>()
         val total = requireNotNull(settlement.totalAmountMinor) { "SETTLEMENT_AMOUNT_MISSING" }
-        val orderNet = Math.subtractExact(
-            paymentRepository.sumSucceededAmountMinor(settlement.orderId),
-            refundItemRepository.sumCompletedAmountMinor(settlement.orderId)
-        )
+        val completedRefunds = refundItemRepository.sumCompletedAmountMinor(settlement.orderId)
+        val orderNet = Math.subtractExact(paymentRepository.sumSucceededAmountMinor(settlement.orderId), completedRefunds)
         verify(
             issueType = ORDER_NET_VS_SETTLEMENT,
             objectType = SETTLEMENT_OBJECT,
@@ -74,7 +73,10 @@ class RevenueReconciliationService(
             matches = allocationTotal == total && rolesComplete
         )
 
-        allocations.forEach { allocation -> reconcileAllocation(allocation, settlement.currency, mismatches) }
+        allocations.forEach { allocation ->
+            reconcileAllocation(allocation, settlement.currency, mismatches)
+            reconcileRecoveryRequired(allocation, allocations, completedRefunds)
+        }
         return ReconciliationResult(SETTLEMENT_OBJECT, settlementId, SETTLEMENT_CHECKS, mismatches)
     }
 
@@ -152,11 +154,41 @@ class RevenueReconciliationService(
     }
 
     private fun expectedStatus(allocation: SettlementAllocationEntity) = when {
+        allocation.amountMinor == 0L -> if (allocation.balanceBucket == SettlementAllocationBalanceBucket.PENDING) {
+            com.joysong.server.settlement.entity.SettlementAllocationStatus.PENDING
+        } else {
+            com.joysong.server.settlement.entity.SettlementAllocationStatus.AVAILABLE
+        }
         allocation.reversedMinor == allocation.amountMinor -> com.joysong.server.settlement.entity.SettlementAllocationStatus.REVERSED
         allocation.reversedMinor > 0 -> com.joysong.server.settlement.entity.SettlementAllocationStatus.PARTIALLY_REVERSED
         allocation.balanceBucket == SettlementAllocationBalanceBucket.PENDING -> com.joysong.server.settlement.entity.SettlementAllocationStatus.PENDING
         else -> com.joysong.server.settlement.entity.SettlementAllocationStatus.AVAILABLE
     }
+
+    private fun reconcileRecoveryRequired(
+        allocation: SettlementAllocationEntity,
+        allocations: List<SettlementAllocationEntity>,
+        cumulativeRefundedMinor: Long
+    ) {
+        val total = allocations.fold(0L) { sum, item -> Math.addExact(sum, item.amountMinor) }
+        if (total <= 0 || cumulativeRefundedMinor !in 0..total) return
+        val target = if (allocation.ownerType == com.joysong.server.settlement.entity.SettlementAllocationOwnerType.DOCTOR) {
+            val nonDoctorTargets = allocations.filter { it.ownerType != allocation.ownerType }
+                .fold(0L) { sum, item -> Math.addExact(sum, proportionalTarget(item.amountMinor, cumulativeRefundedMinor, total)) }
+            Math.subtractExact(cumulativeRefundedMinor, nonDoctorTargets)
+        } else {
+            proportionalTarget(allocation.amountMinor, cumulativeRefundedMinor, total)
+        }
+        if (allocation.reversedMinor == target) {
+            resolveRecoveryRequired(ALLOCATION_OBJECT, allocation.id.toString())
+        }
+    }
+
+    private fun proportionalTarget(amount: Long, refunded: Long, total: Long): Long =
+        BigInteger.valueOf(amount)
+            .multiply(BigInteger.valueOf(refunded))
+            .divide(BigInteger.valueOf(total))
+            .longValueExact()
 
     private fun firstMismatch(expected: Balances, actual: Balances): Pair<Long, Long>? = when {
         expected.pending != actual.pending -> expected.pending to actual.pending

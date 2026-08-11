@@ -168,6 +168,43 @@ class RevenueReconciliationServiceTest {
     }
 
     @Test
+    fun `settlement reconciliation resolves recovery only after cumulative refund target is reversed`() {
+        val recovery = com.joysong.server.settlement.service.RecoveryRequiredRevenueIssue(
+            refundId = "refund-1", refundItemId = "item-1", allocationId = 1,
+            ownerType = "PLATFORM", ownerId = "owner-1", currency = "USD", uncoveredMinor = 10
+        )
+        val allocations = allocations()
+        arrangeSettlement(total = 100, payments = 100, refunds = 40, allocations = allocations)
+        every { ledgerRepository.findAllByAllocationIdOrderByIdAsc(any()) } answers {
+            val allocation = allocations.first { it.id == firstArg<Long>() }
+            listOf(ledger(allocationId = allocation.id, pending = allocation.amountMinor - allocation.reversedMinor))
+        }
+
+        service.recordRecoveryRequired(recovery)
+        service.reconcileSettlement(1)
+        allocations.first().reverse(10)
+        service.reconcileSettlement(1)
+
+        verify(exactly = 1) { issueRepository.resolveActiveIssue("RECOVERY_REQUIRED", "ALLOCATION", "1") }
+    }
+
+    @Test
+    fun `zero allocation follows pending bucket lifecycle instead of being treated as reversed`() {
+        val zero = allocation(1, SettlementAllocationOwnerType.PLATFORM, amount = 0)
+        val remaining = allocations().drop(1)
+        arrangeSettlement(total = 75, payments = 75, refunds = 0, allocations = listOf(zero) + remaining)
+        every { ledgerRepository.findAllByAllocationIdOrderByIdAsc(1) } returns emptyList()
+        every { ledgerRepository.findAllByAllocationIdOrderByIdAsc(2) } returns ledgerForAllocation(2)
+        every { ledgerRepository.findAllByAllocationIdOrderByIdAsc(3) } returns ledgerForAllocation(3)
+        every { ledgerRepository.findAllByAllocationIdOrderByIdAsc(4) } returns ledgerForAllocation(4)
+
+        service.reconcileSettlement(1)
+
+        verify(exactly = 1) { issueRepository.resolveActiveIssue("ALLOCATION_VS_LEDGER", "ALLOCATION", "1") }
+        verify(exactly = 0) { issueRepository.upsertActiveIssue("ALLOCATION_VS_LEDGER", "ALLOCATION", "1", any(), any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `invalid reversed allocation status remains an allocation ledger issue`() {
         arrangeSettlement(
             total = 100,
@@ -201,6 +238,35 @@ class RevenueReconciliationServiceTest {
         verify(exactly = 1) {
             issueRepository.upsertActiveIssue("WALLET_VS_LEDGER", "WALLET", "10", 10, 8, "USD", "ERROR", any())
         }
+    }
+
+    @Test
+    fun `wallet mismatch lifecycle upserts twice then resolves`() {
+        every { walletRepository.findById(11) } returns Optional.of(wallet(id = 11, pending = 10))
+        every { ledgerRepository.findAllByWalletIdOrderByIdAsc(11) } returns listOf(ledger(walletId = 11, pending = 9, snapshotPending = 9))
+        service.reconcileWallet(11)
+        service.reconcileWallet(11)
+        every { ledgerRepository.findAllByWalletIdOrderByIdAsc(11) } returns listOf(ledger(walletId = 11, pending = 10, snapshotPending = 10))
+        service.reconcileWallet(11)
+
+        verify(exactly = 2) { issueRepository.upsertActiveIssue("WALLET_VS_LEDGER", "WALLET", "11", 10, 9, "USD", "ERROR", any()) }
+        verify(exactly = 1) { issueRepository.resolveActiveIssue("WALLET_VS_LEDGER", "WALLET", "11") }
+    }
+
+    @Test
+    fun `allocation and settlement allocation mismatch lifecycles upsert then resolve`() {
+        val incomplete = allocations().dropLast(1)
+        arrangeSettlement(total = 100, payments = 100, refunds = 0, allocations = incomplete)
+        every { ledgerRepository.findAllByAllocationIdOrderByIdAsc(any()) } returns emptyList()
+        service.reconcileSettlement(1)
+        service.reconcileSettlement(1)
+        arrangeSettlement(total = 100, payments = 100, refunds = 0, allocations = allocations())
+        every { ledgerRepository.findAllByAllocationIdOrderByIdAsc(any()) } answers { ledgerForAllocation(firstArg<Long>()) }
+        service.reconcileSettlement(1)
+
+        verify(exactly = 2) { issueRepository.upsertActiveIssue("SETTLEMENT_VS_ALLOCATIONS", "SETTLEMENT", "1", 100, 75, "USD", "ERROR", any()) }
+        verify(exactly = 1) { issueRepository.resolveActiveIssue("SETTLEMENT_VS_ALLOCATIONS", "SETTLEMENT", "1") }
+        verify(exactly = 1) { issueRepository.resolveActiveIssue("ALLOCATION_VS_LEDGER", "ALLOCATION", "1") }
     }
 
     @Test
@@ -239,12 +305,13 @@ class RevenueReconciliationServiceTest {
     private fun allocation(
         id: Long,
         owner: SettlementAllocationOwnerType,
+        amount: Long = 25,
         reversed: Long = 0,
         status: SettlementAllocationStatus = SettlementAllocationStatus.PENDING,
         bucket: SettlementAllocationBalanceBucket = SettlementAllocationBalanceBucket.PENDING
     ) = SettlementAllocationEntity(
         id = id, settlementId = 1, ownerType = owner, ownerId = "owner-$id", ownerName = "owner-$id",
-        rate = BigDecimal.ZERO, amountMinor = 25, reversedMinor = reversed, balanceBucket = bucket, status = status
+        rate = BigDecimal.ZERO, amountMinor = amount, reversedMinor = reversed, balanceBucket = bucket, status = status
     )
 
     private fun ledgerForAllocation(id: Long) = listOf(ledger(allocationId = id, pending = 25, snapshotPending = 25))
