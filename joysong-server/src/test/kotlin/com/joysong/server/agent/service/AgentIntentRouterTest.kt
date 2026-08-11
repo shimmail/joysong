@@ -442,6 +442,56 @@ class AgentIntentRouterTest {
         assertEquals(AgentQueryTarget.INSTITUTION, result.decision.queryTarget)
     }
 
+    @Test
+    fun `later english recommendation keeps doctors independent from negated comparison`() {
+        val result = router.assessCurrent("Don't compare treatments and recommend doctors", "GENERAL")
+
+        assertEquals(AgentLabelPolarity.NEGATIVE, result.evidenceFor(AgentIntent.COMPARISON).polarity)
+        assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentQueryTarget.PROJECT).polarity)
+        assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentQueryTarget.DOCTOR).polarity)
+        assertTrue(result.evidenceFor(AgentQueryTarget.DOCTOR).locked)
+        assertEquals(AgentIntent.CATALOG_QA, result.decision.intent)
+        assertEquals(AgentQueryTarget.DOCTOR, result.decision.queryTarget)
+        assertTrue(result.explicitQueryTarget)
+    }
+
+    @Test
+    fun `later chinese recommendation keeps doctors independent from negated comparison`() {
+        val result = router.assessCurrent("不要比较项目并推荐医生", "GENERAL")
+
+        assertEquals(AgentLabelPolarity.NEGATIVE, result.evidenceFor(AgentIntent.COMPARISON).polarity)
+        assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentQueryTarget.PROJECT).polarity)
+        assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentQueryTarget.DOCTOR).polarity)
+        assertTrue(result.evidenceFor(AgentQueryTarget.DOCTOR).locked)
+        assertEquals(AgentIntent.CATALOG_QA, result.decision.intent)
+        assertEquals(AgentQueryTarget.DOCTOR, result.decision.queryTarget)
+        assertTrue(result.explicitQueryTarget)
+    }
+
+    @Test
+    fun `attached english clinic package does not suppress independent target conflict`() {
+        val result = router.assessCurrent("Don't compare clinic packages; recommend doctors and clinics", "GENERAL")
+
+        assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentQueryTarget.INSTITUTION_PROJECT).polarity)
+        assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentQueryTarget.DOCTOR).polarity)
+        assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentQueryTarget.INSTITUTION).polarity)
+        assertEquals(AgentQueryTarget.DOCTOR, result.decision.queryTarget)
+        assertTrue("CONFLICTING_CURRENT_TARGETS" in result.ambiguityReasons)
+        assertTrue(result.requiresLlmParsing)
+    }
+
+    @Test
+    fun `attached chinese institution package does not suppress independent target conflict`() {
+        val result = router.assessCurrent("不要比较机构套餐；推荐医生和机构", "GENERAL")
+
+        assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentQueryTarget.INSTITUTION_PROJECT).polarity)
+        assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentQueryTarget.DOCTOR).polarity)
+        assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentQueryTarget.INSTITUTION).polarity)
+        assertEquals(AgentQueryTarget.DOCTOR, result.decision.queryTarget)
+        assertTrue("CONFLICTING_CURRENT_TARGETS" in result.ambiguityReasons)
+        assertTrue(result.requiresLlmParsing)
+    }
+
     @ParameterizedTest(name = "{0}")
     @MethodSource("routeCases")
     fun `routes common Chinese and English requests`(

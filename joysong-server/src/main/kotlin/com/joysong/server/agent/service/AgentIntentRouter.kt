@@ -162,7 +162,7 @@ class AgentIntentRouter {
             independentInstitutionSignals.positiveTerms.isNotEmpty(),
             independentProjectSignals.positiveTerms.isNotEmpty()
         ).count { it }
-        if (targetCount > 1 && institutionProjectSignals.positiveTerms.isEmpty()) {
+        if (targetCount > 1 && independentInstitutionProjectSignals.positiveTerms.isEmpty()) {
             score -= 0.20
             reasons += "CONFLICTING_CURRENT_TARGETS"
         }
@@ -451,8 +451,16 @@ class AgentIntentRouter {
                         SentenceConstraint.NEGATED
                     )
                     constrainedMatches.filter { it.term in actionTerms }.forEach { action ->
+                        val nextActionIndex = matches
+                            .asSequence()
+                            .filter { candidate ->
+                                candidate.term in actionTerms && candidate.index >= action.index + action.term.length
+                            }
+                            .minOfOrNull { it.index }
                         attachedToNegatedAction += matches.filter { target ->
-                            target.term in targetTerms && target.index >= action.index + action.term.length
+                            target.term in targetTerms &&
+                                target.index >= action.index + action.term.length &&
+                                (nextActionIndex == null || target.index < nextActionIndex)
                         }
                     }
                 }
