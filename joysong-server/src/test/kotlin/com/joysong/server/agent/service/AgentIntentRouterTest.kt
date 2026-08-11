@@ -71,6 +71,49 @@ class AgentIntentRouterTest {
         assertFalse(result.requiresLlmParsing)
     }
 
+    @ParameterizedTest(name = "negation: {0}")
+    @MethodSource("negationRoutingCases")
+    fun `current message ignores explicitly negated intent and target terms`(
+        query: String,
+        expectedIntent: AgentIntent,
+        expectedTarget: AgentQueryTarget?
+    ) {
+        val result = router.assessCurrent(query, "GENERAL")
+
+        assertEquals(expectedIntent, result.decision.intent)
+        assertEquals(expectedTarget, result.decision.queryTarget)
+        assertTrue(result.explicitIntent)
+        assertTrue(result.explicitQueryTarget)
+    }
+
+    @Test
+    fun `current message summary routes without target outside detail context`() {
+        val result = router.assessCurrent("Don't compare them, just summarize this page", "GENERAL")
+
+        assertEquals(AgentIntent.DETAIL_SUMMARY, result.decision.intent)
+        assertEquals(null, result.decision.queryTarget)
+        assertTrue(result.explicitIntent)
+        assertFalse(result.explicitQueryTarget)
+        assertTrue(result.requiresContextCompletion)
+    }
+
+    @ParameterizedTest(name = "unnegated safety: {0}")
+    @MethodSource("unnegatedSafetyCases")
+    fun `current message keeps unnegated safety signals at highest priority`(query: String) {
+        val result = router.assessCurrent(query, "GENERAL")
+
+        assertEquals(AgentIntent.SAFETY_SCREENING, result.decision.intent)
+        assertFalse(result.requiresLlmParsing)
+    }
+
+    @Test
+    fun `ambiguous double negative requires later parsing`() {
+        val result = router.assessCurrent("我不是不想比较项目", "GENERAL")
+
+        assertTrue("AMBIGUOUS_NEGATION" in result.ambiguityReasons)
+        assertTrue(result.requiresLlmParsing)
+    }
+
     @ParameterizedTest(name = "{0}")
     @MethodSource("routeCases")
     fun `routes common Chinese and English requests`(
@@ -116,6 +159,21 @@ class AgentIntentRouterTest {
             "皮肤感染了还能做项目吗", "我正在服药，可以做激光吗", "我是瘢痕体质",
             "I am pregnant, can I get Botox?", "I am breastfeeding", "I have a severe allergy",
             "I am taking medication", "I have a skin infection", "Can you guarantee a 100% result?"
+        )
+
+        @JvmStatic
+        fun negationRoutingCases(): Stream<Arguments> = Stream.of(
+            Arguments.of("不看医生，推荐机构", AgentIntent.CATALOG_QA, AgentQueryTarget.INSTITUTION),
+            Arguments.of("不要方案，只比较项目", AgentIntent.COMPARISON, AgentQueryTarget.PROJECT),
+            Arguments.of("我没有怀孕，想比较项目", AgentIntent.COMPARISON, AgentQueryTarget.PROJECT),
+            Arguments.of("I don't want a doctor; show me clinics", AgentIntent.CATALOG_QA, AgentQueryTarget.INSTITUTION),
+            Arguments.of("I am not pregnant; compare treatments", AgentIntent.COMPARISON, AgentQueryTarget.PROJECT)
+        )
+
+        @JvmStatic
+        fun unnegatedSafetyCases(): Stream<String> = Stream.of(
+            "我怀孕了，想比较项目", "我有严重过敏史，推荐机构", "我正在服药，可以治疗吗",
+            "I am pregnant; compare treatments", "I have a severe allergy; show me clinics", "I am taking medication; compare treatments"
         )
     }
 }
