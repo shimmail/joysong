@@ -139,10 +139,10 @@ class AgentIntentRouter {
             reasons += "AMBIGUOUS_NEGATION"
         }
         val targetCount = listOf(
-            institutionProjectSignals.positiveTerms.isNotEmpty(),
-            doctorSignals.positiveTerms.isNotEmpty(),
-            institutionSignals.positiveTerms.isNotEmpty(),
-            projectSignals.positiveTerms.isNotEmpty()
+            hasIndependentPositiveSignal(annotatedSignals, institutionProjectTerms),
+            hasIndependentPositiveSignal(annotatedSignals, doctorTerms),
+            hasIndependentPositiveSignal(annotatedSignals, institutionTerms),
+            hasIndependentPositiveSignal(annotatedSignals, projectTerms)
         ).count { it }
         if (targetCount > 1 && institutionProjectSignals.positiveTerms.isEmpty()) {
             score -= 0.20
@@ -376,72 +376,86 @@ class AgentIntentRouter {
 
     private enum class SignalPolarity { POSITIVE, NEGATED, AMBIGUOUS }
 
-    private data class AnnotatedSignal(val term: String, val polarity: SignalPolarity)
+    private data class AnnotatedSignal(val term: String, val polarity: SignalPolarity, val clause: Int)
 
     private data class AnnotatedSignals(
         val matches: List<AnnotatedSignal>,
         val ambiguousNegation: Boolean
     )
 
-    private data class NegationScope(val start: Int, val endExclusive: Int, val ambiguous: Boolean)
+    private enum class SentenceConstraint { NEGATED, UNCERTAIN }
 
     private fun annotateSignals(query: String): AnnotatedSignals {
         val normalizedQuery = normalize(query)
         val normalizedTerms = routingTerms.map(::normalize).distinct().sortedByDescending(String::length)
+        val actionTerms = intentActionTerms.map(::normalize).toSet()
+        val stateTerms = (safetyTerms + institutionProjectTerms + doctorTerms + institutionTerms + projectTerms)
+            .map(::normalize)
+            .toSet()
         val annotated = mutableListOf<AnnotatedSignal>()
         var ambiguousNegation = false
 
-        clauseRanges(normalizedQuery).forEach { range ->
+        clauseRanges(normalizedQuery).forEachIndexed { clauseIndex, range ->
             val clause = normalizedQuery.substring(range)
             val matches = normalizedTerms.flatMap { term ->
                 termIndexes(clause, term).map { index -> SignalMatch(term, index) }
             }
-            val negators = negatorIndexes(clause)
-            val negationScopes = mutableListOf<NegationScope>()
-            negators.forEachIndexed negatorLoop@ { negatorIndex, negator ->
-                val target = matches
-                    .asSequence()
-                    .filter { it.index >= negator.index + negator.term.length }
-                    .minWithOrNull(compareBy<SignalMatch> { it.index }.thenByDescending { it.term.length })
-                    ?: return@negatorLoop
-                val gap = target.index - (negator.index + negator.term.length)
-                val nextNegatorBoundary = negators.getOrNull(negatorIndex + 1)?.index
-                    ?.takeIf { it > target.index }
-                negationScopes += NegationScope(
-                    start = target.index,
-                    endExclusive = negationScopeEnd(target, matches, nextNegatorBoundary),
-                    ambiguous = gap > maxNegationGap
+            val constraints = mutableMapOf<SignalMatch, SentenceConstraint>()
+            val uncertaintyPhrases = uncertaintyPhraseIndexes(clause)
+            uncertaintyPhrases.forEach { phrase ->
+                applyConstraint(
+                    constraints,
+                    nearestMatches(phrase.index + phrase.term.length, matches, stateTerms),
+                    SentenceConstraint.UNCERTAIN
                 )
             }
-            matches.forEach { match ->
-                val overlappingScopes = negationScopes.filter { scope ->
-                    match.index < scope.endExclusive && match.index + match.term.length > scope.start
+            negatorIndexes(clause)
+                .filterNot { negator -> uncertaintyPhrases.any { phrase ->
+                    rangesOverlap(negator.index, negator.term.length, phrase.index, phrase.term.length)
+                } }
+                .forEach { negator ->
+                    applyConstraint(
+                        constraints,
+                        nearestMatches(
+                            negator.index + negator.term.length,
+                            matches,
+                            actionTerms + stateTerms
+                        ),
+                        SentenceConstraint.NEGATED
+                    )
                 }
-                val polarity = when {
-                    overlappingScopes.size > 1 || overlappingScopes.any { it.ambiguous } -> SignalPolarity.AMBIGUOUS
-                    overlappingScopes.size == 1 -> SignalPolarity.NEGATED
-                    else -> SignalPolarity.POSITIVE
+            matches.forEach { match ->
+                val polarity = when (constraints[match]) {
+                    SentenceConstraint.NEGATED -> SignalPolarity.NEGATED
+                    SentenceConstraint.UNCERTAIN -> SignalPolarity.AMBIGUOUS
+                    null -> SignalPolarity.POSITIVE
                 }
                 if (polarity == SignalPolarity.AMBIGUOUS) ambiguousNegation = true
-                annotated += AnnotatedSignal(match.term, polarity)
+                annotated += AnnotatedSignal(match.term, polarity, clauseIndex)
             }
         }
         return AnnotatedSignals(annotated, ambiguousNegation)
     }
 
-    private fun negationScopeEnd(
-        anchor: SignalMatch,
+    private fun nearestMatches(
+        after: Int,
         matches: List<SignalMatch>,
-        nextNegatorBoundary: Int?
-    ): Int {
-        var end = anchor.index + anchor.term.length
-        matches.sortedBy { it.index }.forEach { candidate ->
-            if (nextNegatorBoundary != null && candidate.index >= nextNegatorBoundary) return@forEach
-            if (candidate.index >= anchor.index && candidate.index <= end + maxNegationSignalGap) {
-                end = maxOf(end, candidate.index + candidate.term.length)
-            }
+        compatibleTerms: Set<String>
+    ): List<SignalMatch> {
+        val candidates = matches.filter { it.index >= after && it.term in compatibleTerms }
+        val firstIndex = candidates.minOfOrNull { it.index } ?: return emptyList()
+        return candidates.filter { it.index == firstIndex }
+    }
+
+    private fun applyConstraint(
+        constraints: MutableMap<SignalMatch, SentenceConstraint>,
+        matches: List<SignalMatch>,
+        constraint: SentenceConstraint
+    ) {
+        val resolvedConstraint = if (matches.size > 1) SentenceConstraint.UNCERTAIN else constraint
+        matches.forEach { match ->
+            constraints[match] = if (constraints[match] == null) resolvedConstraint else SentenceConstraint.UNCERTAIN
         }
-        return end
     }
 
     private fun matchSignals(annotatedSignals: AnnotatedSignals, terms: List<String>): MatchedSignals {
@@ -452,6 +466,18 @@ class AgentIntentRouter {
             negatedTerms = matches.filter { it.polarity == SignalPolarity.NEGATED }.map { it.term }.distinct(),
             ambiguousNegation = matches.any { it.polarity == SignalPolarity.AMBIGUOUS }
         )
+    }
+
+    private fun hasIndependentPositiveSignal(annotatedSignals: AnnotatedSignals, terms: List<String>): Boolean {
+        val negatedActionClauses = annotatedSignals.matches
+            .filter { it.polarity == SignalPolarity.NEGATED && it.term in intentActionTerms.map(::normalize) }
+            .mapTo(mutableSetOf()) { it.clause }
+        val normalizedTerms = terms.map(::normalize).toSet()
+        return annotatedSignals.matches.any { signal ->
+            signal.polarity == SignalPolarity.POSITIVE &&
+                signal.term in normalizedTerms &&
+                signal.clause !in negatedActionClauses
+        }
     }
 
     private fun intentEvidence(intent: AgentIntent, signals: MatchedSignals): AgentIntentEvidence? =
@@ -490,7 +516,7 @@ class AgentIntentRouter {
         .trim()
 
     private fun clauseRanges(query: String): List<IntRange> {
-        val delimiter = Regex("[,.;!?，。；！？]|但是|而是|因为|但|只|\\bbut\\b|\\bbecause\\b|\\binstead\\b|\\bjust\\b")
+        val delimiter = Regex("[,.;!?，。；！？]|同时|但是|而是|因为|但|只|\\bwhile\\b|\\bbut\\b|\\bbecause\\b|\\binstead\\b|\\bjust\\b")
         val ranges = mutableListOf<IntRange>()
         var start = 0
         delimiter.findAll(query).forEach { match ->
@@ -525,14 +551,17 @@ class AgentIntentRouter {
         return matches
     }
 
+    private fun uncertaintyPhraseIndexes(text: String): List<SignalMatch> =
+        uncertaintyPhrases.sortedByDescending(String::length).flatMap { phrase ->
+            termIndexes(text, phrase).map { index -> SignalMatch(phrase, index) }
+        }
+
     private fun rangesOverlap(firstStart: Int, firstLength: Int, secondStart: Int, secondLength: Int): Boolean =
         firstStart < secondStart + secondLength && secondStart < firstStart + firstLength
 
     private data class SignalMatch(val term: String, val index: Int)
 
     private companion object {
-        const val maxNegationGap = 24
-        const val maxNegationSignalGap = 8
         val detailContextTypes = setOf("PROJECT", "INSTITUTION", "INSTITUTION_PROJECT", "DOCTOR")
         val intentsRequiringTarget = setOf(
             AgentIntent.CATALOG_QA,
@@ -555,12 +584,15 @@ class AgentIntentRouter {
             "institution project", "institution projects", "clinic package", "clinic packages", "package", "packages", "offering", "offerings"
         )
         val doctorTerms = listOf("医生", "医师", "大夫", "doctor", "doctors", "surgeon", "surgeons", "physician", "physicians")
-        val institutionTerms = listOf("机构", "医院", "诊所", "门诊部", "clinic", "clinics", "hospital", "hospitals", "institution")
-        val projectTerms = listOf("项目", "治疗", "术式", "procedure", "treatment", "treatments")
+        val institutionTerms = listOf(
+            "机构", "医院", "诊所", "门诊部", "clinic", "clinics", "hospital", "hospitals", "institution", "institutions"
+        )
+        val projectTerms = listOf("项目", "治疗", "术式", "procedure", "procedures", "treatment", "treatments")
         val detailSummaryTerms = listOf(
             "总结", "概括", "介绍", "简介", "详情", "当前页面", "当前详情", "这个页面", "这页", "简要", "简短",
             "summary", "summarize", "overview", "introduce", "about this", "current page", "this page"
         )
+        val intentActionTerms = comparisonTerms + planningTerms + detailSummaryTerms
         val safetyTerms = listOf(
             "怀孕", "孕期", "备孕", "哺乳", "严重过敏", "过敏史", "瘢痕体质", "疤痕体质",
             "正在吃药", "正在服药", "皮肤感染", "伤口未愈合", "保证效果", "百分百有效",
@@ -579,5 +611,8 @@ class AgentIntentRouter {
         val routingTerms = safetyTerms + detailSummaryTerms + comparisonTerms + planningTerms + catalogTerms +
             institutionProjectTerms + doctorTerms + institutionTerms + projectTerms + unresolvedReferenceTerms +
             constraintSignalGroups.flatten() + aestheticConcernTerms
+        val uncertaintyPhrases = listOf(
+            "don't know if", "do not know whether", "not sure if", "not sure whether", "不确定是否", "不知道是否"
+        )
     }
 }

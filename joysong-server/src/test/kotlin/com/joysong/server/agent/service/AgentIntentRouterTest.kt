@@ -289,6 +289,85 @@ class AgentIntentRouterTest {
         assertFalse(result.requiresLlmParsing)
     }
 
+    @Test
+    fun `clause boundary keeps pregnancy positive after negated comparison`() {
+        val result = router.assessCurrent("Don't compare treatments while pregnant", "GENERAL")
+
+        assertEquals(AgentLabelPolarity.NEGATIVE, result.evidenceFor(AgentIntent.COMPARISON).polarity)
+        assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentIntent.SAFETY_SCREENING).polarity)
+        assertTrue(result.evidenceFor(AgentIntent.SAFETY_SCREENING).locked)
+    }
+
+    @Test
+    fun `english safety uncertainty requires parser fallback`() {
+        val result = router.assessCurrent("I don't know if I am pregnant", "GENERAL")
+
+        assertEquals(AgentLabelPolarity.UNCERTAIN, result.evidenceFor(AgentIntent.SAFETY_SCREENING).polarity)
+        assertTrue(result.requiresLlmParsing)
+    }
+
+    @Test
+    fun `state negation leaves later comparison and project labels locked`() {
+        val result = router.assessCurrent("I am not pregnant; compare treatments", "GENERAL")
+
+        assertEquals(AgentLabelPolarity.NEGATIVE, result.evidenceFor(AgentIntent.SAFETY_SCREENING).polarity)
+        assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentIntent.COMPARISON).polarity)
+        assertTrue(result.evidenceFor(AgentIntent.COMPARISON).locked)
+        assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentQueryTarget.PROJECT).polarity)
+        assertTrue(result.evidenceFor(AgentQueryTarget.PROJECT).locked)
+    }
+
+    @Test
+    fun `chinese clause boundary keeps pregnancy positive after negated comparison`() {
+        val result = router.assessCurrent("不要比较项目，同时我怀孕了", "GENERAL")
+
+        assertEquals(AgentLabelPolarity.NEGATIVE, result.evidenceFor(AgentIntent.COMPARISON).polarity)
+        assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentIntent.SAFETY_SCREENING).polarity)
+        assertTrue(result.evidenceFor(AgentIntent.SAFETY_SCREENING).locked)
+    }
+
+    @Test
+    fun `chinese safety uncertainty retains comparison and institution labels`() {
+        val result = router.assessCurrent("我不确定是否怀孕，想比较机构", "GENERAL")
+
+        assertEquals(AgentLabelPolarity.UNCERTAIN, result.evidenceFor(AgentIntent.SAFETY_SCREENING).polarity)
+        assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentIntent.COMPARISON).polarity)
+        assertTrue(result.evidenceFor(AgentIntent.COMPARISON).locked)
+        assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentQueryTarget.INSTITUTION).polarity)
+        assertTrue(result.evidenceFor(AgentQueryTarget.INSTITUTION).locked)
+    }
+
+    @Test
+    fun `plural institutions are a positive institution target`() {
+        val result = router.assessCurrent("Compare institutions", "GENERAL")
+
+        assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentQueryTarget.INSTITUTION).polarity)
+    }
+
+    @Test
+    fun `plural procedures are a positive project target`() {
+        val result = router.assessCurrent("What procedures help acne?", "GENERAL")
+
+        assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentQueryTarget.PROJECT).polarity)
+    }
+
+    @Test
+    fun `hospitality is not an institution target`() {
+        val result = router.assessCurrent("Tell me about hospitality", "GENERAL")
+
+        assertTrue(result.targetEvidence.none { it.target == AgentQueryTarget.INSTITUTION })
+    }
+
+    @Test
+    fun `ambiguous compatible targets become uncertain without affecting later labels`() {
+        val result = router.assessCurrent("不要机构项目，推荐医生", "GENERAL")
+
+        assertEquals(AgentLabelPolarity.UNCERTAIN, result.evidenceFor(AgentQueryTarget.INSTITUTION_PROJECT).polarity)
+        assertEquals(AgentLabelPolarity.UNCERTAIN, result.evidenceFor(AgentQueryTarget.INSTITUTION).polarity)
+        assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentQueryTarget.DOCTOR).polarity)
+        assertTrue(result.evidenceFor(AgentQueryTarget.DOCTOR).locked)
+    }
+
     @ParameterizedTest(name = "{0}")
     @MethodSource("routeCases")
     fun `routes common Chinese and English requests`(
