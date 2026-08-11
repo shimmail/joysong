@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
@@ -48,6 +49,12 @@ void main() {
     expect(find.text('北京悦颜中心'), findsOneWidget);
     await tester.tap(find.text('北京悦颜中心'));
     await tester.pumpAndSettle();
+    expect(find.byKey(const Key('institution-back-to-list')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('institution-back-to-list')));
+    await tester.pumpAndSettle();
+    expect(find.text('北京悦颜中心'), findsOneWidget);
+    await tester.tap(find.text('北京悦颜中心'));
+    await tester.pumpAndSettle();
 
     await tester.enterText(find.byKey(const Key('institution-name')), ' 新机构名 ');
     await tester.enterText(
@@ -88,6 +95,81 @@ void main() {
     });
   });
 
+  testWidgets('established year validates range and empty explicitly clears it',
+      (tester) async {
+    _useTallView(tester);
+    final repository = _InstitutionRepository(summaries: const [_summaryA]);
+
+    await tester.pumpWidget(_app(repository));
+    await tester.pumpAndSettle();
+
+    final field = find.byKey(const Key('institution-establishedYear'));
+    await tester.enterText(field, 'year');
+    await tester.tap(find.byKey(const Key('institution-save')));
+    await tester.pump();
+    expect(
+        find.text('请输入 1800 至 ${DateTime.now().year} 之间的整数年份'), findsOneWidget);
+    expect(repository.updateAttempts, 0);
+
+    await tester.enterText(field, '1799');
+    await tester.tap(find.byKey(const Key('institution-save')));
+    await tester.pump();
+    expect(
+        find.text('请输入 1800 至 ${DateTime.now().year} 之间的整数年份'), findsOneWidget);
+    expect(repository.updateAttempts, 0);
+
+    await tester.enterText(field, '');
+    await tester.tap(find.byKey(const Key('institution-save')));
+    await tester.pumpAndSettle();
+    expect(repository.updateAttempts, 1);
+    expect(repository.lastUpdate?.toJson()['establishedYear'], isNull);
+  });
+
+  testWidgets('institution profile states and form copy follow English locale',
+      (tester) async {
+    _useTallView(tester);
+    final repository = _InstitutionRepository(summaries: const [_summaryA]);
+
+    await tester.pumpWidget(_app(repository, locale: const Locale('en')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Edit institution profile'), findsOneWidget);
+    expect(find.text('Established year'), findsOneWidget);
+    expect(find.text('Save profile'), findsOneWidget);
+    expect(find.text('Projects 12'), findsOneWidget);
+    expect(find.text('Doctors 6'), findsOneWidget);
+  });
+
+  testWidgets('loading empty and error states follow English locale',
+      (tester) async {
+    final loading = Completer<List<ManagedInstitutionSummary>>();
+    final emptyRepository = _InstitutionRepository(summaries: const [])
+      ..listCompleter = loading;
+    await tester.pumpWidget(
+      _app(emptyRepository, locale: const Locale('en')),
+    );
+    await tester.pump();
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+    loading.complete(const []);
+    await tester.pumpAndSettle();
+    expect(
+        find.text('No institutions are available to manage'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    final failingRepository = _InstitutionRepository(summaries: const [])
+      ..listError = true;
+    await tester.pumpWidget(
+      _app(failingRepository, locale: const Locale('en')),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Failed to load institution profile. Please try again.'),
+      findsOneWidget,
+    );
+    expect(find.text('Retry'), findsOneWidget);
+  });
+
   testWidgets(
       'images mutate, save disables, failure retries, and dispose ignores late work',
       (tester) async {
@@ -103,7 +185,7 @@ void main() {
     await controller.select('institution-1');
     addTearDown(controller.dispose);
 
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(_appShell(
       home: ManagedInstitutionProfileEditPage(
         controller: controller,
         profile: _profileA,
@@ -176,12 +258,26 @@ Future<void> _reveal(WidgetTester tester, Key key) async {
 Widget _app(
   _InstitutionRepository repository, {
   Future<String?> Function()? imagePicker,
+  Locale locale = const Locale('zh'),
 }) =>
-    MaterialApp(
+    _appShell(
+      locale: locale,
       home: ManagedInstitutionProfilesPage(
         repository: repository,
         imagePicker: imagePicker,
       ),
+    );
+
+Widget _appShell({required Widget home, Locale locale = const Locale('zh')}) =>
+    MaterialApp(
+      locale: locale,
+      supportedLocales: const [Locale('zh'), Locale('en')],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      home: home,
     );
 
 final class _InstitutionRepository implements IdentityRepository {
@@ -194,10 +290,16 @@ final class _InstitutionRepository implements IdentityRepository {
   int updateAttempts = 0;
   Completer<ManagedInstitutionProfile>? saveCompleter;
   Completer<ManagedInstitutionProfile>? detailCompleter;
+  Completer<List<ManagedInstitutionSummary>>? listCompleter;
+  bool listError = false;
 
   @override
-  Future<List<ManagedInstitutionSummary>> listManagedInstitutions() async =>
-      summaries;
+  Future<List<ManagedInstitutionSummary>> listManagedInstitutions() async {
+    if (listError) throw Exception('network');
+    final pending = listCompleter;
+    if (pending != null) return pending.future;
+    return summaries;
+  }
 
   @override
   Future<ManagedInstitutionProfile> loadManagedInstitution(String id) async {

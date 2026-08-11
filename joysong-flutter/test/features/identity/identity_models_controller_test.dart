@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
@@ -218,7 +219,7 @@ void main() {
     ];
 
     await tester.pumpWidget(
-      MaterialApp(
+      _localizedApp(
         home: ManagedInstitutionProfilesPage(
           repository: repository,
           imagePicker: () async => pickedImages.removeAt(0),
@@ -266,7 +267,7 @@ void main() {
       );
 
     await tester.pumpWidget(
-      MaterialApp(
+      _localizedApp(
         home: ManagedInstitutionProjectsPage(
           repository: repository,
           context: repository.managementContext!,
@@ -300,7 +301,7 @@ void main() {
       visibleInstitutionIds: ['inst-1'],
     );
 
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(_localizedApp(
       home: InstitutionMembershipRequestsPage(
         repository: repository,
         context: context,
@@ -311,13 +312,17 @@ void main() {
     await tester.tap(find.byTooltip('审核'));
     await tester.pumpAndSettle();
 
-    expect(find.text('通过'), findsOneWidget);
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    expect(find.text('通过'), findsWidgets);
     expect(find.text('驳回'), findsOneWidget);
     expect(find.text('要求修改'), findsNothing);
+    await tester.tap(find.text('通过').last);
+    await tester.pumpAndSettle();
 
     await tester.tap(find.text('取消'));
     await tester.pumpAndSettle();
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(_localizedApp(
       home: Builder(
         builder: (context) => TextButton(
           onPressed: () => showProfessionalProjectReviewDialog(context),
@@ -328,6 +333,8 @@ void main() {
     await tester.tap(find.text('open project review'));
     await tester.pumpAndSettle();
 
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
     expect(find.text('要求修改'), findsOneWidget);
   });
 
@@ -349,7 +356,7 @@ void main() {
       );
 
     await tester.pumpWidget(
-      MaterialApp(
+      _localizedApp(
         home: ManagementCenterPage(repository: repository),
       ),
     );
@@ -381,7 +388,7 @@ void main() {
         canSubmitInstitutionProjectRequests: true,
       );
 
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(_localizedApp(
       home: ManagementCenterPage(repository: repository),
     ));
     await tester.pumpAndSettle();
@@ -410,7 +417,7 @@ void main() {
         canManageDoctors: true,
       );
 
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(_localizedApp(
       home: ManagementCenterPage(repository: repository),
     ));
     await tester.pumpAndSettle();
@@ -432,7 +439,7 @@ void main() {
         canViewAffiliations: true,
       );
 
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(_localizedApp(
       home: ManagementCenterPage(repository: repository),
     ));
     await tester.pumpAndSettle();
@@ -443,6 +450,19 @@ void main() {
     expect(find.text('机构项目'), findsNothing);
   });
 }
+
+Widget _localizedApp(
+        {required Widget home, Locale locale = const Locale('zh')}) =>
+    MaterialApp(
+      locale: locale,
+      supportedLocales: const [Locale('zh'), Locale('en')],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      home: home,
+    );
 
 final class _FakeIdentityRepository implements IdentityRepository {
   var contextCalls = 0;

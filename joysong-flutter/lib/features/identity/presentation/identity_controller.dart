@@ -149,6 +149,8 @@ final class ManagementController extends ChangeNotifier {
 
 enum InstitutionProfileLoadStatus { idle, loading, ready, empty, failure }
 
+enum InstitutionProfileFailure { load, save }
+
 final class InstitutionProfileController extends ChangeNotifier {
   InstitutionProfileController(this._repository);
 
@@ -158,19 +160,19 @@ final class InstitutionProfileController extends ChangeNotifier {
   List<ManagedInstitutionSummary> _summaries = const [];
   ManagedInstitutionProfile? _selectedProfile;
   bool _isSaving = false;
-  String? _errorMessage;
+  InstitutionProfileFailure? _failure;
   bool _disposed = false;
 
   InstitutionProfileLoadStatus get status => _status;
   List<ManagedInstitutionSummary> get summaries => _summaries;
   ManagedInstitutionProfile? get selectedProfile => _selectedProfile;
   bool get isSaving => _isSaving;
-  String? get errorMessage => _errorMessage;
+  InstitutionProfileFailure? get failure => _failure;
 
   Future<void> load() async {
     if (_status == InstitutionProfileLoadStatus.loading) return;
     _status = InstitutionProfileLoadStatus.loading;
-    _errorMessage = null;
+    _failure = null;
     _notify();
     try {
       _summaries = await _repository.listManagedInstitutions();
@@ -180,7 +182,7 @@ final class InstitutionProfileController extends ChangeNotifier {
           : InstitutionProfileLoadStatus.ready;
     } catch (_) {
       _status = InstitutionProfileLoadStatus.failure;
-      _errorMessage = '机构档案加载失败，请重试';
+      _failure = InstitutionProfileFailure.load;
     }
     _notify();
   }
@@ -188,7 +190,7 @@ final class InstitutionProfileController extends ChangeNotifier {
   Future<bool> select(String id) async {
     if (_status == InstitutionProfileLoadStatus.loading) return false;
     _status = InstitutionProfileLoadStatus.loading;
-    _errorMessage = null;
+    _failure = null;
     _notify();
     try {
       _selectedProfile = await _repository.loadManagedInstitution(id);
@@ -196,7 +198,7 @@ final class InstitutionProfileController extends ChangeNotifier {
       return true;
     } catch (_) {
       _status = InstitutionProfileLoadStatus.failure;
-      _errorMessage = '机构档案加载失败，请重试';
+      _failure = InstitutionProfileFailure.load;
       return false;
     } finally {
       _notify();
@@ -208,19 +210,28 @@ final class InstitutionProfileController extends ChangeNotifier {
     final profile = _selectedProfile;
     if (profile == null) return false;
     _isSaving = true;
-    _errorMessage = null;
+    _failure = null;
     _notify();
     try {
       _selectedProfile =
           await _repository.updateManagedInstitution(profile.id, update);
       return true;
     } catch (_) {
-      _errorMessage = '机构档案保存失败，请稍后重试';
+      _failure = InstitutionProfileFailure.save;
       return false;
     } finally {
       _isSaving = false;
       _notify();
     }
+  }
+
+  void clearSelection() {
+    _selectedProfile = null;
+    _failure = null;
+    _status = _summaries.isEmpty
+        ? InstitutionProfileLoadStatus.empty
+        : InstitutionProfileLoadStatus.ready;
+    _notify();
   }
 
   void _notify() {

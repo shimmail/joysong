@@ -1251,7 +1251,18 @@ class _ManagedInstitutionProfilesPageState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('机构档案')),
+      appBar: AppBar(
+        title: ListenableBuilder(
+          listenable: _controller,
+          builder: (context, _) {
+            final editing = _controller.selectedProfile != null;
+            return Text(context.localized(
+              editing ? '编辑机构档案' : '机构档案',
+              editing ? 'Edit institution profile' : 'Institution profile',
+            ));
+          },
+        ),
+      ),
       body: ListenableBuilder(
         listenable: _controller,
         builder: (context, _) {
@@ -1259,14 +1270,20 @@ class _ManagedInstitutionProfilesPageState
             InstitutionProfileLoadStatus.idle ||
             InstitutionProfileLoadStatus.loading =>
               const Center(child: CircularProgressIndicator()),
-            InstitutionProfileLoadStatus.empty => const Center(
+            InstitutionProfileLoadStatus.empty => Center(
                 child: Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Text('当前账号暂无可管理机构'),
+                  padding: const EdgeInsets.all(24),
+                  child: Text(context.localized(
+                    '当前账号暂无可管理机构',
+                    'No institutions are available to manage',
+                  )),
                 ),
               ),
             InstitutionProfileLoadStatus.failure => _IdentityFailure(
-                message: _controller.errorMessage ?? '机构档案加载失败',
+                message: _institutionProfileFailureMessage(
+                  context,
+                  _controller.failure ?? InstitutionProfileFailure.load,
+                ),
                 onRetry: _load,
               ),
             InstitutionProfileLoadStatus.ready
@@ -1275,6 +1292,7 @@ class _ManagedInstitutionProfilesPageState
                 controller: _controller,
                 profile: _controller.selectedProfile!,
                 imagePicker: widget.imagePicker ?? _pickInstitutionProfileImage,
+                embedded: true,
               ),
             InstitutionProfileLoadStatus.ready => RefreshIndicator(
                 onRefresh: _load,
@@ -1289,7 +1307,7 @@ class _ManagedInstitutionProfilesPageState
                       child: ListTile(
                         leading: const Icon(Icons.apartment_outlined),
                         title: Text(institution.name.isEmpty
-                            ? '未命名机构'
+                            ? context.localized('未命名机构', 'Unnamed institution')
                             : institution.name),
                         subtitle: Text(
                           [
@@ -1321,12 +1339,14 @@ class ManagedInstitutionProfileEditPage extends StatefulWidget {
     required this.controller,
     required this.profile,
     required this.imagePicker,
+    this.embedded = false,
     super.key,
   });
 
   final InstitutionProfileController controller;
   final ManagedInstitutionProfile profile;
   final InstitutionProfileImagePicker imagePicker;
+  final bool embedded;
 
   @override
   State<ManagedInstitutionProfileEditPage> createState() =>
@@ -1371,74 +1391,115 @@ class _ManagedInstitutionProfileEditPageState
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('编辑机构档案')),
-      body: ListenableBuilder(
-        listenable: widget.controller,
-        builder: (context, _) => Form(
-          key: _formKey,
-          child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              const _InfoCard(text: '这是向用户公开展示的信息，请勿填写内部管理或隐私资料。'),
-              const SizedBox(height: 16),
-              _platformFacts(),
-              const SizedBox(height: 16),
-              _textField('name', '机构名称', required: true),
-              _imagePickerField(
-                fieldName: 'coverImage',
-                title: '封面图',
-                addLabel: '从相册选择封面图',
-                values: _singleImage('coverImage'),
-                onAdd: () => _pickSingleImage('coverImage'),
-                onDelete: (_) => _setField('coverImage', ''),
-              ),
-              _textField('city', '城市', helperText: '填写城市名即可，无需输入“市”'),
-              _textField('address', '地址', maxLines: 2),
-              _textField('contactPhone', '联系电话'),
-              _textField('businessHours', '营业时间'),
-              _textField('establishedYear', '成立年份',
-                  keyboardType: TextInputType.number),
-              _textField('description', '机构介绍', maxLines: 4),
-              _textField('tags', '标签（逗号分隔）'),
-              _textField('specialties', '擅长领域（逗号分隔）'),
-              _textField('credentials', '资质文本', maxLines: 3),
-              _imagePickerField(
-                fieldName: 'credentialImages',
-                title: '资质证书图片',
-                addLabel: '从相册添加资质图片',
-                values: _csv('credentialImages'),
-                onAdd: () => _pickListImage('credentialImages'),
-                onDelete: (image) =>
-                    _removeListImage('credentialImages', image),
-              ),
-              _imagePickerField(
-                fieldName: 'images',
-                title: '环境图片',
-                addLabel: '从相册添加环境图片',
-                values: _csv('images'),
-                onAdd: () => _pickListImage('images'),
-                onDelete: (image) => _removeListImage('images', image),
-              ),
-              if (widget.controller.errorMessage != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(
-                    widget.controller.errorMessage!,
-                    style:
-                        TextStyle(color: Theme.of(context).colorScheme.error),
-                  ),
+    final content = ListenableBuilder(
+      listenable: widget.controller,
+      builder: (context, _) => Form(
+        key: _formKey,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            if (widget.embedded && widget.controller.summaries.length > 1) ...[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  key: const Key('institution-back-to-list'),
+                  onPressed: widget.controller.clearSelection,
+                  icon: const Icon(Icons.arrow_back_rounded),
+                  label:
+                      Text(context.localized('返回机构列表', 'Back to institutions')),
                 ),
-              const SizedBox(height: 20),
-              FilledButton(
-                key: const Key('institution-save'),
-                onPressed: widget.controller.isSaving ? null : _save,
-                child: Text(widget.controller.isSaving ? '保存中…' : '保存档案'),
               ),
+              const SizedBox(height: 8),
             ],
-          ),
+            _InfoCard(
+              text: context.localized(
+                '这是向用户公开展示的信息，请勿填写内部管理或隐私资料。',
+                'This information is public. Do not include internal or private data.',
+              ),
+            ),
+            const SizedBox(height: 16),
+            _platformFacts(),
+            const SizedBox(height: 16),
+            _textField('name', context.localized('机构名称', 'Institution name'),
+                required: true),
+            _imagePickerField(
+              fieldName: 'coverImage',
+              title: context.localized('封面图', 'Cover image'),
+              addLabel: context.localized(
+                  '从相册选择封面图', 'Choose cover image from gallery'),
+              values: _singleImage('coverImage'),
+              onAdd: () => _pickSingleImage('coverImage'),
+              onDelete: (_) => _setField('coverImage', ''),
+            ),
+            _textField('city', context.localized('城市', 'City'),
+                helperText: context.localized(
+                    '填写城市名即可，无需输入“市”', 'Enter the city name only')),
+            _textField('address', context.localized('地址', 'Address'),
+                maxLines: 2),
+            _textField(
+                'contactPhone', context.localized('联系电话', 'Contact phone')),
+            _textField(
+                'businessHours', context.localized('营业时间', 'Business hours')),
+            _textField('establishedYear',
+                context.localized('成立年份', 'Established year'),
+                keyboardType: TextInputType.number,
+                validator: _validateEstablishedYear),
+            _textField('description',
+                context.localized('机构介绍', 'Institution description'),
+                maxLines: 4),
+            _textField('tags',
+                context.localized('标签（逗号分隔）', 'Tags (comma-separated)')),
+            _textField(
+                'specialties',
+                context.localized(
+                    '擅长领域（逗号分隔）', 'Specialties (comma-separated)')),
+            _textField('credentials', context.localized('资质文本', 'Credentials'),
+                maxLines: 3),
+            _imagePickerField(
+              fieldName: 'credentialImages',
+              title: context.localized('资质证书图片', 'Credential images'),
+              addLabel: context.localized(
+                  '从相册添加资质图片', 'Add credential image from gallery'),
+              values: _csv('credentialImages'),
+              onAdd: () => _pickListImage('credentialImages'),
+              onDelete: (image) => _removeListImage('credentialImages', image),
+            ),
+            _imagePickerField(
+              fieldName: 'images',
+              title: context.localized('环境图片', 'Facility images'),
+              addLabel: context.localized(
+                  '从相册添加环境图片', 'Add facility image from gallery'),
+              values: _csv('images'),
+              onAdd: () => _pickListImage('images'),
+              onDelete: (image) => _removeListImage('images', image),
+            ),
+            if (widget.controller.failure != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  _institutionProfileFailureMessage(
+                      context, widget.controller.failure!),
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
+            const SizedBox(height: 20),
+            FilledButton(
+              key: const Key('institution-save'),
+              onPressed: widget.controller.isSaving ? null : _save,
+              child: Text(widget.controller.isSaving
+                  ? context.localized('保存中…', 'Saving…')
+                  : context.localized('保存档案', 'Save profile')),
+            ),
+          ],
         ),
       ),
+    );
+    if (widget.embedded) return content;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(context.localized('编辑机构档案', 'Edit institution profile')),
+      ),
+      body: content,
     );
   }
 
@@ -1449,6 +1510,7 @@ class _ManagedInstitutionProfileEditPageState
     int maxLines = 1,
     TextInputType? keyboardType,
     String? helperText,
+    String? Function(String?)? validator,
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -1458,9 +1520,12 @@ class _ManagedInstitutionProfileEditPageState
         maxLines: maxLines,
         keyboardType: keyboardType,
         decoration: InputDecoration(labelText: label, helperText: helperText),
-        validator: required
-            ? (value) => (value ?? '').trim().isEmpty ? '请填写$label' : null
-            : null,
+        validator: validator ??
+            (required
+                ? (value) => (value ?? '').trim().isEmpty
+                    ? context.localized('请填写$label', '$label is required')
+                    : null
+                : null),
       ),
     );
   }
@@ -1485,7 +1550,7 @@ class _ManagedInstitutionProfileEditPageState
               Text(title, style: Theme.of(context).textTheme.titleSmall),
               const SizedBox(height: 8),
               if (values.isEmpty)
-                const Text('暂无图片')
+                Text(context.localized('暂无图片', 'No images'))
               else
                 for (final entry in values.indexed)
                   ListTile(
@@ -1498,7 +1563,7 @@ class _ManagedInstitutionProfileEditPageState
                     ),
                     trailing: IconButton(
                       key: Key('institution-$fieldName-remove-${entry.$1}'),
-                      tooltip: '移除图片',
+                      tooltip: context.localized('移除图片', 'Remove image'),
                       onPressed: () => onDelete(entry.$2),
                       icon: const Icon(Icons.close_rounded),
                     ),
@@ -1533,14 +1598,20 @@ class _ManagedInstitutionProfileEditPageState
           spacing: 12,
           runSpacing: 8,
           children: [
-            Text(profile.isVerified ? '已认证' : '未认证'),
-            Text('评分 ${profile.rating}'),
-            Text('评价 ${profile.reviewCount}'),
-            Text('项目 ${profile.projectCount}'),
-            Text('医生 ${profile.doctorCount}'),
-            Text('咨询 ${profile.consultationCount}'),
-            Text('用户 ${profile.userCount}'),
-            Text('案例 ${profile.caseCount}'),
+            Text(profile.isVerified
+                ? context.localized('已认证', 'Verified')
+                : context.localized('未认证', 'Not verified')),
+            Text('${context.localized('评分', 'Rating')} ${profile.rating}'),
+            Text(
+                '${context.localized('评价', 'Reviews')} ${profile.reviewCount}'),
+            Text(
+                '${context.localized('项目', 'Projects')} ${profile.projectCount}'),
+            Text(
+                '${context.localized('医生', 'Doctors')} ${profile.doctorCount}'),
+            Text(
+                '${context.localized('咨询', 'Consultations')} ${profile.consultationCount}'),
+            Text('${context.localized('用户', 'Users')} ${profile.userCount}'),
+            Text('${context.localized('案例', 'Cases')} ${profile.caseCount}'),
           ],
         ),
       ),
@@ -1590,9 +1661,13 @@ class _ManagedInstitutionProfileEditPageState
           images: _csv('images'),
         );
     if (await widget.controller.save(update) && mounted) {
-      Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('机构档案已保存')),
+      final messenger = ScaffoldMessenger.of(context);
+      if (!widget.embedded) Navigator.of(context).pop();
+      messenger.showSnackBar(
+        SnackBar(
+          content:
+              Text(context.localized('机构档案已保存', 'Institution profile saved')),
+        ),
       );
     }
   }
@@ -1601,6 +1676,20 @@ class _ManagedInstitutionProfileEditPageState
 
   int? _optionalInt(String value) => int.tryParse(value.trim());
 
+  String? _validateEstablishedYear(String? value) {
+    final text = (value ?? '').trim();
+    if (text.isEmpty) return null;
+    final year = int.tryParse(text);
+    final currentYear = DateTime.now().year;
+    if (year == null || year < 1800 || year > currentYear) {
+      return context.localized(
+        '请输入 1800 至 $currentYear 之间的整数年份',
+        'Enter a whole year between 1800 and $currentYear',
+      );
+    }
+    return null;
+  }
+
   List<String> _csv(String name) => _fields[name]!
       .text
       .split(',')
@@ -1608,6 +1697,21 @@ class _ManagedInstitutionProfileEditPageState
       .where((item) => item.isNotEmpty)
       .toList(growable: false);
 }
+
+String _institutionProfileFailureMessage(
+  BuildContext context,
+  InstitutionProfileFailure failure,
+) =>
+    switch (failure) {
+      InstitutionProfileFailure.load => context.localized(
+          '机构档案加载失败，请重试',
+          'Failed to load institution profile. Please try again.',
+        ),
+      InstitutionProfileFailure.save => context.localized(
+          '机构档案保存失败，请稍后重试',
+          'Failed to save institution profile. Please try again later.',
+        ),
+    };
 
 class _DocumentTile extends StatelessWidget {
   const _DocumentTile({
@@ -1712,7 +1816,10 @@ class _IdentityFailure extends StatelessWidget {
             const SizedBox(height: 12),
             Text(message, textAlign: TextAlign.center),
             const SizedBox(height: 16),
-            FilledButton.tonal(onPressed: onRetry, child: const Text('重试')),
+            FilledButton.tonal(
+              onPressed: onRetry,
+              child: Text(context.localized('重试', 'Retry')),
+            ),
           ],
         ),
       ),
