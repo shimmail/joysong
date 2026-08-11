@@ -53,7 +53,6 @@ class _JoysongAppState extends State<JoysongApp> {
   late final LanguageTagProvider _languageTagProvider;
   late final String _startupRouteName;
   ApiClient? _apiClient;
-  TokenStore? _tokenStore;
 
   @override
   void initState() {
@@ -107,7 +106,6 @@ class _JoysongAppState extends State<JoysongApp> {
 
   AuthRepository _createAuthRepository(SecureKeyValueStore storage) {
     final TokenStore tokenStore = SecureTokenStore(storage: storage);
-    _tokenStore = tokenStore;
     final apiClient = ApiClient(
       apiRoot: widget.environment.apiRoot,
       accessTokenProvider: () async => (await tokenStore.read())?.accessToken,
@@ -194,12 +192,8 @@ class _JoysongAppState extends State<JoysongApp> {
                   controller: _authController,
                   agentConfig: widget.environment.agentConfig,
                   apiClient: _apiClient,
-                  apiRoot: widget.environment.apiRoot,
-                  languageTagProvider: _languageTagProvider,
                   allowPreviewData:
                       widget.environment.flavor != AppFlavor.production,
-                  accessTokenProvider: () async =>
-                      (await _tokenStore?.read())?.accessToken,
                 ),
           onGenerateRoute: (settings) => AppRouter.onGenerateRoute(
             settings,

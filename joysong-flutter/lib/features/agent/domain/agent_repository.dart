@@ -1,35 +1,5 @@
 import 'package:joysong_flutter/features/agent/domain/agent_models.dart';
 
-enum ChatStreamEventType { delta, done, error }
-
-class ChatStreamEvent {
-  const ChatStreamEvent.delta(this.content)
-      : type = ChatStreamEventType.delta,
-        turn = null,
-        message = null;
-
-  const ChatStreamEvent.done(this.turn)
-      : type = ChatStreamEventType.done,
-        content = null,
-        message = null;
-
-  const ChatStreamEvent.error(this.message)
-      : type = ChatStreamEventType.error,
-        content = null,
-        turn = null;
-
-  final ChatStreamEventType type;
-  final String? content;
-  final ChatTurn? turn;
-  final String? message;
-}
-
-abstract interface class ChatStreamConnection {
-  Stream<ChatStreamEvent> get events;
-
-  Future<void> cancel();
-}
-
 abstract interface class AgentRepository {
   Future<ChatSession> createSession({
     required ChatPersona persona,
@@ -41,11 +11,6 @@ abstract interface class AgentRepository {
   Future<List<ChatSession>> getSessions({ChatPersona? persona});
 
   Future<ChatTurn> sendMessage(String sessionId, String content);
-
-  Future<ChatStreamConnection> streamMessage(
-    String sessionId,
-    String content,
-  );
 
   Future<List<ChatMessage>> getMessages(
     String sessionId, {

@@ -30,13 +30,6 @@ final class AgentRepositoryImpl implements AgentRepository {
       _remote.sendMessage(sessionId, content);
 
   @override
-  Future<ChatStreamConnection> streamMessage(
-    String sessionId,
-    String content,
-  ) =>
-      _remote.streamMessage(sessionId, content);
-
-  @override
   Future<List<ChatMessage>> getMessages(
     String sessionId, {
     int limit = 30,
