@@ -31,10 +31,10 @@ interface SettlementRepository : JpaRepository<SettlementEntity, Long> {
 
     @Query(
         "SELECT s.id FROM SettlementEntity s " +
-            "WHERE s.status = :status AND s.settledAt <= :settledAt ORDER BY s.id ASC"
+        "WHERE s.status IN :statuses AND s.settledAt <= :settledAt ORDER BY s.id ASC"
     )
     fun findDueSettlementIds(
-        @Param("status") status: String,
+        @Param("statuses") statuses: Set<String>,
         @Param("settledAt") settledAt: LocalDateTime,
         pageable: Pageable
     ): List<Long>
