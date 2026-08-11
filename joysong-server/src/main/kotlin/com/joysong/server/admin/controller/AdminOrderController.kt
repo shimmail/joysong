@@ -11,6 +11,7 @@ import com.joysong.server.settlement.repository.SettlementRepository
 import com.joysong.server.settlement.repository.SettlementAllocationRepository
 import com.joysong.server.reconciliation.repository.ReconciliationIssueRepository
 import com.joysong.server.wallet.repository.WalletLedgerEntryRepository
+import com.joysong.server.wallet.repository.WalletRepository
 import com.joysong.server.wallet.dto.toDto
 import com.joysong.server.wallet.dto.toSummaryDto
 import com.joysong.server.identity.service.ManagementAccessService
@@ -38,6 +39,7 @@ class AdminOrderController(
     private val settlementRepository: SettlementRepository,
     private val settlementAllocationRepository: SettlementAllocationRepository,
     private val walletLedgerEntryRepository: WalletLedgerEntryRepository,
+    private val walletRepository: WalletRepository,
     private val reconciliationIssueRepository: ReconciliationIssueRepository,
     private val doctorInstitutionProjectConfigRepository: DoctorInstitutionProjectConfigRepository,
     private val managementAccessService: ManagementAccessService,
@@ -145,19 +147,32 @@ class AdminOrderController(
     }
 
     @GetMapping("/settlements/{id}/allocations")
-    fun getSettlementAllocations(@PathVariable id: Long): BaseResponse<*> {
+    fun getSettlementAllocations(
+        @PathVariable id: Long,
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "20") size: Int
+    ): BaseResponse<*> {
         val settlement = settlementRepository.findById(id).orElse(null)
             ?: return BaseResponse.error<Any>("结算记录不存在", 404)
-        return BaseResponse.success(
-            settlementAllocationRepository.findAllBySettlementIdOrderByIdAsc(id).map { it.toDto(settlement.currency) }
+        val result = settlementAllocationRepository.findAllBySettlementIdOrderByIdAsc(
+            id, PageRequest.of(page.coerceAtLeast(0), size.coerceIn(1, 100))
         )
+        return BaseResponse.success(mapOf(
+            "content" to result.content.map { it.toDto(settlement.currency) },
+            "totalElements" to result.totalElements,
+            "totalPages" to result.totalPages,
+            "number" to result.number,
+            "size" to result.size
+        ))
     }
 
     @GetMapping("/ledger/{id}")
     fun getLedgerEntry(@PathVariable id: Long): BaseResponse<*> {
         val entry = walletLedgerEntryRepository.findById(id).orElse(null)
             ?: return BaseResponse.error<Any>("账本记录不存在", 404)
-        return BaseResponse.success(entry.toDto())
+        val wallet = walletRepository.findById(entry.walletId).orElse(null)
+            ?: return BaseResponse.error<Any>("账本所属钱包不存在", 404)
+        return BaseResponse.success(entry.toDto(wallet.currency))
     }
 
     @GetMapping("/reconciliation-issues")

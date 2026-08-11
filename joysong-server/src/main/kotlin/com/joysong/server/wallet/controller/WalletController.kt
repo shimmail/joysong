@@ -39,10 +39,11 @@ class WalletController(
         @RequestParam(defaultValue = "0") page: Int,
         @RequestParam(defaultValue = "20") size: Int
     ): BaseResponse<*> {
-        val walletIds = managementAccessService.walletScopes(managementAccessService.actor(authentication))
+        val scopedWallets = managementAccessService.walletScopes(managementAccessService.actor(authentication))
             .flatMap { walletRepository.findAllByOwnerTypeAndOwnerIdIn(it.ownerType, it.ownerIds) }
-            .map { it.id }
+        val walletIds = scopedWallets.map { it.id }
             .toSet()
+        val currenciesByWalletId = scopedWallets.associate { it.id to it.currency }
         val safePage = page.coerceAtLeast(0)
         val safeSize = size.coerceIn(1, 100)
         if (walletIds.isEmpty()) {
@@ -50,7 +51,7 @@ class WalletController(
         }
         val result = walletLedgerEntryRepository.findAllByWalletIdInOrderByIdDesc(walletIds, PageRequest.of(safePage, safeSize))
         return BaseResponse.success(mapOf(
-            "content" to result.content.map { it.toDto() },
+            "content" to result.content.map { it.toDto(currenciesByWalletId.getValue(it.walletId)) },
             "totalElements" to result.totalElements,
             "totalPages" to result.totalPages,
             "number" to result.number,

@@ -27,6 +27,7 @@ data class WalletGroupDto(
 data class WalletLedgerDto(
     val id: Long,
     val walletId: Long,
+    val currency: String,
     val allocationId: Long?,
     val entryType: String,
     val pendingDeltaMinor: Long,
@@ -46,6 +47,18 @@ data class SettlementSummaryDto(
     val currency: String,
     val total: MoneyAmountDto,
     val net: MoneyAmountDto,
+    val state: String,
+    val settlementDueAt: LocalDateTime?,
+    val settlementCreatedAt: LocalDateTime,
+    val releasedAt: LocalDateTime?
+)
+
+data class ConsumerSettlementDto(
+    val settlementId: Long,
+    val orderId: String,
+    val currency: String,
+    val grossTotalPaid: MoneyAmountDto,
+    val netSettled: MoneyAmountDto,
     val state: String,
     val settlementDueAt: LocalDateTime?,
     val settlementCreatedAt: LocalDateTime,
@@ -89,8 +102,8 @@ fun WalletEntity.toSummaryDto() = WalletSummaryDto(
     frozen = MoneyAmountDto(frozenMinor, currency)
 )
 
-fun WalletLedgerEntryEntity.toDto() = WalletLedgerDto(
-    id, walletId, allocationId, entryType, pendingDeltaMinor, availableDeltaMinor, frozenDeltaMinor,
+fun WalletLedgerEntryEntity.toDto(currency: String) = WalletLedgerDto(
+    id, walletId, currency, allocationId, entryType, pendingDeltaMinor, availableDeltaMinor, frozenDeltaMinor,
     pendingBalanceMinor, availableBalanceMinor, frozenBalanceMinor, sourceType, sourceId, createdAt
 )
 
@@ -100,6 +113,18 @@ fun SettlementEntity.toSummaryDto(dueAt: LocalDateTime?) = SettlementSummaryDto(
     currency = currency,
     total = MoneyAmountDto(totalAmountMinor ?: Money.toMinor(totalAmount, currency), currency),
     net = MoneyAmountDto(totalAmountMinor ?: Money.toMinor(totalAmount, currency), currency),
+    state = status,
+    settlementDueAt = dueAt,
+    settlementCreatedAt = createdAt,
+    releasedAt = updatedAt.takeIf { status in setOf("AVAILABLE", "PARTIALLY_REVERSED", "REVERSED") }
+)
+
+fun SettlementEntity.toConsumerDto(dueAt: LocalDateTime?, grossPaidMinor: Long) = ConsumerSettlementDto(
+    settlementId = id,
+    orderId = orderId,
+    currency = currency,
+    grossTotalPaid = MoneyAmountDto(grossPaidMinor, currency),
+    netSettled = MoneyAmountDto(totalAmountMinor ?: Money.toMinor(totalAmount, currency), currency),
     state = status,
     settlementDueAt = dueAt,
     settlementCreatedAt = createdAt,
