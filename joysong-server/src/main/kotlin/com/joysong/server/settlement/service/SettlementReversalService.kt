@@ -32,6 +32,7 @@ data class RecoveryRequiredRevenueIssue(
 /** Task 7 replaces the no-op implementation with durable recovery workflow handling. */
 interface RevenueIssueRecorder {
     fun recordRecoveryRequired(issue: RecoveryRequiredRevenueIssue)
+    fun resolveRecoveryRequired(objectType: String, objectId: String)
 }
 
 /** Appends wallet reversals after a provider refund is durably finalized. */

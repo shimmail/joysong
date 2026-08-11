@@ -87,20 +87,23 @@ class RevenueReconciliationService(
         val latest = entries.lastOrNull()?.let { Balances(it.pendingBalanceMinor, it.availableBalanceMinor, it.frozenBalanceMinor) }
             ?: Balances.ZERO
         val projected = Balances(wallet.pendingMinor, wallet.availableMinor, wallet.frozenMinor)
-        val actual = latest.total()
+        val mismatch = firstMismatch(projected, latest)
+            ?: firstMismatch(projected, accumulated)
+            ?: firstMismatch(latest, accumulated)
+        val evidence = mismatch ?: (projected.pending to projected.pending)
+        val mismatches = linkedSetOf<String>()
         verify(
             issueType = WALLET_VS_LEDGER,
             objectType = WALLET_OBJECT,
             objectId = walletId.toString(),
-            expected = projected.total(),
-            actual = actual,
+            expected = evidence.first,
+            actual = evidence.second,
             currency = wallet.currency,
             details = "projection=$projected latest_snapshot=$latest cumulative_deltas=$accumulated",
-            mismatches = linkedSetOf(),
-            matches = projected == latest && projected == accumulated && latest == accumulated
-        ).also { mismatch ->
-            return ReconciliationResult(WALLET_OBJECT, walletId, setOf(WALLET_VS_LEDGER), mismatch)
-        }
+            mismatches = mismatches,
+            matches = mismatch == null
+        )
+        return ReconciliationResult(WALLET_OBJECT, walletId, setOf(WALLET_VS_LEDGER), mismatches)
     }
 
     @Transactional
@@ -117,6 +120,11 @@ class RevenueReconciliationService(
         )
     }
 
+    @Transactional
+    override fun resolveRecoveryRequired(objectType: String, objectId: String) {
+        issueRepository.resolveActiveIssue(RECOVERY_REQUIRED, objectType, objectId)
+    }
+
     private fun reconcileAllocation(allocation: SettlementAllocationEntity, currency: String, mismatches: MutableSet<String>) {
         val entries = ledgerRepository.findAllByAllocationIdOrderByIdAsc(allocation.id)
         val actual = entries.fold(Balances.ZERO) { balances, entry -> balances.plus(entry) }
@@ -126,18 +134,39 @@ class RevenueReconciliationService(
             allocation.balanceBucket == SettlementAllocationBalanceBucket.PENDING -> Balances(remaining, 0, 0)
             else -> Balances(0, remaining, 0)
         }
+        val expectedStatus = expectedStatus(allocation)
+        val balanceMismatch = firstMismatch(expected, actual)
+        val statusMatches = allocation.status == expectedStatus
+        val evidence = balanceMismatch ?: (statusCode(expectedStatus) to statusCode(allocation.status))
         verify(
             issueType = ALLOCATION_VS_LEDGER,
             objectType = ALLOCATION_OBJECT,
             objectId = allocation.id.toString(),
-            expected = expected.total(),
-            actual = actual.total(),
+            expected = evidence.first,
+            actual = evidence.second,
             currency = currency,
-            details = "expected_bucket=$expected actual_ledger=$actual status=${allocation.status}",
+            details = "expected_bucket=$expected actual_ledger=$actual expected_status=$expectedStatus actual_status=${allocation.status}",
             mismatches = mismatches,
-            matches = expected == actual
+            matches = balanceMismatch == null && statusMatches
         )
     }
+
+    private fun expectedStatus(allocation: SettlementAllocationEntity) = when {
+        allocation.reversedMinor == allocation.amountMinor -> com.joysong.server.settlement.entity.SettlementAllocationStatus.REVERSED
+        allocation.reversedMinor > 0 -> com.joysong.server.settlement.entity.SettlementAllocationStatus.PARTIALLY_REVERSED
+        allocation.balanceBucket == SettlementAllocationBalanceBucket.PENDING -> com.joysong.server.settlement.entity.SettlementAllocationStatus.PENDING
+        else -> com.joysong.server.settlement.entity.SettlementAllocationStatus.AVAILABLE
+    }
+
+    private fun firstMismatch(expected: Balances, actual: Balances): Pair<Long, Long>? = when {
+        expected.pending != actual.pending -> expected.pending to actual.pending
+        expected.available != actual.available -> expected.available to actual.available
+        expected.frozen != actual.frozen -> expected.frozen to actual.frozen
+        else -> null
+    }
+
+    private fun statusCode(status: com.joysong.server.settlement.entity.SettlementAllocationStatus): Long =
+        status.ordinal.toLong() + 1
 
     private fun verify(
         issueType: String,
