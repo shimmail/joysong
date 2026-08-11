@@ -253,6 +253,7 @@ class _AppShellState extends State<AppShell> {
           AgentChatPage(
             chatController: _agentChatController!,
             planController: _agentPlanController!,
+            onOpenCatalogItem: _openAgentCatalogItem,
           )
         else
           const SizedBox.shrink(),
@@ -439,6 +440,56 @@ class _AppShellState extends State<AppShell> {
           initialContextType: context?.$1,
           initialContextId: context?.$2,
           initialContextName: context?.$3,
+          onOpenCatalogItem: _openAgentCatalogItem,
+        ),
+      ),
+    );
+  }
+
+  void _openAgentCatalogItem(AgentCatalogItem item) {
+    final repository = _discoverRepository;
+    if (repository == null) return;
+    final type = item.type.trim().toUpperCase();
+    final id = item.id.trim();
+    if (id.isEmpty) return;
+
+    final DiscoverContentType contentType;
+    String? institutionId;
+    String? projectId;
+    switch (type) {
+      case 'PROJECT':
+        contentType = DiscoverContentType.project;
+      case 'INSTITUTION_PROJECT':
+        institutionId = item.institutionId?.trim();
+        projectId = item.projectId?.trim();
+        if (institutionId == null ||
+            institutionId.isEmpty ||
+            projectId == null ||
+            projectId.isEmpty) {
+          return;
+        }
+        contentType = DiscoverContentType.project;
+      case 'DOCTOR':
+        contentType = DiscoverContentType.doctor;
+      case 'INSTITUTION':
+        contentType = DiscoverContentType.institution;
+      default:
+        return;
+    }
+
+    _contentNavigator.push<void>(
+      MaterialPageRoute(
+        builder: (_) => DiscoverDetailPage(
+          repository: repository,
+          type: contentType,
+          id: projectId ?? id,
+          institutionId: institutionId,
+          projectId: projectId,
+          onBookProject: _bookingRepository == null ? null : _openBooking,
+          socialController: _socialController,
+          onOpenUser: _openPublicUser,
+          onConsultDoctor: _openDoctorChat,
+          onOpenAi: _openAiChat,
         ),
       ),
     );

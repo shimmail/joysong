@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:joysong_flutter/features/agent/domain/agent_models.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_chat_controller.dart';
+import 'package:joysong_flutter/features/agent/presentation/agent_catalog_cards.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_plan_controller.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_plan_view.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_profile_safety_page.dart';
@@ -25,6 +26,8 @@ class AgentChatPage extends StatefulWidget {
     this.initialContextType,
     this.initialContextId,
     this.initialContextName,
+    this.onOpenCatalogItem,
+    this.onHumanConsult,
     super.key,
   });
 
@@ -33,6 +36,8 @@ class AgentChatPage extends StatefulWidget {
   final ChatContextType? initialContextType;
   final String? initialContextId;
   final String? initialContextName;
+  final AgentCatalogItemAction? onOpenCatalogItem;
+  final AgentCatalogItemAction? onHumanConsult;
 
   @override
   State<AgentChatPage> createState() => _AgentChatPageState();
@@ -178,14 +183,28 @@ class _AgentChatPageState extends State<AgentChatPage> {
               Expanded(
                 child: state.messages.isEmpty
                     ? _EmptyChat(english: english)
-                    : ListView.builder(
+                    : ListView(
                         controller: _scrollController,
                         scrollCacheExtent: const ScrollCacheExtent.pixels(600),
                         padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                        itemCount: state.messages.length,
-                        itemBuilder: (context, index) => _ChatBubble(
-                          message: state.messages[index],
-                        ),
+                        children: [
+                          for (final message in state.messages)
+                            _ChatBubble(message: message),
+                          if (state.latestTurn?.catalogReport
+                              case final report?)
+                            AgentCatalogReportCard(
+                              report: report,
+                              onOpen: widget.onOpenCatalogItem,
+                              canOpen: _canOpenCatalogItem,
+                            )
+                          else if (state.latestTurn?.catalogItems
+                              case final items? when items.isNotEmpty)
+                            AgentCatalogReferenceList(
+                              items: items,
+                              onOpen: widget.onOpenCatalogItem,
+                              canOpen: _canOpenCatalogItem,
+                            ),
+                        ],
                       ),
               ),
               _Composer(
@@ -203,6 +222,17 @@ class _AgentChatPageState extends State<AgentChatPage> {
         );
       },
     );
+  }
+
+  bool _canOpenCatalogItem(AgentCatalogItem item) {
+    if (item.id.trim().isEmpty) return false;
+    return switch (item.type.trim().toUpperCase()) {
+      'PROJECT' || 'DOCTOR' || 'INSTITUTION' => true,
+      'INSTITUTION_PROJECT' =>
+        (item.institutionId?.trim().isNotEmpty ?? false) &&
+            (item.projectId?.trim().isNotEmpty ?? false),
+      _ => false,
+    };
   }
 
   PopupMenuItem<_AgentMenuAction> _menuItem(
