@@ -64,6 +64,11 @@ private data class GeneratedTurn(
     val catalogItems: List<AgentCatalogItemResponse>
 )
 
+private data class BoundedRouteContext(
+    val decisions: List<AgentIntentDecision>,
+    val ambiguityReasons: List<String>
+)
+
 internal fun summaryContextDecision(
     topic: String,
     agentIntentRouter: AgentIntentRouter
@@ -293,11 +298,14 @@ class ChatService(
     ): GeneratedTurn {
         val llmMessages = mutableListOf<Map<String, String>>()
         val currentRouteAssessment = agentIntentRouter.assessCurrent(content, session.contextType)
-        val boundedContext = boundedContextDecisions(historyMessages, summary)
+        val boundedContext by lazy {
+            boundedRouteContext(historyMessages, summary, session.contextType)
+        }
         val localRouteAssessment = if (currentRouteAssessment.requiresContextCompletion) {
             agentIntentRouter.supplementWithContext(
                 currentRouteAssessment,
-                boundedContext
+                boundedContext.decisions,
+                boundedContext.ambiguityReasons
             )
         } else {
             currentRouteAssessment
@@ -320,7 +328,7 @@ class ChatService(
             )
         } else localRouteAssessment
         val parsedRoute = if (aiAgentProperties.intentParserEnabled && routeAssessment.requiresLlmParsing) {
-            parseAmbiguousRoute(content, routeAssessment, boundedContext)
+            parseAmbiguousRoute(content, routeAssessment, boundedContext.decisions)
         } else null
         val intentDecision = agentIntentRouter.mergeParsedRoute(routeAssessment, parsedRoute)
         val previousUserQueries = historyMessages.filter { it.role.equals("USER", true) }
@@ -484,17 +492,28 @@ class ChatService(
         return normalized
     }
 
-    private fun boundedContextDecisions(
+    private fun boundedRouteContext(
         historyMessages: List<ChatMessageEntity>,
-        summary: AgentSessionSummary?
-    ): List<AgentIntentDecision> {
+        summary: AgentSessionSummary?,
+        contextType: String
+    ): BoundedRouteContext {
         val summaryDecisions = summary?.unresolvedTopics.orEmpty().mapNotNull {
             summaryContextDecision(it, agentIntentRouter)
         }
-        if (summaryDecisions.isNotEmpty()) return summaryDecisions
-        return historyMessages.filter { it.role.equals("USER", true) }
-            .takeLast(4)
-            .map { agentIntentRouter.assessCurrent(it.content, "GENERAL").decision }
+        val historyAssessments = if (summaryDecisions.isEmpty()) {
+            historyMessages.filter { it.role.equals("USER", true) }
+                .takeLast(4)
+                .map { agentIntentRouter.assessCurrent(it.content, "GENERAL") }
+        } else {
+            emptyList()
+        }
+        val sessionDecision = runCatching { AgentQueryTarget.valueOf(contextType.trim().uppercase()) }
+            .getOrNull()
+            ?.let { agentIntentRouter.validatedDecision(AgentIntent.CATALOG_QA, it) }
+        return BoundedRouteContext(
+            decisions = (summaryDecisions.ifEmpty { historyAssessments.map { it.decision } }) + listOfNotNull(sessionDecision),
+            ambiguityReasons = historyAssessments.flatMap { it.ambiguityReasons }.distinct()
+        )
     }
 
     private fun parseAmbiguousRoute(
@@ -532,25 +551,40 @@ class ChatService(
                 "stream" to false
             )
             val response = intentParserRestTemplate.exchange(url, HttpMethod.POST, HttpEntity(body, headers), Map::class.java)
-            val choice = (response.body?.get("choices") as? List<*>)?.firstOrNull() as? Map<*, *>
-            val message = choice?.get("message") as? Map<*, *>
-            val content = message?.get("content")?.toString().orEmpty()
+            val choices = response.body?.get("choices") as? List<*>
+                ?: throw IntentParserRouteException("MALFORMED_PAYLOAD")
+            val choice = choices.firstOrNull() as? Map<*, *>
+                ?: throw IntentParserRouteException("MALFORMED_PAYLOAD")
+            val message = choice["message"] as? Map<*, *>
+                ?: throw IntentParserRouteException("MALFORMED_PAYLOAD")
+            val content = message["content"] as? String
+                ?: throw IntentParserRouteException("MALFORMED_PAYLOAD")
             val json = content.substringAfter('{', "").substringBeforeLast('}', "").takeIf(String::isNotBlank)?.let { "{$it}" }
                 ?: throw IntentParserRouteException("MALFORMED_PAYLOAD")
             val node = objectMapper.readTree(json)
-            val intent = AgentIntent.entries.firstOrNull { it.name == node.path("intent").asText().trim() }
+            if (!node.isObject) throw IntentParserRouteException("INVALID_SCHEMA")
+            val intentNode = node.get("intent")
+                ?.takeIf { it.isTextual }
+                ?: throw IntentParserRouteException("INVALID_SCHEMA")
+            val intent = AgentIntent.entries.firstOrNull { it.name == intentNode.asText().trim() }
                 ?: throw IntentParserRouteException("INVALID_ENUM")
             val targetNode = node.get("queryTarget")
+                ?: throw IntentParserRouteException("INVALID_SCHEMA")
             val target = when {
-                targetNode == null || targetNode.isNull -> null
-                !targetNode.isTextual -> throw IntentParserRouteException("INVALID_ENUM")
-                targetNode.asText().trim().equals("null", true) -> null
+                targetNode.isNull -> null
+                !targetNode.isTextual -> throw IntentParserRouteException("INVALID_SCHEMA")
                 else -> AgentQueryTarget.entries.firstOrNull { it.name == targetNode.asText().trim() }
                     ?: throw IntentParserRouteException("INVALID_ENUM")
             }
-            val keywords = node.path("keywords").takeIf { it.isArray }?.mapNotNull { item ->
-                item.asText().trim().takeIf { it.length in 2..40 }
-            }.orEmpty().distinct().take(8)
+            val keywordsNode = node.get("keywords")
+                ?.takeIf { it.isArray && it.size() <= 8 }
+                ?: throw IntentParserRouteException("INVALID_SCHEMA")
+            if (keywordsNode.any { !it.isTextual }) throw IntentParserRouteException("INVALID_SCHEMA")
+            val keywords = keywordsNode.map { it.asText().trim() }
+            if (keywords.any { it.length !in 2..40 }) throw IntentParserRouteException("INVALID_SCHEMA")
+            if (!isCompatibleParsedRoute(local, intent, target)) {
+                throw IntentParserRouteException("INCOMPATIBLE_ROUTE")
+            }
             ParsedAgentRoute(intent, target, keywords)
         } catch (error: Exception) {
             logger.info(
@@ -567,6 +601,18 @@ class ChatService(
         isProviderTimeout(error) -> "TIMEOUT"
         error is org.springframework.web.client.HttpStatusCodeException -> "HTTP_ERROR"
         else -> "PROVIDER_ERROR"
+    }
+
+    private fun isCompatibleParsedRoute(
+        local: AgentRouteAssessment,
+        intent: AgentIntent,
+        target: AgentQueryTarget?
+    ): Boolean {
+        if (intent in setOf(AgentIntent.GENERAL_CHAT, AgentIntent.SAFETY_SCREENING) && target != null) return false
+        if (local.explicitIntent && intent != local.decision.intent) return false
+        if (local.explicitQueryTarget && target != local.decision.queryTarget) return false
+        if (local.unresolvedSafetyNegation && intent !in setOf(local.decision.intent, AgentIntent.SAFETY_SCREENING)) return false
+        return true
     }
 
     private class IntentParserRouteException(val category: String) : IllegalArgumentException(category)

@@ -29,7 +29,8 @@ data class AgentRouteAssessment(
     val requiresLlmParsing: Boolean,
     val explicitIntent: Boolean = false,
     val explicitQueryTarget: Boolean = false,
-    val requiresContextCompletion: Boolean = false
+    val requiresContextCompletion: Boolean = false,
+    val unresolvedSafetyNegation: Boolean = false
 )
 
 data class ParsedAgentRoute(
@@ -76,20 +77,21 @@ class AgentIntentRouter {
 
     fun assessCurrent(query: String, contextType: String): AgentRouteAssessment {
         val normalized = normalize(query)
-        val safetySignals = matchSignals(normalized, safetyTerms)
-        val detailSummarySignals = matchSignals(normalized, detailSummaryTerms)
-        val comparisonSignals = matchSignals(normalized, comparisonTerms)
-        val planningSignals = matchSignals(normalized, planningTerms)
-        val catalogSignals = matchSignals(normalized, catalogTerms)
-        val institutionProjectSignals = matchSignals(normalized, institutionProjectTerms)
-        val doctorSignals = matchSignals(normalized, doctorTerms)
-        val institutionSignals = matchSignals(normalized, institutionTerms)
-        val projectSignals = matchSignals(normalized, projectTerms)
-        val unresolvedReferenceSignals = matchSignals(normalized, unresolvedReferenceTerms)
+        val annotatedSignals = annotateSignals(normalized)
+        val safetySignals = matchSignals(annotatedSignals, safetyTerms)
+        val detailSummarySignals = matchSignals(annotatedSignals, detailSummaryTerms)
+        val comparisonSignals = matchSignals(annotatedSignals, comparisonTerms)
+        val planningSignals = matchSignals(annotatedSignals, planningTerms)
+        val catalogSignals = matchSignals(annotatedSignals, catalogTerms)
+        val institutionProjectSignals = matchSignals(annotatedSignals, institutionProjectTerms)
+        val doctorSignals = matchSignals(annotatedSignals, doctorTerms)
+        val institutionSignals = matchSignals(annotatedSignals, institutionTerms)
+        val projectSignals = matchSignals(annotatedSignals, projectTerms)
+        val unresolvedReferenceSignals = matchSignals(annotatedSignals, unresolvedReferenceTerms)
         val reasons = mutableListOf<String>()
         var score = 0.55
 
-        if (matchSignals(normalized, routingTerms).ambiguousNegation) {
+        if (annotatedSignals.ambiguousNegation) {
             reasons += "AMBIGUOUS_NEGATION"
         }
         val queryTarget = when {
@@ -114,7 +116,7 @@ class AgentIntentRouter {
             reasons += "UNRESOLVED_CURRENT_REFERENCE"
         }
         val constraintCount = constraintSignalGroups.count { terms ->
-            matchSignals(normalized, terms).let { signals ->
+            matchSignals(annotatedSignals, terms).let { signals ->
                 signals.positiveTerms.isNotEmpty() || signals.negatedTerms.isNotEmpty()
             }
         }
@@ -130,12 +132,12 @@ class AgentIntentRouter {
             catalogSignals.positiveTerms.isNotEmpty() -> AgentIntent.CATALOG_QA
             else -> AgentIntent.GENERAL_CHAT
         }
-        if (intent == AgentIntent.GENERAL_CHAT && matchSignals(normalized, aestheticConcernTerms).positiveTerms.isNotEmpty()) {
+        if (intent == AgentIntent.GENERAL_CHAT && matchSignals(annotatedSignals, aestheticConcernTerms).positiveTerms.isNotEmpty()) {
             score -= 0.30
             reasons += "UNCLASSIFIED_AESTHETIC_REQUEST"
         }
 
-        val explicitIntent = when (intent) {
+        val matchedExplicitIntent = when (intent) {
             AgentIntent.SAFETY_SCREENING -> safetySignals.positiveTerms.isNotEmpty()
             AgentIntent.DETAIL_SUMMARY -> detailSummarySignals.positiveTerms.isNotEmpty()
             AgentIntent.COMPARISON -> comparisonSignals.positiveTerms.isNotEmpty()
@@ -143,13 +145,27 @@ class AgentIntentRouter {
             AgentIntent.CATALOG_QA -> catalogSignals.positiveTerms.isNotEmpty()
             AgentIntent.GENERAL_CHAT -> false
         }
+        val ambiguousIntentNegation = listOf(
+            safetySignals,
+            detailSummarySignals,
+            comparisonSignals,
+            planningSignals,
+            catalogSignals
+        ).any { it.ambiguousNegation }
+        val unresolvedSafetyNegation = safetySignals.ambiguousNegation
+        val explicitIntent = matchedExplicitIntent && !ambiguousIntentNegation
+        val explicitQueryTarget = queryTarget != null &&
+            "CONFLICTING_CURRENT_TARGETS" !in reasons &&
+            listOf(institutionProjectSignals, doctorSignals, institutionSignals, projectSignals)
+                .none { it.ambiguousNegation }
         if (explicitIntent) score += 0.20
         if (queryTarget != null) score += 0.15
         if (contextType.uppercase() in detailContextTypes) score += 0.10
 
         val confidence = score.coerceIn(0.0, 1.0)
         val requiresContextCompletion = (intent in intentsRequiringTarget && queryTarget == null) ||
-            "UNRESOLVED_CURRENT_REFERENCE" in reasons
+            "UNRESOLVED_CURRENT_REFERENCE" in reasons ||
+            "MULTIPLE_CONSTRAINTS_WITHOUT_TARGET" in reasons
         val needsLlm = requiresLlmParsing(intent, confidence, reasons, requiresContextCompletion)
         return AgentRouteAssessment(
             decision = validatedDecision(intent, queryTarget),
@@ -157,18 +173,20 @@ class AgentIntentRouter {
             ambiguityReasons = reasons.distinct(),
             requiresLlmParsing = needsLlm,
             explicitIntent = explicitIntent,
-            explicitQueryTarget = queryTarget != null,
-            requiresContextCompletion = requiresContextCompletion
+            explicitQueryTarget = explicitQueryTarget,
+            requiresContextCompletion = requiresContextCompletion,
+            unresolvedSafetyNegation = unresolvedSafetyNegation
         )
     }
 
     fun supplementWithContext(
         current: AgentRouteAssessment,
-        contextDecisions: List<AgentIntentDecision>
+        contextDecisions: List<AgentIntentDecision>,
+        contextAmbiguityReasons: List<String> = emptyList()
     ): AgentRouteAssessment {
         if (current.decision.intent == AgentIntent.SAFETY_SCREENING) return current
 
-        val context = contextDecisions.asReversed().firstOrNull { candidate ->
+        val usableContexts = contextDecisions.filter { candidate ->
             candidate.intent != AgentIntent.SAFETY_SCREENING && (
                 candidate.queryTarget != null ||
                     (!current.explicitIntent &&
@@ -176,11 +194,16 @@ class AgentIntentRouter {
                         candidate.intent != AgentIntent.GENERAL_CHAT)
                 )
         }
-            ?: return current
+        if (usableContexts.isEmpty()) return current
+        val context = usableContexts.last()
         val currentDecision = current.decision
-        val targetConflict = current.explicitQueryTarget &&
-            context.queryTarget != null &&
-            context.queryTarget != currentDecision.queryTarget
+        val targetConflict = current.explicitQueryTarget && usableContexts.any { candidate ->
+            candidate.queryTarget != null && candidate.queryTarget != currentDecision.queryTarget
+        }
+        val contextCandidateConflict = usableContexts.mapNotNull { it.queryTarget }.distinct().size > 1 ||
+            (!current.explicitIntent && currentDecision.intent == AgentIntent.GENERAL_CHAT &&
+                usableContexts.map { it.intent }.filter { it != AgentIntent.GENERAL_CHAT }.distinct().size > 1)
+        val uncertainContext = contextAmbiguityReasons.isNotEmpty()
         val resolvedIntent = if (
             !current.explicitIntent &&
             currentDecision.intent == AgentIntent.GENERAL_CHAT &&
@@ -196,13 +219,22 @@ class AgentIntentRouter {
             currentDecision.queryTarget
         }
         val contextFilled = resolvedIntent != currentDecision.intent || resolvedTarget != currentDecision.queryTarget
+        val resolvedMissingTargetConstraint = "MULTIPLE_CONSTRAINTS_WITHOUT_TARGET" in current.ambiguityReasons &&
+            resolvedTarget != null
         val reasons = current.ambiguityReasons
             .filterNot { it == "MULTIPLE_CONSTRAINTS_WITHOUT_TARGET" && resolvedTarget != null }
-            .let { if (targetConflict) it + "CONFLICTING_CONTEXT" else it }
+            .let {
+                if (targetConflict || contextCandidateConflict || uncertainContext) {
+                    it + contextAmbiguityReasons.map { reason -> "CONTEXT_$reason" } + "CONFLICTING_CONTEXT"
+                } else {
+                    it
+                }
+            }
             .distinct()
         val confidence = (current.confidence +
-            (if (contextFilled) 0.10 else 0.0) -
-            (if (targetConflict) 0.20 else 0.0))
+            (if (contextFilled) 0.10 else 0.0) +
+            (if (resolvedMissingTargetConstraint) 0.20 else 0.0) -
+            (if (targetConflict || contextCandidateConflict || uncertainContext) 0.20 else 0.0))
             .coerceIn(0.0, 1.0)
         val requiresContextCompletion = (resolvedIntent in intentsRequiringTarget && resolvedTarget == null) ||
             "UNRESOLVED_CURRENT_REFERENCE" in reasons
@@ -210,7 +242,7 @@ class AgentIntentRouter {
             decision = validatedDecision(resolvedIntent, resolvedTarget),
             confidence = confidence,
             ambiguityReasons = reasons,
-            requiresLlmParsing = targetConflict || requiresLlmParsing(
+            requiresLlmParsing = targetConflict || contextCandidateConflict || uncertainContext || requiresLlmParsing(
                 resolvedIntent,
                 confidence,
                 reasons,
@@ -226,7 +258,12 @@ class AgentIntentRouter {
     ): AgentIntentDecision {
         if (parsed == null || local.decision.intent == AgentIntent.SAFETY_SCREENING) return local.decision
 
-        val intent = if (local.explicitIntent) local.decision.intent else parsed.intent
+        val intent = when {
+            local.unresolvedSafetyNegation && parsed.intent == AgentIntent.SAFETY_SCREENING -> AgentIntent.SAFETY_SCREENING
+            local.unresolvedSafetyNegation -> local.decision.intent
+            local.explicitIntent -> local.decision.intent
+            else -> parsed.intent
+        }
         val target = if (local.explicitQueryTarget) local.decision.queryTarget else parsed.queryTarget
         return if (intent == AgentIntent.SAFETY_SCREENING) {
             validatedDecision(AgentIntent.SAFETY_SCREENING, null)
@@ -290,32 +327,84 @@ class AgentIntentRouter {
         val ambiguousNegation: Boolean
     )
 
-    private fun matchSignals(query: String, terms: List<String>): MatchedSignals {
+    private enum class SignalPolarity { POSITIVE, NEGATED, AMBIGUOUS }
+
+    private data class AnnotatedSignal(val term: String, val polarity: SignalPolarity)
+
+    private data class AnnotatedSignals(
+        val matches: List<AnnotatedSignal>,
+        val ambiguousNegation: Boolean
+    )
+
+    private data class NegationScope(val start: Int, val endExclusive: Int, val ambiguous: Boolean)
+
+    private fun annotateSignals(query: String): AnnotatedSignals {
         val normalizedQuery = normalize(query)
-        val normalizedTerms = terms.map(::normalize).distinct().sortedByDescending(String::length)
-        val positiveTerms = mutableListOf<String>()
-        val negatedTerms = mutableListOf<String>()
+        val normalizedTerms = routingTerms.map(::normalize).distinct().sortedByDescending(String::length)
+        val annotated = mutableListOf<AnnotatedSignal>()
         var ambiguousNegation = false
 
         clauseRanges(normalizedQuery).forEach { range ->
             val clause = normalizedQuery.substring(range)
             val matches = normalizedTerms.flatMap { term ->
                 termIndexes(clause, term).map { index -> SignalMatch(term, index) }
-            }.sortedBy { it.index }.fold(mutableListOf<SignalMatch>()) { selected, match ->
-                if (selected.none { rangesOverlap(it.index, it.term.length, match.index, match.term.length) }) selected += match
-                selected
             }
             val negators = negatorIndexes(clause)
-            val matchedNegators = negators.mapNotNull { negator ->
-                matches.minByOrNull { kotlin.math.abs(it.index - negator.index) }
+            val negationScopes = mutableListOf<NegationScope>()
+            negators.forEachIndexed negatorLoop@ { negatorIndex, negator ->
+                val target = matches
+                    .asSequence()
+                    .filter { it.index >= negator.index + negator.term.length }
+                    .minWithOrNull(compareBy<SignalMatch> { it.index }.thenByDescending { it.term.length })
+                    ?: return@negatorLoop
+                val gap = target.index - (negator.index + negator.term.length)
+                val nextNegatorBoundary = negators.getOrNull(negatorIndex + 1)?.index
+                    ?.takeIf { it > target.index }
+                negationScopes += NegationScope(
+                    start = target.index,
+                    endExclusive = negationScopeEnd(target, matches, nextNegatorBoundary),
+                    ambiguous = gap > maxNegationGap
+                )
             }
-            val negatedMatches = matchedNegators.toSet()
-            if (negatedMatches.size < matchedNegators.size) ambiguousNegation = true
             matches.forEach { match ->
-                if (match in negatedMatches) negatedTerms += match.term else positiveTerms += match.term
+                val overlappingScopes = negationScopes.filter { scope ->
+                    match.index < scope.endExclusive && match.index + match.term.length > scope.start
+                }
+                val polarity = when {
+                    overlappingScopes.size > 1 || overlappingScopes.any { it.ambiguous } -> SignalPolarity.AMBIGUOUS
+                    overlappingScopes.size == 1 -> SignalPolarity.NEGATED
+                    else -> SignalPolarity.POSITIVE
+                }
+                if (polarity == SignalPolarity.AMBIGUOUS) ambiguousNegation = true
+                annotated += AnnotatedSignal(match.term, polarity)
             }
         }
-        return MatchedSignals(positiveTerms.distinct(), negatedTerms.distinct(), ambiguousNegation)
+        return AnnotatedSignals(annotated, ambiguousNegation)
+    }
+
+    private fun negationScopeEnd(
+        anchor: SignalMatch,
+        matches: List<SignalMatch>,
+        nextNegatorBoundary: Int?
+    ): Int {
+        var end = anchor.index + anchor.term.length
+        matches.sortedBy { it.index }.forEach { candidate ->
+            if (nextNegatorBoundary != null && candidate.index >= nextNegatorBoundary) return@forEach
+            if (candidate.index >= anchor.index && candidate.index <= end + maxNegationSignalGap) {
+                end = maxOf(end, candidate.index + candidate.term.length)
+            }
+        }
+        return end
+    }
+
+    private fun matchSignals(annotatedSignals: AnnotatedSignals, terms: List<String>): MatchedSignals {
+        val normalizedTerms = terms.map(::normalize).toSet()
+        val matches = annotatedSignals.matches.filter { it.term in normalizedTerms }
+        return MatchedSignals(
+            positiveTerms = matches.filter { it.polarity == SignalPolarity.POSITIVE }.map { it.term }.distinct(),
+            negatedTerms = matches.filter { it.polarity == SignalPolarity.NEGATED }.map { it.term }.distinct(),
+            ambiguousNegation = matches.any { it.polarity == SignalPolarity.AMBIGUOUS }
+        )
     }
 
     private fun normalize(query: String): String = query
@@ -325,7 +414,7 @@ class AgentIntentRouter {
         .trim()
 
     private fun clauseRanges(query: String): List<IntRange> {
-        val delimiter = Regex("[,.;!?，。；！？]|但是|而是|但|只|\\bbut\\b|\\binstead\\b|\\bjust\\b")
+        val delimiter = Regex("[,.;!?，。；！？]|但是|而是|因为|但|只|\\bbut\\b|\\bbecause\\b|\\binstead\\b|\\bjust\\b")
         val ranges = mutableListOf<IntRange>()
         var start = 0
         delimiter.findAll(query).forEach { match ->
@@ -336,16 +425,21 @@ class AgentIntentRouter {
         return ranges
     }
 
-    private fun termIndexes(text: String, term: String): List<Int> = buildList {
-        var index = text.indexOf(term)
-        while (index >= 0) {
-            add(index)
-            index = text.indexOf(term, index + term.length)
+    private fun termIndexes(text: String, term: String): List<Int> {
+        val escaped = Regex.escape(term)
+        val pattern = if (term.any { it in 'a'..'z' }) {
+            Regex("(?<![a-z0-9])$escaped(?![a-z0-9])")
+        } else {
+            Regex(escaped)
         }
+        return pattern.findAll(text).map { it.range.first }.toList()
     }
 
     private fun negatorIndexes(text: String): List<SignalMatch> {
-        val negators = listOf("don't", "do not", "doesn't", "does not", "not", "without", "不要", "不是", "没有", "别", "不", "没")
+        val negators = listOf(
+            "don't", "do not", "doesn't", "does not", "isn't", "is not", "without", "not", "no",
+            "不要", "不想", "不是", "没有", "无需", "别", "不", "没"
+        )
         val matches = negators.sortedByDescending(String::length).flatMap { term ->
             termIndexes(text, term).map { index -> SignalMatch(term, index) }
         }.sortedBy { it.index }.fold(mutableListOf<SignalMatch>()) { selected, match ->
@@ -361,6 +455,8 @@ class AgentIntentRouter {
     private data class SignalMatch(val term: String, val index: Int)
 
     private companion object {
+        const val maxNegationGap = 24
+        const val maxNegationSignalGap = 8
         val detailContextTypes = setOf("PROJECT", "INSTITUTION", "INSTITUTION_PROJECT", "DOCTOR")
         val intentsRequiringTarget = setOf(
             AgentIntent.CATALOG_QA,
@@ -378,8 +474,11 @@ class AgentIntentRouter {
             listOf("多久", "时间")
         )
         val aestheticConcernTerms = listOf("脸垮", "显老", "松弛", "下垂", "暗沉", "毛孔", "斑", "痘", "皱纹", "细纹", "凹陷", "变美", "改善", "sagging", "aging", "dull", "pores", "acne", "wrinkle", "hollow", "improve my face")
-        val institutionProjectTerms = listOf("机构项目", "机构套餐", "项目套餐", "套餐", "报价", "institution project", "clinic package", "package", "offering")
-        val doctorTerms = listOf("医生", "医师", "大夫", "doctor", "surgeon", "physician")
+        val institutionProjectTerms = listOf(
+            "机构项目", "机构套餐", "项目套餐", "套餐", "报价",
+            "institution project", "institution projects", "clinic package", "clinic packages", "package", "packages", "offering", "offerings"
+        )
+        val doctorTerms = listOf("医生", "医师", "大夫", "doctor", "doctors", "surgeon", "surgeons", "physician", "physicians")
         val institutionTerms = listOf("机构", "医院", "诊所", "门诊部", "clinic", "clinics", "hospital", "hospitals", "institution")
         val projectTerms = listOf("项目", "治疗", "术式", "procedure", "treatment", "treatments")
         val detailSummaryTerms = listOf(
@@ -396,11 +495,13 @@ class AgentIntentRouter {
             "机构", "医院", "诊所", "医生", "医师", "项目", "价格", "费用", "报价", "套餐", "预约",
             "推荐", "光子", "嫩肤", "激光", "注射", "玻尿酸", "肉毒", "超声", "射频", "热玛吉",
             "皮肤", "肤质", "暗沉", "毛孔", "粗糙", "斑", "痘", "皱纹", "细纹", "松弛", "下垂", "凹陷", "显老",
-            "clinic", "hospital", "doctor", "surgeon", "treatment", "procedure", "price", "cost", "package",
+            "clinic", "clinics", "hospital", "hospitals", "doctor", "doctors", "surgeon", "surgeons",
+            "treatment", "treatments", "procedure", "procedures", "price", "prices", "cost", "costs", "package", "packages",
             "recommend", "appointment", "ipl", "aopt", "dpl", "laser", "botox", "filler", "thermage",
             "skin", "dull", "pores", "texture", "spots", "pigmentation", "acne", "wrinkle", "aging", "sagging", "hollow"
         )
         val routingTerms = safetyTerms + detailSummaryTerms + comparisonTerms + planningTerms + catalogTerms +
-            institutionProjectTerms + doctorTerms + institutionTerms + projectTerms + unresolvedReferenceTerms
+            institutionProjectTerms + doctorTerms + institutionTerms + projectTerms + unresolvedReferenceTerms +
+            constraintSignalGroups.flatten() + aestheticConcernTerms
     }
 }

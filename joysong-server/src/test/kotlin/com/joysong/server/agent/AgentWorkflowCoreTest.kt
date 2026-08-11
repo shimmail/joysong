@@ -226,8 +226,102 @@ class AgentWorkflowCoreTest {
             withSuccess(
                 """{"choices":[{"message":{"content":"{\"intent\":\"NOT_ALLOWED\",\"queryTarget\":\"PROJECT\"}"}}]}""",
                 MediaType.APPLICATION_JSON
+            ),
+            withSuccess(
+                """{"choices":[{"message":{"content":"{\"intent\":\"CATALOG_QA\",\"keywords\":[\"fixture-keyword\"]}"}}]}""",
+                MediaType.APPLICATION_JSON
+            ),
+            withSuccess(
+                """{"choices":[{"message":{"content":"{\"intent\":\"CATALOG_QA\",\"queryTarget\":\"PROJECT\"}"}}]}""",
+                MediaType.APPLICATION_JSON
+            ),
+            withSuccess(
+                """{"choices":[{"message":{"content":"{\"intent\":\"CATALOG_QA\",\"queryTarget\":\"PROJECT\",\"keywords\":\"fixture-keyword\"}"}}]}""",
+                MediaType.APPLICATION_JSON
+            ),
+            withSuccess(
+                """{"choices":[{"message":{"content":"{\"intent\":\"CATALOG_QA\",\"queryTarget\":\"PROJECT\",\"keywords\":[{\"value\":\"fixture-keyword\"}]}"}}]}""",
+                MediaType.APPLICATION_JSON
+            ),
+            withSuccess(
+                """{"choices":[{"message":{"content":"{\"intent\":\"GENERAL_CHAT\",\"queryTarget\":\"PROJECT\",\"keywords\":[]}"}}]}""",
+                MediaType.APPLICATION_JSON
+            ),
+            withSuccess(
+                """{"choices":[{"message":{"content":"{\"intent\":\"CATALOG_QA\",\"queryTarget\":\"null\",\"keywords\":[\"fixture-keyword\"]}"}}]}""",
+                MediaType.APPLICATION_JSON
+            ),
+            withSuccess(
+                """{"choices":[{"message":{"content":"{\"intent\":\"COMPARISON\",\"queryTarget\":null,\"keywords\":[\"fixture-keyword\"]}"}}]}""",
+                MediaType.APPLICATION_JSON
             )
         ).forEach(::assertParserFailureStillCompletes)
+    }
+
+    @Test
+    fun `first turn in project context completes locally without intent parser`() {
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
+        val completed = slot<CompleteTurnCommand>()
+        prepareChatGeneration(
+            fixture,
+            "恢复期多久",
+            session(contextType = "PROJECT", contextId = "project-1")
+        )
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "answer")
+        )
+        every { catalog.hasInstitutionProjectMatch("恢复期多久") } returns false
+        every { catalog.contextualSearchQuery("恢复期多久", emptyList()) } returns "恢复期多久"
+        every { catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.PROJECT) } returns AgentPromptEvidence()
+        completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"answer"}}]}""", MediaType.APPLICATION_JSON))
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = "恢复期多久"))
+
+        assertEquals("CATALOG_QA", completed.captured.intent)
+        assertEquals("PROJECT", completed.captured.queryTarget)
+        intentServer.verify()
+        completionServer.verify()
+    }
+
+    @Test
+    fun `ambiguous history candidate requires parser instead of becoming locked context`() {
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
+        val completed = slot<CompleteTurnCommand>()
+        prepareChatGeneration(fixture, "对比一下")
+        every { fixture.contextBuilder.load("user-1", "session-1", 20, 4_000) } returns AgentContext(
+            AgentSessionSummary(),
+            listOf(message(1, "USER", "对比医生和机构"))
+        )
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "answer")
+        )
+        every { catalog.contextualSearchQuery("对比一下", listOf("对比医生和机构")) } returns "对比一下 对比医生和机构"
+        every { catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.INSTITUTION) } returns AgentPromptEvidence()
+        intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess(
+                """{"choices":[{"message":{"content":"{\"intent\":\"COMPARISON\",\"queryTarget\":\"INSTITUTION\",\"keywords\":[]}"}}]}""",
+                MediaType.APPLICATION_JSON
+            ))
+        completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"answer"}}]}""", MediaType.APPLICATION_JSON))
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = "对比一下"))
+
+        assertEquals("COMPARISON", completed.captured.intent)
+        assertEquals("INSTITUTION", completed.captured.queryTarget)
+        intentServer.verify()
+        completionServer.verify()
     }
 
     @Test
@@ -806,10 +900,21 @@ class AgentWorkflowCoreTest {
         val catalog = mockk<AgentCatalogService>()
         val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
         val chat = fixture.chat
+        val completed = slot<CompleteTurnCommand>()
         prepareChatGeneration(fixture, "我想改善脸部松弛")
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "answer")
+        )
         every { catalog.hasInstitutionProjectMatch("我想改善脸部松弛") } returns false
         every { catalog.contextualSearchQuery("我想改善脸部松弛", emptyList()) } returns "我想改善脸部松弛"
-        every { catalog.promptEvidence(any(), any(), any(), null) } returns AgentPromptEvidence()
+        every {
+            catalog.promptEvidence(
+                "我想改善脸部松弛",
+                "我想改善脸部松弛",
+                "我想改善脸部松弛",
+                null
+            )
+        } returns AgentPromptEvidence()
         intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
             .andExpect(method(HttpMethod.POST))
             .andRespond(response)
@@ -818,6 +923,8 @@ class AgentWorkflowCoreTest {
 
         chat.sendMessage("session-1", "user-1", SendMessageRequest(content = "我想改善脸部松弛"))
 
+        assertEquals("CATALOG_QA", completed.captured.intent)
+        assertEquals(null, completed.captured.queryTarget)
         intentServer.verify()
         completionServer.verify()
     }
@@ -874,7 +981,11 @@ class AgentWorkflowCoreTest {
         )
     }
 
-    private fun prepareChatGeneration(fixture: ChatFixture, content: String) {
+    private fun prepareChatGeneration(
+        fixture: ChatFixture,
+        content: String,
+        ownedSession: ChatSessionEntity = session()
+    ) {
         every { fixture.availabilityGuard.requireGenerationEnabled() } just runs
         every { fixture.turnService.beginTurn("session-1", "user-1", content, any()) } returns
             BeginTurnResult.Started("turn-1", "trace-1", 1)
@@ -883,11 +994,20 @@ class AgentWorkflowCoreTest {
         )
         every { fixture.operationLogger.completed(any(), any(), any(), any(), any()) } just runs
         every { fixture.contextBuilder.load("user-1", "session-1", 20, 4_000) } returns AgentContext(AgentSessionSummary(), emptyList())
-        every { sessions.findByIdAndUserIdAndDeletedAtIsNull("session-1", "user-1") } returns session()
+        every { sessions.findByIdAndUserIdAndDeletedAtIsNull("session-1", "user-1") } returns ownedSession
     }
 
-    private fun session(summary: String = "{}") = ChatSessionEntity(
-        id = "session-1", userId = "user-1", persona = "CONSULTANT", contextType = "GENERAL", summaryJson = summary
+    private fun session(
+        summary: String = "{}",
+        contextType: String = "GENERAL",
+        contextId: String = ""
+    ) = ChatSessionEntity(
+        id = "session-1",
+        userId = "user-1",
+        persona = "CONSULTANT",
+        contextType = contextType,
+        contextId = contextId,
+        summaryJson = summary
     )
 
     private fun turn(

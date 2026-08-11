@@ -185,6 +185,55 @@ class AgentIntentRouterTest {
     }
 
     @Test
+    fun `ambiguous safety negation allows only a parser safety upgrade`() {
+        val local = router.assessCurrent("I am not not pregnant; compare treatments", "GENERAL")
+
+        val result = router.mergeParsedRoute(
+            local,
+            ParsedAgentRoute(AgentIntent.SAFETY_SCREENING, null, emptyList())
+        )
+
+        assertEquals(AgentIntent.SAFETY_SCREENING, result.intent)
+        assertEquals(null, result.queryTarget)
+    }
+
+    @Test
+    fun `conflicting current targets remain parser resolvable`() {
+        val local = router.assessCurrent("对比医生和机构", "GENERAL")
+
+        val result = router.mergeParsedRoute(
+            local,
+            ParsedAgentRoute(AgentIntent.COMPARISON, AgentQueryTarget.INSTITUTION, emptyList())
+        )
+
+        assertFalse(local.explicitQueryTarget)
+        assertEquals(AgentQueryTarget.INSTITUTION, result.queryTarget)
+    }
+
+    @Test
+    fun `conflicting context candidates retain fallback and require parsing`() {
+        val result = router.supplementWithContext(
+            router.assessCurrent("对比一下", "GENERAL"),
+            listOf(
+                router.validatedDecision(AgentIntent.CATALOG_QA, AgentQueryTarget.DOCTOR),
+                router.validatedDecision(AgentIntent.CATALOG_QA, AgentQueryTarget.INSTITUTION)
+            )
+        )
+
+        assertEquals(AgentQueryTarget.INSTITUTION, result.decision.queryTarget)
+        assertTrue("CONFLICTING_CONTEXT" in result.ambiguityReasons)
+        assertTrue(result.requiresLlmParsing)
+    }
+
+    @Test
+    fun `english routing terms require word boundaries`() {
+        val result = router.assessCurrent("Tell me about hospitality", "GENERAL")
+
+        assertEquals(AgentIntent.GENERAL_CHAT, result.decision.intent)
+        assertEquals(null, result.decision.queryTarget)
+    }
+
+    @Test
     fun `separate negations in one clause remain deterministic`() {
         val result = router.assessCurrent("我不看医生不比较项目，推荐机构", "GENERAL")
 
@@ -256,14 +305,19 @@ class AgentIntentRouterTest {
             Arguments.of("不看医生，推荐机构", AgentIntent.CATALOG_QA, AgentQueryTarget.INSTITUTION),
             Arguments.of("不要方案，只比较项目", AgentIntent.COMPARISON, AgentQueryTarget.PROJECT),
             Arguments.of("我没有怀孕，想比较项目", AgentIntent.COMPARISON, AgentQueryTarget.PROJECT),
+            Arguments.of("无需医生，推荐机构", AgentIntent.CATALOG_QA, AgentQueryTarget.INSTITUTION),
             Arguments.of("I don't want a doctor; show me clinics", AgentIntent.CATALOG_QA, AgentQueryTarget.INSTITUTION),
-            Arguments.of("I am not pregnant; compare treatments", AgentIntent.COMPARISON, AgentQueryTarget.PROJECT)
+            Arguments.of("I am not pregnant; compare treatments", AgentIntent.COMPARISON, AgentQueryTarget.PROJECT),
+            Arguments.of("She isn't pregnant; compare treatments", AgentIntent.COMPARISON, AgentQueryTarget.PROJECT),
+            Arguments.of("No pregnancy; compare treatments", AgentIntent.COMPARISON, AgentQueryTarget.PROJECT)
         )
 
         @JvmStatic
         fun unnegatedSafetyCases(): Stream<String> = Stream.of(
             "我怀孕了，想比较项目", "我有严重过敏史，推荐机构", "我正在服药，可以治疗吗",
-            "I am pregnant; compare treatments", "I have a severe allergy; show me clinics", "I am taking medication; compare treatments"
+            "我不想做项目因为正在服药",
+            "I am pregnant; compare treatments", "I have a severe allergy; show me clinics", "I am taking medication; compare treatments",
+            "I don't want treatments because I am pregnant"
         )
     }
 }
