@@ -421,6 +421,25 @@ PENDING_PAYMENT
 
 Flutter 可以完成页面和接口抽象，但生产发布前必须等待支付服务契约确定，并至少补齐：支付预下单、渠道参数、支付查询、服务端回调验签、回调幂等、退款查询。客户端不能把“接口返回成功”等同于渠道到账。
 
+### 10.4 收入台账与结算查询
+
+结算记录和钱包是平台内部收入台账：金额一律使用最小货币单位整数 `minor` 与 ISO-4217 三位 `currency`，同一金额对象不得混用元/浮点数与 `minor`。`PENDING`、`AVAILABLE`、`PARTIALLY_REVERSED`、`REVERSED` 是分账状态；钱包分别维护 `pending`、`available`、`frozen` 三个余额桶。`PENDING` 表示待释放的内部余额，`AVAILABLE` 表示已释放到内部可用余额，部分或完全冲正分别为 `PARTIALLY_REVERSED`、`REVERSED`。
+
+| 作用域 | 方法 | 路径 | 说明 |
+|---|---|---|---|
+| 订单所属用户 | GET | `/orders/{id}/settlement` | 仅返回本人订单的消费者安全结算摘要 |
+| 当前专业身份 | GET | `/wallets/me` | 按服务端授权范围返回钱包及三个余额桶 |
+| 当前专业身份 | GET | `/wallets/me/ledger?page=0&size=20` | 返回授权钱包的账本条目；`size` 为 1–100 |
+| 管理员 | GET | `/admin/orders/settlements?page=0&size=20` | 结算列表 |
+| 管理员 | GET | `/admin/orders/settlements/{id}` | 结算详情 |
+| 管理员 | GET | `/admin/orders/settlements/{id}/allocations?page=0&size=20` | 分账明细 |
+| 管理员 | GET | `/admin/orders/reconciliation-issues?page=0&size=20` | 对账异常列表 |
+| 管理员 | GET | `/admin/orders/reconciliation-issues/{id}` | 对账异常详情 |
+
+账本条目是追加式记录：服务端使用不可变 `operationKey` 去重，同一操作的重试不得在客户端制造新余额。每条记录同时返回变动量和 `pendingBalanceMinor`、`availableBalanceMinor`、`frozenBalanceMinor` 三个结果余额快照；Flutter 只展示服务端快照，不在本地重新累计或猜测余额。
+
+`SETTLED`/`AVAILABLE` 只表示内部结算台账已释放，**不表示**款项已经通过 Airwallex 或其他外部通道打款。Airwallex、收款人/beneficiary 与 KYC、FX、提现/withdrawal 和真实 payout 均不在当前 API 契约范围内；客户端不得据此展示出金成功、收款账户或换汇状态。
+
 ## 11. 医生与机构专业管理接口
 
 专业入口使用与管理后台相同的受限接口，但所有列表和写操作都由服务端按 `ManagementContext` 做对象级过滤。
