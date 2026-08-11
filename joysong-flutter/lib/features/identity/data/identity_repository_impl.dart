@@ -102,6 +102,33 @@ final class ApiIdentityRepository implements IdentityRepository {
   }
 
   @override
+  Future<DoctorSelfProfile> loadDoctorSelfProfile() async {
+    final result = await _apiClient.get<DoctorSelfProfile>(
+      '/management/doctor-profile',
+      decodeData: DoctorSelfProfile.fromJson,
+    );
+    if (result == null) {
+      throw const FormatException('医生档案响应为空');
+    }
+    return result;
+  }
+
+  @override
+  Future<DoctorSelfProfile> updateDoctorSelfProfile(
+    DoctorSelfProfileUpdate update,
+  ) async {
+    final result = await _apiClient.put<DoctorSelfProfile>(
+      '/management/doctor-profile',
+      body: update.toJson(),
+      decodeData: DoctorSelfProfile.fromJson,
+    );
+    if (result == null) {
+      throw const FormatException('医生档案响应为空');
+    }
+    return result;
+  }
+
+  @override
   Future<List<ManagementProjectOption>> listManagementProjects() async {
     return await _apiClient.get<List<ManagementProjectOption>>(
           '/admin/projects',

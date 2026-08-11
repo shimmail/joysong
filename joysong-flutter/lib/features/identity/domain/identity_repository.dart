@@ -19,6 +19,12 @@ abstract interface class IdentityRepository {
     ManagedInstitutionProfileDraft draft,
   );
 
+  Future<DoctorSelfProfile> loadDoctorSelfProfile();
+
+  Future<DoctorSelfProfile> updateDoctorSelfProfile(
+    DoctorSelfProfileUpdate update,
+  );
+
   Future<List<ManagedDoctorProfile>> listManagedDoctorProfiles();
 
   Future<ManagedDoctorProfile> updateManagedDoctorProfile(

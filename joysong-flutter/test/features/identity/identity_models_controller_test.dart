@@ -557,6 +557,18 @@ final class _FakeIdentityRepository implements IdentityRepository {
       });
 
   @override
+  Future<DoctorSelfProfile> loadDoctorSelfProfile() {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<DoctorSelfProfile> updateDoctorSelfProfile(
+    DoctorSelfProfileUpdate update,
+  ) {
+    throw UnimplementedError();
+  }
+
+  @override
   Future<List<InstitutionOption>> listInstitutionOptions() async => const [
         InstitutionOption(id: 'inst-1', name: '悦美医疗美容'),
       ];

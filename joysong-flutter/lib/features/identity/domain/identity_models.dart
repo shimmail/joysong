@@ -571,6 +571,149 @@ final class ManagedInstitutionProfileDraft {
       };
 }
 
+final class DoctorInstitutionSummary {
+  const DoctorInstitutionSummary({required this.id, required this.name});
+
+  factory DoctorInstitutionSummary.fromJson(Object? json) {
+    final map = _jsonMap(json, '医生机构摘要');
+    return DoctorInstitutionSummary(
+      id: _requiredText(map['id'], '机构 id'),
+      name: _requiredText(map['name'], '机构名称'),
+    );
+  }
+
+  final String id;
+  final String name;
+}
+
+final class DoctorSelfProfile {
+  const DoctorSelfProfile({
+    required this.id,
+    required this.userId,
+    required this.name,
+    this.title = '',
+    this.bio = '',
+    this.avatar = '',
+    this.contactPhone = '',
+    this.specialties = '',
+    this.credentials = '',
+    this.credentialImages = '',
+    this.certificationTags = '',
+    this.institutionId = '',
+    this.institutionName = '',
+    this.institutions = const [],
+    this.primaryInstitution,
+    this.institutionCount = 0,
+    this.rating = 0,
+    this.reviewCount = 0,
+    this.isVerified = false,
+    this.consultationCount = 0,
+    this.caseCount = 0,
+  });
+
+  factory DoctorSelfProfile.fromJson(Object? json) {
+    final map = _jsonMap(json, '医生本人档案');
+    final primaryInstitution = map['primaryInstitution'];
+    return DoctorSelfProfile(
+      id: _requiredText(map['id'], '医生 id'),
+      userId: _requiredText(map['userId'], '用户 id'),
+      name: _requiredText(map['name'], '医生姓名'),
+      title: map['title']?.toString() ?? '',
+      bio: map['bio']?.toString() ?? '',
+      avatar: map['avatar']?.toString() ?? '',
+      contactPhone: map['contactPhone']?.toString() ?? '',
+      specialties: map['specialties']?.toString() ?? '',
+      credentials: map['credentials']?.toString() ?? '',
+      credentialImages: map['credentialImages']?.toString() ?? '',
+      certificationTags: map['certificationTags']?.toString() ?? '',
+      institutionId: map['institutionId']?.toString() ?? '',
+      institutionName: map['institutionName']?.toString() ?? '',
+      institutions: _objectList(map['institutions'])
+          .map(DoctorInstitutionSummary.fromJson)
+          .toList(growable: false),
+      primaryInstitution: primaryInstitution == null
+          ? null
+          : DoctorInstitutionSummary.fromJson(primaryInstitution),
+      institutionCount: _integer(map['institutionCount']),
+      rating: _decimal(map['rating']),
+      reviewCount: _integer(map['reviewCount']),
+      isVerified: _boolean(map['isVerified']),
+      consultationCount: _integer(map['consultationCount']),
+      caseCount: _integer(map['caseCount']),
+    );
+  }
+
+  final String id;
+  final String userId;
+  final String name;
+  final String title;
+  final String bio;
+  final String avatar;
+  final String contactPhone;
+  final String specialties;
+  final String credentials;
+  final String credentialImages;
+  final String certificationTags;
+  final String institutionId;
+  final String institutionName;
+  final List<DoctorInstitutionSummary> institutions;
+  final DoctorInstitutionSummary? primaryInstitution;
+  final int institutionCount;
+  final num rating;
+  final int reviewCount;
+  final bool isVerified;
+  final int consultationCount;
+  final int caseCount;
+
+  DoctorSelfProfileUpdate toUpdate() => DoctorSelfProfileUpdate(
+        name: name,
+        title: title,
+        bio: bio,
+        avatar: avatar,
+        contactPhone: contactPhone,
+        specialties: specialties,
+        credentials: credentials,
+        credentialImages: credentialImages,
+        certificationTags: certificationTags,
+      );
+}
+
+final class DoctorSelfProfileUpdate {
+  const DoctorSelfProfileUpdate({
+    required this.name,
+    required this.title,
+    required this.bio,
+    required this.avatar,
+    required this.contactPhone,
+    required this.specialties,
+    required this.credentials,
+    required this.credentialImages,
+    required this.certificationTags,
+  });
+
+  final String name;
+  final String title;
+  final String bio;
+  final String avatar;
+  final String contactPhone;
+  final String specialties;
+  final String credentials;
+  final String credentialImages;
+  final String certificationTags;
+
+  Map<String, Object?> toJson() => {
+        'name': name.trim(),
+        'title': title.trim(),
+        'bio': bio.trim(),
+        'avatar': avatar.trim(),
+        'contactPhone': contactPhone.trim(),
+        'specialties': _csvText(specialties),
+        'credentials': credentials.trim(),
+        'credentialImages': _csvText(credentialImages),
+        'certificationTags': _csvText(certificationTags),
+      };
+}
+
 final class ManagedDoctorProfile {
   const ManagedDoctorProfile({
     required this.id,
@@ -1234,10 +1377,17 @@ final class InstitutionProjectRequestDraft {
       };
 }
 
-String _csvText(Iterable<String> values) => values
-    .map((item) => item.trim())
-    .where((item) => item.isNotEmpty)
-    .join(',');
+String _csvText(Object? value) {
+  final values = switch (value) {
+    final String text => text.split(','),
+    final Iterable<Object?> items => items,
+    _ => const <Object?>[],
+  };
+  return values
+      .map((item) => item?.toString().trim() ?? '')
+      .where((item) => item.isNotEmpty)
+      .join(',');
+}
 
 String _requiredText(Object? value, String field) {
   final result = value?.toString().trim() ?? '';
