@@ -17,7 +17,7 @@ import java.time.LocalDateTime
 class DoctorInstitutionChangeMigrationTest {
 
     @Test
-    fun `revenue ledger migration creates immutable idempotent money structures`() {
+    fun `V17 revenue ledger migration remains the immutable base schema`() {
         val sql = migration("db/migration/V17__add_revenue_ledger.sql")
         assertContains(sql, "CREATE TABLE settlement_allocations")
         assertContains(sql, "CREATE TABLE wallets")
@@ -27,9 +27,27 @@ class DoctorInstitutionChangeMigrationTest {
         assertContains(sql, "UNIQUE KEY uk_wallet_owner_currency (owner_type, owner_id, currency)")
         assertContains(sql, "UNIQUE KEY uk_wallet_ledger_operation (operation_key)")
         assertContains(sql, "CHECK (pending_minor >= 0 AND available_minor >= 0 AND frozen_minor >= 0)")
-        assertContains(sql, "pending_balance_minor BIGINT NOT NULL")
-        assertContains(sql, "available_balance_minor BIGINT NOT NULL")
-        assertContains(sql, "frozen_balance_minor BIGINT NOT NULL")
+        assertFalse(sql.contains("balance_bucket"))
+        assertFalse(sql.contains("pending_balance_minor"))
+        assertFalse(sql.contains("available_balance_minor"))
+        assertFalse(sql.contains("frozen_balance_minor"))
+    }
+
+    @Test
+    fun `V18 extends revenue ledger snapshots without rewriting V17`() {
+        val extension = migration("db/migration/V18__extend_revenue_ledger_snapshots.sql")
+        assertContains(extension, "ALTER TABLE settlement_allocations")
+        assertContains(extension, "ADD COLUMN balance_bucket VARCHAR(20) NOT NULL DEFAULT 'PENDING'")
+        assertContains(extension, "ALTER TABLE wallet_ledger_entries")
+        assertContains(extension, "ADD COLUMN pending_balance_minor BIGINT NOT NULL DEFAULT 0")
+        assertContains(extension, "ADD COLUMN available_balance_minor BIGINT NOT NULL DEFAULT 0")
+        assertContains(extension, "ADD COLUMN frozen_balance_minor BIGINT NOT NULL DEFAULT 0")
+
+        val freshSchema = migration("db/migration/B1__init_schema.sql")
+        assertContains(freshSchema, "balance_bucket VARCHAR(20) NOT NULL DEFAULT 'PENDING'")
+        assertContains(freshSchema, "pending_balance_minor BIGINT NOT NULL")
+        assertContains(freshSchema, "available_balance_minor BIGINT NOT NULL")
+        assertContains(freshSchema, "frozen_balance_minor BIGINT NOT NULL")
     }
 
     @Test
