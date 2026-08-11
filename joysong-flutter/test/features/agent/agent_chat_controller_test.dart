@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -51,7 +52,6 @@ void main() {
 
     expect(repository.createCalls, 1);
     expect(repository.sendCalls, 1);
-    expect(repository.streamCalls, 0);
     expect(controller.state.deliveryState, ChatDeliveryState.completed);
     expect(controller.state.messages.last.content, '完整答复');
   });
@@ -63,8 +63,30 @@ void main() {
     await controller.send('想改善肤质');
 
     expect(repository.sendCalls, 1);
-    expect(repository.streamCalls, 0);
     expect(controller.state.deliveryState, ChatDeliveryState.failed);
+  });
+
+  test('delete during a REST send fails explicitly without deleting', () async {
+    final pendingSend = Completer<ChatTurn>();
+    final repository = _FakeAgentRepository(pendingSend: pendingSend);
+    final controller = AgentChatController(repository: repository);
+    final send = controller.send('想改善肤质');
+
+    expect(controller.state.deliveryState, ChatDeliveryState.sending);
+    await expectLater(
+      controller.deleteSession(_session),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          'CHAT_SEND_IN_PROGRESS',
+        ),
+      ),
+    );
+    expect(repository.deleteCalls, 0);
+
+    pendingSend.complete(_turn('完整答复'));
+    await send;
   });
 
   test('REST send includes an idempotency key in exactly one POST', () async {
@@ -166,13 +188,15 @@ class _FakeAgentRepository extends Fake implements AgentRepository {
   _FakeAgentRepository({
     this.messages = const [],
     this.sendError,
+    this.pendingSend,
   });
 
   final List<ChatMessage> messages;
   final Object? sendError;
+  final Completer<ChatTurn>? pendingSend;
   int createCalls = 0;
   int sendCalls = 0;
-  int streamCalls = 0;
+  int deleteCalls = 0;
 
   @override
   Future<ChatSession> createSession({
@@ -195,9 +219,19 @@ class _FakeAgentRepository extends Fake implements AgentRepository {
   }
 
   @override
+  Future<List<ChatSession>> getSessions({ChatPersona? persona}) async =>
+      const [];
+
+  @override
+  Future<void> deleteSession(String sessionId) async {
+    deleteCalls++;
+  }
+
+  @override
   Future<ChatTurn> sendMessage(String sessionId, String content) async {
     sendCalls++;
     if (sendError case final error?) throw error;
+    if (pendingSend case final completer?) return completer.future;
     return _turn('完整答复');
   }
 }
