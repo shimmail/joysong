@@ -187,7 +187,7 @@ OPENAI_INTENT_PARSER_ENABLED=true
 OPENAI_INTENT_MODEL=可选的意图解析模型ID
 ```
 
-生产启用 Agent 时必须显式配置 `AI_AGENT_MODEL`，服务端不会从 `OPENAI_MODEL` 或仓库默认值回退。启用 `OPENAI_INTENT_PARSER_ENABLED` 后，可用 `OPENAI_INTENT_MODEL` 为意图解析指定模型；留空时解析器使用 `AI_AGENT_MODEL`。解析器与最终生成共享 API Key、Base URL、代理和超时相关配置，只有模型名可不同；最终回答始终使用 `AI_AGENT_MODEL`，解析失败则保留本地路由继续生成。
+生产启用 Agent 时必须显式配置 `AI_AGENT_MODEL`，服务端不会从 `OPENAI_MODEL` 或仓库默认值回退。启用 `OPENAI_INTENT_PARSER_ENABLED` 后，可用 `OPENAI_INTENT_MODEL` 为意图解析指定模型；留空时解析器使用 `AI_AGENT_MODEL`。解析器与最终生成共享 API Key、Base URL、代理、HTTP 客户端安全策略和 Provider 协议；解析器连接/读取超时为 3 秒/8 秒，最终生成则为 10 秒/60 秒。最终回答始终使用 `AI_AGENT_MODEL`，解析失败则保留本地路由继续生成。
 
 路由顺序固定为：先使用当前请求中的中英文、可识别否定词的关键词规则；仅在需要时以受限的近期上下文补全；仍有歧义时才调用意图模型。当前请求已明确的意图或目标不会被历史上下文或解析器覆盖。
 

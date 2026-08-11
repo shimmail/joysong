@@ -12,7 +12,7 @@
 
 路由先检查当前请求的中英文关键词，并识别否定表达；只有当前信息不足时，才使用受限的近期上下文补全。仍无法确定时才调用模型解析。当前请求中已明确的意图或目录目标优先于历史，解析结果不能覆盖它。
 
-启用 `OPENAI_INTENT_PARSER_ENABLED=true` 时，`OPENAI_INTENT_MODEL` 可为解析器选择模型；空值回退到 `AI_AGENT_MODEL`。解析器与最终生成共享 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_PROXY_URL` 和超时设置，唯一可不同的是模型名。最终回答始终调用 `AI_AGENT_MODEL`；解析器超时、上游失败或返回无效内容时，工作流使用本地路由继续完成，不会把解析失败作为用户请求失败。
+启用 `OPENAI_INTENT_PARSER_ENABLED=true` 时，`OPENAI_INTENT_MODEL` 可为解析器选择模型；空值回退到 `AI_AGENT_MODEL`。解析器与最终生成共享 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_PROXY_URL`、HTTP 客户端安全策略和 Provider 协议；解析器使用 3 秒连接/8 秒读取超时，最终生成使用 10 秒连接/60 秒读取超时。最终回答始终调用 `AI_AGENT_MODEL`；解析器超时、上游失败或返回无效内容时，工作流使用本地路由继续完成，不会把解析失败作为用户请求失败。
 
 ## 数据模型与保留策略
 
