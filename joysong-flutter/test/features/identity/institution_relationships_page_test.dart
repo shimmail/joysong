@@ -106,6 +106,41 @@ void main() {
     expect(find.text('离开机构'), findsNothing);
   });
 
+  testWidgets('consultant sees institution affiliation without doctor actions',
+      (tester) async {
+    final repository = _FakeIdentityRepository()
+      ..context = const ManagementContext(
+        userId: 'consultant-user',
+        platformRole: 'USER',
+        activeRoles: ['CONSULTANT'],
+        managedInstitutionIds: [],
+        visibleInstitutionIds: [],
+        canApplyToInstitutions: true,
+        canViewAffiliations: true,
+      )
+      ..membershipRequests = [
+        InstitutionMembershipRequest.fromJson({
+          'id': 'membership-1',
+          'requestType': 'CONSULTANT',
+          'userId': 'consultant-user',
+          'institutionId': 'inst-1',
+          'status': 'APPROVED',
+          'requestNote': '希望加入',
+        }),
+      ];
+
+    await tester.pumpWidget(MaterialApp(
+      home: InstitutionRelationshipsPage(repository: repository),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('机构归属'), findsOneWidget);
+    expect(find.text('Joysong Clinic'), findsOneWidget);
+    expect(find.text('提交申请'), findsNothing);
+    expect(find.text('加入机构'), findsNothing);
+    expect(find.text('离开机构'), findsNothing);
+  });
+
   testWidgets('profile exposes institution relationships when identity is available',
       (tester) async {
     final repository = _FakeIdentityRepository()
@@ -129,6 +164,7 @@ void main() {
 final class _FakeIdentityRepository implements IdentityRepository {
   ManagementContext? context;
   List<DoctorInstitutionChangeRequest> requests = const [];
+  List<InstitutionMembershipRequest> membershipRequests = const [];
   DoctorInstitutionChangeRequestDraft? submittedDraft;
   String? reviewDecision;
   String? reviewNote;
@@ -144,6 +180,10 @@ final class _FakeIdentityRepository implements IdentityRepository {
   @override
   Future<List<DoctorInstitutionChangeRequest>>
       listDoctorInstitutionChangeRequests() async => requests;
+
+  @override
+  Future<List<InstitutionMembershipRequest>>
+      listInstitutionMembershipRequests() async => membershipRequests;
 
   @override
   Future<void> submitDoctorInstitutionChangeRequest(

@@ -1,3 +1,6 @@
+-- Finalizer migration for a drained deployment. Previous binaries that still
+-- write doctor_institutions PENDING/CHANGES_REQUESTED rows must be stopped
+-- before this migration adds final status constraints.
 INSERT INTO doctor_institution_change_requests (
     id,
     doctor_id,
@@ -19,11 +22,27 @@ SELECT
     legacy.institution_id,
     'JOIN',
     CASE
+        WHEN legacy.status = 'PENDING'
+             AND EXISTS (
+                 SELECT 1
+                 FROM doctor_institution_change_requests pending_request
+                 WHERE pending_request.doctor_id = legacy.doctor_id
+                   AND pending_request.institution_id = legacy.institution_id
+                   AND pending_request.status = 'PENDING'
+             ) THEN 'REJECTED'
         WHEN legacy.status = 'CHANGES_REQUESTED' THEN 'REJECTED'
         ELSE legacy.status
     END,
     legacy.request_note,
     CASE
+        WHEN legacy.status = 'PENDING'
+             AND EXISTS (
+                 SELECT 1
+                 FROM doctor_institution_change_requests pending_request
+                 WHERE pending_request.doctor_id = legacy.doctor_id
+                   AND pending_request.institution_id = legacy.institution_id
+                   AND pending_request.status = 'PENDING'
+             ) THEN '历史待审核申请已由新关系申请接管'
         WHEN legacy.status IN ('REJECTED', 'CHANGES_REQUESTED')
              AND NULLIF(TRIM(COALESCE(legacy.review_note, '')), '') IS NULL
             THEN '历史审核未填写原因'
@@ -31,7 +50,19 @@ SELECT
     END,
     legacy.doctor_id,
     legacy.confirmed_by,
-    legacy.confirmed_at,
+    CASE
+        WHEN legacy.status = 'PENDING'
+             AND EXISTS (
+                 SELECT 1
+                 FROM doctor_institution_change_requests pending_request
+                 WHERE pending_request.doctor_id = legacy.doctor_id
+                   AND pending_request.institution_id = legacy.institution_id
+                   AND pending_request.status = 'PENDING'
+             ) THEN legacy.updated_at
+        WHEN legacy.status IN ('REJECTED', 'CHANGES_REQUESTED')
+            THEN COALESCE(legacy.confirmed_at, legacy.updated_at)
+        ELSE legacy.confirmed_at
+    END,
     legacy.created_at,
     legacy.created_at,
     legacy.updated_at
@@ -41,16 +72,6 @@ WHERE legacy.status IN ('PENDING', 'REJECTED', 'CHANGES_REQUESTED')
       SELECT 1
       FROM doctor_institution_change_requests request
       WHERE request.id = legacy.id
-  )
-  AND (
-      legacy.status <> 'PENDING'
-      OR NOT EXISTS (
-          SELECT 1
-          FROM doctor_institution_change_requests pending_request
-          WHERE pending_request.doctor_id = legacy.doctor_id
-            AND pending_request.institution_id = legacy.institution_id
-            AND pending_request.status = 'PENDING'
-      )
   );
 
 UPDATE institution_memberships
