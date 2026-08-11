@@ -63,6 +63,13 @@ class DoctorInstitutionChangeMigrationTest {
             javaClass.getResource("/db/migration/V14__finalize_institution_membership_statuses.sql")
         ).readText().replace(Regex("\\s+"), " ").trim()
 
+        assertContains(migration, "INSERT INTO doctor_institution_change_requests")
+        assertContains(migration, "legacy.status IN ('PENDING', 'REJECTED', 'CHANGES_REQUESTED')")
+        assertContains(migration, "WHEN legacy.status = 'CHANGES_REQUESTED' THEN 'REJECTED'")
+        assertContains(migration, "WHEN legacy.status IN ('REJECTED', 'CHANGES_REQUESTED')")
+        assertContains(migration, "THEN '历史审核未填写原因'")
+        assertContains(migration, "legacy.confirmed_by")
+        assertContains(migration, "legacy.confirmed_at")
         assertContains(migration, "UPDATE institution_memberships SET status = 'REJECTED' WHERE status = 'CHANGES_REQUESTED'")
         assertContains(migration, "CONSTRAINT chk_doctor_institutions_status CHECK (status IN ('APPROVED', 'REVOKED'))")
         assertContains(migration, "CONSTRAINT chk_institution_memberships_status CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'REVOKED'))")
