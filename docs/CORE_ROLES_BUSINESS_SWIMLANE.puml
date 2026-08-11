@@ -19,7 +19,7 @@ skinparam activity {
 
 |JoySong 权限与业务服务|
 start
-:当前 master = 873d25b;
+:接口能力按当前 SecurityConfig + Controller + Service 三层授权核定。;
 note right
   专业接口按 SecurityConfig + Controller + Service 三层授权核定。
   “可达但恒为空/403”不计为角色业务能力。
