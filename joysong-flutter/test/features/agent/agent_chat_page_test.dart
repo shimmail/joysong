@@ -7,6 +7,9 @@ import 'package:joysong_flutter/features/agent/presentation/agent_catalog_cards.
 import 'package:joysong_flutter/features/agent/presentation/agent_chat_controller.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_chat_page.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_plan_controller.dart';
+import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
+import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
+import 'package:joysong_flutter/features/shell/presentation/app_shell.dart';
 
 void main() {
   testWidgets('latest catalog report is rendered once and opens its item',
@@ -70,6 +73,50 @@ void main() {
 
     expect(find.text('真人咨询'), findsNothing);
     expect(consultCalls, 0);
+  });
+
+  testWidgets('comparison marks every non-navigable item as incomplete',
+      (tester) async {
+    const report = AgentCatalogReport(
+      mode: 'COMPARISON',
+      title: '对比',
+      summary: '',
+      items: [_unknown, _emptyDoctor, _incompleteInstitutionProject],
+      comparisonDimensions: ['价格'],
+      warnings: [],
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('zh'),
+        supportedLocales: const [Locale('zh')],
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        home: Scaffold(
+          body: AgentComparisonTable(
+            report: report,
+            onOpen: (_) {},
+            canOpen: (_) => false,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('信息暂不完整'), findsNWidgets(3));
+  });
+
+  test('catalog detail adapter never exposes a doctor consultation callback',
+      () {
+    final page = buildAgentCatalogDetailPage(
+      repository: _DiscoverRepository(),
+      type: DiscoverContentType.doctor,
+      id: 'doctor-record-1',
+    );
+
+    expect(page.onConsultDoctor, isNull);
   });
 }
 
@@ -208,6 +255,30 @@ const _unknown = AgentCatalogItem(
   canChatWithHuman: false,
 );
 
+const _emptyDoctor = AgentCatalogItem(
+  type: 'DOCTOR',
+  id: '',
+  name: '缺少标识的医生',
+  subtitle: '',
+  summary: '',
+  attributes: {},
+  institutionId: null,
+  projectId: null,
+  canChatWithHuman: true,
+);
+
+const _incompleteInstitutionProject = AgentCatalogItem(
+  type: 'INSTITUTION_PROJECT',
+  id: 'institution-project-1',
+  name: '缺少关联标识的机构项目',
+  subtitle: '',
+  summary: '',
+  attributes: {},
+  institutionId: null,
+  projectId: null,
+  canChatWithHuman: false,
+);
+
 const _report = AgentCatalogReport(
   mode: 'SUMMARY',
   title: '目录报告',
@@ -216,3 +287,5 @@ const _report = AgentCatalogReport(
   comparisonDimensions: [],
   warnings: [],
 );
+
+class _DiscoverRepository extends Fake implements DiscoverRepository {}

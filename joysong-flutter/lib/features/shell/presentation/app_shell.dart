@@ -479,7 +479,7 @@ class _AppShellState extends State<AppShell> {
 
     _contentNavigator.push<void>(
       MaterialPageRoute(
-        builder: (_) => DiscoverDetailPage(
+        builder: (_) => buildAgentCatalogDetailPage(
           repository: repository,
           type: contentType,
           id: projectId ?? id,
@@ -488,7 +488,6 @@ class _AppShellState extends State<AppShell> {
           onBookProject: _bookingRepository == null ? null : _openBooking,
           socialController: _socialController,
           onOpenUser: _openPublicUser,
-          onConsultDoctor: _openDoctorChat,
           onOpenAi: _openAiChat,
         ),
       ),
@@ -1187,6 +1186,29 @@ class _AppShellState extends State<AppShell> {
     setState(() => _selectedIndex = index);
   }
 }
+
+DiscoverDetailPage buildAgentCatalogDetailPage({
+  required DiscoverRepository repository,
+  required DiscoverContentType type,
+  required String id,
+  String? institutionId,
+  String? projectId,
+  ValueChanged<DiscoverItem>? onBookProject,
+  SocialController? socialController,
+  ValueChanged<String>? onOpenUser,
+  ValueChanged<DiscoverItem>? onOpenAi,
+}) =>
+    DiscoverDetailPage(
+      repository: repository,
+      type: type,
+      id: id,
+      institutionId: institutionId,
+      projectId: projectId,
+      onBookProject: onBookProject,
+      socialController: socialController,
+      onOpenUser: onOpenUser,
+      onOpenAi: onOpenAi,
+    );
 
 class _KeyboardAwareBottomNavigation extends StatelessWidget {
   const _KeyboardAwareBottomNavigation({
