@@ -2214,11 +2214,15 @@ Authorization: Bearer <token>
       "coverImage": "https://cdn.example.com/institutions/cover.jpg",
       "rating": 4.8,
       "reviewCount": 126,
-      "isVerified": true
+      "isVerified": true,
+      "projectCount": 12,
+      "doctorCount": 6
     }
   ]
 }
 ```
+
+列表中的机构摘要固定返回 `id`、`name`、`address`、`city`、`coverImage`、`rating`、`reviewCount`、`isVerified`、`projectCount`、`doctorCount`。其中 `projectCount` 和 `doctorCount` 均为整数只读计数，分别表示机构项目数和医生数；客户端不得编辑或自行推导后写回。
 
 **GET `/api/management/institutions/{institutionId}` 响应，以及成功 PUT 的 `data`：**
 
