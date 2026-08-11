@@ -26,6 +26,13 @@ class SettlementAmountAllocatorTest {
         assertThrows<IllegalArgumentException> { allocator.allocate(100, rates("60", "30", "20", "-10")) }
     }
 
+    @Test
+    fun `rates that do not total 100 are rejected`() {
+        assertThrows<IllegalArgumentException> {
+            allocator.allocate(100, rates("40", "30", "10", "10"))
+        }
+    }
+
     private fun rates(
         platform: String,
         institution: String,
