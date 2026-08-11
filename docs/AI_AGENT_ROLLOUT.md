@@ -19,8 +19,11 @@ OPENAI_STREAM_ENABLED=false
 
 ## 2. 发布前门禁
 
-1. 备份生产数据库并确认恢复流程可用。
-2. 在执行 Flyway 前，使用只读账号运行 V10 preflight。密码只通过当前进程的 `DB_PASSWORD` 环境变量注入，命令和输出不得包含密码：
+V10 preflight 与 Flyway 之间没有数据库锁，不能单独防止“检查后、迁移前”仍有旧实例写入的 TOCTOU 竞态。迁移文件已经发布，禁止通过修改原文件来改变 checksum；本次迁移安全依赖下面的停写窗口。
+
+1. 备份生产数据库并确认恢复流程可用。发布全程保持 `AI_AGENT_ENABLED=false`。
+2. 进入维护窗口，先在网关摘除生产流量，再停止**全部**旧版本写实例。确认没有后台任务、旁路实例或运维脚本继续写入 Agent 表，并通过数据库连接、事务和审计记录验证 Agent 写入已经停止。
+3. 保持上述停写状态，在**同一个冻结窗口**内使用只读账号运行 V10 preflight。密码只通过当前进程的 `DB_PASSWORD` 环境变量注入，命令和输出不得包含密码：
 
    ```powershell
    if ([string]::IsNullOrWhiteSpace($env:DB_PASSWORD)) { throw 'DB_PASSWORD must be injected by the deployment secret store' }
@@ -30,9 +33,11 @@ OPENAI_STREAM_ENABLED=false
      -DatabaseUser '<只读账号>'
    ```
 
-   返回非零或出现 `V10 migration blocked` 时立即停止发布，不要启动 Flyway。先制定并审批遗留数据迁移方案。
-3. 以 `AI_AGENT_ENABLED=false` 部署应用，让 Flyway 执行迁移；确认迁移历史成功且应用 readiness/`/actuator/health` 正常。
-4. 执行发布版本的功能、并发和幂等门禁。数据库测试必须使用 fresh、隔离的 MySQL，不能连接生产或共享开发库。
+   返回非零或出现 `V10 migration blocked` 时立即停止发布，不要启动 Flyway。保持流量摘除、旧实例停止和 Agent 禁用，先制定并审批遗留数据迁移方案。
+4. preflight 通过后仍保持停写，只启动**一个**设置了 `AI_AGENT_ENABLED=false` 的新版本实例执行 Flyway。迁移完成前不得启动其他实例或恢复任何生产流量。
+5. 确认 Flyway 历史成功且该实例 readiness/`/actuator/health` 正常，再启动其余禁用 Agent 的新实例；完成发布版本的功能、并发和幂等门禁后才可恢复普通生产流量。数据库测试必须使用 fresh、隔离的 MySQL，不能连接生产或共享开发库。
+
+任何 preflight、Flyway 或 readiness 失败都必须保持停写和 `AI_AGENT_ENABLED=false`。禁止绕过 preflight、强行恢复流量、执行 Flyway `repair` 掩盖失败，或编辑已发布迁移后重试；应保留现场并按审批后的前向修复方案处理。
 
 ## 3. Secret-safe FastAIToken canary
 
@@ -79,4 +84,4 @@ canary 失败时保持禁用，先修复凭证、模型授权、Host 白名单�
 
 运行时回退的第一动作始终是 `AI_AGENT_ENABLED=false`。不要通过删除数据库表或回滚 Flyway 迁移来停用功能。
 
-V11 是前向兼容迁移，必须保留；**不得回滚或删除 V11**。若需要回退应用版本，先确认旧版本可读取当前 schema，并保持 Agent 禁用。任何后续 schema 修正都应使用新的前向迁移完成。
+V11 是前向兼容迁移，必须保留；**不得回滚或删除 V11**。所有已发布迁移文件都保持不可变，以免改变 Flyway checksum。若需要回退应用版本，先确认旧版本可读取当前 schema，并保持 Agent 禁用。任何后续 schema 修正都应使用新的前向迁移完成。
