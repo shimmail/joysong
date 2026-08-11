@@ -1,25 +1,191 @@
-@startuml
-title JoySong 核心角色业务泳道
+@startuml JoySong_Professional_Role_Interfaces
+title JoySong 用户、机构、医生、顾问接口与业务关系泳道图
 
-|普通用户|
+skinparam shadowing false
+skinparam defaultFontName Microsoft YaHei
+skinparam Padding 2
+skinparam nodesep 7
+skinparam ranksep 10
+skinparam activityFontSize 9
+skinparam activityBorderThickness 1
+skinparam activity {
+  BackgroundColor #F8FAFC
+  BorderColor #64748B
+  DiamondBackgroundColor #FFF7D6
+  DiamondBorderColor #D97706
+  StartColor #16A34A
+  EndColor #DC2626
+}
+
+|JoySong 权限与业务服务|
 start
-:浏览公开医生和机构资料;
-|医生（ACTIVE DOCTOR）|
-:GET /api/management/doctor-profile;
-:查看本人单个医生档案;
-:PUT /api/management/doctor-profile;
-:完整更新九个公开档案字段;
+:当前 master = 873d25b;
 note right
-医生专业端：2 个唯一 method/path 端点。
-仅可操作本人档案；不使用 admin 医生路由。
+  专业接口按 SecurityConfig + Controller + Service 三层授权核定。
+  “可达但恒为空/403”不计为角色业务能力。
 end note
+
+|用户|
+:公开接口族
+/api/auth/**, /api/home/**, /api/discover/**
+GET /api/comments, /api/comments/replies
+GET /api/users/{id}/profile, /api/users/{id}/diaries
+GET /api/public/diary-shares/{token}, /s/diary/{token};
+:登录用户接口族
+/api/user/**, /api/identity/**, /api/agent/**, /api/chat/**
+/api/comments/**, /api/upload, /api/coupons/**, /api/cs/**
+/api/diaries/**, /api/dm/**, /api/favorites/**, /api/likes/**
+/api/notifications/**, /api/orders/**, /api/payments/**
+/api/reports/**, /api/reviews/**, /api/translations;
+note right
+  机构法人、医生、顾问同时继承普通登录用户能力；
+  订单、支付、日记、消息等仍按本人资源归属校验。
+end note
+
+|JoySong 权限与业务服务|
+:POST /api/management/login
+登录并签发专业工作台上下文;
+fork
+  |医生|
+  :GET /api/management/context
+  取得 doctorId、机构关系与能力标志;
+fork again
+  |机构法人|
+  :GET /api/management/context
+  取得 managedInstitutionIds 与审核能力;
+fork again
+  |顾问|
+  :GET /api/management/context
+  仅 canApplyToInstitutions / canViewAffiliations;
+end fork
+
+' ===== 医生全部专业接口 =====
+|医生|
+:本人档案
+GET /api/management/doctor-profile
+PUT /api/management/doctor-profile;
+:本人文章
+GET, POST /api/admin/articles
+PUT, DELETE /api/admin/articles/{id};
+:可见机构与项目
+GET /api/admin/institutions
+GET /api/admin/institutions/{id}
+GET /api/admin/institutions/{id}/doctors
+GET /api/admin/institutions/{id}/projects
+GET /api/admin/institution-projects
+GET /api/admin/projects;
+:医生—机构关系
+GET, POST /api/management/institution-membership-requests
+POST /api/management/institution-membership-requests/DOCTOR/{id}/withdraw;
+:平台/机构项目申请
+GET /api/management/project-requests
+POST /api/management/project-requests/platform
+POST /api/management/project-requests/institutions/{institutionId};
+:医生项目变更
+GET, POST /api/admin/institution-project-requests
+POST /api/admin/institution-project-requests/{id}/withdraw;
+:本人订单管理
+GET /api/management/orders
+GET /api/management/orders/{id}
+POST /api/management/orders/{id}/verify
+POST /api/management/orders/{id}/request-completion;
+note right
+  医生共 26 个专业端点。
+  三类 review 接口仅在医生同时是目标机构法人时可用。
+end note
+
+' ===== 机构法人全部专业接口 =====
 |机构法人|
-:管理已确认归属的机构与机构范围请求;
-|平台管理员|
-:使用 /api/admin/doctors 兼容路由管理全量医生;
-:使用 /api/admin/doctors/{id} 兼容路由更新指定医生;
+:本机构资料与目录
+GET /api/admin/institutions
+GET /api/admin/institutions/{id}
+PUT /api/admin/institutions/{id}
+GET /api/admin/institutions/{id}/doctors
+GET /api/admin/institutions/{id}/projects
+GET /api/admin/institution-projects
+GET /api/admin/projects;
+:审核医生/顾问加入机构
+GET /api/management/institution-membership-requests
+POST /api/management/institution-membership-requests/{requestType}/{id}/review;
+:审核机构项目创建申请
+GET /api/management/project-requests
+POST /api/management/project-requests/{id}/review;
+:审核医生项目变更
+GET /api/admin/institution-project-requests
+POST /api/admin/institution-project-requests/{id}/review;
 note right
-管理员兼容路由不授予医生管理员权限。
+  机构法人拥有 15 个非空业务端点。
+  GET /api/admin/doctors、GET /api/admin/articles 虽返回 200，
+  但纯法人范围恒为空，未计入业务能力。
 end note
+
+' ===== 顾问全部专业接口 =====
+|顾问|
+:查看机构关系申请
+GET /api/management/institution-membership-requests;
+:申请加入机构
+POST /api/management/institution-membership-requests
+requestType=CONSULTANT, action=JOIN;
+:查看平台项目目录
+GET /api/admin/projects;
+note right
+  顾问专属写能力只有“申请加入机构”。
+  顾问申请不能撤回，也不能自行审核。
+  GET /api/management/project-requests 可达但恒为空，未计入能力。
+end note
+
+' ===== 三方关系主链 =====
+|医生|
+:提交 JOIN/LEAVE 机构申请;
+|JoySong 权限与业务服务|
+:校验 ACTIVE DOCTOR 与申请状态;
+|机构法人|
+:审核医生机构关系;
+|JoySong 权限与业务服务|
+:建立或撤销 APPROVED doctor_institutions;
+
+fork
+  |顾问|
+  :提交 CONSULTANT 加入机构申请;
+  |机构法人|
+  :审核顾问加入申请;
+  |JoySong 权限与业务服务|
+  :建立 APPROVED institution_memberships;
+fork again
+  |医生|
+  :提交平台项目或机构项目申请;
+  |机构法人|
+  :审核本机构项目申请;
+  |JoySong 权限与业务服务|
+  :批准后创建 institution_projects + doctor_projects;
+fork again
+  |医生|
+  :提交 JOIN / PROFILE_UPDATE / LEAVE 项目变更;
+  |机构法人|
+  :审核医生项目变更;
+  |JoySong 权限与业务服务|
+  :应用医生—机构项目关系变更;
+end fork
+
+|用户|
+:选择已批准机构项目、医生和顾问并创建订单;
+|JoySong 权限与业务服务|
+:校验四方关系并冻结订单快照;
+|医生|
+:查看本人订单、核销到店、请求完成;
+|用户|
+:支付、确认完成、评价或退款;
+|JoySong 权限与业务服务|
+:按平台管理员维护的分账配置完成结算;
 stop
+
+legend right
+  当前不可用边界：
+  1. 机构法人不能管理订单；OrderService 仅允许 ADMIN 或订单医生。
+  2. 机构法人不能直接 POST/PUT/DELETE 机构项目，只能审核医生申请间接创建。
+  3. 医生、机构、顾问均不能调用分账提案与分账配置 HTTP 接口；当前仅 ADMIN。
+  4. 机构法人不能修改医生档案或医生文章；manageableDoctorIds 不含机构医生。
+  5. 顾问获批加入机构后仍不获得机构、订单、项目、文章或分账管理权。
+endlegend
+
 @enduml
