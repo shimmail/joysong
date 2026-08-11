@@ -47,6 +47,11 @@ class AgentPlanController extends ChangeNotifier {
   AgentPlanState get state => _state;
   bool _disposed = false;
 
+  Future<void> loadProfile() => _run(() async {
+        final profile = await _repository.getProfile();
+        _emit(_state.copyWith(profile: profile));
+      });
+
   Future<void> load() => _run(() async {
         final results = await Future.wait<Object>([
           _repository.getProfile(),
