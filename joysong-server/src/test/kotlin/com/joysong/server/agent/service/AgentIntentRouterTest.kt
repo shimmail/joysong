@@ -368,6 +368,80 @@ class AgentIntentRouterTest {
         assertTrue(result.evidenceFor(AgentQueryTarget.DOCTOR).locked)
     }
 
+    @Test
+    fun `negated english comparison retains treatment evidence without catalog primary route`() {
+        val result = router.assessCurrent("Don't compare treatments", "GENERAL")
+
+        assertEquals(AgentLabelPolarity.NEGATIVE, result.evidenceFor(AgentIntent.COMPARISON).polarity)
+        assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentQueryTarget.PROJECT).polarity)
+        assertEquals(AgentIntent.GENERAL_CHAT, result.decision.intent)
+        assertEquals(null, result.decision.queryTarget)
+        assertFalse(result.explicitIntent)
+        assertFalse(result.explicitQueryTarget)
+    }
+
+    @Test
+    fun `negated chinese comparison retains project evidence without catalog primary route`() {
+        val result = router.assessCurrent("不要比较项目", "GENERAL")
+
+        assertEquals(AgentLabelPolarity.NEGATIVE, result.evidenceFor(AgentIntent.COMPARISON).polarity)
+        assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentQueryTarget.PROJECT).polarity)
+        assertEquals(AgentIntent.GENERAL_CHAT, result.decision.intent)
+        assertEquals(null, result.decision.queryTarget)
+        assertFalse(result.explicitIntent)
+        assertFalse(result.explicitQueryTarget)
+    }
+
+    @Test
+    fun `negated english catalog action retains clinic evidence without positive recommendation route`() {
+        val result = router.assessCurrent("Don't recommend clinics", "GENERAL")
+
+        assertEquals(AgentLabelPolarity.NEGATIVE, result.evidenceFor(AgentIntent.CATALOG_QA).polarity)
+        assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentQueryTarget.INSTITUTION).polarity)
+        assertEquals(AgentIntent.GENERAL_CHAT, result.decision.intent)
+        assertEquals(null, result.decision.queryTarget)
+        assertFalse(result.explicitIntent)
+        assertFalse(result.explicitQueryTarget)
+    }
+
+    @Test
+    fun `negated chinese catalog action retains institution evidence without positive recommendation route`() {
+        val result = router.assessCurrent("不要推荐机构", "GENERAL")
+
+        assertEquals(AgentLabelPolarity.NEGATIVE, result.evidenceFor(AgentIntent.CATALOG_QA).polarity)
+        assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentQueryTarget.INSTITUTION).polarity)
+        assertEquals(AgentIntent.GENERAL_CHAT, result.decision.intent)
+        assertEquals(null, result.decision.queryTarget)
+        assertFalse(result.explicitIntent)
+        assertFalse(result.explicitQueryTarget)
+    }
+
+    @Test
+    fun `double negated comparison remains uncertain and does not promote attached treatments`() {
+        val result = router.assessCurrent("I do not not compare treatments", "GENERAL")
+
+        assertEquals(AgentLabelPolarity.UNCERTAIN, result.evidenceFor(AgentIntent.COMPARISON).polarity)
+        assertFalse(result.evidenceFor(AgentIntent.COMPARISON).locked)
+        assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentQueryTarget.PROJECT).polarity)
+        assertEquals(AgentIntent.GENERAL_CHAT, result.decision.intent)
+        assertEquals(null, result.decision.queryTarget)
+        assertFalse(result.explicitIntent)
+        assertFalse(result.explicitQueryTarget)
+    }
+
+    @Test
+    fun `double negated comparison leaves safety and independent clinic labels locked`() {
+        val result = router.assessCurrent("I do not not compare treatments; I am pregnant; show clinics", "GENERAL")
+
+        assertEquals(AgentLabelPolarity.UNCERTAIN, result.evidenceFor(AgentIntent.COMPARISON).polarity)
+        assertFalse(result.evidenceFor(AgentIntent.COMPARISON).locked)
+        assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentIntent.SAFETY_SCREENING).polarity)
+        assertTrue(result.evidenceFor(AgentIntent.SAFETY_SCREENING).locked)
+        assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentQueryTarget.INSTITUTION).polarity)
+        assertTrue(result.evidenceFor(AgentQueryTarget.INSTITUTION).locked)
+        assertEquals(AgentQueryTarget.INSTITUTION, result.decision.queryTarget)
+    }
+
     @ParameterizedTest(name = "{0}")
     @MethodSource("routeCases")
     fun `routes common Chinese and English requests`(
