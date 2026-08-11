@@ -75,24 +75,36 @@ final class ApiIdentityRepository implements IdentityRepository {
   }
 
   @override
-  Future<List<ManagedInstitutionProfile>>
-      listManagedInstitutionProfiles() async {
-    return await _apiClient.get<List<ManagedInstitutionProfile>>(
-          '/admin/institutions',
+  Future<List<ManagedInstitutionSummary>> listManagedInstitutions() async {
+    return await _apiClient.get<List<ManagedInstitutionSummary>>(
+          '/management/institutions',
           decodeData: (json) => _objectList(json)
-              .map(ManagedInstitutionProfile.fromJson)
+              .map(ManagedInstitutionSummary.fromJson)
               .toList(growable: false),
         ) ??
         const [];
   }
 
   @override
-  Future<ManagedInstitutionProfile> updateManagedInstitutionProfile(
-    ManagedInstitutionProfileDraft draft,
+  Future<ManagedInstitutionProfile> loadManagedInstitution(String id) async {
+    final result = await _apiClient.get<ManagedInstitutionProfile>(
+      '/management/institutions/${id.trim()}',
+      decodeData: ManagedInstitutionProfile.fromJson,
+    );
+    if (result == null) {
+      throw const FormatException('机构档案响应为空');
+    }
+    return result;
+  }
+
+  @override
+  Future<ManagedInstitutionProfile> updateManagedInstitution(
+    String id,
+    ManagedInstitutionProfileUpdate update,
   ) async {
     final result = await _apiClient.put<ManagedInstitutionProfile>(
-      '/admin/institutions/${draft.id}',
-      body: draft.toJson(),
+      '/management/institutions/${id.trim()}',
+      body: update.toJson(),
       decodeData: ManagedInstitutionProfile.fromJson,
     );
     if (result == null) {

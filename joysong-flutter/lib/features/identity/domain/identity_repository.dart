@@ -13,10 +13,13 @@ abstract interface class IdentityRepository {
 
   Future<ManagementContext> loadManagementContext();
 
-  Future<List<ManagedInstitutionProfile>> listManagedInstitutionProfiles();
+  Future<List<ManagedInstitutionSummary>> listManagedInstitutions();
 
-  Future<ManagedInstitutionProfile> updateManagedInstitutionProfile(
-    ManagedInstitutionProfileDraft draft,
+  Future<ManagedInstitutionProfile> loadManagedInstitution(String id);
+
+  Future<ManagedInstitutionProfile> updateManagedInstitution(
+    String id,
+    ManagedInstitutionProfileUpdate update,
   );
 
   Future<DoctorSelfProfile> loadDoctorSelfProfile();

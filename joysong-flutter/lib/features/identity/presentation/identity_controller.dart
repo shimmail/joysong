@@ -155,12 +155,14 @@ final class InstitutionProfileController extends ChangeNotifier {
   final IdentityRepository _repository;
 
   InstitutionProfileLoadStatus _status = InstitutionProfileLoadStatus.idle;
-  List<ManagedInstitutionProfile> _profiles = const [];
+  List<ManagedInstitutionSummary> _summaries = const [];
+  ManagedInstitutionProfile? _selectedProfile;
   bool _isSaving = false;
   String? _errorMessage;
 
   InstitutionProfileLoadStatus get status => _status;
-  List<ManagedInstitutionProfile> get profiles => _profiles;
+  List<ManagedInstitutionSummary> get summaries => _summaries;
+  ManagedInstitutionProfile? get selectedProfile => _selectedProfile;
   bool get isSaving => _isSaving;
   String? get errorMessage => _errorMessage;
 
@@ -170,8 +172,9 @@ final class InstitutionProfileController extends ChangeNotifier {
     _errorMessage = null;
     notifyListeners();
     try {
-      _profiles = await _repository.listManagedInstitutionProfiles();
-      _status = _profiles.isEmpty
+      _summaries = await _repository.listManagedInstitutions();
+      _selectedProfile = null;
+      _status = _summaries.isEmpty
           ? InstitutionProfileLoadStatus.empty
           : InstitutionProfileLoadStatus.ready;
     } catch (_) {
@@ -181,17 +184,34 @@ final class InstitutionProfileController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<bool> save(ManagedInstitutionProfileDraft draft) async {
+  Future<bool> select(String id) async {
+    if (_status == InstitutionProfileLoadStatus.loading) return false;
+    _status = InstitutionProfileLoadStatus.loading;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      _selectedProfile = await _repository.loadManagedInstitution(id);
+      _status = InstitutionProfileLoadStatus.ready;
+      return true;
+    } catch (_) {
+      _status = InstitutionProfileLoadStatus.failure;
+      _errorMessage = '机构档案加载失败，请重试';
+      return false;
+    } finally {
+      notifyListeners();
+    }
+  }
+
+  Future<bool> save(ManagedInstitutionProfileUpdate update) async {
     if (_isSaving) return false;
+    final profile = _selectedProfile;
+    if (profile == null) return false;
     _isSaving = true;
     _errorMessage = null;
     notifyListeners();
     try {
-      final updated = await _repository.updateManagedInstitutionProfile(draft);
-      _profiles = [
-        for (final profile in _profiles)
-          if (profile.id == updated.id) updated else profile,
-      ];
+      _selectedProfile =
+          await _repository.updateManagedInstitution(profile.id, update);
       return true;
     } catch (_) {
       _errorMessage = '机构档案保存失败，请稍后重试';
@@ -215,14 +235,14 @@ final class InstitutionProjectManagementController extends ChangeNotifier {
   final ManagementContext context;
 
   InstitutionProjectLoadStatus _status = InstitutionProjectLoadStatus.idle;
-  List<ManagedInstitutionProfile> _institutions = const [];
+  List<ManagedInstitutionSummary> _institutions = const [];
   List<ManagementProjectOption> _projects = const [];
   List<ManagedInstitutionProject> _institutionProjects = const [];
   bool _isSaving = false;
   String? _errorMessage;
 
   InstitutionProjectLoadStatus get status => _status;
-  List<ManagedInstitutionProfile> get institutions => _institutions;
+  List<ManagedInstitutionSummary> get institutions => _institutions;
   List<ManagementProjectOption> get projects => _projects;
   List<ManagedInstitutionProject> get institutionProjects =>
       _institutionProjects;
@@ -239,11 +259,11 @@ final class InstitutionProjectManagementController extends ChangeNotifier {
     notifyListeners();
     try {
       final results = await Future.wait([
-        _repository.listManagedInstitutionProfiles(),
+        _repository.listManagedInstitutions(),
         _repository.listManagementProjects(),
         _repository.listManagedInstitutionProjects(),
       ]);
-      _institutions = results[0] as List<ManagedInstitutionProfile>;
+      _institutions = results[0] as List<ManagedInstitutionSummary>;
       _projects = results[1] as List<ManagementProjectOption>;
       _institutionProjects = results[2] as List<ManagedInstitutionProject>;
       _status = InstitutionProjectLoadStatus.ready;

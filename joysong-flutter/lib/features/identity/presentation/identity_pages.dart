@@ -481,8 +481,8 @@ class _ManagementCapabilities extends StatelessWidget {
           (
             icon: Icons.how_to_reg_outlined,
             label: buildContext.localized('成员加入审核', 'Membership reviews'),
-            enabled: isLegalRepresentative &&
-                context.canReviewInstitutionRequests,
+            enabled:
+                isLegalRepresentative && context.canReviewInstitutionRequests,
           ),
           (
             icon: Icons.fact_check_outlined,
@@ -685,8 +685,7 @@ class _ManagementCapabilities extends StatelessWidget {
       ));
       return;
     }
-    if (label == '申请新增机构项目' ||
-        label == 'Request institution project') {
+    if (label == '申请新增机构项目' || label == 'Request institution project') {
       Navigator.of(context).push<void>(MaterialPageRoute(
         builder: (_) => InstitutionProjectRequestsPage(
           repository: repository,
@@ -695,8 +694,7 @@ class _ManagementCapabilities extends StatelessWidget {
       ));
       return;
     }
-    if (label == '机构项目申请审核' ||
-        label == 'Institution project reviews') {
+    if (label == '机构项目申请审核' || label == 'Institution project reviews') {
       Navigator.of(context).push<void>(MaterialPageRoute(
         builder: (_) => InstitutionProjectRequestsPage(
           repository: repository,
@@ -715,8 +713,7 @@ class _ManagementCapabilities extends StatelessWidget {
       ));
       return;
     }
-    if (label == '机构项目加入审核' ||
-        label == 'Institution project join reviews') {
+    if (label == '机构项目加入审核' || label == 'Institution project join reviews') {
       Navigator.of(context).push<void>(MaterialPageRoute(
         builder: (_) => InstitutionProjectJoinRequestsPage(
           repository: repository,
@@ -1270,23 +1267,25 @@ class _ManagedInstitutionProfilesPageState
                 child: ListView.separated(
                   physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.all(16),
-                  itemCount: _controller.profiles.length,
+                  itemCount: _controller.summaries.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (context, index) {
-                    final profile = _controller.profiles[index];
+                    final institution = _controller.summaries[index];
                     return Card(
                       child: ListTile(
                         leading: const Icon(Icons.apartment_outlined),
-                        title:
-                            Text(profile.name.isEmpty ? '未命名机构' : profile.name),
+                        title: Text(institution.name.isEmpty
+                            ? '未命名机构'
+                            : institution.name),
                         subtitle: Text(
                           [
-                            if (profile.city.isNotEmpty) profile.city,
-                            if (profile.address.isNotEmpty) profile.address,
+                            if (institution.city.isNotEmpty) institution.city,
+                            if (institution.address.isNotEmpty)
+                              institution.address,
                           ].join(' · '),
                         ),
                         trailing: const Icon(Icons.edit_outlined),
-                        onTap: () => _edit(profile),
+                        onTap: () => _edit(institution),
                       ),
                     );
                   },
@@ -1298,7 +1297,10 @@ class _ManagedInstitutionProfilesPageState
     );
   }
 
-  Future<void> _edit(ManagedInstitutionProfile profile) async {
+  Future<void> _edit(ManagedInstitutionSummary institution) async {
+    if (!await _controller.select(institution.id) || !mounted) return;
+    final profile = _controller.selectedProfile;
+    if (profile == null) return;
     await Navigator.of(context).push<void>(
       MaterialPageRoute(
         builder: (_) => ManagedInstitutionProfileEditPage(
@@ -1336,26 +1338,23 @@ class _ManagedInstitutionProfileEditPageState
   @override
   void initState() {
     super.initState();
-    final draft = widget.profile.toDraft();
+    final update = widget.profile.toUpdate();
     _fields = {
-      'name': TextEditingController(text: draft.name),
-      'coverImage': TextEditingController(text: draft.coverImage),
-      'address': TextEditingController(text: draft.address),
-      'city': TextEditingController(text: draft.city),
-      'contactPhone': TextEditingController(text: draft.contactPhone),
-      'businessHours': TextEditingController(text: draft.businessHours),
+      'name': TextEditingController(text: update.name),
+      'coverImage': TextEditingController(text: update.coverImage),
+      'address': TextEditingController(text: update.address),
+      'city': TextEditingController(text: update.city),
+      'contactPhone': TextEditingController(text: update.contactPhone),
+      'businessHours': TextEditingController(text: update.businessHours),
       'establishedYear':
-          TextEditingController(text: draft.establishedYear?.toString() ?? ''),
-      'certificationTime': TextEditingController(text: draft.certificationTime),
-      'description': TextEditingController(text: draft.description),
-      'tags': TextEditingController(text: draft.tags),
-      'specialties': TextEditingController(text: draft.specialties),
-      'credentials': TextEditingController(text: draft.credentials),
-      'userCount': TextEditingController(text: draft.userCount.toString()),
-      'caseCount': TextEditingController(text: draft.caseCount.toString()),
+          TextEditingController(text: update.establishedYear?.toString() ?? ''),
+      'description': TextEditingController(text: update.description),
+      'tags': TextEditingController(text: update.tags.join(',')),
+      'specialties': TextEditingController(text: update.specialties.join(',')),
+      'credentials': TextEditingController(text: update.credentials),
       'credentialImages':
-          TextEditingController(text: draft.credentialImages.join(',')),
-      'images': TextEditingController(text: draft.images.join(',')),
+          TextEditingController(text: update.credentialImages.join(',')),
+      'images': TextEditingController(text: update.images.join(',')),
     };
   }
 
@@ -1394,21 +1393,17 @@ class _ManagedInstitutionProfileEditPageState
               _textField('businessHours', '营业时间'),
               _textField('establishedYear', '成立年份',
                   keyboardType: TextInputType.number),
-              _textField('certificationTime', '认证时间'),
               _textField('description', '机构介绍', maxLines: 4),
               _textField('tags', '标签（逗号分隔）'),
               _textField('specialties', '擅长领域（逗号分隔）'),
               _textField('credentials', '资质文本', maxLines: 3),
-              _textField('userCount', '用户规模',
-                  keyboardType: TextInputType.number),
-              _textField('caseCount', '案例数',
-                  keyboardType: TextInputType.number),
               _imagePickerField(
                 title: '资质证书图片',
                 addLabel: '从相册添加资质图片',
                 values: _csv('credentialImages'),
                 onAdd: () => _pickListImage('credentialImages'),
-                onDelete: (image) => _removeListImage('credentialImages', image),
+                onDelete: (image) =>
+                    _removeListImage('credentialImages', image),
               ),
               _imagePickerField(
                 title: '环境图片',
@@ -1542,7 +1537,7 @@ class _ManagedInstitutionProfileEditPageState
     FocusManager.instance.primaryFocus?.unfocus();
     if (!(_formKey.currentState?.validate() ?? false)) return;
     final establishedYear = _optionalInt(_fields['establishedYear']!.text);
-    final draft = widget.profile.toDraft().copyWith(
+    final update = widget.profile.toUpdate().copyWith(
           name: _text('name'),
           coverImage: _text('coverImage'),
           city: _text('city'),
@@ -1551,17 +1546,14 @@ class _ManagedInstitutionProfileEditPageState
           businessHours: _text('businessHours'),
           establishedYear: establishedYear,
           clearEstablishedYear: establishedYear == null,
-          certificationTime: _text('certificationTime'),
           description: _text('description'),
-          tags: _text('tags'),
-          specialties: _text('specialties'),
+          tags: _csv('tags'),
+          specialties: _csv('specialties'),
           credentials: _text('credentials'),
-          userCount: _optionalInt(_fields['userCount']!.text) ?? 0,
-          caseCount: _optionalInt(_fields['caseCount']!.text) ?? 0,
           credentialImages: _csv('credentialImages'),
           images: _csv('images'),
         );
-    if (await widget.controller.save(draft) && mounted) {
+    if (await widget.controller.save(update) && mounted) {
       Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('机构档案已保存')),
