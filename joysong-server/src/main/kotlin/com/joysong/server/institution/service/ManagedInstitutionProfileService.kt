@@ -6,6 +6,8 @@ import com.joysong.server.institution.entity.InstitutionEntity
 import com.joysong.server.institution.repository.InstitutionRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionSynchronization
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -56,9 +58,21 @@ class ManagedInstitutionProfileService(
                 businessHours = normalized.businessHours
             ) == 1
         ) { "机构档案更新失败" }
-        institutionService.evictInstitutionAndDiscoverCaches()
+        evictInstitutionCachesAfterCommit()
         return institutionRepository.findById(institutionId).orElseThrow(::ManagedInstitutionProfileNotFoundException)
             .toProfile()
+    }
+
+    private fun evictInstitutionCachesAfterCommit() {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            institutionService.evictInstitutionAndDiscoverCaches()
+            return
+        }
+        TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
+            override fun afterCommit() {
+                institutionService.evictInstitutionAndDiscoverCaches()
+            }
+        })
     }
 
     private fun ManagedInstitutionProfileUpdateCommand.normalized(): ManagedInstitutionProfileUpdateCommand {

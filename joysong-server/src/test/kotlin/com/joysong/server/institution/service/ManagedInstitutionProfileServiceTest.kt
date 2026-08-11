@@ -6,11 +6,13 @@ import com.joysong.server.institution.entity.InstitutionEntity
 import com.joysong.server.institution.repository.InstitutionRepository
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.springframework.security.access.AccessDeniedException
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -119,6 +121,33 @@ class ManagedInstitutionProfileServiceTest {
         )
     }
 
+    @Test
+    fun `update evicts institution caches only after transaction commit`() {
+        stubSuccessfulUpdate()
+        TransactionSynchronizationManager.initSynchronization()
+        try {
+            service.update(actor(), "managed", command())
+
+            verify(exactly = 0) { institutionService.evictInstitutionAndDiscoverCaches() }
+            assertEquals(1, TransactionSynchronizationManager.getSynchronizations().size)
+
+            TransactionSynchronizationManager.getSynchronizations().single().afterCommit()
+
+            verify(exactly = 1) { institutionService.evictInstitutionAndDiscoverCaches() }
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization()
+        }
+    }
+
+    @Test
+    fun `update evicts institution caches immediately without a transaction`() {
+        stubSuccessfulUpdate()
+
+        service.update(actor(), "managed", command())
+
+        verify(exactly = 1) { institutionService.evictInstitutionAndDiscoverCaches() }
+    }
+
     private fun actor(managedInstitutionIds: Set<String> = setOf("managed")) = ManagementActor(
         userId = "legal-user",
         isAdmin = false,
@@ -144,6 +173,11 @@ class ManagedInstitutionProfileServiceTest {
         contactPhone = " 123 ",
         businessHours = " 9-5 "
     )
+
+    private fun stubSuccessfulUpdate() {
+        every { repository.updateManagedProfile(eq("managed"), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns 1
+        every { repository.findById("managed") } returns java.util.Optional.of(institution("managed"))
+    }
 
     private fun institution(
         id: String,
