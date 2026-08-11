@@ -25,6 +25,10 @@ interface SettlementRepository : JpaRepository<SettlementEntity, Long> {
     @Query("SELECT s FROM SettlementEntity s WHERE s.id = :id")
     fun findByIdForUpdate(@Param("id") id: Long): SettlementEntity?
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT s FROM SettlementEntity s WHERE s.orderId = :orderId")
+    fun findByOrderIdForUpdate(@Param("orderId") orderId: String): SettlementEntity?
+
     @Query(
         "SELECT s.id FROM SettlementEntity s " +
             "WHERE s.status = :status AND s.settledAt <= :settledAt ORDER BY s.id ASC"
