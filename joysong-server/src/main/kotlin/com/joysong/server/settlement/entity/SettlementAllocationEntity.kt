@@ -37,18 +37,22 @@ class SettlementAllocationEntity(
     @Column(name = "amount_minor", nullable = false)
     val amountMinor: Long = 0,
 
-    @Column(name = "reversed_minor", nullable = false)
-    var reversedMinor: Long = 0,
-        private set,
+    reversedMinor: Long = 0,
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "status", nullable = false, length = 30)
-    var status: SettlementAllocationStatus = SettlementAllocationStatus.PENDING,
-        private set,
+    status: SettlementAllocationStatus = SettlementAllocationStatus.PENDING,
 
     @Column(name = "created_at", nullable = false, updatable = false)
     val createdAt: LocalDateTime = LocalDateTime.now()
 ) {
+    @Column(name = "reversed_minor", nullable = false)
+    var reversedMinor: Long = reversedMinor
+        private set
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 30)
+    var status: SettlementAllocationStatus = status
+        private set
+
     fun markAvailable() {
         require(status == SettlementAllocationStatus.PENDING) { "仅待入账分账可变为可用" }
         status = SettlementAllocationStatus.AVAILABLE
