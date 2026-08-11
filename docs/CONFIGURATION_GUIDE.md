@@ -82,6 +82,7 @@
 2. 新增：
 
    ```dotenv
+   AI_AGENT_ENABLED=false
    OPENAI_API_KEY=模型服务密钥
    OPENAI_BASE_URL=https://www.fastaitoken.com/v1
    AI_AGENT_MODEL=你的Agent模型ID
@@ -90,7 +91,7 @@
    TRANSLATION_MODEL=你的翻译兜底模型ID
    ```
 
-3. 未使用 AI Agent 或翻译回退时，可以不配置；Qwen 翻译不依赖这组变量。
+3. 未使用 AI Agent 时保持 `AI_AGENT_ENABLED=false`。启用前按 [`AI_AGENT_ROLLOUT.md`](./AI_AGENT_ROLLOUT.md) 完成 preflight、Flyway/readiness、FastAIToken canary 和内部 cohort 门禁；Qwen 翻译不依赖 Agent 开关。
 
 ### 第六步：配置 Google 登录（可选）
 
@@ -157,7 +158,7 @@ TRANSLATION_FALLBACK_PROVIDER=openai
 
 # OpenAI 兼容中转仅在 fallback/provider= openai 时使用
 OPENAI_API_KEY=
-OPENAI_BASE_URL=https://your-relay.example.com/v1
+OPENAI_BASE_URL=https://www.fastaitoken.com/v1
 TRANSLATION_MODEL=gpt-5.5
 ```
 
@@ -176,6 +177,7 @@ TRANSLATION_MODEL=gpt-5.5
 AI Agent 独立读取以下变量，不影响 Qwen：
 
 ```dotenv
+AI_AGENT_ENABLED=false
 OPENAI_API_KEY=中转站或模型服务密钥
 OPENAI_BASE_URL=https://www.fastaitoken.com/v1
 AI_AGENT_MODEL=gpt-5.5
@@ -185,6 +187,8 @@ OPENAI_INTENT_PARSER_ENABLED=true
 ```
 
 生产启用 Agent 时必须显式配置 `AI_AGENT_MODEL`，服务端不会从 `OPENAI_MODEL` 或仓库默认值回退。可选的 `OPENAI_PROXY_URL` 只支持带显式端口的 `http://` 和 `socks://` URL；`https://` proxy URL 会在启动时被拒绝。
+
+生产环境默认保持 `AI_AGENT_ENABLED=false`。启用顺序、secret-safe FastAIToken canary、内部 cohort、监控与立即停用规则见 [`AI_AGENT_ROLLOUT.md`](./AI_AGENT_ROLLOUT.md)。当前应用不包含自动 cohort 分流、指标平台或自动熔断，需由网关、发布平台和运维监控实现。V11 为前向兼容迁移，停用 Agent 时不得删除或回滚。
 
 ## 6. OSS 与图片上传
 
@@ -284,3 +288,4 @@ google.client-id=OAuthWebClientID.apps.googleusercontent.com
 - CORS 只允许已知后台域名；Nginx 配置 HTTPS。
 - OSS 与短信 RAM 凭证遵循最小权限原则。
 - 数据库备份完成后再执行版本迁移，并验证 `/actuator/health`、上传和 Qwen 翻译。
+- AI Agent 以 `AI_AGENT_ENABLED=false` 部署，完成发布手册中的 V10 preflight、Flyway/readiness、FastAIToken canary 和内部 cohort 门禁后再开启。

@@ -37,4 +37,6 @@ Agent 使用且仅使用以下八张表：
 
 详细命令见 [`AI_AGENT_TESTING.md`](./AI_AGENT_TESTING.md)。其中 MySQL 集成测试必须使用当前 worktree 的隔离数据库，不能连接共享开发数据库。
 
+生产发布默认设置 `AI_AGENT_ENABLED=false`，完成 V10 preflight、Flyway、readiness、FastAIToken canary 和内部 cohort 观察后再显式启用。灰度、监控、立即停用和 V11 不可删除的操作步骤见 [`AI_AGENT_ROLLOUT.md`](./AI_AGENT_ROLLOUT.md)。自动 cohort 分流和指标聚合不由当前应用实现，需要网关、发布平台和运维监控平台提供。
+
 实现探索保存在 `codex/ai-agent-task3-spike` 分支。该 spike 用于保留实验记录，未合并到本次同步 REST 交付。

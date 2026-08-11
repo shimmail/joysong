@@ -5,6 +5,7 @@
 ## 配置
 
 ```dotenv
+AI_AGENT_ENABLED=false
 OPENAI_API_KEY=替换为中转站密钥
 OPENAI_BASE_URL=https://www.fastaitoken.com/v1
 AI_AGENT_MODEL=gpt-5.5
@@ -21,6 +22,8 @@ Content-Type: application/json
 ```
 
 生产启用 Agent 时必须显式设置 `AI_AGENT_MODEL`。`OPENAI_BASE_URL` 必须使用批准的 `https://www.fastaitoken.com` 地址，且不要配置成完整的 `/chat/completions` 地址，否则会重复拼接路径。可选的 `OPENAI_PROXY_URL` 只接受带主机和显式端口的 `http://` 或 `socks://` URL；运行时不支持并会拒绝 `https://` proxy URL。API Key 只存在于服务端 Secret 或环境变量，不能提交到 Git、写入 Android 工程或返回给客户端。
+
+生产部署必须先保持 `AI_AGENT_ENABLED=false`。完成 preflight、Flyway、readiness 和一次不输出 Key/Authorization/完整内容的 FastAIToken canary 后，才可在运维侧为内部 cohort 显式开启。当前应用不提供自动 cohort 分流或指标平台；具体步骤见 [`AI_AGENT_ROLLOUT.md`](./AI_AGENT_ROLLOUT.md)。
 
 ## 同步响应与错误处理
 
