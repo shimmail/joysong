@@ -80,6 +80,32 @@ void main() {
     expect(repository.reviewDecision, 'REJECTED');
   });
 
+  testWidgets('doctor without apply capability sees history without submit form',
+      (tester) async {
+    final repository = _FakeIdentityRepository()
+      ..context = const ManagementContext(
+        userId: 'doctor-user',
+        platformRole: 'USER',
+        activeRoles: ['DOCTOR'],
+        doctorId: 'doctor-1',
+        managedInstitutionIds: [],
+        visibleInstitutionIds: [],
+        doctorInstitutionIds: ['inst-1'],
+        canApplyToInstitutions: false,
+      );
+
+    await tester.pumpWidget(MaterialApp(
+      home: InstitutionRelationshipsPage(repository: repository),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('当前机构'), findsOneWidget);
+    expect(find.text('Joysong Clinic'), findsOneWidget);
+    expect(find.text('提交申请'), findsNothing);
+    expect(find.text('加入机构'), findsNothing);
+    expect(find.text('离开机构'), findsNothing);
+  });
+
   testWidgets('profile exposes institution relationships when identity is available',
       (tester) async {
     final repository = _FakeIdentityRepository()
