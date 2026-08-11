@@ -29,6 +29,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.data.jpa.repository.Query
 import java.math.BigDecimal
 import java.time.LocalDateTime
 
@@ -148,6 +149,34 @@ class SettlementReleaseServiceTest {
 
         assertEquals(SettlementAllocationBalanceBucket.AVAILABLE, partial.balanceBucket)
         assertEquals(SettlementAllocationStatus.PARTIALLY_REVERSED, partial.status)
+    }
+
+    @Test
+    fun `repeat release of fully moved partial settlement is a no-op`() {
+        val now = LocalDateTime.of(2026, 8, 11, 3, 0)
+        val settlement = SettlementEntity(id = 91, orderId = "order-1", status = "PARTIALLY_REVERSED")
+        val partial = allocation(1, 100, reversed = 30, status = SettlementAllocationStatus.PARTIALLY_REVERSED)
+        arrangeRelease(settlement, listOf(partial), pendingSettlementOrder())
+        every { walletLedgerService.apply(any()) } returns emptyList()
+
+        releaseService.release(91, now)
+        releaseService.release(91, now.plusMinutes(1))
+
+        verify(exactly = 1) { walletLedgerService.apply(any()) }
+        verify(exactly = 1) { orderRepository.findByIdForUpdate("order-1") }
+        assertEquals(SettlementAllocationBalanceBucket.AVAILABLE, partial.balanceBucket)
+        assertEquals("PARTIALLY_REVERSED", settlement.status)
+    }
+
+    @Test
+    fun `due query requires a pending allocation with unreversed amount`() {
+        val query = SettlementRepository::class.java.methods.single { it.name == "findDueSettlementIds" }
+            .getAnnotation(Query::class.java).value
+
+        assertTrue(query.contains("EXISTS"))
+        assertTrue(query.contains("balanceBucket"))
+        assertTrue(query.contains("PENDING"))
+        assertTrue(query.contains("amountMinor > a.reversedMinor"))
     }
 
     @Test
