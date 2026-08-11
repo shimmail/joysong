@@ -219,39 +219,22 @@ class AgentWorkflowCoreTest {
 
     @Test
     fun `parser safety label upgrades before locked business target compatibility`() {
-        val content = "I am not not pregnant; compare treatments"
-        val router = AgentIntentRouter()
-        val local = router.assessCurrent(content, "GENERAL")
-        assertTrue(local.unresolvedSafetyNegation)
-        assertTrue(local.intentEvidence.single { it.intent == AgentIntent.COMPARISON }.locked)
-        assertTrue(local.targetEvidence.single { it.target == AgentQueryTarget.PROJECT }.locked)
-
-        val completionTemplate = RestTemplate()
-        val intentTemplate = RestTemplate()
-        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
-        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
-        val catalog = mockk<AgentCatalogService>()
-        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
-        val completed = slot<CompleteTurnCommand>()
-        prepareChatGeneration(fixture, content)
-        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
-            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "answer")
-        )
-        every { catalog.contextualSearchQuery(content, emptyList()) } returns content
-        intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
-            .andRespond(withSuccess(
+        assertParserSafetyUpgrade(
+            withSuccess(
                 """{"choices":[{"message":{"content":"{\"intent\":\"COMPARISON\",\"intents\":[\"COMPARISON\",\"SAFETY_SCREENING\"],\"queryTarget\":null,\"keywords\":[]}"}}]}""",
                 MediaType.APPLICATION_JSON
-            ))
-        completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
-            .andRespond(withSuccess("""{"choices":[{"message":{"content":"answer"}}]}""", MediaType.APPLICATION_JSON))
+            )
+        )
+    }
 
-        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
-
-        assertEquals("SAFETY_SCREENING", completed.captured.intent)
-        assertEquals(null, completed.captured.queryTarget)
-        intentServer.verify()
-        completionServer.verify()
+    @Test
+    fun `legacy parser safety intent upgrades with the locked business target`() {
+        assertParserSafetyUpgrade(
+            withSuccess(
+                """{"choices":[{"message":{"content":"{\"intent\":\"SAFETY_SCREENING\",\"queryTarget\":\"PROJECT\",\"keywords\":[]}"}}]}""",
+                MediaType.APPLICATION_JSON
+            )
+        )
     }
 
     @Test
@@ -937,6 +920,40 @@ class AgentWorkflowCoreTest {
         context.updateSummaryAndPrune(session, 1, "GENERAL_CHAT", "PROJECT", "SHOW_CATALOG", emptyList())
 
         assertFalse(session.summaryJson.contains("GENERAL_CHAT:PROJECT:SHOW_CATALOG"))
+    }
+
+    private fun assertParserSafetyUpgrade(response: ResponseCreator) {
+        val content = "I am not not pregnant; compare treatments"
+        val router = AgentIntentRouter()
+        val local = router.assessCurrent(content, "GENERAL")
+        assertTrue(local.unresolvedSafetyNegation)
+        assertTrue(local.intentEvidence.single { it.intent == AgentIntent.COMPARISON }.locked)
+        assertTrue(local.targetEvidence.single { it.target == AgentQueryTarget.PROJECT }.locked)
+
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
+        val completed = slot<CompleteTurnCommand>()
+        prepareChatGeneration(fixture, content)
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "answer")
+        )
+        every { catalog.contextualSearchQuery(content, emptyList()) } returns content
+        intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andExpect(method(HttpMethod.POST))
+            .andRespond(response)
+        completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"answer"}}]}""", MediaType.APPLICATION_JSON))
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("SAFETY_SCREENING", completed.captured.intent)
+        assertEquals(null, completed.captured.queryTarget)
+        intentServer.verify()
+        completionServer.verify()
     }
 
     private fun assertParserFailureStillCompletes(response: ResponseCreator) {
