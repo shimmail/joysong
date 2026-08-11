@@ -31,20 +31,14 @@ class WalletLedgerService(
         validate(mutations)
         if (mutations.isEmpty()) return emptyList()
 
-        val existingByOperation = ledgerRepository.findAllByOperationKeyIn(mutations.map { it.operationKey })
-            .associateBy { it.operationKey }
-        val initiallyMissing = mutations.filterNot { existingByOperation.containsKey(it.operationKey) }
-        if (initiallyMissing.isEmpty()) return mutations.map { existingByOperation.getValue(it.operationKey) }
-
-        val ordered = initiallyMissing.sortedWith(compareBy<WalletMutation>({ it.currency }, { it.ownerType }, { it.ownerId }))
+        val ordered = mutations.sortedWith(compareBy<WalletMutation>({ it.currency }, { it.ownerType }, { it.ownerId }))
         val lockedWallets = ordered.map { WalletKey(it.currency, it.ownerType, it.ownerId) }.distinct().associateWith { key ->
             walletRepository.findForUpdate(key.ownerType, key.ownerId, key.currency)
         }
-        val existingAfterLock = ledgerRepository.findAllByOperationKeyIn(initiallyMissing.map { it.operationKey })
+        val existingAfterLock = ledgerRepository.findAllByOperationKeyInForUpdate(mutations.map { it.operationKey })
             .associateBy { it.operationKey }
-        val existing = existingByOperation + existingAfterLock
-        val toApply = ordered.filterNot { existing.containsKey(it.operationKey) }
-        if (toApply.isEmpty()) return mutations.map { existing.getValue(it.operationKey) }
+        val toApply = ordered.filterNot { existingAfterLock.containsKey(it.operationKey) }
+        if (toApply.isEmpty()) return mutations.map { existingAfterLock.getValue(it.operationKey) }
 
         validateProjectedBalances(toApply, lockedWallets)
         val wallets = toApply.map { WalletKey(it.currency, it.ownerType, it.ownerId) }.distinct().associateWith { key ->
@@ -52,6 +46,7 @@ class WalletLedgerService(
         }
         validateProjectedBalances(toApply, wallets)
 
+        val createdByOperation = mutableMapOf<String, WalletLedgerEntryEntity>()
         toApply.forEach { mutation ->
             val key = WalletKey(mutation.currency, mutation.ownerType, mutation.ownerId)
             wallets.getValue(key).applyDeltas(
@@ -59,10 +54,7 @@ class WalletLedgerService(
                 mutation.availableDelta,
                 mutation.frozenDelta
             )
-        }
-        val createdByOperation = toApply.associate { mutation ->
-            val key = WalletKey(mutation.currency, mutation.ownerType, mutation.ownerId)
-            mutation.operationKey to ledgerRepository.save(
+            createdByOperation[mutation.operationKey] = ledgerRepository.save(
                 WalletLedgerEntryEntity(
                     walletId = wallets.getValue(key).id,
                     allocationId = mutation.allocationId,
@@ -80,7 +72,7 @@ class WalletLedgerService(
             )
         }
         return mutations.map { mutation ->
-            existing[mutation.operationKey] ?: createdByOperation.getValue(mutation.operationKey)
+            existingAfterLock[mutation.operationKey] ?: createdByOperation.getValue(mutation.operationKey)
         }
     }
 
