@@ -172,9 +172,7 @@ class AgentIntentRouter {
             .singleOrNull { it.intent == AgentIntent.SAFETY_SCREENING }
             ?.polarity == AgentLabelPolarity.UNCERTAIN
         val explicitIntent = selectedIntentEvidence?.locked == true
-        val explicitQueryTarget = queryTarget != null &&
-            "CONFLICTING_CURRENT_TARGETS" !in reasons &&
-            selectedTargetEvidence?.locked == true
+        val explicitQueryTarget = selectedTargetEvidence?.locked == true
         if (explicitIntent) score += 0.20
         if (queryTarget != null) score += 0.15
         if (contextType.uppercase() in detailContextTypes) score += 0.10

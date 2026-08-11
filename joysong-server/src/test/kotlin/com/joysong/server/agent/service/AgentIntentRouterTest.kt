@@ -230,7 +230,7 @@ class AgentIntentRouterTest {
     }
 
     @Test
-    fun `conflicting current targets remain parser resolvable`() {
+    fun `conflicting current targets retain a locked primary while requesting parsing`() {
         val local = router.assessCurrent("对比医生和机构", "GENERAL")
 
         val result = router.mergeParsedRoute(
@@ -238,8 +238,12 @@ class AgentIntentRouterTest {
             ParsedAgentRoute(AgentIntent.COMPARISON, AgentQueryTarget.INSTITUTION, emptyList())
         )
 
-        assertFalse(local.explicitQueryTarget)
-        assertEquals(AgentQueryTarget.INSTITUTION, result.queryTarget)
+        assertTrue(local.evidenceFor(AgentQueryTarget.DOCTOR).locked)
+        assertTrue(local.evidenceFor(AgentQueryTarget.INSTITUTION).locked)
+        assertTrue(local.explicitQueryTarget)
+        assertTrue("CONFLICTING_CURRENT_TARGETS" in local.ambiguityReasons)
+        assertTrue(local.requiresLlmParsing)
+        assertEquals(AgentQueryTarget.DOCTOR, result.queryTarget)
     }
 
     @Test
