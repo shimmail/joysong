@@ -20,6 +20,11 @@ import java.time.ZoneId
 class AiAgentPropertiesTest {
 
     @Test
+    fun `AI agent is enabled by default`() {
+        assertTrue(AiAgentProperties().enabled)
+    }
+
+    @Test
     fun `typed properties bind agent settings including the turn lease`() {
         val environment = MockEnvironment()
             .withProperty("ai-agent.enabled", "true")

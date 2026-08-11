@@ -88,7 +88,7 @@ oss:
   public-base-url: ${OSS_PUBLIC_BASE_URL:}
 
 ai-agent:
-  enabled: ${AI_AGENT_ENABLED:false}
+  enabled: ${AI_AGENT_ENABLED:true}
   api-key: ${OPENAI_API_KEY:}
   base-url: ${OPENAI_BASE_URL:}
   model: ${AI_AGENT_MODEL:}
