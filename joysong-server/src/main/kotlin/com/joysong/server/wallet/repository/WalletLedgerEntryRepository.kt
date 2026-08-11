@@ -11,6 +11,8 @@ import org.springframework.stereotype.Repository
 @Repository
 interface WalletLedgerEntryRepository : JpaRepository<WalletLedgerEntryEntity, Long> {
     fun findAllByOperationKeyIn(operationKeys: Collection<String>): List<WalletLedgerEntryEntity>
+    fun findAllByAllocationIdOrderByIdAsc(allocationId: Long): List<WalletLedgerEntryEntity>
+    fun findAllByWalletIdOrderByIdAsc(walletId: Long): List<WalletLedgerEntryEntity>
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select entry from WalletLedgerEntryEntity entry where entry.operationKey in :operationKeys")
