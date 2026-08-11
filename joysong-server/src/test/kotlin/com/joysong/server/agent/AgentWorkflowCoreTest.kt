@@ -19,6 +19,7 @@ import com.joysong.server.agent.repository.AgentTurnRepository
 import com.joysong.server.agent.service.AgentCatalogService
 import com.joysong.server.agent.service.AgentIntentRouter
 import com.joysong.server.agent.service.AgentPromptEvidence
+import com.joysong.server.agent.service.AgentQueryTarget
 import com.joysong.server.chat.dto.SendMessageRequest
 import com.joysong.server.chat.entity.ChatMessageEntity
 import com.joysong.server.chat.entity.ChatSessionEntity
@@ -137,12 +138,19 @@ class AgentWorkflowCoreTest {
         every { sessions.findByIdAndUserIdAndDeletedAtIsNull("session-1", "user-1") } returns session()
         every { catalog.hasInstitutionProjectMatch("我想改善脸部松弛") } returns false
         every { catalog.contextualSearchQuery("我想改善脸部松弛", emptyList()) } returns "我想改善脸部松弛"
-        every { catalog.promptEvidence(any(), any(), any(), any()) } returns AgentPromptEvidence()
+        every {
+            catalog.promptEvidence(
+                "我想改善脸部松弛",
+                "我想改善脸部松弛 fixture-keyword",
+                "我想改善脸部松弛 fixture-keyword",
+                AgentQueryTarget.PROJECT
+            )
+        } returns AgentPromptEvidence()
         intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
             .andExpect(method(HttpMethod.POST))
             .andExpect(content().json("""{"model":"intent-small"}""", false))
             .andRespond(withSuccess(
-                """{"choices":[{"message":{"content":"{\\"intent\\":\\"GENERAL_CHAT\\",\\"queryTarget\\":null,\\"keywords\\":[]}"}}]}""",
+                """{"choices":[{"message":{"content":"{\"intent\":\"CATALOG_QA\",\"queryTarget\":\"PROJECT\",\"keywords\":[\"fixture-keyword\"]}"}}]}""",
                 MediaType.APPLICATION_JSON
             ))
         completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
