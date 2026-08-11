@@ -96,10 +96,14 @@ end note
 
 ' ===== 机构法人全部专业接口 =====
 |机构法人|
-:本机构资料与目录
+:本机构自助档案
+GET /api/management/institutions
+GET /api/management/institutions/{institutionId}
+PUT /api/management/institutions/{institutionId}
+;
+:迁移期兼容只读目录
 GET /api/admin/institutions
 GET /api/admin/institutions/{id}
-PUT /api/admin/institutions/{id}
 GET /api/admin/institutions/{id}/doctors
 GET /api/admin/institutions/{id}/projects
 GET /api/admin/institution-projects
@@ -114,9 +118,10 @@ POST /api/management/project-requests/{id}/review;
 GET /api/admin/institution-project-requests
 POST /api/admin/institution-project-requests/{id}/review;
 note right
-  机构法人拥有 15 个非空业务端点。
+  按“HTTP 方法 + 路径模板”计，机构法人有 15 个明确路由模式：
+  3 个法人自助档案、6 个迁移期兼容只读、6 个本机构审核。
   GET /api/admin/doctors、GET /api/admin/articles 虽返回 200，
-  但纯法人范围恒为空，未计入业务能力。
+  但纯法人范围恒为空，未计入上述计数。
 end note
 
 ' ===== 顾问全部专业接口 =====

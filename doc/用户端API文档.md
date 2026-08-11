@@ -2187,6 +2187,113 @@ Authorization: Bearer <token>
 
 ---
 
+### 12.5a 法人自助机构档案（专业管理入口）
+
+该组接口供**已生效的机构法人**维护自己已确认管理的机构档案；它不是平台管理员机构 CRUD 的替代品。法人账户必须同时具有 `INSTITUTION_LEGAL_REPRESENTATIVE` 活跃角色，以及对应机构状态为 `APPROVED` 的法人成员关系；服务端据此生成 `managedInstitutionIds`，并在每次详情或更新操作时进行对象级校验。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/management/institutions` | 列出当前法人可管理的机构摘要 |
+| GET | `/api/management/institutions/{institutionId}` | 读取一个当前法人可管理的完整机构档案 |
+| PUT | `/api/management/institutions/{institutionId}` | 完整替换一个当前法人可管理的机构档案的全部可编辑字段 |
+
+**认证与对象边界：** 请求携带专业管理登录获得的 Bearer 凭证。平台管理员不能使用这组法人自助接口；无活跃法人角色、没有已批准法人成员关系，或目标 `institutionId` 不在 `managedInstitutionIds` 中时，返回 `403`。无凭证或凭证无效返回 `401`。
+
+**GET `/api/management/institutions` 响应：**
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": [
+    {
+      "id": "institution-uuid",
+      "name": "上海娇颜颂医美中心",
+      "address": "静安区南京西路 100 号",
+      "city": "上海",
+      "coverImage": "https://cdn.example.com/institutions/cover.jpg",
+      "rating": 4.8,
+      "reviewCount": 126,
+      "isVerified": true
+    }
+  ]
+}
+```
+
+**GET `/api/management/institutions/{institutionId}` 响应，以及成功 PUT 的 `data`：**
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "id": "institution-uuid",
+    "name": "上海娇颜颂医美中心",
+    "address": "静安区南京西路 100 号",
+    "city": "上海",
+    "description": "提供注射美容与皮肤管理服务。",
+    "coverImage": "https://cdn.example.com/institutions/cover.jpg",
+    "images": ["https://cdn.example.com/institutions/1.jpg"],
+    "establishedYear": null,
+    "credentials": "医疗机构执业许可证",
+    "credentialImages": ["https://cdn.example.com/institutions/license.jpg"],
+    "specialties": ["皮肤管理", "注射美容"],
+    "tags": ["预约制", "中英双语"],
+    "contactPhone": "021-12345678",
+    "businessHours": "周一至周日 09:00-18:00",
+    "rating": 4.8,
+    "reviewCount": 126,
+    "isVerified": true,
+    "certificationTime": "2026-01-15",
+    "projectCount": 12,
+    "doctorCount": 6,
+    "consultationCount": 310,
+    "userCount": 280,
+    "caseCount": 96,
+    "createdAt": "2026-01-01T09:00:00",
+    "updatedAt": "2026-08-11T10:30:00"
+  }
+}
+```
+
+**PUT 请求体：** 必须是 JSON 对象，且必须且只能包含以下 13 个可编辑键；所有键均为必填键。`establishedYear` 的值可为 JSON `null`，或 `1800` 到当前年份之间的整数。`name` 不得为空白；其余文本字段须为字符串。`images`、`credentialImages`、`specialties`、`tags` 必须是 JSON 字符串数组（可为空数组），数组项不能包含逗号。
+
+```json
+{
+  "name": "上海娇颜颂医美中心",
+  "address": "静安区南京西路 100 号",
+  "city": "上海",
+  "description": "提供注射美容与皮肤管理服务。",
+  "coverImage": "https://cdn.example.com/institutions/cover.jpg",
+  "images": ["https://cdn.example.com/institutions/1.jpg"],
+  "establishedYear": null,
+  "credentials": "医疗机构执业许可证",
+  "credentialImages": ["https://cdn.example.com/institutions/license.jpg"],
+  "specialties": ["皮肤管理", "注射美容"],
+  "tags": ["预约制", "中英双语"],
+  "contactPhone": "021-12345678",
+  "businessHours": "周一至周日 09:00-18:00"
+}
+```
+
+`images`、`credentialImages`、`specialties`、`tags` 在 HTTP 请求和响应中始终使用 JSON 数组；服务端为兼容既有存储会标准化（去除首尾空白、空值及重复项）后保存，客户端不得改为逗号分隔字符串。`credentialImages` 仅是机构自行上传的公开展示材料，不能表示平台已经核验或认证。
+
+**只读字段：** `id`、`createdAt`、`updatedAt`、`rating`、`reviewCount`、`isVerified`、`certificationTime`、`projectCount`、`doctorCount`、`consultationCount`、`userCount`、`caseCount` 只能由响应返回，PUT 不得携带或本地伪造。
+
+**错误响应：**
+
+| HTTP | body `code` | 场景 |
+|------|-------------|------|
+| 400 | 400 | 请求体不是对象、缺少或多出键、键类型不正确、`name` 为空白、年份不是允许整数/`null`，或数组项不符合规则 |
+| 401 | 401 | 未登录、Bearer 凭证缺失、失效或无效 |
+| 403 | 403 | 非活跃机构法人、没有 APPROVED 法人成员关系、平台管理员调用自助入口，或对象不在 `managedInstitutionIds` |
+| 404 | 404 | 已通过对象边界校验但机构记录不存在 |
+| 500 | 500 | 未预期的服务端错误 |
+
+平台管理员继续使用 `/api/admin/institutions/**` 进行全量机构 CRUD。专业端旧的 `/api/admin/institutions/{id}` PUT 不再用于法人档案编辑；现有专业端旧读路径在后续切换完成前保持兼容。
+
+---
+
 ### 12.6 文章管理
 
 | 方法 | 路径 | 描述 |
@@ -2609,6 +2716,9 @@ Authorization: Bearer <token>
 | 上传 | POST | `/api/upload` | ✅ |
 | 医生本人档案 | GET | `/api/management/doctor-profile` | ACTIVE DOCTOR（本人） |
 | 医生本人档案 | PUT | `/api/management/doctor-profile` | ACTIVE DOCTOR（本人） |
+| 法人机构档案 | GET | `/api/management/institutions` | ACTIVE INSTITUTION_LEGAL_REPRESENTATIVE（仅 `managedInstitutionIds`） |
+| 法人机构档案 | GET | `/api/management/institutions/{institutionId}` | ACTIVE INSTITUTION_LEGAL_REPRESENTATIVE（仅 `managedInstitutionIds`） |
+| 法人机构档案 | PUT | `/api/management/institutions/{institutionId}` | ACTIVE INSTITUTION_LEGAL_REPRESENTATIVE（仅 `managedInstitutionIds`） |
 | 管理 | GET | `/api/admin/stats` | ADMIN |
 | 管理 | GET | `/api/admin/projects` | ADMIN |
 | 管理 | POST | `/api/admin/projects` | ADMIN |
