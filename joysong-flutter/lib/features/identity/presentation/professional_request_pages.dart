@@ -342,6 +342,7 @@ class _DoctorProfileFormState extends State<_DoctorProfileForm> {
           certificationTags: _tags.text,
         ),
       );
+      if (!mounted) return;
       widget.onSaved(saved);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

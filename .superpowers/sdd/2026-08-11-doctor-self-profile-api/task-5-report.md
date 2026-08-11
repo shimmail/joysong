@@ -84,3 +84,31 @@ The three baseline dirty `GeneratedPluginRegistrant` files are not included.
 
 - The first post-implementation group run failed only because the new test harness omitted Chinese Flutter localization delegates. The focused rerun verified all three affected behaviors after the harness correction.
 - The known dirty Android/iOS generated plugin registrants remain untouched and must stay unstaged.
+
+## Fix round 1: save completion after disposal
+
+### RED assessment
+
+Review found that `_save()` called `widget.onSaved(saved)` immediately after the awaited PUT. If the page was disposed while the request was in flight, that callback attempted `setState` on the disposed parent.
+
+An honest user-observable RED could not be added without a production test hook: the existing broad `catch (_)` synchronously swallowed the parent's `setState after dispose` `FlutterError`, while the disposed form's own `mounted` check prevented any error UI. Consequently, `tester.takeException()` was already null before the fix. Per the fix-round resolution, the existing three behavior tests were left unchanged instead of adding a fourth test, a source-text assertion, or a production-only test API. No pre-fix RED command/output was fabricated.
+
+### Fix
+
+Added the minimal lifecycle guard immediately after `updateDoctorSelfProfile()` completes and before any callback or state access:
+
+```dart
+if (!mounted) return;
+```
+
+### GREEN
+
+Only the focused page test file was run once:
+
+```powershell
+& 'D:\code\kotlin\joysong\.flutter-cache\sdk\flutter\bin\flutter.bat' test test/features/identity/doctor_self_profile_page_test.dart
+```
+
+Output: `00:01 +3: All tests passed!`
+
+The total number of new behavior tests remains exactly three.
