@@ -159,6 +159,7 @@ final class InstitutionProfileController extends ChangeNotifier {
   ManagedInstitutionProfile? _selectedProfile;
   bool _isSaving = false;
   String? _errorMessage;
+  bool _disposed = false;
 
   InstitutionProfileLoadStatus get status => _status;
   List<ManagedInstitutionSummary> get summaries => _summaries;
@@ -170,7 +171,7 @@ final class InstitutionProfileController extends ChangeNotifier {
     if (_status == InstitutionProfileLoadStatus.loading) return;
     _status = InstitutionProfileLoadStatus.loading;
     _errorMessage = null;
-    notifyListeners();
+    _notify();
     try {
       _summaries = await _repository.listManagedInstitutions();
       _selectedProfile = null;
@@ -181,14 +182,14 @@ final class InstitutionProfileController extends ChangeNotifier {
       _status = InstitutionProfileLoadStatus.failure;
       _errorMessage = '机构档案加载失败，请重试';
     }
-    notifyListeners();
+    _notify();
   }
 
   Future<bool> select(String id) async {
     if (_status == InstitutionProfileLoadStatus.loading) return false;
     _status = InstitutionProfileLoadStatus.loading;
     _errorMessage = null;
-    notifyListeners();
+    _notify();
     try {
       _selectedProfile = await _repository.loadManagedInstitution(id);
       _status = InstitutionProfileLoadStatus.ready;
@@ -198,7 +199,7 @@ final class InstitutionProfileController extends ChangeNotifier {
       _errorMessage = '机构档案加载失败，请重试';
       return false;
     } finally {
-      notifyListeners();
+      _notify();
     }
   }
 
@@ -208,7 +209,7 @@ final class InstitutionProfileController extends ChangeNotifier {
     if (profile == null) return false;
     _isSaving = true;
     _errorMessage = null;
-    notifyListeners();
+    _notify();
     try {
       _selectedProfile =
           await _repository.updateManagedInstitution(profile.id, update);
@@ -218,8 +219,18 @@ final class InstitutionProfileController extends ChangeNotifier {
       return false;
     } finally {
       _isSaving = false;
-      notifyListeners();
+      _notify();
     }
+  }
+
+  void _notify() {
+    if (!_disposed) notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
   }
 }
 

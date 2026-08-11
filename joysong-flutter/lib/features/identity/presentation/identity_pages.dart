@@ -1232,7 +1232,14 @@ class _ManagedInstitutionProfilesPageState
   @override
   void initState() {
     super.initState();
-    _controller = InstitutionProfileController(widget.repository)..load();
+    _controller = InstitutionProfileController(widget.repository);
+    _load();
+  }
+
+  Future<void> _load() async {
+    await _controller.load();
+    if (!mounted || _controller.summaries.length != 1) return;
+    await _controller.select(_controller.summaries.single.id);
   }
 
   @override
@@ -1260,10 +1267,17 @@ class _ManagedInstitutionProfilesPageState
               ),
             InstitutionProfileLoadStatus.failure => _IdentityFailure(
                 message: _controller.errorMessage ?? '机构档案加载失败',
-                onRetry: _controller.load,
+                onRetry: _load,
+              ),
+            InstitutionProfileLoadStatus.ready
+                when _controller.selectedProfile != null =>
+              ManagedInstitutionProfileEditPage(
+                controller: _controller,
+                profile: _controller.selectedProfile!,
+                imagePicker: widget.imagePicker ?? _pickInstitutionProfileImage,
               ),
             InstitutionProfileLoadStatus.ready => RefreshIndicator(
-                onRefresh: _controller.load,
+                onRefresh: _load,
                 child: ListView.separated(
                   physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.all(16),
@@ -1298,18 +1312,7 @@ class _ManagedInstitutionProfilesPageState
   }
 
   Future<void> _edit(ManagedInstitutionSummary institution) async {
-    if (!await _controller.select(institution.id) || !mounted) return;
-    final profile = _controller.selectedProfile;
-    if (profile == null) return;
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        builder: (_) => ManagedInstitutionProfileEditPage(
-          controller: _controller,
-          profile: profile,
-          imagePicker: widget.imagePicker ?? _pickInstitutionProfileImage,
-        ),
-      ),
-    );
+    await _controller.select(institution.id);
   }
 }
 
@@ -1379,8 +1382,11 @@ class _ManagedInstitutionProfileEditPageState
             children: [
               const _InfoCard(text: '这是向用户公开展示的信息，请勿填写内部管理或隐私资料。'),
               const SizedBox(height: 16),
+              _platformFacts(),
+              const SizedBox(height: 16),
               _textField('name', '机构名称', required: true),
               _imagePickerField(
+                fieldName: 'coverImage',
                 title: '封面图',
                 addLabel: '从相册选择封面图',
                 values: _singleImage('coverImage'),
@@ -1398,6 +1404,7 @@ class _ManagedInstitutionProfileEditPageState
               _textField('specialties', '擅长领域（逗号分隔）'),
               _textField('credentials', '资质文本', maxLines: 3),
               _imagePickerField(
+                fieldName: 'credentialImages',
                 title: '资质证书图片',
                 addLabel: '从相册添加资质图片',
                 values: _csv('credentialImages'),
@@ -1406,6 +1413,7 @@ class _ManagedInstitutionProfileEditPageState
                     _removeListImage('credentialImages', image),
               ),
               _imagePickerField(
+                fieldName: 'images',
                 title: '环境图片',
                 addLabel: '从相册添加环境图片',
                 values: _csv('images'),
@@ -1423,6 +1431,7 @@ class _ManagedInstitutionProfileEditPageState
                 ),
               const SizedBox(height: 20),
               FilledButton(
+                key: const Key('institution-save'),
                 onPressed: widget.controller.isSaving ? null : _save,
                 child: Text(widget.controller.isSaving ? '保存中…' : '保存档案'),
               ),
@@ -1444,6 +1453,7 @@ class _ManagedInstitutionProfileEditPageState
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: TextFormField(
+        key: Key('institution-$name'),
         controller: _fields[name],
         maxLines: maxLines,
         keyboardType: keyboardType,
@@ -1456,6 +1466,7 @@ class _ManagedInstitutionProfileEditPageState
   }
 
   Widget _imagePickerField({
+    required String fieldName,
     required String title,
     required String addLabel,
     required List<String> values,
@@ -1476,24 +1487,26 @@ class _ManagedInstitutionProfileEditPageState
               if (values.isEmpty)
                 const Text('暂无图片')
               else
-                for (final image in values)
+                for (final entry in values.indexed)
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.image_outlined),
                     title: Text(
-                      image,
+                      entry.$2,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                     trailing: IconButton(
+                      key: Key('institution-$fieldName-remove-${entry.$1}'),
                       tooltip: '移除图片',
-                      onPressed: () => onDelete(image),
+                      onPressed: () => onDelete(entry.$2),
                       icon: const Icon(Icons.close_rounded),
                     ),
                   ),
               Align(
                 alignment: Alignment.centerLeft,
                 child: OutlinedButton.icon(
+                  key: Key('institution-$fieldName-add'),
                   onPressed: onAdd,
                   icon: const Icon(Icons.photo_library_outlined),
                   label: Text(addLabel),
@@ -1509,6 +1522,29 @@ class _ManagedInstitutionProfileEditPageState
   List<String> _singleImage(String name) {
     final value = _text(name);
     return value.isEmpty ? const [] : [value];
+  }
+
+  Widget _platformFacts() {
+    final profile = widget.profile;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Wrap(
+          spacing: 12,
+          runSpacing: 8,
+          children: [
+            Text(profile.isVerified ? '已认证' : '未认证'),
+            Text('评分 ${profile.rating}'),
+            Text('评价 ${profile.reviewCount}'),
+            Text('项目 ${profile.projectCount}'),
+            Text('医生 ${profile.doctorCount}'),
+            Text('咨询 ${profile.consultationCount}'),
+            Text('用户 ${profile.userCount}'),
+            Text('案例 ${profile.caseCount}'),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _pickSingleImage(String name) async {
