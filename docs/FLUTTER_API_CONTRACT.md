@@ -429,7 +429,7 @@ Flutter 可以完成页面和接口抽象，但生产发布前必须等待支付
 |---|---|
 | 医生本人档案 | `GET /management/doctor-profile`、`PUT /management/doctor-profile` |
 | 法人自助机构档案 | `GET /management/institutions`、`GET /management/institutions/{institutionId}`、`PUT /management/institutions/{institutionId}` |
-| 法人兼容只读机构目录（迁移期） | `GET /admin/institutions`、`GET /admin/institutions/{id}`、`GET /admin/institutions/{id}/doctors`、`GET /admin/institutions/{id}/projects`、`GET /admin/institution-projects`、`GET /admin/projects` |
+| 专业端兼容只读机构目录（迁移期） | `GET /admin/institutions`、`GET /admin/institutions/{id}`、`GET /admin/institutions/{id}/doctors`、`GET /admin/institutions/{id}/projects`、`GET /admin/institution-projects`、`GET /admin/projects` |
 | 平台管理员机构 CRUD | `GET/POST /admin/institutions`、`GET/PUT/DELETE /admin/institutions/{id}` |
 | 文章 | `GET/POST /admin/articles`、`PUT/DELETE /admin/articles/{id}` |
 | 机构项目 | `GET/POST /admin/institution-projects`、`PUT/DELETE /admin/institution-projects/{id}` |
