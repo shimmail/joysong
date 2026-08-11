@@ -4,6 +4,7 @@ import com.joysong.server.order.dto.OrderStatusEnum
 import com.joysong.server.order.repository.OrderRepository
 import com.joysong.server.order.service.OrderStatusLogService
 import com.joysong.server.settlement.entity.SettlementAllocationStatus
+import com.joysong.server.settlement.entity.SettlementAllocationBalanceBucket
 import com.joysong.server.settlement.repository.SettlementAllocationRepository
 import com.joysong.server.settlement.repository.SettlementRepository
 import com.joysong.server.wallet.service.WalletLedgerService
@@ -57,7 +58,11 @@ class SettlementReleaseService(
             }
         )
 
-        allocations.filter { it.status == SettlementAllocationStatus.PENDING }
+        allocations.filter {
+            it.balanceBucket == SettlementAllocationBalanceBucket.PENDING &&
+                it.status != SettlementAllocationStatus.REVERSED &&
+                it.amountMinor > it.reversedMinor
+        }
             .onEach { it.markAvailable() }
             .takeIf { it.isNotEmpty() }
             ?.let { allocationRepository.saveAll(it) }

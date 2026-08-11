@@ -39,6 +39,8 @@ class SettlementAllocationEntity(
 
     reversedMinor: Long = 0,
 
+    balanceBucket: SettlementAllocationBalanceBucket = SettlementAllocationBalanceBucket.PENDING,
+
     status: SettlementAllocationStatus = SettlementAllocationStatus.PENDING,
 
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -49,13 +51,22 @@ class SettlementAllocationEntity(
         private set
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "balance_bucket", nullable = false, length = 20)
+    var balanceBucket: SettlementAllocationBalanceBucket = balanceBucket
+        private set
+
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 30)
     var status: SettlementAllocationStatus = status
         private set
 
     fun markAvailable() {
-        require(status == SettlementAllocationStatus.PENDING) { "仅待入账分账可变为可用" }
-        status = SettlementAllocationStatus.AVAILABLE
+        require(balanceBucket == SettlementAllocationBalanceBucket.PENDING) { "仅待入账余额可变为可用" }
+        require(status != SettlementAllocationStatus.REVERSED) { "已冲正分账无需释放" }
+        balanceBucket = SettlementAllocationBalanceBucket.AVAILABLE
+        if (status == SettlementAllocationStatus.PENDING) {
+            status = SettlementAllocationStatus.AVAILABLE
+        }
     }
 
     fun reverse(amount: Long) {
@@ -84,4 +95,9 @@ enum class SettlementAllocationStatus {
     AVAILABLE,
     PARTIALLY_REVERSED,
     REVERSED
+}
+
+enum class SettlementAllocationBalanceBucket {
+    PENDING,
+    AVAILABLE
 }

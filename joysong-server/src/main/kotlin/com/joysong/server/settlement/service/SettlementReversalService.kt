@@ -4,12 +4,14 @@ import com.joysong.server.refund.entity.RefundItemEntity
 import com.joysong.server.refund.repository.RefundItemRepository
 import com.joysong.server.refund.repository.RefundRepository
 import com.joysong.server.settlement.entity.SettlementAllocationEntity
+import com.joysong.server.settlement.entity.SettlementAllocationBalanceBucket
 import com.joysong.server.settlement.entity.SettlementAllocationOwnerType
 import com.joysong.server.settlement.entity.SettlementAllocationStatus
 import com.joysong.server.settlement.repository.SettlementAllocationRepository
 import com.joysong.server.settlement.repository.SettlementRepository
 import com.joysong.server.wallet.entity.WalletEntity
 import com.joysong.server.wallet.repository.WalletRepository
+import com.joysong.server.wallet.repository.WalletLedgerEntryRepository
 import com.joysong.server.wallet.service.WalletLedgerService
 import com.joysong.server.wallet.service.WalletMutation
 import org.springframework.stereotype.Service
@@ -45,6 +47,7 @@ class SettlementReversalService(
     private val settlementRepository: SettlementRepository,
     private val allocationRepository: SettlementAllocationRepository,
     private val walletRepository: WalletRepository,
+    private val walletLedgerEntryRepository: WalletLedgerEntryRepository,
     private val walletLedgerService: WalletLedgerService,
     private val revenueIssueRecorder: RevenueIssueRecorder
 ) {
@@ -64,6 +67,10 @@ class SettlementReversalService(
         require(cumulativeRefundedMinor in 0..originalNetPaidMinor) { "REFUND_AMOUNT_EXCEEDS_SETTLEMENT" }
         val allocations = allocationRepository.findAllBySettlementIdOrderByIdAscForUpdate(settlement.id)
         require(allocations.isNotEmpty()) { "SETTLEMENT_ALLOCATIONS_MISSING" }
+        validateAllocationSnapshot(allocations, originalNetPaidMinor)
+        val existingOperations = walletLedgerEntryRepository.findAllByOperationKeyInForUpdate(
+            completedItems.flatMap { item -> allocations.map { allocation -> operationKey(item.id, allocation.id) } }
+        ).map { it.operationKey }.toSet()
 
         val walletBalances = mutableMapOf<WalletKey, WalletBalance>()
         val mutations = mutableListOf<WalletMutation>()
@@ -71,10 +78,14 @@ class SettlementReversalService(
             val target = cumulativeTarget(allocation, allocations, cumulativeRefundedMinor, originalNetPaidMinor)
             val required = target - allocation.reversedMinor
             if (required <= 0) return@forEach
+            if (completedItems.any { operationKey(it.id, allocation.id) in existingOperations }) {
+                recordRecovery(refundId, completedItems.first(), allocation, settlement.currency, required)
+                return@forEach
+            }
 
             val key = WalletKey(allocation.ownerType.name, allocation.ownerId, settlement.currency)
             val balance = walletBalances.getOrPut(key) { WalletBalance.from(walletRepository.findForUpdate(key.ownerType, key.ownerId, key.currency)) }
-            val bucket = debitBucket(allocation, balance)
+            val bucket = allocation.balanceBucket
             val coverable = minOf(required, balance.amount(bucket))
             if (coverable > 0) {
                 allocation.reverse(coverable)
@@ -89,17 +100,7 @@ class SettlementReversalService(
                 )
             }
             if (coverable < required) {
-                revenueIssueRecorder.recordRecoveryRequired(
-                    RecoveryRequiredRevenueIssue(
-                        refundId = refundId,
-                        refundItemId = completedItems.first().id,
-                        allocationId = allocation.id,
-                        ownerType = allocation.ownerType.name,
-                        ownerId = allocation.ownerId,
-                        currency = settlement.currency,
-                        uncoveredMinor = required - coverable
-                    )
-                )
+                recordRecovery(refundId, completedItems.first(), allocation, settlement.currency, required - coverable)
             }
         }
 
@@ -111,6 +112,37 @@ class SettlementReversalService(
             settlement.updatedAt = LocalDateTime.now()
             settlementRepository.save(settlement)
         }
+    }
+
+    private fun validateAllocationSnapshot(allocations: List<SettlementAllocationEntity>, totalMinor: Long) {
+        val allocationTotal = allocations.fold(0L) { total, allocation -> Math.addExact(total, allocation.amountMinor) }
+        require(allocationTotal == totalMinor) { "SETTLEMENT_ALLOCATION_TOTAL_MISMATCH" }
+        require(allocations.count { it.ownerType == SettlementAllocationOwnerType.DOCTOR } == 1) {
+            "SETTLEMENT_DOCTOR_ALLOCATION_INVALID"
+        }
+        require(allocations.map { it.ownerType }.distinct().size == allocations.size) {
+            "SETTLEMENT_ALLOCATION_OWNER_ROLES_DUPLICATED"
+        }
+    }
+
+    private fun recordRecovery(
+        refundId: String,
+        item: RefundItemEntity,
+        allocation: SettlementAllocationEntity,
+        currency: String,
+        uncoveredMinor: Long
+    ) {
+        revenueIssueRecorder.recordRecoveryRequired(
+            RecoveryRequiredRevenueIssue(
+                refundId = refundId,
+                refundItemId = item.id,
+                allocationId = allocation.id,
+                ownerType = allocation.ownerType.name,
+                ownerId = allocation.ownerId,
+                currency = currency,
+                uncoveredMinor = uncoveredMinor
+            )
+        )
     }
 
     private fun cumulativeTarget(
@@ -139,7 +171,7 @@ class SettlementReversalService(
         allocation: SettlementAllocationEntity,
         currency: String,
         refundId: String,
-        bucket: BalanceBucket
+        bucket: SettlementAllocationBalanceBucket
     ): List<WalletMutation> {
         val itemTotal = items.sumOf { it.amountMinor }
         var remaining = amount
@@ -151,32 +183,25 @@ class SettlementReversalService(
                 ownerId = allocation.ownerId,
                 currency = currency,
                 allocationId = allocation.id,
-                pendingDelta = if (bucket == BalanceBucket.PENDING) -share else 0,
-                availableDelta = if (bucket == BalanceBucket.AVAILABLE) -share else 0,
+                pendingDelta = if (bucket == SettlementAllocationBalanceBucket.PENDING) -share else 0,
+                availableDelta = if (bucket == SettlementAllocationBalanceBucket.AVAILABLE) -share else 0,
                 frozenDelta = 0,
                 entryType = REVERSAL_ENTRY_TYPE,
                 sourceType = REFUND_SOURCE_TYPE,
                 sourceId = refundId,
-                operationKey = "refund:reverse:${item.id}:${allocation.id}"
+                operationKey = operationKey(item.id, allocation.id)
             )
         }
     }
 
-    private fun debitBucket(allocation: SettlementAllocationEntity, balance: WalletBalance): BalanceBucket = when (allocation.status) {
-        SettlementAllocationStatus.PENDING -> BalanceBucket.PENDING
-        SettlementAllocationStatus.AVAILABLE -> BalanceBucket.AVAILABLE
-        SettlementAllocationStatus.PARTIALLY_REVERSED -> if (balance.available > 0) BalanceBucket.AVAILABLE else BalanceBucket.PENDING
-        SettlementAllocationStatus.REVERSED -> throw IllegalStateException("REVERSED_ALLOCATION_HAS_UNPOSTED_REVERSAL")
-    }
-
-    private enum class BalanceBucket { PENDING, AVAILABLE }
+    private fun operationKey(refundItemId: String, allocationId: Long) = "refund:reverse:$refundItemId:$allocationId"
 
     private data class WalletKey(val ownerType: String, val ownerId: String, val currency: String)
 
     private data class WalletBalance(var pending: Long, var available: Long) {
-        fun amount(bucket: BalanceBucket): Long = if (bucket == BalanceBucket.PENDING) pending else available
-        fun debit(bucket: BalanceBucket, amount: Long) {
-            if (bucket == BalanceBucket.PENDING) pending -= amount else available -= amount
+        fun amount(bucket: SettlementAllocationBalanceBucket): Long = if (bucket == SettlementAllocationBalanceBucket.PENDING) pending else available
+        fun debit(bucket: SettlementAllocationBalanceBucket, amount: Long) {
+            if (bucket == SettlementAllocationBalanceBucket.PENDING) pending -= amount else available -= amount
         }
 
         companion object {

@@ -5,6 +5,7 @@ import com.joysong.server.refund.entity.RefundItemEntity
 import com.joysong.server.refund.repository.RefundItemRepository
 import com.joysong.server.refund.repository.RefundRepository
 import com.joysong.server.settlement.entity.SettlementAllocationEntity
+import com.joysong.server.settlement.entity.SettlementAllocationBalanceBucket
 import com.joysong.server.settlement.entity.SettlementAllocationOwnerType
 import com.joysong.server.settlement.entity.SettlementAllocationStatus
 import com.joysong.server.settlement.entity.SettlementEntity
@@ -15,6 +16,8 @@ import com.joysong.server.settlement.service.RevenueIssueRecorder
 import com.joysong.server.settlement.service.SettlementReversalService
 import com.joysong.server.wallet.entity.WalletEntity
 import com.joysong.server.wallet.repository.WalletRepository
+import com.joysong.server.wallet.repository.WalletLedgerEntryRepository
+import com.joysong.server.wallet.entity.WalletLedgerEntryEntity
 import com.joysong.server.wallet.service.WalletLedgerService
 import com.joysong.server.wallet.service.WalletMutation
 import io.mockk.MockKAnnotations
@@ -35,6 +38,7 @@ class SettlementReversalServiceTest {
     @MockK private lateinit var settlementRepository: SettlementRepository
     @MockK private lateinit var allocationRepository: SettlementAllocationRepository
     @MockK private lateinit var walletRepository: WalletRepository
+    @MockK private lateinit var walletLedgerEntryRepository: WalletLedgerEntryRepository
     @MockK private lateinit var walletLedgerService: WalletLedgerService
     @MockK private lateinit var revenueIssueRecorder: RevenueIssueRecorder
 
@@ -49,6 +53,7 @@ class SettlementReversalServiceTest {
             settlementRepository,
             allocationRepository,
             walletRepository,
+            walletLedgerEntryRepository,
             walletLedgerService,
             revenueIssueRecorder
         )
@@ -153,6 +158,50 @@ class SettlementReversalServiceTest {
     }
 
     @Test
+    fun `retry after partial cover never consumes replenished funds for an existing refund operation`() {
+        val allocation = allocation(amount = 100, status = SettlementAllocationStatus.AVAILABLE)
+        val issues = mutableListOf<RecoveryRequiredRevenueIssue>()
+        arrange(refundAmount = 50, cumulativeAmount = 50, allocations = listOf(allocation), wallet = wallet(available = 30))
+        every { walletLedgerService.apply(any()) } returns emptyList()
+        every { revenueIssueRecorder.recordRecoveryRequired(capture(issues)) } just io.mockk.Runs
+        every { walletLedgerEntryRepository.findAllByOperationKeyInForUpdate(any()) } returnsMany listOf(
+            emptyList(),
+            listOf(WalletLedgerEntryEntity(operationKey = "refund:reverse:item-1:1", availableDeltaMinor = -30))
+        )
+
+        service.reverseCompletedRefund("refund-1")
+        every { walletRepository.findForUpdate(any(), any(), "USD") } returns wallet(available = 20)
+        service.reverseCompletedRefund("refund-1")
+
+        assertEquals(30, allocation.reversedMinor)
+        assertEquals(20, issues.last().uncoveredMinor)
+        verify(exactly = 1) { walletLedgerService.apply(any()) }
+    }
+
+    @Test
+    fun `partially reversed pending allocation debits pending even with unrelated available funds`() {
+        val allocation = allocation(
+            amount = 100,
+            status = SettlementAllocationStatus.PARTIALLY_REVERSED,
+            reversed = 10,
+            bucket = SettlementAllocationBalanceBucket.PENDING
+        )
+        val mutations = slot<List<WalletMutation>>()
+        arrange(
+            refundAmount = 50,
+            cumulativeAmount = 50,
+            allocations = listOf(allocation),
+            wallet = wallet(pending = 40, available = 500)
+        )
+        every { walletLedgerService.apply(capture(mutations)) } returns emptyList()
+
+        service.reverseCompletedRefund("refund-1")
+
+        assertEquals(-40, mutations.captured.single().pendingDelta)
+        assertEquals(0, mutations.captured.single().availableDelta)
+    }
+
+    @Test
     fun `frozen funds are never consumed and produce a recovery issue`() {
         val allocation = allocation(amount = 100, status = SettlementAllocationStatus.AVAILABLE)
         val issue = slot<RecoveryRequiredRevenueIssue>()
@@ -182,6 +231,54 @@ class SettlementReversalServiceTest {
         }
     }
 
+    @Test
+    fun `missing doctor allocation is rejected before writes`() {
+        arrange(
+            refundAmount = 50,
+            cumulativeAmount = 50,
+            allocations = listOf(allocation(amount = 100, owner = SettlementAllocationOwnerType.PLATFORM)),
+            wallet = wallet(pending = 100)
+        )
+
+        val error = assertThrows<IllegalArgumentException> { service.reverseCompletedRefund("refund-1") }
+
+        assertEquals("SETTLEMENT_DOCTOR_ALLOCATION_INVALID", error.message)
+        assertNoWrites()
+    }
+
+    @Test
+    fun `multiple doctor allocations are rejected before writes`() {
+        arrange(
+            refundAmount = 50,
+            cumulativeAmount = 50,
+            allocations = listOf(
+                allocation(id = 1, amount = 50),
+                allocation(id = 2, amount = 50)
+            ),
+            wallet = wallet(pending = 100)
+        )
+
+        val error = assertThrows<IllegalArgumentException> { service.reverseCompletedRefund("refund-1") }
+
+        assertEquals("SETTLEMENT_DOCTOR_ALLOCATION_INVALID", error.message)
+        assertNoWrites()
+    }
+
+    @Test
+    fun `allocation total mismatch is rejected before writes`() {
+        arrange(
+            refundAmount = 50,
+            cumulativeAmount = 50,
+            allocations = listOf(allocation(amount = 99)),
+            wallet = wallet(pending = 100)
+        )
+
+        val error = assertThrows<IllegalArgumentException> { service.reverseCompletedRefund("refund-1") }
+
+        assertEquals("SETTLEMENT_ALLOCATION_TOTAL_MISMATCH", error.message)
+        assertNoWrites()
+    }
+
     private fun arrange(
         refundId: String = "refund-1",
         refundAmount: Long,
@@ -206,6 +303,7 @@ class SettlementReversalServiceTest {
         every { settlementRepository.findByOrderIdForUpdate("order-1") } returns settlement
         every { allocationRepository.findAllBySettlementIdOrderByIdAscForUpdate(91) } returns allocations
         every { walletRepository.findForUpdate(any(), any(), "USD") } returns wallet
+        every { walletLedgerEntryRepository.findAllByOperationKeyInForUpdate(any()) } returns emptyList()
         every { allocationRepository.saveAll(any<Iterable<SettlementAllocationEntity>>()) } answers { firstArg() }
         every { settlementRepository.save(any()) } answers { firstArg() }
     }
@@ -214,7 +312,13 @@ class SettlementReversalServiceTest {
         id: Long = 1,
         amount: Long,
         owner: SettlementAllocationOwnerType = SettlementAllocationOwnerType.DOCTOR,
-        status: SettlementAllocationStatus = SettlementAllocationStatus.PENDING
+        status: SettlementAllocationStatus = SettlementAllocationStatus.PENDING,
+        reversed: Long = 0,
+        bucket: SettlementAllocationBalanceBucket = if (status == SettlementAllocationStatus.PENDING) {
+            SettlementAllocationBalanceBucket.PENDING
+        } else {
+            SettlementAllocationBalanceBucket.AVAILABLE
+        }
     ) = SettlementAllocationEntity(
         id = id,
         settlementId = 91,
@@ -223,6 +327,8 @@ class SettlementReversalServiceTest {
         ownerName = "owner-$id",
         rate = BigDecimal.ZERO,
         amountMinor = amount,
+        reversedMinor = reversed,
+        balanceBucket = bucket,
         status = status
     )
 
@@ -230,4 +336,12 @@ class SettlementReversalServiceTest {
         WalletEntity(id = 1, ownerType = "DOCTOR", ownerId = "owner-1", currency = "USD").also {
             it.applyDeltas(pending, available, frozen)
         }
+
+    private fun assertNoWrites() {
+        verify(exactly = 0) {
+            walletLedgerService.apply(any())
+            allocationRepository.saveAll(any<Iterable<SettlementAllocationEntity>>())
+            settlementRepository.save(any())
+        }
+    }
 }
