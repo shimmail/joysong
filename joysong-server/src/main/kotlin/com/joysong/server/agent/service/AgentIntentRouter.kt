@@ -32,6 +32,12 @@ data class AgentRouteAssessment(
     val requiresContextCompletion: Boolean = false
 )
 
+data class ParsedAgentRoute(
+    val intent: AgentIntent,
+    val queryTarget: AgentQueryTarget?,
+    val keywords: List<String>
+)
+
 /**
  * Lightweight, deterministic routing before catalog search or model generation.
  * Audit persistence is deliberately not referenced here: traces observe a decision,
@@ -212,6 +218,21 @@ class AgentIntentRouter {
             ),
             requiresContextCompletion = requiresContextCompletion
         )
+    }
+
+    fun mergeParsedRoute(
+        local: AgentRouteAssessment,
+        parsed: ParsedAgentRoute?
+    ): AgentIntentDecision {
+        if (parsed == null || local.decision.intent == AgentIntent.SAFETY_SCREENING) return local.decision
+
+        val intent = if (local.explicitIntent) local.decision.intent else parsed.intent
+        val target = if (local.explicitQueryTarget) local.decision.queryTarget else parsed.queryTarget
+        return if (intent == AgentIntent.SAFETY_SCREENING) {
+            validatedDecision(AgentIntent.SAFETY_SCREENING, null)
+        } else {
+            validatedDecision(intent, target)
+        }
     }
 
     fun validatedDecision(intent: AgentIntent, queryTarget: AgentQueryTarget?): AgentIntentDecision {

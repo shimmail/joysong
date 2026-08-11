@@ -32,6 +32,8 @@ import com.joysong.server.agent.service.AgentIntentDecision
 import com.joysong.server.agent.service.AgentIntentRouter
 import com.joysong.server.agent.service.AgentQueryTarget
 import com.joysong.server.agent.service.AgentPromptEvidence
+import com.joysong.server.agent.service.AgentRouteAssessment
+import com.joysong.server.agent.service.ParsedAgentRoute
 import com.joysong.server.config.AiAgentProperties
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Qualifier
@@ -291,10 +293,11 @@ class ChatService(
     ): GeneratedTurn {
         val llmMessages = mutableListOf<Map<String, String>>()
         val currentRouteAssessment = agentIntentRouter.assessCurrent(content, session.contextType)
+        val boundedContext = boundedContextDecisions(historyMessages, summary)
         val localRouteAssessment = if (currentRouteAssessment.requiresContextCompletion) {
             agentIntentRouter.supplementWithContext(
                 currentRouteAssessment,
-                boundedContextDecisions(historyMessages, summary)
+                boundedContext
             )
         } else {
             currentRouteAssessment
@@ -317,19 +320,9 @@ class ChatService(
             )
         } else localRouteAssessment
         val parsedRoute = if (aiAgentProperties.intentParserEnabled && routeAssessment.requiresLlmParsing) {
-            parseAmbiguousRoute(content, routeAssessment.decision)
+            parseAmbiguousRoute(content, routeAssessment, boundedContext)
         } else null
-        // Deterministic safety detection can only be preserved or upgraded, never downgraded by a model.
-        val intentDecision = when {
-            routeAssessment.decision.intent == AgentIntent.SAFETY_SCREENING -> routeAssessment.decision
-            parsedRoute?.intent == AgentIntent.SAFETY_SCREENING && !routeAssessment.explicitIntent ->
-                agentIntentRouter.validatedDecision(AgentIntent.SAFETY_SCREENING, null)
-            parsedRoute != null -> agentIntentRouter.validatedDecision(
-                if (routeAssessment.explicitIntent) routeAssessment.decision.intent else parsedRoute.intent,
-                if (routeAssessment.explicitQueryTarget) routeAssessment.decision.queryTarget else parsedRoute.queryTarget
-            )
-            else -> routeAssessment.decision
-        }
+        val intentDecision = agentIntentRouter.mergeParsedRoute(routeAssessment, parsedRoute)
         val previousUserQueries = historyMessages.filter { it.role.equals("USER", true) }
             .map { it.content }
             .takeLast(4)
@@ -491,12 +484,6 @@ class ChatService(
         return normalized
     }
 
-    private data class ParsedRoute(
-        val intent: AgentIntent,
-        val queryTarget: AgentQueryTarget?,
-        val keywords: List<String>
-    )
-
     private fun boundedContextDecisions(
         historyMessages: List<ChatMessageEntity>,
         summary: AgentSessionSummary?
@@ -510,26 +497,35 @@ class ChatService(
             .map { agentIntentRouter.assessCurrent(it.content, "GENERAL").decision }
     }
 
-    private fun parseAmbiguousRoute(rawQuery: String, fallback: AgentIntentDecision): ParsedRoute? {
+    private fun parseAmbiguousRoute(
+        rawQuery: String,
+        local: AgentRouteAssessment,
+        boundedContext: List<AgentIntentDecision>
+    ): ParsedAgentRoute? {
         if (aiAgentProperties.apiKey.isBlank()) return null
         val startedAt = System.nanoTime()
-        return runCatching {
+        return try {
             val url = providerChatCompletionsUrl()
             val headers = HttpHeaders().apply {
                 setBearerAuth(aiAgentProperties.apiKey)
                 contentType = MediaType.APPLICATION_JSON
             }
+            val context = boundedContext.takeLast(4).joinToString(", ") {
+                "${it.intent}/${it.queryTarget ?: "NONE"}"
+            }.ifBlank { "NONE" }
             val instruction = """
                 Classify one medical-aesthetic chat request. Return JSON only:
                 {"intent":"GENERAL_CHAT|CATALOG_QA|COMPARISON|PLANNING|DETAIL_SUMMARY|SAFETY_SCREENING","queryTarget":"INSTITUTION|DOCTOR|PROJECT|INSTITUTION_PROJECT|null","keywords":["..."]}
                 Use SAFETY_SCREENING for possible contraindications or health risks. Use PLANNING for goals with budget, downtime or personal constraints.
                 Keywords may contain only useful cities, treatments, categories, tags, clinic names or doctor names from the text. Maximum 8 items. Do not invent IDs or facts.
+                Local decision: ${local.decision.intent}/${local.decision.queryTarget ?: "NONE"}. Locked fields: intent=${local.explicitIntent}, queryTarget=${local.explicitQueryTarget}.
+                You may fill only unlocked fields. Do not change locked fields.
             """.trimIndent()
             val body = mapOf(
                 "model" to aiAgentProperties.resolvedIntentModel(),
                 "messages" to listOf(
                     mapOf("role" to "system", "content" to instruction),
-                    mapOf("role" to "user", "content" to "Current: $rawQuery\nLocal fallback: ${fallback.intent}/${fallback.queryTarget}")
+                    mapOf("role" to "user", "content" to "Current: $rawQuery\nBounded route context: $context")
                 ),
                 "temperature" to 0,
                 "max_tokens" to 180,
@@ -540,20 +536,40 @@ class ChatService(
             val message = choice?.get("message") as? Map<*, *>
             val content = message?.get("content")?.toString().orEmpty()
             val json = content.substringAfter('{', "").substringBeforeLast('}', "").takeIf(String::isNotBlank)?.let { "{$it}" }
-                ?: return@runCatching null
+                ?: throw IntentParserRouteException("MALFORMED_PAYLOAD")
             val node = objectMapper.readTree(json)
-            val intent = runCatching { AgentIntent.valueOf(node.path("intent").asText()) }.getOrNull()
-                ?: return@runCatching null
-            val targetText = node.path("queryTarget").asText().takeUnless { it.isBlank() || it.equals("null", true) }
-            val target = targetText?.let { runCatching { AgentQueryTarget.valueOf(it) }.getOrNull() }
+            val intent = AgentIntent.entries.firstOrNull { it.name == node.path("intent").asText().trim() }
+                ?: throw IntentParserRouteException("INVALID_ENUM")
+            val targetNode = node.get("queryTarget")
+            val target = when {
+                targetNode == null || targetNode.isNull -> null
+                !targetNode.isTextual -> throw IntentParserRouteException("INVALID_ENUM")
+                targetNode.asText().trim().equals("null", true) -> null
+                else -> AgentQueryTarget.entries.firstOrNull { it.name == targetNode.asText().trim() }
+                    ?: throw IntentParserRouteException("INVALID_ENUM")
+            }
             val keywords = node.path("keywords").takeIf { it.isArray }?.mapNotNull { item ->
                 item.asText().trim().takeIf { it.length in 2..40 }
             }.orEmpty().distinct().take(8)
-            ParsedRoute(intent, target, keywords)
-        }.onFailure {
-            logger.info("Agent intent parsing fell back to local route durationMs={}", elapsedMs(startedAt))
-        }.getOrNull()
+            ParsedAgentRoute(intent, target, keywords)
+        } catch (error: Exception) {
+            logger.info(
+                "Agent intent parser fallback category={} durationMs={}",
+                intentParserFailureCategory(error),
+                elapsedMs(startedAt)
+            )
+            null
+        }
     }
+
+    private fun intentParserFailureCategory(error: Exception): String = when {
+        error is IntentParserRouteException -> error.category
+        isProviderTimeout(error) -> "TIMEOUT"
+        error is org.springframework.web.client.HttpStatusCodeException -> "HTTP_ERROR"
+        else -> "PROVIDER_ERROR"
+    }
+
+    private class IntentParserRouteException(val category: String) : IllegalArgumentException(category)
 
     /** Reserved SSE path. Disabled by default through OPENAI_STREAM_ENABLED=false. */
     /**
