@@ -17,6 +17,19 @@ import java.time.LocalDateTime
 class DoctorInstitutionChangeMigrationTest {
 
     @Test
+    fun `revenue ledger migration creates immutable idempotent money structures`() {
+        val sql = migration("db/migration/V17__add_revenue_ledger.sql")
+        assertContains(sql, "CREATE TABLE settlement_allocations")
+        assertContains(sql, "CREATE TABLE wallets")
+        assertContains(sql, "CREATE TABLE wallet_ledger_entries")
+        assertContains(sql, "CREATE TABLE reconciliation_issues")
+        assertContains(sql, "UNIQUE KEY uk_settlements_order_id (order_id)")
+        assertContains(sql, "UNIQUE KEY uk_wallet_owner_currency (owner_type, owner_id, currency)")
+        assertContains(sql, "UNIQUE KEY uk_wallet_ledger_operation (operation_key)")
+        assertContains(sql, "CHECK (pending_minor >= 0 AND available_minor >= 0 AND frozen_minor >= 0)")
+    }
+
+    @Test
     fun `V13 migration declares the doctor institution request ledger contract`() {
         val migration = requireNotNull(
             javaClass.getResource("/db/migration/V13__add_doctor_institution_change_requests.sql")
@@ -435,6 +448,9 @@ class DoctorInstitutionChangeMigrationTest {
             execute(dataSource)
         }
     }
+
+    private fun migration(path: String): String =
+        requireNotNull(javaClass.getResource("/$path")).readText().replace(Regex("\\s+"), " ").trim()
 
     private fun seedHistoricalFixtures(jdbcTemplate: JdbcTemplate) {
         jdbcTemplate.update(
