@@ -41,7 +41,31 @@ data class AgentRouteAssessment(
 class AgentIntentRouter {
     fun assess(query: String, contextType: String): AgentRouteAssessment {
         val currentAssessment = assessCurrent(query, contextType)
-        return currentAssessment.copy(decision = decide(query, contextType))
+        val decision = completeDetailContext(currentAssessment.decision, contextType)
+        if (decision == currentAssessment.decision) return currentAssessment
+
+        val reasons = if (decision.queryTarget != null) {
+            currentAssessment.ambiguityReasons - "MULTIPLE_CONSTRAINTS_WITHOUT_TARGET"
+        } else {
+            currentAssessment.ambiguityReasons
+        }
+        val confidence = (currentAssessment.confidence + 0.15 +
+            if ("MULTIPLE_CONSTRAINTS_WITHOUT_TARGET" in currentAssessment.ambiguityReasons && decision.queryTarget != null) 0.20 else 0.0
+            ).coerceAtMost(1.0)
+        val requiresContextCompletion = "UNRESOLVED_CURRENT_REFERENCE" in reasons ||
+            (currentAssessment.requiresContextCompletion && decision.queryTarget == null)
+        return currentAssessment.copy(
+            decision = decision,
+            confidence = confidence,
+            requiresLlmParsing = requiresLlmParsing(
+                decision.intent,
+                confidence,
+                reasons,
+                requiresContextCompletion
+            ),
+            ambiguityReasons = reasons,
+            requiresContextCompletion = requiresContextCompletion
+        )
     }
 
     fun assessCurrent(query: String, contextType: String): AgentRouteAssessment {
@@ -56,22 +80,10 @@ class AgentIntentRouter {
         val institutionSignals = matchSignals(normalized, institutionTerms)
         val projectSignals = matchSignals(normalized, projectTerms)
         val unresolvedReferenceSignals = matchSignals(normalized, unresolvedReferenceTerms)
-        val allSignals = listOf(
-            safetySignals,
-            detailSummarySignals,
-            comparisonSignals,
-            planningSignals,
-            catalogSignals,
-            institutionProjectSignals,
-            doctorSignals,
-            institutionSignals,
-            projectSignals,
-            unresolvedReferenceSignals
-        )
         val reasons = mutableListOf<String>()
         var score = 0.55
 
-        if (allSignals.any(MatchedSignals::ambiguousNegation)) {
+        if (matchSignals(normalized, routingTerms).ambiguousNegation) {
             reasons += "AMBIGUOUS_NEGATION"
         }
         val queryTarget = when {
@@ -132,14 +144,7 @@ class AgentIntentRouter {
         val confidence = score.coerceIn(0.0, 1.0)
         val requiresContextCompletion = (intent in intentsRequiringTarget && queryTarget == null) ||
             "UNRESOLVED_CURRENT_REFERENCE" in reasons
-        val needsLlm = intent != AgentIntent.SAFETY_SCREENING && (
-            confidence < 0.70 ||
-                "AMBIGUOUS_NEGATION" in reasons ||
-                "CONFLICTING_CURRENT_TARGETS" in reasons ||
-                "UNRESOLVED_CURRENT_REFERENCE" in reasons ||
-                "UNCLASSIFIED_AESTHETIC_REQUEST" in reasons ||
-                requiresContextCompletion
-            )
+        val needsLlm = requiresLlmParsing(intent, confidence, reasons, requiresContextCompletion)
         return AgentRouteAssessment(
             decision = validatedDecision(intent, queryTarget),
             confidence = confidence,
@@ -171,14 +176,34 @@ class AgentIntentRouter {
     }
 
     fun decide(query: String, contextType: String): AgentIntentDecision {
-        val detailContext = contextType.uppercase() in detailContextTypes
         val currentDecision = assessCurrent(query, contextType).decision
-        if (!detailContext || currentDecision.intent == AgentIntent.SAFETY_SCREENING) return currentDecision
+        return completeDetailContext(currentDecision, contextType)
+    }
 
+    private fun completeDetailContext(
+        currentDecision: AgentIntentDecision,
+        contextType: String
+    ): AgentIntentDecision {
+        val detailContext = contextType.uppercase() in detailContextTypes
+        if (!detailContext || currentDecision.intent == AgentIntent.SAFETY_SCREENING) return currentDecision
         val queryTarget = currentDecision.queryTarget ?: AgentQueryTarget.valueOf(contextType.uppercase())
         val intent = if (currentDecision.intent == AgentIntent.GENERAL_CHAT) AgentIntent.CATALOG_QA else currentDecision.intent
         return validatedDecision(intent, queryTarget)
     }
+
+    private fun requiresLlmParsing(
+        intent: AgentIntent,
+        confidence: Double,
+        reasons: List<String>,
+        requiresContextCompletion: Boolean
+    ): Boolean = intent != AgentIntent.SAFETY_SCREENING && (
+        confidence < 0.70 ||
+            "AMBIGUOUS_NEGATION" in reasons ||
+            "CONFLICTING_CURRENT_TARGETS" in reasons ||
+            "UNRESOLVED_CURRENT_REFERENCE" in reasons ||
+            "UNCLASSIFIED_AESTHETIC_REQUEST" in reasons ||
+            requiresContextCompletion
+        )
 
     private data class MatchedSignals(
         val positiveTerms: List<String>,
@@ -202,10 +227,10 @@ class AgentIntentRouter {
                 selected
             }
             val negators = negatorIndexes(clause)
-            if (negators.size > 1) ambiguousNegation = true
             val negatedMatches = negators.mapNotNull { negator ->
                 matches.minByOrNull { kotlin.math.abs(it.index - negator.index) }
             }.toSet()
+            if (negatedMatches.size < negators.size) ambiguousNegation = true
             matches.forEach { match ->
                 if (match in negatedMatches) negatedTerms += match.term else positiveTerms += match.term
             }
@@ -295,5 +320,7 @@ class AgentIntentRouter {
             "recommend", "appointment", "ipl", "aopt", "dpl", "laser", "botox", "filler", "thermage",
             "skin", "dull", "pores", "texture", "spots", "pigmentation", "acne", "wrinkle", "aging", "sagging", "hollow"
         )
+        val routingTerms = safetyTerms + detailSummaryTerms + comparisonTerms + planningTerms + catalogTerms +
+            institutionProjectTerms + doctorTerms + institutionTerms + projectTerms + unresolvedReferenceTerms
     }
 }

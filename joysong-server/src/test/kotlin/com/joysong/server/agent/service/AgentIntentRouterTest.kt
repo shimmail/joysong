@@ -36,6 +36,17 @@ class AgentIntentRouterTest {
     }
 
     @Test
+    fun `assessment keeps legacy confidence after detail context completes the route`() {
+        val result = router.assess("恢复期多久", "PROJECT")
+
+        assertEquals(AgentIntent.CATALOG_QA, result.decision.intent)
+        assertEquals(AgentQueryTarget.PROJECT, result.decision.queryTarget)
+        assertEquals(0.80, result.confidence)
+        assertFalse(result.requiresLlmParsing)
+        assertFalse(result.requiresContextCompletion)
+    }
+
+    @Test
     fun `safety takes precedence and avoids recommendations`() {
         val result = router.decide("我在孕期，可以做热玛吉吗", "GENERAL")
         assertEquals(AgentIntent.SAFETY_SCREENING, result.intent)
@@ -112,6 +123,16 @@ class AgentIntentRouterTest {
 
         assertTrue("AMBIGUOUS_NEGATION" in result.ambiguityReasons)
         assertTrue(result.requiresLlmParsing)
+    }
+
+    @Test
+    fun `separate negations in one clause remain deterministic`() {
+        val result = router.assessCurrent("我不看医生不比较项目，推荐机构", "GENERAL")
+
+        assertEquals(AgentIntent.CATALOG_QA, result.decision.intent)
+        assertEquals(AgentQueryTarget.INSTITUTION, result.decision.queryTarget)
+        assertFalse("AMBIGUOUS_NEGATION" in result.ambiguityReasons)
+        assertFalse(result.requiresLlmParsing)
     }
 
     @ParameterizedTest(name = "{0}")
