@@ -33,6 +33,12 @@ class InstitutionService(
     ])
     fun deleteById(id: String) = institutionRepository.deleteById(id)
 
+    @Caching(evict = [
+        CacheEvict(cacheNames = ["institutions"], allEntries = true),
+        CacheEvict(cacheNames = ["discover"], allEntries = true)
+    ])
+    fun evictInstitutionAndDiscoverCaches() = Unit
+
     fun findByNameContainingOrCityContaining(name: String, city: String): List<InstitutionEntity> =
         institutionRepository.findByNameContainingOrCityContaining(name, city)
 
