@@ -2,8 +2,10 @@ package com.joysong.server.order.service
 
 import com.joysong.server.order.dto.OrderStatusEnum
 import com.joysong.server.order.repository.OrderRepository
-import com.joysong.server.settlement.service.SettlementService
+import com.joysong.server.settlement.repository.SettlementRepository
+import com.joysong.server.settlement.service.SettlementReleaseService
 import org.slf4j.LoggerFactory
+import org.springframework.data.domain.PageRequest
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import java.time.LocalDateTime
@@ -19,7 +21,8 @@ import java.time.LocalDateTime
 class OrderScheduledTasks(
     private val orderRepository: OrderRepository,
     private val orderService: OrderService,
-    private val settlementService: SettlementService
+    private val settlementRepository: SettlementRepository,
+    private val settlementReleaseService: SettlementReleaseService
 ) {
 
     companion object {
@@ -36,6 +39,8 @@ class OrderScheduledTasks(
 
         /** 自动好评等待天数（天） */
         private const val AUTO_REVIEW_DELAY_DAYS = 7L
+
+        private const val DUE_SETTLEMENT_BATCH_SIZE = 100
     }
 
     /**
@@ -124,15 +129,23 @@ class OrderScheduledTasks(
     }
 
     /**
-     * 结算到期：每天凌晨3点处理到期的结算记录，将其状态变更为 COMPLETED
+     * 结算到期：每天凌晨3点按结算 ID 分别释放可用余额，避免一个失败阻塞其他结算。
      */
     @Scheduled(cron = "0 0 3 * * ?")
     fun processSettlements() {
-        try {
-            settlementService.processDueSettlements()
-            log.info("结算到期任务执行完毕")
-        } catch (e: Exception) {
-            log.error("结算到期任务执行失败: {}", e.message, e)
+        val now = LocalDateTime.now()
+        val dueSettlementIds = settlementRepository.findDueSettlementIds(
+            "PENDING",
+            now,
+            PageRequest.of(0, DUE_SETTLEMENT_BATCH_SIZE)
+        )
+        dueSettlementIds.forEach { settlementId ->
+            try {
+                settlementReleaseService.release(settlementId, now)
+            } catch (e: Exception) {
+                log.error("释放到期结算[{}]失败: {}", settlementId, e.message, e)
+            }
         }
+        log.info("结算到期任务执行完毕, 共处理{}条", dueSettlementIds.size)
     }
 }
