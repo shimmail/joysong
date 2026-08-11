@@ -24,6 +24,7 @@ class DoctorInstitutionChangeMigrationTest {
         assertContains(sql, "CREATE TABLE wallet_ledger_entries")
         assertContains(sql, "CREATE TABLE reconciliation_issues")
         assertContains(sql, "UNIQUE KEY uk_settlements_order_id (order_id)")
+        assertContains(sql, "duplicate settlements.order_id rows require reconciliation")
         assertContains(sql, "UNIQUE KEY uk_wallet_owner_currency (owner_type, owner_id, currency)")
         assertContains(sql, "UNIQUE KEY uk_wallet_ledger_operation (operation_key)")
         assertContains(sql, "CHECK (pending_minor >= 0 AND available_minor >= 0 AND frozen_minor >= 0)")
@@ -54,11 +55,12 @@ class DoctorInstitutionChangeMigrationTest {
         assertContains(extension, "MODIFY COLUMN frozen_balance_minor BIGINT NOT NULL")
         assertContains(extension, "chk_wallet_ledger_balance_snapshots_non_negative")
 
-        val freshSchema = migration("db/migration/B1__init_schema.sql")
-        assertContains(freshSchema, "balance_bucket VARCHAR(20) NOT NULL DEFAULT 'PENDING'")
-        assertContains(freshSchema, "pending_balance_minor BIGINT NOT NULL")
-        assertContains(freshSchema, "available_balance_minor BIGINT NOT NULL")
-        assertContains(freshSchema, "frozen_balance_minor BIGINT NOT NULL")
+        val baseline = migration("db/migration/B1__init_schema.sql")
+        assertFalse(baseline.contains("CREATE TABLE settlement_allocations"))
+        assertFalse(baseline.contains("CREATE TABLE wallets"))
+        assertFalse(baseline.contains("CREATE TABLE wallet_ledger_entries"))
+        assertFalse(baseline.contains("CREATE TABLE reconciliation_issues"))
+        assertFalse(baseline.contains("uk_settlements_order_id"))
     }
 
     @Test

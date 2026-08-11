@@ -107,7 +107,7 @@ class ReviewServiceTest {
         every { reviewRepository.findByInstitutionProjectId(order.institutionProjectId) } returns
             listOf(review("review-1", 5), review("review-2", 2))
         stubAggregateTargets()
-        every { settlementService.saveSettlement(order.id) } returns io.mockk.mockk<SettlementEntity>()
+        every { settlementService.saveSettlement(order.id, any()) } returns io.mockk.mockk<SettlementEntity>()
 
         reviewService.submitReview(order.id, order.userId, 5, "great", "", "")
 
@@ -139,7 +139,7 @@ class ReviewServiceTest {
         every { reviewRepository.findByInstitutionProjectId(order.institutionProjectId) } returns
             listOf(review("automatic-review", 5))
         stubAggregateTargets()
-        every { settlementService.saveSettlement(order.id) } returns io.mockk.mockk<SettlementEntity>()
+        every { settlementService.saveSettlement(order.id, any()) } returns io.mockk.mockk<SettlementEntity>()
 
         val result = reviewService.submitAutomaticReview(order.id)
 
@@ -149,7 +149,7 @@ class ReviewServiceTest {
         verify { institutionRepository.save(match { it.reviewCount == 1 && it.rating == BigDecimal("5.0") }) }
         verify { doctorRepository.save(match { it.reviewCount == 1 && it.rating == BigDecimal("5.0") }) }
         verify { institutionProjectRepository.save(match { it.reviewCount == 1 && it.rating == BigDecimal("5.0") }) }
-        verify { settlementService.saveSettlement(order.id) }
+        verify { settlementService.saveSettlement(order.id, any()) }
     }
 
     @Test

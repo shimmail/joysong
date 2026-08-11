@@ -54,8 +54,8 @@ class SettlementService(
      * runs in a fresh transaction so a duplicate-key failure can be rolled back before reload.
      */
     @Transactional(rollbackFor = [Exception::class])
-    fun saveSettlement(orderId: String): SettlementEntity = try {
-        inNewTransaction { createSettlement(orderId) }
+    fun saveSettlement(orderId: String, settlementAt: LocalDateTime? = null): SettlementEntity = try {
+        inNewTransaction { createSettlement(orderId, settlementAt) }
     } catch (error: DataIntegrityViolationException) {
         if (error.hasSettlementOrderUniqueViolation()) {
             settlementRepository.findByOrderId(orderId) ?: throw error
@@ -64,7 +64,7 @@ class SettlementService(
         }
     }
 
-    private fun createSettlement(orderId: String): SettlementEntity {
+    private fun createSettlement(orderId: String, settlementAt: LocalDateTime?): SettlementEntity {
         val order = orderRepository.findByIdForUpdate(orderId)
             ?: throw IllegalArgumentException("订单不存在: $orderId")
         settlementRepository.findByOrderId(orderId)?.let { return it }
@@ -95,7 +95,7 @@ class SettlementService(
                 consultantRate = rates.consultantRate,
                 doctorRate = rates.doctorRate,
                 status = "PENDING",
-                settledAt = order.settlementAt
+                settledAt = settlementAt ?: order.settlementAt
             )
         )
         val allocations = allocationRepository.saveAll(

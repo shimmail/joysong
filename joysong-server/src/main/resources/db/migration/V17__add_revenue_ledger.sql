@@ -1,3 +1,21 @@
+-- Adding the one-settlement-per-order invariant is intentionally blocked until
+-- historical duplicates have been reconciled by an operator. Silently deleting
+-- financial rows here would destroy audit history.
+DELIMITER //
+DROP PROCEDURE IF EXISTS assert_no_duplicate_settlement_orders//
+CREATE PROCEDURE assert_no_duplicate_settlement_orders()
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM settlements GROUP BY order_id HAVING COUNT(*) > 1 LIMIT 1
+    ) THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'V17 blocked: duplicate settlements.order_id rows require reconciliation';
+    END IF;
+END//
+DELIMITER ;
+CALL assert_no_duplicate_settlement_orders();
+DROP PROCEDURE assert_no_duplicate_settlement_orders;
+
 ALTER TABLE settlements
     ADD UNIQUE KEY uk_settlements_order_id (order_id);
 
