@@ -54,6 +54,10 @@ interface OrderRepository : JpaRepository<OrderEntity, String> {
                     JOIN settlements s ON s.id = a.settlement_id
                     WHERE s.order_id = :orderId
                 )
+                OR EXISTS (
+                    SELECT 1 FROM wallet_ledger_entries l
+                    WHERE UPPER(l.source_type) = 'ORDER' AND l.source_id = :orderId
+                )
             THEN TRUE ELSE FALSE END
         """,
         nativeQuery = true

@@ -13,7 +13,8 @@ import com.joysong.server.payment.dto.PaymentAttemptResponse
 import com.joysong.server.payment.provider.PaymentProviderException
 import com.joysong.server.refund.service.RefundService
 import com.joysong.server.settlement.repository.SettlementRepository
-import com.joysong.server.wallet.dto.toSummaryDto
+import com.joysong.server.wallet.dto.toConsumerDto
+import com.joysong.server.payment.repository.PaymentRepository
 import com.joysong.server.review.dto.ReviewResponse
 import com.joysong.server.review.service.ReviewService
 import org.springframework.security.core.Authentication
@@ -36,7 +37,8 @@ class OrderController(
     private val refundService: RefundService,
     private val reviewService: ReviewService,
     private val orderStatusLogService: OrderStatusLogService,
-    private val settlementRepository: SettlementRepository
+    private val settlementRepository: SettlementRepository,
+    private val paymentRepository: PaymentRepository
 ) {
 
     /** 创建订单 */
@@ -87,7 +89,9 @@ class OrderController(
             ?: return BaseResponse.error<Any>("Order not found", 404)
         val settlement = settlementRepository.findByOrderId(order.id)
             ?: return BaseResponse.error<Any>("SETTLEMENT_NOT_GENERATED", 409)
-        return BaseResponse.success(settlement.toSummaryDto(order.settlementAt))
+        return BaseResponse.success(
+            settlement.toConsumerDto(order.settlementAt, paymentRepository.sumSucceededAmountMinor(order.id))
+        )
     }
 
     /** 支付面诊金 */
