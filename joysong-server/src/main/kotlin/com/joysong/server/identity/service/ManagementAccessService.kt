@@ -146,7 +146,9 @@ class ManagementAccessService(
         val manageableDoctorIds = buildSet {
             doctorId?.let(::add)
         }
-        if (doctorId == null && managedInstitutionIds.isEmpty() && CONSULTANT_ROLE !in activeRoles) {
+        if (doctorId == null && managedInstitutionIds.isEmpty() &&
+            DOCTOR_ROLE !in activeRoles && CONSULTANT_ROLE !in activeRoles
+        ) {
             throw AccessDeniedException("职业身份已通过，但管理档案或机构归属尚未建立，请联系平台处理")
         }
 
