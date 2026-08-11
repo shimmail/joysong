@@ -1345,6 +1345,7 @@ CREATE TABLE wallet_ledger_entries (
     UNIQUE KEY uk_wallet_ledger_operation (operation_key),
     KEY idx_wallet_ledger_wallet_created (wallet_id, created_at),
     KEY idx_wallet_ledger_source (source_type, source_id),
+    CONSTRAINT chk_wallet_ledger_balance_snapshots_non_negative CHECK (pending_balance_minor >= 0 AND available_balance_minor >= 0 AND frozen_balance_minor >= 0),
     CONSTRAINT fk_wallet_ledger_wallet FOREIGN KEY (wallet_id) REFERENCES wallets(id),
     CONSTRAINT fk_wallet_ledger_allocation FOREIGN KEY (allocation_id) REFERENCES settlement_allocations(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
