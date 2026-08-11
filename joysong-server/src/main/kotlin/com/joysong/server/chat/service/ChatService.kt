@@ -137,7 +137,9 @@ class ChatService(
     }
 
     fun getLastMessage(sessionId: String): String =
-        messageRepository.findFirstBySessionIdOrderByCreatedAtDesc(sessionId)?.content.orEmpty()
+        messageRepository.findFirstBySessionIdOrderByCreatedAtDesc(sessionId)
+            ?.let { PlanningCatalogProjection.projectStoredMessage(it, objectMapper).content }
+            .orEmpty()
 
     /**
      * 获取单个会话

@@ -53,3 +53,11 @@
 - 未新增数据库迁移，不需要也不会改写历史数据；安全变换只存在于读取响应副本。
 - metadata JSON 完全无法解析且没有可识别 `intent=PLANNING` 时保持既有容错行为，无法凭损坏 JSON 安全判断其意图；本次批准范围仅针对可识别的历史 `intent=PLANNING` 行。
 - 若未来新增其他读取 Agent 消息的入口，应复用 `PlanningCatalogProjection.projectStoredMessage`，不能直接暴露历史实体。
+
+## 复审补充：会话列表 lastMessage
+
+- Important 复审发现：`GET /api/chat/sessions` 通过 `ChatService.getLastMessage` 直接读取最新 `ChatMessageEntity.content`，未经过 `reconstruct` 或 `AgentContextBuilder.load`，因此历史 `SUCCEEDED + PLANNING` 最新回复仍可能出现在会话列表。
+- RED：新增真实 HTTP 会话列表 + 隔离 MySQL 回归测试，持久化旧 PLANNING 自由文本后，`lastMessage` 仍返回 `Choose Project A because it is perfect for you`；1 test / 1 failure。
+- 修复：`getLastMessage` 对仓库返回值复用 `PlanningCatalogProjection.projectStoredMessage`，只读取投影副本的正文，不修改数据库行。
+- GREEN：同一 Testcontainers 用例 1/1 通过，44 秒；同时确认数据库历史正文保持原样，普通 `CATALOG_QA` lastMessage 原样返回。
+- 隔离数据库仍为 `myapp_worktree_ai_agent_production_hardening`；未运行全量测试，未扩大到其他路径。
