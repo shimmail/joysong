@@ -51,6 +51,8 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.hamcrest.Matchers.containsString
+import org.hamcrest.Matchers.not
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.context.i18n.LocaleContextHolder
@@ -286,6 +288,57 @@ class AgentWorkflowCoreTest {
                 MediaType.APPLICATION_JSON
             )
         ).forEach(::assertParserFailureStillCompletes)
+    }
+
+    @Test
+    fun `generation prompt preserves safety comparison and institution labels`() {
+        assertGenerationPromptLabels(
+            userContent = "怀孕期间比较两个机构",
+            expectedPrimaryIntent = "SAFETY_SCREENING",
+            expectedLabels = listOf(
+                "请求动作：SAFETY_SCREENING,COMPARISON",
+                "请求对象：INSTITUTION"
+            )
+        )
+    }
+
+    @Test
+    fun `generation prompt preserves comparison planning and project labels`() {
+        assertGenerationPromptLabels(
+            userContent = "比较这些项目并制定方案",
+            expectedPrimaryIntent = "COMPARISON",
+            expectedLabels = listOf(
+                "请求动作：COMPARISON,PLANNING",
+                "请求对象：PROJECT"
+            )
+        )
+    }
+
+    @Test
+    fun `generation prompt keeps negative action only as prohibition`() {
+        assertGenerationPromptLabels(
+            userContent = "不要比较机构，请制定项目方案",
+            expectedPrimaryIntent = "PLANNING",
+            expectedLabels = listOf(
+                "请求动作：PLANNING",
+                "禁止动作：COMPARISON"
+            ),
+            absentLabels = listOf("请求动作：PLANNING,COMPARISON")
+        )
+    }
+
+    @Test
+    fun `parser failure keeps local positive labels in generation prompt`() {
+        assertGenerationPromptLabels(
+            userContent = "我不确定是否怀孕，比较项目并制定方案",
+            expectedPrimaryIntent = "COMPARISON",
+            expectedLabels = listOf(
+                "请求动作：COMPARISON,PLANNING",
+                "请求对象：PROJECT",
+                "待澄清动作：SAFETY_SCREENING"
+            ),
+            parserResponse = withException(SocketTimeoutException("intent parser timed out"))
+        )
     }
 
     @Test
@@ -989,6 +1042,45 @@ class AgentWorkflowCoreTest {
 
         assertEquals("CATALOG_QA", completed.captured.intent)
         assertEquals(null, completed.captured.queryTarget)
+        intentServer.verify()
+        completionServer.verify()
+    }
+
+    private fun assertGenerationPromptLabels(
+        userContent: String,
+        expectedPrimaryIntent: String,
+        expectedLabels: List<String>,
+        absentLabels: List<String> = emptyList(),
+        parserResponse: ResponseCreator? = null
+    ) {
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
+        val completed = slot<CompleteTurnCommand>()
+        prepareChatGeneration(fixture, userContent)
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "answer")
+        )
+        every { catalog.hasInstitutionProjectMatch(userContent) } returns false
+        every { catalog.contextualSearchQuery(userContent, emptyList()) } returns userContent
+        every { catalog.promptEvidence(any(), any(), any(), any()) } returns AgentPromptEvidence()
+        parserResponse?.let { response ->
+            intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+                .andRespond(response)
+        }
+        completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .apply {
+                expectedLabels.forEach { label -> andExpect(content().string(containsString(label))) }
+                absentLabels.forEach { label -> andExpect(content().string(not(containsString(label)))) }
+            }
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"answer"}}]}""", MediaType.APPLICATION_JSON))
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = userContent))
+
+        assertEquals(expectedPrimaryIntent, completed.captured.intent)
         intentServer.verify()
         completionServer.verify()
     }

@@ -30,6 +30,7 @@ import com.joysong.server.agent.service.AgentCatalogService
 import com.joysong.server.agent.service.AgentIntent
 import com.joysong.server.agent.service.AgentIntentDecision
 import com.joysong.server.agent.service.AgentIntentRouter
+import com.joysong.server.agent.service.AgentLabelPolarity
 import com.joysong.server.agent.service.AgentQueryTarget
 import com.joysong.server.agent.service.AgentPromptEvidence
 import com.joysong.server.agent.service.AgentRouteAssessment
@@ -68,6 +69,96 @@ private data class BoundedRouteContext(
     val decisions: List<AgentIntentDecision>,
     val ambiguityReasons: List<String>
 )
+
+private data class GenerationLabelSummary(
+    val requestedActions: List<AgentIntent>,
+    val requestedTargets: List<AgentQueryTarget>,
+    val uncertainActions: List<AgentIntent>,
+    val uncertainTargets: List<AgentQueryTarget>,
+    val prohibitedActions: List<AgentIntent>,
+    val prohibitedTargets: List<AgentQueryTarget>
+) {
+    fun promptConstraint(): String = listOfNotNull(
+        requestedActions.takeIf { it.isNotEmpty() }?.joinToString(",") { it.name }
+            ?.let { "请求动作：$it" },
+        requestedTargets.takeIf { it.isNotEmpty() }?.joinToString(",") { it.name }
+            ?.let { "请求对象：$it" },
+        uncertainActions.takeIf { it.isNotEmpty() }?.joinToString(",") { it.name }
+            ?.let { "待澄清动作：$it" },
+        uncertainTargets.takeIf { it.isNotEmpty() }?.joinToString(",") { it.name }
+            ?.let { "待澄清对象：$it" },
+        prohibitedActions.takeIf { it.isNotEmpty() }?.joinToString(",") { it.name }
+            ?.let { "禁止动作：$it" },
+        prohibitedTargets.takeIf { it.isNotEmpty() }?.joinToString(",") { it.name }
+            ?.let { "禁止对象：$it" }
+    ).takeIf { it.isNotEmpty() }?.joinToString("\n") { it }
+        ?.let {
+            """
+                【本轮结构化诉求标签】
+                $it
+                禁止动作或对象只表示限制，不得作为用户请求执行；待澄清标签只用于提出必要的澄清问题。
+            """.trimIndent()
+        }.orEmpty()
+}
+
+private fun generationLabelSummary(
+    local: AgentRouteAssessment,
+    parsed: ParsedAgentRoute?,
+    decision: AgentIntentDecision
+): GenerationLabelSummary {
+    val parsedActions = parsed?.let { it.intents + it.intent }.orEmpty()
+    val parsedTargets = parsed?.queryTarget?.let(::setOf).orEmpty()
+    val prohibitedActions = local.intentEvidence
+        .filter { it.polarity == AgentLabelPolarity.NEGATIVE }
+        .mapTo(linkedSetOf()) { it.intent }
+    val prohibitedTargets = local.targetEvidence
+        .filter { it.polarity == AgentLabelPolarity.NEGATIVE }
+        .mapTo(linkedSetOf()) { it.target }
+    val uncertainActions = local.intentEvidence
+        .filter { it.polarity == AgentLabelPolarity.UNCERTAIN }
+        .mapTo(linkedSetOf()) { it.intent }
+        .apply { removeAll(parsedActions) }
+    val uncertainTargets = local.targetEvidence
+        .filter { it.polarity == AgentLabelPolarity.UNCERTAIN }
+        .mapTo(linkedSetOf()) { it.target }
+        .apply { removeAll(parsedTargets) }
+    val requestedActions = local.intentEvidence
+        .filter { it.polarity == AgentLabelPolarity.POSITIVE }
+        .mapTo(linkedSetOf()) { it.intent }
+        .apply {
+            add(decision.intent)
+            addAll(parsedActions)
+            removeAll(prohibitedActions + uncertainActions)
+        }
+    val requestedTargets = local.targetEvidence
+        .filter { it.polarity == AgentLabelPolarity.POSITIVE }
+        .mapTo(linkedSetOf()) { it.target }
+        .apply {
+            decision.queryTarget?.let(::add)
+            addAll(parsedTargets)
+            removeAll(prohibitedTargets + uncertainTargets)
+        }
+    return GenerationLabelSummary(
+        requestedActions = orderedActions(requestedActions, decision.intent),
+        requestedTargets = orderedTargets(requestedTargets, decision.queryTarget),
+        uncertainActions = orderedActions(uncertainActions),
+        uncertainTargets = orderedTargets(uncertainTargets),
+        prohibitedActions = orderedActions(prohibitedActions),
+        prohibitedTargets = orderedTargets(prohibitedTargets)
+    )
+}
+
+private fun orderedActions(
+    labels: Set<AgentIntent>,
+    primary: AgentIntent? = null
+): List<AgentIntent> = listOfNotNull(primary?.takeIf(labels::contains)) +
+    AgentIntent.entries.filter { it != primary && it in labels }
+
+private fun orderedTargets(
+    labels: Set<AgentQueryTarget>,
+    primary: AgentQueryTarget? = null
+): List<AgentQueryTarget> = listOfNotNull(primary?.takeIf(labels::contains)) +
+    AgentQueryTarget.entries.filter { it != primary && it in labels }
 
 internal fun summaryContextDecision(
     topic: String,
@@ -331,6 +422,7 @@ class ChatService(
             parseAmbiguousRoute(content, routeAssessment, boundedContext.decisions)
         } else null
         val intentDecision = agentIntentRouter.mergeParsedRoute(routeAssessment, parsedRoute)
+        val labelSummary = generationLabelSummary(routeAssessment, parsedRoute, intentDecision)
         val previousUserQueries = historyMessages.filter { it.role.equals("USER", true) }
             .map { it.content }
             .takeLast(4)
@@ -345,7 +437,8 @@ class ChatService(
             session.contextId,
             content,
             catalogSearchQuery,
-            intentDecision
+            intentDecision,
+            labelSummary
         )
         llmMessages.add(mapOf("role" to "system", "content" to promptBuild.prompt))
         if (summary != null && summary != AgentSessionSummary()) {
@@ -651,11 +744,12 @@ class ChatService(
      */
     private fun getSystemPrompt(
         persona: String,
-        contextType: String = "GENERAL",
-        contextId: String = "",
-        userQuery: String = "",
-        catalogSearchQuery: String = userQuery,
-        intentDecision: AgentIntentDecision = agentIntentRouter.decide(catalogSearchQuery, contextType)
+        contextType: String,
+        contextId: String,
+        userQuery: String,
+        catalogSearchQuery: String,
+        intentDecision: AgentIntentDecision,
+        labelSummary: GenerationLabelSummary
     ): PromptBuildResult {
         val basePrompt = when (persona) {
             "BESTIE" -> "你是娇颜颂的AI闺蜜「小颜」。你性格活泼开朗、善解人意，像一个贴心的好朋友。你关心用户的日常状态，会适时提醒术后护理、鼓励记录变美日记。聊天语气轻松友好，偶尔用可爱的表情。当用户问到专业医美问题时，温柔地建议咨询专业美学咨询师。"
@@ -732,8 +826,16 @@ class ChatService(
             """.trimIndent()
             else -> ""
         }
+        val labelPolicy = labelSummary.promptConstraint()
         return PromptBuildResult(
-            prompt = listOf(basePrompt, responsePolicy, contextInfo, detailSessionPolicy, intentPolicy).filter(String::isNotBlank).joinToString("\n\n"),
+            prompt = listOf(
+                basePrompt,
+                responsePolicy,
+                contextInfo,
+                detailSessionPolicy,
+                intentPolicy,
+                labelPolicy
+            ).filter(String::isNotBlank).joinToString("\n\n"),
             groundingPrompt = evidenceInstruction,
             evidence = evidence
         )
