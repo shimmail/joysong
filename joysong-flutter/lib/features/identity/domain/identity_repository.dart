@@ -61,6 +61,21 @@ abstract interface class IdentityRepository {
     required String reviewNote,
   });
 
+  Future<List<DoctorInstitutionChangeRequest>>
+      listDoctorInstitutionChangeRequests();
+
+  Future<void> submitDoctorInstitutionChangeRequest(
+    DoctorInstitutionChangeRequestDraft draft,
+  );
+
+  Future<void> withdrawDoctorInstitutionChangeRequest(String id);
+
+  Future<void> reviewDoctorInstitutionChangeRequest({
+    required String id,
+    required String decision,
+    required String reviewNote,
+  });
+
   Future<List<ProfessionalProjectRequest>> listProfessionalProjectRequests();
 
   Future<void> submitPlatformProjectRequest(

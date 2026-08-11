@@ -265,6 +265,51 @@ final class ApiIdentityRepository implements IdentityRepository {
   }
 
   @override
+  Future<List<DoctorInstitutionChangeRequest>>
+      listDoctorInstitutionChangeRequests() async {
+    return await _apiClient.get<List<DoctorInstitutionChangeRequest>>(
+          '/management/institution-membership-requests',
+          decodeData: (json) => _objectList(json)
+              .map(DoctorInstitutionChangeRequest.fromJson)
+              .where((item) => item.requestType == 'DOCTOR')
+              .toList(growable: false),
+        ) ??
+        const [];
+  }
+
+  @override
+  Future<void> submitDoctorInstitutionChangeRequest(
+    DoctorInstitutionChangeRequestDraft draft,
+  ) async {
+    await _apiClient.post<void>(
+      '/management/institution-membership-requests',
+      body: draft.toJson(),
+      decodeData: (_) {},
+    );
+  }
+
+  @override
+  Future<void> withdrawDoctorInstitutionChangeRequest(String id) async {
+    await _apiClient.post<void>(
+      '/management/institution-membership-requests/DOCTOR/$id/withdraw',
+      decodeData: (_) {},
+    );
+  }
+
+  @override
+  Future<void> reviewDoctorInstitutionChangeRequest({
+    required String id,
+    required String decision,
+    required String reviewNote,
+  }) async {
+    await _apiClient.post<void>(
+      '/management/institution-membership-requests/DOCTOR/$id/review',
+      body: {'decision': decision, 'reviewNote': reviewNote},
+      decodeData: (_) {},
+    );
+  }
+
+  @override
   Future<List<ProfessionalProjectRequest>>
       listProfessionalProjectRequests() async {
     return await _apiClient.get<List<ProfessionalProjectRequest>>(
