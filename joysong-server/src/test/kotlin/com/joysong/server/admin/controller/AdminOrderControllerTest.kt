@@ -8,6 +8,9 @@ import com.joysong.server.order.service.OrderService
 import com.joysong.server.order.service.OrderSplitRatePolicy
 import com.joysong.server.order.service.OrderStatusLogService
 import com.joysong.server.settlement.repository.SettlementRepository
+import com.joysong.server.settlement.repository.SettlementAllocationRepository
+import com.joysong.server.wallet.repository.WalletLedgerEntryRepository
+import com.joysong.server.reconciliation.repository.ReconciliationIssueRepository
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -24,6 +27,9 @@ class AdminOrderControllerTest {
         val orderService = mockk<OrderService>()
         val orderStatusLogService = mockk<OrderStatusLogService>()
         val settlementRepository = mockk<SettlementRepository>()
+        val settlementAllocationRepository = mockk<SettlementAllocationRepository>()
+        val walletLedgerEntryRepository = mockk<WalletLedgerEntryRepository>()
+        val reconciliationIssueRepository = mockk<ReconciliationIssueRepository>()
         val configRepository = mockk<DoctorInstitutionProjectConfigRepository>()
         val accessService = mockk<ManagementAccessService>()
         every { accessService.actor(authentication) } returns adminActor()
@@ -34,6 +40,9 @@ class AdminOrderControllerTest {
             orderService,
             orderStatusLogService,
             settlementRepository,
+            settlementAllocationRepository,
+            walletLedgerEntryRepository,
+            reconciliationIssueRepository,
             configRepository,
             accessService,
             policy

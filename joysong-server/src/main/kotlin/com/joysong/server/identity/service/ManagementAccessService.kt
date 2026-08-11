@@ -91,6 +91,20 @@ class ManagementAccessService(
             false
         }
 
+    /**
+     * Returns only wallet owners derived from the authenticated actor.  Callers
+     * must never turn a request parameter into a money-owner scope.
+     */
+    fun walletScopes(actor: ManagementActor): List<WalletOwnerScope> = buildList {
+        actor.doctorId?.let { add(WalletOwnerScope("DOCTOR", setOf(it))) }
+        if (CONSULTANT_ROLE in actor.activeRoles) {
+            add(WalletOwnerScope("CONSULTANT", setOf(actor.userId)))
+        }
+        if (LEGAL_REP_ROLE in actor.activeRoles && actor.visibleInstitutionIds.isNotEmpty()) {
+            add(WalletOwnerScope("INSTITUTION", actor.visibleInstitutionIds))
+        }
+    }
+
     private fun actorFor(userId: String, isAdmin: Boolean): ManagementActor {
         require(count("SELECT COUNT(*) FROM users WHERE id = ? AND deleted_at IS NULL", userId) == 1L) {
             "用户不存在或已注销"
@@ -205,6 +219,11 @@ data class ManagementActor(
     val visibleInstitutionIds: Set<String>
         get() = managedInstitutionIds + doctorInstitutionIds
 }
+
+data class WalletOwnerScope(
+    val ownerType: String,
+    val ownerIds: Set<String>
+)
 
 data class ManagementContextView(
     val userId: String,

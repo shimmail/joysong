@@ -8,6 +8,11 @@ import com.joysong.server.order.service.OrderService
 import com.joysong.server.order.service.OrderSplitRatePolicy
 import com.joysong.server.order.service.OrderStatusLogService
 import com.joysong.server.settlement.repository.SettlementRepository
+import com.joysong.server.settlement.repository.SettlementAllocationRepository
+import com.joysong.server.reconciliation.repository.ReconciliationIssueRepository
+import com.joysong.server.wallet.repository.WalletLedgerEntryRepository
+import com.joysong.server.wallet.dto.toDto
+import com.joysong.server.wallet.dto.toSummaryDto
 import com.joysong.server.identity.service.ManagementAccessService
 import org.springframework.security.core.Authentication
 import org.springframework.security.access.AccessDeniedException
@@ -31,6 +36,9 @@ class AdminOrderController(
     private val orderService: OrderService,
     private val orderStatusLogService: OrderStatusLogService,
     private val settlementRepository: SettlementRepository,
+    private val settlementAllocationRepository: SettlementAllocationRepository,
+    private val walletLedgerEntryRepository: WalletLedgerEntryRepository,
+    private val reconciliationIssueRepository: ReconciliationIssueRepository,
     private val doctorInstitutionProjectConfigRepository: DoctorInstitutionProjectConfigRepository,
     private val managementAccessService: ManagementAccessService,
     private val splitRatePolicy: OrderSplitRatePolicy
@@ -125,8 +133,55 @@ class AdminOrderController(
         @RequestParam(defaultValue = "0") page: Int,
         @RequestParam(defaultValue = "20") size: Int
     ): BaseResponse<*> {
-        val pageRequest = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"))
-        return BaseResponse.success(settlementRepository.findAll(pageRequest))
+        val pageRequest = PageRequest.of(page.coerceAtLeast(0), size.coerceIn(1, 100), Sort.by(Sort.Direction.DESC, "createdAt"))
+        return BaseResponse.success(settlementRepository.findAll(pageRequest).map { it.toSummaryDto(null) })
+    }
+
+    @GetMapping("/settlements/{id}")
+    fun getSettlement(@PathVariable id: Long): BaseResponse<*> {
+        val settlement = settlementRepository.findById(id).orElse(null)
+            ?: return BaseResponse.error<Any>("结算记录不存在", 404)
+        return BaseResponse.success(settlement.toSummaryDto(null))
+    }
+
+    @GetMapping("/settlements/{id}/allocations")
+    fun getSettlementAllocations(@PathVariable id: Long): BaseResponse<*> {
+        val settlement = settlementRepository.findById(id).orElse(null)
+            ?: return BaseResponse.error<Any>("结算记录不存在", 404)
+        return BaseResponse.success(
+            settlementAllocationRepository.findAllBySettlementIdOrderByIdAsc(id).map { it.toDto(settlement.currency) }
+        )
+    }
+
+    @GetMapping("/ledger/{id}")
+    fun getLedgerEntry(@PathVariable id: Long): BaseResponse<*> {
+        val entry = walletLedgerEntryRepository.findById(id).orElse(null)
+            ?: return BaseResponse.error<Any>("账本记录不存在", 404)
+        return BaseResponse.success(entry.toDto())
+    }
+
+    @GetMapping("/reconciliation-issues")
+    fun listReconciliationIssues(
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "20") size: Int
+    ): BaseResponse<*> {
+        val result = reconciliationIssueRepository.findAll(
+            PageRequest.of(page.coerceAtLeast(0), size.coerceIn(1, 100), Sort.by(Sort.Direction.DESC, "lastDetectedAt"))
+        )
+        return BaseResponse.success(mapOf(
+            "content" to result.content.map { it.toDto() },
+            "totalElements" to result.totalElements,
+            "totalPages" to result.totalPages,
+            "number" to result.number,
+            "size" to result.size
+        ))
+    }
+
+    @GetMapping("/reconciliation-issues/{id}")
+    fun getReconciliationIssue(@PathVariable id: Long): BaseResponse<*> {
+        val issue = reconciliationIssueRepository.findById(id).orElse(null)
+            ?: return BaseResponse.error<Any>("对账问题不存在", 404)
+        return BaseResponse.success(issue.toDto())
     }
 
     /** 查询医生-机构项目配置列表 */
