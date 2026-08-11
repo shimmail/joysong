@@ -57,11 +57,17 @@ class _AgentChatPageState extends State<AgentChatPage> {
     final contextId = widget.initialContextId?.trim() ?? '';
     final contextName = widget.initialContextName?.trim() ?? '';
     if (contextType != null && contextId.isNotEmpty && contextName.isNotEmpty) {
-      await widget.chatController.startContextSummary(
-        contextType: contextType,
-        contextId: contextId,
-        contextName: contextName,
-      );
+      try {
+        await widget.chatController.startContextSummary(
+          contextType: contextType,
+          contextId: contextId,
+          contextName: contextName,
+        );
+      } on StateError catch (error) {
+        if (error.message != 'CHAT_SEND_IN_PROGRESS') rethrow;
+        // A shared controller may still be delivering its current REST turn.
+        // Keep that session instead of replacing it with context initialization.
+      }
     }
   }
 
