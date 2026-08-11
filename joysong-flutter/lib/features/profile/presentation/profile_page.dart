@@ -302,6 +302,8 @@ class _ProfilePageState extends State<ProfilePage> {
           repository: widget.identityRepository!,
           institutionImagePicker:
               widget.socialRepository == null ? null : _pickInstitutionImage,
+          doctorImagePicker:
+              widget.socialRepository == null ? null : _pickDoctorImage,
         ),
       ),
     );
@@ -317,7 +319,13 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  Future<String?> _pickInstitutionImage() async {
+  Future<String?> _pickInstitutionImage() =>
+      _pickPublicProfileImage(PublicMediaPurpose.institutionProfile);
+
+  Future<String?> _pickDoctorImage() =>
+      _pickPublicProfileImage(PublicMediaPurpose.doctorProfile);
+
+  Future<String?> _pickPublicProfileImage(PublicMediaPurpose purpose) async {
     final selected = await const AppFilePicker().pickImage();
     if (selected == null) return null;
     String? url;
@@ -326,7 +334,8 @@ class _ProfilePageState extends State<ProfilePage> {
         bytes: selected.bytes,
         fileName: selected.fileName,
         mimeType: selected.mimeType,
-        purpose: PublicMediaPurpose.institutionProfile,
+        purpose: purpose,
+        privacy: MediaPrivacy.publicContent,
       ),
     )) {
       if (progress.stage == UploadStage.failed) {

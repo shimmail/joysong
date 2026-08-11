@@ -363,11 +363,13 @@ class ManagementCenterPage extends StatefulWidget {
   const ManagementCenterPage({
     required this.repository,
     this.institutionImagePicker,
+    this.doctorImagePicker,
     super.key,
   });
 
   final IdentityRepository repository;
   final InstitutionProfileImagePicker? institutionImagePicker;
+  final Future<String?> Function()? doctorImagePicker;
 
   @override
   State<ManagementCenterPage> createState() => _ManagementCenterPageState();
@@ -424,6 +426,7 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
                 context: _controller.context!,
                 repository: widget.repository,
                 institutionImagePicker: widget.institutionImagePicker,
+                doctorImagePicker: widget.doctorImagePicker,
               ),
           };
         },
@@ -437,11 +440,13 @@ class _ManagementCapabilities extends StatelessWidget {
     required this.context,
     required this.repository,
     this.institutionImagePicker,
+    this.doctorImagePicker,
   });
 
   final ManagementContext context;
   final IdentityRepository repository;
   final InstitutionProfileImagePicker? institutionImagePicker;
+  final Future<String?> Function()? doctorImagePicker;
 
   @override
   Widget build(BuildContext buildContext) {
@@ -623,7 +628,10 @@ class _ManagementCapabilities extends StatelessWidget {
   void _openCapability(BuildContext context, String label) {
     if (label == '医生档案' || label == 'Doctor profile') {
       Navigator.of(context).push<void>(MaterialPageRoute(
-        builder: (_) => ManagedDoctorProfilePage(repository: repository),
+        builder: (_) => DoctorSelfProfilePage(
+          repository: repository,
+          pickAndUploadImage: doctorImagePicker,
+        ),
       ));
       return;
     }

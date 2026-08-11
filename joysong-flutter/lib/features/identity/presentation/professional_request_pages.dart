@@ -3,19 +3,24 @@ import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
 
-class ManagedDoctorProfilePage extends StatefulWidget {
-  const ManagedDoctorProfilePage({required this.repository, super.key});
+class DoctorSelfProfilePage extends StatefulWidget {
+  const DoctorSelfProfilePage({
+    required this.repository,
+    required this.pickAndUploadImage,
+    super.key,
+  });
 
   final IdentityRepository repository;
+  final Future<String?> Function()? pickAndUploadImage;
 
   @override
-  State<ManagedDoctorProfilePage> createState() =>
-      _ManagedDoctorProfilePageState();
+  State<DoctorSelfProfilePage> createState() => _DoctorSelfProfilePageState();
 }
 
-class _ManagedDoctorProfilePageState extends State<ManagedDoctorProfilePage> {
-  ManagedDoctorProfile? _profile;
+class _DoctorSelfProfilePageState extends State<DoctorSelfProfilePage> {
+  DoctorSelfProfile? _profile;
   String? _error;
+  var _loading = true;
 
   @override
   void initState() {
@@ -24,24 +29,50 @@ class _ManagedDoctorProfilePageState extends State<ManagedDoctorProfilePage> {
   }
 
   Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
-      final profiles = await widget.repository.listManagedDoctorProfiles();
-      if (mounted) setState(() => _profile = profiles.firstOrNull);
+      final profile = await widget.repository.loadDoctorSelfProfile();
+      if (!mounted) return;
+      setState(() {
+        _profile = profile;
+        _loading = false;
+      });
     } catch (_) {
-      if (mounted) setState(() => _error = '医生档案加载失败，请重试');
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = '医生档案加载失败，请重试';
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: Text(context.localized('医生档案', 'Doctor Profile'))),
-        body: _error != null
-            ? Center(child: Text(_error!))
-            : _profile == null
-                ? const Center(child: CircularProgressIndicator())
+        appBar:
+            AppBar(title: Text(context.localized('医生档案', 'Doctor Profile'))),
+        body: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _error != null
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(_error!),
+                        const SizedBox(height: 12),
+                        FilledButton(
+                          onPressed: _load,
+                          child: Text(context.localized('重试', 'Retry')),
+                        ),
+                      ],
+                    ),
+                  )
                 : _DoctorProfileForm(
                     repository: widget.repository,
                     profile: _profile!,
+                    pickAndUploadImage: widget.pickAndUploadImage,
                     onSaved: (profile) => setState(() => _profile = profile),
                   ),
       );
@@ -51,12 +82,14 @@ class _DoctorProfileForm extends StatefulWidget {
   const _DoctorProfileForm({
     required this.repository,
     required this.profile,
+    required this.pickAndUploadImage,
     required this.onSaved,
   });
 
   final IdentityRepository repository;
-  final ManagedDoctorProfile profile;
-  final ValueChanged<ManagedDoctorProfile> onSaved;
+  final DoctorSelfProfile profile;
+  final Future<String?> Function()? pickAndUploadImage;
+  final ValueChanged<DoctorSelfProfile> onSaved;
 
   @override
   State<_DoctorProfileForm> createState() => _DoctorProfileFormState();
@@ -70,7 +103,11 @@ class _DoctorProfileFormState extends State<_DoctorProfileForm> {
   late final TextEditingController _specialties;
   late final TextEditingController _credentials;
   late final TextEditingController _tags;
+  late String _avatar;
+  late List<String> _credentialImages;
   var _saving = false;
+  var _uploadingAvatar = false;
+  var _uploadingCredential = false;
   String? _error;
 
   @override
@@ -84,6 +121,8 @@ class _DoctorProfileFormState extends State<_DoctorProfileForm> {
     _specialties = TextEditingController(text: profile.specialties);
     _credentials = TextEditingController(text: profile.credentials);
     _tags = TextEditingController(text: profile.certificationTags);
+    _avatar = profile.avatar.trim();
+    _credentialImages = _parseCsv(profile.credentialImages);
   }
 
   @override
@@ -106,21 +145,127 @@ class _DoctorProfileFormState extends State<_DoctorProfileForm> {
   Widget build(BuildContext context) => ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          _requestField(_name, context.localized('姓名', 'Name')),
-          _requestField(_title, context.localized('职称', 'Title')),
-          _requestField(_bio, context.localized('个人简介', 'Biography'), maxLines: 4),
-          _requestField(_phone, context.localized('公开联系电话', 'Public phone')),
+          _requestField(
+            _name,
+            context.localized('姓名', 'Name'),
+            fieldKey: const Key('doctor-name'),
+          ),
+          _requestField(
+            _title,
+            context.localized('职称', 'Title'),
+            fieldKey: const Key('doctor-title'),
+          ),
+          _requestField(
+            _bio,
+            context.localized('个人简介', 'Biography'),
+            fieldKey: const Key('doctor-bio'),
+            maxLines: 4,
+          ),
+          _requestField(
+            _phone,
+            context.localized('公开联系电话', 'Public phone'),
+            fieldKey: const Key('doctor-contact-phone'),
+          ),
           _requestField(
             _specialties,
             context.localized('擅长项目', 'Specialties'),
+            fieldKey: const Key('doctor-specialties'),
             maxLines: 3,
           ),
           _requestField(
             _credentials,
             context.localized('公开资历', 'Public credentials'),
+            fieldKey: const Key('doctor-credentials'),
             maxLines: 3,
           ),
-          _requestField(_tags, context.localized('认证标签', 'Certification tags')),
+          _requestField(
+            _tags,
+            context.localized('认证标签', 'Certification tags'),
+            fieldKey: const Key('doctor-certification-tags'),
+          ),
+          Text(
+            context.localized('医生头像', 'Doctor avatar'),
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _avatar.isEmpty
+                ? context.localized('暂未上传', 'Not uploaded')
+                : _avatar,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton.icon(
+                key: const Key('doctor-avatar-upload'),
+                onPressed: _uploadsDisabled || widget.pickAndUploadImage == null
+                    ? null
+                    : _pickAvatar,
+                icon: const Icon(Icons.upload_outlined),
+                label: Text(widget.pickAndUploadImage == null
+                    ? context.localized('上传暂不可用', 'Upload unavailable')
+                    : context.localized('上传/更换头像', 'Upload/replace avatar')),
+              ),
+              TextButton.icon(
+                key: const Key('doctor-avatar-remove'),
+                onPressed: _uploadsDisabled || _avatar.isEmpty
+                    ? null
+                    : () => setState(() => _avatar = ''),
+                icon: const Icon(Icons.delete_outline),
+                label: Text(context.localized('移除头像', 'Remove avatar')),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Text(
+            context.localized(
+              '医生上传的证书图片/展示材料',
+              'Doctor-uploaded certificate images/display materials',
+            ),
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            context.localized(
+              '这些内容将公开展示，不代表平台认证。',
+              'These materials are public display content and do not represent platform verification.',
+            ),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 8),
+          for (final (index, image) in _credentialImages.indexed)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.image_outlined),
+              title: Text(
+                image,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: IconButton(
+                key: Key('doctor-credential-remove-$index'),
+                tooltip: context.localized('移除材料', 'Remove material'),
+                onPressed: _uploadsDisabled
+                    ? null
+                    : () => setState(() => _credentialImages.removeAt(index)),
+                icon: const Icon(Icons.delete_outline),
+              ),
+            ),
+          OutlinedButton.icon(
+            key: const Key('doctor-credential-upload'),
+            onPressed: _uploadsDisabled || widget.pickAndUploadImage == null
+                ? null
+                : _pickCredential,
+            icon: const Icon(Icons.add_photo_alternate_outlined),
+            label: Text(widget.pickAndUploadImage == null
+                ? context.localized('上传暂不可用', 'Upload unavailable')
+                : context.localized('添加展示材料', 'Add display material')),
+          ),
+          const SizedBox(height: 16),
           if (_error != null)
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
@@ -130,12 +275,49 @@ class _DoctorProfileFormState extends State<_DoctorProfileForm> {
               ),
             ),
           FilledButton.icon(
-            onPressed: _saving ? null : _save,
+            onPressed: _uploadsDisabled ? null : _save,
             icon: const Icon(Icons.save_outlined),
             label: Text(context.localized('保存', 'Save')),
           ),
         ],
       );
+
+  bool get _uploadsDisabled =>
+      _saving || _uploadingAvatar || _uploadingCredential;
+
+  Future<void> _pickAvatar() async {
+    setState(() {
+      _uploadingAvatar = true;
+      _error = null;
+    });
+    try {
+      final value = (await widget.pickAndUploadImage?.call())?.trim();
+      if (mounted && value != null && value.isNotEmpty) {
+        setState(() => _avatar = value);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _error = '图片上传失败，请重试');
+    } finally {
+      if (mounted) setState(() => _uploadingAvatar = false);
+    }
+  }
+
+  Future<void> _pickCredential() async {
+    setState(() {
+      _uploadingCredential = true;
+      _error = null;
+    });
+    try {
+      final value = (await widget.pickAndUploadImage?.call())?.trim();
+      if (mounted && value != null && value.isNotEmpty) {
+        setState(() => _credentialImages.add(value));
+      }
+    } catch (_) {
+      if (mounted) setState(() => _error = '图片上传失败，请重试');
+    } finally {
+      if (mounted) setState(() => _uploadingCredential = false);
+    }
+  }
 
   Future<void> _save() async {
     if (_name.text.trim().isEmpty) {
@@ -147,25 +329,24 @@ class _DoctorProfileFormState extends State<_DoctorProfileForm> {
       _error = null;
     });
     try {
-      final current = widget.profile;
-      final saved = await widget.repository.updateManagedDoctorProfile(
-        ManagedDoctorProfileDraft(
-          id: current.id,
+      final saved = await widget.repository.updateDoctorSelfProfile(
+        DoctorSelfProfileUpdate(
           name: _name.text,
           title: _title.text,
           bio: _bio.text,
-          avatar: current.avatar,
+          avatar: _avatar,
           contactPhone: _phone.text,
           specialties: _specialties.text,
           credentials: _credentials.text,
-          credentialImages: current.credentialImages,
+          credentialImages: _credentialImages.join(','),
           certificationTags: _tags.text,
         ),
       );
       widget.onSaved(saved);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(context.localized('医生档案已保存', 'Profile saved'))),
+          SnackBar(
+              content: Text(context.localized('医生档案已保存', 'Profile saved'))),
         );
       }
     } catch (_) {
@@ -1063,18 +1244,26 @@ Future<({String decision, String note})?> _showReviewDialog(
 Widget _requestField(
   TextEditingController controller,
   String label, {
+  Key? fieldKey,
   int maxLines = 1,
   TextInputType? keyboardType,
 }) =>
     Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: TextField(
+        key: fieldKey,
         controller: controller,
         maxLines: maxLines,
         keyboardType: keyboardType,
         decoration: InputDecoration(labelText: label),
       ),
     );
+
+List<String> _parseCsv(String value) => value
+    .split(',')
+    .map((item) => item.trim())
+    .where((item) => item.isNotEmpty)
+    .toList();
 
 String _statusLabel(String status) => switch (status) {
       'PENDING' => '待审核',

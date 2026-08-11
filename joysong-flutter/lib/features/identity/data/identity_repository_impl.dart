@@ -213,30 +213,6 @@ final class ApiIdentityRepository implements IdentityRepository {
   }
 
   @override
-  Future<List<ManagedDoctorProfile>> listManagedDoctorProfiles() async {
-    return await _apiClient.get<List<ManagedDoctorProfile>>(
-          '/admin/doctors',
-          decodeData: (json) => _objectList(json)
-              .map(ManagedDoctorProfile.fromJson)
-              .toList(growable: false),
-        ) ??
-        const [];
-  }
-
-  @override
-  Future<ManagedDoctorProfile> updateManagedDoctorProfile(
-    ManagedDoctorProfileDraft draft,
-  ) async {
-    final result = await _apiClient.put<ManagedDoctorProfile>(
-      '/admin/doctors/${draft.id}',
-      body: draft.toJson(),
-      decodeData: ManagedDoctorProfile.fromJson,
-    );
-    if (result == null) throw const FormatException('医生档案响应为空');
-    return result;
-  }
-
-  @override
   Future<List<InstitutionOption>> listInstitutionOptions() async {
     return await _apiClient.get<List<InstitutionOption>>(
           '/discover/institutions',

@@ -544,19 +544,6 @@ final class _FakeIdentityRepository implements IdentityRepository {
   }
 
   @override
-  Future<List<ManagedDoctorProfile>> listManagedDoctorProfiles() async => [
-        ManagedDoctorProfile.fromJson({'id': 'doctor-1', 'name': '测试医生'}),
-      ];
-
-  @override
-  Future<ManagedDoctorProfile> updateManagedDoctorProfile(
-    ManagedDoctorProfileDraft draft,
-  ) async => ManagedDoctorProfile.fromJson({
-        ...draft.toJson(),
-        'id': draft.id,
-      });
-
-  @override
   Future<DoctorSelfProfile> loadDoctorSelfProfile() {
     throw UnimplementedError();
   }

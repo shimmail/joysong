@@ -117,11 +117,24 @@ class DoctorDetailView extends StatelessWidget {
                 child: KeyedSubtree(
                   key: sectionKeys[0],
                   child: _Section(
-                    title: context.localized('资质保险箱', 'Credentials vault'),
-                    trailing: Text(context.localized('查资质', 'Verify')),
+                    title: context.localized(
+                      '医生上传的证书图片/展示材料',
+                      'Doctor-uploaded certificate images/display materials',
+                    ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        Text(
+                          context.localized(
+                            '内容由医生公开上传，仅用于展示，不代表平台认证。',
+                            'Uploaded by the doctor for public display; this does not represent platform verification.',
+                          ),
+                          style: const TextStyle(
+                            height: 1.45,
+                            color: Color(0xff777777),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
                         Text(
                           context.localized('医生实力', 'Professional profile'),
                           style: const TextStyle(
@@ -439,8 +452,8 @@ class _DoctorTabsDelegate extends SliverPersistentHeaderDelegate {
   Widget build(
       BuildContext context, double shrinkOffset, bool overlapsContent) {
     final labels = context.isEnglish
-        ? const ['Credentials', 'Projects', 'Diaries', 'Reviews', 'Clinics']
-        : const ['资质保险箱', '可预约项目', '用户日记', '用户评价', '出诊机构'];
+        ? const ['Materials', 'Projects', 'Diaries', 'Reviews', 'Clinics']
+        : const ['展示材料', '可预约项目', '用户日记', '用户评价', '出诊机构'];
     return DetailAnchorBar(labels: labels, onTap: onSectionClick);
   }
 

@@ -25,12 +25,6 @@ abstract interface class IdentityRepository {
     DoctorSelfProfileUpdate update,
   );
 
-  Future<List<ManagedDoctorProfile>> listManagedDoctorProfiles();
-
-  Future<ManagedDoctorProfile> updateManagedDoctorProfile(
-    ManagedDoctorProfileDraft draft,
-  );
-
   Future<List<ManagementProjectOption>> listManagementProjects();
 
   Future<ManagementProjectOption> createManagementProject(

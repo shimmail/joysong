@@ -375,6 +375,7 @@ String _folder(PublicMediaPurpose purpose) => switch (purpose) {
       PublicMediaPurpose.avatar => 'avatars',
       PublicMediaPurpose.directMessage => 'dm',
       PublicMediaPurpose.institutionProfile => 'institutions',
+      PublicMediaPurpose.doctorProfile => 'doctors',
     };
 
 String _uploadMessage(Object error) {
