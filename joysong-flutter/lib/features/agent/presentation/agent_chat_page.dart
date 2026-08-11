@@ -82,8 +82,8 @@ class _AgentChatPageState extends State<AgentChatPage> {
 
   void _scrollToEnd() {
     if (!_stickToBottom) return;
-    // Streaming responses may emit many tokens per second. Coalescing their
-    // scroll requests avoids repeatedly restarting an animation every frame.
+    // Coalesce rapid chat state changes so they do not repeatedly restart a
+    // scroll animation within the same frame window.
     _scrollDebounce ??= Timer(const Duration(milliseconds: 80), () {
       _scrollDebounce = null;
       if (!mounted || !_stickToBottom) return;
@@ -164,7 +164,6 @@ class _AgentChatPageState extends State<AgentChatPage> {
               if (state.errorMessage != null)
                 _StatusBanner(
                   message: state.errorMessage!,
-                  state: state.deliveryState,
                 ),
               Expanded(
                 child: state.messages.isEmpty
@@ -182,8 +181,6 @@ class _AgentChatPageState extends State<AgentChatPage> {
               _Composer(
                 inputController: _inputController,
                 isBusy: state.deliveryState.isBusy,
-                isStreaming: state.deliveryState == ChatDeliveryState.streaming,
-                onCancel: widget.chatController.cancelSend,
                 onSend: () {
                   final text = _inputController.text;
                   if (text.trim().isEmpty) return;
@@ -490,9 +487,8 @@ class _ChatBubble extends StatelessWidget {
 }
 
 class _StatusBanner extends StatelessWidget {
-  const _StatusBanner({required this.message, required this.state});
+  const _StatusBanner({required this.message});
   final String message;
-  final ChatDeliveryState state;
 
   @override
   Widget build(BuildContext context) => Semantics(
@@ -502,9 +498,7 @@ class _StatusBanner extends StatelessWidget {
           child: Row(
             children: [
               Icon(
-                state == ChatDeliveryState.cancelled
-                    ? Icons.stop_circle_outlined
-                    : Icons.info_outline,
+                Icons.info_outline,
                 size: 18,
               ),
               const SizedBox(width: 8),
@@ -519,14 +513,10 @@ class _Composer extends StatelessWidget {
   const _Composer({
     required this.inputController,
     required this.isBusy,
-    required this.isStreaming,
-    required this.onCancel,
     required this.onSend,
   });
   final TextEditingController inputController;
   final bool isBusy;
-  final bool isStreaming;
-  final Future<void> Function() onCancel;
   final VoidCallback onSend;
 
   @override
@@ -551,9 +541,9 @@ class _Composer extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               IconButton.filled(
-                tooltip: isBusy ? '停止生成' : '发送',
-                onPressed: isBusy ? onCancel : onSend,
-                icon: Icon(isBusy ? Icons.stop : Icons.send),
+                tooltip: '发送',
+                onPressed: isBusy ? null : onSend,
+                icon: const Icon(Icons.send),
               ),
             ],
           ),

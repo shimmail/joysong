@@ -11,7 +11,6 @@ import 'package:joysong_flutter/features/account_security/presentation/account_s
 import 'package:joysong_flutter/features/account_security/presentation/account_security_page.dart';
 import 'package:joysong_flutter/features/agent/data/agent_remote_data_source.dart';
 import 'package:joysong_flutter/features/agent/data/agent_repository_impl.dart';
-import 'package:joysong_flutter/features/agent/data/chat_sse_transport.dart';
 import 'package:joysong_flutter/features/agent/domain/agent_models.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_chat_controller.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_chat_page.dart';
@@ -62,9 +61,6 @@ class AppShell extends StatefulWidget {
   const AppShell({
     required this.agentConfig,
     this.apiClient,
-    this.apiRoot,
-    this.accessTokenProvider,
-    this.languageTagProvider,
     this.allowPreviewData = false,
     this.currentUserId = '',
     this.onSwitchAccount,
@@ -74,9 +70,6 @@ class AppShell extends StatefulWidget {
 
   final AgentConfig agentConfig;
   final ApiClient? apiClient;
-  final Uri? apiRoot;
-  final AccessTokenProvider? accessTokenProvider;
-  final LanguageTagProvider? languageTagProvider;
   final bool allowPreviewData;
   final String currentUserId;
   final Future<void> Function(BuildContext context)? onSwitchAccount;
@@ -120,10 +113,6 @@ class _AppShellState extends State<AppShell> {
   void didUpdateWidget(covariant AppShell oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.apiClient != widget.apiClient ||
-        oldWidget.apiRoot != widget.apiRoot ||
-        oldWidget.accessTokenProvider != widget.accessTokenProvider ||
-        oldWidget.languageTagProvider != widget.languageTagProvider ||
-        oldWidget.agentConfig.sseEnabled != widget.agentConfig.sseEnabled ||
         oldWidget.agentConfig.recentMessageLimit !=
             widget.agentConfig.recentMessageLimit ||
         oldWidget.currentUserId != widget.currentUserId) {
@@ -185,26 +174,14 @@ class _AppShellState extends State<AppShell> {
       },
     );
 
-    final apiRoot = widget.apiRoot;
-    final accessTokenProvider = widget.accessTokenProvider;
-    if (apiRoot != null && accessTokenProvider != null) {
-      final agentRepository = AgentRepositoryImpl(
-        ApiAgentRemoteDataSource(
-          apiClient: apiClient,
-          streamTransport: HttpChatStreamTransport(
-            apiRoot: apiRoot,
-            accessTokenProvider: accessTokenProvider,
-            languageTagProvider: widget.languageTagProvider,
-          ),
-        ),
-      );
-      _agentChatController = AgentChatController(
-        repository: agentRepository,
-        streamingEnabled: widget.agentConfig.sseEnabled,
-        recentMessageLimit: widget.agentConfig.recentMessageLimit,
-      );
-      _agentPlanController = AgentPlanController(agentRepository);
-    }
+    final agentRepository = AgentRepositoryImpl(
+      ApiAgentRemoteDataSource(apiClient: apiClient),
+    );
+    _agentChatController = AgentChatController(
+      repository: agentRepository,
+      recentMessageLimit: widget.agentConfig.recentMessageLimit,
+    );
+    _agentPlanController = AgentPlanController(agentRepository);
   }
 
   void _disposeControllers() {

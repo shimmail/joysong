@@ -9,11 +9,9 @@ enum AppPlatform { android, ios }
 @immutable
 class AgentConfig {
   const AgentConfig({
-    this.sseEnabled = false,
     this.recentMessageLimit = 20,
   });
 
-  final bool sseEnabled;
   final int recentMessageLimit;
 }
 
@@ -40,7 +38,6 @@ class AppEnvironment {
       ),
       baseUrl: const String.fromEnvironment('API_BASE_URL'),
       agentConfig: const AgentConfig(
-        sseEnabled: false,
         recentMessageLimit: 20,
       ),
     );

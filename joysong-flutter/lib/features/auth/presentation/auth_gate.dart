@@ -12,9 +12,6 @@ class AuthGate extends StatelessWidget {
     required this.controller,
     required this.agentConfig,
     this.apiClient,
-    this.apiRoot,
-    this.accessTokenProvider,
-    this.languageTagProvider,
     this.allowPreviewData = false,
     super.key,
   });
@@ -22,9 +19,6 @@ class AuthGate extends StatelessWidget {
   final AuthController controller;
   final AgentConfig agentConfig;
   final ApiClient? apiClient;
-  final Uri? apiRoot;
-  final AccessTokenProvider? accessTokenProvider;
-  final LanguageTagProvider? languageTagProvider;
   final bool allowPreviewData;
 
   @override
@@ -79,9 +73,6 @@ class AuthGate extends StatelessWidget {
               key: ValueKey(controller.currentUser?.id),
               agentConfig: agentConfig,
               apiClient: apiClient,
-              apiRoot: apiRoot,
-              accessTokenProvider: accessTokenProvider,
-              languageTagProvider: languageTagProvider,
               allowPreviewData: allowPreviewData,
               currentUserId: controller.currentUser?.id ?? '',
               onSwitchAccount: _showAccountSwitcher,

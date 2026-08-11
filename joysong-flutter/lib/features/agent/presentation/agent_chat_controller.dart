@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/features/agent/domain/agent_models.dart';
@@ -9,25 +7,12 @@ enum ChatDeliveryState {
   idle,
   loadingHistory,
   sending,
-  streaming,
   completed,
   failed,
-  cancelled,
-  disconnected,
 }
 
 extension ChatDeliveryStateX on ChatDeliveryState {
-  bool get isBusy =>
-      this == ChatDeliveryState.sending || this == ChatDeliveryState.streaming;
-
-  bool get isTerminal => switch (this) {
-        ChatDeliveryState.completed ||
-        ChatDeliveryState.failed ||
-        ChatDeliveryState.cancelled ||
-        ChatDeliveryState.disconnected =>
-          true,
-        _ => false,
-      };
+  bool get isBusy => this == ChatDeliveryState.sending;
 }
 
 class AgentChatState {
@@ -76,21 +61,16 @@ class AgentChatState {
 class AgentChatController extends ChangeNotifier {
   AgentChatController({
     required AgentRepository repository,
-    this.streamingEnabled = true,
     this.recentMessageLimit = 20,
-    this.persona = ChatPersona.consultant,
   })  : assert(recentMessageLimit > 0),
         _repository = repository;
 
   final AgentRepository _repository;
-  final bool streamingEnabled;
   final int recentMessageLimit;
-  final ChatPersona persona;
 
   AgentChatState _state = const AgentChatState();
   AgentChatState get state => _state;
 
-  ChatStreamConnection? _activeConnection;
   int _operation = 0;
   int _localId = 0;
   bool _disposed = false;
@@ -98,7 +78,9 @@ class AgentChatController extends ChangeNotifier {
   Future<void> loadSessions() async {
     _emit(_state.copyWith(isLoadingSessions: true, clearError: true));
     try {
-      final sessions = await _repository.getSessions(persona: persona);
+      final sessions = await _repository.getSessions(
+        persona: ChatPersona.consultant,
+      );
       _emit(_state.copyWith(sessions: sessions, isLoadingSessions: false));
       // Restore the most recently updated conversation when the page is
       // recreated, so persisted history is immediately visible.
@@ -116,7 +98,7 @@ class AgentChatController extends ChangeNotifier {
   }
 
   Future<void> openSession(ChatSession session) async {
-    await cancelSend();
+    if (_state.deliveryState.isBusy) return;
     final operation = ++_operation;
     _emit(
       _state.copyWith(
@@ -151,7 +133,7 @@ class AgentChatController extends ChangeNotifier {
   }
 
   void startNewSession() {
-    unawaited(cancelSend());
+    if (_state.deliveryState.isBusy) return;
     ++_operation;
     _emit(
       _state.copyWith(
@@ -176,7 +158,7 @@ class AgentChatController extends ChangeNotifier {
         normalizedName.isEmpty) {
       return;
     }
-    await cancelSend();
+    if (_state.deliveryState.isBusy) return;
     final operation = ++_operation;
     _emit(
       _state.copyWith(
@@ -189,7 +171,7 @@ class AgentChatController extends ChangeNotifier {
     );
     try {
       final session = await _repository.createSession(
-        persona: persona,
+        persona: ChatPersona.consultant,
         contextType: contextType,
         contextId: normalizedId,
         title: normalizedName,
@@ -218,7 +200,7 @@ class AgentChatController extends ChangeNotifier {
   }
 
   Future<void> deleteSession(ChatSession session) async {
-    await cancelSend();
+    if (_state.deliveryState.isBusy) return;
     final operation = ++_operation;
     _emit(_state.copyWith(clearError: true));
     try {
@@ -246,7 +228,7 @@ class AgentChatController extends ChangeNotifier {
   Future<void> clearActiveMessages() async {
     final session = _state.activeSession;
     if (session == null) return;
-    await cancelSend();
+    if (_state.deliveryState.isBusy) return;
     final operation = ++_operation;
     _emit(_state.copyWith(clearError: true));
     try {
@@ -267,11 +249,11 @@ class AgentChatController extends ChangeNotifier {
   }
 
   Future<void> clearSessions() async {
-    await cancelSend();
+    if (_state.deliveryState.isBusy) return;
     final operation = ++_operation;
     _emit(_state.copyWith(clearError: true));
     try {
-      await _repository.clearSessions(persona: persona);
+      await _repository.clearSessions(persona: ChatPersona.consultant);
       if (!_isCurrent(operation)) return;
       _emit(
         _state.copyWith(
@@ -308,7 +290,7 @@ class AgentChatController extends ChangeNotifier {
     try {
       final session = _state.activeSession ??
           await _repository.createSession(
-            persona: persona,
+            persona: ChatPersona.consultant,
             contextType: ChatContextType.general,
             title: normalized.length <= 20
                 ? normalized
@@ -327,11 +309,7 @@ class AgentChatController extends ChangeNotifier {
         ),
       );
 
-      if (streamingEnabled) {
-        await _sendStreaming(session, normalized, operation);
-      } else {
-        await _sendNonStreaming(session, normalized, operation);
-      }
+      await _sendRest(session, normalized, operation);
     } on Object catch (error) {
       if (!_isCurrent(operation)) return;
       _emit(
@@ -343,7 +321,7 @@ class AgentChatController extends ChangeNotifier {
     }
   }
 
-  Future<void> _sendNonStreaming(
+  Future<void> _sendRest(
     ChatSession session,
     String content,
     int operation,
@@ -380,97 +358,6 @@ class AgentChatController extends ChangeNotifier {
     }
   }
 
-  Future<void> _sendStreaming(
-    ChatSession session,
-    String content,
-    int operation,
-  ) async {
-    final temporaryAssistant = _temporaryMessage(session.id, 'ASSISTANT', '');
-    _emit(
-      _state.copyWith(
-        messages: _latest([..._state.messages, temporaryAssistant]),
-        deliveryState: ChatDeliveryState.streaming,
-      ),
-    );
-    var receivedTerminalEvent = false;
-    try {
-      // Opening the connection sends the one and only POST for this turn.
-      final connection = await _repository.streamMessage(session.id, content);
-      if (!_isCurrent(operation)) {
-        await connection.cancel();
-        return;
-      }
-      _activeConnection = connection;
-      await for (final event in connection.events) {
-        if (!_isCurrent(operation)) return;
-        switch (event.type) {
-          case ChatStreamEventType.delta:
-            _appendDelta(temporaryAssistant.id, event.content ?? '');
-          case ChatStreamEventType.done:
-            final turn = event.turn!;
-            receivedTerminalEvent = true;
-            _replaceMessage(temporaryAssistant.id, turn.message);
-            _emit(
-              _state.copyWith(
-                deliveryState: ChatDeliveryState.completed,
-                latestTurn: turn,
-              ),
-            );
-          case ChatStreamEventType.error:
-            receivedTerminalEvent = true;
-            _emit(
-              _state.copyWith(
-                deliveryState: ChatDeliveryState.failed,
-                errorMessage: event.message ?? '流式响应失败',
-              ),
-            );
-        }
-        if (receivedTerminalEvent) break;
-      }
-      if (_isCurrent(operation) && !receivedTerminalEvent) {
-        _emit(
-          _state.copyWith(
-            deliveryState: ChatDeliveryState.disconnected,
-            errorMessage: '连接已中断，已保留收到的内容；如需重试请手动发送。',
-          ),
-        );
-      }
-    } on Object catch (error) {
-      if (!_isCurrent(operation)) return;
-      final hasPartial = _state.messages.any(
-        (message) =>
-            message.id == temporaryAssistant.id && message.content.isNotEmpty,
-      );
-      _emit(
-        _state.copyWith(
-          deliveryState: hasPartial
-              ? ChatDeliveryState.disconnected
-              : ChatDeliveryState.failed,
-          errorMessage:
-              hasPartial ? '连接已中断，已保留收到的内容；如需重试请手动发送。' : _messageFor(error),
-        ),
-      );
-    } finally {
-      if (_isCurrent(operation)) {
-        _activeConnection = null;
-      }
-    }
-  }
-
-  Future<void> cancelSend() async {
-    if (!_state.deliveryState.isBusy) return;
-    final connection = _activeConnection;
-    ++_operation;
-    _activeConnection = null;
-    _emit(
-      _state.copyWith(
-        deliveryState: ChatDeliveryState.cancelled,
-        errorMessage: '已停止生成，已保留收到的内容。',
-      ),
-    );
-    await connection?.cancel();
-  }
-
   ChatMessage _temporaryMessage(
           String sessionId, String role, String content) =>
       ChatMessage(
@@ -481,21 +368,6 @@ class AgentChatController extends ChangeNotifier {
         createdAt: DateTime.now().toIso8601String(),
         isTemporary: true,
       );
-
-  void _appendDelta(String messageId, String delta) {
-    if (delta.isEmpty) return;
-    _emit(
-      _state.copyWith(
-        messages: [
-          for (final message in _state.messages)
-            if (message.id == messageId)
-              message.copyWith(content: '${message.content}$delta')
-            else
-              message,
-        ],
-      ),
-    );
-  }
 
   void _replaceMessage(String messageId, ChatMessage replacement) {
     _emit(
@@ -554,8 +426,6 @@ class AgentChatController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     ++_operation;
-    unawaited(_activeConnection?.cancel());
-    _activeConnection = null;
     super.dispose();
   }
 }

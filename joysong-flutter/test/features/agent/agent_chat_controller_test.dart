@@ -1,6 +1,10 @@
-import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:joysong_flutter/core/network/api_client.dart';
+import 'package:joysong_flutter/core/network/api_exception.dart';
+import 'package:joysong_flutter/features/agent/data/agent_remote_data_source.dart';
 import 'package:joysong_flutter/features/agent/domain/agent_models.dart';
 import 'package:joysong_flutter/features/agent/domain/agent_repository.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_chat_controller.dart';
@@ -10,7 +14,6 @@ void main() {
     final messages = _messages(25);
     final controller = AgentChatController(
       repository: _FakeAgentRepository(messages: messages),
-      streamingEnabled: false,
       recentMessageLimit: 20,
     );
 
@@ -26,7 +29,6 @@ void main() {
     final messages = _messages(25);
     final controller = AgentChatController(
       repository: _FakeAgentRepository(messages: messages),
-      streamingEnabled: false,
       recentMessageLimit: 20,
     );
     await controller.openSession(_session);
@@ -38,108 +40,73 @@ void main() {
     expect(controller.state.messages.last.content, '完整答复');
   });
 
-  test('non-streaming sends one POST and reaches completed', () async {
+  test('send uses REST exactly once and reaches completed', () async {
     final repository = _FakeAgentRepository();
     final controller = AgentChatController(
       repository: repository,
-      streamingEnabled: false,
       recentMessageLimit: 20,
     );
 
     await controller.send('想改善肤质');
 
     expect(repository.createCalls, 1);
-    expect(repository.nonStreamCalls, 1);
+    expect(repository.sendCalls, 1);
     expect(repository.streamCalls, 0);
     expect(controller.state.deliveryState, ChatDeliveryState.completed);
     expect(controller.state.messages.last.content, '完整答复');
   });
 
-  test('stream done replaces temporary text and completes once', () async {
-    final connection = _FakeConnection();
-    final repository = _FakeAgentRepository(connection: connection);
+  test('failed REST send is attempted once and awaits manual retry', () async {
+    final repository = _FakeAgentRepository(sendError: StateError('offline'));
     final controller = AgentChatController(repository: repository);
 
-    final sending = controller.send('请给建议');
-    await _waitFor(() => repository.streamCalls == 1);
-    connection.eventsController
-      ..add(const ChatStreamEvent.delta('部分'))
-      ..add(ChatStreamEvent.done(_turn('最终答复')))
-      ..close();
-    await sending;
+    await controller.send('想改善肤质');
 
-    expect(repository.streamCalls, 1);
-    expect(repository.nonStreamCalls, 0);
-    expect(controller.state.deliveryState, ChatDeliveryState.completed);
-    expect(controller.state.messages.last.content, '最终答复');
-    expect(controller.state.messages.last.isTemporary, isFalse);
-  });
-
-  test('server error preserves delta and never falls back to another POST',
-      () async {
-    final connection = _FakeConnection();
-    final repository = _FakeAgentRepository(connection: connection);
-    final controller = AgentChatController(repository: repository);
-
-    final sending = controller.send('问题');
-    await _waitFor(() => repository.streamCalls == 1);
-    connection.eventsController
-      ..add(const ChatStreamEvent.delta('已收到'))
-      ..add(const ChatStreamEvent.error('模型繁忙'))
-      ..close();
-    await sending;
-
+    expect(repository.sendCalls, 1);
+    expect(repository.streamCalls, 0);
     expect(controller.state.deliveryState, ChatDeliveryState.failed);
-    expect(controller.state.messages.last.content, '已收到');
-    expect(controller.state.errorMessage, '模型繁忙');
-    expect(repository.streamCalls, 1);
-    expect(repository.nonStreamCalls, 0);
   });
 
-  test('EOF without terminal event is disconnected and preserves delta',
-      () async {
-    final connection = _FakeConnection();
-    final repository = _FakeAgentRepository(connection: connection);
-    final controller = AgentChatController(repository: repository);
+  test('REST send includes an idempotency key in exactly one POST', () async {
+    var requests = 0;
+    Map<String, Object?>? requestBody;
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+    server.listen((request) async {
+      requests += 1;
+      requestBody = (jsonDecode(await utf8.decoder.bind(request).join()) as Map)
+          .cast<String, Object?>();
+      request.response
+        ..statusCode = HttpStatus.ok
+        ..headers.contentType = ContentType.json
+        ..write(jsonEncode({
+          'code': 200,
+          'message': 'ok',
+          'data': _turnJson('完整答复'),
+        }));
+      await request.response.close();
+    });
+    final client = ApiClient(
+      apiRoot: Uri.parse(
+        'http://${server.address.host}:${server.port}/api/',
+      ),
+    );
+    addTearDown(client.close);
+    final remote = ApiAgentRemoteDataSource(
+      apiClient: client,
+    );
 
-    final sending = controller.send('问题');
-    await _waitFor(() => repository.streamCalls == 1);
-    connection.eventsController
-      ..add(const ChatStreamEvent.delta('半段内容'))
-      ..close();
-    await sending;
+    await remote.sendMessage(_session.id, '想改善肤质');
 
-    expect(controller.state.deliveryState, ChatDeliveryState.disconnected);
-    expect(controller.state.messages.last.content, '半段内容');
-    expect(repository.streamCalls, 1);
-    expect(repository.nonStreamCalls, 0);
+    expect(requests, 1);
+    expect(requestBody?['content'], '想改善肤质');
+    expect(
+      requestBody?['idempotencyKey'],
+      isA<String>()
+          .having((value) => value.isNotEmpty, 'is not empty', isTrue)
+          .having((value) => value.length <= 100, 'length', isTrue),
+    );
   });
-
-  test('active cancellation is terminal and closes only current stream',
-      () async {
-    final connection = _FakeConnection();
-    final repository = _FakeAgentRepository(connection: connection);
-    final controller = AgentChatController(repository: repository);
-
-    final sending = controller.send('问题');
-    await _waitFor(() => repository.streamCalls == 1);
-    connection.eventsController.add(const ChatStreamEvent.delta('保留'));
-    await _waitFor(() => controller.state.messages.last.content == '保留');
-    await controller.cancelSend();
-    await sending;
-
-    expect(connection.cancelCalls, 1);
-    expect(controller.state.deliveryState, ChatDeliveryState.cancelled);
-    expect(controller.state.messages.last.content, '保留');
-    expect(repository.streamCalls, 1);
-  });
-}
-
-Future<void> _waitFor(bool Function() condition) async {
-  for (var index = 0; index < 20 && !condition(); index++) {
-    await Future<void>.delayed(Duration.zero);
-  }
-  expect(condition(), isTrue);
 }
 
 ChatTurn _turn(String content) => ChatTurn(
@@ -156,6 +123,21 @@ ChatTurn _turn(String content) => ChatTurn(
       queryTarget: null,
       nextAction: 'NONE',
     );
+
+Map<String, Object?> _turnJson(String content) => {
+      'message': {
+        'id': 'assistant-1',
+        'sessionId': _session.id,
+        'role': 'ASSISTANT',
+        'content': content,
+        'createdAt': '2026-08-06T10:01:00',
+      },
+      'catalogReport': null,
+      'catalogItems': const <Object?>[],
+      'intent': 'GENERAL_CHAT',
+      'queryTarget': null,
+      'nextAction': 'NONE',
+    };
 
 const _session = ChatSession(
   id: 'session-1',
@@ -180,27 +162,16 @@ List<ChatMessage> _messages(int count) => List.generate(
       growable: false,
     );
 
-class _FakeConnection implements ChatStreamConnection {
-  final eventsController = StreamController<ChatStreamEvent>();
-  int cancelCalls = 0;
-
-  @override
-  Stream<ChatStreamEvent> get events => eventsController.stream;
-
-  @override
-  Future<void> cancel() async {
-    cancelCalls++;
-    if (!eventsController.isClosed) await eventsController.close();
-  }
-}
-
 class _FakeAgentRepository extends Fake implements AgentRepository {
-  _FakeAgentRepository({this.connection, this.messages = const []});
+  _FakeAgentRepository({
+    this.messages = const [],
+    this.sendError,
+  });
 
-  final _FakeConnection? connection;
   final List<ChatMessage> messages;
+  final Object? sendError;
   int createCalls = 0;
-  int nonStreamCalls = 0;
+  int sendCalls = 0;
   int streamCalls = 0;
 
   @override
@@ -225,16 +196,8 @@ class _FakeAgentRepository extends Fake implements AgentRepository {
 
   @override
   Future<ChatTurn> sendMessage(String sessionId, String content) async {
-    nonStreamCalls++;
+    sendCalls++;
+    if (sendError case final error?) throw error;
     return _turn('完整答复');
-  }
-
-  @override
-  Future<ChatStreamConnection> streamMessage(
-    String sessionId,
-    String content,
-  ) async {
-    streamCalls++;
-    return connection!;
   }
 }

@@ -1,6 +1,5 @@
 import 'package:joysong_flutter/core/network/api_client.dart';
 import 'package:joysong_flutter/features/agent/domain/agent_models.dart';
-import 'package:joysong_flutter/features/agent/domain/agent_repository.dart';
 
 abstract interface class AgentRemoteDataSource {
   Future<ChatSession> createSession({
@@ -13,11 +12,6 @@ abstract interface class AgentRemoteDataSource {
   Future<List<ChatSession>> getSessions({ChatPersona? persona});
 
   Future<ChatTurn> sendMessage(String sessionId, String content);
-
-  Future<ChatStreamConnection> streamMessage(
-    String sessionId,
-    String content,
-  );
 
   Future<List<ChatMessage>> getMessages(
     String sessionId, {
@@ -54,22 +48,11 @@ abstract interface class AgentRemoteDataSource {
   Future<AgentCatalogReport> createCatalogReport(String query, String mode);
 }
 
-abstract interface class ChatStreamTransport {
-  Future<ChatStreamConnection> open({
-    required String path,
-    required String content,
-  });
-}
-
 final class ApiAgentRemoteDataSource implements AgentRemoteDataSource {
-  ApiAgentRemoteDataSource({
-    required ApiClient apiClient,
-    required ChatStreamTransport streamTransport,
-  })  : _apiClient = apiClient,
-        _streamTransport = streamTransport;
+  ApiAgentRemoteDataSource({required ApiClient apiClient})
+      : _apiClient = apiClient;
 
   final ApiClient _apiClient;
-  final ChatStreamTransport _streamTransport;
 
   @override
   Future<ChatSession> createSession({
@@ -111,20 +94,13 @@ final class ApiAgentRemoteDataSource implements AgentRemoteDataSource {
       _requireData(
         await _apiClient.post<ChatTurn>(
           'chat/sessions/$sessionId/messages',
-          body: {'content': _validateContent(content)},
+          body: {
+            'content': _validateContent(content),
+            'idempotencyKey': generateApiRequestId(),
+          },
           decodeData: ChatTurn.fromJson,
         ),
         '发送消息',
-      );
-
-  @override
-  Future<ChatStreamConnection> streamMessage(
-    String sessionId,
-    String content,
-  ) =>
-      _streamTransport.open(
-        path: 'chat/sessions/$sessionId/messages/stream',
-        content: _validateContent(content),
       );
 
   @override
