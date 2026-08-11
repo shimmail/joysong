@@ -20,6 +20,7 @@ import io.mockk.MockKAnnotations
 import io.mockk.every
 import io.mockk.impl.annotations.MockK
 import io.mockk.verify
+import org.springframework.data.jpa.repository.Query
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -150,6 +151,69 @@ class RevenueReconciliationServiceTest {
     }
 
     @Test
+    fun `recovery issue opens updates and resolves only through explicit recovery resolution`() {
+        val recovery = com.joysong.server.settlement.service.RecoveryRequiredRevenueIssue(
+            refundId = "refund-1", refundItemId = "item-1", allocationId = 7,
+            ownerType = "DOCTOR", ownerId = "doctor-1", currency = "USD", uncoveredMinor = 35
+        )
+
+        service.recordRecoveryRequired(recovery)
+        service.recordRecoveryRequired(recovery.copy(uncoveredMinor = 20))
+        service.resolveRecoveryRequired("ALLOCATION", "7")
+
+        verify(exactly = 2) {
+            issueRepository.upsertActiveIssue("RECOVERY_REQUIRED", "ALLOCATION", "7", any(), 0, "USD", "CRITICAL", any())
+        }
+        verify(exactly = 1) { issueRepository.resolveActiveIssue("RECOVERY_REQUIRED", "ALLOCATION", "7") }
+    }
+
+    @Test
+    fun `invalid reversed allocation status remains an allocation ledger issue`() {
+        arrangeSettlement(
+            total = 100,
+            payments = 100,
+            refunds = 0,
+            allocations = allocations().map { if (it.id == 1L) allocation(1, SettlementAllocationOwnerType.PLATFORM, reversed = 25) else it }
+        )
+        every { ledgerRepository.findAllByAllocationIdOrderByIdAsc(1) } returns emptyList()
+        every { ledgerRepository.findAllByAllocationIdOrderByIdAsc(2) } returns ledgerForAllocation(2)
+        every { ledgerRepository.findAllByAllocationIdOrderByIdAsc(3) } returns ledgerForAllocation(3)
+        every { ledgerRepository.findAllByAllocationIdOrderByIdAsc(4) } returns ledgerForAllocation(4)
+
+        service.reconcileSettlement(1)
+
+        verify(exactly = 1) {
+            issueRepository.upsertActiveIssue("ALLOCATION_VS_LEDGER", "ALLOCATION", "1", any(), any(), "USD", "ERROR", any())
+        }
+        verify(exactly = 0) { issueRepository.resolveActiveIssue("ALLOCATION_VS_LEDGER", "ALLOCATION", "1") }
+    }
+
+    @Test
+    fun `wallet reports cumulative delta disagreement even when latest snapshot equals projection`() {
+        every { walletRepository.findById(10) } returns Optional.of(wallet(id = 10, pending = 10))
+        every { ledgerRepository.findAllByWalletIdOrderByIdAsc(10) } returns listOf(
+            ledger(walletId = 10, pending = 8, snapshotPending = 8),
+            ledger(walletId = 10, pending = 0, snapshotPending = 10)
+        )
+
+        service.reconcileWallet(10)
+
+        verify(exactly = 1) {
+            issueRepository.upsertActiveIssue("WALLET_VS_LEDGER", "WALLET", "10", 10, 8, "USD", "ERROR", any())
+        }
+    }
+
+    @Test
+    fun `native issue upsert uses generated active key duplicate update semantics`() {
+        val query = ReconciliationIssueRepository::class.java.methods.single { it.name == "upsertActiveIssue" }
+            .getAnnotation(Query::class.java)
+
+        assertTrue(query.nativeQuery)
+        assertTrue(query.value.contains("ON DUPLICATE KEY UPDATE"))
+        assertTrue(query.value.contains("occurrence_count = occurrence_count + 1"))
+    }
+
+    @Test
     fun `missing settlement and wallet fail explicitly`() {
         every { settlementRepository.findById(404) } returns Optional.empty()
         every { walletRepository.findById(405) } returns Optional.empty()
@@ -172,10 +236,15 @@ class RevenueReconciliationServiceTest {
         allocation(3, SettlementAllocationOwnerType.CONSULTANT), allocation(4, SettlementAllocationOwnerType.DOCTOR)
     )
 
-    private fun allocation(id: Long, owner: SettlementAllocationOwnerType) = SettlementAllocationEntity(
+    private fun allocation(
+        id: Long,
+        owner: SettlementAllocationOwnerType,
+        reversed: Long = 0,
+        status: SettlementAllocationStatus = SettlementAllocationStatus.PENDING,
+        bucket: SettlementAllocationBalanceBucket = SettlementAllocationBalanceBucket.PENDING
+    ) = SettlementAllocationEntity(
         id = id, settlementId = 1, ownerType = owner, ownerId = "owner-$id", ownerName = "owner-$id",
-        rate = BigDecimal.ZERO, amountMinor = 25, balanceBucket = SettlementAllocationBalanceBucket.PENDING,
-        status = SettlementAllocationStatus.PENDING
+        rate = BigDecimal.ZERO, amountMinor = 25, reversedMinor = reversed, balanceBucket = bucket, status = status
     )
 
     private fun ledgerForAllocation(id: Long) = listOf(ledger(allocationId = id, pending = 25, snapshotPending = 25))
