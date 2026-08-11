@@ -7,6 +7,7 @@ import 'package:joysong_flutter/core/routing/app_router.dart';
 import 'package:joysong_flutter/features/auth/domain/auth_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
 import 'package:joysong_flutter/features/identity/presentation/identity_pages.dart';
+import 'package:joysong_flutter/features/identity/presentation/institution_relationships_page.dart';
 import 'package:joysong_flutter/features/profile/domain/profile_models.dart';
 import 'package:joysong_flutter/features/profile/domain/profile_repository.dart';
 import 'package:joysong_flutter/features/profile/presentation/edit_profile_page.dart';
@@ -142,6 +143,15 @@ class _ProfilePageState extends State<ProfilePage> {
                   subtitle: context.localized('进入时实时校验专业能力',
                       'Professional access is verified on entry'),
                   onTap: _openManagementCenter,
+                ),
+                _MenuItem(
+                  icon: Icons.account_tree_outlined,
+                  title: context.localized('机构关系', 'Institution relationships'),
+                  subtitle: context.localized(
+                    '查看机构归属与关系申请',
+                    'View affiliations and relationship requests',
+                  ),
+                  onTap: _openInstitutionRelationships,
                 ),
               ],
             ],
@@ -292,6 +302,16 @@ class _ProfilePageState extends State<ProfilePage> {
           repository: widget.identityRepository!,
           institutionImagePicker:
               widget.socialRepository == null ? null : _pickInstitutionImage,
+        ),
+      ),
+    );
+  }
+
+  void _openInstitutionRelationships() {
+    Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => InstitutionRelationshipsPage(
+          repository: widget.identityRepository!,
         ),
       ),
     );

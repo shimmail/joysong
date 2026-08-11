@@ -17,6 +17,12 @@ export type ManagementContext = {
   canManageArticles: boolean;
   canManageSplitConfigs: boolean;
   canManageOrders: boolean;
+  canApplyToInstitutions: boolean;
+  canReviewInstitutionRequests: boolean;
+  canSubmitPlatformProjectRequests: boolean;
+  canSubmitInstitutionProjectRequests: boolean;
+  canReviewInstitutionProjectRequests: boolean;
+  canViewAffiliations: boolean;
 };
 
 type ApiEnvelope<T = unknown> = {
@@ -109,8 +115,7 @@ export function isAdminSession() {
 export function getDefaultManagementPath() {
   const context = getManagementContext();
   if (!context || context.platformRole === 'ADMIN') return '/';
-  if (context.canManageInstitutions) return '/institution-projects';
-  if (context.canManageInstitutionProjects) return '/project-collaboration';
+  if (context.canReviewInstitutionProjectRequests) return '/project-requests';
   if (context.canManageDoctors) return '/doctors';
   if (context.canManageInstitutions || context.visibleInstitutionIds.length > 0) return '/institutions';
   if (context.canManageArticles) return '/articles';

@@ -4,6 +4,7 @@ import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
 import 'package:joysong_flutter/features/identity/presentation/identity_controller.dart';
+import 'package:joysong_flutter/features/identity/presentation/professional_request_pages.dart';
 
 typedef IdentityFilePicker = Future<IdentityFileDraft?> Function(
   IdentityDocumentType type,
@@ -473,15 +474,28 @@ class _ManagementCapabilities extends StatelessWidget {
             enabled: isLegalRepresentative && context.canManageInstitutions,
           ),
           (
-            icon: Icons.spa_outlined,
-            label: buildContext.localized('机构项目', 'Institution projects'),
-            enabled:
-                isLegalRepresentative && context.canManageInstitutionProjects,
+            icon: Icons.how_to_reg_outlined,
+            label: buildContext.localized('成员加入审核', 'Membership reviews'),
+            enabled: isLegalRepresentative &&
+                context.canReviewInstitutionRequests,
           ),
           (
-            icon: Icons.receipt_long_outlined,
-            label: buildContext.localized('专业订单', 'Professional orders'),
-            enabled: isLegalRepresentative && context.canManageOrders,
+            icon: Icons.fact_check_outlined,
+            label: buildContext.localized(
+              '机构项目申请审核',
+              'Institution project reviews',
+            ),
+            enabled: isLegalRepresentative &&
+                context.canReviewInstitutionProjectRequests,
+          ),
+          (
+            icon: Icons.group_add_outlined,
+            label: buildContext.localized(
+              '机构项目加入审核',
+              'Institution project join reviews',
+            ),
+            enabled: isLegalRepresentative &&
+                context.canReviewInstitutionProjectRequests,
           ),
         ],
       ),
@@ -499,9 +513,33 @@ class _ManagementCapabilities extends StatelessWidget {
             enabled: isDoctor && context.canManageDoctors,
           ),
           (
-            icon: Icons.spa_outlined,
-            label: buildContext.localized('机构项目', 'Institution projects'),
-            enabled: isDoctor && context.canManageInstitutionProjects,
+            icon: Icons.add_business_outlined,
+            label: buildContext.localized('申请加入机构', 'Apply to institution'),
+            enabled: isDoctor && context.canApplyToInstitutions,
+          ),
+          (
+            icon: Icons.post_add_outlined,
+            label: buildContext.localized(
+              '申请新增平台项目',
+              'Request platform project',
+            ),
+            enabled: isDoctor && context.canSubmitPlatformProjectRequests,
+          ),
+          (
+            icon: Icons.add_task_outlined,
+            label: buildContext.localized(
+              '申请新增机构项目',
+              'Request institution project',
+            ),
+            enabled: isDoctor && context.canSubmitInstitutionProjectRequests,
+          ),
+          (
+            icon: Icons.group_add_outlined,
+            label: buildContext.localized(
+              '申请加入机构项目',
+              'Join institution project',
+            ),
+            enabled: isDoctor && context.canSubmitInstitutionProjectRequests,
           ),
           (
             icon: Icons.article_outlined,
@@ -524,9 +562,14 @@ class _ManagementCapabilities extends StatelessWidget {
         ),
         items: [
           (
-            icon: Icons.receipt_long_outlined,
-            label: buildContext.localized('专业订单', 'Professional orders'),
-            enabled: isConsultant && context.canManageOrders,
+            icon: Icons.add_business_outlined,
+            label: buildContext.localized('申请加入机构', 'Apply to institution'),
+            enabled: isConsultant && context.canApplyToInstitutions,
+          ),
+          (
+            icon: Icons.badge_outlined,
+            label: buildContext.localized('机构归属', 'Institution affiliation'),
+            enabled: isConsultant && context.canViewAffiliations,
           ),
         ],
       ),
@@ -578,6 +621,12 @@ class _ManagementCapabilities extends StatelessWidget {
   }
 
   void _openCapability(BuildContext context, String label) {
+    if (label == '医生档案' || label == 'Doctor profile') {
+      Navigator.of(context).push<void>(MaterialPageRoute(
+        builder: (_) => ManagedDoctorProfilePage(repository: repository),
+      ));
+      return;
+    }
     if (label == '机构档案' || label == 'Institution profile') {
       Navigator.of(context).push<void>(
         MaterialPageRoute(
@@ -589,15 +638,82 @@ class _ManagementCapabilities extends StatelessWidget {
       );
       return;
     }
-    if (label == '机构项目' || label == 'Institution projects') {
+    if (label == '成员加入审核' || label == 'Membership reviews') {
       Navigator.of(context).push<void>(
         MaterialPageRoute(
-          builder: (_) => ManagedInstitutionProjectsPage(
+          builder: (_) => InstitutionMembershipRequestsPage(
             repository: repository,
             context: this.context,
+            reviewMode: true,
           ),
         ),
       );
+      return;
+    }
+    if (label == '申请加入机构' || label == 'Apply to institution') {
+      Navigator.of(context).push<void>(MaterialPageRoute(
+        builder: (_) => InstitutionMembershipRequestsPage(
+          repository: repository,
+          context: this.context,
+        ),
+      ));
+      return;
+    }
+    if (label == '机构归属' || label == 'Institution affiliation') {
+      Navigator.of(context).push<void>(MaterialPageRoute(
+        builder: (_) => InstitutionMembershipRequestsPage(
+          repository: repository,
+          context: this.context,
+          affiliationOnly: true,
+        ),
+      ));
+      return;
+    }
+    if (label == '申请新增平台项目' || label == 'Request platform project') {
+      Navigator.of(context).push<void>(MaterialPageRoute(
+        builder: (_) => PlatformProjectRequestPage(repository: repository),
+      ));
+      return;
+    }
+    if (label == '申请新增机构项目' ||
+        label == 'Request institution project') {
+      Navigator.of(context).push<void>(MaterialPageRoute(
+        builder: (_) => InstitutionProjectRequestsPage(
+          repository: repository,
+          context: this.context,
+        ),
+      ));
+      return;
+    }
+    if (label == '机构项目申请审核' ||
+        label == 'Institution project reviews') {
+      Navigator.of(context).push<void>(MaterialPageRoute(
+        builder: (_) => InstitutionProjectRequestsPage(
+          repository: repository,
+          context: this.context,
+          reviewMode: true,
+        ),
+      ));
+      return;
+    }
+    if (label == '申请加入机构项目' || label == 'Join institution project') {
+      Navigator.of(context).push<void>(MaterialPageRoute(
+        builder: (_) => InstitutionProjectJoinRequestsPage(
+          repository: repository,
+          context: this.context,
+        ),
+      ));
+      return;
+    }
+    if (label == '机构项目加入审核' ||
+        label == 'Institution project join reviews') {
+      Navigator.of(context).push<void>(MaterialPageRoute(
+        builder: (_) => InstitutionProjectJoinRequestsPage(
+          repository: repository,
+          context: this.context,
+          reviewMode: true,
+        ),
+      ));
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(

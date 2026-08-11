@@ -29,6 +29,40 @@ import java.util.concurrent.atomic.AtomicInteger
 class AdminIdentityServiceTest {
 
     @Test
+    fun `admin doctor practice revoke uses shared relationship cleanup`() {
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        val relationshipService = mockk<DoctorInstitutionRelationshipService>(relaxed = true)
+        val rs = mockk<ResultSet>()
+        every { rs.getString("doctor_id") } returns "doctor-1"
+        every { rs.getString("institution_id") } returns "institution-1"
+        every { rs.getString("member_role") } returns "DOCTOR"
+        every { rs.getString("status") } returns "APPROVED"
+        every { jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) } answers {
+            listOf(secondArg<RowMapper<Any>>().mapRow(rs, 0))
+        }
+        val service = AdminIdentityService(jdbcTemplate, ObjectMapper(), relationshipService)
+
+        service.revokeDoctorPractice("practice-1")
+
+        verify(exactly = 1) { relationshipService.revoke("doctor-1", "institution-1", null) }
+        verify(exactly = 0) {
+            jdbcTemplate.update(match<String> { it.contains("UPDATE doctor_institutions") }, *anyVararg())
+        }
+    }
+
+    @Test
+    fun `admin doctor role revoke cleans every institution through shared service`() {
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        val relationshipService = mockk<DoctorInstitutionRelationshipService>(relaxed = true)
+        every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 1
+        val service = AdminIdentityService(jdbcTemplate, ObjectMapper(), relationshipService)
+
+        service.revokeRole("doctor-1", "DOCTOR", "admin-1", "认证撤销")
+
+        verify(exactly = 1) { relationshipService.revokeAll("doctor-1", "admin-1") }
+    }
+
+    @Test
     fun `bindConsultant creates active consultant role and approved membership while preserving other roles`() {
         val fixture = fixture()
 
@@ -264,7 +298,11 @@ class AdminIdentityServiceTest {
             }
         }
         return Fixture(
-            service = AdminIdentityService(jdbcTemplate, ObjectMapper()),
+            service = AdminIdentityService(
+                jdbcTemplate,
+                ObjectMapper(),
+                mockk<DoctorInstitutionRelationshipService>(relaxed = true)
+            ),
             jdbcTemplate = jdbcTemplate,
             upserts = upserts,
             finalMembershipQueriesProvider = finalMembershipQueries::get,

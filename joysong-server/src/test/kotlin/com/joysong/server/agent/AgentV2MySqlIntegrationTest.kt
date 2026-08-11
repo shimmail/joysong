@@ -94,7 +94,7 @@ class AgentV2MySqlIntegrationTest {
             "SELECT version FROM flyway_schema_history WHERE success = 1 AND version IS NOT NULL ORDER BY installed_rank",
             String::class.java
         )
-        assertEquals((1..11).map(Int::toString), history)
+        assertEquals((1..15).map(Int::toString), history)
 
         assertEquals(1, leaseColumnCount(jdbcTemplate))
 

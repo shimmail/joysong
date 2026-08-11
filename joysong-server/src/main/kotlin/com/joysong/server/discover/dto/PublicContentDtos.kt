@@ -104,7 +104,8 @@ data class DoctorResponse(
     val credentials: String,
     val credentialImages: String,
     val caseCount: Int,
-    val certificationTags: String
+    val certificationTags: String,
+    val projectPrice: BigDecimal? = null
 )
 
 data class InstitutionResponse(
@@ -224,7 +225,7 @@ fun DiaryEntity.toResponse() = DiaryResponse(
     favoriteCount = favoriteCount
 )
 
-fun DoctorEntity.toResponse() = DoctorResponse(
+fun DoctorEntity.toResponse(projectPrice: BigDecimal? = null) = DoctorResponse(
     id = id,
     name = name,
     title = title,
@@ -241,7 +242,8 @@ fun DoctorEntity.toResponse() = DoctorResponse(
     credentials = credentials,
     credentialImages = credentialImages,
     caseCount = caseCount,
-    certificationTags = certificationTags
+    certificationTags = certificationTags,
+    projectPrice = projectPrice
 )
 
 fun InstitutionEntity.toResponse() = InstitutionResponse(

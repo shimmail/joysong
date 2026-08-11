@@ -160,18 +160,18 @@ class DoctorDataInitializer(
         if (doctorProjectRepository.count() == 0L) {
             doctorProjectRepository.saveAll(listOf(
             // 王医生 - 玻尿酸填充、水光针
-            DoctorProjectEntity(doctorId = SeedIds.DOC_ID_1, projectId = SeedIds.PROJ_ID_1, institutionProjectId = SeedIds.IP_ID_1),
-            DoctorProjectEntity(doctorId = SeedIds.DOC_ID_1, projectId = SeedIds.PROJ_ID_2, institutionProjectId = SeedIds.IP_ID_3),
+            DoctorProjectEntity(doctorId = SeedIds.DOC_ID_1, projectId = SeedIds.PROJ_ID_1, institutionProjectId = SeedIds.IP_ID_1, price = BigDecimal("2999.00")),
+            DoctorProjectEntity(doctorId = SeedIds.DOC_ID_1, projectId = SeedIds.PROJ_ID_2, institutionProjectId = SeedIds.IP_ID_3, price = BigDecimal("1299.00")),
             // 李医生 - 双眼皮成形
-            DoctorProjectEntity(doctorId = SeedIds.DOC_ID_2, projectId = SeedIds.PROJ_ID_3, institutionProjectId = SeedIds.IP_ID_4),
+            DoctorProjectEntity(doctorId = SeedIds.DOC_ID_2, projectId = SeedIds.PROJ_ID_3, institutionProjectId = SeedIds.IP_ID_4, price = BigDecimal("4999.00")),
             // 张医生 - 皮秒祛斑
-            DoctorProjectEntity(doctorId = SeedIds.DOC_ID_3, projectId = SeedIds.PROJ_ID_4, institutionProjectId = SeedIds.IP_ID_5),
+            DoctorProjectEntity(doctorId = SeedIds.DOC_ID_3, projectId = SeedIds.PROJ_ID_4, institutionProjectId = SeedIds.IP_ID_5, price = BigDecimal("1999.00")),
             // 陈医生 - 热玛吉抗衰
-            DoctorProjectEntity(doctorId = SeedIds.DOC_ID_4, projectId = SeedIds.PROJ_ID_5, institutionProjectId = SeedIds.IP_ID_6),
+            DoctorProjectEntity(doctorId = SeedIds.DOC_ID_4, projectId = SeedIds.PROJ_ID_5, institutionProjectId = SeedIds.IP_ID_6, price = BigDecimal("7999.00")),
             // 刘医生 - 玻尿酸填充
-            DoctorProjectEntity(doctorId = SeedIds.DOC_ID_5, projectId = SeedIds.PROJ_ID_1, institutionProjectId = SeedIds.IP_ID_2),
+            DoctorProjectEntity(doctorId = SeedIds.DOC_ID_5, projectId = SeedIds.PROJ_ID_1, institutionProjectId = SeedIds.IP_ID_2, price = BigDecimal("2899.00")),
             // 孙医生 - 鼻综合整形
-            DoctorProjectEntity(doctorId = SeedIds.DOC_ID_6, projectId = SeedIds.PROJ_ID_6, institutionProjectId = SeedIds.IP_ID_8)
+            DoctorProjectEntity(doctorId = SeedIds.DOC_ID_6, projectId = SeedIds.PROJ_ID_6, institutionProjectId = SeedIds.IP_ID_8, price = BigDecimal("14999.00"))
         ))
         }
     }

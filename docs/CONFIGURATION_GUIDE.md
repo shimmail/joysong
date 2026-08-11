@@ -188,7 +188,7 @@ OPENAI_INTENT_PARSER_ENABLED=true
 
 生产启用 Agent 时必须显式配置 `AI_AGENT_MODEL`，服务端不会从 `OPENAI_MODEL` 或仓库默认值回退。可选的 `OPENAI_PROXY_URL` 只支持带显式端口的 `http://` 和 `socks://` URL；`https://` proxy URL 会在启动时被拒绝。
 
-生产环境默认保持 `AI_AGENT_ENABLED=false`。启用顺序、secret-safe FastAIToken canary、内部 cohort、监控与立即停用规则见 [`AI_AGENT_ROLLOUT.md`](./AI_AGENT_ROLLOUT.md)。当前应用不包含自动 cohort 分流、指标平台或自动熔断，需由网关、发布平台和运维监控实现。V11 为前向兼容迁移，停用 Agent 时不得删除或回滚。
+生产环境默认保持 `AI_AGENT_ENABLED=false`。启用顺序、secret-safe FastAIToken canary、内部 cohort、监控与立即停用规则见 [`AI_AGENT_ROLLOUT.md`](./AI_AGENT_ROLLOUT.md)。当前应用不包含自动 cohort 分流、指标平台或自动熔断，需由网关、发布平台和运维监控实现。V15 为 Agent lease 的前向兼容迁移，停用 Agent 时不得删除或回滚。
 
 ## 6. OSS 与图片上传
 

@@ -8,6 +8,7 @@ import com.joysong.server.discover.dto.BannerResponse
 import com.joysong.server.discover.dto.DiaryResponse
 import com.joysong.server.discover.dto.ProjectResponse
 import com.joysong.server.discover.dto.toResponse
+import com.joysong.server.discover.repository.DoctorProjectRepository
 import com.joysong.server.home.entity.dto.RecommendedInstitutionProjectDto
 import com.joysong.server.institution.entity.InstitutionEntity
 import com.joysong.server.institution.repository.InstitutionProjectRepository
@@ -25,7 +26,8 @@ class HomeService(
     private val diaryRepository: DiaryRepository,
     private val institutionProjectRepository: InstitutionProjectRepository,
     private val institutionRepository: InstitutionRepository,
-    private val institutionProjectDetailResolver: InstitutionProjectDetailResolver
+    private val institutionProjectDetailResolver: InstitutionProjectDetailResolver,
+    private val doctorProjectRepository: DoctorProjectRepository
 ) {
 
     fun getBanners(): List<BannerResponse> =
@@ -60,6 +62,9 @@ class HomeService(
 
         // 在内存中组装结果
         return institutionProjects.mapNotNull { ip ->
+            val startingPrice = doctorProjectRepository.findActiveByInstitutionProjectId(ip.id)
+                .minOfOrNull { it.price }
+                ?: return@mapNotNull null
             val project = projectMap[ip.projectId] ?: return@mapNotNull null
             val institution = institutionMap[ip.institutionId] ?: return@mapNotNull null
             val effective = institutionProjectDetailResolver.resolve(ip, project)
@@ -69,7 +74,7 @@ class HomeService(
                 projectId = ip.projectId,
                 projectName = effective.name,
                 institutionName = institution.name,
-                price = ip.price,
+                price = startingPrice,
                 originalPrice = ip.originalPrice,
                 currency = ip.currency,
                 coverImage = effective.coverImage,

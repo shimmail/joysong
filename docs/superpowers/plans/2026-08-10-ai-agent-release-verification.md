@@ -142,7 +142,7 @@ Document these operator actions:
 4. Enable for an internal cohort only.
 5. Monitor request success rate, provider 401/429/5xx, p95 latency, stale recoveries, and duplicate-turn count.
 6. Disable immediately on credential errors, sustained provider failure, duplicate turns, or unsafe medical copy.
-7. Rollback uses AI_AGENT_ENABLED=false first; schema V11 remains forward-compatible and is not dropped.
+7. Rollback uses AI_AGENT_ENABLED=false first; schema V15 remains forward-compatible and is not dropped.
 ```
 
 Align all model variables on `AI_AGENT_MODEL`, all relay examples on `https://www.fastaitoken.com/v1`, and all AI proxy examples on `OPENAI_PROXY_URL`.
