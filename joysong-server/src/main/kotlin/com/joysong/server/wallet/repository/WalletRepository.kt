@@ -11,6 +11,8 @@ import org.springframework.stereotype.Repository
 
 @Repository
 interface WalletRepository : JpaRepository<WalletEntity, Long> {
+    fun findAllByOwnerTypeAndOwnerIdIn(ownerType: String, ownerIds: Set<String>): List<WalletEntity>
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query(
         "select wallet from WalletEntity wallet " +

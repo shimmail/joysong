@@ -12,6 +12,8 @@ import com.joysong.server.payment.domain.PaymentType
 import com.joysong.server.payment.dto.PaymentAttemptResponse
 import com.joysong.server.payment.provider.PaymentProviderException
 import com.joysong.server.refund.service.RefundService
+import com.joysong.server.settlement.repository.SettlementRepository
+import com.joysong.server.wallet.dto.toSummaryDto
 import com.joysong.server.review.dto.ReviewResponse
 import com.joysong.server.review.service.ReviewService
 import org.springframework.security.core.Authentication
@@ -33,7 +35,8 @@ class OrderController(
     private val paymentService: PaymentService,
     private val refundService: RefundService,
     private val reviewService: ReviewService,
-    private val orderStatusLogService: OrderStatusLogService
+    private val orderStatusLogService: OrderStatusLogService,
+    private val settlementRepository: SettlementRepository
 ) {
 
     /** 创建订单 */
@@ -75,6 +78,16 @@ class OrderController(
         val order = orderService.getOrderById(id, userId)
             ?: return BaseResponse<Any>(code = 404, message = "Order not found")
         return BaseResponse.success(OrderResponse.from(order))
+    }
+
+    /** Consumer-safe settlement state; ownership is checked before looking up money records. */
+    @GetMapping("/{id}/settlement")
+    fun getSettlement(@PathVariable id: String, authentication: Authentication): BaseResponse<*> {
+        val order = orderService.getOrderById(id, authentication.principal as String)
+            ?: return BaseResponse.error<Any>("Order not found", 404)
+        val settlement = settlementRepository.findByOrderId(order.id)
+            ?: return BaseResponse.error<Any>("SETTLEMENT_NOT_GENERATED", 409)
+        return BaseResponse.success(settlement.toSummaryDto(order.settlementAt))
     }
 
     /** 支付面诊金 */
