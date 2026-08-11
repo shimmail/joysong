@@ -44,6 +44,44 @@ void main() {
     expect(PublicMediaPurpose.institutionProfile.name, 'institutionProfile');
   });
 
+  test('doctor institution change request parses audit fields and action', () {
+    final request = DoctorInstitutionChangeRequest.fromJson({
+      'id': 'request-1',
+      'requestType': 'DOCTOR',
+      'userId': 'doctor-user-1',
+      'institutionId': 'institution-1',
+      'status': 'PENDING',
+      'action': 'LEAVE',
+      'doctorName': 'Dr. Lin',
+      'institutionName': 'Joysong Clinic',
+      'requestNote': 'Moving practices',
+      'reviewNote': 'Acknowledged',
+      'createdAt': '2026-08-10T09:00:00Z',
+      'updatedAt': '2026-08-10T10:00:00Z',
+      'submittedAt': '2026-08-10T09:00:00Z',
+      'reviewedAt': '2026-08-10T10:00:00Z',
+      'deleted': false,
+    });
+
+    expect(request.action, 'LEAVE');
+    expect(request.doctorName, 'Dr. Lin');
+    expect(request.institutionName, 'Joysong Clinic');
+    expect(request.reviewedAt, '2026-08-10T10:00:00Z');
+    expect(
+      const DoctorInstitutionChangeRequestDraft(
+        institutionId: 'institution-1',
+        action: 'JOIN',
+        requestNote: 'Please add me',
+      ).toJson(),
+      {
+        'requestType': 'DOCTOR',
+        'institutionId': 'institution-1',
+        'action': 'JOIN',
+        'requestNote': 'Please add me',
+      },
+    );
+  });
+
   test('management context is fetched again on every entry', () async {
     final repository = _FakeIdentityRepository();
     final controller = ManagementController(repository);
@@ -537,6 +575,25 @@ final class _FakeIdentityRepository implements IdentityRepository {
   @override
   Future<void> reviewInstitutionMembershipRequest({
     required String requestType,
+    required String id,
+    required String decision,
+    required String reviewNote,
+  }) async {}
+
+  @override
+  Future<List<DoctorInstitutionChangeRequest>>
+      listDoctorInstitutionChangeRequests() async => const [];
+
+  @override
+  Future<void> submitDoctorInstitutionChangeRequest(
+    DoctorInstitutionChangeRequestDraft draft,
+  ) async {}
+
+  @override
+  Future<void> withdrawDoctorInstitutionChangeRequest(String id) async {}
+
+  @override
+  Future<void> reviewDoctorInstitutionChangeRequest({
     required String id,
     required String decision,
     required String reviewNote,

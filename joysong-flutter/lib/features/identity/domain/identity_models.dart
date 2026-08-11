@@ -968,6 +968,82 @@ final class InstitutionMembershipRequest {
   final String reviewNote;
 }
 
+final class DoctorInstitutionChangeRequest {
+  const DoctorInstitutionChangeRequest({
+    required this.id,
+    required this.requestType,
+    required this.userId,
+    required this.institutionId,
+    required this.status,
+    required this.action,
+    this.requestNote = '',
+    this.reviewNote = '',
+    this.doctorName = '',
+    this.institutionName = '',
+    this.createdAt = '',
+    this.updatedAt = '',
+    this.submittedAt = '',
+    this.reviewedAt = '',
+    this.deleted = false,
+  });
+
+  factory DoctorInstitutionChangeRequest.fromJson(Object? json) {
+    final map = _jsonMap(json, '医生机构关系申请');
+    return DoctorInstitutionChangeRequest(
+      id: _requiredText(map['id'], '申请 id'),
+      requestType: _requiredText(map['requestType'], '申请类型'),
+      userId: _requiredText(map['userId'], '申请人'),
+      institutionId: _requiredText(map['institutionId'], '机构'),
+      status: _requiredText(map['status'], '申请状态'),
+      action: _requiredText(map['action'], '关系操作'),
+      requestNote: map['requestNote']?.toString() ?? '',
+      reviewNote: map['reviewNote']?.toString() ?? '',
+      doctorName: map['doctorName']?.toString() ?? '',
+      institutionName: map['institutionName']?.toString() ?? '',
+      createdAt: map['createdAt']?.toString() ?? '',
+      updatedAt: map['updatedAt']?.toString() ?? '',
+      submittedAt: map['submittedAt']?.toString() ?? '',
+      reviewedAt: map['reviewedAt']?.toString() ?? '',
+      deleted: _boolean(map['deleted']),
+    );
+  }
+
+  final String id;
+  final String requestType;
+  final String userId;
+  final String institutionId;
+  final String status;
+  final String action;
+  final String requestNote;
+  final String reviewNote;
+  final String doctorName;
+  final String institutionName;
+  final String createdAt;
+  final String updatedAt;
+  final String submittedAt;
+  final String reviewedAt;
+  final bool deleted;
+}
+
+final class DoctorInstitutionChangeRequestDraft {
+  const DoctorInstitutionChangeRequestDraft({
+    required this.institutionId,
+    required this.action,
+    this.requestNote = '',
+  });
+
+  final String institutionId;
+  final String action;
+  final String requestNote;
+
+  Map<String, Object?> toJson() => {
+        'requestType': 'DOCTOR',
+        'institutionId': institutionId.trim(),
+        'action': action,
+        'requestNote': requestNote.trim(),
+      };
+}
+
 final class ProfessionalProjectRequest {
   const ProfessionalProjectRequest({
     required this.id,
