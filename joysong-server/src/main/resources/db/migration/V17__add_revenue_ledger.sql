@@ -15,7 +15,7 @@ CREATE TABLE settlement_allocations (
     UNIQUE KEY uk_allocation_settlement_owner (settlement_id, owner_type, owner_id),
     CONSTRAINT chk_allocation_amount CHECK (amount_minor >= 0 AND reversed_minor BETWEEN 0 AND amount_minor),
     CONSTRAINT fk_allocation_settlement FOREIGN KEY (settlement_id) REFERENCES settlements(id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE wallets (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -30,7 +30,7 @@ CREATE TABLE wallets (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_wallet_owner_currency (owner_type, owner_id, currency),
     CONSTRAINT chk_wallet_balances_non_negative CHECK (pending_minor >= 0 AND available_minor >= 0 AND frozen_minor >= 0)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE wallet_ledger_entries (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -49,7 +49,7 @@ CREATE TABLE wallet_ledger_entries (
     KEY idx_wallet_ledger_source (source_type, source_id),
     CONSTRAINT fk_wallet_ledger_wallet FOREIGN KEY (wallet_id) REFERENCES wallets(id),
     CONSTRAINT fk_wallet_ledger_allocation FOREIGN KEY (allocation_id) REFERENCES settlement_allocations(id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE reconciliation_issues (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -65,4 +65,4 @@ CREATE TABLE reconciliation_issues (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_reconciliation_issues_active (active_key),
     KEY idx_reconciliation_issues_unresolved (resolved_at, created_at)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
