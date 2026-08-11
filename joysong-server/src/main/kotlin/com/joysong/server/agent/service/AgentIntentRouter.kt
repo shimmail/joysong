@@ -227,10 +227,11 @@ class AgentIntentRouter {
                 selected
             }
             val negators = negatorIndexes(clause)
-            val negatedMatches = negators.mapNotNull { negator ->
+            val matchedNegators = negators.mapNotNull { negator ->
                 matches.minByOrNull { kotlin.math.abs(it.index - negator.index) }
-            }.toSet()
-            if (negatedMatches.size < negators.size) ambiguousNegation = true
+            }
+            val negatedMatches = matchedNegators.toSet()
+            if (negatedMatches.size < matchedNegators.size) ambiguousNegation = true
             matches.forEach { match ->
                 if (match in negatedMatches) negatedTerms += match.term else positiveTerms += match.term
             }

@@ -135,6 +135,16 @@ class AgentIntentRouterTest {
         assertFalse(result.requiresLlmParsing)
     }
 
+    @Test
+    fun `non routing negator does not make a later catalog request ambiguous`() {
+        val result = router.assessCurrent("I don't know, recommend clinics", "GENERAL")
+
+        assertEquals(AgentIntent.CATALOG_QA, result.decision.intent)
+        assertEquals(AgentQueryTarget.INSTITUTION, result.decision.queryTarget)
+        assertFalse("AMBIGUOUS_NEGATION" in result.ambiguityReasons)
+        assertFalse(result.requiresLlmParsing)
+    }
+
     @ParameterizedTest(name = "{0}")
     @MethodSource("routeCases")
     fun `routes common Chinese and English requests`(
