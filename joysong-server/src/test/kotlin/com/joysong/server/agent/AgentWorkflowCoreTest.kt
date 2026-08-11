@@ -218,6 +218,53 @@ class AgentWorkflowCoreTest {
     }
 
     @Test
+    fun `parser safety label upgrades before locked business target compatibility`() {
+        val content = "I am not not pregnant; compare treatments"
+        val router = AgentIntentRouter()
+        val local = router.assessCurrent(content, "GENERAL")
+        assertTrue(local.unresolvedSafetyNegation)
+        assertTrue(local.intentEvidence.single { it.intent == AgentIntent.COMPARISON }.locked)
+        assertTrue(local.targetEvidence.single { it.target == AgentQueryTarget.PROJECT }.locked)
+
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
+        val completed = slot<CompleteTurnCommand>()
+        prepareChatGeneration(fixture, content)
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "answer")
+        )
+        every { catalog.contextualSearchQuery(content, emptyList()) } returns content
+        intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess(
+                """{"choices":[{"message":{"content":"{\"intent\":\"COMPARISON\",\"intents\":[\"COMPARISON\",\"SAFETY_SCREENING\"],\"queryTarget\":null,\"keywords\":[]}"}}]}""",
+                MediaType.APPLICATION_JSON
+            ))
+        completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"answer"}}]}""", MediaType.APPLICATION_JSON))
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("SAFETY_SCREENING", completed.captured.intent)
+        assertEquals(null, completed.captured.queryTarget)
+        intentServer.verify()
+        completionServer.verify()
+    }
+
+    @Test
+    fun `invalid optional intents member keeps local route and still completes`() {
+        assertParserFailureStillCompletes(
+            withSuccess(
+                """{"choices":[{"message":{"content":"{\"intent\":\"CATALOG_QA\",\"intents\":[\"CATALOG_QA\",\"NOT_ALLOWED\"],\"queryTarget\":\"PROJECT\",\"keywords\":[\"fixture-keyword\"]}"}}]}""",
+                MediaType.APPLICATION_JSON
+            )
+        )
+    }
+
+    @Test
     fun `intent parser failures keep the local route and still complete`() {
         listOf<ResponseCreator>(
             withException(SocketTimeoutException("intent parser timed out")),

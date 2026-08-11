@@ -187,6 +187,37 @@ class AgentIntentRouterTest {
     }
 
     @Test
+    fun `context resolves only uncertain doctor without changing locked comparison institution`() {
+        val result = router.supplementWithContext(
+            router.assessCurrent("I do not not want a doctor; compare clinics", "GENERAL"),
+            listOf(router.validatedDecision(AgentIntent.CATALOG_QA, AgentQueryTarget.DOCTOR))
+        )
+
+        assertEquals(AgentIntent.COMPARISON, result.decision.intent)
+        assertEquals(AgentQueryTarget.INSTITUTION, result.decision.queryTarget)
+        assertTrue(result.evidenceFor(AgentIntent.COMPARISON).locked)
+        assertTrue(result.evidenceFor(AgentQueryTarget.INSTITUTION).locked)
+        assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentQueryTarget.DOCTOR).polarity)
+        assertEquals(AgentLabelSource.CONTEXT, result.evidenceFor(AgentQueryTarget.DOCTOR).source)
+        assertFalse(result.evidenceFor(AgentQueryTarget.DOCTOR).locked)
+    }
+
+    @Test
+    fun `context fills absent target without deleting current intent labels`() {
+        val result = router.supplementWithContext(
+            router.assessCurrent("Compare options and plan around my budget", "GENERAL"),
+            listOf(router.validatedDecision(AgentIntent.CATALOG_QA, AgentQueryTarget.DOCTOR))
+        )
+
+        assertEquals(AgentIntent.COMPARISON, result.decision.intent)
+        assertEquals(AgentQueryTarget.DOCTOR, result.decision.queryTarget)
+        assertEquals(setOf(AgentIntent.COMPARISON, AgentIntent.PLANNING, AgentIntent.CATALOG_QA), result.positiveIntents())
+        assertEquals(setOf(AgentQueryTarget.DOCTOR), result.positiveTargets())
+        assertEquals(AgentLabelSource.CONTEXT, result.evidenceFor(AgentQueryTarget.DOCTOR).source)
+        assertFalse(result.evidenceFor(AgentQueryTarget.DOCTOR).locked)
+    }
+
+    @Test
     fun `conflicting context retains local candidate and requests parsing`() {
         val result = router.supplementWithContext(
             router.assessCurrent("对比医生", "GENERAL"),

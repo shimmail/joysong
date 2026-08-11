@@ -58,7 +58,8 @@ data class AgentRouteAssessment(
 data class ParsedAgentRoute(
     val intent: AgentIntent,
     val queryTarget: AgentQueryTarget?,
-    val keywords: List<String>
+    val keywords: List<String>,
+    val intents: Set<AgentIntent> = emptySet()
 )
 
 /**
@@ -239,20 +240,37 @@ class AgentIntentRouter {
             (!current.explicitIntent && currentDecision.intent == AgentIntent.GENERAL_CHAT &&
                 usableContexts.map { it.intent }.filter { it != AgentIntent.GENERAL_CHAT }.distinct().size > 1)
         val uncertainContext = contextAmbiguityReasons.isNotEmpty()
-        val resolvedIntent = if (
-            !current.explicitIntent &&
-            currentDecision.intent == AgentIntent.GENERAL_CHAT &&
-            context.intent != AgentIntent.GENERAL_CHAT
-        ) {
-            context.intent
-        } else {
-            currentDecision.intent
+        val contextIntentEvidence = usableContexts.mapTo(mutableSetOf()) { candidate ->
+            AgentIntentEvidence(
+                intent = candidate.intent,
+                polarity = AgentLabelPolarity.POSITIVE,
+                explicit = false,
+                locked = false,
+                source = AgentLabelSource.CONTEXT
+            )
         }
-        val resolvedTarget = if (!current.explicitQueryTarget && currentDecision.queryTarget == null) {
-            context.queryTarget
-        } else {
-            currentDecision.queryTarget
+        val contextTargetEvidence = usableContexts.mapNotNullTo(mutableSetOf()) { candidate ->
+            candidate.queryTarget?.let { target ->
+                AgentTargetEvidence(
+                    target = target,
+                    polarity = AgentLabelPolarity.POSITIVE,
+                    explicit = false,
+                    locked = false,
+                    source = AgentLabelSource.CONTEXT
+                )
+            }
         }
+        val mergedIntentEvidence = mergeIntentEvidence(currentIntentEvidence(current), contextIntentEvidence)
+        val mergedTargetEvidence = mergeTargetEvidence(currentTargetEvidence(current), contextTargetEvidence)
+        val resolvedDecision = selectPrimary(
+            intentEvidence = mergedIntentEvidence,
+            targetEvidence = mergedTargetEvidence,
+            contextType = "GENERAL",
+            preferredIntent = currentDecision.intent.takeIf { it != AgentIntent.GENERAL_CHAT } ?: context.intent,
+            preferredTarget = currentDecision.queryTarget ?: context.queryTarget
+        )
+        val resolvedIntent = resolvedDecision.intent
+        val resolvedTarget = resolvedDecision.queryTarget
         val contextFilled = resolvedIntent != currentDecision.intent || resolvedTarget != currentDecision.queryTarget
         val resolvedMissingTargetConstraint = "MULTIPLE_CONSTRAINTS_WITHOUT_TARGET" in current.ambiguityReasons &&
             resolvedTarget != null
@@ -274,7 +292,7 @@ class AgentIntentRouter {
         val requiresContextCompletion = (resolvedIntent in intentsRequiringTarget && resolvedTarget == null) ||
             "UNRESOLVED_CURRENT_REFERENCE" in reasons
         return current.copy(
-            decision = validatedDecision(resolvedIntent, resolvedTarget),
+            decision = resolvedDecision,
             confidence = confidence,
             ambiguityReasons = reasons,
             requiresLlmParsing = targetConflict || contextCandidateConflict || uncertainContext || requiresLlmParsing(
@@ -283,7 +301,9 @@ class AgentIntentRouter {
                 reasons,
                 requiresContextCompletion
             ),
-            requiresContextCompletion = requiresContextCompletion
+            requiresContextCompletion = requiresContextCompletion,
+            intentEvidence = mergedIntentEvidence,
+            targetEvidence = mergedTargetEvidence
         )
     }
 
@@ -293,17 +313,45 @@ class AgentIntentRouter {
     ): AgentIntentDecision {
         if (parsed == null || local.decision.intent == AgentIntent.SAFETY_SCREENING) return local.decision
 
-        val intent = when {
-            local.unresolvedSafetyNegation && parsed.intent == AgentIntent.SAFETY_SCREENING -> AgentIntent.SAFETY_SCREENING
-            local.unresolvedSafetyNegation -> local.decision.intent
-            local.explicitIntent -> local.decision.intent
-            else -> parsed.intent
+        val parsedIntents = parsed.intents + parsed.intent
+        val modelIntentEvidence = parsedIntents.mapTo(mutableSetOf()) { intent ->
+            AgentIntentEvidence(
+                intent = intent,
+                polarity = AgentLabelPolarity.POSITIVE,
+                explicit = false,
+                locked = false,
+                source = AgentLabelSource.MODEL
+            )
         }
-        val target = if (local.explicitQueryTarget) local.decision.queryTarget else parsed.queryTarget
-        return if (intent == AgentIntent.SAFETY_SCREENING) {
+        val modelTargetEvidence = parsed.queryTarget?.let { target ->
+            setOf(
+                AgentTargetEvidence(
+                    target = target,
+                    polarity = AgentLabelPolarity.POSITIVE,
+                    explicit = false,
+                    locked = false,
+                    source = AgentLabelSource.MODEL
+                )
+            )
+        }.orEmpty()
+        val mergedIntentEvidence = mergeIntentEvidence(currentIntentEvidence(local), modelIntentEvidence)
+        val mergedTargetEvidence = mergeTargetEvidence(currentTargetEvidence(local), modelTargetEvidence)
+        val safetyUpgrade = local.unresolvedSafetyNegation && AgentIntent.SAFETY_SCREENING in parsedIntents
+        val decision = selectPrimary(
+            intentEvidence = mergedIntentEvidence,
+            targetEvidence = mergedTargetEvidence,
+            contextType = "GENERAL",
+            preferredIntent = when {
+                safetyUpgrade -> AgentIntent.SAFETY_SCREENING
+                local.unresolvedSafetyNegation || local.explicitIntent -> local.decision.intent
+                else -> parsed.intent
+            },
+            preferredTarget = if (local.explicitQueryTarget) local.decision.queryTarget else parsed.queryTarget
+        )
+        return if (decision.intent == AgentIntent.SAFETY_SCREENING) {
             validatedDecision(AgentIntent.SAFETY_SCREENING, null)
         } else {
-            validatedDecision(intent, target)
+            decision
         }
     }
 
@@ -346,12 +394,15 @@ class AgentIntentRouter {
     private fun selectPrimary(
         intentEvidence: Set<AgentIntentEvidence>,
         targetEvidence: Set<AgentTargetEvidence>,
-        contextType: String
+        contextType: String,
+        preferredIntent: AgentIntent? = null,
+        preferredTarget: AgentQueryTarget? = null
     ): AgentIntentDecision {
         val positiveIntents = intentEvidence
             .filter { it.polarity == AgentLabelPolarity.POSITIVE }
             .mapTo(mutableSetOf()) { it.intent }
         val intent = when {
+            preferredIntent in positiveIntents -> preferredIntent!!
             AgentIntent.SAFETY_SCREENING in positiveIntents -> AgentIntent.SAFETY_SCREENING
             AgentIntent.DETAIL_SUMMARY in positiveIntents -> AgentIntent.DETAIL_SUMMARY
             AgentIntent.COMPARISON in positiveIntents -> AgentIntent.COMPARISON
@@ -363,6 +414,7 @@ class AgentIntentRouter {
             .filter { it.polarity == AgentLabelPolarity.POSITIVE }
             .mapTo(mutableSetOf()) { it.target }
         val target = when {
+            preferredTarget in positiveTargets -> preferredTarget
             AgentQueryTarget.INSTITUTION_PROJECT in positiveTargets -> AgentQueryTarget.INSTITUTION_PROJECT
             AgentQueryTarget.DOCTOR in positiveTargets -> AgentQueryTarget.DOCTOR
             AgentQueryTarget.INSTITUTION in positiveTargets -> AgentQueryTarget.INSTITUTION
@@ -370,6 +422,61 @@ class AgentIntentRouter {
             else -> null
         }
         return validatedDecision(intent, target)
+    }
+
+    private fun currentIntentEvidence(assessment: AgentRouteAssessment): Set<AgentIntentEvidence> {
+        if (!assessment.explicitIntent || assessment.intentEvidence.any { it.intent == assessment.decision.intent }) {
+            return assessment.intentEvidence
+        }
+        return assessment.intentEvidence + AgentIntentEvidence(
+            intent = assessment.decision.intent,
+            polarity = AgentLabelPolarity.POSITIVE,
+            explicit = true,
+            locked = true,
+            source = AgentLabelSource.CURRENT
+        )
+    }
+
+    private fun currentTargetEvidence(assessment: AgentRouteAssessment): Set<AgentTargetEvidence> {
+        val target = assessment.decision.queryTarget ?: return assessment.targetEvidence
+        if (!assessment.explicitQueryTarget || assessment.targetEvidence.any { it.target == target }) {
+            return assessment.targetEvidence
+        }
+        return assessment.targetEvidence + AgentTargetEvidence(
+            target = target,
+            polarity = AgentLabelPolarity.POSITIVE,
+            explicit = true,
+            locked = true,
+            source = AgentLabelSource.CURRENT
+        )
+    }
+
+    private fun mergeIntentEvidence(
+        current: Set<AgentIntentEvidence>,
+        incoming: Set<AgentIntentEvidence>
+    ): Set<AgentIntentEvidence> {
+        val merged = current.associateByTo(linkedMapOf()) { it.intent }
+        incoming.forEach { candidate ->
+            val existing = merged[candidate.intent]
+            if (existing == null || (!existing.locked && existing.polarity == AgentLabelPolarity.UNCERTAIN)) {
+                merged[candidate.intent] = candidate
+            }
+        }
+        return merged.values.toSet()
+    }
+
+    private fun mergeTargetEvidence(
+        current: Set<AgentTargetEvidence>,
+        incoming: Set<AgentTargetEvidence>
+    ): Set<AgentTargetEvidence> {
+        val merged = current.associateByTo(linkedMapOf()) { it.target }
+        incoming.forEach { candidate ->
+            val existing = merged[candidate.target]
+            if (existing == null || (!existing.locked && existing.polarity == AgentLabelPolarity.UNCERTAIN)) {
+                merged[candidate.target] = candidate
+            }
+        }
+        return merged.values.toSet()
     }
 
     private fun requiresLlmParsing(

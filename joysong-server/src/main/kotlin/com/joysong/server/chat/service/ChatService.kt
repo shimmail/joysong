@@ -534,7 +534,7 @@ class ChatService(
             }.ifBlank { "NONE" }
             val instruction = """
                 Classify one medical-aesthetic chat request. Return JSON only:
-                {"intent":"GENERAL_CHAT|CATALOG_QA|COMPARISON|PLANNING|DETAIL_SUMMARY|SAFETY_SCREENING","queryTarget":"INSTITUTION|DOCTOR|PROJECT|INSTITUTION_PROJECT|null","keywords":["..."]}
+                {"intent":"GENERAL_CHAT|CATALOG_QA|COMPARISON|PLANNING|DETAIL_SUMMARY|SAFETY_SCREENING","intents":["optional additional intent labels"],"queryTarget":"INSTITUTION|DOCTOR|PROJECT|INSTITUTION_PROJECT|null","keywords":["..."]}
                 Use SAFETY_SCREENING for possible contraindications or health risks. Use PLANNING for goals with budget, downtime or personal constraints.
                 Keywords may contain only useful cities, treatments, categories, tags, clinic names or doctor names from the text. Maximum 8 items. Do not invent IDs or facts.
                 Local decision: ${local.decision.intent}/${local.decision.queryTarget ?: "NONE"}. Locked fields: intent=${local.explicitIntent}, queryTarget=${local.explicitQueryTarget}.
@@ -568,6 +568,16 @@ class ChatService(
                 ?: throw IntentParserRouteException("INVALID_SCHEMA")
             val intent = AgentIntent.entries.firstOrNull { it.name == intentNode.asText().trim() }
                 ?: throw IntentParserRouteException("INVALID_ENUM")
+            val intents = node.get("intents")?.let { intentsNode ->
+                if (!intentsNode.isArray || intentsNode.size() > AgentIntent.entries.size) {
+                    throw IntentParserRouteException("INVALID_SCHEMA")
+                }
+                if (intentsNode.any { !it.isTextual }) throw IntentParserRouteException("INVALID_SCHEMA")
+                intentsNode.mapTo(mutableSetOf()) { member ->
+                    AgentIntent.entries.firstOrNull { it.name == member.asText().trim() }
+                        ?: throw IntentParserRouteException("INVALID_ENUM")
+                }
+            }.orEmpty()
             val targetNode = node.get("queryTarget")
                 ?: throw IntentParserRouteException("INVALID_SCHEMA")
             val target = when {
@@ -582,10 +592,10 @@ class ChatService(
             if (keywordsNode.any { !it.isTextual }) throw IntentParserRouteException("INVALID_SCHEMA")
             val keywords = keywordsNode.map { it.asText().trim() }
             if (keywords.any { it.length !in 2..40 }) throw IntentParserRouteException("INVALID_SCHEMA")
-            if (!isCompatibleParsedRoute(local, intent, target)) {
+            if (!isCompatibleParsedRoute(local, intent, intents, target)) {
                 throw IntentParserRouteException("INCOMPATIBLE_ROUTE")
             }
-            ParsedAgentRoute(intent, target, keywords)
+            ParsedAgentRoute(intent, target, keywords, intents)
         } catch (error: Exception) {
             logger.info(
                 "Agent intent parser fallback category={} durationMs={}",
@@ -606,12 +616,18 @@ class ChatService(
     private fun isCompatibleParsedRoute(
         local: AgentRouteAssessment,
         intent: AgentIntent,
+        intents: Set<AgentIntent>,
         target: AgentQueryTarget?
     ): Boolean {
         if (intent in setOf(AgentIntent.GENERAL_CHAT, AgentIntent.SAFETY_SCREENING) && target != null) return false
-        if (local.explicitIntent && intent != local.decision.intent) return false
+        val parsedIntents = intents + intent
+        if (local.unresolvedSafetyNegation && AgentIntent.SAFETY_SCREENING in parsedIntents) return true
+        if (local.explicitIntent && local.decision.intent !in parsedIntents) return false
         if (local.explicitQueryTarget && target != local.decision.queryTarget) return false
-        if (local.unresolvedSafetyNegation && intent !in setOf(local.decision.intent, AgentIntent.SAFETY_SCREENING)) return false
+        if (local.unresolvedSafetyNegation && parsedIntents.none {
+                it in setOf(local.decision.intent, AgentIntent.SAFETY_SCREENING)
+            }
+        ) return false
         return true
     }
 
