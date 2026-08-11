@@ -108,6 +108,65 @@ class AgentIntentRouterTest {
         assertTrue(result.requiresContextCompletion)
     }
 
+    @Test
+    fun `context does not replace explicit Chinese comparison target`() {
+        val result = router.supplementWithContext(
+            router.assessCurrent("对比机构", "GENERAL"),
+            listOf(router.validatedDecision(AgentIntent.CATALOG_QA, AgentQueryTarget.DOCTOR))
+        )
+
+        assertEquals(AgentIntent.COMPARISON, result.decision.intent)
+        assertEquals(AgentQueryTarget.INSTITUTION, result.decision.queryTarget)
+    }
+
+    @Test
+    fun `context completes missing Chinese comparison target`() {
+        val result = router.supplementWithContext(
+            router.assessCurrent("对比一下", "GENERAL"),
+            listOf(router.validatedDecision(AgentIntent.CATALOG_QA, AgentQueryTarget.DOCTOR))
+        )
+
+        assertEquals(AgentIntent.COMPARISON, result.decision.intent)
+        assertEquals(AgentQueryTarget.DOCTOR, result.decision.queryTarget)
+        assertFalse(result.requiresContextCompletion)
+    }
+
+    @Test
+    fun `context does not replace explicit English comparison target`() {
+        val result = router.supplementWithContext(
+            router.assessCurrent("Compare clinics", "GENERAL"),
+            listOf(router.validatedDecision(AgentIntent.CATALOG_QA, AgentQueryTarget.DOCTOR))
+        )
+
+        assertEquals(AgentIntent.COMPARISON, result.decision.intent)
+        assertEquals(AgentQueryTarget.INSTITUTION, result.decision.queryTarget)
+    }
+
+    @Test
+    fun `context completes missing English comparison target`() {
+        val result = router.supplementWithContext(
+            router.assessCurrent("Compare them", "GENERAL"),
+            listOf(router.validatedDecision(AgentIntent.CATALOG_QA, AgentQueryTarget.DOCTOR))
+        )
+
+        assertEquals(AgentIntent.COMPARISON, result.decision.intent)
+        assertEquals(AgentQueryTarget.DOCTOR, result.decision.queryTarget)
+        assertFalse(result.requiresContextCompletion)
+    }
+
+    @Test
+    fun `conflicting context retains local candidate and requests parsing`() {
+        val result = router.supplementWithContext(
+            router.assessCurrent("对比医生", "GENERAL"),
+            listOf(router.validatedDecision(AgentIntent.CATALOG_QA, AgentQueryTarget.INSTITUTION))
+        )
+
+        assertEquals(AgentIntent.COMPARISON, result.decision.intent)
+        assertEquals(AgentQueryTarget.DOCTOR, result.decision.queryTarget)
+        assertTrue("CONFLICTING_CONTEXT" in result.ambiguityReasons)
+        assertTrue(result.requiresLlmParsing)
+    }
+
     @ParameterizedTest(name = "unnegated safety: {0}")
     @MethodSource("unnegatedSafetyCases")
     fun `current message keeps unnegated safety signals at highest priority`(query: String) {

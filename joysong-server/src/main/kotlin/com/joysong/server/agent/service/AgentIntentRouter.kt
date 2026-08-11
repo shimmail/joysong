@@ -156,6 +156,64 @@ class AgentIntentRouter {
         )
     }
 
+    fun supplementWithContext(
+        current: AgentRouteAssessment,
+        contextDecisions: List<AgentIntentDecision>
+    ): AgentRouteAssessment {
+        if (current.decision.intent == AgentIntent.SAFETY_SCREENING) return current
+
+        val context = contextDecisions.asReversed().firstOrNull { candidate ->
+            candidate.intent != AgentIntent.SAFETY_SCREENING && (
+                candidate.queryTarget != null ||
+                    (!current.explicitIntent &&
+                        current.decision.intent == AgentIntent.GENERAL_CHAT &&
+                        candidate.intent != AgentIntent.GENERAL_CHAT)
+                )
+        }
+            ?: return current
+        val currentDecision = current.decision
+        val targetConflict = current.explicitQueryTarget &&
+            context.queryTarget != null &&
+            context.queryTarget != currentDecision.queryTarget
+        val resolvedIntent = if (
+            !current.explicitIntent &&
+            currentDecision.intent == AgentIntent.GENERAL_CHAT &&
+            context.intent != AgentIntent.GENERAL_CHAT
+        ) {
+            context.intent
+        } else {
+            currentDecision.intent
+        }
+        val resolvedTarget = if (!current.explicitQueryTarget && currentDecision.queryTarget == null) {
+            context.queryTarget
+        } else {
+            currentDecision.queryTarget
+        }
+        val contextFilled = resolvedIntent != currentDecision.intent || resolvedTarget != currentDecision.queryTarget
+        val reasons = current.ambiguityReasons
+            .filterNot { it == "MULTIPLE_CONSTRAINTS_WITHOUT_TARGET" && resolvedTarget != null }
+            .let { if (targetConflict) it + "CONFLICTING_CONTEXT" else it }
+            .distinct()
+        val confidence = (current.confidence +
+            (if (contextFilled) 0.10 else 0.0) -
+            (if (targetConflict) 0.20 else 0.0))
+            .coerceIn(0.0, 1.0)
+        val requiresContextCompletion = (resolvedIntent in intentsRequiringTarget && resolvedTarget == null) ||
+            "UNRESOLVED_CURRENT_REFERENCE" in reasons
+        return current.copy(
+            decision = validatedDecision(resolvedIntent, resolvedTarget),
+            confidence = confidence,
+            ambiguityReasons = reasons,
+            requiresLlmParsing = targetConflict || requiresLlmParsing(
+                resolvedIntent,
+                confidence,
+                reasons,
+                requiresContextCompletion
+            ),
+            requiresContextCompletion = requiresContextCompletion
+        )
+    }
+
     fun validatedDecision(intent: AgentIntent, queryTarget: AgentQueryTarget?): AgentIntentDecision {
         val searchCatalog = intent in setOf(
             AgentIntent.CATALOG_QA,

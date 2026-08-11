@@ -262,17 +262,21 @@ class ChatService(
         llmCaller: (List<Map<String, String>>, GenerationProfile) -> LlmCallResult
     ): GeneratedTurn {
         val llmMessages = mutableListOf<Map<String, String>>()
-        val previousUserQueries = historyMessages.filter { it.role.equals("USER", true) }
-            .map { it.content }
-            .takeLast(4)
-        val contextualQuery = agentCatalogService.contextualSearchQuery(content, previousUserQueries)
-        val localRouteAssessment = agentIntentRouter.assess(contextualQuery, session.contextType)
+        val currentRouteAssessment = agentIntentRouter.assessCurrent(content, session.contextType)
+        val localRouteAssessment = if (currentRouteAssessment.requiresContextCompletion) {
+            agentIntentRouter.supplementWithContext(
+                currentRouteAssessment,
+                boundedContextDecisions(historyMessages, summary)
+            )
+        } else {
+            currentRouteAssessment
+        }
         // A custom institution-project name may not contain generic words such as
         // “项目” or “套餐”. Resolve effective inherited details before deciding that
         // the message is general chat, otherwise the database search is skipped.
         val routeAssessment = if (
             localRouteAssessment.decision.intent == AgentIntent.GENERAL_CHAT &&
-            agentCatalogService.hasInstitutionProjectMatch(contextualQuery)
+            agentCatalogService.hasInstitutionProjectMatch(content)
         ) {
             localRouteAssessment.copy(
                 decision = agentIntentRouter.validatedDecision(
@@ -285,15 +289,23 @@ class ChatService(
             )
         } else localRouteAssessment
         val parsedRoute = if (aiAgentProperties.intentParserEnabled && routeAssessment.requiresLlmParsing) {
-            parseAmbiguousRoute(content, contextualQuery, routeAssessment.decision)
+            parseAmbiguousRoute(content, routeAssessment.decision)
         } else null
         // Deterministic safety detection can only be preserved or upgraded, never downgraded by a model.
         val intentDecision = when {
             routeAssessment.decision.intent == AgentIntent.SAFETY_SCREENING -> routeAssessment.decision
-            parsedRoute?.intent == AgentIntent.SAFETY_SCREENING -> agentIntentRouter.validatedDecision(AgentIntent.SAFETY_SCREENING, null)
-            parsedRoute != null -> agentIntentRouter.validatedDecision(parsedRoute.intent, parsedRoute.queryTarget)
+            parsedRoute?.intent == AgentIntent.SAFETY_SCREENING && !routeAssessment.explicitIntent ->
+                agentIntentRouter.validatedDecision(AgentIntent.SAFETY_SCREENING, null)
+            parsedRoute != null -> agentIntentRouter.validatedDecision(
+                if (routeAssessment.explicitIntent) routeAssessment.decision.intent else parsedRoute.intent,
+                if (routeAssessment.explicitQueryTarget) routeAssessment.decision.queryTarget else parsedRoute.queryTarget
+            )
             else -> routeAssessment.decision
         }
+        val previousUserQueries = historyMessages.filter { it.role.equals("USER", true) }
+            .map { it.content }
+            .takeLast(4)
+        val contextualQuery = agentCatalogService.contextualSearchQuery(content, previousUserQueries)
         val generationProfile = generationProfile(intentDecision.intent)
         val catalogSearchQuery = listOf(contextualQuery, parsedRoute?.keywords.orEmpty().joinToString(" "))
             .filter { it.isNotBlank() }
@@ -457,7 +469,33 @@ class ChatService(
         val keywords: List<String>
     )
 
-    private fun parseAmbiguousRoute(rawQuery: String, contextualQuery: String, fallback: AgentIntentDecision): ParsedRoute? {
+    private fun boundedContextDecisions(
+        historyMessages: List<ChatMessageEntity>,
+        summary: AgentSessionSummary?
+    ): List<AgentIntentDecision> {
+        val summaryDecisions = summary?.unresolvedTopics.orEmpty().mapNotNull(::summaryContextDecision)
+        if (summaryDecisions.isNotEmpty()) return summaryDecisions
+        return historyMessages.filter { it.role.equals("USER", true) }
+            .takeLast(4)
+            .map { agentIntentRouter.assessCurrent(it.content, "GENERAL").decision }
+    }
+
+    private fun summaryContextDecision(topic: String): AgentIntentDecision? {
+        val parts = topic.trim().uppercase().split(":")
+        if (parts.size !in 1..3 || parts.any(String::isBlank)) return null
+        val intent = runCatching { AgentIntent.valueOf(parts.first()) }.getOrNull() ?: return null
+        val target = parts.getOrNull(1)?.let { runCatching { AgentQueryTarget.valueOf(it) }.getOrNull() }
+        if (parts.size == 3 && target == null) return null
+        val action = when {
+            target != null -> parts.getOrNull(2)
+            else -> parts.getOrNull(1)
+        }
+        val decision = agentIntentRouter.validatedDecision(intent, target)
+        val expectedAction = decision.nextAction.takeUnless { it.name == "NONE" }?.name
+        return decision.takeIf { action == expectedAction }
+    }
+
+    private fun parseAmbiguousRoute(rawQuery: String, fallback: AgentIntentDecision): ParsedRoute? {
         if (aiAgentProperties.apiKey.isBlank()) return null
         val startedAt = System.nanoTime()
         return runCatching {
@@ -476,7 +514,7 @@ class ChatService(
                 "model" to aiAgentProperties.model,
                 "messages" to listOf(
                     mapOf("role" to "system", "content" to instruction),
-                    mapOf("role" to "user", "content" to "Current: $rawQuery\nContextual: $contextualQuery\nLocal fallback: ${fallback.intent}/${fallback.queryTarget}")
+                    mapOf("role" to "user", "content" to "Current: $rawQuery\nLocal fallback: ${fallback.intent}/${fallback.queryTarget}")
                 ),
                 "temperature" to 0,
                 "max_tokens" to 180,
