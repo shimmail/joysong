@@ -120,6 +120,7 @@ class _InstitutionRelationshipsPageState
 
   Widget _buildDoctorView(BuildContext context) {
     final contextData = _managementContext!;
+    final canApply = contextData.canApplyToInstitutions;
     final currentIds = contextData.doctorInstitutionIds;
     final available = _action == 'LEAVE'
         ? _institutions.where((item) => currentIds.contains(item.id)).toList()
@@ -135,39 +136,41 @@ class _InstitutionRelationshipsPageState
           Text(context.localized('暂无已确认机构归属', 'No confirmed affiliations'))
         else
           for (final id in currentIds) ListTile(title: Text(_institutionName(id))),
-        const SizedBox(height: 16),
-        SegmentedButton<String>(
-          segments: [
-            ButtonSegment(value: 'JOIN', label: Text(context.localized('加入机构', 'Join institution'))),
-            ButtonSegment(value: 'LEAVE', label: Text(context.localized('离开机构', 'Leave institution'))),
-          ],
-          selected: {_action},
-          onSelectionChanged: (value) => setState(() {
-            _action = value.first;
-            _institutionId = null;
-          }),
-        ),
-        const SizedBox(height: 12),
-        DropdownButtonFormField<String>(
-          value: _institutionId,
-          decoration: InputDecoration(labelText: context.localized('目标机构', 'Institution')),
-          items: available
-              .map((item) => DropdownMenuItem(value: item.id, child: Text(item.name)))
-              .toList(),
-          onChanged: _saving ? null : (value) => setState(() => _institutionId = value),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _requestNote,
-          maxLines: 3,
-          decoration: InputDecoration(labelText: context.localized('申请说明', 'Request note')),
-        ),
-        const SizedBox(height: 12),
-        FilledButton.icon(
-          onPressed: _saving || available.isEmpty ? null : _submit,
-          icon: const Icon(Icons.send_outlined),
-          label: Text(context.localized('提交申请', 'Submit request')),
-        ),
+        if (canApply) ...[
+          const SizedBox(height: 16),
+          SegmentedButton<String>(
+            segments: [
+              ButtonSegment(value: 'JOIN', label: Text(context.localized('加入机构', 'Join institution'))),
+              ButtonSegment(value: 'LEAVE', label: Text(context.localized('离开机构', 'Leave institution'))),
+            ],
+            selected: {_action},
+            onSelectionChanged: (value) => setState(() {
+              _action = value.first;
+              _institutionId = null;
+            }),
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            value: _institutionId,
+            decoration: InputDecoration(labelText: context.localized('目标机构', 'Institution')),
+            items: available
+                .map((item) => DropdownMenuItem(value: item.id, child: Text(item.name)))
+                .toList(),
+            onChanged: _saving ? null : (value) => setState(() => _institutionId = value),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _requestNote,
+            maxLines: 3,
+            decoration: InputDecoration(labelText: context.localized('申请说明', 'Request note')),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: _saving || available.isEmpty ? null : _submit,
+            icon: const Icon(Icons.send_outlined),
+            label: Text(context.localized('提交申请', 'Submit request')),
+          ),
+        ],
         const SizedBox(height: 24),
         Text(context.localized('申请记录', 'Request history'),
             style: Theme.of(context).textTheme.titleMedium),
