@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:joysong_flutter/features/agent/domain/agent_models.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_chat_controller.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_plan_controller.dart';
@@ -179,7 +180,7 @@ class _AgentChatPageState extends State<AgentChatPage> {
                     ? _EmptyChat(english: english)
                     : ListView.builder(
                         controller: _scrollController,
-                        cacheExtent: 600,
+                        scrollCacheExtent: const ScrollCacheExtent.pixels(600),
                         padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                         itemCount: state.messages.length,
                         itemBuilder: (context, index) => _ChatBubble(
