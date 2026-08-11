@@ -332,7 +332,16 @@ class DoctorInstitutionChangeMigrationTest {
                 updatedAt = rs.getTimestamp("updated_at").toLocalDateTime()
             )
         }.toMap()
-        assertEquals(setOf("rolling-pending", "rolling-rejected-empty", "rolling-changes"), rollingHistory.keys)
+        assertEquals(
+            setOf(
+                "rolling-pending",
+                "rolling-duplicate-pending",
+                "rolling-rejected-empty",
+                "rolling-rejected-cleared",
+                "rolling-changes"
+            ),
+            rollingHistory.keys
+        )
         assertHistoryRow(
             rollingHistory,
             "rolling-pending",
@@ -345,6 +354,16 @@ class DoctorInstitutionChangeMigrationTest {
         )
         assertHistoryRow(
             rollingHistory,
+            "rolling-duplicate-pending",
+            "REJECTED",
+            "历史待审核申请已由新关系申请接管",
+            "2026-01-02 01:02:03",
+            "2026-01-03 03:04:05",
+            "2026-01-02 01:02:03",
+            "2026-01-03 03:04:05"
+        )
+        assertHistoryRow(
+            rollingHistory,
             "rolling-rejected-empty",
             "REJECTED",
             "历史审核未填写原因",
@@ -352,6 +371,17 @@ class DoctorInstitutionChangeMigrationTest {
             "2026-02-02 02:03:04",
             "2026-02-01 01:02:03",
             "2026-02-03 03:04:05",
+            reviewedBy = REVIEWER_ID
+        )
+        assertHistoryRow(
+            rollingHistory,
+            "rolling-rejected-cleared",
+            "REJECTED",
+            "历史审核未填写原因",
+            "2026-02-04 01:02:03",
+            "2026-02-06 03:04:05",
+            "2026-02-04 01:02:03",
+            "2026-02-06 03:04:05",
             reviewedBy = REVIEWER_ID
         )
         assertHistoryRow(
@@ -492,10 +522,12 @@ class DoctorInstitutionChangeMigrationTest {
             INSERT INTO institutions (id, name) VALUES
                 (?, 'Rolling Pending Institution'),
                 (?, 'Rolling Rejected Institution'),
+                (?, 'Rolling Rejected Cleared Institution'),
                 (?, 'Rolling Changes Institution')
             """.trimIndent(),
             ROLLING_PENDING_INSTITUTION_ID,
             ROLLING_REJECTED_INSTITUTION_ID,
+            ROLLING_REJECTED_CLEARED_INSTITUTION_ID,
             ROLLING_CHANGES_INSTITUTION_ID
         )
         jdbcTemplate.update(
@@ -506,15 +538,24 @@ class DoctorInstitutionChangeMigrationTest {
             VALUES
                 ('rolling-pending', ?, ?, 0, 'PENDING', 'rolling-pending', '', NULL, NULL,
                  '2026-01-01 01:02:03', '2026-01-01 01:02:03', NULL),
+                ('rolling-duplicate-pending', ?, ?, 0, 'PENDING', 'rolling-duplicate-pending', '', NULL, NULL,
+                 '2026-01-02 01:02:03', '2026-01-03 03:04:05', NULL),
                 ('rolling-rejected-empty', ?, ?, 0, 'REJECTED', 'rolling-rejected-empty', '', ?,
                  '2026-02-02 02:03:04', '2026-02-01 01:02:03', '2026-02-03 03:04:05', NULL),
+                ('rolling-rejected-cleared', ?, ?, 0, 'REJECTED', 'rolling-rejected-cleared', '', ?,
+                 NULL, '2026-02-04 01:02:03', '2026-02-06 03:04:05', NULL),
                 ('rolling-changes', ?, ?, 0, 'CHANGES_REQUESTED', 'rolling-changes', 'rolling changes reason', ?,
                  '2026-03-02 02:03:04', '2026-03-01 01:02:03', '2026-03-03 03:04:05', NULL)
             """.trimIndent(),
             DOCTOR_ID,
             ROLLING_PENDING_INSTITUTION_ID,
             DOCTOR_ID,
+            PENDING_INSTITUTION_ID,
+            DOCTOR_ID,
             ROLLING_REJECTED_INSTITUTION_ID,
+            REVIEWER_ID,
+            DOCTOR_ID,
+            ROLLING_REJECTED_CLEARED_INSTITUTION_ID,
             REVIEWER_ID,
             DOCTOR_ID,
             ROLLING_CHANGES_INSTITUTION_ID,
@@ -576,6 +617,7 @@ class DoctorInstitutionChangeMigrationTest {
         private const val SOFT_DELETED_INSTITUTION_ID = "fixture-institution-soft-deleted"
         private const val ROLLING_PENDING_INSTITUTION_ID = "fixture-institution-rolling-pending"
         private const val ROLLING_REJECTED_INSTITUTION_ID = "fixture-institution-rolling-rejected"
+        private const val ROLLING_REJECTED_CLEARED_INSTITUTION_ID = "fixture-rolling-rejected-cleared"
         private const val ROLLING_CHANGES_INSTITUTION_ID = "fixture-institution-rolling-changes"
         private const val CONSULTANT_MEMBERSHIP_ID = "fixture-consultant-membership"
         private val LEGACY_MIGRATIONS = listOf(

@@ -3,6 +3,7 @@ package com.joysong.server.identity.service
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
+import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.springframework.security.access.AccessDeniedException
@@ -108,9 +109,14 @@ class InstitutionMembershipRequestServiceTest {
     }
 
     @Test
-    fun `legacy doctor join approval applies relationship effects before approving request`() {
+    fun `legacy doctor join approval records review before applying relationship effects`() {
         val store = FakeMembershipRequestStore().apply {
             seed(request("legacy-join", MembershipRequestType.DOCTOR, "doctor-2", "institution-1"))
+        }
+        every {
+            relationshipService.approveJoin("doctor-2", "institution-1", "legal-1")
+        } answers {
+            assertEquals("APPROVED", store.get(MembershipRequestType.DOCTOR, "legacy-join")?.status)
         }
 
         service(store).review(

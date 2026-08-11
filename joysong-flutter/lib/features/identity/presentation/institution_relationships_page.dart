@@ -19,6 +19,7 @@ class _InstitutionRelationshipsPageState
   ManagementContext? _managementContext;
   List<InstitutionOption> _institutions = const [];
   List<DoctorInstitutionChangeRequest> _requests = const [];
+  List<InstitutionMembershipRequest> _membershipRequests = const [];
   String _action = 'JOIN';
   String? _institutionId;
   String? _error;
@@ -28,6 +29,9 @@ class _InstitutionRelationshipsPageState
 
   bool get _canUseDoctorView =>
       _managementContext?.activeRoles.contains('DOCTOR') ?? false;
+  bool get _canUseConsultantView =>
+      (_managementContext?.activeRoles.contains('CONSULTANT') ?? false) &&
+      (_managementContext?.canViewAffiliations ?? false);
   bool get _canUseLegalView =>
       (_managementContext?.canReviewInstitutionRequests ?? false) &&
       (_managementContext?.managedInstitutionIds.isNotEmpty ?? false);
@@ -54,6 +58,7 @@ class _InstitutionRelationshipsPageState
         widget.repository.loadManagementContext(),
         widget.repository.listInstitutionOptions(),
         widget.repository.listDoctorInstitutionChangeRequests(),
+        widget.repository.listInstitutionMembershipRequests(),
       ]);
       if (!mounted) return;
       final context = values[0] as ManagementContext;
@@ -61,6 +66,7 @@ class _InstitutionRelationshipsPageState
         _managementContext = context;
         _institutions = values[1] as List<InstitutionOption>;
         _requests = values[2] as List<DoctorInstitutionChangeRequest>;
+        _membershipRequests = values[3] as List<InstitutionMembershipRequest>;
         _legalView = !_canUseDoctorView && _canUseLegalView;
         _loading = false;
       });
@@ -105,6 +111,8 @@ class _InstitutionRelationshipsPageState
                       _buildLegalView(context)
                     else if (_canUseDoctorView)
                       _buildDoctorView(context)
+                    else if (_canUseConsultantView)
+                      _buildConsultantView(context)
                     else
                       Padding(
                         padding: const EdgeInsets.only(top: 24),
@@ -117,6 +125,45 @@ class _InstitutionRelationshipsPageState
                 ),
               ),
       );
+
+  Widget _buildConsultantView(BuildContext context) {
+    final contextData = _managementContext!;
+    final history = _membershipRequests
+        .where((item) =>
+            item.requestType == 'CONSULTANT' &&
+            item.userId == contextData.userId)
+        .toList();
+    final currentIds = <String>[...contextData.visibleInstitutionIds];
+    for (final request in history) {
+      if (request.status == 'APPROVED' &&
+          !currentIds.contains(request.institutionId)) {
+        currentIds.add(request.institutionId);
+      }
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 16),
+        Text(context.localized('机构归属', 'Institution affiliations'),
+            style: Theme.of(context).textTheme.titleMedium),
+        if (currentIds.isEmpty)
+          Text(context.localized('暂无已确认机构归属', 'No confirmed affiliations'))
+        else
+          for (final id in currentIds)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.badge_outlined),
+              title: Text(_institutionName(id)),
+            ),
+        const SizedBox(height: 24),
+        Text(context.localized('申请记录', 'Request history'),
+            style: Theme.of(context).textTheme.titleMedium),
+        if (history.isEmpty)
+          Text(context.localized('暂无申请记录', 'No request history')),
+        for (final request in history) _membershipTile(context, request),
+      ],
+    );
+  }
 
   Widget _buildDoctorView(BuildContext context) {
     final contextData = _managementContext!;
@@ -213,6 +260,25 @@ class _InstitutionRelationshipsPageState
                 : null,
       );
 
+  Widget _membershipTile(
+    BuildContext context,
+    InstitutionMembershipRequest request,
+  ) =>
+      ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: const Icon(Icons.apartment_outlined),
+        title: Text(_institutionName(request.institutionId)),
+        subtitle: Text([
+          _statusLabel(context, request.status),
+          if (request.requestNote.isNotEmpty) request.requestNote,
+          if (request.reviewNote.isNotEmpty)
+            context.localized(
+              '审核意见：${request.reviewNote}',
+              'Review: ${request.reviewNote}',
+            ),
+        ].join('\n')),
+      );
+
   Future<void> _submit() async {
     final institutionId = _institutionId;
     if (institutionId == null) {
@@ -281,10 +347,12 @@ class _InstitutionRelationshipsPageState
     return result;
   }
 
-  String _institutionName(String id) => _institutions
-      .where((item) => item.id == id)
-      .map((item) => item.name)
-      .firstOrNull ?? id;
+  String _institutionName(String id) {
+    for (final item in _institutions) {
+      if (item.id == id) return item.name;
+    }
+    return id;
+  }
 
   String _actionLabel(BuildContext context, String action) => action == 'LEAVE'
       ? context.localized('离开机构', 'Leave institution')

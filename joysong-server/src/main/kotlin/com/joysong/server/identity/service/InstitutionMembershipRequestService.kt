@@ -123,10 +123,11 @@ class InstitutionMembershipRequestService(
         if (decision == MembershipRequestDecision.REJECTED) {
             require(normalizedReviewNote.isNotEmpty()) { "驳回时必须填写审核意见" }
         }
+        val reviewed = store.review(request, actor.userId, decision, normalizedReviewNote)
         if (type == MembershipRequestType.DOCTOR && decision == MembershipRequestDecision.APPROVED) {
             relationshipService.approveJoin(request.userId, request.institutionId, actor.userId)
         }
-        return store.review(request, actor.userId, decision, normalizedReviewNote)
+        return reviewed
     }
 
     private fun requireApplicantRole(actor: ManagementActor, type: MembershipRequestType) {

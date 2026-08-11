@@ -270,8 +270,8 @@ final class ApiIdentityRepository implements IdentityRepository {
     return await _apiClient.get<List<DoctorInstitutionChangeRequest>>(
           '/management/institution-membership-requests',
           decodeData: (json) => _objectList(json)
+              .where(_isDoctorInstitutionRequest)
               .map(DoctorInstitutionChangeRequest.fromJson)
-              .where((item) => item.requestType == 'DOCTOR')
               .toList(growable: false),
         ) ??
         const [];
@@ -395,3 +395,7 @@ final class ApiIdentityRepository implements IdentityRepository {
 }
 
 List<Object?> _objectList(Object? value) => value is List ? value : const [];
+
+bool _isDoctorInstitutionRequest(Object? value) =>
+    value is Map &&
+    value['requestType']?.toString().trim().toUpperCase() == 'DOCTOR';
