@@ -15,6 +15,8 @@ abstract interface class IdentityRepository {
 
   Future<List<ManagedInstitutionSummary>> listManagedInstitutions();
 
+  Future<List<ManagedInstitutionSummary>> listProfessionalVisibleInstitutions();
+
   Future<ManagedInstitutionProfile> loadManagedInstitution(String id);
 
   Future<ManagedInstitutionProfile> updateManagedInstitution(

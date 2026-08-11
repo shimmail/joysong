@@ -259,7 +259,7 @@ final class InstitutionProjectManagementController extends ChangeNotifier {
     notifyListeners();
     try {
       final results = await Future.wait([
-        _repository.listManagedInstitutions(),
+        _repository.listProfessionalVisibleInstitutions(),
         _repository.listManagementProjects(),
         _repository.listManagedInstitutionProjects(),
       ]);

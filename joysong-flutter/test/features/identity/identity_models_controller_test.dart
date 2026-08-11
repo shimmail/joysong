@@ -183,6 +183,28 @@ void main() {
     expect(controller.selectedProfile?.description, '服务端保存结果');
   });
 
+  test('doctor project management uses professional-visible institutions',
+      () async {
+    final repository = _FakeIdentityRepository()
+      ..rejectLegalRepresentativeInstitutionList = true;
+    final controller = InstitutionProjectManagementController(
+      repository,
+      context: const ManagementContext(
+        userId: 'doctor-user-1',
+        platformRole: 'USER',
+        activeRoles: ['DOCTOR'],
+        doctorId: 'doctor-1',
+        managedInstitutionIds: [],
+        visibleInstitutionIds: ['inst-1'],
+      ),
+    );
+
+    await controller.load();
+
+    expect(controller.status, InstitutionProjectLoadStatus.ready);
+    expect(controller.institutions.single.id, 'inst-1');
+  });
+
   testWidgets('institution profile edit uses public info and album image copy',
       (tester) async {
     tester.view.physicalSize = const Size(800, 2200);
@@ -429,6 +451,7 @@ final class _FakeIdentityRepository implements IdentityRepository {
   final savedUpdates = <ManagedInstitutionProfileUpdate>[];
   List<InstitutionMembershipRequest> membershipRequests = const [];
   InstitutionProjectJoinRequestDraft? submittedJoinRequest;
+  bool rejectLegalRepresentativeInstitutionList = false;
 
   @override
   Future<void> deletePrivateDraft(String fileId) async {}
@@ -455,6 +478,9 @@ final class _FakeIdentityRepository implements IdentityRepository {
 
   @override
   Future<List<ManagedInstitutionSummary>> listManagedInstitutions() async {
+    if (rejectLegalRepresentativeInstitutionList) {
+      throw Exception('legal representative endpoint denied');
+    }
     return [
       const ManagedInstitutionSummary(
         id: 'inst-1',
@@ -463,6 +489,16 @@ final class _FakeIdentityRepository implements IdentityRepository {
       ),
     ];
   }
+
+  @override
+  Future<List<ManagedInstitutionSummary>>
+      listProfessionalVisibleInstitutions() async => const [
+            ManagedInstitutionSummary(
+              id: 'inst-1',
+              name: '悦美医疗美容',
+              city: '杭州',
+            ),
+          ];
 
   @override
   Future<ManagedInstitutionProfile> loadManagedInstitution(String id) async {

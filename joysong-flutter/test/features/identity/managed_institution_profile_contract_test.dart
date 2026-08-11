@@ -82,6 +82,19 @@ void main() {
       ),
     ]);
   });
+
+  test('professional-visible institution summaries keep the compatibility path',
+      () async {
+    final client = _RecordingApiClient();
+    final repository = ApiIdentityRepository(client);
+
+    final summaries = await repository.listProfessionalVisibleInstitutions();
+
+    expect(summaries.single.id, 'institution-1');
+    expect(client.requests, [
+      const _Request('GET', '/admin/institutions'),
+    ]);
+  });
 }
 
 const _summaryJson = <String, Object?>{
@@ -129,8 +142,9 @@ final class _RecordingApiClient extends ApiClient {
   }) async {
     requests.add(_Request('GET', path));
     return decodeData(
-      path == '/management/institutions' ? [_summaryJson] : _profileJson,
-    );
+        path == '/management/institutions' || path == '/admin/institutions'
+            ? [_summaryJson]
+            : _profileJson);
   }
 
   @override

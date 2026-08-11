@@ -86,6 +86,18 @@ final class ApiIdentityRepository implements IdentityRepository {
   }
 
   @override
+  Future<List<ManagedInstitutionSummary>>
+      listProfessionalVisibleInstitutions() async {
+    return await _apiClient.get<List<ManagedInstitutionSummary>>(
+          '/admin/institutions',
+          decodeData: (json) => _objectList(json)
+              .map(ManagedInstitutionSummary.fromJson)
+              .toList(growable: false),
+        ) ??
+        const [];
+  }
+
+  @override
   Future<ManagedInstitutionProfile> loadManagedInstitution(String id) async {
     final result = await _apiClient.get<ManagedInstitutionProfile>(
       '/management/institutions/${id.trim()}',
