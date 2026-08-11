@@ -1,11 +1,18 @@
 package com.joysong.server.institution.controller
 
+import com.joysong.server.admin.controller.AdminInstitutionController
+import com.joysong.server.admin.controller.InstitutionProjectController
+import com.joysong.server.catalog.service.CatalogIntegrityService
 import com.joysong.server.common.GlobalExceptionHandler
 import com.joysong.server.config.JwtAuthenticationFilter
 import com.joysong.server.config.JwtTokenProvider
 import com.joysong.server.config.SecurityConfig
+import com.joysong.server.doctor.service.DoctorInstitutionService
+import com.joysong.server.doctor.service.DoctorService
 import com.joysong.server.identity.service.ManagementAccessService
 import com.joysong.server.identity.service.ManagementActor
+import com.joysong.server.institution.entity.InstitutionEntity
+import com.joysong.server.institution.service.InstitutionService
 import com.joysong.server.institution.service.ManagedInstitutionProfile
 import com.joysong.server.institution.service.ManagedInstitutionProfileNotFoundException
 import com.joysong.server.institution.service.ManagedInstitutionProfileService
@@ -64,6 +71,9 @@ class ManagedInstitutionProfileControllerTest {
     @Autowired
     private lateinit var profileService: ManagedInstitutionProfileService
 
+    @Autowired
+    private lateinit var institutionService: InstitutionService
+
     private val legalActor = actor(
         userId = "legal-1",
         roles = setOf("INSTITUTION_LEGAL_REPRESENTATIVE"),
@@ -72,7 +82,7 @@ class ManagedInstitutionProfileControllerTest {
 
     @BeforeEach
     fun resetMocks() {
-        clearMocks(accessService, profileService)
+        clearMocks(accessService, profileService, institutionService)
     }
 
     @ParameterizedTest(name = "unauthenticated {0} returns 401")
@@ -254,6 +264,50 @@ class ManagedInstitutionProfileControllerTest {
             .andExpect(jsonPath("$.code").value(403))
     }
 
+    @Test
+    @WithMockUser(username = "admin-1", roles = ["ADMIN"])
+    fun `ADMIN retains successful write access through legacy admin institution route`() {
+        val adminActor = actor("admin-1", setOf("ADMIN"), isAdmin = true)
+        every { accessService.actor(any()) } returns adminActor
+        every { accessService.requirePlatformAdmin(adminActor) } returns Unit
+        every { institutionService.findById("institution-1") } returns
+            InstitutionEntity(id = "institution-1", name = "旧机构")
+        every { institutionService.save(any()) } answers { firstArg() }
+
+        mockMvc.perform(
+            put("/api/admin/institutions/institution-1")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"id":"ignored","name":"管理员更新"}""")
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.code").value(200))
+            .andExpect(jsonPath("$.data.id").value("institution-1"))
+            .andExpect(jsonPath("$.data.name").value("管理员更新"))
+    }
+
+    @Test
+    @WithMockUser(username = "doctor-1", roles = ["DOCTOR"])
+    fun `professional retains read access through legacy admin institution route`() {
+        val doctorActor = actor(
+            userId = "doctor-1",
+            roles = setOf("DOCTOR"),
+            doctorId = "doctor-1",
+            doctorInstitutionIds = setOf("institution-1")
+        )
+        every { accessService.actor(any()) } returns doctorActor
+        every { institutionService.findAll() } returns listOf(
+            InstitutionEntity(id = "institution-1", name = "可见机构"),
+            InstitutionEntity(id = "institution-2", name = "不可见机构")
+        )
+
+        mockMvc.perform(get("/api/admin/institutions"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.code").value(200))
+            .andExpect(jsonPath("$.data.length()").value(1))
+            .andExpect(jsonPath("$.data[0].id").value("institution-1"))
+            .andExpect(jsonPath("$.data[0].name").value("可见机构"))
+    }
+
     private fun summary() = ManagedInstitutionSummary(
         id = "institution-1",
         name = "悦颜医疗",
@@ -366,6 +420,7 @@ class ManagedInstitutionProfileControllerTest {
             userId: String,
             roles: Set<String>,
             managedInstitutionIds: Set<String> = emptySet(),
+            doctorInstitutionIds: Set<String> = emptySet(),
             doctorId: String? = null,
             isAdmin: Boolean = false
         ) = ManagementActor(
@@ -374,7 +429,7 @@ class ManagedInstitutionProfileControllerTest {
             activeRoles = roles,
             doctorId = doctorId,
             managedInstitutionIds = managedInstitutionIds,
-            doctorInstitutionIds = emptySet(),
+            doctorInstitutionIds = doctorInstitutionIds,
             manageableDoctorIds = doctorId?.let(::setOf) ?: emptySet()
         )
     }
@@ -382,13 +437,28 @@ class ManagedInstitutionProfileControllerTest {
 
 @TestConfiguration
 @ComponentScan(basePackages = ["com.joysong.server.institution.controller"])
-@Import(JwtAuthenticationFilter::class)
+@Import(JwtAuthenticationFilter::class, AdminInstitutionController::class)
 class ManagedInstitutionProfileControllerTestConfig {
     @Bean
     fun managementAccessService(): ManagementAccessService = mockk()
 
     @Bean
     fun managedInstitutionProfileService(): ManagedInstitutionProfileService = mockk()
+
+    @Bean
+    fun institutionService(): InstitutionService = mockk()
+
+    @Bean
+    fun doctorService(): DoctorService = mockk()
+
+    @Bean
+    fun doctorInstitutionService(): DoctorInstitutionService = mockk()
+
+    @Bean
+    fun institutionProjectController(): InstitutionProjectController = mockk()
+
+    @Bean
+    fun catalogIntegrityService(): CatalogIntegrityService = mockk()
 
     @Bean
     fun jwtTokenProvider(): JwtTokenProvider = mockk(relaxed = true)
