@@ -15,6 +15,26 @@ enum class AgentQueryTarget { INSTITUTION, DOCTOR, PROJECT, INSTITUTION_PROJECT 
 
 enum class AgentNextAction { NONE, SHOW_CATALOG, START_PLANNING, COMPLETE_SAFETY_SCREENING }
 
+enum class AgentLabelPolarity { POSITIVE, NEGATIVE, UNCERTAIN }
+
+enum class AgentLabelSource { CURRENT, CONTEXT, MODEL }
+
+data class AgentIntentEvidence(
+    val intent: AgentIntent,
+    val polarity: AgentLabelPolarity,
+    val explicit: Boolean,
+    val locked: Boolean,
+    val source: AgentLabelSource
+)
+
+data class AgentTargetEvidence(
+    val target: AgentQueryTarget,
+    val polarity: AgentLabelPolarity,
+    val explicit: Boolean,
+    val locked: Boolean,
+    val source: AgentLabelSource
+)
+
 data class AgentIntentDecision(
     val intent: AgentIntent,
     val queryTarget: AgentQueryTarget? = null,
@@ -30,7 +50,9 @@ data class AgentRouteAssessment(
     val explicitIntent: Boolean = false,
     val explicitQueryTarget: Boolean = false,
     val requiresContextCompletion: Boolean = false,
-    val unresolvedSafetyNegation: Boolean = false
+    val unresolvedSafetyNegation: Boolean = false,
+    val intentEvidence: Set<AgentIntentEvidence> = emptySet(),
+    val targetEvidence: Set<AgentTargetEvidence> = emptySet()
 )
 
 data class ParsedAgentRoute(
@@ -88,18 +110,33 @@ class AgentIntentRouter {
         val institutionSignals = matchSignals(annotatedSignals, institutionTerms)
         val projectSignals = matchSignals(annotatedSignals, projectTerms)
         val unresolvedReferenceSignals = matchSignals(annotatedSignals, unresolvedReferenceTerms)
+        val specificIntentEvidence = setOfNotNull(
+            intentEvidence(AgentIntent.SAFETY_SCREENING, safetySignals),
+            intentEvidence(AgentIntent.DETAIL_SUMMARY, detailSummarySignals),
+            intentEvidence(AgentIntent.COMPARISON, comparisonSignals),
+            intentEvidence(AgentIntent.PLANNING, planningSignals)
+        )
+        val intentEvidence = specificIntentEvidence + if (
+            specificIntentEvidence.none { it.polarity == AgentLabelPolarity.POSITIVE }
+        ) {
+            setOfNotNull(intentEvidence(AgentIntent.CATALOG_QA, catalogSignals))
+        } else {
+            emptySet()
+        }
+        val targetEvidence = setOfNotNull(
+            targetEvidence(AgentQueryTarget.INSTITUTION_PROJECT, institutionProjectSignals),
+            targetEvidence(AgentQueryTarget.DOCTOR, doctorSignals),
+            targetEvidence(AgentQueryTarget.INSTITUTION, institutionSignals),
+            targetEvidence(AgentQueryTarget.PROJECT, projectSignals)
+        )
+        val decision = selectPrimary(intentEvidence, targetEvidence, contextType)
+        val intent = decision.intent
+        val queryTarget = decision.queryTarget
         val reasons = mutableListOf<String>()
         var score = 0.55
 
         if (annotatedSignals.ambiguousNegation) {
             reasons += "AMBIGUOUS_NEGATION"
-        }
-        val queryTarget = when {
-            institutionProjectSignals.positiveTerms.isNotEmpty() -> AgentQueryTarget.INSTITUTION_PROJECT
-            doctorSignals.positiveTerms.isNotEmpty() -> AgentQueryTarget.DOCTOR
-            institutionSignals.positiveTerms.isNotEmpty() -> AgentQueryTarget.INSTITUTION
-            projectSignals.positiveTerms.isNotEmpty() -> AgentQueryTarget.PROJECT
-            else -> null
         }
         val targetCount = listOf(
             institutionProjectSignals.positiveTerms.isNotEmpty(),
@@ -124,40 +161,20 @@ class AgentIntentRouter {
             score -= 0.20
             reasons += "MULTIPLE_CONSTRAINTS_WITHOUT_TARGET"
         }
-        val intent = when {
-            safetySignals.positiveTerms.isNotEmpty() -> AgentIntent.SAFETY_SCREENING
-            detailSummarySignals.positiveTerms.isNotEmpty() -> AgentIntent.DETAIL_SUMMARY
-            comparisonSignals.positiveTerms.isNotEmpty() -> AgentIntent.COMPARISON
-            planningSignals.positiveTerms.isNotEmpty() -> AgentIntent.PLANNING
-            catalogSignals.positiveTerms.isNotEmpty() -> AgentIntent.CATALOG_QA
-            else -> AgentIntent.GENERAL_CHAT
-        }
         if (intent == AgentIntent.GENERAL_CHAT && matchSignals(annotatedSignals, aestheticConcernTerms).positiveTerms.isNotEmpty()) {
             score -= 0.30
             reasons += "UNCLASSIFIED_AESTHETIC_REQUEST"
         }
 
-        val matchedExplicitIntent = when (intent) {
-            AgentIntent.SAFETY_SCREENING -> safetySignals.positiveTerms.isNotEmpty()
-            AgentIntent.DETAIL_SUMMARY -> detailSummarySignals.positiveTerms.isNotEmpty()
-            AgentIntent.COMPARISON -> comparisonSignals.positiveTerms.isNotEmpty()
-            AgentIntent.PLANNING -> planningSignals.positiveTerms.isNotEmpty()
-            AgentIntent.CATALOG_QA -> catalogSignals.positiveTerms.isNotEmpty()
-            AgentIntent.GENERAL_CHAT -> false
-        }
-        val ambiguousIntentNegation = listOf(
-            safetySignals,
-            detailSummarySignals,
-            comparisonSignals,
-            planningSignals,
-            catalogSignals
-        ).any { it.ambiguousNegation }
-        val unresolvedSafetyNegation = safetySignals.ambiguousNegation
-        val explicitIntent = matchedExplicitIntent && !ambiguousIntentNegation
+        val selectedIntentEvidence = intentEvidence.singleOrNull { it.intent == intent }
+        val selectedTargetEvidence = targetEvidence.singleOrNull { it.target == queryTarget }
+        val unresolvedSafetyNegation = intentEvidence
+            .singleOrNull { it.intent == AgentIntent.SAFETY_SCREENING }
+            ?.polarity == AgentLabelPolarity.UNCERTAIN
+        val explicitIntent = selectedIntentEvidence?.locked == true
         val explicitQueryTarget = queryTarget != null &&
             "CONFLICTING_CURRENT_TARGETS" !in reasons &&
-            listOf(institutionProjectSignals, doctorSignals, institutionSignals, projectSignals)
-                .none { it.ambiguousNegation }
+            selectedTargetEvidence?.locked == true
         if (explicitIntent) score += 0.20
         if (queryTarget != null) score += 0.15
         if (contextType.uppercase() in detailContextTypes) score += 0.10
@@ -168,14 +185,16 @@ class AgentIntentRouter {
             "MULTIPLE_CONSTRAINTS_WITHOUT_TARGET" in reasons
         val needsLlm = requiresLlmParsing(intent, confidence, reasons, requiresContextCompletion)
         return AgentRouteAssessment(
-            decision = validatedDecision(intent, queryTarget),
+            decision = decision,
             confidence = confidence,
             ambiguityReasons = reasons.distinct(),
             requiresLlmParsing = needsLlm,
             explicitIntent = explicitIntent,
             explicitQueryTarget = explicitQueryTarget,
             requiresContextCompletion = requiresContextCompletion,
-            unresolvedSafetyNegation = unresolvedSafetyNegation
+            unresolvedSafetyNegation = unresolvedSafetyNegation,
+            intentEvidence = intentEvidence,
+            targetEvidence = targetEvidence
         )
     }
 
@@ -307,6 +326,36 @@ class AgentIntentRouter {
         return validatedDecision(intent, queryTarget)
     }
 
+    @Suppress("UNUSED_PARAMETER")
+    private fun selectPrimary(
+        intentEvidence: Set<AgentIntentEvidence>,
+        targetEvidence: Set<AgentTargetEvidence>,
+        contextType: String
+    ): AgentIntentDecision {
+        val positiveIntents = intentEvidence
+            .filter { it.polarity == AgentLabelPolarity.POSITIVE }
+            .mapTo(mutableSetOf()) { it.intent }
+        val intent = when {
+            AgentIntent.SAFETY_SCREENING in positiveIntents -> AgentIntent.SAFETY_SCREENING
+            AgentIntent.DETAIL_SUMMARY in positiveIntents -> AgentIntent.DETAIL_SUMMARY
+            AgentIntent.COMPARISON in positiveIntents -> AgentIntent.COMPARISON
+            AgentIntent.PLANNING in positiveIntents -> AgentIntent.PLANNING
+            AgentIntent.CATALOG_QA in positiveIntents -> AgentIntent.CATALOG_QA
+            else -> AgentIntent.GENERAL_CHAT
+        }
+        val positiveTargets = targetEvidence
+            .filter { it.polarity == AgentLabelPolarity.POSITIVE }
+            .mapTo(mutableSetOf()) { it.target }
+        val target = when {
+            AgentQueryTarget.INSTITUTION_PROJECT in positiveTargets -> AgentQueryTarget.INSTITUTION_PROJECT
+            AgentQueryTarget.DOCTOR in positiveTargets -> AgentQueryTarget.DOCTOR
+            AgentQueryTarget.INSTITUTION in positiveTargets -> AgentQueryTarget.INSTITUTION
+            AgentQueryTarget.PROJECT in positiveTargets -> AgentQueryTarget.PROJECT
+            else -> null
+        }
+        return validatedDecision(intent, target)
+    }
+
     private fun requiresLlmParsing(
         intent: AgentIntent,
         confidence: Double,
@@ -405,6 +454,35 @@ class AgentIntentRouter {
             negatedTerms = matches.filter { it.polarity == SignalPolarity.NEGATED }.map { it.term }.distinct(),
             ambiguousNegation = matches.any { it.polarity == SignalPolarity.AMBIGUOUS }
         )
+    }
+
+    private fun intentEvidence(intent: AgentIntent, signals: MatchedSignals): AgentIntentEvidence? =
+        signals.toPolarity()?.let { polarity ->
+            AgentIntentEvidence(
+                intent = intent,
+                polarity = polarity,
+                explicit = true,
+                locked = polarity != AgentLabelPolarity.UNCERTAIN,
+                source = AgentLabelSource.CURRENT
+            )
+        }
+
+    private fun targetEvidence(target: AgentQueryTarget, signals: MatchedSignals): AgentTargetEvidence? =
+        signals.toPolarity()?.let { polarity ->
+            AgentTargetEvidence(
+                target = target,
+                polarity = polarity,
+                explicit = true,
+                locked = polarity != AgentLabelPolarity.UNCERTAIN,
+                source = AgentLabelSource.CURRENT
+            )
+        }
+
+    private fun MatchedSignals.toPolarity(): AgentLabelPolarity? = when {
+        positiveTerms.isNotEmpty() -> AgentLabelPolarity.POSITIVE
+        ambiguousNegation -> AgentLabelPolarity.UNCERTAIN
+        negatedTerms.isNotEmpty() -> AgentLabelPolarity.NEGATIVE
+        else -> null
     }
 
     private fun normalize(query: String): String = query

@@ -13,6 +13,38 @@ class AgentIntentRouterTest {
     private val router = AgentIntentRouter()
 
     @Test
+    fun `current scan retains safety and comparison evidence`() {
+        val safetyComparison = router.assessCurrent("怀孕期间比较两个机构", "GENERAL")
+
+        assertEquals(
+            setOf(AgentIntent.SAFETY_SCREENING, AgentIntent.COMPARISON),
+            safetyComparison.positiveIntents()
+        )
+        assertEquals(setOf(AgentQueryTarget.INSTITUTION), safetyComparison.positiveTargets())
+        assertEquals(AgentIntent.SAFETY_SCREENING, safetyComparison.decision.intent)
+    }
+
+    @Test
+    fun `current scan retains comparison and planning evidence`() {
+        val comparisonPlanning = router.assessCurrent("比较这些项目并制定方案", "GENERAL")
+
+        assertEquals(
+            setOf(AgentIntent.COMPARISON, AgentIntent.PLANNING),
+            comparisonPlanning.positiveIntents()
+        )
+        assertEquals(AgentIntent.COMPARISON, comparisonPlanning.decision.intent)
+    }
+
+    @Test
+    fun `ambiguous target does not unlock independent labels`() {
+        val independent = router.assessCurrent("I do not not want a doctor; compare clinics", "GENERAL")
+
+        assertTrue(independent.evidenceFor(AgentIntent.COMPARISON).locked)
+        assertTrue(independent.evidenceFor(AgentQueryTarget.INSTITUTION).locked)
+        assertEquals(AgentLabelPolarity.UNCERTAIN, independent.evidenceFor(AgentQueryTarget.DOCTOR).polarity)
+    }
+
+    @Test
     fun `comparison routes to catalog search`() {
         val result = router.decide("对比上海的热玛吉机构项目", "GENERAL")
         assertEquals(AgentIntent.COMPARISON, result.intent)
@@ -276,6 +308,20 @@ class AgentIntentRouterTest {
         assertFalse(result.decision.searchCatalog)
         assertFalse(result.requiresLlmParsing)
     }
+
+    private fun AgentRouteAssessment.positiveIntents(): Set<AgentIntent> = intentEvidence
+        .filter { it.polarity == AgentLabelPolarity.POSITIVE }
+        .mapTo(mutableSetOf()) { it.intent }
+
+    private fun AgentRouteAssessment.positiveTargets(): Set<AgentQueryTarget> = targetEvidence
+        .filter { it.polarity == AgentLabelPolarity.POSITIVE }
+        .mapTo(mutableSetOf()) { it.target }
+
+    private fun AgentRouteAssessment.evidenceFor(intent: AgentIntent): AgentIntentEvidence =
+        intentEvidence.single { it.intent == intent }
+
+    private fun AgentRouteAssessment.evidenceFor(target: AgentQueryTarget): AgentTargetEvidence =
+        targetEvidence.single { it.target == target }
 
     companion object {
         @JvmStatic
