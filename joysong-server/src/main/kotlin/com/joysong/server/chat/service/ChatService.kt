@@ -62,6 +62,34 @@ private data class GeneratedTurn(
     val catalogItems: List<AgentCatalogItemResponse>
 )
 
+internal fun summaryContextDecision(
+    topic: String,
+    agentIntentRouter: AgentIntentRouter
+): AgentIntentDecision? {
+    val parts = topic.trim().uppercase().split(":")
+    if (parts.size !in 1..3 || parts.any(String::isBlank)) return null
+    val intent = runCatching { AgentIntent.valueOf(parts.first()) }.getOrNull() ?: return null
+    val target = parts.getOrNull(1)?.let { runCatching { AgentQueryTarget.valueOf(it) }.getOrNull() }
+    if (parts.size == 3 && target == null) return null
+    val action = when {
+        target != null -> parts.getOrNull(2)
+        else -> parts.getOrNull(1)
+    }
+    val decision = agentIntentRouter.validatedDecision(intent, target)
+    val expectedAction = decision.nextAction.takeUnless { it.name == "NONE" }?.name
+    if (action != null && action != expectedAction) return null
+    return decision.takeIf {
+        when (intent) {
+            AgentIntent.GENERAL_CHAT -> target == null && action == null
+            AgentIntent.SAFETY_SCREENING -> target == null
+            AgentIntent.PLANNING,
+            AgentIntent.CATALOG_QA,
+            AgentIntent.COMPARISON,
+            AgentIntent.DETAIL_SUMMARY -> true
+        }
+    }
+}
+
 data class ChatTurnResult(
     val message: ChatMessageEntity,
     val catalogReport: AgentCatalogReportResponse? = null,
@@ -473,26 +501,13 @@ class ChatService(
         historyMessages: List<ChatMessageEntity>,
         summary: AgentSessionSummary?
     ): List<AgentIntentDecision> {
-        val summaryDecisions = summary?.unresolvedTopics.orEmpty().mapNotNull(::summaryContextDecision)
+        val summaryDecisions = summary?.unresolvedTopics.orEmpty().mapNotNull {
+            summaryContextDecision(it, agentIntentRouter)
+        }
         if (summaryDecisions.isNotEmpty()) return summaryDecisions
         return historyMessages.filter { it.role.equals("USER", true) }
             .takeLast(4)
             .map { agentIntentRouter.assessCurrent(it.content, "GENERAL").decision }
-    }
-
-    private fun summaryContextDecision(topic: String): AgentIntentDecision? {
-        val parts = topic.trim().uppercase().split(":")
-        if (parts.size !in 1..3 || parts.any(String::isBlank)) return null
-        val intent = runCatching { AgentIntent.valueOf(parts.first()) }.getOrNull() ?: return null
-        val target = parts.getOrNull(1)?.let { runCatching { AgentQueryTarget.valueOf(it) }.getOrNull() }
-        if (parts.size == 3 && target == null) return null
-        val action = when {
-            target != null -> parts.getOrNull(2)
-            else -> parts.getOrNull(1)
-        }
-        val decision = agentIntentRouter.validatedDecision(intent, target)
-        val expectedAction = decision.nextAction.takeUnless { it.name == "NONE" }?.name
-        return decision.takeIf { action == expectedAction }
     }
 
     private fun parseAmbiguousRoute(rawQuery: String, fallback: AgentIntentDecision): ParsedRoute? {
