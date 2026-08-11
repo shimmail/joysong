@@ -45,6 +45,10 @@ class SecurityConfig(
                     .requestMatchers("/images/**").permitAll()
                     .requestMatchers("/api/admin/login").permitAll()
                     .requestMatchers("/api/management/login").permitAll()
+                    .requestMatchers(
+                        "/api/management/institutions",
+                        "/api/management/institutions/**"
+                    ).authenticated()
                     .requestMatchers(HttpMethod.GET,
                         "/api/admin/doctors",
                         "/api/admin/institutions",
@@ -56,9 +60,9 @@ class SecurityConfig(
                     ).authenticated()
                     .requestMatchers(HttpMethod.PUT,
                         "/api/admin/doctors/*",
-                        "/api/admin/institutions/*",
                         "/api/admin/articles/*"
                     ).authenticated()
+                    .requestMatchers(HttpMethod.PUT, "/api/admin/institutions/*").hasRole("ADMIN")
                     .requestMatchers(HttpMethod.POST,
                         "/api/admin/articles",
                         "/api/admin/institution-project-requests",

@@ -387,25 +387,75 @@ final class ManagementContext {
       canViewAffiliations;
 }
 
+final class ManagedInstitutionSummary {
+  const ManagedInstitutionSummary({
+    required this.id,
+    required this.name,
+    this.city = '',
+    this.address = '',
+    this.coverImage = '',
+    this.isVerified = false,
+    this.rating = 0,
+    this.reviewCount = 0,
+    this.projectCount = 0,
+    this.doctorCount = 0,
+  });
+
+  factory ManagedInstitutionSummary.fromJson(Object? json) {
+    final map = _jsonMap(json, '机构摘要');
+    return ManagedInstitutionSummary(
+      id: _requiredText(map['id'], '机构 id'),
+      name: map['name']?.toString() ?? '',
+      city: _normalizeCity(map['city']?.toString() ?? ''),
+      address: map['address']?.toString() ?? '',
+      coverImage: map['coverImage']?.toString() ?? '',
+      isVerified: _boolean(map['isVerified']),
+      rating: _decimal(map['rating']),
+      reviewCount: _integer(map['reviewCount']),
+      projectCount: _integer(map['projectCount']),
+      doctorCount: _integer(map['doctorCount']),
+    );
+  }
+
+  final String id;
+  final String name;
+  final String city;
+  final String address;
+  final String coverImage;
+  final bool isVerified;
+  final num rating;
+  final int reviewCount;
+  final int projectCount;
+  final int doctorCount;
+}
+
 final class ManagedInstitutionProfile {
   const ManagedInstitutionProfile({
     required this.id,
     required this.name,
-    this.coverImage = '',
     this.address = '',
     this.city = '',
+    this.description = '',
+    this.coverImage = '',
+    this.images = const [],
+    this.establishedYear,
+    this.credentials = '',
+    this.credentialImages = const [],
+    this.specialties = const [],
+    this.tags = const [],
     this.contactPhone = '',
     this.businessHours = '',
-    this.establishedYear,
-    this.certificationTime = '',
-    this.description = '',
-    this.tags = '',
-    this.specialties = '',
-    this.credentials = '',
+    this.rating = 0,
+    this.reviewCount = 0,
+    this.isVerified = false,
+    this.certificationTime,
+    this.projectCount = 0,
+    this.doctorCount = 0,
+    this.consultationCount = 0,
     this.userCount = 0,
     this.caseCount = 0,
-    this.credentialImages = const [],
-    this.images = const [],
+    this.createdAt,
+    this.updatedAt,
   });
 
   factory ManagedInstitutionProfile.fromJson(Object? json) {
@@ -413,161 +463,160 @@ final class ManagedInstitutionProfile {
     return ManagedInstitutionProfile(
       id: _requiredText(map['id'], '机构 id'),
       name: map['name']?.toString() ?? '',
-      coverImage: map['coverImage']?.toString() ?? '',
       address: map['address']?.toString() ?? '',
       city: _normalizeCity(map['city']?.toString() ?? ''),
+      description: map['description']?.toString() ?? '',
+      coverImage: map['coverImage']?.toString() ?? '',
+      images: _stringList(map['images']),
+      establishedYear: _nullableInteger(map['establishedYear']),
+      credentials: map['credentials']?.toString() ?? '',
+      credentialImages: _stringList(map['credentialImages']),
+      specialties: _stringList(map['specialties']),
+      tags: _stringList(map['tags']),
       contactPhone: map['contactPhone']?.toString() ?? '',
       businessHours: map['businessHours']?.toString() ?? '',
-      establishedYear: _nullableInteger(map['establishedYear']),
-      certificationTime: map['certificationTime']?.toString() ?? '',
-      description: map['description']?.toString() ?? '',
-      tags: map['tags']?.toString() ?? '',
-      specialties: map['specialties']?.toString() ?? '',
-      credentials: map['credentials']?.toString() ?? '',
+      rating: _decimal(map['rating']),
+      reviewCount: _integer(map['reviewCount']),
+      isVerified: _boolean(map['isVerified']),
+      certificationTime: _dateTime(map['certificationTime']),
+      projectCount: _integer(map['projectCount']),
+      doctorCount: _integer(map['doctorCount']),
+      consultationCount: _integer(map['consultationCount']),
       userCount: _integer(map['userCount']),
       caseCount: _integer(map['caseCount']),
-      credentialImages: _stringList(map['credentialImages']),
-      images: _stringList(map['images']),
+      createdAt: _dateTime(map['createdAt']),
+      updatedAt: _dateTime(map['updatedAt']),
     );
   }
 
   final String id;
   final String name;
-  final String coverImage;
   final String address;
   final String city;
+  final String description;
+  final String coverImage;
+  final List<String> images;
+  final int? establishedYear;
+  final String credentials;
+  final List<String> credentialImages;
+  final List<String> specialties;
+  final List<String> tags;
   final String contactPhone;
   final String businessHours;
-  final int? establishedYear;
-  final String certificationTime;
-  final String description;
-  final String tags;
-  final String specialties;
-  final String credentials;
+  final num rating;
+  final int reviewCount;
+  final bool isVerified;
+  final DateTime? certificationTime;
+  final int projectCount;
+  final int doctorCount;
+  final int consultationCount;
   final int userCount;
   final int caseCount;
-  final List<String> credentialImages;
-  final List<String> images;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
 
-  ManagedInstitutionProfileDraft toDraft() => ManagedInstitutionProfileDraft(
-        id: id,
-        name: name,
-        coverImage: coverImage,
-        address: address,
-        city: city,
-        contactPhone: contactPhone,
-        businessHours: businessHours,
-        establishedYear: establishedYear,
-        certificationTime: certificationTime,
-        description: description,
-        tags: tags,
-        specialties: specialties,
-        credentials: credentials,
-        userCount: userCount,
-        caseCount: caseCount,
-        credentialImages: credentialImages,
-        images: images,
-      );
+  ManagedInstitutionProfileUpdate toUpdate() =>
+      ManagedInstitutionProfileUpdate.fromProfile(this);
 }
 
-final class ManagedInstitutionProfileDraft {
-  ManagedInstitutionProfileDraft({
-    required this.id,
+final class ManagedInstitutionProfileUpdate {
+  const ManagedInstitutionProfileUpdate({
     required this.name,
-    this.coverImage = '',
-    this.address = '',
-    String city = '',
-    this.contactPhone = '',
-    this.businessHours = '',
-    this.establishedYear,
-    this.certificationTime = '',
-    this.description = '',
-    this.tags = '',
-    this.specialties = '',
-    this.credentials = '',
-    this.userCount = 0,
-    this.caseCount = 0,
-    this.credentialImages = const [],
-    this.images = const [],
-  }) : city = _normalizeCity(city);
+    required this.address,
+    required this.city,
+    required this.description,
+    required this.coverImage,
+    required this.images,
+    required this.establishedYear,
+    required this.credentials,
+    required this.credentialImages,
+    required this.specialties,
+    required this.tags,
+    required this.contactPhone,
+    required this.businessHours,
+  });
 
-  final String id;
+  factory ManagedInstitutionProfileUpdate.fromProfile(
+    ManagedInstitutionProfile profile,
+  ) =>
+      ManagedInstitutionProfileUpdate(
+        name: profile.name,
+        address: profile.address,
+        city: profile.city,
+        description: profile.description,
+        coverImage: profile.coverImage,
+        images: profile.images,
+        establishedYear: profile.establishedYear,
+        credentials: profile.credentials,
+        credentialImages: profile.credentialImages,
+        specialties: profile.specialties,
+        tags: profile.tags,
+        contactPhone: profile.contactPhone,
+        businessHours: profile.businessHours,
+      );
+
   final String name;
-  final String coverImage;
   final String address;
   final String city;
+  final String description;
+  final String coverImage;
+  final List<String> images;
+  final int? establishedYear;
+  final String credentials;
+  final List<String> credentialImages;
+  final List<String> specialties;
+  final List<String> tags;
   final String contactPhone;
   final String businessHours;
-  final int? establishedYear;
-  final String certificationTime;
-  final String description;
-  final String tags;
-  final String specialties;
-  final String credentials;
-  final int userCount;
-  final int caseCount;
-  final List<String> credentialImages;
-  final List<String> images;
 
-  ManagedInstitutionProfileDraft copyWith({
+  ManagedInstitutionProfileUpdate copyWith({
     String? name,
-    String? coverImage,
     String? address,
     String? city,
-    String? contactPhone,
-    String? businessHours,
+    String? description,
+    String? coverImage,
+    List<String>? images,
     int? establishedYear,
     bool clearEstablishedYear = false,
-    String? certificationTime,
-    String? description,
-    String? tags,
-    String? specialties,
     String? credentials,
-    int? userCount,
-    int? caseCount,
     List<String>? credentialImages,
-    List<String>? images,
-  }) {
-    return ManagedInstitutionProfileDraft(
-      id: id,
-      name: name ?? this.name,
-      coverImage: coverImage ?? this.coverImage,
-      address: address ?? this.address,
-      city: city ?? this.city,
-      contactPhone: contactPhone ?? this.contactPhone,
-      businessHours: businessHours ?? this.businessHours,
-      establishedYear:
-          clearEstablishedYear ? null : establishedYear ?? this.establishedYear,
-      certificationTime: certificationTime ?? this.certificationTime,
-      description: description ?? this.description,
-      tags: tags ?? this.tags,
-      specialties: specialties ?? this.specialties,
-      credentials: credentials ?? this.credentials,
-      userCount: userCount ?? this.userCount,
-      caseCount: caseCount ?? this.caseCount,
-      credentialImages: credentialImages ?? this.credentialImages,
-      images: images ?? this.images,
-    );
-  }
+    List<String>? specialties,
+    List<String>? tags,
+    String? contactPhone,
+    String? businessHours,
+  }) =>
+      ManagedInstitutionProfileUpdate(
+        name: name ?? this.name,
+        address: address ?? this.address,
+        city: city ?? this.city,
+        description: description ?? this.description,
+        coverImage: coverImage ?? this.coverImage,
+        images: images ?? this.images,
+        establishedYear: clearEstablishedYear
+            ? null
+            : establishedYear ?? this.establishedYear,
+        credentials: credentials ?? this.credentials,
+        credentialImages: credentialImages ?? this.credentialImages,
+        specialties: specialties ?? this.specialties,
+        tags: tags ?? this.tags,
+        contactPhone: contactPhone ?? this.contactPhone,
+        businessHours: businessHours ?? this.businessHours,
+      );
 
   Map<String, Object?> toJson() => {
-        'id': id,
         'name': name.trim(),
-        'coverImage': coverImage.trim(),
         'address': address.trim(),
-        'city': city,
+        'city': _normalizeCity(city),
+        'description': description.trim(),
+        'coverImage': coverImage.trim(),
+        'images': _normalizedStrings(images),
+        'establishedYear': establishedYear,
+        'credentials': credentials.trim(),
+        'credentialImages': _normalizedStrings(credentialImages),
+        'specialties': _normalizedStrings(specialties),
+        'tags': _normalizedStrings(tags),
         'contactPhone': contactPhone.trim(),
         'businessHours': businessHours.trim(),
-        'establishedYear': establishedYear,
-        'certificationTime': certificationTime.trim(),
-        'description': description.trim(),
-        'tags': tags.trim(),
-        'specialties': specialties.trim(),
-        'credentials': credentials.trim(),
-        'userCount': userCount,
-        'caseCount': caseCount,
-        'credentialImages': _csvText(credentialImages),
-        'images': _csvText(images),
       };
 }
 
@@ -968,6 +1017,11 @@ List<String> _stringList(Object? value) {
   }
   return const [];
 }
+
+List<String> _normalizedStrings(Iterable<String> values) => values
+    .map((value) => value.trim())
+    .where((value) => value.isNotEmpty)
+    .toList(growable: false);
 
 final class InstitutionOption {
   const InstitutionOption({required this.id, required this.name});

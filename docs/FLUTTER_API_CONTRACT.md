@@ -428,7 +428,10 @@ Flutter 可以完成页面和接口抽象，但生产发布前必须等待支付
 | 能力 | 接口 |
 |---|---|
 | 医生本人档案 | `GET /management/doctor-profile`、`PUT /management/doctor-profile` |
-| 机构档案 | `GET /admin/institutions`、`PUT /admin/institutions/{id}` |
+| 法人自助机构档案 | `GET /management/institutions`、`GET /management/institutions/{institutionId}`、`PUT /management/institutions/{institutionId}` |
+| 专业端兼容只读机构数据（迁移期） | `GET /admin/institutions`、`GET /admin/institutions/{id}`、`GET /admin/institutions/{id}/doctors`、`GET /admin/institutions/{id}/projects`、`GET /admin/institution-projects`；已认证专业用户仅可读 `visibleInstitutionIds` 范围 |
+| 专业端兼容只读项目目录（迁移期） | `GET /admin/projects`；这是不含机构写权限的全局项目目录 |
+| 平台管理员全量机构 CRUD | `GET/POST /admin/institutions`、`GET/PUT/DELETE /admin/institutions/{id}`；其中写操作仅限 `ADMIN`，GET 对专业用户仅提供下行所述对象级兼容读取 |
 | 文章 | `GET/POST /admin/articles`、`PUT/DELETE /admin/articles/{id}` |
 | 机构项目 | `GET/POST /admin/institution-projects`、`PUT/DELETE /admin/institution-projects/{id}` |
 | 医生项目协作 | `GET/POST /admin/institution-project-requests`、`POST /{id}/review`、`/{id}/withdraw` |
@@ -441,14 +444,18 @@ Flutter 可以完成页面和接口抽象，但生产发布前必须等待支付
 - 医生仅通过 `/management/doctor-profile` 读取和完整更新自己的单个医生档案；请求不发送 `id` 或 `userId`。PUT 必须带齐 `name`、`title`、`bio`、`avatar`、`contactPhone`、`specialties`、`credentials`、`credentialImages`、`certificationTags` 九个非 null String 字段。`name` 不得为空白，其余八项可用 `""` 清空；缺失或 `null` 为 400。
 - `certificationTags` 保留为传输字段名，但 UI 必须称为“展示标签 / Display tags”并使用中性视觉，不能与平台 `isVerified` 徽章混同。服务端会在忽略大小写、空白和标点归一化后拒绝“平台认证”“官方认证”“安颜认证”“娇颜颂认证”“已认证”“platform verified”“official verified”及等价项目品牌认证声明；“主任医师”等普通医疗职称允许使用。
 - 响应为单个对象而非数组。`id`、`userId`、机构摘要、评分、评价数、认证状态和统计计数是只读平台/关联字段；客户端不得在 PUT 中发送或本地伪造这些字段。
-- 机构法人可修改自己已确认管理的机构、管理其医生和机构项目、审核医生加入/退出/资料修改申请。
+- 法人自助机构档案要求活跃 `INSTITUTION_LEGAL_REPRESENTATIVE` 角色；`/management/context` 的 `managedInstitutionIds` 仅包含 APPROVED 法人成员关系。活跃法人尚无已批准关系时，列表仍返回 200 空数组；详情与 PUT 必须指定集合中的对象，否则为 403。先用该集合决定详情/编辑入口，但服务端仍做最终对象校验。平台管理员不能借这组自助接口操作全量机构。
+- 法人机构列表返回摘要数组；每项固定包含 `id`、`name`、`address`、`city`、`coverImage`、`rating`、`reviewCount`、`isVerified`、`projectCount`、`doctorCount`。`projectCount` 与 `doctorCount` 是服务端返回的整数只读计数，Flutter 不得本地写回或用列表长度替代。
+- 法人 PUT 是严格完整替换：请求必须且只能发送 `name`、`address`、`city`、`description`、`coverImage`、`images`、`establishedYear`、`credentials`、`credentialImages`、`specialties`、`tags`、`contactPhone`、`businessHours` 这 13 个键。`establishedYear` 键必须存在，值可为 `null` 或 1800 至当前年的整数；`images`、`credentialImages`、`specialties`、`tags` 必须为 JSON 字符串数组，不能改用遗留的逗号分隔格式。
+- 法人机构档案响应中的 `id`、`createdAt`、`updatedAt`、`rating`、`reviewCount`、`isVerified`、`certificationTime`、`projectCount`、`doctorCount`、`consultationCount`、`userCount`、`caseCount` 是只读字段。`credentialImages` 是机构自行上传的公开展示材料，UI 不得暗示这些图片已经由平台核验。
+- 法人可审核本机构的成员关系和机构项目申请；不能编辑医生档案，也不能绕过项目申请/审核流程直接创建、修改或删除机构项目。旧专业端 `/admin/institutions/{id}` PUT 已移除；`POST/PUT/DELETE /api/admin/institutions...` 等机构写操作及平台全量 CRUD 始终仅限 `ADMIN`。上表列出的机构范围 GET 旧读路径仅在后续切换完成前向已认证专业用户兼容，并由服务端按 `visibleInstitutionIds` 做对象级只读过滤；`GET /admin/projects` 则只提供全局项目目录。所有兼容 GET 均不授予任何写权限。
 - 医生不能直接修改机构项目价格、销量、评分、评价数或上下架状态。
 - 医生和机构法人都不能修改自己的评分、评价数和认证状态；服务端会保留原值。
-- `credentials` 与 `credentialImages` 是医生自主维护的公开展示材料，和私有身份审核材料相互独立；UI 只能使用“医生上传的证书图片/展示材料”等中性文案，不得写“资质保险箱”“查资质”或“平台已核验”。公开图片经 `POST /upload` 上传并使用 `data.url`，多图再以逗号拼接提交。
+- 医生档案的 `credentials` 与 `credentialImages` 是医生自主维护的公开展示材料，和私有身份审核材料相互独立；UI 只能使用“医生上传的证书图片/展示材料”等中性文案，不得写“资质保险箱”“查资质”或“平台已核验”。公开图片经 `POST /upload` 上传并使用 `data.url`，多图再以逗号拼接提交；这条遗留传输规则不适用于法人机构档案的 JSON 数组字段。
 - 分账调整通过提案完成，医生方与机构方都确认后才替换当前配置；专业用户不能直接写生效配置。
 - 管理员可查看和管理全量数据，客户端不得把管理员专属页面暴露给专业用户。
 
-`/api/admin/doctors` 及 `/api/admin/doctors/{id}` 保留为平台管理员兼容路由，医生专业中心不得再调用。管理端的 `/api/admin/**` 前缀是历史命名，不代表专业用户拥有管理员权限；其他 `/admin/**` 需要平台管理员角色。
+`/api/admin/doctors` 及 `/api/admin/doctors/{id}` 保留为平台管理员兼容路由，医生专业中心不得再调用。管理端的 `/api/admin/**` 前缀是历史命名，不代表专业用户拥有管理员权限；除上表明确列出的迁移期对象级只读 GET 外，其他 `/admin/**` 需要平台管理员角色。
 
 ## 12. 数据表示兼容规则
 

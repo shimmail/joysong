@@ -35,7 +35,7 @@
 | 公开接口 | `/api/discover/**` | 无需认证 |
 | 公开接口 | `/images/**` | 静态图片资源 |
 | 公开接口 | `/actuator/**` | 健康检查 |
-| ADMIN 角色 | `/api/admin/**` | 需要 JWT + `ROLE_ADMIN` |
+| ADMIN 角色 | `/api/admin/**` | 原则上需要 JWT + `ROLE_ADMIN`；本文件明确标注的迁移期 GET 例外仅允许已认证专业用户按 `visibleInstitutionIds` 对象级只读访问 |
 | 需认证 | 其余所有接口 | 需要 JWT Bearer Token |
 
 需要认证的接口，请求头需携带：
@@ -2025,7 +2025,7 @@ Authorization: Bearer <token>
 
 ## 十二、管理后台 `/api/admin`
 
-> 需要 Bearer Token + `ROLE_ADMIN` 角色。
+> 原则上需要 Bearer Token + `ROLE_ADMIN` 角色。迁移期间，仅本章明确标注为“专业端兼容只读”的 GET 路径允许已认证专业用户访问，服务端仍按 `visibleInstitutionIds` 做对象级过滤；所有机构写操作和平台全量 CRUD 均仅限 `ADMIN`。
 
 ### 12.0 POST /api/admin/login
 
@@ -2062,7 +2062,7 @@ Authorization: Bearer <token>
 
 | 方法 | 路径 | 描述 |
 |------|------|------|
-| GET | `/api/admin/projects` | 列出所有项目（支持 `?keyword=X` 模糊搜索，返回 ProjectAdminVo 含 `doctorIds`） |
+| GET | `/api/admin/projects` | `ADMIN` 或迁移期已认证专业用户读取全局项目目录（支持 `?keyword=X` 模糊搜索，返回 ProjectAdminVo 含 `doctorIds`）；该兼容读取不授予项目写权限 |
 | POST | `/api/admin/projects` | 新建项目（自动生成 UUID，支持多医生关联） |
 | PUT | `/api/admin/projects/{id}` | 更新项目（先删旧关联再建新关联） |
 | DELETE | `/api/admin/projects/{id}` | 删除项目（逻辑删除） |
@@ -2177,13 +2177,124 @@ Authorization: Bearer <token>
 
 | 方法 | 路径 | 描述 |
 |------|------|------|
-| GET | `/api/admin/institutions` | 列出所有机构（支持 `?keyword=X` 模糊搜索） |
-| GET | `/api/admin/institutions/{id}` | 机构详情 |
+| GET | `/api/admin/institutions` | `ADMIN` 列出所有机构；迁移期已认证专业用户仅返回 `visibleInstitutionIds` 内机构（支持 `?keyword=X` 模糊搜索） |
+| GET | `/api/admin/institutions/{id}` | `ADMIN` 查看任意机构；迁移期已认证专业用户只能读取 `visibleInstitutionIds` 内机构 |
 | POST | `/api/admin/institutions` | 新建机构（自动生成 UUID） |
 | PUT | `/api/admin/institutions/{id}` | 更新机构 |
 | DELETE | `/api/admin/institutions/{id}` | 删除机构（逻辑删除） |
-| GET | `/api/admin/institutions/{id}/doctors` | 该机构下的医生列表 |
-| GET | `/api/admin/institutions/{id}/projects` | 该机构下的项目列表 |
+| GET | `/api/admin/institutions/{id}/doctors` | `ADMIN` 查看任意机构；迁移期已认证专业用户只能读取 `visibleInstitutionIds` 内机构的医生列表 |
+| GET | `/api/admin/institutions/{id}/projects` | `ADMIN` 查看任意机构；迁移期已认证专业用户只能读取 `visibleInstitutionIds` 内机构的项目列表 |
+
+---
+
+### 12.5a 法人自助机构档案（专业管理入口）
+
+该组接口供**已生效的机构法人**维护自己已确认管理的机构档案；它不是平台管理员机构 CRUD 的替代品。活跃 `INSTITUTION_LEGAL_REPRESENTATIVE` 角色可访问该接口组；服务端只会将对应机构状态为 `APPROVED` 的法人成员关系纳入 `managedInstitutionIds`。因此，尚无已批准法人成员关系的活跃法人调用列表接口会成功返回空数组，而详情与更新仍须通过目标对象校验。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/management/institutions` | 列出当前法人可管理的机构摘要 |
+| GET | `/api/management/institutions/{institutionId}` | 读取一个当前法人可管理的完整机构档案 |
+| PUT | `/api/management/institutions/{institutionId}` | 完整替换一个当前法人可管理的机构档案的全部可编辑字段 |
+
+**认证与对象边界：** 请求携带专业管理登录获得的 Bearer 凭证。平台管理员或没有活跃法人角色时返回 `403`；无凭证或凭证无效返回 `401`。活跃法人即使没有已批准法人成员关系，`GET /api/management/institutions` 仍返回 `200` 与空数组；但 `GET` 详情和 `PUT` 的目标 `institutionId` 必须在 `managedInstitutionIds` 中，未获批准关系而集合为空时也会返回 `403`。
+
+**GET `/api/management/institutions` 响应：**
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": [
+    {
+      "id": "institution-uuid",
+      "name": "上海娇颜颂医美中心",
+      "address": "静安区南京西路 100 号",
+      "city": "上海",
+      "coverImage": "https://cdn.example.com/institutions/cover.jpg",
+      "rating": 4.8,
+      "reviewCount": 126,
+      "isVerified": true,
+      "projectCount": 12,
+      "doctorCount": 6
+    }
+  ]
+}
+```
+
+列表中的机构摘要固定返回 `id`、`name`、`address`、`city`、`coverImage`、`rating`、`reviewCount`、`isVerified`、`projectCount`、`doctorCount`。其中 `projectCount` 和 `doctorCount` 均为整数只读计数，分别表示机构项目数和医生数；客户端不得编辑或自行推导后写回。
+
+**GET `/api/management/institutions/{institutionId}` 响应，以及成功 PUT 的 `data`：**
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "id": "institution-uuid",
+    "name": "上海娇颜颂医美中心",
+    "address": "静安区南京西路 100 号",
+    "city": "上海",
+    "description": "提供注射美容与皮肤管理服务。",
+    "coverImage": "https://cdn.example.com/institutions/cover.jpg",
+    "images": ["https://cdn.example.com/institutions/1.jpg"],
+    "establishedYear": null,
+    "credentials": "医疗机构执业许可证",
+    "credentialImages": ["https://cdn.example.com/institutions/license.jpg"],
+    "specialties": ["皮肤管理", "注射美容"],
+    "tags": ["预约制", "中英双语"],
+    "contactPhone": "021-12345678",
+    "businessHours": "周一至周日 09:00-18:00",
+    "rating": 4.8,
+    "reviewCount": 126,
+    "isVerified": true,
+    "certificationTime": "2026-01-15",
+    "projectCount": 12,
+    "doctorCount": 6,
+    "consultationCount": 310,
+    "userCount": 280,
+    "caseCount": 96,
+    "createdAt": "2026-01-01T09:00:00",
+    "updatedAt": "2026-08-11T10:30:00"
+  }
+}
+```
+
+**PUT 请求体：** 必须是 JSON 对象，且必须且只能包含以下 13 个可编辑键；所有键均为必填键。`establishedYear` 的值可为 JSON `null`，或 `1800` 到当前年份之间的整数。`name` 不得为空白；其余文本字段须为字符串。`images`、`credentialImages`、`specialties`、`tags` 必须是 JSON 字符串数组（可为空数组），数组项不能包含逗号。
+
+```json
+{
+  "name": "上海娇颜颂医美中心",
+  "address": "静安区南京西路 100 号",
+  "city": "上海",
+  "description": "提供注射美容与皮肤管理服务。",
+  "coverImage": "https://cdn.example.com/institutions/cover.jpg",
+  "images": ["https://cdn.example.com/institutions/1.jpg"],
+  "establishedYear": null,
+  "credentials": "医疗机构执业许可证",
+  "credentialImages": ["https://cdn.example.com/institutions/license.jpg"],
+  "specialties": ["皮肤管理", "注射美容"],
+  "tags": ["预约制", "中英双语"],
+  "contactPhone": "021-12345678",
+  "businessHours": "周一至周日 09:00-18:00"
+}
+```
+
+`images`、`credentialImages`、`specialties`、`tags` 在 HTTP 请求和响应中始终使用 JSON 数组；服务端为兼容既有存储会标准化（去除首尾空白、空值及重复项）后保存，客户端不得改为逗号分隔字符串。`credentialImages` 仅是机构自行上传的公开展示材料，不能表示平台已经核验或认证。
+
+**只读字段：** `id`、`createdAt`、`updatedAt`、`rating`、`reviewCount`、`isVerified`、`certificationTime`、`projectCount`、`doctorCount`、`consultationCount`、`userCount`、`caseCount` 只能由响应返回，PUT 不得携带或本地伪造。
+
+**错误响应：**
+
+| HTTP | body `code` | 场景 |
+|------|-------------|------|
+| 400 | 400 | 请求体不是对象、缺少或多出键、键类型不正确、`name` 为空白、年份不是允许整数/`null`，或数组项不符合规则 |
+| 401 | 401 | 未登录、Bearer 凭证缺失、失效或无效 |
+| 403 | 403 | 平台管理员或非活跃机构法人调用自助入口；或在详情/PUT 中目标对象不在 `managedInstitutionIds`（包括活跃法人尚无 APPROVED 法人成员关系时） |
+| 404 | 404 | 已通过对象边界校验但机构记录不存在 |
+| 500 | 500 | 未预期的服务端错误 |
+
+平台管理员继续使用 `/api/admin/institutions/**` 进行全量机构 CRUD。`POST/PUT/DELETE /api/admin/institutions...` 等写操作仅限 `ADMIN`。专业端旧的 `/api/admin/institutions/{id}` PUT 不再用于法人档案编辑；现有专业端旧读 GET 路径在后续切换完成前仅向已认证专业用户兼容，并按 `visibleInstitutionIds` 做对象级只读过滤。
 
 ---
 
@@ -2249,7 +2360,7 @@ Authorization: Bearer <token>
 
 | 方法 | 路径 | 描述 |
 |------|------|------|
-| GET | `/api/admin/institution-projects` | 列出机构项目（支持 `?projectId=X` 或 `?institutionId=X` 过滤），返回 BaseResponse 包裹，每项含关联医生摘要 |
+| GET | `/api/admin/institution-projects` | `ADMIN` 查看全量；迁移期已认证专业用户仅查看 `visibleInstitutionIds` 范围内机构项目（支持 `?projectId=X` 或 `?institutionId=X` 过滤），返回 BaseResponse 包裹，每项含关联医生摘要 |
 | POST | `/api/admin/institution-projects` | 新建机构项目，返回 BaseResponse 包裹 |
 | PUT | `/api/admin/institution-projects/{id}` | 更新机构项目，返回 BaseResponse 包裹 |
 | DELETE | `/api/admin/institution-projects/{id}` | 删除机构项目（逻辑删除），返回 BaseResponse 包裹 |
@@ -2609,8 +2720,11 @@ Authorization: Bearer <token>
 | 上传 | POST | `/api/upload` | ✅ |
 | 医生本人档案 | GET | `/api/management/doctor-profile` | ACTIVE DOCTOR（本人） |
 | 医生本人档案 | PUT | `/api/management/doctor-profile` | ACTIVE DOCTOR（本人） |
+| 法人机构档案 | GET | `/api/management/institutions` | ACTIVE INSTITUTION_LEGAL_REPRESENTATIVE（仅 `managedInstitutionIds`） |
+| 法人机构档案 | GET | `/api/management/institutions/{institutionId}` | ACTIVE INSTITUTION_LEGAL_REPRESENTATIVE（仅 `managedInstitutionIds`） |
+| 法人机构档案 | PUT | `/api/management/institutions/{institutionId}` | ACTIVE INSTITUTION_LEGAL_REPRESENTATIVE（仅 `managedInstitutionIds`） |
 | 管理 | GET | `/api/admin/stats` | ADMIN |
-| 管理 | GET | `/api/admin/projects` | ADMIN |
+| 管理（迁移期兼容只读） | GET | `/api/admin/projects` | ADMIN 或已认证专业用户（全局项目目录） |
 | 管理 | POST | `/api/admin/projects` | ADMIN |
 | 管理 | PUT | `/api/admin/projects/{id}` | ADMIN |
 | 管理 | DELETE | `/api/admin/projects/{id}` | ADMIN |
@@ -2622,14 +2736,14 @@ Authorization: Bearer <token>
 | 管理（平台管理员兼容） | POST | `/api/admin/doctors` | ADMIN |
 | 管理（平台管理员兼容） | PUT | `/api/admin/doctors/{id}` | ADMIN |
 | 管理（平台管理员兼容） | DELETE | `/api/admin/doctors/{id}` | ADMIN |
-| 管理 | GET | `/api/admin/institutions` | ADMIN |
-| 管理 | GET | `/api/admin/institutions/{id}` | ADMIN |
+| 管理（迁移期兼容只读） | GET | `/api/admin/institutions` | ADMIN 全量；已认证专业用户仅 `visibleInstitutionIds` |
+| 管理（迁移期兼容只读） | GET | `/api/admin/institutions/{id}` | ADMIN 全量；已认证专业用户仅 `visibleInstitutionIds` |
 | 管理 | POST | `/api/admin/institutions` | ADMIN |
 | 管理 | PUT | `/api/admin/institutions/{id}` | ADMIN |
 | 管理 | DELETE | `/api/admin/institutions/{id}` | ADMIN |
-| 管理 | GET | `/api/admin/institutions/{id}/doctors` | ADMIN |
-| 管理 | GET | `/api/admin/institutions/{id}/projects` | ADMIN |
-| 管理 | GET | `/api/admin/institution-projects` | ADMIN |
+| 管理（迁移期兼容只读） | GET | `/api/admin/institutions/{id}/doctors` | ADMIN 全量；已认证专业用户仅 `visibleInstitutionIds` |
+| 管理（迁移期兼容只读） | GET | `/api/admin/institutions/{id}/projects` | ADMIN 全量；已认证专业用户仅 `visibleInstitutionIds` |
+| 管理（迁移期兼容只读） | GET | `/api/admin/institution-projects` | ADMIN 全量；已认证专业用户仅 `visibleInstitutionIds` |
 | 管理 | POST | `/api/admin/institution-projects` | ADMIN |
 | 管理 | PUT | `/api/admin/institution-projects/{id}` | ADMIN |
 | 管理 | DELETE | `/api/admin/institution-projects/{id}` | ADMIN |

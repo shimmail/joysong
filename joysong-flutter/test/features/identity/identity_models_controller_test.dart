@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
@@ -97,43 +98,6 @@ void main() {
     expect(repository.contextCalls, 2);
   });
 
-  test('institution profile draft normalizes city and omits protected fields',
-      () {
-    final profile = ManagedInstitutionProfile.fromJson({
-      'id': 'inst-1',
-      'name': '悦美医疗美容',
-      'city': '杭州市',
-      'address': '西湖区 1 号',
-      'rating': 4.9,
-      'reviewCount': 128,
-      'isVerified': true,
-    });
-
-    final draft = profile.toDraft().copyWith(city: ' 杭州市 ');
-
-    expect(draft.city, '杭州');
-    expect(draft.toJson(), isNot(contains('rating')));
-    expect(draft.toJson(), isNot(contains('reviewCount')));
-    expect(draft.toJson(), isNot(contains('isVerified')));
-  });
-
-  test('institution profile image fields use backend string contract', () {
-    final profile = ManagedInstitutionProfile.fromJson({
-      'id': 'inst-1',
-      'name': '悦美医疗美容',
-      'credentialImages': 'license-a.jpg, license-b.jpg',
-      'images': 'lobby.jpg,room.jpg',
-    });
-
-    expect(profile.credentialImages, ['license-a.jpg', 'license-b.jpg']);
-    expect(profile.images, ['lobby.jpg', 'room.jpg']);
-
-    final payload = profile.toDraft().toJson();
-
-    expect(payload['credentialImages'], 'license-a.jpg,license-b.jpg');
-    expect(payload['images'], 'lobby.jpg,room.jpg');
-  });
-
   test('institution project exposes joined doctors from admin response', () {
     final project = ManagedInstitutionProject.fromJson({
       'id': 'institution-project-1',
@@ -205,14 +169,41 @@ void main() {
 
     await controller.load();
     expect(controller.status, InstitutionProfileLoadStatus.ready);
-    expect(controller.profiles.single.id, 'inst-1');
+    expect(controller.summaries.single.id, 'inst-1');
+
+    final selected = await controller.select(controller.summaries.single.id);
+    expect(selected, isTrue);
+    expect(controller.selectedProfile?.id, 'inst-1');
 
     final saved = await controller.save(
-      controller.profiles.single.toDraft().copyWith(city: '宁波市'),
+      controller.selectedProfile!.toUpdate().copyWith(city: '宁波市'),
     );
 
     expect(saved, isTrue);
-    expect(repository.savedDrafts.single.city, '宁波');
+    expect(repository.savedUpdates.single.toJson()['city'], '宁波');
+    expect(controller.selectedProfile?.description, '服务端保存结果');
+  });
+
+  test('doctor project management uses professional-visible institutions',
+      () async {
+    final repository = _FakeIdentityRepository()
+      ..rejectLegalRepresentativeInstitutionList = true;
+    final controller = InstitutionProjectManagementController(
+      repository,
+      context: const ManagementContext(
+        userId: 'doctor-user-1',
+        platformRole: 'USER',
+        activeRoles: ['DOCTOR'],
+        doctorId: 'doctor-1',
+        managedInstitutionIds: [],
+        visibleInstitutionIds: ['inst-1'],
+      ),
+    );
+
+    await controller.load();
+
+    expect(controller.status, InstitutionProjectLoadStatus.ready);
+    expect(controller.institutions.single.id, 'inst-1');
   });
 
   testWidgets('institution profile edit uses public info and album image copy',
@@ -228,7 +219,7 @@ void main() {
     ];
 
     await tester.pumpWidget(
-      MaterialApp(
+      _localizedApp(
         home: ManagedInstitutionProfilesPage(
           repository: repository,
           imagePicker: () async => pickedImages.removeAt(0),
@@ -276,7 +267,7 @@ void main() {
       );
 
     await tester.pumpWidget(
-      MaterialApp(
+      _localizedApp(
         home: ManagedInstitutionProjectsPage(
           repository: repository,
           context: repository.managementContext!,
@@ -289,7 +280,8 @@ void main() {
     expect(find.byIcon(Icons.add_rounded), findsNothing);
   });
 
-  testWidgets('membership reviews offer approve and reject while project reviews retain request changes',
+  testWidgets(
+      'membership reviews offer approve and reject while project reviews retain request changes',
       (tester) async {
     final repository = _FakeIdentityRepository()
       ..membershipRequests = [
@@ -309,7 +301,7 @@ void main() {
       visibleInstitutionIds: ['inst-1'],
     );
 
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(_localizedApp(
       home: InstitutionMembershipRequestsPage(
         repository: repository,
         context: context,
@@ -320,13 +312,17 @@ void main() {
     await tester.tap(find.byTooltip('审核'));
     await tester.pumpAndSettle();
 
-    expect(find.text('通过'), findsOneWidget);
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    expect(find.text('通过'), findsWidgets);
     expect(find.text('驳回'), findsOneWidget);
     expect(find.text('要求修改'), findsNothing);
+    await tester.tap(find.text('通过').last);
+    await tester.pumpAndSettle();
 
     await tester.tap(find.text('取消'));
     await tester.pumpAndSettle();
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(_localizedApp(
       home: Builder(
         builder: (context) => TextButton(
           onPressed: () => showProfessionalProjectReviewDialog(context),
@@ -337,10 +333,13 @@ void main() {
     await tester.tap(find.text('open project review'));
     await tester.pumpAndSettle();
 
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
     expect(find.text('要求修改'), findsOneWidget);
   });
 
-  testWidgets('legal representative sees only institution profile and review queues',
+  testWidgets(
+      'legal representative sees only institution profile and review queues',
       (tester) async {
     final repository = _FakeIdentityRepository()
       ..managementContext = const ManagementContext(
@@ -357,7 +356,7 @@ void main() {
       );
 
     await tester.pumpWidget(
-      MaterialApp(
+      _localizedApp(
         home: ManagementCenterPage(repository: repository),
       ),
     );
@@ -371,7 +370,8 @@ void main() {
     expect(find.text('专业订单'), findsNothing);
   });
 
-  testWidgets('doctor sees self profile and request capabilities', (tester) async {
+  testWidgets('doctor sees self profile and request capabilities',
+      (tester) async {
     final repository = _FakeIdentityRepository()
       ..managementContext = const ManagementContext(
         userId: 'doctor-1',
@@ -388,7 +388,7 @@ void main() {
         canSubmitInstitutionProjectRequests: true,
       );
 
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(_localizedApp(
       home: ManagementCenterPage(repository: repository),
     ));
     await tester.pumpAndSettle();
@@ -417,7 +417,7 @@ void main() {
         canManageDoctors: true,
       );
 
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(_localizedApp(
       home: ManagementCenterPage(repository: repository),
     ));
     await tester.pumpAndSettle();
@@ -439,7 +439,7 @@ void main() {
         canViewAffiliations: true,
       );
 
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(_localizedApp(
       home: ManagementCenterPage(repository: repository),
     ));
     await tester.pumpAndSettle();
@@ -451,13 +451,27 @@ void main() {
   });
 }
 
+Widget _localizedApp(
+        {required Widget home, Locale locale = const Locale('zh')}) =>
+    MaterialApp(
+      locale: locale,
+      supportedLocales: const [Locale('zh'), Locale('en')],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      home: home,
+    );
+
 final class _FakeIdentityRepository implements IdentityRepository {
   var contextCalls = 0;
   var allowManagement = true;
   ManagementContext? managementContext;
-  final savedDrafts = <ManagedInstitutionProfileDraft>[];
+  final savedUpdates = <ManagedInstitutionProfileUpdate>[];
   List<InstitutionMembershipRequest> membershipRequests = const [];
   InstitutionProjectJoinRequestDraft? submittedJoinRequest;
+  bool rejectLegalRepresentativeInstitutionList = false;
 
   @override
   Future<void> deletePrivateDraft(String fileId) async {}
@@ -473,35 +487,58 @@ final class _FakeIdentityRepository implements IdentityRepository {
     }
     return managementContext ??
         const ManagementContext(
-      userId: 'user-1',
-      platformRole: 'USER',
-      activeRoles: ['DOCTOR'],
-      managedInstitutionIds: [],
-      visibleInstitutionIds: [],
-      canManageDoctors: true,
-    );
+          userId: 'user-1',
+          platformRole: 'USER',
+          activeRoles: ['DOCTOR'],
+          managedInstitutionIds: [],
+          visibleInstitutionIds: [],
+          canManageDoctors: true,
+        );
   }
 
   @override
-  Future<List<ManagedInstitutionProfile>>
-      listManagedInstitutionProfiles() async {
+  Future<List<ManagedInstitutionSummary>> listManagedInstitutions() async {
+    if (rejectLegalRepresentativeInstitutionList) {
+      throw Exception('legal representative endpoint denied');
+    }
     return [
-      ManagedInstitutionProfile.fromJson({
-        'id': 'inst-1',
-        'name': '悦美医疗美容',
-        'city': '杭州',
-      }),
+      const ManagedInstitutionSummary(
+        id: 'inst-1',
+        name: '悦美医疗美容',
+        city: '杭州',
+      ),
     ];
   }
 
   @override
-  Future<ManagedInstitutionProfile> updateManagedInstitutionProfile(
-    ManagedInstitutionProfileDraft draft,
-  ) async {
-    savedDrafts.add(draft);
+  Future<List<ManagedInstitutionSummary>>
+      listProfessionalVisibleInstitutions() async => const [
+            ManagedInstitutionSummary(
+              id: 'inst-1',
+              name: '悦美医疗美容',
+              city: '杭州',
+            ),
+          ];
+
+  @override
+  Future<ManagedInstitutionProfile> loadManagedInstitution(String id) async {
     return ManagedInstitutionProfile.fromJson({
-      ...draft.toJson(),
-      'id': draft.id,
+      'id': id,
+      'name': '悦美医疗美容',
+      'city': '杭州',
+    });
+  }
+
+  @override
+  Future<ManagedInstitutionProfile> updateManagedInstitution(
+    String id,
+    ManagedInstitutionProfileUpdate update,
+  ) async {
+    savedUpdates.add(update);
+    return ManagedInstitutionProfile.fromJson({
+      ...update.toJson(),
+      'id': id,
+      'description': '服务端保存结果',
     });
   }
 
