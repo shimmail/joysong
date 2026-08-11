@@ -133,7 +133,7 @@ class AgentChatController extends ChangeNotifier {
   }
 
   void startNewSession() {
-    if (_state.deliveryState.isBusy) return;
+    _rejectSessionMutationWhileBusy();
     ++_operation;
     _emit(
       _state.copyWith(
@@ -158,7 +158,7 @@ class AgentChatController extends ChangeNotifier {
         normalizedName.isEmpty) {
       return;
     }
-    if (_state.deliveryState.isBusy) return;
+    _rejectSessionMutationWhileBusy();
     final operation = ++_operation;
     _emit(
       _state.copyWith(
@@ -200,7 +200,7 @@ class AgentChatController extends ChangeNotifier {
   }
 
   Future<void> deleteSession(ChatSession session) async {
-    if (_state.deliveryState.isBusy) return;
+    _rejectSessionMutationWhileBusy();
     final operation = ++_operation;
     _emit(_state.copyWith(clearError: true));
     try {
@@ -226,9 +226,9 @@ class AgentChatController extends ChangeNotifier {
   }
 
   Future<void> clearActiveMessages() async {
+    _rejectSessionMutationWhileBusy();
     final session = _state.activeSession;
     if (session == null) return;
-    if (_state.deliveryState.isBusy) return;
     final operation = ++_operation;
     _emit(_state.copyWith(clearError: true));
     try {
@@ -249,7 +249,7 @@ class AgentChatController extends ChangeNotifier {
   }
 
   Future<void> clearSessions() async {
-    if (_state.deliveryState.isBusy) return;
+    _rejectSessionMutationWhileBusy();
     final operation = ++_operation;
     _emit(_state.copyWith(clearError: true));
     try {
@@ -407,6 +407,12 @@ class AgentChatController extends ChangeNotifier {
   }
 
   bool _isCurrent(int operation) => !_disposed && operation == _operation;
+
+  void _rejectSessionMutationWhileBusy() {
+    if (_state.deliveryState.isBusy) {
+      throw StateError('CHAT_SEND_IN_PROGRESS');
+    }
+  }
 
   void _emit(AgentChatState state) {
     if (_disposed) return;

@@ -101,6 +101,7 @@ class _AgentChatPageState extends State<AgentChatPage> {
       builder: (context, _) {
         final state = widget.chatController.state;
         final english = Localizations.localeOf(context).languageCode == 'en';
+        final canMutateSessions = !state.deliveryState.isBusy;
         return Scaffold(
           appBar: AppBar(
             title: const Text('颜颜'),
@@ -129,27 +130,29 @@ class _AgentChatPageState extends State<AgentChatPage> {
                     _AgentMenuAction.newChat,
                     Icons.add_comment_outlined,
                     english ? 'New chat' : '新会话',
+                    enabled: canMutateSessions,
                   ),
                   const PopupMenuDivider(),
                   _menuItem(
                     _AgentMenuAction.clearCurrent,
                     Icons.delete_sweep_outlined,
                     english ? 'Clear current messages' : '清空当前消息',
-                    enabled: state.activeSession != null &&
+                    enabled: canMutateSessions &&
+                        state.activeSession != null &&
                         state.messages.isNotEmpty,
                   ),
                   _menuItem(
                     _AgentMenuAction.deleteCurrent,
                     Icons.delete_outline,
                     english ? 'Delete current chat' : '删除当前会话',
-                    enabled: state.activeSession != null,
+                    enabled: canMutateSessions && state.activeSession != null,
                     destructive: true,
                   ),
                   _menuItem(
                     _AgentMenuAction.clearAll,
                     Icons.delete_forever_outlined,
                     english ? 'Clear all history' : '清空全部历史',
-                    enabled: state.sessions.isNotEmpty,
+                    enabled: canMutateSessions && state.sessions.isNotEmpty,
                     destructive: true,
                   ),
                 ],
@@ -241,7 +244,12 @@ class _AgentChatPageState extends State<AgentChatPage> {
       case _AgentMenuAction.plans:
         await _showPlans();
       case _AgentMenuAction.newChat:
-        widget.chatController.startNewSession();
+        try {
+          widget.chatController.startNewSession();
+        } on StateError catch (error) {
+          if (error.message != 'CHAT_SEND_IN_PROGRESS') rethrow;
+          // A send can start after the menu was built. Keep the current chat.
+        }
       case _AgentMenuAction.clearCurrent:
         await _confirmClearCurrent(english);
       case _AgentMenuAction.deleteCurrent:

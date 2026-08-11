@@ -64,3 +64,29 @@ interfaces, configuration, tests, and stop UI have been removed.
   run the smallest relevant Agent tests and one scoped analysis.
 - The pre-existing navigation and scroll deprecations were left unchanged to
   avoid unrelated refactoring.
+
+## Round 1 review fixes
+
+- Verified the race: while REST send was busy, `deleteSession` returned a
+  normally completed future, so `_confirmDeleteSession` returned `true` and
+  dismissed the history sheet without deleting anything.
+- Added RED coverage for both layers:
+  - controller delete expected `StateError('CHAT_SEND_IN_PROGRESS')` but the
+    old implementation completed with `null`;
+  - the chat menu expected new/clear/delete/clear-all to be disabled while a
+    REST send was pending, but the old menu left them enabled.
+- Session mutation APIs now reject REST-busy races explicitly with the stable
+  state error. The page disables those actions while busy; delete and clear
+  confirmation handlers convert a late race into failure/no dismissal, while
+  new-chat preserves the current chat.
+- Removed the obsolete `streamCalls` fake counter and assertions. Production
+  zero-reference grep remains the evidence that the stream interface is gone.
+- A dedicated AuthGate/AppShell composition test remains deferred: there is no
+  existing auth-shell widget harness, and observing the private Agent
+  dependency graph would require a large unrelated fake setup. Scoped analysis
+  and the direct `ApiClient` construction remain the focused verification.
+- Round 1 GREEN verification:
+  - `flutter test --no-pub test/features/agent` passed 8/8 tests;
+  - `flutter analyze --no-pub --no-fatal-infos lib/features/agent` exited 0
+    with only the pre-existing `cacheExtent` deprecation info;
+  - production and focused-test grep found no SSE symbols or `streamCalls`.
