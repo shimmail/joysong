@@ -250,6 +250,20 @@ class AgentWorkflowCoreTest {
     }
 
     @Test
+    fun `strict parser rejects wrapper text unknown fields and multiple objects`() {
+        listOf(
+            """Here is the result: {"intent":"CATALOG_QA","queryTarget":"PROJECT","keywords":["fixture-keyword"]}""",
+            """{"intent":"CATALOG_QA","queryTarget":"PROJECT","keywords":["fixture-keyword"],"unexpected":true}""",
+            """{"intent":"CATALOG_QA","queryTarget":"PROJECT","keywords":["fixture-keyword"]} {"intent":"GENERAL_CHAT","queryTarget":null,"keywords":[]}"""
+        ).forEach { parserContent ->
+            val responseBody = objectMapper.writeValueAsString(
+                mapOf("choices" to listOf(mapOf("message" to mapOf("content" to parserContent))))
+            )
+            assertParserFailureStillCompletes(withSuccess(responseBody, MediaType.APPLICATION_JSON))
+        }
+    }
+
+    @Test
     fun `intent parser failures keep the local route and still complete`() {
         listOf<ResponseCreator>(
             withException(SocketTimeoutException("intent parser timed out")),
@@ -315,6 +329,36 @@ class AgentWorkflowCoreTest {
     }
 
     @Test
+    fun `general comparison summary keeps comparison routing and catalog search`() {
+        val content = "Compare clinics and summarize the differences"
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
+        val completed = slot<CompleteTurnCommand>()
+        prepareChatGeneration(fixture, content)
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "answer")
+        )
+        every { catalog.hasInstitutionProjectMatch(content) } returns false
+        every { catalog.contextualSearchQuery(content, emptyList()) } returns content
+        every { catalog.promptEvidence(content, content, content, AgentQueryTarget.INSTITUTION) } returns AgentPromptEvidence()
+        completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"answer"}}]}""", MediaType.APPLICATION_JSON))
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("COMPARISON", completed.captured.intent)
+        verify(exactly = 1) {
+            catalog.promptEvidence(content, content, content, AgentQueryTarget.INSTITUTION)
+        }
+        intentServer.verify()
+        completionServer.verify()
+    }
+
+    @Test
     fun `generation prompt keeps negative action only as prohibition`() {
         assertGenerationPromptLabels(
             userContent = "不要比较机构，请制定项目方案",
@@ -368,6 +412,81 @@ class AgentWorkflowCoreTest {
 
         assertEquals("CATALOG_QA", completed.captured.intent)
         assertEquals("PROJECT", completed.captured.queryTarget)
+        intentServer.verify()
+        completionServer.verify()
+    }
+
+    @Test
+    fun `project detail price question uses session context when parser is disabled`() {
+        val content = "多少钱？"
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog, intentParserEnabled = false)
+        val completed = slot<CompleteTurnCommand>()
+        prepareChatGeneration(
+            fixture,
+            content,
+            session(contextType = "PROJECT", contextId = "project-1")
+        )
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "answer")
+        )
+        every { catalog.hasInstitutionProjectMatch(content) } returns false
+        every { catalog.contextualSearchQuery(content, emptyList()) } returns content
+        every { catalog.promptEvidence(content, content, content, AgentQueryTarget.PROJECT) } returns AgentPromptEvidence()
+        completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"answer"}}]}""", MediaType.APPLICATION_JSON))
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("CATALOG_QA", completed.captured.intent)
+        assertEquals("PROJECT", completed.captured.queryTarget)
+        intentServer.verify()
+        completionServer.verify()
+    }
+
+    @Test
+    fun `history resolves an uncertain label before parser failure without replacing locked labels`() {
+        val content = "I do not not want a doctor; compare clinics"
+        val history = listOf(message(1, "USER", "Show doctors"))
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
+        val completed = slot<CompleteTurnCommand>()
+        prepareChatGeneration(fixture, content)
+        every { fixture.contextBuilder.load("user-1", "session-1", 20, 4_000) } returns
+            AgentContext(AgentSessionSummary(), history)
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "answer")
+        )
+        every { catalog.hasInstitutionProjectMatch(content) } returns false
+        every { catalog.contextualSearchQuery(content, listOf("Show doctors")) } returns "$content Show doctors"
+        every {
+            catalog.promptEvidence(
+                content,
+                "$content Show doctors",
+                "$content Show doctors",
+                AgentQueryTarget.INSTITUTION
+            )
+        } returns AgentPromptEvidence()
+        intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withException(SocketTimeoutException("intent parser timed out")))
+        completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andExpect(content().string(containsString("请求动作：COMPARISON")))
+            .andExpect(content().string(containsString("请求对象：INSTITUTION,DOCTOR")))
+            .andExpect(content().string(not(containsString("待澄清对象：DOCTOR"))))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"answer"}}]}""", MediaType.APPLICATION_JSON))
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("COMPARISON", completed.captured.intent)
+        assertEquals("INSTITUTION", completed.captured.queryTarget)
         intentServer.verify()
         completionServer.verify()
     }
@@ -1032,6 +1151,14 @@ class AgentWorkflowCoreTest {
                 null
             )
         } returns AgentPromptEvidence()
+        every {
+            catalog.promptEvidence(
+                "我想改善脸部松弛",
+                "我想改善脸部松弛 fixture-keyword",
+                "我想改善脸部松弛 fixture-keyword",
+                AgentQueryTarget.PROJECT
+            )
+        } returns AgentPromptEvidence()
         intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
             .andExpect(method(HttpMethod.POST))
             .andRespond(response)
@@ -1096,7 +1223,8 @@ class AgentWorkflowCoreTest {
     private fun chatFixture(
         completionTemplate: RestTemplate,
         intentTemplate: RestTemplate,
-        catalog: AgentCatalogService
+        catalog: AgentCatalogService,
+        intentParserEnabled: Boolean = true
     ): ChatFixture {
         val turnService = mockk<TurnLifecycleService>()
         val operationLogger = mockk<AgentOperationLogger>()
@@ -1125,7 +1253,8 @@ class AgentWorkflowCoreTest {
             apiKey = "test-key",
             baseUrl = "https://provider.test/v1",
             model = "answer-model",
-            intentModel = "intent-small"
+            intentModel = "intent-small",
+            intentParserEnabled = intentParserEnabled
         ),
         fastReasoningEffort = "",
         complexReasoningEffort = ""

@@ -52,7 +52,8 @@ data class AgentRouteAssessment(
     val requiresContextCompletion: Boolean = false,
     val unresolvedSafetyNegation: Boolean = false,
     val intentEvidence: Set<AgentIntentEvidence> = emptySet(),
-    val targetEvidence: Set<AgentTargetEvidence> = emptySet()
+    val targetEvidence: Set<AgentTargetEvidence> = emptySet(),
+    val contextType: String = "GENERAL"
 )
 
 data class ParsedAgentRoute(
@@ -105,7 +106,16 @@ class AgentIntentRouter {
         val detailSummarySignals = matchSignals(annotatedSignals, detailSummaryTerms)
         val comparisonSignals = matchSignals(annotatedSignals, comparisonTerms)
         val planningSignals = matchSignals(annotatedSignals, planningTerms)
-        val catalogSignals = matchSignals(annotatedSignals, catalogTerms, includeAttachedToNegatedAction = false)
+        val catalogActionSignals = matchSignals(
+            annotatedSignals,
+            catalogActionTerms,
+            includeAttachedToNegatedAction = false
+        )
+        val genericCatalogSignals = matchSignals(
+            annotatedSignals,
+            catalogTerms,
+            includeAttachedToNegatedAction = false
+        )
         val institutionProjectSignals = matchSignals(annotatedSignals, institutionProjectTerms)
         val doctorSignals = matchSignals(annotatedSignals, doctorTerms)
         val institutionSignals = matchSignals(annotatedSignals, institutionTerms)
@@ -129,13 +139,11 @@ class AgentIntentRouter {
             intentEvidence(AgentIntent.COMPARISON, comparisonSignals),
             intentEvidence(AgentIntent.PLANNING, planningSignals)
         )
-        val intentEvidence = specificIntentEvidence + if (
-            specificIntentEvidence.none { it.polarity == AgentLabelPolarity.POSITIVE }
-        ) {
-            setOfNotNull(intentEvidence(AgentIntent.CATALOG_QA, catalogSignals))
-        } else {
-            emptySet()
-        }
+        val catalogEvidence = intentEvidence(AgentIntent.CATALOG_QA, catalogActionSignals)
+            ?: genericCatalogSignals.takeIf {
+                specificIntentEvidence.none { evidence -> evidence.polarity == AgentLabelPolarity.POSITIVE }
+            }?.let { signals -> intentEvidence(AgentIntent.CATALOG_QA, signals) }
+        val intentEvidence = specificIntentEvidence + setOfNotNull(catalogEvidence)
         val targetEvidence = setOfNotNull(
             targetEvidence(AgentQueryTarget.INSTITUTION_PROJECT, institutionProjectSignals),
             targetEvidence(AgentQueryTarget.DOCTOR, doctorSignals),
@@ -197,7 +205,11 @@ class AgentIntentRouter {
         if (contextType.uppercase() in detailContextTypes) score += 0.10
 
         val confidence = score.coerceIn(0.0, 1.0)
-        val requiresContextCompletion = (intent in intentsRequiringTarget && queryTarget == null) ||
+        val hasUnlockedUncertainEvidence = hasUnlockedUncertainEvidence(intentEvidence, targetEvidence)
+        val detailSessionMissingTarget = intent != AgentIntent.SAFETY_SCREENING &&
+            contextType.uppercase() in detailContextTypes && queryTarget == null
+        val requiresContextCompletion = hasUnlockedUncertainEvidence || detailSessionMissingTarget ||
+            (intent in intentsRequiringTarget && queryTarget == null) ||
             "UNRESOLVED_CURRENT_REFERENCE" in reasons ||
             "MULTIPLE_CONSTRAINTS_WITHOUT_TARGET" in reasons
         val needsLlm = requiresLlmParsing(intent, confidence, reasons, requiresContextCompletion)
@@ -211,7 +223,8 @@ class AgentIntentRouter {
             requiresContextCompletion = requiresContextCompletion,
             unresolvedSafetyNegation = unresolvedSafetyNegation,
             intentEvidence = intentEvidence,
-            targetEvidence = targetEvidence
+            targetEvidence = targetEvidence,
+            contextType = contextType
         )
     }
 
@@ -265,7 +278,7 @@ class AgentIntentRouter {
         val resolvedDecision = selectPrimary(
             intentEvidence = mergedIntentEvidence,
             targetEvidence = mergedTargetEvidence,
-            contextType = "GENERAL",
+            contextType = current.contextType,
             preferredIntent = currentDecision.intent.takeIf { it != AgentIntent.GENERAL_CHAT } ?: context.intent,
             preferredTarget = currentDecision.queryTarget ?: context.queryTarget
         )
@@ -289,7 +302,10 @@ class AgentIntentRouter {
             (if (resolvedMissingTargetConstraint) 0.20 else 0.0) -
             (if (targetConflict || contextCandidateConflict || uncertainContext) 0.20 else 0.0))
             .coerceIn(0.0, 1.0)
-        val requiresContextCompletion = (resolvedIntent in intentsRequiringTarget && resolvedTarget == null) ||
+        val requiresContextCompletion = hasUnlockedUncertainEvidence(mergedIntentEvidence, mergedTargetEvidence) ||
+            (resolvedIntent != AgentIntent.SAFETY_SCREENING &&
+                current.contextType.uppercase() in detailContextTypes && resolvedTarget == null) ||
+            (resolvedIntent in intentsRequiringTarget && resolvedTarget == null) ||
             "UNRESOLVED_CURRENT_REFERENCE" in reasons
         return current.copy(
             decision = resolvedDecision,
@@ -340,7 +356,7 @@ class AgentIntentRouter {
         val decision = selectPrimary(
             intentEvidence = mergedIntentEvidence,
             targetEvidence = mergedTargetEvidence,
-            contextType = "GENERAL",
+            contextType = local.contextType,
             preferredIntent = when {
                 safetyUpgrade -> AgentIntent.SAFETY_SCREENING
                 local.unresolvedSafetyNegation || local.explicitIntent -> local.decision.intent
@@ -401,10 +417,14 @@ class AgentIntentRouter {
         val positiveIntents = intentEvidence
             .filter { it.polarity == AgentLabelPolarity.POSITIVE }
             .mapTo(mutableSetOf()) { it.intent }
+        val detailSummaryIsPrimary = AgentIntent.DETAIL_SUMMARY in positiveIntents && (
+            contextType.uppercase() in detailContextTypes ||
+                positiveIntents.all { it == AgentIntent.DETAIL_SUMMARY }
+            )
         val intent = when {
-            preferredIntent in positiveIntents -> preferredIntent!!
             AgentIntent.SAFETY_SCREENING in positiveIntents -> AgentIntent.SAFETY_SCREENING
-            AgentIntent.DETAIL_SUMMARY in positiveIntents -> AgentIntent.DETAIL_SUMMARY
+            detailSummaryIsPrimary -> AgentIntent.DETAIL_SUMMARY
+            preferredIntent in positiveIntents -> preferredIntent!!
             AgentIntent.COMPARISON in positiveIntents -> AgentIntent.COMPARISON
             AgentIntent.PLANNING in positiveIntents -> AgentIntent.PLANNING
             AgentIntent.CATALOG_QA in positiveIntents -> AgentIntent.CATALOG_QA
@@ -479,6 +499,12 @@ class AgentIntentRouter {
         return merged.values.toSet()
     }
 
+    private fun hasUnlockedUncertainEvidence(
+        intents: Set<AgentIntentEvidence>,
+        targets: Set<AgentTargetEvidence>
+    ): Boolean = intents.any { !it.locked && it.polarity == AgentLabelPolarity.UNCERTAIN } ||
+        targets.any { !it.locked && it.polarity == AgentLabelPolarity.UNCERTAIN }
+
     private fun requiresLlmParsing(
         intent: AgentIntent,
         confidence: Double,
@@ -514,6 +540,8 @@ class AgentIntentRouter {
 
     private enum class SentenceConstraint { NEGATED, UNCERTAIN }
 
+    private enum class SignalFamily { SAFETY_STATE, BUSINESS_ACTION, CATALOG_ACTION, TARGET }
+
     private fun annotateSignals(query: String): AnnotatedSignals {
         val normalizedQuery = normalize(query)
         val normalizedTerms = routingTerms.map(::normalize).distinct().sortedByDescending(String::length)
@@ -536,9 +564,10 @@ class AgentIntentRouter {
             val attachedToNegatedAction = mutableSetOf<SignalMatch>()
             val uncertaintyPhrases = uncertaintyPhraseIndexes(clause)
             uncertaintyPhrases.forEach { phrase ->
+                val nearest = nearestMatches(phrase.index + phrase.term.length, matches, stateTerms)
                 applyConstraint(
                     constraints,
-                    nearestMatches(phrase.index + phrase.term.length, matches, stateTerms),
+                    coordinatedMatches(clause, nearest, matches),
                     SentenceConstraint.UNCERTAIN
                 )
             }
@@ -551,7 +580,7 @@ class AgentIntentRouter {
                         negator.index + negator.term.length,
                         matches,
                         actionTerms + stateTerms
-                    )
+                    ).let { nearest -> coordinatedMatches(clause, nearest, matches) }
                     applyConstraint(
                         constraints,
                         constrainedMatches,
@@ -588,6 +617,39 @@ class AgentIntentRouter {
         return AnnotatedSignals(annotated, ambiguousNegation)
     }
 
+    private fun coordinatedMatches(
+        clause: String,
+        nearest: List<SignalMatch>,
+        matches: List<SignalMatch>
+    ): List<SignalMatch> {
+        if (nearest.isEmpty()) return emptyList()
+        val family = nearest.mapNotNull { signalFamily(it.term) }.distinct().singleOrNull() ?: return nearest
+        val coordinated = nearest.toMutableList()
+        var previousEnd = nearest.maxOf { it.index + it.term.length }
+        val laterGroups = matches
+            .filter { it.index >= previousEnd }
+            .groupBy { it.index }
+            .toSortedMap()
+
+        for ((index, candidates) in laterGroups) {
+            val connector = clause.substring(previousEnd, index)
+            if (!coordinationConnector.matches(connector)) break
+            val sameFamily = candidates.filter { signalFamily(it.term) == family }
+            if (sameFamily.isEmpty()) break
+            coordinated += sameFamily
+            previousEnd = sameFamily.maxOf { it.index + it.term.length }
+        }
+        return coordinated.distinct()
+    }
+
+    private fun signalFamily(term: String): SignalFamily? = when (term) {
+        in safetyTerms -> SignalFamily.SAFETY_STATE
+        in comparisonTerms, in planningTerms, in detailSummaryTerms -> SignalFamily.BUSINESS_ACTION
+        in catalogActionTerms -> SignalFamily.CATALOG_ACTION
+        in institutionProjectTerms, in doctorTerms, in institutionTerms, in projectTerms -> SignalFamily.TARGET
+        else -> null
+    }
+
     private fun nearestMatches(
         after: Int,
         matches: List<SignalMatch>,
@@ -603,7 +665,8 @@ class AgentIntentRouter {
         matches: List<SignalMatch>,
         constraint: SentenceConstraint
     ) {
-        val resolvedConstraint = if (matches.size > 1) SentenceConstraint.UNCERTAIN else constraint
+        val overlappingMatches = matches.groupBy { it.index }.any { (_, sameIndex) -> sameIndex.size > 1 }
+        val resolvedConstraint = if (overlappingMatches) SentenceConstraint.UNCERTAIN else constraint
         matches.forEach { match ->
             constraints[match] = if (constraints[match] == null) resolvedConstraint else SentenceConstraint.UNCERTAIN
         }
@@ -737,7 +800,10 @@ class AgentIntentRouter {
             "总结", "概括", "介绍", "简介", "详情", "当前页面", "当前详情", "这个页面", "这页", "简要", "简短",
             "summary", "summarize", "overview", "introduce", "about this", "current page", "this page"
         )
-        val catalogActionTerms = listOf("推荐", "recommend")
+        val catalogActionTerms = listOf(
+            "推荐", "展示", "显示", "查找", "查一下", "找一下", "看看",
+            "recommend", "show", "find", "list"
+        )
         val intentActionTerms = comparisonTerms + planningTerms + detailSummaryTerms + catalogActionTerms
         val safetyTerms = listOf(
             "怀孕", "孕期", "备孕", "哺乳", "严重过敏", "过敏史", "瘢痕体质", "疤痕体质",
@@ -747,18 +813,19 @@ class AgentIntentRouter {
         )
         val catalogTerms = listOf(
             "机构", "医院", "诊所", "医生", "医师", "项目", "价格", "费用", "报价", "套餐", "预约",
-            "推荐", "光子", "嫩肤", "激光", "注射", "玻尿酸", "肉毒", "超声", "射频", "热玛吉",
+            "光子", "嫩肤", "激光", "注射", "玻尿酸", "肉毒", "超声", "射频", "热玛吉",
             "皮肤", "肤质", "暗沉", "毛孔", "粗糙", "斑", "痘", "皱纹", "细纹", "松弛", "下垂", "凹陷", "显老",
             "clinic", "clinics", "hospital", "hospitals", "doctor", "doctors", "surgeon", "surgeons",
             "treatment", "treatments", "procedure", "procedures", "price", "prices", "cost", "costs", "package", "packages",
-            "recommend", "appointment", "ipl", "aopt", "dpl", "laser", "botox", "filler", "thermage",
+            "appointment", "ipl", "aopt", "dpl", "laser", "botox", "filler", "thermage",
             "skin", "dull", "pores", "texture", "spots", "pigmentation", "acne", "wrinkle", "aging", "sagging", "hollow"
         )
-        val routingTerms = safetyTerms + detailSummaryTerms + comparisonTerms + planningTerms + catalogTerms +
+        val routingTerms = safetyTerms + detailSummaryTerms + comparisonTerms + planningTerms + catalogActionTerms + catalogTerms +
             institutionProjectTerms + doctorTerms + institutionTerms + projectTerms + unresolvedReferenceTerms +
             constraintSignalGroups.flatten() + aestheticConcernTerms
         val uncertaintyPhrases = listOf(
             "don't know if", "do not know whether", "not sure if", "not sure whether", "不确定是否", "不知道是否"
         )
+        val coordinationConnector = Regex("\\s*(?:和|或|以及|\\b(?:and|or|nor)\\b)\\s*")
     }
 }

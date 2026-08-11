@@ -267,4 +267,3 @@ Confirm tests demonstrate multi-label scanning, clause-aware negation, per-label
 - [ ] **Step 3: Request whole-branch code review**
 
 Review the full feature range against the design and this plan. Any Critical or Important finding receives one consolidated fix wave followed by one scoped re-review, following the subagent-driven-development limits.
-

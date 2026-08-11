@@ -1,12 +1,13 @@
 # AI Agent 灰度上线手册
 
-本手册用于将同步 REST AI Agent 通过 FastAIToken 中转站安全上线。发布默认保持 `AI_AGENT_ENABLED=false`；只有全部门禁通过后，运维人员才可显式开启内部灰度。当前仓库不包含自动 cohort 分流、指标平台或自动熔断，这些能力需要由 API 网关、发布平台和监控平台配置。
+本手册用于将同步 REST AI Agent 通过 FastAIToken 中转站安全上线。应用运行时默认 `AI_AGENT_ENABLED=true`；本手册的生产灰度基线会故意显式覆盖为 `false`，只有全部门禁通过后，运维人员才可为内部 cohort 改为 `true`。当前仓库不包含自动 cohort 分流、指标平台或自动熔断，这些能力需要由 API 网关、发布平台和监控平台配置。
 
 ## 1. 生产配置基线
 
 机密值只从部署平台 Secret 注入，不写入仓库、命令行参数、日志或截图：
 
 ```dotenv
+# 应用默认 true；灰度门禁阶段故意显式覆盖为 false
 AI_AGENT_ENABLED=false
 OPENAI_API_KEY=由部署平台Secret注入
 OPENAI_BASE_URL=https://www.fastaitoken.com/v1

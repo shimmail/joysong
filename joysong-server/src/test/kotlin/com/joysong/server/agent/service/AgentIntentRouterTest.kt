@@ -36,6 +36,24 @@ class AgentIntentRouterTest {
     }
 
     @Test
+    fun `explicit catalog actions remain separate from generic entity nouns`() {
+        listOf(
+            "比较项目并推荐医生",
+            "Compare treatments and recommend doctors"
+        ).forEach { query ->
+            val result = router.assessCurrent(query, "GENERAL")
+
+            assertEquals(setOf(AgentIntent.CATALOG_QA, AgentIntent.COMPARISON), result.positiveIntents())
+            assertEquals(setOf(AgentQueryTarget.DOCTOR, AgentQueryTarget.PROJECT), result.positiveTargets())
+            assertEquals(AgentIntent.COMPARISON, result.decision.intent)
+            assertTrue(result.decision.searchCatalog)
+        }
+
+        val genericNoun = router.assessCurrent("Compare clinics", "GENERAL")
+        assertEquals(setOf(AgentIntent.COMPARISON), genericNoun.positiveIntents())
+    }
+
+    @Test
     fun `ambiguous target does not unlock independent labels`() {
         val independent = router.assessCurrent("I do not not want a doctor; compare clinics", "GENERAL")
 
@@ -57,6 +75,16 @@ class AgentIntentRouterTest {
         val result = router.decide("帮我简单介绍一下", "DOCTOR")
         assertEquals(AgentIntent.DETAIL_SUMMARY, result.intent)
         assertTrue(result.searchCatalog)
+    }
+
+    @Test
+    fun `comparison stays primary over summary outside a detail context`() {
+        val result = router.assessCurrent("Compare clinics and summarize the differences", "GENERAL")
+
+        assertEquals(setOf(AgentIntent.COMPARISON, AgentIntent.DETAIL_SUMMARY), result.positiveIntents())
+        assertEquals(AgentIntent.COMPARISON, result.decision.intent)
+        assertEquals(AgentQueryTarget.INSTITUTION, result.decision.queryTarget)
+        assertTrue(result.decision.searchCatalog)
     }
 
     @Test
@@ -346,6 +374,35 @@ class AgentIntentRouterTest {
         assertTrue(result.evidenceFor(AgentIntent.COMPARISON).locked)
         assertEquals(AgentLabelPolarity.POSITIVE, result.evidenceFor(AgentQueryTarget.PROJECT).polarity)
         assertTrue(result.evidenceFor(AgentQueryTarget.PROJECT).locked)
+    }
+
+    @Test
+    fun `coordinated safety states share a bounded negation`() {
+        listOf(
+            "我没有怀孕或哺乳，想比较项目",
+            "I am not pregnant or breastfeeding; compare treatments"
+        ).forEach { query ->
+            val result = router.assessCurrent(query, "GENERAL")
+
+            assertEquals(AgentLabelPolarity.NEGATIVE, result.evidenceFor(AgentIntent.SAFETY_SCREENING).polarity)
+            assertEquals(AgentIntent.COMPARISON, result.decision.intent)
+            assertEquals(AgentQueryTarget.PROJECT, result.decision.queryTarget)
+        }
+    }
+
+    @Test
+    fun `coordinated business actions share a bounded negation`() {
+        listOf(
+            "不要比较或规划项目",
+            "Don't compare or plan treatments"
+        ).forEach { query ->
+            val result = router.assessCurrent(query, "GENERAL")
+
+            assertEquals(AgentLabelPolarity.NEGATIVE, result.evidenceFor(AgentIntent.COMPARISON).polarity)
+            assertEquals(AgentLabelPolarity.NEGATIVE, result.evidenceFor(AgentIntent.PLANNING).polarity)
+            assertEquals(AgentIntent.GENERAL_CHAT, result.decision.intent)
+            assertFalse(result.decision.searchCatalog)
+        }
     }
 
     @Test

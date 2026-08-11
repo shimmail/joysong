@@ -652,10 +652,19 @@ class ChatService(
                 ?: throw IntentParserRouteException("MALFORMED_PAYLOAD")
             val content = message["content"] as? String
                 ?: throw IntentParserRouteException("MALFORMED_PAYLOAD")
-            val json = content.substringAfter('{', "").substringBeforeLast('}', "").takeIf(String::isNotBlank)?.let { "{$it}" }
-                ?: throw IntentParserRouteException("MALFORMED_PAYLOAD")
-            val node = objectMapper.readTree(json)
+            val node = objectMapper.factory.createParser(content.trim()).use { parser ->
+                val parsed: com.fasterxml.jackson.databind.JsonNode = objectMapper.readTree(parser)
+                    ?: throw IntentParserRouteException("MALFORMED_PAYLOAD")
+                if (parser.nextToken() != null) throw IntentParserRouteException("INVALID_SCHEMA")
+                parsed
+            }
             if (!node.isObject) throw IntentParserRouteException("INVALID_SCHEMA")
+            val requiredFields = setOf("intent", "queryTarget", "keywords")
+            val allowedFields = requiredFields + "intents"
+            val actualFields = node.fieldNames().asSequence().toSet()
+            if (!actualFields.containsAll(requiredFields) || !allowedFields.containsAll(actualFields)) {
+                throw IntentParserRouteException("INVALID_SCHEMA")
+            }
             val intentNode = node.get("intent")
                 ?.takeIf { it.isTextual }
                 ?: throw IntentParserRouteException("INVALID_SCHEMA")

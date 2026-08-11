@@ -5,7 +5,7 @@
 ## 配置
 
 ```dotenv
-AI_AGENT_ENABLED=false
+AI_AGENT_ENABLED=true
 OPENAI_API_KEY=替换为中转站密钥
 OPENAI_BASE_URL=https://www.fastaitoken.com/v1
 AI_AGENT_MODEL=gpt-5.5
@@ -27,7 +27,7 @@ Content-Type: application/json
 
 意图路由遵循固定顺序：当前请求的中英文否定感知关键词，受限的近期上下文补全，最后才是模型解析。当前请求中已明确的目标不受历史或模型结果覆盖；解析器失败时保留本地路由并继续最终生成。
 
-生产部署必须先保持 `AI_AGENT_ENABLED=false`。完成 preflight、Flyway、readiness 和一次不输出 Key/Authorization/完整内容的 FastAIToken canary 后，才可在运维侧为内部 cohort 显式开启。当前应用不提供自动 cohort 分流或指标平台；具体步骤见 [`AI_AGENT_ROLLOUT.md`](./AI_AGENT_ROLLOUT.md)。
+应用未设置开关时默认 `AI_AGENT_ENABLED=true`。生产灰度部署必须故意显式覆盖为 `false`；完成 preflight、Flyway、readiness 和一次不输出 Key/Authorization/完整内容的 FastAIToken canary 后，才可在运维侧为内部 cohort 显式开启。当前应用不提供自动 cohort 分流或指标平台；具体步骤见 [`AI_AGENT_ROLLOUT.md`](./AI_AGENT_ROLLOUT.md)。
 
 ## 同步响应与错误处理
 
