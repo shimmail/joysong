@@ -10,6 +10,8 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import io.mockk.verifyOrder
+import jakarta.persistence.LockModeType
+import org.springframework.data.jpa.repository.Lock
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
@@ -23,7 +25,7 @@ class WalletLedgerServiceTest {
     private var nextWalletId = 1L
 
     init {
-        every { ledgerRepository.findAllByOperationKeyIn(any()) } answers {
+        every { ledgerRepository.findAllByOperationKeyInForUpdate(any()) } answers {
             firstArg<Collection<String>>().mapNotNull(entries::get)
         }
         every { walletRepository.findForUpdate(any(), any(), any()) } answers {
@@ -81,6 +83,17 @@ class WalletLedgerServiceTest {
 
         assertEquals(0, wallet("doctor-1").pendingMinor)
         assertEquals(500, wallet("doctor-1").availableMinor)
+    }
+
+    @Test
+    fun `each same-wallet entry stores its own resulting balance snapshot`() {
+        val entries = service.apply(listOf(
+            credit("doctor-1", 100, "op-first"),
+            credit("doctor-1", 200, "op-second")
+        ))
+
+        assertEquals(100, entries[0].pendingBalanceMinor)
+        assertEquals(300, entries[1].pendingBalanceMinor)
     }
 
     @Test
@@ -143,7 +156,7 @@ class WalletLedgerServiceTest {
             pendingBalanceMinor = 50,
             operationKey = "op-concurrent"
         )
-        every { ledgerRepository.findAllByOperationKeyIn(any()) } returnsMany listOf(emptyList(), listOf(concurrentEntry))
+        every { ledgerRepository.findAllByOperationKeyInForUpdate(any()) } returns listOf(concurrentEntry)
 
         val result = service.apply(listOf(credit("doctor-1", 50, "op-concurrent")))
 
@@ -172,6 +185,16 @@ class WalletLedgerServiceTest {
         assertEquals(25, entry.pendingBalanceMinor)
         verify(exactly = 1) { walletRepository.createIfAbsent("DOCTOR", "doctor-race", "USD") }
         verify(exactly = 2) { walletRepository.findForUpdate("DOCTOR", "doctor-race", "USD") }
+    }
+
+    @Test
+    fun `post-lock operation lookup uses pessimistic write locking`() {
+        val method = WalletLedgerEntryRepository::class.java.getMethod(
+            "findAllByOperationKeyInForUpdate",
+            Collection::class.java
+        )
+
+        assertEquals(LockModeType.PESSIMISTIC_WRITE, method.getAnnotation(Lock::class.java).value)
     }
 
     private fun wallet(ownerId: String): WalletEntity = wallets.getValue(WalletKey("DOCTOR", ownerId, "USD"))
