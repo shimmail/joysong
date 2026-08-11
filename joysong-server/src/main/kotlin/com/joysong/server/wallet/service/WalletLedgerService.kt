@@ -33,25 +33,26 @@ class WalletLedgerService(
 
         val existingByOperation = ledgerRepository.findAllByOperationKeyIn(mutations.map { it.operationKey })
             .associateBy { it.operationKey }
-        val remaining = mutations.filterNot { existingByOperation.containsKey(it.operationKey) }
-        if (remaining.isEmpty()) return mutations.map { existingByOperation.getValue(it.operationKey) }
+        val initiallyMissing = mutations.filterNot { existingByOperation.containsKey(it.operationKey) }
+        if (initiallyMissing.isEmpty()) return mutations.map { existingByOperation.getValue(it.operationKey) }
 
-        val ordered = remaining.sortedWith(compareBy<WalletMutation>({ it.currency }, { it.ownerType }, { it.ownerId }))
-        val keys = ordered.map { WalletKey(it.currency, it.ownerType, it.ownerId) }.distinct()
-        val wallets = keys.associateWith { key ->
+        val ordered = initiallyMissing.sortedWith(compareBy<WalletMutation>({ it.currency }, { it.ownerType }, { it.ownerId }))
+        val lockedWallets = ordered.map { WalletKey(it.currency, it.ownerType, it.ownerId) }.distinct().associateWith { key ->
             walletRepository.findForUpdate(key.ownerType, key.ownerId, key.currency)
-                ?: WalletEntity(ownerType = key.ownerType, ownerId = key.ownerId, currency = key.currency)
         }
+        val existingAfterLock = ledgerRepository.findAllByOperationKeyIn(initiallyMissing.map { it.operationKey })
+            .associateBy { it.operationKey }
+        val existing = existingByOperation + existingAfterLock
+        val toApply = ordered.filterNot { existing.containsKey(it.operationKey) }
+        if (toApply.isEmpty()) return mutations.map { existing.getValue(it.operationKey) }
 
-        val projected = wallets.mapValues { (_, wallet) ->
-            WalletBalance(wallet.pendingMinor, wallet.availableMinor, wallet.frozenMinor)
-        }.toMutableMap()
-        ordered.forEach { mutation ->
-            val key = WalletKey(mutation.currency, mutation.ownerType, mutation.ownerId)
-            projected[key] = projected.getValue(key).plus(mutation)
+        validateProjectedBalances(toApply, lockedWallets)
+        val wallets = toApply.map { WalletKey(it.currency, it.ownerType, it.ownerId) }.distinct().associateWith { key ->
+            lockedWallets.getValue(key) ?: createAndLock(key)
         }
+        validateProjectedBalances(toApply, wallets)
 
-        ordered.forEach { mutation ->
+        toApply.forEach { mutation ->
             val key = WalletKey(mutation.currency, mutation.ownerType, mutation.ownerId)
             wallets.getValue(key).applyDeltas(
                 mutation.pendingDelta,
@@ -59,9 +60,7 @@ class WalletLedgerService(
                 mutation.frozenDelta
             )
         }
-        wallets.values.filter { it.id == 0L }.forEach(walletRepository::save)
-
-        val createdByOperation = ordered.associate { mutation ->
+        val createdByOperation = toApply.associate { mutation ->
             val key = WalletKey(mutation.currency, mutation.ownerType, mutation.ownerId)
             mutation.operationKey to ledgerRepository.save(
                 WalletLedgerEntryEntity(
@@ -71,6 +70,9 @@ class WalletLedgerService(
                     pendingDeltaMinor = mutation.pendingDelta,
                     availableDeltaMinor = mutation.availableDelta,
                     frozenDeltaMinor = mutation.frozenDelta,
+                    pendingBalanceMinor = wallets.getValue(key).pendingMinor,
+                    availableBalanceMinor = wallets.getValue(key).availableMinor,
+                    frozenBalanceMinor = wallets.getValue(key).frozenMinor,
                     sourceType = mutation.sourceType,
                     sourceId = mutation.sourceId,
                     operationKey = mutation.operationKey
@@ -78,7 +80,27 @@ class WalletLedgerService(
             )
         }
         return mutations.map { mutation ->
-            existingByOperation[mutation.operationKey] ?: createdByOperation.getValue(mutation.operationKey)
+            existing[mutation.operationKey] ?: createdByOperation.getValue(mutation.operationKey)
+        }
+    }
+
+    private fun createAndLock(key: WalletKey): WalletEntity {
+        walletRepository.createIfAbsent(key.ownerType, key.ownerId, key.currency)
+        return checkNotNull(walletRepository.findForUpdate(key.ownerType, key.ownerId, key.currency)) {
+            "创建钱包后无法锁定钱包"
+        }
+    }
+
+    private fun validateProjectedBalances(
+        mutations: List<WalletMutation>,
+        wallets: Map<WalletKey, WalletEntity?>
+    ) {
+        val projected = wallets.mapValues { (_, wallet) ->
+            wallet?.let { WalletBalance(it.pendingMinor, it.availableMinor, it.frozenMinor) } ?: WalletBalance.ZERO
+        }.toMutableMap()
+        mutations.forEach { mutation ->
+            val key = WalletKey(mutation.currency, mutation.ownerType, mutation.ownerId)
+            projected[key] = projected.getValue(key).plus(mutation)
         }
     }
 
@@ -110,6 +132,10 @@ class WalletLedgerService(
             val frozen = Math.addExact(frozenMinor, mutation.frozenDelta)
             require(pending >= 0 && available >= 0 && frozen >= 0) { "钱包余额不能为负数" }
             return WalletBalance(pending, available, frozen)
+        }
+
+        companion object {
+            val ZERO = WalletBalance(0, 0, 0)
         }
     }
 }

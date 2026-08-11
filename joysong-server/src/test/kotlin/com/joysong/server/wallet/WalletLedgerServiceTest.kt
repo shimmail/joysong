@@ -20,6 +20,7 @@ class WalletLedgerServiceTest {
     private val wallets = mutableMapOf<WalletKey, WalletEntity>()
     private val entries = mutableMapOf<String, WalletLedgerEntryEntity>()
     private val service = WalletLedgerService(walletRepository, ledgerRepository)
+    private var nextWalletId = 1L
 
     init {
         every { ledgerRepository.findAllByOperationKeyIn(any()) } answers {
@@ -28,8 +29,13 @@ class WalletLedgerServiceTest {
         every { walletRepository.findForUpdate(any(), any(), any()) } answers {
             wallets[WalletKey(firstArg(), secondArg(), thirdArg())]
         }
-        every { walletRepository.save(any()) } answers {
-            firstArg<WalletEntity>().also { wallets[WalletKey(it.ownerType, it.ownerId, it.currency)] = it }
+        every { walletRepository.createIfAbsent(any(), any(), any()) } answers {
+            val key = WalletKey(firstArg(), secondArg(), thirdArg())
+            wallets.putIfAbsent(
+                key,
+                WalletEntity(id = nextWalletId++, ownerType = key.ownerType, ownerId = key.ownerId, currency = key.currency)
+            )
+            1
         }
         every { ledgerRepository.save(any()) } answers {
             firstArg<WalletLedgerEntryEntity>().also { entries[it.operationKey] = it }
@@ -63,6 +69,9 @@ class WalletLedgerServiceTest {
         assertEquals(500, entry.pendingDeltaMinor)
         assertEquals(0, entry.availableDeltaMinor)
         assertEquals(0, entry.frozenDeltaMinor)
+        assertEquals(500, entry.pendingBalanceMinor)
+        assertEquals(0, entry.availableBalanceMinor)
+        assertEquals(0, entry.frozenBalanceMinor)
     }
 
     @Test
@@ -118,8 +127,51 @@ class WalletLedgerServiceTest {
             ))
         }
 
-        verify(exactly = 0) { walletRepository.save(any()) }
+        verify(exactly = 0) { walletRepository.createIfAbsent(any(), any(), any()) }
         verify(exactly = 0) { ledgerRepository.save(any()) }
+    }
+
+    @Test
+    fun `operation keys are rechecked after wallet locks are acquired`() {
+        val lockedWallet = WalletEntity(id = 7, ownerType = "DOCTOR", ownerId = "doctor-1", currency = "USD")
+        lockedWallet.applyDeltas(50, 0, 0)
+        wallets[WalletKey("DOCTOR", "doctor-1", "USD")] = lockedWallet
+        val concurrentEntry = WalletLedgerEntryEntity(
+            id = 9,
+            walletId = 7,
+            pendingDeltaMinor = 50,
+            pendingBalanceMinor = 50,
+            operationKey = "op-concurrent"
+        )
+        every { ledgerRepository.findAllByOperationKeyIn(any()) } returnsMany listOf(emptyList(), listOf(concurrentEntry))
+
+        val result = service.apply(listOf(credit("doctor-1", 50, "op-concurrent")))
+
+        assertEquals(listOf(concurrentEntry), result)
+        assertEquals(50, lockedWallet.pendingMinor)
+        verify(exactly = 0) { ledgerRepository.save(any()) }
+    }
+
+    @Test
+    fun `wallet creation race reloads the winning wallet before mutation`() {
+        var lockReads = 0
+        every { walletRepository.findForUpdate("DOCTOR", "doctor-race", "USD") } answers {
+            lockReads += 1
+            if (lockReads == 1) null else WalletEntity(
+                id = 77,
+                ownerType = "DOCTOR",
+                ownerId = "doctor-race",
+                currency = "USD"
+            )
+        }
+        every { walletRepository.createIfAbsent("DOCTOR", "doctor-race", "USD") } returns 0
+
+        val entry = service.apply(listOf(credit("doctor-race", 25, "op-race"))).single()
+
+        assertEquals(77, entry.walletId)
+        assertEquals(25, entry.pendingBalanceMinor)
+        verify(exactly = 1) { walletRepository.createIfAbsent("DOCTOR", "doctor-race", "USD") }
+        verify(exactly = 2) { walletRepository.findForUpdate("DOCTOR", "doctor-race", "USD") }
     }
 
     private fun wallet(ownerId: String): WalletEntity = wallets.getValue(WalletKey("DOCTOR", ownerId, "USD"))
