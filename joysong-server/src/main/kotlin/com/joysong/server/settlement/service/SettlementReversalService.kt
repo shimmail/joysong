@@ -54,9 +54,16 @@ class SettlementReversalService(
         require(refund.status == COMPLETED_REFUND_STATUS) { "REFUND_NOT_COMPLETED" }
         val completedItems = refundItemRepository.findAllByRefundIdOrderByCreatedAtAsc(refundId)
             .filter { it.status == COMPLETED_ITEM_STATUS && it.amountMinor > 0 }
-        if (completedItems.isEmpty()) return
+        if (completedItems.isEmpty()) {
+            markCompleted(refund)
+            return
+        }
 
-        val settlement = settlementRepository.findByOrderIdForUpdate(refund.orderId) ?: return
+        val settlement = settlementRepository.findByOrderIdForUpdate(refund.orderId)
+        if (settlement == null) {
+            markCompleted(refund)
+            return
+        }
         val originalNetPaidMinor = requireNotNull(settlement.totalAmountMinor) { "SETTLEMENT_AMOUNT_MISSING" }
         require(originalNetPaidMinor > 0) { "SETTLEMENT_AMOUNT_NOT_POSITIVE" }
         val cumulativeRefundedMinor = refundItemRepository.sumCompletedAmountMinor(refund.orderId)
@@ -106,14 +113,26 @@ class SettlementReversalService(
             allocationRepository.saveAll(allocations)
             settlement.status = when {
                 allocations.all { it.reversedMinor == it.amountMinor } -> REVERSED_STATUS
-                allocations.any {
-                    it.balanceBucket == SettlementAllocationBalanceBucket.PENDING && it.reversedMinor < it.amountMinor
-                } -> PENDING_STATUS
                 else -> PARTIALLY_REVERSED_STATUS
             }
             settlement.updatedAt = LocalDateTime.now()
             settlementRepository.save(settlement)
         }
+        val reversalComplete = allocations.all { allocation ->
+            allocation.reversedMinor == cumulativeTarget(
+                allocation,
+                allocations,
+                cumulativeRefundedMinor,
+                originalNetPaidMinor
+            )
+        }
+        if (reversalComplete) markCompleted(refund)
+    }
+
+    private fun markCompleted(refund: com.joysong.server.refund.entity.RefundEntity) {
+        refund.revenueReversalStatus = REVERSAL_COMPLETED_STATUS
+        refund.revenueReversedAt = LocalDateTime.now()
+        refundRepository.save(refund)
     }
 
     private fun validateAllocationSnapshot(allocations: List<SettlementAllocationEntity>, totalMinor: Long) {
@@ -218,6 +237,6 @@ class SettlementReversalService(
         const val REFUND_SOURCE_TYPE = "REFUND"
         const val PARTIALLY_REVERSED_STATUS = "PARTIALLY_REVERSED"
         const val REVERSED_STATUS = "REVERSED"
-        const val PENDING_STATUS = "PENDING"
+        const val REVERSAL_COMPLETED_STATUS = "COMPLETED"
     }
 }

@@ -135,7 +135,7 @@ class OrderScheduledTasks(
     fun processSettlements() {
         val now = LocalDateTime.now()
         val dueSettlementIds = settlementRepository.findDueSettlementIds(
-            "PENDING",
+            setOf("PENDING", "PARTIALLY_REVERSED"),
             now,
             PageRequest.of(0, DUE_SETTLEMENT_BATCH_SIZE)
         )

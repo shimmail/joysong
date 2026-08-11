@@ -6,12 +6,23 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
 import java.sql.DriverManager
+import java.nio.file.Paths
 
 class RevenueLedgerMigrationIntegrationTest {
     @Test
+    fun `isolated database names derive from active worktree directory`() {
+        val fresh = databaseName("fresh")
+        val duplicates = databaseName("duplicates")
+
+        assertTrue(fresh.startsWith("myapp_worktree_"))
+        assertTrue(fresh.contains("revenue_sharing"))
+        assertTrue(fresh != duplicates)
+    }
+
+    @Test
     fun `fresh isolated database migrates through revenue ledger`() {
         val rootUrl = rootUrl()
-        val database = "myapp_worktree_revenue_sharing_fresh"
+        val database = databaseName("fresh")
         recreate(rootUrl, database)
         val targetUrl = databaseUrl(rootUrl, database)
         println("MYSQL_HOST=${host(rootUrl)}")
@@ -33,7 +44,7 @@ class RevenueLedgerMigrationIntegrationTest {
     @Test
     fun `upgrade blocks historical duplicate settlements before unique index`() {
         val rootUrl = rootUrl()
-        val database = "myapp_worktree_revenue_sharing_duplicates"
+        val database = databaseName("duplicates")
         recreate(rootUrl, database)
         val targetUrl = databaseUrl(rootUrl, database)
         println("MYSQL_HOST=${host(rootUrl)}")
@@ -69,6 +80,16 @@ class RevenueLedgerMigrationIntegrationTest {
                 statement.execute("CREATE DATABASE `$database` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci")
             }
         }
+    }
+
+    private fun databaseName(scenario: String): String {
+        val current = Paths.get("").toAbsolutePath().normalize()
+        val worktreeDirectory = if (current.fileName.toString() == "joysong-server") current.parent else current
+        val worktreeId = worktreeDirectory.fileName.toString().lowercase()
+            .replace(Regex("[^a-z0-9]+"), "_")
+            .trim('_')
+        require(worktreeId.isNotBlank())
+        return "myapp_worktree_${worktreeId}_$scenario"
     }
 
     private fun databaseUrl(rootUrl: String, database: String) = rootUrl.replace(Regex("/mysql(?:\\?.*)?$"), "/$database")

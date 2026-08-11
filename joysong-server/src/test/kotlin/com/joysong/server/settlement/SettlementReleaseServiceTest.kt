@@ -58,7 +58,7 @@ class SettlementReleaseServiceTest {
     @Test
     fun `release moves remaining pending balances to available and settles the order`() {
         val now = LocalDateTime.of(2026, 8, 11, 3, 0)
-        val settlement = SettlementEntity(id = 91, orderId = "order-1", status = "PENDING")
+        val settlement = SettlementEntity(id = 91, orderId = "order-1", status = "PARTIALLY_REVERSED")
         val allocations = listOf(allocation(1, 100), allocation(2, 250))
         val mutations = slot<List<WalletMutation>>()
         arrangeRelease(settlement, allocations, pendingSettlementOrder())
@@ -134,6 +134,7 @@ class SettlementReleaseServiceTest {
         assertEquals(70, mutations.captured.single().availableDelta)
         assertEquals(-70, mutations.captured.single().pendingDelta)
         assertEquals(SettlementAllocationStatus.PARTIALLY_REVERSED, partial.status)
+        assertEquals("PARTIALLY_REVERSED", settlement.status)
     }
 
     @Test
@@ -174,7 +175,9 @@ class SettlementReleaseServiceTest {
     @Test
     fun `scheduler continues with later due settlement after one release fails`() {
         val scheduler = OrderScheduledTasks(orderRepository, orderService, settlementRepository, schedulerReleaseService)
-        every { settlementRepository.findDueSettlementIds("PENDING", any(), any()) } returns listOf(91, 92)
+        every {
+            settlementRepository.findDueSettlementIds(setOf("PENDING", "PARTIALLY_REVERSED"), any(), any())
+        } returns listOf(91, 92)
         every { schedulerReleaseService.release(91, any()) } throws IllegalStateException("first failed")
         every { schedulerReleaseService.release(92, any()) } just Runs
 

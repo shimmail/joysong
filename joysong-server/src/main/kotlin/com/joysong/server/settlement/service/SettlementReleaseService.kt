@@ -26,7 +26,7 @@ class SettlementReleaseService(
     fun release(settlementId: Long, now: LocalDateTime) {
         val settlement = settlementRepository.findByIdForUpdate(settlementId) ?: return
         if (settlement.status in TERMINAL_STATUSES) return
-        check(settlement.status == PENDING_STATUS) { "不支持的结算状态: ${settlement.status}" }
+        check(settlement.status in RELEASABLE_STATUSES) { "不支持的结算状态: ${settlement.status}" }
 
         val allocations = allocationRepository.findAllBySettlementIdOrderByIdAsc(settlementId)
         val order = orderRepository.findByIdForUpdate(settlement.orderId)
@@ -67,7 +67,7 @@ class SettlementReleaseService(
             .takeIf { it.isNotEmpty() }
             ?.let { allocationRepository.saveAll(it) }
 
-        settlement.status = AVAILABLE_STATUS
+        settlement.status = if (allocations.any { it.reversedMinor > 0 }) PARTIALLY_REVERSED_STATUS else AVAILABLE_STATUS
         settlement.updatedAt = now
         settlementRepository.save(settlement)
         orderRepository.save(order.copy(status = OrderStatusEnum.SETTLED.value, updatedAt = now))
@@ -82,10 +82,11 @@ class SettlementReleaseService(
     }
 
     private companion object {
-        const val PENDING_STATUS = "PENDING"
         const val AVAILABLE_STATUS = "AVAILABLE"
+        const val PARTIALLY_REVERSED_STATUS = "PARTIALLY_REVERSED"
         const val RELEASE_ENTRY_TYPE = "RELEASE"
         const val SETTLEMENT_SOURCE_TYPE = "SETTLEMENT"
-        val TERMINAL_STATUSES = setOf("AVAILABLE", "PARTIALLY_REVERSED", "REVERSED")
+        val RELEASABLE_STATUSES = setOf("PENDING", PARTIALLY_REVERSED_STATUS)
+        val TERMINAL_STATUSES = setOf("AVAILABLE", "REVERSED")
     }
 }

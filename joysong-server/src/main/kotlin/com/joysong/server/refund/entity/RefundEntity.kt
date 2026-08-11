@@ -38,5 +38,9 @@ data class RefundEntity(
     @Column(name = "reviewed_at") val reviewedAt: LocalDateTime? = null,
     @Column(name = "reject_reason", length = 500) val rejectReason: String? = null,
     @Column(name = "requested_at") val requestedAt: LocalDateTime? = null,
-    @Column(name = "completed_at") val completedAt: LocalDateTime? = null
+    @Column(name = "completed_at") val completedAt: LocalDateTime? = null,
+    @Column(name = "revenue_reversal_status", nullable = false, length = 20)
+    var revenueReversalStatus: String = "PENDING",
+    @Column(name = "revenue_reversed_at")
+    var revenueReversedAt: LocalDateTime? = null
 )
