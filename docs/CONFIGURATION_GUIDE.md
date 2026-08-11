@@ -184,9 +184,14 @@ AI_AGENT_MODEL=gpt-5.5
 OPENAI_PROXY_URL=http://proxy.example.internal:8080
 OPENAI_STREAM_ENABLED=false
 OPENAI_INTENT_PARSER_ENABLED=true
+OPENAI_INTENT_MODEL=可选的意图解析模型ID
 ```
 
-生产启用 Agent 时必须显式配置 `AI_AGENT_MODEL`，服务端不会从 `OPENAI_MODEL` 或仓库默认值回退。可选的 `OPENAI_PROXY_URL` 只支持带显式端口的 `http://` 和 `socks://` URL；`https://` proxy URL 会在启动时被拒绝。
+生产启用 Agent 时必须显式配置 `AI_AGENT_MODEL`，服务端不会从 `OPENAI_MODEL` 或仓库默认值回退。启用 `OPENAI_INTENT_PARSER_ENABLED` 后，可用 `OPENAI_INTENT_MODEL` 为意图解析指定模型；留空时解析器使用 `AI_AGENT_MODEL`。解析器与最终生成共享 API Key、Base URL、代理和超时相关配置，只有模型名可不同；最终回答始终使用 `AI_AGENT_MODEL`，解析失败则保留本地路由继续生成。
+
+路由顺序固定为：先使用当前请求中的中英文、可识别否定词的关键词规则；仅在需要时以受限的近期上下文补全；仍有歧义时才调用意图模型。当前请求已明确的意图或目标不会被历史上下文或解析器覆盖。
+
+可选的 `OPENAI_PROXY_URL` 只支持带显式端口的 `http://` 和 `socks://` URL；`https://` proxy URL 会在启动时被拒绝。
 
 生产环境默认保持 `AI_AGENT_ENABLED=false`。启用顺序、secret-safe FastAIToken canary、内部 cohort、监控与立即停用规则见 [`AI_AGENT_ROLLOUT.md`](./AI_AGENT_ROLLOUT.md)。当前应用不包含自动 cohort 分流、指标平台或自动熔断，需由网关、发布平台和运维监控实现。V15 为 Agent lease 的前向兼容迁移，停用 Agent 时不得删除或回滚。
 

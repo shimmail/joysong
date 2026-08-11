@@ -117,7 +117,10 @@ class AgentChatFlowIntegrationTest {
         fakeLlmDelayMs.set(0)
         fakeLlmContent.set("测试回复")
         fakeLlmRawResponse.set(null)
+        fakeIntentParserContent.set("""{"intent":"CATALOG_QA","queryTarget":"DOCTOR","keywords":["context"]}""")
         fakeLlmRequestBodies.clear()
+        aiAgentProperties.intentParserEnabled = false
+        aiAgentProperties.intentModel = "intent-test-model"
         transactionStates.clear()
         llmRestTemplate.requestFactory = SimpleClientHttpRequestFactory().apply {
             setConnectTimeout(1_000)
@@ -164,6 +167,48 @@ class AgentChatFlowIntegrationTest {
         assertEquals(AgentTurnStatus.SUCCEEDED, turnRepository.findAll().single { it.sessionId == session.id }.status)
         assertEquals(listOf(false), transactionStates)
         assertFalse(TransactionSynchronizationManager.isActualTransactionActive())
+    }
+
+    @Test
+    fun `ambiguous request uses intent model and does not override its current institution target from history`() {
+        aiAgentProperties.intentParserEnabled = true
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+        chatService.sendMessage(
+            session.id,
+            "user-1",
+            SendMessageRequest("请比较医生", "intent-history-doctor-1")
+        )
+        fakeLlmCalls.set(0)
+        fakeLlmRequestBodies.clear()
+
+        val result = chatService.sendMessage(
+            session.id,
+            "user-1",
+            SendMessageRequest("这家机构怎么样", "intent-current-institution-1")
+        )
+
+        assertEquals("CATALOG_QA", result.intent)
+        assertEquals("INSTITUTION", result.queryTarget)
+        assertEquals(2, fakeLlmCalls.get())
+        val requests = fakeLlmRequestBodies.map(objectMapper::readTree)
+        assertEquals("intent-test-model", requests.first().path("model").asText())
+        assertEquals("test-model", requests.last().path("model").asText())
+    }
+
+    @Test
+    fun `parser failure still completes using the local route`() {
+        aiAgentProperties.intentParserEnabled = true
+        fakeIntentParserContent.set("not-json")
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+
+        val result = chatService.sendMessage(
+            session.id,
+            "user-1",
+            SendMessageRequest("我最近感觉脸垮了，该怎么办", "intent-parser-fallback-1")
+        )
+
+        assertEquals("GENERAL_CHAT", result.intent)
+        assertEquals(2, fakeLlmCalls.get())
     }
 
     @Test
@@ -829,6 +874,9 @@ class AgentChatFlowIntegrationTest {
         private val fakeLlmDelayMs = AtomicLong()
         private val fakeLlmContent = AtomicReference("测试回复")
         private val fakeLlmRawResponse = AtomicReference<String?>(null)
+        private val fakeIntentParserContent = AtomicReference(
+            """{"intent":"CATALOG_QA","queryTarget":"DOCTOR","keywords":["context"]}"""
+        )
         private val fakeLlmRequestBodies = CopyOnWriteArrayList<String>()
         private val fakeLlmExecutor = Executors.newCachedThreadPool()
         private val fakeLlm = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
@@ -840,6 +888,8 @@ class AgentChatFlowIntegrationTest {
                 val status = fakeLlmStatus.get()
                 val streaming = Regex("\"stream\"\\s*:\\s*true").containsMatchIn(requestBody)
                 val rawResponse = fakeLlmRawResponse.get()
+                val intentParserRequest = Regex("\"model\"\\s*:\\s*\"intent-test-model\"")
+                    .containsMatchIn(requestBody)
                 val response = if (rawResponse != null) {
                     rawResponse.toByteArray(StandardCharsets.UTF_8)
                 } else if (status != 200) {
@@ -854,7 +904,7 @@ class AgentChatFlowIntegrationTest {
                 } else """
                     {
                       "id": "chatcmpl-test",
-                      "choices": [{"message": {"content": "${fakeLlmContent.get()}"}, "finish_reason": "stop"}],
+                      "choices": [{"message": {"content": ${ObjectMapper().writeValueAsString(if (intentParserRequest) fakeIntentParserContent.get() else fakeLlmContent.get())}}, "finish_reason": "stop"}],
                       "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}
                     }
                 """.trimIndent().toByteArray(StandardCharsets.UTF_8)
@@ -893,7 +943,8 @@ class AgentChatFlowIntegrationTest {
             registry.add("ai-agent.base-url") { "http://127.0.0.1:${fakeLlm.address.port}/v1" }
             registry.add("ai-agent.api-key") { "test-key" }
             registry.add("ai-agent.model") { "test-model" }
-            registry.add("ai-agent.intent-parser-enabled") { "false" }
+            registry.add("ai-agent.intent-parser-enabled") { "true" }
+            registry.add("ai-agent.intent-model") { "intent-test-model" }
             registry.add("ai-agent.demo-fallback-enabled") { "false" }
         }
 
@@ -915,8 +966,11 @@ class ReportingAgentChatMySqlContainer(imageName: String) :
     MySQLContainer<ReportingAgentChatMySqlContainer>(imageName) {
 
     override fun start() {
-        super.start()
         println("AGENT_CHAT_TEST_DB_HOST=$host")
         println("AGENT_CHAT_TEST_DB_NAME=$databaseName")
+        require(databaseName.startsWith("myapp_worktree_")) {
+            "Refusing to start integration test with non-worktree database: $databaseName"
+        }
+        super.start()
     }
 }
