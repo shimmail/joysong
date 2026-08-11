@@ -2189,7 +2189,7 @@ Authorization: Bearer <token>
 
 ### 12.5a 法人自助机构档案（专业管理入口）
 
-该组接口供**已生效的机构法人**维护自己已确认管理的机构档案；它不是平台管理员机构 CRUD 的替代品。法人账户必须同时具有 `INSTITUTION_LEGAL_REPRESENTATIVE` 活跃角色，以及对应机构状态为 `APPROVED` 的法人成员关系；服务端据此生成 `managedInstitutionIds`，并在每次详情或更新操作时进行对象级校验。
+该组接口供**已生效的机构法人**维护自己已确认管理的机构档案；它不是平台管理员机构 CRUD 的替代品。活跃 `INSTITUTION_LEGAL_REPRESENTATIVE` 角色可访问该接口组；服务端只会将对应机构状态为 `APPROVED` 的法人成员关系纳入 `managedInstitutionIds`。因此，尚无已批准法人成员关系的活跃法人调用列表接口会成功返回空数组，而详情与更新仍须通过目标对象校验。
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -2197,7 +2197,7 @@ Authorization: Bearer <token>
 | GET | `/api/management/institutions/{institutionId}` | 读取一个当前法人可管理的完整机构档案 |
 | PUT | `/api/management/institutions/{institutionId}` | 完整替换一个当前法人可管理的机构档案的全部可编辑字段 |
 
-**认证与对象边界：** 请求携带专业管理登录获得的 Bearer 凭证。平台管理员不能使用这组法人自助接口；无活跃法人角色、没有已批准法人成员关系，或目标 `institutionId` 不在 `managedInstitutionIds` 中时，返回 `403`。无凭证或凭证无效返回 `401`。
+**认证与对象边界：** 请求携带专业管理登录获得的 Bearer 凭证。平台管理员或没有活跃法人角色时返回 `403`；无凭证或凭证无效返回 `401`。活跃法人即使没有已批准法人成员关系，`GET /api/management/institutions` 仍返回 `200` 与空数组；但 `GET` 详情和 `PUT` 的目标 `institutionId` 必须在 `managedInstitutionIds` 中，未获批准关系而集合为空时也会返回 `403`。
 
 **GET `/api/management/institutions` 响应：**
 
@@ -2286,7 +2286,7 @@ Authorization: Bearer <token>
 |------|-------------|------|
 | 400 | 400 | 请求体不是对象、缺少或多出键、键类型不正确、`name` 为空白、年份不是允许整数/`null`，或数组项不符合规则 |
 | 401 | 401 | 未登录、Bearer 凭证缺失、失效或无效 |
-| 403 | 403 | 非活跃机构法人、没有 APPROVED 法人成员关系、平台管理员调用自助入口，或对象不在 `managedInstitutionIds` |
+| 403 | 403 | 平台管理员或非活跃机构法人调用自助入口；或在详情/PUT 中目标对象不在 `managedInstitutionIds`（包括活跃法人尚无 APPROVED 法人成员关系时） |
 | 404 | 404 | 已通过对象边界校验但机构记录不存在 |
 | 500 | 500 | 未预期的服务端错误 |
 

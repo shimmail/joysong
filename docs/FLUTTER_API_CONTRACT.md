@@ -443,7 +443,7 @@ Flutter 可以完成页面和接口抽象，但生产发布前必须等待支付
 - 医生仅通过 `/management/doctor-profile` 读取和完整更新自己的单个医生档案；请求不发送 `id` 或 `userId`。PUT 必须带齐 `name`、`title`、`bio`、`avatar`、`contactPhone`、`specialties`、`credentials`、`credentialImages`、`certificationTags` 九个非 null String 字段。`name` 不得为空白，其余八项可用 `""` 清空；缺失或 `null` 为 400。
 - `certificationTags` 保留为传输字段名，但 UI 必须称为“展示标签 / Display tags”并使用中性视觉，不能与平台 `isVerified` 徽章混同。服务端会在忽略大小写、空白和标点归一化后拒绝“平台认证”“官方认证”“安颜认证”“娇颜颂认证”“已认证”“platform verified”“official verified”及等价项目品牌认证声明；“主任医师”等普通医疗职称允许使用。
 - 响应为单个对象而非数组。`id`、`userId`、机构摘要、评分、评价数、认证状态和统计计数是只读平台/关联字段；客户端不得在 PUT 中发送或本地伪造这些字段。
-- 法人自助机构档案仅适用于同时拥有活跃 `INSTITUTION_LEGAL_REPRESENTATIVE` 角色和 APPROVED 法人成员关系的账户。先用 `/management/context` 的 `managedInstitutionIds` 决定入口；每次 GET/PUT 仍由服务端校验目标对象，不在该集合中为 403。平台管理员不能借这组自助接口操作全量机构。
+- 法人自助机构档案要求活跃 `INSTITUTION_LEGAL_REPRESENTATIVE` 角色；`/management/context` 的 `managedInstitutionIds` 仅包含 APPROVED 法人成员关系。活跃法人尚无已批准关系时，列表仍返回 200 空数组；详情与 PUT 必须指定集合中的对象，否则为 403。先用该集合决定详情/编辑入口，但服务端仍做最终对象校验。平台管理员不能借这组自助接口操作全量机构。
 - 法人 PUT 是严格完整替换：请求必须且只能发送 `name`、`address`、`city`、`description`、`coverImage`、`images`、`establishedYear`、`credentials`、`credentialImages`、`specialties`、`tags`、`contactPhone`、`businessHours` 这 13 个键。`establishedYear` 键必须存在，值可为 `null` 或 1800 至当前年的整数；`images`、`credentialImages`、`specialties`、`tags` 必须为 JSON 字符串数组，不能改用遗留的逗号分隔格式。
 - 法人机构档案响应中的 `id`、`createdAt`、`updatedAt`、`rating`、`reviewCount`、`isVerified`、`certificationTime`、`projectCount`、`doctorCount`、`consultationCount`、`userCount`、`caseCount` 是只读字段。`credentialImages` 是机构自行上传的公开展示材料，UI 不得暗示这些图片已经由平台核验。
 - 法人可审核本机构的成员关系和机构项目申请；不能编辑医生档案，也不能绕过项目申请/审核流程直接创建、修改或删除机构项目。旧专业端 `/admin/institutions/{id}` PUT 已移除；上表列出的旧读路径仅在后续切换完成前兼容。`/api/admin/institutions/**` 的 CRUD 始终是平台管理员权限。
