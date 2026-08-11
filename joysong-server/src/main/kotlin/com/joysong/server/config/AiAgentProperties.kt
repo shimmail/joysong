@@ -53,7 +53,7 @@ object AiAgentProxyUrlPolicy {
 @EnableConfigurationProperties(AiAgentProperties::class)
 class AiAgentConfiguration {
     @Bean
-    fun clock(): Clock = Clock.systemUTC()
+    fun clock(): Clock = Clock.systemDefaultZone()
 
     @Bean("turnLease")
     fun turnLease(properties: AiAgentProperties): Duration = properties.turnLease.also { lease ->
