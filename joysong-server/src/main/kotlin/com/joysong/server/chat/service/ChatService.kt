@@ -526,7 +526,7 @@ class ChatService(
                 Keywords may contain only useful cities, treatments, categories, tags, clinic names or doctor names from the text. Maximum 8 items. Do not invent IDs or facts.
             """.trimIndent()
             val body = mapOf(
-                "model" to aiAgentProperties.model,
+                "model" to aiAgentProperties.resolvedIntentModel(),
                 "messages" to listOf(
                     mapOf("role" to "system", "content" to instruction),
                     mapOf("role" to "user", "content" to "Current: $rawQuery\nLocal fallback: ${fallback.intent}/${fallback.queryTarget}")

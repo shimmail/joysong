@@ -14,6 +14,20 @@ class RestTemplateConfigTest {
     private val config = RestTemplateConfig()
 
     @Test
+    fun `explicit intent model overrides the answer model`() {
+        val properties = AiAgentProperties(model = "answer-model", intentModel = " intent-small ")
+
+        assertEquals("intent-small", properties.resolvedIntentModel())
+    }
+
+    @Test
+    fun `blank intent model falls back to the answer model`() {
+        val properties = AiAgentProperties(model = "answer-model", intentModel = "   ")
+
+        assertEquals("answer-model", properties.resolvedIntentModel())
+    }
+
+    @Test
     fun `agent clients use the AI agent proxy`() {
         val properties = AiAgentProperties(proxyUrl = "http://127.0.0.1:8899")
 

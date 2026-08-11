@@ -3,20 +3,36 @@ package com.joysong.server.agent
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import com.joysong.server.agent.context.AgentContextBuilder
+import com.joysong.server.agent.context.AgentContext
 import com.joysong.server.agent.context.AgentSessionSummary
+import com.joysong.server.agent.diagnostics.AgentOperationLogger
 import com.joysong.server.agent.dto.AgentCatalogItemResponse
 import com.joysong.server.agent.dto.AgentCatalogReportResponse
 import com.joysong.server.agent.entity.AgentTurnEntity
 import com.joysong.server.agent.entity.AgentTurnStatus
+import com.joysong.server.agent.orchestration.AiAgentAvailabilityGuard
 import com.joysong.server.agent.orchestration.BeginTurnResult
 import com.joysong.server.agent.orchestration.CompleteTurnCommand
 import com.joysong.server.agent.orchestration.IdempotencyKeyConflictException
 import com.joysong.server.agent.orchestration.TurnLifecycleService
 import com.joysong.server.agent.repository.AgentTurnRepository
+import com.joysong.server.agent.service.AgentCatalogService
+import com.joysong.server.agent.service.AgentIntentRouter
+import com.joysong.server.agent.service.AgentPromptEvidence
+import com.joysong.server.chat.dto.SendMessageRequest
 import com.joysong.server.chat.entity.ChatMessageEntity
 import com.joysong.server.chat.entity.ChatSessionEntity
 import com.joysong.server.chat.repository.ChatMessageRepository
 import com.joysong.server.chat.repository.ChatSessionRepository
+import com.joysong.server.chat.service.ChatService
+import com.joysong.server.chat.service.ChatTurnResult
+import com.joysong.server.config.AiAgentProperties
+import com.joysong.server.doctor.repository.DoctorRepository
+import com.joysong.server.doctor.service.DoctorInstitutionService
+import com.joysong.server.institution.repository.InstitutionProjectRepository
+import com.joysong.server.institution.repository.InstitutionRepository
+import com.joysong.server.institution.service.InstitutionProjectDetailResolver
+import com.joysong.server.project.repository.ProjectRepository
 import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
@@ -34,6 +50,14 @@ import org.junit.jupiter.api.Test
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.context.i18n.LocaleContextHolder
+import org.springframework.http.HttpMethod
+import org.springframework.http.MediaType
+import org.springframework.test.web.client.MockRestServiceServer
+import org.springframework.test.web.client.match.MockRestRequestMatchers.content
+import org.springframework.test.web.client.match.MockRestRequestMatchers.method
+import org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo
+import org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess
+import org.springframework.web.client.RestTemplate
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -62,6 +86,74 @@ class AgentWorkflowCoreTest {
     @BeforeEach
     fun defaultMessageCleanupCandidates() {
         every { messages.findBySessionIdOrderBySequenceNoAsc(any()) } returns emptyList()
+    }
+
+    @Test
+    fun `ambiguous route uses intent model while answer uses main model`() {
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val turnService = mockk<TurnLifecycleService>()
+        val operationLogger = mockk<AgentOperationLogger>()
+        val contextBuilder = mockk<AgentContextBuilder>()
+        val availabilityGuard = mockk<AiAgentAvailabilityGuard>()
+        val chat = ChatService(
+            sessionRepository = sessions,
+            messageRepository = messages,
+            projectRepository = mockk<ProjectRepository>(),
+            institutionRepository = mockk<InstitutionRepository>(),
+            institutionProjectRepository = mockk<InstitutionProjectRepository>(),
+            doctorRepository = mockk<DoctorRepository>(),
+            doctorInstitutionService = mockk<DoctorInstitutionService>(),
+            institutionProjectDetailResolver = mockk<InstitutionProjectDetailResolver>(),
+            agentCatalogService = catalog,
+            agentIntentRouter = AgentIntentRouter(),
+            turnLifecycleService = turnService,
+            agentOperationLogger = operationLogger,
+            agentContextBuilder = contextBuilder,
+            aiAgentAvailabilityGuard = availabilityGuard,
+            objectMapper = objectMapper,
+            restTemplate = completionTemplate,
+            intentParserRestTemplate = intentTemplate,
+            aiAgentProperties = AiAgentProperties(
+                apiKey = "test-key",
+                baseUrl = "https://provider.test/v1",
+                model = "answer-model",
+                intentModel = "intent-small"
+            ),
+            fastReasoningEffort = "",
+            complexReasoningEffort = ""
+        )
+        every { availabilityGuard.requireGenerationEnabled() } just runs
+        every { turnService.beginTurn("session-1", "user-1", "我想改善脸部松弛", any()) } returns
+            BeginTurnResult.Started("turn-1", "trace-1", 1)
+        every { turnService.completeTurn(any()) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "answer")
+        )
+        every { operationLogger.completed(any(), any(), any(), any(), any()) } just runs
+        every { contextBuilder.load("user-1", "session-1", 20, 4_000) } returns AgentContext(AgentSessionSummary(), emptyList())
+        every { sessions.findByIdAndUserIdAndDeletedAtIsNull("session-1", "user-1") } returns session()
+        every { catalog.hasInstitutionProjectMatch("我想改善脸部松弛") } returns false
+        every { catalog.contextualSearchQuery("我想改善脸部松弛", emptyList()) } returns "我想改善脸部松弛"
+        every { catalog.promptEvidence(any(), any(), any(), any()) } returns AgentPromptEvidence()
+        intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andExpect(method(HttpMethod.POST))
+            .andExpect(content().json("""{"model":"intent-small"}""", false))
+            .andRespond(withSuccess(
+                """{"choices":[{"message":{"content":"{\\"intent\\":\\"GENERAL_CHAT\\",\\"queryTarget\\":null,\\"keywords\\":[]}"}}]}""",
+                MediaType.APPLICATION_JSON
+            ))
+        completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andExpect(method(HttpMethod.POST))
+            .andExpect(content().json("""{"model":"answer-model"}""", false))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"answer"}}]}""", MediaType.APPLICATION_JSON))
+
+        chat.sendMessage("session-1", "user-1", SendMessageRequest(content = "我想改善脸部松弛"))
+
+        intentServer.verify()
+        completionServer.verify()
     }
 
     @Test

@@ -92,6 +92,7 @@ ai-agent:
   api-key: ${OPENAI_API_KEY:}
   base-url: ${OPENAI_BASE_URL:}
   model: ${AI_AGENT_MODEL:}
+  intent-model: ${OPENAI_INTENT_MODEL:}
   # Supported proxy schemes are http:// and socks://. HTTPS proxy endpoints are rejected.
   proxy-url: ${OPENAI_PROXY_URL:}
   turn-lease: ${AI_AGENT_TURN_LEASE_SECONDS:90}s
