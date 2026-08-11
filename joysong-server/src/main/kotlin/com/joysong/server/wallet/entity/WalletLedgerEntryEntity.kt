@@ -33,6 +33,15 @@ class WalletLedgerEntryEntity(
     @Column(name = "frozen_delta_minor", nullable = false)
     val frozenDeltaMinor: Long = 0,
 
+    @Column(name = "pending_balance_minor", nullable = false)
+    val pendingBalanceMinor: Long = 0,
+
+    @Column(name = "available_balance_minor", nullable = false)
+    val availableBalanceMinor: Long = 0,
+
+    @Column(name = "frozen_balance_minor", nullable = false)
+    val frozenBalanceMinor: Long = 0,
+
     @Column(name = "source_type", nullable = false, length = 30)
     val sourceType: String = "",
 

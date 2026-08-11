@@ -27,6 +27,9 @@ class DoctorInstitutionChangeMigrationTest {
         assertContains(sql, "UNIQUE KEY uk_wallet_owner_currency (owner_type, owner_id, currency)")
         assertContains(sql, "UNIQUE KEY uk_wallet_ledger_operation (operation_key)")
         assertContains(sql, "CHECK (pending_minor >= 0 AND available_minor >= 0 AND frozen_minor >= 0)")
+        assertContains(sql, "pending_balance_minor BIGINT NOT NULL")
+        assertContains(sql, "available_balance_minor BIGINT NOT NULL")
+        assertContains(sql, "frozen_balance_minor BIGINT NOT NULL")
     }
 
     @Test
