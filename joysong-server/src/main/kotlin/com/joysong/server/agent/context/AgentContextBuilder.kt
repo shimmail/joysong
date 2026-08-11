@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.joysong.server.agent.dto.AgentCatalogItemResponse
 import com.joysong.server.agent.repository.AgentTurnRepository
+import com.joysong.server.agent.service.PlanningCatalogProjection
 import com.joysong.server.chat.entity.ChatMessageEntity
 import com.joysong.server.chat.entity.ChatSessionEntity
 import com.joysong.server.chat.repository.ChatMessageRepository
@@ -11,6 +12,7 @@ import com.joysong.server.chat.repository.ChatSessionRepository
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.time.Clock
 import java.time.LocalDateTime
 import java.util.UUID
 
@@ -40,6 +42,7 @@ class AgentContextBuilder(
     private val messageRepository: ChatMessageRepository,
     private val turnRepository: AgentTurnRepository,
     private val objectMapper: ObjectMapper,
+    private val clock: Clock,
     @Value("\${agent.recent-message-limit:20}") private val recentMessageLimit: Int = 20,
     @Value("\${agent.message-retention-days:7}") private val messageRetentionDays: Long = 7
 ) : AgentChatHistoryPort {
@@ -49,7 +52,7 @@ class AgentContextBuilder(
         val session = sessionRepository.findByIdAndUserIdForUpdate(sessionId, userId)
             ?: throw IllegalArgumentException("会话不存在或无权访问")
         val summary = parseSummary(session.summaryJson)
-        val cutoff = LocalDateTime.now().minusDays(messageRetentionDays)
+        val cutoff = LocalDateTime.now(clock).minusDays(messageRetentionDays)
         val allMessages = messageRepository.findBySessionIdOrderBySequenceNoAsc(sessionId)
         val expired = allMessages.filter { it.createdAt.isBefore(cutoff) }
         val overLimit = allMessages.dropLast(recentMessageLimit.coerceAtLeast(0)).toSet()
@@ -65,6 +68,7 @@ class AgentContextBuilder(
             .filterNot { it in prune }
             .sortedBy { it.sequenceNo }
             .takeLast(maxMessages.coerceAtLeast(0).coerceAtMost(recentMessageLimit))
+            .map { PlanningCatalogProjection.projectStoredMessage(it, objectMapper) }
         val bounded = recent.asReversed()
             .fold(mutableListOf<ChatMessageEntity>() to 0) { (selected, tokenCount), message ->
                 val next = tokenCount + simpleTokenCount(message.content)
@@ -106,7 +110,7 @@ class AgentContextBuilder(
         persistSummary(session, updated)
 
         val allMessages = messageRepository.findBySessionIdOrderBySequenceNoAsc(session.id)
-        val cutoff = LocalDateTime.now().minusDays(messageRetentionDays)
+        val cutoff = LocalDateTime.now(clock).minusDays(messageRetentionDays)
         val overLimit = allMessages.dropLast(recentMessageLimit.coerceAtLeast(0)).toSet()
         val expired = allMessages.filter { it.createdAt.isBefore(cutoff) }.toSet()
         val prune = (overLimit + expired).toList()
@@ -139,8 +143,9 @@ class AgentContextBuilder(
 
     private fun persistSummary(session: ChatSessionEntity, summary: AgentSessionSummary) {
         session.summaryJson = serializeSummary(summary)
-        session.summaryUpdatedAt = LocalDateTime.now()
-        session.updatedAt = LocalDateTime.now()
+        val now = LocalDateTime.now(clock)
+        session.summaryUpdatedAt = now
+        session.updatedAt = now
         sessionRepository.save(session)
     }
 

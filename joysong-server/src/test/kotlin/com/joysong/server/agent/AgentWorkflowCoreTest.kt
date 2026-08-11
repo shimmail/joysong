@@ -1,8 +1,11 @@
 package com.joysong.server.agent
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import com.joysong.server.agent.context.AgentContextBuilder
 import com.joysong.server.agent.context.AgentSessionSummary
+import com.joysong.server.agent.dto.AgentCatalogItemResponse
+import com.joysong.server.agent.dto.AgentCatalogReportResponse
 import com.joysong.server.agent.entity.AgentTurnEntity
 import com.joysong.server.agent.entity.AgentTurnStatus
 import com.joysong.server.agent.orchestration.BeginTurnResult
@@ -30,19 +33,21 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.context.i18n.LocaleContextHolder
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneOffset
+import java.util.Locale
 
 class AgentWorkflowCoreTest {
     private val sessions = mockk<ChatSessionRepository>()
     private val messages = mockk<ChatMessageRepository>()
     private val turns = mockk<AgentTurnRepository>()
-    private val objectMapper = ObjectMapper()
-    private val context = AgentContextBuilder(sessions, messages, turns, objectMapper, 20, 7)
+    private val objectMapper = ObjectMapper().registerKotlinModule()
     private val clock = Clock.fixed(Instant.parse("2026-08-10T04:00:00Z"), ZoneOffset.UTC)
+    private val context = AgentContextBuilder(sessions, messages, turns, objectMapper, clock, 20, 7)
     private val turnLease = Duration.ofMinutes(2)
     private val lifecycle = TurnLifecycleService(
         sessions,
@@ -109,6 +114,71 @@ class AgentWorkflowCoreTest {
         assertEquals("PROJECT", replay.queryTarget)
         assertEquals("SHOW_CATALOG", replay.nextAction)
         verify(exactly = 0) { messages.save(any()) }
+    }
+
+    @Test
+    fun `replay projects historical planning content and metadata without rewriting stored message`() {
+        val turn = turn(status = AgentTurnStatus.SUCCEEDED)
+        val unsafeItem = AgentCatalogItemResponse(
+            type = "PROJECT",
+            id = "123e4567-e89b-12d3-a456-426614174000",
+            name = "Project A",
+            subtitle = "one day downtime",
+            summary = "pain free and risk free",
+            attributes = linkedMapOf("reference price" to "$888", "risk" to "none")
+        )
+        val unsafeReport = AgentCatalogReportResponse(
+            mode = "PLANNING",
+            title = "Best treatment plan",
+            summary = "Guaranteed result",
+            items = listOf(unsafeItem),
+            comparisonDimensions = listOf("risk"),
+            warnings = listOf("no warning")
+        )
+        val storedContent = "Choose Project A because it is perfect for you"
+        val replayed = ChatMessageEntity(
+            sessionId = "session-1",
+            turnId = turn.id,
+            sequenceNo = 2,
+            role = "ASSISTANT",
+            content = storedContent,
+            metadataJson = objectMapper.writeValueAsString(
+                mapOf(
+                    "intent" to "PLANNING",
+                    "queryTarget" to "PROJECT",
+                    "nextAction" to "START_PLANNING",
+                    "catalogItems" to listOf(unsafeItem),
+                    "catalogReport" to unsafeReport
+                )
+            )
+        )
+        every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns session()
+        every { turns.findBySessionIdAndIdempotencyKey("session-1", "key-1") } returns turn
+        every { messages.findByTurnIdAndRole(turn.id, "ASSISTANT") } returns replayed
+
+        val previousLocale = LocaleContextHolder.getLocale()
+        LocaleContextHolder.setLocale(Locale.ENGLISH)
+        try {
+            val result = lifecycle.beginTurn("session-1", "user-1", "hello", "key-1") as BeginTurnResult.Replayed
+
+            assertEquals(
+                "This is platform information reference only and is not diagnosis or treatment advice. " +
+                    "The platform can show structured details such as names and prices; personal suitability, " +
+                    "downtime, pain, contraindications, and risks require confirmation with the institution or a qualified clinician.",
+                result.turn.message.content
+            )
+            assertEquals(storedContent, replayed.content)
+            assertEquals("", result.turn.catalogItems.single().subtitle)
+            assertEquals("", result.turn.catalogItems.single().summary)
+            assertEquals(mapOf("reference price" to "$888"), result.turn.catalogItems.single().attributes)
+            assertEquals("SUMMARY", result.turn.catalogReport?.mode)
+            assertEquals(emptyList<String>(), result.turn.catalogReport?.comparisonDimensions)
+            assertFalse(result.turn.catalogReport?.title.orEmpty().contains("Best treatment plan"))
+            assertFalse(result.turn.catalogReport?.summary.orEmpty().contains("Guaranteed result"))
+            verify(exactly = 0) { messages.save(any()) }
+        } finally {
+            LocaleContextHolder.setLocale(previousLocale)
+        }
     }
 
     @Test
@@ -307,7 +377,7 @@ class AgentWorkflowCoreTest {
     @Test
     fun `does not load succeeded messages older than the configured retention window`() {
         val owned = session()
-        val expired = message(1, "USER", "expired", LocalDateTime.now().minusDays(8))
+        val expired = message(1, "USER", "expired", LocalDateTime.now(clock).minusDays(8))
         every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns owned
         every { sessions.save(any()) } answers { firstArg() }
         every { messages.deleteAll(any<Iterable<ChatMessageEntity>>()) } just runs
@@ -328,9 +398,80 @@ class AgentWorkflowCoreTest {
     }
 
     @Test
+    fun `uses the shared clock for retention boundary ordering and summary timestamps`() {
+        val owned = session(summary = "{\"schemaVersion\":1,\"lastSummarizedSequence\":1}")
+        val cutoff = LocalDateTime.of(2026, 8, 3, 4, 0)
+        val expired = message(1, "USER", "expired", cutoff.minusNanos(1))
+        val boundary = message(2, "ASSISTANT", "boundary", cutoff)
+        val current = message(3, "USER", "current", LocalDateTime.of(2026, 8, 10, 3, 59))
+        every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns owned
+        every { sessions.save(any()) } answers { firstArg() }
+        every { messages.deleteAll(any<Iterable<ChatMessageEntity>>()) } just runs
+        every { messages.findBySessionIdOrderBySequenceNoAsc("session-1") } returns listOf(current, expired, boundary)
+        every { messages.findSucceededTurnMessagesBySessionId("session-1") } returns listOf(current, expired, boundary)
+
+        val loaded = context.load("user-1", "session-1", 20, 100)
+
+        assertEquals(listOf("boundary", "current"), loaded.messages.map { it.content })
+        assertEquals(LocalDateTime.of(2026, 8, 10, 4, 0), owned.summaryUpdatedAt)
+        assertEquals(LocalDateTime.of(2026, 8, 10, 4, 0), owned.updatedAt)
+        verify { messages.deleteAll(match { it.toList() == listOf(expired) }) }
+    }
+
+    @Test
+    fun `history load returns a safe copy of historical planning content and metadata`() {
+        val storedContent = "Choose Project A because it is perfect for you"
+        val historical = message(2, "ASSISTANT", storedContent).apply {
+            metadataJson = """{
+                "intent":"PLANNING",
+                "queryTarget":"PROJECT",
+                "nextAction":"START_PLANNING",
+                "catalogItems":[{
+                    "type":"PROJECT",
+                    "id":"123e4567-e89b-12d3-a456-426614174000",
+                    "name":"Project A",
+                    "subtitle":"one day downtime",
+                    "summary":"pain free and risk free",
+                    "attributes":{"reference price":"${'$'}888","risk":"none"},
+                    "institutionId":null,
+                    "projectId":null,
+                    "canChatWithHuman":false
+                }],
+                "catalogReport":null
+            }""".trimIndent()
+        }
+        every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns session()
+        every { sessions.save(any()) } answers { firstArg() }
+        every { messages.findBySessionIdOrderBySequenceNoAsc("session-1") } returns listOf(historical)
+        every { messages.findSucceededTurnMessagesBySessionId("session-1") } returns listOf(historical)
+
+        val previousLocale = LocaleContextHolder.getLocale()
+        LocaleContextHolder.setLocale(Locale.ENGLISH)
+        try {
+            val loaded = context.load("user-1", "session-1", 20, 1_000).messages.single()
+            val projectedMetadata = objectMapper.readTree(loaded.metadataJson)
+
+            assertEquals(
+                "This is platform information reference only and is not diagnosis or treatment advice. " +
+                    "The platform can show structured details such as names and prices; personal suitability, " +
+                    "downtime, pain, contraindications, and risks require confirmation with the institution or a qualified clinician.",
+                loaded.content
+            )
+            assertEquals("", projectedMetadata.path("catalogItems").single().path("subtitle").asText())
+            assertEquals("", projectedMetadata.path("catalogItems").single().path("summary").asText())
+            assertEquals("$888", projectedMetadata.path("catalogItems").single().path("attributes").path("reference price").asText())
+            assertFalse(projectedMetadata.path("catalogItems").single().path("attributes").has("risk"))
+            assertEquals(storedContent, historical.content)
+            assertTrue(historical.metadataJson.contains("one day downtime"))
+        } finally {
+            LocaleContextHolder.setLocale(previousLocale)
+        }
+    }
+
+    @Test
     fun `physically prunes expired failed turn messages while keeping context succeeded only`() {
         val owned = session()
-        val failedUser = message(1, "USER", "failed request", LocalDateTime.now().minusDays(8))
+        val failedUser = message(1, "USER", "failed request", LocalDateTime.now(clock).minusDays(8))
         every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns owned
         every { sessions.save(any()) } answers { firstArg() }
         every { messages.findBySessionIdOrderBySequenceNoAsc("session-1") } returns listOf(failedUser)
@@ -408,7 +549,7 @@ class AgentWorkflowCoreTest {
     @Test
     fun `pruning retains deterministic summary but excludes raw safety evidence`() {
         val session = session()
-        val old = message(1, "USER", "I am pregnant and have severe allergies", LocalDateTime.now().minusDays(8))
+        val old = message(1, "USER", "I am pregnant and have severe allergies", LocalDateTime.now(clock).minusDays(8))
         val newer = message(2, "ASSISTANT", "safe response")
         every { messages.findSucceededTurnMessagesBySessionId("session-1") } returns listOf(old, newer)
         every { messages.findBySessionIdOrderBySequenceNoAsc("session-1") } returns listOf(old, newer)
