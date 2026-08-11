@@ -430,11 +430,12 @@ Flutter 可以完成页面和接口抽象，但生产发布前必须等待支付
 | 订单所属用户 | GET | `/orders/{id}/settlement` | 仅返回本人订单的消费者安全结算摘要 |
 | 当前专业身份 | GET | `/wallets/me` | 按服务端授权范围返回钱包及三个余额桶 |
 | 当前专业身份 | GET | `/wallets/me/ledger?page=0&size=20` | 返回授权钱包的账本条目；`size` 为 1–100 |
-| 管理员 | GET | `/admin/orders/settlements?page=0&size=20` | 结算列表 |
-| 管理员 | GET | `/admin/orders/settlements/{id}` | 结算详情 |
-| 管理员 | GET | `/admin/orders/settlements/{id}/allocations?page=0&size=20` | 分账明细 |
-| 管理员 | GET | `/admin/orders/reconciliation-issues?page=0&size=20` | 对账异常列表 |
-| 管理员 | GET | `/admin/orders/reconciliation-issues/{id}` | 对账异常详情 |
+| 管理员 | GET | `/api/admin/settlements?page=0&size=20` | 结算列表 |
+| 管理员 | GET | `/api/admin/settlements/{id}` | 结算详情 |
+| 管理员 | GET | `/api/admin/settlements/{id}/allocations?page=0&size=20` | 分账明细 |
+| 管理员 | GET | `/api/admin/ledger/{id}` | 单条账本记录 |
+| 管理员 | GET | `/api/admin/reconciliation-issues?page=0&size=20` | 对账异常列表 |
+| 管理员 | GET | `/api/admin/reconciliation-issues/{id}` | 对账异常详情 |
 
 账本条目是追加式记录：服务端使用不可变 `operationKey` 去重，同一操作的重试不得在客户端制造新余额。每条记录同时返回变动量和 `pendingBalanceMinor`、`availableBalanceMinor`、`frozenBalanceMinor` 三个结果余额快照；Flutter 只展示服务端快照，不在本地重新累计或猜测余额。
 
