@@ -31,6 +31,47 @@ void main() {
     expect(find.widgetWithText(TextFormField, '认证时间'), findsNothing);
     expect(find.widgetWithText(TextFormField, '用户数'), findsNothing);
     expect(find.widgetWithText(TextFormField, '案例数'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(
+      _app(
+        _InstitutionRepository(summaries: const [_summaryA]),
+        locale: const Locale('en'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Edit institution profile'), findsOneWidget);
+    expect(find.text('Established year'), findsOneWidget);
+    expect(find.text('Save profile'), findsOneWidget);
+    expect(find.text('Projects 12'), findsOneWidget);
+    expect(find.text('Doctors 6'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    final loading = Completer<List<ManagedInstitutionSummary>>();
+    final emptyRepository = _InstitutionRepository(summaries: const [])
+      ..listCompleter = loading;
+    await tester.pumpWidget(
+      _app(emptyRepository, locale: const Locale('en')),
+    );
+    await tester.pump();
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    loading.complete(const []);
+    await tester.pumpAndSettle();
+    expect(
+        find.text('No institutions are available to manage'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    final failingRepository = _InstitutionRepository(summaries: const [])
+      ..listError = true;
+    await tester.pumpWidget(
+      _app(failingRepository, locale: const Locale('en')),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Failed to load institution profile. Please try again.'),
+      findsOneWidget,
+    );
+    expect(find.text('Retry'), findsOneWidget);
   });
 
   testWidgets(
@@ -55,6 +96,22 @@ void main() {
     expect(find.text('北京悦颜中心'), findsOneWidget);
     await tester.tap(find.text('北京悦颜中心'));
     await tester.pumpAndSettle();
+
+    final establishedYear =
+        find.byKey(const Key('institution-establishedYear'));
+    final save = find.byKey(const Key('institution-save'));
+    await tester.enterText(establishedYear, 'year');
+    await tester.tap(save);
+    await tester.pump();
+    expect(
+        find.text('请输入 1800 至 ${DateTime.now().year} 之间的整数年份'), findsOneWidget);
+    expect(repository.updateAttempts, 0);
+    await tester.enterText(establishedYear, '1799');
+    await tester.tap(save);
+    await tester.pump();
+    expect(
+        find.text('请输入 1800 至 ${DateTime.now().year} 之间的整数年份'), findsOneWidget);
+    expect(repository.updateAttempts, 0);
 
     await tester.enterText(find.byKey(const Key('institution-name')), ' 新机构名 ');
     await tester.enterText(
@@ -93,81 +150,6 @@ void main() {
       'contactPhone': '13800000000',
       'businessHours': '09:00-20:00',
     });
-  });
-
-  testWidgets('established year validates range and empty explicitly clears it',
-      (tester) async {
-    _useTallView(tester);
-    final repository = _InstitutionRepository(summaries: const [_summaryA]);
-
-    await tester.pumpWidget(_app(repository));
-    await tester.pumpAndSettle();
-
-    final field = find.byKey(const Key('institution-establishedYear'));
-    await tester.enterText(field, 'year');
-    await tester.tap(find.byKey(const Key('institution-save')));
-    await tester.pump();
-    expect(
-        find.text('请输入 1800 至 ${DateTime.now().year} 之间的整数年份'), findsOneWidget);
-    expect(repository.updateAttempts, 0);
-
-    await tester.enterText(field, '1799');
-    await tester.tap(find.byKey(const Key('institution-save')));
-    await tester.pump();
-    expect(
-        find.text('请输入 1800 至 ${DateTime.now().year} 之间的整数年份'), findsOneWidget);
-    expect(repository.updateAttempts, 0);
-
-    await tester.enterText(field, '');
-    await tester.tap(find.byKey(const Key('institution-save')));
-    await tester.pumpAndSettle();
-    expect(repository.updateAttempts, 1);
-    expect(repository.lastUpdate?.toJson()['establishedYear'], isNull);
-  });
-
-  testWidgets('institution profile states and form copy follow English locale',
-      (tester) async {
-    _useTallView(tester);
-    final repository = _InstitutionRepository(summaries: const [_summaryA]);
-
-    await tester.pumpWidget(_app(repository, locale: const Locale('en')));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Edit institution profile'), findsOneWidget);
-    expect(find.text('Established year'), findsOneWidget);
-    expect(find.text('Save profile'), findsOneWidget);
-    expect(find.text('Projects 12'), findsOneWidget);
-    expect(find.text('Doctors 6'), findsOneWidget);
-  });
-
-  testWidgets('loading empty and error states follow English locale',
-      (tester) async {
-    final loading = Completer<List<ManagedInstitutionSummary>>();
-    final emptyRepository = _InstitutionRepository(summaries: const [])
-      ..listCompleter = loading;
-    await tester.pumpWidget(
-      _app(emptyRepository, locale: const Locale('en')),
-    );
-    await tester.pump();
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
-
-    loading.complete(const []);
-    await tester.pumpAndSettle();
-    expect(
-        find.text('No institutions are available to manage'), findsOneWidget);
-
-    await tester.pumpWidget(const SizedBox.shrink());
-    final failingRepository = _InstitutionRepository(summaries: const [])
-      ..listError = true;
-    await tester.pumpWidget(
-      _app(failingRepository, locale: const Locale('en')),
-    );
-    await tester.pumpAndSettle();
-    expect(
-      find.text('Failed to load institution profile. Please try again.'),
-      findsOneWidget,
-    );
-    expect(find.text('Retry'), findsOneWidget);
   });
 
   testWidgets(
