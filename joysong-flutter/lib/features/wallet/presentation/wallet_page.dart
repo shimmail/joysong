@@ -80,6 +80,16 @@ class _WalletPageState extends State<WalletPage> {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
         children: [
+          if (controller.overviewErrorMessage != null) ...[
+            _OverviewRetry(
+              message: context.localized(
+                '钱包刷新失败，当前显示上次数据',
+                'Wallet refresh failed. Showing previously loaded data.',
+              ),
+              onRetry: controller.refresh,
+            ),
+            const SizedBox(height: 12),
+          ],
           if (controller.overview.wallets.length > 1) ...[
             DropdownButtonFormField<int>(
               key: const Key('wallet-owner-selector'),
@@ -91,16 +101,21 @@ class _WalletPageState extends State<WalletPage> {
               items: controller.overview.wallets
                   .map((account) => DropdownMenuItem(
                         value: account.walletId,
-                        child: Text(account.selectorLabel),
+                        child: Text(_selectorLabel(context, account)),
                       ))
                   .toList(growable: false),
               onChanged: (walletId) {
-                if (walletId != null) unawaited(controller.selectWallet(walletId));
+                if (walletId != null)
+                  unawaited(controller.selectWallet(walletId));
               },
             ),
             const SizedBox(height: 12),
           ],
-          _BalanceCard(wallet: wallet, money: _money),
+          _BalanceCard(
+            wallet: wallet,
+            money: _money,
+            selectorLabel: _selectorLabel(context, wallet),
+          ),
           const SizedBox(height: 12),
           SizedBox(
             height: 46,
@@ -136,7 +151,8 @@ class _WalletPageState extends State<WalletPage> {
               onRetry: controller.retryLedger,
             )
           else if (controller.entries.isEmpty)
-            _EmptyLedger(message: context.localized('暂无流水记录', 'No ledger entries yet'))
+            _EmptyLedger(
+                message: context.localized('暂无流水记录', 'No ledger entries yet'))
           else ...[
             for (final entry in controller.entries)
               _LedgerTile(entry: entry, money: _money),
@@ -163,13 +179,29 @@ class _WalletPageState extends State<WalletPage> {
       ),
     );
   }
+
+  String _selectorLabel(BuildContext context, WalletAccount wallet) =>
+      '${_walletTypeLabel(context, wallet.ownerType)} · ${wallet.ownerName}';
+
+  String _walletTypeLabel(BuildContext context, String ownerType) =>
+      switch (ownerType) {
+        'DOCTOR' => context.localized('医生钱包', 'Doctor wallet'),
+        'CONSULTANT' => context.localized('顾问钱包', 'Consultant wallet'),
+        'INSTITUTION' => context.localized('机构钱包', 'Institution wallet'),
+        _ => context.localized('钱包', 'Wallet'),
+      };
 }
 
 class _BalanceCard extends StatelessWidget {
-  const _BalanceCard({required this.wallet, required this.money});
+  const _BalanceCard({
+    required this.wallet,
+    required this.money,
+    required this.selectorLabel,
+  });
 
   final WalletAccount wallet;
   final UsdMoneyFormatter money;
+  final String selectorLabel;
 
   @override
   Widget build(BuildContext context) => Card(
@@ -178,7 +210,8 @@ class _BalanceCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(wallet.selectorLabel, style: Theme.of(context).textTheme.titleSmall),
+              Text(selectorLabel,
+                  style: Theme.of(context).textTheme.titleSmall),
               const SizedBox(height: 12),
               Text(context.localized('可用余额', 'Available balance')),
               const SizedBox(height: 4),
@@ -187,8 +220,14 @@ class _BalanceCard extends StatelessWidget {
               const SizedBox(height: 16),
               Row(
                 children: [
-                  Expanded(child: _MinorBalance(label: context.localized('待入账', 'Pending'), value: money.format(wallet.pendingMinor))),
-                  Expanded(child: _MinorBalance(label: context.localized('冻结', 'Frozen'), value: money.format(wallet.frozenMinor))),
+                  Expanded(
+                      child: _MinorBalance(
+                          label: context.localized('待入账', 'Pending'),
+                          value: money.format(wallet.pendingMinor))),
+                  Expanded(
+                      child: _MinorBalance(
+                          label: context.localized('冻结', 'Frozen'),
+                          value: money.format(wallet.frozenMinor))),
                 ],
               ),
             ],
@@ -216,18 +255,56 @@ class _LedgerTile extends StatelessWidget {
   const _LedgerTile({required this.entry, required this.money});
   final WalletLedgerEntry entry;
   final UsdMoneyFormatter money;
+  String _title(BuildContext context) => switch (entry.entryType) {
+        'REVERSAL' => context.localized('退款冲正', 'Refund reversal'),
+        'RELEASE' => context.localized('转入可用余额', 'Transferred to available'),
+        _ => context.localized('诊疗收益', 'Earnings'),
+      };
+
+  String _description(BuildContext context) => switch (entry.sourceType) {
+        'REFUND' => '${context.localized('退款', 'Refund')} ${entry.sourceId}',
+        _ => '${context.localized('订单', 'Order')} ${entry.sourceId}',
+      };
+
   @override
   Widget build(BuildContext context) => ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-        title: Text(entry.title),
-        subtitle: Text(entry.description),
+        title: Text(_title(context)),
+        subtitle: Text(_description(context)),
         trailing: Text(money.format(entry.amountMinor),
             style: Theme.of(context).textTheme.titleSmall),
       );
 }
 
+class _OverviewRetry extends StatelessWidget {
+  const _OverviewRetry({required this.message, required this.onRetry});
+  final String message;
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context) => Material(
+        color: Theme.of(context).colorScheme.errorContainer,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(children: [
+            Expanded(child: Text(message)),
+            TextButton(
+              key: const Key('wallet-overview-retry-button'),
+              onPressed: onRetry,
+              child: Text(context.localized('重试', 'Retry')),
+            ),
+          ]),
+        ),
+      );
+}
+
 class _MessageState extends StatelessWidget {
-  const _MessageState({this.icon = Icons.error_outline, required this.message, this.detail, this.onRetry});
+  const _MessageState(
+      {this.icon = Icons.error_outline,
+      required this.message,
+      this.detail,
+      this.onRetry});
   final IconData icon;
   final String message;
   final String? detail;
@@ -237,10 +314,17 @@ class _MessageState extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Icon(icon, size: 44), const SizedBox(height: 12),
+            Icon(icon, size: 44),
+            const SizedBox(height: 12),
             Text(message, textAlign: TextAlign.center),
-            if (detail != null) ...[const SizedBox(height: 8), Text(detail!, textAlign: TextAlign.center)],
-            if (onRetry != null) TextButton(onPressed: onRetry, child: Text(context.localized('重试', 'Retry'))),
+            if (detail != null) ...[
+              const SizedBox(height: 8),
+              Text(detail!, textAlign: TextAlign.center)
+            ],
+            if (onRetry != null)
+              TextButton(
+                  onPressed: onRetry,
+                  child: Text(context.localized('重试', 'Retry'))),
           ]),
         ),
       );
@@ -255,7 +339,10 @@ class _InlineRetry extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         child: Column(children: [
           Text(message, textAlign: TextAlign.center),
-          TextButton(key: const Key('wallet-retry-button'), onPressed: onRetry, child: Text(context.localized('重试', 'Retry'))),
+          TextButton(
+              key: const Key('wallet-retry-button'),
+              onPressed: onRetry,
+              child: Text(context.localized('重试', 'Retry'))),
         ]),
       );
 }

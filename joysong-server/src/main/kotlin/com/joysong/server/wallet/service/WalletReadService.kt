@@ -56,7 +56,7 @@ class WalletReadService(
         walletId = wallet.id,
         ownerType = wallet.ownerType,
         ownerId = wallet.ownerId,
-        displayName = displayName(wallet.ownerType),
+        displayName = wallet.ownerType,
         ownerName = ownerName(wallet),
         pendingMinor = wallet.pendingMinor,
         availableMinor = wallet.availableMinor,
@@ -70,23 +70,16 @@ class WalletReadService(
         else -> wallet.ownerId
     }
 
-    private fun displayName(ownerType: String): String = when (ownerType) {
-        "DOCTOR" -> "医生钱包"
-        "CONSULTANT" -> "顾问钱包"
-        "INSTITUTION" -> "机构钱包"
-        else -> "钱包"
-    }
-
     private fun WalletLedgerEntryEntity.toLedgerItem(currency: String) = WalletLedgerItemDto(
         id = id,
         walletId = walletId,
         entryType = entryType,
-        title = when (entryType) {
-            "REVERSAL" -> "退款冲正"
-            else -> "诊疗收益"
-        },
-        description = if (entryType == "REVERSAL") "退款 $sourceId" else "订单 $sourceId",
-        amountMinor = sequenceOf(pendingDeltaMinor, availableDeltaMinor, frozenDeltaMinor).firstOrNull { it != 0L } ?: 0L,
+        title = entryType,
+        description = "$sourceType:$sourceId",
+        sourceType = sourceType,
+        sourceId = sourceId,
+        amountMinor = if (entryType == "RELEASE") 0L else
+            sequenceOf(pendingDeltaMinor, availableDeltaMinor, frozenDeltaMinor).firstOrNull { it != 0L } ?: 0L,
         pendingAfterMinor = pendingBalanceMinor,
         availableAfterMinor = availableBalanceMinor,
         frozenAfterMinor = frozenBalanceMinor,

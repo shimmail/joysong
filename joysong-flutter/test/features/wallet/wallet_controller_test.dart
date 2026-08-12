@@ -17,7 +17,8 @@ void main() {
     expect(controller.overviewErrorMessage, isNull);
   });
 
-  test('automatically selects a single wallet and loads its first page', () async {
+  test('automatically selects a single wallet and loads its first page',
+      () async {
     final repository = _FakeWalletRepository()
       ..overview = _overview(_wallet(101))
       ..pages[101] = _page(101, [_entry(1, 101)], last: true);
@@ -62,10 +63,12 @@ void main() {
     await controller.refresh();
 
     expect(controller.entries.map((entry) => entry.id), [2]);
-    expect(repository.ledgerRequests, [(101, 0, 20), (101, 1, 20), (101, 0, 20)]);
+    expect(
+        repository.ledgerRequests, [(101, 0, 20), (101, 1, 20), (101, 0, 20)]);
   });
 
-  test('pagination failure retains loaded entries and exposes retry state', () async {
+  test('pagination failure retains loaded entries and exposes retry state',
+      () async {
     final repository = _FakeWalletRepository()
       ..overview = _overview(_wallet(101))
       ..pages[101] = _page(101, [_entry(1, 101)], last: false);
@@ -93,7 +96,8 @@ void main() {
 
     await controller.loadNextPage();
     repository.errorsByRequest.remove((101, 2));
-    repository.pagesByRequest[(101, 2)] = _page(101, [_entry(3, 101)], last: true);
+    repository.pagesByRequest[(101, 2)] =
+        _page(101, [_entry(3, 101)], last: true);
     await controller.retryLedger();
 
     expect(controller.entries.map((entry) => entry.id), [1, 2, 3]);
@@ -119,7 +123,8 @@ void main() {
     expect(repository.ledgerRequests, [(101, 0, 20), (101, 0, 20)]);
   });
 
-  test('failed refresh keeps prior ledger entries and exposes a retryable error',
+  test(
+      'failed refresh keeps prior ledger entries and exposes a retryable error',
       () async {
     final repository = _FakeWalletRepository()
       ..overview = _overview(_wallet(101))
@@ -134,10 +139,28 @@ void main() {
     expect(controller.ledgerErrorMessage, isNotNull);
     expect(controller.selectedWalletId, 101);
   });
+
+  test(
+      'failed overview refresh keeps wallet data and exposes retryable overview error',
+      () async {
+    final repository = _FakeWalletRepository()
+      ..overview = _overview(_wallet(101))
+      ..pages[101] = _page(101, [_entry(1, 101)], last: true);
+    final controller = WalletController(repository);
+    await controller.load();
+    repository.overviewError = StateError('offline');
+
+    await controller.refresh();
+
+    expect(controller.overview.wallets.single.walletId, 101);
+    expect(controller.entries.map((entry) => entry.id), [1]);
+    expect(controller.overviewErrorMessage, isNotNull);
+  });
 }
 
 WalletOverview _overview(WalletAccount first, [WalletAccount? second]) =>
-    WalletOverview(currency: 'USD', wallets: [first, if (second != null) second]);
+    WalletOverview(
+        currency: 'USD', wallets: [first, if (second != null) second]);
 
 WalletAccount _wallet(int id) => WalletAccount(
       walletId: id,
@@ -156,6 +179,8 @@ WalletLedgerEntry _entry(int id, int walletId) => WalletLedgerEntry(
       entryType: 'SETTLEMENT_CREDIT',
       title: '诊疗收益',
       description: '订单 JS$id',
+      sourceType: 'ORDER',
+      sourceId: 'JS$id',
       amountMinor: 1200,
       pendingAfterMinor: 0,
       availableAfterMinor: 1200,
@@ -164,7 +189,8 @@ WalletLedgerEntry _entry(int id, int walletId) => WalletLedgerEntry(
       createdAt: DateTime(2026, 8, 11),
     );
 
-WalletLedgerPage _page(int walletId, List<WalletLedgerEntry> entries, {required bool last}) =>
+WalletLedgerPage _page(int walletId, List<WalletLedgerEntry> entries,
+        {required bool last}) =>
     WalletLedgerPage(
       content: entries,
       page: 0,
@@ -182,9 +208,14 @@ final class _FakeWalletRepository implements WalletRepository {
   final List<(int, int, int)> ledgerRequests = [];
   final Map<(int, int), Object> errorsByRequest = {};
   Object? ledgerError;
+  Object? overviewError;
 
   @override
-  Future<WalletOverview> getOverview() async => overview;
+  Future<WalletOverview> getOverview() async {
+    final error = overviewError;
+    if (error != null) throw error;
+    return overview;
+  }
 
   @override
   Future<WalletLedgerPage> getLedger({

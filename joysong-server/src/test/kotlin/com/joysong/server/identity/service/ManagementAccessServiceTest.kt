@@ -3,12 +3,34 @@ package com.joysong.server.identity.service
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.security.access.AccessDeniedException
 
 class ManagementAccessServiceTest {
+
+    @Test
+    fun `institution wallet scope excludes doctor affiliations not managed by legal representative`() {
+        val service = ManagementAccessService(mockk(relaxed = true))
+        val actor = ManagementActor(
+            userId = "doctor-legal-1",
+            isAdmin = false,
+            activeRoles = setOf("DOCTOR", "INSTITUTION_LEGAL_REPRESENTATIVE"),
+            doctorId = "doctor-legal-1",
+            managedInstitutionIds = setOf("institution-b"),
+            doctorInstitutionIds = setOf("institution-a"),
+            manageableDoctorIds = setOf("doctor-legal-1")
+        )
+
+        val scopes = service.walletScopes(actor)
+
+        assertEquals(
+            setOf("institution-b"),
+            scopes.single { it.ownerType == "INSTITUTION" }.ownerIds
+        )
+    }
 
     @Test
     fun `legal representative capabilities exclude doctor order article and split management`() {

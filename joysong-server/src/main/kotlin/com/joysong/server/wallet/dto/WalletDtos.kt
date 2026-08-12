@@ -55,6 +55,8 @@ data class WalletLedgerItemDto(
     val entryType: String,
     val title: String,
     val description: String,
+    val sourceType: String,
+    val sourceId: String,
     val amountMinor: Long,
     val pendingAfterMinor: Long,
     val availableAfterMinor: Long,

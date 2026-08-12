@@ -76,7 +76,7 @@ class WalletReadServiceTest {
 
         assertEquals(listOf("DOCTOR", "CONSULTANT", "INSTITUTION", "INSTITUTION"), overview.wallets.map { it.ownerType })
         assertEquals(listOf("张医生", "李顾问", "娇颜颂一院", "娇颜颂二院"), overview.wallets.map { it.ownerName })
-        assertEquals(listOf("医生钱包", "顾问钱包", "机构钱包", "机构钱包"), overview.wallets.map { it.displayName })
+        assertEquals(listOf("DOCTOR", "CONSULTANT", "INSTITUTION", "INSTITUTION"), overview.wallets.map { it.displayName })
         assertEquals(listOf(1L, 2L, 3L, 4L), overview.wallets.map { it.walletId })
     }
 
@@ -87,6 +87,32 @@ class WalletReadServiceTest {
         every { wallets.findAllByOwnerTypeAndOwnerIdIn("DOCTOR", setOf("doctor-1")) } returns listOf(wallet(11, "DOCTOR", "doctor-1"))
 
         assertThrows(AccessDeniedException::class.java) { service.ledger(actor, 99, 0, 20) }
+    }
+
+    @Test
+    fun `doctor legal representative cannot read institution wallet from doctor affiliation`() {
+        val scopedService = WalletReadService(
+            ManagementAccessService(mockk(relaxed = true)),
+            wallets,
+            ledgers,
+            doctors,
+            users,
+            institutions
+        )
+        val actor = actor(
+            userId = "doctor-legal-1",
+            roles = setOf("DOCTOR", "INSTITUTION_LEGAL_REPRESENTATIVE"),
+            doctorId = "doctor-legal-1",
+            institutions = setOf("institution-b"),
+            doctorInstitutions = setOf("institution-a")
+        )
+        every { wallets.findAllByOwnerTypeAndOwnerIdIn("DOCTOR", setOf("doctor-legal-1")) } returns emptyList()
+        every { wallets.findAllByOwnerTypeAndOwnerIdIn("INSTITUTION", setOf("institution-b")) } returns
+            listOf(wallet(22, "INSTITUTION", "institution-b"))
+
+        assertThrows(AccessDeniedException::class.java) {
+            scopedService.ledger(actor, 21, 0, 20)
+        }
     }
 
     @Test
@@ -103,11 +129,51 @@ class WalletReadServiceTest {
 
         assertEquals(-1200, item.amountMinor)
         assertEquals("USD", item.currency)
-        assertEquals("退款冲正", item.title)
-        assertEquals("退款 refund-1", item.description)
+        assertEquals("REVERSAL", item.title)
+        assertEquals("REFUND:refund-1", item.description)
+        assertEquals("REFUND", item.sourceType)
+        assertEquals("refund-1", item.sourceId)
         verify { ledgers.findAllByWalletIdOrderByCreatedAtDescIdDesc(11, match { it.pageNumber == 0 && it.pageSize == 100 }) }
         assertEquals(emptyList<String>(), WalletLedgerItemDto::class.memberProperties.map { it.name.lowercase() }
             .filter { name -> listOf("provider", "payout", "bank", "beneficiary", "fx").any(name::contains) })
+    }
+
+    @Test
+    fun `release is a neutral pending to available transfer rather than negative earnings`() {
+        val actor = actor(doctorId = "doctor-1", roles = setOf("DOCTOR"))
+        every { access.walletScopes(actor) } returns listOf(WalletOwnerScope("DOCTOR", setOf("doctor-1")))
+        every { wallets.findAllByOwnerTypeAndOwnerIdIn("DOCTOR", setOf("doctor-1")) } returns listOf(wallet(11, "DOCTOR", "doctor-1"))
+        every { ledgers.findAllByWalletIdOrderByCreatedAtDescIdDesc(11, any()) } returns PageImpl(listOf(
+            WalletLedgerEntryEntity(
+                id = 9,
+                walletId = 11,
+                entryType = "RELEASE",
+                pendingDeltaMinor = -1200,
+                availableDeltaMinor = 1200,
+                pendingBalanceMinor = 0,
+                availableBalanceMinor = 10000,
+                sourceType = "ORDER",
+                sourceId = "order-1",
+                createdAt = LocalDateTime.of(2026, 8, 11, 11, 0)
+            )
+        ))
+
+        val item = service.ledger(actor, 11, 0, 20).content.single()
+
+        assertEquals(0, item.amountMinor)
+        assertEquals("RELEASE", item.entryType)
+        assertEquals("RELEASE", item.title)
+        assertEquals("ORDER:order-1", item.description)
+    }
+
+    @Test
+    fun `wallet read DTOs expose semantic codes and source references for client localization`() {
+        assertEquals(
+            setOf("entryType", "sourceId", "sourceType"),
+            WalletLedgerItemDto::class.memberProperties.map { it.name }
+                .filter { it == "entryType" || it == "sourceId" || it == "sourceType" }
+                .toSet()
+        )
     }
 
     @Test
@@ -115,7 +181,7 @@ class WalletReadServiceTest {
         val json = ObjectMapper().findAndRegisterModules().writeValueAsString(
             com.joysong.server.wallet.dto.WalletOverviewDto(
                 wallets = listOf(
-                    WalletViewDto(1, "DOCTOR", "doctor-1", "医生钱包", "张医生", 1200, 8800, 0)
+                    WalletViewDto(1, "DOCTOR", "doctor-1", "DOCTOR", "张医生", 1200, 8800, 0)
                 )
             )
         )
@@ -128,8 +194,9 @@ class WalletReadServiceTest {
         userId: String = "ordinary-1",
         roles: Set<String> = emptySet(),
         doctorId: String? = null,
-        institutions: Set<String> = emptySet()
-    ) = ManagementActor(userId, false, roles, doctorId, institutions, emptySet(), doctorId?.let(::setOf) ?: emptySet())
+        institutions: Set<String> = emptySet(),
+        doctorInstitutions: Set<String> = emptySet()
+    ) = ManagementActor(userId, false, roles, doctorId, institutions, doctorInstitutions, doctorId?.let(::setOf) ?: emptySet())
 
     private fun wallet(id: Long, ownerType: String, ownerId: String) =
         WalletEntity(id = id, ownerType = ownerType, ownerId = ownerId, currency = "USD").also {

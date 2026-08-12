@@ -62,6 +62,8 @@ Map<String, Object?> _ledgerJson() => {
       'entryType': 'SETTLEMENT_CREDIT',
       'title': '诊疗收益',
       'description': '订单 JS1',
+      'sourceType': 'ORDER',
+      'sourceId': 'JS1',
       'amountMinor': 1200,
       'pendingAfterMinor': 0,
       'availableAfterMinor': 1200,
