@@ -56,6 +56,11 @@ import 'package:joysong_flutter/features/social/presentation/diary_detail_page.d
 import 'package:joysong_flutter/features/social/presentation/social_controller.dart';
 import 'package:joysong_flutter/features/social/presentation/social_page.dart';
 import 'package:joysong_flutter/features/social/presentation/public_user_page.dart';
+import 'package:joysong_flutter/features/wallet/data/wallet_remote_data_source.dart';
+import 'package:joysong_flutter/features/wallet/data/wallet_repository_impl.dart';
+import 'package:joysong_flutter/features/wallet/domain/wallet_repository.dart';
+import 'package:joysong_flutter/features/wallet/presentation/wallet_controller.dart';
+import 'package:joysong_flutter/features/wallet/presentation/wallet_page.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({
@@ -92,12 +97,14 @@ class _AppShellState extends State<AppShell> {
   OrdersRepository? _ordersRepository;
   SocialRepository? _socialRepository;
   MessagingRepository? _messagingRepository;
+  WalletRepository? _walletRepository;
   OrdersController? _ordersController;
   SocialController? _socialController;
   NotificationController? _notificationController;
   MessagingHubController? _messagingController;
   AgentChatController? _agentChatController;
   AgentPlanController? _agentPlanController;
+  WalletController? _walletController;
   int _unreadNotificationCount = 0;
 
   NavigatorState get _contentNavigator =>
@@ -133,6 +140,7 @@ class _AppShellState extends State<AppShell> {
       _ordersRepository = null;
       _socialRepository = null;
       _messagingRepository = null;
+      _walletRepository = null;
       return;
     }
     _homeRepository = ApiHomeRepository(apiClient);
@@ -157,6 +165,8 @@ class _AppShellState extends State<AppShell> {
     _messagingRepository = MessagingRepositoryImpl(
       ApiMessagingRemoteDataSource(apiClient),
     );
+    _walletRepository = WalletRepositoryImpl(ApiWalletRemoteDataSource(apiClient));
+    _walletController = WalletController(_walletRepository!);
     _notificationController = NotificationController(_messagingRepository!);
     _notificationController!.addListener(_handleNotificationStateChanged);
     unawaited(_notificationController!.refresh());
@@ -192,12 +202,14 @@ class _AppShellState extends State<AppShell> {
     _messagingController?.dispose();
     _agentChatController?.dispose();
     _agentPlanController?.dispose();
+    _walletController?.dispose();
     _ordersController = null;
     _socialController = null;
     _notificationController = null;
     _messagingController = null;
     _agentChatController = null;
     _agentPlanController = null;
+    _walletController = null;
   }
 
   void _handleNotificationStateChanged() {
@@ -262,6 +274,7 @@ class _AppShellState extends State<AppShell> {
           identityRepository: _identityRepository,
           socialRepository: _socialRepository,
           onOrders: _ordersController == null ? null : _openOrders,
+          onWallet: _walletController == null ? null : _openWallet,
           onDiaries: _socialController == null ? null : _openSocial,
           onJourney: _showJourneyComingSoon,
           onCustomerService:
@@ -590,6 +603,14 @@ class _AppShellState extends State<AppShell> {
           onEditReview: _openOrderReviewEditor,
         ),
       ),
+    );
+  }
+
+  Future<void> _openWallet() async {
+    final controller = _walletController;
+    if (controller == null) return;
+    await _contentNavigator.push<void>(
+      MaterialPageRoute(builder: (_) => WalletPage(controller: controller)),
     );
   }
 
