@@ -61,8 +61,8 @@
 ### 服务端
 
 - 新增 `POST /api/translations`，请求字段为 `text`、`targetLanguage`、`contentType`。
-- 接口沿用现有 Bearer 登录鉴权；Qwen 与 OpenAI 密钥均只在服务端读取，不向客户端下发。
-- 默认 Provider 为百炼 `qwen3.7-flash`：评论、回复、私信和日记正文共用精简翻译提示词，低温度且只返回译文，以降低等待。OpenAI 中转作为可配置兜底，也可手动设为 Provider。
+- 接口沿用现有 Bearer 登录鉴权；共享的 Agent/Qwen 密钥只在服务端读取，不向客户端下发。
+- 翻译固定使用百炼 `qwen3.7-flash`：评论、回复、私信和日记正文共用精简翻译提示词，低温度且只返回译文，以降低等待。
 - 翻译复用 `AI_AGENT_API_KEY` 与 `AI_AGENT_BASE_URL`，但模型在代码中固定为 `qwen3.7-flash`，不使用聊天或意图模型。
 - 翻译 Provider、请求形状和模型均为代码策略，不提供供应商回退或独立翻译环境变量。
 - 部署前需在百炼开通 `qwen3.7-flash` 并配置五项 Agent 变量。所有密钥不得写入客户端或提交到仓库。

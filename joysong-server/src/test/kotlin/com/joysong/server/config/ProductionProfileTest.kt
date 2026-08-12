@@ -85,15 +85,16 @@ class ProductionProfileTest {
         val yamlText = listOf("application.yml", "application-prod.yml", "application-dev.example.yml")
             .joinToString("\n") { ClassPathResource(it).inputStream.bufferedReader().use { reader -> reader.readText() } }
         val envText = Files.readString(Path.of(".env.example"))
-        val deploymentDocumentation = listOf(
-            "AI_AGENT_DEVELOPMENT.md",
-            "AI_AGENT_ROLLOUT.md",
-            "AI_TRANSLATION_SOLUTION.md",
-            "CLOUD_DEPLOYMENT_GUIDE.md",
-            "CONFIGURATION_GUIDE.md",
-            "LLM_RELAY_CONFIGURATION.md",
-            "支付开发与云服务器部署指南.md"
-        ).joinToString("\n") { Files.readString(Path.of("..", "docs", it)) }
+        val documentationRoots = listOf(Path.of("..", "doc"), Path.of("..", "docs"))
+        val deploymentDocumentation = documentationRoots.flatMap { root ->
+            Files.walk(root).use { paths ->
+                paths.filter { path ->
+                    Files.isRegularFile(path) &&
+                        path.fileName.toString().endsWith(".md") &&
+                        !path.normalize().toString().replace('\\', '/').contains("/docs/superpowers/")
+                }.map(Files::readString).toList()
+            }
+        }.joinToString("\n")
         val environmentName = Regex("\\b(?:AI_AGENT|OPENAI|QWEN|TRANSLATION)_[A-Z0-9_]+\\b")
         val expected = setOf(
             "AI_AGENT_PROVIDER",
@@ -123,5 +124,14 @@ class ProductionProfileTest {
         assertEquals("qwen", envLines["AI_AGENT_PROVIDER"])
         assertEquals("qwen-plus", envLines["AI_AGENT_MODEL"])
         assertEquals("qwen-turbo", envLines["AI_AGENT_INTENT_MODEL"])
+    }
+
+    @Test
+    fun `current Qwen documentation has no obsolete translation fallback or relay guidance`() {
+        val translationGuide = Files.readString(Path.of("..", "docs", "AI_TRANSLATION_SOLUTION.md"))
+        val rolloutGuide = Files.readString(Path.of("..", "docs", "AI_AGENT_ROLLOUT.md"))
+
+        assertFalse(translationGuide.contains("OpenAI", ignoreCase = true))
+        assertFalse(rolloutGuide.contains("FastAIToken", ignoreCase = true))
     }
 }

@@ -38,7 +38,7 @@ V10 preflight 与 Flyway 之间没有数据库锁，不能单独防止“检查�
 
 任何 preflight、Flyway 或 readiness 失败都必须保持停写和入口摘除。禁止绕过 preflight、强行恢复流量、执行 Flyway `repair` 掩盖失败，或编辑已发布迁移后重试。
 
-## 3. Secret-safe FastAIToken canary
+## 3. Secret-safe Qwen canary
 
 保持生产 Agent 入口摘除，由受控运维环境向批准 endpoint 发起一次最小请求，模型使用 `AI_AGENT_MODEL`。日志只记录时间、模型标识、HTTP 状态、耗时和结果分类。
 
@@ -64,7 +64,7 @@ canary 失败时保持禁用，先修复凭证、模型授权、Host 白名单�
 | 指标 | 上线观察重点 |
 |---|---|
 | 请求成功率 | Agent REST 请求按状态与结果分类统计 |
-| 供应商错误 | FastAIToken `401`、`429`、`5xx` 分开统计 |
+| 供应商错误 | Qwen `401`、`429`、`5xx` 分开统计 |
 | p95 延迟 | 端到端和供应商调用耗时 |
 | stale 恢复 | stale `RUNNING` turn 恢复次数与比例 |
 | 重复 turn | 相同幂等键或业务请求产生多个 turn 的计数，目标为 0 |
@@ -77,7 +77,7 @@ canary 失败时保持禁用，先修复凭证、模型授权、Host 白名单�
 - 发现重复 turn、幂等失效或 stale 恢复异常增长；
 - 发现不安全医美文案、诊断性结论或保证效果表述。
 
-停用后保留脱敏证据，冻结 cohort 扩大并开展复盘。恢复前重新执行 preflight 适用性确认、readiness、FastAIToken canary 和内部 cohort 门禁。
+停用后保留脱敏证据，冻结 cohort 扩大并开展复盘。恢复前重新执行 preflight 适用性确认、readiness、Qwen canary 和内部 cohort 门禁。
 
 ## 6. 回退边界
 

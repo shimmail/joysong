@@ -154,3 +154,31 @@ regressions were then checked without repeating the passing command:
 
 Observed result: BUILD SUCCESSFUL in 5 seconds. Static review found exactly the five allowed
 environment names across the maintained operational guides, and `git diff --check` passed.
+
+## Review fix round 2
+
+The documentation guard now recursively enumerates every Markdown file under `doc/` and
+`docs/`. Its only path exclusion is `docs/superpowers/`, whose specs and plans are historical
+requirements records. Markdown filenames are stripped before matching so links such as
+`AI_AGENT_TESTING.md` are not confused with environment variables; prose and code blocks are
+still scanned. At verification time the guard covered 27 current documents.
+
+The remaining current-document inconsistencies were corrected:
+
+- `doc/项目技术文档.md` now shows the five Qwen Agent variables and states that the Google
+  proxy is identity-only and cannot affect Agent or translation traffic.
+- `AI_TRANSLATION_SOLUTION.md` no longer describes an OpenAI fallback or selectable provider.
+- `AI_AGENT_ROLLOUT.md` consistently describes a Qwen canary instead of FastAIToken.
+
+### Round 2 RED/GREEN
+
+```text
+.\gradlew.bat test --tests com.joysong.server.config.ProductionProfileTest
+```
+
+RED: 8 tests completed, 2 failed. The recursive contract test found the old variables in
+`doc/项目技术文档.md`; the semantic guard found obsolete OpenAI and FastAIToken guidance.
+
+GREEN: the same class completed 8 tests with 0 failures in 4 seconds. A fresh recursive scan
+found exactly `AI_AGENT_PROVIDER`, `AI_AGENT_API_KEY`, `AI_AGENT_BASE_URL`,
+`AI_AGENT_MODEL`, and `AI_AGENT_INTENT_MODEL`; `git diff --check` passed.
