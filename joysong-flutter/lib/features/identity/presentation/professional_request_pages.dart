@@ -423,16 +423,22 @@ class _InstitutionMembershipRequestsPageState
       _error = null;
     });
     try {
-      final values = await Future.wait([
-        widget.repository.listInstitutionOptions(),
-        widget.repository.listInstitutionMembershipRequests(),
-      ]);
+      final requests =
+          await widget.repository.listInstitutionMembershipRequests();
       if (!mounted) return;
       setState(() {
-        _institutions = values[0] as List<InstitutionOption>;
-        _requests = values[1] as List<InstitutionMembershipRequest>;
+        _requests = requests;
         _loading = false;
       });
+      if (widget.reviewMode || widget.affiliationOnly) {
+        try {
+          final institutions =
+              await widget.repository.listInstitutionOptions();
+          if (mounted) setState(() => _institutions = institutions);
+        } catch (_) {
+          // Request data remains usable with institution ids as fallback names.
+        }
+      }
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -444,9 +450,13 @@ class _InstitutionMembershipRequestsPageState
 
   @override
   Widget build(BuildContext context) {
-    final visibleRequests = widget.affiliationOnly
-        ? _requests.where((item) => item.status == 'APPROVED').toList()
-        : _requests;
+    final visibleRequests = _requests.where((item) {
+      if (item.requestType != widget.requestType) return false;
+      if (!widget.reviewMode && item.userId != widget.context.userId) {
+        return false;
+      }
+      return !widget.affiliationOnly || item.status == 'APPROVED';
+    }).toList();
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.reviewMode

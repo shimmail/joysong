@@ -4,6 +4,7 @@ import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
+import 'package:joysong_flutter/features/identity/presentation/identity_pages.dart';
 import 'package:joysong_flutter/features/identity/presentation/institution_relationships_page.dart';
 import 'package:joysong_flutter/features/profile/presentation/profile_page.dart';
 
@@ -158,8 +159,12 @@ void main() {
   });
 
   testWidgets(
-      'profile exposes institution relationships when identity is available',
+      'profile keeps identity verification without discover repository',
       (tester) async {
+    tester.view.physicalSize = const Size(900, 4000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     final repository = _FakeIdentityRepository()
       ..context = const ManagementContext(
         userId: 'doctor-user',
@@ -170,16 +175,18 @@ void main() {
       );
 
     await tester.pumpWidget(MaterialApp(
+      locale: const Locale('zh'),
       home: ProfilePage(
         identityRepository: repository,
-        discoverRepository: const _FakeDiscoverRepository(),
       ),
     ));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('机构关系'));
+    final identityEntry = find.textContaining(RegExp('身份认证|Identity verification'));
+    expect(identityEntry, findsOneWidget);
+    await tester.tap(identityEntry);
     await tester.pumpAndSettle();
-    expect(find.text('当前机构'), findsOneWidget);
+    expect(find.byType(IdentityCenterPage), findsOneWidget);
   });
 }
 

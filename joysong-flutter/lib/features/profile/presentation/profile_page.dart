@@ -130,8 +130,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     context.localized('常见问题和客服留言', 'FAQs and customer support'),
                 onTap: _openHelp,
               ),
-              if (widget.identityRepository != null &&
-                  widget.discoverRepository != null) ...[
+              if (widget.identityRepository != null) ...[
                 _MenuItem(
                   icon: Icons.verified_user_outlined,
                   title: context.localized('身份认证', 'Identity verification'),
@@ -141,6 +140,9 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                   onTap: _openIdentityCenter,
                 ),
+              ],
+              if (widget.identityRepository != null &&
+                  widget.discoverRepository != null) ...[
                 _MenuItem(
                   icon: Icons.admin_panel_settings_outlined,
                   title: context.localized('专业管理', 'Professional management'),

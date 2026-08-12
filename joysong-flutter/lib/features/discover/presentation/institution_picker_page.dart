@@ -108,10 +108,27 @@ class _InstitutionPickerPageState extends State<InstitutionPickerPage> {
                       controller: _scrollController,
                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                       itemCount: _controller.items.length +
-                          (_controller.isLoadingMore ? 1 : 0),
+                          (_controller.isLoadingMore ||
+                                  _controller.errorMessage ==
+                                      'discover_load_more_failed'
+                              ? 1
+                              : 0),
                       separatorBuilder: (_, __) => const SizedBox(height: 12),
                       itemBuilder: (context, index) {
                         if (index == _controller.items.length) {
+                          if (!_controller.isLoadingMore) {
+                            return Center(
+                              child: TextButton.icon(
+                                key: const Key('institution-picker-load-more-retry'),
+                                onPressed: _controller.loadMore,
+                                icon: const Icon(Icons.refresh_rounded),
+                                label: Text(context.localized(
+                                  '加载失败，点击重试',
+                                  'Load failed. Tap to retry',
+                                )),
+                              ),
+                            );
+                          }
                           return const Center(
                             child: Padding(
                               padding: EdgeInsets.all(12),
