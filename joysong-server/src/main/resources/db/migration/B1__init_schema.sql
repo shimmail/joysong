@@ -977,18 +977,10 @@ CREATE TABLE doctor_project_change_requests (
     schedule_note VARCHAR(500) DEFAULT '',
     cover_image VARCHAR(500) DEFAULT '',
     images VARCHAR(2000) DEFAULT '',
-    price_suggestion DECIMAL(10,2) DEFAULT NULL,
-    consultation_fee DECIMAL(10,2) DEFAULT NULL,
-    commission_rate DECIMAL(5,2) DEFAULT NULL,
-    institution_rate DECIMAL(5,2) DEFAULT NULL,
-    base_doctor_project_updated_at TIMESTAMP NULL DEFAULT NULL,
-    base_config_id VARCHAR(36) DEFAULT NULL,
-    base_config_updated_at TIMESTAMP NULL DEFAULT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
     submitted_by VARCHAR(36) NOT NULL,
     reviewed_by VARCHAR(36) DEFAULT NULL,
     review_note VARCHAR(1000) DEFAULT '',
-    force_processed BOOLEAN NOT NULL DEFAULT FALSE,
     submitted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     reviewed_at TIMESTAMP NULL DEFAULT NULL,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -1006,11 +998,7 @@ CREATE TABLE doctor_project_change_requests (
     CONSTRAINT fk_dpcr_submitter FOREIGN KEY (submitted_by) REFERENCES users(id),
     CONSTRAINT fk_dpcr_reviewer FOREIGN KEY (reviewed_by) REFERENCES users(id),
     CONSTRAINT chk_dpcr_type CHECK (request_type IN ('JOIN', 'PROFILE_UPDATE', 'LEAVE')),
-    CONSTRAINT chk_dpcr_status CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'WITHDRAWN', 'CHANGES_REQUESTED')),
-    CONSTRAINT chk_dpcr_profile_config CHECK ((request_type = 'PROFILE_UPDATE' AND consultation_fee IS NOT NULL AND commission_rate IS NOT NULL AND institution_rate IS NOT NULL) OR (request_type <> 'PROFILE_UPDATE' AND consultation_fee IS NULL AND commission_rate IS NULL AND institution_rate IS NULL)),
-    CONSTRAINT chk_dpcr_consultation_fee CHECK (consultation_fee IS NULL OR (consultation_fee >= 0 AND consultation_fee <= 99999999.99)),
-    CONSTRAINT chk_dpcr_commission_rate CHECK (commission_rate IS NULL OR (commission_rate >= 0 AND commission_rate <= 100)),
-    CONSTRAINT chk_dpcr_institution_rate CHECK (institution_rate IS NULL OR (institution_rate >= 0 AND institution_rate <= 100))
+    CONSTRAINT chk_dpcr_status CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'WITHDRAWN'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- 分账生效值与协商提案分表保存；任何一方的新提案都不会覆盖当前生效配置。

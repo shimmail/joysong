@@ -124,6 +124,34 @@ class DoctorProjectChangeServiceTest {
     }
 
     @Test
+    fun `profile update request view exposes immutable before snapshot`() {
+        every { jdbcTemplate.query(any<String>(), any<RowMapper<Any>>()) } answers {
+            val mapper = secondArg<RowMapper<Any>>()
+            val rs = viewResultSet("PENDING")
+            every { rs.getString("request_type") } returns "PROFILE_UPDATE"
+            every { rs.getBigDecimal("current_price") } returns BigDecimal("700.00")
+            every { rs.getString("current_service_description") } returns "before service"
+            every { rs.getString("current_service_tags") } returns "before-a,before-b"
+            every { rs.getString("current_schedule_note") } returns "before schedule"
+            every { rs.getString("current_cover_image") } returns "before-cover"
+            every { rs.getString("current_images") } returns "before-image"
+            every { rs.getBigDecimal("current_consultation_fee") } returns BigDecimal("20.00")
+            every { rs.getBigDecimal("current_commission_rate") } returns BigDecimal("5.00")
+            every { rs.getBigDecimal("current_institution_rate") } returns BigDecimal("35.00")
+            listOf(mapper.mapRow(rs, 0))
+        }
+
+        val view = service.list(doctorActor()).single()
+
+        assertEquals(BigDecimal("700.00"), view.currentPrice)
+        assertEquals("before service", view.currentServiceDescription)
+        assertEquals(listOf("before-a", "before-b"), view.currentServiceTags)
+        assertEquals(BigDecimal("20.00"), view.currentConsultationFee)
+        assertEquals(BigDecimal("10.00"), view.currentPlatformRate)
+        assertEquals(BigDecimal("50.00"), view.currentDoctorRate)
+    }
+
+    @Test
     fun `legal representative cannot force profile approval`() {
         assertThrows(AccessDeniedException::class.java) {
             service.review(legalActor(), "request-1", "APPROVED", "force", true)
