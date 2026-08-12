@@ -84,7 +84,8 @@ class DoctorInstitutionChangeMigrationTest {
         assertContains(sql, "SELECT DISTINCT 'INSTITUTION', im.institution_id, 'USD'")
         assertContains(sql, "ur.status = 'ACTIVE'")
         assertContains(sql, "im.status = 'APPROVED'")
-        assertContains(sql, "ON DUPLICATE KEY UPDATE id = id")
+        assertContains(sql, "ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(wallets.id)")
+        assertFalse(sql.contains("ON DUPLICATE KEY UPDATE id = id"))
         assertFalse(sql.contains("wallet_ledger_entries"))
     }
 
