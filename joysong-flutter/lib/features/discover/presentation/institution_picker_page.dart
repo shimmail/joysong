@@ -15,9 +15,14 @@ final class InstitutionPickerSelection {
 }
 
 class InstitutionPickerPage extends StatefulWidget {
-  const InstitutionPickerPage({required this.repository, super.key});
+  const InstitutionPickerPage({
+    required this.repository,
+    required this.role,
+    super.key,
+  });
 
   final DiscoverRepository repository;
+  final String role;
 
   @override
   State<InstitutionPickerPage> createState() => _InstitutionPickerPageState();
@@ -119,7 +124,8 @@ class _InstitutionPickerPageState extends State<InstitutionPickerPage> {
                           if (!_controller.isLoadingMore) {
                             return Center(
                               child: TextButton.icon(
-                                key: const Key('institution-picker-load-more-retry'),
+                                key: const Key(
+                                    'institution-picker-load-more-retry'),
                                 onPressed: _controller.loadMore,
                                 icon: const Icon(Icons.refresh_rounded),
                                 label: Text(context.localized(

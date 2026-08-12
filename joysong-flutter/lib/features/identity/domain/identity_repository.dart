@@ -36,8 +36,6 @@ abstract interface class IdentityRepository {
     ConsultantMembershipDraft draft,
   );
 
-  Future<List<ConsultantProjectSummary>> listConsultantProjects();
-
   Future<List<ManagementProjectOption>> listManagementProjects();
 
   Future<ManagementProjectOption> createManagementProject(

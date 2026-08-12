@@ -770,7 +770,10 @@ final class ManagementProjectOption {
     this.category = '',
     this.description = '',
     this.tags = '',
+    this.categoryTags = '',
     this.coverImage = '',
+    this.referencePrice = 0,
+    this.currency = '',
   });
 
   factory ManagementProjectOption.fromJson(Object? json) {
@@ -781,7 +784,10 @@ final class ManagementProjectOption {
       category: map['category']?.toString() ?? '',
       description: map['description']?.toString() ?? '',
       tags: map['tags']?.toString() ?? '',
+      categoryTags: _csvText(map['categoryTags']),
       coverImage: map['coverImage']?.toString() ?? '',
+      referencePrice: _decimal(map['referencePrice']),
+      currency: map['currency']?.toString() ?? '',
     );
   }
 
@@ -790,7 +796,10 @@ final class ManagementProjectOption {
   final String category;
   final String description;
   final String tags;
+  final String categoryTags;
   final String coverImage;
+  final num referencePrice;
+  final String currency;
 }
 
 final class ManagementProjectDraft {
@@ -1374,45 +1383,6 @@ final class ConsultantMembershipDraft {
         'institutionId': institutionId.trim(),
         'requestNote': requestNote.trim(),
       };
-}
-
-final class ConsultantProjectSummary {
-  const ConsultantProjectSummary({
-    required this.id,
-    required this.name,
-    required this.category,
-    required this.description,
-    required this.tags,
-    required this.categoryTags,
-    required this.coverImage,
-    required this.referencePrice,
-    required this.currency,
-  });
-
-  factory ConsultantProjectSummary.fromJson(Object? json) {
-    final map = _jsonMap(json, '专业项目');
-    return ConsultantProjectSummary(
-      id: _requiredText(map['id'], '项目 id'),
-      name: _requiredText(map['name'], '项目名称'),
-      category: map['category']?.toString() ?? '',
-      description: map['description']?.toString() ?? '',
-      tags: _csvText(map['tags']),
-      categoryTags: _csvText(map['categoryTags']),
-      coverImage: map['coverImage']?.toString() ?? '',
-      referencePrice: _decimal(map['referencePrice']),
-      currency: _requiredText(map['currency'], '币种'),
-    );
-  }
-
-  final String id;
-  final String name;
-  final String category;
-  final String description;
-  final String tags;
-  final String categoryTags;
-  final String coverImage;
-  final num referencePrice;
-  final String currency;
 }
 
 final class InstitutionProjectRequestDraft {

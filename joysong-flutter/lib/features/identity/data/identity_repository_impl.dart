@@ -179,20 +179,9 @@ final class ApiIdentityRepository implements IdentityRepository {
   }
 
   @override
-  Future<List<ConsultantProjectSummary>> listConsultantProjects() async {
-    return await _apiClient.get<List<ConsultantProjectSummary>>(
-          '/management/projects',
-          decodeData: (json) => _objectList(json)
-              .map(ConsultantProjectSummary.fromJson)
-              .toList(growable: false),
-        ) ??
-        const [];
-  }
-
-  @override
   Future<List<ManagementProjectOption>> listManagementProjects() async {
     return await _apiClient.get<List<ManagementProjectOption>>(
-          '/admin/projects',
+          '/management/projects',
           decodeData: (json) => _objectList(json)
               .map(ManagementProjectOption.fromJson)
               .toList(growable: false),

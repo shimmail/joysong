@@ -586,6 +586,7 @@ class _InstitutionMembershipRequestsPageState
         .push<InstitutionPickerSelection>(MaterialPageRoute(
       builder: (_) => InstitutionPickerPage(
         repository: widget.discoverRepository,
+        role: widget.requestType.trim().toUpperCase(),
       ),
     ));
     if (!mounted || selection == null) return;

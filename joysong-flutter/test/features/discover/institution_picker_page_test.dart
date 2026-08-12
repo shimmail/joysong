@@ -10,7 +10,7 @@ void main() {
     final repository = _FakeDiscoverRepository();
 
     await tester.pumpWidget(MaterialApp(
-      home: InstitutionPickerPage(repository: repository),
+      home: InstitutionPickerPage(repository: repository, role: 'DOCTOR'),
     ));
     await tester.pumpAndSettle();
     await tester.enterText(
@@ -35,7 +35,10 @@ void main() {
           onPressed: () async {
             selection = await Navigator.of(context)
                 .push<InstitutionPickerSelection>(MaterialPageRoute(
-              builder: (_) => InstitutionPickerPage(repository: repository),
+              builder: (_) => InstitutionPickerPage(
+                repository: repository,
+                role: 'DOCTOR',
+              ),
             ));
           },
           child: const Text('open'),

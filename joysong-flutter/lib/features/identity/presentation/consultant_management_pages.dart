@@ -66,6 +66,7 @@ class _ConsultantMembershipPageState extends State<ConsultantMembershipPage> {
         .push<InstitutionPickerSelection>(MaterialPageRoute(
       builder: (_) => InstitutionPickerPage(
         repository: widget.discoverRepository,
+        role: IdentityRoleType.consultant.code,
       ),
     ));
     if (mounted && selection != null) {
@@ -242,7 +243,7 @@ class ConsultantProjectCatalogPage extends StatefulWidget {
 
 class _ConsultantProjectCatalogPageState
     extends State<ConsultantProjectCatalogPage> {
-  List<ConsultantProjectSummary> _items = const [];
+  List<ManagementProjectOption> _items = const [];
   Object? _error;
   var _loading = true;
 
@@ -258,7 +259,7 @@ class _ConsultantProjectCatalogPageState
       _error = null;
     });
     try {
-      final items = await widget.repository.listConsultantProjects();
+      final items = await widget.repository.listManagementProjects();
       if (!mounted) return;
       setState(() {
         _items = items;

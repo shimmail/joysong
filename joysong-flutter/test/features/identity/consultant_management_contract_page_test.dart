@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/core/network/api_client.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
+import 'package:joysong_flutter/features/discover/presentation/institution_picker_page.dart';
 import 'package:joysong_flutter/features/identity/data/identity_repository_impl.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
@@ -21,7 +22,7 @@ void main() {
         requestNote: ' 希望加入 ',
       ),
     );
-    final projects = await repository.listConsultantProjects();
+    final projects = await repository.listManagementProjects();
 
     expect(memberships.single.institutionName, 'Joysong Clinic');
     expect(memberships.single.confirmedBy, 'legal-1');
@@ -67,6 +68,10 @@ void main() {
     expect(find.textContaining('legal-1'), findsOneWidget);
     await tester.tap(find.byKey(const Key('consultant-institution-picker')));
     await tester.pumpAndSettle();
+    final picker = tester.widget<InstitutionPickerPage>(
+      find.byType(InstitutionPickerPage),
+    );
+    expect(picker.role, IdentityRoleType.consultant.code);
     await tester.tap(find.text('New Clinic'));
     await tester.pumpAndSettle();
     await tester.enterText(
@@ -211,8 +216,8 @@ final class _FakeIdentityRepository implements IdentityRepository {
   }
 
   @override
-  Future<List<ConsultantProjectSummary>> listConsultantProjects() async =>
-      [ConsultantProjectSummary.fromJson(_projectJson)];
+  Future<List<ManagementProjectOption>> listManagementProjects() async =>
+      [ManagementProjectOption.fromJson(_projectJson)];
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
