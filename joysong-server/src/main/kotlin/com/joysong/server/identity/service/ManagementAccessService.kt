@@ -95,27 +95,15 @@ class ManagementAccessService(
         require(count("SELECT COUNT(*) FROM users WHERE id = ? AND deleted_at IS NULL", userId) == 1L) {
             "用户不存在或已注销"
         }
-        if (isAdmin) {
-            return ManagementActor(
-                userId = userId,
-                isAdmin = true,
-                activeRoles = setOf("ADMIN"),
-                doctorId = null,
-                managedInstitutionIds = emptySet(),
-                doctorInstitutionIds = emptySet(),
-                consultantInstitutionIds = emptySet(),
-                manageableDoctorIds = emptySet()
-            )
-        }
-
-        val activeRoles = jdbcTemplate.queryForList(
+        val professionalRoles = jdbcTemplate.queryForList(
             "SELECT role_code FROM user_roles WHERE user_id = ? AND status = 'ACTIVE'",
             String::class.java,
             userId
         ).toSet()
-        if (activeRoles.intersect(setOf(DOCTOR_ROLE, LEGAL_REP_ROLE, CONSULTANT_ROLE)).isEmpty()) {
+        if (!isAdmin && professionalRoles.intersect(setOf(DOCTOR_ROLE, LEGAL_REP_ROLE, CONSULTANT_ROLE)).isEmpty()) {
             throw AccessDeniedException("账号尚未取得专业身份管理权限")
         }
+        val activeRoles = professionalRoles + if (isAdmin) setOf("ADMIN") else emptySet()
 
         val doctorId = userId.takeIf { DOCTOR_ROLE in activeRoles && count(
             "SELECT COUNT(*) FROM doctors WHERE id = ? AND deleted_at IS NULL",
@@ -158,7 +146,7 @@ class ManagementAccessService(
         val manageableDoctorIds = buildSet {
             doctorId?.let(::add)
         }
-        if (doctorId == null && managedInstitutionIds.isEmpty() &&
+        if (!isAdmin && doctorId == null && managedInstitutionIds.isEmpty() &&
             DOCTOR_ROLE !in activeRoles && CONSULTANT_ROLE !in activeRoles
         ) {
             throw AccessDeniedException("职业身份已通过，但管理档案或机构归属尚未建立，请联系平台处理")
@@ -166,7 +154,7 @@ class ManagementAccessService(
 
         return ManagementActor(
             userId = userId,
-            isAdmin = false,
+            isAdmin = isAdmin,
             activeRoles = activeRoles,
             doctorId = doctorId,
             managedInstitutionIds = managedInstitutionIds,
@@ -197,12 +185,12 @@ class ManagementAccessService(
         canManageArticles = isAdmin || manageableDoctorIds.isNotEmpty(),
         canManageSplitConfigs = isAdmin,
         canManageOrders = isAdmin || doctorId != null,
-        canApplyToInstitutions = !isAdmin && (doctorId != null || CONSULTANT_ROLE in activeRoles),
+        canApplyToInstitutions = doctorId != null || CONSULTANT_ROLE in activeRoles,
         canReviewInstitutionRequests = isAdmin || managedInstitutionIds.isNotEmpty(),
         canSubmitPlatformProjectRequests = !isAdmin && doctorId != null,
         canSubmitInstitutionProjectRequests = !isAdmin && doctorId != null,
         canReviewInstitutionProjectRequests = isAdmin || managedInstitutionIds.isNotEmpty(),
-        canViewAffiliations = !isAdmin && (doctorId != null || CONSULTANT_ROLE in activeRoles)
+        canViewAffiliations = doctorId != null || CONSULTANT_ROLE in activeRoles
     )
 
     private fun count(sql: String, vararg args: Any): Long =

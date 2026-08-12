@@ -14,7 +14,7 @@ import org.springframework.security.core.Authentication
 
 class ManagementProjectControllerTest {
     @Test
-    fun `active consultant reads deterministic project summaries while admin is rejected`() {
+    fun `active consultant including admin consultant reads deterministic project summaries while admin only is rejected`() {
         val repository = mockk<ProjectRepository>()
         every { repository.findAll() } returns listOf(ProjectEntity("2", "B"), ProjectEntity("1", "A"))
         val catalog = ManagementProjectCatalogService(repository)
@@ -23,6 +23,9 @@ class ManagementProjectControllerTest {
         every { access.actor(auth) } returns actor(setOf("CONSULTANT"))
         val controller = ManagementProjectController(access, catalog)
 
+        assertEquals(listOf("1", "2"), controller.list(auth).data!!.map { it.id })
+
+        every { access.actor(auth) } returns actor(setOf("ADMIN", "CONSULTANT"), admin = true)
         assertEquals(listOf("1", "2"), controller.list(auth).data!!.map { it.id })
 
         every { access.actor(auth) } returns actor(setOf("ADMIN"), admin = true)

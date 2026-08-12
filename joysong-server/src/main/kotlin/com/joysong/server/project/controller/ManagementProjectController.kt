@@ -21,7 +21,7 @@ class ManagementProjectController(
     @GetMapping
     fun list(authentication: Authentication): BaseResponse<List<ManagementProjectSummary>> {
         val actor = accessService.actor(authentication)
-        if (actor.isAdmin || actor.activeRoles.intersect(PROFESSIONAL_ROLES).isEmpty()) {
+        if (actor.activeRoles.intersect(PROFESSIONAL_ROLES).isEmpty()) {
             throw AccessDeniedException("只有已认证的专业身份可以查看项目目录")
         }
         return BaseResponse.success(catalogService.list())

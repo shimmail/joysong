@@ -123,7 +123,7 @@ class InstitutionMembershipRequestService(
     }
 
     private fun requireConsultant(actor: ManagementActor) {
-        if (actor.isAdmin || "CONSULTANT" !in actor.activeRoles) {
+        if ("CONSULTANT" !in actor.activeRoles) {
             throw AccessDeniedException("只有本人已认证的顾问可以访问机构关系")
         }
     }
@@ -244,17 +244,10 @@ class JdbcInstitutionMembershipRequestStore(
                 now
             )
         }
-        return InstitutionMembershipRequestView(
-            id = id,
-            requestType = type,
-            userId = userId,
-            institutionId = institutionId,
-            status = "PENDING",
-            requestNote = requestNote,
-            reviewNote = "",
-            createdAt = now,
-            updatedAt = now
-        )
+        if (type == MembershipRequestType.CONSULTANT) {
+            return requireNotNull(findOwnedConsultant(userId, id)) { "机构加入申请不存在" }
+        }
+        return InstitutionMembershipRequestView(id, type, userId, institutionId, "PENDING", requestNote, "", now, now)
     }
 
     override fun resubmit(
@@ -269,18 +262,16 @@ class JdbcInstitutionMembershipRequestStore(
             SET status = 'PENDING', request_note = ?, review_note = '',
                 confirmed_by = NULL, confirmed_at = NULL, revoked_at = NULL$restoreDeleted,
                 updated_at = NOW()
-            WHERE id = ?
+            WHERE id = ? AND status IN ('REJECTED', 'REVOKED')
             """.trimIndent(),
             requestNote,
             request.id
         )
-        check(updated == 1) { "机构加入申请已被其他操作处理" }
-        return request.copy(
-            status = "PENDING",
-            requestNote = requestNote,
-            reviewNote = "",
-            updatedAt = LocalDateTime.now()
-        )
+        if (updated != 1) throw ConsultantMembershipConflictException("机构加入申请已被其他操作处理")
+        if (request.requestType == MembershipRequestType.CONSULTANT) {
+            return requireNotNull(findOwnedConsultant(request.userId, request.id)) { "机构加入申请不存在" }
+        }
+        return request.copy(status = "PENDING", requestNote = requestNote, reviewNote = "", updatedAt = LocalDateTime.now())
     }
 
     override fun listVisible(
@@ -326,6 +317,13 @@ class JdbcInstitutionMembershipRequestStore(
         consultantRowMapper,
         userId
     )
+
+    private fun findOwnedConsultant(userId: String, id: String): InstitutionMembershipRequestView? = jdbcTemplate.query(
+        consultantSelectSql() + " AND im.user_id = ? AND im.id = ?",
+        consultantRowMapper,
+        userId,
+        id
+    ).firstOrNull()
 
     override fun institutionExists(institutionId: String): Boolean = jdbcTemplate.queryForObject(
         "SELECT COUNT(*) FROM institutions WHERE id = ? AND deleted_at IS NULL",
@@ -395,11 +393,12 @@ class JdbcInstitutionMembershipRequestStore(
     private fun consultantSelectSql() =
         """
         SELECT im.id, 'CONSULTANT' AS request_type, im.user_id, im.institution_id,
-               i.name AS institution_name, im.status, im.request_note, im.review_note,
+               COALESCE(i.name, CONCAT('已删除机构（', im.institution_id, '）')) AS institution_name,
+               im.status, im.request_note, im.review_note,
                im.created_at, im.updated_at, im.confirmed_by, im.confirmed_at, im.revoked_at,
                FALSE AS is_deleted
         FROM institution_memberships im
-        JOIN institutions i ON i.id = im.institution_id AND i.deleted_at IS NULL
+        LEFT JOIN institutions i ON i.id = im.institution_id AND i.deleted_at IS NULL
         WHERE im.member_role = 'CONSULTANT'
         """.trimIndent()
 

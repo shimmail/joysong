@@ -3,6 +3,7 @@ package com.joysong.server.identity.service
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -10,6 +11,39 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.security.access.AccessDeniedException
 
 class ManagementAccessServiceTest {
+
+    @Test
+    fun `platform admin retains active consultant role and approved institution projection`() {
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        every { jdbcTemplate.queryForObject(any<String>(), Long::class.java, "admin-consultant") } returns 1L
+        every {
+            jdbcTemplate.queryForList(match<String> { it.contains("SELECT role_code") }, String::class.java, "admin-consultant")
+        } returns listOf("CONSULTANT")
+        every {
+            jdbcTemplate.queryForList(match<String> { it.contains("member_role = 'CONSULTANT'") }, String::class.java, "admin-consultant")
+        } returns listOf("institution-1")
+
+        val context = ManagementAccessService(jdbcTemplate).contextFor("admin-consultant", "ADMIN")
+
+        assertTrue("ADMIN" in context.activeRoles)
+        assertTrue("CONSULTANT" in context.activeRoles)
+        assertTrue("institution-1" in context.consultantInstitutionIds)
+        assertTrue(context.canApplyToInstitutions)
+    }
+
+    @Test
+    fun `platform admin without professional role has no professional self service capability`() {
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        every { jdbcTemplate.queryForObject(any<String>(), Long::class.java, "admin-only") } returns 1L
+        every {
+            jdbcTemplate.queryForList(match<String> { it.contains("SELECT role_code") }, String::class.java, "admin-only")
+        } returns emptyList()
+
+        val context = ManagementAccessService(jdbcTemplate).contextFor("admin-only", "ADMIN")
+
+        assertEquals(setOf("ADMIN"), context.activeRoles.toSet())
+        assertFalse(context.canApplyToInstitutions)
+    }
 
     @Test
     fun `active doctor without profile remains an actor for explicit profile not found handling`() {

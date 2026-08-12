@@ -40,6 +40,17 @@ class InstitutionMembershipRequestServiceTest {
     }
 
     @Test
+    fun `platform admin with active consultant role keeps consultant self service while admin only is denied`() {
+        val store = FakeMembershipRequestStore()
+        val adminConsultant = adminActor().copy(activeRoles = setOf("ADMIN", "CONSULTANT"))
+
+        assertEquals("PENDING", service(store).submitConsultant(adminConsultant, "institution-1", "加入").status)
+        assertThrows(AccessDeniedException::class.java) {
+            service(store).submitConsultant(adminActor(), "institution-1", "加入")
+        }
+    }
+
+    @Test
     fun `consultant self contract lists only token owner and submits fixed consultant join`() {
         val store = FakeMembershipRequestStore().apply {
             seed(request("own", MembershipRequestType.CONSULTANT, "consultant-1", "institution-1"))

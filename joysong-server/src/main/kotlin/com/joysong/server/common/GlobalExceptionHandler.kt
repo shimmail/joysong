@@ -7,6 +7,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.http.converter.HttpMessageNotReadableException
 import org.springframework.web.bind.annotation.ExceptionHandler
+import org.springframework.web.HttpRequestMethodNotSupportedException
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.security.access.AccessDeniedException
 import com.joysong.server.auth.service.InvalidRefreshTokenException
@@ -22,6 +23,11 @@ import jakarta.servlet.http.HttpServletResponse
 class GlobalExceptionHandler {
 
     private val log = LoggerFactory.getLogger(javaClass)
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException::class)
+    fun handleMethodNotSupported(): ResponseEntity<BaseResponse<Nothing>> =
+        ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
+            .body(BaseResponse.error("请求方法不支持", 405))
 
     @ExceptionHandler(InvalidRefreshTokenException::class)
     fun handleInvalidRefreshToken(e: InvalidRefreshTokenException): ResponseEntity<BaseResponse<Nothing>> =

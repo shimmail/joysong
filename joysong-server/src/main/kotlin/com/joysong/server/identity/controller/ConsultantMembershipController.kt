@@ -1,6 +1,7 @@
 package com.joysong.server.identity.controller
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.fasterxml.jackson.annotation.JsonAnySetter
 import com.joysong.server.common.BaseResponse
 import com.joysong.server.identity.service.InstitutionMembershipRequestService
 import com.joysong.server.identity.service.InstitutionMembershipRequestView
@@ -27,18 +28,28 @@ class ConsultantMembershipController(
     fun submit(
         authentication: Authentication,
         @RequestBody request: SubmitConsultantMembershipRequest
-    ): BaseResponse<ConsultantMembershipResponse> = BaseResponse.success(
+    ): BaseResponse<ConsultantMembershipResponse> {
+        require(request.unknownFields.isEmpty()) { "请求包含未知字段" }
+        return BaseResponse.success(
         membershipService.submitConsultant(
             accessService.actor(authentication), request.institutionId, request.requestNote
         ).toResponse()
-    )
+        )
+    }
 }
 
 @JsonIgnoreProperties(ignoreUnknown = false)
 data class SubmitConsultantMembershipRequest(
     val institutionId: String,
     val requestNote: String
-)
+) {
+    val unknownFields: MutableMap<String, Any?> = linkedMapOf()
+
+    @JsonAnySetter
+    fun unknown(name: String, value: Any?) {
+        unknownFields[name] = value
+    }
+}
 
 data class ConsultantMembershipResponse(
     val id: String,
