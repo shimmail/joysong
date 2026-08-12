@@ -22,6 +22,7 @@ class ProfilePage extends StatefulWidget {
     this.identityRepository,
     this.socialRepository,
     this.onOrders,
+    this.onWallet,
     this.onDiaries,
     this.onJourney,
     this.onCustomerService,
@@ -36,6 +37,7 @@ class ProfilePage extends StatefulWidget {
   final IdentityRepository? identityRepository;
   final SocialRepository? socialRepository;
   final VoidCallback? onOrders;
+  final VoidCallback? onWallet;
   final VoidCallback? onDiaries;
   final VoidCallback? onJourney;
   final VoidCallback? onCustomerService;
@@ -113,6 +115,12 @@ class _ProfilePageState extends State<ProfilePage> {
           const SizedBox(height: 12),
           _MenuCard(
             items: [
+              _MenuItem(
+                icon: Icons.account_balance_wallet_outlined,
+                title: context.localized('钱包', 'Wallet'),
+                subtitle: context.localized('查看专业收益与流水', 'View professional earnings and ledger'),
+                onTap: widget.onWallet,
+              ),
               _MenuItem(
                 icon: Icons.support_agent_outlined,
                 title: context.localized('联系客服', 'Customer service'),
