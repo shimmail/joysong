@@ -1302,6 +1302,248 @@ final class InstitutionProjectJoinRequestDraft {
       };
 }
 
+final class DoctorProjectProfileUpdateDraft {
+  const DoctorProjectProfileUpdateDraft({
+    required this.institutionProjectId,
+    required this.priceSuggestion,
+    required this.serviceDescription,
+    required this.serviceTags,
+    required this.scheduleNote,
+    required this.coverImage,
+    required this.images,
+    required this.consultationFee,
+    required this.commissionRate,
+    required this.institutionRate,
+    required this.platformRate,
+    required this.notes,
+  });
+
+  final String institutionProjectId;
+  final num priceSuggestion;
+  final String serviceDescription;
+  final List<String> serviceTags;
+  final String scheduleNote;
+  final String coverImage;
+  final List<String> images;
+  final num consultationFee;
+  final num commissionRate;
+  final num institutionRate;
+  final num platformRate;
+  final String notes;
+
+  void validate() {
+    if (institutionProjectId.trim().isEmpty) {
+      throw ArgumentError('请选择机构项目');
+    }
+    final description = serviceDescription.trim();
+    if (description.isEmpty || description.length > 5000) {
+      throw ArgumentError('服务说明不能为空且不能超过 5000 字');
+    }
+    if (scheduleNote.trim().length > 500 || notes.trim().length > 2000) {
+      throw ArgumentError('排期或补充说明过长');
+    }
+    if (coverImage.trim().length > 500 ||
+        images.length > 20 ||
+        images.any(
+            (value) => value.trim().isEmpty || value.trim().length > 500)) {
+      throw ArgumentError('图片地址不合法');
+    }
+    if (serviceTags.length > 20 ||
+        serviceTags.any(
+            (value) => value.trim().isEmpty || value.trim().length > 100)) {
+      throw ArgumentError('服务标签不合法');
+    }
+    for (final amount in [priceSuggestion, consultationFee]) {
+      if (!_validDecimal(amount, 99999999.99)) {
+        throw ArgumentError('金额必须为非负且最多保留两位小数');
+      }
+    }
+    for (final rate in [commissionRate, institutionRate, platformRate]) {
+      if (!_validDecimal(rate, 100)) {
+        throw ArgumentError('分账比例必须在 0 到 100 之间且最多两位小数');
+      }
+    }
+    if (commissionRate + institutionRate + platformRate > 100) {
+      throw ArgumentError('平台、机构和顾问比例合计不能超过 100%');
+    }
+  }
+
+  Map<String, Object?> toJson() {
+    validate();
+    return {
+      'requestType': 'PROFILE_UPDATE',
+      'institutionProjectId': institutionProjectId.trim(),
+      'priceSuggestion': priceSuggestion,
+      'serviceDescription': serviceDescription.trim(),
+      'serviceTags': serviceTags.map((value) => value.trim()).toList(),
+      'scheduleNote': scheduleNote.trim(),
+      'coverImage': coverImage.trim(),
+      'images': images.map((value) => value.trim()).toList(),
+      'consultationFee': consultationFee,
+      'commissionRate': commissionRate,
+      'institutionRate': institutionRate,
+      'notes': notes.trim(),
+    };
+  }
+}
+
+final class DoctorProjectProfileUpdateTarget {
+  const DoctorProjectProfileUpdateTarget({
+    required this.institutionProjectId,
+    required this.projectName,
+    required this.institutionId,
+    required this.institutionName,
+    required this.currentPrice,
+    required this.serviceDescription,
+    required this.serviceTags,
+    required this.scheduleNote,
+    required this.coverImage,
+    required this.images,
+    required this.consultationFee,
+    required this.commissionRate,
+    required this.institutionRate,
+    required this.platformRate,
+    required this.doctorRate,
+  });
+
+  factory DoctorProjectProfileUpdateTarget.fromJson(Object? json) {
+    final map = _jsonMap(json, '医生项目资料修改目标');
+    return DoctorProjectProfileUpdateTarget(
+      institutionProjectId:
+          _requiredText(map['institutionProjectId'], '机构项目 id'),
+      projectName: _requiredText(map['projectName'], '项目名称'),
+      institutionId: _requiredText(map['institutionId'], '机构 id'),
+      institutionName: _requiredText(map['institutionName'], '机构名称'),
+      currentPrice: _decimal(map['currentPrice']),
+      serviceDescription: map['serviceDescription']?.toString() ?? '',
+      serviceTags: _stringList(map['serviceTags']),
+      scheduleNote: map['scheduleNote']?.toString() ?? '',
+      coverImage: map['coverImage']?.toString() ?? '',
+      images: _stringList(map['images']),
+      consultationFee: _decimal(map['consultationFee']),
+      commissionRate: _decimal(map['commissionRate']),
+      institutionRate: _decimal(map['institutionRate']),
+      platformRate: _decimal(map['platformRate']),
+      doctorRate: _decimal(map['doctorRate']),
+    );
+  }
+
+  final String institutionProjectId, projectName, institutionId;
+  final String institutionName, serviceDescription, scheduleNote, coverImage;
+  final num currentPrice, consultationFee, commissionRate, institutionRate;
+  final num platformRate, doctorRate;
+  final List<String> serviceTags, images;
+}
+
+final class DoctorProjectChangeRequest {
+  const DoctorProjectChangeRequest({
+    required this.id,
+    required this.doctorId,
+    required this.doctorName,
+    required this.institutionId,
+    required this.institutionName,
+    required this.institutionProjectId,
+    required this.projectName,
+    required this.requestType,
+    required this.serviceDescription,
+    required this.priceSuggestion,
+    required this.notes,
+    required this.serviceTags,
+    required this.scheduleNote,
+    required this.coverImage,
+    required this.images,
+    required this.consultationFee,
+    required this.commissionRate,
+    required this.institutionRate,
+    required this.platformRate,
+    required this.doctorRate,
+    required this.forceProcessed,
+    this.currentPrice,
+    this.currentServiceDescription,
+    this.currentServiceTags,
+    this.currentScheduleNote,
+    this.currentCoverImage,
+    this.currentImages,
+    this.currentConsultationFee,
+    this.currentCommissionRate,
+    this.currentInstitutionRate,
+    this.currentPlatformRate,
+    this.currentDoctorRate,
+    required this.status,
+    required this.reviewNote,
+  });
+
+  factory DoctorProjectChangeRequest.fromJson(Object? json) {
+    final map = _jsonMap(json, '医生项目变更申请');
+    final requestType = _requiredText(map['requestType'], '申请类型');
+    final requiresProfileValues = requestType == 'PROFILE_UPDATE';
+    num? proposedDecimal(String field) => requiresProfileValues
+        ? _decimal(map[field])
+        : _nullableDecimal(map[field]);
+    return DoctorProjectChangeRequest(
+      id: _requiredText(map['id'], '申请 id'),
+      doctorId: _requiredText(map['doctorId'], '医生 id'),
+      doctorName: map['doctorName']?.toString() ?? '',
+      institutionId: _requiredText(map['institutionId'], '机构 id'),
+      institutionName: map['institutionName']?.toString() ?? '',
+      institutionProjectId:
+          _requiredText(map['institutionProjectId'], '机构项目 id'),
+      projectName: _requiredText(map['projectName'], '项目名称'),
+      requestType: requestType,
+      serviceDescription: map['serviceDescription']?.toString() ?? '',
+      priceSuggestion: proposedDecimal('priceSuggestion'),
+      notes: map['notes']?.toString() ?? '',
+      serviceTags: _stringList(map['serviceTags']),
+      scheduleNote: map['scheduleNote']?.toString() ?? '',
+      coverImage: map['coverImage']?.toString() ?? '',
+      images: _stringList(map['images']),
+      consultationFee: proposedDecimal('consultationFee'),
+      commissionRate: proposedDecimal('commissionRate'),
+      institutionRate: proposedDecimal('institutionRate'),
+      platformRate: proposedDecimal('platformRate'),
+      doctorRate: proposedDecimal('doctorRate'),
+      forceProcessed: _boolean(map['forceProcessed']),
+      currentPrice: _nullableDecimal(map['currentPrice']),
+      currentServiceDescription:
+          _nullableText(map['currentServiceDescription']),
+      currentServiceTags: map['currentServiceTags'] is List
+          ? _stringList(map['currentServiceTags'])
+          : null,
+      currentScheduleNote: _nullableText(map['currentScheduleNote']),
+      currentCoverImage: _nullableText(map['currentCoverImage']),
+      currentImages: map['currentImages'] is List
+          ? _stringList(map['currentImages'])
+          : null,
+      currentConsultationFee: _nullableDecimal(map['currentConsultationFee']),
+      currentCommissionRate: _nullableDecimal(map['currentCommissionRate']),
+      currentInstitutionRate: _nullableDecimal(map['currentInstitutionRate']),
+      currentPlatformRate: _nullableDecimal(map['currentPlatformRate']),
+      currentDoctorRate: _nullableDecimal(map['currentDoctorRate']),
+      status: _requiredText(map['status'], '申请状态'),
+      reviewNote: map['reviewNote']?.toString() ?? '',
+    );
+  }
+
+  final String id, doctorId, doctorName, institutionId, institutionName;
+  final String institutionProjectId, projectName, requestType;
+  final String serviceDescription, notes, scheduleNote, coverImage;
+  final num? priceSuggestion, consultationFee, commissionRate;
+  final num? institutionRate, platformRate, doctorRate;
+  final List<String> serviceTags, images;
+  final bool forceProcessed;
+  final num? currentPrice, currentConsultationFee, currentCommissionRate;
+  final num? currentInstitutionRate, currentPlatformRate, currentDoctorRate;
+  final String? currentServiceDescription, currentScheduleNote;
+  final String? currentCoverImage;
+  final List<String>? currentServiceTags, currentImages;
+  final String status, reviewNote;
+}
+
+bool _validDecimal(num value, num max) {
+  if (!value.isFinite || value < 0 || value > max) return false;
+  return ((value * 100).roundToDouble() - value * 100).abs() < 0.0000001;
+}
+
 final class PlatformProjectRequestDraft {
   const PlatformProjectRequestDraft({
     required this.name,

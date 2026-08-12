@@ -436,7 +436,7 @@ Flutter 可以完成页面和接口抽象，但生产发布前必须等待支付
 | 平台管理员全量机构 CRUD | `GET/POST /admin/institutions`、`GET/PUT/DELETE /admin/institutions/{id}`；其中写操作仅限 `ADMIN`，GET 对专业用户仅提供下行所述对象级兼容读取 |
 | 文章 | `GET/POST /admin/articles`、`PUT/DELETE /admin/articles/{id}` |
 | 机构项目 | `GET/POST /admin/institution-projects`、`PUT/DELETE /admin/institution-projects/{id}` |
-| 医生项目协作 | `GET/POST /admin/institution-project-requests`、`POST /{id}/review`、`/{id}/withdraw` |
+| 医生项目协作 | `GET /admin/institution-project-requests/profile-update-targets`、`GET/POST /admin/institution-project-requests`、`POST /{id}/review`、`/{id}/withdraw` |
 | 当前分账 | `GET /admin/doctor-institution-project-configs` |
 | 分账提案 | `GET/POST /admin/doctor-institution-project-config-proposals`、`POST /{id}/confirm`、`/reject`、`/withdraw` |
 | 相关订单 | `GET /management/orders?status=...`、`GET /management/orders/{id}`、核销接口见上节 |
@@ -455,10 +455,17 @@ Flutter 可以完成页面和接口抽象，但生产发布前必须等待支付
 - `POST /management/consultant-memberships` 固定表达本人 `CONSULTANT + JOIN`，请求必须只发送 `institutionId` 和 `requestNote`；不得发送 `requestType`、`action` 或 `userId`。`institutionId` 去除首尾空白后不能为空，`requestNote` 去除首尾空白后最多 1000 字符。同一顾问与机构已有 `REJECTED` 或 `REVOKED` 记录时复用原记录并回到 `PENDING`；其他既有状态或并发重复提交返回 HTTP 409。机构不存在或已删除返回 404。顾问不能通过该接口撤回或审核。
 - 顾问加入申请仍由机构法人或平台管理员通过通用审核接口处理：`GET /management/institution-membership-requests` 与 `POST /management/institution-membership-requests/{requestType}/{id}/review`。通用接口继续按管理员或 `managedInstitutionIds` 限定可见和可审核对象；顾问专用接口不改变这一兼容边界。
 - Flutter 专业项目选择统一使用 `GET /management/projects`，不得继续调用 `/admin/projects`。该目录只允许拥有至少一个活跃 `DOCTOR`、`CONSULTANT` 或 `INSTITUTION_LEGAL_REPRESENTATIVE` 身份且不是平台管理员的用户访问，返回全局只读数组，按 `name`、`id` 排序。每项固定包含 `id`、`name`、`category`、`description`、`tags`、`categoryTags`、`coverImage`、`referencePrice`、`currency`；不接受查询参数，也不授予任何项目写能力。
+- `POST /admin/institution-project-requests` 的 `PROFILE_UPDATE` 是医生修改本人医生级项目资料、价格、面诊费和分账的唯一生效前申请入口。Flutter 请求 VO 必须精确包含 12 个键：`institutionProjectId`、固定值 `requestType: PROFILE_UPDATE`、`serviceDescription`、`priceSuggestion`、`notes`、`serviceTags`、`scheduleNote`、`coverImage`、`images`、`consultationFee`、`commissionRate`、`institutionRate`；其中 `serviceTags`、`images` 是 JSON 字符串数组，不能发送 `doctorId`、`platformRate`、`doctorRate` 或基线字段。
+- `GET /admin/institution-project-requests/profile-update-targets` 是表单唯一的当前值来源，只返回已认证医生本人仍有效的医生—机构项目。响应是数组，每项 `DoctorProjectProfileUpdateTargetView` 精确包含：`institutionProjectId`、`projectName`、`institutionId`、`institutionName`、`currentPrice`、`serviceDescription`、`serviceTags`、`scheduleNote`、`coverImage`、`images`、`consultationFee`、`commissionRate`、`institutionRate`、`platformRate`、`doctorRate`。15 个字段全部非 null；无有效配置时返回面诊费 0、顾问率 0、策略默认机构率以及当前平台率和推导医生率。Flutter 不得用机构项目价或本地默认比例伪造基线。
+- `serviceDescription` 非空且最长 5000；`notes`/`scheduleNote`/`coverImage` 最长分别为 2000/500/500；两个数组各最多 20 项，标签每项非空且最长 100，图片每项最长 500。`priceSuggestion`、`consultationFee` 为 `0..99999999.99` 的最多两位小数；`commissionRate`（兼容字段名，语义为顾问率）和 `institutionRate`（机构率）均为 `0..100` 的最多两位小数。
+- `platformRate` 是服务端配置、不可编辑；`doctorRate = 100 - platformRate - institutionRate - commissionRate` 由服务端推导且不得小于 0。Flutter 只读展示响应中的 `platformRate` 与 `doctorRate`，文案必须明确区分顾问率、机构率、平台率和医生净比例。
+- 提交成功只创建 `PENDING` 申请。机构法人通过 `POST /admin/institution-project-requests/{id}/review` 且显式发送 `force: false` 批准后，服务端才按 `(doctorId, institutionProjectId)` 在同一事务中更新本人 `doctor_projects` 与本人分账配置；基线变化返回 409，绝不波及同项目其他医生。平台管理员可显式发送 `force: true` 强制处理，但必须填写 `reviewNote`，响应以 `forceProcessed`、`reviewedBy`、`reviewedAt` 留痕。
+- `DoctorProjectChangeView`/Flutter 响应 VO 字段固定为：`id`、`doctorId`、`doctorName`、`institutionId`、`institutionName`、`institutionProjectId`、`projectName`、`requestType`、`serviceDescription`、`priceSuggestion`、`notes`、`serviceTags`、`scheduleNote`、`coverImage`、`images`、`consultationFee`、`commissionRate`、`institutionRate`、`platformRate`、`doctorRate`、`currentPrice`、`currentServiceDescription`、`currentServiceTags`、`currentScheduleNote`、`currentCoverImage`、`currentImages`、`currentConsultationFee`、`currentCommissionRate`、`currentInstitutionRate`、`currentPlatformRate`、`currentDoctorRate`、`forceProcessed`、`status`、`submittedBy`、`reviewedBy`、`reviewerName`、`reviewNote`、`submittedAt`、`reviewedAt`、`updatedAt`。V17/V18 先增加可空提案、基线与 11 个 `current*` 列，V18 回填升级前的 `PROFILE_UPDATE`，V19 最后启用范围和判别约束。新申请的 `current*` 是提交事务固化的 before 快照；升级前历史申请无法还原提交时原值，因此 V18 按 `(doctorId, institutionProjectId)` 捕获**迁移执行时**的当前医生项目与未软删 config，明确属于近似快照。缺 config 使用面诊费 0、顾问率 0、机构率 40、平台率 10 和推导医生率；缺医生项目使用价格 0 与空资料。审核页使用已固化字段，不能在审批时重新读取当前表冒充原值。非 `PROFILE_UPDATE` 的这些字段仍为 null。
+- 该接口族使用真实 HTTP 状态：400 参数错误、403 身份/对象/强制处理越权、409 重复 `PENDING`/基线变化/已处理或并发冲突、500 服务端异常。写请求不得自动重试；409 应刷新申请与当前项目配置后提示用户重新提交。
 - 医生不能直接修改机构项目价格、销量、评分、评价数或上下架状态。
 - 医生和机构法人都不能修改自己的评分、评价数和认证状态；服务端会保留原值。
 - 医生档案的 `credentials` 与 `credentialImages` 是医生自主维护的公开展示材料，和私有身份审核材料相互独立；UI 只能使用“医生上传的证书图片/展示材料”等中性文案，不得写“资质保险箱”“查资质”或“平台已核验”。公开图片经 `POST /upload` 上传并使用 `data.url`，多图再以逗号拼接提交；这条遗留传输规则不适用于法人机构档案的 JSON 数组字段。
-- 分账调整通过提案完成，医生方与机构方都确认后才替换当前配置；专业用户不能直接写生效配置。
+- 通用分账调整仍通过提案完成；医生项目 `PROFILE_UPDATE` 是受法人审核和基线保护的专用例外。两种流程都不能由专业用户直接写生效配置。
 - 管理员可查看和管理全量数据，客户端不得把管理员专属页面暴露给专业用户。
 
 `/api/admin/doctors` 及 `/api/admin/doctors/{id}` 保留为平台管理员兼容路由，医生专业中心不得再调用。管理端的 `/api/admin/**` 前缀是历史命名，不代表专业用户拥有管理员权限；除上表明确列出的迁移期对象级只读 GET 外，其他 `/admin/**` 需要平台管理员角色。

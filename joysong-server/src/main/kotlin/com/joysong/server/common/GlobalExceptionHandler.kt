@@ -15,6 +15,8 @@ import com.joysong.server.doctor.service.DoctorProfileNotFoundException
 import com.joysong.server.institution.service.ManagedInstitutionProfileNotFoundException
 import com.joysong.server.identity.service.ConsultantInstitutionNotFoundException
 import com.joysong.server.identity.service.ConsultantMembershipConflictException
+import com.joysong.server.institution.service.DoctorProjectChangeConflictException
+import com.joysong.server.institution.service.DoctorProjectChangeNotFoundException
 import java.io.IOException
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
@@ -60,6 +62,14 @@ class GlobalExceptionHandler {
     @ExceptionHandler(ConsultantMembershipConflictException::class)
     fun handleConsultantMembershipConflict(e: ConsultantMembershipConflictException) =
         ResponseEntity.status(HttpStatus.CONFLICT).body(BaseResponse.error<Nothing>(e.message ?: "机构关系冲突", 409))
+
+    @ExceptionHandler(DoctorProjectChangeConflictException::class)
+    fun handleDoctorProjectChangeConflict(e: DoctorProjectChangeConflictException) =
+        ResponseEntity.status(HttpStatus.CONFLICT).body(BaseResponse.error<Nothing>(e.message ?: "项目申请冲突", 409))
+
+    @ExceptionHandler(DoctorProjectChangeNotFoundException::class)
+    fun handleDoctorProjectChangeNotFound(e: DoctorProjectChangeNotFoundException) =
+        ResponseEntity.status(HttpStatus.NOT_FOUND).body(BaseResponse.error<Nothing>(e.message ?: "项目申请不存在", 404))
 
     @ExceptionHandler(IllegalArgumentException::class)
     fun handleIllegalArgument(

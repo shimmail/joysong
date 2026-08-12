@@ -82,15 +82,21 @@ GET /api/management/project-requests
 POST /api/management/project-requests/platform
 POST /api/management/project-requests/institutions/{institutionId};
 :医生项目变更
+GET /api/admin/institution-project-requests/profile-update-targets
 GET, POST /api/admin/institution-project-requests
 POST /api/admin/institution-project-requests/{id}/withdraw;
+note right
+  PROFILE_UPDATE exact 12 keys：
+  本人价格 + 展示资料 + 面诊费 + 顾问率 + 机构率。
+  平台率只读，医生净比例由服务端推导。
+end note
 :本人订单管理
 GET /api/management/orders
 GET /api/management/orders/{id}
 POST /api/management/orders/{id}/verify
 POST /api/management/orders/{id}/request-completion;
 note right
-  医生共 26 个专业端点。
+  医生共 27 个专业端点（新增本人 PROFILE_UPDATE 当前基线 GET）。
   三类 review 接口仅在医生同时是目标机构法人时可用。
 end note
 
@@ -117,6 +123,11 @@ POST /api/management/project-requests/{id}/review;
 :审核医生项目变更
 GET /api/admin/institution-project-requests
 POST /api/admin/institution-project-requests/{id}/review;
+note right
+  法人仅审核本机构，force=false；
+  批准后按 doctorId + institutionProjectId 原子生效。
+  路由数不变，语义扩展不重复计数。
+end note
 note right
   按“HTTP 方法 + 路径模板”计，机构法人有 15 个明确路由模式：
   3 个法人自助档案、6 个迁移期兼容只读、6 个本机构审核。
@@ -168,11 +179,20 @@ fork again
   :批准后创建 institution_projects + doctor_projects;
 fork again
   |医生|
-  :提交 JOIN / PROFILE_UPDATE / LEAVE 项目变更;
+  :提交 JOIN / PROFILE_UPDATE / LEAVE 项目变更
+  PROFILE_UPDATE 携带本人价格、展示资料、面诊费、顾问率、机构率;
   |机构法人|
-  :审核医生项目变更;
+  :审核本机构医生项目变更（force=false）;
   |JoySong 权限与业务服务|
-  :应用医生—机构项目关系变更;
+  :提交事务固化 V18 current* before 快照
+  审核时用不可变 before 对比请求 after;
+  :校验 PENDING + 提交基线并锁定复合键;
+  :原子更新该医生的 doctor_projects + 分账配置
+  不影响同一机构项目下其他医生;
+fork again
+  |JoySong 权限与业务服务|
+  :平台管理员审核或 force=true 强制处理
+  必填 reviewNote 并记录 forceProcessed/reviewer/time;
 end fork
 
 |用户|
@@ -191,7 +211,7 @@ legend right
   当前不可用边界：
   1. 机构法人不能管理订单；OrderService 仅允许 ADMIN 或订单医生。
   2. 机构法人不能直接 POST/PUT/DELETE 机构项目，只能审核医生申请间接创建。
-  3. 医生、机构、顾问均不能调用分账提案与分账配置 HTTP 接口；当前仅 ADMIN。
+  3. 医生、机构、顾问均不能直接写分账配置；医生仅可通过 PROFILE_UPDATE 申请，法人批准后原子生效。
   4. 机构法人不能修改医生档案或医生文章；manageableDoctorIds 不含机构医生。
   5. 顾问获批加入机构后仍不获得机构、订单、项目、文章或分账管理权。
 endlegend

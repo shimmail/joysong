@@ -115,4 +115,20 @@ abstract interface class IdentityRepository {
     required String decision,
     required String reviewNote,
   });
+
+  Future<DoctorProjectChangeRequest> submitDoctorProjectProfileUpdate(
+    DoctorProjectProfileUpdateDraft draft,
+  );
+
+  Future<List<DoctorProjectProfileUpdateTarget>>
+      listDoctorProjectProfileUpdateTargets();
+
+  Future<List<DoctorProjectChangeRequest>> listDoctorProjectChangeRequests();
+
+  Future<void> reviewDoctorProjectChangeRequest({
+    required String id,
+    required String decision,
+    required String reviewNote,
+    required bool force,
+  });
 }

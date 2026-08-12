@@ -126,7 +126,7 @@ class ManagementAccessService(
                 """
                 SELECT institution_id
                 FROM doctor_institutions
-                WHERE doctor_id = ? AND status = 'APPROVED' AND deleted_at IS NULL
+                WHERE doctor_id = ? AND status = 'APPROVED' AND revoked_at IS NULL AND deleted_at IS NULL
                 """.trimIndent(),
                 String::class.java,
                 doctorId

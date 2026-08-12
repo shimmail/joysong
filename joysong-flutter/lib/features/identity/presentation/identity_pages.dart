@@ -458,12 +458,10 @@ class _ManagementCapabilities extends StatelessWidget {
   @override
   Widget build(BuildContext buildContext) {
     final isAdmin = context.platformRole == 'ADMIN';
-    final isLegalRepresentative = isAdmin ||
-        context.activeRoles.contains(
-          IdentityRoleType.institutionLegalRepresentative.code,
-        );
-    final isDoctor =
-        isAdmin || context.activeRoles.contains(IdentityRoleType.doctor.code);
+    final isLegalRepresentative = context.activeRoles.contains(
+      IdentityRoleType.institutionLegalRepresentative.code,
+    );
+    final isDoctor = context.activeRoles.contains(IdentityRoleType.doctor.code);
     final isConsultant =
         context.activeRoles.contains(IdentityRoleType.consultant.code);
     final groups = <({
@@ -521,6 +519,37 @@ class _ManagementCapabilities extends StatelessWidget {
                 context.canReviewInstitutionProjectRequests,
             action: _ManagementAction.institutionProjectJoinReviews,
           ),
+          (
+            icon: Icons.compare_arrows_outlined,
+            label: buildContext.localized(
+              '医生项目资料审核',
+              'Doctor project profile reviews',
+            ),
+            enabled: !isAdmin &&
+                isLegalRepresentative &&
+                context.canReviewInstitutionProjectRequests,
+            action: _ManagementAction.doctorProjectProfileReviews,
+          ),
+        ],
+      ),
+      (
+        icon: Icons.admin_panel_settings_outlined,
+        title: buildContext.localized('平台管理', 'Platform administration'),
+        membershipRequestType: null,
+        emptyText: buildContext.localized(
+          '暂无平台管理权限',
+          'No platform administration access',
+        ),
+        items: [
+          (
+            icon: Icons.compare_arrows_outlined,
+            label: buildContext.localized(
+              '医生项目资料审核',
+              'Doctor project profile reviews',
+            ),
+            enabled: isAdmin && context.canReviewInstitutionProjectRequests,
+            action: _ManagementAction.doctorProjectProfileReviews,
+          ),
         ],
       ),
       (
@@ -572,6 +601,15 @@ class _ManagementCapabilities extends StatelessWidget {
             ),
             enabled: isDoctor && context.canSubmitInstitutionProjectRequests,
             action: _ManagementAction.institutionProjectJoinRequest,
+          ),
+          (
+            icon: Icons.edit_note_outlined,
+            label: buildContext.localized(
+              '修改本人项目资料',
+              'Update my project profile',
+            ),
+            enabled: isDoctor && context.canSubmitInstitutionProjectRequests,
+            action: _ManagementAction.doctorProjectProfileUpdate,
           ),
           (
             icon: Icons.article_outlined,
@@ -766,12 +804,30 @@ class _ManagementCapabilities extends StatelessWidget {
       ));
       return;
     }
+    if (action == _ManagementAction.doctorProjectProfileUpdate) {
+      Navigator.of(context).push<void>(MaterialPageRoute(
+        builder: (_) => DoctorProjectProfileUpdatePage(
+          repository: repository,
+          pickAndUploadImage: doctorImagePicker,
+        ),
+      ));
+      return;
+    }
     if (action == _ManagementAction.institutionProjectJoinReviews) {
       Navigator.of(context).push<void>(MaterialPageRoute(
         builder: (_) => InstitutionProjectJoinRequestsPage(
           repository: repository,
           context: this.context,
           reviewMode: true,
+        ),
+      ));
+      return;
+    }
+    if (action == _ManagementAction.doctorProjectProfileReviews) {
+      Navigator.of(context).push<void>(MaterialPageRoute(
+        builder: (_) => DoctorProjectProfileReviewPage(
+          repository: repository,
+          context: this.context,
         ),
       ));
       return;
@@ -792,11 +848,13 @@ enum _ManagementAction {
   membershipReviews,
   institutionProjectReviews,
   institutionProjectJoinReviews,
+  doctorProjectProfileReviews,
   doctorProfile,
   applyMembership,
   platformProjectRequest,
   institutionProjectRequest,
   institutionProjectJoinRequest,
+  doctorProjectProfileUpdate,
   consultantMembership,
   consultantProjects,
   unavailable,
