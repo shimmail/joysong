@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
+import 'package:joysong_flutter/features/discover/presentation/institution_picker_page.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
 
@@ -370,16 +372,20 @@ class _DoctorProfileFormState extends State<_DoctorProfileForm> {
 }
 
 class InstitutionMembershipRequestsPage extends StatefulWidget {
-  const InstitutionMembershipRequestsPage({
+  InstitutionMembershipRequestsPage({
     required this.repository,
+    required this.discoverRepository,
     required this.context,
+    required String requestType,
     this.reviewMode = false,
     this.affiliationOnly = false,
     super.key,
-  });
+  }) : requestType = _validateMembershipRequestType(requestType);
 
   final IdentityRepository repository;
+  final DiscoverRepository discoverRepository;
   final ManagementContext context;
+  final String requestType;
   final bool reviewMode;
   final bool affiliationOnly;
 
@@ -394,13 +400,10 @@ class _InstitutionMembershipRequestsPageState
   List<InstitutionOption> _institutions = const [];
   List<InstitutionMembershipRequest> _requests = const [];
   String? _institutionId;
+  String? _selectedInstitutionName;
   String? _error;
   var _loading = true;
   var _saving = false;
-
-  String get _requestType => widget.context.activeRoles.contains('DOCTOR')
-      ? 'DOCTOR'
-      : 'CONSULTANT';
 
   @override
   void initState() {
@@ -460,26 +463,31 @@ class _InstitutionMembershipRequestsPageState
                 padding: const EdgeInsets.all(16),
                 children: [
                   if (!widget.reviewMode && !widget.affiliationOnly) ...[
-                    DropdownButtonFormField<String>(
-                      initialValue: _institutionId,
-                      decoration: InputDecoration(
-                        labelText: context.localized('目标机构', 'Institution'),
+                    ListTile(
+                      key: const Key('membership-institution-picker'),
+                      enabled: !_saving,
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.apartment_outlined),
+                      title: Text(
+                        _selectedInstitutionName ??
+                            context.localized('选择机构', 'Select institution'),
                       ),
-                      items: _institutions
-                          .map((item) => DropdownMenuItem(
-                                value: item.id,
-                                child: Text(item.name),
-                              ))
-                          .toList(),
-                      onChanged: (value) =>
-                          setState(() => _institutionId = value),
+                      subtitle: _institutionId == null
+                          ? Text(context.localized(
+                              '搜索全部机构',
+                              'Search all institutions',
+                            ))
+                          : null,
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: _saving ? null : _selectInstitution,
                     ),
                     const SizedBox(height: 12),
                     TextField(
                       controller: _note,
                       maxLines: 3,
                       decoration: InputDecoration(
-                        labelText: context.localized('申请说明', 'Application note'),
+                        labelText:
+                            context.localized('申请说明', 'Application note'),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -520,20 +528,22 @@ class _InstitutionMembershipRequestsPageState
                             : _institutionName(request.institutionId)),
                         subtitle: Text([
                           _statusLabel(request.status),
-                          if (request.requestNote.isNotEmpty) request.requestNote,
+                          if (request.requestNote.isNotEmpty)
+                            request.requestNote,
                           if (request.reviewNote.isNotEmpty)
                             context.localized(
                               '审核意见：${request.reviewNote}',
                               'Review: ${request.reviewNote}',
                             ),
                         ].join('\n')),
-                        trailing: widget.reviewMode && request.status == 'PENDING'
-                            ? IconButton(
-                                tooltip: context.localized('审核', 'Review'),
-                                icon: const Icon(Icons.fact_check_outlined),
-                                onPressed: () => _review(request),
-                              )
-                            : null,
+                        trailing:
+                            widget.reviewMode && request.status == 'PENDING'
+                                ? IconButton(
+                                    tooltip: context.localized('审核', 'Review'),
+                                    icon: const Icon(Icons.fact_check_outlined),
+                                    onPressed: () => _review(request),
+                                  )
+                                : null,
                       ),
                 ],
               ),
@@ -545,14 +555,15 @@ class _InstitutionMembershipRequestsPageState
     final institutionId = _institutionId;
     if (institutionId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.localized('请选择机构', 'Select an institution'))),
+        SnackBar(
+            content: Text(context.localized('请选择机构', 'Select an institution'))),
       );
       return;
     }
     setState(() => _saving = true);
     try {
       await widget.repository.submitInstitutionMembershipRequest(
-        requestType: _requestType,
+        requestType: widget.requestType,
         institutionId: institutionId,
         requestNote: _note.text,
       );
@@ -563,6 +574,20 @@ class _InstitutionMembershipRequestsPageState
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  Future<void> _selectInstitution() async {
+    final selection = await Navigator.of(context)
+        .push<InstitutionPickerSelection>(MaterialPageRoute(
+      builder: (_) => InstitutionPickerPage(
+        repository: widget.discoverRepository,
+      ),
+    ));
+    if (!mounted || selection == null) return;
+    setState(() {
+      _institutionId = selection.id;
+      _selectedInstitutionName = selection.name;
+    });
   }
 
   Future<void> _review(InstitutionMembershipRequest request) async {
@@ -581,10 +606,19 @@ class _InstitutionMembershipRequestsPageState
     }
   }
 
-  String _institutionName(String id) => _institutions
-      .where((item) => item.id == id)
-      .map((item) => item.name)
-      .firstOrNull ?? id;
+  String _institutionName(String id) =>
+      _institutions
+          .where((item) => item.id == id)
+          .map((item) => item.name)
+          .firstOrNull ??
+      id;
+}
+
+String _validateMembershipRequestType(String value) {
+  if (value != 'DOCTOR' && value != 'CONSULTANT') {
+    throw ArgumentError.value(value, 'requestType');
+  }
+  return value;
 }
 
 class PlatformProjectRequestPage extends StatefulWidget {
@@ -624,7 +658,8 @@ class _PlatformProjectRequestPageState
 
   Future<void> _load() async {
     try {
-      final requests = await widget.repository.listProfessionalProjectRequests();
+      final requests =
+          await widget.repository.listProfessionalProjectRequests();
       if (mounted) {
         setState(() => _requests =
             requests.where((item) => item.requestType == 'PLATFORM').toList());
@@ -637,7 +672,8 @@ class _PlatformProjectRequestPageState
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(
-          title: Text(context.localized('申请新增平台项目', 'Request Platform Project')),
+          title:
+              Text(context.localized('申请新增平台项目', 'Request Platform Project')),
         ),
         body: ListView(
           padding: const EdgeInsets.all(16),
@@ -649,7 +685,8 @@ class _PlatformProjectRequestPageState
               context.localized('项目说明', 'Description'),
               maxLines: 4,
             ),
-            _requestField(_notes, context.localized('补充说明', 'Notes'), maxLines: 3),
+            _requestField(_notes, context.localized('补充说明', 'Notes'),
+                maxLines: 3),
             FilledButton.icon(
               onPressed: _saving ? null : _submit,
               icon: const Icon(Icons.send_outlined),
@@ -657,7 +694,8 @@ class _PlatformProjectRequestPageState
             ),
             if (_error != null) ...[
               const SizedBox(height: 12),
-              Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              Text(_error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error)),
             ],
             const SizedBox(height: 24),
             for (final request in _requests)
@@ -805,13 +843,15 @@ class _InstitutionProjectRequestsPageState
                                 child: Text(item.name),
                               ))
                           .toList(),
-                      onChanged: (value) => setState(() => _institutionId = value),
+                      onChanged: (value) =>
+                          setState(() => _institutionId = value),
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
                       initialValue: _projectId,
                       decoration: InputDecoration(
-                        labelText: context.localized('平台项目', 'Platform project'),
+                        labelText:
+                            context.localized('平台项目', 'Platform project'),
                       ),
                       items: _projects
                           .map((item) => DropdownMenuItem(
@@ -832,7 +872,8 @@ class _InstitutionProjectRequestsPageState
                       context.localized('价格建议', 'Price suggestion'),
                       keyboardType: TextInputType.number,
                     ),
-                    _requestField(_notes, context.localized('说明', 'Notes'), maxLines: 3),
+                    _requestField(_notes, context.localized('说明', 'Notes'),
+                        maxLines: 3),
                     FilledButton.icon(
                       onPressed: _saving ? null : _submit,
                       icon: const Icon(Icons.send_outlined),
@@ -841,12 +882,15 @@ class _InstitutionProjectRequestsPageState
                     const SizedBox(height: 24),
                   ],
                   if (_error != null)
-                    Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                    Text(_error!,
+                        style: TextStyle(
+                            color: Theme.of(context).colorScheme.error)),
                   for (final request in _requests)
                     ListTile(
                       contentPadding: EdgeInsets.zero,
                       leading: const Icon(Icons.medical_services_outlined),
-                      title: Text(request.projectName ?? request.projectId ?? ''),
+                      title:
+                          Text(request.projectName ?? request.projectId ?? ''),
                       subtitle: Text([
                         request.institutionName ?? request.institutionId ?? '',
                         if ((request.doctorName).isNotEmpty) request.doctorName,
@@ -983,8 +1027,8 @@ class _InstitutionProjectJoinRequestsPageState
         _requests = requests
             .where((request) => request.requestType == 'JOIN')
             .where((request) => institutionIds.contains(request.institutionId))
-            .where((request) =>
-                widget.reviewMode || request.doctorId == doctorId)
+            .where(
+                (request) => widget.reviewMode || request.doctorId == doctorId)
             .toList(growable: false);
         _projects = projects
             .where((project) => institutionIds.contains(project.institutionId))
@@ -1077,7 +1121,8 @@ class _InstitutionProjectJoinRequestsPageState
                 if (_error != null)
                   Text(
                     _error!,
-                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                    style:
+                        TextStyle(color: Theme.of(context).colorScheme.error),
                   ),
                 if (_requests.isEmpty && _error == null)
                   ListTile(

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/files/app_file_picker.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
 import 'package:joysong_flutter/features/identity/presentation/identity_controller.dart';
@@ -362,12 +363,14 @@ Future<String?> _pickInstitutionProfileImage() async {
 class ManagementCenterPage extends StatefulWidget {
   const ManagementCenterPage({
     required this.repository,
+    required this.discoverRepository,
     this.institutionImagePicker,
     this.doctorImagePicker,
     super.key,
   });
 
   final IdentityRepository repository;
+  final DiscoverRepository discoverRepository;
   final InstitutionProfileImagePicker? institutionImagePicker;
   final Future<String?> Function()? doctorImagePicker;
 
@@ -425,6 +428,7 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
             ManagementLoadStatus.ready => _ManagementCapabilities(
                 context: _controller.context!,
                 repository: widget.repository,
+                discoverRepository: widget.discoverRepository,
                 institutionImagePicker: widget.institutionImagePicker,
                 doctorImagePicker: widget.doctorImagePicker,
               ),
@@ -439,12 +443,14 @@ class _ManagementCapabilities extends StatelessWidget {
   const _ManagementCapabilities({
     required this.context,
     required this.repository,
+    required this.discoverRepository,
     this.institutionImagePicker,
     this.doctorImagePicker,
   });
 
   final ManagementContext context;
   final IdentityRepository repository;
+  final DiscoverRepository discoverRepository;
   final InstitutionProfileImagePicker? institutionImagePicker;
   final Future<String?> Function()? doctorImagePicker;
 
@@ -463,11 +469,13 @@ class _ManagementCapabilities extends StatelessWidget {
       IconData icon,
       String title,
       String emptyText,
+      String? membershipRequestType,
       List<({IconData icon, String label, bool enabled})> items,
     })>[
       (
         icon: Icons.apartment_outlined,
         title: buildContext.localized('法人', 'Legal representative'),
+        membershipRequestType: null,
         emptyText: buildContext.localized(
           '暂无机构法人可用配置',
           'No legal representative settings available',
@@ -507,6 +515,7 @@ class _ManagementCapabilities extends StatelessWidget {
       (
         icon: Icons.medical_services_outlined,
         title: buildContext.localized('医生', 'Doctor'),
+        membershipRequestType: 'DOCTOR',
         emptyText: buildContext.localized(
           '暂无医生可用配置',
           'No doctor settings available',
@@ -563,6 +572,7 @@ class _ManagementCapabilities extends StatelessWidget {
       (
         icon: Icons.support_agent_outlined,
         title: buildContext.localized('顾问', 'Consultant'),
+        membershipRequestType: 'CONSULTANT',
         emptyText: buildContext.localized(
           '暂无顾问可用配置',
           'No consultant settings available',
@@ -616,8 +626,11 @@ class _ManagementCapabilities extends StatelessWidget {
                       ),
                     ),
                     trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () =>
-                        _openCapability(buildContext, capability.label),
+                    onTap: () => _openCapability(
+                      buildContext,
+                      capability.label,
+                      membershipRequestType: group.membershipRequestType,
+                    ),
                   ),
             ],
           ),
@@ -627,7 +640,23 @@ class _ManagementCapabilities extends StatelessWidget {
     );
   }
 
-  void _openCapability(BuildContext context, String label) {
+  void _openCapability(
+    BuildContext context,
+    String label, {
+    String? membershipRequestType,
+  }) {
+    if ((label == '申请加入机构' || label == 'Apply to institution') &&
+        membershipRequestType != null) {
+      Navigator.of(context).push<void>(MaterialPageRoute(
+        builder: (_) => InstitutionMembershipRequestsPage(
+          repository: repository,
+          discoverRepository: discoverRepository,
+          context: this.context,
+          requestType: membershipRequestType,
+        ),
+      ));
+      return;
+    }
     if (label == '医生档案' || label == 'Doctor profile') {
       Navigator.of(context).push<void>(MaterialPageRoute(
         builder: (_) => DoctorSelfProfilePage(
@@ -653,27 +682,22 @@ class _ManagementCapabilities extends StatelessWidget {
         MaterialPageRoute(
           builder: (_) => InstitutionMembershipRequestsPage(
             repository: repository,
+            discoverRepository: discoverRepository,
             context: this.context,
+            requestType: 'DOCTOR',
             reviewMode: true,
           ),
         ),
       );
       return;
     }
-    if (label == '申请加入机构' || label == 'Apply to institution') {
-      Navigator.of(context).push<void>(MaterialPageRoute(
-        builder: (_) => InstitutionMembershipRequestsPage(
-          repository: repository,
-          context: this.context,
-        ),
-      ));
-      return;
-    }
     if (label == '机构归属' || label == 'Institution affiliation') {
       Navigator.of(context).push<void>(MaterialPageRoute(
         builder: (_) => InstitutionMembershipRequestsPage(
           repository: repository,
+          discoverRepository: discoverRepository,
           context: this.context,
+          requestType: 'CONSULTANT',
           affiliationOnly: true,
         ),
       ));

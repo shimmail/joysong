@@ -3,6 +3,8 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
+import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
 import 'package:joysong_flutter/features/identity/presentation/identity_controller.dart';
@@ -304,7 +306,9 @@ void main() {
     await tester.pumpWidget(_localizedApp(
       home: InstitutionMembershipRequestsPage(
         repository: repository,
+        discoverRepository: const _FakeDiscoverRepository(),
         context: context,
+        requestType: 'DOCTOR',
         reviewMode: true,
       ),
     ));
@@ -357,7 +361,10 @@ void main() {
 
     await tester.pumpWidget(
       _localizedApp(
-        home: ManagementCenterPage(repository: repository),
+        home: ManagementCenterPage(
+          repository: repository,
+          discoverRepository: const _FakeDiscoverRepository(),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -389,7 +396,10 @@ void main() {
       );
 
     await tester.pumpWidget(_localizedApp(
-      home: ManagementCenterPage(repository: repository),
+      home: ManagementCenterPage(
+        repository: repository,
+        discoverRepository: const _FakeDiscoverRepository(),
+      ),
     ));
     await tester.pumpAndSettle();
 
@@ -418,7 +428,10 @@ void main() {
       );
 
     await tester.pumpWidget(_localizedApp(
-      home: ManagementCenterPage(repository: repository),
+      home: ManagementCenterPage(
+        repository: repository,
+        discoverRepository: const _FakeDiscoverRepository(),
+      ),
     ));
     await tester.pumpAndSettle();
 
@@ -440,7 +453,10 @@ void main() {
       );
 
     await tester.pumpWidget(_localizedApp(
-      home: ManagementCenterPage(repository: repository),
+      home: ManagementCenterPage(
+        repository: repository,
+        discoverRepository: const _FakeDiscoverRepository(),
+      ),
     ));
     await tester.pumpAndSettle();
 
@@ -463,6 +479,33 @@ Widget _localizedApp(
       ],
       home: home,
     );
+
+final class _FakeDiscoverRepository implements DiscoverRepository {
+  const _FakeDiscoverRepository();
+
+  @override
+  Future<DiscoverFilterOptions> loadFilterOptions() async =>
+      const DiscoverFilterOptions();
+
+  @override
+  Future<DiscoverPageResult> loadPage({
+    required DiscoverContentType type,
+    required int offset,
+    required int limit,
+    String query = '',
+    List<String> categories = const [],
+    List<String> cities = const [],
+    List<String> tags = const [],
+  }) async =>
+      const DiscoverPageResult(items: [], hasMore: false);
+
+  @override
+  Future<DiscoverItem> loadDetail({
+    required DiscoverContentType type,
+    required String id,
+  }) =>
+      throw UnimplementedError();
+}
 
 final class _FakeIdentityRepository implements IdentityRepository {
   var contextCalls = 0;

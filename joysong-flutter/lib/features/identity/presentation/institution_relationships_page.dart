@@ -1,12 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
+import 'package:joysong_flutter/features/discover/presentation/institution_picker_page.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
 
 class InstitutionRelationshipsPage extends StatefulWidget {
-  const InstitutionRelationshipsPage({required this.repository, super.key});
+  const InstitutionRelationshipsPage({
+    required this.repository,
+    required this.discoverRepository,
+    super.key,
+  });
 
   final IdentityRepository repository;
+  final DiscoverRepository discoverRepository;
 
   @override
   State<InstitutionRelationshipsPage> createState() =>
@@ -22,6 +29,7 @@ class _InstitutionRelationshipsPageState
   List<InstitutionMembershipRequest> _membershipRequests = const [];
   String _action = 'JOIN';
   String? _institutionId;
+  String? _selectedInstitutionName;
   String? _error;
   var _loading = true;
   var _saving = false;
@@ -71,10 +79,12 @@ class _InstitutionRelationshipsPageState
         _loading = false;
       });
     } catch (_) {
-      if (mounted) setState(() {
-        _loading = false;
-        _error = '机构关系加载失败，请重试';
-      });
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = '机构关系加载失败，请重试';
+        });
+      }
     }
   }
 
@@ -95,11 +105,13 @@ class _InstitutionRelationshipsPageState
                         segments: [
                           ButtonSegment(
                             value: false,
-                            label: Text(context.localized('我的关系', 'My relationships')),
+                            label: Text(
+                                context.localized('我的关系', 'My relationships')),
                           ),
                           ButtonSegment(
                             value: true,
-                            label: Text(context.localized('审核申请', 'Review requests')),
+                            label: Text(
+                                context.localized('审核申请', 'Review requests')),
                           ),
                         ],
                         selected: {_legalView},
@@ -172,7 +184,8 @@ class _InstitutionRelationshipsPageState
     final available = _action == 'LEAVE'
         ? _institutions.where((item) => currentIds.contains(item.id)).toList()
         : _institutions;
-    final history = _requests.where((item) => item.userId == contextData.userId).toList();
+    final history =
+        _requests.where((item) => item.userId == contextData.userId).toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -182,38 +195,69 @@ class _InstitutionRelationshipsPageState
         if (currentIds.isEmpty)
           Text(context.localized('暂无已确认机构归属', 'No confirmed affiliations'))
         else
-          for (final id in currentIds) ListTile(title: Text(_institutionName(id))),
+          for (final id in currentIds)
+            ListTile(title: Text(_institutionName(id))),
         if (canApply) ...[
           const SizedBox(height: 16),
           SegmentedButton<String>(
             segments: [
-              ButtonSegment(value: 'JOIN', label: Text(context.localized('加入机构', 'Join institution'))),
-              ButtonSegment(value: 'LEAVE', label: Text(context.localized('离开机构', 'Leave institution'))),
+              ButtonSegment(
+                  value: 'JOIN',
+                  label: Text(context.localized('加入机构', 'Join institution'))),
+              ButtonSegment(
+                  value: 'LEAVE',
+                  label: Text(context.localized('离开机构', 'Leave institution'))),
             ],
             selected: {_action},
             onSelectionChanged: (value) => setState(() {
               _action = value.first;
               _institutionId = null;
+              _selectedInstitutionName = null;
             }),
           ),
           const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            value: _institutionId,
-            decoration: InputDecoration(labelText: context.localized('目标机构', 'Institution')),
-            items: available
-                .map((item) => DropdownMenuItem(value: item.id, child: Text(item.name)))
-                .toList(),
-            onChanged: _saving ? null : (value) => setState(() => _institutionId = value),
-          ),
+          if (_action == 'JOIN')
+            ListTile(
+              key: const Key('doctor-join-institution-picker'),
+              enabled: !_saving,
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.apartment_outlined),
+              title: Text(_selectedInstitutionName ??
+                  context.localized('选择机构', 'Select institution')),
+              subtitle: _institutionId == null
+                  ? Text(context.localized('搜索全部机构', 'Search all institutions'))
+                  : null,
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: _saving ? null : _selectInstitution,
+            )
+          else
+            DropdownButtonFormField<String>(
+              initialValue: _institutionId,
+              decoration: InputDecoration(
+                labelText: context.localized('目标机构', 'Institution'),
+              ),
+              items: available
+                  .map((item) => DropdownMenuItem(
+                        value: item.id,
+                        child: Text(item.name),
+                      ))
+                  .toList(),
+              onChanged: _saving
+                  ? null
+                  : (value) => setState(() => _institutionId = value),
+            ),
           const SizedBox(height: 12),
           TextField(
             controller: _requestNote,
             maxLines: 3,
-            decoration: InputDecoration(labelText: context.localized('申请说明', 'Request note')),
+            decoration: InputDecoration(
+                labelText: context.localized('申请说明', 'Request note')),
           ),
           const SizedBox(height: 12),
           FilledButton.icon(
-            onPressed: _saving || available.isEmpty ? null : _submit,
+            onPressed: _saving || (_action == 'LEAVE' && available.isEmpty)
+                ? null
+                : _submit,
             icon: const Icon(Icons.send_outlined),
             label: Text(context.localized('提交申请', 'Submit request')),
           ),
@@ -221,42 +265,60 @@ class _InstitutionRelationshipsPageState
         const SizedBox(height: 24),
         Text(context.localized('申请记录', 'Request history'),
             style: Theme.of(context).textTheme.titleMedium),
-        for (final request in history) _requestTile(context, request, canWithdraw: true),
+        for (final request in history)
+          _requestTile(context, request, canWithdraw: true),
       ],
     );
   }
 
   Widget _buildLegalView(BuildContext context) {
     final managedIds = _managementContext!.managedInstitutionIds;
-    final requests = _requests.where((item) => managedIds.contains(item.institutionId)).toList();
+    final requests = _requests
+        .where((item) => managedIds.contains(item.institutionId))
+        .toList();
     final pending = requests.where((item) => item.status == 'PENDING').toList();
     final history = requests.where((item) => item.status != 'PENDING').toList();
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const SizedBox(height: 16),
-      Text(context.localized('待审核', 'Pending'), style: Theme.of(context).textTheme.titleMedium),
-      if (pending.isEmpty) Text(context.localized('暂无待审核申请', 'No pending requests')),
-      for (final request in pending) _requestTile(context, request, canReview: true),
+      Text(context.localized('待审核', 'Pending'),
+          style: Theme.of(context).textTheme.titleMedium),
+      if (pending.isEmpty)
+        Text(context.localized('暂无待审核申请', 'No pending requests')),
+      for (final request in pending)
+        _requestTile(context, request, canReview: true),
       const SizedBox(height: 20),
-      Text(context.localized('审核历史', 'Review history'), style: Theme.of(context).textTheme.titleMedium),
+      Text(context.localized('审核历史', 'Review history'),
+          style: Theme.of(context).textTheme.titleMedium),
       for (final request in history) _requestTile(context, request),
     ]);
   }
 
-  Widget _requestTile(BuildContext context, DoctorInstitutionChangeRequest request,
-      {bool canWithdraw = false, bool canReview = false}) => ListTile(
+  Widget _requestTile(
+          BuildContext context, DoctorInstitutionChangeRequest request,
+          {bool canWithdraw = false, bool canReview = false}) =>
+      ListTile(
         contentPadding: EdgeInsets.zero,
         leading: const Icon(Icons.apartment_outlined),
-        title: Text('${_actionLabel(context, request.action)} · ${request.institutionName.isEmpty ? _institutionName(request.institutionId) : request.institutionName}'),
+        title: Text(
+            '${_actionLabel(context, request.action)} · ${request.institutionName.isEmpty ? _institutionName(request.institutionId) : request.institutionName}'),
         subtitle: Text([
           if (request.doctorName.isNotEmpty) request.doctorName,
           _statusLabel(context, request.status),
           if (request.requestNote.isNotEmpty) request.requestNote,
-          if (request.reviewNote.isNotEmpty) context.localized('审核意见：${request.reviewNote}', 'Review: ${request.reviewNote}'),
+          if (request.reviewNote.isNotEmpty)
+            context.localized(
+                '审核意见：${request.reviewNote}', 'Review: ${request.reviewNote}'),
         ].join('\n')),
         trailing: canReview
-            ? IconButton(tooltip: context.localized('审核', 'Review'), icon: const Icon(Icons.fact_check_outlined), onPressed: () => _review(request))
+            ? IconButton(
+                tooltip: context.localized('审核', 'Review'),
+                icon: const Icon(Icons.fact_check_outlined),
+                onPressed: () => _review(request))
             : canWithdraw && request.status == 'PENDING'
-                ? IconButton(tooltip: context.localized('撤回', 'Withdraw'), icon: const Icon(Icons.undo_outlined), onPressed: () => _withdraw(request))
+                ? IconButton(
+                    tooltip: context.localized('撤回', 'Withdraw'),
+                    icon: const Icon(Icons.undo_outlined),
+                    onPressed: () => _withdraw(request))
                 : null,
       );
 
@@ -282,13 +344,17 @@ class _InstitutionRelationshipsPageState
   Future<void> _submit() async {
     final institutionId = _institutionId;
     if (institutionId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.localized('请选择机构', 'Select an institution'))));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(context.localized('请选择机构', 'Select an institution'))));
       return;
     }
     setState(() => _saving = true);
     try {
       await widget.repository.submitDoctorInstitutionChangeRequest(
-        DoctorInstitutionChangeRequestDraft(institutionId: institutionId, action: _action, requestNote: _requestNote.text),
+        DoctorInstitutionChangeRequestDraft(
+            institutionId: institutionId,
+            action: _action,
+            requestNote: _requestNote.text),
       );
       _requestNote.clear();
       await _load();
@@ -299,9 +365,24 @@ class _InstitutionRelationshipsPageState
     }
   }
 
+  Future<void> _selectInstitution() async {
+    final selection = await Navigator.of(context)
+        .push<InstitutionPickerSelection>(MaterialPageRoute(
+      builder: (_) => InstitutionPickerPage(
+        repository: widget.discoverRepository,
+      ),
+    ));
+    if (!mounted || selection == null) return;
+    setState(() {
+      _institutionId = selection.id;
+      _selectedInstitutionName = selection.name;
+    });
+  }
+
   Future<void> _withdraw(DoctorInstitutionChangeRequest request) async {
     try {
-      await widget.repository.withdrawDoctorInstitutionChangeRequest(request.id);
+      await widget.repository
+          .withdrawDoctorInstitutionChangeRequest(request.id);
       await _load();
     } catch (_) {
       if (mounted) setState(() => _error = '申请撤回失败，请稍后重试');
@@ -312,36 +393,55 @@ class _InstitutionRelationshipsPageState
     final result = await _showReviewDialog(context);
     if (result == null) return;
     try {
-      await widget.repository.reviewDoctorInstitutionChangeRequest(id: request.id, decision: result.decision, reviewNote: result.note);
+      await widget.repository.reviewDoctorInstitutionChangeRequest(
+          id: request.id, decision: result.decision, reviewNote: result.note);
       await _load();
     } catch (_) {
       if (mounted) setState(() => _error = '审核提交失败，请稍后重试');
     }
   }
 
-  Future<({String decision, String note})?> _showReviewDialog(BuildContext context) async {
+  Future<({String decision, String note})?> _showReviewDialog(
+      BuildContext context) async {
     final note = TextEditingController();
     var decision = 'APPROVED';
     final result = await showDialog<({String decision, String note})>(
       context: context,
-      builder: (dialogContext) => StatefulBuilder(builder: (context, setState) => AlertDialog(
-        title: Text(context.localized('审核申请', 'Review request')),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          DropdownButtonFormField<String>(initialValue: decision, items: const [
-            DropdownMenuItem(value: 'APPROVED', child: Text('通过')),
-            DropdownMenuItem(value: 'REJECTED', child: Text('驳回')),
-          ], onChanged: (value) => setState(() => decision = value ?? 'APPROVED')),
-          const SizedBox(height: 12),
-          TextField(controller: note, maxLines: 3, decoration: InputDecoration(labelText: context.localized('审核意见', 'Review note'))),
-        ]),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(dialogContext).pop(), child: Text(context.localized('取消', 'Cancel'))),
-          FilledButton(onPressed: () {
-            if (decision == 'REJECTED' && note.text.trim().isEmpty) return;
-            Navigator.of(dialogContext).pop((decision: decision, note: note.text.trim()));
-          }, child: Text(context.localized('确认', 'Confirm'))),
-        ],
-      )),
+      builder: (dialogContext) => StatefulBuilder(
+          builder: (context, setState) => AlertDialog(
+                title: Text(context.localized('审核申请', 'Review request')),
+                content: Column(mainAxisSize: MainAxisSize.min, children: [
+                  DropdownButtonFormField<String>(
+                      initialValue: decision,
+                      items: const [
+                        DropdownMenuItem(value: 'APPROVED', child: Text('通过')),
+                        DropdownMenuItem(value: 'REJECTED', child: Text('驳回')),
+                      ],
+                      onChanged: (value) =>
+                          setState(() => decision = value ?? 'APPROVED')),
+                  const SizedBox(height: 12),
+                  TextField(
+                      controller: note,
+                      maxLines: 3,
+                      decoration: InputDecoration(
+                          labelText: context.localized('审核意见', 'Review note'))),
+                ]),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      child: Text(context.localized('取消', 'Cancel'))),
+                  FilledButton(
+                      onPressed: () {
+                        if (decision == 'REJECTED' &&
+                            note.text.trim().isEmpty) {
+                          return;
+                        }
+                        Navigator.of(dialogContext)
+                            .pop((decision: decision, note: note.text.trim()));
+                      },
+                      child: Text(context.localized('确认', 'Confirm'))),
+                ],
+              )),
     );
     note.dispose();
     return result;
@@ -375,6 +475,7 @@ class _ErrorMessage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(top: 16),
-        child: Text(message, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+        child: Text(message,
+            style: TextStyle(color: Theme.of(context).colorScheme.error)),
       );
 }
