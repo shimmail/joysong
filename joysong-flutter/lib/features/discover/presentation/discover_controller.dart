@@ -84,6 +84,7 @@ final class DiscoverController extends ChangeNotifier {
       return;
     }
     _isLoadingMore = true;
+    _errorMessage = null;
     final generation = _generation;
     notifyListeners();
     try {

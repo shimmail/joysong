@@ -5,6 +5,7 @@ import 'package:joysong_flutter/core/files/app_file_picker.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/routing/app_router.dart';
 import 'package:joysong_flutter/features/auth/domain/auth_models.dart';
+import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
 import 'package:joysong_flutter/features/identity/presentation/identity_pages.dart';
 import 'package:joysong_flutter/features/identity/presentation/institution_relationships_page.dart';
@@ -20,6 +21,7 @@ class ProfilePage extends StatefulWidget {
   const ProfilePage({
     this.profileRepository,
     this.identityRepository,
+    this.discoverRepository,
     this.socialRepository,
     this.onOrders,
     this.onDiaries,
@@ -34,6 +36,7 @@ class ProfilePage extends StatefulWidget {
 
   final ProfileRepository? profileRepository;
   final IdentityRepository? identityRepository;
+  final DiscoverRepository? discoverRepository;
   final SocialRepository? socialRepository;
   final VoidCallback? onOrders;
   final VoidCallback? onDiaries;
@@ -137,6 +140,9 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                   onTap: _openIdentityCenter,
                 ),
+              ],
+              if (widget.identityRepository != null &&
+                  widget.discoverRepository != null) ...[
                 _MenuItem(
                   icon: Icons.admin_panel_settings_outlined,
                   title: context.localized('专业管理', 'Professional management'),
@@ -300,6 +306,7 @@ class _ProfilePageState extends State<ProfilePage> {
       MaterialPageRoute(
         builder: (_) => ManagementCenterPage(
           repository: widget.identityRepository!,
+          discoverRepository: widget.discoverRepository!,
           institutionImagePicker:
               widget.socialRepository == null ? null : _pickInstitutionImage,
           doctorImagePicker:
@@ -314,6 +321,7 @@ class _ProfilePageState extends State<ProfilePage> {
       MaterialPageRoute(
         builder: (_) => InstitutionRelationshipsPage(
           repository: widget.identityRepository!,
+          discoverRepository: widget.discoverRepository!,
         ),
       ),
     );

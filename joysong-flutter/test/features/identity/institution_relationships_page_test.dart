@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
+import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
+import 'package:joysong_flutter/features/identity/presentation/identity_pages.dart';
 import 'package:joysong_flutter/features/identity/presentation/institution_relationships_page.dart';
 import 'package:joysong_flutter/features/profile/presentation/profile_page.dart';
 
@@ -20,23 +23,27 @@ void main() {
       );
 
     await tester.pumpWidget(MaterialApp(
-      home: InstitutionRelationshipsPage(repository: repository),
+      home: InstitutionRelationshipsPage(
+        repository: repository,
+        discoverRepository: const _FakeDiscoverRepository(),
+      ),
     ));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('离开机构'));
+    await tester.tap(find.text('Leave institution'));
     await tester.pumpAndSettle();
     await tester.tap(find.byType(DropdownButtonFormField<String>));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Joysong Clinic').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('提交申请'));
+    await tester.tap(find.text('Submit request'));
     await tester.pumpAndSettle();
 
     expect(repository.submittedDraft?.action, 'LEAVE');
     expect(repository.submittedDraft?.institutionId, 'inst-1');
   });
 
-  testWidgets('legal representative rejects with a required reason', (tester) async {
+  testWidgets('legal representative rejects with a required reason',
+      (tester) async {
     final repository = _FakeIdentityRepository()
       ..context = const ManagementContext(
         userId: 'legal-user',
@@ -60,7 +67,10 @@ void main() {
       ];
 
     await tester.pumpWidget(MaterialApp(
-      home: InstitutionRelationshipsPage(repository: repository),
+      home: InstitutionRelationshipsPage(
+        repository: repository,
+        discoverRepository: const _FakeDiscoverRepository(),
+      ),
     ));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('审核'));
@@ -80,7 +90,8 @@ void main() {
     expect(repository.reviewDecision, 'REJECTED');
   });
 
-  testWidgets('doctor without apply capability sees history without submit form',
+  testWidgets(
+      'doctor without apply capability sees history without submit form',
       (tester) async {
     final repository = _FakeIdentityRepository()
       ..context = const ManagementContext(
@@ -95,7 +106,10 @@ void main() {
       );
 
     await tester.pumpWidget(MaterialApp(
-      home: InstitutionRelationshipsPage(repository: repository),
+      home: InstitutionRelationshipsPage(
+        repository: repository,
+        discoverRepository: const _FakeDiscoverRepository(),
+      ),
     ));
     await tester.pumpAndSettle();
 
@@ -130,7 +144,10 @@ void main() {
       ];
 
     await tester.pumpWidget(MaterialApp(
-      home: InstitutionRelationshipsPage(repository: repository),
+      home: InstitutionRelationshipsPage(
+        repository: repository,
+        discoverRepository: const _FakeDiscoverRepository(),
+      ),
     ));
     await tester.pumpAndSettle();
 
@@ -141,8 +158,13 @@ void main() {
     expect(find.text('离开机构'), findsNothing);
   });
 
-  testWidgets('profile exposes institution relationships when identity is available',
+  testWidgets(
+      'profile keeps identity verification without discover repository',
       (tester) async {
+    tester.view.physicalSize = const Size(900, 4000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     final repository = _FakeIdentityRepository()
       ..context = const ManagementContext(
         userId: 'doctor-user',
@@ -152,13 +174,47 @@ void main() {
         visibleInstitutionIds: [],
       );
 
-    await tester.pumpWidget(MaterialApp(home: ProfilePage(identityRepository: repository)));
+    await tester.pumpWidget(MaterialApp(
+      locale: const Locale('zh'),
+      home: ProfilePage(
+        identityRepository: repository,
+      ),
+    ));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('机构关系'));
+    final identityEntry = find.textContaining(RegExp('身份认证|Identity verification'));
+    expect(identityEntry, findsOneWidget);
+    await tester.tap(identityEntry);
     await tester.pumpAndSettle();
-    expect(find.text('当前机构'), findsOneWidget);
+    expect(find.byType(IdentityCenterPage), findsOneWidget);
   });
+}
+
+final class _FakeDiscoverRepository implements DiscoverRepository {
+  const _FakeDiscoverRepository();
+
+  @override
+  Future<DiscoverFilterOptions> loadFilterOptions() async =>
+      const DiscoverFilterOptions();
+
+  @override
+  Future<DiscoverPageResult> loadPage({
+    required DiscoverContentType type,
+    required int offset,
+    required int limit,
+    String query = '',
+    List<String> categories = const [],
+    List<String> cities = const [],
+    List<String> tags = const [],
+  }) async =>
+      const DiscoverPageResult(items: [], hasMore: false);
+
+  @override
+  Future<DiscoverItem> loadDetail({
+    required DiscoverContentType type,
+    required String id,
+  }) =>
+      throw UnimplementedError();
 }
 
 final class _FakeIdentityRepository implements IdentityRepository {

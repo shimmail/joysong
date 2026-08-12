@@ -260,6 +260,7 @@ class _AppShellState extends State<AppShell> {
         ProfilePage(
           profileRepository: _profileRepository,
           identityRepository: _identityRepository,
+          discoverRepository: _discoverRepository,
           socialRepository: _socialRepository,
           onOrders: _ordersController == null ? null : _openOrders,
           onDiaries: _socialController == null ? null : _openSocial,

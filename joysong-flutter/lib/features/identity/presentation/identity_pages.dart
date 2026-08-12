@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/files/app_file_picker.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
 import 'package:joysong_flutter/features/identity/presentation/identity_controller.dart';
@@ -362,12 +363,14 @@ Future<String?> _pickInstitutionProfileImage() async {
 class ManagementCenterPage extends StatefulWidget {
   const ManagementCenterPage({
     required this.repository,
+    required this.discoverRepository,
     this.institutionImagePicker,
     this.doctorImagePicker,
     super.key,
   });
 
   final IdentityRepository repository;
+  final DiscoverRepository discoverRepository;
   final InstitutionProfileImagePicker? institutionImagePicker;
   final Future<String?> Function()? doctorImagePicker;
 
@@ -425,6 +428,7 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
             ManagementLoadStatus.ready => _ManagementCapabilities(
                 context: _controller.context!,
                 repository: widget.repository,
+                discoverRepository: widget.discoverRepository,
                 institutionImagePicker: widget.institutionImagePicker,
                 doctorImagePicker: widget.doctorImagePicker,
               ),
@@ -439,12 +443,14 @@ class _ManagementCapabilities extends StatelessWidget {
   const _ManagementCapabilities({
     required this.context,
     required this.repository,
+    required this.discoverRepository,
     this.institutionImagePicker,
     this.doctorImagePicker,
   });
 
   final ManagementContext context;
   final IdentityRepository repository;
+  final DiscoverRepository discoverRepository;
   final InstitutionProfileImagePicker? institutionImagePicker;
   final Future<String?> Function()? doctorImagePicker;
 
@@ -463,11 +469,14 @@ class _ManagementCapabilities extends StatelessWidget {
       IconData icon,
       String title,
       String emptyText,
-      List<({IconData icon, String label, bool enabled})> items,
+      String? membershipRequestType,
+      List<({IconData icon, String label, bool enabled, _ManagementAction action})>
+          items,
     })>[
       (
         icon: Icons.apartment_outlined,
         title: buildContext.localized('法人', 'Legal representative'),
+        membershipRequestType: null,
         emptyText: buildContext.localized(
           '暂无机构法人可用配置',
           'No legal representative settings available',
@@ -477,12 +486,14 @@ class _ManagementCapabilities extends StatelessWidget {
             icon: Icons.apartment_outlined,
             label: buildContext.localized('机构档案', 'Institution profile'),
             enabled: isLegalRepresentative && context.canManageInstitutions,
+            action: _ManagementAction.institutionProfile,
           ),
           (
             icon: Icons.how_to_reg_outlined,
             label: buildContext.localized('成员加入审核', 'Membership reviews'),
             enabled:
                 isLegalRepresentative && context.canReviewInstitutionRequests,
+            action: _ManagementAction.membershipReviews,
           ),
           (
             icon: Icons.fact_check_outlined,
@@ -492,6 +503,7 @@ class _ManagementCapabilities extends StatelessWidget {
             ),
             enabled: isLegalRepresentative &&
                 context.canReviewInstitutionProjectRequests,
+            action: _ManagementAction.institutionProjectReviews,
           ),
           (
             icon: Icons.group_add_outlined,
@@ -501,12 +513,14 @@ class _ManagementCapabilities extends StatelessWidget {
             ),
             enabled: isLegalRepresentative &&
                 context.canReviewInstitutionProjectRequests,
+            action: _ManagementAction.institutionProjectJoinReviews,
           ),
         ],
       ),
       (
         icon: Icons.medical_services_outlined,
         title: buildContext.localized('医生', 'Doctor'),
+        membershipRequestType: 'DOCTOR',
         emptyText: buildContext.localized(
           '暂无医生可用配置',
           'No doctor settings available',
@@ -518,11 +532,13 @@ class _ManagementCapabilities extends StatelessWidget {
             enabled:
                 context.activeRoles.contains(IdentityRoleType.doctor.code) &&
                     context.canManageDoctors,
+            action: _ManagementAction.doctorProfile,
           ),
           (
             icon: Icons.add_business_outlined,
             label: buildContext.localized('申请加入机构', 'Apply to institution'),
             enabled: isDoctor && context.canApplyToInstitutions,
+            action: _ManagementAction.applyMembership,
           ),
           (
             icon: Icons.post_add_outlined,
@@ -531,6 +547,7 @@ class _ManagementCapabilities extends StatelessWidget {
               'Request platform project',
             ),
             enabled: isDoctor && context.canSubmitPlatformProjectRequests,
+            action: _ManagementAction.platformProjectRequest,
           ),
           (
             icon: Icons.add_task_outlined,
@@ -539,6 +556,7 @@ class _ManagementCapabilities extends StatelessWidget {
               'Request institution project',
             ),
             enabled: isDoctor && context.canSubmitInstitutionProjectRequests,
+            action: _ManagementAction.institutionProjectRequest,
           ),
           (
             icon: Icons.group_add_outlined,
@@ -547,22 +565,26 @@ class _ManagementCapabilities extends StatelessWidget {
               'Join institution project',
             ),
             enabled: isDoctor && context.canSubmitInstitutionProjectRequests,
+            action: _ManagementAction.institutionProjectJoinRequest,
           ),
           (
             icon: Icons.article_outlined,
             label: buildContext.localized('专业文章', 'Professional articles'),
             enabled: isDoctor && context.canManageArticles,
+            action: _ManagementAction.unavailable,
           ),
           (
             icon: Icons.receipt_long_outlined,
             label: buildContext.localized('专业订单', 'Professional orders'),
             enabled: isDoctor && context.canManageOrders,
+            action: _ManagementAction.unavailable,
           ),
         ],
       ),
       (
         icon: Icons.support_agent_outlined,
         title: buildContext.localized('顾问', 'Consultant'),
+        membershipRequestType: 'CONSULTANT',
         emptyText: buildContext.localized(
           '暂无顾问可用配置',
           'No consultant settings available',
@@ -572,11 +594,13 @@ class _ManagementCapabilities extends StatelessWidget {
             icon: Icons.add_business_outlined,
             label: buildContext.localized('申请加入机构', 'Apply to institution'),
             enabled: isConsultant && context.canApplyToInstitutions,
+            action: _ManagementAction.applyMembership,
           ),
           (
             icon: Icons.badge_outlined,
             label: buildContext.localized('机构归属', 'Institution affiliation'),
             enabled: isConsultant && context.canViewAffiliations,
+            action: _ManagementAction.affiliation,
           ),
         ],
       ),
@@ -616,8 +640,11 @@ class _ManagementCapabilities extends StatelessWidget {
                       ),
                     ),
                     trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () =>
-                        _openCapability(buildContext, capability.label),
+                    onTap: () => _openCapability(
+                      buildContext,
+                      capability.action,
+                      membershipRequestType: group.membershipRequestType,
+                    ),
                   ),
             ],
           ),
@@ -627,8 +654,24 @@ class _ManagementCapabilities extends StatelessWidget {
     );
   }
 
-  void _openCapability(BuildContext context, String label) {
-    if (label == '医生档案' || label == 'Doctor profile') {
+  void _openCapability(
+    BuildContext context,
+    _ManagementAction action, {
+    String? membershipRequestType,
+  }) {
+    if (action == _ManagementAction.applyMembership &&
+        membershipRequestType != null) {
+      Navigator.of(context).push<void>(MaterialPageRoute(
+        builder: (_) => InstitutionMembershipRequestsPage(
+          repository: repository,
+          discoverRepository: discoverRepository,
+          context: this.context,
+          requestType: membershipRequestType,
+        ),
+      ));
+      return;
+    }
+    if (action == _ManagementAction.doctorProfile) {
       Navigator.of(context).push<void>(MaterialPageRoute(
         builder: (_) => DoctorSelfProfilePage(
           repository: repository,
@@ -637,7 +680,7 @@ class _ManagementCapabilities extends StatelessWidget {
       ));
       return;
     }
-    if (label == '机构档案' || label == 'Institution profile') {
+    if (action == _ManagementAction.institutionProfile) {
       Navigator.of(context).push<void>(
         MaterialPageRoute(
           builder: (_) => ManagedInstitutionProfilesPage(
@@ -648,44 +691,39 @@ class _ManagementCapabilities extends StatelessWidget {
       );
       return;
     }
-    if (label == '成员加入审核' || label == 'Membership reviews') {
+    if (action == _ManagementAction.membershipReviews) {
       Navigator.of(context).push<void>(
         MaterialPageRoute(
           builder: (_) => InstitutionMembershipRequestsPage(
             repository: repository,
+            discoverRepository: discoverRepository,
             context: this.context,
+            requestType: 'DOCTOR',
             reviewMode: true,
           ),
         ),
       );
       return;
     }
-    if (label == '申请加入机构' || label == 'Apply to institution') {
+    if (action == _ManagementAction.affiliation) {
       Navigator.of(context).push<void>(MaterialPageRoute(
         builder: (_) => InstitutionMembershipRequestsPage(
           repository: repository,
+          discoverRepository: discoverRepository,
           context: this.context,
-        ),
-      ));
-      return;
-    }
-    if (label == '机构归属' || label == 'Institution affiliation') {
-      Navigator.of(context).push<void>(MaterialPageRoute(
-        builder: (_) => InstitutionMembershipRequestsPage(
-          repository: repository,
-          context: this.context,
+          requestType: 'CONSULTANT',
           affiliationOnly: true,
         ),
       ));
       return;
     }
-    if (label == '申请新增平台项目' || label == 'Request platform project') {
+    if (action == _ManagementAction.platformProjectRequest) {
       Navigator.of(context).push<void>(MaterialPageRoute(
         builder: (_) => PlatformProjectRequestPage(repository: repository),
       ));
       return;
     }
-    if (label == '申请新增机构项目' || label == 'Request institution project') {
+    if (action == _ManagementAction.institutionProjectRequest) {
       Navigator.of(context).push<void>(MaterialPageRoute(
         builder: (_) => InstitutionProjectRequestsPage(
           repository: repository,
@@ -694,7 +732,7 @@ class _ManagementCapabilities extends StatelessWidget {
       ));
       return;
     }
-    if (label == '机构项目申请审核' || label == 'Institution project reviews') {
+    if (action == _ManagementAction.institutionProjectReviews) {
       Navigator.of(context).push<void>(MaterialPageRoute(
         builder: (_) => InstitutionProjectRequestsPage(
           repository: repository,
@@ -704,7 +742,7 @@ class _ManagementCapabilities extends StatelessWidget {
       ));
       return;
     }
-    if (label == '申请加入机构项目' || label == 'Join institution project') {
+    if (action == _ManagementAction.institutionProjectJoinRequest) {
       Navigator.of(context).push<void>(MaterialPageRoute(
         builder: (_) => InstitutionProjectJoinRequestsPage(
           repository: repository,
@@ -713,7 +751,7 @@ class _ManagementCapabilities extends StatelessWidget {
       ));
       return;
     }
-    if (label == '机构项目加入审核' || label == 'Institution project join reviews') {
+    if (action == _ManagementAction.institutionProjectJoinReviews) {
       Navigator.of(context).push<void>(MaterialPageRoute(
         builder: (_) => InstitutionProjectJoinRequestsPage(
           repository: repository,
@@ -724,9 +762,28 @@ class _ManagementCapabilities extends StatelessWidget {
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$label页面正在接入受限接口')),
+      SnackBar(
+        content: Text(context.localized(
+          '该功能当前不可用',
+          'This feature is currently unavailable',
+        )),
+      ),
     );
   }
+}
+
+enum _ManagementAction {
+  institutionProfile,
+  membershipReviews,
+  institutionProjectReviews,
+  institutionProjectJoinReviews,
+  doctorProfile,
+  applyMembership,
+  platformProjectRequest,
+  institutionProjectRequest,
+  institutionProjectJoinRequest,
+  affiliation,
+  unavailable,
 }
 
 class ManagedInstitutionProjectsPage extends StatefulWidget {
