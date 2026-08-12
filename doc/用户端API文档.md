@@ -1639,7 +1639,7 @@ Authorization: Bearer <token>
 }
 ```
 
-所有余额均为 USD 整数最小货币单位；客户端使用服务端提供的 `displayName` 与 `ownerName`，不得从 ID 推断身份名称。
+所有余额均为 USD 整数最小货币单位。`displayName` 是与 `ownerType` 相同的稳定语义代码，客户端按 locale 本地化钱包类型；`ownerName` 仍是服务端解析的人类可读名称。
 
 ---
 
@@ -1680,7 +1680,7 @@ Authorization: Bearer <token>
 }
 ```
 
-`entryType` 当前可为 `SETTLEMENT`（创建待结算收益）、`RELEASE`（结算到期，将待入账余额转入可用余额）或 `REVERSAL`（退款冲正）。`amountMinor` 为带符号整数：收入为正，退款冲正为负；对 `RELEASE`，请结合三个 `*AfterMinor` 余额快照展示余额桶转移。`title` 和 `description` 是服务端提供的业务文案；客户端不得显示原始操作键或推导隐私归属信息。当前 Wallet 的“提现”仅是客户端提示“提现功能即将开放”，不发送 API 请求，也不代表已支持出金、收款账户、银行、受益人、KYC 或换汇。
+`entryType` 当前可为 `SETTLEMENT`（创建待结算收益）、`RELEASE`（待入账转可用）或 `REVERSAL`（退款冲正）。`amountMinor` 的收入为正、冲正为负；`RELEASE` 是中性余额桶转移，固定为 `0`，不得再次计入收入。为兼容现有 wire shape，`title` 等于 `entryType`，`description` 为 `sourceType:sourceId`；同时显式返回 `sourceType` 和 `sourceId`。Flutter 使用这些公开语义代码本地化；它们不是内部 `operationKey`，API 不暴露 `operationKey`。
 
 ---
 

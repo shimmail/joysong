@@ -32,7 +32,7 @@
 
 **Interfaces:**
 - Consumes: `ManagementAccessService.actor(Authentication)` and `walletScopes(actor)`; `WalletRepository`; doctor, user, and institution repositories for owner display names.
-- Produces: `WalletOverviewDto(currency: String, wallets: List<WalletViewDto>)`; `WalletViewDto(walletId, ownerType, ownerId, displayName, ownerName, pendingMinor, availableMinor, frozenMinor)`; `WalletLedgerPageDto(content, page, size, totalElements, totalPages, last)`; `WalletLedgerItemDto(id, walletId, entryType, title, description, amountMinor, pendingAfterMinor, availableAfterMinor, frozenAfterMinor, currency, createdAt)`.
+- Produces: `WalletOverviewDto(currency: String, wallets: List<WalletViewDto>)`; `WalletViewDto(walletId, ownerType, ownerId, displayName, ownerName, pendingMinor, availableMinor, frozenMinor)` where `displayName` is the stable `ownerType` semantic code; `WalletLedgerPageDto(content, page, size, totalElements, totalPages, last)`; `WalletLedgerItemDto(id, walletId, entryType, title, description, sourceType, sourceId, amountMinor, pendingAfterMinor, availableAfterMinor, frozenAfterMinor, currency, createdAt)`, with Flutter-localized copy derived from semantic codes.
 
 - [ ] **Step 1: Write failing service/controller tests**
 
@@ -56,7 +56,7 @@ Expected: compilation/test failure because the new VO/service and required `wall
 
 - [ ] **Step 3: Implement minimal read service and VO mapping**
 
-Implement actor-scope loading, USD filtering, owner-name resolution, deterministic owner ordering, and wallet-specific ledger authorization. Compute one signed `amountMinor` from the non-zero delta for each entry; map entry types to stable business titles/descriptions without exposing operation keys. Bound page to `>= 0`, size to `1..100`, and order ledger rows by `createdAt DESC, id DESC`.
+Implement actor-scope loading, USD filtering, owner-name resolution, deterministic owner ordering, and wallet-specific ledger authorization. Compute one signed `amountMinor` from the non-zero delta for income/reversal entries; return zero for the neutral `RELEASE` bucket transfer. Expose stable public semantic codes and source references without exposing internal operation keys. Bound page to `>= 0`, size to `1..100`, and order ledger rows by `createdAt DESC, id DESC`.
 
 ```kotlin
 data class WalletOverviewDto(val currency: String = "USD", val wallets: List<WalletViewDto>)

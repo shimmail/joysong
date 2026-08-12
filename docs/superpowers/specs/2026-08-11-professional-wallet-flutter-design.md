@@ -71,7 +71,7 @@ The server derives all wallet scopes from the authenticated actor. The request a
         "walletId": 101,
         "ownerType": "DOCTOR",
         "ownerId": "doctor-id",
-        "displayName": "医生钱包",
+        "displayName": "DOCTOR",
         "ownerName": "张医生",
         "pendingMinor": 12000,
         "availableMinor": 85000,
@@ -84,7 +84,7 @@ The server derives all wallet scopes from the authenticated actor. The request a
 
 `wallets` is empty for an authenticated user without an approved revenue-bearing identity. This is a successful response, not an authorization error.
 
-The server supplies `displayName` and `ownerName`; Flutter does not infer institutional or professional names from IDs. The response contains no provider, payout, beneficiary, bank, or FX information.
+The server supplies `displayName` as a stable semantic code matching `ownerType`, plus the human owner `ownerName`. Flutter localizes the wallet-type code and never infers institutional or professional names from IDs. Semantic codes are public presentation contract values, not internal `operationKey` values. The response contains no provider, payout, beneficiary, bank, or FX information.
 
 ### Wallet ledger
 
@@ -101,9 +101,11 @@ The server supplies `displayName` and `ownerName`; Flutter does not infer instit
       {
         "id": 1001,
         "walletId": 101,
-        "entryType": "SETTLEMENT_CREDIT",
-        "title": "诊疗收益",
-        "description": "订单 JS202608110001",
+        "entryType": "SETTLEMENT",
+        "title": "SETTLEMENT",
+        "description": "ORDER:JS202608110001",
+        "sourceType": "ORDER",
+        "sourceId": "JS202608110001",
         "amountMinor": 12000,
         "pendingAfterMinor": 12000,
         "availableAfterMinor": 85000,
@@ -121,7 +123,7 @@ The server supplies `displayName` and `ownerName`; Flutter does not infer instit
 }
 ```
 
-`amountMinor` is signed: credits are positive and refund reversals are negative. Backend VO mapping supplies localized business-oriented `title` and `description`; the client must not expose raw operation keys or reconstruct sensitive ownership data.
+`amountMinor` is signed: credits are positive and refund reversals are negative. `RELEASE` is a neutral pending-to-available bucket transfer and always returns `amountMinor: 0`, so it cannot be counted as a second income event. For wire compatibility, `title` equals `entryType` and `description` is the stable `sourceType:sourceId` semantic reference; `sourceType` and `sourceId` are also returned explicitly. Flutter localizes from `entryType`/`sourceType` and displays `sourceId`. These public semantic codes are not raw internal operation keys, and the API never exposes `operationKey`.
 
 The page size is bounded server-side and ordering is deterministic by newest creation time followed by descending ID.
 
