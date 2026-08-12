@@ -231,33 +231,48 @@ class AiAgentPropertiesTest {
         assertTrue(error.message.orEmpty().contains("AI_AGENT_BASE_URL"))
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = ["default", "dev", "prod"])
+    fun `complete deployment rejects OpenAI compatible provider in every profile`(profile: String) {
+        val properties = validEnabledProperties().copy(
+            provider = AiAgentProvider.OPENAI_COMPATIBLE,
+            baseUrl = "https://www.fastaitoken.com/v1"
+        )
+
+        val error = assertThrows(IllegalStateException::class.java) {
+            validator(properties, profile = profile).validate()
+        }
+
+        assertTrue(error.message.orEmpty().contains("AI_AGENT_PROVIDER=QWEN"))
+    }
+
     @Test
     fun `development profile normalizes an approved provider base URL`() {
         val properties = validEnabledProperties().copy(
-            baseUrl = "  HTTPS://WWW.FASTAITOKEN.COM:443/v1/  "
+            baseUrl = "  HTTPS://DASHSCOPE.ALIYUNCS.COM:443/compatible-mode/v1/  "
         )
 
         validator(properties, profile = "dev").validate()
 
-        assertEquals("https://www.fastaitoken.com/v1", properties.baseUrl)
+        assertEquals("https://dashscope.aliyuncs.com/compatible-mode/v1", properties.baseUrl)
     }
 
     @Test
     fun `enabled production stores the normalized approved base URL for runtime use`() {
         val properties = validEnabledProperties().copy(
-            baseUrl = "  HTTPS://WWW.FASTAITOKEN.COM:443/v1/  "
+            baseUrl = "  HTTPS://DASHSCOPE.ALIYUNCS.COM:443/compatible-mode/v1/  "
         )
 
         validator(properties).validate()
 
-        assertEquals("https://www.fastaitoken.com/v1", properties.baseUrl)
+        assertEquals("https://dashscope.aliyuncs.com/compatible-mode/v1", properties.baseUrl)
     }
 
     private fun validEnabledProperties() = AiAgentProperties(
-        provider = AiAgentProvider.OPENAI_COMPATIBLE,
+        provider = AiAgentProvider.QWEN,
         apiKey = "test-key",
-        baseUrl = "https://www.fastaitoken.com/v1",
-        model = "gpt-5.5",
+        baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        model = "qwen-plus",
         intentModel = "intent-model"
     )
 

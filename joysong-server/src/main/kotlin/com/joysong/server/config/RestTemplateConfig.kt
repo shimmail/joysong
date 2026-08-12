@@ -3,6 +3,9 @@ package com.joysong.server.config
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.http.client.SimpleClientHttpRequestFactory
+import org.springframework.web.client.HttpClientErrorException
+import org.springframework.web.client.HttpServerErrorException
+import org.springframework.web.client.ResponseErrorHandler
 
 @Configuration
 class RestTemplateConfig {
@@ -31,6 +34,38 @@ class RestTemplateConfig {
         val factory = SimpleClientHttpRequestFactory()
         factory.setConnectTimeout(connectTimeoutMs)
         factory.setReadTimeout(readTimeoutMs)
-        return org.springframework.web.client.RestTemplate(factory)
+        return org.springframework.web.client.RestTemplate(factory).apply {
+            errorHandler = StatusOnlyResponseErrorHandler
+        }
+    }
+
+    private object StatusOnlyResponseErrorHandler : ResponseErrorHandler {
+        override fun hasError(response: org.springframework.http.client.ClientHttpResponse): Boolean =
+            response.statusCode.isError
+
+        override fun handleError(response: org.springframework.http.client.ClientHttpResponse) {
+            val status = response.statusCode
+            val statusText = response.statusText
+            val headers = response.headers
+            val emptyBody = ByteArray(0)
+
+            when {
+                status.is4xxClientError -> throw HttpClientErrorException.create(
+                    status,
+                    statusText,
+                    headers,
+                    emptyBody,
+                    null
+                )
+
+                status.is5xxServerError -> throw HttpServerErrorException.create(
+                    status,
+                    statusText,
+                    headers,
+                    emptyBody,
+                    null
+                )
+            }
+        }
     }
 }

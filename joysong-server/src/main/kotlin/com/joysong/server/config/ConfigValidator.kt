@@ -51,6 +51,9 @@ class ConfigValidator(
         if (isProduction && !ossEnabled) missing.add("OSS_ENABLED=true")
         if (isProduction && !smsEnabled) missing.add("SMS_ENABLED=true")
         val provider = aiAgentProperties.provider
+        if (aiAgentProperties.enabled && provider != null && provider != AiAgentProvider.QWEN) {
+            missing.add("AI_AGENT_PROVIDER=QWEN (required by the complete deployment)")
+        }
         val normalizedBaseUrl = provider?.let {
             AiAgentProviderUrlPolicy.normalizeAllowed(it, aiAgentProperties.baseUrl)
         }

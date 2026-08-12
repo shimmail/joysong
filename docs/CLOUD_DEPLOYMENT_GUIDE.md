@@ -75,7 +75,7 @@ ai-agent:
   intent-model: ${AI_AGENT_INTENT_MODEL}
 ```
 
-不要把真实值写入 `application-prod.yml` 或 Git。生产必须提供上述五项 Agent 变量，任何一项为空都会导致启动失败。`AI_AGENT_MODEL` 只用于最终回答，`AI_AGENT_INTENT_MODEL` 只用于意图分类，必须分别配置为适合各自用途的模型 ID。翻译复用同一 API Key 与 Base URL，并在代码中固定使用 `qwen3.7-flash`。Agent 代理、超时、意图解析开关、演示回退、流式和推理设置均为代码策略，不能通过环境变量覆盖。
+不要把真实值写入 `application-prod.yml` 或 Git。生产必须提供上述五项 Agent 变量，任何一项为空都会导致启动失败。当前完整部署只允许 `AI_AGENT_PROVIDER=qwen`；OpenAI-compatible 工厂 enum 不能用于包含翻译功能的部署。`AI_AGENT_MODEL` 只用于最终回答，`AI_AGENT_INTENT_MODEL` 只用于意图分类，必须分别配置为适合各自用途的模型 ID。翻译复用同一 API Key 与 Base URL，并在代码中固定使用 `qwen3.7-flash`。Agent 代理、超时、意图解析开关、演示回退、流式和推理设置均为代码策略，不能通过环境变量覆盖。
 
 ### 4.2 管理端
 
@@ -194,7 +194,7 @@ PAYMENT_RECONCILIATION_STALE_SECONDS=120
 |---|---|
 | `CORS_ALLOWED_ORIGINS` | 跨域来源白名单；生产只填实际 HTTPS 域名 |
 | `GOOGLE_PROXY_URL` | 仅用于 Google ID Token 公钥校验的受控代理；不要配置为通用出网代理 |
-| `AI_AGENT_PROVIDER` | Agent 请求协议；例如 `qwen` |
+| `AI_AGENT_PROVIDER` | 当前完整部署固定为 `qwen`；其他 enum 值不可用于部署 |
 | `AI_AGENT_API_KEY` | Agent 与翻译共享的服务端密钥 |
 | `AI_AGENT_BASE_URL` | Agent 与翻译共享的批准 HTTPS endpoint |
 | `AI_AGENT_MODEL` | Agent 最终回答模型 ID |

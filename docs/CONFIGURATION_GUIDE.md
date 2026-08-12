@@ -142,7 +142,7 @@ CORS_ALLOWED_ORIGINS=https://admin.example.com
 
 ## 4. Qwen 翻译配置
 
-评论、回复、私信、日记正文固定使用百炼 `qwen3.7-flash`。翻译复用 AI Agent 的密钥与地址，但不使用聊天或意图模型。
+评论、回复、私信、日记正文固定使用百炼 `qwen3.7-flash`。翻译复用 AI Agent 的密钥与地址，但不使用聊天或意图模型。当前完整部署因此只允许 `AI_AGENT_PROVIDER=qwen`；OpenAI-compatible 工厂 enum 仅是未来协议兼容能力，不能用于当前完整翻译部署。
 
 ```dotenv
 AI_AGENT_PROVIDER=qwen
