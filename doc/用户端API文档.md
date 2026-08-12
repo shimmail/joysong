@@ -1579,7 +1579,7 @@ Authorization: Bearer <token>
 
 ### 9.14 GET /api/orders/{id}/settlement
 
-**描述：** 查看订单结算详情（含分账金额、结算状态、到期时间）
+**描述：** 查看本人订单的消费者安全结算摘要。此接口不会返回任何专业身份的分账比例、分账金额或钱包余额。
 
 **路径参数：** `id` — 订单 ID
 
@@ -1590,21 +1590,95 @@ Authorization: Bearer <token>
   "code": 200,
   "message": "success",
   "data": {
-    "id": "uuid",
+    "settlementId": 1001,
     "orderId": "uuid",
-    "institutionId": "uuid",
-    "platformAmount": 1280.00,
-    "institutionAmount": 11520.00,
-    "platformRate": 10.00,
-    "status": "PENDING",
-    "settledAt": null,
-    "createdAt": "2026-07-14T14:00:00"
+    "currency": "USD",
+    "grossTotalPaid": { "minor": 128000, "currency": "USD" },
+    "netSettled": { "minor": 115200, "currency": "USD" },
+    "state": "PENDING",
+    "settlementDueAt": "2026-08-14T14:00:00",
+    "settlementCreatedAt": "2026-07-14T14:00:00",
+    "releasedAt": null
   }
 }
 ```
 
 **错误响应：**
-- 404：订单不存在或尚未产生结算记录
+- 404：订单不存在或不属于当前登录用户
+- 409：`SETTLEMENT_NOT_GENERATED`，订单结算记录尚未生成；客户端应展示生成中状态，不应将其视为零金额结算
+
+金额对象始终使用 ISO-4217 三位 `currency` 和整数最小货币单位 `minor`；退款后 `grossTotalPaid` 与 `netSettled` 可能不同。
+
+---
+
+### 9.15 GET /api/wallets/me
+
+**认证：** Bearer JWT，服务端仅从当前认证主体推导可见钱包范围；请求不接受 owner ID，返回的 `walletId` 只是后续账本查询的选择器，不能授予所有权。
+
+**描述：** 返回当前用户可访问的独立专业钱包。医生、顾问与机构法定代表人可分别拥有钱包；同一登录账号的各身份余额绝不汇总。普通用户成功返回空 `wallets`，不会创建 `CUSTOMER` 钱包。
+
+**响应示例：**
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "currency": "USD",
+    "wallets": [{
+      "walletId": 101,
+      "ownerType": "DOCTOR",
+      "ownerId": "doctor-id",
+      "displayName": "医生钱包",
+      "ownerName": "张医生",
+      "pendingMinor": 12000,
+      "availableMinor": 85000,
+      "frozenMinor": 0
+    }]
+  }
+}
+```
+
+所有余额均为 USD 整数最小货币单位；客户端使用服务端提供的 `displayName` 与 `ownerName`，不得从 ID 推断身份名称。
+
+---
+
+### 9.16 GET /api/wallets/me/ledger
+
+**认证：** Bearer JWT。`walletId` 必填且必须属于当前认证主体的可见范围；无权或不存在的钱包返回 403 或 404，且不泄露任何余额或账本数据。
+
+**查询参数：** `walletId`（整数，必填）、`page`（整数，默认 0，最小 0）、`size`（整数，默认 20，服务端限制为 1–100）。账本稳定按 `createdAt` 倒序、再按 `id` 倒序返回。
+
+**响应示例：**
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "content": [{
+      "id": 1001,
+      "walletId": 101,
+      "entryType": "SETTLEMENT",
+      "title": "诊疗收益",
+      "description": "订单 JS202608110001",
+      "amountMinor": 12000,
+      "pendingAfterMinor": 12000,
+      "availableAfterMinor": 85000,
+      "frozenAfterMinor": 0,
+      "currency": "USD",
+      "createdAt": "2026-08-11T10:30:00"
+    }],
+    "page": 0,
+    "size": 20,
+    "totalElements": 1,
+    "totalPages": 1,
+    "last": true
+  }
+}
+```
+
+`amountMinor` 为带符号整数：收入为正，退款冲正为负。`title` 和 `description` 是服务端提供的业务文案；客户端不得显示原始操作键或推导隐私归属信息。当前 Wallet 的“提现”仅是客户端提示“提现功能即将开放”，不发送 API 请求，也不代表已支持出金、收款账户、银行、受益人、KYC 或换汇。
 
 ---
 
