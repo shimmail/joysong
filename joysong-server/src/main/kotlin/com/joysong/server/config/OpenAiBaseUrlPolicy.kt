@@ -21,7 +21,7 @@ object AiAgentProviderUrlPolicy {
                 uri.port !in setOf(-1, 443) ||
                 uri.rawQuery != null ||
                 uri.rawFragment != null ||
-                !isAllowedPath(provider, uri.rawPath.orEmpty())
+                !isAllowedPath(provider, uri.rawPath.orEmpty(), uri.path.orEmpty())
             ) {
                 null
             } else {
@@ -40,17 +40,19 @@ object AiAgentProviderUrlPolicy {
         AiAgentProvider.OPENAI_COMPATIBLE -> FAST_AI_TOKEN_HOST
     }
 
-    private fun isAllowedPath(provider: AiAgentProvider, path: String): Boolean = when (provider) {
-        AiAgentProvider.QWEN ->
-            (path == "/compatible-mode" || path.startsWith("/compatible-mode/")) &&
-                path.split('/').none(::isDotSegment)
+    private fun isAllowedPath(provider: AiAgentProvider, rawPath: String, decodedPath: String): Boolean = when (provider) {
+        AiAgentProvider.QWEN -> isAllowedQwenPath(rawPath, decodedPath)
         AiAgentProvider.OPENAI_COMPATIBLE -> true
     }
 
-    private fun isDotSegment(segment: String): Boolean =
-        segment.equals(".", ignoreCase = true) ||
-            segment.equals("..", ignoreCase = true) ||
-            segment.replace(Regex("%2e", RegexOption.IGNORE_CASE), ".") in setOf(".", "..")
+    private fun isAllowedQwenPath(rawPath: String, decodedPath: String): Boolean {
+        // Compatible-mode paths are ASCII canonical paths. Reject any escape so a downstream
+        // server cannot reinterpret a doubly encoded separator or dot segment.
+        if ('%' in rawPath) return false
+        if (decodedPath.contains('\\')) return false
+        if (decodedPath != "/compatible-mode" && !decodedPath.startsWith("/compatible-mode/")) return false
+        return decodedPath.split('/').none { it == "." || it == ".." }
+    }
 }
 
 @Deprecated("Use AiAgentProviderUrlPolicy with an explicit provider")

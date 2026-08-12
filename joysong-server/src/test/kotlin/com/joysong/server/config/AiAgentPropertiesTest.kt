@@ -112,7 +112,11 @@ class AiAgentPropertiesTest {
             "https://dashscope.aliyuncs.com:444/compatible-mode/v1",
             "https://dashscope.aliyuncs.com/compatible-mode/../v1",
             "https://dashscope.aliyuncs.com/compatible-mode/%2e%2e/v1",
-            "https://dashscope.aliyuncs.com/compatible-mode/%2E/v1"
+            "https://dashscope.aliyuncs.com/compatible-mode/%2E/v1",
+            "https://dashscope.aliyuncs.com/compatible-mode/%2e%2e%2foutside",
+            "https://dashscope.aliyuncs.com/compatible-mode/%2E%2E%2Foutside",
+            "https://dashscope.aliyuncs.com/compatible-mode/%2e%2e%5coutside",
+            "https://dashscope.aliyuncs.com/compatible-mode/%2E%2E%5Coutside"
         ]
     )
     fun `provider URL policy rejects mismatched or unsafe Qwen endpoints`(url: String) {
