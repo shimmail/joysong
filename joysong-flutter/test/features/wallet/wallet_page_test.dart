@@ -32,8 +32,13 @@ void main() {
 
   testWidgets('selects independent institution wallet and paginates ledger',
       (tester) async {
-    final institution = _wallet(202,
-        displayName: '机构钱包', ownerName: '娇颜颂医疗机构', available: 9900);
+    final institution = _wallet(
+      202,
+      ownerType: 'INSTITUTION',
+      displayName: 'INSTITUTION',
+      ownerName: '娇颜颂医疗机构',
+      available: 9900,
+    );
     final repository = _WalletRepository()
       ..overview = _overview(_wallet(101), institution)
       ..pages[(101, 0)] = _page(101, [_entry(1, 101)], last: true)
@@ -48,11 +53,12 @@ void main() {
     await tester.tap(find.text('机构钱包 · 娇颜颂医疗机构').last);
     await tester.pumpAndSettle();
     expect(find.text(r'$99.00'), findsOneWidget);
-    expect(find.text('流水 2'), findsOneWidget);
+    expect(find.text('诊疗收益'), findsOneWidget);
+    expect(find.text('订单 JS2'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('wallet-load-more-button')));
     await tester.pumpAndSettle();
-    expect(find.text('流水 3'), findsOneWidget);
+    expect(find.text('订单 JS3'), findsOneWidget);
   });
 
   testWidgets('shows ledger retry and local withdrawal coming-soon message',
@@ -68,7 +74,8 @@ void main() {
     repository.pages[(101, 0)] = _page(101, [_entry(1, 101)], last: true);
     await tester.tap(find.byKey(const Key('wallet-retry-button')));
     await tester.pumpAndSettle();
-    expect(find.text('流水 1'), findsOneWidget);
+    expect(find.text('诊疗收益'), findsOneWidget);
+    expect(find.text('订单 JS1'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('wallet-withdraw-button')));
     await tester.pump();
@@ -147,13 +154,14 @@ WalletOverview _overview(WalletAccount first, [WalletAccount? second]) =>
 
 WalletAccount _wallet(
   int id, {
-  String displayName = '医生钱包',
+  String ownerType = 'DOCTOR',
+  String displayName = 'DOCTOR',
   String ownerName = '张医生',
   int available = 85000,
 }) =>
     WalletAccount(
       walletId: id,
-      ownerType: 'DOCTOR',
+      ownerType: ownerType,
       ownerId: 'owner-$id',
       displayName: displayName,
       ownerName: ownerName,
@@ -165,9 +173,9 @@ WalletAccount _wallet(
 WalletLedgerEntry _entry(int id, int walletId) => WalletLedgerEntry(
       id: id,
       walletId: walletId,
-      entryType: 'SETTLEMENT_CREDIT',
-      title: '流水 $id',
-      description: '订单 JS$id',
+      entryType: 'SETTLEMENT',
+      title: 'SETTLEMENT',
+      description: 'ORDER:JS$id',
       sourceType: 'ORDER',
       sourceId: 'JS$id',
       amountMinor: 1200,
