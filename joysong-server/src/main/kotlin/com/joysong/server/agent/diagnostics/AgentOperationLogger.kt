@@ -83,11 +83,7 @@ class AgentOperationLogger {
 
     private fun safeId(value: String): String = value.filter { it.isLetterOrDigit() || it == '-' }.take(64)
 
-    private fun safeModelName(value: String): String = value.trim().takeIf { candidate ->
-        safeModelNamePattern.matches(candidate) &&
-            !sensitiveMetadataPattern.containsMatchIn(candidate) &&
-            !phonePattern.containsMatchIn(candidate)
-    } ?: "redacted"
+    private fun safeModelName(@Suppress("UNUSED_PARAMETER") value: String): String = "redacted"
 
     private fun safeErrorCode(value: String): String = value.trim().uppercase()
         .takeIf(stableErrorCodes::contains)
@@ -114,12 +110,10 @@ class AgentOperationLogger {
         ?: "redacted"
 
     private companion object {
-        val safeModelNamePattern = Regex("[A-Za-z][A-Za-z0-9._-]{0,79}")
         val safeProviderHostPattern = Regex("[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?")
         val safeProviderErrorCodePattern = Regex("[a-z0-9][a-z0-9._-]{0,79}")
         val safeExceptionTypePattern = Regex("[A-Za-z][A-Za-z0-9_$.-]{0,119}")
         val sensitiveMetadataPattern = Regex("(?i)(authorization|bearer|token|api[_-]?key|test[_-]?key)")
-        val phonePattern = Regex("1[3-9]\\d{9}")
         val providerPhases = setOf("INTENT_CLASSIFICATION", "MODEL_COMPLETION")
         val providerCategories = setOf(
             "AUTH",

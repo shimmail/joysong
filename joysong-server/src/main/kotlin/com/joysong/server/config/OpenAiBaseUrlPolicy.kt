@@ -11,6 +11,8 @@ enum class AiAgentProvider {
 object AiAgentProviderUrlPolicy {
     private const val DASHSCOPE_HOST = "dashscope.aliyuncs.com"
     private const val FAST_AI_TOKEN_HOST = "www.fastaitoken.com"
+    private const val QWEN_BASE_PATH = "/compatible-mode/v1"
+    private const val OPENAI_COMPATIBLE_BASE_PATH = "/v1"
 
     fun normalizeAllowed(provider: AiAgentProvider, value: String): String? {
         return try {
@@ -41,8 +43,9 @@ object AiAgentProviderUrlPolicy {
     }
 
     private fun isAllowedPath(provider: AiAgentProvider, rawPath: String, decodedPath: String): Boolean = when (provider) {
-        AiAgentProvider.QWEN -> isAllowedQwenPath(rawPath, decodedPath)
-        AiAgentProvider.OPENAI_COMPATIBLE -> true
+        AiAgentProvider.QWEN -> isAllowedQwenPath(rawPath.trimEnd('/'), decodedPath.trimEnd('/'))
+        AiAgentProvider.OPENAI_COMPATIBLE -> rawPath.trimEnd('/') == OPENAI_COMPATIBLE_BASE_PATH &&
+            decodedPath.trimEnd('/') == OPENAI_COMPATIBLE_BASE_PATH
     }
 
     private fun isAllowedQwenPath(rawPath: String, decodedPath: String): Boolean {
@@ -50,8 +53,7 @@ object AiAgentProviderUrlPolicy {
         // server cannot reinterpret a doubly encoded separator or dot segment.
         if ('%' in rawPath) return false
         if (decodedPath.contains('\\')) return false
-        if (decodedPath != "/compatible-mode" && !decodedPath.startsWith("/compatible-mode/")) return false
-        return decodedPath.split('/').none { it == "." || it == ".." }
+        return decodedPath == QWEN_BASE_PATH
     }
 }
 

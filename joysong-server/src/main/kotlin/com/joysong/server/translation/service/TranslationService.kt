@@ -10,6 +10,8 @@ import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.stereotype.Service
+import org.springframework.web.client.ResourceAccessException
+import org.springframework.web.client.RestClientResponseException
 import org.springframework.web.client.RestTemplate
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
@@ -50,7 +52,7 @@ class TranslationService(
         return try {
             requestQwenTranslation(text, targetLanguage)
         } catch (error: Exception) {
-            logger.warn("Translation request failed via Qwen: {}", error.message)
+            logTranslationFailure(error)
             throw IllegalStateException("AI翻译暂时不可用，请稍后重试")
         }
     }
@@ -75,23 +77,45 @@ class TranslationService(
             "max_tokens" to qwenTranslationMaxTokens(text),
             "stream" to false
         )
-        return try {
-            val url = "${aiAgentProperties.baseUrl.trimEnd('/')}/chat/completions"
-            val response = restTemplate.exchange(url, HttpMethod.POST, HttpEntity(body, headers), Map::class.java)
-            val choice = (response.body?.get("choices") as? List<*>)?.firstOrNull() as? Map<*, *>
-            val message = choice?.get("message") as? Map<*, *>
-            val translatedText = message?.get("content")?.toString()?.trim().orEmpty()
-            check(translatedText.isNotEmpty()) { "Qwen 翻译服务未返回有效内容" }
-            TranslationResponse(
-                translatedText = translatedText,
-                detectedLanguage = "und",
-                targetLanguage = targetLanguage,
-                provider = "qwen"
-            )
-        } catch (error: Exception) {
-            logger.warn("Qwen translation request failed: {}", error.message)
-            throw IllegalStateException("Qwen 翻译暂时不可用")
+        val url = "${aiAgentProperties.baseUrl.trimEnd('/')}/chat/completions"
+        val response = restTemplate.exchange(url, HttpMethod.POST, HttpEntity(body, headers), Map::class.java)
+        val choice = (response.body?.get("choices") as? List<*>)?.firstOrNull() as? Map<*, *>
+        val message = choice?.get("message") as? Map<*, *>
+        val translatedText = message?.get("content")?.toString()?.trim().orEmpty()
+        check(translatedText.isNotEmpty()) { "Qwen 翻译服务未返回有效内容" }
+        return TranslationResponse(
+            translatedText = translatedText,
+            detectedLanguage = "und",
+            targetLanguage = targetLanguage,
+            provider = "qwen"
+        )
+    }
+
+    private fun logTranslationFailure(error: Exception) {
+        val responseError = generateSequence(error as Throwable?) { it.cause }
+            .filterIsInstance<RestClientResponseException>()
+            .firstOrNull()
+        val category = when {
+            responseError != null -> "HTTP_ERROR"
+            error is ResourceAccessException -> "NETWORK_ERROR"
+            else -> "INVALID_RESPONSE"
         }
+        val status = responseError?.statusCode?.value()?.takeIf { it in 100..599 }
+        val httpStatus = status?.toString() ?: "none"
+        val errorCode = when {
+            status in setOf(401, 403) -> "AUTH"
+            status == 429 -> "RATE_LIMIT"
+            status != null && status in 400..499 -> "INVALID_REQUEST"
+            status != null && status in 500..599 -> "UPSTREAM_5XX"
+            error is ResourceAccessException -> "NETWORK"
+            else -> "INVALID_RESPONSE"
+        }
+        logger.warn(
+            "TRANSLATION_PROVIDER category={} httpStatus={} errorCode={}",
+            category,
+            httpStatus,
+            errorCode
+        )
     }
 
     private fun normalizeLanguageTag(raw: String): String {

@@ -38,6 +38,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 import org.springframework.http.MediaType
 import org.springframework.http.client.SimpleClientHttpRequestFactory
+import org.springframework.http.client.support.HttpRequestWrapper
 import org.springframework.security.test.context.support.WithMockUser
 import org.springframework.http.client.ClientHttpRequestInterceptor
 import org.springframework.test.context.DynamicPropertyRegistry
@@ -107,8 +108,13 @@ class AgentChatFlowIntegrationTest {
     @Qualifier("agentLlmRestTemplate")
     private lateinit var llmRestTemplate: RestTemplate
 
+    @Autowired
+    @Qualifier("agentIntentParserRestTemplate")
+    private lateinit var intentParserRestTemplate: RestTemplate
+
     private val transactionStates = CopyOnWriteArrayList<Boolean>()
     private lateinit var transactionInterceptor: ClientHttpRequestInterceptor
+    private lateinit var fakeProviderInterceptor: ClientHttpRequestInterceptor
 
     @BeforeEach
     fun installTransactionObserver() {
@@ -125,16 +131,43 @@ class AgentChatFlowIntegrationTest {
             setConnectTimeout(1_000)
             setReadTimeout(100)
         }
+        intentParserRestTemplate.requestFactory = SimpleClientHttpRequestFactory().apply {
+            setConnectTimeout(1_000)
+            setReadTimeout(100)
+        }
+        fakeProviderInterceptor = ClientHttpRequestInterceptor { request, body, execution ->
+            val localRequest = object : HttpRequestWrapper(request) {
+                override fun getURI() = java.net.URI(
+                    "http",
+                    null,
+                    "127.0.0.1",
+                    fakeLlm.address.port,
+                    request.uri.path,
+                    null,
+                    null
+                )
+            }
+            execution.execute(localRequest, body)
+        }
         transactionInterceptor = ClientHttpRequestInterceptor { request, body, execution ->
             transactionStates += TransactionSynchronizationManager.isActualTransactionActive()
             execution.execute(request, body)
         }
-        llmRestTemplate.interceptors = llmRestTemplate.interceptors + transactionInterceptor
+        llmRestTemplate.interceptors = llmRestTemplate.interceptors + listOf(
+            fakeProviderInterceptor,
+            transactionInterceptor
+        )
+        intentParserRestTemplate.interceptors = intentParserRestTemplate.interceptors + fakeProviderInterceptor
     }
 
     @AfterEach
     fun removeTransactionObserver() {
-        llmRestTemplate.interceptors = llmRestTemplate.interceptors.filterNot { it === transactionInterceptor }
+        llmRestTemplate.interceptors = llmRestTemplate.interceptors.filterNot {
+            it === transactionInterceptor || it === fakeProviderInterceptor
+        }
+        intentParserRestTemplate.interceptors = intentParserRestTemplate.interceptors.filterNot {
+            it === fakeProviderInterceptor
+        }
         assertEquals(0, turnRepository.findAll().count { it.status == AgentTurnStatus.RUNNING })
     }
 
@@ -616,7 +649,9 @@ class AgentChatFlowIntegrationTest {
             sensitiveValues = listOf("provider-secret-body", "private@example.com", "13800000000")
         )
         val providerLog = logs.single {
-            it.contains("operation=PROVIDER_CALL") && it.contains("modelName=test-model")
+            it.contains("operation=PROVIDER_CALL") &&
+                it.contains("providerPhase=MODEL_COMPLETION") &&
+                it.contains("modelName=redacted")
         }
         val expectedCategory = when (providerStatus) {
             401 -> "AUTH"
@@ -627,8 +662,8 @@ class AgentChatFlowIntegrationTest {
         assertTrue(providerLog.contains("providerCategory=$expectedCategory"))
         assertNoSensitiveLogData(providerLog, "provider contract request")
         if (providerStatus == 429) {
-            assertTrue(providerLog.contains("providerHost=127.0.0.1"))
-            assertTrue(providerLog.contains("modelName=test-model"))
+            assertTrue(providerLog.contains("providerHost=www.fastaitoken.com"))
+            assertFalse(providerLog.contains("test-model"))
             assertTrue(providerLog.contains("providerErrorCode=rate_limit_exceeded"))
             assertTrue(Regex("""messageCount=\d+""").containsMatchIn(providerLog))
             assertTrue(Regex("""systemMessageCount=\d+""").containsMatchIn(providerLog))
@@ -760,7 +795,8 @@ class AgentChatFlowIntegrationTest {
         assertTrue(log.contains("traceId=$traceId"))
         assertTrue(log.contains("turnId=${turn.id}"))
         assertTrue(log.contains("terminalStatus=SUCCEEDED"))
-        assertTrue(log.contains("modelName=test-model"))
+        assertTrue(log.contains("modelName=redacted"))
+        assertFalse(log.contains("test-model"))
         assertTrue(Regex("""durationMs=\d+""").containsMatchIn(log))
         assertTrue(Regex("""sessionHash=[0-9a-f]{16}""").containsMatchIn(log))
         assertNoSensitiveLogData(log, sensitiveContent)
@@ -993,7 +1029,7 @@ class AgentChatFlowIntegrationTest {
             registry.add("payment.stripe.secret-key") { "sk_test_agent_chat" }
             registry.add("payment.stripe.webhook-secret") { "whsec_agent_chat" }
             registry.add("ai-agent.provider") { "openai-compatible" }
-            registry.add("ai-agent.base-url") { "http://127.0.0.1:${fakeLlm.address.port}/v1" }
+            registry.add("ai-agent.base-url") { "https://www.fastaitoken.com/v1" }
             registry.add("ai-agent.api-key") { "test-key" }
             registry.add("ai-agent.model") { "test-model" }
             registry.add("ai-agent.intent-model") { "intent-test-model" }

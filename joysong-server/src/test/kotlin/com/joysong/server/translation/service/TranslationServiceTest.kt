@@ -1,5 +1,8 @@
 package com.joysong.server.translation.service
 
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import com.joysong.server.config.AiAgentProperties
 import com.joysong.server.translation.dto.TranslateTextRequest
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -7,6 +10,8 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.slf4j.LoggerFactory
+import org.springframework.http.HttpStatus
 import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.test.web.client.MockRestServiceServer
@@ -15,6 +20,7 @@ import org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPat
 import org.springframework.test.web.client.match.MockRestRequestMatchers.header
 import org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo
 import org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess
+import org.springframework.test.web.client.response.MockRestResponseCreators.withStatus
 import org.springframework.web.client.RestTemplate
 
 class TranslationServiceTest {
@@ -128,6 +134,52 @@ class TranslationServiceTest {
     fun `rejects invalid language tag`() {
         assertThrows(IllegalArgumentException::class.java) {
             service.translate(TranslateTextRequest("hello", "not_a_language", "general"))
+        }
+    }
+
+    @Test
+    fun `translation failure logs only controlled diagnostics without the provider response body`() {
+        val sensitiveBody = "private diary test-key private@example.com 13800000000"
+        server.expect(requestTo("https://example.test/v1/chat/completions"))
+            .andExpect(method(HttpMethod.POST))
+            .andRespond(
+                withStatus(HttpStatus.BAD_GATEWAY)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("""{"error":{"code":"private_model_customer_42","message":"$sensitiveBody"}}""")
+            )
+
+        val logs = captureTranslationLogs {
+            assertThrows(IllegalStateException::class.java) {
+                service.translate(TranslateTextRequest("sensitive request", "en-US", "diary"))
+            }
+        }
+        val joined = logs.joinToString("\n")
+
+        assertTrue(joined.contains("category=HTTP_ERROR"))
+        assertTrue(joined.contains("httpStatus=502"))
+        assertTrue(joined.contains("errorCode=UPSTREAM_5XX"))
+        listOf(
+            sensitiveBody,
+            "private diary",
+            "test-key",
+            "private@example.com",
+            "13800000000",
+            "private_model_customer_42"
+        )
+            .forEach { sensitive -> assertFalse(joined.contains(sensitive, ignoreCase = true)) }
+        server.verify()
+    }
+
+    private fun captureTranslationLogs(block: () -> Unit): List<String> {
+        val logger = LoggerFactory.getLogger(TranslationService::class.java) as Logger
+        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        logger.addAppender(appender)
+        return try {
+            block()
+            appender.list.map { it.formattedMessage }
+        } finally {
+            logger.detachAppender(appender)
+            appender.stop()
         }
     }
 }

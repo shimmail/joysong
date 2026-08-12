@@ -50,19 +50,20 @@ class ConfigValidator(
         val isProduction = environment.activeProfiles.any { it.equals("prod", ignoreCase = true) }
         if (isProduction && !ossEnabled) missing.add("OSS_ENABLED=true")
         if (isProduction && !smsEnabled) missing.add("SMS_ENABLED=true")
+        val provider = aiAgentProperties.provider
+        val normalizedBaseUrl = provider?.let {
+            AiAgentProviderUrlPolicy.normalizeAllowed(it, aiAgentProperties.baseUrl)
+        }
+        if (normalizedBaseUrl == null) {
+            missing.add("AI_AGENT_BASE_URL (approved provider base endpoint required)")
+        } else {
+            aiAgentProperties.baseUrl = normalizedBaseUrl
+        }
         if (isProduction) {
-            val provider = aiAgentProperties.provider
             if (provider == null) missing.add("AI_AGENT_PROVIDER")
             if (aiAgentProperties.apiKey.isBlank()) missing.add("AI_AGENT_API_KEY")
-            val normalizedBaseUrl = provider?.let {
-                AiAgentProviderUrlPolicy.normalizeAllowed(it, aiAgentProperties.baseUrl)
-            }
-            if (normalizedBaseUrl == null) {
-                missing.add("AI_AGENT_BASE_URL (approved HTTPS endpoint required)")
-            } else {
-                aiAgentProperties.baseUrl = normalizedBaseUrl
-            }
             if (aiAgentProperties.model.isBlank()) missing.add("AI_AGENT_MODEL")
+            if (aiAgentProperties.intentModel.isBlank()) missing.add("AI_AGENT_INTENT_MODEL")
         }
         if (isProduction && logVerificationCodeForDev) {
             missing.add("verification-code log-for-dev must be disabled in production")

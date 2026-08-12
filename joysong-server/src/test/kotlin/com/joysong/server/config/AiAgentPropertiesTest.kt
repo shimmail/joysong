@@ -112,6 +112,30 @@ class AiAgentPropertiesTest {
     @ParameterizedTest
     @ValueSource(
         strings = [
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/extra"
+        ]
+    )
+    fun `provider URL policy rejects Qwen paths that are not the approved base path`(url: String) {
+        assertNull(AiAgentProviderUrlPolicy.normalizeAllowed(AiAgentProvider.QWEN, url))
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+        strings = [
+            "https://www.fastaitoken.com",
+            "https://www.fastaitoken.com/chat/completions",
+            "https://www.fastaitoken.com/v1/chat/completions",
+            "https://www.fastaitoken.com/v1/extra"
+        ]
+    )
+    fun `provider URL policy rejects compatible paths that are not the approved base path`(url: String) {
+        assertNull(AiAgentProviderUrlPolicy.normalizeAllowed(AiAgentProvider.OPENAI_COMPATIBLE, url))
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+        strings = [
             "https://www.fastaitoken.com/v1",
             "https://dashscope.aliyuncs.com/v1",
             "http://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -185,6 +209,40 @@ class AiAgentPropertiesTest {
     }
 
     @Test
+    fun `enabled production rejects a blank intent model`() {
+        val properties = validEnabledProperties().copy(intentModel = "")
+
+        val error = assertThrows(IllegalStateException::class.java) { validator(properties).validate() }
+
+        assertTrue(error.message.orEmpty().contains("AI_AGENT_INTENT_MODEL"))
+    }
+
+    @Test
+    fun `default profile rejects an invalid provider base URL combination`() {
+        val properties = validEnabledProperties().copy(
+            provider = AiAgentProvider.QWEN,
+            baseUrl = "https://www.fastaitoken.com/v1"
+        )
+
+        val error = assertThrows(IllegalStateException::class.java) {
+            validator(properties, profile = "default").validate()
+        }
+
+        assertTrue(error.message.orEmpty().contains("AI_AGENT_BASE_URL"))
+    }
+
+    @Test
+    fun `development profile normalizes an approved provider base URL`() {
+        val properties = validEnabledProperties().copy(
+            baseUrl = "  HTTPS://WWW.FASTAITOKEN.COM:443/v1/  "
+        )
+
+        validator(properties, profile = "dev").validate()
+
+        assertEquals("https://www.fastaitoken.com/v1", properties.baseUrl)
+    }
+
+    @Test
     fun `enabled production stores the normalized approved base URL for runtime use`() {
         val properties = validEnabledProperties().copy(
             baseUrl = "  HTTPS://WWW.FASTAITOKEN.COM:443/v1/  "
@@ -199,11 +257,15 @@ class AiAgentPropertiesTest {
         provider = AiAgentProvider.OPENAI_COMPATIBLE,
         apiKey = "test-key",
         baseUrl = "https://www.fastaitoken.com/v1",
-        model = "gpt-5.5"
+        model = "gpt-5.5",
+        intentModel = "intent-model"
     )
 
-    private fun validator(properties: AiAgentProperties): ConfigValidator = ConfigValidator(
-        environment = MockEnvironment().apply { setActiveProfiles("prod") },
+    private fun validator(
+        properties: AiAgentProperties,
+        profile: String = "prod"
+    ): ConfigValidator = ConfigValidator(
+        environment = MockEnvironment().apply { setActiveProfiles(profile) },
         jwtSecret = "test-jwt-secret-that-is-at-least-32-characters",
         googleClientId = "test-google-client-id",
         ossAccessKeyId = "test-oss-key",
