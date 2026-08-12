@@ -21,6 +21,18 @@ class DoctorProjectChangeControllerTest {
     private val controller = DoctorProjectChangeController(service, access)
 
     @Test
+    fun `profile update targets derive doctor from authenticated actor`() {
+        val actor = actor().copy(activeRoles = setOf("DOCTOR"), doctorId = "doctor-1")
+        every { access.actor(authentication) } returns actor
+        every { service.listProfileUpdateTargets(actor) } returns emptyList()
+
+        val response = controller.listProfileUpdateTargets(authentication)
+
+        verify(exactly = 1) { service.listProfileUpdateTargets(actor) }
+        assertEquals(200, response.code)
+    }
+
+    @Test
     fun `submit forwards full twelve key profile update arrays`() {
         val actor = actor()
         val request = DoctorProjectChangeRequest("ip-1", "PROFILE_UPDATE", "service", BigDecimal("880"), "notes", listOf("tag"), "schedule", "cover", listOf("image"), BigDecimal("30"), BigDecimal("10"), BigDecimal("40"))

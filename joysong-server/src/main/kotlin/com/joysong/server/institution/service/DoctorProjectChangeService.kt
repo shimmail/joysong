@@ -41,6 +41,61 @@ class DoctorProjectChangeService(
     private fun validateMoney(value: BigDecimal) {
         require(value >= BigDecimal.ZERO && value <= BigDecimal("99999999.99") && value.stripTrailingZeros().scale() <= 2) { "金额须在范围内且最多两位小数" }
     }
+
+    fun listProfileUpdateTargets(actor: ManagementActor): List<DoctorProjectProfileUpdateTargetView> {
+        val doctorId = actor.doctorId
+            ?: throw AccessDeniedException("只有已认证医生可以读取项目资料修改基线")
+        return jdbcTemplate.query(
+            """
+            SELECT dp.institution_project_id,
+                   COALESCE(ip.name, p.name) AS project_name,
+                   ip.institution_id, i.name AS institution_name,
+                   dp.price AS current_price, dp.service_description,
+                   dp.service_tags, dp.schedule_note, dp.cover_image, dp.images,
+                   c.consultation_fee, c.commission_rate, c.institution_rate
+            FROM doctor_projects dp
+            JOIN institution_projects ip
+              ON ip.id = dp.institution_project_id AND ip.deleted_at IS NULL AND ip.is_active = TRUE
+            JOIN institutions i ON i.id = ip.institution_id AND i.deleted_at IS NULL
+            JOIN projects p ON p.id = ip.project_id AND p.deleted_at IS NULL
+            JOIN doctor_institutions di
+              ON di.doctor_id = dp.doctor_id AND di.institution_id = ip.institution_id
+             AND di.status = 'APPROVED' AND di.revoked_at IS NULL AND di.deleted_at IS NULL
+            LEFT JOIN doctor_institution_project_configs c
+              ON c.doctor_id = dp.doctor_id
+             AND c.institution_project_id = dp.institution_project_id
+             AND c.deleted_at IS NULL
+            WHERE dp.doctor_id = ?
+            ORDER BY i.name, project_name, dp.institution_project_id
+            """.trimIndent(),
+            { rs, _ ->
+                val commissionRate = rs.getBigDecimal("commission_rate")
+                val institutionRate = rs.getBigDecimal("institution_rate")
+                val split = if (commissionRate != null && institutionRate != null) {
+                    splitRatePolicy.resolve(institutionRate, commissionRate)
+                } else splitRatePolicy.defaults()
+                DoctorProjectProfileUpdateTargetView(
+                    institutionProjectId = rs.getString("institution_project_id"),
+                    projectName = rs.getString("project_name"),
+                    institutionId = rs.getString("institution_id"),
+                    institutionName = rs.getString("institution_name"),
+                    currentPrice = rs.getBigDecimal("current_price"),
+                    serviceDescription = rs.getString("service_description").orEmpty(),
+                    serviceTags = decodeList(rs.getString("service_tags")),
+                    scheduleNote = rs.getString("schedule_note").orEmpty(),
+                    coverImage = rs.getString("cover_image").orEmpty(),
+                    images = decodeList(rs.getString("images")),
+                    consultationFee = rs.getBigDecimal("consultation_fee") ?: BigDecimal.ZERO,
+                    commissionRate = commissionRate ?: split.consultantRate,
+                    institutionRate = institutionRate ?: split.institutionRate,
+                    platformRate = split.platformRate,
+                    doctorRate = split.doctorRate
+                )
+            },
+            doctorId
+        )
+    }
+
     fun list(actor: ManagementActor): List<DoctorProjectChangeView> {
         val rows = jdbcTemplate.query(
             """
@@ -336,6 +391,24 @@ data class DoctorProjectChangeRequest(
     val consultationFee: BigDecimal? = null,
     val commissionRate: BigDecimal? = null,
     val institutionRate: BigDecimal? = null
+)
+
+data class DoctorProjectProfileUpdateTargetView(
+    val institutionProjectId: String,
+    val projectName: String,
+    val institutionId: String,
+    val institutionName: String,
+    val currentPrice: BigDecimal,
+    val serviceDescription: String,
+    val serviceTags: List<String>,
+    val scheduleNote: String,
+    val coverImage: String,
+    val images: List<String>,
+    val consultationFee: BigDecimal,
+    val commissionRate: BigDecimal,
+    val institutionRate: BigDecimal,
+    val platformRate: BigDecimal,
+    val doctorRate: BigDecimal
 )
 
 data class DoctorProjectChangeView(

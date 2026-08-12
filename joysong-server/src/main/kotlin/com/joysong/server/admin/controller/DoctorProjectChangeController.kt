@@ -18,6 +18,10 @@ class DoctorProjectChangeController(
     private val service: DoctorProjectChangeService,
     private val managementAccessService: ManagementAccessService
 ) {
+    @GetMapping("/profile-update-targets")
+    fun listProfileUpdateTargets(authentication: Authentication): BaseResponse<*> =
+        BaseResponse.success(service.listProfileUpdateTargets(managementAccessService.actor(authentication)))
+
     @GetMapping
     fun list(authentication: Authentication): BaseResponse<*> =
         BaseResponse.success(service.list(managementAccessService.actor(authentication)))

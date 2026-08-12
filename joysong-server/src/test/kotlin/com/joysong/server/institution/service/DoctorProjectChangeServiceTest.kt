@@ -32,6 +32,85 @@ class DoctorProjectChangeServiceTest {
     private val service = DoctorProjectChangeService(jdbcTemplate, doctorProjectRepository, configRepository, relationshipService, splitRatePolicy)
 
     @Test
+    fun `profile update targets expose only current doctor approved active bindings`() {
+        every {
+            jdbcTemplate.query(
+                match<String> {
+                    it.contains("dp.doctor_id = ?") &&
+                        it.contains("di.status = 'APPROVED'") &&
+                        it.contains("di.revoked_at IS NULL") &&
+                        it.contains("di.deleted_at IS NULL") &&
+                        it.contains("ip.deleted_at IS NULL") &&
+                        it.contains("c.doctor_id = dp.doctor_id") &&
+                        it.contains("c.institution_project_id = dp.institution_project_id")
+                },
+                any<RowMapper<Any>>(),
+                "doctor-1"
+            )
+        } answers {
+            val mapper = secondArg<RowMapper<Any>>()
+            val rs = mockk<ResultSet>(relaxed = true) {
+                every { getString("institution_project_id") } returns "ip-1"
+                every { getString("project_name") } returns "Project"
+                every { getString("institution_id") } returns "institution-1"
+                every { getString("institution_name") } returns "Institution"
+                every { getBigDecimal("current_price") } returns BigDecimal("880.00")
+                every { getString("service_description") } returns "service"
+                every { getString("service_tags") } returns "tag-a,tag-b"
+                every { getString("schedule_note") } returns "schedule"
+                every { getString("cover_image") } returns "cover"
+                every { getString("images") } returns "image-a,image-b"
+                every { getBigDecimal("consultation_fee") } returns BigDecimal("30.00")
+                every { getBigDecimal("commission_rate") } returns BigDecimal("10.00")
+                every { getBigDecimal("institution_rate") } returns BigDecimal("40.00")
+            }
+            listOf(mapper.mapRow(rs, 0))
+        }
+
+        val target = service.listProfileUpdateTargets(doctorActor()).single()
+
+        assertEquals("ip-1", target.institutionProjectId)
+        assertEquals(BigDecimal("880.00"), target.currentPrice)
+        assertEquals(listOf("tag-a", "tag-b"), target.serviceTags)
+        assertEquals(BigDecimal("10.00"), target.platformRate)
+        assertEquals(BigDecimal("40.00"), target.doctorRate)
+    }
+
+    @Test
+    fun `profile update targets reject admin without authenticated doctor identity`() {
+        assertThrows(AccessDeniedException::class.java) {
+            service.listProfileUpdateTargets(adminActor())
+        }
+        verify(exactly = 0) { jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) }
+    }
+
+    @Test
+    fun `profile update target without config uses system defaults`() {
+        every { jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), "doctor-1") } answers {
+            val mapper = secondArg<RowMapper<Any>>()
+            val rs = mockk<ResultSet>(relaxed = true) {
+                every { getString("institution_project_id") } returns "ip-1"
+                every { getString("project_name") } returns "Project"
+                every { getString("institution_id") } returns "institution-1"
+                every { getString("institution_name") } returns "Institution"
+                every { getBigDecimal("current_price") } returns BigDecimal("880.00")
+                every { getBigDecimal("consultation_fee") } returns null
+                every { getBigDecimal("commission_rate") } returns null
+                every { getBigDecimal("institution_rate") } returns null
+            }
+            listOf(mapper.mapRow(rs, 0))
+        }
+
+        val target = service.listProfileUpdateTargets(doctorActor()).single()
+
+        assertEquals(BigDecimal.ZERO, target.consultationFee)
+        assertEquals(BigDecimal.ZERO, target.commissionRate)
+        assertEquals(BigDecimal("40.00"), target.institutionRate)
+        assertEquals(BigDecimal("10.00"), target.platformRate)
+        assertEquals(BigDecimal("50.00"), target.doctorRate)
+    }
+
+    @Test
     fun `profile update requires complete snapshot values`() {
         val request = DoctorProjectChangeRequest(
             institutionProjectId = "ip-1", requestType = "PROFILE_UPDATE",
