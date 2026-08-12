@@ -16,9 +16,9 @@ import java.math.BigDecimal
 @Testcontainers
 class DoctorProjectProfileUpdateMigrationTest {
     @Test
-    fun `legacy V12 schema is repaired before V17`() {
+    fun `legacy schema recorded through V19 is repaired by V20`() {
         DoctorProfileMigrationMySqlContainer("mysql:8.0.39")
-            .withDatabaseName("myapp_worktree_legacy_v12_migration")
+            .withDatabaseName("myapp_worktree_doctor_orders_articles_legacy")
             .withTmpFs(mapOf("/var/lib/mysql" to "rw"))
             .use { legacyMysql ->
                 legacyMysql.start()
@@ -29,7 +29,7 @@ class DoctorProjectProfileUpdateMigrationTest {
                     if (target != null) config.target(target)
                     config.load()
                 }
-                legacyFlyway("16").migrate()
+                legacyFlyway("19").migrate()
                 jdbc.execute("ALTER TABLE doctor_project_change_requests DROP CHECK chk_dpcr_price_suggestion")
                 jdbc.execute("ALTER TABLE doctor_project_change_requests DROP COLUMN notes, DROP COLUMN price_suggestion")
                 jdbc.execute("DROP TABLE professional_project_requests")
@@ -101,7 +101,7 @@ class DoctorProjectProfileUpdateMigrationTest {
     private fun decimal(jdbc: JdbcTemplate, sql: String): BigDecimal = jdbc.queryForObject(sql, BigDecimal::class.java)!!
 
     companion object {
-        private const val DB_NAME = "myapp_worktree_doctor_profile_update_request_migration"
+        private const val DB_NAME = "myapp_worktree_doctor_orders_articles"
 
         @Container @JvmField
         val mysql = DoctorProfileMigrationMySqlContainer("mysql:8.0.39")

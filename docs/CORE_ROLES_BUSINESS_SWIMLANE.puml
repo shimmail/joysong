@@ -65,8 +65,8 @@ end fork
 GET /api/management/doctor-profile
 PUT /api/management/doctor-profile;
 :本人文章
-GET, POST /api/admin/articles
-PUT, DELETE /api/admin/articles/{id};
+GET, POST /api/management/doctor-articles
+PUT, DELETE /api/management/doctor-articles/{id};
 :可见机构与项目
 GET /api/admin/institutions
 GET /api/admin/institutions/{id}
@@ -96,7 +96,9 @@ GET /api/management/orders/{id}
 POST /api/management/orders/{id}/verify
 POST /api/management/orders/{id}/request-completion;
 note right
-  医生共 27 个专业端点（新增本人 PROFILE_UPDATE 当前基线 GET）。
+  医生共 27 个专业端点（4 个本人文章端点已使用专业端路径，数量不变）。
+  文章与订单均要求当前 ACTIVE DOCTOR，并按 doctor_id=self 限定对象。
+  订单响应不下发核销码；仅依据 canVerify / canRequestCompletion 展示动作。
   三类 review 接口仅在医生同时是目标机构法人时可用。
 end note
 

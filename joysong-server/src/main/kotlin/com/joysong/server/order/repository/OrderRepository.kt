@@ -6,9 +6,23 @@ import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Lock
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.Pageable
 import java.time.LocalDateTime
 
 interface OrderRepository : JpaRepository<OrderEntity, String> {
+    @Query("""
+        SELECT o FROM OrderEntity o
+        WHERE (:doctorId IS NULL OR o.doctorId = :doctorId)
+          AND (:status IS NULL OR o.status = :status)
+        ORDER BY o.createdAt DESC, o.id DESC
+    """)
+    fun findManagementOrders(
+        @Param("doctorId") doctorId: String?,
+        @Param("status") status: String?,
+        pageable: Pageable
+    ): Page<OrderEntity>
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT o FROM OrderEntity o WHERE o.id = :id")
     fun findByIdForUpdate(@Param("id") id: String): OrderEntity?

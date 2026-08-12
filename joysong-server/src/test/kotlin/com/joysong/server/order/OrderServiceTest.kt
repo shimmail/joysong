@@ -490,7 +490,7 @@ class OrderServiceTest {
     @Test
     fun `confirmVerification 状态变更为 VERIFIED`() {
         val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.CONSULTATION_PAID.value)
-        every { orderRepository.findById("o1") } returns Optional.of(order)
+        every { orderRepository.findByIdForUpdate("o1") } returns order
         every { orderRepository.save(any()) } answers { firstArg() }
 
         val result = orderService.confirmVerification("o1", "inst-user-1", "123456")
@@ -502,17 +502,16 @@ class OrderServiceTest {
     @Test
     fun `confirmVerification 非法状态转换抛出异常`() {
         val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.PENDING_PAYMENT.value)
-        every { orderRepository.findById("o1") } returns Optional.of(order)
+        every { orderRepository.findByIdForUpdate("o1") } returns order
 
-        assertThrows<IllegalArgumentException> {
+        assertThrows<com.joysong.server.order.service.OrderManagementConflictException> {
             orderService.confirmVerification("o1", "inst-user-1", "123456")
         }
     }
 
     @Test
-    fun `管理侧订单列表不返回用户核销码`() {
+    fun `管理员可以查看全部专业订单列表和详情`() {
         val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.CONSULTATION_PAID.value)
-        every { orderRepository.findAll() } returns listOf(order)
         val actor = ManagementActor(
             userId = "admin-1",
             isAdmin = true,
@@ -523,10 +522,55 @@ class OrderServiceTest {
             manageableDoctorIds = emptySet()
         )
 
-        val result = orderService.getOrdersForManagement(actor, null, 0, 20)
+        every { orderRepository.findManagementOrders(null, null, any()) } returns
+            org.springframework.data.domain.PageImpl(listOf(order))
+        every { orderRepository.findById(order.id) } returns Optional.of(order)
 
-        assertEquals(1, result.size)
-        assertNull(result.single().verifyCode)
+        assertEquals(listOf(order.id), orderService.getOrdersForManagement(actor, null, 0, 20).map { it.id })
+        assertEquals(order.id, orderService.requireOrderForManagement(actor, order.id).id)
+    }
+
+    @Test
+    fun `管理员可以核销和申请完成任意医生订单`() {
+        val actor = ManagementActor("admin-1", true, setOf("ADMIN"), null, emptySet(), emptySet(), emptySet())
+        val verificationOrder = createTestOrder("verify-order", "user-1", status = OrderStatusEnum.CONSULTATION_PAID.value)
+            .copy(doctorId = "doctor-2", verifyCode = "123456")
+        val completionOrder = createTestOrder("completion-order", "user-1", status = OrderStatusEnum.BALANCE_PAID.value)
+            .copy(doctorId = "doctor-3", verifyCode = "654321")
+        every { orderRepository.findByIdForUpdate("verify-order") } returns verificationOrder
+        every { orderRepository.findByIdForUpdate("completion-order") } returns completionOrder
+        every { orderRepository.save(any()) } answers { firstArg() }
+
+        assertEquals(OrderStatusEnum.VERIFIED.value,
+            orderService.confirmVerificationForManagement(actor, "verify-order", "123456").status)
+        assertEquals(OrderStatusEnum.PENDING_COMPLETION.value,
+            orderService.requestCompletionForManagement(actor, "completion-order", "654321").status)
+    }
+
+    @Test
+    fun `专业订单列表使用精确 offset 且仅查询医生本人`() {
+        val pageable = slot<org.springframework.data.domain.Pageable>()
+        val actor = ManagementActor("doctor-1", false, setOf("DOCTOR"), "doctor-1", emptySet(), emptySet(), setOf("doctor-1"))
+        every { orderRepository.findManagementOrders("doctor-1", null, capture(pageable)) } returns
+            org.springframework.data.domain.PageImpl(List(20) { createTestOrder("o${it + 16}", "user-1") })
+
+        val result = orderService.getOrdersForManagement(actor, null, 15, 20)
+
+        assertEquals(15, pageable.captured.offset)
+        assertEquals(20, result.size)
+    }
+
+    @Test
+    fun `confirmVerification replay is idempotent and does not log`() {
+        val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.VERIFIED.value)
+            .copy(verifiedAt = LocalDateTime.now(), verifyCode = null)
+        every { orderRepository.findByIdForUpdate("o1") } returns order
+
+        val result = orderService.confirmVerification("o1", "doctor-1", "123456")
+
+        assertEquals(OrderStatusEnum.VERIFIED.value, result.status)
+        verify(exactly = 0) { orderRepository.save(any()) }
+        verify(exactly = 0) { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) }
     }
 
     // ---- 确认完成 ----

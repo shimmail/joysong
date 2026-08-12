@@ -51,9 +51,8 @@ class ManagementOrderController(
         @Valid @RequestBody request: OrderVerificationRequest
     ): BaseResponse<*> {
         val actor = managementAccessService.actor(authentication)
-        orderService.requireOrderForManagement(actor, id)
         return BaseResponse.success(
-            orderService.confirmVerification(id, actor.userId, request.verificationCode)
+            orderService.confirmVerificationForManagement(actor, id, request.verificationCode)
         )
     }
 
@@ -64,9 +63,8 @@ class ManagementOrderController(
         @Valid @RequestBody request: OrderVerificationRequest
     ): BaseResponse<*> {
         val actor = managementAccessService.actor(authentication)
-        orderService.requireOrderForManagement(actor, id)
         return BaseResponse.success(
-            orderService.requestCompletion(id, actor.userId, request.verificationCode)
+            orderService.requestCompletionForManagement(actor, id, request.verificationCode)
         )
     }
 }

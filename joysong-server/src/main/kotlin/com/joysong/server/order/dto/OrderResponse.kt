@@ -42,7 +42,9 @@ data class OrderResponse(
     val doctorName: String = "",
     val createdAt: LocalDateTime,
     val updatedAt: LocalDateTime?,
-    val completedAt: LocalDateTime? = null
+    val completedAt: LocalDateTime? = null,
+    val canVerify: Boolean = false,
+    val canRequestCompletion: Boolean = false
 ) {
     /**
      * Android 端使用 price 字段名，与 amount 值相同，保持向后兼容
@@ -53,7 +55,11 @@ data class OrderResponse(
     companion object {
         /** 管理侧可查看订单，但不能读取由用户出示的核销码。 */
         fun forManagement(entity: OrderEntity): OrderResponse =
-            fromEntity(entity, entity.status).copy(verifyCode = null)
+            fromEntity(entity, entity.status).copy(
+                verifyCode = null,
+                canVerify = entity.status == OrderStatusEnum.CONSULTATION_PAID.value,
+                canRequestCompletion = entity.status == OrderStatusEnum.BALANCE_PAID.value
+            )
 
         /** 用户端不暴露内部结算阶段，统一显示为已完成。 */
         fun from(entity: OrderEntity): OrderResponse {

@@ -11,6 +11,7 @@ import com.joysong.server.institution.repository.InstitutionProjectRepository
 import com.joysong.server.institution.repository.InstitutionRepository
 import com.joysong.server.institution.service.InstitutionProjectDetailResolver
 import com.joysong.server.identity.service.ManagementActor
+import com.joysong.server.common.OffsetPageRequest
 import com.joysong.server.identity.service.InstitutionConsultantService
 import com.joysong.server.identity.service.DoctorInstitutionRelationshipService
 import com.joysong.server.order.dto.CreateOrderRequest
@@ -26,6 +27,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.context.annotation.Lazy
 import org.springframework.security.access.AccessDeniedException
 import org.springframework.stereotype.Service
+import org.springframework.data.domain.PageRequest
 import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
 import java.security.SecureRandom
@@ -246,17 +248,16 @@ class OrderService(
         if (normalizedStatus != null) {
             require(OrderStatusEnum.fromValue(normalizedStatus) != null) { "订单状态无效" }
         }
-        val visible = orderRepository.findAll()
-            .asSequence()
-            .filter { canManageOrder(actor, it) }
-            .filter { normalizedStatus == null || it.status == normalizedStatus }
-            .sortedByDescending { it.createdAt }
-            .map(OrderResponse::forManagement)
-            .toList()
-        return visible.apiSlice(offset, limit)
+        require(offset >= 0) { "offset 不能小于 0" }
+        require(limit in 1..100) { "limit 必须在 1-100 之间" }
+        val doctorId = requireProfessionalDoctor(actor)
+        return orderRepository.findManagementOrders(
+            doctorId, normalizedStatus, OffsetPageRequest(offset.toLong(), limit)
+        ).content.map(OrderResponse::forManagement)
     }
 
     fun requireOrderForManagement(actor: ManagementActor, orderId: String): OrderEntity {
+        requireProfessionalDoctor(actor)
         val order = orderRepository.findById(orderId)
             .orElseThrow { IllegalArgumentException("订单不存在") }
         if (!canManageOrder(actor, order)) throw AccessDeniedException("无权管理该订单")
@@ -264,8 +265,13 @@ class OrderService(
     }
 
     private fun canManageOrder(actor: ManagementActor, order: OrderEntity): Boolean =
-        actor.isAdmin ||
-            (actor.doctorId != null && order.doctorId == actor.doctorId)
+        actor.isAdmin || ("DOCTOR" in actor.activeRoles && actor.doctorId != null && order.doctorId == actor.doctorId)
+
+    private fun requireProfessionalDoctor(actor: ManagementActor): String? {
+        if (actor.isAdmin) return null
+        if ("DOCTOR" !in actor.activeRoles) throw AccessDeniedException("仅限在职医生")
+        return actor.doctorId ?: throw AccessDeniedException("仅限在职医生")
+    }
 
     /**
      * 按状态获取用户的订单列表
@@ -330,15 +336,29 @@ class OrderService(
      * @return 更新后的订单响应对象
      */
     @Transactional(rollbackFor = [Exception::class])
+    fun confirmVerificationForManagement(actor: ManagementActor, orderId: String, verificationCode: String): OrderResponse {
+        requireProfessionalDoctor(actor)
+        val order = orderRepository.findByIdForUpdate(orderId) ?: throw OrderManagementNotFoundException()
+        if (!canManageOrder(actor, order)) throw AccessDeniedException("无权管理该订单")
+        return confirmVerificationLocked(order, actor.userId, verificationCode)
+    }
+
+    @Transactional(rollbackFor = [Exception::class])
     fun confirmVerification(orderId: String, operatorId: String, verificationCode: String): OrderResponse {
-        val order = orderRepository.findById(orderId)
-            .orElseThrow { IllegalArgumentException("订单不存在: $orderId") }
+        val order = orderRepository.findByIdForUpdate(orderId)
+            ?: throw IllegalArgumentException("订单不存在: $orderId")
+        return confirmVerificationLocked(order, operatorId, verificationCode)
+    }
+
+    private fun confirmVerificationLocked(order: OrderEntity, operatorId: String, verificationCode: String): OrderResponse {
+        val orderId = order.id
+        if (order.status == OrderStatusEnum.VERIFIED.value && order.verifiedAt != null) {
+            return OrderResponse.forManagement(order)
+        }
 
         val currentStatus = OrderStatusEnum.fromValue(order.status)
             ?: throw IllegalStateException("订单状态无效: ${order.status}")
-        require(currentStatus == OrderStatusEnum.CONSULTATION_PAID) {
-            "当前状态[${currentStatus.value}]不允许确认到店核验，需先支付面诊金"
-        }
+        if (currentStatus != OrderStatusEnum.CONSULTATION_PAID) throw OrderManagementConflictException("当前订单状态不允许确认到店核验")
         require(order.verifyCode != null && order.verifyCode == verificationCode.trim()) { "核销码不正确" }
 
         val updated = orderRepository.save(
@@ -358,7 +378,7 @@ class OrderService(
             remark = "确认到店核验"
         )
         log.info("订单[{}]确认到店核验成功, 操作人: {}", orderId, operatorId)
-        return OrderResponse.from(updated)
+        return OrderResponse.forManagement(updated)
     }
 
     /**
@@ -371,15 +391,29 @@ class OrderService(
      * @return 更新后的订单响应对象
      */
     @Transactional(rollbackFor = [Exception::class])
+    fun requestCompletionForManagement(actor: ManagementActor, orderId: String, verificationCode: String): OrderResponse {
+        requireProfessionalDoctor(actor)
+        val order = orderRepository.findByIdForUpdate(orderId) ?: throw OrderManagementNotFoundException()
+        if (!canManageOrder(actor, order)) throw AccessDeniedException("无权管理该订单")
+        return requestCompletionLocked(order, actor.userId, verificationCode)
+    }
+
+    @Transactional(rollbackFor = [Exception::class])
     fun requestCompletion(orderId: String, operatorId: String, verificationCode: String): OrderResponse {
-        val order = orderRepository.findById(orderId)
-            .orElseThrow { IllegalArgumentException("订单不存在: $orderId") }
+        val order = orderRepository.findByIdForUpdate(orderId)
+            ?: throw IllegalArgumentException("订单不存在: $orderId")
+        return requestCompletionLocked(order, operatorId, verificationCode)
+    }
+
+    private fun requestCompletionLocked(order: OrderEntity, operatorId: String, verificationCode: String): OrderResponse {
+        val orderId = order.id
+        if (order.status == OrderStatusEnum.PENDING_COMPLETION.value && order.completionRequestedAt != null) {
+            return OrderResponse.forManagement(order)
+        }
 
         val currentStatus = OrderStatusEnum.fromValue(order.status)
             ?: throw IllegalStateException("订单状态无效: ${order.status}")
-        require(currentStatus == OrderStatusEnum.BALANCE_PAID) {
-            "当前状态[${currentStatus.value}]不允许申请完成，需先支付尾款"
-        }
+        if (currentStatus != OrderStatusEnum.BALANCE_PAID) throw OrderManagementConflictException("当前订单状态不允许申请完成")
         require(order.verifyCode != null && order.verifyCode == verificationCode.trim()) { "核销码不正确" }
 
         val updated = orderRepository.save(
@@ -399,7 +433,7 @@ class OrderService(
             remark = "机构申请项目完成"
         )
         log.info("订单[{}]机构申请完成, 操作人: {}", orderId, operatorId)
-        return OrderResponse.from(updated)
+        return OrderResponse.forManagement(updated)
     }
 
     /**
@@ -879,3 +913,6 @@ class OrderService(
         return "RFD$timestamp${UUID.randomUUID().toString().take(6).uppercase()}"
     }
 }
+
+class OrderManagementNotFoundException : RuntimeException("订单不存在")
+class OrderManagementConflictException(message: String) : RuntimeException(message)
