@@ -2227,7 +2227,7 @@ Authorization: Bearer <token>
 }
 ```
 
-`PROFILE_UPDATE` 响应中的 11 个 `current*` 字段是 V18 在**提交事务内**固化的 before 快照；非 `PROFILE_UPDATE` 申请这些字段为 `null`。法人或管理员审核列表必须用这组不可变快照与请求中的 after 字段做对比，不得在审批时重新读取生效表冒充原值。提交时尚无有效分账配置，则快照采用 `currentConsultationFee = 0`、`currentCommissionRate = 0`、`currentInstitutionRate =` 服务端策略默认机构率，并据当时平台率推导 `currentPlatformRate` 与 `currentDoctorRate`。
+`PROFILE_UPDATE` 响应中的 11 个 `current*` 字段是不可变 before 快照；非 `PROFILE_UPDATE` 申请这些字段为 `null`。V17/V18 先增加可空列，V18 回填旧数据，V19 再启用完整性约束。V18 以后新申请在**提交事务内**固化真实 before；升级前历史申请无法还原提交时状态，V18 按 `(doctorId, institutionProjectId)` 捕获**迁移执行时**的医生项目和未软删 config，属于可审计的近似快照。历史行缺 config 时采用面诊费 0、顾问率 0、机构率 40、平台率 10 及推导医生率；缺医生项目时采用价格 0 和空资料。法人或管理员审核列表必须使用已固化字段与 after 做对比，不得在审批时重新读取生效表冒充原值。
 
 ### POST /api/admin/institution-project-requests/{id}/review
 

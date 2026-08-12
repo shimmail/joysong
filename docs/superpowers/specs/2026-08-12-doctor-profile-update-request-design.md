@@ -63,7 +63,7 @@
 - 应用层继续用 `OrderSplitRatePolicy` 校验平台、机构、顾问合计不超过 100；
 - 保留现有 `pending_key` 唯一键，从数据库层保证每个 `(doctor_id, institution_project_id)` 最多一个 PENDING。
 
-既有历史申请的新列保持 null，迁移不回填臆造快照。同步修改 `V1__init_schema.sql` 与 `B1__init_schema.sql`，并在空的隔离数据库验证全量迁移。
+升级顺序固定为：V17/V18 仅增加可空的提案、基线和 before 列；V18 再回填既有 `PROFILE_UPDATE`；V19 最后增加范围与判别约束。历史申请无法还原提交时原值，故按 `(doctor_id, institution_project_id)` 从迁移执行时的 `doctor_projects` 和未软删 config 精确捕获可审计近似快照。缺 config 使用服务默认面诊费 0、顾问率 0、机构率 40、平台率 10 及推导医生率；缺 doctor project 使用价格 0 与空资料。fresh migration 与 V15 历史 fixture 升级均须在名称以 `myapp_worktree_` 开头的隔离 MySQL 数据库验证。
 
 ## 4. API 契约
 
