@@ -33,6 +33,8 @@ void main() {
           'entryType': 'REFUND_REVERSAL',
           'title': '退款冲正',
           'description': '订单 JS1',
+          'sourceType': 'REFUND',
+          'sourceId': 'JS1',
           'amountMinor': -1200,
           'pendingAfterMinor': 0,
           'availableAfterMinor': 100,
@@ -49,6 +51,7 @@ void main() {
     });
 
     expect(page.content.single.amountMinor, -1200);
+    expect(page.content.single.sourceType, 'REFUND');
     expect(page.last, isTrue);
   });
 

@@ -92,9 +92,49 @@ void main() {
 
     expect(find.text('Withdrawal coming soon'), findsOneWidget);
   });
+
+  testWidgets('shows retained wallet data with refresh error and retry',
+      (tester) async {
+    final repository = _WalletRepository()
+      ..overview = _overview(_wallet(101))
+      ..pages[(101, 0)] = _page(101, [_entry(1, 101)], last: true);
+    final controller = WalletController(repository);
+    await tester.pumpWidget(_walletApp(controller));
+    await tester.pumpAndSettle();
+    repository.overviewError = StateError('offline');
+
+    await controller.refresh();
+    await tester.pumpAndSettle();
+
+    expect(find.text(r'$850.00'), findsOneWidget);
+    expect(
+        find.byKey(const Key('wallet-overview-retry-button')), findsOneWidget);
+  });
+
+  testWidgets('localizes semantic wallet and ledger labels in English',
+      (tester) async {
+    final repository = _WalletRepository()
+      ..overview = _overview(_wallet(101))
+      ..pages[(101, 0)] = _page(101, [_entry(1, 101)], last: true);
+
+    await tester.pumpWidget(_walletApp(
+      WalletController(repository),
+      locale: const Locale('en'),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Doctor wallet · 张医生'), findsWidgets);
+    expect(find.text('Earnings'), findsOneWidget);
+    expect(find.text('Order JS1'), findsOneWidget);
+    expect(find.textContaining('钱包'), findsNothing);
+    expect(find.textContaining('流水'), findsNothing);
+    expect(find.textContaining('订单'), findsNothing);
+  });
 }
 
-Widget _walletApp(WalletController controller, {Locale locale = const Locale('zh')}) => MaterialApp(
+Widget _walletApp(WalletController controller,
+        {Locale locale = const Locale('zh')}) =>
+    MaterialApp(
       locale: locale,
       supportedLocales: const [Locale('zh'), Locale('en')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
@@ -102,9 +142,11 @@ Widget _walletApp(WalletController controller, {Locale locale = const Locale('zh
     );
 
 WalletOverview _overview(WalletAccount first, [WalletAccount? second]) =>
-    WalletOverview(currency: 'USD', wallets: [first, if (second != null) second]);
+    WalletOverview(
+        currency: 'USD', wallets: [first, if (second != null) second]);
 
-WalletAccount _wallet(int id, {
+WalletAccount _wallet(
+  int id, {
   String displayName = '医生钱包',
   String ownerName = '张医生',
   int available = 85000,
@@ -126,6 +168,8 @@ WalletLedgerEntry _entry(int id, int walletId) => WalletLedgerEntry(
       entryType: 'SETTLEMENT_CREDIT',
       title: '流水 $id',
       description: '订单 JS$id',
+      sourceType: 'ORDER',
+      sourceId: 'JS$id',
       amountMinor: 1200,
       pendingAfterMinor: 0,
       availableAfterMinor: 0,
@@ -150,9 +194,14 @@ final class _WalletRepository implements WalletRepository {
   final pages = <(int, int), WalletLedgerPage>{};
   final errors = <(int, int), Object>{};
   var withdrawCalls = 0;
+  Object? overviewError;
 
   @override
-  Future<WalletOverview> getOverview() async => overview;
+  Future<WalletOverview> getOverview() async {
+    final error = overviewError;
+    if (error != null) throw error;
+    return overview;
+  }
 
   @override
   Future<WalletLedgerPage> getLedger({

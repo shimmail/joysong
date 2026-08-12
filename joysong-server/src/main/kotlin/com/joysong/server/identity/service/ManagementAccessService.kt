@@ -100,8 +100,8 @@ class ManagementAccessService(
         if (CONSULTANT_ROLE in actor.activeRoles) {
             add(WalletOwnerScope("CONSULTANT", setOf(actor.userId)))
         }
-        if (LEGAL_REP_ROLE in actor.activeRoles && actor.visibleInstitutionIds.isNotEmpty()) {
-            add(WalletOwnerScope("INSTITUTION", actor.visibleInstitutionIds))
+        if (LEGAL_REP_ROLE in actor.activeRoles && actor.managedInstitutionIds.isNotEmpty()) {
+            add(WalletOwnerScope("INSTITUTION", actor.managedInstitutionIds))
         }
     }
 

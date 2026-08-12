@@ -60,6 +60,8 @@ final class WalletLedgerEntry {
     required this.entryType,
     required this.title,
     required this.description,
+    required this.sourceType,
+    required this.sourceId,
     required this.amountMinor,
     required this.pendingAfterMinor,
     required this.availableAfterMinor,
@@ -76,9 +78,13 @@ final class WalletLedgerEntry {
       entryType: _text(map['entryType'], 'entryType'),
       title: _text(map['title'], 'title'),
       description: _text(map['description'], 'description'),
+      sourceType: _text(map['sourceType'], 'sourceType'),
+      sourceId: _text(map['sourceId'], 'sourceId'),
       amountMinor: _integer(map['amountMinor'], 'amountMinor'),
-      pendingAfterMinor: _integer(map['pendingAfterMinor'], 'pendingAfterMinor'),
-      availableAfterMinor: _integer(map['availableAfterMinor'], 'availableAfterMinor'),
+      pendingAfterMinor:
+          _integer(map['pendingAfterMinor'], 'pendingAfterMinor'),
+      availableAfterMinor:
+          _integer(map['availableAfterMinor'], 'availableAfterMinor'),
       frozenAfterMinor: _integer(map['frozenAfterMinor'], 'frozenAfterMinor'),
       currency: _text(map['currency'], 'currency'),
       createdAt: DateTime.parse(_text(map['createdAt'], 'createdAt')),
@@ -90,6 +96,8 @@ final class WalletLedgerEntry {
   final String entryType;
   final String title;
   final String description;
+  final String sourceType;
+  final String sourceId;
   final int amountMinor;
   final int pendingAfterMinor;
   final int availableAfterMinor;
@@ -169,7 +177,9 @@ String _text(Object? value, String field) {
 
 int _integer(Object? value, String field) => switch (value) {
       final int number => number,
-      final num number when number == number.truncateToDouble() => number.toInt(),
-      final String text => int.tryParse(text) ?? (throw FormatException('$field不是整数')),
+      final num number when number == number.truncateToDouble() =>
+        number.toInt(),
+      final String text =>
+        int.tryParse(text) ?? (throw FormatException('$field不是整数')),
       _ => throw FormatException('$field不是整数'),
     };
