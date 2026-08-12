@@ -43,6 +43,9 @@ import org.springframework.http.*
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.client.RestTemplate
+import org.springframework.web.client.ResourceAccessException
+import org.springframework.web.client.RestClientResponseException
+import java.net.URI
 import java.time.LocalDateTime
 import java.util.UUID
 
@@ -56,6 +59,34 @@ private data class LlmCallResult(
     val content: String,
     val fallbackUsed: Boolean
 )
+
+private data class ProviderCallContext(
+    val traceId: String,
+    val turnId: String
+)
+
+internal fun buildChatCompletionRequest(
+    model: String,
+    messages: List<Map<String, String>>,
+    maxOutputTokens: Int,
+    temperature: Number,
+    reasoningEffort: String?
+): MutableMap<String, Any> {
+    val isGpt5 = model.trim().lowercase().startsWith("gpt-5")
+    return linkedMapOf<String, Any>(
+        "model" to model,
+        "messages" to messages,
+        "stream" to false
+    ).apply {
+        if (isGpt5) {
+            this["max_completion_tokens"] = maxOutputTokens
+            reasoningEffort?.takeIf(String::isNotBlank)?.let { this["reasoning_effort"] = it }
+        } else {
+            this["temperature"] = temperature
+            this["max_tokens"] = maxOutputTokens
+        }
+    }
+}
 
 private data class GeneratedTurn(
     val content: String,
@@ -290,7 +321,7 @@ class ChatService(
         sessionId: String,
         userId: String,
         request: SendMessageRequest,
-        llmCaller: (List<Map<String, String>>, GenerationProfile) -> LlmCallResult
+        llmCaller: (List<Map<String, String>>, GenerationProfile, ProviderCallContext) -> LlmCallResult
     ): ChatTurnResult {
         val content = request.content.trim()
         require(content.isNotEmpty()) { "消息内容不能为空" }
@@ -318,7 +349,7 @@ class ChatService(
         sessionId: String,
         userId: String,
         content: String,
-        llmCaller: (List<Map<String, String>>, GenerationProfile) -> LlmCallResult
+        llmCaller: (List<Map<String, String>>, GenerationProfile, ProviderCallContext) -> LlmCallResult
     ): ChatTurnResult {
         val totalStartedAt = System.nanoTime()
         return try {
@@ -347,7 +378,7 @@ class ChatService(
         userId: String,
         content: String,
         totalStartedAt: Long,
-        llmCaller: (List<Map<String, String>>, GenerationProfile) -> LlmCallResult
+        llmCaller: (List<Map<String, String>>, GenerationProfile, ProviderCallContext) -> LlmCallResult
     ): ChatTurnResult {
         val context = agentContextBuilder.load(userId, sessionId, 20, 4_000)
         val session = sessionRepository.findByIdAndUserIdAndDeletedAtIsNull(sessionId, userId)
@@ -358,6 +389,7 @@ class ChatService(
             historyMessages = context.messages,
             summary = context.summary,
             appendCurrentUser = true,
+            providerCallContext = ProviderCallContext(begin.traceId, begin.turnId),
             llmCaller = llmCaller
         )
         val durationMs = elapsedMs(totalStartedAt)
@@ -385,7 +417,8 @@ class ChatService(
         historyMessages: List<ChatMessageEntity>,
         summary: AgentSessionSummary?,
         appendCurrentUser: Boolean,
-        llmCaller: (List<Map<String, String>>, GenerationProfile) -> LlmCallResult
+        providerCallContext: ProviderCallContext,
+        llmCaller: (List<Map<String, String>>, GenerationProfile, ProviderCallContext) -> LlmCallResult
     ): GeneratedTurn {
         val llmMessages = mutableListOf<Map<String, String>>()
         val currentRouteAssessment = agentIntentRouter.assessCurrent(content, session.contextType)
@@ -419,7 +452,7 @@ class ChatService(
             )
         } else localRouteAssessment
         val parsedRoute = if (aiAgentProperties.intentParserEnabled && routeAssessment.requiresLlmParsing) {
-            parseAmbiguousRoute(content, routeAssessment, boundedContext.decisions)
+            parseAmbiguousRoute(content, routeAssessment, boundedContext.decisions, providerCallContext)
         } else null
         val intentDecision = agentIntentRouter.mergeParsedRoute(routeAssessment, parsedRoute)
         val labelSummary = generationLabelSummary(routeAssessment, parsedRoute, intentDecision)
@@ -457,7 +490,7 @@ class ChatService(
             llmMessages.add(mapOf("role" to "system", "content" to promptBuild.groundingPrompt))
         }
 
-        val llmResult = llmCaller(llmMessages, generationProfile)
+        val llmResult = llmCaller(llmMessages, generationProfile, providerCallContext)
         val aiContent = enforcePlanningBoundary(
             intent = intentDecision.intent,
             content = naturalizeUserFacingLanguage(llmResult.content)
@@ -516,7 +549,8 @@ class ChatService(
      */
     private fun callLLM(
         messages: List<Map<String, String>>,
-        profile: GenerationProfile = generationProfile(AgentIntent.GENERAL_CHAT)
+        profile: GenerationProfile = generationProfile(AgentIntent.GENERAL_CHAT),
+        providerCallContext: ProviderCallContext
     ): LlmCallResult {
         // Demo replies are opt-in for local development. Production must not
         // persist a fabricated assistant answer as if it came from a model.
@@ -530,21 +564,20 @@ class ChatService(
             )
         }
 
+        val startedAt = System.nanoTime()
         return try {
             val url = providerChatCompletionsUrl()
             val headers = HttpHeaders().apply {
                 setBearerAuth(aiAgentProperties.apiKey)
                 contentType = MediaType.APPLICATION_JSON
             }
-            val body = mutableMapOf<String, Any>(
-                "model" to aiAgentProperties.model,
-                "messages" to messages,
-                "temperature" to 0.25,
-                "max_tokens" to profile.maxOutputTokens,
-                // FastAIToken 当前可能不支持稳定 SSE；确认兼容后再改为 true。
-                "stream" to false
+            val body = buildChatCompletionRequest(
+                model = aiAgentProperties.model,
+                messages = messages,
+                maxOutputTokens = profile.maxOutputTokens,
+                temperature = 0.25,
+                reasoningEffort = reasoningEffort(profile)
             )
-            reasoningEffort(profile)?.let { body["reasoning_effort"] = it }
             val response = restTemplate.exchange(url, HttpMethod.POST, HttpEntity(body, headers), Map::class.java)
             val responseBody = response.body
             val choices = responseBody?.get("choices") as? List<*>
@@ -559,6 +592,13 @@ class ChatService(
                 fallbackUsed = content == null
             )
         } catch (e: Exception) {
+            logProviderFailure(
+                providerCallContext,
+                "MODEL_COMPLETION",
+                messages,
+                e,
+                startedAt
+            )
             if (!aiAgentProperties.demoFallbackEnabled) {
                 throw IllegalStateException(if (isProviderTimeout(e)) "AI_PROVIDER_TIMEOUT" else "AI_PROVIDER_UNAVAILABLE")
             }
@@ -612,7 +652,8 @@ class ChatService(
     private fun parseAmbiguousRoute(
         rawQuery: String,
         local: AgentRouteAssessment,
-        boundedContext: List<AgentIntentDecision>
+        boundedContext: List<AgentIntentDecision>,
+        providerCallContext: ProviderCallContext
     ): ParsedAgentRoute? {
         if (aiAgentProperties.apiKey.isBlank()) return null
         val startedAt = System.nanoTime()
@@ -633,15 +674,16 @@ class ChatService(
                 Local decision: ${local.decision.intent}/${local.decision.queryTarget ?: "NONE"}. Locked fields: intent=${local.explicitIntent}, queryTarget=${local.explicitQueryTarget}.
                 You may fill only unlocked fields. Do not change locked fields.
             """.trimIndent()
-            val body = mapOf(
-                "model" to aiAgentProperties.resolvedIntentModel(),
-                "messages" to listOf(
-                    mapOf("role" to "system", "content" to instruction),
-                    mapOf("role" to "user", "content" to "Current: $rawQuery\nBounded route context: $context")
-                ),
-                "temperature" to 0,
-                "max_tokens" to 180,
-                "stream" to false
+            val parserMessages = listOf(
+                mapOf("role" to "system", "content" to instruction),
+                mapOf("role" to "user", "content" to "Current: $rawQuery\nBounded route context: $context")
+            )
+            val body = buildChatCompletionRequest(
+                model = aiAgentProperties.resolvedIntentModel(),
+                messages = parserMessages,
+                maxOutputTokens = 180,
+                temperature = 0,
+                reasoningEffort = reasoningEffort(generationProfile(AgentIntent.GENERAL_CHAT))
             )
             val response = intentParserRestTemplate.exchange(url, HttpMethod.POST, HttpEntity(body, headers), Map::class.java)
             val choices = response.body?.get("choices") as? List<*>
@@ -699,6 +741,18 @@ class ChatService(
             }
             ParsedAgentRoute(intent, target, keywords, intents)
         } catch (error: Exception) {
+            runCatching {
+                logProviderFailure(
+                    providerCallContext,
+                    "INTENT_CLASSIFICATION",
+                    emptyList(),
+                    error,
+                    startedAt,
+                    aiAgentProperties.resolvedIntentModel()
+                )
+            }.onFailure { diagnosticError ->
+                logger.warn("Agent intent parser diagnostics failed category={}", diagnosticError.javaClass.simpleName)
+            }
             logger.info(
                 "Agent intent parser fallback category={} durationMs={}",
                 intentParserFailureCategory(error),
@@ -851,6 +905,58 @@ class ChatService(
     }
 
     private fun elapsedMs(startedAt: Long): Long = (System.nanoTime() - startedAt) / 1_000_000
+
+    private fun logProviderFailure(
+        context: ProviderCallContext,
+        phase: String,
+        messages: List<Map<String, String>>,
+        error: Throwable,
+        startedAt: Long,
+        modelName: String = aiAgentProperties.model
+    ) {
+        val responseError = generateSequence<Throwable>(error) { it.cause }
+            .filterIsInstance<RestClientResponseException>()
+            .firstOrNull()
+        val rootCause = generateSequence<Throwable>(error) { it.cause }.last()
+        val httpStatus = responseError?.statusCode?.value()
+        val category = when {
+            httpStatus in setOf(401, 403) -> "AUTH"
+            httpStatus == 429 -> "RATE_LIMIT"
+            httpStatus == 404 -> "MODEL_NOT_FOUND"
+            httpStatus == 400 -> "INVALID_REQUEST"
+            httpStatus != null && httpStatus in 500..599 -> "UPSTREAM_5XX"
+            rootCause is java.net.SocketTimeoutException -> "READ_TIMEOUT"
+            rootCause is java.net.ConnectException -> "CONNECT_TIMEOUT"
+            error is ResourceAccessException -> "NETWORK"
+            responseError == null -> "INVALID_RESPONSE"
+            else -> "UNKNOWN"
+        }
+        val providerErrorCode = responseError?.let { response ->
+            runCatching {
+                objectMapper.readTree(response.responseBodyAsString)
+                    .path("error")
+                    .path("code")
+                    .asText()
+                    .takeIf(String::isNotBlank)
+            }.getOrNull()
+        }
+        val providerHost = runCatching { URI(aiAgentProperties.baseUrl.trim()).host }.getOrNull().orEmpty()
+        agentOperationLogger.providerFailed(
+            traceId = context.traceId,
+            turnId = context.turnId,
+            providerPhase = phase,
+            providerHost = providerHost,
+            modelName = modelName,
+            httpStatus = httpStatus,
+            providerCategory = category,
+            providerErrorCode = providerErrorCode,
+            exceptionType = (responseError ?: rootCause).javaClass.simpleName,
+            durationMs = elapsedMs(startedAt),
+            messageCount = messages.size,
+            systemMessageCount = messages.count { it["role"].equals("system", ignoreCase = true) },
+            totalCharacterCount = messages.sumOf { it["content"].orEmpty().length }
+        )
+    }
 
     private fun naturalizeUserFacingLanguage(content: String): String = content
         .replace("目前命中到", "目前可以看到")

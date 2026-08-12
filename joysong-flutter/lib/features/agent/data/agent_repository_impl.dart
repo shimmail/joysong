@@ -26,8 +26,16 @@ final class AgentRepositoryImpl implements AgentRepository {
       _remote.getSessions(persona: persona);
 
   @override
-  Future<ChatTurn> sendMessage(String sessionId, String content) =>
-      _remote.sendMessage(sessionId, content);
+  Future<ChatTurn> sendMessage(
+    String sessionId,
+    String content, {
+    required String idempotencyKey,
+  }) =>
+      _remote.sendMessage(
+        sessionId,
+        content,
+        idempotencyKey: idempotencyKey,
+      );
 
   @override
   Future<List<ChatMessage>> getMessages(

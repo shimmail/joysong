@@ -123,8 +123,11 @@ class _BusyAgentRepository extends Fake implements AgentRepository {
       const [];
 
   @override
-  Future<ChatTurn> sendMessage(String sessionId, String content) =>
-      pendingSend.future;
+  Future<ChatTurn> sendMessage(
+    String sessionId,
+    String content, {
+    required String idempotencyKey,
+  }) => pendingSend.future;
 }
 
 const _session = ChatSession(

@@ -174,7 +174,11 @@ class _CatalogRepository extends Fake implements AgentRepository {
       _session;
 
   @override
-  Future<ChatTurn> sendMessage(String sessionId, String content) async => turn;
+  Future<ChatTurn> sendMessage(
+    String sessionId,
+    String content, {
+    required String idempotencyKey,
+  }) async => turn;
 }
 
 ChatTurn _turn({

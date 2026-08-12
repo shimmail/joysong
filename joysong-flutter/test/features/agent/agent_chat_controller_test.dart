@@ -4,7 +4,6 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/core/network/api_client.dart';
-import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/features/agent/data/agent_remote_data_source.dart';
 import 'package:joysong_flutter/features/agent/domain/agent_models.dart';
 import 'package:joysong_flutter/features/agent/domain/agent_repository.dart';
@@ -66,6 +65,23 @@ void main() {
     expect(controller.state.deliveryState, ChatDeliveryState.failed);
   });
 
+  test('manual retry reuses the same idempotency key after failure',
+      () async {
+    final repository = _FakeAgentRepository(failFirstNonStream: true);
+    final controller = AgentChatController(
+      repository: repository,
+      recentMessageLimit: 20,
+    );
+
+    await controller.send('在吗');
+    await controller.send('在吗');
+
+    expect(repository.sendCalls, 2);
+    expect(repository.idempotencyKeys.length, 2);
+    expect(repository.idempotencyKeys.first, repository.idempotencyKeys.last);
+    expect(controller.state.deliveryState, ChatDeliveryState.completed);
+  });
+
   test('delete during a REST send fails explicitly without deleting', () async {
     final pendingSend = Completer<ChatTurn>();
     final repository = _FakeAgentRepository(pendingSend: pendingSend);
@@ -92,10 +108,12 @@ void main() {
   test('REST send includes an idempotency key in exactly one POST', () async {
     var requests = 0;
     Map<String, Object?>? requestBody;
+    String? idempotencyHeader;
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() => server.close(force: true));
     server.listen((request) async {
       requests += 1;
+      idempotencyHeader = request.headers.value('Idempotency-Key');
       requestBody = (jsonDecode(await utf8.decoder.bind(request).join()) as Map)
           .cast<String, Object?>();
       request.response
@@ -118,16 +136,19 @@ void main() {
       apiClient: client,
     );
 
-    await remote.sendMessage(_session.id, '想改善肤质');
+    await remote.sendMessage(
+      _session.id,
+      '想改善肤质',
+      idempotencyKey: 'fixed-idempotency-key',
+    );
 
     expect(requests, 1);
     expect(requestBody?['content'], '想改善肤质');
     expect(
       requestBody?['idempotencyKey'],
-      isA<String>()
-          .having((value) => value.isNotEmpty, 'is not empty', isTrue)
-          .having((value) => value.length <= 100, 'length', isTrue),
+      'fixed-idempotency-key',
     );
+    expect(idempotencyHeader, 'fixed-idempotency-key');
   });
 }
 
@@ -189,14 +210,17 @@ class _FakeAgentRepository extends Fake implements AgentRepository {
     this.messages = const [],
     this.sendError,
     this.pendingSend,
+    this.failFirstNonStream = false,
   });
 
   final List<ChatMessage> messages;
   final Object? sendError;
   final Completer<ChatTurn>? pendingSend;
+  final bool failFirstNonStream;
   int createCalls = 0;
   int sendCalls = 0;
   int deleteCalls = 0;
+  final idempotencyKeys = <String>[];
 
   @override
   Future<ChatSession> createSession({
@@ -228,8 +252,16 @@ class _FakeAgentRepository extends Fake implements AgentRepository {
   }
 
   @override
-  Future<ChatTurn> sendMessage(String sessionId, String content) async {
+  Future<ChatTurn> sendMessage(
+    String sessionId,
+    String content, {
+    required String idempotencyKey,
+  }) async {
     sendCalls++;
+    idempotencyKeys.add(idempotencyKey);
+    if (failFirstNonStream && sendCalls == 1) {
+      throw Exception('timeout');
+    }
     if (sendError case final error?) throw error;
     if (pendingSend case final completer?) return completer.future;
     return _turn('完整答复');

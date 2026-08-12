@@ -44,6 +44,39 @@ class AgentOperationLogger {
         )
     }
 
+    fun providerFailed(
+        traceId: String,
+        turnId: String,
+        providerPhase: String,
+        providerHost: String,
+        modelName: String,
+        httpStatus: Int?,
+        providerCategory: String,
+        providerErrorCode: String?,
+        exceptionType: String,
+        durationMs: Long,
+        messageCount: Int,
+        systemMessageCount: Int,
+        totalCharacterCount: Int
+    ) {
+        logger.warn(
+            "AGENT_PROVIDER operation=PROVIDER_CALL traceId={} turnId={} providerPhase={} providerHost={} modelName={} httpStatus={} providerCategory={} providerErrorCode={} exceptionType={} durationMs={} messageCount={} systemMessageCount={} totalCharacterCount={}",
+            safeId(traceId),
+            safeId(turnId),
+            safeProviderPhase(providerPhase),
+            safeProviderHost(providerHost),
+            safeModelName(modelName),
+            httpStatus?.takeIf { it in 100..599 }?.toString() ?: "none",
+            safeProviderCategory(providerCategory),
+            safeProviderErrorCode(providerErrorCode),
+            safeExceptionType(exceptionType),
+            durationMs.coerceAtLeast(0),
+            messageCount.coerceIn(0, 100),
+            systemMessageCount.coerceIn(0, 100),
+            totalCharacterCount.coerceIn(0, 1_000_000)
+        )
+    }
+
     private fun sessionHash(sessionId: String): String = HexFormat.of().formatHex(
         MessageDigest.getInstance("SHA-256").digest(sessionId.toByteArray(StandardCharsets.UTF_8))
     ).take(16)
@@ -60,10 +93,46 @@ class AgentOperationLogger {
         .takeIf(stableErrorCodes::contains)
         ?: "AGENT_INTERNAL_ERROR"
 
+    private fun safeProviderPhase(value: String): String = value.trim().uppercase()
+        .takeIf(providerPhases::contains)
+        ?: "UNKNOWN"
+
+    private fun safeProviderHost(value: String): String = value.trim().lowercase()
+        .takeIf(safeProviderHostPattern::matches)
+        ?: "redacted"
+
+    private fun safeProviderCategory(value: String): String = value.trim().uppercase()
+        .takeIf(providerCategories::contains)
+        ?: "UNKNOWN"
+
+    private fun safeProviderErrorCode(value: String?): String = value.orEmpty().trim().lowercase()
+        .takeIf { safeProviderErrorCodePattern.matches(it) && !sensitiveMetadataPattern.containsMatchIn(it) }
+        ?: "none"
+
+    private fun safeExceptionType(value: String): String = value.trim()
+        .takeIf(safeExceptionTypePattern::matches)
+        ?: "redacted"
+
     private companion object {
         val safeModelNamePattern = Regex("[A-Za-z][A-Za-z0-9._-]{0,79}")
+        val safeProviderHostPattern = Regex("[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?")
+        val safeProviderErrorCodePattern = Regex("[a-z0-9][a-z0-9._-]{0,79}")
+        val safeExceptionTypePattern = Regex("[A-Za-z][A-Za-z0-9_$.-]{0,119}")
         val sensitiveMetadataPattern = Regex("(?i)(authorization|bearer|token|api[_-]?key|test[_-]?key)")
         val phonePattern = Regex("1[3-9]\\d{9}")
+        val providerPhases = setOf("INTENT_CLASSIFICATION", "MODEL_COMPLETION")
+        val providerCategories = setOf(
+            "AUTH",
+            "RATE_LIMIT",
+            "MODEL_NOT_FOUND",
+            "INVALID_REQUEST",
+            "UPSTREAM_5XX",
+            "CONNECT_TIMEOUT",
+            "READ_TIMEOUT",
+            "NETWORK",
+            "INVALID_RESPONSE",
+            "UNKNOWN"
+        )
         val stableErrorCodes = setOf(
             "INVALID_REQUEST",
             "INVALID_IDEMPOTENCY_KEY",

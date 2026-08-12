@@ -11,7 +11,11 @@ abstract interface class AgentRemoteDataSource {
 
   Future<List<ChatSession>> getSessions({ChatPersona? persona});
 
-  Future<ChatTurn> sendMessage(String sessionId, String content);
+  Future<ChatTurn> sendMessage(
+    String sessionId,
+    String content, {
+    required String idempotencyKey,
+  });
 
   Future<List<ChatMessage>> getMessages(
     String sessionId, {
@@ -90,13 +94,18 @@ final class ApiAgentRemoteDataSource implements AgentRemoteDataSource {
       const [];
 
   @override
-  Future<ChatTurn> sendMessage(String sessionId, String content) async =>
+  Future<ChatTurn> sendMessage(
+    String sessionId,
+    String content, {
+    required String idempotencyKey,
+  }) async =>
       _requireData(
-        await _apiClient.post<ChatTurn>(
+        await _apiClient.postIdempotent<ChatTurn>(
           'chat/sessions/$sessionId/messages',
+          idempotencyKey: idempotencyKey,
           body: {
             'content': _validateContent(content),
-            'idempotencyKey': generateApiRequestId(),
+            'idempotencyKey': idempotencyKey,
           },
           decodeData: ChatTurn.fromJson,
         ),

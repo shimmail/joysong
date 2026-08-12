@@ -10,7 +10,11 @@ abstract interface class AgentRepository {
 
   Future<List<ChatSession>> getSessions({ChatPersona? persona});
 
-  Future<ChatTurn> sendMessage(String sessionId, String content);
+  Future<ChatTurn> sendMessage(
+    String sessionId,
+    String content, {
+    required String idempotencyKey,
+  });
 
   Future<List<ChatMessage>> getMessages(
     String sessionId, {

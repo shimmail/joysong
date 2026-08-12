@@ -74,6 +74,7 @@ class AgentChatController extends ChangeNotifier {
   int _operation = 0;
   int _localId = 0;
   bool _disposed = false;
+  _PendingSend? _pendingSend;
 
   Future<void> loadSessions() async {
     _emit(_state.copyWith(isLoadingSessions: true, clearError: true));
@@ -300,6 +301,7 @@ class AgentChatController extends ChangeNotifier {
       final sessions = _state.sessions.any((item) => item.id == session.id)
           ? _state.sessions
           : [session, ..._state.sessions];
+      final idempotencyKey = _idempotencyKeyFor(session.id, normalized);
       final userMessage = _temporaryMessage(session.id, 'USER', normalized);
       _emit(
         _state.copyWith(
@@ -309,7 +311,7 @@ class AgentChatController extends ChangeNotifier {
         ),
       );
 
-      await _sendRest(session, normalized, operation);
+      await _sendRest(session, normalized, operation, idempotencyKey);
     } on Object catch (error) {
       if (!_isCurrent(operation)) return;
       _emit(
@@ -325,6 +327,7 @@ class AgentChatController extends ChangeNotifier {
     ChatSession session,
     String content,
     int operation,
+    String idempotencyKey,
   ) async {
     // This is exactly one POST. Failure is surfaced for an explicit manual
     // retry; neither this controller nor ApiClient replays POST requests.
@@ -336,11 +339,16 @@ class AgentChatController extends ChangeNotifier {
       ),
     );
     try {
-      final turn = await _repository.sendMessage(session.id, content);
+      final turn = await _repository.sendMessage(
+        session.id,
+        content,
+        idempotencyKey: idempotencyKey,
+      );
       if (!_isCurrent(operation)) {
         _removeMessage(temporaryAssistant.id);
         return;
       }
+      _clearPendingSend(session.id, content, idempotencyKey);
       _replaceMessage(temporaryAssistant.id, turn.message);
       _emit(
         _state.copyWith(
@@ -368,6 +376,36 @@ class AgentChatController extends ChangeNotifier {
         createdAt: DateTime.now().toIso8601String(),
         isTemporary: true,
       );
+
+  String _idempotencyKeyFor(String sessionId, String content) {
+    final pending = _pendingSend;
+    if (pending != null &&
+        pending.sessionId == sessionId &&
+        pending.content == content) {
+      return pending.idempotencyKey;
+    }
+    final key = 'agent-${DateTime.now().microsecondsSinceEpoch}-${++_localId}';
+    _pendingSend = _PendingSend(
+      sessionId: sessionId,
+      content: content,
+      idempotencyKey: key,
+    );
+    return key;
+  }
+
+  void _clearPendingSend(
+    String sessionId,
+    String content,
+    String idempotencyKey,
+  ) {
+    final pending = _pendingSend;
+    if (pending != null &&
+        pending.sessionId == sessionId &&
+        pending.content == content &&
+        pending.idempotencyKey == idempotencyKey) {
+      _pendingSend = null;
+    }
+  }
 
   void _replaceMessage(String messageId, ChatMessage replacement) {
     _emit(
@@ -434,4 +472,16 @@ class AgentChatController extends ChangeNotifier {
     ++_operation;
     super.dispose();
   }
+}
+
+class _PendingSend {
+  const _PendingSend({
+    required this.sessionId,
+    required this.content,
+    required this.idempotencyKey,
+  });
+
+  final String sessionId;
+  final String content;
+  final String idempotencyKey;
 }

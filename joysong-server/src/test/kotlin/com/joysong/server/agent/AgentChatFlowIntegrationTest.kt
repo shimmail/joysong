@@ -596,11 +596,28 @@ class AgentChatFlowIntegrationTest {
     fun `HTTP provider status failures share one stable redacted contract`(providerStatus: Int) {
         fakeLlmStatus.set(providerStatus)
 
-        assertHttpProviderFailure(
+        val logs = assertHttpProviderFailure(
             idempotencyKey = "http-provider-status-$providerStatus",
             expectedErrorCode = "AI_PROVIDER_UNAVAILABLE",
             sensitiveValues = listOf("provider-secret-body", "private@example.com", "13800000000")
         )
+        val providerLog = logs.single { it.contains("operation=PROVIDER_CALL") }
+        val expectedCategory = when (providerStatus) {
+            401 -> "AUTH"
+            429 -> "RATE_LIMIT"
+            else -> "UPSTREAM_5XX"
+        }
+        assertTrue(providerLog.contains("httpStatus=$providerStatus"))
+        assertTrue(providerLog.contains("providerCategory=$expectedCategory"))
+        assertNoSensitiveLogData(providerLog, "provider contract request")
+        if (providerStatus == 429) {
+            assertTrue(providerLog.contains("providerHost=127.0.0.1"))
+            assertTrue(providerLog.contains("modelName=test-model"))
+            assertTrue(providerLog.contains("providerErrorCode=rate_limit_exceeded"))
+            assertTrue(Regex("""messageCount=\d+""").containsMatchIn(providerLog))
+            assertTrue(Regex("""systemMessageCount=\d+""").containsMatchIn(providerLog))
+            assertTrue(Regex("""totalCharacterCount=\d+""").containsMatchIn(providerLog))
+        }
     }
 
     @ParameterizedTest(name = "provider payload {index} is sanitized")
@@ -626,11 +643,15 @@ class AgentChatFlowIntegrationTest {
     fun `HTTP send maps provider timeout to a redacted 503 response`() {
         fakeLlmDelayMs.set(500)
 
-        assertHttpProviderFailure(
+        val logs = assertHttpProviderFailure(
             idempotencyKey = "http-timeout-1",
             expectedErrorCode = "AI_PROVIDER_TIMEOUT",
             sensitiveValues = listOf("provider-secret-body")
         )
+        val providerLog = logs.single { it.contains("operation=PROVIDER_CALL") }
+        assertTrue(providerLog.contains("httpStatus=none"))
+        assertTrue(providerLog.contains("providerCategory=READ_TIMEOUT"))
+        assertNoSensitiveLogData(providerLog, "provider contract request")
     }
 
     @Test
@@ -766,6 +787,21 @@ class AgentChatFlowIntegrationTest {
         val logs = captureAgentOperationLogs {
             agentOperationLogger.completed("trace-1", "turn-1", "session-1", 1, sensitive)
             agentOperationLogger.failed("trace-2", "turn-2", "session-2", 2, sensitive)
+            agentOperationLogger.providerFailed(
+                traceId = "trace-3",
+                turnId = "turn-3",
+                providerPhase = sensitive,
+                providerHost = sensitive,
+                modelName = sensitive,
+                httpStatus = 999,
+                providerCategory = sensitive,
+                providerErrorCode = sensitive,
+                exceptionType = sensitive,
+                durationMs = -1,
+                messageCount = -1,
+                systemMessageCount = -1,
+                totalCharacterCount = -1
+            )
         }
         val joined = logs.joinToString("\n")
 
@@ -795,7 +831,7 @@ class AgentChatFlowIntegrationTest {
         idempotencyKey: String,
         expectedErrorCode: String,
         sensitiveValues: List<String>
-    ) {
+    ): List<String> {
         val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
         lateinit var responseBody: String
 
@@ -838,6 +874,7 @@ class AgentChatFlowIntegrationTest {
         assertRedacted(responseBody, valuesThatMustBeRedacted)
         assertRedacted(failureLogs.joinToString("\n"), valuesThatMustBeRedacted)
         assertRedacted(persistedMessages.joinToString("\n") { it.metadataJson }, valuesThatMustBeRedacted)
+        return logs
     }
 
     private fun assertRedacted(value: String, sensitiveValues: List<String>) {
@@ -893,7 +930,7 @@ class AgentChatFlowIntegrationTest {
                 val response = if (rawResponse != null) {
                     rawResponse.toByteArray(StandardCharsets.UTF_8)
                 } else if (status != 200) {
-                    """{"error":{"message":"provider-secret-body test-key 13800000000 private@example.com"}}""".toByteArray(StandardCharsets.UTF_8)
+                    """{"error":{"code":"rate_limit_exceeded","message":"provider-secret-body test-key 13800000000 private@example.com"}}""".toByteArray(StandardCharsets.UTF_8)
                 } else if (streaming) {
                     """
                         data: {"id":"chatcmpl-test","choices":[{"delta":{"content":"测试回复"},"finish_reason":null}]}
