@@ -68,25 +68,13 @@ private data class ProviderCallContext(
 internal fun buildChatCompletionRequest(
     model: String,
     messages: List<Map<String, String>>,
-    maxOutputTokens: Int,
-    temperature: Number,
-    reasoningEffort: String?
-): MutableMap<String, Any> {
-    val isGpt5 = model.trim().lowercase().startsWith("gpt-5")
-    return linkedMapOf<String, Any>(
-        "model" to model,
-        "messages" to messages,
-        "stream" to false
-    ).apply {
-        if (isGpt5) {
-            this["max_completion_tokens"] = maxOutputTokens
-            reasoningEffort?.takeIf(String::isNotBlank)?.let { this["reasoning_effort"] = it }
-        } else {
-            this["temperature"] = temperature
-            this["max_tokens"] = maxOutputTokens
-        }
-    }
-}
+    maxOutputTokens: Int
+): MutableMap<String, Any> = linkedMapOf(
+    "model" to model.trim(),
+    "messages" to messages,
+    "stream" to false,
+    "max_tokens" to maxOutputTokens
+)
 
 private data class GeneratedTurn(
     val content: String,
@@ -574,9 +562,7 @@ class ChatService(
             val body = buildChatCompletionRequest(
                 model = aiAgentProperties.model,
                 messages = messages,
-                maxOutputTokens = profile.maxOutputTokens,
-                temperature = 0.25,
-                reasoningEffort = reasoningEffort(profile)
+                maxOutputTokens = profile.maxOutputTokens
             )
             val response = restTemplate.exchange(url, HttpMethod.POST, HttpEntity(body, headers), Map::class.java)
             val responseBody = response.body
@@ -681,9 +667,7 @@ class ChatService(
             val body = buildChatCompletionRequest(
                 model = aiAgentProperties.resolvedIntentModel(),
                 messages = parserMessages,
-                maxOutputTokens = 180,
-                temperature = 0,
-                reasoningEffort = reasoningEffort(generationProfile(AgentIntent.GENERAL_CHAT))
+                maxOutputTokens = 180
             )
             val response = intentParserRestTemplate.exchange(url, HttpMethod.POST, HttpEntity(body, headers), Map::class.java)
             val choices = response.body?.get("choices") as? List<*>

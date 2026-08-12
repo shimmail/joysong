@@ -9,34 +9,31 @@ class ChatCompletionRequestTest {
     private val messages = listOf(mapOf("role" to "user", "content" to "hello"))
 
     @Test
-    fun `GPT-5 uses completion token and reasoning parameters without temperature`() {
+    fun `GPT-5 uses gateway compatible token parameter only`() {
         val body = buildChatCompletionRequest(
             model = " gpt-5.5 ",
             messages = messages,
-            maxOutputTokens = 280,
-            temperature = 0.25,
-            reasoningEffort = "none"
+            maxOutputTokens = 280
         )
 
-        assertEquals(280, body["max_completion_tokens"])
-        assertEquals("none", body["reasoning_effort"])
-        assertFalse(body.containsKey("max_tokens"))
+        assertEquals("gpt-5.5", body["model"])
+        assertEquals(280, body["max_tokens"])
+        assertFalse(body.containsKey("max_completion_tokens"))
+        assertFalse(body.containsKey("reasoning_effort"))
         assertFalse(body.containsKey("temperature"))
     }
 
     @Test
-    fun `non GPT-5 keeps legacy token and temperature parameters`() {
+    fun `non GPT-5 uses the same gateway compatible request shape`() {
         val body = buildChatCompletionRequest(
             model = "test-model",
             messages = messages,
-            maxOutputTokens = 180,
-            temperature = 0,
-            reasoningEffort = null
+            maxOutputTokens = 180
         )
 
         assertEquals(180, body["max_tokens"])
-        assertEquals(0, body["temperature"])
         assertFalse(body.containsKey("max_completion_tokens"))
         assertFalse(body.containsKey("reasoning_effort"))
+        assertFalse(body.containsKey("temperature"))
     }
 }
