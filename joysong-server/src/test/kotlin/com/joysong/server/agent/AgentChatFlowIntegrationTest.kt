@@ -699,7 +699,9 @@ class AgentChatFlowIntegrationTest {
             expectedErrorCode = "AI_PROVIDER_TIMEOUT",
             sensitiveValues = listOf("provider-secret-body")
         )
-        val providerLog = logs.single { it.contains("operation=PROVIDER_CALL") }
+        val providerLog = logs.single {
+            it.contains("operation=PROVIDER_CALL") && it.contains("providerPhase=MODEL_COMPLETION")
+        }
         assertTrue(providerLog.contains("httpStatus=none"))
         assertTrue(providerLog.contains("providerCategory=READ_TIMEOUT"))
         assertNoSensitiveLogData(providerLog, "provider contract request")
