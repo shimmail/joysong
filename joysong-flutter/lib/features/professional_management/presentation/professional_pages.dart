@@ -39,38 +39,38 @@ class _DoctorArticlesPageState extends State<DoctorArticlesPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: Text(context.localized('专业文章', 'Professional articles')),
-    ),
-    floatingActionButton: FloatingActionButton(
-      onPressed: () => _edit(),
-      child: const Icon(Icons.add),
-    ),
-    body: items == null
-        ? error == null
-              ? const Center(child: CircularProgressIndicator())
-              : _Retry(error: error!, onRetry: _load)
-        : RefreshIndicator(
-            onRefresh: _load,
-            child: ListView(
-              children: [
-                for (final item in items!)
-                  ListTile(
-                    title: Text(item.title),
-                    subtitle: Text(item.summary),
-                    onTap: () => _edit(item),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.delete_outline),
-                      onPressed: () async {
-                        await widget.repository.deleteArticle(item.id);
-                        if (mounted) _load();
-                      },
-                    ),
-                  ),
-              ],
-            ),
-          ),
-  );
+        appBar: AppBar(
+          title: Text(context.localized('专业文章', 'Professional articles')),
+        ),
+        floatingActionButton: FloatingActionButton(
+          onPressed: () => _edit(),
+          child: const Icon(Icons.add),
+        ),
+        body: items == null
+            ? error == null
+                ? const Center(child: CircularProgressIndicator())
+                : _Retry(error: error!, onRetry: _load)
+            : RefreshIndicator(
+                onRefresh: _load,
+                child: ListView(
+                  children: [
+                    for (final item in items!)
+                      ListTile(
+                        title: Text(item.title),
+                        subtitle: Text(item.summary),
+                        onTap: () => _edit(item),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () async {
+                            await widget.repository.deleteArticle(item.id);
+                            if (mounted) _load();
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+      );
   Future<void> _edit([DoctorArticle? article]) async {
     await Navigator.push(
       context,
@@ -130,71 +130,71 @@ class _DoctorArticleEditPageState extends State<DoctorArticleEditPage> {
   void _titleChanged() => setState(() {});
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text(context.localized('编辑文章', 'Edit article'))),
-    body: ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        TextField(
-          controller: title,
-          decoration: InputDecoration(
-            labelText: context.localized('标题', 'Title'),
-          ),
+        appBar: AppBar(title: Text(context.localized('编辑文章', 'Edit article'))),
+        body: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            TextField(
+              controller: title,
+              decoration: InputDecoration(
+                labelText: context.localized('标题', 'Title'),
+              ),
+            ),
+            TextField(
+              controller: summary,
+              maxLines: 2,
+              decoration: InputDecoration(
+                labelText: context.localized('摘要', 'Summary'),
+              ),
+            ),
+            TextField(
+              controller: content,
+              maxLines: 8,
+              decoration: InputDecoration(
+                labelText: context.localized('正文', 'Content'),
+              ),
+            ),
+            OutlinedButton(
+              onPressed: busy || widget.pickCoverImage == null
+                  ? null
+                  : () async {
+                      final v = await widget.pickCoverImage!();
+                      if (mounted && v != null) setState(() => cover = v);
+                    },
+              child: Text(context.localized('上传封面', 'Upload cover')),
+            ),
+            FilledButton(
+              onPressed: busy || title.text.trim().isEmpty
+                  ? null
+                  : () async {
+                      setState(() => busy = true);
+                      try {
+                        await widget.repository.saveArticle(
+                          DoctorArticleDraft(
+                            title: title.text,
+                            summary: summary.text,
+                            coverImage: cover,
+                            publishDate:
+                                widget.article?.publishDate ?? DateTime.now(),
+                            content: content.text,
+                          ),
+                          id: widget.article?.id,
+                        );
+                        if (context.mounted) Navigator.pop(context);
+                      } catch (_) {
+                        if (mounted) setState(() => busy = false);
+                      }
+                    },
+              child: busy
+                  ? const SizedBox.square(
+                      dimension: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Text(context.localized('保存', 'Save')),
+            ),
+          ],
         ),
-        TextField(
-          controller: summary,
-          maxLines: 2,
-          decoration: InputDecoration(
-            labelText: context.localized('摘要', 'Summary'),
-          ),
-        ),
-        TextField(
-          controller: content,
-          maxLines: 8,
-          decoration: InputDecoration(
-            labelText: context.localized('正文', 'Content'),
-          ),
-        ),
-        OutlinedButton(
-          onPressed: busy || widget.pickCoverImage == null
-              ? null
-              : () async {
-                  final v = await widget.pickCoverImage!();
-                  if (mounted && v != null) setState(() => cover = v);
-                },
-          child: Text(context.localized('上传封面', 'Upload cover')),
-        ),
-        FilledButton(
-          onPressed: busy || title.text.trim().isEmpty
-              ? null
-              : () async {
-                  setState(() => busy = true);
-                  try {
-                    await widget.repository.saveArticle(
-                      DoctorArticleDraft(
-                        title: title.text,
-                        summary: summary.text,
-                        coverImage: cover,
-                        publishDate:
-                            widget.article?.publishDate ?? DateTime.now(),
-                        content: content.text,
-                      ),
-                      id: widget.article?.id,
-                    );
-                    if (mounted) Navigator.pop(context);
-                  } catch (_) {
-                    if (mounted) setState(() => busy = false);
-                  }
-                },
-          child: busy
-              ? const SizedBox.square(
-                  dimension: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : Text(context.localized('保存', 'Save')),
-        ),
-      ],
-    ),
-  );
+      );
 }
 
 class DoctorOrdersPage extends StatefulWidget {
@@ -228,35 +228,35 @@ class _DoctorOrdersPageState extends State<DoctorOrdersPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: Text(context.localized('专业订单', 'Professional orders')),
-    ),
-    body: items == null
-        ? error == null
-              ? const Center(child: CircularProgressIndicator())
-              : _Retry(error: error!, onRetry: load)
-        : RefreshIndicator(
-            onRefresh: load,
-            child: ListView(
-              children: [
-                for (final item in items!)
-                  ListTile(
-                    title: Text(item.projectName),
-                    subtitle: Text('${item.orderNo} · ${item.status}'),
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => DoctorOrderDetailPage(
-                          repository: widget.repository,
-                          id: item.id,
+        appBar: AppBar(
+          title: Text(context.localized('专业订单', 'Professional orders')),
+        ),
+        body: items == null
+            ? error == null
+                ? const Center(child: CircularProgressIndicator())
+                : _Retry(error: error!, onRetry: load)
+            : RefreshIndicator(
+                onRefresh: load,
+                child: ListView(
+                  children: [
+                    for (final item in items!)
+                      ListTile(
+                        title: Text(item.projectName),
+                        subtitle: Text('${item.orderNo} · ${item.status}'),
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => DoctorOrderDetailPage(
+                              repository: widget.repository,
+                              id: item.id,
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-  );
+                  ],
+                ),
+              ),
+      );
 }
 
 class DoctorOrderDetailPage extends StatefulWidget {
@@ -284,11 +284,12 @@ class _DoctorOrderDetailPageState extends State<DoctorOrderDetailPage> {
   Future<void> load() async {
     try {
       final v = await widget.repository.getOrder(widget.id);
-      if (mounted)
+      if (mounted) {
         setState(() {
           order = v;
           error = null;
         });
+      }
     } catch (e) {
       if (mounted) setState(() => error = e);
     }
@@ -334,34 +335,35 @@ class _DoctorOrderDetailPageState extends State<DoctorOrderDetailPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text(context.localized('订单详情', 'Order details'))),
-    body: order == null
-        ? error == null
-              ? const Center(child: CircularProgressIndicator())
-              : _Retry(error: error!, onRetry: load)
-        : ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              Text(
-                order!.projectName,
-                style: Theme.of(context).textTheme.titleLarge,
+        appBar: AppBar(title: Text(context.localized('订单详情', 'Order details'))),
+        body: order == null
+            ? error == null
+                ? const Center(child: CircularProgressIndicator())
+                : _Retry(error: error!, onRetry: load)
+            : ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  Text(
+                    order!.projectName,
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  Text(order!.orderNo),
+                  Text(order!.status),
+                  if (error != null) Text('$error'),
+                  if (order!.canVerify)
+                    FilledButton(
+                      onPressed: busy ? null : () => act(false),
+                      child: Text(context.localized('到店核销', 'Verify visit')),
+                    ),
+                  if (order!.canRequestCompletion)
+                    FilledButton(
+                      onPressed: busy ? null : () => act(true),
+                      child:
+                          Text(context.localized('申请完成', 'Request completion')),
+                    ),
+                ],
               ),
-              Text(order!.orderNo),
-              Text(order!.status),
-              if (error != null) Text('$error'),
-              if (order!.canVerify)
-                FilledButton(
-                  onPressed: busy ? null : () => act(false),
-                  child: Text(context.localized('到店核销', 'Verify visit')),
-                ),
-              if (order!.canRequestCompletion)
-                FilledButton(
-                  onPressed: busy ? null : () => act(true),
-                  child: Text(context.localized('申请完成', 'Request completion')),
-                ),
-            ],
-          ),
-  );
+      );
 }
 
 class _Retry extends StatelessWidget {
@@ -370,15 +372,15 @@ class _Retry extends StatelessWidget {
   final Future<void> Function() onRetry;
   @override
   Widget build(BuildContext context) => Center(
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text('$error'),
-        TextButton(
-          onPressed: onRetry,
-          child: Text(context.localized('重试', 'Retry')),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('$error'),
+            TextButton(
+              onPressed: onRetry,
+              child: Text(context.localized('重试', 'Retry')),
+            ),
+          ],
         ),
-      ],
-    ),
-  );
+      );
 }

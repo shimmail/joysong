@@ -883,7 +883,6 @@ enum _ManagementAction {
   consultantProjects,
   doctorArticles,
   doctorOrders,
-  unavailable,
 }
 
 class ManagedInstitutionProjectsPage extends StatefulWidget {
