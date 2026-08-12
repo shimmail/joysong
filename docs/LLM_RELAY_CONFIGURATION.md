@@ -20,7 +20,7 @@ Authorization: Bearer {AI_AGENT_API_KEY}
 Content-Type: application/json
 ```
 
-生产必须显式设置五项 Agent 变量。`AI_AGENT_INTENT_MODEL` 留空即使用 `AI_AGENT_MODEL`。两类调用共享 API Key、Base URL 与 Provider 协议；客户端固定直连，超时固定在代码中。Base URL 不要配置成完整的 `/chat/completions` 地址。API Key 只存在于服务端 Secret 或环境变量。
+生产必须显式设置五项 Agent 变量，任何一项为空都会导致启动失败。`AI_AGENT_MODEL` 负责最终回答，`AI_AGENT_INTENT_MODEL` 负责意图分类，两个模型 ID 必须独立填写。两类调用共享 API Key、Base URL 与 Provider 协议；客户端固定直连，超时固定在代码中。Base URL 不要配置成完整的 `/chat/completions` 地址。API Key 只存在于服务端 Secret 或环境变量。
 
 意图路由遵循固定顺序：当前请求的中英文否定感知关键词，受限的近期上下文补全，最后才是模型解析。当前请求中已明确的目标不受历史或模型结果覆盖；解析器失败时保留本地路由并继续最终生成。
 

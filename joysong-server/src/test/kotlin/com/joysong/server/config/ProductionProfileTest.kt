@@ -177,4 +177,37 @@ class ProductionProfileTest {
             assertFalse(pattern.containsMatchIn(currentDocumentation), "obsolete documentation pattern: ${pattern.pattern}")
         }
     }
+
+    @Test
+    fun `current documentation requires a distinct nonblank production intent model`() {
+        val currentDocuments = listOf(Path.of("..", "doc"), Path.of("..", "docs")).flatMap { root ->
+            Files.walk(root).use { paths ->
+                paths.filter { path ->
+                    Files.isRegularFile(path) &&
+                        path.fileName.toString().endsWith(".md") &&
+                        !path.normalize().toString().replace('\\', '/').contains("/docs/superpowers/")
+                }.toList()
+            }
+        }
+        val intentModelMayBeBlank = Regex("\\$\\{AI_AGENT_INTENT_MODEL:\\}", RegexOption.IGNORE_CASE)
+        val violations = currentDocuments.flatMap { path ->
+            val content = Files.readString(path)
+            val blankDefault = intentModelMayBeBlank.find(content)?.value
+            val optionalDescription = content.lineSequence()
+                .flatMap { line -> line.split(Regex("[。；]")).asSequence() }
+                .firstOrNull { clause ->
+                clause.contains("AI_AGENT_INTENT_MODEL", ignoreCase = true) &&
+                    Regex("optional|可选|留空|空值|回退|fallback|defaults?\\s+to|默认使用", RegexOption.IGNORE_CASE)
+                        .containsMatchIn(clause)
+            }
+            listOfNotNull(blankDefault, optionalDescription).map { violation ->
+                path.normalize().toString() to violation.trim()
+            }
+        }
+
+        assertTrue(
+            violations.isEmpty(),
+            "AI_AGENT_INTENT_MODEL must be production-required and distinct: ${violations.joinToString()}"
+        )
+    }
 }

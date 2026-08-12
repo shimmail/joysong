@@ -72,10 +72,10 @@ ai-agent:
   api-key: ${AI_AGENT_API_KEY}
   base-url: ${AI_AGENT_BASE_URL}
   model: ${AI_AGENT_MODEL}
-  intent-model: ${AI_AGENT_INTENT_MODEL:}
+  intent-model: ${AI_AGENT_INTENT_MODEL}
 ```
 
-不要把真实值写入 `application-prod.yml` 或 Git。部署只配置上述五项 Agent 变量；翻译复用同一 API Key 与 Base URL，并在代码中固定使用 `qwen3.7-flash`。Agent 代理、超时、意图解析开关、演示回退、流式和推理设置均为代码策略，不能通过环境变量覆盖。
+不要把真实值写入 `application-prod.yml` 或 Git。生产必须提供上述五项 Agent 变量，任何一项为空都会导致启动失败。`AI_AGENT_MODEL` 只用于最终回答，`AI_AGENT_INTENT_MODEL` 只用于意图分类，必须分别配置为适合各自用途的模型 ID。翻译复用同一 API Key 与 Base URL，并在代码中固定使用 `qwen3.7-flash`。Agent 代理、超时、意图解析开关、演示回退、流式和推理设置均为代码策略，不能通过环境变量覆盖。
 
 ### 4.2 管理端
 
@@ -198,7 +198,7 @@ PAYMENT_RECONCILIATION_STALE_SECONDS=120
 | `AI_AGENT_API_KEY` | Agent 与翻译共享的服务端密钥 |
 | `AI_AGENT_BASE_URL` | Agent 与翻译共享的批准 HTTPS endpoint |
 | `AI_AGENT_MODEL` | Agent 最终回答模型 ID |
-| `AI_AGENT_INTENT_MODEL` | 可选的意图解析模型；留空时使用最终回答模型 |
+| `AI_AGENT_INTENT_MODEL` | 生产必填的意图分类模型 ID；与最终回答模型分开配置 |
 | `STRIPE_API_BASE` / `STRIPE_API_VERSION` | Stripe API 地址和版本 |
 | `STRIPE_SUCCESS_URL` / `STRIPE_CANCEL_URL` | 支付回跳页面 |
 | `STRIPE_PRODUCT_NAME` | 支付商品名 |

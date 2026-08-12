@@ -166,7 +166,7 @@ AI_AGENT_MODEL=qwen-plus
 AI_AGENT_INTENT_MODEL=qwen-turbo
 ```
 
-生产必须显式配置上述五项变量。`AI_AGENT_INTENT_MODEL` 留空时解析器使用 `AI_AGENT_MODEL`。解析器与最终生成共享 API Key、Base URL 和 Provider 协议；超时与直连网络策略固定在代码中。
+生产必须显式配置上述五项变量，任何一项为空都会导致启动失败。`AI_AGENT_MODEL` 仅用于最终回答，`AI_AGENT_INTENT_MODEL` 仅用于意图分类；两者必须分别提供，不共享默认值。解析器与最终生成共享 API Key、Base URL 和 Provider 协议；超时与直连网络策略固定在代码中。
 
 路由顺序固定为：先使用当前请求中的中英文、可识别否定词的关键词规则；仅在需要时以受限的近期上下文补全；仍有歧义时才调用意图模型。当前请求已明确的意图或目标不会被历史上下文或解析器覆盖。
 
