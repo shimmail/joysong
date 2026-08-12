@@ -75,10 +75,27 @@ void main() {
     expect(find.text('提现功能即将开放'), findsOneWidget);
     expect(repository.withdrawCalls, 0);
   });
+
+  testWidgets('localizes the withdrawal coming-soon message in English',
+      (tester) async {
+    final repository = _WalletRepository()
+      ..overview = _overview(_wallet(101))
+      ..pages[(101, 0)] = _page(101, [_entry(1, 101)], last: true);
+    await tester.pumpWidget(_walletApp(
+      WalletController(repository),
+      locale: const Locale('en'),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('wallet-withdraw-button')));
+    await tester.pump();
+
+    expect(find.text('Withdrawal coming soon'), findsOneWidget);
+  });
 }
 
-Widget _walletApp(WalletController controller) => MaterialApp(
-      locale: const Locale('zh'),
+Widget _walletApp(WalletController controller, {Locale locale = const Locale('zh')}) => MaterialApp(
+      locale: locale,
       supportedLocales: const [Locale('zh'), Locale('en')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
       home: WalletPage(controller: controller),
