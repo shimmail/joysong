@@ -12,6 +12,12 @@
 
 Flutter 不连接数据库，也不调用管理后台网页。用户态和专业身份态都直接调用服务端 REST API。
 
+### 专业端只读目录与申请撤回
+
+ACTIVE 医生或服务端权限上下文允许的机构法人可进入“专业目录”。Flutter 仅使用既有兼容接口：`GET /admin/institutions`、`GET /admin/institutions/{id}`、`GET /admin/institutions/{id}/doctors`、`GET /admin/institution-projects`、`GET /admin/projects`。医生项目由真实机构项目响应的 `institutionId` 与 `doctors[].id` 在客户端过滤，不调用额外路径。`GET /admin/projects` 仅用于只读兼容目录；管理中心申请表单的项目选择仍遵循其独立 selection/target 契约，二者不可互换。后续详情 id 必须来自前序可见响应；403 与 404 显示相同不可用状态并允许重试。
+
+医生本人状态为 `PENDING`、类型为 `JOIN` 或 `PROFILE_UPDATE` 的项目申请可调用 `POST /admin/institution-project-requests/{id}/withdraw`；成功刷新列表，失败保留原项。专业 Flutter 不创建、修改或删除项目/机构项目。管理员系统、管理员接口实现与页面不变 / Admin system, admin API implementation, and pages are unchanged.
+
 `AppShell` 是 Flutter 唯一的账号作用域组合根；账号相关的 repository 和 controller 只能由它按当前登录会话创建、复用和销毁。
 
 开发地址建议：
@@ -420,6 +426,30 @@ PENDING_PAYMENT
 支付方式、第三方下单、验签、异步回调、幂等通知和退款通道尚未落地。现有 `pay-consultation`、`pay-balance` 与兼容 `/pay` 仅用于内部流程占位；`/pay` 的 `method` 当前不会真正选择渠道。
 
 Flutter 可以完成页面和接口抽象，但生产发布前必须等待支付服务契约确定，并至少补齐：支付预下单、渠道参数、支付查询、服务端回调验签、回调幂等、退款查询。客户端不能把“接口返回成功”等同于渠道到账。
+
+### 10.4 收入台账与结算查询
+
+结算记录和钱包是平台内部收入台账：金额一律使用最小货币单位整数 `minor` 与 ISO-4217 三位 `currency`，同一金额对象不得混用元/浮点数与 `minor`。`PENDING`、`AVAILABLE`、`PARTIALLY_REVERSED`、`REVERSED` 是分账状态；钱包分别维护 `pending`、`available`、`frozen` 三个余额桶。`PENDING` 表示待释放的内部余额，`AVAILABLE` 表示已释放到内部可用余额，部分或完全冲正分别为 `PARTIALLY_REVERSED`、`REVERSED`。
+
+| 作用域 | 方法 | 路径 | 说明 |
+|---|---|---|---|
+| 订单所属用户 | GET | `/orders/{id}/settlement` | 仅返回本人订单的消费者安全结算摘要 |
+| 当前登录用户 | GET | `/wallets/me` | 服务端按认证主体返回独立钱包；普通用户成功返回空列表 |
+| 当前登录用户 | GET | `/wallets/me/ledger?walletId={walletId}&page=0&size=20` | 查询一个已授权钱包的账本；`walletId` 必填，`size` 为 1–100 |
+| 管理员 | GET | `/api/admin/settlements?page=0&size=20` | 结算列表 |
+| 管理员 | GET | `/api/admin/settlements/{id}` | 结算详情 |
+| 管理员 | GET | `/api/admin/settlements/{id}/allocations?page=0&size=20` | 分账明细 |
+| 管理员 | GET | `/api/admin/ledger/{id}` | 单条账本记录 |
+| 管理员 | GET | `/api/admin/reconciliation-issues?page=0&size=20` | 对账异常列表 |
+| 管理员 | GET | `/api/admin/reconciliation-issues/{id}` | 对账异常详情 |
+
+钱包概览固定为 `{"currency":"USD","wallets":[...]}`；每项有 `walletId`、`ownerType`、`ownerId`、`displayName`、`ownerName`、`pendingMinor`、`availableMinor`、`frozenMinor`，全部金额为整数最小货币单位。`displayName` 是与 `ownerType` 相同的稳定语义代码，Flutter 按 locale 本地化。`walletId` 只能选择当前主体已授权的一个钱包，绝不能合并多身份余额。
+
+账本分页固定为 `content`、`page`、`size`、`totalElements`、`totalPages`、`last`。每项有 `id`、`walletId`、`entryType`、`title`、`description`、`sourceType`、`sourceId`、`amountMinor`、三个余额快照、`currency`、`createdAt`。`title == entryType`，`description == sourceType + ':' + sourceId`是兼容形状；Flutter 以 `entryType`/`sourceType` 本地化并显示 `sourceId`。这些是公开语义代码，不是且不得暴露内部 `operationKey`。`RELEASE` 的 `amountMinor` 固定为 `0`，不得作为收入重复累计。
+
+`GET /orders/{id}/settlement` 的消费者安全摘要固定为 `settlementId`、`orderId`、`currency`、`grossTotalPaid`、`netSettled`、`state`、`settlementDueAt`、`settlementCreatedAt`、`releasedAt`。金额对象为 `{minor, currency}`；409 `SETTLEMENT_NOT_GENERATED` 表示结算生成中，应呈现非致命等待状态，不能转成空结算或零金额。
+
+`SETTLED`/`AVAILABLE` 只表示内部结算台账已释放，**不表示**款项已经通过 Airwallex 或其他外部通道打款。Airwallex、收款人/beneficiary 与 KYC、FX、提现/withdrawal 和真实 payout 均不在当前 API 契约范围内；客户端不得据此展示出金成功、收款账户或换汇状态。
 
 ## 11. 医生与机构专业管理接口
 

@@ -1,4 +1,8 @@
 @startuml JoySong_Professional_Role_Interfaces
+note across
+专业端目录：ACTIVE 医生/有权限法人 -> 现有只读 GET -> 搜索/空/错误/重试 -> 机构/医生/项目详情。
+仅医生可撤回本人 PENDING JOIN/PROFILE_UPDATE；管理员系统、接口实现和页面不变。
+end note
 title JoySong 用户、机构、医生、顾问接口与业务关系泳道图
 
 skinparam shadowing false

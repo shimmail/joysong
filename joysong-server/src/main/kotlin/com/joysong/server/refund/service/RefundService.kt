@@ -6,6 +6,7 @@ import com.joysong.server.order.repository.OrderRepository
 import com.joysong.server.order.service.OrderStatusLogService
 import com.joysong.server.refund.entity.RefundEntity
 import com.joysong.server.refund.repository.RefundRepository
+import com.joysong.server.settlement.service.SettlementReversalService
 import org.slf4j.LoggerFactory
 import org.springframework.context.annotation.Lazy
 import org.springframework.stereotype.Service
@@ -21,7 +22,8 @@ class RefundService(
     @Lazy private val couponService: CouponService,
     private val refundExecutionService: RefundExecutionService? = null,
     private val workflowPersistenceService: RefundWorkflowPersistenceService =
-        RefundWorkflowPersistenceService(refundRepository, orderRepository, orderStatusLogService)
+        RefundWorkflowPersistenceService(refundRepository, orderRepository, orderStatusLogService),
+    private val settlementReversalService: SettlementReversalService? = null
 ) {
     companion object {
         private val log = LoggerFactory.getLogger(RefundService::class.java)
@@ -196,6 +198,7 @@ class RefundService(
     }
 
     private fun afterApproved(finalized: FinalizedRefund) {
+        settlementReversalService?.reverseCompletedRefund(finalized.refund.id)
         finalized.order.userCouponId?.let { returnCouponSafely(it, finalized.order.id) }
         notifyRefundApplied(finalized.order, finalized.refund)
     }

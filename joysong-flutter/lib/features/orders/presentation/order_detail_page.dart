@@ -282,6 +282,17 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
           const SizedBox(height: 12),
           _SettlementCard(settlement: controller.settlement!),
         ],
+        if (controller.isSettlementGenerationPending) ...[
+          const SizedBox(height: 12),
+          _SettlementPendingCard(),
+        ],
+        if (controller.settlementErrorMessage != null) ...[
+          const SizedBox(height: 12),
+          _SettlementErrorCard(
+            message: controller.settlementErrorMessage!,
+            onRetry: controller.retrySettlement,
+          ),
+        ],
         if (controller.statusLogs.isNotEmpty) ...[
           const SizedBox(height: 20),
           Text(_isEnglish(context) ? 'Order progress' : '订单进度',
@@ -600,17 +611,56 @@ class _SettlementCard extends StatelessWidget {
         children: [
           _DetailLine(
             label: _isEnglish(context) ? 'Status' : '状态',
-            value: settlement.status,
+            value: settlement.state,
           ),
           _DetailLine(
-            label: _isEnglish(context) ? 'Order total' : '订单总额',
-            value: settlement.totalAmount.formatted,
+            label: _isEnglish(context) ? 'Total paid' : '实付总额',
+            value: _minorUsd(settlement.grossTotalPaidMinor),
           ),
-          if (settlement.settledAt != null)
+          _DetailLine(
+            label: _isEnglish(context) ? 'Net settled' : '净结算额',
+            value: _minorUsd(settlement.netSettledMinor),
+          ),
+          if (settlement.releasedAt != null)
             _DetailLine(
-              label: _isEnglish(context) ? 'Settled at' : '结算时间',
-              value: _detailDateTime(settlement.settledAt!),
+              label: _isEnglish(context) ? 'Released at' : '释放时间',
+              value: _detailDateTime(settlement.releasedAt!),
             ),
+        ],
+      );
+}
+
+class _SettlementPendingCard extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => _DetailPanel(
+        title: _isEnglish(context) ? 'Settlement progress' : '结算进度',
+        children: [
+          Text(_isEnglish(context)
+              ? 'Settlement is being generated.'
+              : '结算信息生成中。'),
+        ],
+      );
+}
+
+class _SettlementErrorCard extends StatelessWidget {
+  const _SettlementErrorCard({required this.message, required this.onRetry});
+
+  final String message;
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context) => _DetailPanel(
+        title: _isEnglish(context) ? 'Settlement progress' : '结算进度',
+        children: [
+          Text(message),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              key: const Key('settlement-retry-button'),
+              onPressed: onRetry,
+              child: Text(_isEnglish(context) ? 'Retry' : '重试'),
+            ),
+          ),
         ],
       );
 }
@@ -870,6 +920,18 @@ String _refundStatusText(BuildContext context, RefundStatus status) {
     RefundStatus.cancelled => 'Cancelled',
     RefundStatus.unknown => 'Unknown',
   };
+}
+
+String _minorUsd(int minor) {
+  final negative = minor < 0;
+  final digits = minor.abs().toString().padLeft(3, '0');
+  final rawDollars = digits.substring(0, digits.length - 2);
+  final dollars = rawDollars.replaceAllMapped(
+    RegExp(r'(?=(\d{3})+(?!\d))'),
+    (_) => ',',
+  );
+  final cents = digits.substring(digits.length - 2);
+  return '${negative ? '-' : ''}\$$dollars.$cents';
 }
 
 bool _isEnglish(BuildContext context) =>

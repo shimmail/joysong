@@ -247,32 +247,63 @@ final class OrderStatusLog {
 @immutable
 final class Settlement {
   const Settlement({
-    required this.id,
+    required this.settlementId,
     required this.orderId,
-    required this.totalAmount,
-    required this.status,
-    required this.createdAt,
-    this.settledAt,
+    required this.currency,
+    required this.grossTotalPaidMinor,
+    required this.netSettledMinor,
+    required this.state,
+    required this.settlementCreatedAt,
+    this.settlementDueAt,
+    this.releasedAt,
   });
 
-  final int id;
+  final int settlementId;
   final String orderId;
-  final Money totalAmount;
-  final String status;
-  final DateTime createdAt;
-  final DateTime? settledAt;
+  final String currency;
+  final int grossTotalPaidMinor;
+  final int netSettledMinor;
+  final String state;
+  final DateTime? settlementDueAt;
+  final DateTime settlementCreatedAt;
+  final DateTime? releasedAt;
 
   factory Settlement.fromJson(Object? json) {
     final map = jsonMap(json, '结算详情');
+    final currency = requiredString(map, 'currency', '结算详情');
     return Settlement(
-      id: intValue(map['id']),
+      settlementId: requiredInt(map, 'settlementId', '结算详情'),
       orderId: requiredString(map, 'orderId', '结算详情'),
-      totalAmount: Money.parse(map['totalAmount'], field: '结算总额'),
-      status: stringValue(map['status'], fallback: 'UNKNOWN'),
-      createdAt: requiredLocalDateTime(map['createdAt'], '结算创建时间'),
-      settledAt: localDateTime(map['settledAt']),
+      currency: currency,
+      grossTotalPaidMinor: _settlementMoneyMinor(
+        map['grossTotalPaid'],
+        currency: currency,
+        field: '结算总额',
+      ),
+      netSettledMinor: _settlementMoneyMinor(
+        map['netSettled'],
+        currency: currency,
+        field: '净结算额',
+      ),
+      state: requiredString(map, 'state', '结算详情'),
+      settlementDueAt: localDateTime(map['settlementDueAt']),
+      settlementCreatedAt:
+          requiredLocalDateTime(map['settlementCreatedAt'], '结算创建时间'),
+      releasedAt: localDateTime(map['releasedAt']),
     );
   }
+}
+
+int _settlementMoneyMinor(
+  Object? value, {
+  required String currency,
+  required String field,
+}) {
+  final map = jsonMap(value, field);
+  if (requiredString(map, 'currency', field) != currency) {
+    throw FormatException('$field币种不匹配');
+  }
+  return requiredInt(map, 'minor', field);
 }
 
 Map<String, dynamic> jsonMap(Object? value, String label) {
@@ -304,6 +335,15 @@ int intValue(Object? value, {int fallback = 0}) {
   if (value is int) return value;
   if (value is num) return value.toInt();
   return int.tryParse(value?.toString() ?? '') ?? fallback;
+}
+
+int requiredInt(Map<String, dynamic> map, String key, String label) {
+  final value = map[key];
+  if (value is int) return value;
+  if (value is num && value == value.toInt()) return value.toInt();
+  final parsed = int.tryParse(value?.toString() ?? '');
+  if (parsed == null) throw FormatException('$label缺少有效的 $key');
+  return parsed;
 }
 
 DateTime? localDateTime(Object? value) {

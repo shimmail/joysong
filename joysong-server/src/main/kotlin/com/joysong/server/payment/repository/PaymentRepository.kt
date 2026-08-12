@@ -10,6 +10,12 @@ import java.util.Optional
 import java.time.LocalDateTime
 
 interface PaymentRepository : JpaRepository<PaymentEntity, String> {
+    @Query(
+        "select coalesce(sum(p.amountMinor), 0) from PaymentEntity p " +
+            "where p.orderId = :orderId and p.status in ('SUCCEEDED', 'SUCCESS')"
+    )
+    fun sumSucceededAmountMinor(@Param("orderId") orderId: String): Long
+
     fun findByOrderId(orderId: String): Optional<PaymentEntity>
     fun findByOrderIdAndPaymentTypeAndStatus(orderId: String, paymentType: String, status: String): PaymentEntity?
     fun findFirstByOrderIdAndPaymentTypeAndStatusInOrderByCreatedAtDesc(

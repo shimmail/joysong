@@ -50,4 +50,31 @@ interface OrderRepository : JpaRepository<OrderEntity, String> {
     /** 管理员根据ID查询订单（包含软删除），绕过 @Where 过滤 */
     @Query(value = "SELECT * FROM orders WHERE id = :id", nativeQuery = true)
     fun findByIdIncludeDeleted(id: String): OrderEntity?
+
+    @Query(
+        value = """
+            SELECT CASE WHEN
+                EXISTS (SELECT 1 FROM payments WHERE order_id = :orderId)
+                OR EXISTS (SELECT 1 FROM refunds WHERE order_id = :orderId)
+                OR EXISTS (SELECT 1 FROM settlements WHERE order_id = :orderId)
+                OR EXISTS (
+                    SELECT 1 FROM settlement_allocations a
+                    JOIN settlements s ON s.id = a.settlement_id
+                    WHERE s.order_id = :orderId
+                )
+                OR EXISTS (
+                    SELECT 1 FROM wallet_ledger_entries l
+                    JOIN settlement_allocations a ON a.id = l.allocation_id
+                    JOIN settlements s ON s.id = a.settlement_id
+                    WHERE s.order_id = :orderId
+                )
+                OR EXISTS (
+                    SELECT 1 FROM wallet_ledger_entries l
+                    WHERE UPPER(l.source_type) = 'ORDER' AND l.source_id = :orderId
+                )
+            THEN TRUE ELSE FALSE END
+        """,
+        nativeQuery = true
+    )
+    fun hasMoneyReferences(@Param("orderId") orderId: String): Boolean
 }

@@ -78,9 +78,9 @@ final class ApiIdentityRepository implements IdentityRepository {
   Future<List<ManagedInstitutionSummary>> listManagedInstitutions() async {
     return await _apiClient.get<List<ManagedInstitutionSummary>>(
           '/management/institutions',
-          decodeData: (json) => _objectList(json)
-              .map(ManagedInstitutionSummary.fromJson)
-              .toList(growable: false),
+          decodeData: (json) => _objectList(
+            json,
+          ).map(ManagedInstitutionSummary.fromJson).toList(growable: false),
         ) ??
         const [];
   }
@@ -90,9 +90,9 @@ final class ApiIdentityRepository implements IdentityRepository {
       listProfessionalVisibleInstitutions() async {
     return await _apiClient.get<List<ManagedInstitutionSummary>>(
           '/admin/institutions',
-          decodeData: (json) => _objectList(json)
-              .map(ManagedInstitutionSummary.fromJson)
-              .toList(growable: false),
+          decodeData: (json) => _objectList(
+            json,
+          ).map(ManagedInstitutionSummary.fromJson).toList(growable: false),
         ) ??
         const [];
   }
@@ -156,9 +156,9 @@ final class ApiIdentityRepository implements IdentityRepository {
   Future<List<ConsultantMembership>> listConsultantMemberships() async {
     return await _apiClient.get<List<ConsultantMembership>>(
           '/management/consultant-memberships',
-          decodeData: (json) => _objectList(json)
-              .map(ConsultantMembership.fromJson)
-              .toList(growable: false),
+          decodeData: (json) => _objectList(
+            json,
+          ).map(ConsultantMembership.fromJson).toList(growable: false),
         ) ??
         const [];
   }
@@ -182,26 +182,11 @@ final class ApiIdentityRepository implements IdentityRepository {
   Future<List<ManagementProjectOption>> listManagementProjects() async {
     return await _apiClient.get<List<ManagementProjectOption>>(
           '/management/projects',
-          decodeData: (json) => _objectList(json)
-              .map(ManagementProjectOption.fromJson)
-              .toList(growable: false),
+          decodeData: (json) => _objectList(
+            json,
+          ).map(ManagementProjectOption.fromJson).toList(growable: false),
         ) ??
         const [];
-  }
-
-  @override
-  Future<ManagementProjectOption> createManagementProject(
-    ManagementProjectDraft draft,
-  ) async {
-    final result = await _apiClient.post<ManagementProjectOption>(
-      '/admin/projects',
-      body: draft.toJson(),
-      decodeData: ManagementProjectOption.fromJson,
-    );
-    if (result == null) {
-      throw const FormatException('项目响应为空');
-    }
-    return result;
   }
 
   @override
@@ -209,45 +194,11 @@ final class ApiIdentityRepository implements IdentityRepository {
       listManagedInstitutionProjects() async {
     return await _apiClient.get<List<ManagedInstitutionProject>>(
           '/admin/institution-projects',
-          decodeData: (json) => _objectList(json)
-              .map(ManagedInstitutionProject.fromJson)
-              .toList(growable: false),
+          decodeData: (json) => _objectList(
+            json,
+          ).map(ManagedInstitutionProject.fromJson).toList(growable: false),
         ) ??
         const [];
-  }
-
-  @override
-  Future<ManagedInstitutionProject> createManagedInstitutionProject(
-    ManagedInstitutionProjectDraft draft,
-  ) async {
-    final result = await _apiClient.post<ManagedInstitutionProject>(
-      '/admin/institution-projects',
-      body: draft.toJson(),
-      decodeData: ManagedInstitutionProject.fromJson,
-    );
-    if (result == null) {
-      throw const FormatException('机构项目响应为空');
-    }
-    return result;
-  }
-
-  @override
-  Future<ManagedInstitutionProject> updateManagedInstitutionProject(
-    ManagedInstitutionProjectDraft draft,
-  ) async {
-    final id = draft.id?.trim();
-    if (id == null || id.isEmpty) {
-      throw ArgumentError('机构项目 id 不能为空');
-    }
-    final result = await _apiClient.put<ManagedInstitutionProject>(
-      '/admin/institution-projects/$id',
-      body: draft.toJson(),
-      decodeData: ManagedInstitutionProject.fromJson,
-    );
-    if (result == null) {
-      throw const FormatException('机构项目响应为空');
-    }
-    return result;
   }
 
   @override
@@ -267,9 +218,9 @@ final class ApiIdentityRepository implements IdentityRepository {
     return await _apiClient.get<List<InstitutionOption>>(
           '/discover/institutions',
           query: const {'offset': 0, 'limit': 100},
-          decodeData: (json) => _objectList(json)
-              .map(InstitutionOption.fromJson)
-              .toList(growable: false),
+          decodeData: (json) => _objectList(
+            json,
+          ).map(InstitutionOption.fromJson).toList(growable: false),
         ) ??
         const [];
   }
@@ -279,9 +230,9 @@ final class ApiIdentityRepository implements IdentityRepository {
       listInstitutionMembershipRequests() async {
     return await _apiClient.get<List<InstitutionMembershipRequest>>(
           '/management/institution-membership-requests',
-          decodeData: (json) => _objectList(json)
-              .map(InstitutionMembershipRequest.fromJson)
-              .toList(growable: false),
+          decodeData: (json) => _objectList(
+            json,
+          ).map(InstitutionMembershipRequest.fromJson).toList(growable: false),
         ) ??
         const [];
   }
@@ -367,9 +318,9 @@ final class ApiIdentityRepository implements IdentityRepository {
       listProfessionalProjectRequests() async {
     return await _apiClient.get<List<ProfessionalProjectRequest>>(
           '/management/project-requests',
-          decodeData: (json) => _objectList(json)
-              .map(ProfessionalProjectRequest.fromJson)
-              .toList(growable: false),
+          decodeData: (json) => _objectList(
+            json,
+          ).map(ProfessionalProjectRequest.fromJson).toList(growable: false),
         ) ??
         const [];
   }
@@ -414,9 +365,9 @@ final class ApiIdentityRepository implements IdentityRepository {
       listInstitutionProjectJoinRequests() async {
     return await _apiClient.get<List<InstitutionProjectJoinRequest>>(
           '/admin/institution-project-requests',
-          decodeData: (json) => _objectList(json)
-              .map(InstitutionProjectJoinRequest.fromJson)
-              .toList(growable: false),
+          decodeData: (json) => _objectList(
+            json,
+          ).map(InstitutionProjectJoinRequest.fromJson).toList(growable: false),
         ) ??
         const [];
   }
@@ -476,11 +427,21 @@ final class ApiIdentityRepository implements IdentityRepository {
       listDoctorProjectChangeRequests() async {
     return await _apiClient.get<List<DoctorProjectChangeRequest>>(
           '/admin/institution-project-requests',
-          decodeData: (json) => _objectList(json)
-              .map(DoctorProjectChangeRequest.fromJson)
-              .toList(growable: false),
+          decodeData: (json) => _objectList(
+            json,
+          ).map(DoctorProjectChangeRequest.fromJson).toList(growable: false),
         ) ??
         const [];
+  }
+
+  @override
+  Future<void> withdrawDoctorProjectChangeRequest(String id) async {
+    final normalizedId = id.trim();
+    if (normalizedId.isEmpty) throw ArgumentError.value(id, 'id');
+    await _apiClient.post<void>(
+      '/admin/institution-project-requests/$normalizedId/withdraw',
+      decodeData: (_) {},
+    );
   }
 
   @override

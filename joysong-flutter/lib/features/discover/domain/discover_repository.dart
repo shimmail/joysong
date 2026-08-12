@@ -25,3 +25,15 @@ abstract interface class InstitutionProjectDetailRepository {
     required String projectId,
   });
 }
+
+abstract interface class ProfessionalCatalogRepository {
+  Future<List<DiscoverItem>> loadVisibleInstitutions();
+  Future<DiscoverItem> loadVisibleInstitution(String id);
+  Future<List<DiscoverItem>> loadVisibleInstitutionDoctors(String id);
+  Future<List<DiscoverItem>> loadVisibleDoctorProjects(
+    String institutionId,
+    String doctorId,
+  );
+  Future<List<DiscoverItem>> loadVisibleInstitutionProjects();
+  Future<List<DiscoverItem>> loadVisibleProjects();
+}

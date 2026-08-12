@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
 import 'package:joysong_flutter/features/orders/presentation/orders_controller.dart';
 
@@ -53,5 +54,38 @@ void main() {
     expect(result, isFalse);
     expect(controller.errorMessage, '请选择或填写退款原因');
     expect(repository.actionCalls, 0);
+  });
+
+  test('detail treats settlement-not-generated as pending, not an error',
+      () async {
+    final repository = FakeOrdersRepository()
+      ..orders = [sampleOrder(status: OrderStatus.completed)]
+      ..settlementError = const ApiException(
+        message: 'SETTLEMENT_NOT_GENERATED',
+        httpStatus: 409,
+        businessCode: 409,
+      );
+    final controller = OrderDetailController(repository, orderId: 'order-1');
+
+    await controller.load();
+
+    expect(controller.isSettlementGenerationPending, isTrue);
+    expect(controller.settlementErrorMessage, isNull);
+  });
+
+  test('detail keeps settlement support errors visible and retryable',
+      () async {
+    final repository = FakeOrdersRepository()
+      ..orders = [sampleOrder(status: OrderStatus.completed)]
+      ..settlementError = const FormatException('结算详情不是 JSON 对象');
+    final controller = OrderDetailController(repository, orderId: 'order-1');
+
+    await controller.load();
+
+    expect(controller.settlementErrorMessage, '结算详情不是 JSON 对象');
+    repository.settlementError = null;
+    await controller.retrySettlement();
+    expect(controller.settlementErrorMessage, isNull);
+    expect(controller.settlement, isNotNull);
   });
 }
