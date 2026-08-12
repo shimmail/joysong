@@ -45,6 +45,7 @@ import 'package:joysong_flutter/features/orders/presentation/order_detail_page.d
 import 'package:joysong_flutter/features/orders/presentation/orders_controller.dart';
 import 'package:joysong_flutter/features/orders/presentation/orders_page.dart';
 import 'package:joysong_flutter/features/profile/presentation/profile_page.dart';
+import 'package:joysong_flutter/features/professional_management/data/professional_repository.dart';
 import 'package:joysong_flutter/features/profile/data/profile_repository_impl.dart';
 import 'package:joysong_flutter/features/profile/domain/profile_repository.dart';
 import 'package:joysong_flutter/features/social/data/api_public_media_uploader.dart';
@@ -262,6 +263,9 @@ class _AppShellState extends State<AppShell> {
           identityRepository: _identityRepository,
           discoverRepository: _discoverRepository,
           socialRepository: _socialRepository,
+          professionalRepository: widget.apiClient == null
+              ? null
+              : ProfessionalRepository(widget.apiClient!),
           onOrders: _ordersController == null ? null : _openOrders,
           onDiaries: _socialController == null ? null : _openSocial,
           onJourney: _showJourneyComingSoon,

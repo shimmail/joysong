@@ -7,6 +7,8 @@ import 'package:joysong_flutter/features/identity/domain/identity_repository.dar
 import 'package:joysong_flutter/features/identity/presentation/consultant_management_pages.dart';
 import 'package:joysong_flutter/features/identity/presentation/identity_controller.dart';
 import 'package:joysong_flutter/features/identity/presentation/professional_request_pages.dart';
+import 'package:joysong_flutter/features/professional_management/data/professional_repository.dart';
+import 'package:joysong_flutter/features/professional_management/presentation/professional_pages.dart';
 
 typedef IdentityFilePicker = Future<IdentityFileDraft?> Function(
   IdentityDocumentType type,
@@ -367,6 +369,7 @@ class ManagementCenterPage extends StatefulWidget {
     required this.discoverRepository,
     this.institutionImagePicker,
     this.doctorImagePicker,
+    this.professionalRepository,
     super.key,
   });
 
@@ -374,6 +377,7 @@ class ManagementCenterPage extends StatefulWidget {
   final DiscoverRepository discoverRepository;
   final InstitutionProfileImagePicker? institutionImagePicker;
   final Future<String?> Function()? doctorImagePicker;
+  final ProfessionalRepository? professionalRepository;
 
   @override
   State<ManagementCenterPage> createState() => _ManagementCenterPageState();
@@ -432,6 +436,7 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
                 discoverRepository: widget.discoverRepository,
                 institutionImagePicker: widget.institutionImagePicker,
                 doctorImagePicker: widget.doctorImagePicker,
+                professionalRepository: widget.professionalRepository,
               ),
           };
         },
@@ -447,6 +452,7 @@ class _ManagementCapabilities extends StatelessWidget {
     required this.discoverRepository,
     this.institutionImagePicker,
     this.doctorImagePicker,
+    this.professionalRepository,
   });
 
   final ManagementContext context;
@@ -454,6 +460,7 @@ class _ManagementCapabilities extends StatelessWidget {
   final DiscoverRepository discoverRepository;
   final InstitutionProfileImagePicker? institutionImagePicker;
   final Future<String?> Function()? doctorImagePicker;
+  final ProfessionalRepository? professionalRepository;
 
   @override
   Widget build(BuildContext buildContext) {
@@ -615,13 +622,13 @@ class _ManagementCapabilities extends StatelessWidget {
             icon: Icons.article_outlined,
             label: buildContext.localized('专业文章', 'Professional articles'),
             enabled: isDoctor && context.canManageArticles,
-            action: _ManagementAction.unavailable,
+            action: _ManagementAction.doctorArticles,
           ),
           (
             icon: Icons.receipt_long_outlined,
             label: buildContext.localized('专业订单', 'Professional orders'),
             enabled: isDoctor && context.canManageOrders,
-            action: _ManagementAction.unavailable,
+            action: _ManagementAction.doctorOrders,
           ),
         ],
       ),
@@ -709,6 +716,23 @@ class _ManagementCapabilities extends StatelessWidget {
     _ManagementAction action, {
     String? membershipRequestType,
   }) {
+    if (action == _ManagementAction.doctorArticles &&
+        professionalRepository != null) {
+      Navigator.of(context).push<void>(MaterialPageRoute(
+        builder: (_) => DoctorArticlesPage(
+          repository: professionalRepository!,
+          pickCoverImage: doctorImagePicker,
+        ),
+      ));
+      return;
+    }
+    if (action == _ManagementAction.doctorOrders &&
+        professionalRepository != null) {
+      Navigator.of(context).push<void>(MaterialPageRoute(
+        builder: (_) => DoctorOrdersPage(repository: professionalRepository!),
+      ));
+      return;
+    }
     if (action == _ManagementAction.applyMembership &&
         membershipRequestType != null) {
       Navigator.of(context).push<void>(MaterialPageRoute(
@@ -857,6 +881,8 @@ enum _ManagementAction {
   doctorProjectProfileUpdate,
   consultantMembership,
   consultantProjects,
+  doctorArticles,
+  doctorOrders,
   unavailable,
 }
 

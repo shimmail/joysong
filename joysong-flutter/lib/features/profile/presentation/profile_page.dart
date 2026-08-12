@@ -16,6 +16,7 @@ import 'package:joysong_flutter/features/profile/presentation/profile_controller
 import 'package:joysong_flutter/features/profile/presentation/profile_support_pages.dart';
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
 import 'package:joysong_flutter/features/social/domain/social_repository.dart';
+import 'package:joysong_flutter/features/professional_management/data/professional_repository.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({
@@ -23,6 +24,7 @@ class ProfilePage extends StatefulWidget {
     this.identityRepository,
     this.discoverRepository,
     this.socialRepository,
+    this.professionalRepository,
     this.onOrders,
     this.onDiaries,
     this.onJourney,
@@ -38,6 +40,7 @@ class ProfilePage extends StatefulWidget {
   final IdentityRepository? identityRepository;
   final DiscoverRepository? discoverRepository;
   final SocialRepository? socialRepository;
+  final ProfessionalRepository? professionalRepository;
   final VoidCallback? onOrders;
   final VoidCallback? onDiaries;
   final VoidCallback? onJourney;
@@ -311,6 +314,7 @@ class _ProfilePageState extends State<ProfilePage> {
               widget.socialRepository == null ? null : _pickInstitutionImage,
           doctorImagePicker:
               widget.socialRepository == null ? null : _pickDoctorImage,
+          professionalRepository: widget.professionalRepository,
         ),
       ),
     );
