@@ -1075,7 +1075,7 @@ components:
         walletId: { type: integer, format: int64, example: 101 }
         ownerType: { type: string, enum: [DOCTOR, CONSULTANT, INSTITUTION] }
         ownerId: { type: string }
-        displayName: { type: string, enum: [DOCTOR, CONSULTANT, INSTITUTION], example: DOCTOR, description: 稳定语义代码，客户端本地化 }
+        displayName: { type: string, enum: [DOCTOR, CONSULTANT, INSTITUTION], example: DOCTOR, description: 与 ownerType 相同的公开语义代码，客户端本地化；不是内部 operationKey }
         ownerName: { type: string, example: 张医生 }
         pendingMinor: { type: integer, format: int64, example: 12000 }
         availableMinor: { type: integer, format: int64, example: 85000 }
@@ -1093,11 +1093,11 @@ components:
         id: { type: integer, format: int64, example: 1001 }
         walletId: { type: integer, format: int64, example: 101 }
         entryType: { type: string, enum: [SETTLEMENT, RELEASE, REVERSAL], example: SETTLEMENT }
-        title: { type: string, example: SETTLEMENT, description: 兼容保留的稳定语义值 }
-        description: { type: string, example: 'ORDER:JS202608110001', description: 兼容保留的稳定语义值 }
-        sourceType: { type: string, example: ORDER }
-        sourceId: { type: string, example: JS202608110001 }
-        amountMinor: { type: integer, format: int64, description: 收入为正，退款冲正为负；RELEASE 为 0, example: 12000 }
+        title: { type: string, enum: [SETTLEMENT, RELEASE, REVERSAL], example: SETTLEMENT, description: 兼容字段，等于 entryType；由客户端本地化 }
+        description: { type: string, example: 'ORDER:JS202608110001', description: 兼容字段，等于 sourceType + ':' + sourceId }
+        sourceType: { type: string, example: ORDER, description: 公开业务来源语义代码，不是内部 operationKey }
+        sourceId: { type: string, example: JS202608110001, description: 用于生成本地化流水描述的来源标识 }
+        amountMinor: { type: integer, format: int64, description: 收入为正，退款冲正为负；RELEASE 是中性余额桶转移，固定为 0, example: 12000 }
         pendingAfterMinor: { type: integer, format: int64, example: 12000 }
         availableAfterMinor: { type: integer, format: int64, example: 85000 }
         frozenAfterMinor: { type: integer, format: int64, example: 0 }
