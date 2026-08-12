@@ -170,4 +170,3 @@
 - [ ] If persistence verification becomes necessary, derive the worktree id, print resolved host/database first, and use only a fresh database beginning `myapp_worktree_`; do not reset shared state.
 - [ ] Review diff for unrelated edits and delete only temporary artifacts created by this slice.
 - [ ] Commit audit corrections as `fix: align doctor articles and orders contracts`; otherwise leave verified commits unchanged.
-

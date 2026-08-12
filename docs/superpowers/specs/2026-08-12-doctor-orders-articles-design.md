@@ -125,4 +125,3 @@ No schema migration is justified. If optimistic versioning is later required, it
 Backend focused tests must prove exact article request/response fields, active-role and self ownership, admin compatibility, database-scoped filtering, validation and soft delete; and order self/admin visibility, status filtering/pagination, hidden code, state/code preconditions, row-lock serialization, replay idempotency, one status log, and all 400/403/404/409 mappings.
 
 Flutter tests are capped to the smallest useful set: one article repository/VO contract test, one article list/editor widget test, one order repository/VO contract test, and one order list/detail/action widget test. After focused tests pass, run `flutter analyze` once and at most one broader suite per project under the repository test rules.
-
