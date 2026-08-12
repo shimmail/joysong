@@ -6,6 +6,7 @@ import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/discover/presentation/discover_content_card.dart';
 import 'package:joysong_flutter/features/discover/presentation/discover_controller.dart';
+import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 
 final class InstitutionPickerSelection {
   const InstitutionPickerSelection({required this.id, required this.name});
@@ -22,7 +23,7 @@ class InstitutionPickerPage extends StatefulWidget {
   });
 
   final DiscoverRepository repository;
-  final String role;
+  final IdentityRoleType role;
 
   @override
   State<InstitutionPickerPage> createState() => _InstitutionPickerPageState();

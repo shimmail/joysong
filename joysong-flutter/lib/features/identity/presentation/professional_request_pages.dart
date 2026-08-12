@@ -586,7 +586,7 @@ class _InstitutionMembershipRequestsPageState
         .push<InstitutionPickerSelection>(MaterialPageRoute(
       builder: (_) => InstitutionPickerPage(
         repository: widget.discoverRepository,
-        role: widget.requestType.trim().toUpperCase(),
+        role: IdentityRoleType.fromCode(widget.requestType),
       ),
     ));
     if (!mounted || selection == null) return;
@@ -798,19 +798,26 @@ class _InstitutionProjectRequestsPageState
 
   Future<void> _load() async {
     try {
-      final values = await Future.wait([
-        widget.repository.listInstitutionOptions(),
-        widget.repository.listManagementProjects(),
-        widget.repository.listProfessionalProjectRequests(),
-      ]);
+      final requests =
+          await widget.repository.listProfessionalProjectRequests();
+      final values = widget.reviewMode
+          ? null
+          : await Future.wait([
+              widget.repository.listInstitutionOptions(),
+              widget.repository.listManagementProjects(),
+            ]);
       if (!mounted) return;
       final allowedIds = widget.context.doctorInstitutionIds.toSet();
       setState(() {
-        _institutions = (values[0] as List<InstitutionOption>)
-            .where((item) => widget.reviewMode || allowedIds.contains(item.id))
-            .toList();
-        _projects = values[1] as List<ManagementProjectOption>;
-        _requests = (values[2] as List<ProfessionalProjectRequest>)
+        _institutions = values == null
+            ? const []
+            : (values[0] as List<InstitutionOption>)
+                .where((item) => allowedIds.contains(item.id))
+                .toList();
+        _projects = values == null
+            ? const []
+            : values[1] as List<ManagementProjectOption>;
+        _requests = requests
             .where((item) => item.requestType == 'INSTITUTION')
             .toList();
         _loading = false;

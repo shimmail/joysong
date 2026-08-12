@@ -346,6 +346,20 @@ void main() {
       'legal representative sees only institution profile and review queues',
       (tester) async {
     final repository = _FakeIdentityRepository()
+      ..rejectProfessionalProjectCatalog = true
+      ..professionalProjectRequests = [
+        ProfessionalProjectRequest.fromJson({
+          'id': 'request-1',
+          'requestType': 'INSTITUTION',
+          'doctorId': 'doctor-1',
+          'doctorName': 'Doctor Joy',
+          'institutionId': 'inst-1',
+          'institutionName': 'Joysong Clinic',
+          'projectId': 'project-1',
+          'projectName': 'Skin Renewal',
+          'status': 'PENDING',
+        }),
+      ]
       ..managementContext = const ManagementContext(
         userId: 'user-legal',
         platformRole: 'USER',
@@ -375,6 +389,11 @@ void main() {
     expect(find.text('机构项目加入审核'), findsOneWidget);
     expect(find.text('机构项目'), findsNothing);
     expect(find.text('专业订单'), findsNothing);
+
+    await tester.tap(find.text('机构项目申请审核'));
+    await tester.pumpAndSettle();
+    expect(find.text('Skin Renewal'), findsOneWidget);
+    expect(find.text('机构项目申请加载失败，请重试'), findsNothing);
   });
 
   testWidgets('doctor sees self profile and request capabilities',
@@ -508,6 +527,18 @@ final class _FakeDiscoverRepository implements DiscoverRepository {
 }
 
 final class _FakeIdentityRepository implements IdentityRepository {
+  bool rejectProfessionalProjectCatalog = false;
+  List<ProfessionalProjectRequest> professionalProjectRequests = const [];
+
+  @override
+  Future<List<ConsultantMembership>> listConsultantMemberships() async =>
+      const [];
+
+  @override
+  Future<ConsultantMembership> submitConsultantMembership(
+    ConsultantMembershipDraft draft,
+  ) =>
+      throw UnimplementedError();
   var contextCalls = 0;
   var allowManagement = true;
   ManagementContext? managementContext;
@@ -630,8 +661,12 @@ final class _FakeIdentityRepository implements IdentityRepository {
           ];
 
   @override
-  Future<List<ManagementProjectOption>> listManagementProjects() async =>
-      const [];
+  Future<List<ManagementProjectOption>> listManagementProjects() async {
+    if (rejectProfessionalProjectCatalog) {
+      throw Exception('403 forbidden');
+    }
+    return const [];
+  }
 
   @override
   Future<void> submitSplitConfigProposal(
@@ -705,7 +740,7 @@ final class _FakeIdentityRepository implements IdentityRepository {
 
   @override
   Future<List<ProfessionalProjectRequest>>
-      listProfessionalProjectRequests() async => const [];
+      listProfessionalProjectRequests() async => professionalProjectRequests;
 
   @override
   Future<void> submitPlatformProjectRequest(

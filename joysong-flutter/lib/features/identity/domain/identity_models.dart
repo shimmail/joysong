@@ -780,14 +780,14 @@ final class ManagementProjectOption {
     final map = _jsonMap(json, '项目');
     return ManagementProjectOption(
       id: _requiredText(map['id'], '项目 id'),
-      name: map['name']?.toString() ?? '',
+      name: _requiredText(map['name'], '项目名称'),
       category: map['category']?.toString() ?? '',
       description: map['description']?.toString() ?? '',
       tags: map['tags']?.toString() ?? '',
       categoryTags: _csvText(map['categoryTags']),
       coverImage: map['coverImage']?.toString() ?? '',
       referencePrice: _decimal(map['referencePrice']),
-      currency: map['currency']?.toString() ?? '',
+      currency: _requiredText(map['currency'], '币种'),
     );
   }
 

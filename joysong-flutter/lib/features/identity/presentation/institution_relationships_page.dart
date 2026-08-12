@@ -304,7 +304,7 @@ class _InstitutionRelationshipsPageState
         .push<InstitutionPickerSelection>(MaterialPageRoute(
       builder: (_) => InstitutionPickerPage(
         repository: widget.discoverRepository,
-        role: IdentityRoleType.doctor.code,
+        role: IdentityRoleType.doctor,
       ),
     ));
     if (!mounted || selection == null) return;

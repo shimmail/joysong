@@ -32,6 +32,14 @@ void main() {
     expect(projects.single.categoryTags, 'skin,laser');
     expect(projects.single.referencePrice, 980.50);
     expect(projects.single.currency, 'CNY');
+    for (final requiredKey in ['id', 'name', 'currency']) {
+      expect(
+        () => ManagementProjectOption.fromJson(
+          Map<String, Object?>.from(_projectJson)..remove(requiredKey),
+        ),
+        throwsFormatException,
+      );
+    }
     expect(client.requests, [
       const _Request('GET', '/management/consultant-memberships'),
       const _Request(
@@ -71,7 +79,7 @@ void main() {
     final picker = tester.widget<InstitutionPickerPage>(
       find.byType(InstitutionPickerPage),
     );
-    expect(picker.role, IdentityRoleType.consultant.code);
+    expect(picker.role, IdentityRoleType.consultant);
     await tester.tap(find.text('New Clinic'));
     await tester.pumpAndSettle();
     await tester.enterText(

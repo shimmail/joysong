@@ -66,7 +66,7 @@ class _ConsultantMembershipPageState extends State<ConsultantMembershipPage> {
         .push<InstitutionPickerSelection>(MaterialPageRoute(
       builder: (_) => InstitutionPickerPage(
         repository: widget.discoverRepository,
-        role: IdentityRoleType.consultant.code,
+        role: IdentityRoleType.consultant,
       ),
     ));
     if (mounted && selection != null) {

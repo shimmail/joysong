@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/discover/presentation/institution_picker_page.dart';
+import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 
 void main() {
   testWidgets('picker trims search and requests institutions only',
@@ -10,7 +11,10 @@ void main() {
     final repository = _FakeDiscoverRepository();
 
     await tester.pumpWidget(MaterialApp(
-      home: InstitutionPickerPage(repository: repository, role: 'DOCTOR'),
+      home: InstitutionPickerPage(
+        repository: repository,
+        role: IdentityRoleType.doctor,
+      ),
     ));
     await tester.pumpAndSettle();
     await tester.enterText(
@@ -37,7 +41,7 @@ void main() {
                 .push<InstitutionPickerSelection>(MaterialPageRoute(
               builder: (_) => InstitutionPickerPage(
                 repository: repository,
-                role: 'DOCTOR',
+                role: IdentityRoleType.doctor,
               ),
             ));
           },
