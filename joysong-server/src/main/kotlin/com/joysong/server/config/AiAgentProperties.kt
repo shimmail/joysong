@@ -12,6 +12,7 @@ import java.time.Duration
 @ConfigurationProperties("ai-agent")
 data class AiAgentProperties(
     var enabled: Boolean = true,
+    var provider: AiAgentProvider? = null,
     var apiKey: String = "",
     var baseUrl: String = "",
     var model: String = "",

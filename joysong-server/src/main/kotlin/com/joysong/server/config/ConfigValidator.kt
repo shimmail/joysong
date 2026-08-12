@@ -51,20 +51,24 @@ class ConfigValidator(
             missing.add("AI_AGENT_TURN_LEASE_SECONDS (at least 82 seconds; must exceed the 81-second serial HTTP budget)")
         }
         if (!AiAgentProxyUrlPolicy.isAllowed(aiAgentProperties.proxyUrl)) {
-            missing.add("OPENAI_PROXY_URL (http or socks URL with host and explicit valid port; user-info is not allowed)")
+            missing.add("AI_AGENT_PROXY_URL (http or socks URL with host and explicit valid port; user-info is not allowed)")
         }
 
         val isProduction = environment.activeProfiles.any { it.equals("prod", ignoreCase = true) }
         if (isProduction && !ossEnabled) missing.add("OSS_ENABLED=true")
         if (isProduction && !smsEnabled) missing.add("SMS_ENABLED=true")
         if (isProduction && aiAgentProperties.demoFallbackEnabled) {
-            missing.add("OPENAI demo fallback must be disabled in production")
+            missing.add("AI Agent demo fallback must be disabled in production")
         }
         if (isProduction && aiAgentProperties.enabled) {
-            if (aiAgentProperties.apiKey.isBlank()) missing.add("OPENAI_API_KEY")
-            val normalizedBaseUrl = OpenAiBaseUrlPolicy.normalizeAllowed(aiAgentProperties.baseUrl)
+            val provider = aiAgentProperties.provider
+            if (provider == null) missing.add("AI_AGENT_PROVIDER")
+            if (aiAgentProperties.apiKey.isBlank()) missing.add("AI_AGENT_API_KEY")
+            val normalizedBaseUrl = provider?.let {
+                AiAgentProviderUrlPolicy.normalizeAllowed(it, aiAgentProperties.baseUrl)
+            }
             if (normalizedBaseUrl == null) {
-                missing.add("OPENAI_BASE_URL (approved HTTPS endpoint required)")
+                missing.add("AI_AGENT_BASE_URL (approved HTTPS endpoint required)")
             } else {
                 aiAgentProperties.baseUrl = normalizedBaseUrl
             }

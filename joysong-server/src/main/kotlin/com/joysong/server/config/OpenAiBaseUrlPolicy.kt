@@ -3,25 +3,30 @@ package com.joysong.server.config
 import java.net.URI
 import java.net.URISyntaxException
 
-object OpenAiBaseUrlPolicy {
-    private const val ALLOWED_HOST = "www.fastaitoken.com"
+enum class AiAgentProvider {
+    QWEN,
+    OPENAI_COMPATIBLE
+}
 
-    fun isAllowed(value: String): Boolean = normalizeAllowed(value) != null
+object AiAgentProviderUrlPolicy {
+    private const val DASHSCOPE_HOST = "dashscope.aliyuncs.com"
+    private const val FAST_AI_TOKEN_HOST = "www.fastaitoken.com"
 
-    fun normalizeAllowed(value: String): String? {
+    fun normalizeAllowed(provider: AiAgentProvider, value: String): String? {
         return try {
             val uri = URI(value.trim())
             if (!uri.scheme.equals("https", ignoreCase = true) ||
-                uri.host?.lowercase() != ALLOWED_HOST ||
+                uri.host?.lowercase() != allowedHost(provider) ||
                 uri.userInfo != null ||
                 uri.port !in setOf(-1, 443) ||
                 uri.rawQuery != null ||
-                uri.rawFragment != null
+                uri.rawFragment != null ||
+                !isAllowedPath(provider, uri.rawPath.orEmpty())
             ) {
                 null
             } else {
                 val path = uri.rawPath.orEmpty().trimEnd('/')
-                "https://$ALLOWED_HOST$path"
+                "https://${allowedHost(provider)}$path"
             }
         } catch (_: URISyntaxException) {
             null
@@ -29,4 +34,23 @@ object OpenAiBaseUrlPolicy {
             null
         }
     }
+
+    private fun allowedHost(provider: AiAgentProvider): String = when (provider) {
+        AiAgentProvider.QWEN -> DASHSCOPE_HOST
+        AiAgentProvider.OPENAI_COMPATIBLE -> FAST_AI_TOKEN_HOST
+    }
+
+    private fun isAllowedPath(provider: AiAgentProvider, path: String): Boolean = when (provider) {
+        AiAgentProvider.QWEN -> path == "/compatible-mode" || path.startsWith("/compatible-mode/")
+        AiAgentProvider.OPENAI_COMPATIBLE -> true
+    }
+}
+
+@Deprecated("Use AiAgentProviderUrlPolicy with an explicit provider")
+object OpenAiBaseUrlPolicy {
+    fun isAllowed(value: String): Boolean =
+        AiAgentProviderUrlPolicy.normalizeAllowed(AiAgentProvider.OPENAI_COMPATIBLE, value) != null
+
+    fun normalizeAllowed(value: String): String? =
+        AiAgentProviderUrlPolicy.normalizeAllowed(AiAgentProvider.OPENAI_COMPATIBLE, value)
 }

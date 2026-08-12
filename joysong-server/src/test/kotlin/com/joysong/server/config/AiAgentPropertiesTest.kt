@@ -3,6 +3,7 @@ package com.joysong.server.config
 import org.junit.jupiter.api.Assertions.assertDoesNotThrow
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -28,6 +29,7 @@ class AiAgentPropertiesTest {
     fun `typed properties bind agent settings including the turn lease`() {
         val environment = MockEnvironment()
             .withProperty("ai-agent.enabled", "true")
+            .withProperty("ai-agent.provider", "qWeN")
             .withProperty("ai-agent.api-key", "test-key")
             .withProperty("ai-agent.base-url", "https://www.fastaitoken.com/v1")
             .withProperty("ai-agent.model", "gpt-5.5")
@@ -39,11 +41,79 @@ class AiAgentPropertiesTest {
             .get()
 
         assertEquals(true, properties.enabled)
+        assertEquals(AiAgentProvider.QWEN, properties.provider)
         assertEquals("test-key", properties.apiKey)
         assertEquals("https://www.fastaitoken.com/v1", properties.baseUrl)
         assertEquals("gpt-5.5", properties.model)
         assertEquals("http://127.0.0.1:7890", properties.proxyUrl)
         assertEquals(Duration.ofSeconds(90), properties.turnLease)
+    }
+
+    @Test
+    fun `unknown provider values are rejected by property binding`() {
+        val environment = MockEnvironment().withProperty("ai-agent.provider", "anthropic")
+
+        assertThrows(Exception::class.java) {
+            Binder.get(environment).bind("ai-agent", Bindable.of(AiAgentProperties::class.java)).get()
+        }
+    }
+
+    @Test
+    fun `intent model is optional and defaults to the chat model`() {
+        val properties = AiAgentProperties(model = "qwen3.7-flash", intentModel = " ")
+
+        assertEquals("qwen3.7-flash", properties.resolvedIntentModel())
+    }
+
+    @Test
+    fun `agent properties do not bind legacy or translation credentials`() {
+        val environment = MockEnvironment()
+            .withProperty("openai.api-key", "legacy-key")
+            .withProperty("translation.qwen.api-key", "translation-key")
+
+        val properties = Binder.get(environment)
+            .bind("ai-agent", Bindable.of(AiAgentProperties::class.java))
+            .orElseGet(::AiAgentProperties)
+
+        assertEquals("", properties.apiKey)
+    }
+
+    @Test
+    fun `provider URL policy accepts and normalizes Qwen compatible-mode endpoints`() {
+        assertEquals(
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            AiAgentProviderUrlPolicy.normalizeAllowed(
+                AiAgentProvider.QWEN,
+                "  HTTPS://DASHSCOPE.ALIYUNCS.COM:443/compatible-mode/v1/  "
+            )
+        )
+    }
+
+    @Test
+    fun `provider URL policy accepts and normalizes approved OpenAI-compatible endpoints`() {
+        assertEquals(
+            "https://www.fastaitoken.com/v1",
+            AiAgentProviderUrlPolicy.normalizeAllowed(
+                AiAgentProvider.OPENAI_COMPATIBLE,
+                "  HTTPS://WWW.FASTAITOKEN.COM:443/v1/  "
+            )
+        )
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+        strings = [
+            "https://www.fastaitoken.com/v1",
+            "https://dashscope.aliyuncs.com/v1",
+            "http://dashscope.aliyuncs.com/compatible-mode/v1",
+            "https://user:secret@dashscope.aliyuncs.com/compatible-mode/v1",
+            "https://dashscope.aliyuncs.com/compatible-mode/v1?key=secret",
+            "https://dashscope.aliyuncs.com/compatible-mode/v1#fragment",
+            "https://dashscope.aliyuncs.com:444/compatible-mode/v1"
+        ]
+    )
+    fun `provider URL policy rejects mismatched or unsafe Qwen endpoints`(url: String) {
+        assertNull(AiAgentProviderUrlPolicy.normalizeAllowed(AiAgentProvider.QWEN, url))
     }
 
     @Test
@@ -88,7 +158,7 @@ class AiAgentPropertiesTest {
 
         val error = assertThrows(IllegalStateException::class.java) { validator(properties).validate() }
 
-        assertTrue(error.message.orEmpty().contains("OPENAI_API_KEY"))
+        assertTrue(error.message.orEmpty().contains("AI_AGENT_API_KEY"))
     }
 
     @Test
@@ -97,7 +167,7 @@ class AiAgentPropertiesTest {
 
         val error = assertThrows(IllegalStateException::class.java) { validator(properties).validate() }
 
-        assertTrue(error.message.orEmpty().contains("OPENAI_BASE_URL"))
+        assertTrue(error.message.orEmpty().contains("AI_AGENT_BASE_URL"))
     }
 
     @Test
@@ -107,6 +177,15 @@ class AiAgentPropertiesTest {
         val error = assertThrows(IllegalStateException::class.java) { validator(properties).validate() }
 
         assertTrue(error.message.orEmpty().contains("AI_AGENT_MODEL"))
+    }
+
+    @Test
+    fun `enabled production rejects a blank provider`() {
+        val properties = validEnabledProperties().copy(provider = null)
+
+        val error = assertThrows(IllegalStateException::class.java) { validator(properties).validate() }
+
+        assertTrue(error.message.orEmpty().contains("AI_AGENT_PROVIDER"))
     }
 
     @Test
@@ -162,12 +241,13 @@ class AiAgentPropertiesTest {
 
         val error = assertThrows(IllegalStateException::class.java) { validator(properties).validate() }
 
-        assertTrue(error.message.orEmpty().contains("OPENAI_PROXY_URL"))
+        assertTrue(error.message.orEmpty().contains("AI_AGENT_PROXY_URL"))
         assertFalse(error.message.orEmpty().contains(proxyUrl))
     }
 
     private fun validEnabledProperties() = AiAgentProperties(
         enabled = true,
+        provider = AiAgentProvider.OPENAI_COMPATIBLE,
         apiKey = "test-key",
         baseUrl = "https://www.fastaitoken.com/v1",
         model = "gpt-5.5"
