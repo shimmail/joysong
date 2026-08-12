@@ -82,10 +82,10 @@ class WalletReadService(
         walletId = walletId,
         entryType = entryType,
         title = when (entryType) {
-            "REFUND_REVERSAL" -> "退款冲正"
+            "REVERSAL" -> "退款冲正"
             else -> "诊疗收益"
         },
-        description = "订单 $sourceId",
+        description = if (entryType == "REVERSAL") "退款 $sourceId" else "订单 $sourceId",
         amountMinor = sequenceOf(pendingDeltaMinor, availableDeltaMinor, frozenDeltaMinor).firstOrNull { it != 0L } ?: 0L,
         pendingAfterMinor = pendingBalanceMinor,
         availableAfterMinor = availableBalanceMinor,

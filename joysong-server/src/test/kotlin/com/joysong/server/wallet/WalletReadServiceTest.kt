@@ -95,7 +95,7 @@ class WalletReadServiceTest {
         every { access.walletScopes(actor) } returns listOf(WalletOwnerScope("DOCTOR", setOf("doctor-1")))
         every { wallets.findAllByOwnerTypeAndOwnerIdIn("DOCTOR", setOf("doctor-1")) } returns listOf(wallet(11, "DOCTOR", "doctor-1"))
         every { ledgers.findAllByWalletIdOrderByCreatedAtDescIdDesc(11, any()) } returns PageImpl(listOf(
-            WalletLedgerEntryEntity(id = 8, walletId = 11, entryType = "REFUND_REVERSAL", availableDeltaMinor = -1200, availableBalanceMinor = 8800, sourceType = "ORDER", sourceId = "JS1", createdAt = LocalDateTime.of(2026, 8, 11, 10, 30))
+            WalletLedgerEntryEntity(id = 8, walletId = 11, entryType = "REVERSAL", availableDeltaMinor = -1200, availableBalanceMinor = 8800, sourceType = "REFUND", sourceId = "refund-1", createdAt = LocalDateTime.of(2026, 8, 11, 10, 30))
         ))
 
         val page = service.ledger(actor, 11, -1, 101)
@@ -103,6 +103,8 @@ class WalletReadServiceTest {
 
         assertEquals(-1200, item.amountMinor)
         assertEquals("USD", item.currency)
+        assertEquals("退款冲正", item.title)
+        assertEquals("退款 refund-1", item.description)
         verify { ledgers.findAllByWalletIdOrderByCreatedAtDescIdDesc(11, match { it.pageNumber == 0 && it.pageSize == 100 }) }
         assertEquals(emptyList<String>(), WalletLedgerItemDto::class.memberProperties.map { it.name.lowercase() }
             .filter { name -> listOf("provider", "payout", "bank", "beneficiary", "fx").any(name::contains) })
