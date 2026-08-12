@@ -189,18 +189,9 @@ class ProductionProfileTest {
                 }.toList()
             }
         }
-        val intentModelMayBeBlank = Regex("\\$\\{AI_AGENT_INTENT_MODEL:\\}", RegexOption.IGNORE_CASE)
         val violations = currentDocuments.flatMap { path ->
             val content = Files.readString(path)
-            val blankDefault = intentModelMayBeBlank.find(content)?.value
-            val optionalDescription = content.lineSequence()
-                .flatMap { line -> line.split(Regex("[。；]")).asSequence() }
-                .firstOrNull { clause ->
-                clause.contains("AI_AGENT_INTENT_MODEL", ignoreCase = true) &&
-                    Regex("optional|可选|留空|空值|回退|fallback|defaults?\\s+to|默认使用", RegexOption.IGNORE_CASE)
-                        .containsMatchIn(clause)
-            }
-            listOfNotNull(blankDefault, optionalDescription).map { violation ->
+            findIntentModelDocumentationViolations(content).map { violation ->
                 path.normalize().toString() to violation.trim()
             }
         }
@@ -209,5 +200,86 @@ class ProductionProfileTest {
             violations.isEmpty(),
             "AI_AGENT_INTENT_MODEL must be production-required and distinct: ${violations.joinToString()}"
         )
+    }
+
+    @Test
+    fun `intent model documentation guard catches optional English placeholders and hard wraps`() {
+        val violations = listOf(
+            "AI_AGENT_INTENT_MODEL may be blank",
+            "AI_AGENT_INTENT_MODEL may be empty",
+            "AI_AGENT_INTENT_MODEL may be omitted",
+            "AI_AGENT_INTENT_MODEL inherits AI_AGENT_MODEL",
+            "AI_AGENT_INTENT_MODEL may be\nleft blank",
+            "intent-model: \${AI_AGENT_INTENT_MODEL: }",
+            "intent-model: \${AI_AGENT_INTENT_MODEL:\${AI_AGENT_MODEL}}"
+        )
+
+        violations.forEach { sample ->
+            assertTrue(
+                findIntentModelDocumentationViolations(sample).isNotEmpty(),
+                "guard missed optional intent-model semantics: $sample"
+            )
+        }
+    }
+
+    @Test
+    fun `intent model documentation guard accepts required and negated wording`() {
+        val compliant = listOf(
+            "AI_AGENT_INTENT_MODEL is required and must be set separately.",
+            "AI_AGENT_INTENT_MODEL 不可选，必须单独配置。",
+            "AI_AGENT_INTENT_MODEL 不允许留空。",
+            "AI_AGENT_INTENT_MODEL 无回退，必须使用独立模型。"
+        )
+
+        compliant.forEach { sample ->
+            assertTrue(
+                findIntentModelDocumentationViolations(sample).isEmpty(),
+                "guard rejected compliant intent-model semantics: $sample"
+            )
+        }
+    }
+
+    private fun findIntentModelDocumentationViolations(content: String): List<String> {
+        val placeholderViolations = listOf(
+            Regex("\\$\\{\\s*AI_AGENT_INTENT_MODEL\\s*:\\s*}", RegexOption.IGNORE_CASE),
+            Regex(
+                "\\$\\{\\s*AI_AGENT_INTENT_MODEL\\s*:\\s*\\$\\{\\s*AI_AGENT_MODEL\\s*}\\s*}",
+                RegexOption.IGNORE_CASE
+            )
+        ).flatMap { pattern -> pattern.findAll(content).map { it.value }.toList() }
+
+        val normalized = content.replace(Regex("\\s+"), " ").trim()
+        val protected = normalized
+            .replace(
+                Regex(
+                    "(?i)\\b(?:not\\s+optional|non-?optional|must\\s+not\\s+be\\s+(?:blank|empty|omitted)|" +
+                        "cannot\\s+be\\s+(?:blank|empty|omitted)|non-?(?:blank|empty)|" +
+                        "does\\s+not\\s+inherit|no\\s+fallback|does\\s+not\\s+fall\\s+back)\\b"
+                ),
+                "COMPLIANT"
+            )
+            .replace(
+                Regex("不可选|并非可选|不允许留空|不得留空|不能留空|禁止留空|无回退|不会回退|不回退"),
+                "合规"
+            )
+        val optionalSemantics = Regex(
+            "(?i)optional|may\\s+be\\s+(?:blank|empty|omitted)|can\\s+be\\s+(?:blank|empty|omitted)|" +
+                "(?:is\\s+)?(?:blank|empty)|omitted|inherits?(?:\\s+from)?|falls?\\s+back|fallback|" +
+                "defaults?\\s+to|可选|留空|空值|回退|默认使用"
+        )
+        val semanticViolations = protected.split(Regex("[.!?。；;]")).mapNotNull { clause ->
+            val variableIndex = clause.indexOf("AI_AGENT_INTENT_MODEL", ignoreCase = true)
+            if (variableIndex < 0) return@mapNotNull null
+            val start = (variableIndex - INTENT_MODEL_SEMANTIC_RADIUS).coerceAtLeast(0)
+            val end = (variableIndex + "AI_AGENT_INTENT_MODEL".length + INTENT_MODEL_SEMANTIC_RADIUS)
+                .coerceAtMost(clause.length)
+            clause.substring(start, end).takeIf(optionalSemantics::containsMatchIn)?.trim()
+        }
+
+        return placeholderViolations + semanticViolations
+    }
+
+    private companion object {
+        const val INTENT_MODEL_SEMANTIC_RADIUS = 96
     }
 }
