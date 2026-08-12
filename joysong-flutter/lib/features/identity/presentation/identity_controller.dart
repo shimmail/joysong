@@ -1,13 +1,18 @@
 import 'package:flutter/foundation.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
+import 'package:joysong_flutter/features/identity/presentation/identity_error_messages.dart';
 
 enum IdentityLoadStatus { idle, loading, ready, failure }
 
 final class IdentityController extends ChangeNotifier {
-  IdentityController(this._repository);
+  IdentityController(
+    this._repository, {
+    IdentityMessageResolver? messageResolver,
+  }) : _messageResolver = messageResolver ?? _chineseMessage;
 
   final IdentityRepository _repository;
+  IdentityMessageResolver _messageResolver;
 
   IdentityLoadStatus _status = IdentityLoadStatus.idle;
   IdentityOverview _overview = const IdentityOverview();
@@ -23,6 +28,10 @@ final class IdentityController extends ChangeNotifier {
   String? get successMessage => _successMessage;
   bool isUploading(IdentityDocumentType type) => _uploading.contains(type);
 
+  void setMessageResolver(IdentityMessageResolver resolver) {
+    _messageResolver = resolver;
+  }
+
   Future<void> load() async {
     if (_status == IdentityLoadStatus.loading) {
       return;
@@ -33,9 +42,13 @@ final class IdentityController extends ChangeNotifier {
     try {
       _overview = await _repository.loadOverview();
       _status = IdentityLoadStatus.ready;
-    } catch (_) {
+    } catch (error) {
       _status = IdentityLoadStatus.failure;
-      _errorMessage = '身份信息加载失败，请重试';
+      _errorMessage = identityErrorMessage(
+        error,
+        operation: IdentityErrorOperation.load,
+        resolve: _messageResolver,
+      );
     }
     notifyListeners();
   }
@@ -50,7 +63,11 @@ final class IdentityController extends ChangeNotifier {
     try {
       return await _repository.uploadPrivateFile(draft);
     } catch (error) {
-      _errorMessage = _message(error, '认证材料上传失败');
+      _errorMessage = identityErrorMessage(
+        error,
+        operation: IdentityErrorOperation.upload,
+        resolve: _messageResolver,
+      );
       return null;
     } finally {
       _uploading.remove(draft.purpose);
@@ -63,7 +80,11 @@ final class IdentityController extends ChangeNotifier {
       await _repository.deletePrivateDraft(fileId);
       return true;
     } catch (error) {
-      _errorMessage = _message(error, '认证材料删除失败');
+      _errorMessage = identityErrorMessage(
+        error,
+        operation: IdentityErrorOperation.delete,
+        resolve: _messageResolver,
+      );
       notifyListeners();
       return false;
     }
@@ -81,25 +102,27 @@ final class IdentityController extends ChangeNotifier {
       application.validate();
       await _repository.submitApplication(application);
       _overview = await _repository.loadOverview();
-      _successMessage = '身份申请已提交，请等待审核';
+      _successMessage = _messageResolver(
+        '身份申请已提交，请等待审核',
+        'Identity application submitted. Please wait for review.',
+      );
       _status = IdentityLoadStatus.ready;
       return true;
     } catch (error) {
-      _errorMessage = _message(error, '身份申请提交失败');
+      _errorMessage = identityErrorMessage(
+        error,
+        operation: IdentityErrorOperation.submit,
+        resolve: _messageResolver,
+      );
       return false;
     } finally {
       _isSubmitting = false;
       notifyListeners();
     }
   }
-
-  String _message(Object error, String fallback) {
-    if (error is ArgumentError && error.message != null) {
-      return error.message.toString();
-    }
-    return fallback;
-  }
 }
+
+String _chineseMessage(String chinese, String english) => chinese;
 
 enum ManagementLoadStatus { idle, loading, ready, denied, failure }
 

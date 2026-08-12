@@ -29,7 +29,7 @@ class WalletEntity(
     @Column(name = "owner_id", nullable = false, length = 36, updatable = false)
     val ownerId: String = "",
 
-    @Column(nullable = false, length = 3, updatable = false)
+    @Column(nullable = false, length = 3, updatable = false, columnDefinition = "CHAR(3)")
     val currency: String = "",
 
     @Version

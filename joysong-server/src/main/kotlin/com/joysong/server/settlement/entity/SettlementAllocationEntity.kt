@@ -8,6 +8,8 @@ import jakarta.persistence.GeneratedValue
 import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import jakarta.persistence.Table
+import org.hibernate.annotations.JdbcTypeCode
+import org.hibernate.type.SqlTypes
 import java.math.BigDecimal
 import java.time.LocalDateTime
 
@@ -22,6 +24,7 @@ class SettlementAllocationEntity(
     val settlementId: Long = 0,
 
     @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
     @Column(name = "owner_type", nullable = false, length = 20)
     val ownerType: SettlementAllocationOwnerType = SettlementAllocationOwnerType.PLATFORM,
 
@@ -51,11 +54,13 @@ class SettlementAllocationEntity(
         private set
 
     @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
     @Column(name = "balance_bucket", nullable = false, length = 20)
     var balanceBucket: SettlementAllocationBalanceBucket = balanceBucket
         private set
 
     @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
     @Column(name = "status", nullable = false, length = 30)
     var status: SettlementAllocationStatus = status
         private set

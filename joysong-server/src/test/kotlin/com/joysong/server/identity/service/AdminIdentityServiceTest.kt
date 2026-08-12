@@ -1,6 +1,7 @@
 package com.joysong.server.identity.service
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.joysong.server.wallet.repository.WalletRepository
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -40,7 +41,7 @@ class AdminIdentityServiceTest {
         every { jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) } answers {
             listOf(secondArg<RowMapper<Any>>().mapRow(rs, 0))
         }
-        val service = AdminIdentityService(jdbcTemplate, ObjectMapper(), relationshipService)
+        val service = AdminIdentityService(jdbcTemplate, ObjectMapper(), relationshipService, mockk(relaxed = true))
 
         service.revokeDoctorPractice("practice-1")
 
@@ -55,7 +56,7 @@ class AdminIdentityServiceTest {
         val jdbcTemplate = mockk<JdbcTemplate>()
         val relationshipService = mockk<DoctorInstitutionRelationshipService>(relaxed = true)
         every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 1
-        val service = AdminIdentityService(jdbcTemplate, ObjectMapper(), relationshipService)
+        val service = AdminIdentityService(jdbcTemplate, ObjectMapper(), relationshipService, mockk(relaxed = true))
 
         service.revokeRole("doctor-1", "DOCTOR", "admin-1", "认证撤销")
 
@@ -73,6 +74,7 @@ class AdminIdentityServiceTest {
         assertEquals("CONSULTANT", fixture.upserts[0].args[1])
         assertTrue(fixture.upserts.none { it.sql.contains("INSTITUTION_LEGAL_REPRESENTATIVE") })
         assertEquals("CONSULTANT", fixture.membershipRoleCode)
+        verify(exactly = 1) { fixture.walletRepository.createIfAbsent("CONSULTANT", "user-1", "USD") }
     }
 
     @Test
@@ -237,6 +239,7 @@ class AdminIdentityServiceTest {
         finalMembershipFound: Boolean = true
     ): Fixture {
         val jdbcTemplate = mockk<JdbcTemplate>()
+        val walletRepository = mockk<WalletRepository>(relaxed = true)
         val upserts = java.util.Collections.synchronizedList(mutableListOf<SqlCall>())
         val finalMembershipQueries = AtomicInteger()
         val preInsertMembershipSelects = AtomicInteger()
@@ -301,7 +304,8 @@ class AdminIdentityServiceTest {
             service = AdminIdentityService(
                 jdbcTemplate,
                 ObjectMapper(),
-                mockk<DoctorInstitutionRelationshipService>(relaxed = true)
+                mockk<DoctorInstitutionRelationshipService>(relaxed = true),
+                walletRepository
             ),
             jdbcTemplate = jdbcTemplate,
             upserts = upserts,
@@ -309,7 +313,8 @@ class AdminIdentityServiceTest {
             preInsertMembershipSelectsProvider = preInsertMembershipSelects::get,
             membershipRoleCodeProvider = { membershipRoleCode },
             validationQueries = validationQueries,
-            finalMembershipSqlProvider = finalMembershipSql::get
+            finalMembershipSqlProvider = finalMembershipSql::get,
+            walletRepository = walletRepository
         )
     }
 
@@ -350,7 +355,8 @@ class AdminIdentityServiceTest {
         private val preInsertMembershipSelectsProvider: () -> Int,
         private val membershipRoleCodeProvider: () -> String,
         val validationQueries: List<String>,
-        private val finalMembershipSqlProvider: () -> String
+        private val finalMembershipSqlProvider: () -> String,
+        val walletRepository: WalletRepository
     ) {
         val finalMembershipQueries get() = finalMembershipQueriesProvider()
         val preInsertMembershipSelects get() = preInsertMembershipSelectsProvider()

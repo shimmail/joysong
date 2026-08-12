@@ -31,11 +31,24 @@ class IdentityCenterPage extends StatefulWidget {
 
 class _IdentityCenterPageState extends State<IdentityCenterPage> {
   late final IdentityController _controller;
+  bool _hasLoaded = false;
 
   @override
   void initState() {
     super.initState();
-    _controller = IdentityController(widget.repository)..load();
+    _controller = IdentityController(widget.repository);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _controller.setMessageResolver(
+      (chinese, english) => context.localized(chinese, english),
+    );
+    if (!_hasLoaded) {
+      _hasLoaded = true;
+      _controller.load();
+    }
   }
 
   @override
@@ -47,7 +60,9 @@ class _IdentityCenterPageState extends State<IdentityCenterPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('身份认证')),
+      appBar: AppBar(
+        title: Text(context.localized('身份认证', 'Identity verification')),
+      ),
       body: ListenableBuilder(
         listenable: _controller,
         builder: (context, _) {
@@ -56,7 +71,11 @@ class _IdentityCenterPageState extends State<IdentityCenterPage> {
             IdentityLoadStatus.loading =>
               const Center(child: CircularProgressIndicator()),
             IdentityLoadStatus.failure => _IdentityFailure(
-                message: _controller.errorMessage ?? '身份信息加载失败',
+                message: _controller.errorMessage ??
+                    context.localized(
+                      '身份信息加载失败',
+                      'Unable to load identity information.',
+                    ),
                 onRetry: _controller.load,
               ),
             IdentityLoadStatus.ready => _IdentityOverviewView(
@@ -216,7 +235,14 @@ class _IdentityApplicationPageState extends State<IdentityApplicationPage> {
   Widget build(BuildContext context) {
     final requiredDocuments = _requiredDocuments(widget.role);
     return Scaffold(
-      appBar: AppBar(title: Text('申请${widget.role.label}身份')),
+      appBar: AppBar(
+        title: Text(
+          context.localized(
+            '申请${widget.role.label}身份',
+            'Apply for ${_englishRoleLabel(widget.role)} identity',
+          ),
+        ),
+      ),
       body: ListenableBuilder(
         listenable: widget.controller,
         builder: (context, _) => Form(
@@ -224,7 +250,12 @@ class _IdentityApplicationPageState extends State<IdentityApplicationPage> {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              const _InfoCard(text: '请仅提交真实、必要的认证信息。证件号码与材料不会显示在公开主页。'),
+              _InfoCard(
+                text: context.localized(
+                  '请仅提交真实、必要的认证信息。证件号码与材料不会显示在公开主页。',
+                  'Submit only accurate, necessary verification information. ID numbers and documents are never shown publicly.',
+                ),
+              ),
               const SizedBox(height: 16),
               for (final field in _fieldsFor(widget.role)) ...[
                 TextFormField(
@@ -232,14 +263,30 @@ class _IdentityApplicationPageState extends State<IdentityApplicationPage> {
                   controller: _fields[field.name],
                   obscureText: field.name == 'idNumber',
                   maxLines: field.multiline ? 3 : 1,
-                  decoration: InputDecoration(labelText: field.label),
+                  decoration: InputDecoration(
+                    labelText: context.localized(
+                      field.label,
+                      field.englishLabel,
+                    ),
+                  ),
                   validator: (value) =>
-                      (value ?? '').trim().isEmpty ? '请填写${field.label}' : null,
+                      (value ?? '').trim().isEmpty
+                          ? context.localized(
+                              '请填写${field.label}',
+                              '${field.englishLabel} is required.',
+                            )
+                          : null,
                 ),
                 const SizedBox(height: 12),
               ],
               const SizedBox(height: 8),
-              Text('私有认证材料', style: Theme.of(context).textTheme.titleMedium),
+              Text(
+                context.localized(
+                  '私有认证材料',
+                  'Private verification documents',
+                ),
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
               const SizedBox(height: 8),
               for (final type in requiredDocuments)
                 _DocumentTile(
@@ -254,7 +301,10 @@ class _IdentityApplicationPageState extends State<IdentityApplicationPage> {
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Text(
-                    '当前构建未接入系统文件选择器，材料上传入口暂不可用。',
+                    context.localized(
+                      '当前构建未接入系统文件选择器，材料上传入口暂不可用。',
+                      'Document selection is unavailable in this build.',
+                    ),
                     style: TextStyle(
                       color: Theme.of(context).colorScheme.error,
                     ),
@@ -275,7 +325,11 @@ class _IdentityApplicationPageState extends State<IdentityApplicationPage> {
               FilledButton(
                 key: const Key('submit-identity-application'),
                 onPressed: widget.controller.isSubmitting ? null : _submit,
-                child: Text(widget.controller.isSubmitting ? '提交中…' : '提交审核'),
+                child: Text(
+                  widget.controller.isSubmitting
+                      ? context.localized('提交中…', 'Submitting…')
+                      : context.localized('提交审核', 'Submit for review'),
+                ),
               ),
             ],
           ),
@@ -1520,8 +1574,16 @@ class _DocumentTile extends StatelessWidget {
     return Card(
       child: ListTile(
         leading: const Icon(Icons.lock_outline),
-        title: Text(type.label),
-        subtitle: Text(file?.originalName ?? '仅支持 JPG、PNG、WebP 或 PDF，最大 10MB'),
+        title: Text(
+          context.localized(type.label, _englishDocumentLabel(type)),
+        ),
+        subtitle: Text(
+          file?.originalName ??
+              context.localized(
+                '仅支持 JPG、PNG、WebP 或 PDF，最大 10MB',
+                'JPG, PNG, WebP, or PDF only; maximum 10 MB',
+              ),
+        ),
         trailing: isUploading
             ? const SizedBox.square(
                 dimension: 20,
@@ -1530,10 +1592,13 @@ class _DocumentTile extends StatelessWidget {
             : file == null
                 ? TextButton(
                     onPressed: canPick ? onUpload : null,
-                    child: const Text('上传'),
+                    child: Text(context.localized('上传', 'Upload')),
                   )
                 : IconButton(
-                    tooltip: '删除未提交材料',
+                    tooltip: context.localized(
+                      '删除未提交材料',
+                      'Delete unsubmitted document',
+                    ),
                     onPressed: onDelete,
                     icon: const Icon(Icons.delete_outline),
                   ),
@@ -1613,42 +1678,80 @@ class _IdentityFailure extends StatelessWidget {
 }
 
 final class _IdentityField {
-  const _IdentityField(this.name, this.label, {this.multiline = false});
+  const _IdentityField(
+    this.name,
+    this.label,
+    this.englishLabel, {
+    this.multiline = false,
+  });
 
   final String name;
   final String label;
+  final String englishLabel;
   final bool multiline;
 }
 
 List<_IdentityField> _fieldsFor(IdentityRoleType role) {
   const common = [
-    _IdentityField('realName', '真实姓名'),
-    _IdentityField('idNumber', '证件号码'),
+    _IdentityField('realName', '真实姓名', 'Real name'),
+    _IdentityField('idNumber', '证件号码', 'ID number'),
   ];
   return switch (role) {
     IdentityRoleType.doctor => const [
         ...common,
-        _IdentityField('hospitalName', '执业机构'),
-        _IdentityField('department', '科室'),
-        _IdentityField('title', '职称'),
-        _IdentityField('qualificationNo', '医师资格证编号'),
-        _IdentityField('practiceNo', '医师执业证编号'),
-        _IdentityField('reason', '申请理由', multiline: true),
+        _IdentityField('hospitalName', '执业机构', 'Practicing institution'),
+        _IdentityField('department', '科室', 'Department'),
+        _IdentityField('title', '职称', 'Professional title'),
+        _IdentityField(
+          'qualificationNo',
+          '医师资格证编号',
+          'Doctor qualification certificate number',
+        ),
+        _IdentityField(
+          'practiceNo',
+          '医师执业证编号',
+          'Medical practice certificate number',
+        ),
+        _IdentityField(
+          'reason',
+          '申请理由',
+          'Application reason',
+          multiline: true,
+        ),
       ],
     IdentityRoleType.consultant => const [
         ...common,
-        _IdentityField('phone', '联系电话'),
-        _IdentityField('experience', '从业经历', multiline: true),
-        _IdentityField('proofDescription', '证明材料说明', multiline: true),
-        _IdentityField('reason', '申请理由', multiline: true),
+        _IdentityField('phone', '联系电话', 'Contact phone number'),
+        _IdentityField(
+          'experience',
+          '从业经历',
+          'Professional experience',
+          multiline: true,
+        ),
+        _IdentityField(
+          'proofDescription',
+          '证明材料说明',
+          'Supporting document description',
+          multiline: true,
+        ),
+        _IdentityField(
+          'reason',
+          '申请理由',
+          'Application reason',
+          multiline: true,
+        ),
       ],
     IdentityRoleType.institutionLegalRepresentative => const [
         ...common,
-        _IdentityField('phone', '联系电话'),
-        _IdentityField('institutionName', '机构名称'),
-        _IdentityField('businessLicenseNo', '统一社会信用代码'),
-        _IdentityField('region', '所在地区'),
-        _IdentityField('address', '详细地址', multiline: true),
+        _IdentityField('phone', '联系电话', 'Contact phone number'),
+        _IdentityField('institutionName', '机构名称', 'Institution name'),
+        _IdentityField(
+          'businessLicenseNo',
+          '统一社会信用代码',
+          'Unified social credit code',
+        ),
+        _IdentityField('region', '所在地区', 'Region'),
+        _IdentityField('address', '详细地址', 'Address', multiline: true),
       ],
     IdentityRoleType.unknown => const [],
   };
@@ -1661,6 +1764,27 @@ List<IdentityDocumentType> _requiredDocuments(IdentityRoleType role) {
     documents: const [],
   ).requiredDocuments;
 }
+
+String _englishRoleLabel(IdentityRoleType role) => switch (role) {
+      IdentityRoleType.doctor => 'doctor',
+      IdentityRoleType.consultant => 'medical aesthetics consultant',
+      IdentityRoleType.institutionLegalRepresentative =>
+        'institution legal representative',
+      IdentityRoleType.unknown => 'professional',
+    };
+
+String _englishDocumentLabel(IdentityDocumentType type) => switch (type) {
+      IdentityDocumentType.businessLicense => 'Business license',
+      IdentityDocumentType.idCardFront => 'Front of ID card',
+      IdentityDocumentType.idCardBack => 'Back of ID card',
+      IdentityDocumentType.idCardHandheld => 'Photo holding ID card',
+      IdentityDocumentType.doctorQualification =>
+        'Doctor qualification certificate',
+      IdentityDocumentType.doctorPracticeCertificate =>
+        'Medical practice certificate',
+      IdentityDocumentType.consultantProof =>
+        'Medical aesthetics consultant proof',
+    };
 
 IconData _roleIcon(IdentityRoleType role) => switch (role) {
       IdentityRoleType.doctor => Icons.medical_services_outlined,
