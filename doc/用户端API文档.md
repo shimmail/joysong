@@ -2023,6 +2023,111 @@ Authorization: Bearer <token>
 
 ---
 
+## 已认证顾问机构关系与专业项目目录
+
+以下接口使用专业管理登录获得的 Bearer Token。顾问机构关系接口只接受本人 `ACTIVE CONSULTANT` 身份；平台管理员、未认证顾问及被撤销身份均返回 `403`。服务端从登录身份确定 `userId`，客户端不得提交或查询他人的关系。
+
+### GET /api/management/consultant-memberships
+
+列出当前顾问本人的全部 `CONSULTANT` 机构关系申请，按 `createdAt`、`id` 倒序。获批关系也通过同一数组返回；Flutter 以 `status == "APPROVED"` 判断当前可见 affiliation。没有记录时返回空数组。
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": [
+    {
+      "id": "membership-uuid",
+      "institutionId": "institution-uuid",
+      "institutionName": "上海娇颜颂医美中心",
+      "status": "APPROVED",
+      "requestNote": "希望加入机构提供咨询服务",
+      "reviewNote": "资料符合要求",
+      "createdAt": "2026-08-01T09:30:00",
+      "updatedAt": "2026-08-02T10:00:00",
+      "confirmedBy": "reviewer-user-uuid",
+      "confirmedAt": "2026-08-02T10:00:00",
+      "revokedAt": null
+    }
+  ]
+}
+```
+
+每项固定包含以下字段：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | String | 机构关系申请 ID |
+| institutionId | String | 机构 ID |
+| institutionName | String | 机构名称 |
+| status | String | 当前关系状态；现有流程包括 `PENDING`、`APPROVED`、`REJECTED`、`REVOKED` |
+| requestNote | String | 顾问提交的申请说明 |
+| reviewNote | String | 审核意见 |
+| createdAt | LocalDateTime | 创建时间，无时区 ISO 本地时间 |
+| updatedAt | LocalDateTime | 最近更新时间，无时区 ISO 本地时间 |
+| confirmedBy | String? | 批准人用户 ID，未批准时为 `null` |
+| confirmedAt | LocalDateTime? | 批准时间，未批准时为 `null` |
+| revokedAt | LocalDateTime? | 撤销时间，未撤销时为 `null` |
+
+### POST /api/management/consultant-memberships
+
+提交固定为 `CONSULTANT + JOIN` 的本人机构加入申请。请求体只包含以下两个键，不发送遗留的 `requestType`、`action` 或 `userId`：
+
+```json
+{
+  "institutionId": "institution-uuid",
+  "requestNote": "希望加入机构提供咨询服务"
+}
+```
+
+| 字段 | 类型 | 必填 | 规则 |
+|------|------|------|------|
+| institutionId | String | 是 | 去除首尾空白后不得为空；机构必须存在且未逻辑删除 |
+| requestNote | String | 是 | 可传空字符串；服务端去除首尾空白后最多 1000 个字符 |
+
+成功时返回与 GET 数组元素相同的单个对象，新申请状态为 `PENDING`。同一顾问与机构已有 `REJECTED` 或 `REVOKED` 记录时复用原记录并重置为 `PENDING`；处于其他状态时返回 `409`，并发重复提交也返回 `409`。该专用接口不提供撤回或自助审核。
+
+### GET /api/management/projects
+
+返回全局专业项目只读目录。允许拥有至少一个 `ACTIVE DOCTOR`、`ACTIVE CONSULTANT` 或 `ACTIVE INSTITUTION_LEGAL_REPRESENTATIVE` 身份的专业用户访问；平台管理员不能通过该专业入口访问。结果按 `name`、`id` 排序，不接受查询参数。
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": [
+    {
+      "id": "project-uuid",
+      "name": "光子嫩肤",
+      "category": "皮肤美容",
+      "description": "项目介绍",
+      "tags": "提亮,嫩肤",
+      "categoryTags": "光电项目",
+      "coverImage": "https://cdn.example.com/projects/cover.jpg",
+      "referencePrice": 1280.00,
+      "currency": "CNY"
+    }
+  ]
+}
+```
+
+响应元素固定为 `id`、`name`、`category`、`description`、`tags`、`categoryTags`、`coverImage`、`referencePrice`、`currency`；其中 `referencePrice` 是十进制 JSON number。该接口不授予项目创建、更新、删除或机构项目管理权限。
+
+**错误响应：**
+
+| HTTP | body `code` | 场景 |
+|------|-------------|------|
+| 400 | 400 | POST JSON 不可解析、出现未知键、机构 ID 为空或申请说明超过 1000 字符 |
+| 401 | 401 | Bearer 凭证缺失、失效或无效 |
+| 403 | 403 | 顾问关系接口不是本人活跃顾问；或项目目录调用方不是已认证专业用户/是平台管理员 |
+| 404 | 404 | POST 指定的机构不存在或已逻辑删除 |
+| 409 | 409 | 同一顾问与机构已有不可重新提交的关系，或并发重复提交 |
+| 500 | 500 | 未预期的服务端错误 |
+
+机构法人和平台管理员仍通过通用 `GET /api/management/institution-membership-requests` 与 `POST /api/management/institution-membership-requests/{requestType}/{id}/review` 审核其权限范围内的顾问申请；专用顾问接口不会扩大通用审核接口的对象边界。迁移后的 Flutter 顾问页面不得再使用通用申请 POST，也不得使用 `/api/admin/projects` 获取目录。
+
+---
+
 ## 十二、管理后台 `/api/admin`
 
 > 原则上需要 Bearer Token + `ROLE_ADMIN` 角色。迁移期间，仅本章明确标注为“专业端兼容只读”的 GET 路径允许已认证专业用户访问，服务端仍按 `visibleInstitutionIds` 做对象级过滤；所有机构写操作和平台全量 CRUD 均仅限 `ADMIN`。
@@ -2723,6 +2828,9 @@ Authorization: Bearer <token>
 | 法人机构档案 | GET | `/api/management/institutions` | ACTIVE INSTITUTION_LEGAL_REPRESENTATIVE（仅 `managedInstitutionIds`） |
 | 法人机构档案 | GET | `/api/management/institutions/{institutionId}` | ACTIVE INSTITUTION_LEGAL_REPRESENTATIVE（仅 `managedInstitutionIds`） |
 | 法人机构档案 | PUT | `/api/management/institutions/{institutionId}` | ACTIVE INSTITUTION_LEGAL_REPRESENTATIVE（仅 `managedInstitutionIds`） |
+| 顾问本人机构关系 | GET | `/api/management/consultant-memberships` | ACTIVE CONSULTANT（本人） |
+| 顾问本人机构关系 | POST | `/api/management/consultant-memberships` | ACTIVE CONSULTANT（固定 CONSULTANT + JOIN） |
+| 专业项目目录 | GET | `/api/management/projects` | 已认证专业用户（只读；不含 ADMIN） |
 | 管理 | GET | `/api/admin/stats` | ADMIN |
 | 管理（迁移期兼容只读） | GET | `/api/admin/projects` | ADMIN 或已认证专业用户（全局项目目录） |
 | 管理 | POST | `/api/admin/projects` | ADMIN |
