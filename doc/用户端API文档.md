@@ -1678,7 +1678,7 @@ Authorization: Bearer <token>
 }
 ```
 
-`amountMinor` 为带符号整数：收入为正，退款冲正为负。`title` 和 `description` 是服务端提供的业务文案；客户端不得显示原始操作键或推导隐私归属信息。当前 Wallet 的“提现”仅是客户端提示“提现功能即将开放”，不发送 API 请求，也不代表已支持出金、收款账户、银行、受益人、KYC 或换汇。
+`entryType` 当前可为 `SETTLEMENT`（创建待结算收益）、`RELEASE`（结算到期，将待入账余额转入可用余额）或 `REVERSAL`（退款冲正）。`amountMinor` 为带符号整数：收入为正，退款冲正为负；对 `RELEASE`，请结合三个 `*AfterMinor` 余额快照展示余额桶转移。`title` 和 `description` 是服务端提供的业务文案；客户端不得显示原始操作键或推导隐私归属信息。当前 Wallet 的“提现”仅是客户端提示“提现功能即将开放”，不发送 API 请求，也不代表已支持出金、收款账户、银行、受益人、KYC 或换汇。
 
 ---
 

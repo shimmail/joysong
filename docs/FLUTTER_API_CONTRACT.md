@@ -439,7 +439,7 @@ Flutter 可以完成页面和接口抽象，但生产发布前必须等待支付
 
 钱包概览固定为 `{"currency":"USD","wallets":[...]}`；每项有 `walletId`、`ownerType`、`ownerId`、`displayName`、`ownerName`、`pendingMinor`、`availableMinor`、`frozenMinor`，全部金额为整数最小货币单位。`walletId` 只能选择当前主体已授权的一个钱包，绝不能合并多身份余额；无权或不存在的 `walletId` 返回 403/404 且不返回财务数据。
 
-账本分页固定为 `content`、`page`、`size`、`totalElements`、`totalPages`、`last`。每项有 `id`、`walletId`、`entryType`、`title`、`description`、带符号 `amountMinor`、`pendingAfterMinor`、`availableAfterMinor`、`frozenAfterMinor`、`currency`、`createdAt`；按 `createdAt DESC, id DESC` 稳定排序。`amountMinor` 正数为收入，负数为退款冲正；Flutter 只展示服务端快照和业务文案，不使用浮点数累计或重建余额。
+账本分页固定为 `content`、`page`、`size`、`totalElements`、`totalPages`、`last`。每项有 `id`、`walletId`、`entryType`、`title`、`description`、带符号 `amountMinor`、`pendingAfterMinor`、`availableAfterMinor`、`frozenAfterMinor`、`currency`、`createdAt`；按 `createdAt DESC, id DESC` 稳定排序。当前 `entryType` 为 `SETTLEMENT`（创建待结算收益）、`RELEASE`（待入账转可用）或 `REVERSAL`（退款冲正）。`amountMinor` 正数为收入，负数为退款冲正；`RELEASE` 的余额桶转移应以服务端三个结果余额快照展示。Flutter 只展示服务端快照和业务文案，不使用浮点数累计或重建余额。
 
 `GET /orders/{id}/settlement` 的消费者安全摘要固定为 `settlementId`、`orderId`、`currency`、`grossTotalPaid`、`netSettled`、`state`、`settlementDueAt`、`settlementCreatedAt`、`releasedAt`。金额对象为 `{minor, currency}`；409 `SETTLEMENT_NOT_GENERATED` 表示结算生成中，应呈现非致命等待状态，不能转成空结算或零金额。
 
