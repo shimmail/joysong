@@ -6,7 +6,7 @@ import com.joysong.server.article.dto.DoctorArticleUpsertRequest
 import com.joysong.server.article.dto.DoctorArticleView
 import com.joysong.server.doctor.repository.DoctorRepository
 import com.joysong.server.identity.service.ManagementActor
-import org.springframework.data.domain.PageRequest
+import com.joysong.server.common.OffsetPageRequest
 import org.springframework.security.access.AccessDeniedException
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDateTime
@@ -25,14 +25,14 @@ class ArticleService(
     fun listForManagement(actor: ManagementActor, keyword: String?, offset: Int, limit: Int): List<DoctorArticleView> {
         require(offset >= 0) { "offset 不能小于 0" }
         require(limit in 1..100) { "limit 必须在 1-100 之间" }
-        if (!actor.isAdmin) requireDoctorActor(actor)
-        val page = PageRequest.of(offset / limit, limit)
+        val doctorId = requireDoctorActor(actor)
         return articleRepository.findManagementArticles(
-            actor.doctorId.takeUnless { actor.isAdmin }, keyword?.trim()?.takeIf(String::isNotEmpty), page
-        ).content.drop(offset % limit).map(DoctorArticleView::from)
+            doctorId, keyword?.trim()?.takeIf(String::isNotEmpty), OffsetPageRequest(offset.toLong(), limit)
+        ).content.map(DoctorArticleView::from)
     }
 
     @Transactional
+    @Caching(evict = [CacheEvict(cacheNames = ["articles"], allEntries = true), CacheEvict(cacheNames = ["home"], allEntries = true)])
     fun createForManagement(actor: ManagementActor, request: DoctorArticleUpsertRequest): DoctorArticleView {
         val doctorId = requireDoctorActor(actor)
         val doctor = doctorRepository.findById(doctorId).orElseThrow { AccessDeniedException("医生档案不存在") }
@@ -41,6 +41,7 @@ class ArticleService(
     }
 
     @Transactional
+    @Caching(evict = [CacheEvict(cacheNames = ["articles"], allEntries = true), CacheEvict(cacheNames = ["home"], allEntries = true)])
     fun updateForManagement(actor: ManagementActor, id: String, request: DoctorArticleUpsertRequest): DoctorArticleView {
         requireDoctorActor(actor)
         val existing = articleRepository.findByIdForUpdate(id) ?: throw ArticleNotFoundException()
@@ -53,6 +54,7 @@ class ArticleService(
     }
 
     @Transactional
+    @Caching(evict = [CacheEvict(cacheNames = ["articles"], allEntries = true), CacheEvict(cacheNames = ["home"], allEntries = true)])
     fun deleteForManagement(actor: ManagementActor, id: String) {
         requireDoctorActor(actor)
         val existing = articleRepository.findByIdForUpdate(id) ?: throw ArticleNotFoundException()
@@ -61,12 +63,12 @@ class ArticleService(
     }
 
     private fun requireDoctorActor(actor: ManagementActor): String {
-        if (actor.isAdmin) return actor.doctorId ?: throw AccessDeniedException("管理员请通过兼容管理接口创建文章")
+        if (actor.isAdmin || "DOCTOR" !in actor.activeRoles) throw AccessDeniedException("仅限在职医生")
         return actor.doctorId ?: throw AccessDeniedException("仅限在职医生")
     }
 
     private fun requireOwner(actor: ManagementActor, article: ArticleEntity) {
-        if (!actor.isAdmin && article.doctorId != actor.doctorId) throw AccessDeniedException("无权管理该文章")
+        if (article.doctorId != actor.doctorId) throw AccessDeniedException("无权管理该文章")
     }
 
     private fun DoctorArticleUpsertRequest.toEntity(id: String, doctorId: String, author: String) = ArticleEntity(

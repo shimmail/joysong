@@ -510,9 +510,8 @@ class OrderServiceTest {
     }
 
     @Test
-    fun `管理侧订单列表不返回用户核销码`() {
+    fun `管理员不能使用专业订单列表`() {
         val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.CONSULTATION_PAID.value)
-        every { orderRepository.findManagementOrders(null, null, any()) } returns org.springframework.data.domain.PageImpl(listOf(order))
         val actor = ManagementActor(
             userId = "admin-1",
             isAdmin = true,
@@ -523,12 +522,27 @@ class OrderServiceTest {
             manageableDoctorIds = emptySet()
         )
 
-        val result = orderService.getOrdersForManagement(actor, null, 0, 20)
+        assertThrows<org.springframework.security.access.AccessDeniedException> {
+            orderService.getOrdersForManagement(actor, null, 0, 20)
+        }
+        assertThrows<org.springframework.security.access.AccessDeniedException> {
+            orderService.requireOrderForManagement(actor, order.id)
+        }
+        verify(exactly = 0) { orderRepository.findManagementOrders(any(), any(), any()) }
+        verify(exactly = 0) { orderRepository.findById(any()) }
+    }
 
-        assertEquals(1, result.size)
-        assertNull(result.single().verifyCode)
-        assertTrue(result.single().canVerify)
-        assertFalse(result.single().canRequestCompletion)
+    @Test
+    fun `专业订单列表使用精确 offset 且仅查询医生本人`() {
+        val pageable = slot<org.springframework.data.domain.Pageable>()
+        val actor = ManagementActor("doctor-1", false, setOf("DOCTOR"), "doctor-1", emptySet(), emptySet(), setOf("doctor-1"))
+        every { orderRepository.findManagementOrders("doctor-1", null, capture(pageable)) } returns
+            org.springframework.data.domain.PageImpl(List(20) { createTestOrder("o${it + 16}", "user-1") })
+
+        val result = orderService.getOrdersForManagement(actor, null, 15, 20)
+
+        assertEquals(15, pageable.captured.offset)
+        assertEquals(20, result.size)
     }
 
     @Test

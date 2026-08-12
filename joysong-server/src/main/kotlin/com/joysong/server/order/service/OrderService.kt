@@ -11,6 +11,7 @@ import com.joysong.server.institution.repository.InstitutionProjectRepository
 import com.joysong.server.institution.repository.InstitutionRepository
 import com.joysong.server.institution.service.InstitutionProjectDetailResolver
 import com.joysong.server.identity.service.ManagementActor
+import com.joysong.server.common.OffsetPageRequest
 import com.joysong.server.identity.service.InstitutionConsultantService
 import com.joysong.server.identity.service.DoctorInstitutionRelationshipService
 import com.joysong.server.order.dto.CreateOrderRequest
@@ -249,13 +250,14 @@ class OrderService(
         }
         require(offset >= 0) { "offset 不能小于 0" }
         require(limit in 1..100) { "limit 必须在 1-100 之间" }
-        if (!actor.isAdmin && actor.doctorId == null) throw AccessDeniedException("仅限在职医生")
+        val doctorId = requireProfessionalDoctor(actor)
         return orderRepository.findManagementOrders(
-            actor.doctorId.takeUnless { actor.isAdmin }, normalizedStatus, PageRequest.of(offset / limit, limit)
-        ).content.drop(offset % limit).map(OrderResponse::forManagement)
+            doctorId, normalizedStatus, OffsetPageRequest(offset.toLong(), limit)
+        ).content.map(OrderResponse::forManagement)
     }
 
     fun requireOrderForManagement(actor: ManagementActor, orderId: String): OrderEntity {
+        requireProfessionalDoctor(actor)
         val order = orderRepository.findById(orderId)
             .orElseThrow { IllegalArgumentException("订单不存在") }
         if (!canManageOrder(actor, order)) throw AccessDeniedException("无权管理该订单")
@@ -263,8 +265,12 @@ class OrderService(
     }
 
     private fun canManageOrder(actor: ManagementActor, order: OrderEntity): Boolean =
-        actor.isAdmin ||
-            (actor.doctorId != null && order.doctorId == actor.doctorId)
+        !actor.isAdmin && "DOCTOR" in actor.activeRoles && actor.doctorId != null && order.doctorId == actor.doctorId
+
+    private fun requireProfessionalDoctor(actor: ManagementActor): String {
+        if (actor.isAdmin || "DOCTOR" !in actor.activeRoles) throw AccessDeniedException("仅限在职医生")
+        return actor.doctorId ?: throw AccessDeniedException("仅限在职医生")
+    }
 
     /**
      * 按状态获取用户的订单列表
@@ -330,6 +336,7 @@ class OrderService(
      */
     @Transactional(rollbackFor = [Exception::class])
     fun confirmVerificationForManagement(actor: ManagementActor, orderId: String, verificationCode: String): OrderResponse {
+        requireProfessionalDoctor(actor)
         val order = orderRepository.findByIdForUpdate(orderId) ?: throw OrderManagementNotFoundException()
         if (!canManageOrder(actor, order)) throw AccessDeniedException("无权管理该订单")
         return confirmVerificationLocked(order, actor.userId, verificationCode)
@@ -384,6 +391,7 @@ class OrderService(
      */
     @Transactional(rollbackFor = [Exception::class])
     fun requestCompletionForManagement(actor: ManagementActor, orderId: String, verificationCode: String): OrderResponse {
+        requireProfessionalDoctor(actor)
         val order = orderRepository.findByIdForUpdate(orderId) ?: throw OrderManagementNotFoundException()
         if (!canManageOrder(actor, order)) throw AccessDeniedException("无权管理该订单")
         return requestCompletionLocked(order, actor.userId, verificationCode)

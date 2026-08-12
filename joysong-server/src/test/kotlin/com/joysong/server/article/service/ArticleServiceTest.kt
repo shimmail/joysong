@@ -9,6 +9,7 @@ import com.joysong.server.identity.service.ManagementActor
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import io.mockk.slot
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -26,10 +27,12 @@ class ArticleServiceTest {
 
     @Test
     fun `doctor list is database scoped to self`() {
-        every { articles.findManagementArticles("doctor-1", null, any()) } returns PageImpl(listOf(article()))
-        val result = service.listForManagement(doctor, null, 0, 20)
-        assertEquals(listOf("article-1"), result.map { it.id })
-        verify(exactly = 1) { articles.findManagementArticles("doctor-1", null, any()) }
+        val pageable = slot<org.springframework.data.domain.Pageable>()
+        every { articles.findManagementArticles("doctor-1", null, capture(pageable)) } returns PageImpl(List(20) { article().copy(id = "article-${it + 16}") })
+        val result = service.listForManagement(doctor, null, 15, 20)
+        assertEquals("article-16", result.first().id)
+        assertEquals(15, pageable.captured.offset)
+        assertEquals(20, result.size)
     }
 
     @Test
@@ -47,6 +50,15 @@ class ArticleServiceTest {
     fun `doctor cannot update another doctors article`() {
         every { articles.findByIdForUpdate("article-1") } returns article(doctorId = "doctor-2")
         assertThrows<AccessDeniedException> { service.updateForManagement(doctor, "article-1", request) }
+    }
+
+    @Test
+    fun `admin cannot use professional article routes`() {
+        val admin = ManagementActor("admin-1", true, setOf("ADMIN"), null, emptySet(), emptySet(), emptySet())
+        assertThrows<AccessDeniedException> { service.listForManagement(admin, null, 0, 20) }
+        assertThrows<AccessDeniedException> { service.createForManagement(admin, request) }
+        verify(exactly = 0) { articles.findManagementArticles(any(), any(), any()) }
+        verify(exactly = 0) { articles.save(any()) }
     }
 
     private fun article(doctorId: String = "doctor-1") = ArticleEntity(
