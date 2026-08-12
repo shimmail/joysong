@@ -30,8 +30,11 @@ import com.joysong.server.agent.service.AgentCatalogService
 import com.joysong.server.agent.service.AgentIntent
 import com.joysong.server.agent.service.AgentIntentDecision
 import com.joysong.server.agent.service.AgentIntentRouter
+import com.joysong.server.agent.service.AgentLabelPolarity
 import com.joysong.server.agent.service.AgentQueryTarget
 import com.joysong.server.agent.service.AgentPromptEvidence
+import com.joysong.server.agent.service.AgentRouteAssessment
+import com.joysong.server.agent.service.ParsedAgentRoute
 import com.joysong.server.config.AiAgentProperties
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Qualifier
@@ -61,6 +64,129 @@ private data class GeneratedTurn(
     val catalogReport: AgentCatalogReportResponse?,
     val catalogItems: List<AgentCatalogItemResponse>
 )
+
+private data class BoundedRouteContext(
+    val decisions: List<AgentIntentDecision>,
+    val ambiguityReasons: List<String>
+)
+
+private data class GenerationLabelSummary(
+    val requestedActions: List<AgentIntent>,
+    val requestedTargets: List<AgentQueryTarget>,
+    val uncertainActions: List<AgentIntent>,
+    val uncertainTargets: List<AgentQueryTarget>,
+    val prohibitedActions: List<AgentIntent>,
+    val prohibitedTargets: List<AgentQueryTarget>
+) {
+    fun promptConstraint(): String = listOfNotNull(
+        requestedActions.takeIf { it.isNotEmpty() }?.joinToString(",") { it.name }
+            ?.let { "请求动作：$it" },
+        requestedTargets.takeIf { it.isNotEmpty() }?.joinToString(",") { it.name }
+            ?.let { "请求对象：$it" },
+        uncertainActions.takeIf { it.isNotEmpty() }?.joinToString(",") { it.name }
+            ?.let { "待澄清动作：$it" },
+        uncertainTargets.takeIf { it.isNotEmpty() }?.joinToString(",") { it.name }
+            ?.let { "待澄清对象：$it" },
+        prohibitedActions.takeIf { it.isNotEmpty() }?.joinToString(",") { it.name }
+            ?.let { "禁止动作：$it" },
+        prohibitedTargets.takeIf { it.isNotEmpty() }?.joinToString(",") { it.name }
+            ?.let { "禁止对象：$it" }
+    ).takeIf { it.isNotEmpty() }?.joinToString("\n") { it }
+        ?.let {
+            """
+                【本轮结构化诉求标签】
+                $it
+                禁止动作或对象只表示限制，不得作为用户请求执行；待澄清标签只用于提出必要的澄清问题。
+            """.trimIndent()
+        }.orEmpty()
+}
+
+private fun generationLabelSummary(
+    local: AgentRouteAssessment,
+    parsed: ParsedAgentRoute?,
+    decision: AgentIntentDecision
+): GenerationLabelSummary {
+    val parsedActions = parsed?.let { it.intents + it.intent }.orEmpty()
+    val parsedTargets = parsed?.queryTarget?.let(::setOf).orEmpty()
+    val prohibitedActions = local.intentEvidence
+        .filter { it.polarity == AgentLabelPolarity.NEGATIVE }
+        .mapTo(linkedSetOf()) { it.intent }
+    val prohibitedTargets = local.targetEvidence
+        .filter { it.polarity == AgentLabelPolarity.NEGATIVE }
+        .mapTo(linkedSetOf()) { it.target }
+    val uncertainActions = local.intentEvidence
+        .filter { it.polarity == AgentLabelPolarity.UNCERTAIN }
+        .mapTo(linkedSetOf()) { it.intent }
+        .apply { removeAll(parsedActions) }
+    val uncertainTargets = local.targetEvidence
+        .filter { it.polarity == AgentLabelPolarity.UNCERTAIN }
+        .mapTo(linkedSetOf()) { it.target }
+        .apply { removeAll(parsedTargets) }
+    val requestedActions = local.intentEvidence
+        .filter { it.polarity == AgentLabelPolarity.POSITIVE }
+        .mapTo(linkedSetOf()) { it.intent }
+        .apply {
+            add(decision.intent)
+            addAll(parsedActions)
+            removeAll(prohibitedActions + uncertainActions)
+        }
+    val requestedTargets = local.targetEvidence
+        .filter { it.polarity == AgentLabelPolarity.POSITIVE }
+        .mapTo(linkedSetOf()) { it.target }
+        .apply {
+            decision.queryTarget?.let(::add)
+            addAll(parsedTargets)
+            removeAll(prohibitedTargets + uncertainTargets)
+        }
+    return GenerationLabelSummary(
+        requestedActions = orderedActions(requestedActions, decision.intent),
+        requestedTargets = orderedTargets(requestedTargets, decision.queryTarget),
+        uncertainActions = orderedActions(uncertainActions),
+        uncertainTargets = orderedTargets(uncertainTargets),
+        prohibitedActions = orderedActions(prohibitedActions),
+        prohibitedTargets = orderedTargets(prohibitedTargets)
+    )
+}
+
+private fun orderedActions(
+    labels: Set<AgentIntent>,
+    primary: AgentIntent? = null
+): List<AgentIntent> = listOfNotNull(primary?.takeIf(labels::contains)) +
+    AgentIntent.entries.filter { it != primary && it in labels }
+
+private fun orderedTargets(
+    labels: Set<AgentQueryTarget>,
+    primary: AgentQueryTarget? = null
+): List<AgentQueryTarget> = listOfNotNull(primary?.takeIf(labels::contains)) +
+    AgentQueryTarget.entries.filter { it != primary && it in labels }
+
+internal fun summaryContextDecision(
+    topic: String,
+    agentIntentRouter: AgentIntentRouter
+): AgentIntentDecision? {
+    val parts = topic.trim().uppercase().split(":")
+    if (parts.size !in 1..3 || parts.any(String::isBlank)) return null
+    val intent = runCatching { AgentIntent.valueOf(parts.first()) }.getOrNull() ?: return null
+    val target = parts.getOrNull(1)?.let { runCatching { AgentQueryTarget.valueOf(it) }.getOrNull() }
+    if (parts.size == 3 && target == null) return null
+    val action = when {
+        target != null -> parts.getOrNull(2)
+        else -> parts.getOrNull(1)
+    }
+    val decision = agentIntentRouter.validatedDecision(intent, target)
+    val expectedAction = decision.nextAction.takeUnless { it.name == "NONE" }?.name
+    if (action != null && action != expectedAction) return null
+    return decision.takeIf {
+        when (intent) {
+            AgentIntent.GENERAL_CHAT -> target == null && action == null
+            AgentIntent.SAFETY_SCREENING -> target == null
+            AgentIntent.PLANNING,
+            AgentIntent.CATALOG_QA,
+            AgentIntent.COMPARISON,
+            AgentIntent.DETAIL_SUMMARY -> true
+        }
+    }
+}
 
 data class ChatTurnResult(
     val message: ChatMessageEntity,
@@ -262,17 +388,25 @@ class ChatService(
         llmCaller: (List<Map<String, String>>, GenerationProfile) -> LlmCallResult
     ): GeneratedTurn {
         val llmMessages = mutableListOf<Map<String, String>>()
-        val previousUserQueries = historyMessages.filter { it.role.equals("USER", true) }
-            .map { it.content }
-            .takeLast(4)
-        val contextualQuery = agentCatalogService.contextualSearchQuery(content, previousUserQueries)
-        val localRouteAssessment = agentIntentRouter.assess(contextualQuery, session.contextType)
+        val currentRouteAssessment = agentIntentRouter.assessCurrent(content, session.contextType)
+        val boundedContext by lazy {
+            boundedRouteContext(historyMessages, summary, session.contextType)
+        }
+        val localRouteAssessment = if (currentRouteAssessment.requiresContextCompletion) {
+            agentIntentRouter.supplementWithContext(
+                currentRouteAssessment,
+                boundedContext.decisions,
+                boundedContext.ambiguityReasons
+            )
+        } else {
+            currentRouteAssessment
+        }
         // A custom institution-project name may not contain generic words such as
         // “项目” or “套餐”. Resolve effective inherited details before deciding that
         // the message is general chat, otherwise the database search is skipped.
         val routeAssessment = if (
             localRouteAssessment.decision.intent == AgentIntent.GENERAL_CHAT &&
-            agentCatalogService.hasInstitutionProjectMatch(contextualQuery)
+            agentCatalogService.hasInstitutionProjectMatch(content)
         ) {
             localRouteAssessment.copy(
                 decision = agentIntentRouter.validatedDecision(
@@ -285,15 +419,14 @@ class ChatService(
             )
         } else localRouteAssessment
         val parsedRoute = if (aiAgentProperties.intentParserEnabled && routeAssessment.requiresLlmParsing) {
-            parseAmbiguousRoute(content, contextualQuery, routeAssessment.decision)
+            parseAmbiguousRoute(content, routeAssessment, boundedContext.decisions)
         } else null
-        // Deterministic safety detection can only be preserved or upgraded, never downgraded by a model.
-        val intentDecision = when {
-            routeAssessment.decision.intent == AgentIntent.SAFETY_SCREENING -> routeAssessment.decision
-            parsedRoute?.intent == AgentIntent.SAFETY_SCREENING -> agentIntentRouter.validatedDecision(AgentIntent.SAFETY_SCREENING, null)
-            parsedRoute != null -> agentIntentRouter.validatedDecision(parsedRoute.intent, parsedRoute.queryTarget)
-            else -> routeAssessment.decision
-        }
+        val intentDecision = agentIntentRouter.mergeParsedRoute(routeAssessment, parsedRoute)
+        val labelSummary = generationLabelSummary(routeAssessment, parsedRoute, intentDecision)
+        val previousUserQueries = historyMessages.filter { it.role.equals("USER", true) }
+            .map { it.content }
+            .takeLast(4)
+        val contextualQuery = agentCatalogService.contextualSearchQuery(content, previousUserQueries)
         val generationProfile = generationProfile(intentDecision.intent)
         val catalogSearchQuery = listOf(contextualQuery, parsedRoute?.keywords.orEmpty().joinToString(" "))
             .filter { it.isNotBlank() }
@@ -304,7 +437,8 @@ class ChatService(
             session.contextId,
             content,
             catalogSearchQuery,
-            intentDecision
+            intentDecision,
+            labelSummary
         )
         llmMessages.add(mapOf("role" to "system", "content" to promptBuild.prompt))
         if (summary != null && summary != AgentSessionSummary()) {
@@ -451,56 +585,155 @@ class ChatService(
         return normalized
     }
 
-    private data class ParsedRoute(
-        val intent: AgentIntent,
-        val queryTarget: AgentQueryTarget?,
-        val keywords: List<String>
-    )
+    private fun boundedRouteContext(
+        historyMessages: List<ChatMessageEntity>,
+        summary: AgentSessionSummary?,
+        contextType: String
+    ): BoundedRouteContext {
+        val summaryDecisions = summary?.unresolvedTopics.orEmpty().mapNotNull {
+            summaryContextDecision(it, agentIntentRouter)
+        }
+        val historyAssessments = if (summaryDecisions.isEmpty()) {
+            historyMessages.filter { it.role.equals("USER", true) }
+                .takeLast(4)
+                .map { agentIntentRouter.assessCurrent(it.content, "GENERAL") }
+        } else {
+            emptyList()
+        }
+        val sessionDecision = runCatching { AgentQueryTarget.valueOf(contextType.trim().uppercase()) }
+            .getOrNull()
+            ?.let { agentIntentRouter.validatedDecision(AgentIntent.CATALOG_QA, it) }
+        return BoundedRouteContext(
+            decisions = (summaryDecisions.ifEmpty { historyAssessments.map { it.decision } }) + listOfNotNull(sessionDecision),
+            ambiguityReasons = historyAssessments.flatMap { it.ambiguityReasons }.distinct()
+        )
+    }
 
-    private fun parseAmbiguousRoute(rawQuery: String, contextualQuery: String, fallback: AgentIntentDecision): ParsedRoute? {
+    private fun parseAmbiguousRoute(
+        rawQuery: String,
+        local: AgentRouteAssessment,
+        boundedContext: List<AgentIntentDecision>
+    ): ParsedAgentRoute? {
         if (aiAgentProperties.apiKey.isBlank()) return null
         val startedAt = System.nanoTime()
-        return runCatching {
+        return try {
             val url = providerChatCompletionsUrl()
             val headers = HttpHeaders().apply {
                 setBearerAuth(aiAgentProperties.apiKey)
                 contentType = MediaType.APPLICATION_JSON
             }
+            val context = boundedContext.takeLast(4).joinToString(", ") {
+                "${it.intent}/${it.queryTarget ?: "NONE"}"
+            }.ifBlank { "NONE" }
             val instruction = """
                 Classify one medical-aesthetic chat request. Return JSON only:
-                {"intent":"GENERAL_CHAT|CATALOG_QA|COMPARISON|PLANNING|DETAIL_SUMMARY|SAFETY_SCREENING","queryTarget":"INSTITUTION|DOCTOR|PROJECT|INSTITUTION_PROJECT|null","keywords":["..."]}
+                {"intent":"GENERAL_CHAT|CATALOG_QA|COMPARISON|PLANNING|DETAIL_SUMMARY|SAFETY_SCREENING","intents":["optional additional intent labels"],"queryTarget":"INSTITUTION|DOCTOR|PROJECT|INSTITUTION_PROJECT|null","keywords":["..."]}
                 Use SAFETY_SCREENING for possible contraindications or health risks. Use PLANNING for goals with budget, downtime or personal constraints.
                 Keywords may contain only useful cities, treatments, categories, tags, clinic names or doctor names from the text. Maximum 8 items. Do not invent IDs or facts.
+                Local decision: ${local.decision.intent}/${local.decision.queryTarget ?: "NONE"}. Locked fields: intent=${local.explicitIntent}, queryTarget=${local.explicitQueryTarget}.
+                You may fill only unlocked fields. Do not change locked fields.
             """.trimIndent()
             val body = mapOf(
-                "model" to aiAgentProperties.model,
+                "model" to aiAgentProperties.resolvedIntentModel(),
                 "messages" to listOf(
                     mapOf("role" to "system", "content" to instruction),
-                    mapOf("role" to "user", "content" to "Current: $rawQuery\nContextual: $contextualQuery\nLocal fallback: ${fallback.intent}/${fallback.queryTarget}")
+                    mapOf("role" to "user", "content" to "Current: $rawQuery\nBounded route context: $context")
                 ),
                 "temperature" to 0,
                 "max_tokens" to 180,
                 "stream" to false
             )
             val response = intentParserRestTemplate.exchange(url, HttpMethod.POST, HttpEntity(body, headers), Map::class.java)
-            val choice = (response.body?.get("choices") as? List<*>)?.firstOrNull() as? Map<*, *>
-            val message = choice?.get("message") as? Map<*, *>
-            val content = message?.get("content")?.toString().orEmpty()
-            val json = content.substringAfter('{', "").substringBeforeLast('}', "").takeIf(String::isNotBlank)?.let { "{$it}" }
-                ?: return@runCatching null
-            val node = objectMapper.readTree(json)
-            val intent = runCatching { AgentIntent.valueOf(node.path("intent").asText()) }.getOrNull()
-                ?: return@runCatching null
-            val targetText = node.path("queryTarget").asText().takeUnless { it.isBlank() || it.equals("null", true) }
-            val target = targetText?.let { runCatching { AgentQueryTarget.valueOf(it) }.getOrNull() }
-            val keywords = node.path("keywords").takeIf { it.isArray }?.mapNotNull { item ->
-                item.asText().trim().takeIf { it.length in 2..40 }
-            }.orEmpty().distinct().take(8)
-            ParsedRoute(intent, target, keywords)
-        }.onFailure {
-            logger.info("Agent intent parsing fell back to local route durationMs={}", elapsedMs(startedAt))
-        }.getOrNull()
+            val choices = response.body?.get("choices") as? List<*>
+                ?: throw IntentParserRouteException("MALFORMED_PAYLOAD")
+            val choice = choices.firstOrNull() as? Map<*, *>
+                ?: throw IntentParserRouteException("MALFORMED_PAYLOAD")
+            val message = choice["message"] as? Map<*, *>
+                ?: throw IntentParserRouteException("MALFORMED_PAYLOAD")
+            val content = message["content"] as? String
+                ?: throw IntentParserRouteException("MALFORMED_PAYLOAD")
+            val node = objectMapper.factory.createParser(content.trim()).use { parser ->
+                val parsed: com.fasterxml.jackson.databind.JsonNode = objectMapper.readTree(parser)
+                    ?: throw IntentParserRouteException("MALFORMED_PAYLOAD")
+                if (parser.nextToken() != null) throw IntentParserRouteException("INVALID_SCHEMA")
+                parsed
+            }
+            if (!node.isObject) throw IntentParserRouteException("INVALID_SCHEMA")
+            val requiredFields = setOf("intent", "queryTarget", "keywords")
+            val allowedFields = requiredFields + "intents"
+            val actualFields = node.fieldNames().asSequence().toSet()
+            if (!actualFields.containsAll(requiredFields) || !allowedFields.containsAll(actualFields)) {
+                throw IntentParserRouteException("INVALID_SCHEMA")
+            }
+            val intentNode = node.get("intent")
+                ?.takeIf { it.isTextual }
+                ?: throw IntentParserRouteException("INVALID_SCHEMA")
+            val intent = AgentIntent.entries.firstOrNull { it.name == intentNode.asText().trim() }
+                ?: throw IntentParserRouteException("INVALID_ENUM")
+            val intents = node.get("intents")?.let { intentsNode ->
+                if (!intentsNode.isArray || intentsNode.size() > AgentIntent.entries.size) {
+                    throw IntentParserRouteException("INVALID_SCHEMA")
+                }
+                if (intentsNode.any { !it.isTextual }) throw IntentParserRouteException("INVALID_SCHEMA")
+                intentsNode.mapTo(mutableSetOf()) { member ->
+                    AgentIntent.entries.firstOrNull { it.name == member.asText().trim() }
+                        ?: throw IntentParserRouteException("INVALID_ENUM")
+                }
+            }.orEmpty()
+            val targetNode = node.get("queryTarget")
+                ?: throw IntentParserRouteException("INVALID_SCHEMA")
+            val target = when {
+                targetNode.isNull -> null
+                !targetNode.isTextual -> throw IntentParserRouteException("INVALID_SCHEMA")
+                else -> AgentQueryTarget.entries.firstOrNull { it.name == targetNode.asText().trim() }
+                    ?: throw IntentParserRouteException("INVALID_ENUM")
+            }
+            val keywordsNode = node.get("keywords")
+                ?.takeIf { it.isArray && it.size() <= 8 }
+                ?: throw IntentParserRouteException("INVALID_SCHEMA")
+            if (keywordsNode.any { !it.isTextual }) throw IntentParserRouteException("INVALID_SCHEMA")
+            val keywords = keywordsNode.map { it.asText().trim() }
+            if (keywords.any { it.length !in 2..40 }) throw IntentParserRouteException("INVALID_SCHEMA")
+            if (!isCompatibleParsedRoute(local, intent, intents, target)) {
+                throw IntentParserRouteException("INCOMPATIBLE_ROUTE")
+            }
+            ParsedAgentRoute(intent, target, keywords, intents)
+        } catch (error: Exception) {
+            logger.info(
+                "Agent intent parser fallback category={} durationMs={}",
+                intentParserFailureCategory(error),
+                elapsedMs(startedAt)
+            )
+            null
+        }
     }
+
+    private fun intentParserFailureCategory(error: Exception): String = when {
+        error is IntentParserRouteException -> error.category
+        isProviderTimeout(error) -> "TIMEOUT"
+        error is org.springframework.web.client.HttpStatusCodeException -> "HTTP_ERROR"
+        else -> "PROVIDER_ERROR"
+    }
+
+    private fun isCompatibleParsedRoute(
+        local: AgentRouteAssessment,
+        intent: AgentIntent,
+        intents: Set<AgentIntent>,
+        target: AgentQueryTarget?
+    ): Boolean {
+        val parsedIntents = intents + intent
+        if (local.unresolvedSafetyNegation && AgentIntent.SAFETY_SCREENING in parsedIntents) return true
+        if (intent in setOf(AgentIntent.GENERAL_CHAT, AgentIntent.SAFETY_SCREENING) && target != null) return false
+        if (local.explicitIntent && local.decision.intent !in parsedIntents) return false
+        if (local.explicitQueryTarget && target != local.decision.queryTarget) return false
+        if (local.unresolvedSafetyNegation && parsedIntents.none {
+                it in setOf(local.decision.intent, AgentIntent.SAFETY_SCREENING)
+            }
+        ) return false
+        return true
+    }
+
+    private class IntentParserRouteException(val category: String) : IllegalArgumentException(category)
 
     /** Reserved SSE path. Disabled by default through OPENAI_STREAM_ENABLED=false. */
     /**
@@ -520,11 +753,12 @@ class ChatService(
      */
     private fun getSystemPrompt(
         persona: String,
-        contextType: String = "GENERAL",
-        contextId: String = "",
-        userQuery: String = "",
-        catalogSearchQuery: String = userQuery,
-        intentDecision: AgentIntentDecision = agentIntentRouter.decide(catalogSearchQuery, contextType)
+        contextType: String,
+        contextId: String,
+        userQuery: String,
+        catalogSearchQuery: String,
+        intentDecision: AgentIntentDecision,
+        labelSummary: GenerationLabelSummary
     ): PromptBuildResult {
         val basePrompt = when (persona) {
             "BESTIE" -> "你是娇颜颂的AI闺蜜「小颜」。你性格活泼开朗、善解人意，像一个贴心的好朋友。你关心用户的日常状态，会适时提醒术后护理、鼓励记录变美日记。聊天语气轻松友好，偶尔用可爱的表情。当用户问到专业医美问题时，温柔地建议咨询专业美学咨询师。"
@@ -601,8 +835,16 @@ class ChatService(
             """.trimIndent()
             else -> ""
         }
+        val labelPolicy = labelSummary.promptConstraint()
         return PromptBuildResult(
-            prompt = listOf(basePrompt, responsePolicy, contextInfo, detailSessionPolicy, intentPolicy).filter(String::isNotBlank).joinToString("\n\n"),
+            prompt = listOf(
+                basePrompt,
+                responsePolicy,
+                contextInfo,
+                detailSessionPolicy,
+                intentPolicy,
+                labelPolicy
+            ).filter(String::isNotBlank).joinToString("\n\n"),
             groundingPrompt = evidenceInstruction,
             evidence = evidence
         )

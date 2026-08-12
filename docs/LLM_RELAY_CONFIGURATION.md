@@ -5,12 +5,14 @@
 ## 配置
 
 ```dotenv
-AI_AGENT_ENABLED=false
+AI_AGENT_ENABLED=true
 OPENAI_API_KEY=替换为中转站密钥
 OPENAI_BASE_URL=https://www.fastaitoken.com/v1
 AI_AGENT_MODEL=gpt-5.5
 OPENAI_PROXY_URL=http://proxy.example.internal:8080
 OPENAI_STREAM_ENABLED=false
+OPENAI_INTENT_PARSER_ENABLED=true
+OPENAI_INTENT_MODEL=可选的意图解析模型ID
 ```
 
 服务端请求地址为：
@@ -21,9 +23,11 @@ Authorization: Bearer {OPENAI_API_KEY}
 Content-Type: application/json
 ```
 
-生产启用 Agent 时必须显式设置 `AI_AGENT_MODEL`。`OPENAI_BASE_URL` 必须使用批准的 `https://www.fastaitoken.com` 地址，且不要配置成完整的 `/chat/completions` 地址，否则会重复拼接路径。可选的 `OPENAI_PROXY_URL` 只接受带主机和显式端口的 `http://` 或 `socks://` URL；运行时不支持并会拒绝 `https://` proxy URL。API Key 只存在于服务端 Secret 或环境变量，不能提交到 Git、写入 Android 工程或返回给客户端。
+生产启用 Agent 时必须显式设置 `AI_AGENT_MODEL`。`OPENAI_INTENT_MODEL` 仅在 `OPENAI_INTENT_PARSER_ENABLED=true` 时供解析器使用；留空即使用 `AI_AGENT_MODEL`。两类调用共享 API Key、Base URL、代理、HTTP 客户端安全策略与 Provider 协议；解析器连接/读取超时固定为 3 秒/8 秒，最终生成保持 10 秒/60 秒，且最终回答始终调用 `AI_AGENT_MODEL`。`OPENAI_BASE_URL` 必须使用批准的 `https://www.fastaitoken.com` 地址，且不要配置成完整的 `/chat/completions` 地址，否则会重复拼接路径。可选的 `OPENAI_PROXY_URL` 只接受带主机和显式端口的 `http://` 或 `socks://` URL；运行时不支持并会拒绝 `https://` proxy URL。API Key 只存在于服务端 Secret 或环境变量，不能提交到 Git、写入 Android 工程或返回给客户端。
 
-生产部署必须先保持 `AI_AGENT_ENABLED=false`。完成 preflight、Flyway、readiness 和一次不输出 Key/Authorization/完整内容的 FastAIToken canary 后，才可在运维侧为内部 cohort 显式开启。当前应用不提供自动 cohort 分流或指标平台；具体步骤见 [`AI_AGENT_ROLLOUT.md`](./AI_AGENT_ROLLOUT.md)。
+意图路由遵循固定顺序：当前请求的中英文否定感知关键词，受限的近期上下文补全，最后才是模型解析。当前请求中已明确的目标不受历史或模型结果覆盖；解析器失败时保留本地路由并继续最终生成。
+
+应用未设置开关时默认 `AI_AGENT_ENABLED=true`。生产灰度部署必须故意显式覆盖为 `false`；完成 preflight、Flyway、readiness 和一次不输出 Key/Authorization/完整内容的 FastAIToken canary 后，才可在运维侧为内部 cohort 显式开启。当前应用不提供自动 cohort 分流或指标平台；具体步骤见 [`AI_AGENT_ROLLOUT.md`](./AI_AGENT_ROLLOUT.md)。
 
 ## 同步响应与错误处理
 

@@ -68,7 +68,7 @@ spring:
     password: ${DB_PASSWORD}
 
 ai-agent:
-  enabled: ${AI_AGENT_ENABLED:false}
+  enabled: ${AI_AGENT_ENABLED:true}
   base-url: ${OPENAI_BASE_URL}
   model: ${AI_AGENT_MODEL}
   proxy-url: ${OPENAI_PROXY_URL:}
@@ -195,6 +195,7 @@ PAYMENT_RECONCILIATION_STALE_SECONDS=120
 |---|---|
 | `CORS_ALLOWED_ORIGINS` | 跨域来源白名单；生产只填实际 HTTPS 域名 |
 | `GOOGLE_PROXY_URL` | 仅用于 Google ID Token 公钥校验的受控代理；不要配置为通用出网代理 |
+| `AI_AGENT_ENABLED` | AI Agent 应用开关；未设置时应用默认 `true`，灰度发布可显式覆盖为 `false` |
 | `AI_AGENT_MODEL` | 生产启用 Agent 时必须显式设置的模型 ID；无生产默认值 |
 | `OPENAI_PROXY_URL` | Agent 专用可选代理；只支持带显式端口的 `http://` 或 `socks://` URL |
 | `OPENAI_STREAM_ENABLED` | AI 流式响应开关 |

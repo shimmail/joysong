@@ -11,15 +11,18 @@ import java.time.Duration
 
 @ConfigurationProperties("ai-agent")
 data class AiAgentProperties(
-    var enabled: Boolean = false,
+    var enabled: Boolean = true,
     var apiKey: String = "",
     var baseUrl: String = "",
     var model: String = "",
+    var intentModel: String = "",
     var proxyUrl: String = "",
     var turnLease: Duration = Duration.ofSeconds(90),
     var intentParserEnabled: Boolean = true,
     var demoFallbackEnabled: Boolean = false
-)
+) {
+    fun resolvedIntentModel(): String = intentModel.trim().ifBlank { model.trim() }
+}
 
 object AiAgentHttpBudget {
     const val COMPLETION_CONNECT_TIMEOUT_MS = 10_000
