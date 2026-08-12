@@ -126,10 +126,6 @@ class ManagementAccessService(
             String::class.java,
             userId
         ).toSet()
-        if (activeRoles.intersect(setOf(DOCTOR_ROLE, LEGAL_REP_ROLE, CONSULTANT_ROLE)).isEmpty()) {
-            throw AccessDeniedException("账号尚未取得专业身份管理权限")
-        }
-
         val doctorId = userId.takeIf { DOCTOR_ROLE in activeRoles && count(
             "SELECT COUNT(*) FROM doctors WHERE id = ? AND deleted_at IS NULL",
             userId
@@ -160,10 +156,6 @@ class ManagementAccessService(
         val manageableDoctorIds = buildSet {
             doctorId?.let(::add)
         }
-        if (doctorId == null && managedInstitutionIds.isEmpty() && CONSULTANT_ROLE !in activeRoles) {
-            throw AccessDeniedException("职业身份已通过，但管理档案或机构归属尚未建立，请联系平台处理")
-        }
-
         return ManagementActor(
             userId = userId,
             isAdmin = false,

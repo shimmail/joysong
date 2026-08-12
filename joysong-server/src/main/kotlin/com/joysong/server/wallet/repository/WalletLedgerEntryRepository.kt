@@ -16,6 +16,7 @@ interface WalletLedgerEntryRepository : JpaRepository<WalletLedgerEntryEntity, L
     fun findAllByAllocationIdOrderByIdAsc(allocationId: Long): List<WalletLedgerEntryEntity>
     fun findAllByWalletIdOrderByIdAsc(walletId: Long): List<WalletLedgerEntryEntity>
     fun findAllByWalletIdInOrderByIdDesc(walletIds: Set<Long>, pageable: Pageable): Page<WalletLedgerEntryEntity>
+    fun findAllByWalletIdOrderByCreatedAtDescIdDesc(walletId: Long, pageable: Pageable): Page<WalletLedgerEntryEntity>
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select entry from WalletLedgerEntryEntity entry where entry.operationKey in :operationKeys")
