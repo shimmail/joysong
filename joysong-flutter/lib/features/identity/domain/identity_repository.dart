@@ -57,7 +57,7 @@ abstract interface class IdentityRepository {
   Future<List<InstitutionOption>> listInstitutionOptions();
 
   Future<List<InstitutionMembershipRequest>>
-      listInstitutionMembershipRequests();
+  listInstitutionMembershipRequests();
 
   Future<void> submitInstitutionMembershipRequest({
     required String requestType,
@@ -73,7 +73,7 @@ abstract interface class IdentityRepository {
   });
 
   Future<List<DoctorInstitutionChangeRequest>>
-      listDoctorInstitutionChangeRequests();
+  listDoctorInstitutionChangeRequests();
 
   Future<void> submitDoctorInstitutionChangeRequest(
     DoctorInstitutionChangeRequestDraft draft,
@@ -89,9 +89,7 @@ abstract interface class IdentityRepository {
 
   Future<List<ProfessionalProjectRequest>> listProfessionalProjectRequests();
 
-  Future<void> submitPlatformProjectRequest(
-    PlatformProjectRequestDraft draft,
-  );
+  Future<void> submitPlatformProjectRequest(PlatformProjectRequestDraft draft);
 
   Future<void> submitInstitutionProjectRequest(
     InstitutionProjectRequestDraft draft,
@@ -104,7 +102,7 @@ abstract interface class IdentityRepository {
   });
 
   Future<List<InstitutionProjectJoinRequest>>
-      listInstitutionProjectJoinRequests();
+  listInstitutionProjectJoinRequests();
 
   Future<void> submitInstitutionProjectJoinRequest(
     InstitutionProjectJoinRequestDraft draft,
@@ -121,9 +119,11 @@ abstract interface class IdentityRepository {
   );
 
   Future<List<DoctorProjectProfileUpdateTarget>>
-      listDoctorProjectProfileUpdateTargets();
+  listDoctorProjectProfileUpdateTargets();
 
   Future<List<DoctorProjectChangeRequest>> listDoctorProjectChangeRequests();
+
+  Future<void> withdrawDoctorProjectChangeRequest(String id);
 
   Future<void> reviewDoctorProjectChangeRequest({
     required String id,

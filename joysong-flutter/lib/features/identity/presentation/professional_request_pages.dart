@@ -1026,6 +1026,7 @@ class _DoctorProjectProfileUpdatePageState
   final _institutionRate = TextEditingController();
   final _notes = TextEditingController();
   List<DoctorProjectProfileUpdateTarget> _targets = const [];
+  List<DoctorProjectChangeRequest> _requests = const [];
   DoctorProjectProfileUpdateTarget? _selected;
   bool _loading = true, _saving = false, _uploading = false;
   String? _error;
@@ -1061,11 +1062,15 @@ class _DoctorProjectProfileUpdatePageState
       _error = null;
     });
     try {
-      final targets =
-          await widget.repository.listDoctorProjectProfileUpdateTargets();
+      final values = await Future.wait([
+        widget.repository.listDoctorProjectProfileUpdateTargets(),
+        widget.repository.listDoctorProjectChangeRequests(),
+      ]);
+      final targets = values[0] as List<DoctorProjectProfileUpdateTarget>;
       if (!mounted) return;
       setState(() {
         _targets = targets;
+        _requests = values[1] as List<DoctorProjectChangeRequest>;
         _loading = false;
       });
       if (targets.length == 1) _select(targets.single);
@@ -1198,6 +1203,23 @@ class _DoctorProjectProfileUpdatePageState
                           _saving
                               ? 'Submitting…'
                               : 'Submit profile update request'))),
+                  const SizedBox(height: 16),
+                  Text(context.localized('我的项目申请', 'My project requests'),
+                      style: Theme.of(context).textTheme.titleMedium),
+                  for (final request in _requests)
+                    ListTile(
+                      title: Text(
+                          '${request.institutionName} · ${request.projectName}'),
+                      subtitle: Text(request.status),
+                      trailing: _canWithdraw(request)
+                          ? TextButton(
+                              key: Key('withdraw-${request.id}'),
+                              onPressed:
+                                  _saving ? null : () => _withdraw(request),
+                              child: Text(context.localized('撤回', 'Withdraw')),
+                            )
+                          : null,
+                    ),
                 ],
               ]),
       );
@@ -1207,6 +1229,46 @@ class _DoctorProjectProfileUpdatePageState
       (_selected?.platformRate ?? 0) -
       (num.tryParse(_institutionRate.text) ?? 0) -
       (num.tryParse(_consultantRate.text) ?? 0);
+
+  bool _canWithdraw(DoctorProjectChangeRequest request) {
+    final status = request.status.trim().toUpperCase();
+    final type = request.requestType.trim().toUpperCase();
+    return status == 'PENDING' && (type == 'JOIN' || type == 'PROFILE_UPDATE');
+  }
+
+  Future<void> _withdraw(DoctorProjectChangeRequest request) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(context.localized('撤回申请', 'Withdraw request')),
+        content: Text(context.localized(
+            '确认撤回这条待处理申请？', 'Withdraw this pending request?')),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text(context.localized('取消', 'Cancel'))),
+          FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: Text(context.localized('撤回', 'Withdraw'))),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    setState(() => _saving = true);
+    try {
+      await widget.repository.withdrawDoctorProjectChangeRequest(request.id);
+      await _load();
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(context.localized('申请已撤回', 'Request withdrawn.'))));
+    } catch (_) {
+      if (mounted)
+        setState(() => _error =
+            context.localized('撤回失败，请重试', 'Withdrawal failed. Please retry.'));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
 
   Future<void> _uploadImage() async {
     setState(() => _uploading = true);
@@ -1444,8 +1506,8 @@ class _DoctorProjectProfileReviewPageState
                                           ? null
                                           : () => _review(
                                               request, 'APPROVED', false),
-                                      child: Text(context.localized(
-                                          '批准', 'Approve'))),
+                                      child: Text(
+                                          context.localized('批准', 'Approve'))),
                                   OutlinedButton(
                                       key: Key('reject-${request.id}'),
                                       onPressed: _submitting

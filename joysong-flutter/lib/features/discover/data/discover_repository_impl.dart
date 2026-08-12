@@ -4,12 +4,15 @@ import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 
 final class ApiDiscoverRepository
-    implements DiscoverRepository, InstitutionProjectDetailRepository {
+    implements
+        DiscoverRepository,
+        InstitutionProjectDetailRepository,
+        ProfessionalCatalogRepository {
   ApiDiscoverRepository(
     this._apiClient, {
     PublicMediaUrlResolver? mediaUrlResolver,
   }) : _mediaUrlResolver =
-            mediaUrlResolver ?? ApiPublicMediaUrlResolver(_apiClient.apiRoot);
+           mediaUrlResolver ?? ApiPublicMediaUrlResolver(_apiClient.apiRoot);
 
   final ApiClient _apiClient;
   final PublicMediaUrlResolver _mediaUrlResolver;
@@ -49,7 +52,8 @@ final class ApiDiscoverRepository
       final items = groups.expand((group) => group.items).take(limit).toList();
       return DiscoverPageResult(items: items, hasMore: false);
     }
-    final data = await _apiClient.get<List<DiscoverItem>>(
+    final data =
+        await _apiClient.get<List<DiscoverItem>>(
           '/discover/${type.pathSegment}',
           query: {
             'offset': offset,
@@ -94,10 +98,7 @@ final class ApiDiscoverRepository
     final detail = await _apiClient.get<DiscoverItem>(
       '/discover/${type.pathSegment}/$id',
       decodeData: (json) => DiscoverItem.fromJson(
-        resolvePublicMediaUrlsInJson(
-          json,
-          resolver: _mediaUrlResolver,
-        ),
+        resolvePublicMediaUrlsInJson(json, resolver: _mediaUrlResolver),
         type: type,
         mediaUrlResolver: _mediaUrlResolver,
       ),
@@ -116,10 +117,7 @@ final class ApiDiscoverRepository
     final detail = await _apiClient.get<DiscoverItem>(
       '/discover/institutions/$institutionId/projects/$projectId',
       decodeData: (json) => DiscoverItem.fromJson(
-        resolvePublicMediaUrlsInJson(
-          json,
-          resolver: _mediaUrlResolver,
-        ),
+        resolvePublicMediaUrlsInJson(json, resolver: _mediaUrlResolver),
         type: DiscoverContentType.project,
         mediaUrlResolver: _mediaUrlResolver,
       ),
@@ -129,4 +127,68 @@ final class ApiDiscoverRepository
     }
     return detail;
   }
+
+  Future<List<DiscoverItem>> _catalogList(
+    String path,
+    DiscoverContentType type,
+  ) async =>
+      await _apiClient.get<List<DiscoverItem>>(
+        path,
+        decodeData: (json) {
+          if (json is! List) throw const FormatException('目录列表响应格式错误');
+          return json
+              .map(
+                (item) => DiscoverItem.fromJson(
+                  resolvePublicMediaUrlsInJson(
+                    item,
+                    resolver: _mediaUrlResolver,
+                  ),
+                  type: type,
+                  mediaUrlResolver: _mediaUrlResolver,
+                ),
+              )
+              .toList(growable: false);
+        },
+      ) ??
+      const [];
+
+  @override
+  Future<List<DiscoverItem>> loadVisibleInstitutions() =>
+      _catalogList('/admin/institutions', DiscoverContentType.institution);
+
+  @override
+  Future<DiscoverItem> loadVisibleInstitution(String id) async =>
+      await _apiClient.get<DiscoverItem>(
+        '/admin/institutions/${id.trim()}',
+        decodeData: (json) => DiscoverItem.fromJson(
+          json,
+          type: DiscoverContentType.institution,
+          mediaUrlResolver: _mediaUrlResolver,
+        ),
+      ) ??
+      (throw const FormatException('机构详情响应为空'));
+
+  @override
+  Future<List<DiscoverItem>> loadVisibleInstitutionDoctors(String id) =>
+      _catalogList(
+        '/admin/institutions/${id.trim()}/doctors',
+        DiscoverContentType.doctor,
+      );
+
+  @override
+  Future<List<DiscoverItem>> loadVisibleDoctorProjects(
+    String institutionId,
+    String doctorId,
+  ) => _catalogList(
+    '/admin/institutions/${institutionId.trim()}/doctors/${doctorId.trim()}/projects',
+    DiscoverContentType.project,
+  );
+
+  @override
+  Future<List<DiscoverItem>> loadVisibleInstitutionProjects() =>
+      _catalogList('/admin/institution-projects', DiscoverContentType.project);
+
+  @override
+  Future<List<DiscoverItem>> loadVisibleProjects() =>
+      _catalogList('/admin/projects', DiscoverContentType.project);
 }

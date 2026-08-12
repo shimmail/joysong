@@ -78,21 +78,21 @@ final class ApiIdentityRepository implements IdentityRepository {
   Future<List<ManagedInstitutionSummary>> listManagedInstitutions() async {
     return await _apiClient.get<List<ManagedInstitutionSummary>>(
           '/management/institutions',
-          decodeData: (json) => _objectList(json)
-              .map(ManagedInstitutionSummary.fromJson)
-              .toList(growable: false),
+          decodeData: (json) => _objectList(
+            json,
+          ).map(ManagedInstitutionSummary.fromJson).toList(growable: false),
         ) ??
         const [];
   }
 
   @override
   Future<List<ManagedInstitutionSummary>>
-      listProfessionalVisibleInstitutions() async {
+  listProfessionalVisibleInstitutions() async {
     return await _apiClient.get<List<ManagedInstitutionSummary>>(
           '/admin/institutions',
-          decodeData: (json) => _objectList(json)
-              .map(ManagedInstitutionSummary.fromJson)
-              .toList(growable: false),
+          decodeData: (json) => _objectList(
+            json,
+          ).map(ManagedInstitutionSummary.fromJson).toList(growable: false),
         ) ??
         const [];
   }
@@ -156,9 +156,9 @@ final class ApiIdentityRepository implements IdentityRepository {
   Future<List<ConsultantMembership>> listConsultantMemberships() async {
     return await _apiClient.get<List<ConsultantMembership>>(
           '/management/consultant-memberships',
-          decodeData: (json) => _objectList(json)
-              .map(ConsultantMembership.fromJson)
-              .toList(growable: false),
+          decodeData: (json) => _objectList(
+            json,
+          ).map(ConsultantMembership.fromJson).toList(growable: false),
         ) ??
         const [];
   }
@@ -182,9 +182,9 @@ final class ApiIdentityRepository implements IdentityRepository {
   Future<List<ManagementProjectOption>> listManagementProjects() async {
     return await _apiClient.get<List<ManagementProjectOption>>(
           '/management/projects',
-          decodeData: (json) => _objectList(json)
-              .map(ManagementProjectOption.fromJson)
-              .toList(growable: false),
+          decodeData: (json) => _objectList(
+            json,
+          ).map(ManagementProjectOption.fromJson).toList(growable: false),
         ) ??
         const [];
   }
@@ -206,12 +206,12 @@ final class ApiIdentityRepository implements IdentityRepository {
 
   @override
   Future<List<ManagedInstitutionProject>>
-      listManagedInstitutionProjects() async {
+  listManagedInstitutionProjects() async {
     return await _apiClient.get<List<ManagedInstitutionProject>>(
           '/admin/institution-projects',
-          decodeData: (json) => _objectList(json)
-              .map(ManagedInstitutionProject.fromJson)
-              .toList(growable: false),
+          decodeData: (json) => _objectList(
+            json,
+          ).map(ManagedInstitutionProject.fromJson).toList(growable: false),
         ) ??
         const [];
   }
@@ -267,21 +267,21 @@ final class ApiIdentityRepository implements IdentityRepository {
     return await _apiClient.get<List<InstitutionOption>>(
           '/discover/institutions',
           query: const {'offset': 0, 'limit': 100},
-          decodeData: (json) => _objectList(json)
-              .map(InstitutionOption.fromJson)
-              .toList(growable: false),
+          decodeData: (json) => _objectList(
+            json,
+          ).map(InstitutionOption.fromJson).toList(growable: false),
         ) ??
         const [];
   }
 
   @override
   Future<List<InstitutionMembershipRequest>>
-      listInstitutionMembershipRequests() async {
+  listInstitutionMembershipRequests() async {
     return await _apiClient.get<List<InstitutionMembershipRequest>>(
           '/management/institution-membership-requests',
-          decodeData: (json) => _objectList(json)
-              .map(InstitutionMembershipRequest.fromJson)
-              .toList(growable: false),
+          decodeData: (json) => _objectList(
+            json,
+          ).map(InstitutionMembershipRequest.fromJson).toList(growable: false),
         ) ??
         const [];
   }
@@ -319,7 +319,7 @@ final class ApiIdentityRepository implements IdentityRepository {
 
   @override
   Future<List<DoctorInstitutionChangeRequest>>
-      listDoctorInstitutionChangeRequests() async {
+  listDoctorInstitutionChangeRequests() async {
     return await _apiClient.get<List<DoctorInstitutionChangeRequest>>(
           '/management/institution-membership-requests',
           decodeData: (json) => _objectList(json)
@@ -364,12 +364,12 @@ final class ApiIdentityRepository implements IdentityRepository {
 
   @override
   Future<List<ProfessionalProjectRequest>>
-      listProfessionalProjectRequests() async {
+  listProfessionalProjectRequests() async {
     return await _apiClient.get<List<ProfessionalProjectRequest>>(
           '/management/project-requests',
-          decodeData: (json) => _objectList(json)
-              .map(ProfessionalProjectRequest.fromJson)
-              .toList(growable: false),
+          decodeData: (json) => _objectList(
+            json,
+          ).map(ProfessionalProjectRequest.fromJson).toList(growable: false),
         ) ??
         const [];
   }
@@ -411,12 +411,12 @@ final class ApiIdentityRepository implements IdentityRepository {
 
   @override
   Future<List<InstitutionProjectJoinRequest>>
-      listInstitutionProjectJoinRequests() async {
+  listInstitutionProjectJoinRequests() async {
     return await _apiClient.get<List<InstitutionProjectJoinRequest>>(
           '/admin/institution-project-requests',
-          decodeData: (json) => _objectList(json)
-              .map(InstitutionProjectJoinRequest.fromJson)
-              .toList(growable: false),
+          decodeData: (json) => _objectList(
+            json,
+          ).map(InstitutionProjectJoinRequest.fromJson).toList(growable: false),
         ) ??
         const [];
   }
@@ -461,7 +461,7 @@ final class ApiIdentityRepository implements IdentityRepository {
 
   @override
   Future<List<DoctorProjectProfileUpdateTarget>>
-      listDoctorProjectProfileUpdateTargets() async {
+  listDoctorProjectProfileUpdateTargets() async {
     return await _apiClient.get<List<DoctorProjectProfileUpdateTarget>>(
           '/admin/institution-project-requests/profile-update-targets',
           decodeData: (json) => _objectList(json)
@@ -473,14 +473,24 @@ final class ApiIdentityRepository implements IdentityRepository {
 
   @override
   Future<List<DoctorProjectChangeRequest>>
-      listDoctorProjectChangeRequests() async {
+  listDoctorProjectChangeRequests() async {
     return await _apiClient.get<List<DoctorProjectChangeRequest>>(
           '/admin/institution-project-requests',
-          decodeData: (json) => _objectList(json)
-              .map(DoctorProjectChangeRequest.fromJson)
-              .toList(growable: false),
+          decodeData: (json) => _objectList(
+            json,
+          ).map(DoctorProjectChangeRequest.fromJson).toList(growable: false),
         ) ??
         const [];
+  }
+
+  @override
+  Future<void> withdrawDoctorProjectChangeRequest(String id) async {
+    final normalizedId = id.trim();
+    if (normalizedId.isEmpty) throw ArgumentError.value(id, 'id');
+    await _apiClient.post<void>(
+      '/admin/institution-project-requests/$normalizedId/withdraw',
+      decodeData: (_) {},
+    );
   }
 
   @override
