@@ -510,7 +510,7 @@ class OrderServiceTest {
     }
 
     @Test
-    fun `管理员不能使用专业订单列表`() {
+    fun `管理员可以查看全部专业订单列表和详情`() {
         val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.CONSULTATION_PAID.value)
         val actor = ManagementActor(
             userId = "admin-1",
@@ -522,14 +522,29 @@ class OrderServiceTest {
             manageableDoctorIds = emptySet()
         )
 
-        assertThrows<org.springframework.security.access.AccessDeniedException> {
-            orderService.getOrdersForManagement(actor, null, 0, 20)
-        }
-        assertThrows<org.springframework.security.access.AccessDeniedException> {
-            orderService.requireOrderForManagement(actor, order.id)
-        }
-        verify(exactly = 0) { orderRepository.findManagementOrders(any(), any(), any()) }
-        verify(exactly = 0) { orderRepository.findById(any()) }
+        every { orderRepository.findManagementOrders(null, null, any()) } returns
+            org.springframework.data.domain.PageImpl(listOf(order))
+        every { orderRepository.findById(order.id) } returns Optional.of(order)
+
+        assertEquals(listOf(order.id), orderService.getOrdersForManagement(actor, null, 0, 20).map { it.id })
+        assertEquals(order.id, orderService.requireOrderForManagement(actor, order.id).id)
+    }
+
+    @Test
+    fun `管理员可以核销和申请完成任意医生订单`() {
+        val actor = ManagementActor("admin-1", true, setOf("ADMIN"), null, emptySet(), emptySet(), emptySet())
+        val verificationOrder = createTestOrder("verify-order", "user-1", status = OrderStatusEnum.CONSULTATION_PAID.value)
+            .copy(doctorId = "doctor-2", verifyCode = "123456")
+        val completionOrder = createTestOrder("completion-order", "user-1", status = OrderStatusEnum.BALANCE_PAID.value)
+            .copy(doctorId = "doctor-3", verifyCode = "654321")
+        every { orderRepository.findByIdForUpdate("verify-order") } returns verificationOrder
+        every { orderRepository.findByIdForUpdate("completion-order") } returns completionOrder
+        every { orderRepository.save(any()) } answers { firstArg() }
+
+        assertEquals(OrderStatusEnum.VERIFIED.value,
+            orderService.confirmVerificationForManagement(actor, "verify-order", "123456").status)
+        assertEquals(OrderStatusEnum.PENDING_COMPLETION.value,
+            orderService.requestCompletionForManagement(actor, "completion-order", "654321").status)
     }
 
     @Test

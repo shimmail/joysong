@@ -265,10 +265,11 @@ class OrderService(
     }
 
     private fun canManageOrder(actor: ManagementActor, order: OrderEntity): Boolean =
-        !actor.isAdmin && "DOCTOR" in actor.activeRoles && actor.doctorId != null && order.doctorId == actor.doctorId
+        actor.isAdmin || ("DOCTOR" in actor.activeRoles && actor.doctorId != null && order.doctorId == actor.doctorId)
 
-    private fun requireProfessionalDoctor(actor: ManagementActor): String {
-        if (actor.isAdmin || "DOCTOR" !in actor.activeRoles) throw AccessDeniedException("仅限在职医生")
+    private fun requireProfessionalDoctor(actor: ManagementActor): String? {
+        if (actor.isAdmin) return null
+        if ("DOCTOR" !in actor.activeRoles) throw AccessDeniedException("仅限在职医生")
         return actor.doctorId ?: throw AccessDeniedException("仅限在职医生")
     }
 
