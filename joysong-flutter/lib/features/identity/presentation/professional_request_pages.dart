@@ -451,7 +451,9 @@ class _InstitutionMembershipRequestsPageState
   @override
   Widget build(BuildContext context) {
     final visibleRequests = _requests.where((item) {
-      if (item.requestType != widget.requestType) return false;
+      if (!widget.reviewMode && item.requestType != widget.requestType) {
+        return false;
+      }
       if (!widget.reviewMode && item.userId != widget.context.userId) {
         return false;
       }

@@ -4,6 +4,7 @@ import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
+import 'package:joysong_flutter/features/identity/presentation/identity_pages.dart';
 import 'package:joysong_flutter/features/identity/presentation/professional_request_pages.dart';
 
 void main() {
@@ -17,47 +18,60 @@ void main() {
     final identityRepository = _FakeIdentityRepository();
     final discoverRepository = _FakeDiscoverRepository();
 
-    Future<void> pumpRequestPage(String requestType) => tester.pumpWidget(
-          MaterialApp(
-            home: InstitutionMembershipRequestsPage(
-              requestType: requestType,
-              context: const ManagementContext(
-                userId: 'professional-1',
-                platformRole: 'USER',
-                activeRoles: ['DOCTOR', 'CONSULTANT'],
-                managedInstitutionIds: [],
-                visibleInstitutionIds: [],
-                canApplyToInstitutions: true,
-              ),
-              repository: identityRepository,
-              discoverRepository: discoverRepository,
-            ),
-          ),
-        );
-
-    await pumpRequestPage('DOCTOR');
+    await tester.pumpWidget(MaterialApp(
+      home: ManagementCenterPage(
+        repository: identityRepository,
+        discoverRepository: discoverRepository,
+      ),
+    ));
     await tester.pumpAndSettle();
-    await _applyFromPage(
+    await _applyFromEntry(
       tester,
+      entry: find.text('Apply to institution').first,
       expectedNote: 'doctor own request',
     );
     expect(identityRepository.submittedTypes, ['DOCTOR']);
-
-    await pumpRequestPage('CONSULTANT');
+    await tester.pageBack();
     await tester.pumpAndSettle();
-    await _applyFromPage(
+
+    await _applyFromEntry(
       tester,
+      entry: find.text('Apply to institution').last,
       expectedNote: 'consultant own request',
     );
     expect(identityRepository.submittedTypes, ['DOCTOR', 'CONSULTANT']);
     expect(identityRepository.optionCalls, 0);
+
+    await tester.pumpWidget(MaterialApp(
+      key: const ValueKey('mixed-membership-review-app'),
+      home: InstitutionMembershipRequestsPage(
+        key: const ValueKey('mixed-membership-review'),
+        requestType: 'DOCTOR',
+        reviewMode: true,
+        context: const ManagementContext(
+          userId: 'legal-user',
+          platformRole: 'USER',
+          activeRoles: ['INSTITUTION_LEGAL_REPRESENTATIVE'],
+          managedInstitutionIds: ['inst-1'],
+          visibleInstitutionIds: ['inst-1'],
+        ),
+        repository: identityRepository,
+        discoverRepository: discoverRepository,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('doctor own request'), findsOneWidget);
+    expect(find.textContaining('consultant own request'), findsOneWidget);
   });
 }
 
-Future<void> _applyFromPage(
+Future<void> _applyFromEntry(
   WidgetTester tester, {
+  required Finder entry,
   required String expectedNote,
 }) async {
+  await tester.tap(entry);
+  await tester.pumpAndSettle();
   expect(find.textContaining(expectedNote), findsOneWidget);
   expect(find.textContaining('other role request'), findsNothing);
   expect(find.textContaining('other user request'), findsNothing);
