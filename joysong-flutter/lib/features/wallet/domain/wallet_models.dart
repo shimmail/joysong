@@ -110,6 +110,8 @@ final class WalletLedgerPage {
 
   factory WalletLedgerPage.fromJson(Object? json) {
     final map = _map(json, '钱包流水页');
+    final last = map['last'];
+    if (last is! bool) throw const FormatException('last不是布尔值');
     return WalletLedgerPage(
       content: _list(map['content'], 'content')
           .map(WalletLedgerEntry.fromJson)
@@ -118,7 +120,7 @@ final class WalletLedgerPage {
       size: _integer(map['size'], 'size'),
       totalElements: _integer(map['totalElements'], 'totalElements'),
       totalPages: _integer(map['totalPages'], 'totalPages'),
-      last: map['last'] == true,
+      last: last,
     );
   }
 

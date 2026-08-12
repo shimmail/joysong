@@ -41,6 +41,7 @@ void main() {
     final loading = controller.load();
     await Future<void>.delayed(Duration.zero);
     await controller.selectWallet(202);
+    expect(controller.isOverviewLoading, isFalse);
     first.complete(_page(101, [_entry(1, 101)], last: true));
     await loading;
 
@@ -93,6 +94,22 @@ void main() {
     expect(controller.ledgerErrorMessage, isNull);
     expect(controller.entries.map((entry) => entry.id), [1]);
     expect(repository.ledgerRequests, [(101, 0, 20), (101, 0, 20)]);
+  });
+
+  test('failed refresh keeps prior ledger entries and exposes a retryable error',
+      () async {
+    final repository = _FakeWalletRepository()
+      ..overview = _overview(_wallet(101))
+      ..pages[101] = _page(101, [_entry(1, 101)], last: true);
+    final controller = WalletController(repository);
+    await controller.load();
+    repository.ledgerError = StateError('offline');
+
+    await controller.refresh();
+
+    expect(controller.entries.map((entry) => entry.id), [1]);
+    expect(controller.ledgerErrorMessage, isNotNull);
+    expect(controller.selectedWalletId, 101);
   });
 }
 

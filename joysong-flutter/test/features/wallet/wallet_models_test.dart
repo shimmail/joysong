@@ -52,6 +52,22 @@ void main() {
     expect(page.last, isTrue);
   });
 
+  test('rejects missing or non-boolean ledger last value', () {
+    final page = {
+      'content': const [],
+      'page': 0,
+      'size': 20,
+      'totalElements': 0,
+      'totalPages': 0,
+    };
+
+    expect(() => WalletLedgerPage.fromJson(page), throwsFormatException);
+    expect(
+      () => WalletLedgerPage.fromJson({...page, 'last': 'false'}),
+      throwsFormatException,
+    );
+  });
+
   test('formats USD minor units without floating point rounding', () {
     const formatter = UsdMoneyFormatter();
 
