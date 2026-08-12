@@ -91,13 +91,13 @@ Run the two test classes from Step 2. Expected: PASS. Commit only Task 1 files w
 - Consumes: exact Task 1 paths and VO field names.
 - Produces: authoritative request/response/error documentation for Flutter implementers.
 
-- [ ] **Step 1: Add a failing contract assertion**
+- [ ] **Step 1: Verify the implemented response contract**
 
-Extend `WalletControllerTest` with JSON assertions for `data.currency`, `data.wallets[*].displayName`, `ownerName`, flat minor fields, and wallet-specific ledger pagination fields including `last`.
+Inspect the Task 1 controller tests and add any missing JSON assertions for `data.currency`, `data.wallets[*].displayName`, `ownerName`, flat minor fields, and wallet-specific ledger pagination fields including `last`. This documentation task does not manufacture a RED cycle when Task 1 already proves the production contract.
 
-- [ ] **Step 2: Verify the focused assertion fails before any mapper adjustment**
+- [ ] **Step 2: Run the focused contract test**
 
-Run `WalletControllerTest`; expected failure must identify a missing or mismatched documented response field rather than test setup.
+Run `WalletControllerTest`. If a newly added assertion exposes a real mismatch, fix the production mapper through RED/GREEN before documenting it. Otherwise record the existing green contract as the documentation source of truth.
 
 - [ ] **Step 3: Write exact documentation**
 
