@@ -134,4 +134,29 @@ class ProductionProfileTest {
         assertFalse(translationGuide.contains("OpenAI", ignoreCase = true))
         assertFalse(rolloutGuide.contains("FastAIToken", ignoreCase = true))
     }
+
+    @Test
+    fun `current documentation contains no obsolete Agent configuration or network examples`() {
+        val currentDocumentation = listOf(Path.of("..", "doc"), Path.of("..", "docs")).flatMap { root ->
+            Files.walk(root).use { paths ->
+                paths.filter { path ->
+                    Files.isRegularFile(path) &&
+                        path.fileName.toString().endsWith(".md") &&
+                        !path.normalize().toString().replace('\\', '/').contains("/docs/superpowers/")
+                }.map(Files::readString).toList()
+            }
+        }.joinToString("\n")
+        val forbidden = listOf(
+            Regex("openai\\.(?:api-key|base-url|model)", RegexOption.IGNORE_CASE),
+            Regex("@Qualifier\\(\\\"llmRestTemplate\\\"\\)"),
+            Regex("(?:api.?key|ApiKey)[^\\n]{0,40}(?:isBlank|空|未配置)[^\\n]{0,40}(?:演示|demo)", RegexOption.IGNORE_CASE),
+            Regex("google\\.proxy-url[^\\n]{0,80}(?:驱动|控制|代理)[^\\n]{0,40}(?:llmRestTemplate|Agent|AI|OpenAI|翻译)", RegexOption.IGNORE_CASE),
+            Regex("(?:Agent|AI|OpenAI|翻译|LLM)[^\\n]{0,80}(?:继承|共享|使用)[^\\n]{0,40}google\\.proxy-url", RegexOption.IGNORE_CASE),
+            Regex("llmRestTemplate[^\\n]{0,80}google\\.proxy-url", RegexOption.IGNORE_CASE)
+        )
+
+        forbidden.forEach { pattern ->
+            assertFalse(pattern.containsMatchIn(currentDocumentation), "obsolete documentation pattern: ${pattern.pattern}")
+        }
+    }
 }

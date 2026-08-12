@@ -182,3 +182,38 @@ RED: 8 tests completed, 2 failed. The recursive contract test found the old vari
 GREEN: the same class completed 8 tests with 0 failures in 4 seconds. A fresh recursive scan
 found exactly `AI_AGENT_PROVIDER`, `AI_AGENT_API_KEY`, `AI_AGENT_BASE_URL`,
 `AI_AGENT_MODEL`, and `AI_AGENT_INTENT_MODEL`; `git diff --check` passed.
+
+## Review fix round 3
+
+The recursive current-document guard now also rejects obsolete Spring property keys,
+Agent injection through `@Qualifier("llmRestTemplate")`, blank-key demo fallback examples,
+and statements that make `google.proxy-url` drive Agent or translation traffic. The proxy
+patterns target positive coupling language so the required statement that Google identity is
+isolated from Agent and translation clients remains valid.
+
+The two remaining documents now use `AiAgentProperties`, `agentLlmRestTemplate`,
+`agentIntentParserRestTemplate`, and `translationRestTemplate`. They describe the five-variable
+Qwen contract, stable provider errors rather than demo fallback, and direct Agent/translation
+network policy independent of the Google identity proxy.
+
+### Round 3 RED/GREEN
+
+```text
+.\gradlew.bat test --tests com.joysong.server.config.ProductionProfileTest
+```
+
+RED: 9 tests completed, 1 failed. The new semantic guard detected the obsolete property and
+network examples in the current documentation.
+
+GREEN: the same class completed 9 tests with 0 failures in 6 seconds. A focused static scan of
+the two corrected documents found no obsolete `openai.api-key`, `openai.base-url`,
+`openai.model`, Agent `@Qualifier("llmRestTemplate")`, or blank-key demo fallback pattern.
+
+### Round 3 self-review
+
+- The documentation enumeration still covers all Markdown under `doc/` and `docs/`, excluding
+  only historical `docs/superpowers/` requirements records.
+- Generic discussion of third-party protocols is not banned; the guard targets obsolete
+  configuration and unsafe fallback/network examples.
+- No production code, migrations, database, or environment-variable surface changed.
+- Only the focused `ProductionProfileTest` was rerun, following the project test rules.
