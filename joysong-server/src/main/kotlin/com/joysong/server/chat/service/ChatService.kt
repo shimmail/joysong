@@ -1,6 +1,8 @@
 package com.joysong.server.chat.service
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.joysong.server.agent.provider.AgentProviderRequestFactory
+import com.joysong.server.agent.provider.AgentRequestPurpose
 import com.joysong.server.chat.dto.CreateSessionRequest
 import com.joysong.server.chat.dto.SendMessageRequest
 import com.joysong.server.agent.context.AgentContextBuilder
@@ -38,7 +40,6 @@ import com.joysong.server.agent.service.ParsedAgentRoute
 import com.joysong.server.config.AiAgentProperties
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Qualifier
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.*
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -63,17 +64,6 @@ private data class LlmCallResult(
 private data class ProviderCallContext(
     val traceId: String,
     val turnId: String
-)
-
-internal fun buildChatCompletionRequest(
-    model: String,
-    messages: List<Map<String, String>>,
-    maxOutputTokens: Int
-): MutableMap<String, Any> = linkedMapOf(
-    "model" to model.trim(),
-    "messages" to messages,
-    "stream" to false,
-    "max_tokens" to maxOutputTokens
 )
 
 private data class GeneratedTurn(
@@ -236,9 +226,7 @@ class ChatService(
     private val objectMapper: ObjectMapper,
     @Qualifier("agentLlmRestTemplate") private val restTemplate: RestTemplate,
     @Qualifier("agentIntentParserRestTemplate") private val intentParserRestTemplate: RestTemplate,
-    private val aiAgentProperties: AiAgentProperties,
-    @Value("\${openai.fast-reasoning-effort:none}") private val fastReasoningEffort: String,
-    @Value("\${openai.complex-reasoning-effort:low}") private val complexReasoningEffort: String
+    private val aiAgentProperties: AiAgentProperties
 ) {
     private val logger = LoggerFactory.getLogger(ChatService::class.java)
 
@@ -559,10 +547,12 @@ class ChatService(
                 setBearerAuth(aiAgentProperties.apiKey)
                 contentType = MediaType.APPLICATION_JSON
             }
-            val body = buildChatCompletionRequest(
+            val body = AgentProviderRequestFactory.build(
+                provider = aiAgentProperties.provider ?: error("AI provider is required"),
                 model = aiAgentProperties.model,
                 messages = messages,
-                maxOutputTokens = profile.maxOutputTokens
+                maxOutputTokens = profile.maxOutputTokens,
+                purpose = AgentRequestPurpose.CHAT
             )
             val response = restTemplate.exchange(url, HttpMethod.POST, HttpEntity(body, headers), Map::class.java)
             val responseBody = response.body
@@ -664,10 +654,12 @@ class ChatService(
                 mapOf("role" to "system", "content" to instruction),
                 mapOf("role" to "user", "content" to "Current: $rawQuery\nBounded route context: $context")
             )
-            val body = buildChatCompletionRequest(
+            val body = AgentProviderRequestFactory.build(
+                provider = aiAgentProperties.provider ?: error("AI provider is required"),
                 model = aiAgentProperties.resolvedIntentModel(),
                 messages = parserMessages,
-                maxOutputTokens = 180
+                maxOutputTokens = 180,
+                purpose = AgentRequestPurpose.INTENT
             )
             val response = intentParserRestTemplate.exchange(url, HttpMethod.POST, HttpEntity(body, headers), Map::class.java)
             val choices = response.body?.get("choices") as? List<*>
@@ -1071,37 +1063,26 @@ class ChatService(
 
     private data class GenerationProfile(
         val historyMessageLimit: Int,
-        val maxOutputTokens: Int,
-        val complexReasoning: Boolean
+        val maxOutputTokens: Int
     )
 
     private fun generationProfile(intent: AgentIntent): GenerationProfile = when (intent) {
         AgentIntent.GENERAL_CHAT -> GenerationProfile(
             historyMessageLimit = 4,
-            maxOutputTokens = 280,
-            complexReasoning = false
+            maxOutputTokens = 280
         )
         AgentIntent.CATALOG_QA -> GenerationProfile(
             historyMessageLimit = 4,
-            maxOutputTokens = 420,
-            complexReasoning = false
+            maxOutputTokens = 420
         )
         AgentIntent.DETAIL_SUMMARY -> GenerationProfile(
             historyMessageLimit = 4,
-            maxOutputTokens = 260,
-            complexReasoning = false
+            maxOutputTokens = 260
         )
         AgentIntent.COMPARISON, AgentIntent.PLANNING, AgentIntent.SAFETY_SCREENING -> GenerationProfile(
             historyMessageLimit = 6,
-            maxOutputTokens = 600,
-            complexReasoning = true
+            maxOutputTokens = 600
         )
-    }
-
-    private fun reasoningEffort(profile: GenerationProfile): String? {
-        if (!aiAgentProperties.model.trim().lowercase().startsWith("gpt-5")) return null
-        val configured = if (profile.complexReasoning) complexReasoningEffort else fastReasoningEffort
-        return configured.trim().lowercase().takeIf { it in setOf("none", "minimal", "low", "medium", "high") }
     }
 
     private fun contextDetailSummary(content: String?): String {

@@ -31,6 +31,7 @@ import com.joysong.server.chat.repository.ChatSessionRepository
 import com.joysong.server.chat.service.ChatService
 import com.joysong.server.chat.service.ChatTurnResult
 import com.joysong.server.config.AiAgentProperties
+import com.joysong.server.config.AiAgentProvider
 import com.joysong.server.doctor.repository.DoctorRepository
 import com.joysong.server.doctor.service.DoctorInstitutionService
 import com.joysong.server.institution.repository.InstitutionProjectRepository
@@ -129,13 +130,12 @@ class AgentWorkflowCoreTest {
             restTemplate = completionTemplate,
             intentParserRestTemplate = intentTemplate,
             aiAgentProperties = AiAgentProperties(
+                provider = AiAgentProvider.OPENAI_COMPATIBLE,
                 apiKey = "test-key",
                 baseUrl = "https://provider.test/v1",
                 model = "answer-model",
                 intentModel = "intent-small"
-            ),
-            fastReasoningEffort = "",
-            complexReasoningEffort = ""
+            )
         )
         every { availabilityGuard.requireGenerationEnabled() } just runs
         every { turnService.beginTurn("session-1", "user-1", "我想改善脸部松弛", any()) } returns
@@ -1250,14 +1250,13 @@ class AgentWorkflowCoreTest {
         restTemplate = completionTemplate,
         intentParserRestTemplate = intentTemplate,
         aiAgentProperties = AiAgentProperties(
+            provider = AiAgentProvider.OPENAI_COMPATIBLE,
             apiKey = "test-key",
             baseUrl = "https://provider.test/v1",
             model = "answer-model",
             intentModel = "intent-small",
             intentParserEnabled = intentParserEnabled
-        ),
-        fastReasoningEffort = "",
-        complexReasoningEffort = ""
+        )
             ),
             turnService = turnService,
             operationLogger = operationLogger,

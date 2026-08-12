@@ -1,5 +1,8 @@
 package com.joysong.server.chat.service
 
+import com.joysong.server.agent.provider.AgentProviderRequestFactory
+import com.joysong.server.agent.provider.AgentRequestPurpose
+import com.joysong.server.config.AiAgentProvider
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Test
@@ -9,31 +12,76 @@ class ChatCompletionRequestTest {
     private val messages = listOf(mapOf("role" to "user", "content" to "hello"))
 
     @Test
-    fun `GPT-5 uses gateway compatible token parameter only`() {
-        val body = buildChatCompletionRequest(
-            model = " gpt-5.5 ",
+    fun `QWEN intent request adds deterministic temperature`() {
+        val body = AgentProviderRequestFactory.build(
+            provider = AiAgentProvider.QWEN,
+            model = " qwen-plus ",
             messages = messages,
-            maxOutputTokens = 280
+            maxOutputTokens = 180,
+            purpose = AgentRequestPurpose.INTENT
         )
 
-        assertEquals("gpt-5.5", body["model"])
-        assertEquals(280, body["max_tokens"])
-        assertFalse(body.containsKey("max_completion_tokens"))
-        assertFalse(body.containsKey("reasoning_effort"))
-        assertFalse(body.containsKey("temperature"))
+        assertEquals(
+            linkedMapOf(
+                "model" to "qwen-plus",
+                "messages" to messages,
+                "stream" to false,
+                "max_tokens" to 180,
+                "temperature" to 0
+            ),
+            body
+        )
+        assertLegacyParametersAreAbsent(body)
     }
 
     @Test
-    fun `non GPT-5 uses the same gateway compatible request shape`() {
-        val body = buildChatCompletionRequest(
-            model = "test-model",
-            messages = messages,
-            maxOutputTokens = 180
+    fun `QWEN chat request has no temperature regardless of model`() {
+        val first = AgentProviderRequestFactory.build(
+            AiAgentProvider.QWEN,
+            "qwen-plus",
+            messages,
+            280,
+            AgentRequestPurpose.CHAT
+        )
+        val second = AgentProviderRequestFactory.build(
+            AiAgentProvider.QWEN,
+            "qwen-max",
+            messages,
+            280,
+            AgentRequestPurpose.CHAT
         )
 
-        assertEquals(180, body["max_tokens"])
+        assertEquals(first.keys, second.keys)
+        assertFalse(first.containsKey("temperature"))
+        assertLegacyParametersAreAbsent(first)
+    }
+
+    @Test
+    fun `OpenAI compatible requests keep the conservative shape for both purposes`() {
+        AgentRequestPurpose.entries.forEach { purpose ->
+            val body = AgentProviderRequestFactory.build(
+                AiAgentProvider.OPENAI_COMPATIBLE,
+                " gateway-model ",
+                messages,
+                280,
+                purpose
+            )
+
+            assertEquals(
+                linkedMapOf(
+                    "model" to "gateway-model",
+                    "messages" to messages,
+                    "stream" to false,
+                    "max_tokens" to 280
+                ),
+                body
+            )
+            assertLegacyParametersAreAbsent(body)
+        }
+    }
+
+    private fun assertLegacyParametersAreAbsent(body: Map<String, Any>) {
         assertFalse(body.containsKey("max_completion_tokens"))
         assertFalse(body.containsKey("reasoning_effort"))
-        assertFalse(body.containsKey("temperature"))
     }
 }
