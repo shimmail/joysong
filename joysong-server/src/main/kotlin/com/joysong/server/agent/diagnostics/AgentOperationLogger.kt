@@ -102,7 +102,7 @@ class AgentOperationLogger {
         ?: "UNKNOWN"
 
     private fun safeProviderErrorCode(value: String?): String = value.orEmpty().trim().lowercase()
-        .takeIf { safeProviderErrorCodePattern.matches(it) && !sensitiveMetadataPattern.containsMatchIn(it) }
+        .takeIf(stableProviderErrorCodes::contains)
         ?: "none"
 
     private fun safeExceptionType(value: String): String = value.trim()
@@ -111,7 +111,6 @@ class AgentOperationLogger {
 
     private companion object {
         val safeProviderHostPattern = Regex("[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?")
-        val safeProviderErrorCodePattern = Regex("[a-z0-9][a-z0-9._-]{0,79}")
         val safeExceptionTypePattern = Regex("[A-Za-z][A-Za-z0-9_$.-]{0,119}")
         val sensitiveMetadataPattern = Regex("(?i)(authorization|bearer|token|api[_-]?key|test[_-]?key)")
         val providerPhases = setOf("INTENT_CLASSIFICATION", "MODEL_COMPLETION")
@@ -126,6 +125,13 @@ class AgentOperationLogger {
             "NETWORK",
             "INVALID_RESPONSE",
             "UNKNOWN"
+        )
+        val stableProviderErrorCodes = setOf(
+            "authentication_failed",
+            "rate_limit_exceeded",
+            "model_not_found",
+            "invalid_request",
+            "upstream_error"
         )
         val stableErrorCodes = setOf(
             "INVALID_REQUEST",

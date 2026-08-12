@@ -907,15 +907,6 @@ class ChatService(
             responseError == null -> "INVALID_RESPONSE"
             else -> "UNKNOWN"
         }
-        val providerErrorCode = responseError?.let { response ->
-            runCatching {
-                objectMapper.readTree(response.responseBodyAsString)
-                    .path("error")
-                    .path("code")
-                    .asText()
-                    .takeIf(String::isNotBlank)
-            }.getOrNull()
-        }
         val providerHost = runCatching { URI(aiAgentProperties.baseUrl.trim()).host }.getOrNull().orEmpty()
         agentOperationLogger.providerFailed(
             traceId = context.traceId,
@@ -925,13 +916,22 @@ class ChatService(
             modelName = modelName,
             httpStatus = httpStatus,
             providerCategory = category,
-            providerErrorCode = providerErrorCode,
+            providerErrorCode = stableProviderErrorCode(category),
             exceptionType = (responseError ?: rootCause).javaClass.simpleName,
             durationMs = elapsedMs(startedAt),
             messageCount = messages.size,
             systemMessageCount = messages.count { it["role"].equals("system", ignoreCase = true) },
             totalCharacterCount = messages.sumOf { it["content"].orEmpty().length }
         )
+    }
+
+    private fun stableProviderErrorCode(category: String): String? = when (category) {
+        "AUTH" -> "authentication_failed"
+        "RATE_LIMIT" -> "rate_limit_exceeded"
+        "MODEL_NOT_FOUND" -> "model_not_found"
+        "INVALID_REQUEST" -> "invalid_request"
+        "UPSTREAM_5XX" -> "upstream_error"
+        else -> null
     }
 
     private fun naturalizeUserFacingLanguage(content: String): String = content
