@@ -75,6 +75,7 @@ final class WalletController extends ChangeNotifier {
       return;
     }
     final request = ++_requestVersion;
+    _isOverviewLoading = false;
     _selectedWalletId = walletId;
     _entries = const [];
     _ledgerPage = 0;
@@ -87,7 +88,9 @@ final class WalletController extends ChangeNotifier {
   Future<void> retryLedger() {
     final walletId = _selectedWalletId;
     if (walletId == null) return Future<void>.value();
-    return _entries.isEmpty ? _loadFirstPage(walletId, request: ++_requestVersion) : loadNextPage();
+    return _entries.isEmpty || _ledgerErrorMessage != null
+        ? _loadFirstPage(walletId, request: ++_requestVersion)
+        : loadNextPage();
   }
 
   Future<void> loadNextPage() async {
@@ -140,8 +143,6 @@ final class WalletController extends ChangeNotifier {
       _hasNextPage = !page.last;
     } catch (error) {
       if (_isActive(request, walletId)) {
-        _entries = const [];
-        _hasNextPage = false;
         _ledgerErrorMessage = _message(error, '流水加载失败');
       }
     } finally {
