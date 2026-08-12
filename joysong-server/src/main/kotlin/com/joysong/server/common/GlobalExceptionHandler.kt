@@ -7,11 +7,14 @@ import org.springframework.http.HttpStatus
 import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.http.converter.HttpMessageNotReadableException
 import org.springframework.web.bind.annotation.ExceptionHandler
+import org.springframework.web.HttpRequestMethodNotSupportedException
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.security.access.AccessDeniedException
 import com.joysong.server.auth.service.InvalidRefreshTokenException
 import com.joysong.server.doctor.service.DoctorProfileNotFoundException
 import com.joysong.server.institution.service.ManagedInstitutionProfileNotFoundException
+import com.joysong.server.identity.service.ConsultantInstitutionNotFoundException
+import com.joysong.server.identity.service.ConsultantMembershipConflictException
 import java.io.IOException
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
@@ -20,6 +23,11 @@ import jakarta.servlet.http.HttpServletResponse
 class GlobalExceptionHandler {
 
     private val log = LoggerFactory.getLogger(javaClass)
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException::class)
+    fun handleMethodNotSupported(): ResponseEntity<BaseResponse<Nothing>> =
+        ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
+            .body(BaseResponse.error("请求方法不支持", 405))
 
     @ExceptionHandler(InvalidRefreshTokenException::class)
     fun handleInvalidRefreshToken(e: InvalidRefreshTokenException): ResponseEntity<BaseResponse<Nothing>> =
@@ -44,6 +52,14 @@ class GlobalExceptionHandler {
     ): ResponseEntity<BaseResponse<Nothing>> =
         ResponseEntity.status(HttpStatus.NOT_FOUND)
             .body(BaseResponse.error(e.message ?: "机构档案不存在", 404))
+
+    @ExceptionHandler(ConsultantInstitutionNotFoundException::class)
+    fun handleConsultantInstitutionNotFound(e: ConsultantInstitutionNotFoundException) =
+        ResponseEntity.status(HttpStatus.NOT_FOUND).body(BaseResponse.error<Nothing>(e.message ?: "机构不存在", 404))
+
+    @ExceptionHandler(ConsultantMembershipConflictException::class)
+    fun handleConsultantMembershipConflict(e: ConsultantMembershipConflictException) =
+        ResponseEntity.status(HttpStatus.CONFLICT).body(BaseResponse.error<Nothing>(e.message ?: "机构关系冲突", 409))
 
     @ExceptionHandler(IllegalArgumentException::class)
     fun handleIllegalArgument(
@@ -153,4 +169,6 @@ class GlobalExceptionHandler {
         startsWith("/api/admin/") ||
             this == "/api/management/doctor-profile" ||
             startsWith("/api/management/institutions")
+            || startsWith("/api/management/consultant-memberships")
+            || this == "/api/management/projects"
 }

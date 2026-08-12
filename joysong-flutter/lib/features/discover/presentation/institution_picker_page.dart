@@ -6,6 +6,7 @@ import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/discover/presentation/discover_content_card.dart';
 import 'package:joysong_flutter/features/discover/presentation/discover_controller.dart';
+import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 
 final class InstitutionPickerSelection {
   const InstitutionPickerSelection({required this.id, required this.name});
@@ -15,9 +16,14 @@ final class InstitutionPickerSelection {
 }
 
 class InstitutionPickerPage extends StatefulWidget {
-  const InstitutionPickerPage({required this.repository, super.key});
+  const InstitutionPickerPage({
+    required this.repository,
+    required this.role,
+    super.key,
+  });
 
   final DiscoverRepository repository;
+  final IdentityRoleType role;
 
   @override
   State<InstitutionPickerPage> createState() => _InstitutionPickerPageState();
@@ -119,7 +125,8 @@ class _InstitutionPickerPageState extends State<InstitutionPickerPage> {
                           if (!_controller.isLoadingMore) {
                             return Center(
                               child: TextButton.icon(
-                                key: const Key('institution-picker-load-more-retry'),
+                                key: const Key(
+                                    'institution-picker-load-more-retry'),
                                 onPressed: _controller.loadMore,
                                 icon: const Icon(Icons.refresh_rounded),
                                 label: Text(context.localized(

@@ -47,7 +47,9 @@ class SecurityConfig(
                     .requestMatchers("/api/management/login").permitAll()
                     .requestMatchers(
                         "/api/management/institutions",
-                        "/api/management/institutions/**"
+                        "/api/management/institutions/**",
+                        "/api/management/consultant-memberships",
+                        "/api/management/projects"
                     ).authenticated()
                     .requestMatchers(HttpMethod.GET,
                         "/api/admin/doctors",

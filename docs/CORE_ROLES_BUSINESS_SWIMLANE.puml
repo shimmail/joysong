@@ -126,16 +126,19 @@ end note
 
 ' ===== 顾问全部专业接口 =====
 |顾问|
-:查看机构关系申请
-GET /api/management/institution-membership-requests;
-:申请加入机构
-POST /api/management/institution-membership-requests
-requestType=CONSULTANT, action=JOIN;
-:查看平台项目目录
-GET /api/admin/projects;
+:查看本人顾问机构关系
+GET /api/management/consultant-memberships;
+:固定申请加入机构
+POST /api/management/consultant-memberships
+仅 institutionId + requestNote;
+:查看专业只读项目目录
+GET /api/management/projects;
 note right
+  顾问共 4 个专业端点（含 GET /api/management/context）。
   顾问专属写能力只有“申请加入机构”。
   顾问申请不能撤回，也不能自行审核。
+  法人与 ADMIN 仍通过 generic membership review 审核；
+  其可见性分别受 managedInstitutionIds / 管理员范围约束。
   GET /api/management/project-requests 可达但恒为空，未计入能力。
 end note
 

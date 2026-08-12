@@ -153,9 +153,35 @@ final class ApiIdentityRepository implements IdentityRepository {
   }
 
   @override
+  Future<List<ConsultantMembership>> listConsultantMemberships() async {
+    return await _apiClient.get<List<ConsultantMembership>>(
+          '/management/consultant-memberships',
+          decodeData: (json) => _objectList(json)
+              .map(ConsultantMembership.fromJson)
+              .toList(growable: false),
+        ) ??
+        const [];
+  }
+
+  @override
+  Future<ConsultantMembership> submitConsultantMembership(
+    ConsultantMembershipDraft draft,
+  ) async {
+    final result = await _apiClient.post<ConsultantMembership>(
+      '/management/consultant-memberships',
+      body: draft.toJson(),
+      decodeData: ConsultantMembership.fromJson,
+    );
+    if (result == null) {
+      throw const FormatException('顾问机构申请响应为空');
+    }
+    return result;
+  }
+
+  @override
   Future<List<ManagementProjectOption>> listManagementProjects() async {
     return await _apiClient.get<List<ManagementProjectOption>>(
-          '/admin/projects',
+          '/management/projects',
           decodeData: (json) => _objectList(json)
               .map(ManagementProjectOption.fromJson)
               .toList(growable: false),

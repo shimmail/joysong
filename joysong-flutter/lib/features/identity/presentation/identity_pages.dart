@@ -4,6 +4,7 @@ import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
+import 'package:joysong_flutter/features/identity/presentation/consultant_management_pages.dart';
 import 'package:joysong_flutter/features/identity/presentation/identity_controller.dart';
 import 'package:joysong_flutter/features/identity/presentation/professional_request_pages.dart';
 
@@ -463,15 +464,20 @@ class _ManagementCapabilities extends StatelessWidget {
         );
     final isDoctor =
         isAdmin || context.activeRoles.contains(IdentityRoleType.doctor.code);
-    final isConsultant = isAdmin ||
+    final isConsultant =
         context.activeRoles.contains(IdentityRoleType.consultant.code);
     final groups = <({
       IconData icon,
       String title,
       String emptyText,
       String? membershipRequestType,
-      List<({IconData icon, String label, bool enabled, _ManagementAction action})>
-          items,
+      List<
+          ({
+            IconData icon,
+            String label,
+            bool enabled,
+            _ManagementAction action
+          })> items,
     })>[
       (
         icon: Icons.apartment_outlined,
@@ -584,7 +590,7 @@ class _ManagementCapabilities extends StatelessWidget {
       (
         icon: Icons.support_agent_outlined,
         title: buildContext.localized('顾问', 'Consultant'),
-        membershipRequestType: 'CONSULTANT',
+        membershipRequestType: null,
         emptyText: buildContext.localized(
           '暂无顾问可用配置',
           'No consultant settings available',
@@ -594,13 +600,19 @@ class _ManagementCapabilities extends StatelessWidget {
             icon: Icons.add_business_outlined,
             label: buildContext.localized('申请加入机构', 'Apply to institution'),
             enabled: isConsultant && context.canApplyToInstitutions,
-            action: _ManagementAction.applyMembership,
+            action: _ManagementAction.consultantMembership,
           ),
           (
             icon: Icons.badge_outlined,
             label: buildContext.localized('机构归属', 'Institution affiliation'),
             enabled: isConsultant && context.canViewAffiliations,
-            action: _ManagementAction.affiliation,
+            action: _ManagementAction.consultantMembership,
+          ),
+          (
+            icon: Icons.spa_outlined,
+            label: buildContext.localized('项目目录', 'Project catalog'),
+            enabled: isConsultant,
+            action: _ManagementAction.consultantProjects,
           ),
         ],
       ),
@@ -705,15 +717,18 @@ class _ManagementCapabilities extends StatelessWidget {
       );
       return;
     }
-    if (action == _ManagementAction.affiliation) {
+    if (action == _ManagementAction.consultantMembership) {
       Navigator.of(context).push<void>(MaterialPageRoute(
-        builder: (_) => InstitutionMembershipRequestsPage(
+        builder: (_) => ConsultantMembershipPage(
           repository: repository,
           discoverRepository: discoverRepository,
-          context: this.context,
-          requestType: 'CONSULTANT',
-          affiliationOnly: true,
         ),
+      ));
+      return;
+    }
+    if (action == _ManagementAction.consultantProjects) {
+      Navigator.of(context).push<void>(MaterialPageRoute(
+        builder: (_) => ConsultantProjectCatalogPage(repository: repository),
       ));
       return;
     }
@@ -782,7 +797,8 @@ enum _ManagementAction {
   platformProjectRequest,
   institutionProjectRequest,
   institutionProjectJoinRequest,
-  affiliation,
+  consultantMembership,
+  consultantProjects,
   unavailable,
 }
 

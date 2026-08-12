@@ -6,6 +6,7 @@ import org.springframework.security.access.AccessDeniedException
 import org.springframework.stereotype.Repository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.dao.DuplicateKeyException
 import java.time.LocalDateTime
 import java.util.UUID
 
@@ -39,8 +40,15 @@ data class InstitutionMembershipRequestView(
     val reviewNote: String,
     val createdAt: LocalDateTime,
     val updatedAt: LocalDateTime,
-    val deleted: Boolean = false
+    val deleted: Boolean = false,
+    val institutionName: String = "",
+    val confirmedBy: String? = null,
+    val confirmedAt: LocalDateTime? = null,
+    val revokedAt: LocalDateTime? = null
 )
+
+class ConsultantMembershipConflictException(message: String) : RuntimeException(message)
+class ConsultantInstitutionNotFoundException(message: String) : RuntimeException(message)
 
 interface InstitutionMembershipRequestStore {
     fun find(
@@ -63,6 +71,8 @@ interface InstitutionMembershipRequestStore {
 
     fun listVisible(userId: String, managedInstitutionIds: Set<String>): List<InstitutionMembershipRequestView>
     fun listAll(): List<InstitutionMembershipRequestView>
+    fun listOwnedConsultant(userId: String): List<InstitutionMembershipRequestView>
+    fun institutionExists(institutionId: String): Boolean
 
     fun findById(type: MembershipRequestType, id: String): InstitutionMembershipRequestView?
 
@@ -79,6 +89,44 @@ class InstitutionMembershipRequestService(
     private val store: InstitutionMembershipRequestStore,
     private val relationshipService: DoctorInstitutionRelationshipService
 ) {
+    fun listOwnedConsultant(actor: ManagementActor): List<InstitutionMembershipRequestView> {
+        requireConsultant(actor)
+        return store.listOwnedConsultant(actor.userId)
+    }
+
+    @Transactional
+    fun submitConsultant(
+        actor: ManagementActor,
+        institutionId: String,
+        requestNote: String
+    ): InstitutionMembershipRequestView {
+        requireConsultant(actor)
+        val normalizedInstitutionId = institutionId.trim()
+        require(normalizedInstitutionId.isNotEmpty()) { "机构不能为空" }
+        if (!store.institutionExists(normalizedInstitutionId)) {
+            throw ConsultantInstitutionNotFoundException("机构不存在")
+        }
+        val normalizedNote = requestNote.trim()
+        require(normalizedNote.length <= 1000) { "申请说明不能超过1000个字符" }
+        val existing = store.find(MembershipRequestType.CONSULTANT, actor.userId, normalizedInstitutionId)
+        if (existing != null) {
+            if (existing.status !in setOf("REJECTED", "REVOKED")) {
+                throw ConsultantMembershipConflictException("该机构加入申请当前不可重新提交")
+            }
+            return store.resubmit(existing, normalizedNote)
+        }
+        return try {
+            store.create(MembershipRequestType.CONSULTANT, actor.userId, normalizedInstitutionId, normalizedNote)
+        } catch (_: DuplicateKeyException) {
+            throw ConsultantMembershipConflictException("该机构加入申请当前不可重新提交")
+        }
+    }
+
+    private fun requireConsultant(actor: ManagementActor) {
+        if ("CONSULTANT" !in actor.activeRoles) {
+            throw AccessDeniedException("只有本人已认证的顾问可以访问机构关系")
+        }
+    }
     @Transactional
     fun submit(
         actor: ManagementActor,
@@ -196,17 +244,10 @@ class JdbcInstitutionMembershipRequestStore(
                 now
             )
         }
-        return InstitutionMembershipRequestView(
-            id = id,
-            requestType = type,
-            userId = userId,
-            institutionId = institutionId,
-            status = "PENDING",
-            requestNote = requestNote,
-            reviewNote = "",
-            createdAt = now,
-            updatedAt = now
-        )
+        if (type == MembershipRequestType.CONSULTANT) {
+            return requireNotNull(findOwnedConsultant(userId, id)) { "机构加入申请不存在" }
+        }
+        return InstitutionMembershipRequestView(id, type, userId, institutionId, "PENDING", requestNote, "", now, now)
     }
 
     override fun resubmit(
@@ -221,18 +262,16 @@ class JdbcInstitutionMembershipRequestStore(
             SET status = 'PENDING', request_note = ?, review_note = '',
                 confirmed_by = NULL, confirmed_at = NULL, revoked_at = NULL$restoreDeleted,
                 updated_at = NOW()
-            WHERE id = ?
+            WHERE id = ? AND status IN ('REJECTED', 'REVOKED')
             """.trimIndent(),
             requestNote,
             request.id
         )
-        check(updated == 1) { "机构加入申请已被其他操作处理" }
-        return request.copy(
-            status = "PENDING",
-            requestNote = requestNote,
-            reviewNote = "",
-            updatedAt = LocalDateTime.now()
-        )
+        if (updated != 1) throw ConsultantMembershipConflictException("机构加入申请已被其他操作处理")
+        if (request.requestType == MembershipRequestType.CONSULTANT) {
+            return requireNotNull(findOwnedConsultant(request.userId, request.id)) { "机构加入申请不存在" }
+        }
+        return request.copy(status = "PENDING", requestNote = requestNote, reviewNote = "", updatedAt = LocalDateTime.now())
     }
 
     override fun listVisible(
@@ -272,6 +311,25 @@ class JdbcInstitutionMembershipRequestStore(
         """.trimIndent(),
         rowMapper
     )
+
+    override fun listOwnedConsultant(userId: String): List<InstitutionMembershipRequestView> = jdbcTemplate.query(
+        consultantSelectSql() + " AND im.user_id = ? ORDER BY im.created_at DESC, im.id DESC",
+        consultantRowMapper,
+        userId
+    )
+
+    private fun findOwnedConsultant(userId: String, id: String): InstitutionMembershipRequestView? = jdbcTemplate.query(
+        consultantSelectSql() + " AND im.user_id = ? AND im.id = ?",
+        consultantRowMapper,
+        userId,
+        id
+    ).firstOrNull()
+
+    override fun institutionExists(institutionId: String): Boolean = jdbcTemplate.queryForObject(
+        "SELECT COUNT(*) FROM institutions WHERE id = ? AND deleted_at IS NULL",
+        Long::class.java,
+        institutionId
+    ) == 1L
 
     override fun findById(
         type: MembershipRequestType,
@@ -332,6 +390,18 @@ class JdbcInstitutionMembershipRequestStore(
             """.trimIndent()
     }
 
+    private fun consultantSelectSql() =
+        """
+        SELECT im.id, 'CONSULTANT' AS request_type, im.user_id, im.institution_id,
+               COALESCE(i.name, CONCAT('已删除机构（', im.institution_id, '）')) AS institution_name,
+               im.status, im.request_note, im.review_note,
+               im.created_at, im.updated_at, im.confirmed_by, im.confirmed_at, im.revoked_at,
+               FALSE AS is_deleted
+        FROM institution_memberships im
+        LEFT JOIN institutions i ON i.id = im.institution_id AND i.deleted_at IS NULL
+        WHERE im.member_role = 'CONSULTANT'
+        """.trimIndent()
+
     private fun table(type: MembershipRequestType) = when (type) {
         MembershipRequestType.DOCTOR -> "doctor_institutions"
         MembershipRequestType.CONSULTANT -> "institution_memberships"
@@ -354,6 +424,20 @@ class JdbcInstitutionMembershipRequestStore(
             createdAt = rs.getTimestamp("created_at").toLocalDateTime(),
             updatedAt = rs.getTimestamp("updated_at").toLocalDateTime(),
             deleted = rs.getBoolean("is_deleted")
+        )
+    }
+
+    private val consultantRowMapper = RowMapper { rs, _ ->
+        InstitutionMembershipRequestView(
+            id = rs.getString("id"), requestType = MembershipRequestType.CONSULTANT,
+            userId = rs.getString("user_id"), institutionId = rs.getString("institution_id"),
+            institutionName = rs.getString("institution_name"), status = rs.getString("status"),
+            requestNote = rs.getString("request_note"), reviewNote = rs.getString("review_note"),
+            createdAt = rs.getTimestamp("created_at").toLocalDateTime(),
+            updatedAt = rs.getTimestamp("updated_at").toLocalDateTime(),
+            confirmedBy = rs.getString("confirmed_by"),
+            confirmedAt = rs.getTimestamp("confirmed_at")?.toLocalDateTime(),
+            revokedAt = rs.getTimestamp("revoked_at")?.toLocalDateTime()
         )
     }
 }

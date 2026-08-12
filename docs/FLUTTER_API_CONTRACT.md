@@ -429,6 +429,8 @@ Flutter 可以完成页面和接口抽象，但生产发布前必须等待支付
 |---|---|
 | 医生本人档案 | `GET /management/doctor-profile`、`PUT /management/doctor-profile` |
 | 法人自助机构档案 | `GET /management/institutions`、`GET /management/institutions/{institutionId}`、`PUT /management/institutions/{institutionId}` |
+| 顾问本人机构关系 | `GET /management/consultant-memberships`、`POST /management/consultant-memberships` |
+| 已认证专业用户只读项目目录 | `GET /management/projects` |
 | 专业端兼容只读机构数据（迁移期） | `GET /admin/institutions`、`GET /admin/institutions/{id}`、`GET /admin/institutions/{id}/doctors`、`GET /admin/institutions/{id}/projects`、`GET /admin/institution-projects`；已认证专业用户仅可读 `visibleInstitutionIds` 范围 |
 | 专业端兼容只读项目目录（迁移期） | `GET /admin/projects`；这是不含机构写权限的全局项目目录 |
 | 平台管理员全量机构 CRUD | `GET/POST /admin/institutions`、`GET/PUT/DELETE /admin/institutions/{id}`；其中写操作仅限 `ADMIN`，GET 对专业用户仅提供下行所述对象级兼容读取 |
@@ -449,6 +451,10 @@ Flutter 可以完成页面和接口抽象，但生产发布前必须等待支付
 - 法人 PUT 是严格完整替换：请求必须且只能发送 `name`、`address`、`city`、`description`、`coverImage`、`images`、`establishedYear`、`credentials`、`credentialImages`、`specialties`、`tags`、`contactPhone`、`businessHours` 这 13 个键。`establishedYear` 键必须存在，值可为 `null` 或 1800 至当前年的整数；`images`、`credentialImages`、`specialties`、`tags` 必须为 JSON 字符串数组，不能改用遗留的逗号分隔格式。
 - 法人机构档案响应中的 `id`、`createdAt`、`updatedAt`、`rating`、`reviewCount`、`isVerified`、`certificationTime`、`projectCount`、`doctorCount`、`consultationCount`、`userCount`、`caseCount` 是只读字段。`credentialImages` 是机构自行上传的公开展示材料，UI 不得暗示这些图片已经由平台核验。
 - 法人可审核本机构的成员关系和机构项目申请；不能编辑医生档案，也不能绕过项目申请/审核流程直接创建、修改或删除机构项目。旧专业端 `/admin/institutions/{id}` PUT 已移除；`POST/PUT/DELETE /api/admin/institutions...` 等机构写操作及平台全量 CRUD 始终仅限 `ADMIN`。上表列出的机构范围 GET 旧读路径仅在后续切换完成前向已认证专业用户兼容，并由服务端按 `visibleInstitutionIds` 做对象级只读过滤；`GET /admin/projects` 则只提供全局项目目录。所有兼容 GET 均不授予任何写权限。
+- 顾问机构关系必须改用本人专用接口。`GET /management/consultant-memberships` 只返回当前 `ACTIVE CONSULTANT` 自己的 `CONSULTANT` 记录；每项包含 `id`、`institutionId`、`institutionName`、`status`、`requestNote`、`reviewNote`、`createdAt`、`updatedAt`、`confirmedBy`、`confirmedAt`、`revokedAt`。Flutter 仅将 `status == APPROVED` 的项目呈现为当前 affiliation，不能依据历史申请推断关系。
+- `POST /management/consultant-memberships` 固定表达本人 `CONSULTANT + JOIN`，请求必须只发送 `institutionId` 和 `requestNote`；不得发送 `requestType`、`action` 或 `userId`。`institutionId` 去除首尾空白后不能为空，`requestNote` 去除首尾空白后最多 1000 字符。同一顾问与机构已有 `REJECTED` 或 `REVOKED` 记录时复用原记录并回到 `PENDING`；其他既有状态或并发重复提交返回 HTTP 409。机构不存在或已删除返回 404。顾问不能通过该接口撤回或审核。
+- 顾问加入申请仍由机构法人或平台管理员通过通用审核接口处理：`GET /management/institution-membership-requests` 与 `POST /management/institution-membership-requests/{requestType}/{id}/review`。通用接口继续按管理员或 `managedInstitutionIds` 限定可见和可审核对象；顾问专用接口不改变这一兼容边界。
+- Flutter 专业项目选择统一使用 `GET /management/projects`，不得继续调用 `/admin/projects`。该目录只允许拥有至少一个活跃 `DOCTOR`、`CONSULTANT` 或 `INSTITUTION_LEGAL_REPRESENTATIVE` 身份且不是平台管理员的用户访问，返回全局只读数组，按 `name`、`id` 排序。每项固定包含 `id`、`name`、`category`、`description`、`tags`、`categoryTags`、`coverImage`、`referencePrice`、`currency`；不接受查询参数，也不授予任何项目写能力。
 - 医生不能直接修改机构项目价格、销量、评分、评价数或上下架状态。
 - 医生和机构法人都不能修改自己的评分、评价数和认证状态；服务端会保留原值。
 - 医生档案的 `credentials` 与 `credentialImages` 是医生自主维护的公开展示材料，和私有身份审核材料相互独立；UI 只能使用“医生上传的证书图片/展示材料”等中性文案，不得写“资质保险箱”“查资质”或“平台已核验”。公开图片经 `POST /upload` 上传并使用 `data.url`，多图再以逗号拼接提交；这条遗留传输规则不适用于法人机构档案的 JSON 数组字段。

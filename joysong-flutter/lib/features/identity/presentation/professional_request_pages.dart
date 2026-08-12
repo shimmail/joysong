@@ -378,7 +378,6 @@ class InstitutionMembershipRequestsPage extends StatefulWidget {
     required this.context,
     required String requestType,
     this.reviewMode = false,
-    this.affiliationOnly = false,
     super.key,
   }) : requestType = _validateMembershipRequestType(requestType);
 
@@ -387,7 +386,6 @@ class InstitutionMembershipRequestsPage extends StatefulWidget {
   final ManagementContext context;
   final String requestType;
   final bool reviewMode;
-  final bool affiliationOnly;
 
   @override
   State<InstitutionMembershipRequestsPage> createState() =>
@@ -430,10 +428,9 @@ class _InstitutionMembershipRequestsPageState
         _requests = requests;
         _loading = false;
       });
-      if (widget.reviewMode || widget.affiliationOnly) {
+      if (widget.reviewMode) {
         try {
-          final institutions =
-              await widget.repository.listInstitutionOptions();
+          final institutions = await widget.repository.listInstitutionOptions();
           if (mounted) setState(() => _institutions = institutions);
         } catch (_) {
           // Request data remains usable with institution ids as fallback names.
@@ -457,15 +454,13 @@ class _InstitutionMembershipRequestsPageState
       if (!widget.reviewMode && item.userId != widget.context.userId) {
         return false;
       }
-      return !widget.affiliationOnly || item.status == 'APPROVED';
+      return true;
     }).toList();
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.reviewMode
             ? context.localized('成员加入审核', 'Membership Reviews')
-            : widget.affiliationOnly
-                ? context.localized('机构归属', 'Institution Affiliation')
-                : context.localized('申请加入机构', 'Apply to Institution')),
+            : context.localized('申请加入机构', 'Apply to Institution')),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -474,7 +469,7 @@ class _InstitutionMembershipRequestsPageState
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  if (!widget.reviewMode && !widget.affiliationOnly) ...[
+                  if (!widget.reviewMode) ...[
                     ListTile(
                       key: const Key('membership-institution-picker'),
                       enabled: !_saving,
@@ -524,10 +519,8 @@ class _InstitutionMembershipRequestsPageState
                     ListTile(
                       enabled: false,
                       title: Text(context.localized(
-                        widget.affiliationOnly ? '暂无已确认机构归属' : '暂无申请记录',
-                        widget.affiliationOnly
-                            ? 'No approved affiliation'
-                            : 'No requests',
+                        '暂无申请记录',
+                        'No requests',
                       )),
                     )
                   else
@@ -593,6 +586,7 @@ class _InstitutionMembershipRequestsPageState
         .push<InstitutionPickerSelection>(MaterialPageRoute(
       builder: (_) => InstitutionPickerPage(
         repository: widget.discoverRepository,
+        role: IdentityRoleType.fromCode(widget.requestType),
       ),
     ));
     if (!mounted || selection == null) return;
@@ -627,7 +621,7 @@ class _InstitutionMembershipRequestsPageState
 }
 
 String _validateMembershipRequestType(String value) {
-  if (value != 'DOCTOR' && value != 'CONSULTANT') {
+  if (value != 'DOCTOR') {
     throw ArgumentError.value(value, 'requestType');
   }
   return value;
@@ -804,19 +798,26 @@ class _InstitutionProjectRequestsPageState
 
   Future<void> _load() async {
     try {
-      final values = await Future.wait([
-        widget.repository.listInstitutionOptions(),
-        widget.repository.listManagementProjects(),
-        widget.repository.listProfessionalProjectRequests(),
-      ]);
+      final requests =
+          await widget.repository.listProfessionalProjectRequests();
+      final values = widget.reviewMode
+          ? null
+          : await Future.wait([
+              widget.repository.listInstitutionOptions(),
+              widget.repository.listManagementProjects(),
+            ]);
       if (!mounted) return;
       final allowedIds = widget.context.doctorInstitutionIds.toSet();
       setState(() {
-        _institutions = (values[0] as List<InstitutionOption>)
-            .where((item) => widget.reviewMode || allowedIds.contains(item.id))
-            .toList();
-        _projects = values[1] as List<ManagementProjectOption>;
-        _requests = (values[2] as List<ProfessionalProjectRequest>)
+        _institutions = values == null
+            ? const []
+            : (values[0] as List<InstitutionOption>)
+                .where((item) => allowedIds.contains(item.id))
+                .toList();
+        _projects = values == null
+            ? const []
+            : values[1] as List<ManagementProjectOption>;
+        _requests = requests
             .where((item) => item.requestType == 'INSTITUTION')
             .toList();
         _loading = false;
