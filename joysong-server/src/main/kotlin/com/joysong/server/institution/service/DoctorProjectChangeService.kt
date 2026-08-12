@@ -14,6 +14,9 @@ import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDateTime
 import java.math.BigDecimal
 import java.util.UUID
+import com.fasterxml.jackson.core.type.TypeReference
+import com.fasterxml.jackson.databind.ObjectMapper
+import org.springframework.dao.DataIntegrityViolationException
 
 private val PROJECT_CHANGE_TYPES = setOf("JOIN", "PROFILE_UPDATE", "LEAVE")
 private val PROJECT_CHANGE_DECISIONS = setOf("APPROVED", "REJECTED", "CHANGES_REQUESTED")
@@ -24,9 +27,20 @@ class DoctorProjectChangeService(
     private val doctorProjectRepository: DoctorProjectRepository,
     private val configRepository: DoctorInstitutionProjectConfigRepository,
     private val relationshipService: DoctorInstitutionRelationshipService,
-    private val splitRatePolicy: OrderSplitRatePolicy
+    private val splitRatePolicy: OrderSplitRatePolicy,
+    private val objectMapper: ObjectMapper
 ) {
-    private fun decodeList(raw: String?): List<String> = raw.orEmpty().split(',').map(String::trim).filter(String::isNotEmpty)
+    private fun decodeList(raw: String?): List<String> {
+        val value = raw.orEmpty()
+        if (value.isBlank()) return emptyList()
+        return if (value.trimStart().startsWith("[")) {
+            objectMapper.readValue(value, object : TypeReference<List<String>>() {})
+        } else value.split(',').map(String::trim).filter(String::isNotEmpty)
+    }
+
+    private fun encodeList(values: List<String>): String = objectMapper.writeValueAsString(values).also {
+        require(it.length <= 20000) { "数组字段序列化后最长 20000 字符" }
+    }
 
     private fun validateProfile(request: DoctorProjectChangeRequest) {
         require(request.serviceDescription.trim().isNotEmpty() && request.serviceDescription.trim().length <= 5000) { "服务说明不能为空且最长 5000" }
@@ -108,6 +122,7 @@ class DoctorProjectChangeService(
                    r.current_price, r.current_service_description, r.current_service_tags,
                    r.current_schedule_note, r.current_cover_image, r.current_images,
                    r.current_consultation_fee, r.current_commission_rate, r.current_institution_rate,
+                   r.current_platform_rate, r.current_doctor_rate,
                    r.reviewed_by, reviewer.nickname AS reviewer_name, r.review_note,
                    r.submitted_at, r.reviewed_at, r.updated_at
             FROM doctor_project_change_requests r
@@ -122,9 +137,6 @@ class DoctorProjectChangeService(
             val requestType = rs.getString("request_type")
             val currentCommissionRate = if (requestType == "PROFILE_UPDATE") rs.getBigDecimal("current_commission_rate") else null
             val currentInstitutionRate = if (requestType == "PROFILE_UPDATE") rs.getBigDecimal("current_institution_rate") else null
-            val currentSplit = if (currentCommissionRate != null && currentInstitutionRate != null) {
-                splitRatePolicy.resolve(currentInstitutionRate, currentCommissionRate)
-            } else null
             DoctorProjectChangeView(
                 id = rs.getString("id"),
                 doctorId = rs.getString("doctor_id"),
@@ -155,8 +167,8 @@ class DoctorProjectChangeService(
                 currentConsultationFee = if (requestType == "PROFILE_UPDATE") rs.getBigDecimal("current_consultation_fee") else null,
                 currentCommissionRate = currentCommissionRate,
                 currentInstitutionRate = currentInstitutionRate,
-                currentPlatformRate = currentSplit?.platformRate,
-                currentDoctorRate = currentSplit?.doctorRate,
+                currentPlatformRate = if (requestType == "PROFILE_UPDATE") rs.getBigDecimal("current_platform_rate") else null,
+                currentDoctorRate = if (requestType == "PROFILE_UPDATE") rs.getBigDecimal("current_doctor_rate") else null,
                 forceProcessed = rs.getBoolean("force_processed"),
                 status = rs.getString("status"),
                 submittedBy = rs.getString("submitted_by"),
@@ -183,7 +195,7 @@ class DoctorProjectChangeService(
         val institutionProjectId = request.institutionProjectId.trim()
         require(institutionProjectId.isNotEmpty()) { "机构项目不能为空" }
         val project = projectTarget(institutionProjectId)
-            ?: throw IllegalArgumentException("机构项目不存在")
+            ?: throw DoctorProjectChangeNotFoundException("机构项目不存在")
         if (project.institutionId !in actor.doctorInstitutionIds) {
             throw AccessDeniedException("医生尚未取得该机构的有效执业关系")
         }
@@ -202,12 +214,17 @@ class DoctorProjectChangeService(
             }
             "PROFILE_UPDATE", "LEAVE" -> require(existing != null) { "医生尚未加入该机构项目" }
         }
-        val config = if (requestType == "PROFILE_UPDATE") configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeleted(doctorId, institutionProjectId) else null
+        val config = if (requestType == "PROFILE_UPDATE") configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate(doctorId, institutionProjectId) else null
         if (requestType == "PROFILE_UPDATE") validateProfile(request)
         if (pendingCount(doctorId, institutionProjectId) != 0L) throw DoctorProjectChangeConflictException("该项目已有待处理申请")
 
         val id = UUID.randomUUID().toString()
-        jdbcTemplate.update(
+        val currentSplit = if (requestType == "PROFILE_UPDATE") {
+            val currentCommission = config?.commissionRate ?: splitRatePolicy.defaults().consultantRate
+            val currentInstitution = config?.institutionRate ?: splitRatePolicy.defaults().institutionRate
+            splitRatePolicy.resolve(currentInstitution, currentCommission)
+        } else null
+        try { jdbcTemplate.update(
             """
             INSERT INTO doctor_project_change_requests
                 (id, doctor_id, institution_id, institution_project_id, request_type,
@@ -215,9 +232,10 @@ class DoctorProjectChangeService(
                  base_doctor_project_updated_at, base_config_id, base_config_updated_at,
                  current_price, current_service_description, current_service_tags, current_schedule_note,
                  current_cover_image, current_images, current_consultation_fee, current_commission_rate, current_institution_rate,
+                 current_platform_rate, current_doctor_rate,
                  notes, service_tags, schedule_note, cover_image, images,
                  status, submitted_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
             """.trimIndent(),
             id,
             doctorId,
@@ -237,27 +255,31 @@ class DoctorProjectChangeService(
             if (requestType == "PROFILE_UPDATE") config?.consultationFee ?: BigDecimal.ZERO else null,
             if (requestType == "PROFILE_UPDATE") config?.commissionRate ?: splitRatePolicy.defaults().consultantRate else null,
             if (requestType == "PROFILE_UPDATE") config?.institutionRate ?: splitRatePolicy.defaults().institutionRate else null,
-            request.notes.trim().take(2000),
-            request.serviceTags.joinToString(",").take(500),
+            currentSplit?.platformRate, currentSplit?.doctorRate,
+            request.notes.trim(),
+            encodeList(request.serviceTags),
             request.scheduleNote.trim().take(500),
             request.coverImage.trim().take(500),
-            request.images.joinToString(",").take(2000),
+            encodeList(request.images),
             actor.userId
-        )
+        ) } catch (e: DataIntegrityViolationException) {
+            throw DoctorProjectChangeConflictException("该项目已有待处理申请")
+        }
         return requireNotNull(list(actor).firstOrNull { it.id == id }) { "项目申请创建失败" }
     }
 
     @Transactional
-    fun review(actor: ManagementActor, id: String, decision: String, reviewNote: String, force: Boolean? = false): DoctorProjectChangeView {
+    fun review(actor: ManagementActor, id: String, decision: String, reviewNote: String, force: Boolean?): DoctorProjectChangeView {
         val normalizedDecision = decision.trim().uppercase()
         require(normalizedDecision in PROJECT_CHANGE_DECISIONS) { "审核结果不正确" }
         if (normalizedDecision != "APPROVED") require(reviewNote.isNotBlank()) { "驳回或要求修改时必须填写原因" }
         require(force != null) { "force 字段必须显式提交" }
+        require(!force || normalizedDecision == "APPROVED") { "仅 APPROVED 决策允许强制处理" }
         if (force) {
             if (!actor.isAdmin) throw AccessDeniedException("只有平台管理员可以强制处理")
             require(reviewNote.isNotBlank()) { "强制处理必须填写说明" }
         }
-        val target = lockedTarget(id) ?: throw IllegalArgumentException("项目申请不存在")
+        val target = lockedTarget(id) ?: throw DoctorProjectChangeNotFoundException("项目申请不存在")
         if (target.status != "PENDING") throw DoctorProjectChangeConflictException("项目申请已处理")
         if (!actor.isAdmin && target.institutionId !in actor.managedInstitutionIds) {
             throw AccessDeniedException("只有所属机构法人可以审核该申请")
@@ -286,7 +308,7 @@ class DoctorProjectChangeService(
 
     @Transactional
     fun withdraw(actor: ManagementActor, id: String): DoctorProjectChangeView {
-        val target = lockedTarget(id) ?: throw IllegalArgumentException("项目申请不存在")
+        val target = lockedTarget(id) ?: throw DoctorProjectChangeNotFoundException("项目申请不存在")
         require(target.status == "PENDING") { "只有待处理申请可以撤回" }
         if (!actor.isAdmin && (actor.doctorId != target.doctorId || actor.userId != target.submittedBy)) {
             throw AccessDeniedException("只能撤回自己提交的申请")
@@ -317,7 +339,7 @@ class DoctorProjectChangeService(
                     if (existing.updatedAt != target.baseDoctorProjectUpdatedAt) throw DoctorProjectChangeConflictException("医生项目基线已变化")
                 }
                 val config = configRepository.findForUpdate(target.doctorId, target.institutionProjectId)
-                    ?: configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeleted(target.doctorId, target.institutionProjectId)
+                    ?: configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate(target.doctorId, target.institutionProjectId)
                 if (!force && (config?.id != target.baseConfigId || config?.updatedAt != target.baseConfigUpdatedAt)) throw DoctorProjectChangeConflictException("分账配置基线已变化")
                 splitRatePolicy.resolve(requireNotNull(target.institutionRate), requireNotNull(target.commissionRate))
                 doctorProjectRepository.save(target.toEntity(existing.createdAt, requireNotNull(target.priceSuggestion)))
@@ -360,7 +382,7 @@ class DoctorProjectChangeService(
     )
 
     private fun projectTarget(institutionProjectId: String): ProjectTarget? = jdbcTemplate.query(
-        "SELECT institution_id, project_id FROM institution_projects WHERE id = ? AND deleted_at IS NULL",
+        "SELECT institution_id, project_id FROM institution_projects WHERE id = ? AND deleted_at IS NULL AND is_active = TRUE",
         { rs, _ -> ProjectTarget(rs.getString("institution_id"), rs.getString("project_id")) },
         institutionProjectId
     ).firstOrNull()
@@ -503,3 +525,4 @@ private data class ChangeTarget(
 )
 
 class DoctorProjectChangeConflictException(message: String) : RuntimeException(message)
+class DoctorProjectChangeNotFoundException(message: String) : RuntimeException(message)

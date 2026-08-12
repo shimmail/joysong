@@ -13,12 +13,14 @@ import org.junit.jupiter.api.Test
 import org.springframework.security.access.AccessDeniedException
 import org.springframework.security.core.Authentication
 import java.math.BigDecimal
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 
 class DoctorProjectChangeControllerTest {
     private val service = mockk<DoctorProjectChangeService>()
     private val access = mockk<ManagementAccessService>()
     private val authentication = mockk<Authentication>()
-    private val controller = DoctorProjectChangeController(service, access)
+    private val mapper = jacksonObjectMapper()
+    private val controller = DoctorProjectChangeController(service, access, mapper)
 
     @Test
     fun `profile update targets derive doctor from authenticated actor`() {
@@ -37,11 +39,11 @@ class DoctorProjectChangeControllerTest {
         val actor = actor()
         val request = DoctorProjectChangeRequest("ip-1", "PROFILE_UPDATE", "service", BigDecimal("880"), "notes", listOf("tag"), "schedule", "cover", listOf("image"), BigDecimal("30"), BigDecimal("10"), BigDecimal("40"))
         every { access.actor(authentication) } returns actor
-        every { service.submit(actor, request) } returns mockk()
+        every { service.submit(actor, match { it.requestType == "PROFILE_UPDATE" && it.serviceTags == listOf("tag") && it.images == listOf("image") }) } returns mockk()
 
-        controller.submit(authentication, request)
+        controller.submit(authentication, mapper.valueToTree(request))
 
-        verify(exactly = 1) { service.submit(actor, request) }
+        verify(exactly = 1) { service.submit(actor, match { it.requestType == "PROFILE_UPDATE" && it.serviceTags == listOf("tag") && it.images == listOf("image") }) }
         assertEquals(listOf("tag"), request.serviceTags)
         assertEquals(listOf("image"), request.images)
     }

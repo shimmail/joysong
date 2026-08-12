@@ -25,6 +25,10 @@ import org.testcontainers.containers.MySQLContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
 import java.math.BigDecimal
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import org.springframework.boot.test.context.TestConfiguration
+import org.springframework.context.annotation.Bean
 
 @Tag("mysql-integration")
 @Testcontainers
@@ -39,7 +43,7 @@ import java.math.BigDecimal
     "order.split.institution-rate=40.00"
 ])
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import(DoctorProjectChangeService::class, DoctorInstitutionRelationshipService::class, OrderSplitRatePolicy::class, OrderSplitProperties::class)
+@Import(DoctorProjectChangeService::class, DoctorInstitutionRelationshipService::class, OrderSplitRatePolicy::class, OrderSplitProperties::class, ProfileUpdatePersistenceTestConfig::class)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class DoctorProjectProfileUpdatePersistenceTest {
@@ -49,7 +53,7 @@ class DoctorProjectProfileUpdatePersistenceTest {
     @Test
     @Order(1)
     fun `fresh migrations and approval atomically update only target doctor`() {
-        assertEquals(((1..15).toList() + listOf(17, 18)).map(Int::toString), jdbc.queryForList(
+        assertEquals(((1..15).toList() + listOf(17, 18, 19)).map(Int::toString), jdbc.queryForList(
             "SELECT version FROM flyway_schema_history WHERE success = 1 AND version IS NOT NULL ORDER BY installed_rank",
             String::class.java
         ))
@@ -124,6 +128,11 @@ class DoctorProjectProfileUpdatePersistenceTest {
             .withDatabaseName(DB_NAME)
             .withTmpFs(mapOf("/var/lib/mysql" to "rw"))
     }
+}
+
+@TestConfiguration
+class ProfileUpdatePersistenceTestConfig {
+    @Bean fun objectMapper(): ObjectMapper = jacksonObjectMapper()
 }
 
 class DoctorProjectProfileUpdateMySqlContainer(imageName: String) : MySQLContainer<DoctorProjectProfileUpdateMySqlContainer>(imageName) {

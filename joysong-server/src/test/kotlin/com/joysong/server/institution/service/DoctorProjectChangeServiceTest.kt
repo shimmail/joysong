@@ -22,6 +22,7 @@ import java.sql.Timestamp
 import java.time.LocalDateTime
 import com.joysong.server.order.service.OrderSplitRatePolicy
 import com.joysong.server.config.OrderSplitProperties
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 
 class DoctorProjectChangeServiceTest {
     private val jdbcTemplate = mockk<JdbcTemplate>()
@@ -29,7 +30,7 @@ class DoctorProjectChangeServiceTest {
     private val configRepository = mockk<DoctorInstitutionProjectConfigRepository>()
     private val relationshipService = mockk<DoctorInstitutionRelationshipService>(relaxed = true)
     private val splitRatePolicy = OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("10.00"); institutionRate = BigDecimal("40.00") })
-    private val service = DoctorProjectChangeService(jdbcTemplate, doctorProjectRepository, configRepository, relationshipService, splitRatePolicy)
+    private val service = DoctorProjectChangeService(jdbcTemplate, doctorProjectRepository, configRepository, relationshipService, splitRatePolicy, jacksonObjectMapper())
 
     @Test
     fun `profile update targets expose only current doctor approved active bindings`() {
@@ -138,6 +139,8 @@ class DoctorProjectChangeServiceTest {
             every { rs.getBigDecimal("current_consultation_fee") } returns BigDecimal("20.00")
             every { rs.getBigDecimal("current_commission_rate") } returns BigDecimal("5.00")
             every { rs.getBigDecimal("current_institution_rate") } returns BigDecimal("35.00")
+            every { rs.getBigDecimal("current_platform_rate") } returns BigDecimal("10.00")
+            every { rs.getBigDecimal("current_doctor_rate") } returns BigDecimal("50.00")
             listOf(mapper.mapRow(rs, 0))
         }
 
@@ -231,7 +234,7 @@ class DoctorProjectChangeServiceTest {
         every { doctorProjectRepository.save(any()) } answers { firstArg() }
         every { jdbcTemplate.update(match<String> { it.contains("UPDATE doctor_project_change_requests") }, *anyVararg()) } returns 1
 
-        val result = service.review(legalActor(), "request-1", "APPROVED", "")
+        val result = service.review(legalActor(), "request-1", "APPROVED", "", false)
 
         val binding = slot<DoctorProjectEntity>()
         verify { doctorProjectRepository.save(capture(binding)) }
@@ -250,7 +253,7 @@ class DoctorProjectChangeServiceTest {
         stubReviewQueries(status = "CHANGES_REQUESTED")
         every { jdbcTemplate.update(match<String> { it.contains("UPDATE doctor_project_change_requests") }, *anyVararg()) } returns 1
 
-        val result = service.review(legalActor(), "request-1", "CHANGES_REQUESTED", "请修改价格")
+        val result = service.review(legalActor(), "request-1", "CHANGES_REQUESTED", "请修改价格", false)
 
         assertEquals("CHANGES_REQUESTED", result.status)
         verify(exactly = 0) { doctorProjectRepository.save(any()) }
@@ -263,7 +266,7 @@ class DoctorProjectChangeServiceTest {
             org.springframework.security.access.AccessDeniedException("医生与机构的有效执业关系已失效")
 
         assertThrows(org.springframework.security.access.AccessDeniedException::class.java) {
-            service.review(legalActor(), "request-1", "APPROVED", "")
+            service.review(legalActor(), "request-1", "APPROVED", "", false)
         }
 
         verify(exactly = 0) { doctorProjectRepository.save(any()) }

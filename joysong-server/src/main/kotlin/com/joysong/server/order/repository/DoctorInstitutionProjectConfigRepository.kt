@@ -21,5 +21,13 @@ interface DoctorInstitutionProjectConfigRepository : JpaRepository<DoctorInstitu
         @Param("doctorId") doctorId: String,
         @Param("institutionProjectId") institutionProjectId: String
     ): DoctorInstitutionProjectConfigEntity?
+    @Query(
+        value = "SELECT * FROM doctor_institution_project_configs WHERE doctor_id = :doctorId AND institution_project_id = :institutionProjectId LIMIT 1 FOR UPDATE",
+        nativeQuery = true
+    )
+    fun findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate(
+        @Param("doctorId") doctorId: String,
+        @Param("institutionProjectId") institutionProjectId: String
+    ): DoctorInstitutionProjectConfigEntity?
     fun deleteByInstitutionProjectId(institutionProjectId: String)
 }
