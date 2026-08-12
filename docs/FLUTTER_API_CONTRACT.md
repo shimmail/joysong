@@ -428,8 +428,8 @@ Flutter 可以完成页面和接口抽象，但生产发布前必须等待支付
 | 作用域 | 方法 | 路径 | 说明 |
 |---|---|---|---|
 | 订单所属用户 | GET | `/orders/{id}/settlement` | 仅返回本人订单的消费者安全结算摘要 |
-| 当前专业身份 | GET | `/wallets/me` | 按服务端授权范围返回钱包及三个余额桶 |
-| 当前专业身份 | GET | `/wallets/me/ledger?page=0&size=20` | 返回授权钱包的账本条目；`size` 为 1–100 |
+| 当前登录用户 | GET | `/wallets/me` | 服务端按认证主体返回独立钱包；普通用户成功返回空列表 |
+| 当前登录用户 | GET | `/wallets/me/ledger?walletId={walletId}&page=0&size=20` | 查询一个已授权钱包的账本；`walletId` 必填，`size` 为 1–100 |
 | 管理员 | GET | `/api/admin/settlements?page=0&size=20` | 结算列表 |
 | 管理员 | GET | `/api/admin/settlements/{id}` | 结算详情 |
 | 管理员 | GET | `/api/admin/settlements/{id}/allocations?page=0&size=20` | 分账明细 |
@@ -437,7 +437,11 @@ Flutter 可以完成页面和接口抽象，但生产发布前必须等待支付
 | 管理员 | GET | `/api/admin/reconciliation-issues?page=0&size=20` | 对账异常列表 |
 | 管理员 | GET | `/api/admin/reconciliation-issues/{id}` | 对账异常详情 |
 
-账本条目是追加式记录：服务端使用不可变 `operationKey` 去重，同一操作的重试不得在客户端制造新余额。每条记录同时返回变动量和 `pendingBalanceMinor`、`availableBalanceMinor`、`frozenBalanceMinor` 三个结果余额快照；Flutter 只展示服务端快照，不在本地重新累计或猜测余额。
+钱包概览固定为 `{"currency":"USD","wallets":[...]}`；每项有 `walletId`、`ownerType`、`ownerId`、`displayName`、`ownerName`、`pendingMinor`、`availableMinor`、`frozenMinor`，全部金额为整数最小货币单位。`walletId` 只能选择当前主体已授权的一个钱包，绝不能合并多身份余额；无权或不存在的 `walletId` 返回 403/404 且不返回财务数据。
+
+账本分页固定为 `content`、`page`、`size`、`totalElements`、`totalPages`、`last`。每项有 `id`、`walletId`、`entryType`、`title`、`description`、带符号 `amountMinor`、`pendingAfterMinor`、`availableAfterMinor`、`frozenAfterMinor`、`currency`、`createdAt`；按 `createdAt DESC, id DESC` 稳定排序。`amountMinor` 正数为收入，负数为退款冲正；Flutter 只展示服务端快照和业务文案，不使用浮点数累计或重建余额。
+
+`GET /orders/{id}/settlement` 的消费者安全摘要固定为 `settlementId`、`orderId`、`currency`、`grossTotalPaid`、`netSettled`、`state`、`settlementDueAt`、`settlementCreatedAt`、`releasedAt`。金额对象为 `{minor, currency}`；409 `SETTLEMENT_NOT_GENERATED` 表示结算生成中，应呈现非致命等待状态，不能转成空结算或零金额。
 
 `SETTLED`/`AVAILABLE` 只表示内部结算台账已释放，**不表示**款项已经通过 Airwallex 或其他外部通道打款。Airwallex、收款人/beneficiary 与 KYC、FX、提现/withdrawal 和真实 payout 均不在当前 API 契约范围内；客户端不得据此展示出金成功、收款账户或换汇状态。
 

@@ -1043,6 +1043,74 @@ components:
           type: string
           example: 效果真好！
           description: 评论内容
+    MoneyAmountDto:
+      type: object
+      required: [minor, currency]
+      properties:
+        minor:
+          type: integer
+          format: int64
+          description: 整数最小货币单位
+          example: 12000
+        currency:
+          type: string
+          enum: [USD]
+    ConsumerSettlementDto:
+      type: object
+      required: [settlementId, orderId, currency, grossTotalPaid, netSettled, state, settlementCreatedAt]
+      properties:
+        settlementId: { type: integer, format: int64, example: 1001 }
+        orderId: { type: string }
+        currency: { type: string, enum: [USD] }
+        grossTotalPaid: { $ref: '#/components/schemas/MoneyAmountDto' }
+        netSettled: { $ref: '#/components/schemas/MoneyAmountDto' }
+        state: { type: string, example: PENDING }
+        settlementDueAt: { type: string, format: date-time, nullable: true }
+        settlementCreatedAt: { type: string, format: date-time }
+        releasedAt: { type: string, format: date-time, nullable: true }
+    WalletViewDto:
+      type: object
+      required: [walletId, ownerType, ownerId, displayName, ownerName, pendingMinor, availableMinor, frozenMinor]
+      properties:
+        walletId: { type: integer, format: int64, example: 101 }
+        ownerType: { type: string, enum: [DOCTOR, CONSULTANT, INSTITUTION] }
+        ownerId: { type: string }
+        displayName: { type: string, example: 医生钱包 }
+        ownerName: { type: string, example: 张医生 }
+        pendingMinor: { type: integer, format: int64, example: 12000 }
+        availableMinor: { type: integer, format: int64, example: 85000 }
+        frozenMinor: { type: integer, format: int64, example: 0 }
+    WalletOverviewDto:
+      type: object
+      required: [currency, wallets]
+      properties:
+        currency: { type: string, enum: [USD] }
+        wallets: { type: array, items: { $ref: '#/components/schemas/WalletViewDto' } }
+    WalletLedgerItemDto:
+      type: object
+      required: [id, walletId, entryType, title, description, amountMinor, pendingAfterMinor, availableAfterMinor, frozenAfterMinor, currency, createdAt]
+      properties:
+        id: { type: integer, format: int64, example: 1001 }
+        walletId: { type: integer, format: int64, example: 101 }
+        entryType: { type: string, enum: [SETTLEMENT, REVERSAL], example: SETTLEMENT }
+        title: { type: string, example: 诊疗收益 }
+        description: { type: string, example: 订单 JS202608110001 }
+        amountMinor: { type: integer, format: int64, description: 收入为正，退款冲正为负, example: 12000 }
+        pendingAfterMinor: { type: integer, format: int64, example: 12000 }
+        availableAfterMinor: { type: integer, format: int64, example: 85000 }
+        frozenAfterMinor: { type: integer, format: int64, example: 0 }
+        currency: { type: string, enum: [USD] }
+        createdAt: { type: string, format: date-time }
+    WalletLedgerPageDto:
+      type: object
+      required: [content, page, size, totalElements, totalPages, last]
+      properties:
+        content: { type: array, items: { $ref: '#/components/schemas/WalletLedgerItemDto' } }
+        page: { type: integer, minimum: 0, example: 0 }
+        size: { type: integer, minimum: 1, maximum: 100, example: 20 }
+        totalElements: { type: integer, format: int64, example: 1 }
+        totalPages: { type: integer, example: 1 }
+        last: { type: boolean, example: true }
 paths:
   /api/auth/login:
     post:
@@ -2052,6 +2120,95 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BaseResponse'
+  /api/orders/{id}/settlement:
+    get:
+      tags:
+      - 订单模块
+      summary: 本人订单的消费者安全结算摘要
+      operationId: getConsumerSettlement
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: 成功；不包含专业分账或钱包信息
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ConsumerSettlementDto'
+        '404':
+          description: 订单不存在或不属于当前用户
+        '409':
+          description: SETTLEMENT_NOT_GENERATED，结算记录生成中
+  /api/wallets/me:
+    get:
+      tags:
+      - 钱包模块
+      summary: 当前登录用户的独立专业钱包
+      description: 普通用户成功返回空 wallets；服务端从认证主体推导范围，绝不聚合不同 owner 的余额。
+      operationId: getMyWallets
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/WalletOverviewDto'
+  /api/wallets/me/ledger:
+    get:
+      tags:
+      - 钱包模块
+      summary: 当前用户一个钱包的分页账本
+      description: walletId 必须属于当前认证主体；按 createdAt DESC、id DESC 稳定排序。
+      operationId: getMyWalletLedger
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: walletId
+        in: query
+        required: true
+        schema: { type: integer, format: int64 }
+      - name: page
+        in: query
+        required: false
+        schema: { type: integer, minimum: 0, default: 0 }
+      - name: size
+        in: query
+        required: false
+        schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/BaseResponse'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/WalletLedgerPageDto'
+        '403':
+          description: walletId 不在当前主体授权范围
+        '404':
+          description: 钱包不存在
   /api/orders/{id}/refund:
     post:
       tags:
