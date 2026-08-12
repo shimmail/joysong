@@ -91,6 +91,20 @@ class ManagementAccessService(
             false
         }
 
+    /**
+     * Returns only wallet owners derived from the authenticated actor.  Callers
+     * must never turn a request parameter into a money-owner scope.
+     */
+    fun walletScopes(actor: ManagementActor): List<WalletOwnerScope> = buildList {
+        actor.doctorId?.let { add(WalletOwnerScope("DOCTOR", setOf(it))) }
+        if (CONSULTANT_ROLE in actor.activeRoles) {
+            add(WalletOwnerScope("CONSULTANT", setOf(actor.userId)))
+        }
+        if (LEGAL_REP_ROLE in actor.activeRoles && actor.managedInstitutionIds.isNotEmpty()) {
+            add(WalletOwnerScope("INSTITUTION", actor.managedInstitutionIds))
+        }
+    }
+
     private fun actorFor(userId: String, isAdmin: Boolean): ManagementActor {
         require(count("SELECT COUNT(*) FROM users WHERE id = ? AND deleted_at IS NULL", userId) == 1L) {
             "用户不存在或已注销"
@@ -100,11 +114,7 @@ class ManagementAccessService(
             String::class.java,
             userId
         ).toSet()
-        if (!isAdmin && professionalRoles.intersect(setOf(DOCTOR_ROLE, LEGAL_REP_ROLE, CONSULTANT_ROLE)).isEmpty()) {
-            throw AccessDeniedException("账号尚未取得专业身份管理权限")
-        }
         val activeRoles = professionalRoles + if (isAdmin) setOf("ADMIN") else emptySet()
-
         val doctorId = userId.takeIf { DOCTOR_ROLE in activeRoles && count(
             "SELECT COUNT(*) FROM doctors WHERE id = ? AND deleted_at IS NULL",
             userId
@@ -146,12 +156,6 @@ class ManagementAccessService(
         val manageableDoctorIds = buildSet {
             doctorId?.let(::add)
         }
-        if (!isAdmin && doctorId == null && managedInstitutionIds.isEmpty() &&
-            DOCTOR_ROLE !in activeRoles && CONSULTANT_ROLE !in activeRoles
-        ) {
-            throw AccessDeniedException("职业身份已通过，但管理档案或机构归属尚未建立，请联系平台处理")
-        }
-
         return ManagementActor(
             userId = userId,
             isAdmin = isAdmin,
@@ -210,6 +214,11 @@ data class ManagementActor(
     val visibleInstitutionIds: Set<String>
         get() = managedInstitutionIds + doctorInstitutionIds + consultantInstitutionIds
 }
+
+data class WalletOwnerScope(
+    val ownerType: String,
+    val ownerIds: Set<String>
+)
 
 data class ManagementContextView(
     val userId: String,

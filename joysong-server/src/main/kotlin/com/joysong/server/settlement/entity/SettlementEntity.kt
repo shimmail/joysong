@@ -11,7 +11,10 @@ import java.time.LocalDateTime
  * @since 2026-07-30
  */
 @Entity
-@Table(name = "settlements")
+@Table(
+    name = "settlements",
+    uniqueConstraints = [UniqueConstraint(name = "uk_settlements_order_id", columnNames = ["order_id"])]
+)
 class SettlementEntity(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

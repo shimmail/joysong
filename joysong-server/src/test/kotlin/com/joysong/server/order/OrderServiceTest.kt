@@ -31,6 +31,7 @@ import com.joysong.server.review.service.ReviewService
 import io.mockk.*
 import io.mockk.impl.annotations.MockK
 import jakarta.persistence.EntityManager
+import jakarta.persistence.Query
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -146,6 +147,39 @@ class OrderServiceTest {
         assertThrows<org.springframework.security.access.AccessDeniedException> {
             orderService.requireOrderForManagement(actor, "order-1")
         }
+    }
+
+    @Test
+    fun `money linked order cannot be hard deleted`() {
+        val order = OrderEntity(
+            id = "order-money", userId = "user-1", projectName = "项目", price = BigDecimal.TEN, status = "COMPLETED"
+        )
+        every { orderRepository.findByIdIncludeDeleted("order-money") } returns order
+        every { orderRepository.hasMoneyReferences("order-money") } returns true
+
+        val error = assertThrows<IllegalArgumentException> {
+            orderService.adminHardDeleteOrder("order-money")
+        }
+
+        assertEquals("订单已关联支付、退款或结算账本记录，禁止物理删除", error.message)
+        verify(exactly = 0) { entityManager.createNativeQuery(any()) }
+    }
+
+    @Test
+    fun `order without money references remains hard deletable`() {
+        val order = OrderEntity(
+            id = "order-empty", userId = "user-1", projectName = "项目", price = BigDecimal.TEN, status = "CANCELLED"
+        )
+        val query = mockk<Query>()
+        every { orderRepository.findByIdIncludeDeleted("order-empty") } returns order
+        every { orderRepository.hasMoneyReferences("order-empty") } returns false
+        every { entityManager.createNativeQuery("DELETE FROM orders WHERE id = :id") } returns query
+        every { query.setParameter("id", "order-empty") } returns query
+        every { query.executeUpdate() } returns 1
+
+        orderService.adminHardDeleteOrder("order-empty")
+
+        verify(exactly = 1) { query.executeUpdate() }
     }
 
     @Test
@@ -580,7 +614,7 @@ class OrderServiceTest {
         val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.PENDING_COMPLETION.value)
         every { orderRepository.findById("o1") } returns Optional.of(order)
         every { orderRepository.save(any()) } answers { firstArg() }
-        every { settlementService.saveSettlement("o1") } returns mockk()
+        every { settlementService.saveSettlement("o1", any()) } returns mockk()
 
         val result = orderService.confirmCompletion("o1", "user-1")
 
@@ -589,7 +623,7 @@ class OrderServiceTest {
         val saved = slot<OrderEntity>()
         verify { orderRepository.save(capture(saved)) }
         assertNotNull(saved.captured.settlementAt)
-        verify { settlementService.saveSettlement("o1") }
+        verify { settlementService.saveSettlement("o1", saved.captured.settlementAt) }
     }
 
     @Test

@@ -66,6 +66,27 @@ class ManagementAccessServiceTest {
     }
 
     @Test
+    fun `institution wallet scope excludes doctor affiliations not managed by legal representative`() {
+        val service = ManagementAccessService(mockk(relaxed = true))
+        val actor = ManagementActor(
+            userId = "doctor-legal-1",
+            isAdmin = false,
+            activeRoles = setOf("DOCTOR", "INSTITUTION_LEGAL_REPRESENTATIVE"),
+            doctorId = "doctor-legal-1",
+            managedInstitutionIds = setOf("institution-b"),
+            doctorInstitutionIds = setOf("institution-a"),
+            manageableDoctorIds = setOf("doctor-legal-1")
+        )
+
+        val scopes = service.walletScopes(actor)
+
+        assertEquals(
+            setOf("institution-b"),
+            scopes.single { it.ownerType == "INSTITUTION" }.ownerIds
+        )
+    }
+
+    @Test
     fun `legal representative capabilities exclude doctor order article and split management`() {
         val jdbcTemplate = mockk<JdbcTemplate>()
         every {

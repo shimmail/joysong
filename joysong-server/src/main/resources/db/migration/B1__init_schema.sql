@@ -485,7 +485,7 @@ CREATE TABLE IF NOT EXISTS settlements (
     settled_at DATETIME DEFAULT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_settlements_order_id (order_id),
+    KEY idx_settlements_order_id (order_id),
     INDEX idx_settlements_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='结算分账记录表';
 
