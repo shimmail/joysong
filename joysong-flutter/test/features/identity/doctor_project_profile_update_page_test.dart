@@ -47,7 +47,7 @@ void main() {
     expect(find.text('Approve'), findsOneWidget);
   });
 
-  testWidgets('admin force approval requires explicit confirmation and note',
+  testWidgets('admin supports ordinary decisions and confirmed force approval',
       (tester) async {
     _largeView(tester);
     final repository = _FakeRepository();
@@ -58,8 +58,21 @@ void main() {
     )));
     await tester.pumpAndSettle();
 
-    expect(find.text('Approve'), findsNothing);
-    expect(find.text('Reject'), findsNothing);
+    expect(find.text('Approve'), findsOneWidget);
+    expect(find.text('Reject'), findsOneWidget);
+    expect(find.text('Request changes'), findsOneWidget);
+    expect(find.text('Force approve'), findsOneWidget);
+
+    await tester.tap(find.text('Request changes'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.byKey(const Key('profile-review-note')), 'Please revise');
+    await tester.tap(find.text('Confirm'));
+    await tester.pumpAndSettle();
+
+    expect(repository.reviewDecision, 'CHANGES_REQUESTED');
+    expect(repository.reviewForce, isFalse);
+
     await tester.tap(find.text('Force approve'));
     await tester.pumpAndSettle();
     expect(find.text('Confirm force approval'), findsOneWidget);
@@ -69,6 +82,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(repository.reviewForce, isTrue);
+    expect(repository.reviewDecision, 'APPROVED');
     expect(repository.reviewNote, 'Manual handling');
   });
 
@@ -130,6 +144,7 @@ final class _FakeRepository implements IdentityRepository {
   final ManagementContext? managementContext;
   DoctorProjectProfileUpdateDraft? submitted;
   bool? reviewForce;
+  String? reviewDecision;
   String? reviewNote;
 
   @override
@@ -157,6 +172,7 @@ final class _FakeRepository implements IdentityRepository {
       required String decision,
       required String reviewNote,
       required bool force}) async {
+    reviewDecision = decision;
     reviewForce = force;
     this.reviewNote = reviewNote;
   }

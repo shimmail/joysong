@@ -1438,24 +1438,30 @@ class _DoctorProjectProfileReviewPageState
                               if (request.status == 'PENDING') ...[
                                 const SizedBox(height: 12),
                                 Wrap(spacing: 8, runSpacing: 8, children: [
-                                  if (!_isAdmin)
-                                    FilledButton(
-                                        key: Key('approve-${request.id}'),
-                                        onPressed: _submitting
-                                            ? null
-                                            : () => _review(
-                                                request, 'APPROVED', false),
-                                        child: Text(context.localized(
-                                            '批准', 'Approve'))),
-                                  if (!_isAdmin)
-                                    OutlinedButton(
-                                        key: Key('reject-${request.id}'),
-                                        onPressed: _submitting
-                                            ? null
-                                            : () => _review(
-                                                request, 'REJECTED', false),
-                                        child: Text(
-                                            context.localized('驳回', 'Reject'))),
+                                  FilledButton(
+                                      key: Key('approve-${request.id}'),
+                                      onPressed: _submitting
+                                          ? null
+                                          : () => _review(
+                                              request, 'APPROVED', false),
+                                      child: Text(context.localized(
+                                          '批准', 'Approve'))),
+                                  OutlinedButton(
+                                      key: Key('reject-${request.id}'),
+                                      onPressed: _submitting
+                                          ? null
+                                          : () => _review(
+                                              request, 'REJECTED', false),
+                                      child: Text(
+                                          context.localized('驳回', 'Reject'))),
+                                  OutlinedButton(
+                                      key: Key('changes-${request.id}'),
+                                      onPressed: _submitting
+                                          ? null
+                                          : () => _review(request,
+                                              'CHANGES_REQUESTED', false),
+                                      child: Text(context.localized(
+                                          '要求修改', 'Request changes'))),
                                   if (_isAdmin)
                                     FilledButton.tonal(
                                         key: Key('force-${request.id}'),
