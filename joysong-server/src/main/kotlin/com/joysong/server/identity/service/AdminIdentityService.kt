@@ -2,6 +2,7 @@ package com.joysong.server.identity.service
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.joysong.server.wallet.repository.WalletRepository
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
@@ -26,7 +27,8 @@ private val RELATION_STATUSES = setOf("PENDING", "APPROVED", "REVOKED")
 class AdminIdentityService(
     private val jdbcTemplate: JdbcTemplate,
     private val objectMapper: ObjectMapper,
-    private val doctorInstitutionRelationshipService: DoctorInstitutionRelationshipService
+    private val doctorInstitutionRelationshipService: DoctorInstitutionRelationshipService,
+    private val walletRepository: WalletRepository
 ) {
     private val namedJdbcTemplate = NamedParameterJdbcTemplate(jdbcTemplate)
 
@@ -138,6 +140,7 @@ class AdminIdentityService(
             if (target.roleCode == "INSTITUTION_LEGAL_REPRESENTATIVE") {
                 provisionInstitutionForLegalRepresentative(target, reviewerId)
             }
+            provisionWallet(target.userId, target.roleCode)
         }
     }
 
@@ -197,6 +200,7 @@ class AdminIdentityService(
             normalizedConfirmerId,
             normalizedConfirmerId
         )
+        walletRepository.createIfAbsent("CONSULTANT", normalizedUserId, "USD")
 
         return jdbcTemplate.query(
             """
@@ -646,6 +650,25 @@ class AdminIdentityService(
             institutionId,
             reviewerId
         )
+    }
+
+    private fun provisionWallet(userId: String, roleCode: String) {
+        when (roleCode) {
+            "DOCTOR", "CONSULTANT" -> walletRepository.createIfAbsent(roleCode, userId, "USD")
+            "INSTITUTION_LEGAL_REPRESENTATIVE" -> jdbcTemplate.queryForList(
+                """
+                SELECT institution_id
+                FROM institution_memberships
+                WHERE user_id = ?
+                  AND member_role IN ('INSTITUTION_LEGAL_REPRESENTATIVE', 'LEGAL_REPRESENTATIVE')
+                  AND status = 'APPROVED'
+                """.trimIndent(),
+                String::class.java,
+                userId
+            ).distinct().forEach { institutionId ->
+                walletRepository.createIfAbsent("INSTITUTION", institutionId, "USD")
+            }
+        }
     }
 
     private fun count(sql: String, vararg args: Any): Long =

@@ -77,6 +77,18 @@ class DoctorInstitutionChangeMigrationTest {
     }
 
     @Test
+    fun `V26 provisions zero balance USD wallets for active professional identities`() {
+        val sql = migration("db/migration/V26__provision_certified_wallets.sql")
+        assertContains(sql, "SELECT 'DOCTOR', ur.user_id, 'USD'")
+        assertContains(sql, "SELECT 'CONSULTANT', ur.user_id, 'USD'")
+        assertContains(sql, "SELECT DISTINCT 'INSTITUTION', im.institution_id, 'USD'")
+        assertContains(sql, "ur.status = 'ACTIVE'")
+        assertContains(sql, "im.status = 'APPROVED'")
+        assertContains(sql, "ON DUPLICATE KEY UPDATE id = id")
+        assertFalse(sql.contains("wallet_ledger_entries"))
+    }
+
+    @Test
     fun `V13 migration declares the doctor institution request ledger contract`() {
         val migration = requireNotNull(
             javaClass.getResource("/db/migration/V13__add_doctor_institution_change_requests.sql")
