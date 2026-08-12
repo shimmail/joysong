@@ -17,6 +17,9 @@ import com.joysong.server.identity.service.ConsultantInstitutionNotFoundExceptio
 import com.joysong.server.identity.service.ConsultantMembershipConflictException
 import com.joysong.server.institution.service.DoctorProjectChangeConflictException
 import com.joysong.server.institution.service.DoctorProjectChangeNotFoundException
+import com.joysong.server.article.service.ArticleNotFoundException
+import com.joysong.server.order.service.OrderManagementConflictException
+import com.joysong.server.order.service.OrderManagementNotFoundException
 import java.io.IOException
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
@@ -70,6 +73,18 @@ class GlobalExceptionHandler {
     @ExceptionHandler(DoctorProjectChangeNotFoundException::class)
     fun handleDoctorProjectChangeNotFound(e: DoctorProjectChangeNotFoundException) =
         ResponseEntity.status(HttpStatus.NOT_FOUND).body(BaseResponse.error<Nothing>(e.message ?: "项目申请不存在", 404))
+
+    @ExceptionHandler(ArticleNotFoundException::class)
+    fun handleArticleNotFound(e: ArticleNotFoundException) =
+        ResponseEntity.status(HttpStatus.NOT_FOUND).body(BaseResponse.error<Nothing>(e.message ?: "文章不存在", 404))
+
+    @ExceptionHandler(OrderManagementNotFoundException::class)
+    fun handleOrderManagementNotFound(e: OrderManagementNotFoundException) =
+        ResponseEntity.status(HttpStatus.NOT_FOUND).body(BaseResponse.error<Nothing>(e.message ?: "订单不存在", 404))
+
+    @ExceptionHandler(OrderManagementConflictException::class)
+    fun handleOrderManagementConflict(e: OrderManagementConflictException) =
+        ResponseEntity.status(HttpStatus.CONFLICT).body(BaseResponse.error<Nothing>(e.message ?: "订单状态冲突", 409))
 
     @ExceptionHandler(IllegalArgumentException::class)
     fun handleIllegalArgument(
@@ -181,4 +196,6 @@ class GlobalExceptionHandler {
             startsWith("/api/management/institutions")
             || startsWith("/api/management/consultant-memberships")
             || this == "/api/management/projects"
+            || startsWith("/api/management/doctor-articles")
+            || startsWith("/api/management/orders")
 }
