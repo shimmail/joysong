@@ -15,6 +15,11 @@ import java.nio.file.Path
 
 class ProductionProfileTest {
 
+    private val environmentName = Regex(
+        "\\b(?:AI_AGENT|OPENAI|QWEN|TRANSLATION)_[A-Z0-9_]+\\b",
+        RegexOption.IGNORE_CASE
+    )
+
     private val properties = YamlPropertySourceLoader()
         .load("production", ClassPathResource("application-prod.yml"))
         .single()
@@ -95,7 +100,6 @@ class ProductionProfileTest {
                 }.map(Files::readString).toList()
             }
         }.joinToString("\n")
-        val environmentName = Regex("\\b(?:AI_AGENT|OPENAI|QWEN|TRANSLATION)_[A-Z0-9_]+\\b")
         val expected = setOf(
             "AI_AGENT_PROVIDER",
             "AI_AGENT_API_KEY",
@@ -106,13 +110,29 @@ class ProductionProfileTest {
 
         assertEquals(expected, environmentName.findAll(yamlText).map { it.value }.toSet())
         assertEquals(expected, environmentName.findAll(envText).map { it.value }.toSet())
-        val documentationWithoutMarkdownFileNames = deploymentDocumentation.replace(Regex("[A-Z0-9_]+\\.md"), "")
-        assertEquals(expected, environmentName.findAll(documentationWithoutMarkdownFileNames).map { it.value }.toSet())
+        val documentationWithoutMarkdownFileNames = deploymentDocumentation.replace(
+            Regex("[A-Z0-9_]+\\.md", RegexOption.IGNORE_CASE),
+            ""
+        )
+        assertEquals(
+            expected,
+            environmentName.findAll(documentationWithoutMarkdownFileNames).map { it.value }.toSet()
+        )
         assertEquals("\${AI_AGENT_PROVIDER:}", applicationProperties.getProperty("ai-agent.provider"))
         assertEquals("\${AI_AGENT_API_KEY:}", applicationProperties.getProperty("ai-agent.api-key"))
         assertEquals("\${AI_AGENT_BASE_URL:}", applicationProperties.getProperty("ai-agent.base-url"))
         assertEquals("\${AI_AGENT_MODEL:}", applicationProperties.getProperty("ai-agent.model"))
         assertEquals("\${AI_AGENT_INTENT_MODEL:}", applicationProperties.getProperty("ai-agent.intent-model"))
+    }
+
+    @Test
+    fun `agent environment guard catches legacy variables regardless of case`() {
+        val sample = "openai_api_key OpenAI_BASE_URL qWeN_model translation_provider"
+
+        assertEquals(
+            setOf("openai_api_key", "OpenAI_BASE_URL", "qWeN_model", "translation_provider"),
+            environmentName.findAll(sample).map { it.value }.toSet()
+        )
     }
 
     @Test
@@ -147,12 +167,10 @@ class ProductionProfileTest {
             }
         }.joinToString("\n")
         val forbidden = listOf(
-            Regex("openai\\.(?:api-key|base-url|model)", RegexOption.IGNORE_CASE),
-            Regex("@Qualifier\\(\\\"llmRestTemplate\\\"\\)"),
-            Regex("(?:api.?key|ApiKey)[^\\n]{0,40}(?:isBlank|空|未配置)[^\\n]{0,40}(?:演示|demo)", RegexOption.IGNORE_CASE),
-            Regex("google\\.proxy-url[^\\n]{0,80}(?:驱动|控制|代理)[^\\n]{0,40}(?:llmRestTemplate|Agent|AI|OpenAI|翻译)", RegexOption.IGNORE_CASE),
-            Regex("(?:Agent|AI|OpenAI|翻译|LLM)[^\\n]{0,80}(?:继承|共享|使用)[^\\n]{0,40}google\\.proxy-url", RegexOption.IGNORE_CASE),
-            Regex("llmRestTemplate[^\\n]{0,80}google\\.proxy-url", RegexOption.IGNORE_CASE)
+            Regex("\\b(?:openai|qwen|translation)\\.(?:provider|api-key|base-url|model)\\b", RegexOption.IGNORE_CASE),
+            Regex("\\bai\\.provider\\b", RegexOption.IGNORE_CASE),
+            Regex("\\bai-agent\\.(?:proxy-url|lease-timeout|intent-parser-enabled|demo-fallback-enabled|stream|reasoning)\\b", RegexOption.IGNORE_CASE),
+            Regex("\\bllmRestTemplate\\b", RegexOption.IGNORE_CASE)
         )
 
         forbidden.forEach { pattern ->

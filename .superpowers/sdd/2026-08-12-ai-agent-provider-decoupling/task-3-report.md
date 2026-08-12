@@ -217,3 +217,70 @@ the two corrected documents found no obsolete `openai.api-key`, `openai.base-url
   configuration and unsafe fallback/network examples.
 - No production code, migrations, database, or environment-variable surface changed.
 - Only the focused `ProductionProfileTest` was rerun, following the project test rules.
+
+## Review fix round 4
+
+The environment-variable scan is now case-insensitive while still requiring the five allowed
+names to use their exact uppercase spelling. A focused synthetic regression covers lowercase
+and mixed-case legacy names, so variants such as `openai_api_key` and `OpenAI_BASE_URL` no
+longer evade the guard.
+
+The current-document guard now rejects stable obsolete configuration tokens rather than
+trying to infer proxy semantics from Chinese or English word order. It rejects legacy
+provider properties, removed environment-facing Agent policy properties, and the obsolete
+`llmRestTemplate` bean name anywhere in current documentation.
+
+The unused `llmRestTemplate` bean was removed. Google identity verification already creates
+its own `NetHttpTransport` inside `AuthenticationService`, while Agent, intent parsing, and
+translation retain their dedicated direct `RestTemplate` beans. The bean's proxy factory
+branch and now-unreferenced `AiAgentProxyUrlPolicy` were removed with it.
+
+The two inaccurate guides were aligned with production code:
+
+- `doc/项目技术文档.md` now explains that adding a provider requires code changes to
+  `AiAgentProvider`, `AiAgentProviderUrlPolicy`, and `AgentProviderRequestFactory`, plus tests;
+  environment variables can only select an already-supported enum value and allowlisted URL.
+- `doc/系统安全加固开发文档.md` now states that `AuthenticationService` owns the Google
+  transport and documents only the dedicated direct Agent and translation clients.
+
+### Round 4 RED
+
+```text
+.\gradlew.bat test \
+  --tests com.joysong.server.config.ProductionProfileTest \
+  --tests com.joysong.server.config.RestTemplateConfigTest
+```
+
+Observed result: 15 tests completed, 3 failed, exactly in the new regressions for mixed-case
+legacy environment names, stable obsolete documentation tokens, and the still-published
+unused legacy bean.
+
+### Round 4 GREEN
+
+The same two-class command completed successfully in 10 seconds. After tightening the allowed
+name assertion to preserve exact uppercase spelling, only the changed class was rerun:
+
+```text
+.\gradlew.bat test --tests com.joysong.server.config.ProductionProfileTest
+```
+
+Observed result: BUILD SUCCESSFUL in 6 seconds.
+
+Direct bean-consumer regressions were checked without repeating the passing command:
+
+```text
+.\gradlew.bat test \
+  --tests com.joysong.server.config.AiAgentProfileStartupTest \
+  --tests com.joysong.server.translation.service.TranslationServiceTest
+```
+
+Observed result: 7 tests, 0 failures, BUILD SUCCESSFUL in 4 seconds.
+
+After removing the proxy-policy helper left unreachable by the legacy bean deletion:
+
+```text
+.\gradlew.bat test --tests com.joysong.server.config.AiAgentPropertiesTest
+```
+
+Observed result: BUILD SUCCESSFUL in 16 seconds, including fresh production and test Kotlin
+compilation.

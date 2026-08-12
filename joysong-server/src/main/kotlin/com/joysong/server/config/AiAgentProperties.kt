@@ -4,8 +4,6 @@ import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import java.net.URI
-import java.net.URISyntaxException
 import java.time.Clock
 import java.time.Duration
 
@@ -39,23 +37,6 @@ object AiAgentHttpBudget {
     val minimumTurnLease: Duration = Duration.ofSeconds(82)
 
     fun isTurnLeaseSafe(value: Duration): Boolean = value >= minimumTurnLease
-}
-
-object AiAgentProxyUrlPolicy {
-    private val allowedSchemes = setOf("http", "socks")
-
-    fun isAllowed(value: String): Boolean {
-        if (value.isBlank()) return true
-        return try {
-            val uri = URI(value.trim())
-            uri.scheme?.lowercase() in allowedSchemes &&
-                !uri.host.isNullOrBlank() &&
-                uri.port in 1..65535 &&
-                uri.userInfo == null
-        } catch (_: URISyntaxException) {
-            false
-        }
-    }
 }
 
 @Configuration(proxyBeanMethods = false)

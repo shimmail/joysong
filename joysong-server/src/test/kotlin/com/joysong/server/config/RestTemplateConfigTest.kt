@@ -5,11 +5,8 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.springframework.context.annotation.AnnotationConfigApplicationContext
 import org.springframework.core.env.MapPropertySource
-import org.springframework.http.client.SimpleClientHttpRequestFactory
 import org.springframework.test.util.ReflectionTestUtils
 import org.springframework.web.client.RestTemplate
-import java.net.InetSocketAddress
-import java.net.Proxy
 
 class RestTemplateConfigTest {
 
@@ -36,10 +33,10 @@ class RestTemplateConfigTest {
     }
 
     @Test
-    fun `Google identity client keeps the Google proxy policy`() {
-        val template = config.llmRestTemplate("http://127.0.0.1:7890")
-
-        assertProxy(template, Proxy.Type.HTTP, "127.0.0.1", 7890)
+    fun `configuration does not publish unused legacy LLM client`() {
+        AnnotationConfigApplicationContext(RestTemplateConfig::class.java).use { context ->
+            assertEquals(false, context.containsBean("llmRestTemplate"))
+        }
     }
 
     @Test
@@ -62,19 +59,5 @@ class RestTemplateConfigTest {
             val template = ReflectionTestUtils.getField(service, "restTemplate") as RestTemplate
             assertEquals(null, ReflectionTestUtils.getField(template.requestFactory, "proxy"))
         }
-    }
-
-    private fun assertProxy(
-        template: RestTemplate,
-        expectedType: Proxy.Type,
-        expectedHost: String,
-        expectedPort: Int
-    ) {
-        val factory = template.requestFactory as SimpleClientHttpRequestFactory
-        val proxy = ReflectionTestUtils.getField(factory, "proxy") as Proxy
-        val address = proxy.address() as InetSocketAddress
-        assertEquals(expectedType, proxy.type())
-        assertEquals(expectedHost, address.hostString)
-        assertEquals(expectedPort, address.port)
     }
 }
