@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
+import 'package:joysong_flutter/features/identity/presentation/identity_pages.dart';
 import 'package:joysong_flutter/features/identity/presentation/professional_request_pages.dart';
 
 void main() {
@@ -56,6 +58,8 @@ void main() {
     )));
     await tester.pumpAndSettle();
 
+    expect(find.text('Approve'), findsNothing);
+    expect(find.text('Reject'), findsNothing);
     await tester.tap(find.text('Force approve'));
     await tester.pumpAndSettle();
     expect(find.text('Confirm force approval'), findsOneWidget);
@@ -66,6 +70,28 @@ void main() {
 
     expect(repository.reviewForce, isTrue);
     expect(repository.reviewNote, 'Manual handling');
+  });
+
+  testWidgets(
+      'platform admin enters profile reviews without ordinary professional entries',
+      (tester) async {
+    _largeView(tester);
+    final repository = _FakeRepository(managementContext: _adminReviewContext);
+    await tester.pumpWidget(MaterialApp(
+      home: ManagementCenterPage(
+        repository: repository,
+        discoverRepository: _UnusedDiscoverRepository(),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Doctor project profile reviews'), findsOneWidget);
+    expect(find.text('Institution profile'), findsNothing);
+    expect(find.text('Apply to institution'), findsNothing);
+    await tester.tap(find.text('Doctor project profile reviews'));
+    await tester.pumpAndSettle();
+    expect(find.byType(DoctorProjectProfileReviewPage), findsOneWidget);
+    expect(find.text('Force approve'), findsOneWidget);
   });
 }
 
@@ -90,11 +116,25 @@ const _adminContext = ManagementContext(
   managedInstitutionIds: [],
   visibleInstitutionIds: [],
 );
+const _adminReviewContext = ManagementContext(
+  userId: 'admin-1',
+  platformRole: 'ADMIN',
+  activeRoles: [],
+  managedInstitutionIds: [],
+  visibleInstitutionIds: [],
+  canReviewInstitutionProjectRequests: true,
+);
 
 final class _FakeRepository implements IdentityRepository {
+  _FakeRepository({this.managementContext});
+  final ManagementContext? managementContext;
   DoctorProjectProfileUpdateDraft? submitted;
   bool? reviewForce;
   String? reviewNote;
+
+  @override
+  Future<ManagementContext> loadManagementContext() async =>
+      managementContext ?? _legalContext;
 
   @override
   Future<List<DoctorProjectProfileUpdateTarget>>
@@ -121,6 +161,11 @@ final class _FakeRepository implements IdentityRepository {
     this.reviewNote = reviewNote;
   }
 
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+final class _UnusedDiscoverRepository implements DiscoverRepository {
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

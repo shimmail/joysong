@@ -1314,6 +1314,7 @@ final class DoctorProjectProfileUpdateDraft {
     required this.consultationFee,
     required this.commissionRate,
     required this.institutionRate,
+    required this.platformRate,
     required this.notes,
   });
 
@@ -1327,6 +1328,7 @@ final class DoctorProjectProfileUpdateDraft {
   final num consultationFee;
   final num commissionRate;
   final num institutionRate;
+  final num platformRate;
   final String notes;
 
   void validate() {
@@ -1356,10 +1358,13 @@ final class DoctorProjectProfileUpdateDraft {
         throw ArgumentError('金额必须为非负且最多保留两位小数');
       }
     }
-    for (final rate in [commissionRate, institutionRate]) {
+    for (final rate in [commissionRate, institutionRate, platformRate]) {
       if (!_validDecimal(rate, 100)) {
         throw ArgumentError('分账比例必须在 0 到 100 之间且最多两位小数');
       }
+    }
+    if (commissionRate + institutionRate + platformRate > 100) {
+      throw ArgumentError('平台、机构和顾问比例合计不能超过 100%');
     }
   }
 
@@ -1470,6 +1475,11 @@ final class DoctorProjectChangeRequest {
 
   factory DoctorProjectChangeRequest.fromJson(Object? json) {
     final map = _jsonMap(json, '医生项目变更申请');
+    final requestType = _requiredText(map['requestType'], '申请类型');
+    final requiresProfileValues = requestType == 'PROFILE_UPDATE';
+    num? proposedDecimal(String field) => requiresProfileValues
+        ? _decimal(map[field])
+        : _nullableDecimal(map[field]);
     return DoctorProjectChangeRequest(
       id: _requiredText(map['id'], '申请 id'),
       doctorId: _requiredText(map['doctorId'], '医生 id'),
@@ -1479,19 +1489,19 @@ final class DoctorProjectChangeRequest {
       institutionProjectId:
           _requiredText(map['institutionProjectId'], '机构项目 id'),
       projectName: _requiredText(map['projectName'], '项目名称'),
-      requestType: _requiredText(map['requestType'], '申请类型'),
+      requestType: requestType,
       serviceDescription: map['serviceDescription']?.toString() ?? '',
-      priceSuggestion: _decimal(map['priceSuggestion']),
+      priceSuggestion: proposedDecimal('priceSuggestion'),
       notes: map['notes']?.toString() ?? '',
       serviceTags: _stringList(map['serviceTags']),
       scheduleNote: map['scheduleNote']?.toString() ?? '',
       coverImage: map['coverImage']?.toString() ?? '',
       images: _stringList(map['images']),
-      consultationFee: _decimal(map['consultationFee']),
-      commissionRate: _decimal(map['commissionRate']),
-      institutionRate: _decimal(map['institutionRate']),
-      platformRate: _decimal(map['platformRate']),
-      doctorRate: _decimal(map['doctorRate']),
+      consultationFee: proposedDecimal('consultationFee'),
+      commissionRate: proposedDecimal('commissionRate'),
+      institutionRate: proposedDecimal('institutionRate'),
+      platformRate: proposedDecimal('platformRate'),
+      doctorRate: proposedDecimal('doctorRate'),
       forceProcessed: _boolean(map['forceProcessed']),
       currentPrice: _nullableDecimal(map['currentPrice']),
       currentServiceDescription:
@@ -1517,8 +1527,8 @@ final class DoctorProjectChangeRequest {
   final String id, doctorId, doctorName, institutionId, institutionName;
   final String institutionProjectId, projectName, requestType;
   final String serviceDescription, notes, scheduleNote, coverImage;
-  final num priceSuggestion, consultationFee, commissionRate;
-  final num institutionRate, platformRate, doctorRate;
+  final num? priceSuggestion, consultationFee, commissionRate;
+  final num? institutionRate, platformRate, doctorRate;
   final List<String> serviceTags, images;
   final bool forceProcessed;
   final num? currentPrice, currentConsultationFee, currentCommissionRate;

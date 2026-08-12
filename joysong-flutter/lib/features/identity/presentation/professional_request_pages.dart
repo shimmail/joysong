@@ -1246,17 +1246,13 @@ class _DoctorProjectProfileUpdatePageState
       consultationFee: values[1]!,
       commissionRate: values[2]!,
       institutionRate: values[3]!,
+      platformRate: target.platformRate,
       notes: _notes.text,
     );
     try {
       draft.validate();
     } on ArgumentError catch (error) {
       setState(() => _error = error.message.toString());
-      return;
-    }
-    if (_derivedDoctorRate() < 0) {
-      setState(() => _error = context.localized('平台、机构和顾问比例合计不能超过 100%',
-          'Platform, institution and consultant rates cannot exceed 100%.'));
       return;
     }
     setState(() {
@@ -1419,7 +1415,7 @@ class _DoctorProjectProfileReviewPageState
                                   style:
                                       Theme.of(context).textTheme.titleSmall),
                               Text(
-                                  '${context.localized('医生级价格', 'Doctor price')}: ${request.priceSuggestion}'),
+                                  '${context.localized('医生级价格', 'Doctor price')}: ${request.priceSuggestion ?? '-'}'),
                               Text(
                                   '${context.localized('项目展示说明', 'Display description')}: ${request.serviceDescription}'),
                               Text(
@@ -1427,37 +1423,39 @@ class _DoctorProjectProfileReviewPageState
                               Text(
                                   '${context.localized('排期', 'Schedule')}: ${request.scheduleNote}'),
                               Text(
-                                  '${context.localized('面诊费', 'Consultation fee')}: ${request.consultationFee}'),
+                                  '${context.localized('面诊费', 'Consultation fee')}: ${request.consultationFee ?? '-'}'),
                               Text(
-                                  '${context.localized('医美顾问比例', 'Consultant rate')}: ${request.commissionRate}%'),
+                                  '${context.localized('医美顾问比例', 'Consultant rate')}: ${request.commissionRate ?? '-'}%'),
                               Text(
-                                  '${context.localized('机构比例', 'Institution rate')}: ${request.institutionRate}%'),
+                                  '${context.localized('机构比例', 'Institution rate')}: ${request.institutionRate ?? '-'}%'),
                               Text(
-                                  '${context.localized('平台比例（只读）', 'Platform rate (read only)')}: ${request.platformRate}%'),
+                                  '${context.localized('平台比例（只读）', 'Platform rate (read only)')}: ${request.platformRate ?? '-'}%'),
                               Text(
-                                  '${context.localized('医生净比例（推导）', 'Doctor net rate (derived)')}: ${request.doctorRate}%'),
+                                  '${context.localized('医生净比例（推导）', 'Doctor net rate (derived)')}: ${request.doctorRate ?? '-'}%'),
                               if (request.forceProcessed)
                                 Text(context.localized('已由管理员强制处理',
                                     'Force-processed by an administrator')),
                               if (request.status == 'PENDING') ...[
                                 const SizedBox(height: 12),
                                 Wrap(spacing: 8, runSpacing: 8, children: [
-                                  FilledButton(
-                                      key: Key('approve-${request.id}'),
-                                      onPressed: _submitting
-                                          ? null
-                                          : () => _review(
-                                              request, 'APPROVED', false),
-                                      child: Text(
-                                          context.localized('批准', 'Approve'))),
-                                  OutlinedButton(
-                                      key: Key('reject-${request.id}'),
-                                      onPressed: _submitting
-                                          ? null
-                                          : () => _review(
-                                              request, 'REJECTED', false),
-                                      child: Text(
-                                          context.localized('驳回', 'Reject'))),
+                                  if (!_isAdmin)
+                                    FilledButton(
+                                        key: Key('approve-${request.id}'),
+                                        onPressed: _submitting
+                                            ? null
+                                            : () => _review(
+                                                request, 'APPROVED', false),
+                                        child: Text(context.localized(
+                                            '批准', 'Approve'))),
+                                  if (!_isAdmin)
+                                    OutlinedButton(
+                                        key: Key('reject-${request.id}'),
+                                        onPressed: _submitting
+                                            ? null
+                                            : () => _review(
+                                                request, 'REJECTED', false),
+                                        child: Text(
+                                            context.localized('驳回', 'Reject'))),
                                   if (_isAdmin)
                                     FilledButton.tonal(
                                         key: Key('force-${request.id}'),

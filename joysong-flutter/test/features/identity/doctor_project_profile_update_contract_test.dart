@@ -16,6 +16,7 @@ void main() {
       consultationFee: 300,
       commissionRate: 10,
       institutionRate: 40,
+      platformRate: 10,
       notes: ' 整体调整 ',
     );
 
@@ -33,6 +34,22 @@ void main() {
       'institutionRate': 40,
       'notes': '整体调整',
     });
+    const invalidDraft = DoctorProjectProfileUpdateDraft(
+      institutionProjectId: 'ip-1',
+      priceSuggestion: 12800,
+      serviceDescription: '服务说明',
+      serviceTags: [],
+      scheduleNote: '',
+      coverImage: '',
+      images: [],
+      consultationFee: 300,
+      commissionRate: 30,
+      institutionRate: 60,
+      platformRate: 20,
+      notes: '',
+    );
+
+    expect(invalidDraft.toJson, throwsArgumentError);
   });
 
   test('request view decodes arrays, rates, and force audit fields', () {
@@ -43,6 +60,48 @@ void main() {
     expect(request.platformRate, 10);
     expect(request.doctorRate, 40);
     expect(request.forceProcessed, isTrue);
+  });
+
+  test('mixed JOIN, LEAVE and PROFILE_UPDATE requests decode by type', () {
+    final requests = [
+      DoctorProjectChangeRequest.fromJson({
+        ..._requestJson,
+        'id': 'join-1',
+        'requestType': 'JOIN',
+        'priceSuggestion': null,
+        'consultationFee': null,
+        'commissionRate': null,
+        'institutionRate': null,
+        'platformRate': null,
+        'doctorRate': null,
+      }),
+      DoctorProjectChangeRequest.fromJson({
+        ..._requestJson,
+        'id': 'leave-1',
+        'requestType': 'LEAVE',
+        'priceSuggestion': null,
+        'consultationFee': null,
+        'commissionRate': null,
+        'institutionRate': null,
+        'platformRate': null,
+        'doctorRate': null,
+      }),
+      DoctorProjectChangeRequest.fromJson(_requestJson),
+    ];
+
+    expect(requests.map((request) => request.requestType),
+        ['JOIN', 'LEAVE', 'PROFILE_UPDATE']);
+    expect(requests.take(2).every((request) => request.platformRate == null),
+        isTrue);
+    expect(requests.last.currentPlatformRate, 10);
+    expect(requests.last.currentDoctorRate, 45);
+    expect(
+      () => DoctorProjectChangeRequest.fromJson({
+        ..._requestJson,
+        'platformRate': null,
+      }),
+      throwsFormatException,
+    );
   });
 
   test(
@@ -61,6 +120,7 @@ void main() {
       consultationFee: 300,
       commissionRate: 10,
       institutionRate: 40,
+      platformRate: 10,
       notes: '',
     );
 

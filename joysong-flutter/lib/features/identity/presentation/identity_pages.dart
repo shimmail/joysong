@@ -458,12 +458,10 @@ class _ManagementCapabilities extends StatelessWidget {
   @override
   Widget build(BuildContext buildContext) {
     final isAdmin = context.platformRole == 'ADMIN';
-    final isLegalRepresentative = isAdmin ||
-        context.activeRoles.contains(
-          IdentityRoleType.institutionLegalRepresentative.code,
-        );
-    final isDoctor =
-        isAdmin || context.activeRoles.contains(IdentityRoleType.doctor.code);
+    final isLegalRepresentative = context.activeRoles.contains(
+      IdentityRoleType.institutionLegalRepresentative.code,
+    );
+    final isDoctor = context.activeRoles.contains(IdentityRoleType.doctor.code);
     final isConsultant =
         context.activeRoles.contains(IdentityRoleType.consultant.code);
     final groups = <({
@@ -527,8 +525,29 @@ class _ManagementCapabilities extends StatelessWidget {
               '医生项目资料审核',
               'Doctor project profile reviews',
             ),
-            enabled: isLegalRepresentative &&
+            enabled: !isAdmin &&
+                isLegalRepresentative &&
                 context.canReviewInstitutionProjectRequests,
+            action: _ManagementAction.doctorProjectProfileReviews,
+          ),
+        ],
+      ),
+      (
+        icon: Icons.admin_panel_settings_outlined,
+        title: buildContext.localized('平台管理', 'Platform administration'),
+        membershipRequestType: null,
+        emptyText: buildContext.localized(
+          '暂无平台管理权限',
+          'No platform administration access',
+        ),
+        items: [
+          (
+            icon: Icons.compare_arrows_outlined,
+            label: buildContext.localized(
+              '医生项目资料审核',
+              'Doctor project profile reviews',
+            ),
+            enabled: isAdmin && context.canReviewInstitutionProjectRequests,
             action: _ManagementAction.doctorProjectProfileReviews,
           ),
         ],
