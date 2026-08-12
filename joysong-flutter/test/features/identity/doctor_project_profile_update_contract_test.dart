@@ -81,6 +81,18 @@ void main() {
       ),
     ]);
   });
+
+  test('repository loads the server-owned current profile update target',
+      () async {
+    final client = _RecordingApiClient();
+    final targets = await ApiIdentityRepository(client)
+        .listDoctorProjectProfileUpdateTargets();
+
+    expect(targets.single.currentPrice, 12000);
+    expect(targets.single.platformRate, 10);
+    expect(client.requests.single.path,
+        '/admin/institution-project-requests/profile-update-targets');
+  });
 }
 
 const _requestJson = <String, Object?>{
@@ -105,6 +117,17 @@ const _requestJson = <String, Object?>{
   'platformRate': 10,
   'doctorRate': 40,
   'forceProcessed': true,
+  'currentPrice': 12000,
+  'currentServiceDescription': '当前说明',
+  'currentServiceTags': ['当前标签'],
+  'currentScheduleNote': '周二',
+  'currentCoverImage': 'old-cover.jpg',
+  'currentImages': ['old.jpg'],
+  'currentConsultationFee': 200,
+  'currentCommissionRate': 5,
+  'currentInstitutionRate': 40,
+  'currentPlatformRate': 10,
+  'currentDoctorRate': 45,
   'status': 'PENDING',
   'submittedBy': 'user-1',
   'reviewedBy': null,
@@ -115,9 +138,35 @@ const _requestJson = <String, Object?>{
   'updatedAt': '2026-08-12T08:00:00',
 };
 
+const _targetJson = <String, Object?>{
+  'institutionProjectId': 'ip-1',
+  'projectName': '项目一',
+  'institutionId': 'institution-1',
+  'institutionName': '娇颜颂',
+  'currentPrice': 12000,
+  'serviceDescription': '当前说明',
+  'serviceTags': ['自然'],
+  'scheduleNote': '',
+  'coverImage': '',
+  'images': <String>[],
+  'consultationFee': 200,
+  'commissionRate': 10,
+  'institutionRate': 40,
+  'platformRate': 10,
+  'doctorRate': 40,
+};
+
 final class _RecordingApiClient extends ApiClient {
   _RecordingApiClient() : super(apiRoot: Uri.parse('http://localhost/api/'));
   final List<_Request> requests = [];
+
+  @override
+  Future<T?> get<T>(String path,
+      {Map<String, Object?> query = const {},
+      required T Function(Object? json) decodeData}) async {
+    requests.add(_Request('GET', path, null));
+    return decodeData([_targetJson]);
+  }
 
   @override
   Future<T?> post<T>(String path,

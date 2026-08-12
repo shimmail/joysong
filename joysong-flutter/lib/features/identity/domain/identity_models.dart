@@ -1382,6 +1382,54 @@ final class DoctorProjectProfileUpdateDraft {
   }
 }
 
+final class DoctorProjectProfileUpdateTarget {
+  const DoctorProjectProfileUpdateTarget({
+    required this.institutionProjectId,
+    required this.projectName,
+    required this.institutionId,
+    required this.institutionName,
+    required this.currentPrice,
+    required this.serviceDescription,
+    required this.serviceTags,
+    required this.scheduleNote,
+    required this.coverImage,
+    required this.images,
+    required this.consultationFee,
+    required this.commissionRate,
+    required this.institutionRate,
+    required this.platformRate,
+    required this.doctorRate,
+  });
+
+  factory DoctorProjectProfileUpdateTarget.fromJson(Object? json) {
+    final map = _jsonMap(json, '医生项目资料修改目标');
+    return DoctorProjectProfileUpdateTarget(
+      institutionProjectId:
+          _requiredText(map['institutionProjectId'], '机构项目 id'),
+      projectName: _requiredText(map['projectName'], '项目名称'),
+      institutionId: _requiredText(map['institutionId'], '机构 id'),
+      institutionName: _requiredText(map['institutionName'], '机构名称'),
+      currentPrice: _decimal(map['currentPrice']),
+      serviceDescription: map['serviceDescription']?.toString() ?? '',
+      serviceTags: _stringList(map['serviceTags']),
+      scheduleNote: map['scheduleNote']?.toString() ?? '',
+      coverImage: map['coverImage']?.toString() ?? '',
+      images: _stringList(map['images']),
+      consultationFee: _decimal(map['consultationFee']),
+      commissionRate: _decimal(map['commissionRate']),
+      institutionRate: _decimal(map['institutionRate']),
+      platformRate: _decimal(map['platformRate']),
+      doctorRate: _decimal(map['doctorRate']),
+    );
+  }
+
+  final String institutionProjectId, projectName, institutionId;
+  final String institutionName, serviceDescription, scheduleNote, coverImage;
+  final num currentPrice, consultationFee, commissionRate, institutionRate;
+  final num platformRate, doctorRate;
+  final List<String> serviceTags, images;
+}
+
 final class DoctorProjectChangeRequest {
   const DoctorProjectChangeRequest({
     required this.id,
@@ -1405,6 +1453,17 @@ final class DoctorProjectChangeRequest {
     required this.platformRate,
     required this.doctorRate,
     required this.forceProcessed,
+    this.currentPrice,
+    this.currentServiceDescription,
+    this.currentServiceTags,
+    this.currentScheduleNote,
+    this.currentCoverImage,
+    this.currentImages,
+    this.currentConsultationFee,
+    this.currentCommissionRate,
+    this.currentInstitutionRate,
+    this.currentPlatformRate,
+    this.currentDoctorRate,
     required this.status,
     required this.reviewNote,
   });
@@ -1434,6 +1493,22 @@ final class DoctorProjectChangeRequest {
       platformRate: _decimal(map['platformRate']),
       doctorRate: _decimal(map['doctorRate']),
       forceProcessed: _boolean(map['forceProcessed']),
+      currentPrice: _nullableDecimal(map['currentPrice']),
+      currentServiceDescription:
+          _nullableText(map['currentServiceDescription']),
+      currentServiceTags: map['currentServiceTags'] is List
+          ? _stringList(map['currentServiceTags'])
+          : null,
+      currentScheduleNote: _nullableText(map['currentScheduleNote']),
+      currentCoverImage: _nullableText(map['currentCoverImage']),
+      currentImages: map['currentImages'] is List
+          ? _stringList(map['currentImages'])
+          : null,
+      currentConsultationFee: _nullableDecimal(map['currentConsultationFee']),
+      currentCommissionRate: _nullableDecimal(map['currentCommissionRate']),
+      currentInstitutionRate: _nullableDecimal(map['currentInstitutionRate']),
+      currentPlatformRate: _nullableDecimal(map['currentPlatformRate']),
+      currentDoctorRate: _nullableDecimal(map['currentDoctorRate']),
       status: _requiredText(map['status'], '申请状态'),
       reviewNote: map['reviewNote']?.toString() ?? '',
     );
@@ -1446,6 +1521,11 @@ final class DoctorProjectChangeRequest {
   final num institutionRate, platformRate, doctorRate;
   final List<String> serviceTags, images;
   final bool forceProcessed;
+  final num? currentPrice, currentConsultationFee, currentCommissionRate;
+  final num? currentInstitutionRate, currentPlatformRate, currentDoctorRate;
+  final String? currentServiceDescription, currentScheduleNote;
+  final String? currentCoverImage;
+  final List<String>? currentServiceTags, currentImages;
   final String status, reviewNote;
 }
 

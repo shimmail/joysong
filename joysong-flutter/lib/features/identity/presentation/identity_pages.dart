@@ -521,6 +521,16 @@ class _ManagementCapabilities extends StatelessWidget {
                 context.canReviewInstitutionProjectRequests,
             action: _ManagementAction.institutionProjectJoinReviews,
           ),
+          (
+            icon: Icons.compare_arrows_outlined,
+            label: buildContext.localized(
+              '医生项目资料审核',
+              'Doctor project profile reviews',
+            ),
+            enabled: isLegalRepresentative &&
+                context.canReviewInstitutionProjectRequests,
+            action: _ManagementAction.doctorProjectProfileReviews,
+          ),
         ],
       ),
       (
@@ -572,6 +582,15 @@ class _ManagementCapabilities extends StatelessWidget {
             ),
             enabled: isDoctor && context.canSubmitInstitutionProjectRequests,
             action: _ManagementAction.institutionProjectJoinRequest,
+          ),
+          (
+            icon: Icons.edit_note_outlined,
+            label: buildContext.localized(
+              '修改本人项目资料',
+              'Update my project profile',
+            ),
+            enabled: isDoctor && context.canSubmitInstitutionProjectRequests,
+            action: _ManagementAction.doctorProjectProfileUpdate,
           ),
           (
             icon: Icons.article_outlined,
@@ -766,12 +785,30 @@ class _ManagementCapabilities extends StatelessWidget {
       ));
       return;
     }
+    if (action == _ManagementAction.doctorProjectProfileUpdate) {
+      Navigator.of(context).push<void>(MaterialPageRoute(
+        builder: (_) => DoctorProjectProfileUpdatePage(
+          repository: repository,
+          pickAndUploadImage: doctorImagePicker,
+        ),
+      ));
+      return;
+    }
     if (action == _ManagementAction.institutionProjectJoinReviews) {
       Navigator.of(context).push<void>(MaterialPageRoute(
         builder: (_) => InstitutionProjectJoinRequestsPage(
           repository: repository,
           context: this.context,
           reviewMode: true,
+        ),
+      ));
+      return;
+    }
+    if (action == _ManagementAction.doctorProjectProfileReviews) {
+      Navigator.of(context).push<void>(MaterialPageRoute(
+        builder: (_) => DoctorProjectProfileReviewPage(
+          repository: repository,
+          context: this.context,
         ),
       ));
       return;
@@ -792,11 +829,13 @@ enum _ManagementAction {
   membershipReviews,
   institutionProjectReviews,
   institutionProjectJoinReviews,
+  doctorProjectProfileReviews,
   doctorProfile,
   applyMembership,
   platformProjectRequest,
   institutionProjectRequest,
   institutionProjectJoinRequest,
+  doctorProjectProfileUpdate,
   consultantMembership,
   consultantProjects,
   unavailable,

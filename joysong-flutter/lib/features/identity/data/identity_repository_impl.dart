@@ -460,6 +460,30 @@ final class ApiIdentityRepository implements IdentityRepository {
   }
 
   @override
+  Future<List<DoctorProjectProfileUpdateTarget>>
+      listDoctorProjectProfileUpdateTargets() async {
+    return await _apiClient.get<List<DoctorProjectProfileUpdateTarget>>(
+          '/admin/institution-project-requests/profile-update-targets',
+          decodeData: (json) => _objectList(json)
+              .map(DoctorProjectProfileUpdateTarget.fromJson)
+              .toList(growable: false),
+        ) ??
+        const [];
+  }
+
+  @override
+  Future<List<DoctorProjectChangeRequest>>
+      listDoctorProjectChangeRequests() async {
+    return await _apiClient.get<List<DoctorProjectChangeRequest>>(
+          '/admin/institution-project-requests',
+          decodeData: (json) => _objectList(json)
+              .map(DoctorProjectChangeRequest.fromJson)
+              .toList(growable: false),
+        ) ??
+        const [];
+  }
+
+  @override
   Future<void> reviewDoctorProjectChangeRequest({
     required String id,
     required String decision,

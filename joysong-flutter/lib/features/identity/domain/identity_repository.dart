@@ -120,6 +120,11 @@ abstract interface class IdentityRepository {
     DoctorProjectProfileUpdateDraft draft,
   );
 
+  Future<List<DoctorProjectProfileUpdateTarget>>
+      listDoctorProjectProfileUpdateTargets();
+
+  Future<List<DoctorProjectChangeRequest>> listDoctorProjectChangeRequests();
+
   Future<void> reviewDoctorProjectChangeRequest({
     required String id,
     required String decision,
