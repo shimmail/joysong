@@ -12,7 +12,7 @@ final class ApiDiscoverRepository
     this._apiClient, {
     PublicMediaUrlResolver? mediaUrlResolver,
   }) : _mediaUrlResolver =
-           mediaUrlResolver ?? ApiPublicMediaUrlResolver(_apiClient.apiRoot);
+            mediaUrlResolver ?? ApiPublicMediaUrlResolver(_apiClient.apiRoot);
 
   final ApiClient _apiClient;
   final PublicMediaUrlResolver _mediaUrlResolver;
@@ -52,8 +52,7 @@ final class ApiDiscoverRepository
       final items = groups.expand((group) => group.items).take(limit).toList();
       return DiscoverPageResult(items: items, hasMore: false);
     }
-    final data =
-        await _apiClient.get<List<DiscoverItem>>(
+    final data = await _apiClient.get<List<DiscoverItem>>(
           '/discover/${type.pathSegment}',
           query: {
             'offset': offset,
@@ -179,10 +178,29 @@ final class ApiDiscoverRepository
   Future<List<DiscoverItem>> loadVisibleDoctorProjects(
     String institutionId,
     String doctorId,
-  ) => _catalogList(
-    '/admin/institutions/${institutionId.trim()}/doctors/${doctorId.trim()}/projects',
-    DiscoverContentType.project,
-  );
+  ) async {
+    final normalizedInstitutionId = institutionId.trim();
+    final normalizedDoctorId = doctorId.trim();
+    final projects = await loadVisibleInstitutionProjects();
+    return projects.where((item) {
+      final institution = item.raw['institution'];
+      final itemInstitutionId = (item.raw['institutionId'] ??
+              (institution is Map ? institution['id'] : null))
+          ?.toString()
+          .trim();
+      final doctors = item.raw['doctors'];
+      final doctorIds = doctors is List
+          ? doctors
+              .map((doctor) => doctor is Map
+                  ? (doctor['id'] ?? doctor['doctorId'])?.toString().trim()
+                  : doctor?.toString().trim())
+              .whereType<String>()
+              .toSet()
+          : const <String>{};
+      return itemInstitutionId == normalizedInstitutionId &&
+          doctorIds.contains(normalizedDoctorId);
+    }).toList(growable: false);
+  }
 
   @override
   Future<List<DiscoverItem>> loadVisibleInstitutionProjects() =>

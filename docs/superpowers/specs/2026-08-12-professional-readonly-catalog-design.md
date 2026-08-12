@@ -11,7 +11,6 @@ The app consumes these existing compatibility endpoints exactly as deployed:
 - `GET /api/admin/institutions`
 - `GET /api/admin/institutions/{id}`
 - `GET /api/admin/institutions/{id}/doctors`
-- `GET /api/admin/institutions/{id}/doctors/{doctorId}/projects`
 - `GET /api/admin/institution-projects`
 - `GET /api/admin/projects`
 - `POST /api/admin/institution-project-requests/{id}/withdraw`
@@ -37,7 +36,7 @@ The navigation flow is:
 1. Context-gated workspace entry loads visible institutions and catalog projects through existing GET methods.
 2. Search filters the already authorized returned set by localized institution/project/doctor display fields. It does not issue arbitrary object probes.
 3. Institution selection loads only `/institutions/{id}` and `/institutions/{id}/doctors` for an id returned by the visible list.
-4. Doctor selection loads `/institutions/{id}/doctors/{doctorId}/projects` only when both ids came from the current visible hierarchy.
+4. Doctor selection filters the already-visible institution-project response by its real `institutionId` and `doctors[].id` fields; no synthetic doctor-project route is called.
 5. Project selection reuses the existing discover project detail.
 
 An HTTP 403 or 404 is presented as an unavailable/error state with retry; the client does not distinguish “not owned” from “not found,” preserving object-level privacy. Empty collections have role-neutral localized copy. A retry repeats only the failed GET.

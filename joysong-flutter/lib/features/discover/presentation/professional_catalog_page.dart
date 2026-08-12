@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
+import 'package:joysong_flutter/features/discover/presentation/catalog_institution_detail_view.dart';
+import 'package:joysong_flutter/features/discover/presentation/catalog_project_detail_view.dart';
 
 enum ProfessionalCatalogScope { doctor, legalRepresentative }
 
@@ -158,10 +160,7 @@ class _ProfessionalCatalogPageState extends State<ProfessionalCatalogPage> {
         MaterialPageRoute(
           builder: (_) => Scaffold(
             appBar: AppBar(title: Text(item.title)),
-            body: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(item.subtitle.isEmpty ? item.title : item.subtitle),
-            ),
+            body: CatalogProjectDetailView(item: item),
           ),
         ),
       );
@@ -236,31 +235,34 @@ class _InstitutionCatalogPageState extends State<_InstitutionCatalogPage> {
                       ],
                     ),
                   )
-                : ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      if (_doctors.isEmpty)
-                        Text(
-                            context.localized('暂无可见医生', 'No visible doctors.')),
-                      for (final doctor in _doctors)
-                        Card(
-                          child: ListTile(
-                            title: Text(doctor.title),
-                            subtitle: Text(doctor.subtitle),
-                            trailing: const Icon(Icons.chevron_right),
-                            onTap: () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => _DoctorProjectsPage(
-                                  repository: widget.repository,
-                                  institutionId: widget.institution.id,
-                                  doctor: doctor,
+                : Column(children: [
+                    CatalogInstitutionDetailView(item: widget.institution),
+                    Expanded(
+                        child: ListView(
+                            padding: const EdgeInsets.all(16),
+                            children: [
+                          if (_doctors.isEmpty)
+                            Text(context.localized(
+                                '暂无可见医生', 'No visible doctors.')),
+                          for (final doctor in _doctors)
+                            Card(
+                              child: ListTile(
+                                title: Text(doctor.title),
+                                subtitle: Text(doctor.subtitle),
+                                trailing: const Icon(Icons.chevron_right),
+                                onTap: () => Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => _DoctorProjectsPage(
+                                      repository: widget.repository,
+                                      institutionId: widget.institution.id,
+                                      doctor: doctor,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                        ),
-                    ],
-                  ),
+                        ])),
+                  ]),
       );
 }
 
@@ -337,6 +339,14 @@ class _DoctorProjectsPageState extends State<_DoctorProjectsPage> {
                           child: ListTile(
                             title: Text(item.title),
                             subtitle: Text(item.subtitle),
+                            onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => Scaffold(
+                                  appBar: AppBar(title: Text(item.title)),
+                                  body: CatalogProjectDetailView(item: item),
+                                ),
+                              ),
+                            ),
                           ),
                         ),
                     ],

@@ -1062,8 +1062,14 @@ class _DoctorProjectProfileUpdatePageState
       _error = null;
     });
     try {
-      final values = await Future.wait([
-        widget.repository.listDoctorProjectProfileUpdateTargets(),
+      Object? targetFailure;
+      final values = await Future.wait<Object>([
+        widget.repository.listDoctorProjectProfileUpdateTargets().catchError(
+          (Object error) {
+            targetFailure = error;
+            return const <DoctorProjectProfileUpdateTarget>[];
+          },
+        ),
         widget.repository.listDoctorProjectChangeRequests(),
       ]);
       final targets = values[0] as List<DoctorProjectProfileUpdateTarget>;
@@ -1072,6 +1078,10 @@ class _DoctorProjectProfileUpdatePageState
         _targets = targets;
         _requests = values[1] as List<DoctorProjectChangeRequest>;
         _loading = false;
+        if (targetFailure != null) {
+          _error = context.localized('可修改项目加载失败，请重试',
+              'Failed to load editable projects. Please retry.');
+        }
       });
       if (targets.length == 1) _select(targets.single);
     } catch (_) {
@@ -1204,23 +1214,24 @@ class _DoctorProjectProfileUpdatePageState
                               ? 'Submitting…'
                               : 'Submit profile update request'))),
                   const SizedBox(height: 16),
-                  Text(context.localized('我的项目申请', 'My project requests'),
-                      style: Theme.of(context).textTheme.titleMedium),
-                  for (final request in _requests)
-                    ListTile(
-                      title: Text(
-                          '${request.institutionName} · ${request.projectName}'),
-                      subtitle: Text(request.status),
-                      trailing: _canWithdraw(request)
-                          ? TextButton(
-                              key: Key('withdraw-${request.id}'),
-                              onPressed:
-                                  _saving ? null : () => _withdraw(request),
-                              child: Text(context.localized('撤回', 'Withdraw')),
-                            )
-                          : null,
-                    ),
                 ],
+                const SizedBox(height: 16),
+                Text(context.localized('我的项目申请', 'My project requests'),
+                    style: Theme.of(context).textTheme.titleMedium),
+                for (final request in _requests)
+                  ListTile(
+                    title: Text(
+                        '${request.institutionName} · ${request.projectName}'),
+                    subtitle: Text(request.status),
+                    trailing: _canWithdraw(request)
+                        ? TextButton(
+                            key: Key('withdraw-${request.id}'),
+                            onPressed:
+                                _saving ? null : () => _withdraw(request),
+                            child: Text(context.localized('撤回', 'Withdraw')),
+                          )
+                        : null,
+                  ),
               ]),
       );
 
