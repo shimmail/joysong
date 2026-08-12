@@ -16,6 +16,34 @@ import java.math.BigDecimal
 @Testcontainers
 class DoctorProjectProfileUpdateMigrationTest {
     @Test
+    fun `legacy V12 schema is repaired before V17`() {
+        DoctorProfileMigrationMySqlContainer("mysql:8.0.39")
+            .withDatabaseName("myapp_worktree_legacy_v12_migration")
+            .withTmpFs(mapOf("/var/lib/mysql" to "rw"))
+            .use { legacyMysql ->
+                legacyMysql.start()
+                val jdbc = JdbcTemplate(DriverManagerDataSource(legacyMysql.jdbcUrl, legacyMysql.username, legacyMysql.password))
+                val legacyFlyway = { target: String? ->
+                    val config = Flyway.configure().dataSource(legacyMysql.jdbcUrl, legacyMysql.username, legacyMysql.password)
+                        .locations("classpath:db/migration")
+                    if (target != null) config.target(target)
+                    config.load()
+                }
+                legacyFlyway("16").migrate()
+                jdbc.execute("ALTER TABLE doctor_project_change_requests DROP CHECK chk_dpcr_price_suggestion")
+                jdbc.execute("ALTER TABLE doctor_project_change_requests DROP COLUMN notes, DROP COLUMN price_suggestion")
+                jdbc.execute("DROP TABLE professional_project_requests")
+                jdbc.execute("ALTER TABLE doctor_project_change_requests DROP CHECK chk_dpcr_status, ADD CONSTRAINT chk_dpcr_status CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'WITHDRAWN'))")
+
+                legacyFlyway(null).migrate()
+
+                assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='doctor_project_change_requests' AND column_name='price_suggestion'", Int::class.java))
+                assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='professional_project_requests'", Int::class.java))
+                assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.check_constraints WHERE constraint_schema=DATABASE() AND constraint_name='chk_dpcr_status' AND check_clause LIKE '%CHANGES_REQUESTED%'", Int::class.java))
+            }
+    }
+
+    @Test
     fun `pre V17 profile update history is backfilled before V19 constraints`() {
         val jdbc = JdbcTemplate(DriverManagerDataSource(mysql.jdbcUrl, mysql.username, mysql.password))
         flyway("15").migrate()

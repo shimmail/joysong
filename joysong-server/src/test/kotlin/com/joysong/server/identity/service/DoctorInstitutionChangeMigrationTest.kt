@@ -17,13 +17,29 @@ import java.time.LocalDateTime
 class DoctorInstitutionChangeMigrationTest {
 
     @Test
+    fun `V16 repairs doctor project price after merged V12 drift`() {
+        val migration = requireNotNull(
+            javaClass.getResource("/db/migration/V16__repair_doctor_project_price.sql")
+        ).readText().replace(Regex("\\s+"), " ").trim()
+
+        assertContains(migration, "information_schema.columns")
+        assertContains(migration, "ALTER TABLE doctor_projects ADD COLUMN price DECIMAL(10, 2) NULL")
+        assertContains(migration, "SET dp.price = ip.price")
+        assertContains(migration, "MODIFY COLUMN price DECIMAL(10, 2) NOT NULL")
+        assertContains(migration, "CHECK (price >= 0)")
+    }
+
+    @Test
     fun `V13 migration declares the doctor institution request ledger contract`() {
         val migration = requireNotNull(
             javaClass.getResource("/db/migration/V13__add_doctor_institution_change_requests.sql")
         ).readText()
         val normalized = migration.replace(Regex("\\s+"), " ").trim()
 
-        assertContains(normalized, "CREATE TABLE doctor_institution_change_requests")
+        assertContains(normalized, "CREATE TABLE IF NOT EXISTS doctor_institution_change_requests")
+        assertContains(normalized, "information_schema.columns")
+        assertContains(normalized, "ALTER TABLE doctor_institutions ADD COLUMN request_note")
+        assertContains(normalized, "ALTER TABLE doctor_institutions ADD COLUMN review_note")
         assertContains(normalized, "action VARCHAR(20) NOT NULL")
         assertContains(normalized, "status VARCHAR(20) NOT NULL DEFAULT 'PENDING'")
         assertContains(normalized, "action IN ('JOIN', 'LEAVE')")
