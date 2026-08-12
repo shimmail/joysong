@@ -2128,6 +2128,141 @@ Authorization: Bearer <token>
 
 ---
 
+## 医生项目资料与价格变更申请 `/api/admin/institution-project-requests`
+
+> `/api/admin/**` 是历史路径前缀。本节的提交与本人查询能力面向 `ACTIVE DOCTOR`，本机构审核面向机构法人；平台管理员可查看全量并审核或强制处理。所有响应继续使用 `{ "code": 200, "message": "success", "data": ... }` 包装。
+
+### POST /api/admin/institution-project-requests（`PROFILE_UPDATE`）
+
+医生申请完整替换本人在指定机构项目下的医生级价格、展示资料、面诊费与分账参数。请求必须提交以下 **exact 12 个 JSON 键**，不得缺失、为 `null`（三个金额/比例字段除 Kotlin 类型可空外，`PROFILE_UPDATE` 业务校验仍要求非 null）或携带额外业务字段：
+
+| JSON 字段 | Kotlin DTO | 类型 | 规则 |
+|---|---|---|---|
+| `institutionProjectId` | `institutionProjectId` | string | 必填；目标机构项目必须存在且未删除 |
+| `requestType` | `requestType` | string | 固定 `PROFILE_UPDATE` |
+| `serviceDescription` | `serviceDescription` | string | 去首尾空白后非空，最长 5000 |
+| `priceSuggestion` | `priceSuggestion` | decimal | 必填，`0..99999999.99`，最多 2 位小数；批准后写入本人 `doctor_projects.price` |
+| `notes` | `notes` | string | 可空字符串，最长 2000 |
+| `serviceTags` | `serviceTags` | string[] | JSON 数组，最多 20 项；每项非空且最长 100 |
+| `scheduleNote` | `scheduleNote` | string | 可空字符串，最长 500 |
+| `coverImage` | `coverImage` | string | 可空字符串，最长 500 |
+| `images` | `images` | string[] | JSON 数组，最多 20 项；每项 URL/存储值最长 500 |
+| `consultationFee` | `consultationFee` | decimal | 必填，`0..99999999.99`，最多 2 位小数 |
+| `commissionRate` | `commissionRate` | decimal | 必填，`0..100`，最多 2 位小数；字段名保留兼容，语义为**顾问分账比例** |
+| `institutionRate` | `institutionRate` | decimal | 必填，`0..100`，最多 2 位小数；语义为**机构分账比例** |
+
+请求示例：
+
+```json
+{
+  "institutionProjectId": "f0000001-0000-4000-8000-000000000001",
+  "requestType": "PROFILE_UPDATE",
+  "serviceDescription": "由本人提供术前评估、治疗及复诊服务",
+  "priceSuggestion": 3680.00,
+  "notes": "更新项目展示与分账参数",
+  "serviceTags": ["自然塑形", "精细注射"],
+  "scheduleNote": "周一至周五需提前预约",
+  "coverImage": "https://cdn.example.com/doctor-project/cover.webp",
+  "images": ["https://cdn.example.com/doctor-project/1.webp"],
+  "consultationFee": 200.00,
+  "commissionRate": 8.00,
+  "institutionRate": 25.00
+}
+```
+
+分账规则：`platformRate` 由服务端运行配置提供，医生、法人均不得提交或修改；`doctorRate` 也不在请求中提交，由服务端按 `100 - platformRate - institutionRate - commissionRate` 推导。四方比例合计必须为 100%，推导出的医生净比例不得小于 0。这里 `commissionRate` 是顾问率，不是医生率或平台率。
+
+对象边界与并发规则：
+
+- 服务端从认证上下文取得 `doctorId`，客户端不得提交 `doctorId`；目标必须是本人已经加入的 `(doctorId, institutionProjectId)` 复合键，并且医生与目标机构具有有效执业关系。
+- 同一复合键同时只能有一条 `PENDING` 申请；重复提交返回 409。
+- 提交时记录 `doctor_projects.updated_at` 以及现有分账配置的 `id/updated_at` 作为不可由客户端传入的基线。法人普通批准时若医生项目、分账配置或有效执业关系已变化，则返回 409，不覆盖新数据。
+- 申请本身只进入 `PENDING`，不会提前改动生效表。法人批准时在一个事务中锁定并同时更新本人 `doctor_projects` 与本人 `doctor_institution_project_configs`；任一步失败全部回滚。
+- 数据定位始终使用 `(doctorId, institutionProjectId)`，不会修改同一机构项目下其他医生的价格、展示资料、面诊费或分账。
+
+成功响应的 `data` 是 `DoctorProjectChangeView`，固定字段如下：
+
+```json
+{
+  "id": "request-uuid",
+  "doctorId": "doctor-uuid",
+  "doctorName": "王医生",
+  "institutionId": "institution-uuid",
+  "institutionName": "示例机构",
+  "institutionProjectId": "institution-project-uuid",
+  "projectName": "玻尿酸填充",
+  "requestType": "PROFILE_UPDATE",
+  "serviceDescription": "由本人提供术前评估、治疗及复诊服务",
+  "priceSuggestion": 3680.00,
+  "notes": "更新项目展示与分账参数",
+  "serviceTags": ["自然塑形", "精细注射"],
+  "scheduleNote": "周一至周五需提前预约",
+  "coverImage": "https://cdn.example.com/doctor-project/cover.webp",
+  "images": ["https://cdn.example.com/doctor-project/1.webp"],
+  "consultationFee": 200.00,
+  "commissionRate": 8.00,
+  "institutionRate": 25.00,
+  "platformRate": 10.00,
+  "doctorRate": 57.00,
+  "forceProcessed": false,
+  "status": "PENDING",
+  "submittedBy": "user-uuid",
+  "reviewedBy": null,
+  "reviewerName": null,
+  "reviewNote": "",
+  "submittedAt": "2026-08-12T10:00:00",
+  "reviewedAt": null,
+  "updatedAt": "2026-08-12T10:00:00"
+}
+```
+
+### POST /api/admin/institution-project-requests/{id}/review
+
+```json
+{
+  "decision": "APPROVED",
+  "reviewNote": "同意调整",
+  "force": false
+}
+```
+
+- `decision` 只能为 `APPROVED`、`REJECTED`、`CHANGES_REQUESTED`；后两者必须填写 `reviewNote`。
+- `force` 键必须显式提交且不可为 `null`。机构法人只能审核自己 `managedInstitutionIds` 内的申请，且只能使用 `force: false`；`APPROVED` 时执行上述基线校验与原子生效。
+- 只有平台管理员可以使用 `force: true`；此时 `reviewNote` 必填。强制批准会跳过有效执业关系和两组基线一致性校验，但仍锁定并原子更新同一医生复合键、执行金额/比例校验，并通过 `reviewedBy`、`reviewNote`、`reviewedAt`、`forceProcessed: true` 留下审计记录。
+- 已非 `PENDING` 或并发已处理返回 409。`REJECTED`/`CHANGES_REQUESTED` 只更新申请状态，不改生效数据。
+
+相关接口：`GET /api/admin/institution-project-requests` 按角色返回本人、本机构或管理员全量申请；`POST /api/admin/institution-project-requests/{id}/withdraw` 允许医生撤回本人提交且仍为 `PENDING` 的申请（管理员也可撤回）。
+
+错误响应均采用真实 HTTP 状态与同值 envelope `code`：400（字段、金额、比例或审核参数不合法）、403（非已认证医生、越权机构、非法强制处理）、409（重复待审、基线变化、已处理或并发冲突）、500（服务端异常）。
+
+### GET /api/admin/institution-project-requests/profile-update-targets
+
+已认证医生读取本人当前可申请修改的医生级机构项目基线。无查询参数；服务端只返回当前医生已有 `doctor_projects`、目标机构项目有效、机构/平台项目未删除且医生机构关系为 `APPROVED`、未撤销、未删除的记录。非已认证医生返回 403；没有合格目标时返回 200 空数组。该读取不授予对其他医生或机构项目主数据的访问权。
+
+每个 `DoctorProjectProfileUpdateTargetView` 固定包含 15 个字段：
+
+```json
+{
+  "institutionProjectId": "institution-project-uuid",
+  "projectName": "玻尿酸填充",
+  "institutionId": "institution-uuid",
+  "institutionName": "示例机构",
+  "currentPrice": 3680.00,
+  "serviceDescription": "由本人提供术前评估、治疗及复诊服务",
+  "serviceTags": ["自然塑形", "精细注射"],
+  "scheduleNote": "周一至周五需提前预约",
+  "coverImage": "https://cdn.example.com/doctor-project/cover.webp",
+  "images": ["https://cdn.example.com/doctor-project/1.webp"],
+  "consultationFee": 200.00,
+  "commissionRate": 8.00,
+  "institutionRate": 25.00,
+  "platformRate": 10.00,
+  "doctorRate": 57.00
+}
+```
+
+`currentPrice` 必为 decimal；展示文本提供安全空字符串，`serviceTags`/`images` 始终为 JSON 数组。尚无有效医生分账配置时，`consultationFee`、`commissionRate`、`institutionRate`、`platformRate`、`doctorRate` 均可为 `null`；只有顾问率与机构率同时存在时才计算平台率和医生净比例。Flutter 应使用本接口预填 `PROFILE_UPDATE` 表单，不得从机构级项目目录猜测医生本人价格或分账基线。
+
 ## 十二、管理后台 `/api/admin`
 
 > 原则上需要 Bearer Token + `ROLE_ADMIN` 角色。迁移期间，仅本章明确标注为“专业端兼容只读”的 GET 路径允许已认证专业用户访问，服务端仍按 `visibleInstitutionIds` 做对象级过滤；所有机构写操作和平台全量 CRUD 均仅限 `ADMIN`。
@@ -2852,6 +2987,11 @@ Authorization: Bearer <token>
 | 管理（迁移期兼容只读） | GET | `/api/admin/institutions/{id}/doctors` | ADMIN 全量；已认证专业用户仅 `visibleInstitutionIds` |
 | 管理（迁移期兼容只读） | GET | `/api/admin/institutions/{id}/projects` | ADMIN 全量；已认证专业用户仅 `visibleInstitutionIds` |
 | 管理（迁移期兼容只读） | GET | `/api/admin/institution-projects` | ADMIN 全量；已认证专业用户仅 `visibleInstitutionIds` |
+| 医生项目资料修改基线 | GET | `/api/admin/institution-project-requests/profile-update-targets` | ACTIVE DOCTOR（仅本人有效医生项目） |
+| 医生项目变更 | GET | `/api/admin/institution-project-requests` | ACTIVE DOCTOR 本人；法人本机构；ADMIN 全量 |
+| 医生项目变更 | POST | `/api/admin/institution-project-requests` | ACTIVE DOCTOR（本人） |
+| 医生项目变更审核 | POST | `/api/admin/institution-project-requests/{id}/review` | 本机构法人；ADMIN（可 `force=true`） |
+| 医生项目变更撤回 | POST | `/api/admin/institution-project-requests/{id}/withdraw` | 提交医生本人或 ADMIN；仅 PENDING |
 | 管理 | POST | `/api/admin/institution-projects` | ADMIN |
 | 管理 | PUT | `/api/admin/institution-projects/{id}` | ADMIN |
 | 管理 | DELETE | `/api/admin/institution-projects/{id}` | ADMIN |
