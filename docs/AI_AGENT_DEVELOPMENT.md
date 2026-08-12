@@ -12,7 +12,7 @@
 
 路由先检查当前请求的中英文关键词，并识别否定表达；只有当前信息不足时，才使用受限的近期上下文补全。仍无法确定时才调用模型解析。当前请求中已明确的意图或目录目标优先于历史，解析结果不能覆盖它。
 
-启用 `OPENAI_INTENT_PARSER_ENABLED=true` 时，`OPENAI_INTENT_MODEL` 可为解析器选择模型；空值回退到 `AI_AGENT_MODEL`。解析器与最终生成共享 `OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_PROXY_URL`、HTTP 客户端安全策略和 Provider 协议；解析器使用 3 秒连接/8 秒读取超时，最终生成使用 10 秒连接/60 秒读取超时。最终回答始终调用 `AI_AGENT_MODEL`；解析器超时、上游失败或返回无效内容时，工作流使用本地路由继续完成，不会把解析失败作为用户请求失败。
+意图解析器固定启用，`AI_AGENT_INTENT_MODEL` 可为解析器选择模型；空值回退到 `AI_AGENT_MODEL`。解析器与最终生成共享 `AI_AGENT_API_KEY`、`AI_AGENT_BASE_URL` 和 Provider 协议；两类客户端均固定直连，超时分别为 3 秒/8 秒和 10 秒/60 秒。
 
 ## 数据模型与保留策略
 
@@ -49,6 +49,6 @@ Agent 使用且仅使用以下八张表：
 
 详细命令见 [`AI_AGENT_TESTING.md`](./AI_AGENT_TESTING.md)。其中 MySQL 集成测试必须使用当前 worktree 的隔离数据库，不能连接共享开发数据库。
 
-应用运行时默认 `AI_AGENT_ENABLED=true`。生产灰度发布会故意显式覆盖为 `false`：先进入维护窗口并停止全部旧写实例，再在同一冻结窗口完成 V10 preflight、单实例 Flyway 和 readiness；迁移完成前不得恢复流量。随后完成 FastAIToken canary 和内部 cohort 观察后再显式启用。灰度、监控、立即停用和 V15 不可删除的操作步骤见 [`AI_AGENT_ROLLOUT.md`](./AI_AGENT_ROLLOUT.md)。自动 cohort 分流和指标聚合不由当前应用实现，需要网关、发布平台和运维监控平台提供。
+应用运行时固定启用 Agent。生产灰度与紧急停用由网关或发布平台控制入口：先进入维护窗口并停止全部旧写实例，再在同一冻结窗口完成 preflight、单实例 Flyway 和 readiness。自动 cohort 分流和指标聚合不由当前应用实现。
 
 实现探索保存在 `codex/ai-agent-task3-spike` 分支。该 spike 用于保留实验记录，未合并到本次同步 REST 交付。

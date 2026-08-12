@@ -68,13 +68,14 @@ spring:
     password: ${DB_PASSWORD}
 
 ai-agent:
-  enabled: ${AI_AGENT_ENABLED:true}
-  base-url: ${OPENAI_BASE_URL}
+  provider: ${AI_AGENT_PROVIDER}
+  api-key: ${AI_AGENT_API_KEY}
+  base-url: ${AI_AGENT_BASE_URL}
   model: ${AI_AGENT_MODEL}
-  proxy-url: ${OPENAI_PROXY_URL:}
+  intent-model: ${AI_AGENT_INTENT_MODEL:}
 ```
 
-不要把真实值写入 `application-prod.yml` 或 Git。生产启用 Agent 时必须显式设置 `OPENAI_BASE_URL` 和 `AI_AGENT_MODEL`；当前代码白名单只允许 `https://www.fastaitoken.com`（省略端口或显式 `443`）。可选的 `OPENAI_PROXY_URL` 只支持带显式端口的 `http://` 或 `socks://` URL，`https://` proxy URL 会被拒绝。若需要其他模型端点或代理协议，必须先修改策略并增加测试。
+不要把真实值写入 `application-prod.yml` 或 Git。部署只配置上述五项 Agent 变量；翻译复用同一 API Key 与 Base URL，并在代码中固定使用 `qwen3.7-flash`。Agent 代理、超时、意图解析开关、演示回退、流式和推理设置均为代码策略，不能通过环境变量覆盖。
 
 ### 4.2 管理端
 
@@ -166,13 +167,11 @@ SMS_ACCESS_KEY_SECRET=<secret>
 SMS_SIGN_NAME=<signature>
 SMS_TEMPLATE_CODE=<template>
 
-OPENAI_API_KEY=<key>
-OPENAI_BASE_URL=https://www.fastaitoken.com/v1
-AI_AGENT_MODEL=<approved-model>
-OPENAI_PROXY_URL=http://proxy.example.internal:8080
-QWEN_API_KEY=<key-if-used>
-QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-QWEN_MODEL=qwen3.7-flash
+AI_AGENT_PROVIDER=qwen
+AI_AGENT_API_KEY=<key>
+AI_AGENT_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+AI_AGENT_MODEL=qwen-plus
+AI_AGENT_INTENT_MODEL=qwen-turbo
 
 STRIPE_SECRET_KEY=sk_live_<from Stripe Dashboard Live mode>
 STRIPE_WEBHOOK_SECRET=whsec_<from the production Webhook Endpoint>
@@ -195,15 +194,11 @@ PAYMENT_RECONCILIATION_STALE_SECONDS=120
 |---|---|
 | `CORS_ALLOWED_ORIGINS` | 跨域来源白名单；生产只填实际 HTTPS 域名 |
 | `GOOGLE_PROXY_URL` | 仅用于 Google ID Token 公钥校验的受控代理；不要配置为通用出网代理 |
-| `AI_AGENT_ENABLED` | AI Agent 应用开关；未设置时应用默认 `true`，灰度发布可显式覆盖为 `false` |
-| `AI_AGENT_MODEL` | 生产启用 Agent 时必须显式设置的模型 ID；无生产默认值 |
-| `OPENAI_PROXY_URL` | Agent 专用可选代理；只支持带显式端口的 `http://` 或 `socks://` URL |
-| `OPENAI_STREAM_ENABLED` | AI 流式响应开关 |
-| `OPENAI_INTENT_PARSER_ENABLED` | AI 意图解析开关 |
-| `OPENAI_FAST_REASONING_EFFORT` / `OPENAI_COMPLEX_REASONING_EFFORT` | 推理预算；确认供应商支持后再配置 |
-| `TRANSLATION_PROVIDER` / `TRANSLATION_FALLBACK_PROVIDER` | 翻译主/备用供应商 |
-| `TRANSLATION_MODEL` | OpenAI 翻译模型 |
-| `QWEN_MT_BASE_URL` | 旧版通义兼容地址变量 |
+| `AI_AGENT_PROVIDER` | Agent 请求协议；例如 `qwen` |
+| `AI_AGENT_API_KEY` | Agent 与翻译共享的服务端密钥 |
+| `AI_AGENT_BASE_URL` | Agent 与翻译共享的批准 HTTPS endpoint |
+| `AI_AGENT_MODEL` | Agent 最终回答模型 ID |
+| `AI_AGENT_INTENT_MODEL` | 可选的意图解析模型；留空时使用最终回答模型 |
 | `STRIPE_API_BASE` / `STRIPE_API_VERSION` | Stripe API 地址和版本 |
 | `STRIPE_SUCCESS_URL` / `STRIPE_CANCEL_URL` | 支付回跳页面 |
 | `STRIPE_PRODUCT_NAME` | 支付商品名 |

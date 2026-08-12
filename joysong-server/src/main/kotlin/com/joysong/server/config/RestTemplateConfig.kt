@@ -16,6 +16,10 @@ class RestTemplateConfig {
         return createRestTemplate(proxyUrl, 10_000, 60_000)
     }
 
+    @Bean("translationRestTemplate")
+    fun translationRestTemplate(): org.springframework.web.client.RestTemplate =
+        createRestTemplate("", 10_000, 60_000)
+
     @Bean("agentLlmRestTemplate")
     fun agentLlmRestTemplate(): org.springframework.web.client.RestTemplate =
         createRestTemplate(

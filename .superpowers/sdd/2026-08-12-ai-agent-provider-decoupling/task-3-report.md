@@ -115,3 +115,42 @@ test runs.
 Branch: `codex/ai-provider-decoupling`
 
 Commit subject: `feat: enforce five-variable AI agent contract`
+
+## Review fix round 1
+
+Three Important review findings were addressed in one follow-up:
+
+- Current deployment/configuration documentation now exposes only the five-variable Agent
+  contract. The regression scan covers seven top-level operational guides and excludes only
+  Markdown filenames such as `AI_AGENT_TESTING.md`, not document prose or code blocks.
+- The Qwen `.env.example` is internally consistent: chat uses `qwen-plus`, intent parsing uses
+  `qwen-turbo`, and translation remains the isolated code constant `qwen3.7-flash`.
+- Translation now injects a dedicated direct `translationRestTemplate`; setting
+  `GOOGLE_PROXY_URL` affects only the Google identity client and cannot route translation
+  traffic through that proxy.
+
+### Round 1 RED
+
+```text
+.\gradlew.bat test \
+  --tests com.joysong.server.config.ProductionProfileTest \
+  --tests com.joysong.server.config.RestTemplateConfigTest
+```
+
+Observed result: 12 tests completed, 3 failed. The three new tests independently exposed old
+variables in current guides, incompatible Qwen example models, and translation inheriting the
+Google proxy.
+
+### Round 1 GREEN
+
+The same two-class command completed 12 tests with 0 failures in 10 seconds. Direct qualifier
+regressions were then checked without repeating the passing command:
+
+```text
+.\gradlew.bat test \
+  --tests com.joysong.server.translation.service.TranslationServiceTest \
+  --tests com.joysong.server.config.AiAgentProfileStartupTest
+```
+
+Observed result: BUILD SUCCESSFUL in 5 seconds. Static review found exactly the five allowed
+environment names across the maintained operational guides, and `git diff --check` passed.

@@ -38,17 +38,17 @@
 
 1. 打开 [阿里云百炼控制台](https://bailian.console.aliyun.com/)，开通模型服务并进入实际部署使用的业务空间。
 2. 在该业务空间创建 API Key；不同地域/业务空间的 Key 和 API 地址可能不同。
-3. 将控制台展示的 OpenAI 兼容 Base URL 复制出来，并新增：
+3. 将控制台展示的 OpenAI 兼容 Base URL 复制出来，并配置：
 
    ```dotenv
-   TRANSLATION_PROVIDER=qwen
-   QWEN_API_KEY=刚创建的百炼APIKey
-   QWEN_BASE_URL=从百炼控制台复制的兼容接口地址
-   QWEN_MODEL=qwen3.7-flash
+   AI_AGENT_PROVIDER=qwen
+   AI_AGENT_API_KEY=刚创建的百炼APIKey
+   AI_AGENT_BASE_URL=从百炼控制台复制的兼容接口地址
+   AI_AGENT_MODEL=qwen-plus
+   AI_AGENT_INTENT_MODEL=qwen-turbo
    ```
 
-4. 可选：若希望 Qwen 故障时自动使用旧的模型中转，再设置 `TRANSLATION_FALLBACK_PROVIDER=openai` 及第五步的 OpenAI 变量；若不需要回退，设为 `none`。
-5. 重启服务端，在 App 中翻译一条评论验证。百炼的 API Key 和兼容接口配置见[官方文档](https://help.aliyun.com/zh/model-studio/what-is-model-studio)。
+4. 重启服务端，在 App 中翻译一条评论验证。翻译复用上述 API Key 与 Base URL，但模型固定为代码中的 `qwen3.7-flash`。百炼配置见[官方文档](https://help.aliyun.com/zh/model-studio/what-is-model-studio)。
 
 ### 第三步：配置图片存储（需要上传图片时）
 
@@ -76,22 +76,20 @@
 3. 在**生产配置**中把 `aliyun.sms.enabled` 改为 `true`，并把 `sign-name`、`template-code` 换成审核通过的值。
 4. 用真实手机号请求验证码；未开通或变量为空时保持关闭，不要误用于生产。
 
-### 第五步：配置 AI Agent / OpenAI 回退（可选）
+### 第五步：确认 AI Agent 配置
 
 1. 从所使用的模型服务商或中转站获取 API Key、兼容 API 地址和确切模型 ID。
 2. 新增：
 
    ```dotenv
-   AI_AGENT_ENABLED=true
-   OPENAI_API_KEY=模型服务密钥
-   OPENAI_BASE_URL=https://www.fastaitoken.com/v1
-   AI_AGENT_MODEL=你的Agent模型ID
-   OPENAI_PROXY_URL=http://proxy.example.internal:8080
-   TRANSLATION_FALLBACK_PROVIDER=openai
-   TRANSLATION_MODEL=你的翻译兜底模型ID
+   AI_AGENT_PROVIDER=qwen
+   AI_AGENT_API_KEY=模型服务密钥
+   AI_AGENT_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+   AI_AGENT_MODEL=qwen-plus
+   AI_AGENT_INTENT_MODEL=qwen-turbo
    ```
 
-3. 应用未设置该变量时默认启用 AI Agent；若当前部署不使用 Agent，必须显式设置 `AI_AGENT_ENABLED=false`。生产灰度启用前按 [`AI_AGENT_ROLLOUT.md`](./AI_AGENT_ROLLOUT.md) 完成 preflight、Flyway/readiness、FastAIToken canary 和内部 cohort 门禁；Qwen 翻译不依赖 Agent 开关。
+3. 应用固定启用 AI Agent；灰度与紧急停用通过网关或发布层控制入口，不新增应用环境开关。
 
 ### 第六步：配置 Google 登录（可选）
 
@@ -144,56 +142,35 @@ CORS_ALLOWED_ORIGINS=https://admin.example.com
 
 ## 4. Qwen 翻译配置
 
-评论、回复、私信、日记正文默认使用百炼 `qwen3.7-flash`。翻译与 AI Agent 使用不同的密钥、地址和模型配置。
+评论、回复、私信、日记正文固定使用百炼 `qwen3.7-flash`。翻译复用 AI Agent 的密钥与地址，但不使用聊天或意图模型。
 
 ```dotenv
-# Qwen 主翻译通道
-TRANSLATION_PROVIDER=qwen
-QWEN_API_KEY=百炼业务空间对应的APIKey
-QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-QWEN_MODEL=qwen3.7-flash
-
-# Qwen 异常时的可选回退；不需要回退时设为 none
-TRANSLATION_FALLBACK_PROVIDER=openai
-
-# OpenAI 兼容中转仅在 fallback/provider= openai 时使用
-OPENAI_API_KEY=
-OPENAI_BASE_URL=https://www.fastaitoken.com/v1
-TRANSLATION_MODEL=gpt-5.5
+AI_AGENT_PROVIDER=qwen
+AI_AGENT_API_KEY=百炼业务空间对应的APIKey
+AI_AGENT_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+AI_AGENT_MODEL=qwen-plus
+AI_AGENT_INTENT_MODEL=qwen-turbo
 ```
 
-支持的翻译 Provider：
-
-| `TRANSLATION_PROVIDER` / `TRANSLATION_FALLBACK_PROVIDER` | 说明 |
-|---|---|
-| `qwen` | 默认值，调用 `qwen3.7-flash`；适用于四类用户内容翻译 |
-| `openai` | 使用 OpenAI 兼容 Chat Completions 接口兜底 |
-| `none` | 仅适用于 `TRANSLATION_FALLBACK_PROVIDER`，表示不回退 |
-
-注意：Qwen 的 API Key 与地域/业务空间有关，应使用百炼控制台实际提供的兼容接口地址覆盖 `QWEN_BASE_URL`。服务端使用专用精简提示词，客户端不保存任何翻译密钥。
+Qwen 的 API Key 与地域/业务空间有关，应使用百炼控制台实际提供的兼容接口地址配置 `AI_AGENT_BASE_URL`。翻译没有独立 Provider、密钥或回退配置。
 
 ## 5. AI Agent 配置
 
 AI Agent 独立读取以下变量，不影响 Qwen：
 
 ```dotenv
-AI_AGENT_ENABLED=true
-OPENAI_API_KEY=中转站或模型服务密钥
-OPENAI_BASE_URL=https://www.fastaitoken.com/v1
-AI_AGENT_MODEL=gpt-5.5
-OPENAI_PROXY_URL=http://proxy.example.internal:8080
-OPENAI_STREAM_ENABLED=false
-OPENAI_INTENT_PARSER_ENABLED=true
-OPENAI_INTENT_MODEL=可选的意图解析模型ID
+AI_AGENT_PROVIDER=qwen
+AI_AGENT_API_KEY=模型服务密钥
+AI_AGENT_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+AI_AGENT_MODEL=qwen-plus
+AI_AGENT_INTENT_MODEL=qwen-turbo
 ```
 
-生产启用 Agent 时必须显式配置 `AI_AGENT_MODEL`，服务端不会从 `OPENAI_MODEL` 或仓库默认值回退。启用 `OPENAI_INTENT_PARSER_ENABLED` 后，可用 `OPENAI_INTENT_MODEL` 为意图解析指定模型；留空时解析器使用 `AI_AGENT_MODEL`。解析器与最终生成共享 API Key、Base URL、代理、HTTP 客户端安全策略和 Provider 协议；解析器连接/读取超时为 3 秒/8 秒，最终生成则为 10 秒/60 秒。最终回答始终使用 `AI_AGENT_MODEL`，解析失败则保留本地路由继续生成。
+生产必须显式配置上述五项变量。`AI_AGENT_INTENT_MODEL` 留空时解析器使用 `AI_AGENT_MODEL`。解析器与最终生成共享 API Key、Base URL 和 Provider 协议；超时与直连网络策略固定在代码中。
 
 路由顺序固定为：先使用当前请求中的中英文、可识别否定词的关键词规则；仅在需要时以受限的近期上下文补全；仍有歧义时才调用意图模型。当前请求已明确的意图或目标不会被历史上下文或解析器覆盖。
 
-可选的 `OPENAI_PROXY_URL` 只支持带显式端口的 `http://` 和 `socks://` URL；`https://` proxy URL 会在启动时被拒绝。
-
-应用运行时默认 `AI_AGENT_ENABLED=true`。生产灰度手册在门禁阶段会故意显式覆盖为 `false`，通过 secret-safe FastAIToken canary、内部 cohort 与监控门禁后再改为 `true`；这不是全局默认值。具体顺序与立即停用规则见 [`AI_AGENT_ROLLOUT.md`](./AI_AGENT_ROLLOUT.md)。当前应用不包含自动 cohort 分流、指标平台或自动熔断，需由网关、发布平台和运维监控实现。V15 为 Agent lease 的前向兼容迁移，停用 Agent 时不得删除或回滚。
+应用固定启用 AI Agent。当前应用不包含自动 cohort 分流、指标平台或自动熔断，需由网关、发布平台和运维监控实现。V15 为 Agent lease 的前向兼容迁移，不得删除或回滚。
 
 ## 6. OSS 与图片上传
 
@@ -281,7 +258,7 @@ google.client-id=OAuthWebClientID.apps.googleusercontent.com
 
 1. 创建 MySQL 数据库或允许当前 JDBC URL 自动创建；设置 `DB_PASSWORD`。
 2. 使用 `SPRING_PROFILES_ACTIVE=dev` 启动服务端；仅限本地。
-3. 填写 `QWEN_API_KEY` 后验证翻译接口；没有 Key 时可将 `TRANSLATION_PROVIDER=openai` 临时调试。
+3. 填写五项 Agent 变量后验证翻译接口；翻译没有独立凭据或供应商回退。
 4. 启动管理后台开发服务，确认浏览器通过 Vite 代理访问 API。
 5. Android 模拟器使用 `10.0.2.2`，真机使用可访问的开发机地址。
 
@@ -293,4 +270,4 @@ google.client-id=OAuthWebClientID.apps.googleusercontent.com
 - CORS 只允许已知后台域名；Nginx 配置 HTTPS。
 - OSS 与短信 RAM 凭证遵循最小权限原则。
 - 数据库备份完成后再执行版本迁移，并验证 `/actuator/health`、上传和 Qwen 翻译。
-- AI Agent 应用默认启用；执行生产灰度时，部署配置须故意显式设置 `AI_AGENT_ENABLED=false`，完成发布手册中的 V10 preflight、Flyway/readiness、FastAIToken canary 和内部 cohort 门禁后再开启。
+- AI Agent 固定启用；生产灰度与紧急停用通过网关或发布层控制入口。

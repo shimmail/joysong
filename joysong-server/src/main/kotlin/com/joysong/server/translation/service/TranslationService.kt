@@ -18,7 +18,7 @@ import java.util.Locale
 
 @Service
 class TranslationService(
-    @Qualifier("llmRestTemplate") private val restTemplate: RestTemplate,
+    @Qualifier("translationRestTemplate") private val restTemplate: RestTemplate,
     private val aiAgentProperties: AiAgentProperties
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)

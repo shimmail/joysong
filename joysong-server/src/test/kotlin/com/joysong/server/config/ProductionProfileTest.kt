@@ -85,6 +85,15 @@ class ProductionProfileTest {
         val yamlText = listOf("application.yml", "application-prod.yml", "application-dev.example.yml")
             .joinToString("\n") { ClassPathResource(it).inputStream.bufferedReader().use { reader -> reader.readText() } }
         val envText = Files.readString(Path.of(".env.example"))
+        val deploymentDocumentation = listOf(
+            "AI_AGENT_DEVELOPMENT.md",
+            "AI_AGENT_ROLLOUT.md",
+            "AI_TRANSLATION_SOLUTION.md",
+            "CLOUD_DEPLOYMENT_GUIDE.md",
+            "CONFIGURATION_GUIDE.md",
+            "LLM_RELAY_CONFIGURATION.md",
+            "支付开发与云服务器部署指南.md"
+        ).joinToString("\n") { Files.readString(Path.of("..", "docs", it)) }
         val environmentName = Regex("\\b(?:AI_AGENT|OPENAI|QWEN|TRANSLATION)_[A-Z0-9_]+\\b")
         val expected = setOf(
             "AI_AGENT_PROVIDER",
@@ -96,10 +105,23 @@ class ProductionProfileTest {
 
         assertEquals(expected, environmentName.findAll(yamlText).map { it.value }.toSet())
         assertEquals(expected, environmentName.findAll(envText).map { it.value }.toSet())
+        val documentationWithoutMarkdownFileNames = deploymentDocumentation.replace(Regex("[A-Z0-9_]+\\.md"), "")
+        assertEquals(expected, environmentName.findAll(documentationWithoutMarkdownFileNames).map { it.value }.toSet())
         assertEquals("\${AI_AGENT_PROVIDER:}", applicationProperties.getProperty("ai-agent.provider"))
         assertEquals("\${AI_AGENT_API_KEY:}", applicationProperties.getProperty("ai-agent.api-key"))
         assertEquals("\${AI_AGENT_BASE_URL:}", applicationProperties.getProperty("ai-agent.base-url"))
         assertEquals("\${AI_AGENT_MODEL:}", applicationProperties.getProperty("ai-agent.model"))
         assertEquals("\${AI_AGENT_INTENT_MODEL:}", applicationProperties.getProperty("ai-agent.intent-model"))
+    }
+
+    @Test
+    fun `Qwen environment example uses compatible chat and intent models`() {
+        val envLines = Files.readAllLines(Path.of(".env.example"))
+            .filter { it.startsWith("AI_AGENT_") }
+            .associate { it.substringBefore('=') to it.substringAfter('=') }
+
+        assertEquals("qwen", envLines["AI_AGENT_PROVIDER"])
+        assertEquals("qwen-plus", envLines["AI_AGENT_MODEL"])
+        assertEquals("qwen-turbo", envLines["AI_AGENT_INTENT_MODEL"])
     }
 }
