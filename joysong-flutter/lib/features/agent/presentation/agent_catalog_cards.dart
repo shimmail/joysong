@@ -4,6 +4,74 @@ import 'package:joysong_flutter/features/agent/domain/agent_models.dart';
 typedef AgentCatalogItemAction = void Function(AgentCatalogItem item);
 typedef AgentCatalogItemPredicate = bool Function(AgentCatalogItem item);
 
+class AgentCatalogLinkList extends StatelessWidget {
+  const AgentCatalogLinkList({
+    required this.items,
+    this.onOpen,
+    this.canOpen,
+    super.key,
+  });
+
+  final List<AgentCatalogItem> items;
+  final AgentCatalogItemAction? onOpen;
+  final AgentCatalogItemPredicate? canOpen;
+
+  @override
+  Widget build(BuildContext context) => Column(
+        children: [
+          for (final item in items) ...[
+            AgentCatalogLinkCard(item: item, onOpen: onOpen, canOpen: canOpen),
+            const SizedBox(height: 8),
+          ],
+        ],
+      );
+}
+
+class AgentCatalogLinkCard extends StatelessWidget {
+  const AgentCatalogLinkCard({
+    required this.item,
+    this.onOpen,
+    this.canOpen,
+    super.key,
+  });
+
+  final AgentCatalogItem item;
+  final AgentCatalogItemAction? onOpen;
+  final AgentCatalogItemPredicate? canOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final open = onOpen != null && (canOpen?.call(item) ?? true);
+    return Card(
+      margin: const EdgeInsets.only(top: 6),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: open ? () => onOpen!(item) : null,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(children: [
+            CircleAvatar(child: Icon(_typeIcon(item.type))),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(item.name,
+                      style: Theme.of(context).textTheme.titleSmall),
+                  if (item.subtitle.trim().isNotEmpty)
+                    Text(item.subtitle,
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                ],
+              ),
+            ),
+            if (open) const Icon(Icons.chevron_right),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
 class AgentCatalogReferenceList extends StatelessWidget {
   const AgentCatalogReferenceList({
     required this.items,

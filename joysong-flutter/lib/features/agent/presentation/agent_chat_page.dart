@@ -188,22 +188,16 @@ class _AgentChatPageState extends State<AgentChatPage> {
                         scrollCacheExtent: const ScrollCacheExtent.pixels(600),
                         padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                         children: [
-                          for (final message in state.messages)
+                          for (final message in state.messages) ...[
                             _ChatBubble(message: message),
-                          if (state.latestTurn?.catalogReport
-                              case final report?)
-                            AgentCatalogReportCard(
-                              report: report,
-                              onOpen: widget.onOpenCatalogItem,
-                              canOpen: _canOpenCatalogItem,
-                            )
-                          else if (state.latestTurn?.catalogItems
-                              case final items? when items.isNotEmpty)
-                            AgentCatalogReferenceList(
-                              items: items,
-                              onOpen: widget.onOpenCatalogItem,
-                              canOpen: _canOpenCatalogItem,
-                            ),
+                            if (!message.isUser &&
+                                _supportedCatalogItems(message).isNotEmpty)
+                              AgentCatalogLinkList(
+                                items: _supportedCatalogItems(message),
+                                onOpen: widget.onOpenCatalogItem,
+                                canOpen: _canOpenCatalogItem,
+                              ),
+                          ],
                         ],
                       ),
               ),
@@ -233,6 +227,18 @@ class _AgentChatPageState extends State<AgentChatPage> {
             (item.projectId?.trim().isNotEmpty ?? false),
       _ => false,
     };
+  }
+
+  List<AgentCatalogItem> _supportedCatalogItems(ChatMessage message) {
+    const supported = {
+      'DOCTOR',
+      'INSTITUTION',
+      'PROJECT',
+      'INSTITUTION_PROJECT',
+    };
+    return message.catalogItems
+        .where((item) => supported.contains(item.type.trim().toUpperCase()))
+        .toList(growable: false);
   }
 
   PopupMenuItem<_AgentMenuAction> _menuItem(

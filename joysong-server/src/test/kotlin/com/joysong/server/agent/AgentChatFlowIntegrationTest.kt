@@ -170,6 +170,48 @@ class AgentChatFlowIntegrationTest {
     }
 
     @Test
+    @WithMockUser(username = "user-1")
+    fun `history restores supported catalog cards on their assistant message`() {
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+        val started = turnLifecycleService.beginTurn(
+            session.id,
+            "user-1",
+            "show catalog cards",
+            "history-cards-1"
+        ) as BeginTurnResult.Started
+        val turn = turnRepository.findById(started.turnId).orElseThrow().apply {
+            status = AgentTurnStatus.SUCCEEDED
+            completedAt = LocalDateTime.now()
+        }
+        turnRepository.saveAndFlush(turn)
+        messageRepository.saveAndFlush(
+            ChatMessageEntity(
+                sessionId = session.id,
+                turnId = turn.id,
+                sequenceNo = started.sequenceNo * 2,
+                role = "ASSISTANT",
+                content = "catalog reply",
+                metadataJson = """{
+                    "catalogItems":[
+                      {"type":"DOCTOR","id":"doctor-1","name":"Doctor","subtitle":"","summary":"","attributes":{}},
+                      {"type":"INSTITUTION","id":"institution-1","name":"Institution","subtitle":"","summary":"","attributes":{}},
+                      {"type":"PROJECT","id":"project-1","name":"Project","subtitle":"","summary":"","attributes":{}},
+                      {"type":"INSTITUTION_PROJECT","id":"link-1","name":"Institution project","subtitle":"","summary":"","attributes":{},"institutionId":"institution-1","projectId":"project-1"},
+                      {"type":"UNKNOWN","id":"unknown-1","name":"Unknown","subtitle":"","summary":"","attributes":{}}
+                    ]
+                }""".trimIndent()
+            )
+        )
+
+        mockMvc.perform(get("/api/chat/sessions/{id}/messages", session.id))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data[0].catalogItems").isEmpty)
+            .andExpect(jsonPath("$.data[1].catalogItems.length()").value(4))
+            .andExpect(jsonPath("$.data[1].catalogItems[0].type").value("DOCTOR"))
+            .andExpect(jsonPath("$.data[1].catalogItems[3].type").value("INSTITUTION_PROJECT"))
+    }
+
+    @Test
     fun `ambiguous request uses intent model and does not override its current institution target from history`() {
         aiAgentProperties.intentParserEnabled = true
         val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))

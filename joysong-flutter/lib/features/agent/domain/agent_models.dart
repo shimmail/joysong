@@ -65,6 +65,7 @@ class ChatMessage {
     required this.role,
     required this.content,
     required this.createdAt,
+    this.catalogItems = const [],
     this.isTemporary = false,
   });
 
@@ -73,16 +74,23 @@ class ChatMessage {
   final String role;
   final String content;
   final String createdAt;
+  final List<AgentCatalogItem> catalogItems;
   final bool isTemporary;
 
   bool get isUser => role.toUpperCase() == 'USER';
 
-  ChatMessage copyWith({String? content, bool? isTemporary}) => ChatMessage(
+  ChatMessage copyWith({
+    String? content,
+    List<AgentCatalogItem>? catalogItems,
+    bool? isTemporary,
+  }) =>
+      ChatMessage(
         id: id,
         sessionId: sessionId,
         role: role,
         content: content ?? this.content,
         createdAt: createdAt,
+        catalogItems: catalogItems ?? this.catalogItems,
         isTemporary: isTemporary ?? this.isTemporary,
       );
 
@@ -94,6 +102,8 @@ class ChatMessage {
       role: stringValue(map['role'], fallback: 'ASSISTANT'),
       content: stringValue(map['content']),
       createdAt: stringValue(map['createdAt']),
+      catalogItems:
+          jsonList(map['catalogItems']).map(AgentCatalogItem.fromJson).toList(),
     );
   }
 }

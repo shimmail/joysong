@@ -349,7 +349,12 @@ class AgentChatController extends ChangeNotifier {
         return;
       }
       _clearPendingSend(session.id, content, idempotencyKey);
-      _replaceMessage(temporaryAssistant.id, turn.message);
+      final assistantMessage = turn.message.copyWith(
+        catalogItems: turn.message.catalogItems.isNotEmpty
+            ? turn.message.catalogItems
+            : turn.catalogItems,
+      );
+      _replaceMessage(temporaryAssistant.id, assistantMessage);
       _emit(
         _state.copyWith(
           deliveryState: ChatDeliveryState.completed,

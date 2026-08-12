@@ -9,6 +9,7 @@ import com.joysong.server.chat.entity.ChatMessageEntity
 import com.joysong.server.chat.entity.ChatSessionEntity
 import com.joysong.server.chat.service.ChatService
 import com.joysong.server.agent.orchestration.AgentChatException
+import com.joysong.server.agent.orchestration.TurnLifecycleService
 import com.joysong.server.common.BaseResponse
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.Authentication
@@ -19,7 +20,8 @@ import java.time.LocalDateTime
 @RestController
 @RequestMapping("/api/chat")
 class ChatController(
-    private val chatService: ChatService
+    private val chatService: ChatService,
+    private val turnLifecycleService: TurnLifecycleService
 ) {
 
     /**
@@ -61,7 +63,7 @@ class ChatController(
         return ResponseEntity.ok(
             BaseResponse.success(
                 ChatTurnResponse(
-                    message = turn.message.toResponse(),
+                    message = turn.message.toResponse(turn.catalogItems),
                     catalogReport = turn.catalogReport,
                     catalogItems = turn.catalogItems,
                     intent = turn.intent,
@@ -85,7 +87,9 @@ class ChatController(
         @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
         before: LocalDateTime?
     ): BaseResponse<List<ChatMessageResponse>> = BaseResponse.success(
-        chatService.getMessages(id, authentication.name, limit, before).map { it.toResponse() }
+        chatService.getMessages(id, authentication.name, limit, before).map {
+            it.toResponse(turnLifecycleService.catalogItemsForMessage(it))
+        }
     )
 
     @PostMapping("/sessions/{id}/messages/stream")
@@ -140,13 +144,14 @@ class ChatController(
         )
     }
 
-    private fun ChatMessageEntity.toResponse(): ChatMessageResponse {
+    private fun ChatMessageEntity.toResponse(catalogItems: List<com.joysong.server.agent.dto.AgentCatalogItemResponse> = emptyList()): ChatMessageResponse {
         return ChatMessageResponse(
             id = id,
             sessionId = sessionId,
             role = role,
             content = content,
-            createdAt = createdAt.toString()
+            createdAt = createdAt.toString(),
+            catalogItems = catalogItems
         )
     }
 }

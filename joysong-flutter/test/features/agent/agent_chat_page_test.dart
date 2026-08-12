@@ -12,20 +12,20 @@ import 'package:joysong_flutter/features/discover/domain/discover_repository.dar
 import 'package:joysong_flutter/features/shell/presentation/app_shell.dart';
 
 void main() {
-  testWidgets('latest catalog report is rendered once and opens its item',
+  testWidgets('catalog card is bound to the assistant message and opens item',
       (tester) async {
     final repository = _CatalogRepository(
-      _turn(report: _report, catalogItems: const [_duplicateProject]),
+      _turn(catalogItems: const [_project]),
     );
     AgentCatalogItem? opened;
 
     await _pumpPage(tester, repository, onOpen: (item) => opened = item);
     await _sendAndSettle(tester);
 
-    expect(find.byType(AgentCatalogReportCard), findsOneWidget);
-    expect(find.byType(AgentCatalogDetailCard), findsOneWidget);
-    expect(find.text('重复项目'), findsNothing);
-    await tester.tap(find.text('查看详情'));
+    expect(find.byType(AgentCatalogReportCard), findsNothing);
+    expect(find.byType(AgentCatalogLinkCard), findsOneWidget);
+    expect(find.text('项目一'), findsOneWidget);
+    await tester.tap(find.byType(AgentCatalogLinkCard));
     expect(opened?.id, 'project-1');
   });
 
@@ -39,10 +39,10 @@ void main() {
     await _sendAndSettle(tester);
 
     expect(find.byType(AgentCatalogReportCard), findsNothing);
-    expect(find.byType(AgentCatalogDetailCard), findsOneWidget);
+    expect(find.byType(AgentCatalogLinkCard), findsOneWidget);
   });
 
-  testWidgets('unknown catalog type is informational and cannot navigate',
+  testWidgets('unknown catalog type is hidden and cannot navigate',
       (tester) async {
     final repository = _CatalogRepository(
       _turn(catalogItems: const [_unknown]),
@@ -52,7 +52,7 @@ void main() {
     await _pumpPage(tester, repository, onOpen: (_) => openCalls++);
     await _sendAndSettle(tester);
 
-    expect(find.text('信息暂不完整'), findsOneWidget);
+    expect(find.byType(AgentCatalogLinkCard), findsNothing);
     expect(find.text('查看详情'), findsNothing);
     expect(openCalls, 0);
   });
@@ -73,39 +73,6 @@ void main() {
 
     expect(find.text('真人咨询'), findsNothing);
     expect(consultCalls, 0);
-  });
-
-  testWidgets('comparison marks every non-navigable item as incomplete',
-      (tester) async {
-    const report = AgentCatalogReport(
-      mode: 'COMPARISON',
-      title: '对比',
-      summary: '',
-      items: [_unknown, _emptyDoctor, _incompleteInstitutionProject],
-      comparisonDimensions: ['价格'],
-      warnings: [],
-    );
-
-    await tester.pumpWidget(
-      MaterialApp(
-        locale: const Locale('zh'),
-        supportedLocales: const [Locale('zh')],
-        localizationsDelegates: const [
-          GlobalMaterialLocalizations.delegate,
-          GlobalWidgetsLocalizations.delegate,
-          GlobalCupertinoLocalizations.delegate,
-        ],
-        home: Scaffold(
-          body: AgentComparisonTable(
-            report: report,
-            onOpen: (_) {},
-            canOpen: (_) => false,
-          ),
-        ),
-      ),
-    );
-
-    expect(find.text('信息暂不完整'), findsNWidgets(3));
   });
 
   test('catalog detail adapter never exposes a doctor consultation callback',
@@ -178,7 +145,8 @@ class _CatalogRepository extends Fake implements AgentRepository {
     String sessionId,
     String content, {
     required String idempotencyKey,
-  }) async => turn;
+  }) async =>
+      turn;
 }
 
 ChatTurn _turn({
@@ -223,18 +191,6 @@ const _project = AgentCatalogItem(
   canChatWithHuman: false,
 );
 
-const _duplicateProject = AgentCatalogItem(
-  type: 'PROJECT',
-  id: 'project-1',
-  name: '重复项目',
-  subtitle: '',
-  summary: '',
-  attributes: {},
-  institutionId: null,
-  projectId: null,
-  canChatWithHuman: false,
-);
-
 const _doctor = AgentCatalogItem(
   type: 'DOCTOR',
   id: 'doctor-record-1',
@@ -257,39 +213,6 @@ const _unknown = AgentCatalogItem(
   institutionId: null,
   projectId: null,
   canChatWithHuman: false,
-);
-
-const _emptyDoctor = AgentCatalogItem(
-  type: 'DOCTOR',
-  id: '',
-  name: '缺少标识的医生',
-  subtitle: '',
-  summary: '',
-  attributes: {},
-  institutionId: null,
-  projectId: null,
-  canChatWithHuman: true,
-);
-
-const _incompleteInstitutionProject = AgentCatalogItem(
-  type: 'INSTITUTION_PROJECT',
-  id: 'institution-project-1',
-  name: '缺少关联标识的机构项目',
-  subtitle: '',
-  summary: '',
-  attributes: {},
-  institutionId: null,
-  projectId: null,
-  canChatWithHuman: false,
-);
-
-const _report = AgentCatalogReport(
-  mode: 'SUMMARY',
-  title: '目录报告',
-  summary: '',
-  items: [_project],
-  comparisonDimensions: [],
-  warnings: [],
 );
 
 class _DiscoverRepository extends Fake implements DiscoverRepository {}

@@ -10,6 +10,28 @@ import 'package:joysong_flutter/features/agent/domain/agent_repository.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_chat_controller.dart';
 
 void main() {
+  test('ChatMessage decodes persisted catalog items with old-response fallback',
+      () {
+    final withCards = ChatMessage.fromJson({
+      'id': 'assistant-1',
+      'sessionId': 'session-1',
+      'role': 'ASSISTANT',
+      'content': 'reply',
+      'createdAt': '2026-08-12T00:00:00',
+      'catalogItems': [_catalogItemJson],
+    });
+    final legacy = ChatMessage.fromJson({
+      'id': 'assistant-2',
+      'sessionId': 'session-1',
+      'role': 'ASSISTANT',
+      'content': 'legacy',
+      'createdAt': '2026-08-12T00:00:01',
+    });
+
+    expect(withCards.catalogItems.single.id, 'project-1');
+    expect(legacy.catalogItems, isEmpty);
+  });
+
   test('openSession keeps only the latest 20 messages', () async {
     final messages = _messages(25);
     final controller = AgentChatController(
@@ -65,8 +87,7 @@ void main() {
     expect(controller.state.deliveryState, ChatDeliveryState.failed);
   });
 
-  test('manual retry reuses the same idempotency key after failure',
-      () async {
+  test('manual retry reuses the same idempotency key after failure', () async {
     final repository = _FakeAgentRepository(failFirstNonStream: true);
     final controller = AgentChatController(
       repository: repository,
@@ -151,6 +172,15 @@ void main() {
     expect(idempotencyHeader, 'fixed-idempotency-key');
   });
 }
+
+const _catalogItemJson = <String, Object?>{
+  'type': 'PROJECT',
+  'id': 'project-1',
+  'name': 'Project',
+  'subtitle': '',
+  'summary': '',
+  'attributes': <String, String>{},
+};
 
 ChatTurn _turn(String content) => ChatTurn(
       message: ChatMessage(

@@ -57,6 +57,21 @@ class TurnLifecycleService(
     @Qualifier("turnLease")
     private val turnLease: Duration
 ) {
+    private val supportedCatalogTypes = setOf("DOCTOR", "INSTITUTION", "PROJECT", "INSTITUTION_PROJECT")
+
+    fun catalogItemsForMessage(message: ChatMessageEntity): List<AgentCatalogItemResponse> {
+        if (!message.role.equals("ASSISTANT", ignoreCase = true)) return emptyList()
+        return runCatching { objectMapper.readTree(message.metadataJson.ifBlank { "{}" }) }
+            .getOrNull()
+            ?.get("catalogItems")
+            ?.takeIf { it.isArray }
+            ?.mapNotNull { node ->
+                runCatching { objectMapper.treeToValue(node, AgentCatalogItemResponse::class.java) }
+                    .getOrNull()
+                    ?.takeIf { it.type.uppercase() in supportedCatalogTypes }
+            }
+            .orEmpty()
+    }
     @Transactional
     fun beginTurn(sessionId: String, userId: String, content: String, idempotencyKey: String): BeginTurnResult {
         val canonicalContent = content.trim().also { require(it.isNotEmpty()) { "消息内容不能为空" } }
@@ -263,8 +278,7 @@ class TurnLifecycleService(
         val projectedMessage = PlanningCatalogProjection.projectStoredMessage(message, objectMapper)
         val metadata = objectMapper.readTree(projectedMessage.metadataJson.ifBlank { "{}" })
         val intent = metadata.path("intent").asText("GENERAL_CHAT")
-        val catalogItems = metadata.get("catalogItems")?.takeIf { it.isArray }
-            ?.map { objectMapper.treeToValue(it, AgentCatalogItemResponse::class.java) }.orEmpty()
+        val catalogItems = catalogItemsForMessage(projectedMessage)
         val catalogReport = metadata.get("catalogReport")?.takeUnless { it.isNull }
             ?.let { objectMapper.treeToValue(it, AgentCatalogReportResponse::class.java) }
         return ChatTurnResult(

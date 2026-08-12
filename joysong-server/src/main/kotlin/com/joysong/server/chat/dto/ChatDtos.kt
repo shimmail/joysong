@@ -31,7 +31,8 @@ data class ChatMessageResponse(
     val sessionId: String,
     val role: String,
     val content: String,
-    val createdAt: String
+    val createdAt: String,
+    val catalogItems: List<AgentCatalogItemResponse> = emptyList()
 )
 
 data class ChatTurnResponse(
