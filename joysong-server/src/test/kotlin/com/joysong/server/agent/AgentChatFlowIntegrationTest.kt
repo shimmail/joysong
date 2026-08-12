@@ -119,7 +119,6 @@ class AgentChatFlowIntegrationTest {
         fakeLlmRawResponse.set(null)
         fakeIntentParserContent.set("""{"intent":"CATALOG_QA","queryTarget":"DOCTOR","keywords":["context"]}""")
         fakeLlmRequestBodies.clear()
-        aiAgentProperties.intentParserEnabled = false
         aiAgentProperties.intentModel = "intent-test-model"
         transactionStates.clear()
         llmRestTemplate.requestFactory = SimpleClientHttpRequestFactory().apply {
@@ -158,7 +157,7 @@ class AgentChatFlowIntegrationTest {
         assertEquals(first.message.id, replay.message.id)
         assertNotNull(first.traceId)
         assertEquals(first.traceId, replay.traceId)
-        assertEquals(1, fakeLlmCalls.get())
+        assertEquals(2, fakeLlmCalls.get())
         assertEquals(1, turnCount(session.id))
         assertEquals(
             listOf(1L, 2L),
@@ -213,7 +212,6 @@ class AgentChatFlowIntegrationTest {
 
     @Test
     fun `ambiguous request uses intent model and does not override its current institution target from history`() {
-        aiAgentProperties.intentParserEnabled = true
         val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
         chatService.sendMessage(
             session.id,
@@ -239,7 +237,6 @@ class AgentChatFlowIntegrationTest {
 
     @Test
     fun `parser failure still completes using the local route`() {
-        aiAgentProperties.intentParserEnabled = true
         fakeIntentParserContent.set("not-json")
         val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
 
@@ -496,7 +493,7 @@ class AgentChatFlowIntegrationTest {
         }
 
         assertEquals("IDEMPOTENCY_KEY_CONFLICT", error.code)
-        assertEquals(1, fakeLlmCalls.get())
+        assertEquals(2, fakeLlmCalls.get())
         assertEquals(1, turnCount(session.id))
     }
 
@@ -562,31 +559,6 @@ class AgentChatFlowIntegrationTest {
 
     @Test
     @WithMockUser(username = "user-1")
-    fun `HTTP send is rejected as AGENT_DISABLED before turn persistence when AI agent is disabled`() {
-        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
-        val turnsBefore = turnRepository.count()
-        val enabledBefore = aiAgentProperties.enabled
-        aiAgentProperties.enabled = false
-
-        try {
-            mockMvc.perform(
-                post("/api/chat/sessions/{id}/messages", session.id)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("""{"content":"disabled request","idempotencyKey":"http-disabled-1"}""")
-            )
-                .andExpect(status().isServiceUnavailable)
-                .andExpect(jsonPath("$.code").value(503))
-                .andExpect(jsonPath("$.message").value("AGENT_DISABLED"))
-        } finally {
-            aiAgentProperties.enabled = enabledBefore
-        }
-
-        assertEquals(turnsBefore, turnRepository.count())
-        assertEquals(0, fakeLlmCalls.get())
-    }
-
-    @Test
-    @WithMockUser(username = "user-1")
     fun `HTTP send returns 404 for an unknown session`() {
         mockMvc.perform(
             post("/api/chat/sessions/{id}/messages", "missing")
@@ -643,7 +615,9 @@ class AgentChatFlowIntegrationTest {
             expectedErrorCode = "AI_PROVIDER_UNAVAILABLE",
             sensitiveValues = listOf("provider-secret-body", "private@example.com", "13800000000")
         )
-        val providerLog = logs.single { it.contains("operation=PROVIDER_CALL") }
+        val providerLog = logs.single {
+            it.contains("operation=PROVIDER_CALL") && it.contains("modelName=test-model")
+        }
         val expectedCategory = when (providerStatus) {
             401 -> "AUTH"
             429 -> "RATE_LIMIT"
@@ -1018,13 +992,11 @@ class AgentChatFlowIntegrationTest {
             registry.add("admin.bootstrap.password") { "test-admin-password" }
             registry.add("payment.stripe.secret-key") { "sk_test_agent_chat" }
             registry.add("payment.stripe.webhook-secret") { "whsec_agent_chat" }
-            registry.add("ai-agent.enabled") { "true" }
+            registry.add("ai-agent.provider") { "openai-compatible" }
             registry.add("ai-agent.base-url") { "http://127.0.0.1:${fakeLlm.address.port}/v1" }
             registry.add("ai-agent.api-key") { "test-key" }
             registry.add("ai-agent.model") { "test-model" }
-            registry.add("ai-agent.intent-parser-enabled") { "true" }
             registry.add("ai-agent.intent-model") { "intent-test-model" }
-            registry.add("ai-agent.demo-fallback-enabled") { "false" }
         }
 
         @JvmStatic

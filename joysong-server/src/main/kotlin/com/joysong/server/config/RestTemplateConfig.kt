@@ -17,17 +17,17 @@ class RestTemplateConfig {
     }
 
     @Bean("agentLlmRestTemplate")
-    fun agentLlmRestTemplate(properties: AiAgentProperties): org.springframework.web.client.RestTemplate =
+    fun agentLlmRestTemplate(): org.springframework.web.client.RestTemplate =
         createRestTemplate(
-            properties.proxyUrl,
+            "",
             AiAgentHttpBudget.COMPLETION_CONNECT_TIMEOUT_MS,
             AiAgentHttpBudget.COMPLETION_READ_TIMEOUT_MS
         )
 
     @Bean("agentIntentParserRestTemplate")
-    fun agentIntentParserRestTemplate(properties: AiAgentProperties): org.springframework.web.client.RestTemplate =
+    fun agentIntentParserRestTemplate(): org.springframework.web.client.RestTemplate =
         createRestTemplate(
-            properties.proxyUrl,
+            "",
             AiAgentHttpBudget.INTENT_CONNECT_TIMEOUT_MS,
             AiAgentHttpBudget.INTENT_READ_TIMEOUT_MS
         )
@@ -38,7 +38,7 @@ class RestTemplateConfig {
         readTimeoutMs: Int
     ): org.springframework.web.client.RestTemplate {
         if (!AiAgentProxyUrlPolicy.isAllowed(proxyUrl)) {
-            throw IllegalStateException("Invalid OPENAI_PROXY_URL configuration")
+            throw IllegalStateException("Invalid proxy URL configuration")
         }
         val factory = SimpleClientHttpRequestFactory()
         factory.setConnectTimeout(connectTimeoutMs)

@@ -424,7 +424,7 @@ class AgentWorkflowCoreTest {
         val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
         val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
         val catalog = mockk<AgentCatalogService>()
-        val fixture = chatFixture(completionTemplate, intentTemplate, catalog, intentParserEnabled = false)
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
         val completed = slot<CompleteTurnCommand>()
         prepareChatGeneration(
             fixture,
@@ -1223,8 +1223,7 @@ class AgentWorkflowCoreTest {
     private fun chatFixture(
         completionTemplate: RestTemplate,
         intentTemplate: RestTemplate,
-        catalog: AgentCatalogService,
-        intentParserEnabled: Boolean = true
+        catalog: AgentCatalogService
     ): ChatFixture {
         val turnService = mockk<TurnLifecycleService>()
         val operationLogger = mockk<AgentOperationLogger>()
@@ -1254,8 +1253,7 @@ class AgentWorkflowCoreTest {
             apiKey = "test-key",
             baseUrl = "https://provider.test/v1",
             model = "answer-model",
-            intentModel = "intent-small",
-            intentParserEnabled = intentParserEnabled
+            intentModel = "intent-small"
         )
             ),
             turnService = turnService,

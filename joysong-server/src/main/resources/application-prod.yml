@@ -46,14 +46,3 @@ aliyun:
 security:
   verification-code:
     log-for-dev: false
-
-ai-agent:
-  base-url: ${OPENAI_BASE_URL:https://www.fastaitoken.com/v1}
-  # Production must never persist a fabricated assistant response. This is a
-  # literal so a deployment cannot turn demo replies back on accidentally.
-  demo-fallback-enabled: false
-
-openai:
-  base-url: ${OPENAI_BASE_URL:}
-  stream-enabled: ${OPENAI_STREAM_ENABLED:false}
-  demo-fallback-enabled: false

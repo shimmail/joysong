@@ -1,6 +1,5 @@
 package com.joysong.server.config
 
-import org.junit.jupiter.api.Assertions.assertDoesNotThrow
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
@@ -26,27 +25,23 @@ class AiAgentPropertiesTest {
     }
 
     @Test
-    fun `typed properties bind agent settings including the turn lease`() {
+    fun `typed properties bind only the five deployment settings`() {
         val environment = MockEnvironment()
-            .withProperty("ai-agent.enabled", "true")
             .withProperty("ai-agent.provider", "qWeN")
             .withProperty("ai-agent.api-key", "test-key")
             .withProperty("ai-agent.base-url", "https://www.fastaitoken.com/v1")
             .withProperty("ai-agent.model", "gpt-5.5")
-            .withProperty("ai-agent.proxy-url", "http://127.0.0.1:7890")
-            .withProperty("ai-agent.turn-lease", "90s")
+            .withProperty("ai-agent.intent-model", "intent-model")
 
         val properties = Binder.get(environment)
             .bind("ai-agent", Bindable.of(AiAgentProperties::class.java))
             .get()
 
-        assertEquals(true, properties.enabled)
         assertEquals(AiAgentProvider.QWEN, properties.provider)
         assertEquals("test-key", properties.apiKey)
         assertEquals("https://www.fastaitoken.com/v1", properties.baseUrl)
         assertEquals("gpt-5.5", properties.model)
-        assertEquals("http://127.0.0.1:7890", properties.proxyUrl)
-        assertEquals(Duration.ofSeconds(90), properties.turnLease)
+        assertEquals("intent-model", properties.intentModel)
     }
 
     @Test
@@ -76,6 +71,20 @@ class AiAgentPropertiesTest {
             .orElseGet(::AiAgentProperties)
 
         assertEquals("", properties.apiKey)
+    }
+
+    @Test
+    fun `obsolete agent settings are rejected instead of overriding fixed runtime policy`() {
+        val environment = MockEnvironment()
+            .withProperty("ai-agent.enabled", "false")
+            .withProperty("ai-agent.proxy-url", "http://127.0.0.1:7890")
+            .withProperty("ai-agent.turn-lease", "120s")
+            .withProperty("ai-agent.intent-parser-enabled", "false")
+            .withProperty("ai-agent.demo-fallback-enabled", "true")
+
+        assertThrows(Exception::class.java) {
+            Binder.get(environment).bind("ai-agent", Bindable.of(AiAgentProperties::class.java)).get()
+        }
     }
 
     @Test
@@ -127,10 +136,7 @@ class AiAgentPropertiesTest {
     fun `runtime beans expose the configured lease and one stable system default clock`() {
         AnnotationConfigApplicationContext().use { context ->
             context.environment.propertySources.addFirst(
-                org.springframework.core.env.MapPropertySource(
-                    "test",
-                    mapOf("ai-agent.turn-lease" to "90s")
-                )
+                org.springframework.core.env.MapPropertySource("test", emptyMap())
             )
             context.register(AiAgentConfiguration::class.java)
             context.refresh()
@@ -140,23 +146,6 @@ class AiAgentPropertiesTest {
             assertEquals(ZoneId.systemDefault(), clock.zone)
             assertSame(clock, context.getBean(Clock::class.java))
         }
-    }
-
-    @Test
-    fun `runtime configuration rejects a lease that cannot cover serial provider calls`() {
-        val context = AnnotationConfigApplicationContext()
-        context.environment.propertySources.addFirst(
-            org.springframework.core.env.MapPropertySource(
-                "test",
-                mapOf("ai-agent.turn-lease" to "81s")
-            )
-        )
-        context.register(AiAgentConfiguration::class.java)
-
-        val error = assertThrows(Exception::class.java) { context.refresh() }
-
-        assertTrue(error.causeChain().contains("AI_AGENT_TURN_LEASE_SECONDS"))
-        context.close()
     }
 
     @Test
@@ -206,54 +195,7 @@ class AiAgentPropertiesTest {
         assertEquals("https://www.fastaitoken.com/v1", properties.baseUrl)
     }
 
-    @Test
-    fun `disabled production accepts blank provider credentials`() {
-        val properties = AiAgentProperties(enabled = false)
-
-        assertDoesNotThrow { validator(properties).validate() }
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = ["-1", "0", "81"])
-    fun `production rejects non-positive or under-budget turn leases`(leaseSeconds: String) {
-        val properties = validEnabledProperties().copy(turnLease = Duration.ofSeconds(leaseSeconds.toLong()))
-
-        val error = assertThrows(IllegalStateException::class.java) { validator(properties).validate() }
-
-        assertTrue(error.message.orEmpty().contains("AI_AGENT_TURN_LEASE_SECONDS"))
-    }
-
-    @Test
-    fun `production accepts the explicit minimum safe turn lease`() {
-        val properties = validEnabledProperties().copy(turnLease = Duration.ofSeconds(82))
-
-        assertDoesNotThrow { validator(properties).validate() }
-    }
-
-    @ParameterizedTest
-    @ValueSource(
-        strings = [
-            "ftp://proxy.example.test:8080",
-            "http:///missing-host:8080",
-            "http://proxy.example.test",
-            "http://proxy.example.test:0",
-            "http://proxy.example.test:65536",
-            "https://proxy.example.test:8443",
-            "http://user:secret@proxy.example.test:8080",
-            "not a uri"
-        ]
-    )
-    fun `invalid proxy settings fail validation without exposing their value`(proxyUrl: String) {
-        val properties = AiAgentProperties(enabled = false, proxyUrl = proxyUrl)
-
-        val error = assertThrows(IllegalStateException::class.java) { validator(properties).validate() }
-
-        assertTrue(error.message.orEmpty().contains("AI_AGENT_PROXY_URL"))
-        assertFalse(error.message.orEmpty().contains(proxyUrl))
-    }
-
     private fun validEnabledProperties() = AiAgentProperties(
-        enabled = true,
         provider = AiAgentProvider.OPENAI_COMPATIBLE,
         apiKey = "test-key",
         baseUrl = "https://www.fastaitoken.com/v1",

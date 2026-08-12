@@ -535,7 +535,7 @@ class ChatService(
                 throw IllegalStateException("AI_PROVIDER_UNAVAILABLE")
             }
             return LlmCallResult(
-                "你好！我是娇颜颂的AI助手，目前处于演示模式。配置 OPENAI_API_KEY 环境变量后即可使用完整的AI对话功能。",
+                "你好！我是娇颜颂的AI助手，目前处于演示模式。配置 AI Agent 凭据后即可使用完整的AI对话功能。",
                 true
             )
         }
@@ -765,7 +765,7 @@ class ChatService(
 
     private class IntentParserRouteException(val category: String) : IllegalArgumentException(category)
 
-    /** Reserved SSE path. Disabled by default through OPENAI_STREAM_ENABLED=false. */
+    /** Reserved SSE path. Streaming remains disabled by fixed runtime policy. */
     /**
      * 根据 persona 获取角色名称
      */

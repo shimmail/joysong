@@ -13,7 +13,6 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.context.annotation.Import
 import org.springframework.core.env.StandardEnvironment
-import org.springframework.test.util.ReflectionTestUtils
 
 class AiAgentProfileStartupTest {
 
@@ -44,21 +43,23 @@ class AiAgentProfileStartupTest {
             "aliyun.sms.access-key-secret=test-sms-secret",
             "aliyun.sms.sign-name=test-sign",
             "aliyun.sms.template-code=test-template",
-            "ai-agent.enabled=false"
+            "ai-agent.provider=qwen",
+            "ai-agent.api-key=test-key",
+            "ai-agent.base-url=https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "ai-agent.model=test-model",
+            "ai-agent.intent-model=test-intent-model"
         )
 
     @Test
-    fun `disabled production profile starts without OpenAI provider credentials`() {
+    fun `production profile starts with the five variable agent contract`() {
         contextRunner.run { context ->
             assertThat(context).hasNotFailed()
             assertThat(context.environment.activeProfiles).containsExactly("prod")
             assertThat(context.environment.getProperty("spring.flyway.clean-disabled")).isEqualTo("true")
             assertThat(context).hasSingleBean(TranslationService::class.java)
-            assertThat(context.getBean(AiAgentProperties::class.java).enabled).isFalse()
+            assertThat(context.getBean(AiAgentProperties::class.java).enabled).isTrue()
             val translationService = context.getBean(TranslationService::class.java)
-            assertThat(ReflectionTestUtils.getField(translationService, "baseUrl")).isEqualTo("")
-            assertThat(ReflectionTestUtils.getField(translationService, "restTemplate"))
-                .isSameAs(context.getBean("llmRestTemplate"))
+            assertThat(translationService).isNotNull
         }
     }
 
@@ -66,8 +67,7 @@ class AiAgentProfileStartupTest {
     fun `enabled production profile fails without an explicitly configured model`() {
         contextRunner
             .withPropertyValues(
-                "ai-agent.enabled=true",
-                "ai-agent.api-key=test-key"
+                "ai-agent.model="
             )
             .run { context ->
                 assertThat(context).hasFailed()

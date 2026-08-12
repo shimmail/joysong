@@ -11,18 +11,23 @@ import java.time.Duration
 
 @ConfigurationProperties("ai-agent")
 data class AiAgentProperties(
-    var enabled: Boolean = true,
     var provider: AiAgentProvider? = null,
     var apiKey: String = "",
     var baseUrl: String = "",
     var model: String = "",
-    var intentModel: String = "",
-    var proxyUrl: String = "",
-    var turnLease: Duration = Duration.ofSeconds(90),
-    var intentParserEnabled: Boolean = true,
-    var demoFallbackEnabled: Boolean = false
+    var intentModel: String = ""
 ) {
+    val enabled: Boolean get() = true
+    val proxyUrl: String get() = ""
+    val turnLease: Duration get() = AiAgentRuntimePolicy.TURN_LEASE
+    val intentParserEnabled: Boolean get() = true
+    val demoFallbackEnabled: Boolean get() = false
+
     fun resolvedIntentModel(): String = intentModel.trim().ifBlank { model.trim() }
+}
+
+object AiAgentRuntimePolicy {
+    val TURN_LEASE: Duration = Duration.ofSeconds(90)
 }
 
 object AiAgentHttpBudget {
@@ -60,9 +65,5 @@ class AiAgentConfiguration {
     fun clock(): Clock = Clock.systemDefaultZone()
 
     @Bean("turnLease")
-    fun turnLease(properties: AiAgentProperties): Duration = properties.turnLease.also { lease ->
-        require(AiAgentHttpBudget.isTurnLeaseSafe(lease)) {
-            "AI_AGENT_TURN_LEASE_SECONDS must be at least 82 seconds to exceed the 81-second serial HTTP budget"
-        }
-    }
+    fun turnLease(): Duration = AiAgentRuntimePolicy.TURN_LEASE
 }

@@ -1,6 +1,6 @@
 package com.joysong.server.translation.service
 
-import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.joysong.server.config.AiAgentProperties
 import com.joysong.server.translation.dto.TranslateTextRequest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -12,6 +12,7 @@ import org.springframework.http.MediaType
 import org.springframework.test.web.client.MockRestServiceServer
 import org.springframework.test.web.client.match.MockRestRequestMatchers.method
 import org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath
+import org.springframework.test.web.client.match.MockRestRequestMatchers.header
 import org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo
 import org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess
 import org.springframework.web.client.RestTemplate
@@ -21,11 +22,10 @@ class TranslationServiceTest {
     private val server = MockRestServiceServer.createServer(restTemplate)
     private val service = TranslationService(
         restTemplate = restTemplate,
-        objectMapper = jacksonObjectMapper(),
-        apiKey = "test-key",
-        baseUrl = "https://example.test/v1",
-        model = "test-model",
-        provider = "openai"
+        aiAgentProperties = AiAgentProperties(
+            apiKey = "test-key",
+            baseUrl = "https://example.test/v1"
+        )
     )
 
     @Test
@@ -34,7 +34,7 @@ class TranslationServiceTest {
             .andExpect(method(HttpMethod.POST))
             .andRespond(
                 withSuccess(
-                    """{"choices":[{"message":{"content":"{\"translatedText\":\"Recovery is going well ✨\",\"detectedLanguage\":\"zh-CN\"}"}}]}""",
+                    """{"choices":[{"message":{"content":"Recovery is going well ✨"}}]}""",
                     MediaType.APPLICATION_JSON
                 )
             )
@@ -44,7 +44,7 @@ class TranslationServiceTest {
         val second = service.translate(request)
 
         assertEquals("Recovery is going well ✨", first.translatedText)
-        assertEquals("zh-CN", first.detectedLanguage)
+        assertEquals("und", first.detectedLanguage)
         assertEquals("en-US", first.targetLanguage)
         assertFalse(first.cached)
         assertTrue(second.cached)
@@ -57,7 +57,7 @@ class TranslationServiceTest {
             .andExpect(method(HttpMethod.POST))
             .andRespond(
                 withSuccess(
-                    """{"choices":[{"message":{"content":"{\"translatedText\":\"Hello\",\"detectedLanguage\":\"zh-CN\"}"}}]}""",
+                    """{"choices":[{"message":{"content":"Hello"}}]}""",
                     MediaType.APPLICATION_JSON
                 )
             )
@@ -77,15 +77,10 @@ class TranslationServiceTest {
         val qwenServer = MockRestServiceServer.createServer(qwenRestTemplate)
         val qwenService = TranslationService(
             restTemplate = qwenRestTemplate,
-            objectMapper = jacksonObjectMapper(),
-            apiKey = "",
-            baseUrl = "https://unused.test/v1",
-            model = "unused-model",
-            provider = "qwen",
-            fallbackProvider = "none",
-            qwenApiKey = "qwen-key",
-            qwenBaseUrl = "https://qwen.test/v1",
-            qwenModel = "qwen3.7-flash"
+            aiAgentProperties = AiAgentProperties(
+                apiKey = "qwen-key",
+                baseUrl = "https://qwen.test/v1"
+            )
         )
         qwenServer.expect(requestTo("https://qwen.test/v1/chat/completions"))
             .andExpect(method(HttpMethod.POST))
@@ -101,6 +96,32 @@ class TranslationServiceTest {
         assertEquals("Hello", response.translatedText)
         assertEquals("qwen", response.provider)
         qwenServer.verify()
+    }
+
+    @Test
+    fun `translation reuses agent credentials but never agent models`() {
+        val agentRestTemplate = RestTemplate()
+        val agentServer = MockRestServiceServer.createServer(agentRestTemplate)
+        val translationService = TranslationService(
+            restTemplate = agentRestTemplate,
+            aiAgentProperties = AiAgentProperties(
+                apiKey = "shared-agent-key",
+                baseUrl = "https://agent.example.test/v1",
+                model = "chat-model-must-not-be-used",
+                intentModel = "intent-model-must-not-be-used"
+            )
+        )
+        agentServer.expect(requestTo("https://agent.example.test/v1/chat/completions"))
+            .andExpect(method(HttpMethod.POST))
+            .andExpect(header("Authorization", "Bearer shared-agent-key"))
+            .andExpect(jsonPath("$.model").value("qwen3.7-flash"))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"Hello"}}]}""", MediaType.APPLICATION_JSON))
+
+        val response = translationService.translate(TranslateTextRequest("你好", "en-US", "comment"))
+
+        assertEquals("Hello", response.translatedText)
+        assertEquals("qwen", response.provider)
+        agentServer.verify()
     }
 
     @Test

@@ -10,6 +10,8 @@ import org.springframework.boot.context.properties.bind.Binder
 import org.springframework.boot.env.YamlPropertySourceLoader
 import org.springframework.core.io.ClassPathResource
 import org.springframework.core.env.StandardEnvironment
+import java.nio.file.Files
+import java.nio.file.Path
 
 class ProductionProfileTest {
 
@@ -40,7 +42,7 @@ class ProductionProfileTest {
         assertNull(properties.getProperty("payment.mode"))
         assertNull(properties.getProperty("payment.stripe.enabled"))
         assertEquals(false, properties.getProperty("security.verification-code.log-for-dev"))
-        assertEquals(false, properties.getProperty("openai.demo-fallback-enabled"))
+        assertNull(properties.getProperty("openai.demo-fallback-enabled"))
     }
 
     @Test
@@ -50,7 +52,7 @@ class ProductionProfileTest {
         assertEquals("\${OSS_BUCKET_NAME}", properties.getProperty("oss.bucket-name"))
         assertEquals("\${SMS_SIGN_NAME}", properties.getProperty("aliyun.sms.sign-name"))
         assertTrue(properties.getProperty("aliyun.sms.template-code").toString().contains("SMS_TEMPLATE_CODE"))
-        assertEquals("\${OPENAI_BASE_URL:}", properties.getProperty("openai.base-url"))
+        assertNull(properties.getProperty("openai.base-url"))
     }
 
     @Test
@@ -63,7 +65,7 @@ class ProductionProfileTest {
     }
 
     @Test
-    fun `development profile enables demo fallback through typed agent properties`() {
+    fun `development profile cannot enable fixed agent fallback policy`() {
         val environment = StandardEnvironment().apply {
             propertySources.remove(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME)
             propertySources.remove(StandardEnvironment.SYSTEM_PROPERTIES_PROPERTY_SOURCE_NAME)
@@ -75,6 +77,29 @@ class ProductionProfileTest {
             .bind("ai-agent", Bindable.of(AiAgentProperties::class.java))
             .get()
 
-        assertTrue(aiAgent.demoFallbackEnabled)
+        assertFalse(aiAgent.demoFallbackEnabled)
+    }
+
+    @Test
+    fun `agent deployment contract exposes exactly five environment variables`() {
+        val yamlText = listOf("application.yml", "application-prod.yml", "application-dev.example.yml")
+            .joinToString("\n") { ClassPathResource(it).inputStream.bufferedReader().use { reader -> reader.readText() } }
+        val envText = Files.readString(Path.of(".env.example"))
+        val environmentName = Regex("\\b(?:AI_AGENT|OPENAI|QWEN|TRANSLATION)_[A-Z0-9_]+\\b")
+        val expected = setOf(
+            "AI_AGENT_PROVIDER",
+            "AI_AGENT_API_KEY",
+            "AI_AGENT_BASE_URL",
+            "AI_AGENT_MODEL",
+            "AI_AGENT_INTENT_MODEL"
+        )
+
+        assertEquals(expected, environmentName.findAll(yamlText).map { it.value }.toSet())
+        assertEquals(expected, environmentName.findAll(envText).map { it.value }.toSet())
+        assertEquals("\${AI_AGENT_PROVIDER:}", applicationProperties.getProperty("ai-agent.provider"))
+        assertEquals("\${AI_AGENT_API_KEY:}", applicationProperties.getProperty("ai-agent.api-key"))
+        assertEquals("\${AI_AGENT_BASE_URL:}", applicationProperties.getProperty("ai-agent.base-url"))
+        assertEquals("\${AI_AGENT_MODEL:}", applicationProperties.getProperty("ai-agent.model"))
+        assertEquals("\${AI_AGENT_INTENT_MODEL:}", applicationProperties.getProperty("ai-agent.intent-model"))
     }
 }

@@ -1,7 +1,6 @@
 package com.joysong.server.config
 
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import org.springframework.http.client.SimpleClientHttpRequestFactory
 import org.springframework.test.util.ReflectionTestUtils
@@ -28,37 +27,9 @@ class RestTemplateConfigTest {
     }
 
     @Test
-    fun `agent clients use the AI agent proxy`() {
-        val properties = AiAgentProperties(proxyUrl = "http://127.0.0.1:8899")
-
-        assertProxy(config.agentLlmRestTemplate(properties), Proxy.Type.HTTP, "127.0.0.1", 8899)
-        assertProxy(config.agentIntentParserRestTemplate(properties), Proxy.Type.HTTP, "127.0.0.1", 8899)
-        assertProxy(
-            config.agentLlmRestTemplate(AiAgentProperties(proxyUrl = "socks://127.0.0.1:1080")),
-            Proxy.Type.SOCKS,
-            "127.0.0.1",
-            1080
-        )
-    }
-
-    @Test
-    fun `agent clients reject an HTTPS proxy that the runtime cannot implement`() {
-        val error = assertThrows(IllegalStateException::class.java) {
-            config.agentLlmRestTemplate(AiAgentProperties(proxyUrl = "https://proxy.example.test:8443"))
-        }
-
-        assertEquals("Invalid OPENAI_PROXY_URL configuration", error.message)
-    }
-
-    @Test
-    fun `agent client rejects an invalid proxy without exposing credentials`() {
-        val properties = AiAgentProperties(proxyUrl = "ftp://user:secret@proxy.example.test:8080")
-
-        val error = assertThrows(IllegalStateException::class.java) {
-            config.agentLlmRestTemplate(properties)
-        }
-
-        assertEquals("Invalid OPENAI_PROXY_URL configuration", error.message)
+    fun `agent clients use fixed direct connection policy`() {
+        assertEquals(null, ReflectionTestUtils.getField(config.agentLlmRestTemplate().requestFactory, "proxy"))
+        assertEquals(null, ReflectionTestUtils.getField(config.agentIntentParserRestTemplate().requestFactory, "proxy"))
     }
 
     @Test
