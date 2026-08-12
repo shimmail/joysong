@@ -408,9 +408,9 @@ PENDING_PAYMENT
 核销职责必须分离：
 
 1. 用户在 `CONSULTATION_PAID` 状态调用 `/verification-code`，向现场人员展示核销码。
-2. 医生或机构法人调用 `POST /management/orders/{id}/verify`，请求体 `{ "verificationCode": "123456" }`，推进到 `VERIFIED`。
+2. 订单所属医生调用 `POST /management/orders/{id}/verify`，请求体 `{ "verificationCode": "123456" }`，推进到 `VERIFIED`。
 3. 用户支付尾款后进入 `BALANCE_PAID` 并获得第二次核销码。
-4. 医生或机构法人调用 `POST /management/orders/{id}/request-completion`，推进到 `PENDING_COMPLETION`。
+4. 订单所属医生调用 `POST /management/orders/{id}/request-completion`，推进到 `PENDING_COMPLETION`。
 5. 用户调用 `/confirm-completion` 最终确认。
 
 旧 `POST /orders/{id}/verify` 仅为旧 Android 兼容，当前语义也只是生成核销码。Flutter 禁止使用该旧路径。用户端绝不能调用专业端核销接口，也不能自行确认自己的核销码。
@@ -434,7 +434,7 @@ Flutter 可以完成页面和接口抽象，但生产发布前必须等待支付
 | 专业端兼容只读机构数据（迁移期） | `GET /admin/institutions`、`GET /admin/institutions/{id}`、`GET /admin/institutions/{id}/doctors`、`GET /admin/institutions/{id}/projects`、`GET /admin/institution-projects`；已认证专业用户仅可读 `visibleInstitutionIds` 范围 |
 | 专业端兼容只读项目目录（迁移期） | `GET /admin/projects`；这是不含机构写权限的全局项目目录 |
 | 平台管理员全量机构 CRUD | `GET/POST /admin/institutions`、`GET/PUT/DELETE /admin/institutions/{id}`；其中写操作仅限 `ADMIN`，GET 对专业用户仅提供下行所述对象级兼容读取 |
-| 文章 | `GET/POST /admin/articles`、`PUT/DELETE /admin/articles/{id}` |
+| 医生本人文章 | `GET/POST /management/doctor-articles`、`PUT/DELETE /management/doctor-articles/{id}` |
 | 机构项目 | `GET/POST /admin/institution-projects`、`PUT/DELETE /admin/institution-projects/{id}` |
 | 医生项目协作 | `GET /admin/institution-project-requests/profile-update-targets`、`GET/POST /admin/institution-project-requests`、`POST /{id}/review`、`/{id}/withdraw` |
 | 当前分账 | `GET /admin/doctor-institution-project-configs` |
@@ -442,6 +442,12 @@ Flutter 可以完成页面和接口抽象，但生产发布前必须等待支付
 | 相关订单 | `GET /management/orders?status=...`、`GET /management/orders/{id}`、核销接口见上节 |
 
 权限规则：
+
+- 医生文章必须使用专业端 `/management/doctor-articles`，不得调用管理员文章接口。四个路由分别是列表、创建、完整更新和逻辑删除；没有文章详情 GET。每次请求均重新校验当前 `ACTIVE DOCTOR`，普通医生只能读写 `doctorId == self` 的文章。管理员端接口保持其既有契约，专业端新增路由不替代、不修改管理员系统行为。
+- `DoctorArticleDraft` 请求必须且只能序列化 `title`、`summary`、`coverImage`、`publishDate`、`content` 五个非 null 字段；`publishDate` 为 `yyyy-MM-dd`。响应 `DoctorArticle` 精确包含 `id`、`title`、`authorName`、`summary`、`coverImage`、`publishDate`、`content`、`readCount`、`doctorId`、`createdAt`、`updatedAt`。后六类身份、计数和时间字段均只读。创建为 HTTP 201；其余成功为 200；参数错误 400、越权 403、不存在 404、并发/状态冲突 409。列表支持 `keyword`、`offset`、`limit`，编辑页需要详情时从本人列表按 id 定位。
+- `DoctorOrder` 复用管理订单 JSON 字段：`id`、`orderNo`、`userId`、`projectId`、`institutionId`、`consultantId`、`doctorId`、`institutionProjectId`、`projectName`、`institutionName`、`consultantName`、`coverImage`、`amount`、`price`、`currency`、`paidAmount`、`couponId`、`userCouponId`、`discountAmount`、`status`、`quantity`、`remark`、`consultationFee`、`remainingAmount`、`transactionMethod`、`userPhone`、`appointmentTime`、`paymentTime`、`verifyCode`、`qrCode`、`evidenceUrl`、`hasReview`、`refundStatus`、`refundAmount`、`doctorName`、`createdAt`、`updatedAt`、`completedAt`、`canVerify`、`canRequestCompletion`。`price` 是 `amount` 的兼容别名；金额按十进制定点解析。管理响应的 `verifyCode` 恒为 `null`，UI 不能展示或缓存核销码。
+- 订单列表接受 `status`、`offset`、`limit`，详情与列表返回同一 VO。普通医生只能访问 `doctorId == self`；法人和顾问没有订单权限。`canVerify` 仅在 `CONSULTATION_PAID` 为 true，`canRequestCompletion` 仅在 `BALANCE_PAID` 为 true，Flutter 只能按服务端标志显示动作，不得单凭本地状态推断。
+- 两个订单动作请求体都必须且只能是 `{ "verificationCode": "123456" }`，核销码须为 6 位数字。服务端加锁后再次校验对象、状态和核销码：不存在 404、对象越界/身份失效 403、核销码格式或不匹配 400、状态不允许 409。`CONSULTATION_PAID -> VERIFIED` 与 `BALANCE_PAID -> PENDING_COMPLETION` 成功后清除核销码并各写一次状态日志；已处于对应目标状态且时间戳存在的直接重放返回当前对象，不重复写日志，后续其他状态仍为 409。
 
 - 医生仅通过 `/management/doctor-profile` 读取和完整更新自己的单个医生档案；请求不发送 `id` 或 `userId`。PUT 必须带齐 `name`、`title`、`bio`、`avatar`、`contactPhone`、`specialties`、`credentials`、`credentialImages`、`certificationTags` 九个非 null String 字段。`name` 不得为空白，其余八项可用 `""` 清空；缺失或 `null` 为 400。
 - `certificationTags` 保留为传输字段名，但 UI 必须称为“展示标签 / Display tags”并使用中性视觉，不能与平台 `isVerified` 徽章混同。服务端会在忽略大小写、空白和标点归一化后拒绝“平台认证”“官方认证”“安颜认证”“娇颜颂认证”“已认证”“platform verified”“official verified”及等价项目品牌认证声明；“主任医师”等普通医疗职称允许使用。

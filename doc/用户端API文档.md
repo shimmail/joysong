@@ -2553,12 +2553,58 @@ Authorization: Bearer <token>
 
 ### 12.6 文章管理
 
+以下 `/api/admin/articles` 是平台管理员既有接口，专业管理中心不得调用；本次新增的医生本人文章接口见 12.6a，二者契约和权限边界相互独立。
+
 | 方法 | 路径 | 描述 |
 |------|------|------|
 | GET | `/api/admin/articles` | 列出所有文章（支持 `?keyword=X` 模糊搜索） |
 | POST | `/api/admin/articles` | 新建文章（自动生成 UUID） |
 | PUT | `/api/admin/articles/{id}` | 更新文章 |
 | DELETE | `/api/admin/articles/{id}` | 删除文章（逻辑删除） |
+
+---
+
+### 12.6a 医生本人文章（专业管理入口）
+
+要求当前用户具有 `ACTIVE DOCTOR`，并按 `expert_articles.doctor_id = 当前医生 id` 限定列表和写操作对象。平台管理员仍使用 12.6 的管理员接口；新增专业端接口不修改管理员系统代码、页面或接口行为。
+
+| 方法 | 路径 | 描述 |
+|------|------|------|
+| GET | `/api/management/doctor-articles?keyword=&offset=0&limit=20` | 本人文章列表；无单篇详情 GET |
+| POST | `/api/management/doctor-articles` | 创建本人文章，成功 HTTP 201 |
+| PUT | `/api/management/doctor-articles/{id}` | 完整替换本人文章的五个可编辑字段 |
+| DELETE | `/api/management/doctor-articles/{id}` | 逻辑删除本人文章，成功 HTTP 200 |
+
+POST/PUT 请求体必须且只能包含以下五个非 null 字段：
+
+```json
+{
+  "title": "术后护理",
+  "summary": "摘要",
+  "coverImage": "https://cdn.example.com/article.jpg",
+  "publishDate": "2026-08-12",
+  "content": "<p>正文</p>"
+}
+```
+
+`title` 非空且最长 200；`summary` 最长 1000；`coverImage` 最长 500；`content` 最长 100000；`publishDate` 为 `yyyy-MM-dd`。响应 `data` 精确包含 `id`、`title`、`authorName`、`summary`、`coverImage`、`publishDate`、`content`、`readCount`、`doctorId`、`createdAt`、`updatedAt`。其中 `id`、`authorName`、`readCount`、`doctorId`、`createdAt`、`updatedAt` 均由服务端维护，客户端不得写入。列表按本人范围查询，`keyword` 用于搜索，`offset >= 0`，`limit` 为 1..100。
+
+错误语义：400 为字段/分页/核销格式错误，403 为非活跃医生或对象不属于本人，404 为目标文章不存在，409 为并发冲突。POST 不得自动重试；PUT 对同一内容可安全重放，重复删除已逻辑删除对象返回 404。
+
+---
+
+### 12.6b 医生本人订单（专业管理入口）
+
+| 方法 | 路径 | 描述 |
+|------|------|------|
+| GET | `/api/management/orders?status=&offset=0&limit=20` | 本人订单列表 |
+| GET | `/api/management/orders/{id}` | 本人订单详情 |
+| POST | `/api/management/orders/{id}/verify` | `CONSULTATION_PAID -> VERIFIED` |
+| POST | `/api/management/orders/{id}/request-completion` | `BALANCE_PAID -> PENDING_COMPLETION` |
+
+列表和详情只允许当前 `ACTIVE DOCTOR` 访问 `doctorId == self` 的订单；法人、顾问无此权限。列表、详情和动作响应使用同一个管理订单对象，字段为：`id`、`orderNo`、`userId`、`projectId`、`institutionId`、`consultantId`、`doctorId`、`institutionProjectId`、`projectName`、`institutionName`、`consultantName`、`coverImage`、`amount`、`price`、`currency`、`paidAmount`、`couponId`、`userCouponId`、`discountAmount`、`status`、`quantity`、`remark`、`consultationFee`、`remainingAmount`、`transactionMethod`、`userPhone`、`appointmentTime`、`paymentTime`、`verifyCode`、`qrCode`、`evidenceUrl`、`hasReview`、`refundStatus`、`refundAmount`、`doctorName`、`createdAt`、`updatedAt`、`completedAt`、`canVerify`、`canRequestCompletion`。`price` 与 `amount` 值相同；管理响应的 `verifyCode` 固定为 `null`。
+
+两个动作请求体都必须且只能为 `{ "verificationCode": "123456" }`，值为 6 位数字。Flutter 仅按服务端 `canVerify`、`canRequestCompletion` 显示动作。服务端在行锁内重查对象、状态和核销码；成功后清空核销码并写一次状态日志。重复请求若已经处于对应目标状态且目标时间戳存在，返回当前对象且不重复写日志；任何更晚或不同状态返回 409。错误状态：核销码错误 400、对象越界 403、不存在 404、状态冲突 409。
 
 ---
 
