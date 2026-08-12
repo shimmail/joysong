@@ -445,6 +445,37 @@ final class ApiIdentityRepository implements IdentityRepository {
       decodeData: (_) {},
     );
   }
+
+  @override
+  Future<DoctorProjectChangeRequest> submitDoctorProjectProfileUpdate(
+    DoctorProjectProfileUpdateDraft draft,
+  ) async {
+    final result = await _apiClient.post<DoctorProjectChangeRequest>(
+      '/admin/institution-project-requests',
+      body: draft.toJson(),
+      decodeData: DoctorProjectChangeRequest.fromJson,
+    );
+    if (result == null) throw const FormatException('医生项目变更申请响应为空');
+    return result;
+  }
+
+  @override
+  Future<void> reviewDoctorProjectChangeRequest({
+    required String id,
+    required String decision,
+    required String reviewNote,
+    required bool force,
+  }) async {
+    await _apiClient.post<void>(
+      '/admin/institution-project-requests/$id/review',
+      body: {
+        'decision': decision,
+        'reviewNote': reviewNote.trim(),
+        'force': force,
+      },
+      decodeData: (_) {},
+    );
+  }
 }
 
 List<Object?> _objectList(Object? value) => value is List ? value : const [];
