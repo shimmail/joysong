@@ -40,7 +40,8 @@ class DoctorProjectChangeController(
             managementAccessService.actor(authentication),
             id,
             request.decision,
-            request.reviewNote
+            request.reviewNote,
+            request.force
         )
     )
 
@@ -51,5 +52,6 @@ class DoctorProjectChangeController(
 
 data class ProjectChangeReviewRequest(
     val decision: String = "",
-    val reviewNote: String = ""
+    val reviewNote: String = "",
+    val force: Boolean? = null
 )

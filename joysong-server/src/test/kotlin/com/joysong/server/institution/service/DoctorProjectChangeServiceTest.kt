@@ -18,13 +18,29 @@ import java.math.BigDecimal
 import java.sql.ResultSet
 import java.sql.Timestamp
 import java.time.LocalDateTime
+import com.joysong.server.order.service.OrderSplitRatePolicy
+import com.joysong.server.config.OrderSplitProperties
 
 class DoctorProjectChangeServiceTest {
     private val jdbcTemplate = mockk<JdbcTemplate>()
     private val doctorProjectRepository = mockk<DoctorProjectRepository>()
     private val configRepository = mockk<DoctorInstitutionProjectConfigRepository>()
     private val relationshipService = mockk<DoctorInstitutionRelationshipService>(relaxed = true)
-    private val service = DoctorProjectChangeService(jdbcTemplate, doctorProjectRepository, configRepository, relationshipService)
+    private val splitRatePolicy = OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("10.00"); institutionRate = BigDecimal("40.00") })
+    private val service = DoctorProjectChangeService(jdbcTemplate, doctorProjectRepository, configRepository, relationshipService, splitRatePolicy)
+
+    @Test
+    fun `profile update requires complete snapshot values`() {
+        val request = DoctorProjectChangeRequest(
+            institutionProjectId = "ip-1", requestType = "PROFILE_UPDATE",
+            serviceDescription = "service", priceSuggestion = BigDecimal("880.00"),
+            notes = "notes", serviceTags = listOf("tag"), scheduleNote = "schedule",
+            coverImage = "cover", images = listOf("image"), consultationFee = BigDecimal("30.00"),
+            commissionRate = BigDecimal("10.00"), institutionRate = BigDecimal("40.00")
+        )
+        assertEquals(listOf("tag"), request.serviceTags)
+        assertEquals(BigDecimal("30.00"), request.consultationFee)
+    }
 
     @Test
     fun `join submission rejects legacy profile fields outside minimal contract`() {
@@ -53,7 +69,7 @@ class DoctorProjectChangeServiceTest {
                     serviceDescription = "service",
                     priceSuggestion = BigDecimal("880.00"),
                     notes = "notes",
-                    serviceTags = "legacy-tag"
+                    serviceTags = listOf("legacy-tag")
                 )
             )
         }
@@ -64,7 +80,7 @@ class DoctorProjectChangeServiceTest {
     @Test
     fun `join approval stores doctor price and submitted service content`() {
         stubReviewQueries()
-        every { doctorProjectRepository.findByDoctorIdAndInstitutionProjectId("doctor-1", "ip-1") } returns null
+        every { doctorProjectRepository.findForUpdate("doctor-1", "ip-1") } returns null
         every { doctorProjectRepository.save(any()) } answers { firstArg() }
         every { jdbcTemplate.update(match<String> { it.contains("UPDATE doctor_project_change_requests") }, *anyVararg()) } returns 1
 
