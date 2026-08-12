@@ -14,6 +14,8 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
+import org.springframework.security.access.AccessDeniedException
+import com.joysong.server.order.entity.DoctorInstitutionProjectConfigEntity
 import java.math.BigDecimal
 import java.sql.ResultSet
 import java.sql.Timestamp
@@ -40,6 +42,44 @@ class DoctorProjectChangeServiceTest {
         )
         assertEquals(listOf("tag"), request.serviceTags)
         assertEquals(BigDecimal("30.00"), request.consultationFee)
+    }
+
+    @Test
+    fun `legal representative cannot force profile approval`() {
+        assertThrows(AccessDeniedException::class.java) {
+            service.review(legalActor(), "request-1", "APPROVED", "force", true)
+        }
+    }
+
+    @Test
+    fun `profile approval rejects drift before writing either effective row`() {
+        stubReviewQueries(requestType = "PROFILE_UPDATE")
+        every { doctorProjectRepository.findForUpdate("doctor-1", "ip-1") } returns doctorProject(updatedAt = LocalDateTime.of(2026, 8, 11, 10, 0))
+
+        assertThrows(DoctorProjectChangeConflictException::class.java) {
+            service.review(legalActor(), "request-1", "APPROVED", "", false)
+        }
+
+        verify(exactly = 0) { doctorProjectRepository.save(any()) }
+        verify(exactly = 0) { configRepository.save(any()) }
+    }
+
+    @Test
+    fun `admin force applies exact doctor profile and records force audit`() {
+        stubReviewQueries(requestType = "PROFILE_UPDATE")
+        every { doctorProjectRepository.findForUpdate("doctor-1", "ip-1") } returns doctorProject()
+        every { configRepository.findForUpdate("doctor-1", "ip-1") } returns DoctorInstitutionProjectConfigEntity(id="config-1", doctorId="doctor-1", institutionProjectId="ip-1")
+        every { doctorProjectRepository.save(any()) } answers { firstArg() }
+        every { configRepository.save(any()) } answers { firstArg() }
+        every { jdbcTemplate.update(match<String> { it.contains("UPDATE doctor_project_change_requests") }, *anyVararg()) } returns 1
+
+        service.review(adminActor(), "request-1", "APPROVED", "override drift", true)
+
+        val project = slot<DoctorProjectEntity>()
+        verify(exactly = 1) { doctorProjectRepository.save(capture(project)) }
+        assertEquals(BigDecimal("880.00"), project.captured.price)
+        verify(exactly = 1) { configRepository.save(match { it.doctorId == "doctor-1" && it.consultationFee == BigDecimal("30.00") }) }
+        verify(exactly = 1) { jdbcTemplate.update(match<String> { it.contains("force_processed = ?") }, *anyVararg()) }
     }
 
     @Test
@@ -122,7 +162,7 @@ class DoctorProjectChangeServiceTest {
         verify(exactly = 0) { doctorProjectRepository.save(any()) }
     }
 
-    private fun stubReviewQueries(status: String = "APPROVED") {
+    private fun stubReviewQueries(status: String = "APPROVED", requestType: String = "JOIN") {
         every {
             jdbcTemplate.queryForObject(match<String> { it.contains("doctor_institutions") }, Long::class.java, *anyVararg())
         } returns 1L
@@ -133,17 +173,17 @@ class DoctorProjectChangeServiceTest {
         every { jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) } answers {
             val sql = firstArg<String>()
             val mapper = secondArg<RowMapper<Any>>()
-            val rs = if (sql.contains("FOR UPDATE")) targetResultSet() else viewResultSet(status)
+            val rs = if (sql.contains("FOR UPDATE")) targetResultSet(requestType) else viewResultSet(status)
             listOf(mapper.mapRow(rs, 0))
         }
     }
 
-    private fun targetResultSet(): ResultSet = mockk(relaxed = true) {
+    private fun targetResultSet(requestType: String = "JOIN"): ResultSet = mockk(relaxed = true) {
         every { getString("doctor_id") } returns "doctor-1"
         every { getString("institution_id") } returns "institution-1"
         every { getString("institution_project_id") } returns "ip-1"
         every { getString("project_id") } returns "project-1"
-        every { getString("request_type") } returns "JOIN"
+        every { getString("request_type") } returns requestType
         every { getString("service_description") } returns "service"
         every { getString("service_tags") } returns "tag"
         every { getString("schedule_note") } returns "schedule"
@@ -153,6 +193,12 @@ class DoctorProjectChangeServiceTest {
         every { getString("notes") } returns "doctor notes"
         every { getString("status") } returns "PENDING"
         every { getString("submitted_by") } returns "doctor-1"
+        every { getBigDecimal("consultation_fee") } returns BigDecimal("30.00")
+        every { getBigDecimal("commission_rate") } returns BigDecimal("10.00")
+        every { getBigDecimal("institution_rate") } returns BigDecimal("40.00")
+        every { getTimestamp("base_doctor_project_updated_at") } returns Timestamp.valueOf(LocalDateTime.of(2026, 8, 10, 10, 0))
+        every { getString("base_config_id") } returns "config-1"
+        every { getTimestamp("base_config_updated_at") } returns Timestamp.valueOf(LocalDateTime.of(2026, 8, 10, 10, 0))
     }
 
     private fun viewResultSet(status: String): ResultSet = mockk(relaxed = true) {
@@ -190,6 +236,12 @@ class DoctorProjectChangeServiceTest {
         managedInstitutionIds = setOf("institution-1"),
         doctorInstitutionIds = emptySet(),
         manageableDoctorIds = emptySet()
+    )
+
+    private fun adminActor() = legalActor().copy(userId="admin-1", isAdmin=true, managedInstitutionIds=emptySet())
+
+    private fun doctorProject(updatedAt: LocalDateTime = LocalDateTime.of(2026, 8, 10, 10, 0)) = DoctorProjectEntity(
+        doctorId="doctor-1", projectId="project-1", institutionProjectId="ip-1", price=BigDecimal("100.00"), updatedAt=updatedAt
     )
 
     private fun doctorActor() = ManagementActor(

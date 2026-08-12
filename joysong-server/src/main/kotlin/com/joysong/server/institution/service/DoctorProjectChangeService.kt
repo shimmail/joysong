@@ -129,7 +129,7 @@ class DoctorProjectChangeService(
         }
         val config = if (requestType == "PROFILE_UPDATE") configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeleted(doctorId, institutionProjectId) else null
         if (requestType == "PROFILE_UPDATE") validateProfile(request)
-        require(pendingCount(doctorId, institutionProjectId) == 0L) { "该项目已有待处理申请" }
+        if (pendingCount(doctorId, institutionProjectId) != 0L) throw DoctorProjectChangeConflictException("该项目已有待处理申请")
 
         val id = UUID.randomUUID().toString()
         jdbcTemplate.update(
@@ -172,7 +172,7 @@ class DoctorProjectChangeService(
             require(reviewNote.isNotBlank()) { "强制处理必须填写说明" }
         }
         val target = lockedTarget(id) ?: throw IllegalArgumentException("项目申请不存在")
-        require(target.status == "PENDING") { "项目申请已处理" }
+        if (target.status != "PENDING") throw DoctorProjectChangeConflictException("项目申请已处理")
         if (!actor.isAdmin && target.institutionId !in actor.managedInstitutionIds) {
             throw AccessDeniedException("只有所属机构法人可以审核该申请")
         }
@@ -194,7 +194,7 @@ class DoctorProjectChangeService(
             force,
             id
         )
-        check(updated == 1) { "项目申请已被其他审核人处理" }
+        if (updated != 1) throw DoctorProjectChangeConflictException("项目申请已被其他审核人处理")
         return requireNotNull(list(actor).firstOrNull { it.id == id }) { "项目申请审核结果读取失败" }
     }
 
@@ -228,11 +228,11 @@ class DoctorProjectChangeService(
                 require(existing != null) { "医生项目关系不存在" }
                 if (!force) {
                     relationshipService.requireActiveRelationshipForUpdate(target.doctorId, target.institutionId)
-                    check(existing.updatedAt == target.baseDoctorProjectUpdatedAt) { "医生项目基线已变化" }
+                    if (existing.updatedAt != target.baseDoctorProjectUpdatedAt) throw DoctorProjectChangeConflictException("医生项目基线已变化")
                 }
                 val config = configRepository.findForUpdate(target.doctorId, target.institutionProjectId)
                     ?: configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeleted(target.doctorId, target.institutionProjectId)
-                if (!force) check(config?.id == target.baseConfigId && config?.updatedAt == target.baseConfigUpdatedAt) { "分账配置基线已变化" }
+                if (!force && (config?.id != target.baseConfigId || config?.updatedAt != target.baseConfigUpdatedAt)) throw DoctorProjectChangeConflictException("分账配置基线已变化")
                 splitRatePolicy.resolve(requireNotNull(target.institutionRate), requireNotNull(target.commissionRate))
                 doctorProjectRepository.save(target.toEntity(existing.createdAt, requireNotNull(target.priceSuggestion)))
                 val effective = config ?: DoctorInstitutionProjectConfigEntity(doctorId=target.doctorId, institutionProjectId=target.institutionProjectId)
@@ -386,3 +386,5 @@ private data class ChangeTarget(
     val consultationFee: BigDecimal?, val commissionRate: BigDecimal?, val institutionRate: BigDecimal?,
     val baseDoctorProjectUpdatedAt: LocalDateTime?, val baseConfigId: String?, val baseConfigUpdatedAt: LocalDateTime?
 )
+
+class DoctorProjectChangeConflictException(message: String) : RuntimeException(message)
