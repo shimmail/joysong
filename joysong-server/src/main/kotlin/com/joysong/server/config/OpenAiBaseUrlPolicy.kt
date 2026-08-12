@@ -41,9 +41,16 @@ object AiAgentProviderUrlPolicy {
     }
 
     private fun isAllowedPath(provider: AiAgentProvider, path: String): Boolean = when (provider) {
-        AiAgentProvider.QWEN -> path == "/compatible-mode" || path.startsWith("/compatible-mode/")
+        AiAgentProvider.QWEN ->
+            (path == "/compatible-mode" || path.startsWith("/compatible-mode/")) &&
+                path.split('/').none(::isDotSegment)
         AiAgentProvider.OPENAI_COMPATIBLE -> true
     }
+
+    private fun isDotSegment(segment: String): Boolean =
+        segment.equals(".", ignoreCase = true) ||
+            segment.equals("..", ignoreCase = true) ||
+            segment.replace(Regex("%2e", RegexOption.IGNORE_CASE), ".") in setOf(".", "..")
 }
 
 @Deprecated("Use AiAgentProviderUrlPolicy with an explicit provider")
