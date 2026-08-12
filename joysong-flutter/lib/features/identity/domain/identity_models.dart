@@ -1314,6 +1314,107 @@ final class PlatformProjectRequestDraft {
       };
 }
 
+final class ConsultantMembership {
+  const ConsultantMembership({
+    required this.id,
+    required this.institutionId,
+    required this.institutionName,
+    required this.status,
+    required this.requestNote,
+    required this.reviewNote,
+    required this.createdAt,
+    required this.updatedAt,
+    this.confirmedBy,
+    this.confirmedAt,
+    this.revokedAt,
+  });
+
+  factory ConsultantMembership.fromJson(Object? json) {
+    final map = _jsonMap(json, '顾问机构关系');
+    return ConsultantMembership(
+      id: _requiredText(map['id'], '关系 id'),
+      institutionId: _requiredText(map['institutionId'], '机构 id'),
+      institutionName: _requiredText(map['institutionName'], '机构名称'),
+      status: _requiredText(map['status'], '状态'),
+      requestNote: map['requestNote']?.toString() ?? '',
+      reviewNote: map['reviewNote']?.toString() ?? '',
+      createdAt: _dateTime(map['createdAt']) ??
+          (throw const FormatException('响应缺少创建时间')),
+      updatedAt: _dateTime(map['updatedAt']) ??
+          (throw const FormatException('响应缺少更新时间')),
+      confirmedBy: _nullableText(map['confirmedBy']),
+      confirmedAt: _dateTime(map['confirmedAt']),
+      revokedAt: _dateTime(map['revokedAt']),
+    );
+  }
+
+  final String id;
+  final String institutionId;
+  final String institutionName;
+  final String status;
+  final String requestNote;
+  final String reviewNote;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  final String? confirmedBy;
+  final DateTime? confirmedAt;
+  final DateTime? revokedAt;
+}
+
+final class ConsultantMembershipDraft {
+  const ConsultantMembershipDraft({
+    required this.institutionId,
+    required this.requestNote,
+  });
+
+  final String institutionId;
+  final String requestNote;
+
+  Map<String, Object?> toJson() => {
+        'institutionId': institutionId.trim(),
+        'requestNote': requestNote.trim(),
+      };
+}
+
+final class ConsultantProjectSummary {
+  const ConsultantProjectSummary({
+    required this.id,
+    required this.name,
+    required this.category,
+    required this.description,
+    required this.tags,
+    required this.categoryTags,
+    required this.coverImage,
+    required this.referencePrice,
+    required this.currency,
+  });
+
+  factory ConsultantProjectSummary.fromJson(Object? json) {
+    final map = _jsonMap(json, '专业项目');
+    return ConsultantProjectSummary(
+      id: _requiredText(map['id'], '项目 id'),
+      name: _requiredText(map['name'], '项目名称'),
+      category: map['category']?.toString() ?? '',
+      description: map['description']?.toString() ?? '',
+      tags: _csvText(map['tags']),
+      categoryTags: _csvText(map['categoryTags']),
+      coverImage: map['coverImage']?.toString() ?? '',
+      referencePrice: _decimal(map['referencePrice']),
+      currency: _requiredText(map['currency'], '币种'),
+    );
+  }
+
+  final String id;
+  final String name;
+  final String category;
+  final String description;
+  final String tags;
+  final String categoryTags;
+  final String coverImage;
+  final num referencePrice;
+  final String currency;
+}
+
 final class InstitutionProjectRequestDraft {
   const InstitutionProjectRequestDraft({
     required this.institutionId,

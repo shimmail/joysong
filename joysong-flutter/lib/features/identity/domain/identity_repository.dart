@@ -30,6 +30,14 @@ abstract interface class IdentityRepository {
     DoctorSelfProfileUpdate update,
   );
 
+  Future<List<ConsultantMembership>> listConsultantMemberships();
+
+  Future<ConsultantMembership> submitConsultantMembership(
+    ConsultantMembershipDraft draft,
+  );
+
+  Future<List<ConsultantProjectSummary>> listConsultantProjects();
+
   Future<List<ManagementProjectOption>> listManagementProjects();
 
   Future<ManagementProjectOption> createManagementProject(

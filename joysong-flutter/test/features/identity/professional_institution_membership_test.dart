@@ -9,7 +9,7 @@ import 'package:joysong_flutter/features/identity/presentation/professional_requ
 
 void main() {
   testWidgets(
-      'multi-role entries submit their explicit membership request type',
+      'doctor entry submits its explicit membership request type and legal review stays mixed',
       (tester) async {
     tester.view.physicalSize = const Size(900, 4000);
     tester.view.devicePixelRatio = 1;
@@ -31,15 +31,6 @@ void main() {
       expectedNote: 'doctor own request',
     );
     expect(identityRepository.submittedTypes, ['DOCTOR']);
-    await tester.pageBack();
-    await tester.pumpAndSettle();
-
-    await _applyFromEntry(
-      tester,
-      entry: find.text('Apply to institution').last,
-      expectedNote: 'consultant own request',
-    );
-    expect(identityRepository.submittedTypes, ['DOCTOR', 'CONSULTANT']);
     expect(identityRepository.optionCalls, 0);
 
     await tester.pumpWidget(MaterialApp(
@@ -82,6 +73,7 @@ Future<void> _applyFromEntry(
   await tester.tap(find.text('Submit'));
   await tester.pumpAndSettle();
 }
+
 final class _FakeIdentityRepository implements IdentityRepository {
   final submittedTypes = <String>[];
   var optionCalls = 0;
@@ -106,39 +98,39 @@ final class _FakeIdentityRepository implements IdentityRepository {
   @override
   Future<List<InstitutionMembershipRequest>>
       listInstitutionMembershipRequests() async => [
-        InstitutionMembershipRequest.fromJson({
-          'id': 'doctor-own',
-          'requestType': 'DOCTOR',
-          'userId': 'professional-1',
-          'institutionId': 'inst-1',
-          'status': 'PENDING',
-          'requestNote': 'doctor own request',
-        }),
-        InstitutionMembershipRequest.fromJson({
-          'id': 'consultant-own',
-          'requestType': 'CONSULTANT',
-          'userId': 'professional-1',
-          'institutionId': 'inst-1',
-          'status': 'PENDING',
-          'requestNote': 'consultant own request',
-        }),
-        InstitutionMembershipRequest.fromJson({
-          'id': 'other-role',
-          'requestType': 'CONSULTANT',
-          'userId': 'other-user',
-          'institutionId': 'inst-1',
-          'status': 'PENDING',
-          'requestNote': 'other role request',
-        }),
-        InstitutionMembershipRequest.fromJson({
-          'id': 'other-user',
-          'requestType': 'DOCTOR',
-          'userId': 'other-user',
-          'institutionId': 'inst-1',
-          'status': 'PENDING',
-          'requestNote': 'other user request',
-        }),
-      ];
+            InstitutionMembershipRequest.fromJson({
+              'id': 'doctor-own',
+              'requestType': 'DOCTOR',
+              'userId': 'professional-1',
+              'institutionId': 'inst-1',
+              'status': 'PENDING',
+              'requestNote': 'doctor own request',
+            }),
+            InstitutionMembershipRequest.fromJson({
+              'id': 'consultant-own',
+              'requestType': 'CONSULTANT',
+              'userId': 'professional-1',
+              'institutionId': 'inst-1',
+              'status': 'PENDING',
+              'requestNote': 'consultant own request',
+            }),
+            InstitutionMembershipRequest.fromJson({
+              'id': 'other-role',
+              'requestType': 'CONSULTANT',
+              'userId': 'other-user',
+              'institutionId': 'inst-1',
+              'status': 'PENDING',
+              'requestNote': 'other role request',
+            }),
+            InstitutionMembershipRequest.fromJson({
+              'id': 'other-user',
+              'requestType': 'DOCTOR',
+              'userId': 'other-user',
+              'institutionId': 'inst-1',
+              'status': 'PENDING',
+              'requestNote': 'other user request',
+            }),
+          ];
 
   @override
   Future<void> submitInstitutionMembershipRequest({
