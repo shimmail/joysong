@@ -107,7 +107,12 @@ class _WalletPageState extends State<WalletPage> {
             child: FilledButton.tonalIcon(
               key: const Key('wallet-withdraw-button'),
               onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('提现功能即将开放')),
+                SnackBar(
+                  content: Text(context.localized(
+                    '提现功能即将开放',
+                    'Withdrawal coming soon',
+                  )),
+                ),
               ),
               icon: const Icon(Icons.account_balance_outlined),
               label: Text(context.localized('提现', 'Withdraw')),
