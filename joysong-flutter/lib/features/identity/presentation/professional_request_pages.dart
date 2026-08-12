@@ -1258,13 +1258,15 @@ class _DoctorProjectProfileUpdatePageState
     try {
       await widget.repository.withdrawDoctorProjectChangeRequest(request.id);
       await _load();
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text(context.localized('申请已撤回', 'Request withdrawn.'))));
+      }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() => _error =
             context.localized('撤回失败，请重试', 'Withdrawal failed. Please retry.'));
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }

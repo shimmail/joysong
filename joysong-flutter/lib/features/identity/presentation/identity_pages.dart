@@ -11,8 +11,8 @@ import 'package:joysong_flutter/features/identity/presentation/professional_requ
 import 'package:joysong_flutter/features/professional_management/data/professional_repository.dart';
 import 'package:joysong_flutter/features/professional_management/presentation/professional_pages.dart';
 
-typedef IdentityFilePicker =
-    Future<IdentityFileDraft?> Function(IdentityDocumentType type);
+typedef IdentityFilePicker = Future<IdentityFileDraft?> Function(
+    IdentityDocumentType type);
 typedef InstitutionProfileImagePicker = Future<String?> Function();
 
 class IdentityCenterPage extends StatefulWidget {
@@ -52,16 +52,17 @@ class _IdentityCenterPageState extends State<IdentityCenterPage> {
         listenable: _controller,
         builder: (context, _) {
           return switch (_controller.status) {
-            IdentityLoadStatus.idle || IdentityLoadStatus.loading =>
+            IdentityLoadStatus.idle ||
+            IdentityLoadStatus.loading =>
               const Center(child: CircularProgressIndicator()),
             IdentityLoadStatus.failure => _IdentityFailure(
-              message: _controller.errorMessage ?? '身份信息加载失败',
-              onRetry: _controller.load,
-            ),
+                message: _controller.errorMessage ?? '身份信息加载失败',
+                onRetry: _controller.load,
+              ),
             IdentityLoadStatus.ready => _IdentityOverviewView(
-              controller: _controller,
-              filePicker: widget.filePicker ?? _pickIdentityFile,
-            ),
+                controller: _controller,
+                filePicker: widget.filePicker ?? _pickIdentityFile,
+              ),
           };
         },
       ),
@@ -127,8 +128,8 @@ class _IdentityOverviewView extends StatelessWidget {
           Text(
             '认证材料通过私有接口上传，不会进入公开图片库，也不会生成可公开访问的 URL。',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
           ),
         ],
       ),
@@ -410,23 +411,24 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
         listenable: _controller,
         builder: (context, _) {
           return switch (_controller.status) {
-            ManagementLoadStatus.idle || ManagementLoadStatus.loading =>
+            ManagementLoadStatus.idle ||
+            ManagementLoadStatus.loading =>
               const Center(child: CircularProgressIndicator()),
             ManagementLoadStatus.denied ||
-            ManagementLoadStatus.failure => _IdentityFailure(
-              message:
-                  _controller.errorMessage ??
-                  context.localized('没有专业管理权限', 'No professional access'),
-              onRetry: _controller.enter,
-            ),
+            ManagementLoadStatus.failure =>
+              _IdentityFailure(
+                message: _controller.errorMessage ??
+                    context.localized('没有专业管理权限', 'No professional access'),
+                onRetry: _controller.enter,
+              ),
             ManagementLoadStatus.ready => _ManagementCapabilities(
-              context: _controller.context!,
-              repository: widget.repository,
-              discoverRepository: widget.discoverRepository,
-              institutionImagePicker: widget.institutionImagePicker,
-              doctorImagePicker: widget.doctorImagePicker,
-              professionalRepository: widget.professionalRepository,
-            ),
+                context: _controller.context!,
+                repository: widget.repository,
+                discoverRepository: widget.discoverRepository,
+                institutionImagePicker: widget.institutionImagePicker,
+                doctorImagePicker: widget.doctorImagePicker,
+                professionalRepository: widget.professionalRepository,
+              ),
           };
         },
       ),
@@ -461,232 +463,217 @@ class _ManagementCapabilities extends StatelessWidget {
     final isConsultant = context.activeRoles.contains(
       IdentityRoleType.consultant.code,
     );
-    final groups =
-        <
+    final groups = <({
+      IconData icon,
+      String title,
+      String emptyText,
+      String? membershipRequestType,
+      List<
           ({
             IconData icon,
-            String title,
-            String emptyText,
-            String? membershipRequestType,
-            List<
-              ({
-                IconData icon,
-                String label,
-                bool enabled,
-                _ManagementAction action,
-              })
-            >
-            items,
-          })
-        >[
+            String label,
+            bool enabled,
+            _ManagementAction action,
+          })> items,
+    })>[
+      (
+        icon: Icons.apartment_outlined,
+        title: buildContext.localized('法人', 'Legal representative'),
+        membershipRequestType: null,
+        emptyText: buildContext.localized(
+          '暂无机构法人可用配置',
+          'No legal representative settings available',
+        ),
+        items: [
+          (
+            icon: Icons.menu_book_outlined,
+            label: buildContext.localized('专业目录', 'Professional catalog'),
+            enabled: isLegalRepresentative &&
+                context.visibleInstitutionIds.isNotEmpty &&
+                discoverRepository is ProfessionalCatalogRepository,
+            action: _ManagementAction.professionalCatalog,
+          ),
           (
             icon: Icons.apartment_outlined,
-            title: buildContext.localized('法人', 'Legal representative'),
-            membershipRequestType: null,
-            emptyText: buildContext.localized(
-              '暂无机构法人可用配置',
-              'No legal representative settings available',
-            ),
-            items: [
-              (
-                icon: Icons.menu_book_outlined,
-                label: buildContext.localized('专业目录', 'Professional catalog'),
-                enabled:
-                    isLegalRepresentative &&
-                    context.visibleInstitutionIds.isNotEmpty &&
-                    discoverRepository is ProfessionalCatalogRepository,
-                action: _ManagementAction.professionalCatalog,
-              ),
-              (
-                icon: Icons.apartment_outlined,
-                label: buildContext.localized('机构档案', 'Institution profile'),
-                enabled: isLegalRepresentative && context.canManageInstitutions,
-                action: _ManagementAction.institutionProfile,
-              ),
-              (
-                icon: Icons.how_to_reg_outlined,
-                label: buildContext.localized('成员加入审核', 'Membership reviews'),
-                enabled:
-                    isLegalRepresentative &&
-                    context.canReviewInstitutionRequests,
-                action: _ManagementAction.membershipReviews,
-              ),
-              (
-                icon: Icons.fact_check_outlined,
-                label: buildContext.localized(
-                  '机构项目申请审核',
-                  'Institution project reviews',
-                ),
-                enabled:
-                    isLegalRepresentative &&
-                    context.canReviewInstitutionProjectRequests,
-                action: _ManagementAction.institutionProjectReviews,
-              ),
-              (
-                icon: Icons.group_add_outlined,
-                label: buildContext.localized(
-                  '机构项目加入审核',
-                  'Institution project join reviews',
-                ),
-                enabled:
-                    isLegalRepresentative &&
-                    context.canReviewInstitutionProjectRequests,
-                action: _ManagementAction.institutionProjectJoinReviews,
-              ),
-              (
-                icon: Icons.compare_arrows_outlined,
-                label: buildContext.localized(
-                  '医生项目资料审核',
-                  'Doctor project profile reviews',
-                ),
-                enabled:
-                    !isAdmin &&
-                    isLegalRepresentative &&
-                    context.canReviewInstitutionProjectRequests,
-                action: _ManagementAction.doctorProjectProfileReviews,
-              ),
-            ],
+            label: buildContext.localized('机构档案', 'Institution profile'),
+            enabled: isLegalRepresentative && context.canManageInstitutions,
+            action: _ManagementAction.institutionProfile,
           ),
           (
-            icon: Icons.admin_panel_settings_outlined,
-            title: buildContext.localized('平台管理', 'Platform administration'),
-            membershipRequestType: null,
-            emptyText: buildContext.localized(
-              '暂无平台管理权限',
-              'No platform administration access',
-            ),
-            items: [
-              (
-                icon: Icons.menu_book_outlined,
-                label: buildContext.localized('专业目录', 'Professional catalog'),
-                enabled:
-                    isDoctor &&
-                    context.doctorId != null &&
-                    discoverRepository is ProfessionalCatalogRepository,
-                action: _ManagementAction.professionalCatalog,
-              ),
-              (
-                icon: Icons.compare_arrows_outlined,
-                label: buildContext.localized(
-                  '医生项目资料审核',
-                  'Doctor project profile reviews',
-                ),
-                enabled: isAdmin && context.canReviewInstitutionProjectRequests,
-                action: _ManagementAction.doctorProjectProfileReviews,
-              ),
-            ],
+            icon: Icons.how_to_reg_outlined,
+            label: buildContext.localized('成员加入审核', 'Membership reviews'),
+            enabled:
+                isLegalRepresentative && context.canReviewInstitutionRequests,
+            action: _ManagementAction.membershipReviews,
           ),
+          (
+            icon: Icons.fact_check_outlined,
+            label: buildContext.localized(
+              '机构项目申请审核',
+              'Institution project reviews',
+            ),
+            enabled: isLegalRepresentative &&
+                context.canReviewInstitutionProjectRequests,
+            action: _ManagementAction.institutionProjectReviews,
+          ),
+          (
+            icon: Icons.group_add_outlined,
+            label: buildContext.localized(
+              '机构项目加入审核',
+              'Institution project join reviews',
+            ),
+            enabled: isLegalRepresentative &&
+                context.canReviewInstitutionProjectRequests,
+            action: _ManagementAction.institutionProjectJoinReviews,
+          ),
+          (
+            icon: Icons.compare_arrows_outlined,
+            label: buildContext.localized(
+              '医生项目资料审核',
+              'Doctor project profile reviews',
+            ),
+            enabled: !isAdmin &&
+                isLegalRepresentative &&
+                context.canReviewInstitutionProjectRequests,
+            action: _ManagementAction.doctorProjectProfileReviews,
+          ),
+        ],
+      ),
+      (
+        icon: Icons.admin_panel_settings_outlined,
+        title: buildContext.localized('平台管理', 'Platform administration'),
+        membershipRequestType: null,
+        emptyText: buildContext.localized(
+          '暂无平台管理权限',
+          'No platform administration access',
+        ),
+        items: [
+          (
+            icon: Icons.menu_book_outlined,
+            label: buildContext.localized('专业目录', 'Professional catalog'),
+            enabled: isDoctor &&
+                context.doctorId != null &&
+                discoverRepository is ProfessionalCatalogRepository,
+            action: _ManagementAction.professionalCatalog,
+          ),
+          (
+            icon: Icons.compare_arrows_outlined,
+            label: buildContext.localized(
+              '医生项目资料审核',
+              'Doctor project profile reviews',
+            ),
+            enabled: isAdmin && context.canReviewInstitutionProjectRequests,
+            action: _ManagementAction.doctorProjectProfileReviews,
+          ),
+        ],
+      ),
+      (
+        icon: Icons.medical_services_outlined,
+        title: buildContext.localized('医生', 'Doctor'),
+        membershipRequestType: 'DOCTOR',
+        emptyText: buildContext.localized(
+          '暂无医生可用配置',
+          'No doctor settings available',
+        ),
+        items: [
           (
             icon: Icons.medical_services_outlined,
-            title: buildContext.localized('医生', 'Doctor'),
-            membershipRequestType: 'DOCTOR',
-            emptyText: buildContext.localized(
-              '暂无医生可用配置',
-              'No doctor settings available',
-            ),
-            items: [
-              (
-                icon: Icons.medical_services_outlined,
-                label: buildContext.localized('医生档案', 'Doctor profile'),
-                enabled:
-                    context.activeRoles.contains(
-                      IdentityRoleType.doctor.code,
-                    ) &&
-                    context.canManageDoctors,
-                action: _ManagementAction.doctorProfile,
-              ),
-              (
-                icon: Icons.add_business_outlined,
-                label: buildContext.localized('申请加入机构', 'Apply to institution'),
-                enabled: isDoctor && context.canApplyToInstitutions,
-                action: _ManagementAction.applyMembership,
-              ),
-              (
-                icon: Icons.post_add_outlined,
-                label: buildContext.localized(
-                  '申请新增平台项目',
-                  'Request platform project',
-                ),
-                enabled: isDoctor && context.canSubmitPlatformProjectRequests,
-                action: _ManagementAction.platformProjectRequest,
-              ),
-              (
-                icon: Icons.add_task_outlined,
-                label: buildContext.localized(
-                  '申请新增机构项目',
-                  'Request institution project',
-                ),
-                enabled:
-                    isDoctor && context.canSubmitInstitutionProjectRequests,
-                action: _ManagementAction.institutionProjectRequest,
-              ),
-              (
-                icon: Icons.group_add_outlined,
-                label: buildContext.localized(
-                  '申请加入机构项目',
-                  'Join institution project',
-                ),
-                enabled:
-                    isDoctor && context.canSubmitInstitutionProjectRequests,
-                action: _ManagementAction.institutionProjectJoinRequest,
-              ),
-              (
-                icon: Icons.edit_note_outlined,
-                label: buildContext.localized(
-                  '修改本人项目资料',
-                  'Update my project profile',
-                ),
-                enabled:
-                    isDoctor && context.canSubmitInstitutionProjectRequests,
-                action: _ManagementAction.doctorProjectProfileUpdate,
-              ),
-              (
-                icon: Icons.article_outlined,
-                label: buildContext.localized('专业文章', 'Professional articles'),
-                enabled: isDoctor && context.canManageArticles,
-                action: _ManagementAction.doctorArticles,
-              ),
-              (
-                icon: Icons.receipt_long_outlined,
-                label: buildContext.localized('专业订单', 'Professional orders'),
-                enabled: isDoctor && context.canManageOrders,
-                action: _ManagementAction.doctorOrders,
-              ),
-            ],
+            label: buildContext.localized('医生档案', 'Doctor profile'),
+            enabled: context.activeRoles.contains(
+                  IdentityRoleType.doctor.code,
+                ) &&
+                context.canManageDoctors,
+            action: _ManagementAction.doctorProfile,
           ),
           (
-            icon: Icons.support_agent_outlined,
-            title: buildContext.localized('顾问', 'Consultant'),
-            membershipRequestType: null,
-            emptyText: buildContext.localized(
-              '暂无顾问可用配置',
-              'No consultant settings available',
-            ),
-            items: [
-              (
-                icon: Icons.add_business_outlined,
-                label: buildContext.localized('申请加入机构', 'Apply to institution'),
-                enabled: isConsultant && context.canApplyToInstitutions,
-                action: _ManagementAction.consultantMembership,
-              ),
-              (
-                icon: Icons.badge_outlined,
-                label: buildContext.localized(
-                  '机构归属',
-                  'Institution affiliation',
-                ),
-                enabled: isConsultant && context.canViewAffiliations,
-                action: _ManagementAction.consultantMembership,
-              ),
-              (
-                icon: Icons.spa_outlined,
-                label: buildContext.localized('项目目录', 'Project catalog'),
-                enabled: isConsultant,
-                action: _ManagementAction.consultantProjects,
-              ),
-            ],
+            icon: Icons.add_business_outlined,
+            label: buildContext.localized('申请加入机构', 'Apply to institution'),
+            enabled: isDoctor && context.canApplyToInstitutions,
+            action: _ManagementAction.applyMembership,
           ),
-        ];
+          (
+            icon: Icons.post_add_outlined,
+            label: buildContext.localized(
+              '申请新增平台项目',
+              'Request platform project',
+            ),
+            enabled: isDoctor && context.canSubmitPlatformProjectRequests,
+            action: _ManagementAction.platformProjectRequest,
+          ),
+          (
+            icon: Icons.add_task_outlined,
+            label: buildContext.localized(
+              '申请新增机构项目',
+              'Request institution project',
+            ),
+            enabled: isDoctor && context.canSubmitInstitutionProjectRequests,
+            action: _ManagementAction.institutionProjectRequest,
+          ),
+          (
+            icon: Icons.group_add_outlined,
+            label: buildContext.localized(
+              '申请加入机构项目',
+              'Join institution project',
+            ),
+            enabled: isDoctor && context.canSubmitInstitutionProjectRequests,
+            action: _ManagementAction.institutionProjectJoinRequest,
+          ),
+          (
+            icon: Icons.edit_note_outlined,
+            label: buildContext.localized(
+              '修改本人项目资料',
+              'Update my project profile',
+            ),
+            enabled: isDoctor && context.canSubmitInstitutionProjectRequests,
+            action: _ManagementAction.doctorProjectProfileUpdate,
+          ),
+          (
+            icon: Icons.article_outlined,
+            label: buildContext.localized('专业文章', 'Professional articles'),
+            enabled: isDoctor && context.canManageArticles,
+            action: _ManagementAction.doctorArticles,
+          ),
+          (
+            icon: Icons.receipt_long_outlined,
+            label: buildContext.localized('专业订单', 'Professional orders'),
+            enabled: isDoctor && context.canManageOrders,
+            action: _ManagementAction.doctorOrders,
+          ),
+        ],
+      ),
+      (
+        icon: Icons.support_agent_outlined,
+        title: buildContext.localized('顾问', 'Consultant'),
+        membershipRequestType: null,
+        emptyText: buildContext.localized(
+          '暂无顾问可用配置',
+          'No consultant settings available',
+        ),
+        items: [
+          (
+            icon: Icons.add_business_outlined,
+            label: buildContext.localized('申请加入机构', 'Apply to institution'),
+            enabled: isConsultant && context.canApplyToInstitutions,
+            action: _ManagementAction.consultantMembership,
+          ),
+          (
+            icon: Icons.badge_outlined,
+            label: buildContext.localized(
+              '机构归属',
+              'Institution affiliation',
+            ),
+            enabled: isConsultant && context.canViewAffiliations,
+            action: _ManagementAction.consultantMembership,
+          ),
+          (
+            icon: Icons.spa_outlined,
+            label: buildContext.localized('项目目录', 'Project catalog'),
+            enabled: isConsultant,
+            action: _ManagementAction.consultantProjects,
+          ),
+        ],
+      ),
+    ];
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -743,8 +730,8 @@ class _ManagementCapabilities extends StatelessWidget {
     if (action == _ManagementAction.professionalCatalog &&
         discoverRepository is ProfessionalCatalogRepository) {
       final isDoctor = this.context.activeRoles.contains(
-        IdentityRoleType.doctor.code,
-      );
+            IdentityRoleType.doctor.code,
+          );
       Navigator.of(context).push<void>(
         MaterialPageRoute(
           builder: (_) => ProfessionalCatalogPage(
@@ -955,513 +942,6 @@ enum _ManagementAction {
   doctorOrders,
 }
 
-class ManagedInstitutionProjectsPage extends StatefulWidget {
-  const ManagedInstitutionProjectsPage({
-    required this.repository,
-    required this.context,
-    super.key,
-  });
-
-  final IdentityRepository repository;
-  final ManagementContext context;
-
-  @override
-  State<ManagedInstitutionProjectsPage> createState() =>
-      _ManagedInstitutionProjectsPageState();
-}
-
-class _ManagedInstitutionProjectsPageState
-    extends State<ManagedInstitutionProjectsPage> {
-  late final InstitutionProjectManagementController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = InstitutionProjectManagementController(
-      widget.repository,
-      context: widget.context,
-    )..load();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(context.localized('机构项目', 'Institution Projects')),
-      ),
-      floatingActionButton: ListenableBuilder(
-        listenable: _controller,
-        builder: (context, _) => _controller.canPublish
-            ? FloatingActionButton.extended(
-                onPressed:
-                    _controller.status == InstitutionProjectLoadStatus.ready
-                    ? () => _edit(null)
-                    : null,
-                icon: const Icon(Icons.add_rounded),
-                label: Text(context.localized('发布', 'Publish')),
-              )
-            : const SizedBox.shrink(),
-      ),
-      body: ListenableBuilder(
-        listenable: _controller,
-        builder: (context, _) {
-          return switch (_controller.status) {
-            InstitutionProjectLoadStatus.idle ||
-            InstitutionProjectLoadStatus.loading => const Center(
-              child: CircularProgressIndicator(),
-            ),
-            InstitutionProjectLoadStatus.failure => _IdentityFailure(
-              message:
-                  _controller.errorMessage ??
-                  context.localized(
-                    '机构项目加载失败',
-                    'Unable to load institution projects',
-                  ),
-              onRetry: _controller.load,
-            ),
-            InstitutionProjectLoadStatus.ready => RefreshIndicator(
-              onRefresh: _controller.load,
-              child: ListView.separated(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(16),
-                itemCount:
-                    _controller.institutionProjects.length +
-                    (_controller.institutionProjects.isEmpty ? 1 : 0),
-                separatorBuilder: (_, __) => const SizedBox(height: 8),
-                itemBuilder: (context, index) {
-                  if (_controller.institutionProjects.isEmpty) {
-                    return _InfoCard(
-                      text: context.localized(
-                        '暂无机构项目',
-                        'No institution projects yet',
-                      ),
-                    );
-                  }
-                  final item = _controller.institutionProjects[index];
-                  final institution = _controller.institutions
-                      .where((profile) => profile.id == item.institutionId)
-                      .firstOrNull;
-                  return Card(
-                    child: ListTile(
-                      leading: const Icon(Icons.spa_outlined),
-                      title: Text(item.effectiveName),
-                      subtitle: Text(
-                        [
-                          if (institution != null) institution.name,
-                          '${context.localized('价格', 'Price')} ${item.price}',
-                          item.isActive
-                              ? context.localized('已上架', 'Active')
-                              : context.localized('已下架', 'Inactive'),
-                        ].join(' · '),
-                      ),
-                      trailing: _controller.canPublish
-                          ? const Icon(Icons.edit_outlined)
-                          : null,
-                      onTap: _controller.canPublish ? () => _edit(item) : null,
-                    ),
-                  );
-                },
-              ),
-            ),
-          };
-        },
-      ),
-    );
-  }
-
-  Future<void> _edit(ManagedInstitutionProject? project) async {
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        builder: (_) => ManagedInstitutionProjectEditPage(
-          controller: _controller,
-          project: project,
-        ),
-      ),
-    );
-  }
-}
-
-class ManagedInstitutionProjectEditPage extends StatefulWidget {
-  const ManagedInstitutionProjectEditPage({
-    required this.controller,
-    this.project,
-    super.key,
-  });
-
-  final InstitutionProjectManagementController controller;
-  final ManagedInstitutionProject? project;
-
-  @override
-  State<ManagedInstitutionProjectEditPage> createState() =>
-      _ManagedInstitutionProjectEditPageState();
-}
-
-class _ManagedInstitutionProjectEditPageState
-    extends State<ManagedInstitutionProjectEditPage> {
-  final _formKey = GlobalKey<FormState>();
-  late final TextEditingController _newProjectName;
-  late final TextEditingController _newProjectCategory;
-  late final TextEditingController _name;
-  late final TextEditingController _category;
-  late final TextEditingController _description;
-  late final TextEditingController _tags;
-  late final TextEditingController _slogan;
-  late final TextEditingController _detailContent;
-  late final TextEditingController _price;
-  late final TextEditingController _originalPrice;
-  late final TextEditingController _coverImage;
-  late final TextEditingController _images;
-  late final TextEditingController _consultationFee;
-  late final TextEditingController _commissionRate;
-  late final TextEditingController _institutionRate;
-  String? _institutionId;
-  String? _projectId;
-  var _isActive = true;
-
-  bool get _editing => widget.project != null;
-
-  @override
-  void initState() {
-    super.initState();
-    final project = widget.project;
-    _institutionId =
-        project?.institutionId ??
-        widget.controller.context.doctorInstitutionIds.firstOrNull;
-    _projectId = project?.projectId;
-    _isActive = project?.isActive ?? true;
-    _newProjectName = TextEditingController();
-    _newProjectCategory = TextEditingController();
-    _name = TextEditingController(text: project?.name ?? '');
-    _category = TextEditingController(text: project?.category ?? '');
-    _description = TextEditingController(text: project?.description ?? '');
-    _tags = TextEditingController(text: project?.tags ?? '');
-    _slogan = TextEditingController(text: project?.slogan ?? '');
-    _detailContent = TextEditingController(text: project?.detailContent ?? '');
-    _price = TextEditingController(text: (project?.price ?? 0).toString());
-    _originalPrice = TextEditingController(
-      text: project?.originalPrice?.toString() ?? '',
-    );
-    _coverImage = TextEditingController(text: project?.coverImage ?? '');
-    _images = TextEditingController(text: project?.images ?? '');
-    _consultationFee = TextEditingController(text: '0');
-    _commissionRate = TextEditingController(text: '0');
-    _institutionRate = TextEditingController(text: '40');
-  }
-
-  @override
-  void dispose() {
-    for (final controller in [
-      _newProjectName,
-      _newProjectCategory,
-      _name,
-      _category,
-      _description,
-      _tags,
-      _slogan,
-      _detailContent,
-      _price,
-      _originalPrice,
-      _coverImage,
-      _images,
-      _consultationFee,
-      _commissionRate,
-      _institutionRate,
-    ]) {
-      controller.dispose();
-    }
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final doctorInstitutionIds = widget.controller.context.doctorInstitutionIds;
-    final institutionOptions = widget.controller.institutions
-        .where((institution) => doctorInstitutionIds.contains(institution.id))
-        .toList(growable: false);
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          context.localized(
-            _editing ? '编辑机构项目' : '发布机构项目',
-            _editing
-                ? 'Edit Institution Project'
-                : 'Publish Institution Project',
-          ),
-        ),
-      ),
-      body: ListenableBuilder(
-        listenable: widget.controller,
-        builder: (context, _) => Form(
-          key: _formKey,
-          child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              _InfoCard(
-                text: context.localized(
-                  '项目和机构项目仅支持认证医生发布；机构下拉框只显示医生本人已绑定机构。分账配置会作为提案提交，需双方确认后生效。',
-                  'Only verified doctors can publish projects. The institution picker only shows institutions bound to this doctor. Split settings are submitted as proposals and take effect after both sides confirm.',
-                ),
-              ),
-              const SizedBox(height: 16),
-              DropdownButtonFormField<String>(
-                initialValue: _institutionId,
-                decoration: InputDecoration(
-                  labelText: context.localized('所属机构', 'Institution'),
-                ),
-                items: institutionOptions
-                    .map(
-                      (item) => DropdownMenuItem(
-                        value: item.id,
-                        child: Text(item.name),
-                      ),
-                    )
-                    .toList(),
-                onChanged: _editing
-                    ? null
-                    : (value) => setState(() => _institutionId = value),
-                validator: (value) => value == null || value.isEmpty
-                    ? context.localized('请选择所属机构', 'Select an institution')
-                    : null,
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                initialValue: _projectId,
-                decoration: InputDecoration(
-                  labelText: context.localized('关联公共项目', 'Base project'),
-                ),
-                items: widget.controller.projects
-                    .map(
-                      (item) => DropdownMenuItem(
-                        value: item.id,
-                        child: Text(item.name),
-                      ),
-                    )
-                    .toList(),
-                onChanged: _editing
-                    ? null
-                    : (value) => setState(() => _projectId = value),
-              ),
-              if (!_editing) ...[
-                const SizedBox(height: 12),
-                _field(
-                  _newProjectName,
-                  context.localized('新项目名称', 'New project name'),
-                ),
-                _field(
-                  _newProjectCategory,
-                  context.localized('新项目分类', 'New project category'),
-                ),
-              ],
-              const SizedBox(height: 8),
-              Text(
-                context.localized('机构项目独立详情', 'Institution project details'),
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 12),
-              _field(_name, context.localized('独立名称', 'Custom name')),
-              _field(_category, context.localized('独立分类', 'Custom category')),
-              _field(
-                _description,
-                context.localized('独立简介', 'Custom description'),
-                maxLines: 3,
-              ),
-              _field(
-                _tags,
-                context.localized('标签（逗号分隔）', 'Tags, comma separated'),
-              ),
-              _field(_slogan, context.localized('宣传语', 'Slogan')),
-              _field(
-                _detailContent,
-                context.localized('详情正文', 'Detail content'),
-                maxLines: 4,
-              ),
-              _field(
-                _price,
-                context.localized('价格', 'Price'),
-                keyboardType: TextInputType.number,
-                required: true,
-              ),
-              _field(
-                _originalPrice,
-                context.localized('原价', 'Original price'),
-                keyboardType: TextInputType.number,
-              ),
-              _field(
-                _coverImage,
-                context.localized('封面图 URL', 'Cover image URL'),
-              ),
-              _field(
-                _images,
-                context.localized(
-                  '图集 URL（逗号分隔）',
-                  'Gallery URLs, comma separated',
-                ),
-                maxLines: 2,
-              ),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(context.localized('是否上架', 'Active')),
-                value: _isActive,
-                onChanged: (value) => setState(() => _isActive = value),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                context.localized('分账管理', 'Split configuration'),
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 12),
-              _field(
-                _consultationFee,
-                context.localized('面诊金', 'Consultation fee'),
-                keyboardType: TextInputType.number,
-              ),
-              _field(
-                _commissionRate,
-                context.localized('医美顾问分账比例（%）', 'Consultant split rate (%)'),
-                keyboardType: TextInputType.number,
-              ),
-              _field(
-                _institutionRate,
-                context.localized('机构分账比例（%）', 'Institution split rate (%)'),
-                keyboardType: TextInputType.number,
-              ),
-              if (widget.controller.errorMessage != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(
-                    widget.controller.errorMessage!,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                  ),
-                ),
-              const SizedBox(height: 20),
-              FilledButton(
-                onPressed: widget.controller.isSaving ? null : _save,
-                child: Text(
-                  widget.controller.isSaving
-                      ? context.localized('保存中…', 'Saving...')
-                      : context.localized('保存并提交分账', 'Save and submit split'),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _field(
-    TextEditingController controller,
-    String label, {
-    int maxLines = 1,
-    TextInputType? keyboardType,
-    bool required = false,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: TextFormField(
-        controller: controller,
-        maxLines: maxLines,
-        keyboardType: keyboardType,
-        decoration: InputDecoration(labelText: label),
-        validator: required
-            ? (value) => (value ?? '').trim().isEmpty
-                  ? context.localized('请填写$label', 'Please enter $label')
-                  : null
-            : null,
-      ),
-    );
-  }
-
-  Future<void> _save() async {
-    FocusManager.instance.primaryFocus?.unfocus();
-    if (!(_formKey.currentState?.validate() ?? false)) return;
-    var projectId = _projectId?.trim() ?? '';
-    if (!_editing && projectId.isEmpty) {
-      final name = _newProjectName.text.trim();
-      if (name.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              context.localized(
-                '请选择公共项目，或填写新项目名称',
-                'Select a base project or enter a new project name',
-              ),
-            ),
-          ),
-        );
-        return;
-      }
-      final created = await widget.controller.createBaseProject(
-        ManagementProjectDraft(
-          name: name,
-          category: _newProjectCategory.text.trim(),
-          description: _description.text.trim(),
-          tags: _tags.text.trim(),
-          coverImage: _coverImage.text.trim(),
-          referencePrice: _num(_price.text),
-        ),
-      );
-      if (created == null) return;
-      projectId = created.id;
-    }
-    final draft = ManagedInstitutionProjectDraft(
-      id: widget.project?.id,
-      institutionId: _institutionId?.trim() ?? '',
-      projectId: projectId,
-      name: _name.text,
-      category: _category.text,
-      description: _description.text,
-      tags: _tags.text,
-      slogan: _slogan.text,
-      detailContent: _detailContent.text,
-      price: _num(_price.text),
-      originalPrice: _nullableNum(_originalPrice.text),
-      coverImage: _coverImage.text,
-      images: _images.text,
-      isActive: _isActive,
-    );
-    final split = SplitConfigProposalDraft(
-      doctorId: widget.controller.context.doctorId ?? '',
-      institutionProjectId: widget.project?.id ?? 'pending',
-      consultationFee: _num(_consultationFee.text),
-      commissionRate: _num(_commissionRate.text),
-      institutionRate: _num(_institutionRate.text),
-    );
-    if (await widget.controller.saveInstitutionProject(
-          project: draft,
-          split: split,
-        ) &&
-        mounted) {
-      Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            context.localized(
-              '机构项目已保存，分账提案已提交',
-              'Institution project saved and split proposal submitted',
-            ),
-          ),
-        ),
-      );
-    }
-  }
-
-  num _num(String value) => num.tryParse(value.trim()) ?? 0;
-
-  num? _nullableNum(String value) {
-    final text = value.trim();
-    return text.isEmpty ? null : num.tryParse(text);
-  }
-}
-
 class ManagedInstitutionProfilesPage extends StatefulWidget {
   const ManagedInstitutionProfilesPage({
     required this.repository,
@@ -1522,27 +1002,28 @@ class _ManagedInstitutionProfilesPageState
         builder: (context, _) {
           return switch (_controller.status) {
             InstitutionProfileLoadStatus.idle ||
-            InstitutionProfileLoadStatus.loading => const Center(
-              child: CircularProgressIndicator(),
-            ),
+            InstitutionProfileLoadStatus.loading =>
+              const Center(
+                child: CircularProgressIndicator(),
+              ),
             InstitutionProfileLoadStatus.empty => Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Text(
-                  context.localized(
-                    '当前账号暂无可管理机构',
-                    'No institutions are available to manage',
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text(
+                    context.localized(
+                      '当前账号暂无可管理机构',
+                      'No institutions are available to manage',
+                    ),
                   ),
                 ),
               ),
-            ),
             InstitutionProfileLoadStatus.failure => _IdentityFailure(
-              message: _institutionProfileFailureMessage(
-                context,
-                _controller.failure ?? InstitutionProfileFailure.load,
+                message: _institutionProfileFailureMessage(
+                  context,
+                  _controller.failure ?? InstitutionProfileFailure.load,
+                ),
+                onRetry: _load,
               ),
-              onRetry: _load,
-            ),
             InstitutionProfileLoadStatus.ready
                 when _controller.selectedProfile != null =>
               ManagedInstitutionProfileEditPage(
@@ -1552,36 +1033,37 @@ class _ManagedInstitutionProfilesPageState
                 embedded: true,
               ),
             InstitutionProfileLoadStatus.ready => RefreshIndicator(
-              onRefresh: _load,
-              child: ListView.separated(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(16),
-                itemCount: _controller.summaries.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 8),
-                itemBuilder: (context, index) {
-                  final institution = _controller.summaries[index];
-                  return Card(
-                    child: ListTile(
-                      leading: const Icon(Icons.apartment_outlined),
-                      title: Text(
-                        institution.name.isEmpty
-                            ? context.localized('未命名机构', 'Unnamed institution')
-                            : institution.name,
+                onRefresh: _load,
+                child: ListView.separated(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(16),
+                  itemCount: _controller.summaries.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final institution = _controller.summaries[index];
+                    return Card(
+                      child: ListTile(
+                        leading: const Icon(Icons.apartment_outlined),
+                        title: Text(
+                          institution.name.isEmpty
+                              ? context.localized(
+                                  '未命名机构', 'Unnamed institution')
+                              : institution.name,
+                        ),
+                        subtitle: Text(
+                          [
+                            if (institution.city.isNotEmpty) institution.city,
+                            if (institution.address.isNotEmpty)
+                              institution.address,
+                          ].join(' · '),
+                        ),
+                        trailing: const Icon(Icons.edit_outlined),
+                        onTap: () => _edit(institution),
                       ),
-                      subtitle: Text(
-                        [
-                          if (institution.city.isNotEmpty) institution.city,
-                          if (institution.address.isNotEmpty)
-                            institution.address,
-                        ].join(' · '),
-                      ),
-                      trailing: const Icon(Icons.edit_outlined),
-                      onTap: () => _edit(institution),
-                    ),
-                  );
-                },
+                    );
+                  },
+                ),
               ),
-            ),
           };
         },
       ),
@@ -1816,12 +1298,11 @@ class _ManagedInstitutionProfileEditPageState
         maxLines: maxLines,
         keyboardType: keyboardType,
         decoration: InputDecoration(labelText: label, helperText: helperText),
-        validator:
-            validator ??
+        validator: validator ??
             (required
                 ? (value) => (value ?? '').trim().isEmpty
-                      ? context.localized('请填写$label', '$label is required')
-                      : null
+                    ? context.localized('请填写$label', '$label is required')
+                    : null
                 : null),
       ),
     );
@@ -1948,21 +1429,21 @@ class _ManagedInstitutionProfileEditPageState
     if (!(_formKey.currentState?.validate() ?? false)) return;
     final establishedYear = _optionalInt(_fields['establishedYear']!.text);
     final update = widget.profile.toUpdate().copyWith(
-      name: _text('name'),
-      coverImage: _text('coverImage'),
-      city: _text('city'),
-      address: _text('address'),
-      contactPhone: _text('contactPhone'),
-      businessHours: _text('businessHours'),
-      establishedYear: establishedYear,
-      clearEstablishedYear: establishedYear == null,
-      description: _text('description'),
-      tags: _csv('tags'),
-      specialties: _csv('specialties'),
-      credentials: _text('credentials'),
-      credentialImages: _csv('credentialImages'),
-      images: _csv('images'),
-    );
+          name: _text('name'),
+          coverImage: _text('coverImage'),
+          city: _text('city'),
+          address: _text('address'),
+          contactPhone: _text('contactPhone'),
+          businessHours: _text('businessHours'),
+          establishedYear: establishedYear,
+          clearEstablishedYear: establishedYear == null,
+          description: _text('description'),
+          tags: _csv('tags'),
+          specialties: _csv('specialties'),
+          credentials: _text('credentials'),
+          credentialImages: _csv('credentialImages'),
+          images: _csv('images'),
+        );
     if (await widget.controller.save(update) && mounted) {
       final messenger = ScaffoldMessenger.of(context);
       if (!widget.embedded) Navigator.of(context).pop();
@@ -1994,7 +1475,8 @@ class _ManagedInstitutionProfileEditPageState
     return null;
   }
 
-  List<String> _csv(String name) => _fields[name]!.text
+  List<String> _csv(String name) => _fields[name]!
+      .text
       .split(',')
       .map((item) => item.trim())
       .where((item) => item.isNotEmpty)
@@ -2004,16 +1486,17 @@ class _ManagedInstitutionProfileEditPageState
 String _institutionProfileFailureMessage(
   BuildContext context,
   InstitutionProfileFailure failure,
-) => switch (failure) {
-  InstitutionProfileFailure.load => context.localized(
-    '机构档案加载失败，请重试',
-    'Failed to load institution profile. Please try again.',
-  ),
-  InstitutionProfileFailure.save => context.localized(
-    '机构档案保存失败，请稍后重试',
-    'Failed to save institution profile. Please try again later.',
-  ),
-};
+) =>
+    switch (failure) {
+      InstitutionProfileFailure.load => context.localized(
+          '机构档案加载失败，请重试',
+          'Failed to load institution profile. Please try again.',
+        ),
+      InstitutionProfileFailure.save => context.localized(
+          '机构档案保存失败，请稍后重试',
+          'Failed to save institution profile. Please try again later.',
+        ),
+    };
 
 class _DocumentTile extends StatelessWidget {
   const _DocumentTile({
@@ -2045,15 +1528,15 @@ class _DocumentTile extends StatelessWidget {
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
             : file == null
-            ? TextButton(
-                onPressed: canPick ? onUpload : null,
-                child: const Text('上传'),
-              )
-            : IconButton(
-                tooltip: '删除未提交材料',
-                onPressed: onDelete,
-                icon: const Icon(Icons.delete_outline),
-              ),
+                ? TextButton(
+                    onPressed: canPick ? onUpload : null,
+                    child: const Text('上传'),
+                  )
+                : IconButton(
+                    tooltip: '删除未提交材料',
+                    onPressed: onDelete,
+                    icon: const Icon(Icons.delete_outline),
+                  ),
       ),
     );
   }
@@ -2144,29 +1627,29 @@ List<_IdentityField> _fieldsFor(IdentityRoleType role) {
   ];
   return switch (role) {
     IdentityRoleType.doctor => const [
-      ...common,
-      _IdentityField('hospitalName', '执业机构'),
-      _IdentityField('department', '科室'),
-      _IdentityField('title', '职称'),
-      _IdentityField('qualificationNo', '医师资格证编号'),
-      _IdentityField('practiceNo', '医师执业证编号'),
-      _IdentityField('reason', '申请理由', multiline: true),
-    ],
+        ...common,
+        _IdentityField('hospitalName', '执业机构'),
+        _IdentityField('department', '科室'),
+        _IdentityField('title', '职称'),
+        _IdentityField('qualificationNo', '医师资格证编号'),
+        _IdentityField('practiceNo', '医师执业证编号'),
+        _IdentityField('reason', '申请理由', multiline: true),
+      ],
     IdentityRoleType.consultant => const [
-      ...common,
-      _IdentityField('phone', '联系电话'),
-      _IdentityField('experience', '从业经历', multiline: true),
-      _IdentityField('proofDescription', '证明材料说明', multiline: true),
-      _IdentityField('reason', '申请理由', multiline: true),
-    ],
+        ...common,
+        _IdentityField('phone', '联系电话'),
+        _IdentityField('experience', '从业经历', multiline: true),
+        _IdentityField('proofDescription', '证明材料说明', multiline: true),
+        _IdentityField('reason', '申请理由', multiline: true),
+      ],
     IdentityRoleType.institutionLegalRepresentative => const [
-      ...common,
-      _IdentityField('phone', '联系电话'),
-      _IdentityField('institutionName', '机构名称'),
-      _IdentityField('businessLicenseNo', '统一社会信用代码'),
-      _IdentityField('region', '所在地区'),
-      _IdentityField('address', '详细地址', multiline: true),
-    ],
+        ...common,
+        _IdentityField('phone', '联系电话'),
+        _IdentityField('institutionName', '机构名称'),
+        _IdentityField('businessLicenseNo', '统一社会信用代码'),
+        _IdentityField('region', '所在地区'),
+        _IdentityField('address', '详细地址', multiline: true),
+      ],
     IdentityRoleType.unknown => const [],
   };
 }
@@ -2180,8 +1663,9 @@ List<IdentityDocumentType> _requiredDocuments(IdentityRoleType role) {
 }
 
 IconData _roleIcon(IdentityRoleType role) => switch (role) {
-  IdentityRoleType.doctor => Icons.medical_services_outlined,
-  IdentityRoleType.consultant => Icons.support_agent_outlined,
-  IdentityRoleType.institutionLegalRepresentative => Icons.apartment_outlined,
-  IdentityRoleType.unknown => Icons.help_outline,
-};
+      IdentityRoleType.doctor => Icons.medical_services_outlined,
+      IdentityRoleType.consultant => Icons.support_agent_outlined,
+      IdentityRoleType.institutionLegalRepresentative =>
+        Icons.apartment_outlined,
+      IdentityRoleType.unknown => Icons.help_outline,
+    };

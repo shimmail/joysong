@@ -153,6 +153,20 @@ void main() {
     expect(client.requests.single.path,
         '/admin/institution-project-requests/profile-update-targets');
   });
+
+  test('doctor withdraws pending project requests', () async {
+    final client = _RecordingApiClient();
+    await ApiIdentityRepository(client)
+        .withdrawDoctorProjectChangeRequest(' request-1 ');
+
+    expect(
+        client.requests.single,
+        const _Request(
+          'POST',
+          '/admin/institution-project-requests/request-1/withdraw',
+          null,
+        ));
+  });
 }
 
 const _requestJson = <String, Object?>{

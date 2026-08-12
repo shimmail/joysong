@@ -56,7 +56,7 @@ class _ProfessionalCatalogPageState extends State<ProfessionalCatalogPage> {
         _loading = false;
       });
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _loading = false;
           _error = context.localized(
@@ -64,6 +64,7 @@ class _ProfessionalCatalogPageState extends State<ProfessionalCatalogPage> {
             'Catalog unavailable. Please retry.',
           );
         });
+      }
     }
   }
 
@@ -72,8 +73,8 @@ class _ProfessionalCatalogPageState extends State<ProfessionalCatalogPage> {
     final query = _search.text.trim().toLowerCase();
     bool matches(DiscoverItem item) =>
         '${item.title} ${item.subtitle} ${item.meta}'.toLowerCase().contains(
-          query,
-        );
+              query,
+            );
     final institutions = _institutions.where(matches).toList();
     final projects = _projects.where(matches).toList();
     return Scaffold(
@@ -83,63 +84,64 @@ class _ProfessionalCatalogPageState extends State<ProfessionalCatalogPage> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-          ? Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(_error!),
-                  TextButton(
-                    onPressed: _load,
-                    child: Text(context.localized('重试', 'Retry')),
-                  ),
-                ],
-              ),
-            )
-          : RefreshIndicator(
-              onRefresh: _load,
-              child: ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  TextField(
-                    controller: _search,
-                    onChanged: (_) => setState(() {}),
-                    decoration: InputDecoration(
-                      prefixIcon: const Icon(Icons.search),
-                      hintText: context.localized(
-                        '搜索机构、医生或项目',
-                        'Search institutions, doctors, or projects',
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(_error!),
+                      TextButton(
+                        onPressed: _load,
+                        child: Text(context.localized('重试', 'Retry')),
                       ),
-                    ),
+                    ],
                   ),
-                  const SizedBox(height: 16),
-                  if (_institutions.isEmpty && _projects.isEmpty)
-                    Text(
-                      context.localized(
-                        '暂无可见目录内容',
-                        'No visible catalog content.',
+                )
+              : RefreshIndicator(
+                  onRefresh: _load,
+                  child: ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      TextField(
+                        controller: _search,
+                        onChanged: (_) => setState(() {}),
+                        decoration: InputDecoration(
+                          prefixIcon: const Icon(Icons.search),
+                          hintText: context.localized(
+                            '搜索机构、医生或项目',
+                            'Search institutions, doctors, or projects',
+                          ),
+                        ),
                       ),
-                    )
-                  else if (institutions.isEmpty && projects.isEmpty)
-                    Text(context.localized('没有匹配结果', 'No matching results.')),
-                  for (final item in institutions)
-                    _itemTile(item, () => _openInstitution(item)),
-                  for (final item in projects)
-                    _itemTile(item, () => _openItem(item)),
-                ],
-              ),
-            ),
+                      const SizedBox(height: 16),
+                      if (_institutions.isEmpty && _projects.isEmpty)
+                        Text(
+                          context.localized(
+                            '暂无可见目录内容',
+                            'No visible catalog content.',
+                          ),
+                        )
+                      else if (institutions.isEmpty && projects.isEmpty)
+                        Text(context.localized(
+                            '没有匹配结果', 'No matching results.')),
+                      for (final item in institutions)
+                        _itemTile(item, () => _openInstitution(item)),
+                      for (final item in projects)
+                        _itemTile(item, () => _openItem(item)),
+                    ],
+                  ),
+                ),
     );
   }
 
   Widget _itemTile(DiscoverItem item, VoidCallback open) => Card(
-    child: ListTile(
-      key: Key('catalog-${item.type.name}-${item.id}'),
-      title: Text(item.title),
-      subtitle: item.subtitle.isEmpty ? null : Text(item.subtitle),
-      trailing: const Icon(Icons.chevron_right),
-      onTap: open,
-    ),
-  );
+        child: ListTile(
+          key: Key('catalog-${item.type.name}-${item.id}'),
+          title: Text(item.title),
+          subtitle: item.subtitle.isEmpty ? null : Text(item.subtitle),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: open,
+        ),
+      );
 
   Future<void> _openInstitution(DiscoverItem institution) async {
     Navigator.of(context).push(
@@ -153,16 +155,16 @@ class _ProfessionalCatalogPageState extends State<ProfessionalCatalogPage> {
   }
 
   void _openItem(DiscoverItem item) => Navigator.of(context).push(
-    MaterialPageRoute(
-      builder: (_) => Scaffold(
-        appBar: AppBar(title: Text(item.title)),
-        body: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Text(item.subtitle.isEmpty ? item.title : item.subtitle),
+        MaterialPageRoute(
+          builder: (_) => Scaffold(
+            appBar: AppBar(title: Text(item.title)),
+            body: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(item.subtitle.isEmpty ? item.title : item.subtitle),
+            ),
+          ),
         ),
-      ),
-    ),
-  );
+      );
 }
 
 class _InstitutionCatalogPage extends StatefulWidget {
@@ -197,13 +199,14 @@ class _InstitutionCatalogPageState extends State<_InstitutionCatalogPage> {
       final doctors = await widget.repository.loadVisibleInstitutionDoctors(
         widget.institution.id,
       );
-      if (mounted)
+      if (mounted) {
         setState(() {
           _doctors = doctors;
           _loading = false;
         });
+      }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _loading = false;
           _error = context.localized(
@@ -211,52 +214,54 @@ class _InstitutionCatalogPageState extends State<_InstitutionCatalogPage> {
             'Content unavailable. Please retry.',
           );
         });
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text(widget.institution.title)),
-    body: _loading
-        ? const Center(child: CircularProgressIndicator())
-        : _error != null
-        ? Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(_error!),
-                TextButton(
-                  onPressed: _load,
-                  child: Text(context.localized('重试', 'Retry')),
-                ),
-              ],
-            ),
-          )
-        : ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              if (_doctors.isEmpty)
-                Text(context.localized('暂无可见医生', 'No visible doctors.')),
-              for (final doctor in _doctors)
-                Card(
-                  child: ListTile(
-                    title: Text(doctor.title),
-                    subtitle: Text(doctor.subtitle),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => _DoctorProjectsPage(
-                          repository: widget.repository,
-                          institutionId: widget.institution.id,
-                          doctor: doctor,
+        appBar: AppBar(title: Text(widget.institution.title)),
+        body: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _error != null
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(_error!),
+                        TextButton(
+                          onPressed: _load,
+                          child: Text(context.localized('重试', 'Retry')),
                         ),
-                      ),
+                      ],
                     ),
+                  )
+                : ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      if (_doctors.isEmpty)
+                        Text(
+                            context.localized('暂无可见医生', 'No visible doctors.')),
+                      for (final doctor in _doctors)
+                        Card(
+                          child: ListTile(
+                            title: Text(doctor.title),
+                            subtitle: Text(doctor.subtitle),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => _DoctorProjectsPage(
+                                  repository: widget.repository,
+                                  institutionId: widget.institution.id,
+                                  doctor: doctor,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
-                ),
-            ],
-          ),
-  );
+      );
 }
 
 class _DoctorProjectsPage extends StatefulWidget {
@@ -288,49 +293,53 @@ class _DoctorProjectsPageState extends State<_DoctorProjectsPage> {
         widget.institutionId,
         widget.doctor.id,
       );
-      if (mounted) setState(() => _items = items);
+      if (mounted) {
+        setState(() => _items = items);
+      }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(
           () => _error = context.localized(
             '内容暂不可用，请重试',
             'Content unavailable. Please retry.',
           ),
         );
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text(widget.doctor.title)),
-    body: _items == null && _error == null
-        ? const Center(child: CircularProgressIndicator())
-        : _error != null
-        ? Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(_error!),
-                TextButton(
-                  onPressed: _load,
-                  child: Text(context.localized('重试', 'Retry')),
-                ),
-              ],
-            ),
-          )
-        : ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              if (_items!.isEmpty)
-                Text(context.localized('暂无可见项目', 'No visible projects.')),
-              for (final item in _items!)
-                Card(
-                  child: ListTile(
-                    title: Text(item.title),
-                    subtitle: Text(item.subtitle),
+        appBar: AppBar(title: Text(widget.doctor.title)),
+        body: _items == null && _error == null
+            ? const Center(child: CircularProgressIndicator())
+            : _error != null
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(_error!),
+                        TextButton(
+                          onPressed: _load,
+                          child: Text(context.localized('重试', 'Retry')),
+                        ),
+                      ],
+                    ),
+                  )
+                : ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      if (_items!.isEmpty)
+                        Text(context.localized(
+                            '暂无可见项目', 'No visible projects.')),
+                      for (final item in _items!)
+                        Card(
+                          child: ListTile(
+                            title: Text(item.title),
+                            subtitle: Text(item.subtitle),
+                          ),
+                        ),
+                    ],
                   ),
-                ),
-            ],
-          ),
-  );
+      );
 }

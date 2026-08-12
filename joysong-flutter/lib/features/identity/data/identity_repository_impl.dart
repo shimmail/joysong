@@ -87,7 +87,7 @@ final class ApiIdentityRepository implements IdentityRepository {
 
   @override
   Future<List<ManagedInstitutionSummary>>
-  listProfessionalVisibleInstitutions() async {
+      listProfessionalVisibleInstitutions() async {
     return await _apiClient.get<List<ManagedInstitutionSummary>>(
           '/admin/institutions',
           decodeData: (json) => _objectList(
@@ -190,23 +190,8 @@ final class ApiIdentityRepository implements IdentityRepository {
   }
 
   @override
-  Future<ManagementProjectOption> createManagementProject(
-    ManagementProjectDraft draft,
-  ) async {
-    final result = await _apiClient.post<ManagementProjectOption>(
-      '/admin/projects',
-      body: draft.toJson(),
-      decodeData: ManagementProjectOption.fromJson,
-    );
-    if (result == null) {
-      throw const FormatException('项目响应为空');
-    }
-    return result;
-  }
-
-  @override
   Future<List<ManagedInstitutionProject>>
-  listManagedInstitutionProjects() async {
+      listManagedInstitutionProjects() async {
     return await _apiClient.get<List<ManagedInstitutionProject>>(
           '/admin/institution-projects',
           decodeData: (json) => _objectList(
@@ -214,40 +199,6 @@ final class ApiIdentityRepository implements IdentityRepository {
           ).map(ManagedInstitutionProject.fromJson).toList(growable: false),
         ) ??
         const [];
-  }
-
-  @override
-  Future<ManagedInstitutionProject> createManagedInstitutionProject(
-    ManagedInstitutionProjectDraft draft,
-  ) async {
-    final result = await _apiClient.post<ManagedInstitutionProject>(
-      '/admin/institution-projects',
-      body: draft.toJson(),
-      decodeData: ManagedInstitutionProject.fromJson,
-    );
-    if (result == null) {
-      throw const FormatException('机构项目响应为空');
-    }
-    return result;
-  }
-
-  @override
-  Future<ManagedInstitutionProject> updateManagedInstitutionProject(
-    ManagedInstitutionProjectDraft draft,
-  ) async {
-    final id = draft.id?.trim();
-    if (id == null || id.isEmpty) {
-      throw ArgumentError('机构项目 id 不能为空');
-    }
-    final result = await _apiClient.put<ManagedInstitutionProject>(
-      '/admin/institution-projects/$id',
-      body: draft.toJson(),
-      decodeData: ManagedInstitutionProject.fromJson,
-    );
-    if (result == null) {
-      throw const FormatException('机构项目响应为空');
-    }
-    return result;
   }
 
   @override
@@ -276,7 +227,7 @@ final class ApiIdentityRepository implements IdentityRepository {
 
   @override
   Future<List<InstitutionMembershipRequest>>
-  listInstitutionMembershipRequests() async {
+      listInstitutionMembershipRequests() async {
     return await _apiClient.get<List<InstitutionMembershipRequest>>(
           '/management/institution-membership-requests',
           decodeData: (json) => _objectList(
@@ -319,7 +270,7 @@ final class ApiIdentityRepository implements IdentityRepository {
 
   @override
   Future<List<DoctorInstitutionChangeRequest>>
-  listDoctorInstitutionChangeRequests() async {
+      listDoctorInstitutionChangeRequests() async {
     return await _apiClient.get<List<DoctorInstitutionChangeRequest>>(
           '/management/institution-membership-requests',
           decodeData: (json) => _objectList(json)
@@ -364,7 +315,7 @@ final class ApiIdentityRepository implements IdentityRepository {
 
   @override
   Future<List<ProfessionalProjectRequest>>
-  listProfessionalProjectRequests() async {
+      listProfessionalProjectRequests() async {
     return await _apiClient.get<List<ProfessionalProjectRequest>>(
           '/management/project-requests',
           decodeData: (json) => _objectList(
@@ -411,7 +362,7 @@ final class ApiIdentityRepository implements IdentityRepository {
 
   @override
   Future<List<InstitutionProjectJoinRequest>>
-  listInstitutionProjectJoinRequests() async {
+      listInstitutionProjectJoinRequests() async {
     return await _apiClient.get<List<InstitutionProjectJoinRequest>>(
           '/admin/institution-project-requests',
           decodeData: (json) => _objectList(
@@ -461,7 +412,7 @@ final class ApiIdentityRepository implements IdentityRepository {
 
   @override
   Future<List<DoctorProjectProfileUpdateTarget>>
-  listDoctorProjectProfileUpdateTargets() async {
+      listDoctorProjectProfileUpdateTargets() async {
     return await _apiClient.get<List<DoctorProjectProfileUpdateTarget>>(
           '/admin/institution-project-requests/profile-update-targets',
           decodeData: (json) => _objectList(json)
@@ -473,7 +424,7 @@ final class ApiIdentityRepository implements IdentityRepository {
 
   @override
   Future<List<DoctorProjectChangeRequest>>
-  listDoctorProjectChangeRequests() async {
+      listDoctorProjectChangeRequests() async {
     return await _apiClient.get<List<DoctorProjectChangeRequest>>(
           '/admin/institution-project-requests',
           decodeData: (json) => _objectList(
