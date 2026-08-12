@@ -19,6 +19,7 @@ final class WalletController extends ChangeNotifier {
   bool _isLoadingMore = false;
   bool _hasNextPage = false;
   int _ledgerPage = 0;
+  int? _failedNextPage;
   int _requestVersion = 0;
 
   WalletOverview get overview => _overview;
@@ -80,6 +81,7 @@ final class WalletController extends ChangeNotifier {
     _entries = const [];
     _ledgerPage = 0;
     _hasNextPage = false;
+    _failedNextPage = null;
     _ledgerErrorMessage = null;
     notifyListeners();
     await _loadFirstPage(walletId, request: request);
@@ -88,16 +90,20 @@ final class WalletController extends ChangeNotifier {
   Future<void> retryLedger() {
     final walletId = _selectedWalletId;
     if (walletId == null) return Future<void>.value();
+    final failedNextPage = _failedNextPage;
+    if (failedNextPage != null) {
+      return loadNextPage(retryPage: failedNextPage);
+    }
     return _entries.isEmpty || _ledgerErrorMessage != null
         ? _loadFirstPage(walletId, request: ++_requestVersion)
         : loadNextPage();
   }
 
-  Future<void> loadNextPage() async {
+  Future<void> loadNextPage({int? retryPage}) async {
     final walletId = _selectedWalletId;
     if (walletId == null || _isLedgerLoading || _isLoadingMore || !_hasNextPage) return;
     final request = _requestVersion;
-    final nextPage = _ledgerPage + 1;
+    final nextPage = retryPage ?? _ledgerPage + 1;
     _isLoadingMore = true;
     _ledgerErrorMessage = null;
     notifyListeners();
@@ -115,9 +121,11 @@ final class WalletController extends ChangeNotifier {
       ]);
       _ledgerPage = page.page;
       _hasNextPage = !page.last;
+      _failedNextPage = null;
     } catch (error) {
       if (_isActive(request, walletId)) {
         _ledgerErrorMessage = _message(error, '更多流水加载失败');
+        _failedNextPage = nextPage;
       }
     } finally {
       if (_isActive(request, walletId)) {
@@ -141,8 +149,10 @@ final class WalletController extends ChangeNotifier {
       _entries = List.unmodifiable(page.content);
       _ledgerPage = page.page;
       _hasNextPage = !page.last;
+      _failedNextPage = null;
     } catch (error) {
       if (_isActive(request, walletId)) {
+        _failedNextPage = null;
         _ledgerErrorMessage = _message(error, '流水加载失败');
       }
     } finally {

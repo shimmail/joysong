@@ -80,6 +80,29 @@ void main() {
     expect(controller.isLoadingMore, isFalse);
   });
 
+  test('retries the failed next page and appends without replacing entries',
+      () async {
+    final repository = _FakeWalletRepository()
+      ..overview = _overview(_wallet(101))
+      ..pagesByRequest[(101, 0)] = _page(101, [_entry(1, 101)], last: false)
+      ..pagesByRequest[(101, 1)] = _page(101, [_entry(2, 101)], last: false);
+    final controller = WalletController(repository);
+    await controller.load();
+    await controller.loadNextPage();
+    repository.errorsByRequest[(101, 2)] = StateError('offline');
+
+    await controller.loadNextPage();
+    repository.errorsByRequest.remove((101, 2));
+    repository.pagesByRequest[(101, 2)] = _page(101, [_entry(3, 101)], last: true);
+    await controller.retryLedger();
+
+    expect(controller.entries.map((entry) => entry.id), [1, 2, 3]);
+    expect(
+      repository.ledgerRequests,
+      [(101, 0, 20), (101, 1, 20), (101, 2, 20), (101, 2, 20)],
+    );
+  });
+
   test('retries a failed first ledger page for the active wallet', () async {
     final repository = _FakeWalletRepository()
       ..overview = _overview(_wallet(101))
@@ -154,8 +177,10 @@ WalletLedgerPage _page(int walletId, List<WalletLedgerEntry> entries, {required 
 final class _FakeWalletRepository implements WalletRepository {
   WalletOverview overview = const WalletOverview(currency: 'USD', wallets: []);
   final Map<int, WalletLedgerPage> pages = {};
+  final Map<(int, int), WalletLedgerPage> pagesByRequest = {};
   final Map<int, Future<WalletLedgerPage>> pageFutures = {};
   final List<(int, int, int)> ledgerRequests = [];
+  final Map<(int, int), Object> errorsByRequest = {};
   Object? ledgerError;
 
   @override
@@ -170,9 +195,11 @@ final class _FakeWalletRepository implements WalletRepository {
     ledgerRequests.add((walletId, page, size));
     final future = pageFutures[walletId];
     if (future != null && page == 0) return future;
+    final pageError = errorsByRequest[(walletId, page)];
+    if (pageError != null) throw pageError;
     final error = ledgerError;
     if (error != null) throw error;
-    final result = pages[walletId];
+    final result = pagesByRequest[(walletId, page)] ?? pages[walletId];
     if (result == null) throw StateError('missing page');
     return WalletLedgerPage(
       content: result.content,
