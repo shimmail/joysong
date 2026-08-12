@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/core/network/api_client.dart';
 import 'package:joysong_flutter/features/orders/data/orders_remote_data_source.dart';
+import 'package:joysong_flutter/features/orders/domain/order_models.dart';
 import 'package:joysong_flutter/features/orders/domain/payment_models.dart';
 
 import 'order_test_fixtures.dart';
@@ -99,6 +100,31 @@ void main() {
     expect(client.lastPath, 'payments/payment-1/confirm');
     expect(client.lastIdempotencyKey, 'confirm-key-1');
     expect(client.lastBody, isNull);
+  });
+
+  test('gets the consumer settlement using its current response contract',
+      () async {
+    final client = _FakeApiClient()
+      ..responseData = {
+        'settlementId': 1,
+        'orderId': 'order-1',
+        'currency': 'USD',
+        'grossTotalPaid': {'currency': 'USD', 'minor': 1200},
+        'netSettled': {'currency': 'USD', 'minor': 1000},
+        'state': 'PENDING_RELEASE',
+        'settlementDueAt': '2026-08-12T10:00:00',
+        'settlementCreatedAt': '2026-08-11T10:00:00',
+        'releasedAt': null,
+      };
+    final dataSource = ApiOrdersRemoteDataSource(client);
+
+    final settlement = await dataSource.getSettlement('order-1');
+
+    expect(client.lastMethod, 'GET');
+    expect(client.lastPath, 'orders/order-1/settlement');
+    expect(settlement, isA<Settlement>());
+    expect(settlement.grossTotalPaidMinor, 1200);
+    expect(settlement.netSettledMinor, 1000);
   });
 }
 
