@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/files/app_file_picker.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
+import 'package:joysong_flutter/features/discover/presentation/professional_catalog_page.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
 import 'package:joysong_flutter/features/identity/presentation/consultant_management_pages.dart';
@@ -11,8 +12,7 @@ import 'package:joysong_flutter/features/professional_management/data/profession
 import 'package:joysong_flutter/features/professional_management/presentation/professional_pages.dart';
 
 typedef IdentityFilePicker = Future<IdentityFileDraft?> Function(
-  IdentityDocumentType type,
-);
+    IdentityDocumentType type);
 typedef InstitutionProfileImagePicker = Future<String?> Function();
 
 class IdentityCenterPage extends StatefulWidget {
@@ -122,9 +122,7 @@ class _IdentityOverviewView extends StatelessWidget {
                 ? null
                 : () => _selectRole(context),
             icon: const Icon(Icons.verified_user_outlined),
-            label: Text(
-              overview.hasPendingApplication ? '已有申请正在审核' : '申请专业身份',
-            ),
+            label: Text(overview.hasPendingApplication ? '已有申请正在审核' : '申请专业身份'),
           ),
           const SizedBox(height: 12),
           Text(
@@ -226,9 +224,7 @@ class _IdentityApplicationPageState extends State<IdentityApplicationPage> {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              const _InfoCard(
-                text: '请仅提交真实、必要的认证信息。证件号码与材料不会显示在公开主页。',
-              ),
+              const _InfoCard(text: '请仅提交真实、必要的认证信息。证件号码与材料不会显示在公开主页。'),
               const SizedBox(height: 16),
               for (final field in _fieldsFor(widget.role)) ...[
                 TextFormField(
@@ -259,8 +255,9 @@ class _IdentityApplicationPageState extends State<IdentityApplicationPage> {
                   padding: const EdgeInsets.only(top: 8),
                   child: Text(
                     '当前构建未接入系统文件选择器，材料上传入口暂不可用。',
-                    style:
-                        TextStyle(color: Theme.of(context).colorScheme.error),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
                   ),
                 ),
               if (widget.controller.errorMessage != null)
@@ -269,17 +266,16 @@ class _IdentityApplicationPageState extends State<IdentityApplicationPage> {
                   child: Text(
                     widget.controller.errorMessage!,
                     textAlign: TextAlign.center,
-                    style:
-                        TextStyle(color: Theme.of(context).colorScheme.error),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
                   ),
                 ),
               const SizedBox(height: 20),
               FilledButton(
                 key: const Key('submit-identity-application'),
                 onPressed: widget.controller.isSubmitting ? null : _submit,
-                child: Text(
-                  widget.controller.isSubmitting ? '提交中…' : '提交审核',
-                ),
+                child: Text(widget.controller.isSubmitting ? '提交中…' : '提交审核'),
               ),
             ],
           ),
@@ -345,9 +341,7 @@ class _IdentityApplicationPageState extends State<IdentityApplicationPage> {
   }
 }
 
-Future<IdentityFileDraft?> _pickIdentityFile(
-  IdentityDocumentType type,
-) async {
+Future<IdentityFileDraft?> _pickIdentityFile(IdentityDocumentType type) async {
   final selected = await const AppFilePicker().pickIdentityDocument();
   if (selected == null) return null;
   return IdentityFileDraft(
@@ -424,10 +418,7 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
             ManagementLoadStatus.failure =>
               _IdentityFailure(
                 message: _controller.errorMessage ??
-                    context.localized(
-                      '没有专业管理权限',
-                      'No professional access',
-                    ),
+                    context.localized('没有专业管理权限', 'No professional access'),
                 onRetry: _controller.enter,
               ),
             ManagementLoadStatus.ready => _ManagementCapabilities(
@@ -469,8 +460,9 @@ class _ManagementCapabilities extends StatelessWidget {
       IdentityRoleType.institutionLegalRepresentative.code,
     );
     final isDoctor = context.activeRoles.contains(IdentityRoleType.doctor.code);
-    final isConsultant =
-        context.activeRoles.contains(IdentityRoleType.consultant.code);
+    final isConsultant = context.activeRoles.contains(
+      IdentityRoleType.consultant.code,
+    );
     final groups = <({
       IconData icon,
       String title,
@@ -481,7 +473,7 @@ class _ManagementCapabilities extends StatelessWidget {
             IconData icon,
             String label,
             bool enabled,
-            _ManagementAction action
+            _ManagementAction action,
           })> items,
     })>[
       (
@@ -493,6 +485,14 @@ class _ManagementCapabilities extends StatelessWidget {
           'No legal representative settings available',
         ),
         items: [
+          (
+            icon: Icons.menu_book_outlined,
+            label: buildContext.localized('专业目录', 'Professional catalog'),
+            enabled: isLegalRepresentative &&
+                context.visibleInstitutionIds.isNotEmpty &&
+                discoverRepository is ProfessionalCatalogRepository,
+            action: _ManagementAction.professionalCatalog,
+          ),
           (
             icon: Icons.apartment_outlined,
             label: buildContext.localized('机构档案', 'Institution profile'),
@@ -549,6 +549,14 @@ class _ManagementCapabilities extends StatelessWidget {
         ),
         items: [
           (
+            icon: Icons.menu_book_outlined,
+            label: buildContext.localized('专业目录', 'Professional catalog'),
+            enabled: isDoctor &&
+                context.doctorId != null &&
+                discoverRepository is ProfessionalCatalogRepository,
+            action: _ManagementAction.professionalCatalog,
+          ),
+          (
             icon: Icons.compare_arrows_outlined,
             label: buildContext.localized(
               '医生项目资料审核',
@@ -571,9 +579,10 @@ class _ManagementCapabilities extends StatelessWidget {
           (
             icon: Icons.medical_services_outlined,
             label: buildContext.localized('医生档案', 'Doctor profile'),
-            enabled:
-                context.activeRoles.contains(IdentityRoleType.doctor.code) &&
-                    context.canManageDoctors,
+            enabled: context.activeRoles.contains(
+                  IdentityRoleType.doctor.code,
+                ) &&
+                context.canManageDoctors,
             action: _ManagementAction.doctorProfile,
           ),
           (
@@ -649,7 +658,10 @@ class _ManagementCapabilities extends StatelessWidget {
           ),
           (
             icon: Icons.badge_outlined,
-            label: buildContext.localized('机构归属', 'Institution affiliation'),
+            label: buildContext.localized(
+              '机构归属',
+              'Institution affiliation',
+            ),
             enabled: isConsultant && context.canViewAffiliations,
             action: _ManagementAction.consultantMembership,
           ),
@@ -676,17 +688,16 @@ class _ManagementCapabilities extends StatelessWidget {
           ExpansionTile(
             leading: Icon(group.icon),
             title: Text(group.title),
-            initiallyExpanded:
-                group.items.any((capability) => capability.enabled),
+            initiallyExpanded: group.items.any(
+              (capability) => capability.enabled,
+            ),
             children: [
               if (group.items.every((capability) => !capability.enabled))
-                ListTile(
-                  enabled: false,
-                  title: Text(group.emptyText),
-                )
+                ListTile(enabled: false, title: Text(group.emptyText))
               else
-                for (final capability
-                    in group.items.where((item) => item.enabled))
+                for (final capability in group.items.where(
+                  (item) => item.enabled,
+                ))
                   ListTile(
                     leading: Icon(capability.icon),
                     title: Text(capability.label),
@@ -716,42 +727,67 @@ class _ManagementCapabilities extends StatelessWidget {
     _ManagementAction action, {
     String? membershipRequestType,
   }) {
+    if (action == _ManagementAction.professionalCatalog &&
+        discoverRepository is ProfessionalCatalogRepository) {
+      final isDoctor = this.context.activeRoles.contains(
+            IdentityRoleType.doctor.code,
+          );
+      Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => ProfessionalCatalogPage(
+            repository: discoverRepository as ProfessionalCatalogRepository,
+            scope: isDoctor
+                ? ProfessionalCatalogScope.doctor
+                : ProfessionalCatalogScope.legalRepresentative,
+          ),
+        ),
+      );
+      return;
+    }
     if (action == _ManagementAction.doctorArticles &&
         professionalRepository != null) {
-      Navigator.of(context).push<void>(MaterialPageRoute(
-        builder: (_) => DoctorArticlesPage(
-          repository: professionalRepository!,
-          pickCoverImage: doctorImagePicker,
+      Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => DoctorArticlesPage(
+            repository: professionalRepository!,
+            pickCoverImage: doctorImagePicker,
+          ),
         ),
-      ));
+      );
       return;
     }
     if (action == _ManagementAction.doctorOrders &&
         professionalRepository != null) {
-      Navigator.of(context).push<void>(MaterialPageRoute(
-        builder: (_) => DoctorOrdersPage(repository: professionalRepository!),
-      ));
+      Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => DoctorOrdersPage(repository: professionalRepository!),
+        ),
+      );
       return;
     }
     if (action == _ManagementAction.applyMembership &&
         membershipRequestType != null) {
-      Navigator.of(context).push<void>(MaterialPageRoute(
-        builder: (_) => InstitutionMembershipRequestsPage(
-          repository: repository,
-          discoverRepository: discoverRepository,
-          context: this.context,
-          requestType: membershipRequestType,
+      Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => InstitutionMembershipRequestsPage(
+            repository: repository,
+            discoverRepository: discoverRepository,
+            context: this.context,
+            requestType: membershipRequestType,
+          ),
         ),
-      ));
+      );
       return;
     }
     if (action == _ManagementAction.doctorProfile) {
-      Navigator.of(context).push<void>(MaterialPageRoute(
-        builder: (_) => DoctorSelfProfilePage(
-          repository: repository,
-          pickAndUploadImage: doctorImagePicker,
+      Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => DoctorSelfProfilePage(
+            repository: repository,
+            pickAndUploadImage: doctorImagePicker,
+          ),
         ),
-      ));
+      );
       return;
     }
     if (action == _ManagementAction.institutionProfile) {
@@ -780,94 +816,115 @@ class _ManagementCapabilities extends StatelessWidget {
       return;
     }
     if (action == _ManagementAction.consultantMembership) {
-      Navigator.of(context).push<void>(MaterialPageRoute(
-        builder: (_) => ConsultantMembershipPage(
-          repository: repository,
-          discoverRepository: discoverRepository,
+      Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => ConsultantMembershipPage(
+            repository: repository,
+            discoverRepository: discoverRepository,
+          ),
         ),
-      ));
+      );
       return;
     }
     if (action == _ManagementAction.consultantProjects) {
-      Navigator.of(context).push<void>(MaterialPageRoute(
-        builder: (_) => ConsultantProjectCatalogPage(repository: repository),
-      ));
+      Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => ConsultantProjectCatalogPage(repository: repository),
+        ),
+      );
       return;
     }
     if (action == _ManagementAction.platformProjectRequest) {
-      Navigator.of(context).push<void>(MaterialPageRoute(
-        builder: (_) => PlatformProjectRequestPage(repository: repository),
-      ));
+      Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => PlatformProjectRequestPage(repository: repository),
+        ),
+      );
       return;
     }
     if (action == _ManagementAction.institutionProjectRequest) {
-      Navigator.of(context).push<void>(MaterialPageRoute(
-        builder: (_) => InstitutionProjectRequestsPage(
-          repository: repository,
-          context: this.context,
+      Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => InstitutionProjectRequestsPage(
+            repository: repository,
+            context: this.context,
+          ),
         ),
-      ));
+      );
       return;
     }
     if (action == _ManagementAction.institutionProjectReviews) {
-      Navigator.of(context).push<void>(MaterialPageRoute(
-        builder: (_) => InstitutionProjectRequestsPage(
-          repository: repository,
-          context: this.context,
-          reviewMode: true,
+      Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => InstitutionProjectRequestsPage(
+            repository: repository,
+            context: this.context,
+            reviewMode: true,
+          ),
         ),
-      ));
+      );
       return;
     }
     if (action == _ManagementAction.institutionProjectJoinRequest) {
-      Navigator.of(context).push<void>(MaterialPageRoute(
-        builder: (_) => InstitutionProjectJoinRequestsPage(
-          repository: repository,
-          context: this.context,
+      Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => InstitutionProjectJoinRequestsPage(
+            repository: repository,
+            context: this.context,
+          ),
         ),
-      ));
+      );
       return;
     }
     if (action == _ManagementAction.doctorProjectProfileUpdate) {
-      Navigator.of(context).push<void>(MaterialPageRoute(
-        builder: (_) => DoctorProjectProfileUpdatePage(
-          repository: repository,
-          pickAndUploadImage: doctorImagePicker,
+      Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => DoctorProjectProfileUpdatePage(
+            repository: repository,
+            pickAndUploadImage: doctorImagePicker,
+          ),
         ),
-      ));
+      );
       return;
     }
     if (action == _ManagementAction.institutionProjectJoinReviews) {
-      Navigator.of(context).push<void>(MaterialPageRoute(
-        builder: (_) => InstitutionProjectJoinRequestsPage(
-          repository: repository,
-          context: this.context,
-          reviewMode: true,
+      Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => InstitutionProjectJoinRequestsPage(
+            repository: repository,
+            context: this.context,
+            reviewMode: true,
+          ),
         ),
-      ));
+      );
       return;
     }
     if (action == _ManagementAction.doctorProjectProfileReviews) {
-      Navigator.of(context).push<void>(MaterialPageRoute(
-        builder: (_) => DoctorProjectProfileReviewPage(
-          repository: repository,
-          context: this.context,
+      Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => DoctorProjectProfileReviewPage(
+            repository: repository,
+            context: this.context,
+          ),
         ),
-      ));
+      );
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(context.localized(
-          '该功能当前不可用',
-          'This feature is currently unavailable',
-        )),
+        content: Text(
+          context.localized(
+            '该功能当前不可用',
+            'This feature is currently unavailable',
+          ),
+        ),
       ),
     );
   }
 }
 
 enum _ManagementAction {
+  professionalCatalog,
   institutionProfile,
   membershipReviews,
   institutionProjectReviews,
@@ -883,487 +940,6 @@ enum _ManagementAction {
   consultantProjects,
   doctorArticles,
   doctorOrders,
-}
-
-class ManagedInstitutionProjectsPage extends StatefulWidget {
-  const ManagedInstitutionProjectsPage({
-    required this.repository,
-    required this.context,
-    super.key,
-  });
-
-  final IdentityRepository repository;
-  final ManagementContext context;
-
-  @override
-  State<ManagedInstitutionProjectsPage> createState() =>
-      _ManagedInstitutionProjectsPageState();
-}
-
-class _ManagedInstitutionProjectsPageState
-    extends State<ManagedInstitutionProjectsPage> {
-  late final InstitutionProjectManagementController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = InstitutionProjectManagementController(
-      widget.repository,
-      context: widget.context,
-    )..load();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-          title: Text(context.localized('机构项目', 'Institution Projects'))),
-      floatingActionButton: ListenableBuilder(
-        listenable: _controller,
-        builder: (context, _) => _controller.canPublish
-            ? FloatingActionButton.extended(
-                onPressed:
-                    _controller.status == InstitutionProjectLoadStatus.ready
-                        ? () => _edit(null)
-                        : null,
-                icon: const Icon(Icons.add_rounded),
-                label: Text(context.localized('发布', 'Publish')),
-              )
-            : const SizedBox.shrink(),
-      ),
-      body: ListenableBuilder(
-        listenable: _controller,
-        builder: (context, _) {
-          return switch (_controller.status) {
-            InstitutionProjectLoadStatus.idle ||
-            InstitutionProjectLoadStatus.loading =>
-              const Center(child: CircularProgressIndicator()),
-            InstitutionProjectLoadStatus.failure => _IdentityFailure(
-                message: _controller.errorMessage ??
-                    context.localized(
-                      '机构项目加载失败',
-                      'Unable to load institution projects',
-                    ),
-                onRetry: _controller.load,
-              ),
-            InstitutionProjectLoadStatus.ready => RefreshIndicator(
-                onRefresh: _controller.load,
-                child: ListView.separated(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _controller.institutionProjects.length +
-                      (_controller.institutionProjects.isEmpty ? 1 : 0),
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (context, index) {
-                    if (_controller.institutionProjects.isEmpty) {
-                      return _InfoCard(
-                        text: context.localized(
-                          '暂无机构项目',
-                          'No institution projects yet',
-                        ),
-                      );
-                    }
-                    final item = _controller.institutionProjects[index];
-                    final institution = _controller.institutions
-                        .where((profile) => profile.id == item.institutionId)
-                        .firstOrNull;
-                    return Card(
-                      child: ListTile(
-                        leading: const Icon(Icons.spa_outlined),
-                        title: Text(item.effectiveName),
-                        subtitle: Text(
-                          [
-                            if (institution != null) institution.name,
-                            '${context.localized('价格', 'Price')} ${item.price}',
-                            item.isActive
-                                ? context.localized('已上架', 'Active')
-                                : context.localized('已下架', 'Inactive'),
-                          ].join(' · '),
-                        ),
-                        trailing: _controller.canPublish
-                            ? const Icon(Icons.edit_outlined)
-                            : null,
-                        onTap:
-                            _controller.canPublish ? () => _edit(item) : null,
-                      ),
-                    );
-                  },
-                ),
-              ),
-          };
-        },
-      ),
-    );
-  }
-
-  Future<void> _edit(ManagedInstitutionProject? project) async {
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        builder: (_) => ManagedInstitutionProjectEditPage(
-          controller: _controller,
-          project: project,
-        ),
-      ),
-    );
-  }
-}
-
-class ManagedInstitutionProjectEditPage extends StatefulWidget {
-  const ManagedInstitutionProjectEditPage({
-    required this.controller,
-    this.project,
-    super.key,
-  });
-
-  final InstitutionProjectManagementController controller;
-  final ManagedInstitutionProject? project;
-
-  @override
-  State<ManagedInstitutionProjectEditPage> createState() =>
-      _ManagedInstitutionProjectEditPageState();
-}
-
-class _ManagedInstitutionProjectEditPageState
-    extends State<ManagedInstitutionProjectEditPage> {
-  final _formKey = GlobalKey<FormState>();
-  late final TextEditingController _newProjectName;
-  late final TextEditingController _newProjectCategory;
-  late final TextEditingController _name;
-  late final TextEditingController _category;
-  late final TextEditingController _description;
-  late final TextEditingController _tags;
-  late final TextEditingController _slogan;
-  late final TextEditingController _detailContent;
-  late final TextEditingController _price;
-  late final TextEditingController _originalPrice;
-  late final TextEditingController _coverImage;
-  late final TextEditingController _images;
-  late final TextEditingController _consultationFee;
-  late final TextEditingController _commissionRate;
-  late final TextEditingController _institutionRate;
-  String? _institutionId;
-  String? _projectId;
-  var _isActive = true;
-
-  bool get _editing => widget.project != null;
-
-  @override
-  void initState() {
-    super.initState();
-    final project = widget.project;
-    _institutionId = project?.institutionId ??
-        widget.controller.context.doctorInstitutionIds.firstOrNull;
-    _projectId = project?.projectId;
-    _isActive = project?.isActive ?? true;
-    _newProjectName = TextEditingController();
-    _newProjectCategory = TextEditingController();
-    _name = TextEditingController(text: project?.name ?? '');
-    _category = TextEditingController(text: project?.category ?? '');
-    _description = TextEditingController(text: project?.description ?? '');
-    _tags = TextEditingController(text: project?.tags ?? '');
-    _slogan = TextEditingController(text: project?.slogan ?? '');
-    _detailContent = TextEditingController(text: project?.detailContent ?? '');
-    _price = TextEditingController(text: (project?.price ?? 0).toString());
-    _originalPrice =
-        TextEditingController(text: project?.originalPrice?.toString() ?? '');
-    _coverImage = TextEditingController(text: project?.coverImage ?? '');
-    _images = TextEditingController(text: project?.images ?? '');
-    _consultationFee = TextEditingController(text: '0');
-    _commissionRate = TextEditingController(text: '0');
-    _institutionRate = TextEditingController(text: '40');
-  }
-
-  @override
-  void dispose() {
-    for (final controller in [
-      _newProjectName,
-      _newProjectCategory,
-      _name,
-      _category,
-      _description,
-      _tags,
-      _slogan,
-      _detailContent,
-      _price,
-      _originalPrice,
-      _coverImage,
-      _images,
-      _consultationFee,
-      _commissionRate,
-      _institutionRate,
-    ]) {
-      controller.dispose();
-    }
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final doctorInstitutionIds = widget.controller.context.doctorInstitutionIds;
-    final institutionOptions = widget.controller.institutions
-        .where((institution) => doctorInstitutionIds.contains(institution.id))
-        .toList(growable: false);
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(context.localized(
-          _editing ? '编辑机构项目' : '发布机构项目',
-          _editing ? 'Edit Institution Project' : 'Publish Institution Project',
-        )),
-      ),
-      body: ListenableBuilder(
-        listenable: widget.controller,
-        builder: (context, _) => Form(
-          key: _formKey,
-          child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              _InfoCard(
-                text: context.localized(
-                  '项目和机构项目仅支持认证医生发布；机构下拉框只显示医生本人已绑定机构。分账配置会作为提案提交，需双方确认后生效。',
-                  'Only verified doctors can publish projects. The institution picker only shows institutions bound to this doctor. Split settings are submitted as proposals and take effect after both sides confirm.',
-                ),
-              ),
-              const SizedBox(height: 16),
-              DropdownButtonFormField<String>(
-                initialValue: _institutionId,
-                decoration: InputDecoration(
-                  labelText: context.localized('所属机构', 'Institution'),
-                ),
-                items: institutionOptions
-                    .map((item) => DropdownMenuItem(
-                          value: item.id,
-                          child: Text(item.name),
-                        ))
-                    .toList(),
-                onChanged: _editing
-                    ? null
-                    : (value) => setState(() => _institutionId = value),
-                validator: (value) => value == null || value.isEmpty
-                    ? context.localized('请选择所属机构', 'Select an institution')
-                    : null,
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                initialValue: _projectId,
-                decoration: InputDecoration(
-                  labelText: context.localized('关联公共项目', 'Base project'),
-                ),
-                items: widget.controller.projects
-                    .map((item) => DropdownMenuItem(
-                          value: item.id,
-                          child: Text(item.name),
-                        ))
-                    .toList(),
-                onChanged: _editing
-                    ? null
-                    : (value) => setState(() => _projectId = value),
-              ),
-              if (!_editing) ...[
-                const SizedBox(height: 12),
-                _field(
-                  _newProjectName,
-                  context.localized('新项目名称', 'New project name'),
-                ),
-                _field(
-                  _newProjectCategory,
-                  context.localized('新项目分类', 'New project category'),
-                ),
-              ],
-              const SizedBox(height: 8),
-              Text(
-                context.localized('机构项目独立详情', 'Institution project details'),
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 12),
-              _field(_name, context.localized('独立名称', 'Custom name')),
-              _field(_category, context.localized('独立分类', 'Custom category')),
-              _field(
-                _description,
-                context.localized('独立简介', 'Custom description'),
-                maxLines: 3,
-              ),
-              _field(_tags,
-                  context.localized('标签（逗号分隔）', 'Tags, comma separated')),
-              _field(_slogan, context.localized('宣传语', 'Slogan')),
-              _field(
-                _detailContent,
-                context.localized('详情正文', 'Detail content'),
-                maxLines: 4,
-              ),
-              _field(
-                _price,
-                context.localized('价格', 'Price'),
-                keyboardType: TextInputType.number,
-                required: true,
-              ),
-              _field(
-                _originalPrice,
-                context.localized('原价', 'Original price'),
-                keyboardType: TextInputType.number,
-              ),
-              _field(
-                  _coverImage, context.localized('封面图 URL', 'Cover image URL')),
-              _field(
-                _images,
-                context.localized(
-                    '图集 URL（逗号分隔）', 'Gallery URLs, comma separated'),
-                maxLines: 2,
-              ),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(context.localized('是否上架', 'Active')),
-                value: _isActive,
-                onChanged: (value) => setState(() => _isActive = value),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                context.localized('分账管理', 'Split configuration'),
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 12),
-              _field(
-                _consultationFee,
-                context.localized('面诊金', 'Consultation fee'),
-                keyboardType: TextInputType.number,
-              ),
-              _field(
-                _commissionRate,
-                context.localized('医美顾问分账比例（%）', 'Consultant split rate (%)'),
-                keyboardType: TextInputType.number,
-              ),
-              _field(
-                _institutionRate,
-                context.localized('机构分账比例（%）', 'Institution split rate (%)'),
-                keyboardType: TextInputType.number,
-              ),
-              if (widget.controller.errorMessage != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(
-                    widget.controller.errorMessage!,
-                    style:
-                        TextStyle(color: Theme.of(context).colorScheme.error),
-                  ),
-                ),
-              const SizedBox(height: 20),
-              FilledButton(
-                onPressed: widget.controller.isSaving ? null : _save,
-                child: Text(widget.controller.isSaving
-                    ? context.localized('保存中…', 'Saving...')
-                    : context.localized('保存并提交分账', 'Save and submit split')),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _field(
-    TextEditingController controller,
-    String label, {
-    int maxLines = 1,
-    TextInputType? keyboardType,
-    bool required = false,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: TextFormField(
-        controller: controller,
-        maxLines: maxLines,
-        keyboardType: keyboardType,
-        decoration: InputDecoration(labelText: label),
-        validator: required
-            ? (value) => (value ?? '').trim().isEmpty
-                ? context.localized('请填写$label', 'Please enter $label')
-                : null
-            : null,
-      ),
-    );
-  }
-
-  Future<void> _save() async {
-    FocusManager.instance.primaryFocus?.unfocus();
-    if (!(_formKey.currentState?.validate() ?? false)) return;
-    var projectId = _projectId?.trim() ?? '';
-    if (!_editing && projectId.isEmpty) {
-      final name = _newProjectName.text.trim();
-      if (name.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(context.localized(
-              '请选择公共项目，或填写新项目名称',
-              'Select a base project or enter a new project name',
-            )),
-          ),
-        );
-        return;
-      }
-      final created = await widget.controller.createBaseProject(
-        ManagementProjectDraft(
-          name: name,
-          category: _newProjectCategory.text.trim(),
-          description: _description.text.trim(),
-          tags: _tags.text.trim(),
-          coverImage: _coverImage.text.trim(),
-          referencePrice: _num(_price.text),
-        ),
-      );
-      if (created == null) return;
-      projectId = created.id;
-    }
-    final draft = ManagedInstitutionProjectDraft(
-      id: widget.project?.id,
-      institutionId: _institutionId?.trim() ?? '',
-      projectId: projectId,
-      name: _name.text,
-      category: _category.text,
-      description: _description.text,
-      tags: _tags.text,
-      slogan: _slogan.text,
-      detailContent: _detailContent.text,
-      price: _num(_price.text),
-      originalPrice: _nullableNum(_originalPrice.text),
-      coverImage: _coverImage.text,
-      images: _images.text,
-      isActive: _isActive,
-    );
-    final split = SplitConfigProposalDraft(
-      doctorId: widget.controller.context.doctorId ?? '',
-      institutionProjectId: widget.project?.id ?? 'pending',
-      consultationFee: _num(_consultationFee.text),
-      commissionRate: _num(_commissionRate.text),
-      institutionRate: _num(_institutionRate.text),
-    );
-    if (await widget.controller.saveInstitutionProject(
-          project: draft,
-          split: split,
-        ) &&
-        mounted) {
-      Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(context.localized(
-            '机构项目已保存，分账提案已提交',
-            'Institution project saved and split proposal submitted',
-          )),
-        ),
-      );
-    }
-  }
-
-  num _num(String value) => num.tryParse(value.trim()) ?? 0;
-
-  num? _nullableNum(String value) {
-    final text = value.trim();
-    return text.isEmpty ? null : num.tryParse(text);
-  }
 }
 
 class ManagedInstitutionProfilesPage extends StatefulWidget {
@@ -1412,10 +988,12 @@ class _ManagedInstitutionProfilesPageState
           listenable: _controller,
           builder: (context, _) {
             final editing = _controller.selectedProfile != null;
-            return Text(context.localized(
-              editing ? '编辑机构档案' : '机构档案',
-              editing ? 'Edit institution profile' : 'Institution profile',
-            ));
+            return Text(
+              context.localized(
+                editing ? '编辑机构档案' : '机构档案',
+                editing ? 'Edit institution profile' : 'Institution profile',
+              ),
+            );
           },
         ),
       ),
@@ -1425,14 +1003,18 @@ class _ManagedInstitutionProfilesPageState
           return switch (_controller.status) {
             InstitutionProfileLoadStatus.idle ||
             InstitutionProfileLoadStatus.loading =>
-              const Center(child: CircularProgressIndicator()),
+              const Center(
+                child: CircularProgressIndicator(),
+              ),
             InstitutionProfileLoadStatus.empty => Center(
                 child: Padding(
                   padding: const EdgeInsets.all(24),
-                  child: Text(context.localized(
-                    '当前账号暂无可管理机构',
-                    'No institutions are available to manage',
-                  )),
+                  child: Text(
+                    context.localized(
+                      '当前账号暂无可管理机构',
+                      'No institutions are available to manage',
+                    ),
+                  ),
                 ),
               ),
             InstitutionProfileLoadStatus.failure => _IdentityFailure(
@@ -1462,9 +1044,12 @@ class _ManagedInstitutionProfilesPageState
                     return Card(
                       child: ListTile(
                         leading: const Icon(Icons.apartment_outlined),
-                        title: Text(institution.name.isEmpty
-                            ? context.localized('未命名机构', 'Unnamed institution')
-                            : institution.name),
+                        title: Text(
+                          institution.name.isEmpty
+                              ? context.localized(
+                                  '未命名机构', 'Unnamed institution')
+                              : institution.name,
+                        ),
                         subtitle: Text(
                           [
                             if (institution.city.isNotEmpty) institution.city,
@@ -1525,14 +1110,16 @@ class _ManagedInstitutionProfileEditPageState
       'city': TextEditingController(text: update.city),
       'contactPhone': TextEditingController(text: update.contactPhone),
       'businessHours': TextEditingController(text: update.businessHours),
-      'establishedYear':
-          TextEditingController(text: update.establishedYear?.toString() ?? ''),
+      'establishedYear': TextEditingController(
+        text: update.establishedYear?.toString() ?? '',
+      ),
       'description': TextEditingController(text: update.description),
       'tags': TextEditingController(text: update.tags.join(',')),
       'specialties': TextEditingController(text: update.specialties.join(',')),
       'credentials': TextEditingController(text: update.credentials),
-      'credentialImages':
-          TextEditingController(text: update.credentialImages.join(',')),
+      'credentialImages': TextEditingController(
+        text: update.credentialImages.join(','),
+      ),
       'images': TextEditingController(text: update.images.join(',')),
     };
   }
@@ -1561,8 +1148,9 @@ class _ManagedInstitutionProfileEditPageState
                   key: const Key('institution-back-to-list'),
                   onPressed: widget.controller.clearSelection,
                   icon: const Icon(Icons.arrow_back_rounded),
-                  label:
-                      Text(context.localized('返回机构列表', 'Back to institutions')),
+                  label: Text(
+                    context.localized('返回机构列表', 'Back to institutions'),
+                  ),
                 ),
               ),
               const SizedBox(height: 8),
@@ -1576,46 +1164,74 @@ class _ManagedInstitutionProfileEditPageState
             const SizedBox(height: 16),
             _platformFacts(),
             const SizedBox(height: 16),
-            _textField('name', context.localized('机构名称', 'Institution name'),
-                required: true),
+            _textField(
+              'name',
+              context.localized('机构名称', 'Institution name'),
+              required: true,
+            ),
             _imagePickerField(
               fieldName: 'coverImage',
               title: context.localized('封面图', 'Cover image'),
               addLabel: context.localized(
-                  '从相册选择封面图', 'Choose cover image from gallery'),
+                '从相册选择封面图',
+                'Choose cover image from gallery',
+              ),
               values: _singleImage('coverImage'),
               onAdd: () => _pickSingleImage('coverImage'),
               onDelete: (_) => _setField('coverImage', ''),
             ),
-            _textField('city', context.localized('城市', 'City'),
-                helperText: context.localized(
-                    '填写城市名即可，无需输入“市”', 'Enter the city name only')),
-            _textField('address', context.localized('地址', 'Address'),
-                maxLines: 2),
             _textField(
-                'contactPhone', context.localized('联系电话', 'Contact phone')),
+              'city',
+              context.localized('城市', 'City'),
+              helperText: context.localized(
+                '填写城市名即可，无需输入“市”',
+                'Enter the city name only',
+              ),
+            ),
             _textField(
-                'businessHours', context.localized('营业时间', 'Business hours')),
-            _textField('establishedYear',
-                context.localized('成立年份', 'Established year'),
-                keyboardType: TextInputType.number,
-                validator: _validateEstablishedYear),
-            _textField('description',
-                context.localized('机构介绍', 'Institution description'),
-                maxLines: 4),
-            _textField('tags',
-                context.localized('标签（逗号分隔）', 'Tags (comma-separated)')),
+              'address',
+              context.localized('地址', 'Address'),
+              maxLines: 2,
+            ),
             _textField(
-                'specialties',
-                context.localized(
-                    '擅长领域（逗号分隔）', 'Specialties (comma-separated)')),
-            _textField('credentials', context.localized('资质文本', 'Credentials'),
-                maxLines: 3),
+              'contactPhone',
+              context.localized('联系电话', 'Contact phone'),
+            ),
+            _textField(
+              'businessHours',
+              context.localized('营业时间', 'Business hours'),
+            ),
+            _textField(
+              'establishedYear',
+              context.localized('成立年份', 'Established year'),
+              keyboardType: TextInputType.number,
+              validator: _validateEstablishedYear,
+            ),
+            _textField(
+              'description',
+              context.localized('机构介绍', 'Institution description'),
+              maxLines: 4,
+            ),
+            _textField(
+              'tags',
+              context.localized('标签（逗号分隔）', 'Tags (comma-separated)'),
+            ),
+            _textField(
+              'specialties',
+              context.localized('擅长领域（逗号分隔）', 'Specialties (comma-separated)'),
+            ),
+            _textField(
+              'credentials',
+              context.localized('资质文本', 'Credentials'),
+              maxLines: 3,
+            ),
             _imagePickerField(
               fieldName: 'credentialImages',
               title: context.localized('资质证书图片', 'Credential images'),
               addLabel: context.localized(
-                  '从相册添加资质图片', 'Add credential image from gallery'),
+                '从相册添加资质图片',
+                'Add credential image from gallery',
+              ),
               values: _csv('credentialImages'),
               onAdd: () => _pickListImage('credentialImages'),
               onDelete: (image) => _removeListImage('credentialImages', image),
@@ -1624,7 +1240,9 @@ class _ManagedInstitutionProfileEditPageState
               fieldName: 'images',
               title: context.localized('环境图片', 'Facility images'),
               addLabel: context.localized(
-                  '从相册添加环境图片', 'Add facility image from gallery'),
+                '从相册添加环境图片',
+                'Add facility image from gallery',
+              ),
               values: _csv('images'),
               onAdd: () => _pickListImage('images'),
               onDelete: (image) => _removeListImage('images', image),
@@ -1634,7 +1252,9 @@ class _ManagedInstitutionProfileEditPageState
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(
                   _institutionProfileFailureMessage(
-                      context, widget.controller.failure!),
+                    context,
+                    widget.controller.failure!,
+                  ),
                   style: TextStyle(color: Theme.of(context).colorScheme.error),
                 ),
               ),
@@ -1642,9 +1262,11 @@ class _ManagedInstitutionProfileEditPageState
             FilledButton(
               key: const Key('institution-save'),
               onPressed: widget.controller.isSaving ? null : _save,
-              child: Text(widget.controller.isSaving
-                  ? context.localized('保存中…', 'Saving…')
-                  : context.localized('保存档案', 'Save profile')),
+              child: Text(
+                widget.controller.isSaving
+                    ? context.localized('保存中…', 'Saving…')
+                    : context.localized('保存档案', 'Save profile'),
+              ),
             ),
           ],
         ),
@@ -1754,18 +1376,24 @@ class _ManagedInstitutionProfileEditPageState
           spacing: 12,
           runSpacing: 8,
           children: [
-            Text(profile.isVerified
-                ? context.localized('已认证', 'Verified')
-                : context.localized('未认证', 'Not verified')),
+            Text(
+              profile.isVerified
+                  ? context.localized('已认证', 'Verified')
+                  : context.localized('未认证', 'Not verified'),
+            ),
             Text('${context.localized('评分', 'Rating')} ${profile.rating}'),
             Text(
-                '${context.localized('评价', 'Reviews')} ${profile.reviewCount}'),
+              '${context.localized('评价', 'Reviews')} ${profile.reviewCount}',
+            ),
             Text(
-                '${context.localized('项目', 'Projects')} ${profile.projectCount}'),
+              '${context.localized('项目', 'Projects')} ${profile.projectCount}',
+            ),
             Text(
-                '${context.localized('医生', 'Doctors')} ${profile.doctorCount}'),
+              '${context.localized('医生', 'Doctors')} ${profile.doctorCount}',
+            ),
             Text(
-                '${context.localized('咨询', 'Consultations')} ${profile.consultationCount}'),
+              '${context.localized('咨询', 'Consultations')} ${profile.consultationCount}',
+            ),
             Text('${context.localized('用户', 'Users')} ${profile.userCount}'),
             Text('${context.localized('案例', 'Cases')} ${profile.caseCount}'),
           ],
@@ -1821,8 +1449,9 @@ class _ManagedInstitutionProfileEditPageState
       if (!widget.embedded) Navigator.of(context).pop();
       messenger.showSnackBar(
         SnackBar(
-          content:
-              Text(context.localized('机构档案已保存', 'Institution profile saved')),
+          content: Text(
+            context.localized('机构档案已保存', 'Institution profile saved'),
+          ),
         ),
       );
     }

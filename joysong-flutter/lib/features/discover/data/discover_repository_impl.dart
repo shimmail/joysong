@@ -4,7 +4,10 @@ import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 
 final class ApiDiscoverRepository
-    implements DiscoverRepository, InstitutionProjectDetailRepository {
+    implements
+        DiscoverRepository,
+        InstitutionProjectDetailRepository,
+        ProfessionalCatalogRepository {
   ApiDiscoverRepository(
     this._apiClient, {
     PublicMediaUrlResolver? mediaUrlResolver,
@@ -94,10 +97,7 @@ final class ApiDiscoverRepository
     final detail = await _apiClient.get<DiscoverItem>(
       '/discover/${type.pathSegment}/$id',
       decodeData: (json) => DiscoverItem.fromJson(
-        resolvePublicMediaUrlsInJson(
-          json,
-          resolver: _mediaUrlResolver,
-        ),
+        resolvePublicMediaUrlsInJson(json, resolver: _mediaUrlResolver),
         type: type,
         mediaUrlResolver: _mediaUrlResolver,
       ),
@@ -116,10 +116,7 @@ final class ApiDiscoverRepository
     final detail = await _apiClient.get<DiscoverItem>(
       '/discover/institutions/$institutionId/projects/$projectId',
       decodeData: (json) => DiscoverItem.fromJson(
-        resolvePublicMediaUrlsInJson(
-          json,
-          resolver: _mediaUrlResolver,
-        ),
+        resolvePublicMediaUrlsInJson(json, resolver: _mediaUrlResolver),
         type: DiscoverContentType.project,
         mediaUrlResolver: _mediaUrlResolver,
       ),
@@ -129,4 +126,87 @@ final class ApiDiscoverRepository
     }
     return detail;
   }
+
+  Future<List<DiscoverItem>> _catalogList(
+    String path,
+    DiscoverContentType type,
+  ) async =>
+      await _apiClient.get<List<DiscoverItem>>(
+        path,
+        decodeData: (json) {
+          if (json is! List) throw const FormatException('目录列表响应格式错误');
+          return json
+              .map(
+                (item) => DiscoverItem.fromJson(
+                  resolvePublicMediaUrlsInJson(
+                    item,
+                    resolver: _mediaUrlResolver,
+                  ),
+                  type: type,
+                  mediaUrlResolver: _mediaUrlResolver,
+                ),
+              )
+              .toList(growable: false);
+        },
+      ) ??
+      const [];
+
+  @override
+  Future<List<DiscoverItem>> loadVisibleInstitutions() =>
+      _catalogList('/admin/institutions', DiscoverContentType.institution);
+
+  @override
+  Future<DiscoverItem> loadVisibleInstitution(String id) async =>
+      await _apiClient.get<DiscoverItem>(
+        '/admin/institutions/${id.trim()}',
+        decodeData: (json) => DiscoverItem.fromJson(
+          json,
+          type: DiscoverContentType.institution,
+          mediaUrlResolver: _mediaUrlResolver,
+        ),
+      ) ??
+      (throw const FormatException('机构详情响应为空'));
+
+  @override
+  Future<List<DiscoverItem>> loadVisibleInstitutionDoctors(String id) =>
+      _catalogList(
+        '/admin/institutions/${id.trim()}/doctors',
+        DiscoverContentType.doctor,
+      );
+
+  @override
+  Future<List<DiscoverItem>> loadVisibleDoctorProjects(
+    String institutionId,
+    String doctorId,
+  ) async {
+    final normalizedInstitutionId = institutionId.trim();
+    final normalizedDoctorId = doctorId.trim();
+    final projects = await loadVisibleInstitutionProjects();
+    return projects.where((item) {
+      final institution = item.raw['institution'];
+      final itemInstitutionId = (item.raw['institutionId'] ??
+              (institution is Map ? institution['id'] : null))
+          ?.toString()
+          .trim();
+      final doctors = item.raw['doctors'];
+      final doctorIds = doctors is List
+          ? doctors
+              .map((doctor) => doctor is Map
+                  ? (doctor['id'] ?? doctor['doctorId'])?.toString().trim()
+                  : doctor?.toString().trim())
+              .whereType<String>()
+              .toSet()
+          : const <String>{};
+      return itemInstitutionId == normalizedInstitutionId &&
+          doctorIds.contains(normalizedDoctorId);
+    }).toList(growable: false);
+  }
+
+  @override
+  Future<List<DiscoverItem>> loadVisibleInstitutionProjects() =>
+      _catalogList('/admin/institution-projects', DiscoverContentType.project);
+
+  @override
+  Future<List<DiscoverItem>> loadVisibleProjects() =>
+      _catalogList('/admin/projects', DiscoverContentType.project);
 }

@@ -12,6 +12,12 @@
 
 Flutter 不连接数据库，也不调用管理后台网页。用户态和专业身份态都直接调用服务端 REST API。
 
+### 专业端只读目录与申请撤回
+
+ACTIVE 医生或服务端权限上下文允许的机构法人可进入“专业目录”。Flutter 仅使用既有兼容接口：`GET /admin/institutions`、`GET /admin/institutions/{id}`、`GET /admin/institutions/{id}/doctors`、`GET /admin/institution-projects`、`GET /admin/projects`。医生项目由真实机构项目响应的 `institutionId` 与 `doctors[].id` 在客户端过滤，不调用额外路径。`GET /admin/projects` 仅用于只读兼容目录；管理中心申请表单的项目选择仍遵循其独立 selection/target 契约，二者不可互换。后续详情 id 必须来自前序可见响应；403 与 404 显示相同不可用状态并允许重试。
+
+医生本人状态为 `PENDING`、类型为 `JOIN` 或 `PROFILE_UPDATE` 的项目申请可调用 `POST /admin/institution-project-requests/{id}/withdraw`；成功刷新列表，失败保留原项。专业 Flutter 不创建、修改或删除项目/机构项目。管理员系统、管理员接口实现与页面不变 / Admin system, admin API implementation, and pages are unchanged.
+
 `AppShell` 是 Flutter 唯一的账号作用域组合根；账号相关的 repository 和 controller 只能由它按当前登录会话创建、复用和销毁。
 
 开发地址建议：
