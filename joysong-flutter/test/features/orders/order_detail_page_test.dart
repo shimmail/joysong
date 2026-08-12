@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
 import 'package:joysong_flutter/features/orders/presentation/order_detail_page.dart';
 import 'package:joysong_flutter/features/orders/presentation/orders_controller.dart';
@@ -11,6 +12,42 @@ import 'package:joysong_flutter/features/social/presentation/social_controller.d
 import 'order_test_fixtures.dart';
 
 void main() {
+  testWidgets('shows settlement pending and retries a support-data error',
+      (tester) async {
+    final repository = FakeOrdersRepository()
+      ..orders = [sampleOrder(status: OrderStatus.completed)]
+      ..settlementError = const ApiException(
+        message: 'SETTLEMENT_NOT_GENERATED',
+        httpStatus: 409,
+        businessCode: 409,
+      );
+    final controller = OrderDetailController(repository, orderId: 'order-1');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('zh'),
+        supportedLocales: const [Locale('zh'), Locale('en')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
+        home: OrderDetailPage(controller: controller),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('结算信息生成中。'), findsOneWidget);
+
+    repository.settlementError = const FormatException('结算详情不是 JSON 对象');
+    await controller.retrySettlement();
+    await tester.pumpAndSettle();
+    expect(find.text('结算详情不是 JSON 对象'), findsOneWidget);
+
+    repository.settlementError = null;
+    final retryButton = find.byKey(const Key('settlement-retry-button'));
+    await tester.ensureVisible(retryButton);
+    await tester.pumpAndSettle();
+    await tester.tap(retryButton);
+    await tester.pumpAndSettle();
+    expect(find.text(r'$1,280.50'), findsAtLeastNWidgets(2));
+  });
+
   testWidgets('leaves order details after deleting an order', (tester) async {
     tester.view.physicalSize = const Size(800, 1200);
     tester.view.devicePixelRatio = 1;

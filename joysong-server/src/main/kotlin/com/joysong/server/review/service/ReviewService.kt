@@ -111,7 +111,7 @@ class ReviewService(
                 remark = "用户主动评价，进入待结算"
             )
             log.info("订单[{}]用户主动评价完成，状态从{}转为PENDING_SETTLEMENT", orderId, previousStatus)
-            settlementService.saveSettlement(orderId)
+            settlementService.saveSettlement(orderId, settlementAt)
         }
 
         return review
@@ -155,11 +155,12 @@ class ReviewService(
 
         recalculateStats(order.institutionId, order.doctorId, order.institutionProjectId)
 
+        val settlementAt = order.settlementAt ?: now.plusDays(30)
         orderRepository.save(
             order.copy(
                 status = OrderStatusEnum.PENDING_SETTLEMENT.value,
                 hasReview = true,
-                settlementAt = order.settlementAt ?: now.plusDays(30),
+                settlementAt = settlementAt,
                 completedAt = order.completedAt ?: now,
                 updatedAt = now
             )
@@ -172,7 +173,7 @@ class ReviewService(
             operatorType = OPERATOR_TYPE_SYSTEM,
             remark = "超时自动好评"
         )
-        settlementService.saveSettlement(orderId)
+        settlementService.saveSettlement(orderId, settlementAt)
         log.info("订单[{}]超时自动好评完成", orderId)
         return review
     }

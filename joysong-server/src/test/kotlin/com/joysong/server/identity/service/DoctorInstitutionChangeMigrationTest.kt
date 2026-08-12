@@ -17,6 +17,53 @@ import java.time.LocalDateTime
 class DoctorInstitutionChangeMigrationTest {
 
     @Test
+    fun `V17 revenue ledger migration remains the immutable base schema`() {
+        val sql = migration("db/migration/V17__add_revenue_ledger.sql")
+        assertContains(sql, "CREATE TABLE settlement_allocations")
+        assertContains(sql, "CREATE TABLE wallets")
+        assertContains(sql, "CREATE TABLE wallet_ledger_entries")
+        assertContains(sql, "CREATE TABLE reconciliation_issues")
+        assertContains(sql, "UNIQUE KEY uk_settlements_order_id (order_id)")
+        assertContains(sql, "duplicate settlements.order_id rows require reconciliation")
+        assertContains(sql, "UNIQUE KEY uk_wallet_owner_currency (owner_type, owner_id, currency)")
+        assertContains(sql, "UNIQUE KEY uk_wallet_ledger_operation (operation_key)")
+        assertContains(sql, "CHECK (pending_minor >= 0 AND available_minor >= 0 AND frozen_minor >= 0)")
+        assertFalse(sql.contains("balance_bucket"))
+        assertFalse(sql.contains("pending_balance_minor"))
+        assertFalse(sql.contains("available_balance_minor"))
+        assertFalse(sql.contains("frozen_balance_minor"))
+    }
+
+    @Test
+    fun `V18 extends revenue ledger snapshots without rewriting V17`() {
+        val extension = migration("db/migration/V18__extend_revenue_ledger_snapshots.sql")
+        assertContains(extension, "ALTER TABLE settlement_allocations")
+        assertContains(extension, "ADD COLUMN balance_bucket VARCHAR(20) NULL")
+        assertContains(extension, "allocation.status = 'AVAILABLE'")
+        assertContains(extension, "entry_type = 'RELEASE'")
+        assertContains(extension, "MODIFY COLUMN balance_bucket VARCHAR(20) NOT NULL DEFAULT 'PENDING'")
+        assertContains(extension, "ALTER TABLE wallet_ledger_entries")
+        assertContains(extension, "ADD COLUMN pending_balance_minor BIGINT NULL")
+        assertContains(extension, "ADD COLUMN available_balance_minor BIGINT NULL")
+        assertContains(extension, "ADD COLUMN frozen_balance_minor BIGINT NULL")
+        assertContains(extension, "SUM(pending_delta_minor) OVER")
+        assertContains(extension, "SUM(available_delta_minor) OVER")
+        assertContains(extension, "SUM(frozen_delta_minor) OVER")
+        assertContains(extension, "PARTITION BY wallet_id ORDER BY id ROWS UNBOUNDED PRECEDING")
+        assertContains(extension, "MODIFY COLUMN pending_balance_minor BIGINT NOT NULL")
+        assertContains(extension, "MODIFY COLUMN available_balance_minor BIGINT NOT NULL")
+        assertContains(extension, "MODIFY COLUMN frozen_balance_minor BIGINT NOT NULL")
+        assertContains(extension, "chk_wallet_ledger_balance_snapshots_non_negative")
+
+        val baseline = migration("db/migration/B1__init_schema.sql")
+        assertFalse(baseline.contains("CREATE TABLE settlement_allocations"))
+        assertFalse(baseline.contains("CREATE TABLE wallets"))
+        assertFalse(baseline.contains("CREATE TABLE wallet_ledger_entries"))
+        assertFalse(baseline.contains("CREATE TABLE reconciliation_issues"))
+        assertFalse(baseline.contains("uk_settlements_order_id"))
+    }
+
+    @Test
     fun `V13 migration declares the doctor institution request ledger contract`() {
         val migration = requireNotNull(
             javaClass.getResource("/db/migration/V13__add_doctor_institution_change_requests.sql")
@@ -435,6 +482,9 @@ class DoctorInstitutionChangeMigrationTest {
             execute(dataSource)
         }
     }
+
+    private fun migration(path: String): String =
+        requireNotNull(javaClass.getResource("/$path")).readText().replace(Regex("\\s+"), " ").trim()
 
     private fun seedHistoricalFixtures(jdbcTemplate: JdbcTemplate) {
         jdbcTemplate.update(

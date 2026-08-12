@@ -442,7 +442,7 @@ class OrderService(
         )
         log.info("订单[{}]用户确认完成, 结算到期时间: {}", orderId, settlementAt)
 
-        settlementService.saveSettlement(orderId)
+        settlementService.saveSettlement(orderId, settlementAt)
         return OrderResponse.from(updated)
     }
 
@@ -738,8 +738,12 @@ class OrderService(
      */
     @Transactional(rollbackFor = [Exception::class])
     fun adminHardDeleteOrder(orderId: String) {
-        val order = orderRepository.findByIdIncludeDeleted(orderId)
+        orderRepository.findByIdIncludeDeleted(orderId)
             ?: throw RuntimeException("订单不存在")
+
+        require(!orderRepository.hasMoneyReferences(orderId)) {
+            "订单已关联支付、退款或结算账本记录，禁止物理删除"
+        }
 
         entityManager.createNativeQuery("DELETE FROM orders WHERE id = :id")
             .setParameter("id", orderId)

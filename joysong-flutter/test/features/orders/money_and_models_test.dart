@@ -30,4 +30,25 @@ void main() {
 
     expect(() => Order.fromJson(json), throwsFormatException);
   });
+
+  test('Settlement maps the consumer-safe minor-unit contract', () {
+    final settlement = Settlement.fromJson({
+      'settlementId': 42,
+      'orderId': 'order-1',
+      'currency': 'USD',
+      'grossTotalPaid': {'currency': 'USD', 'minor': 128050},
+      'netSettled': {'currency': 'USD', 'minor': 120000},
+      'state': 'RELEASED',
+      'settlementDueAt': '2026-08-12T10:00:00',
+      'settlementCreatedAt': '2026-08-11T10:00:00',
+      'releasedAt': '2026-08-13T10:00:00',
+    });
+
+    expect(settlement.settlementId, 42);
+    expect(settlement.grossTotalPaidMinor, 128050);
+    expect(settlement.netSettledMinor, 120000);
+    expect(settlement.grossTotalPaidMinor, isNot(settlement.netSettledMinor));
+    expect(settlement.currency, 'USD');
+    expect(settlement.releasedAt, DateTime(2026, 8, 13, 10));
+  });
 }

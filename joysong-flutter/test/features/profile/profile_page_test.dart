@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/features/auth/domain/auth_models.dart';
 import 'package:joysong_flutter/features/profile/domain/profile_models.dart';
@@ -12,6 +13,9 @@ void main() {
     var accountCalls = 0;
     await tester.pumpWidget(
       MaterialApp(
+        locale: const Locale('zh'),
+        supportedLocales: const [Locale('zh'), Locale('en')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
         home: Scaffold(
           body: ProfilePage(
             profileRepository: _ProfileRepository(),
@@ -39,6 +43,9 @@ void main() {
     final repository = _ProfileRepository();
     await tester.pumpWidget(
       MaterialApp(
+        locale: const Locale('zh'),
+        supportedLocales: const [Locale('zh'), Locale('en')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
         home: Scaffold(body: ProfilePage(profileRepository: repository)),
       ),
     );
@@ -57,6 +64,31 @@ void main() {
 
     expect(find.text('更新用户'), findsOneWidget);
     expect(repository.updateCalls, 1);
+  });
+
+  testWidgets('shows Wallet for every signed-in profile', (tester) async {
+    var walletCalls = 0;
+    await tester.pumpWidget(MaterialApp(
+      locale: const Locale('zh'),
+      supportedLocales: const [Locale('zh'), Locale('en')],
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
+      home: Scaffold(
+        body: ProfilePage(
+          profileRepository: _ProfileRepository(),
+          onWallet: () => walletCalls++,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(
+      find.byIcon(Icons.account_balance_wallet_outlined),
+      240,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.byIcon(Icons.account_balance_wallet_outlined));
+
+    expect(walletCalls, 1);
   });
 }
 

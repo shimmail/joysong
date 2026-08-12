@@ -114,6 +114,7 @@ class FakeOrdersRepository implements OrdersRepository {
   String? lastRefundReason;
   String? lastRefundDescription;
   String? lastRefundEvidenceUrl;
+  Object? settlementError;
 
   @override
   Future<List<Order>> getOrders({
@@ -255,11 +256,17 @@ class FakeOrdersRepository implements OrdersRepository {
   Future<List<OrderStatusLog>> getStatusLogs(String id) async => const [];
 
   @override
-  Future<Settlement> getSettlement(String id) async => Settlement(
-        id: 1,
-        orderId: id,
-        totalAmount: Money.parse('1280.50'),
-        status: 'PENDING',
-        createdAt: DateTime(2026, 8, 6),
-      );
+  Future<Settlement> getSettlement(String id) async {
+    final error = settlementError;
+    if (error != null) throw error;
+    return Settlement(
+      settlementId: 1,
+      orderId: id,
+      currency: 'USD',
+      grossTotalPaidMinor: 128050,
+      netSettledMinor: 128050,
+      state: 'PENDING_RELEASE',
+      settlementCreatedAt: DateTime(2026, 8, 6),
+    );
+  }
 }
