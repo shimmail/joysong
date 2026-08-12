@@ -184,6 +184,8 @@ fork again
   |机构法人|
   :审核本机构医生项目变更（force=false）;
   |JoySong 权限与业务服务|
+  :提交事务固化 V18 current* before 快照
+  审核时用不可变 before 对比请求 after;
   :校验 PENDING + 提交基线并锁定复合键;
   :原子更新该医生的 doctor_projects + 分账配置
   不影响同一机构项目下其他医生;

@@ -2204,6 +2204,17 @@ Authorization: Bearer <token>
   "institutionRate": 25.00,
   "platformRate": 10.00,
   "doctorRate": 57.00,
+  "currentPrice": 3500.00,
+  "currentServiceDescription": "提交申请时的原服务说明",
+  "currentServiceTags": ["原标签"],
+  "currentScheduleNote": "原排班说明",
+  "currentCoverImage": "https://cdn.example.com/doctor-project/old-cover.webp",
+  "currentImages": ["https://cdn.example.com/doctor-project/old-1.webp"],
+  "currentConsultationFee": 150.00,
+  "currentCommissionRate": 6.00,
+  "currentInstitutionRate": 25.00,
+  "currentPlatformRate": 10.00,
+  "currentDoctorRate": 59.00,
   "forceProcessed": false,
   "status": "PENDING",
   "submittedBy": "user-uuid",
@@ -2215,6 +2226,8 @@ Authorization: Bearer <token>
   "updatedAt": "2026-08-12T10:00:00"
 }
 ```
+
+`PROFILE_UPDATE` 响应中的 11 个 `current*` 字段是 V18 在**提交事务内**固化的 before 快照；非 `PROFILE_UPDATE` 申请这些字段为 `null`。法人或管理员审核列表必须用这组不可变快照与请求中的 after 字段做对比，不得在审批时重新读取生效表冒充原值。提交时尚无有效分账配置，则快照采用 `currentConsultationFee = 0`、`currentCommissionRate = 0`、`currentInstitutionRate =` 服务端策略默认机构率，并据当时平台率推导 `currentPlatformRate` 与 `currentDoctorRate`。
 
 ### POST /api/admin/institution-project-requests/{id}/review
 
@@ -2261,7 +2274,7 @@ Authorization: Bearer <token>
 }
 ```
 
-`currentPrice` 必为 decimal；展示文本提供安全空字符串，`serviceTags`/`images` 始终为 JSON 数组。尚无有效医生分账配置时，`consultationFee`、`commissionRate`、`institutionRate`、`platformRate`、`doctorRate` 均可为 `null`；只有顾问率与机构率同时存在时才计算平台率和医生净比例。Flutter 应使用本接口预填 `PROFILE_UPDATE` 表单，不得从机构级项目目录猜测医生本人价格或分账基线。
+全部 15 个字段均非 `null`：`currentPrice` 为 decimal，展示文本可为空字符串，`serviceTags`/`images` 可为空 JSON 数组。尚无有效医生分账配置时，服务端返回 `consultationFee = 0`、`commissionRate = 0`、`institutionRate =` 当前策略默认机构率，并返回当前策略 `platformRate` 与推导后的 `doctorRate`。Flutter 应使用本接口预填 `PROFILE_UPDATE` 表单，不得从机构级项目目录猜测医生本人价格或分账基线。
 
 ## 十二、管理后台 `/api/admin`
 
