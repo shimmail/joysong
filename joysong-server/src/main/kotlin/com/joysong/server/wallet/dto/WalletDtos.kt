@@ -24,6 +24,45 @@ data class WalletGroupDto(
     val wallets: List<WalletSummaryDto>
 )
 
+data class WalletOverviewDto(
+    val currency: String = "USD",
+    val wallets: List<WalletViewDto>
+)
+
+data class WalletViewDto(
+    val walletId: Long,
+    val ownerType: String,
+    val ownerId: String,
+    val displayName: String,
+    val ownerName: String,
+    val pendingMinor: Long,
+    val availableMinor: Long,
+    val frozenMinor: Long
+)
+
+data class WalletLedgerPageDto(
+    val content: List<WalletLedgerItemDto>,
+    val page: Int,
+    val size: Int,
+    val totalElements: Long,
+    val totalPages: Int,
+    val last: Boolean
+)
+
+data class WalletLedgerItemDto(
+    val id: Long,
+    val walletId: Long,
+    val entryType: String,
+    val title: String,
+    val description: String,
+    val amountMinor: Long,
+    val pendingAfterMinor: Long,
+    val availableAfterMinor: Long,
+    val frozenAfterMinor: Long,
+    val currency: String,
+    val createdAt: LocalDateTime
+)
+
 data class WalletLedgerDto(
     val id: Long,
     val walletId: Long,
