@@ -40,6 +40,39 @@ class InstitutionMembershipRequestServiceTest {
     }
 
     @Test
+    fun `consultant self contract lists only token owner and submits fixed consultant join`() {
+        val store = FakeMembershipRequestStore().apply {
+            seed(request("own", MembershipRequestType.CONSULTANT, "consultant-1", "institution-1"))
+            seed(request("other", MembershipRequestType.CONSULTANT, "consultant-2", "institution-1"))
+        }
+        val service = service(store)
+
+        assertEquals(listOf("own"), service.listOwnedConsultant(consultantActor()).map { it.id })
+        val submitted = service.submitConsultant(consultantActor(), " institution-2 ", " 加入说明 ")
+
+        assertEquals(MembershipRequestType.CONSULTANT, submitted.requestType)
+        assertEquals("consultant-1", submitted.userId)
+        assertEquals("institution-2", submitted.institutionId)
+        assertEquals("加入说明", submitted.requestNote)
+    }
+
+    @Test
+    fun `consultant rejected and revoked memberships resubmit while pending conflicts`() {
+        val store = FakeMembershipRequestStore().apply {
+            seed(request("rejected", MembershipRequestType.CONSULTANT, "consultant-1", "institution-r", "REJECTED"))
+            seed(request("revoked", MembershipRequestType.CONSULTANT, "consultant-1", "institution-v", "REVOKED"))
+            seed(request("pending", MembershipRequestType.CONSULTANT, "consultant-1", "institution-p", "PENDING"))
+        }
+        val service = service(store)
+
+        assertEquals("PENDING", service.submitConsultant(consultantActor(), "institution-r", "again").status)
+        assertEquals("PENDING", service.submitConsultant(consultantActor(), "institution-v", "again").status)
+        assertThrows(ConsultantMembershipConflictException::class.java) {
+            service.submitConsultant(consultantActor(), "institution-p", "again")
+        }
+    }
+
+    @Test
     fun `list contains only own requests and requests in managed institutions`() {
         val store = FakeMembershipRequestStore().apply {
             seed(request("own", MembershipRequestType.CONSULTANT, "legal-1", "institution-9"))
@@ -223,6 +256,12 @@ private class FakeMembershipRequestStore : InstitutionMembershipRequestStore {
         .filter { it.userId == userId || it.institutionId in managedInstitutionIds }
 
     override fun listAll() = requests.values.toList()
+
+    override fun listOwnedConsultant(userId: String) = requests.values.filter {
+        it.requestType == MembershipRequestType.CONSULTANT && it.userId == userId
+    }
+
+    override fun institutionExists(institutionId: String) = true
 
     override fun findById(type: MembershipRequestType, id: String) = requests[type to id]
 

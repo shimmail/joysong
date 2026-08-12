@@ -103,6 +103,7 @@ class ManagementAccessService(
                 doctorId = null,
                 managedInstitutionIds = emptySet(),
                 doctorInstitutionIds = emptySet(),
+                consultantInstitutionIds = emptySet(),
                 manageableDoctorIds = emptySet()
             )
         }
@@ -143,6 +144,17 @@ class ManagementAccessService(
                 doctorId
             ).toSet()
         } else emptySet()
+        val consultantInstitutionIds = if (CONSULTANT_ROLE in activeRoles) {
+            jdbcTemplate.queryForList(
+                """
+                SELECT institution_id FROM institution_memberships
+                WHERE user_id = ? AND member_role = 'CONSULTANT'
+                  AND status = 'APPROVED' AND revoked_at IS NULL
+                """.trimIndent(),
+                String::class.java,
+                userId
+            ).toSet()
+        } else emptySet()
         val manageableDoctorIds = buildSet {
             doctorId?.let(::add)
         }
@@ -159,6 +171,7 @@ class ManagementAccessService(
             doctorId = doctorId,
             managedInstitutionIds = managedInstitutionIds,
             doctorInstitutionIds = doctorInstitutionIds,
+            consultantInstitutionIds = consultantInstitutionIds,
             manageableDoctorIds = manageableDoctorIds
         )
     }
@@ -177,6 +190,7 @@ class ManagementAccessService(
         managedInstitutionIds = managedInstitutionIds.sorted(),
         visibleInstitutionIds = visibleInstitutionIds.sorted(),
         doctorInstitutionIds = doctorInstitutionIds.sorted(),
+        consultantInstitutionIds = consultantInstitutionIds.sorted(),
         canManageDoctors = isAdmin || manageableDoctorIds.isNotEmpty(),
         canManageInstitutions = isAdmin || managedInstitutionIds.isNotEmpty(),
         canManageInstitutionProjects = isAdmin,
@@ -202,10 +216,11 @@ data class ManagementActor(
     val doctorId: String?,
     val managedInstitutionIds: Set<String>,
     val doctorInstitutionIds: Set<String>,
-    val manageableDoctorIds: Set<String>
+    val manageableDoctorIds: Set<String>,
+    val consultantInstitutionIds: Set<String> = emptySet()
 ) {
     val visibleInstitutionIds: Set<String>
-        get() = managedInstitutionIds + doctorInstitutionIds
+        get() = managedInstitutionIds + doctorInstitutionIds + consultantInstitutionIds
 }
 
 data class ManagementContextView(
@@ -216,6 +231,7 @@ data class ManagementContextView(
     val managedInstitutionIds: List<String>,
     val visibleInstitutionIds: List<String>,
     val doctorInstitutionIds: List<String>,
+    val consultantInstitutionIds: List<String>,
     val canManageDoctors: Boolean,
     val canManageInstitutions: Boolean,
     val canManageInstitutionProjects: Boolean,

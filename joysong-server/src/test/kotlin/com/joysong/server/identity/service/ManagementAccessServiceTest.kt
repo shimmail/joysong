@@ -86,6 +86,13 @@ class ManagementAccessServiceTest {
                 "consultant-1"
             )
         } returns listOf("CONSULTANT")
+        every {
+            jdbcTemplate.queryForList(
+                match<String> { it.contains("member_role = 'CONSULTANT'") },
+                String::class.java,
+                "consultant-1"
+            )
+        } returns listOf("institution-1")
 
         val context = ManagementAccessService(jdbcTemplate).contextFor("consultant-1", "USER")
 
@@ -95,6 +102,8 @@ class ManagementAccessServiceTest {
         assertFalse(context.canManageInstitutionProjects)
         assertFalse(context.canManageOrders)
         assertFalse(context.canManageSplitConfigs)
+        assertTrue("institution-1" in context.visibleInstitutionIds)
+        assertTrue("institution-1" in context.consultantInstitutionIds)
     }
 
     @Test
