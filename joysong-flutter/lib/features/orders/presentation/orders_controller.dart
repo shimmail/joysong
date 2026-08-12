@@ -97,6 +97,8 @@ final class OrderDetailController extends ChangeNotifier {
   Settlement? _settlement;
   List<OrderStatusLog> _statusLogs = const [];
   String? _errorMessage;
+  String? _settlementErrorMessage;
+  bool _isSettlementGenerationPending = false;
   bool _isLoading = false;
   OrderAction? _activeAction;
   bool _isRemoved = false;
@@ -106,6 +108,8 @@ final class OrderDetailController extends ChangeNotifier {
   Settlement? get settlement => _settlement;
   List<OrderStatusLog> get statusLogs => _statusLogs;
   String? get errorMessage => _errorMessage;
+  String? get settlementErrorMessage => _settlementErrorMessage;
+  bool get isSettlementGenerationPending => _isSettlementGenerationPending;
   bool get isLoading => _isLoading;
   OrderAction? get activeAction => _activeAction;
   bool get isBusy => _activeAction != null;
@@ -192,6 +196,12 @@ final class OrderDetailController extends ChangeNotifier {
         removesOrder: true,
       );
 
+  Future<void> retrySettlement() async {
+    if (_order == null || !_supportsSettlement(_order!)) return;
+    await _loadSettlement();
+    notifyListeners();
+  }
+
   Future<bool> _runOrderAction(
     OrderAction action,
     Future<Order> Function() operation,
@@ -260,20 +270,40 @@ final class OrderDetailController extends ChangeNotifier {
     } else {
       _refund = null;
     }
-    if (const {
-      OrderStatus.completed,
-      OrderStatus.pendingSettlement,
-      OrderStatus.settled,
-    }.contains(detail.status)) {
-      try {
-        _settlement = await _repository.getSettlement(orderId);
-      } catch (_) {
-        _settlement = null;
-      }
+    if (_supportsSettlement(detail)) {
+      await _loadSettlement();
     } else {
       _settlement = null;
+      _settlementErrorMessage = null;
+      _isSettlementGenerationPending = false;
     }
   }
+
+  bool _supportsSettlement(Order order) => const {
+        OrderStatus.completed,
+        OrderStatus.pendingSettlement,
+        OrderStatus.settled,
+      }.contains(order.status);
+
+  Future<void> _loadSettlement() async {
+    _settlement = null;
+    _settlementErrorMessage = null;
+    _isSettlementGenerationPending = false;
+    try {
+      _settlement = await _repository.getSettlement(orderId);
+    } catch (error) {
+      if (_isSettlementNotGenerated(error)) {
+        _isSettlementGenerationPending = true;
+      } else {
+        _settlementErrorMessage = _orderMessageFor(error, '结算详情加载失败');
+      }
+    }
+  }
+
+  bool _isSettlementNotGenerated(Object error) =>
+      error is ApiException &&
+      error.httpStatus == 409 &&
+      error.message == 'SETTLEMENT_NOT_GENERATED';
 }
 
 String _orderMessageFor(Object error, String fallback) {
