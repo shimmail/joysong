@@ -105,6 +105,22 @@ class ChatCompletionRequestTest {
         assertEquals("Streaming is only supported for chat requests", exception.message)
     }
 
+    @Test
+    fun `streaming is rejected for OpenAI compatible chat requests`() {
+        val exception = assertThrows(IllegalArgumentException::class.java) {
+            AgentProviderRequestFactory.build(
+                AiAgentProvider.OPENAI_COMPATIBLE,
+                "gateway-model",
+                messages,
+                280,
+                AgentRequestPurpose.CHAT,
+                streaming = true
+            )
+        }
+
+        assertEquals("Streaming is only supported for Qwen chat requests", exception.message)
+    }
+
     private fun assertLegacyParametersAreAbsent(body: Map<String, Any>) {
         assertFalse(body.containsKey("max_completion_tokens"))
         assertFalse(body.containsKey("reasoning_effort"))

@@ -21,6 +21,9 @@ object AgentProviderRequestFactory {
         "stream" to streaming,
         "max_tokens" to maxOutputTokens
     ).apply {
+        require(!streaming || provider == AiAgentProvider.QWEN) {
+            "Streaming is only supported for Qwen chat requests"
+        }
         require(!streaming || purpose == AgentRequestPurpose.CHAT) {
             "Streaming is only supported for chat requests"
         }
