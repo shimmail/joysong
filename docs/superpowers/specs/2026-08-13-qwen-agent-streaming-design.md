@@ -143,4 +143,3 @@ Controller 的状态转换：
 ## 交付与兼容性
 
 后端先提供新 SSE 端点并保留旧端点，然后 Flutter 切换默认调用。因为旧端点不变，旧客户端无需同步升级。新端点的事件名和 data schema 作为稳定客户端契约，实现不向 Flutter 暴露 DashScope 原始事件格式。
-
