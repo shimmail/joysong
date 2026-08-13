@@ -9,6 +9,9 @@ import com.joysong.server.agent.diagnostics.AgentOperationLogger
 import com.joysong.server.agent.orchestration.AgentChatException
 import com.joysong.server.agent.orchestration.BeginTurnResult
 import com.joysong.server.agent.orchestration.TurnLifecycleService
+import com.joysong.server.agent.streaming.AgentStreamEvent
+import com.joysong.server.agent.streaming.AgentStreamSink
+import com.joysong.server.agent.streaming.AgentStreamingService
 import com.joysong.server.agent.repository.AgentTurnRepository
 import com.joysong.server.config.AiAgentProperties
 import com.joysong.server.chat.dto.CreateSessionRequest
@@ -44,11 +47,13 @@ import org.springframework.http.client.ClientHttpRequestInterceptor
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.request
 import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.web.client.RestTemplate
 import org.slf4j.LoggerFactory
@@ -60,7 +65,10 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Paths
 import java.time.LocalDateTime
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -102,6 +110,9 @@ class AgentChatFlowIntegrationTest {
     private lateinit var turnLifecycleService: TurnLifecycleService
 
     @Autowired
+    private lateinit var agentStreamingService: AgentStreamingService
+
+    @Autowired
     private lateinit var aiAgentProperties: AiAgentProperties
 
     @Autowired
@@ -123,6 +134,7 @@ class AgentChatFlowIntegrationTest {
         fakeLlmDelayMs.set(0)
         fakeLlmContent.set("测试回复")
         fakeLlmRawResponse.set(null)
+        fakeLlmStreamResponse.set(defaultStreamResponse)
         fakeIntentParserContent.set("""{"intent":"CATALOG_QA","queryTarget":"DOCTOR","keywords":["context"]}""")
         fakeLlmRequestBodies.clear()
         aiAgentProperties.intentModel = "intent-test-model"
@@ -142,7 +154,7 @@ class AgentChatFlowIntegrationTest {
                     null,
                     "127.0.0.1",
                     fakeLlm.address.port,
-                    request.uri.path,
+                    "/v1/chat/completions",
                     null,
                     null
                 )
@@ -734,21 +746,158 @@ class AgentChatFlowIntegrationTest {
 
     @Test
     @WithMockUser(username = "user-1")
-    fun `HTTP streaming endpoint is disabled synchronously without calling the model`() {
+    fun `HTTP streaming success emits ordered events and persists one complete turn`() {
         val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
-        val callsBefore = fakeLlmCalls.get()
 
-        mockMvc.perform(
-            post("/api/chat/sessions/{id}/messages/stream", session.id)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("""{"content":"do not stream","idempotencyKey":"http-stream-1"}""")
-        )
-            .andExpect(status().isNotFound)
-            .andExpect(jsonPath("$.message").value("AGENT_STREAMING_DISABLED"))
+        val response = stream(session.id, "你好", "http-stream-success-1")
 
-        assertEquals(callsBefore, fakeLlmCalls.get())
-        assertEquals(0, messageCount(session.id))
-        assertEquals(0, turnCount(session.id))
+        assertEventOrder(response, "event:started", "event:delta", "event:completed")
+        assertFalse(response.contains("event:failed"))
+        assertEquals(1, streamingProviderCallCount())
+        assertEquals(listOf("USER", "ASSISTANT"), messages(session.id).map { it.role })
+        assertEquals("测试回复", messages(session.id).last().content)
+        assertEquals(AgentTurnStatus.SUCCEEDED, turn(session.id).status)
+    }
+
+    @Test
+    @WithMockUser(username = "user-1")
+    fun `HTTP planning stream suppresses unsafe deltas and persists only policy safe content`() {
+        fakeLlmStreamResponse.set(streamResponse("结合你低痛偏好，建议选择A"))
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+
+        val response = stream(session.id, "帮我规划适合自己的项目", "http-stream-planning-1")
+
+        assertEventOrder(response, "event:started", "event:completed")
+        assertFalse(response.contains("event:delta"))
+        val assistant = messages(session.id).single { it.role == "ASSISTANT" }
+        assertTrue(assistant.content.contains("信息参考"))
+        assertFalse(assistant.content.contains("低痛偏好"))
+        assertFalse(assistant.content.contains("建议选择A"))
+        assertFalse(response.contains("低痛偏好"))
+    }
+
+    @Test
+    @WithMockUser(username = "user-1")
+    fun `HTTP streaming replay emits stored completion without another provider call or message`() {
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+        val first = stream(session.id, "你好", "http-stream-replay-1")
+        val callsAfterFirst = streamingProviderCallCount()
+
+        val replay = stream(session.id, "你好", "http-stream-replay-1")
+
+        assertTrue(first.contains("event:started"))
+        assertFalse(replay.contains("event:started"))
+        assertFalse(replay.contains("event:delta"))
+        assertTrue(replay.contains("event:completed"))
+        assertEquals(callsAfterFirst, streamingProviderCallCount())
+        assertEquals(2, messageCount(session.id))
+        assertEquals(1, turnCount(session.id))
+    }
+
+    @Test
+    @WithMockUser(username = "user-1")
+    fun `HTTP streaming duplicate running turn returns conflict before provider call`() {
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+        val started = turnLifecycleService.beginTurn(session.id, "user-1", "你好", "http-stream-running-1") as BeginTurnResult.Started
+        val callsBefore = streamingProviderCallCount()
+        try {
+            mockMvc.perform(
+                post("/api/chat/sessions/{id}/messages/stream", session.id)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"content":"你好","idempotencyKey":"http-stream-running-1"}""")
+            )
+                .andExpect(status().isConflict)
+                .andExpect(jsonPath("$.message").value("TURN_IN_PROGRESS"))
+            assertEquals(callsBefore, streamingProviderCallCount())
+            assertEquals(1, messageCount(session.id))
+        } finally {
+            turnLifecycleService.cancelTurn(started.turnId, "TEST_CLEANUP", 0)
+        }
+    }
+
+    @ParameterizedTest(name = "streaming provider HTTP {0} is atomic")
+    @ValueSource(ints = [400, 429, 500])
+    @WithMockUser(username = "user-1")
+    fun `HTTP streaming upstream errors fail atomically with redacted terminal event`(providerStatus: Int) {
+        fakeLlmStatus.set(providerStatus)
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+
+        val response = stream(session.id, "你好", "http-stream-upstream-$providerStatus")
+
+        assertEventOrder(response, "event:started", "event:failed")
+        assertTrue(response.contains("AI_PROVIDER_UNAVAILABLE"))
+        assertFalse(response.contains("provider-secret-body"))
+        assertEquals(listOf("USER"), messages(session.id).map { it.role })
+        assertEquals(AgentTurnStatus.FAILED, turn(session.id).status)
+    }
+
+    @Test
+    @WithMockUser(username = "user-1")
+    fun `HTTP streaming timeout fails atomically and remains retryable`() {
+        fakeLlmDelayMs.set(500)
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+
+        val response = stream(session.id, "你好", "http-stream-timeout-1")
+
+        assertTrue(response.contains("event:failed"))
+        assertTrue(response.contains("AI_PROVIDER_TIMEOUT"))
+        assertTrue(response.contains("\"retryable\":true"))
+        assertEquals(listOf("USER"), messages(session.id).map { it.role })
+        assertEquals(AgentTurnStatus.FAILED, turn(session.id).status)
+    }
+
+    @ParameterizedTest(name = "stream payload {index} fails atomically")
+    @ValueSource(strings = ["data: {not-json}\n\ndata: [DONE]\n\n", "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"])
+    @WithMockUser(username = "user-1")
+    fun `HTTP malformed or incomplete provider stream never persists a partial assistant`(payload: String) {
+        fakeLlmStreamResponse.set(payload)
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+
+        val response = stream(session.id, "你好", "http-stream-bad-${payload.hashCode()}")
+
+        assertTrue(response.contains("event:failed"))
+        assertFalse(response.contains("event:completed"))
+        assertEquals(listOf("USER"), messages(session.id).map { it.role })
+        assertEquals(AgentTurnStatus.FAILED, turn(session.id).status)
+    }
+
+    @Test
+    fun `stream disconnect cancels the running turn without persisting assistant content`() {
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+        val terminal = CountDownLatch(1)
+        val open = AtomicBoolean(true)
+        val sink = object : AgentStreamSink {
+            override val isOpen: Boolean get() = open.get()
+            override fun started(event: AgentStreamEvent.Started) = Unit
+            override fun delta(event: AgentStreamEvent.Delta) { open.set(false) }
+            override fun completed(event: AgentStreamEvent.Completed) = terminal.countDown()
+            override fun failed(event: AgentStreamEvent.Failed) = terminal.countDown()
+        }
+
+        agentStreamingService.stream(session.id, "user-1", SendMessageRequest("你好", "stream-disconnect-1"), sink)
+        awaitTurnStatus(session.id, AgentTurnStatus.CANCELLED)
+
+        assertFalse(terminal.await(50, TimeUnit.MILLISECONDS))
+        assertEquals(listOf("USER"), messages(session.id).map { it.role })
+        assertEquals("CLIENT_DISCONNECTED", turn(session.id).errorCode)
+    }
+
+    @Test
+    @WithMockUser(username = "user-1")
+    fun `failed streaming execution retries the same idempotency key without duplicating user message`() {
+        fakeLlmStatus.set(500)
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+        val failed = stream(session.id, "你好", "http-stream-retry-1")
+        assertTrue(failed.contains("event:failed"))
+        fakeLlmStatus.set(200)
+
+        val retried = stream(session.id, "你好", "http-stream-retry-1")
+
+        assertTrue(retried.contains("event:completed"))
+        assertEquals(2, streamingProviderCallCount())
+        assertEquals(listOf("USER", "ASSISTANT"), messages(session.id).map { it.role })
+        assertEquals(1, turnCount(session.id))
+        assertEquals(AgentTurnStatus.SUCCEEDED, turn(session.id).status)
     }
 
     @Test
@@ -868,6 +1017,43 @@ class AgentChatFlowIntegrationTest {
         assertTrue(joined.contains("errorCode=AGENT_INTERNAL_ERROR"))
     }
 
+    private fun stream(sessionId: String, content: String, idempotencyKey: String): String {
+        val initial = mockMvc.perform(
+            post("/api/chat/sessions/{id}/messages/stream", sessionId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(SendMessageRequest(content, idempotencyKey)))
+        )
+            .andExpect(request().asyncStarted())
+            .andReturn()
+        return mockMvc.perform(asyncDispatch(initial))
+            .andExpect(status().isOk)
+            .andReturn().response.contentAsString
+    }
+
+    private fun assertEventOrder(response: String, vararg events: String) {
+        val positions = events.map { event ->
+            response.indexOf(event).also { assertTrue(it >= 0, "Missing $event in $response") }
+        }
+        assertEquals(positions.sorted(), positions)
+    }
+
+    private fun messages(sessionId: String) = messageRepository.findBySessionIdOrderBySequenceNoAsc(sessionId)
+
+    private fun turn(sessionId: String) = turnRepository.findAll().single { it.sessionId == sessionId }
+
+    private fun streamingProviderCallCount() = fakeLlmRequestBodies.count {
+        Regex("\"stream\"\\s*:\\s*true").containsMatchIn(it)
+    }
+
+    private fun awaitTurnStatus(sessionId: String, expected: AgentTurnStatus) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (System.nanoTime() < deadline) {
+            if (turnRepository.findAll().singleOrNull { it.sessionId == sessionId }?.status == expected) return
+            Thread.yield()
+        }
+        assertEquals(expected, turn(sessionId).status)
+    }
+
     private fun captureAgentOperationLogs(block: () -> Unit): List<String> {
         val logger = LoggerFactory.getLogger(agentOperationLoggerName) as Logger
         val appender = ListAppender<ILoggingEvent>().apply { start() }
@@ -965,6 +1151,9 @@ class AgentChatFlowIntegrationTest {
         private val fakeLlmDelayMs = AtomicLong()
         private val fakeLlmContent = AtomicReference("测试回复")
         private val fakeLlmRawResponse = AtomicReference<String?>(null)
+        private const val defaultStreamResponse =
+            "data: {\"id\":\"chatcmpl-test\",\"choices\":[{\"delta\":{\"content\":\"测试回复\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\n"
+        private val fakeLlmStreamResponse = AtomicReference(defaultStreamResponse)
         private val fakeIntentParserContent = AtomicReference(
             """{"intent":"CATALOG_QA","queryTarget":"DOCTOR","keywords":["context"]}"""
         )
@@ -986,12 +1175,7 @@ class AgentChatFlowIntegrationTest {
                 } else if (status != 200) {
                     """{"error":{"code":"rate_limit_exceeded","message":"provider-secret-body test-key 13800000000 private@example.com"}}""".toByteArray(StandardCharsets.UTF_8)
                 } else if (streaming) {
-                    """
-                        data: {"id":"chatcmpl-test","choices":[{"delta":{"content":"测试回复"},"finish_reason":null}]}
-
-                        data: [DONE]
-
-                    """.trimIndent().toByteArray(StandardCharsets.UTF_8)
+                    fakeLlmStreamResponse.get().toByteArray(StandardCharsets.UTF_8)
                 } else """
                     {
                       "id": "chatcmpl-test",
@@ -1030,8 +1214,8 @@ class AgentChatFlowIntegrationTest {
             registry.add("admin.bootstrap.password") { "test-admin-password" }
             registry.add("payment.stripe.secret-key") { "sk_test_agent_chat" }
             registry.add("payment.stripe.webhook-secret") { "whsec_agent_chat" }
-            registry.add("ai-agent.provider") { "openai-compatible" }
-            registry.add("ai-agent.base-url") { "https://www.fastaitoken.com/v1" }
+            registry.add("ai-agent.provider") { "QWEN" }
+            registry.add("ai-agent.base-url") { "https://dashscope.aliyuncs.com/compatible-mode/v1" }
             registry.add("ai-agent.api-key") { "test-key" }
             registry.add("ai-agent.model") { "test-model" }
             registry.add("ai-agent.intent-model") { "intent-test-model" }
@@ -1048,6 +1232,9 @@ class AgentChatFlowIntegrationTest {
             val worktreeName = Paths.get(System.getProperty("user.dir")).parent.fileName.toString()
             return "myapp_worktree_${worktreeName.replace(Regex("[^A-Za-z0-9]+"), "_")}".lowercase()
         }
+
+        private fun streamResponse(content: String): String =
+            "data: {\"id\":\"chatcmpl-test\",\"choices\":[{\"delta\":{\"content\":${ObjectMapper().writeValueAsString(content)}},\"finish_reason\":null}]}\n\ndata: [DONE]\n\n"
     }
 }
 
@@ -1057,8 +1244,8 @@ class ReportingAgentChatMySqlContainer(imageName: String) :
     override fun start() {
         println("AGENT_CHAT_TEST_DB_HOST=$host")
         println("AGENT_CHAT_TEST_DB_NAME=$databaseName")
-        require(databaseName.startsWith("myapp_worktree_")) {
-            "Refusing to start integration test with non-worktree database: $databaseName"
+        require(databaseName == "myapp_worktree_qwen_agent_streaming") {
+            "Refusing to start integration test with unexpected database: $databaseName"
         }
         super.start()
     }

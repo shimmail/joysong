@@ -93,7 +93,14 @@ class TurnLifecycleService(
                 AgentTurnStatus.FAILED -> if (existing.errorCode == "STALE_RECOVERED") {
                     BeginTurnResult.IdempotencyExpired
                 } else {
-                    throw IdempotencyKeyConflictException()
+                    existing.status = AgentTurnStatus.RUNNING
+                    existing.errorCode = null
+                    existing.startedAt = now
+                    existing.leaseExpiresAt = now.plus(turnLease)
+                    existing.completedAt = null
+                    existing.totalDurationMs = 0
+                    turnRepository.save(existing)
+                    BeginTurnResult.Started(existing.id, existing.traceId, existing.sequenceNo)
                 }
                 else -> throw IdempotencyKeyConflictException()
             }
