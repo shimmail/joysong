@@ -56,9 +56,12 @@ class AgentStreamingService(
         val upstream = AtomicReference<InputStream>()
         val subscription = AgentStreamSubscription { code ->
             if (state.compareAndSet(StreamState.ACTIVE, StreamState.TERMINATED)) {
-                upstream.getAndSet(null)?.close()
-                task.get()?.cancel(true)
-                if (prepared is PreparedChatTurn.Started) chatService.cancelStreamingMessage(prepared, code)
+                runCatching { upstream.getAndSet(null)?.close() }
+                try {
+                    task.get()?.cancel(true)
+                } finally {
+                    if (prepared is PreparedChatTurn.Started) chatService.cancelStreamingMessage(prepared, code)
+                }
             }
         }
         if (prepared is PreparedChatTurn.Replayed) {
@@ -93,7 +96,7 @@ class AgentStreamingService(
                     prepared.userMessage.toResponse()
                 )
             )
-            val content = executeProvider(prepared, upstream) { chunk ->
+            val content = executeProvider(prepared, state, upstream) { chunk ->
                 if (!sink.isOpen) throw ClientDisconnectedException()
                 if (!prepared.planning) sink.delta(AgentStreamEvent.Delta(chunk))
             }
@@ -107,20 +110,26 @@ class AgentStreamingService(
                 state.set(StreamState.TERMINATED)
                 if (sink.isOpen) sink.completed(AgentStreamEvent.Completed(completed.toResponse()))
             } catch (error: Exception) {
-                val code = chatService.failStreamingMessage(prepared, error)
-                state.set(StreamState.TERMINATED)
-                emitFailed(sink, prepared, code)
+                var code = "AGENT_INTERNAL_ERROR"
+                try {
+                    code = chatService.failStreamingMessage(prepared, error)
+                } catch (_: Exception) {
+                    // Persistence failure is already isolated by ChatService. The stream must still terminate.
+                } finally {
+                    state.set(StreamState.TERMINATED)
+                    emitFailed(sink, prepared, code)
+                }
             }
         } catch (_: ClientDisconnectedException) {
             cancel(prepared, state)
         } catch (error: Exception) {
             fail(prepared, sink, state, error)
         } finally {
-            upstream.getAndSet(null)?.close()
+            runCatching { upstream.getAndSet(null)?.close() }
         }
     }
 
-    private fun executeProvider(prepared: PreparedChatTurn.Started, upstream: AtomicReference<InputStream>, onDelta: (String) -> Unit): String {
+    private fun executeProvider(prepared: PreparedChatTurn.Started, state: AtomicReference<StreamState>, upstream: AtomicReference<InputStream>, onDelta: (String) -> Unit): String {
         val provider = properties.provider ?: error("AI provider is required")
         val headers = HttpHeaders().apply {
             setBearerAuth(properties.apiKey)
@@ -137,7 +146,7 @@ class AgentStreamingService(
         )
         providerStreamOpener?.let { opener ->
             val input = opener(prepared, headers, body)
-            upstream.set(input)
+            registerUpstream(input, state, upstream)
             return input.use { QwenChatStreamParser.parse(it, onDelta) }
         }
         return requireNotNull(
@@ -154,11 +163,18 @@ class AgentStreamingService(
                     payload.write(body, MediaType.APPLICATION_JSON, request)
                 },
                 { response ->
-                    upstream.set(response.body)
+                    registerUpstream(response.body, state, upstream)
                     QwenChatStreamParser.parse(response.body, onDelta)
                 }
             )
         )
+    }
+
+    private fun registerUpstream(input: InputStream, state: AtomicReference<StreamState>, upstream: AtomicReference<InputStream>) {
+        upstream.set(input)
+        if (state.get() != StreamState.ACTIVE) {
+            runCatching { upstream.getAndSet(null)?.close() }
+        }
     }
 
     private fun cancel(prepared: PreparedChatTurn.Started, state: AtomicReference<StreamState>) {

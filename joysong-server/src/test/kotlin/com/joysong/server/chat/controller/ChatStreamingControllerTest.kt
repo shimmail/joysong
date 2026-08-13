@@ -22,6 +22,7 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
+import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter
 
 class ChatStreamingControllerTest {
     private val streaming = mockk<AgentStreamingService>()
@@ -72,6 +73,26 @@ class ChatStreamingControllerTest {
             .andExpect(status().isNotFound)
             .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.message").value("SESSION_NOT_FOUND"))
+    }
+
+    @Test
+    fun `completion timeout and error callbacks cancel subscription`() {
+        every { streaming.stream(any(), any(), any(), any()) } returns subscription
+        val emitter = controller.streamMessage(
+            UsernamePasswordAuthenticationToken("captured-user", "n/a"),
+            "session-1",
+            com.joysong.server.chat.dto.SendMessageRequest("hello")
+        )
+        fun callback(name: String): Any = ResponseBodyEmitter::class.java.getDeclaredField(name)
+            .apply { isAccessible = true }.get(emitter)
+
+        (callback("completionCallback") as Runnable).run()
+        (callback("timeoutCallback") as Runnable).run()
+        @Suppress("UNCHECKED_CAST")
+        (callback("errorCallback") as java.util.function.Consumer<Throwable>).accept(IllegalStateException("disconnect"))
+
+        verify { subscription.cancel("CLIENT_DISCONNECTED") }
+        verify { subscription.cancel("STREAM_TIMEOUT") }
     }
 
     private fun message(role: String, content: String) = com.joysong.server.chat.dto.ChatMessageResponse(

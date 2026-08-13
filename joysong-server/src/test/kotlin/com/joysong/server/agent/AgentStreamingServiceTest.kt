@@ -222,6 +222,67 @@ class AgentStreamingServiceTest {
         verify(exactly = 0) { chatService.completeStreamingMessage(any(), any()) }
     }
 
+    @Test
+    fun `upstream registered after cancellation is closed immediately`() {
+        val prepared = prepared()
+        val sink = RecordingSink()
+        val releaseOpen = CountDownLatch(1)
+        val opened = CountDownLatch(1)
+        val stream = BlockingInputStream()
+        every { chatService.prepareStreamingMessage(any(), any(), any()) } returns prepared
+        every { chatService.cancelStreamingMessage(prepared, "STREAM_TIMEOUT") } just runs
+        val streamService = AgentStreamingService(chatService, restTemplate, properties, TaskExecutor { task -> Thread(task).start() }) { _, _, _ ->
+            opened.countDown()
+            while (releaseOpen.count > 0) runCatching { releaseOpen.await() }
+            stream
+        }
+
+        val subscription = streamService.stream("session-1", "user-1", SendMessageRequest("question"), sink)
+        assertTrue(opened.await(2, TimeUnit.SECONDS))
+        subscription.cancel("STREAM_TIMEOUT")
+        releaseOpen.countDown()
+
+        assertTrue(stream.closed.await(2, TimeUnit.SECONDS))
+        verify(exactly = 1) { chatService.cancelStreamingMessage(prepared, "STREAM_TIMEOUT") }
+    }
+
+    @Test
+    fun `upstream close failure still cancels turn`() {
+        val prepared = prepared()
+        val sink = RecordingSink()
+        val entered = CountDownLatch(1)
+        val closeAttempted = CountDownLatch(1)
+        val failingClose = object : InputStream() {
+            override fun read(): Int { entered.countDown(); Thread.sleep(5_000); return -1 }
+            override fun close() { closeAttempted.countDown(); throw IllegalStateException("close failed") }
+        }
+        every { chatService.prepareStreamingMessage(any(), any(), any()) } returns prepared
+        every { chatService.cancelStreamingMessage(prepared, "STREAM_TIMEOUT") } just runs
+        val streamService = AgentStreamingService(chatService, restTemplate, properties, TaskExecutor { task -> Thread(task).start() }) { _, _, _ -> failingClose }
+
+        val subscription = streamService.stream("session-1", "user-1", SendMessageRequest("question"), sink)
+        assertTrue(entered.await(2, TimeUnit.SECONDS))
+        subscription.cancel("STREAM_TIMEOUT")
+
+        assertTrue(closeAttempted.await(2, TimeUnit.SECONDS))
+        verify(exactly = 1) { chatService.cancelStreamingMessage(prepared, "STREAM_TIMEOUT") }
+    }
+
+    @Test
+    fun `finalization and fail persistence errors still emit one failed terminal event`() {
+        val prepared = prepared()
+        val sink = RecordingSink()
+        every { chatService.prepareStreamingMessage(any(), any(), any()) } returns prepared
+        every { chatService.completeStreamingMessage(prepared, "answer") } throws IllegalStateException("complete failed")
+        every { chatService.failStreamingMessage(prepared, any()) } throws IllegalStateException("fail failed")
+        provider.expect { }.andRespond(withSuccess(sse("answer"), MediaType.TEXT_EVENT_STREAM))
+
+        service().stream("session-1", "user-1", SendMessageRequest("question"), sink)
+
+        assertEquals(1, sink.events.count { it is AgentStreamEvent.Failed })
+        assertEquals("AGENT_INTERNAL_ERROR", (sink.events.last() as AgentStreamEvent.Failed).code)
+    }
+
     private class BlockingInputStream : InputStream() {
         val entered = CountDownLatch(1)
         val closed = CountDownLatch(1)
