@@ -20,6 +20,8 @@ import org.springframework.web.bind.annotation.*
 import org.springframework.format.annotation.DateTimeFormat
 import java.time.LocalDateTime
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
+import com.joysong.server.agent.streaming.AgentStreamSubscription
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 
 @RestController
@@ -110,13 +112,21 @@ class ChatController(
         val userId = authentication.name
         val emitter = SseEmitter(60_000L)
         val sink = SseEmitterSink(emitter)
-        emitter.onCompletion(sink::close)
-        emitter.onError { sink.close() }
+        val subscription = AtomicReference<AgentStreamSubscription>()
+        emitter.onCompletion {
+            sink.close()
+            subscription.get()?.cancel("CLIENT_DISCONNECTED")
+        }
+        emitter.onError {
+            sink.close()
+            subscription.get()?.cancel("CLIENT_DISCONNECTED")
+        }
         emitter.onTimeout {
             sink.close()
+            subscription.get()?.cancel("STREAM_TIMEOUT")
             emitter.complete()
         }
-        agentStreamingService.stream(id, userId, request, sink)
+        subscription.set(agentStreamingService.stream(id, userId, request, sink))
         return emitter
     }
 

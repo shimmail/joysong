@@ -23,12 +23,14 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.springframework.core.task.SyncTaskExecutor
+import org.springframework.core.task.TaskExecutor
 import org.springframework.http.MediaType
 import org.springframework.test.web.client.MockRestServiceServer
 import org.springframework.test.web.client.match.MockRestRequestMatchers.content
 import org.springframework.test.web.client.response.MockRestResponseCreators.withServerError
 import org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess
 import org.springframework.web.client.RestTemplate
+import java.util.concurrent.atomic.AtomicReference
 
 class AgentStreamingServiceTest {
     private val chatService = mockk<ChatService>()
@@ -138,6 +140,41 @@ class AgentStreamingServiceTest {
         verify(exactly = 0) { chatService.completeStreamingMessage(any(), any()) }
         assertEquals(1, sink.events.count { it is AgentStreamEvent.Completed || it is AgentStreamEvent.Failed })
         assertTrue(sink.events.last() is AgentStreamEvent.Failed)
+    }
+
+    @Test
+    fun `disconnect that wins terminal ownership prevents assistant persistence`() {
+        val prepared = prepared()
+        val sink = RecordingSink()
+        val pending = AtomicReference<Runnable>()
+        val executor = TaskExecutor { pending.set(it) }
+        every { chatService.prepareStreamingMessage(any(), any(), any()) } returns prepared
+        every { chatService.cancelStreamingMessage(prepared, "CLIENT_DISCONNECTED") } just runs
+
+        val subscription = AgentStreamingService(chatService, restTemplate, properties, executor)
+            .stream("session-1", "user-1", SendMessageRequest("question"), sink)
+        subscription.cancel("CLIENT_DISCONNECTED")
+        pending.get().run()
+
+        verify(exactly = 1) { chatService.cancelStreamingMessage(prepared, "CLIENT_DISCONNECTED") }
+        verify(exactly = 0) { chatService.completeStreamingMessage(any(), any()) }
+    }
+
+    @Test
+    fun `cancelling subscription interrupts an in flight provider task`() {
+        val prepared = prepared()
+        val sink = RecordingSink()
+        val pending = AtomicReference<Runnable>()
+        val executor = TaskExecutor { pending.set(it) }
+        every { chatService.prepareStreamingMessage(any(), any(), any()) } returns prepared
+        every { chatService.cancelStreamingMessage(prepared, "STREAM_TIMEOUT") } just runs
+
+        val subscription = AgentStreamingService(chatService, restTemplate, properties, executor)
+            .stream("session-1", "user-1", SendMessageRequest("question"), sink)
+        subscription.cancel("STREAM_TIMEOUT")
+
+        assertTrue(subscription.isCancelled)
+        verify(exactly = 1) { chatService.cancelStreamingMessage(prepared, "STREAM_TIMEOUT") }
     }
 
     private fun service() = AgentStreamingService(chatService, restTemplate, properties, SyncTaskExecutor())

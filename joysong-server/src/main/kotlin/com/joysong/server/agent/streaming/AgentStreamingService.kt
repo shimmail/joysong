@@ -19,6 +19,19 @@ import org.springframework.http.MediaType
 import org.springframework.stereotype.Service
 import org.springframework.web.client.RestTemplate
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.FutureTask
+import java.util.concurrent.atomic.AtomicReference
+
+class AgentStreamSubscription internal constructor(
+    private val cancelAction: (String) -> Unit
+) {
+    private val cancelled = AtomicBoolean(false)
+    val isCancelled: Boolean get() = cancelled.get()
+
+    fun cancel(code: String) {
+        if (cancelled.compareAndSet(false, true)) cancelAction(code)
+    }
+}
 
 @Service
 class AgentStreamingService(
@@ -27,26 +40,42 @@ class AgentStreamingService(
     private val properties: AiAgentProperties,
     private val taskExecutor: TaskExecutor
 ) {
-    fun stream(sessionId: String, userId: String, request: SendMessageRequest, sink: AgentStreamSink) {
+    fun stream(
+        sessionId: String,
+        userId: String,
+        request: SendMessageRequest,
+        sink: AgentStreamSink
+    ): AgentStreamSubscription {
         val prepared = chatService.prepareStreamingMessage(sessionId, userId, request)
+        val terminal = AtomicBoolean(false)
+        val task = AtomicReference<FutureTask<Unit>>()
+        val subscription = AgentStreamSubscription { code ->
+            if (terminal.compareAndSet(false, true)) {
+                task.get()?.cancel(true)
+                if (prepared is PreparedChatTurn.Started) chatService.cancelStreamingMessage(prepared, code)
+            }
+        }
         if (prepared is PreparedChatTurn.Replayed) {
             taskExecutor.execute {
                 if (sink.isOpen) sink.completed(AgentStreamEvent.Completed(prepared.turn.toResponse()))
             }
-            return
+            return subscription
         }
         prepared as PreparedChatTurn.Started
+        val providerTask = FutureTask<Unit> { consume(prepared, sink, terminal) }
+        task.set(providerTask)
         try {
-            taskExecutor.execute { consume(prepared, sink) }
+            taskExecutor.execute(providerTask)
         } catch (error: Exception) {
-            chatService.failStreamingMessage(prepared, error)
+            if (terminal.compareAndSet(false, true)) chatService.failStreamingMessage(prepared, error)
             throw error
         }
+        return subscription
     }
 
-    private fun consume(prepared: PreparedChatTurn.Started, sink: AgentStreamSink) {
-        val terminal = AtomicBoolean(false)
+    private fun consume(prepared: PreparedChatTurn.Started, sink: AgentStreamSink, terminal: AtomicBoolean) {
         try {
+            if (terminal.get()) return
             if (!sink.isOpen) {
                 cancel(prepared, terminal)
                 return
@@ -66,8 +95,9 @@ class AgentStreamingService(
                 cancel(prepared, terminal)
                 return
             }
+            if (!terminal.compareAndSet(false, true)) return
             val completed = chatService.completeStreamingMessage(prepared, content)
-            if (terminal.compareAndSet(false, true) && sink.isOpen) {
+            if (sink.isOpen) {
                 sink.completed(AgentStreamEvent.Completed(completed.toResponse()))
             }
         } catch (_: ClientDisconnectedException) {
