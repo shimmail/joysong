@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/features/agent/domain/agent_models.dart';
@@ -24,6 +26,8 @@ class AgentChatState {
     this.errorMessage,
     this.isLoadingSessions = false,
     this.latestTurn,
+    this.streamingMessageId,
+    this.failedMessageId,
   });
 
   final List<ChatSession> sessions;
@@ -33,6 +37,8 @@ class AgentChatState {
   final String? errorMessage;
   final bool isLoadingSessions;
   final ChatTurn? latestTurn;
+  final String? streamingMessageId;
+  final String? failedMessageId;
 
   AgentChatState copyWith({
     List<ChatSession>? sessions,
@@ -45,6 +51,10 @@ class AgentChatState {
     bool? isLoadingSessions,
     ChatTurn? latestTurn,
     bool clearLatestTurn = false,
+    String? streamingMessageId,
+    bool clearStreamingMessage = false,
+    String? failedMessageId,
+    bool clearFailedMessage = false,
   }) =>
       AgentChatState(
         sessions: sessions ?? this.sessions,
@@ -55,6 +65,11 @@ class AgentChatState {
         errorMessage: clearError ? null : errorMessage ?? this.errorMessage,
         isLoadingSessions: isLoadingSessions ?? this.isLoadingSessions,
         latestTurn: clearLatestTurn ? null : latestTurn ?? this.latestTurn,
+        streamingMessageId: clearStreamingMessage
+            ? null
+            : streamingMessageId ?? this.streamingMessageId,
+        failedMessageId:
+            clearFailedMessage ? null : failedMessageId ?? this.failedMessageId,
       );
 }
 
@@ -75,6 +90,7 @@ class AgentChatController extends ChangeNotifier {
   int _localId = 0;
   bool _disposed = false;
   _PendingSend? _pendingSend;
+  _ActiveStream? _activeStream;
 
   Future<void> loadSessions() async {
     _emit(_state.copyWith(isLoadingSessions: true, clearError: true));
@@ -99,7 +115,7 @@ class AgentChatController extends ChangeNotifier {
   }
 
   Future<void> openSession(ChatSession session) async {
-    if (_state.deliveryState.isBusy) return;
+    await _cancelActiveStream();
     final operation = ++_operation;
     _emit(
       _state.copyWith(
@@ -108,6 +124,8 @@ class AgentChatController extends ChangeNotifier {
         deliveryState: ChatDeliveryState.loadingHistory,
         clearError: true,
         clearLatestTurn: true,
+        clearStreamingMessage: true,
+        clearFailedMessage: true,
       ),
     );
     try {
@@ -143,6 +161,8 @@ class AgentChatController extends ChangeNotifier {
         deliveryState: ChatDeliveryState.idle,
         clearError: true,
         clearLatestTurn: true,
+        clearStreamingMessage: true,
+        clearFailedMessage: true,
       ),
     );
   }
@@ -168,6 +188,8 @@ class AgentChatController extends ChangeNotifier {
         deliveryState: ChatDeliveryState.sending,
         clearError: true,
         clearLatestTurn: true,
+        clearStreamingMessage: true,
+        clearFailedMessage: true,
       ),
     );
     try {
@@ -286,6 +308,8 @@ class AgentChatController extends ChangeNotifier {
         deliveryState: ChatDeliveryState.sending,
         clearError: true,
         clearLatestTurn: true,
+        clearStreamingMessage: true,
+        clearFailedMessage: true,
       ),
     );
     try {
@@ -311,7 +335,13 @@ class AgentChatController extends ChangeNotifier {
         ),
       );
 
-      await _sendRest(session, normalized, operation, idempotencyKey);
+      await _streamSend(
+        session,
+        normalized,
+        operation,
+        idempotencyKey,
+        userMessageId: userMessage.id,
+      );
     } on Object catch (error) {
       if (!_isCurrent(operation)) return;
       _emit(
@@ -323,51 +353,164 @@ class AgentChatController extends ChangeNotifier {
     }
   }
 
-  Future<void> _sendRest(
-    ChatSession session,
-    String content,
-    int operation,
-    String idempotencyKey,
-  ) async {
-    // This is exactly one POST. Failure is surfaced for an explicit manual
-    // retry; neither this controller nor ApiClient replays POST requests.
+  Future<void> retry() async {
+    if (_state.deliveryState.isBusy) return;
+    final pending = _pendingSend;
+    final session = _state.activeSession;
+    final failedMessageId = _state.failedMessageId;
+    if (pending == null ||
+        session == null ||
+        pending.sessionId != session.id ||
+        failedMessageId == null) {
+      return;
+    }
+
+    final operation = ++_operation;
+    final placeholder = _temporaryMessage(session.id, 'ASSISTANT', '');
+    _emit(
+      _state.copyWith(
+        messages: _latest([
+          for (final message in _state.messages)
+            if (message.id == failedMessageId) placeholder else message,
+        ]),
+        deliveryState: ChatDeliveryState.sending,
+        clearError: true,
+        clearLatestTurn: true,
+        streamingMessageId: placeholder.id,
+        clearFailedMessage: true,
+      ),
+    );
+    await _listenToStream(
+      session: session,
+      content: pending.content,
+      operation: operation,
+      idempotencyKey: pending.idempotencyKey,
+      placeholderId: placeholder.id,
+    );
+  }
+
+  Future<void> _streamSend(
+      ChatSession session, String content, int operation, String idempotencyKey,
+      {required String userMessageId}) async {
     final temporaryAssistant = _temporaryMessage(session.id, 'ASSISTANT', '');
     _emit(
       _state.copyWith(
         messages: _latest([..._state.messages, temporaryAssistant]),
         deliveryState: ChatDeliveryState.sending,
+        streamingMessageId: temporaryAssistant.id,
+        clearFailedMessage: true,
       ),
     );
-    try {
-      final turn = await _repository.sendMessage(
-        session.id,
-        content,
-        idempotencyKey: idempotencyKey,
-      );
-      if (!_isCurrent(operation)) {
-        _removeMessage(temporaryAssistant.id);
+    await _listenToStream(
+      session: session,
+      content: content,
+      operation: operation,
+      idempotencyKey: idempotencyKey,
+      placeholderId: temporaryAssistant.id,
+      userMessageId: userMessageId,
+    );
+  }
+
+  Future<void> _listenToStream({
+    required ChatSession session,
+    required String content,
+    required int operation,
+    required String idempotencyKey,
+    required String placeholderId,
+    String? userMessageId,
+  }) async {
+    final finished = Completer<void>();
+    var terminalEventReceived = false;
+    bool isActive() =>
+        _isCurrent(operation) &&
+        _state.activeSession?.id == session.id &&
+        _state.streamingMessageId == placeholderId;
+
+    void finish() {
+      if (!finished.isCompleted) finished.complete();
+    }
+
+    void fail([Object? error]) {
+      if (!isActive()) {
+        finish();
         return;
       }
-      _clearPendingSend(session.id, content, idempotencyKey);
-      final assistantMessage = turn.message.copyWith(
-        catalogItems: turn.message.catalogItems.isNotEmpty
-            ? turn.message.catalogItems
-            : turn.catalogItems,
-      );
-      _replaceMessage(temporaryAssistant.id, assistantMessage);
+      terminalEventReceived = true;
       _emit(
         _state.copyWith(
-          deliveryState: ChatDeliveryState.completed,
-          latestTurn: turn,
+          deliveryState: ChatDeliveryState.failed,
+          errorMessage: error == null ? null : _messageFor(error),
+          failedMessageId: placeholderId,
+          clearStreamingMessage: true,
         ),
       );
-    } on Object {
-      // Do not leave an empty "正在思考" bubble after a failed POST. The
-      // outer send() handler exposes the actual failure in the status banner.
-      if (_isCurrent(operation)) {
-        _removeMessage(temporaryAssistant.id);
-      }
-      rethrow;
+      finish();
+    }
+
+    late final StreamSubscription<AgentStreamEvent> subscription;
+    subscription = _repository
+        .streamMessage(
+          sessionId: session.id,
+          content: content,
+          idempotencyKey: idempotencyKey,
+        )
+        .listen(
+          (event) {
+            if (!isActive()) return;
+            switch (event) {
+              case AgentStreamStarted(:final userMessage):
+                if (userMessageId != null) {
+                  _replaceMessage(userMessageId, userMessage);
+                }
+              case AgentStreamDelta(:final content):
+                final placeholder = _state.messages
+                    .where((message) => message.id == placeholderId)
+                    .firstOrNull;
+                if (placeholder != null) {
+                  _replaceMessage(
+                    placeholderId,
+                    placeholder.copyWith(
+                        content: placeholder.content + content),
+                  );
+                }
+              case AgentStreamCompleted(:final turn):
+                terminalEventReceived = true;
+                _clearPendingSend(session.id, content, idempotencyKey);
+                final assistantMessage = turn.message.copyWith(
+                  catalogItems: turn.message.catalogItems.isNotEmpty
+                      ? turn.message.catalogItems
+                      : turn.catalogItems,
+                );
+                _replaceMessage(placeholderId, assistantMessage);
+                _emit(
+                  _state.copyWith(
+                    deliveryState: ChatDeliveryState.completed,
+                    latestTurn: turn,
+                    clearStreamingMessage: true,
+                    clearFailedMessage: true,
+                  ),
+                );
+                finish();
+              case AgentStreamFailed():
+                fail();
+            }
+          },
+          onError: (Object error, StackTrace stackTrace) => fail(error),
+          onDone: () {
+            if (!terminalEventReceived) fail(StateError('STREAM_INTERRUPTED'));
+            finish();
+          },
+          cancelOnError: false,
+        );
+    _activeStream = _ActiveStream(
+      operation: operation,
+      subscription: subscription,
+      finished: finished,
+    );
+    await finished.future;
+    if (_activeStream?.operation == operation) {
+      _activeStream = null;
+      await subscription.cancel();
     }
   }
 
@@ -425,14 +568,12 @@ class AgentChatController extends ChangeNotifier {
     );
   }
 
-  void _removeMessage(String messageId) {
-    _emit(
-      _state.copyWith(
-        messages: _state.messages
-            .where((message) => message.id != messageId)
-            .toList(growable: false),
-      ),
-    );
+  Future<void> _cancelActiveStream() async {
+    final active = _activeStream;
+    _activeStream = null;
+    if (active == null) return;
+    if (!active.finished.isCompleted) active.finished.complete();
+    await active.subscription.cancel();
   }
 
   List<ChatMessage> _deduplicate(Iterable<ChatMessage> messages) {
@@ -475,6 +616,7 @@ class AgentChatController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     ++_operation;
+    unawaited(_cancelActiveStream());
     super.dispose();
   }
 }
@@ -489,4 +631,16 @@ class _PendingSend {
   final String sessionId;
   final String content;
   final String idempotencyKey;
+}
+
+class _ActiveStream {
+  const _ActiveStream({
+    required this.operation,
+    required this.subscription,
+    required this.finished,
+  });
+
+  final int operation;
+  final StreamSubscription<AgentStreamEvent> subscription;
+  final Completer<void> finished;
 }

@@ -10,7 +10,7 @@ import 'package:joysong_flutter/features/agent/presentation/agent_chat_page.dart
 import 'package:joysong_flutter/features/agent/presentation/agent_plan_controller.dart';
 
 void main() {
-  testWidgets('session mutation actions are disabled during a REST send',
+  testWidgets('session mutation actions are disabled during a streamed send',
       (tester) async {
     tester.view
       ..physicalSize = const Size(1200, 800)
@@ -65,7 +65,7 @@ void main() {
   });
 
   testWidgets(
-      'context initialization preserves an in-flight REST send without an async error',
+      'context initialization preserves an in-flight streamed send without an async error',
       (tester) async {
     final pendingSend = Completer<ChatTurn>();
     final repository = _BusyAgentRepository(pendingSend);
@@ -123,11 +123,21 @@ class _BusyAgentRepository extends Fake implements AgentRepository {
       const [];
 
   @override
+  Stream<AgentStreamEvent> streamMessage({
+    required String sessionId,
+    required String content,
+    required String idempotencyKey,
+  }) async* {
+    yield AgentStreamCompleted(turn: await pendingSend.future);
+  }
+
+  @override
   Future<ChatTurn> sendMessage(
     String sessionId,
     String content, {
     required String idempotencyKey,
-  }) => pendingSend.future;
+  }) =>
+      pendingSend.future;
 }
 
 const _session = ChatSession(

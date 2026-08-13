@@ -190,6 +190,19 @@ class _AgentChatPageState extends State<AgentChatPage> {
                         children: [
                           for (final message in state.messages) ...[
                             _ChatBubble(message: message),
+                            if (message.id == state.failedMessageId)
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: TextButton.icon(
+                                  onPressed: state.deliveryState.isBusy
+                                      ? null
+                                      : () => unawaited(
+                                            widget.chatController.retry(),
+                                          ),
+                                  icon: const Icon(Icons.refresh, size: 18),
+                                  label: const Text('生成中断，可重试'),
+                                ),
+                              ),
                             if (!message.isUser &&
                                 _supportedCatalogItems(message).isNotEmpty)
                               AgentCatalogLinkList(

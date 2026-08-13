@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -12,6 +14,60 @@ import 'package:joysong_flutter/features/discover/domain/discover_repository.dar
 import 'package:joysong_flutter/features/shell/presentation/app_shell.dart';
 
 void main() {
+  testWidgets('assistant bubble updates while the response is streaming',
+      (tester) async {
+    final stream = StreamController<AgentStreamEvent>();
+    await _pumpPage(tester, _CatalogRepository.streams([stream]));
+
+    await tester.enterText(find.byType(TextField), '推荐项目');
+    await tester.tap(find.byIcon(Icons.send));
+    await tester.pump();
+    expect(find.text('正在思考…'), findsOneWidget);
+
+    stream.add(const AgentStreamDelta(content: '实时内容'));
+    await tester.pump();
+    expect(find.text('实时内容'), findsOneWidget);
+
+    stream.add(AgentStreamCompleted(turn: _turn()));
+    await stream.close();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('interrupted stream offers retry without duplicating user bubble',
+      (tester) async {
+    final first = StreamController<AgentStreamEvent>();
+    final second = StreamController<AgentStreamEvent>();
+    await _pumpPage(tester, _CatalogRepository.streams([first, second]));
+
+    await tester.enterText(find.byType(TextField), '推荐项目');
+    await tester.tap(find.byIcon(Icons.send));
+    await tester.pump();
+    first
+      ..add(const AgentStreamDelta(content: '部分内容'))
+      ..add(const AgentStreamFailed(
+        code: 'UPSTREAM_TIMEOUT',
+        traceId: 'trace-1',
+        retryable: true,
+      ));
+    await first.close();
+    await tester.pumpAndSettle();
+
+    expect(find.text('部分内容'), findsOneWidget);
+    expect(find.text('生成中断，可重试'), findsOneWidget);
+    expect(find.text('推荐项目'), findsOneWidget);
+
+    await tester.tap(find.text('生成中断，可重试'));
+    await tester.pump();
+    expect(find.text('推荐项目'), findsOneWidget);
+    expect(find.text('部分内容'), findsNothing);
+
+    second.add(AgentStreamCompleted(turn: _turn()));
+    await second.close();
+    await tester.pumpAndSettle();
+    expect(find.text('推荐项目'), findsOneWidget);
+    expect(find.text('参考结果'), findsOneWidget);
+  });
+
   testWidgets('catalog card is bound to the assistant message and opens item',
       (tester) async {
     final repository = _CatalogRepository(
@@ -124,9 +180,23 @@ Future<void> _sendAndSettle(WidgetTester tester) async {
 }
 
 class _CatalogRepository extends Fake implements AgentRepository {
-  _CatalogRepository(this.turn);
+  _CatalogRepository(this.turn) : streams = const [];
 
-  final ChatTurn turn;
+  _CatalogRepository.streams(this.streams) : turn = null;
+
+  final ChatTurn? turn;
+  final List<StreamController<AgentStreamEvent>> streams;
+  int streamCalls = 0;
+
+  @override
+  Stream<AgentStreamEvent> streamMessage({
+    required String sessionId,
+    required String content,
+    required String idempotencyKey,
+  }) =>
+      streams.isEmpty
+          ? Stream.value(AgentStreamCompleted(turn: turn!))
+          : streams[streamCalls++].stream;
 
   @override
   Future<List<ChatSession>> getSessions({ChatPersona? persona}) async => [];
@@ -146,7 +216,7 @@ class _CatalogRepository extends Fake implements AgentRepository {
     String content, {
     required String idempotencyKey,
   }) async =>
-      turn;
+      turn!;
 }
 
 ChatTurn _turn({
