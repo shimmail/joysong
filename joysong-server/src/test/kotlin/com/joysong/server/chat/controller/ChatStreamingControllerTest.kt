@@ -55,7 +55,8 @@ class ChatStreamingControllerTest {
 
         assertTrue(response.contains("event:started"))
         assertTrue(response.contains("event:delta"))
-        assertTrue(response.contains("event:failed"))
+        assertTrue(response.contains("event:error"))
+        assertTrue(!response.contains("event:failed"))
         assertTrue(response.contains("\"traceId\":\"trace-1\""))
         verify { streaming.stream("session-1", "captured-user", any(), any()) }
     }

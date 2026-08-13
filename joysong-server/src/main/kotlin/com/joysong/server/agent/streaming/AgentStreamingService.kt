@@ -66,6 +66,15 @@ class AgentStreamingService(
         }
         if (prepared is PreparedChatTurn.Replayed) {
             taskExecutor.execute {
+                if (sink.isOpen) {
+                    sink.started(
+                        AgentStreamEvent.Started(
+                            traceId = prepared.traceId,
+                            turnId = prepared.turnId,
+                            userMessage = prepared.userMessage.toResponse()
+                        )
+                    )
+                }
                 if (sink.isOpen) sink.completed(AgentStreamEvent.Completed(prepared.turn.toResponse()))
             }
             return subscription

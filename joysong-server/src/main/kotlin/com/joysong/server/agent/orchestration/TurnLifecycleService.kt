@@ -25,7 +25,12 @@ import java.util.UUID
 
 sealed interface BeginTurnResult {
     data class Started(val turnId: String, val traceId: String, val sequenceNo: Long) : BeginTurnResult
-    data class Replayed(val turn: ChatTurnResult) : BeginTurnResult
+    data class Replayed(
+        val turnId: String,
+        val traceId: String,
+        val userMessage: ChatMessageEntity,
+        val turn: ChatTurnResult
+    ) : BeginTurnResult
     data object InProgress : BeginTurnResult
     data object IdempotencyExpired : BeginTurnResult
 }
@@ -82,8 +87,20 @@ class TurnLifecycleService(
         turnRepository.findBySessionIdAndIdempotencyKey(sessionId, idempotencyKey)?.let { existing ->
             if (existing.requestHash != requestHash) throw IdempotencyKeyConflictException()
             return when (existing.status) {
-                AgentTurnStatus.SUCCEEDED -> messageRepository.findByTurnIdAndRole(existing.id, "ASSISTANT")
-                    ?.let { BeginTurnResult.Replayed(reconstruct(existing, it)) } ?: BeginTurnResult.IdempotencyExpired
+                AgentTurnStatus.SUCCEEDED -> {
+                    val assistant = messageRepository.findByTurnIdAndRole(existing.id, "ASSISTANT")
+                    val userMessage = messageRepository.findByTurnIdAndRole(existing.id, "USER")
+                    if (assistant == null || userMessage == null) {
+                        BeginTurnResult.IdempotencyExpired
+                    } else {
+                        BeginTurnResult.Replayed(
+                            turnId = existing.id,
+                            traceId = existing.traceId,
+                            userMessage = userMessage,
+                            turn = reconstruct(existing, assistant)
+                        )
+                    }
+                }
                 AgentTurnStatus.RUNNING -> if (recoverIfExpired(existing, now)) {
                     turnRepository.flush()
                     BeginTurnResult.IdempotencyExpired

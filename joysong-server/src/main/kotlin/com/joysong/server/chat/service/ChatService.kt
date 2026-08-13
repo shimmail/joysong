@@ -208,7 +208,12 @@ data class ChatTurnResult(
 )
 
 sealed interface PreparedChatTurn {
-    data class Replayed(val turn: ChatTurnResult) : PreparedChatTurn
+    data class Replayed(
+        val traceId: String,
+        val turnId: String,
+        val userMessage: ChatMessageEntity,
+        val turn: ChatTurnResult
+    ) : PreparedChatTurn
 
     data class Started(
         val traceId: String,
@@ -317,7 +322,12 @@ class ChatService(
         aiAgentAvailabilityGuard.requireGenerationEnabled()
         val content = canonicalMessageContent(request)
         val begin = beginTurn(sessionId, userId, content, request.idempotencyKey)
-        if (begin is BeginTurnResult.Replayed) return PreparedChatTurn.Replayed(begin.turn)
+        if (begin is BeginTurnResult.Replayed) return PreparedChatTurn.Replayed(
+            traceId = begin.traceId,
+            turnId = begin.turnId,
+            userMessage = begin.userMessage,
+            turn = begin.turn
+        )
         begin as BeginTurnResult.Started
         val startedAt = System.nanoTime()
         try {

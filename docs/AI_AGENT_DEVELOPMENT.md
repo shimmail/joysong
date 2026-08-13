@@ -20,11 +20,11 @@ data: {"content":"可以先关注"}
 event: completed
 data: {"turn":{"message":{"id":"message-2","sessionId":"session-1","role":"ASSISTANT","content":"可以先关注温和方案。","createdAt":"2026-08-13T10:00:01"},"catalogReport":null,"catalogItems":[],"intent":"CATALOG_QA","queryTarget":"PROJECT","nextAction":"NONE","traceId":"trace-1"}}
 
-event: failed
+event: error
 data: {"code":"AI_PROVIDER_TIMEOUT","traceId":"trace-1","retryable":true}
 ```
 
-一次流只能以 `completed` 或 `failed` 之一结束。原有 `POST /api/chat/sessions/{id}/messages` 同步接口及其请求/响应语义保持兼容，旧客户端无需改造；相同 session 中重复的有效 `idempotencyKey` 仍返回稳定结果且不会新增 turn 或消息。
+一次流只能以 `completed` 或 `error` 之一结束。原有 `POST /api/chat/sessions/{id}/messages` 同步接口及其请求/响应语义保持兼容，旧客户端无需改造；相同 session 中重复的有效 `idempotencyKey` 会按 `started` → `completed` 重放稳定结果，且不会新增 turn、消息或供应商调用。
 
 每次成功工作流以 MySQL 中的一条 `agent_turns` 记录及其消息为边界。`summary_json` 是 `agent_sessions` 中服务器端持久化的紧凑结构化摘要，供上下文构建使用；当前 REST response 不暴露该字段。它不是可执行指令，也不保存完整模型提示词或原始敏感内容。
 
@@ -53,11 +53,11 @@ Agent 使用且仅使用以下八张表：
 
 ## REST 语义
 
-同步接口使用稳定的 HTTP 状态：成功响应为 `2xx`，输入不合法为 `400`，找不到资源为 `404`，同一请求冲突为 `409`，上游模型不可用或超时为 `503`，未预期服务端错误为 `500`。调用方应按 HTTP 状态处理结果，不能依赖错误文本匹配。流式接口建立 SSE 后，使用 `failed` 事件携带稳定错误码、`traceId` 与可重试标记。
+同步接口使用稳定的 HTTP 状态：成功响应为 `2xx`，输入不合法为 `400`，找不到资源为 `404`，同一请求冲突为 `409`，上游模型不可用或超时为 `503`，未预期服务端错误为 `500`。调用方应按 HTTP 状态处理结果，不能依赖错误文本匹配。流式接口建立 SSE 后，使用 `error` 事件携带稳定错误码、`traceId` 与可重试标记。
 
 流式生成当前是 **Qwen-only**：只支持 `AI_AGENT_PROVIDER=qwen` 的百炼 OpenAI-compatible 流响应，不承诺其他 Provider 的流式格式兼容。`PLANNING` 意图不会向客户端发送上游 `delta`；服务端先完整缓冲模型输出，执行规划安全边界并完成持久化后，只通过 `completed` 交付最终安全内容。
 
-若上游、客户端连接或最终化失败，已经展示在客户端的 partial assistant output 仅存在于客户端本地 UI，服务端不持久化该 partial 内容；turn 会以失败或取消状态结束，历史消息接口不会返回这段不完整回答。客户端可保留并标记本地 partial 消息，并按 `failed.retryable` 决定是否允许重试。
+若上游、客户端连接或最终化失败，已经展示在客户端的 partial assistant output 仅存在于客户端本地 UI，服务端不持久化该 partial 内容；turn 会以失败或取消状态结束，历史消息接口不会返回这段不完整回答。客户端可保留并标记本地 partial 消息，并按 `error.retryable` 决定是否允许重试。
 
 创建 Agent turn 时请求体可选传递 `idempotencyKey`。同一 session 中重复的有效键返回已创建的稳定结果，不应额外创建 turn 或消息；未传该键的调用仍受支持。
 

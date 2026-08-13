@@ -169,9 +169,9 @@ AI_AGENT_INTENT_MODEL=qwen-turbo
 
 生产必须显式配置上述五项变量，任何一项为空都会导致启动失败。`AI_AGENT_MODEL` 仅用于最终回答，`AI_AGENT_INTENT_MODEL` 仅用于意图分类；两者必须分别提供，不共享默认值。解析器与最终生成共享 API Key、Base URL 和 Provider 协议；超时与直连网络策略固定在代码中。
 
-流式 Agent 使用 `POST /api/chat/sessions/{id}/messages/stream`，并以 `started`、`delta`、`completed`、`failed` 四类 SSE 事件交付。它是 **Qwen-only**，不会增加第六项部署变量，也没有独立的流式启用、OpenAI 凭据或 Provider 回退开关；原有 `POST /api/chat/sessions/{id}/messages` 同步接口继续兼容旧客户端。
+流式 Agent 使用 `POST /api/chat/sessions/{id}/messages/stream`，并以 `started`、`delta`、`completed`、`error` 四类 SSE 事件交付。它是 **Qwen-only**，不会增加第六项部署变量，也没有独立的流式启用、OpenAI 凭据或 Provider 回退开关；原有 `POST /api/chat/sessions/{id}/messages` 同步接口继续兼容旧客户端。
 
-`PLANNING` 流式请求会在服务端缓冲完整模型输出，安全处理完成前不发送 `delta`。若流最终以 `failed` 结束，客户端可能已渲染的 partial assistant output 仅保留在本地 UI，服务端不持久化该 partial 内容，消息历史不会包含它。
+`PLANNING` 流式请求会在服务端缓冲完整模型输出，安全处理完成前不发送 `delta`。若流最终以 `error` 结束，客户端可能已渲染的 partial assistant output 仅保留在本地 UI，服务端不持久化该 partial 内容，消息历史不会包含它。
 
 路由顺序固定为：先使用当前请求中的中英文、可识别否定词的关键词规则；仅在需要时以受限的近期上下文补全；仍有歧义时才调用意图模型。当前请求已明确的意图或目标不会被历史上下文或解析器覆盖。
 

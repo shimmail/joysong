@@ -202,7 +202,7 @@ class ChatController(
         }
 
         override fun failed(event: AgentStreamEvent.Failed) {
-            send("failed", event)
+            send("error", event)
             close()
             emitter.complete()
         }

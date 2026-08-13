@@ -70,6 +70,32 @@ class AgentStreamingServiceTest {
     }
 
     @Test
+    fun `successful idempotent replay emits original started then completed without provider or persistence`() {
+        val userMessage = prepared().userMessage
+        val replayed = PreparedChatTurn.Replayed(
+            traceId = "original-trace",
+            turnId = "original-turn",
+            userMessage = userMessage,
+            turn = completedTurn("persisted answer")
+        )
+        val sink = RecordingSink()
+        every { chatService.prepareStreamingMessage("session-1", "user-1", any()) } returns replayed
+
+        service().stream("session-1", "user-1", SendMessageRequest("question", "same-key"), sink)
+
+        assertEquals(listOf("started", "completed"), sink.order)
+        val started = sink.events.first() as AgentStreamEvent.Started
+        assertEquals("original-trace", started.traceId)
+        assertEquals("original-turn", started.turnId)
+        assertEquals("user-message-1", started.userMessage.id)
+        assertEquals("question", started.userMessage.content)
+        verify(exactly = 0) { chatService.completeStreamingMessage(any(), any()) }
+        verify(exactly = 0) { chatService.failStreamingMessage(any(), any()) }
+        verify(exactly = 0) { chatService.cancelStreamingMessage(any(), any()) }
+        provider.verify()
+    }
+
+    @Test
     fun `planning buffers the full provider answer and never exposes raw deltas`() {
         val prepared = prepared(planning = true)
         val sink = RecordingSink()

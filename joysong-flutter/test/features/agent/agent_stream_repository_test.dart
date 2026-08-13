@@ -87,6 +87,32 @@ void main() {
     expect(failed.retryable, isTrue);
   });
 
+  test('keeps parsing legacy failed terminal events', () async {
+    final fixture = await _StreamFixture.start((request) async {
+      await utf8.decoder.bind(request).join();
+      request.response
+        ..statusCode = HttpStatus.ok
+        ..headers.contentType =
+            ContentType('text', 'event-stream', charset: 'utf-8')
+        ..write(
+          'event: failed\n'
+          'data: {"code":"AI_PROVIDER_UNAVAILABLE","traceId":"trace-legacy","retryable":true}\n\n',
+        );
+      await request.response.close();
+    });
+    addTearDown(fixture.close);
+
+    final events = await fixture.repository
+        .streamMessage(
+          sessionId: 'session-1',
+          content: 'hello',
+          idempotencyKey: 'legacy-key',
+        )
+        .toList();
+
+    expect(events.single, isA<AgentStreamFailed>());
+  });
+
   test('fails when EOF arrives without a terminal event', () async {
     final fixture = await _StreamFixture.start((request) async {
       await utf8.decoder.bind(request).join();
