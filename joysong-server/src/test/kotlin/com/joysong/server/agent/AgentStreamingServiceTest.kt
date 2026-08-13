@@ -31,6 +31,9 @@ import org.springframework.test.web.client.response.MockRestResponseCreators.wit
 import org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess
 import org.springframework.web.client.RestTemplate
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.io.InputStream
 
 class AgentStreamingServiceTest {
     private val chatService = mockk<ChatService>()
@@ -175,6 +178,61 @@ class AgentStreamingServiceTest {
 
         assertTrue(subscription.isCancelled)
         verify(exactly = 1) { chatService.cancelStreamingMessage(prepared, "STREAM_TIMEOUT") }
+    }
+
+    @Test
+    fun `completion failure fails the turn and emits exactly one failed event`() {
+        val prepared = prepared()
+        val sink = RecordingSink()
+        every { chatService.prepareStreamingMessage(any(), any(), any()) } returns prepared
+        every { chatService.completeStreamingMessage(prepared, "answer") } throws IllegalStateException("database")
+        every { chatService.failStreamingMessage(prepared, any()) } returns "AGENT_INTERNAL_ERROR"
+        provider.expect { }.andRespond(withSuccess(sse("answer"), MediaType.TEXT_EVENT_STREAM))
+
+        service().stream("session-1", "user-1", SendMessageRequest("question"), sink)
+
+        verify(exactly = 1) { chatService.failStreamingMessage(prepared, any()) }
+        assertEquals(1, sink.events.count { it is AgentStreamEvent.Failed || it is AgentStreamEvent.Completed })
+        assertTrue(sink.events.last() is AgentStreamEvent.Failed)
+    }
+
+    @Test
+    fun `cancel closes blocking upstream stream and worker exits without persistence`() {
+        val prepared = prepared()
+        val sink = RecordingSink()
+        val blocking = BlockingInputStream()
+        val workerDone = CountDownLatch(1)
+        every { chatService.prepareStreamingMessage(any(), any(), any()) } returns prepared
+        every { chatService.cancelStreamingMessage(prepared, "STREAM_TIMEOUT") } just runs
+        val streamService = AgentStreamingService(
+            chatService,
+            restTemplate,
+            properties,
+            TaskExecutor { task -> Thread { try { task.run() } finally { workerDone.countDown() } }.start() },
+            { _, _, _ -> blocking }
+        )
+
+        val subscription = streamService.stream("session-1", "user-1", SendMessageRequest("question"), sink)
+        assertTrue(blocking.entered.await(2, TimeUnit.SECONDS))
+        subscription.cancel("STREAM_TIMEOUT")
+
+        assertTrue(blocking.closed.await(2, TimeUnit.SECONDS))
+        assertTrue(workerDone.await(2, TimeUnit.SECONDS))
+        verify(exactly = 1) { chatService.cancelStreamingMessage(prepared, "STREAM_TIMEOUT") }
+        verify(exactly = 0) { chatService.completeStreamingMessage(any(), any()) }
+    }
+
+    private class BlockingInputStream : InputStream() {
+        val entered = CountDownLatch(1)
+        val closed = CountDownLatch(1)
+        override fun read(): Int {
+            entered.countDown()
+            closed.await()
+            return -1
+        }
+        override fun close() {
+            closed.countDown()
+        }
     }
 
     private fun service() = AgentStreamingService(chatService, restTemplate, properties, SyncTaskExecutor())

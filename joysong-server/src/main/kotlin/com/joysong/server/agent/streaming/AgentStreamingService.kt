@@ -21,6 +21,9 @@ import org.springframework.web.client.RestTemplate
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.FutureTask
 import java.util.concurrent.atomic.AtomicReference
+import java.io.InputStream
+
+private enum class StreamState { ACTIVE, FINALIZING, TERMINATED }
 
 class AgentStreamSubscription internal constructor(
     private val cancelAction: (String) -> Unit
@@ -38,7 +41,8 @@ class AgentStreamingService(
     private val chatService: ChatService,
     @Qualifier("agentLlmRestTemplate") private val restTemplate: RestTemplate,
     private val properties: AiAgentProperties,
-    private val taskExecutor: TaskExecutor
+    private val taskExecutor: TaskExecutor,
+    private val providerStreamOpener: ((PreparedChatTurn.Started, HttpHeaders, Map<String, Any>) -> InputStream)? = null
 ) {
     fun stream(
         sessionId: String,
@@ -47,10 +51,12 @@ class AgentStreamingService(
         sink: AgentStreamSink
     ): AgentStreamSubscription {
         val prepared = chatService.prepareStreamingMessage(sessionId, userId, request)
-        val terminal = AtomicBoolean(false)
+        val state = AtomicReference(StreamState.ACTIVE)
         val task = AtomicReference<FutureTask<Unit>>()
+        val upstream = AtomicReference<InputStream>()
         val subscription = AgentStreamSubscription { code ->
-            if (terminal.compareAndSet(false, true)) {
+            if (state.compareAndSet(StreamState.ACTIVE, StreamState.TERMINATED)) {
+                upstream.getAndSet(null)?.close()
                 task.get()?.cancel(true)
                 if (prepared is PreparedChatTurn.Started) chatService.cancelStreamingMessage(prepared, code)
             }
@@ -62,22 +68,22 @@ class AgentStreamingService(
             return subscription
         }
         prepared as PreparedChatTurn.Started
-        val providerTask = FutureTask<Unit> { consume(prepared, sink, terminal) }
+        val providerTask = FutureTask<Unit> { consume(prepared, sink, state, upstream) }
         task.set(providerTask)
         try {
             taskExecutor.execute(providerTask)
         } catch (error: Exception) {
-            if (terminal.compareAndSet(false, true)) chatService.failStreamingMessage(prepared, error)
+            if (state.compareAndSet(StreamState.ACTIVE, StreamState.TERMINATED)) chatService.failStreamingMessage(prepared, error)
             throw error
         }
         return subscription
     }
 
-    private fun consume(prepared: PreparedChatTurn.Started, sink: AgentStreamSink, terminal: AtomicBoolean) {
+    private fun consume(prepared: PreparedChatTurn.Started, sink: AgentStreamSink, state: AtomicReference<StreamState>, upstream: AtomicReference<InputStream>) {
         try {
-            if (terminal.get()) return
+            if (state.get() != StreamState.ACTIVE) return
             if (!sink.isOpen) {
-                cancel(prepared, terminal)
+                cancel(prepared, state)
                 return
             }
             sink.started(
@@ -87,27 +93,34 @@ class AgentStreamingService(
                     prepared.userMessage.toResponse()
                 )
             )
-            val content = executeProvider(prepared) { chunk ->
+            val content = executeProvider(prepared, upstream) { chunk ->
                 if (!sink.isOpen) throw ClientDisconnectedException()
                 if (!prepared.planning) sink.delta(AgentStreamEvent.Delta(chunk))
             }
             if (!sink.isOpen) {
-                cancel(prepared, terminal)
+                cancel(prepared, state)
                 return
             }
-            if (!terminal.compareAndSet(false, true)) return
-            val completed = chatService.completeStreamingMessage(prepared, content)
-            if (sink.isOpen) {
-                sink.completed(AgentStreamEvent.Completed(completed.toResponse()))
+            if (!state.compareAndSet(StreamState.ACTIVE, StreamState.FINALIZING)) return
+            try {
+                val completed = chatService.completeStreamingMessage(prepared, content)
+                state.set(StreamState.TERMINATED)
+                if (sink.isOpen) sink.completed(AgentStreamEvent.Completed(completed.toResponse()))
+            } catch (error: Exception) {
+                val code = chatService.failStreamingMessage(prepared, error)
+                state.set(StreamState.TERMINATED)
+                emitFailed(sink, prepared, code)
             }
         } catch (_: ClientDisconnectedException) {
-            cancel(prepared, terminal)
+            cancel(prepared, state)
         } catch (error: Exception) {
-            fail(prepared, sink, terminal, error)
+            fail(prepared, sink, state, error)
+        } finally {
+            upstream.getAndSet(null)?.close()
         }
     }
 
-    private fun executeProvider(prepared: PreparedChatTurn.Started, onDelta: (String) -> Unit): String {
+    private fun executeProvider(prepared: PreparedChatTurn.Started, upstream: AtomicReference<InputStream>, onDelta: (String) -> Unit): String {
         val provider = properties.provider ?: error("AI provider is required")
         val headers = HttpHeaders().apply {
             setBearerAuth(properties.apiKey)
@@ -122,6 +135,11 @@ class AgentStreamingService(
             purpose = AgentRequestPurpose.CHAT,
             streaming = true
         )
+        providerStreamOpener?.let { opener ->
+            val input = opener(prepared, headers, body)
+            upstream.set(input)
+            return input.use { QwenChatStreamParser.parse(it, onDelta) }
+        }
         return requireNotNull(
             restTemplate.execute(
                 "${properties.baseUrl.trim().trimEnd('/')}/chat/completions",
@@ -135,13 +153,16 @@ class AgentStreamingService(
                     }
                     payload.write(body, MediaType.APPLICATION_JSON, request)
                 },
-                { response -> QwenChatStreamParser.parse(response.body, onDelta) }
+                { response ->
+                    upstream.set(response.body)
+                    QwenChatStreamParser.parse(response.body, onDelta)
+                }
             )
         )
     }
 
-    private fun cancel(prepared: PreparedChatTurn.Started, terminal: AtomicBoolean) {
-        if (terminal.compareAndSet(false, true)) {
+    private fun cancel(prepared: PreparedChatTurn.Started, state: AtomicReference<StreamState>) {
+        if (state.compareAndSet(StreamState.ACTIVE, StreamState.TERMINATED)) {
             chatService.cancelStreamingMessage(prepared, "CLIENT_DISCONNECTED")
         }
     }
@@ -149,11 +170,15 @@ class AgentStreamingService(
     private fun fail(
         prepared: PreparedChatTurn.Started,
         sink: AgentStreamSink,
-        terminal: AtomicBoolean,
+        state: AtomicReference<StreamState>,
         error: Exception
     ) {
-        if (!terminal.compareAndSet(false, true)) return
+        if (!state.compareAndSet(StreamState.ACTIVE, StreamState.TERMINATED)) return
         val code = chatService.failStreamingMessage(prepared, error)
+        emitFailed(sink, prepared, code)
+    }
+
+    private fun emitFailed(sink: AgentStreamSink, prepared: PreparedChatTurn.Started, code: String) {
         if (sink.isOpen) {
             runCatching {
                 sink.failed(
