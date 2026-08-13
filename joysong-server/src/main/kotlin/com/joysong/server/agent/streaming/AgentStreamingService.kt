@@ -190,8 +190,14 @@ class AgentStreamingService(
         error: Exception
     ) {
         if (!state.compareAndSet(StreamState.ACTIVE, StreamState.TERMINATED)) return
-        val code = chatService.failStreamingMessage(prepared, error)
-        emitFailed(sink, prepared, code)
+        var code = "AGENT_INTERNAL_ERROR"
+        try {
+            code = chatService.failStreamingMessage(prepared, error)
+        } catch (_: Exception) {
+            // The in-memory stream must still report its terminal failure.
+        } finally {
+            emitFailed(sink, prepared, code)
+        }
     }
 
     private fun emitFailed(sink: AgentStreamSink, prepared: PreparedChatTurn.Started, code: String) {

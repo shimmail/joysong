@@ -146,6 +146,21 @@ class AgentStreamingServiceTest {
     }
 
     @Test
+    fun `sink failure still emits one stable failed event when failure persistence throws`() {
+        val prepared = prepared()
+        val sink = RecordingSink(throwOnDelta = true)
+        every { chatService.prepareStreamingMessage(any(), any(), any()) } returns prepared
+        every { chatService.failStreamingMessage(prepared, any()) } throws IllegalStateException("fail failed")
+        provider.expect { }.andRespond(withSuccess(sse("first"), MediaType.TEXT_EVENT_STREAM))
+
+        service().stream("session-1", "user-1", SendMessageRequest("question"), sink)
+
+        verify(exactly = 1) { chatService.failStreamingMessage(prepared, any()) }
+        assertEquals(1, sink.events.count { it is AgentStreamEvent.Failed })
+        assertEquals("AGENT_INTERNAL_ERROR", (sink.events.last() as AgentStreamEvent.Failed).code)
+    }
+
+    @Test
     fun `disconnect that wins terminal ownership prevents assistant persistence`() {
         val prepared = prepared()
         val sink = RecordingSink()
