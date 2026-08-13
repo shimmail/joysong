@@ -8,20 +8,26 @@ import com.joysong.server.chat.dto.SendMessageRequest
 import com.joysong.server.chat.entity.ChatMessageEntity
 import com.joysong.server.chat.entity.ChatSessionEntity
 import com.joysong.server.chat.service.ChatService
-import com.joysong.server.agent.orchestration.AgentChatException
+import com.joysong.server.agent.streaming.AgentStreamEvent
+import com.joysong.server.agent.streaming.AgentStreamSink
+import com.joysong.server.agent.streaming.AgentStreamingService
 import com.joysong.server.agent.orchestration.TurnLifecycleService
 import com.joysong.server.common.BaseResponse
 import org.springframework.http.ResponseEntity
+import org.springframework.http.MediaType
 import org.springframework.security.core.Authentication
 import org.springframework.web.bind.annotation.*
 import org.springframework.format.annotation.DateTimeFormat
 import java.time.LocalDateTime
+import java.util.concurrent.atomic.AtomicBoolean
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 
 @RestController
 @RequestMapping("/api/chat")
 class ChatController(
     private val chatService: ChatService,
-    private val turnLifecycleService: TurnLifecycleService
+    private val turnLifecycleService: TurnLifecycleService,
+    private val agentStreamingService: AgentStreamingService
 ) {
 
     /**
@@ -92,9 +98,27 @@ class ChatController(
         }
     )
 
-    @PostMapping("/sessions/{id}/messages/stream")
-    fun streamMessage(): ResponseEntity<BaseResponse<Nothing>> =
-        throw AgentChatException("AGENT_STREAMING_DISABLED")
+    @PostMapping(
+        "/sessions/{id}/messages/stream",
+        produces = [MediaType.TEXT_EVENT_STREAM_VALUE]
+    )
+    fun streamMessage(
+        authentication: Authentication,
+        @PathVariable id: String,
+        @RequestBody request: SendMessageRequest
+    ): SseEmitter {
+        val userId = authentication.name
+        val emitter = SseEmitter(60_000L)
+        val sink = SseEmitterSink(emitter)
+        emitter.onCompletion(sink::close)
+        emitter.onError { sink.close() }
+        emitter.onTimeout {
+            sink.close()
+            emitter.complete()
+        }
+        agentStreamingService.stream(id, userId, request, sink)
+        return emitter
+    }
 
     @DeleteMapping("/sessions/{id}")
     fun deleteSession(authentication: Authentication, @PathVariable id: String): BaseResponse<String> {
@@ -153,5 +177,33 @@ class ChatController(
             createdAt = createdAt.toString(),
             catalogItems = catalogItems
         )
+    }
+
+    private class SseEmitterSink(private val emitter: SseEmitter) : AgentStreamSink {
+        private val open = AtomicBoolean(true)
+        override val isOpen: Boolean get() = open.get()
+
+        override fun started(event: AgentStreamEvent.Started) = send("started", event)
+        override fun delta(event: AgentStreamEvent.Delta) = send("delta", event)
+        override fun completed(event: AgentStreamEvent.Completed) {
+            send("completed", event)
+            close()
+            emitter.complete()
+        }
+
+        override fun failed(event: AgentStreamEvent.Failed) {
+            send("failed", event)
+            close()
+            emitter.complete()
+        }
+
+        fun close() {
+            open.set(false)
+        }
+
+        private fun send(name: String, event: AgentStreamEvent) {
+            if (!open.get()) throw IllegalStateException("SSE emitter is closed")
+            emitter.send(SseEmitter.event().name(name).data(event))
+        }
     }
 }

@@ -56,7 +56,7 @@ private data class PromptBuildResult(
     val evidence: AgentPromptEvidence
 )
 
-private data class LlmCallResult(
+data class LlmCallResult(
     val content: String,
     val fallbackUsed: Boolean
 )
@@ -66,7 +66,7 @@ private data class ProviderCallContext(
     val turnId: String
 )
 
-private data class GeneratedTurn(
+data class GeneratedTurn(
     val content: String,
     val intentDecision: AgentIntentDecision,
     val llmResult: LlmCallResult,
@@ -207,6 +207,22 @@ data class ChatTurnResult(
     val traceId: String? = null
 )
 
+sealed interface PreparedChatTurn {
+    data class Replayed(val turn: ChatTurnResult) : PreparedChatTurn
+
+    data class Started(
+        val traceId: String,
+        val turnId: String,
+        val userMessage: ChatMessageEntity,
+        val messages: List<Map<String, String>>,
+        val maxOutputTokens: Int,
+        val planning: Boolean,
+        internal val sessionId: String = userMessage.sessionId,
+        internal val startedAt: Long = System.nanoTime(),
+        val generated: GeneratedTurn? = null
+    ) : PreparedChatTurn
+}
+
 @Service
 class ChatService(
     private val sessionRepository: ChatSessionRepository,
@@ -293,30 +309,135 @@ class ChatService(
         return sendMessageInternal(sessionId, userId, request, ::callLLM)
     }
 
+    fun prepareStreamingMessage(
+        sessionId: String,
+        userId: String,
+        request: SendMessageRequest
+    ): PreparedChatTurn {
+        aiAgentAvailabilityGuard.requireGenerationEnabled()
+        val content = canonicalMessageContent(request)
+        val begin = beginTurn(sessionId, userId, content, request.idempotencyKey)
+        if (begin is BeginTurnResult.Replayed) return PreparedChatTurn.Replayed(begin.turn)
+        begin as BeginTurnResult.Started
+        val startedAt = System.nanoTime()
+        try {
+            val context = agentContextBuilder.load(userId, sessionId, 20, 4_000)
+            val session = sessionRepository.findByIdAndUserIdAndDeletedAtIsNull(sessionId, userId)
+                ?: throw AgentChatException("SESSION_NOT_FOUND", begin.traceId)
+            var capturedMessages: List<Map<String, String>> = emptyList()
+            var capturedProfile: GenerationProfile? = null
+            val generated = generateTurn(
+                session,
+                content,
+                context.messages,
+                context.summary,
+                true,
+                ProviderCallContext(begin.traceId, begin.turnId)
+            ) { messages, profile, _ ->
+                capturedMessages = messages
+                capturedProfile = profile
+                LlmCallResult("", false)
+            }
+            val userMessage = messageRepository.findByTurnIdAndRole(begin.turnId, "USER")
+                ?: ChatMessageEntity(sessionId = sessionId, turnId = begin.turnId, role = "USER", content = content)
+            return PreparedChatTurn.Started(
+                traceId = begin.traceId,
+                turnId = begin.turnId,
+                userMessage = userMessage,
+                messages = capturedMessages,
+                maxOutputTokens = requireNotNull(capturedProfile).maxOutputTokens,
+                planning = generated.intentDecision.intent == AgentIntent.PLANNING,
+                sessionId = sessionId,
+                startedAt = startedAt,
+                generated = generated
+            )
+        } catch (error: Exception) {
+            val code = if (error is AgentChatException) error.code else "AGENT_INTERNAL_ERROR"
+            val durationMs = elapsedMs(startedAt)
+            turnLifecycleService.failTurn(begin.turnId, code, durationMs)
+            agentOperationLogger.failed(begin.traceId, begin.turnId, sessionId, durationMs, code)
+            throw if (error is AgentChatException) error else AgentChatException(code, begin.traceId)
+        }
+    }
+
+    fun completeStreamingMessage(prepared: PreparedChatTurn.Started, providerContent: String): ChatTurnResult {
+        val generated = requireNotNull(prepared.generated).copy(
+            content = enforcePlanningBoundary(
+                prepared.generated.intentDecision.intent,
+                naturalizeUserFacingLanguage(providerContent)
+            ),
+            llmResult = LlmCallResult(providerContent, false)
+        )
+        val durationMs = elapsedMs(prepared.startedAt)
+        val completed = turnLifecycleService.completeTurn(
+            CompleteTurnCommand(
+                turnId = prepared.turnId,
+                content = generated.content,
+                intent = generated.intentDecision.intent.name,
+                queryTarget = generated.intentDecision.queryTarget?.name,
+                nextAction = generated.intentDecision.nextAction.name,
+                catalogReport = generated.catalogReport,
+                catalogItems = generated.catalogItems,
+                durationMs = durationMs,
+                modelName = aiAgentProperties.model
+            )
+        )
+        agentOperationLogger.completed(prepared.traceId, prepared.turnId, prepared.sessionId, durationMs, aiAgentProperties.model)
+        return completed
+    }
+
+    fun failStreamingMessage(prepared: PreparedChatTurn.Started, error: Throwable): String {
+        val code = if (isProviderTimeout(error)) "AI_PROVIDER_TIMEOUT" else "AI_PROVIDER_UNAVAILABLE"
+        val durationMs = elapsedMs(prepared.startedAt)
+        turnLifecycleService.failTurn(prepared.turnId, code, durationMs)
+        agentOperationLogger.failed(prepared.traceId, prepared.turnId, prepared.sessionId, durationMs, code)
+        return code
+    }
+
+    fun cancelStreamingMessage(prepared: PreparedChatTurn.Started, code: String) {
+        val durationMs = elapsedMs(prepared.startedAt)
+        turnLifecycleService.cancelTurn(prepared.turnId, code, durationMs)
+        agentOperationLogger.failed(prepared.traceId, prepared.turnId, prepared.sessionId, durationMs, code)
+    }
+
+    private fun canonicalMessageContent(request: SendMessageRequest): String = request.content.trim().also {
+        require(it.isNotEmpty()) { "消息内容不能为空" }
+        require(it.length <= 5000) { "消息内容不能超过 5000 字" }
+    }
+
+    private fun beginTurn(
+        sessionId: String,
+        userId: String,
+        content: String,
+        rawIdempotencyKey: String?
+    ): BeginTurnResult {
+        val idempotencyKey = rawIdempotencyKey?.trim()?.also {
+            require(it.isNotEmpty() && it.length <= 100) { "INVALID_IDEMPOTENCY_KEY" }
+        } ?: UUID.randomUUID().toString()
+        return try {
+            when (val begin = turnLifecycleService.beginTurn(sessionId, userId, content, idempotencyKey)) {
+                BeginTurnResult.InProgress -> throw AgentChatException.turnInProgress()
+                BeginTurnResult.IdempotencyExpired -> throw AgentChatException.idempotencyExpired()
+                else -> begin
+            }
+        } catch (_: IdempotencyKeyConflictException) {
+            throw AgentChatException.idempotencyConflict()
+        } catch (error: IllegalArgumentException) {
+            throw AgentChatException.sessionNotFound()
+        }
+    }
+
     private fun sendMessageInternal(
         sessionId: String,
         userId: String,
         request: SendMessageRequest,
         llmCaller: (List<Map<String, String>>, GenerationProfile, ProviderCallContext) -> LlmCallResult
     ): ChatTurnResult {
-        val content = request.content.trim()
-        require(content.isNotEmpty()) { "消息内容不能为空" }
-        require(content.length <= 5000) { "消息内容不能超过 5000 字" }
-        val idempotencyKey = request.idempotencyKey?.trim()?.also {
-            require(it.isNotEmpty() && it.length <= 100) { "INVALID_IDEMPOTENCY_KEY" }
-        } ?: UUID.randomUUID().toString()
-        val begin = try {
-            turnLifecycleService.beginTurn(sessionId, userId, content, idempotencyKey)
-        } catch (_: IdempotencyKeyConflictException) {
-            throw AgentChatException.idempotencyConflict()
-        } catch (_: IllegalArgumentException) {
-            throw AgentChatException.sessionNotFound()
-        }
-        return when (begin) {
+        val content = canonicalMessageContent(request)
+        return when (val begin = beginTurn(sessionId, userId, content, request.idempotencyKey)) {
             is BeginTurnResult.Replayed -> begin.turn
-            BeginTurnResult.InProgress -> throw AgentChatException.turnInProgress()
-            BeginTurnResult.IdempotencyExpired -> throw AgentChatException.idempotencyExpired()
             is BeginTurnResult.Started -> executeStartedTurn(begin, sessionId, userId, content, llmCaller)
+            else -> error("Unreachable begin turn state")
         }
     }
 
@@ -1061,7 +1182,7 @@ class ChatService(
         }
     }
 
-    private data class GenerationProfile(
+    data class GenerationProfile(
         val historyMessageLimit: Int,
         val maxOutputTokens: Int
     )

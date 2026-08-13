@@ -23,6 +23,7 @@ import com.joysong.server.agent.service.AgentRouteAssessment
 import com.joysong.server.agent.service.ParsedAgentRoute
 import com.joysong.server.agent.service.AgentPromptEvidence
 import com.joysong.server.agent.service.AgentQueryTarget
+import com.joysong.server.agent.streaming.AgentStreamEvent
 import com.joysong.server.chat.dto.SendMessageRequest
 import com.joysong.server.chat.entity.ChatMessageEntity
 import com.joysong.server.chat.entity.ChatSessionEntity
@@ -76,6 +77,7 @@ import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 import java.util.Locale
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 
 class AgentWorkflowCoreTest {
     private val sessions = mockk<ChatSessionRepository>()
@@ -98,6 +100,18 @@ class AgentWorkflowCoreTest {
     @BeforeEach
     fun defaultMessageCleanupCandidates() {
         every { messages.findBySessionIdOrderBySequenceNoAsc(any()) } returns emptyList()
+    }
+
+    @Test
+    fun `stream events serialize with stable public field names`() {
+        val mapper = jacksonObjectMapper()
+        val failed = mapper.readTree(
+            mapper.writeValueAsString(AgentStreamEvent.Failed("AI_PROVIDER_TIMEOUT", "trace-1", true))
+        )
+
+        assertEquals("AI_PROVIDER_TIMEOUT", failed.path("code").asText())
+        assertEquals("trace-1", failed.path("traceId").asText())
+        assertTrue(failed.path("retryable").asBoolean())
     }
 
     @Test
