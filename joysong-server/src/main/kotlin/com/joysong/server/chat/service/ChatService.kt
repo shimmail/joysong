@@ -396,7 +396,7 @@ class ChatService(
 
     fun cancelStreamingMessage(prepared: PreparedChatTurn.Started, code: String) {
         val durationMs = elapsedMs(prepared.startedAt)
-        turnLifecycleService.cancelTurn(prepared.turnId, code, durationMs)
+        turnLifecycleService.failTurn(prepared.turnId, code, durationMs)
         agentOperationLogger.failed(prepared.traceId, prepared.turnId, prepared.sessionId, durationMs, code)
     }
 

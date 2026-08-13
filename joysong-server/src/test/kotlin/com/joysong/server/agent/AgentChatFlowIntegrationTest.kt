@@ -135,6 +135,8 @@ class AgentChatFlowIntegrationTest {
         fakeLlmContent.set("测试回复")
         fakeLlmRawResponse.set(null)
         fakeLlmStreamResponse.set(defaultStreamResponse)
+        fakeStreamEntered.set(null)
+        fakeStreamRelease.set(null)
         fakeIntentParserContent.set("""{"intent":"CATALOG_QA","queryTarget":"DOCTOR","keywords":["context"]}""")
         fakeLlmRequestBodies.clear()
         aiAgentProperties.intentModel = "intent-test-model"
@@ -833,6 +835,24 @@ class AgentChatFlowIntegrationTest {
 
     @Test
     @WithMockUser(username = "user-1")
+    fun `HTTP streaming upstream body is absent from real logback events`() {
+        fakeLlmStatus.set(500)
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+
+        val logs = captureAgentOperationLogs {
+            val response = stream(session.id, "redaction request", "http-stream-log-redaction-1")
+            assertTrue(response.contains("event:failed"))
+        }.joinToString("\n")
+
+        listOf("provider-secret-body", "test-key", "private@example.com", "13800000000").forEach {
+            assertFalse(logs.contains(it, ignoreCase = true), "Sensitive provider data leaked into Logback: $it")
+        }
+        assertTrue(logs.contains("operation=PROVIDER_CALL"))
+        assertTrue(logs.contains("operation=MODEL_COMPLETION"))
+    }
+
+    @Test
+    @WithMockUser(username = "user-1")
     fun `HTTP streaming timeout fails atomically and remains retryable`() {
         fakeLlmDelayMs.set(500)
         val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
@@ -862,22 +882,24 @@ class AgentChatFlowIntegrationTest {
     }
 
     @Test
-    fun `stream disconnect cancels the running turn without persisting assistant content`() {
+    @WithMockUser(username = "user-1")
+    fun `HTTP async completion callback fails the running turn without persisting assistant content`() {
         val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
-        val terminal = CountDownLatch(1)
-        val open = AtomicBoolean(true)
-        val sink = object : AgentStreamSink {
-            override val isOpen: Boolean get() = open.get()
-            override fun started(event: AgentStreamEvent.Started) = Unit
-            override fun delta(event: AgentStreamEvent.Delta) { open.set(false) }
-            override fun completed(event: AgentStreamEvent.Completed) = terminal.countDown()
-            override fun failed(event: AgentStreamEvent.Failed) = terminal.countDown()
-        }
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        fakeStreamEntered.set(entered)
+        fakeStreamRelease.set(release)
+        val initial = mockMvc.perform(
+            post("/api/chat/sessions/{id}/messages/stream", session.id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"content":"你好","idempotencyKey":"stream-disconnect-1"}""")
+        ).andExpect(request().asyncStarted()).andReturn()
+        assertTrue(entered.await(5, TimeUnit.SECONDS))
 
-        agentStreamingService.stream(session.id, "user-1", SendMessageRequest("你好", "stream-disconnect-1"), sink)
-        awaitTurnStatus(session.id, AgentTurnStatus.CANCELLED)
+        requireNotNull(initial.request.asyncContext).complete()
+        release.countDown()
+        awaitTurnStatus(session.id, AgentTurnStatus.FAILED)
 
-        assertFalse(terminal.await(50, TimeUnit.MILLISECONDS))
         assertEquals(listOf("USER"), messages(session.id).map { it.role })
         assertEquals("CLIENT_DISCONNECTED", turn(session.id).errorCode)
     }
@@ -889,15 +911,73 @@ class AgentChatFlowIntegrationTest {
         val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
         val failed = stream(session.id, "你好", "http-stream-retry-1")
         assertTrue(failed.contains("event:failed"))
+        val firstTurn = turn(session.id)
+        val firstUser = messages(session.id).single()
+        val firstTurnId = firstTurn.id
+        val firstTraceId = firstTurn.traceId
+        val firstSequenceNo = firstTurn.sequenceNo
+        val firstStartedAt = firstTurn.startedAt
+        val firstLeaseExpiresAt = firstTurn.leaseExpiresAt
         fakeLlmStatus.set(200)
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        fakeStreamEntered.set(entered)
+        fakeStreamRelease.set(release)
 
-        val retried = stream(session.id, "你好", "http-stream-retry-1")
+        val retryInitial = mockMvc.perform(
+            post("/api/chat/sessions/{id}/messages/stream", session.id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"content":"你好","idempotencyKey":"http-stream-retry-1"}""")
+        ).andExpect(request().asyncStarted()).andReturn()
+        assertTrue(entered.await(5, TimeUnit.SECONDS))
+        val runningRetry = turn(session.id)
+        assertEquals(firstTurnId, runningRetry.id)
+        assertEquals(firstTraceId, runningRetry.traceId)
+        assertEquals(firstSequenceNo, runningRetry.sequenceNo)
+        assertEquals(AgentTurnStatus.RUNNING, runningRetry.status)
+        assertEquals(null, runningRetry.errorCode)
+        assertEquals(null, runningRetry.completedAt)
+        assertTrue(runningRetry.startedAt.isAfter(firstStartedAt))
+        assertTrue(requireNotNull(runningRetry.leaseExpiresAt).isAfter(requireNotNull(firstLeaseExpiresAt)))
+        assertEquals(firstUser.id, messages(session.id).single().id)
+        release.countDown()
+        val retried = mockMvc.perform(asyncDispatch(retryInitial)).andExpect(status().isOk)
+            .andReturn().response.contentAsString
 
         assertTrue(retried.contains("event:completed"))
         assertEquals(2, streamingProviderCallCount())
         assertEquals(listOf("USER", "ASSISTANT"), messages(session.id).map { it.role })
         assertEquals(1, turnCount(session.id))
         assertEquals(AgentTurnStatus.SUCCEEDED, turn(session.id).status)
+    }
+
+    @Test
+    @WithMockUser(username = "user-1")
+    fun `concurrent duplicate stream keeps one running turn user message and provider call`() {
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        fakeStreamEntered.set(entered)
+        fakeStreamRelease.set(release)
+
+        val first = mockMvc.perform(
+            post("/api/chat/sessions/{id}/messages/stream", session.id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"content":"你好","idempotencyKey":"http-stream-concurrent-1"}""")
+        ).andExpect(request().asyncStarted()).andReturn()
+        assertTrue(entered.await(5, TimeUnit.SECONDS))
+
+        mockMvc.perform(
+            post("/api/chat/sessions/{id}/messages/stream", session.id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"content":"你好","idempotencyKey":"http-stream-concurrent-1"}""")
+        ).andExpect(status().isConflict)
+            .andExpect(jsonPath("$.message").value("TURN_IN_PROGRESS"))
+        assertEquals(1, turnCount(session.id))
+        assertEquals(listOf("USER"), messages(session.id).map { it.role })
+        assertEquals(1, streamingProviderCallCount())
+        release.countDown()
+        mockMvc.perform(asyncDispatch(first)).andExpect(status().isOk)
     }
 
     @Test
@@ -1154,6 +1234,8 @@ class AgentChatFlowIntegrationTest {
         private const val defaultStreamResponse =
             "data: {\"id\":\"chatcmpl-test\",\"choices\":[{\"delta\":{\"content\":\"测试回复\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n\n"
         private val fakeLlmStreamResponse = AtomicReference(defaultStreamResponse)
+        private val fakeStreamEntered = AtomicReference<CountDownLatch?>(null)
+        private val fakeStreamRelease = AtomicReference<CountDownLatch?>(null)
         private val fakeIntentParserContent = AtomicReference(
             """{"intent":"CATALOG_QA","queryTarget":"DOCTOR","keywords":["context"]}"""
         )
@@ -1167,6 +1249,10 @@ class AgentChatFlowIntegrationTest {
                 Thread.sleep(fakeLlmDelayMs.get())
                 val status = fakeLlmStatus.get()
                 val streaming = Regex("\"stream\"\\s*:\\s*true").containsMatchIn(requestBody)
+                if (streaming) {
+                    fakeStreamEntered.get()?.countDown()
+                    fakeStreamRelease.get()?.await(5, TimeUnit.SECONDS)
+                }
                 val rawResponse = fakeLlmRawResponse.get()
                 val intentParserRequest = Regex("\"model\"\\s*:\\s*\"intent-test-model\"")
                     .containsMatchIn(requestBody)
