@@ -8,6 +8,18 @@ final class AgentRepositoryImpl implements AgentRepository {
   final AgentRemoteDataSource _remote;
 
   @override
+  Stream<AgentStreamEvent> streamMessage({
+    required String sessionId,
+    required String content,
+    required String idempotencyKey,
+  }) =>
+      _remote.streamMessage(
+        sessionId: sessionId,
+        content: content,
+        idempotencyKey: idempotencyKey,
+      );
+
+  @override
   Future<ChatSession> createSession({
     required ChatPersona persona,
     required ChatContextType contextType,

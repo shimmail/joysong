@@ -1,6 +1,12 @@
 import 'package:joysong_flutter/features/agent/domain/agent_models.dart';
 
 abstract interface class AgentRepository {
+  Stream<AgentStreamEvent> streamMessage({
+    required String sessionId,
+    required String content,
+    required String idempotencyKey,
+  });
+
   Future<ChatSession> createSession({
     required ChatPersona persona,
     required ChatContextType contextType,

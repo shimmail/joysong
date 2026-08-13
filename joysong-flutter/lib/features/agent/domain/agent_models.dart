@@ -1,5 +1,45 @@
 enum ChatPersona { bestie, consultant }
 
+sealed class AgentStreamEvent {
+  const AgentStreamEvent();
+}
+
+final class AgentStreamStarted extends AgentStreamEvent {
+  const AgentStreamStarted({
+    required this.traceId,
+    required this.turnId,
+    required this.userMessage,
+  });
+
+  final String traceId;
+  final String turnId;
+  final ChatMessage userMessage;
+}
+
+final class AgentStreamDelta extends AgentStreamEvent {
+  const AgentStreamDelta({required this.content});
+
+  final String content;
+}
+
+final class AgentStreamCompleted extends AgentStreamEvent {
+  const AgentStreamCompleted({required this.turn});
+
+  final ChatTurn turn;
+}
+
+final class AgentStreamFailed extends AgentStreamEvent {
+  const AgentStreamFailed({
+    required this.code,
+    required this.traceId,
+    required this.retryable,
+  });
+
+  final String code;
+  final String? traceId;
+  final bool retryable;
+}
+
 extension ChatPersonaWire on ChatPersona {
   String get wireName => switch (this) {
         ChatPersona.bestie => 'BESTIE',

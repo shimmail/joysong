@@ -1,7 +1,19 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:joysong_flutter/core/network/api_client.dart';
 import 'package:joysong_flutter/features/agent/domain/agent_models.dart';
 
+typedef AgentStreamByteSource = Stream<List<int>> Function();
+
 abstract interface class AgentRemoteDataSource {
+  Stream<AgentStreamEvent> streamMessage({
+    required String sessionId,
+    required String content,
+    required String idempotencyKey,
+  });
+
   Future<ChatSession> createSession({
     required ChatPersona persona,
     required ChatContextType contextType,
@@ -53,10 +65,144 @@ abstract interface class AgentRemoteDataSource {
 }
 
 final class ApiAgentRemoteDataSource implements AgentRemoteDataSource {
-  ApiAgentRemoteDataSource({required ApiClient apiClient})
-      : _apiClient = apiClient;
+  ApiAgentRemoteDataSource({
+    required ApiClient apiClient,
+    AccessTokenProvider? accessTokenProvider,
+    HttpClient? streamHttpClient,
+    AgentStreamByteSource? streamByteSource,
+  })  : _apiClient = apiClient,
+        _accessTokenProvider = accessTokenProvider,
+        _streamHttpClient = streamHttpClient ?? HttpClient(),
+        _streamByteSource = streamByteSource;
 
   final ApiClient _apiClient;
+  final AccessTokenProvider? _accessTokenProvider;
+  final HttpClient _streamHttpClient;
+  final AgentStreamByteSource? _streamByteSource;
+
+  @override
+  Stream<AgentStreamEvent> streamMessage({
+    required String sessionId,
+    required String content,
+    required String idempotencyKey,
+  }) {
+    late final StreamController<AgentStreamEvent> controller;
+    StreamSubscription<String>? lines;
+    HttpClientRequest? request;
+    HttpClientResponse? response;
+    var cancelled = false;
+
+    Future<void> start() async {
+      var terminal = false;
+      var eventName = '';
+      final dataLines = <String>[];
+      try {
+        final byteStream = _streamByteSource?.call() ??
+            await _openStream(
+              sessionId: sessionId,
+              content: content,
+              idempotencyKey: idempotencyKey,
+              onRequest: (activeRequest) => request = activeRequest,
+              onResponse: (activeResponse) => response = activeResponse,
+            );
+        if (cancelled) return;
+
+        void dispatch() {
+          if (eventName.isEmpty && dataLines.isEmpty) return;
+          final event = _decodeStreamEvent(eventName, dataLines.join('\n'));
+          if (event != null) {
+            controller.add(event);
+            terminal =
+                event is AgentStreamCompleted || event is AgentStreamFailed;
+          }
+          eventName = '';
+          dataLines.clear();
+        }
+
+        lines = utf8.decoder
+            .bind(byteStream)
+            .transform(const LineSplitter())
+            .listen(
+              (line) {
+                if (line.isEmpty) {
+                  dispatch();
+                } else if (!line.startsWith(':')) {
+                  final colon = line.indexOf(':');
+                  final field = colon < 0 ? line : line.substring(0, colon);
+                  var value = colon < 0 ? '' : line.substring(colon + 1);
+                  if (value.startsWith(' ')) value = value.substring(1);
+                  if (field == 'event') eventName = value;
+                  if (field == 'data') dataLines.add(value);
+                }
+              },
+              onError: controller.addError,
+              onDone: () {
+                if (cancelled) return;
+                dispatch();
+                if (!terminal) {
+                  controller
+                      .addError(StateError('AGENT_STREAM_MISSING_TERMINAL'));
+                }
+                controller.close();
+              },
+              cancelOnError: true,
+            );
+      } on Object catch (error, stackTrace) {
+        if (!cancelled) {
+          controller.addError(error, stackTrace);
+          await controller.close();
+        }
+      }
+    }
+
+    controller = StreamController<AgentStreamEvent>(
+      onListen: start,
+      onCancel: () async {
+        cancelled = true;
+        await lines?.cancel();
+        final activeResponse = response;
+        if (activeResponse == null) {
+          request?.abort();
+        } else {
+          final socket = await activeResponse.detachSocket();
+          socket.destroy();
+        }
+      },
+    );
+    return controller.stream;
+  }
+
+  Future<Stream<List<int>>> _openStream({
+    required String sessionId,
+    required String content,
+    required String idempotencyKey,
+    required void Function(HttpClientRequest request) onRequest,
+    required void Function(HttpClientResponse response) onResponse,
+  }) async {
+    final uri = _apiClient.apiRoot.resolve(
+      'chat/sessions/${Uri.encodeComponent(sessionId)}/messages/stream',
+    );
+    final request = await _streamHttpClient.postUrl(uri);
+    onRequest(request);
+    request.headers
+      ..set(HttpHeaders.acceptHeader, 'text/event-stream')
+      ..contentType = ContentType.json;
+    final token = await _accessTokenProvider?.call();
+    if (token != null && token.isNotEmpty) {
+      request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+    }
+    request.write(jsonEncode({
+      'content': _validateContent(content),
+      'idempotencyKey': idempotencyKey,
+    }));
+    final response = await request.close();
+    onResponse(response);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      response.detachSocket().then((socket) => socket.destroy());
+      throw HttpException('Agent stream request failed', uri: uri);
+    }
+    return response;
+  }
 
   @override
   Future<ChatSession> createSession({
@@ -249,4 +395,24 @@ String _validateContent(String content) {
     throw ArgumentError.value(content, 'content', '消息长度必须为 1–5000 字符');
   }
   return normalized;
+}
+
+AgentStreamEvent? _decodeStreamEvent(String name, String data) {
+  if (data.isEmpty) return null;
+  final json = requireJsonMap(jsonDecode(data), 'Agent stream event');
+  return switch (name) {
+    'started' => AgentStreamStarted(
+        traceId: requireString(json, 'traceId'),
+        turnId: requireString(json, 'turnId'),
+        userMessage: ChatMessage.fromJson(json['userMessage']),
+      ),
+    'delta' => AgentStreamDelta(content: stringValue(json['content'])),
+    'completed' => AgentStreamCompleted(turn: ChatTurn.fromJson(json['turn'])),
+    'error' || 'failed' => AgentStreamFailed(
+        code: requireString(json, 'code'),
+        traceId: nullableString(json['traceId']),
+        retryable: json['retryable'] == true,
+      ),
+    _ => null,
+  };
 }
