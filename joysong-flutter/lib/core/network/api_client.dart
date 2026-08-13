@@ -28,10 +28,10 @@ final class StreamHttpOperation {
   StreamHttpOperation._();
 
   final _response = Completer<StreamHttpResponse>();
-  late final void Function() _cancel;
+  late final Future<void> Function() _cancel;
 
   Future<StreamHttpResponse> get response => _response.future;
-  void cancel() => _cancel();
+  Future<void> cancel() => _cancel();
 }
 
 class ApiClient {
@@ -80,10 +80,10 @@ class ApiClient {
     StreamHttpRequest? request;
     StreamHttpResponse? response;
     var cancelled = false;
-    operation._cancel = () {
+    operation._cancel = () async {
       cancelled = true;
       request?.abort();
-      response?.cancel();
+      await response?.cancel();
     };
 
     Future<void>(() async {

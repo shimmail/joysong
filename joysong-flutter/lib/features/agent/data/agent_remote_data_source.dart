@@ -157,7 +157,11 @@ final class ApiAgentRemoteDataSource implements AgentRemoteDataSource {
       onCancel: () async {
         cancelled = true;
         await lines?.cancel();
-        operation?.cancel();
+        try {
+          await operation?.cancel();
+        } on Object {
+          // Cancellation races with an already closed response are expected.
+        }
       },
     );
     return controller.stream;

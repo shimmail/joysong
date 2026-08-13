@@ -119,15 +119,17 @@ void main() {
   });
 
   test('closes the domain stream after an upstream decoder error', () async {
+    final upstreamCancelled = Completer<void>();
     late final StreamController<List<int>> bytes;
     bytes = StreamController<List<int>>(
       onListen: () {
         bytes.add(const [0xff]);
         bytes.close();
       },
+      onCancel: upstreamCancelled.complete,
     );
     final repository = _repository(
-      (_) async => _FakeStreamRequest(_FakeStreamResponse(bytes.stream)),
+      (_) async => _FakeStreamRequest(_FakeStreamResponse(bytes: bytes.stream)),
     );
 
     await expectLater(
@@ -138,6 +140,7 @@ void main() {
       ),
       emitsInOrder([emitsError(isA<FormatException>()), emitsDone]),
     );
+    await upstreamCancelled.future;
   });
 
   test('cancel while opening aborts before the body is sent', () async {
@@ -222,6 +225,26 @@ void main() {
 
     await response.cancelled.future;
   });
+
+  test('subscription cancel absorbs asynchronous response close races',
+      () async {
+    final response = _FakeStreamResponse(
+      cancelError: const SocketException('already closed'),
+    );
+    final request = _FakeStreamRequest(response);
+    final repository = _repository((_) async => request);
+    final subscription = repository
+        .streamMessage(
+          sessionId: 'session-1',
+          content: 'hello',
+          idempotencyKey: 'key-close-race',
+        )
+        .listen((_) {});
+    await response.listened.future;
+
+    await subscription.cancel();
+    await Future<void>.delayed(Duration.zero);
+  });
 }
 
 AgentRepositoryImpl _repository(
@@ -278,9 +301,13 @@ final class _FakeStreamRequest implements StreamHttpRequest {
 }
 
 final class _FakeStreamResponse implements StreamHttpResponse {
-  _FakeStreamResponse([Stream<List<int>>? bytes]) : _bytes = bytes;
+  _FakeStreamResponse({
+    Stream<List<int>>? bytes,
+    this.cancelError,
+  }) : _bytes = bytes;
 
   final Stream<List<int>>? _bytes;
+  final Object? cancelError;
   final listened = Completer<void>();
   final cancelled = Completer<void>();
 
@@ -299,6 +326,8 @@ final class _FakeStreamResponse implements StreamHttpResponse {
   @override
   Future<void> cancel() async {
     if (!cancelled.isCompleted) cancelled.complete();
+    await Future<void>.delayed(Duration.zero);
+    if (cancelError case final error?) throw error;
   }
 }
 

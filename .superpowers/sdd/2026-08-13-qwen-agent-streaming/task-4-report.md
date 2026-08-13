@@ -35,3 +35,11 @@
 - Decoder/upstream errors now emit the error and close the domain stream.
 - RED evidence: production HTTP sent no Authorization header; decoder error did not close; cancellable HTTP lifecycle types were absent.
 - GREEN evidence: the scoped Task 4 test passed 6/6 after the transport fix. Scoped analysis over six affected files subsequently reported no issues, including the added deterministic token-pending and response-pending cancellation cases.
+
+## Fix round 2
+
+- Changed `StreamHttpOperation.cancel()` to return `Future<void>` so response cancellation is owned instead of discarded.
+- The data source awaits cancellation and absorbs the expected asynchronous already-closed response race, preventing an unhandled zone error.
+- Added a regression test whose fake response throws asynchronously from `cancel()`: RED exposed an unhandled `SocketException`; GREEN passed 9/9 scoped tests.
+- Added an assertion that a decoder failure cancels its underlying byte-stream subscription.
+- Scoped analysis over the three affected files reported no issues.
