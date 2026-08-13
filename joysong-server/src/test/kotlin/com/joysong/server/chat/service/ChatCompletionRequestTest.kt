@@ -5,6 +5,7 @@ import com.joysong.server.agent.provider.AgentRequestPurpose
 import com.joysong.server.config.AiAgentProvider
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 
 class ChatCompletionRequestTest {
@@ -78,6 +79,30 @@ class ChatCompletionRequestTest {
             )
             assertLegacyParametersAreAbsent(body)
         }
+    }
+
+    @Test
+    fun `QWEN chat request enables stream only when explicitly requested`() {
+        val streaming = AgentProviderRequestFactory.build(
+            AiAgentProvider.QWEN, "qwen-plus", messages, 280, AgentRequestPurpose.CHAT, streaming = true
+        )
+        val default = AgentProviderRequestFactory.build(
+            AiAgentProvider.QWEN, "qwen-plus", messages, 280, AgentRequestPurpose.CHAT
+        )
+
+        assertEquals(true, streaming["stream"])
+        assertEquals(false, default["stream"])
+    }
+
+    @Test
+    fun `streaming is rejected for non-chat purposes`() {
+        val exception = assertThrows(IllegalArgumentException::class.java) {
+            AgentProviderRequestFactory.build(
+                AiAgentProvider.QWEN, "qwen-plus", messages, 180, AgentRequestPurpose.INTENT, streaming = true
+            )
+        }
+
+        assertEquals("Streaming is only supported for chat requests", exception.message)
     }
 
     private fun assertLegacyParametersAreAbsent(body: Map<String, Any>) {

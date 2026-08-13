@@ -13,13 +13,17 @@ object AgentProviderRequestFactory {
         model: String,
         messages: List<Map<String, String>>,
         maxOutputTokens: Int,
-        purpose: AgentRequestPurpose
+        purpose: AgentRequestPurpose,
+        streaming: Boolean = false
     ): Map<String, Any> = linkedMapOf<String, Any>(
         "model" to model.trim(),
         "messages" to messages,
-        "stream" to false,
+        "stream" to streaming,
         "max_tokens" to maxOutputTokens
     ).apply {
+        require(!streaming || purpose == AgentRequestPurpose.CHAT) {
+            "Streaming is only supported for chat requests"
+        }
         if (provider == AiAgentProvider.QWEN && purpose == AgentRequestPurpose.INTENT) {
             put("temperature", 0)
         }
