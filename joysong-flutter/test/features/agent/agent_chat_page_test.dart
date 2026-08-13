@@ -68,6 +68,28 @@ void main() {
     expect(find.text('参考结果'), findsOneWidget);
   });
 
+  testWidgets('non-retryable interruption shows status without retry action',
+      (tester) async {
+    final stream = StreamController<AgentStreamEvent>();
+    await _pumpPage(tester, _CatalogRepository.streams([stream]));
+    await tester.enterText(find.byType(TextField), '推荐项目');
+    await tester.tap(find.byIcon(Icons.send));
+    await tester.pump();
+    stream
+      ..add(const AgentStreamDelta(content: '部分内容'))
+      ..add(const AgentStreamFailed(
+        code: 'POLICY_REJECTED',
+        traceId: null,
+        retryable: false,
+      ));
+    await stream.close();
+    await tester.pumpAndSettle();
+
+    expect(find.text('部分内容'), findsOneWidget);
+    expect(find.text('生成中断'), findsOneWidget);
+    expect(find.text('生成中断，可重试'), findsNothing);
+  });
+
   testWidgets('catalog card is bound to the assistant message and opens item',
       (tester) async {
     final repository = _CatalogRepository(

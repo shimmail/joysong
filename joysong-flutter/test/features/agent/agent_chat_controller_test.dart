@@ -222,38 +222,69 @@ void main() {
     await first;
   });
 
-  test('opening another session cancels stream and ignores late events',
+  test('opening another session rejects callbacks delivered after cancellation',
       () async {
-    final stream = StreamController<AgentStreamEvent>();
-    final repository = _FakeAgentRepository(streams: [stream]);
+    final stream = _LateEventStream();
+    final repository = _FakeAgentRepository(lateStreams: [stream]);
     final controller = AgentChatController(repository: repository);
     final send = controller.send('在吗');
     await Future<void>.delayed(Duration.zero);
 
     await controller.openSession(_otherSession);
-    stream.add(const AgentStreamDelta(content: '迟到内容'));
+    stream
+      ..emit(const AgentStreamDelta(content: '迟到内容'))
+      ..emit(const AgentStreamCompleted(turn: _completeTurn));
     await Future<void>.delayed(Duration.zero);
 
-    expect(repository.cancelCalls, 1);
+    expect(stream.cancelCalls, 1);
+    expect(stream.deliveredEvents, 2);
     expect(controller.state.activeSession?.id, _otherSession.id);
     expect(controller.state.messages, isEmpty);
-    await stream.close();
     await send;
   });
 
-  test('dispose cancels the active stream subscription', () async {
-    final stream = StreamController<AgentStreamEvent>();
-    final repository = _FakeAgentRepository(streams: [stream]);
+  test('dispose rejects callbacks delivered after cancellation', () async {
+    final stream = _LateEventStream();
+    final repository = _FakeAgentRepository(lateStreams: [stream]);
     final controller = AgentChatController(repository: repository);
     final send = controller.send('在吗');
     await Future<void>.delayed(Duration.zero);
+    var notifications = 0;
+    controller.addListener(() => notifications++);
 
     controller.dispose();
+    stream
+      ..emit(const AgentStreamDelta(content: '迟到内容'))
+      ..emit(const AgentStreamCompleted(turn: _completeTurn));
     await Future<void>.delayed(Duration.zero);
 
-    expect(repository.cancelCalls, 1);
+    expect(stream.cancelCalls, 1);
+    expect(stream.deliveredEvents, 2);
+    expect(notifications, 0);
+    await send;
+  });
+
+  test('non-retryable failure retains partial text without a retry target',
+      () async {
+    final stream = StreamController<AgentStreamEvent>();
+    final controller = AgentChatController(
+      repository: _FakeAgentRepository(streams: [stream]),
+    );
+    final send = controller.send('在吗');
+    await Future<void>.delayed(Duration.zero);
+    stream
+      ..add(const AgentStreamDelta(content: '部分内容'))
+      ..add(const AgentStreamFailed(
+        code: 'POLICY_REJECTED',
+        traceId: 'trace-2',
+        retryable: false,
+      ));
     await stream.close();
     await send;
+
+    expect(controller.state.messages.last.content, '部分内容');
+    expect(controller.state.failedMessageId, isNull);
+    expect(controller.state.errorMessage, '生成中断');
   });
 
   test('delete during a streaming send fails explicitly without deleting',
@@ -420,10 +451,12 @@ class _FakeAgentRepository extends Fake implements AgentRepository {
   _FakeAgentRepository({
     this.messages = const [],
     this.streams = const [],
+    this.lateStreams = const [],
   });
 
   final List<ChatMessage> messages;
   final List<StreamController<AgentStreamEvent>> streams;
+  final List<_LateEventStream> lateStreams;
   int createCalls = 0;
   int deleteCalls = 0;
   int streamCalls = 0;
@@ -436,6 +469,7 @@ class _FakeAgentRepository extends Fake implements AgentRepository {
     required String content,
     required String idempotencyKey,
   }) {
+    if (lateStreams.isNotEmpty) return lateStreams[streamCalls++];
     final source = streams[streamCalls++];
     idempotencyKeys.add(idempotencyKey);
     return source.stream.asBroadcastStream(onCancel: (_) => cancelCalls++);
@@ -469,4 +503,48 @@ class _FakeAgentRepository extends Fake implements AgentRepository {
   Future<void> deleteSession(String sessionId) async {
     deleteCalls++;
   }
+}
+
+class _LateEventStream extends Stream<AgentStreamEvent> {
+  void Function(AgentStreamEvent)? _onData;
+  int cancelCalls = 0;
+  int deliveredEvents = 0;
+
+  void emit(AgentStreamEvent event) {
+    deliveredEvents++;
+    _onData?.call(event);
+  }
+
+  @override
+  StreamSubscription<AgentStreamEvent> listen(
+    void Function(AgentStreamEvent event)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) {
+    _onData = onData;
+    return _LateEventSubscription(() => cancelCalls++);
+  }
+}
+
+class _LateEventSubscription implements StreamSubscription<AgentStreamEvent> {
+  _LateEventSubscription(this._onCancel);
+  final void Function() _onCancel;
+
+  @override
+  Future<void> cancel() async => _onCancel();
+  @override
+  void onData(void Function(AgentStreamEvent data)? handleData) {}
+  @override
+  void onDone(void Function()? handleDone) {}
+  @override
+  void onError(Function? handleError) {}
+  @override
+  void pause([Future<void>? resumeSignal]) {}
+  @override
+  void resume() {}
+  @override
+  bool get isPaused => false;
+  @override
+  Future<E> asFuture<E>([E? futureValue]) => Completer<E>().future;
 }

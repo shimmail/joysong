@@ -430,7 +430,7 @@ class AgentChatController extends ChangeNotifier {
       if (!finished.isCompleted) finished.complete();
     }
 
-    void fail([Object? error]) {
+    void fail({Object? error, bool retryable = true}) {
       if (!isActive()) {
         finish();
         return;
@@ -439,8 +439,10 @@ class AgentChatController extends ChangeNotifier {
       _emit(
         _state.copyWith(
           deliveryState: ChatDeliveryState.failed,
-          errorMessage: error == null ? null : _messageFor(error),
-          failedMessageId: placeholderId,
+          errorMessage:
+              error == null ? (retryable ? null : '生成中断') : _messageFor(error),
+          failedMessageId: retryable ? placeholderId : null,
+          clearFailedMessage: !retryable,
           clearStreamingMessage: true,
         ),
       );
@@ -491,13 +493,15 @@ class AgentChatController extends ChangeNotifier {
                   ),
                 );
                 finish();
-              case AgentStreamFailed():
-                fail();
+              case AgentStreamFailed(:final retryable):
+                fail(retryable: retryable);
             }
           },
-          onError: (Object error, StackTrace stackTrace) => fail(error),
+          onError: (Object error, StackTrace stackTrace) => fail(error: error),
           onDone: () {
-            if (!terminalEventReceived) fail(StateError('STREAM_INTERRUPTED'));
+            if (!terminalEventReceived) {
+              fail(error: StateError('STREAM_INTERRUPTED'));
+            }
             finish();
           },
           cancelOnError: false,
