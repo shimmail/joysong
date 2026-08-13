@@ -179,6 +179,27 @@ class ProductionProfileTest {
     }
 
     @Test
+    fun `current documentation describes the streaming contract without adding deployment variables`() {
+        val developmentGuide = Files.readString(Path.of("..", "docs", "AI_AGENT_DEVELOPMENT.md"))
+        val configurationGuide = Files.readString(Path.of("..", "docs", "CONFIGURATION_GUIDE.md"))
+        val streamingContract = developmentGuide + "\n" + configurationGuide
+
+        listOf(
+            "/api/chat/sessions/{id}/messages/stream",
+            "started",
+            "delta",
+            "completed",
+            "failed",
+            "PLANNING",
+            "partial"
+        ).forEach { term ->
+            assertTrue(streamingContract.contains(term), "streaming documentation is missing: $term")
+        }
+        assertTrue(streamingContract.contains("Qwen-only"), "streaming provider boundary must be explicit")
+        assertTrue(streamingContract.contains("不持久化"), "failed partial output must be documented as non-persistent")
+    }
+
+    @Test
     fun `current documentation requires a distinct nonblank production intent model`() {
         val currentDocuments = listOf(Path.of("..", "doc"), Path.of("..", "docs")).flatMap { root ->
             Files.walk(root).use { paths ->
