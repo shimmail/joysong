@@ -17,6 +17,7 @@ void main() {
           request.headers.value(HttpHeaders.acceptHeader), 'text/event-stream');
       expect(request.headers.value(HttpHeaders.authorizationHeader),
           'Bearer token-1');
+      expect(request.headers.value('Idempotency-Key'), 'key-1');
       expect(
         jsonDecode(await utf8.decoder.bind(request).join()),
         {'content': '你好', 'idempotencyKey': 'key-1'},
@@ -117,41 +118,188 @@ void main() {
     );
   });
 
-  test('cancelling the domain stream closes the HTTP response subscription',
-      () async {
-    final cancelled = Completer<void>();
+  test('closes the domain stream after an upstream decoder error', () async {
     late final StreamController<List<int>> bytes;
     bytes = StreamController<List<int>>(
-      onListen: () => bytes.add(
-        utf8.encode('event: delta\ndata: {"content":"first"}\n\n'),
-      ),
-      onCancel: cancelled.complete,
+      onListen: () {
+        bytes.add(const [0xff]);
+        bytes.close();
+      },
     );
-    final apiClient = ApiClient(apiRoot: Uri.parse('http://localhost/api/'));
-    addTearDown(apiClient.close);
-    final repository = AgentRepositoryImpl(
-      ApiAgentRemoteDataSource(
-        apiClient: apiClient,
-        streamByteSource: () => bytes.stream,
-      ),
+    final repository = _repository(
+      (_) async => _FakeStreamRequest(_FakeStreamResponse(bytes.stream)),
     );
 
-    late final StreamSubscription<AgentStreamEvent> subscription;
-    final first = Completer<void>();
-    subscription = repository
+    await expectLater(
+      repository.streamMessage(
+        sessionId: 'session-1',
+        content: 'hello',
+        idempotencyKey: 'key-error',
+      ),
+      emitsInOrder([emitsError(isA<FormatException>()), emitsDone]),
+    );
+  });
+
+  test('cancel while opening aborts before the body is sent', () async {
+    final request = _FakeStreamRequest();
+    final opened = Completer<StreamHttpRequest>();
+    final repository = _repository((_) => opened.future);
+    final subscription = repository
         .streamMessage(
-      sessionId: 'session-1',
-      content: 'hello',
-      idempotencyKey: 'key-4',
-    )
-        .listen((_) {
-      if (!first.isCompleted) first.complete();
-    });
-    await first.future;
+          sessionId: 'session-1',
+          content: 'hello',
+          idempotencyKey: 'key-open',
+        )
+        .listen((_) {});
+
+    await subscription.cancel();
+    opened.complete(request);
+    await request.aborted.future;
+
+    expect(request.writeCalls, 0);
+    expect(request.closeCalls, 0);
+  });
+
+  test('cancel while awaiting auth token aborts before body send', () async {
+    final request = _FakeStreamRequest();
+    final token = Completer<String?>();
+    final repository = _repository(
+      (_) async => request,
+      accessTokenProvider: () => token.future,
+    );
+    final subscription = repository
+        .streamMessage(
+          sessionId: 'session-1',
+          content: 'hello',
+          idempotencyKey: 'key-token',
+        )
+        .listen((_) {});
+    await request.headersSet.future;
+
+    await subscription.cancel();
+    token.complete('late-token');
+    await request.aborted.future;
+
+    expect(request.writeCalls, 0);
+    expect(request.closeCalls, 0);
+  });
+
+  test('cancel while POST awaits response closes a late response', () async {
+    final response = _FakeStreamResponse();
+    final responsePending = Completer<StreamHttpResponse>();
+    final request = _FakeStreamRequest(response, responsePending.future);
+    final repository = _repository((_) async => request);
+    final subscription = repository
+        .streamMessage(
+          sessionId: 'session-1',
+          content: 'hello',
+          idempotencyKey: 'key-post',
+        )
+        .listen((_) {});
+    await request.closeStarted.future;
+
+    await subscription.cancel();
+    responsePending.complete(response);
+
+    await request.aborted.future;
+    await response.cancelled.future;
+  });
+
+  test('cancel after response arrival cancels its byte subscription', () async {
+    final response = _FakeStreamResponse();
+    final request = _FakeStreamRequest(response);
+    final repository = _repository((_) async => request);
+    final subscription = repository
+        .streamMessage(
+          sessionId: 'session-1',
+          content: 'hello',
+          idempotencyKey: 'key-response',
+        )
+        .listen((_) {});
+    await response.listened.future;
+
     await subscription.cancel();
 
-    await cancelled.future;
+    await response.cancelled.future;
   });
+}
+
+AgentRepositoryImpl _repository(
+  StreamHttpRequestOpener opener, {
+  AccessTokenProvider? accessTokenProvider,
+}) {
+  final apiClient = ApiClient(
+    apiRoot: Uri.parse('http://localhost/api/'),
+    accessTokenProvider: accessTokenProvider,
+    streamRequestOpener: opener,
+  );
+  return AgentRepositoryImpl(ApiAgentRemoteDataSource(apiClient: apiClient));
+}
+
+final class _FakeStreamRequest implements StreamHttpRequest {
+  _FakeStreamRequest([
+    StreamHttpResponse? response,
+    Future<StreamHttpResponse>? responseFuture,
+  ])  : _response = response ?? _FakeStreamResponse(),
+        _responseFuture = responseFuture;
+
+  final StreamHttpResponse _response;
+  final Future<StreamHttpResponse>? _responseFuture;
+  final aborted = Completer<void>();
+  final headersSet = Completer<void>();
+  final closeStarted = Completer<void>();
+  int writeCalls = 0;
+  int closeCalls = 0;
+
+  final headers = <String, String>{};
+
+  @override
+  void setHeader(String name, String value) {
+    headers[name] = value;
+    if (!headersSet.isCompleted) headersSet.complete();
+  }
+
+  @override
+  void abort() {
+    if (!aborted.isCompleted) aborted.complete();
+  }
+
+  @override
+  Future<StreamHttpResponse> close() async {
+    closeCalls += 1;
+    if (!closeStarted.isCompleted) closeStarted.complete();
+    return _responseFuture == null ? _response : await _responseFuture;
+  }
+
+  @override
+  void add(List<int> body) {
+    writeCalls += 1;
+  }
+}
+
+final class _FakeStreamResponse implements StreamHttpResponse {
+  _FakeStreamResponse([Stream<List<int>>? bytes]) : _bytes = bytes;
+
+  final Stream<List<int>>? _bytes;
+  final listened = Completer<void>();
+  final cancelled = Completer<void>();
+
+  @override
+  int get statusCode => HttpStatus.ok;
+
+  @override
+  late final Stream<List<int>> bytes = _bytes ??
+      Stream<List<int>>.multi((events) {
+        if (!listened.isCompleted) listened.complete();
+        events.onCancel = () {
+          if (!cancelled.isCompleted) cancelled.complete();
+        };
+      });
+
+  @override
+  Future<void> cancel() async {
+    if (!cancelled.isCompleted) cancelled.complete();
+  }
 }
 
 final class _StreamFixture {
@@ -170,10 +318,7 @@ final class _StreamFixture {
       apiRoot: Uri.parse('http://${server.address.host}:${server.port}/api/'),
       accessTokenProvider: () async => 'token-1',
     );
-    final remote = ApiAgentRemoteDataSource(
-      apiClient: apiClient,
-      accessTokenProvider: () async => 'token-1',
-    );
+    final remote = ApiAgentRemoteDataSource(apiClient: apiClient);
     return _StreamFixture(server, apiClient, AgentRepositoryImpl(remote));
   }
 

@@ -9,6 +9,30 @@ typedef AccessTokenProvider = Future<String?> Function();
 typedef UnauthorizedHandler = Future<String?> Function();
 typedef LanguageTagProvider = String Function();
 typedef RequestIdProvider = String Function();
+typedef StreamHttpRequestOpener = Future<StreamHttpRequest> Function(Uri uri);
+
+abstract interface class StreamHttpRequest {
+  void setHeader(String name, String value);
+  void add(List<int> bytes);
+  Future<StreamHttpResponse> close();
+  void abort();
+}
+
+abstract interface class StreamHttpResponse {
+  int get statusCode;
+  Stream<List<int>> get bytes;
+  Future<void> cancel();
+}
+
+final class StreamHttpOperation {
+  StreamHttpOperation._();
+
+  final _response = Completer<StreamHttpResponse>();
+  late final void Function() _cancel;
+
+  Future<StreamHttpResponse> get response => _response.future;
+  void cancel() => _cancel();
+}
 
 class ApiClient {
   ApiClient({
@@ -18,6 +42,7 @@ class ApiClient {
     RequestIdProvider? requestIdProvider,
     String clientName = 'joysong-flutter',
     HttpClient? httpClient,
+    StreamHttpRequestOpener? streamRequestOpener,
     Duration requestTimeout = const Duration(seconds: 30),
   })  : _apiRoot = apiRoot,
         _accessTokenProvider = accessTokenProvider,
@@ -25,6 +50,7 @@ class ApiClient {
         _requestIdProvider = requestIdProvider ?? generateApiRequestId,
         _clientName = clientName,
         _httpClient = httpClient ?? HttpClient(),
+        _streamRequestOpener = streamRequestOpener,
         _requestTimeout = requestTimeout;
 
   final Uri _apiRoot;
@@ -33,6 +59,7 @@ class ApiClient {
   final RequestIdProvider _requestIdProvider;
   final String _clientName;
   final HttpClient _httpClient;
+  final StreamHttpRequestOpener? _streamRequestOpener;
   final Duration _requestTimeout;
   UnauthorizedHandler? _unauthorizedHandler;
   Future<String?>? _refreshInFlight;
@@ -41,6 +68,64 @@ class ApiClient {
 
   void configureUnauthorizedHandler(UnauthorizedHandler handler) {
     _unauthorizedHandler = handler;
+  }
+
+  StreamHttpOperation openStreamPost(
+    String path, {
+    required String idempotencyKey,
+    required Object body,
+  }) {
+    _validateHeaderToken(idempotencyKey, 'Idempotency-Key');
+    final operation = StreamHttpOperation._();
+    StreamHttpRequest? request;
+    StreamHttpResponse? response;
+    var cancelled = false;
+    operation._cancel = () {
+      cancelled = true;
+      request?.abort();
+      response?.cancel();
+    };
+
+    Future<void>(() async {
+      try {
+        final uri = _resolve(path, const {});
+        final opener = _streamRequestOpener;
+        request = opener == null
+            ? _IoStreamHttpRequest(await _httpClient.postUrl(uri))
+            : await opener(uri);
+        if (cancelled) {
+          request!.abort();
+          return;
+        }
+        request!
+          ..setHeader(HttpHeaders.acceptHeader, 'text/event-stream')
+          ..setHeader(HttpHeaders.contentTypeHeader, 'application/json')
+          ..setHeader('Idempotency-Key', idempotencyKey);
+        final token = await _accessTokenProvider?.call();
+        if (cancelled) {
+          request!.abort();
+          return;
+        }
+        if (token != null && token.isNotEmpty) {
+          request!.setHeader(
+            HttpHeaders.authorizationHeader,
+            'Bearer $token',
+          );
+        }
+        request!.add(utf8.encode(jsonEncode(body)));
+        response = await request!.close();
+        if (cancelled) {
+          await response!.cancel();
+          return;
+        }
+        operation._response.complete(response);
+      } on Object catch (error, stackTrace) {
+        if (!cancelled && !operation._response.isCompleted) {
+          operation._response.completeError(error, stackTrace);
+        }
+      }
+    });
+    return operation;
   }
 
   Future<T?> get<T>(
@@ -481,4 +566,42 @@ final class _RawEnvelope {
   final String message;
   final Object? data;
   final bool hasData;
+}
+
+final class _IoStreamHttpRequest implements StreamHttpRequest {
+  _IoStreamHttpRequest(this._request);
+
+  final HttpClientRequest _request;
+
+  @override
+  void setHeader(String name, String value) =>
+      _request.headers.set(name, value);
+
+  @override
+  void add(List<int> bytes) => _request.add(bytes);
+
+  @override
+  Future<StreamHttpResponse> close() async =>
+      _IoStreamHttpResponse(await _request.close());
+
+  @override
+  void abort() => _request.abort();
+}
+
+final class _IoStreamHttpResponse implements StreamHttpResponse {
+  _IoStreamHttpResponse(this._response);
+
+  final HttpClientResponse _response;
+
+  @override
+  int get statusCode => _response.statusCode;
+
+  @override
+  Stream<List<int>> get bytes => _response;
+
+  @override
+  Future<void> cancel() async {
+    final socket = await _response.detachSocket();
+    socket.destroy();
+  }
 }
