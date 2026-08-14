@@ -21,6 +21,7 @@ import org.testcontainers.containers.MySQLContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
 import java.sql.DriverManager
+import java.sql.Timestamp
 import java.util.concurrent.CyclicBarrier
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -264,6 +265,58 @@ class ConsultantInstitutionChangeMySqlIntegrationTest {
                     fixture.institutionId
                 )
             )
+            assertEquals("APPROVED", requestStatus(request.id))
+        }
+    }
+
+    @Test
+    fun `approving join restores the same revoked membership with reviewer metadata`() {
+        val fixture = seedUsersAndInstitution("restore-join")
+        val membershipId = "restore-join-membership"
+        jdbc.update(
+            """
+            INSERT INTO institution_memberships
+                (id, user_id, institution_id, member_role, status,
+                 confirmed_by, confirmed_at, revoked_at)
+            VALUES (?, ?, ?, 'CONSULTANT', 'REVOKED', ?,
+                    '2025-01-02 03:04:05', '2025-02-03 04:05:06')
+            """.trimIndent(),
+            membershipId,
+            fixture.consultantId,
+            fixture.institutionId,
+            fixture.customerId
+        )
+
+        serviceContext().use { context ->
+            val request = context.service.submit(
+                consultantActor(fixture.consultantId),
+                fixture.institutionId,
+                ConsultantInstitutionAction.JOIN,
+                "restore relationship"
+            )
+            context.service.review(
+                adminActor(fixture.reviewerId),
+                request.id,
+                MembershipRequestDecision.APPROVED,
+                "approved"
+            )
+
+            val memberships = jdbc.queryForList(
+                """
+                SELECT id, status, confirmed_by, confirmed_at, revoked_at
+                FROM institution_memberships
+                WHERE user_id = ? AND institution_id = ? AND member_role = 'CONSULTANT'
+                """.trimIndent(),
+                fixture.consultantId,
+                fixture.institutionId
+            )
+            assertEquals(1, memberships.size)
+            assertEquals(membershipId, memberships.single()["id"])
+            assertEquals("APPROVED", memberships.single()["status"])
+            assertEquals(fixture.reviewerId, memberships.single()["confirmed_by"])
+            assertTrue(memberships.single()["confirmed_at"] != null)
+            assertTrue(memberships.single()["confirmed_at"] != Timestamp.valueOf("2025-01-02 03:04:05"))
+            assertNull(memberships.single()["revoked_at"])
             assertEquals("APPROVED", requestStatus(request.id))
         }
     }
