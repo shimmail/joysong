@@ -70,6 +70,21 @@ void main() {
     expect(find.text('顾问 二'), findsOneWidget);
   });
 
+  testWidgets('shows retry state when the consultant request throws directly', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _pickerHost(
+        loadConsultants: () => throw StateError('request failed directly'),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('加载咨询师失败，请重试'), findsOneWidget);
+    expect(find.text('重试'), findsOneWidget);
+  });
+
   testWidgets('returns the tapped consultant to the host', (tester) async {
     BookingConsultant? selected;
     final consultants = [

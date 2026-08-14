@@ -33,12 +33,15 @@ class _InstitutionConsultantPickerState
   @override
   void initState() {
     super.initState();
-    _consultants = widget.loadConsultants();
+    _consultants = _loadConsultants();
   }
+
+  Future<List<BookingConsultant>> _loadConsultants() =>
+      Future.sync(widget.loadConsultants);
 
   void _retry() {
     setState(() {
-      _consultants = widget.loadConsultants();
+      _consultants = _loadConsultants();
     });
   }
 
