@@ -213,8 +213,7 @@ class AgentCatalogReportCard extends StatelessWidget {
   final AgentCatalogItemAction? onHumanChat;
   final AgentCatalogItemPredicate? canOpen;
 
-  bool get _isComparison =>
-      report.mode.toUpperCase() == 'COMPARISON' && report.items.length > 1;
+  bool get _isComparison => report.mode.trim().toUpperCase() == 'COMPARISON';
 
   @override
   Widget build(BuildContext context) {
@@ -305,6 +304,10 @@ class AgentComparisonStatusCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isZh = Localizations.localeOf(context).languageCode == 'zh';
+    final operandNames = request.operands
+        .map((item) => item.displayName.trim())
+        .where((name) => name.isNotEmpty)
+        .toList(growable: false);
     final guidance = request.missingFields
         .map(
           (field) => switch (field) {
@@ -329,9 +332,9 @@ class AgentComparisonStatusCard extends StatelessWidget {
               isZh ? '还需要补充对比信息' : 'More comparison details needed',
               style: Theme.of(context).textTheme.titleMedium,
             ),
-            if (request.operands.isNotEmpty) ...[
+            if (operandNames.isNotEmpty) ...[
               const SizedBox(height: 8),
-              Text(request.operands.map((item) => item.displayName).join(' · ')),
+              Text(operandNames.join(' · ')),
             ],
             for (final text in guidance) ...[
               const SizedBox(height: 8),
@@ -370,7 +373,7 @@ class AgentComparisonTable extends StatelessWidget {
         child: DataTable(
           headingRowHeight: 64,
           dataRowMinHeight: 52,
-          dataRowMaxHeight: 88,
+          dataRowMaxHeight: double.infinity,
           columns: [
             const DataColumn(label: Text('')),
             for (final item in visibleItems)
@@ -416,8 +419,6 @@ class AgentComparisonTable extends StatelessWidget {
                       item.attributes[dimension]?.trim().isNotEmpty == true
                           ? item.attributes[dimension]!
                           : missingValue,
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
                     ),
                   )),
               ]),

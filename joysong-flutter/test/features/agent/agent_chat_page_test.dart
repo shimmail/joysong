@@ -122,6 +122,25 @@ void main() {
 
     expect(find.byType(AgentComparisonStatusCard), findsNothing);
     expect(find.byType(AgentCatalogReportCard), findsOneWidget);
+    expect(find.byType(AgentComparisonTable), findsOneWidget);
+    expect(find.byType(AgentCatalogDetailCard), findsNothing);
+    expect(find.byType(AgentCatalogLinkCard), findsNothing);
+  });
+
+  testWidgets('complete comparison without report suppresses all attachments',
+      (tester) async {
+    final repository = _CatalogRepository(
+      _turn(
+        catalogItems: const [_project],
+        comparisonRequest: _completeRequest,
+      ),
+    );
+
+    await _pumpPage(tester, repository);
+    await _sendAndSettle(tester);
+
+    expect(find.byType(AgentComparisonStatusCard), findsNothing);
+    expect(find.byType(AgentCatalogReportCard), findsNothing);
     expect(find.byType(AgentCatalogLinkCard), findsNothing);
   });
 

@@ -37,6 +37,39 @@ void main() {
     );
   });
 
+  testWidgets(
+      'status card trims operand names and ignores unknown missing fields',
+      (tester) async {
+    await _pumpCard(
+      tester,
+      const AgentComparisonStatusCard(request: _whitespaceRequest),
+      locale: const Locale('en'),
+    );
+
+    expect(find.text('Clinic A · Clinic B'), findsOneWidget);
+    expect(find.textContaining('FUTURE_FIELD'), findsNothing);
+    expect(find.text('Select at least two items to compare'), findsNothing);
+    expect(
+      find.text(
+        'Specify whether to compare clinics, doctors, treatments, or clinic treatments',
+      ),
+      findsNothing,
+    );
+  });
+
+  testWidgets('single item comparison report still uses comparison table',
+      (tester) async {
+    await _pumpCard(
+      tester,
+      AgentCatalogReportCard(report: _projectReport),
+      locale: const Locale('en'),
+    );
+
+    expect(find.byType(AgentComparisonTable), findsOneWidget);
+    expect(find.byType(AgentCatalogDetailCard), findsNothing);
+    expect(find.text('Comparison'), findsOneWidget);
+  });
+
   testWidgets('institution and doctor tables omit price rows', (tester) async {
     await _pumpCard(tester, AgentComparisonTable(report: _institutionReport));
     expect(find.text('City'), findsOneWidget);
@@ -51,8 +84,14 @@ void main() {
       (tester) async {
     await _pumpCard(tester, AgentComparisonTable(report: _projectReport));
 
-    for (final row in ['Category', 'Reference price', 'Rating', 'Tags']) {
-      expect(find.text(row), findsOneWidget);
+    for (final entry in const {
+      'Category': 'Skin',
+      'Reference price': r'$100',
+      'Rating': '4.7',
+      'Tags': 'Popular',
+    }.entries) {
+      expect(find.text(entry.key), findsOneWidget);
+      expect(find.text(entry.value), findsOneWidget);
     }
   });
 
@@ -64,18 +103,19 @@ void main() {
       AgentComparisonTable(report: _institutionProjectReport),
     );
 
-    for (final row in [
-      'City',
-      'Category',
-      'Clinic price',
-      'Reference price',
-      'Rating',
-      'Review count',
-      'Sales',
-      'Clinic verified',
-      'Tags',
-    ]) {
-      expect(find.text(row), findsOneWidget);
+    for (final entry in const {
+      'City': 'Shanghai',
+      'Category': 'Skin',
+      'Clinic price': r'$90',
+      'Reference price': r'$100',
+      'Rating': '4.7',
+      'Review count': '20',
+      'Sales': '30',
+      'Clinic verified': 'Verified',
+      'Tags': 'Popular',
+    }.entries) {
+      expect(find.text(entry.key), findsOneWidget);
+      expect(find.text(entry.value), findsOneWidget);
     }
   });
 
@@ -87,6 +127,25 @@ void main() {
     expect(find.text('Dr. One'), findsOneWidget);
     expect(find.text('Clinic A (Shanghai), Clinic B (Beijing)'), findsOneWidget);
     expect(find.text('2/2'), findsOneWidget);
+  });
+
+  testWidgets(
+      'doctor practice institutions cell lays out the complete value without ellipsis',
+      (tester) async {
+    await _pumpCard(
+      tester,
+      AgentComparisonTable(report: _longDoctorReport),
+      locale: const Locale('en'),
+      textScaler: const TextScaler.linear(2),
+      width: 300,
+    );
+
+    final valueFinder = find.text(_longPracticeInstitutions);
+    final value = tester.widget<Text>(valueFinder);
+    expect(value.maxLines, isNull);
+    expect(value.overflow, isNull);
+    expect(tester.getSize(valueFinder).height, greaterThan(88));
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('comparison table localizes missing structured values',
@@ -122,12 +181,45 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets(
+      'comparison table falls back to the union of structured attribute keys',
+      (tester) async {
+    await _pumpCard(tester, AgentComparisonTable(report: _fallbackReport));
+
+    expect(find.text('Backend key A'), findsOneWidget);
+    expect(find.text('Alpha value'), findsOneWidget);
+    expect(find.text('Backend key B'), findsOneWidget);
+    expect(find.text('Beta value'), findsOneWidget);
+  });
+
+  testWidgets('comparison report honors onOpen and canOpen', (tester) async {
+    AgentCatalogItem? opened;
+    await _pumpCard(
+      tester,
+      AgentCatalogReportCard(
+        report: _actionReport,
+        onOpen: (item) => opened = item,
+        canOpen: (item) => item.id == 'project-open',
+      ),
+      locale: const Locale('en'),
+    );
+
+    await tester.tap(find.text('Open project'));
+    expect(opened?.id, 'project-open');
+
+    await tester.tap(find.text('Blocked project'), warnIfMissed: false);
+    expect(opened?.id, 'project-open');
+    expect(find.text('Information is incomplete'), findsOneWidget);
+  });
 }
 
 Future<void> _pumpCard(
   WidgetTester tester,
   Widget child, {
   Locale locale = const Locale('zh'),
+  TextScaler textScaler = TextScaler.noScaling,
+  double? width,
 }) =>
     tester.pumpWidget(
       MaterialApp(
@@ -138,7 +230,12 @@ Future<void> _pumpCard(
           GlobalWidgetsLocalizations.delegate,
           GlobalCupertinoLocalizations.delegate,
         ],
-        home: Scaffold(body: child),
+        home: MediaQuery(
+          data: MediaQueryData(textScaler: textScaler),
+          child: Scaffold(
+            body: SizedBox(width: width, child: child),
+          ),
+        ),
       ),
     );
 
@@ -154,6 +251,30 @@ const _incompleteRequest = AgentComparisonRequest(
   dimensions: [],
   constraints: {},
   missingFields: {'OPERANDS', 'TARGET_TYPE'},
+);
+
+const _whitespaceRequest = AgentComparisonRequest(
+  operands: [
+    AgentComparisonOperand(
+      entityType: 'INSTITUTION',
+      entityId: 'clinic-a',
+      displayName: '  Clinic A  ',
+    ),
+    AgentComparisonOperand(
+      entityType: 'INSTITUTION',
+      entityId: 'blank',
+      displayName: '   ',
+    ),
+    AgentComparisonOperand(
+      entityType: 'INSTITUTION',
+      entityId: 'clinic-b',
+      displayName: ' Clinic B ',
+    ),
+  ],
+  targetType: 'INSTITUTION',
+  dimensions: [],
+  constraints: {},
+  missingFields: {'FUTURE_FIELD'},
 );
 
 final _institutionReport = _report(
@@ -212,6 +333,23 @@ final _doctorReport = _report(
     'Practice institutions',
     'Practice institution verification',
   ],
+);
+
+const _longPracticeInstitutions =
+    'Clinic A (Shanghai), Clinic B (Beijing), Clinic C (Shenzhen); 2 more';
+
+final _longDoctorReport = _report(
+  items: [
+    _item(
+      type: 'DOCTOR',
+      id: 'doctor-long',
+      name: 'Dr',
+      attributes: const {
+        'Practice institutions': _longPracticeInstitutions,
+      },
+    ),
+  ],
+  dimensions: const ['Practice institutions'],
 );
 
 final _projectReport = _report(
@@ -290,6 +428,42 @@ final _fiveItemReport = _report(
         name: 'Item $index',
         attributes: const {'Rating': '4.8'},
       ),
+  ],
+  dimensions: const ['Rating'],
+);
+
+final _fallbackReport = _report(
+  items: [
+    _item(
+      type: 'PROJECT',
+      id: 'project-a',
+      name: 'Project A',
+      attributes: const {'Backend key A': 'Alpha value'},
+    ),
+    _item(
+      type: 'PROJECT',
+      id: 'project-b',
+      name: 'Project B',
+      attributes: const {'Backend key B': 'Beta value'},
+    ),
+  ],
+  dimensions: const [],
+);
+
+final _actionReport = _report(
+  items: [
+    _item(
+      type: 'PROJECT',
+      id: 'project-open',
+      name: 'Open project',
+      attributes: const {'Rating': '4.8'},
+    ),
+    _item(
+      type: 'PROJECT',
+      id: 'project-blocked',
+      name: 'Blocked project',
+      attributes: const {'Rating': '4.7'},
+    ),
   ],
   dimensions: const ['Rating'],
 );
