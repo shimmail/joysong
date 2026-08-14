@@ -98,6 +98,15 @@ Normalization trims whitespace, removes blank values, preserves first-seen order
 
 Internal dimension keys are stable, locale-independent identifiers. Report labels remain localized presentation values.
 
+`ComparisonRequest.dimensions` stores high-level comparison groups rather than one entry per rendered row. The default groups are `PRICE`, `CREDENTIALS`, and `RATING`, restricted by target type. A projection expands each group into the target-specific structured rows below. Identity and context rows such as city, category, specialties, tags, and practice institutions may accompany those groups without consuming additional request-dimension slots. Consequently, the five-dimension request limit does not limit the number of rows rendered in a table.
+
+Default groups by target:
+
+- institution: `CREDENTIALS`, `RATING`;
+- doctor: `CREDENTIALS`, `RATING`;
+- project: `PRICE`, `RATING`;
+- institution project: `PRICE`, `CREDENTIALS`, `RATING`.
+
 ### 5.1 Institution
 
 No price dimension is shown because an institution has different prices for different projects.
