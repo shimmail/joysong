@@ -26,6 +26,7 @@ class DiscoverPage extends StatefulWidget {
     this.socialController,
     this.onOpenUser,
     this.onConsultDoctor,
+    this.onConsultInstitution,
     this.onOpenAi,
     this.initialType = DiscoverContentType.all,
     super.key,
@@ -36,6 +37,7 @@ class DiscoverPage extends StatefulWidget {
   final SocialController? socialController;
   final ValueChanged<String>? onOpenUser;
   final ValueChanged<DiscoverItem>? onConsultDoctor;
+  final ValueChanged<String>? onConsultInstitution;
   final ValueChanged<DiscoverItem>? onOpenAi;
   final DiscoverContentType initialType;
 
@@ -249,6 +251,7 @@ class _DiscoverPageState extends State<DiscoverPage>
                   socialController: widget.socialController,
                   onOpenUser: widget.onOpenUser,
                   onConsultDoctor: widget.onConsultDoctor,
+                  onConsultInstitution: widget.onConsultInstitution,
                   onOpenAi: widget.onOpenAi,
                 ),
             ],
@@ -607,6 +610,7 @@ class _DiscoveryResultsPane extends StatefulWidget {
     this.socialController,
     this.onOpenUser,
     this.onConsultDoctor,
+    this.onConsultInstitution,
     this.onOpenAi,
   });
 
@@ -620,6 +624,7 @@ class _DiscoveryResultsPane extends StatefulWidget {
   final SocialController? socialController;
   final ValueChanged<String>? onOpenUser;
   final ValueChanged<DiscoverItem>? onConsultDoctor;
+  final ValueChanged<String>? onConsultInstitution;
   final ValueChanged<DiscoverItem>? onOpenAi;
 
   @override
@@ -780,6 +785,7 @@ class _DiscoveryResultsPaneState extends State<_DiscoveryResultsPane> {
           socialController: widget.socialController,
           onOpenUser: widget.onOpenUser,
           onConsultDoctor: widget.onConsultDoctor,
+          onConsultInstitution: widget.onConsultInstitution,
           onOpenAi: widget.onOpenAi,
         ),
       ),
@@ -804,6 +810,7 @@ class _DiscoveryResultsPaneState extends State<_DiscoveryResultsPane> {
         socialController: widget.socialController,
         onOpenUser: widget.onOpenUser,
         onConsultDoctor: widget.onConsultDoctor,
+        onConsultInstitution: widget.onConsultInstitution,
         onOpenAi: widget.onOpenAi,
       ),
     ));
@@ -833,6 +840,7 @@ class _DiscoveryResultsPaneState extends State<_DiscoveryResultsPane> {
         socialController: widget.socialController,
         onOpenUser: widget.onOpenUser,
         onConsultDoctor: widget.onConsultDoctor,
+        onConsultInstitution: widget.onConsultInstitution,
         onOpenAi: widget.onOpenAi,
       ),
     ));
@@ -953,6 +961,7 @@ class DiscoverDetailPage extends StatefulWidget {
     this.socialController,
     this.onOpenUser,
     this.onConsultDoctor,
+    this.onConsultInstitution,
     this.onOpenAi,
     super.key,
   });
@@ -967,6 +976,7 @@ class DiscoverDetailPage extends StatefulWidget {
   final SocialController? socialController;
   final ValueChanged<String>? onOpenUser;
   final ValueChanged<DiscoverItem>? onConsultDoctor;
+  final ValueChanged<String>? onConsultInstitution;
   final ValueChanged<DiscoverItem>? onOpenAi;
 
   @override
@@ -1013,6 +1023,7 @@ class _DiscoverDetailPageState extends State<DiscoverDetailPage> {
           socialController: widget.socialController,
           onOpenUser: widget.onOpenUser,
           onConsultDoctor: widget.onConsultDoctor,
+          onConsultInstitution: widget.onConsultInstitution,
           onOpenAi: widget.onOpenAi,
         ),
       ),
@@ -1102,6 +1113,8 @@ class _DiscoverDetailPageState extends State<DiscoverDetailPage> {
                                 socialController: widget.socialController,
                                 onOpenUser: widget.onOpenUser,
                                 onConsultDoctor: widget.onConsultDoctor,
+                                onConsultInstitution:
+                                    widget.onConsultInstitution,
                                 onOpenAi: widget.onOpenAi,
                               ),
                             ),
@@ -1124,6 +1137,8 @@ class _DiscoverDetailPageState extends State<DiscoverDetailPage> {
                                 socialController: widget.socialController,
                                 onOpenUser: widget.onOpenUser,
                                 onConsultDoctor: widget.onConsultDoctor,
+                                onConsultInstitution:
+                                    widget.onConsultInstitution,
                                 onOpenAi: widget.onOpenAi,
                               ),
                             ),
@@ -1147,6 +1162,7 @@ class _DiscoverDetailPageState extends State<DiscoverDetailPage> {
                         CatalogInstitutionDetailView(
                           item: item,
                           socialController: widget.socialController,
+                          onConsultInstitution: widget.onConsultInstitution,
                           onProjectTap: (institutionId, projectId) =>
                               Navigator.of(context).push<void>(
                             MaterialPageRoute(
@@ -1160,6 +1176,8 @@ class _DiscoverDetailPageState extends State<DiscoverDetailPage> {
                                 socialController: widget.socialController,
                                 onOpenUser: widget.onOpenUser,
                                 onConsultDoctor: widget.onConsultDoctor,
+                                onConsultInstitution:
+                                    widget.onConsultInstitution,
                                 onOpenAi: widget.onOpenAi,
                               ),
                             ),
@@ -1223,6 +1241,7 @@ class _DiscoverDetailPageState extends State<DiscoverDetailPage> {
                   socialController: widget.socialController,
                   onOpenUser: widget.onOpenUser,
                   onConsultDoctor: widget.onConsultDoctor,
+                  onConsultInstitution: widget.onConsultInstitution,
                   onOpenAi: widget.onOpenAi,
                 ),
               ));
@@ -1311,6 +1330,7 @@ class _DiscoverDetailPageState extends State<DiscoverDetailPage> {
           socialController: widget.socialController,
           onOpenUser: widget.onOpenUser,
           onConsultDoctor: widget.onConsultDoctor,
+          onConsultInstitution: widget.onConsultInstitution,
           onOpenAi: widget.onOpenAi,
         ),
       ));

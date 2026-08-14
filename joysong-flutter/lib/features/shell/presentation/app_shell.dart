@@ -24,6 +24,7 @@ import 'package:joysong_flutter/features/discover/data/discover_repository_impl.
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/discover/presentation/discover_page.dart';
+import 'package:joysong_flutter/features/shell/presentation/institution_consultant_picker.dart';
 import 'package:joysong_flutter/features/home/data/home_repository_impl.dart';
 import 'package:joysong_flutter/features/home/domain/home_models.dart';
 import 'package:joysong_flutter/features/home/domain/home_repository.dart';
@@ -107,6 +108,7 @@ class _AppShellState extends State<AppShell> {
   AgentPlanController? _agentPlanController;
   WalletController? _walletController;
   int _unreadNotificationCount = 0;
+  bool _institutionConsultantPickerOpen = false;
 
   NavigatorState get _contentNavigator =>
       _contentNavigatorKey.currentState ?? Navigator.of(context);
@@ -246,6 +248,8 @@ class _AppShellState extends State<AppShell> {
           socialController: _socialController,
           onOpenUser: _openPublicUser,
           onConsultDoctor: _openDoctorChat,
+          onConsultInstitution:
+              _bookingRepository == null ? null : _openInstitutionConsultants,
           onOpenAi: _openAiChat,
         ),
         if (_messagingController != null)
@@ -334,6 +338,9 @@ class _AppShellState extends State<AppShell> {
               socialController: _socialController,
               onOpenUser: _openPublicUser,
               onConsultDoctor: _openDoctorChat,
+              onConsultInstitution: _bookingRepository == null
+                  ? null
+                  : _openInstitutionConsultants,
               onOpenAi: _openAiChat,
             ),
           ),
@@ -365,6 +372,8 @@ class _AppShellState extends State<AppShell> {
           socialController: _socialController,
           onOpenUser: _openPublicUser,
           onConsultDoctor: _openDoctorChat,
+          onConsultInstitution:
+              _bookingRepository == null ? null : _openInstitutionConsultants,
           onOpenAi: _openAiChat,
         ),
       ),
@@ -397,6 +406,8 @@ class _AppShellState extends State<AppShell> {
         socialController: _socialController,
         onOpenUser: _openPublicUser,
         onConsultDoctor: _openDoctorChat,
+        onConsultInstitution:
+            _bookingRepository == null ? null : _openInstitutionConsultants,
         onOpenAi: _openAiChat,
       ),
     ));
@@ -506,6 +517,8 @@ class _AppShellState extends State<AppShell> {
           onBookProject: _bookingRepository == null ? null : _openBooking,
           socialController: _socialController,
           onOpenUser: _openPublicUser,
+          onConsultInstitution:
+              _bookingRepository == null ? null : _openInstitutionConsultants,
           onOpenAi: _openAiChat,
         ),
       ),
@@ -735,6 +748,8 @@ class _AppShellState extends State<AppShell> {
           socialController: _socialController,
           onOpenUser: _openPublicUser,
           onConsultDoctor: _openDoctorChat,
+          onConsultInstitution:
+              _bookingRepository == null ? null : _openInstitutionConsultants,
           onOpenAi: _openAiChat,
         ),
       ),
@@ -818,6 +833,24 @@ class _AppShellState extends State<AppShell> {
         doctor.id,
         title: doctor.title,
       );
+
+  Future<void> _openInstitutionConsultants(String institutionId) async {
+    final repository = _bookingRepository;
+    final id = institutionId.trim();
+    if (repository == null || id.isEmpty || _institutionConsultantPickerOpen) {
+      return;
+    }
+    _institutionConsultantPickerOpen = true;
+    try {
+      await openInstitutionConsultantChat(
+        context: context,
+        loadConsultants: () => repository.getConsultants(id),
+        openDirectMessage: _openDirectMessage,
+      );
+    } finally {
+      _institutionConsultantPickerOpen = false;
+    }
+  }
 
   Future<void> _openDirectMessage(
     String targetId, {
@@ -950,6 +983,8 @@ class _AppShellState extends State<AppShell> {
         socialController: _socialController,
         onOpenUser: _openPublicUser,
         onConsultDoctor: _openDoctorChat,
+        onConsultInstitution:
+            _bookingRepository == null ? null : _openInstitutionConsultants,
         onOpenAi: _openAiChat,
       ),
     ));
@@ -1222,6 +1257,7 @@ DiscoverDetailPage buildAgentCatalogDetailPage({
   ValueChanged<DiscoverItem>? onBookProject,
   SocialController? socialController,
   ValueChanged<String>? onOpenUser,
+  ValueChanged<String>? onConsultInstitution,
   ValueChanged<DiscoverItem>? onOpenAi,
 }) =>
     DiscoverDetailPage(
@@ -1233,6 +1269,7 @@ DiscoverDetailPage buildAgentCatalogDetailPage({
       onBookProject: onBookProject,
       socialController: socialController,
       onOpenUser: onOpenUser,
+      onConsultInstitution: onConsultInstitution,
       onOpenAi: onOpenAi,
     );
 
