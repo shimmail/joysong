@@ -299,13 +299,75 @@ AgentComparisonRequest? _comparisonRequestOrNull(Object? json) {
 }
 
 AgentCatalogReport? _catalogReportOrNull(Object? json) {
-  if (json == null) return null;
+  if (json == null || !_isValidMessageCatalogReport(json)) return null;
   try {
     return AgentCatalogReport.fromJson(json);
   } on Object {
     return null;
   }
 }
+
+bool _isValidMessageCatalogReport(Object? json) {
+  if (json is! Map) return false;
+  return _hasOnlyStringValues(json, const ['mode', 'title', 'summary']) &&
+      _hasOnlyStringList(json, 'comparisonDimensions') &&
+      _hasOnlyStringList(json, 'warnings') &&
+      _hasOnlyCatalogItems(json, 'items');
+}
+
+bool _hasOnlyStringValues(Map<dynamic, dynamic> map, List<String> keys) =>
+    keys.every((key) => !map.containsKey(key) || map[key] is String);
+
+bool _hasOnlyStringList(Map<dynamic, dynamic> map, String key) {
+  if (!map.containsKey(key)) return true;
+  final value = map[key];
+  return value is List && value.every((item) => item is String);
+}
+
+bool _hasOnlyCatalogItems(Map<dynamic, dynamic> map, String key) {
+  if (!map.containsKey(key)) return true;
+  final value = map[key];
+  return value is List && value.every(_isValidMessageCatalogItem);
+}
+
+bool _isValidMessageCatalogItem(Object? json) {
+  if (json is! Map) return false;
+  if (!_hasOnlyStringValues(
+    json,
+    const [
+      'type',
+      'id',
+      'name',
+      'subtitle',
+      'summary',
+    ],
+  )) {
+    return false;
+  }
+  if (!_hasOnlyNullableStringValues(
+    json,
+    const ['institutionId', 'projectId'],
+  )) {
+    return false;
+  }
+  final attributes = json['attributes'];
+  if (attributes != null &&
+      (attributes is! Map ||
+          attributes.entries.any(
+            (entry) => entry.key is! String || entry.value is! String,
+          ))) {
+    return false;
+  }
+  final canChatWithHuman = json['canChatWithHuman'];
+  return canChatWithHuman == null || canChatWithHuman is bool;
+}
+
+bool _hasOnlyNullableStringValues(
+  Map<dynamic, dynamic> map,
+  List<String> keys,
+) =>
+    keys.every((key) =>
+        !map.containsKey(key) || map[key] == null || map[key] is String);
 
 class ChatTurn {
   const ChatTurn({

@@ -88,11 +88,40 @@ void main() {
       'comparisonRequest': _comparisonRequestJson,
       'catalogReport': const ['not-a-report'],
     });
+    final malformedScalarReport = ChatMessage.fromJson({
+      'id': 'assistant-3',
+      'sessionId': 'session-1',
+      'role': 'ASSISTANT',
+      'content': 'reply',
+      'createdAt': '2026-08-12T00:00:02',
+      'comparisonRequest': _comparisonRequestJson,
+      'catalogReport': {
+        ..._catalogReportJson,
+        'mode': 7,
+        'title': true,
+      },
+    });
+    final malformedDimensionsReport = ChatMessage.fromJson({
+      'id': 'assistant-4',
+      'sessionId': 'session-1',
+      'role': 'ASSISTANT',
+      'content': 'reply',
+      'createdAt': '2026-08-12T00:00:03',
+      'comparisonRequest': _comparisonRequestJson,
+      'catalogReport': {
+        ..._catalogReportJson,
+        'comparisonDimensions': [1],
+      },
+    });
 
     expect(malformedRequest.comparisonRequest, isNull);
     expect(malformedRequest.catalogReport?.title, 'Comparison report');
     expect(malformedReport.comparisonRequest?.targetType, 'PROJECT');
     expect(malformedReport.catalogReport, isNull);
+    expect(malformedScalarReport.comparisonRequest?.targetType, 'PROJECT');
+    expect(malformedScalarReport.catalogReport, isNull);
+    expect(malformedDimensionsReport.comparisonRequest?.targetType, 'PROJECT');
+    expect(malformedDimensionsReport.catalogReport, isNull);
   });
 
   test('ChatTurn keeps legacy top-level catalog report', () {
