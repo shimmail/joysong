@@ -16,6 +16,20 @@ Future<BookingConsultant?> showInstitutionConsultantPicker({
       ),
     );
 
+Future<void> openInstitutionConsultantChat({
+  required BuildContext context,
+  required Future<List<BookingConsultant>> Function() loadConsultants,
+  required Future<void> Function(String targetId, {String? title})
+      openDirectMessage,
+}) async {
+  final consultant = await showInstitutionConsultantPicker(
+    context: context,
+    loadConsultants: loadConsultants,
+  );
+  if (consultant == null || !context.mounted) return;
+  await openDirectMessage(consultant.id, title: consultant.name);
+}
+
 class _InstitutionConsultantPicker extends StatefulWidget {
   const _InstitutionConsultantPicker({required this.loadConsultants});
 
@@ -94,7 +108,8 @@ class _InstitutionConsultantPickerState
                     itemBuilder: (context, index) {
                       final consultant = consultants[index];
                       return ListTile(
-                        key: ValueKey('institution-consultant-${consultant.id}'),
+                        key:
+                            ValueKey('institution-consultant-${consultant.id}'),
                         leading: const CircleAvatar(
                           child: Icon(Icons.support_agent_rounded),
                         ),

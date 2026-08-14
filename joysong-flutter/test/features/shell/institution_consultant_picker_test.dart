@@ -132,6 +132,51 @@ void main() {
     expect(result, isNull);
     expect(selectionCalls, 0);
   });
+
+  testWidgets('opens a direct message for the selected consultant', (
+    tester,
+  ) async {
+    final opened = <String>[];
+
+    await tester.pumpWidget(
+      _consultantChatHost(
+        loadConsultants: () async => const [
+          BookingConsultant(id: 'consultant-2', name: '林顾问'),
+        ],
+        openDirectMessage: (id, {title}) async => opened.add('$id|$title'),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const Key('institution-consultant-consultant-2')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(opened, ['consultant-2|林顾问']);
+  });
+
+  testWidgets('does not open a direct message when consultant picker dismisses',
+      (
+    tester,
+  ) async {
+    final opened = <String>[];
+
+    await tester.pumpWidget(
+      _consultantChatHost(
+        loadConsultants: () async => const [
+          BookingConsultant(id: 'consultant-2', name: '林顾问'),
+        ],
+        openDirectMessage: (id, {title}) async => opened.add('$id|$title'),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    await tester.tapAt(const Offset(5, 5));
+    await tester.pumpAndSettle();
+
+    expect(opened, isEmpty);
+  });
 }
 
 Widget _pickerHost({
@@ -154,6 +199,29 @@ Widget _pickerHost({
               onResult?.call(consultant);
               if (consultant != null) onSelected?.call(consultant);
             },
+            child: const Text('open'),
+          ),
+        ),
+      ),
+    );
+
+Widget _consultantChatHost({
+  required Future<List<BookingConsultant>> Function() loadConsultants,
+  required Future<void> Function(String targetId, {String? title})
+      openDirectMessage,
+}) =>
+    MaterialApp(
+      locale: const Locale('zh'),
+      supportedLocales: const [Locale('zh')],
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
+      home: Scaffold(
+        body: Builder(
+          builder: (context) => TextButton(
+            onPressed: () => openInstitutionConsultantChat(
+              context: context,
+              loadConsultants: loadConsultants,
+              openDirectMessage: openDirectMessage,
+            ),
             child: const Text('open'),
           ),
         ),
