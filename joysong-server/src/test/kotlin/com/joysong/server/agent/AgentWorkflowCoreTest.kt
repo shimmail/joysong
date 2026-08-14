@@ -1,6 +1,7 @@
 package com.joysong.server.agent
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import com.joysong.server.agent.context.AgentContextBuilder
 import com.joysong.server.agent.context.AgentContext
@@ -940,6 +941,74 @@ class AgentWorkflowCoreTest {
     }
 
     @Test
+    fun `comparison request normalization failure does not discard a valid catalog report`() {
+        val report = comparisonReport()
+        val assistant = message(2, "ASSISTANT", "comparison").apply {
+            metadataJson = """{
+                "intent":"COMPARISON",
+                "comparisonRequest":{
+                    "operands":[null],
+                    "targetType":"PROJECT",
+                    "dimensions":[],
+                    "constraints":{},
+                    "missingFields":[]
+                },
+                "catalogReport":${objectMapper.writeValueAsString(report)}
+            }""".trimIndent()
+        }
+
+        val projection = lifecycle.projectMessage(assistant)
+
+        assertEquals(null, projection.comparisonRequest)
+        assertEquals("COMPARISON", projection.catalogReport?.mode)
+        assertEquals("Comparison", projection.catalogReport?.title)
+        assertEquals(setOf("PRICE", "RATING"), projection.catalogReport?.comparisonDimensions?.toSet())
+    }
+
+    @Test
+    fun `planning projection uses one metadata parse path`() {
+        val countingMapper = CountingObjectMapper().apply { registerKotlinModule() }
+        val countingLifecycle = TurnLifecycleService(
+            sessions,
+            messages,
+            turns,
+            context,
+            countingMapper,
+            clock = clock,
+            turnLease = turnLease,
+            comparisonRequestBuilder = ComparisonRequestBuilder()
+        )
+        val unsafeItem = AgentCatalogItemResponse(
+            type = "PROJECT",
+            id = "project-1",
+            name = "Project One",
+            subtitle = "one day downtime",
+            summary = "pain free",
+            attributes = linkedMapOf("reference price" to "$888", "risk" to "none")
+        )
+        val assistant = message(2, "ASSISTANT", "unsafe planning claim").apply {
+            metadataJson = countingMapper.writeValueAsString(
+                mapOf(
+                    "intent" to "planning",
+                    "queryTarget" to "PROJECT",
+                    "nextAction" to "START_PLANNING",
+                    "catalogItems" to listOf(unsafeItem),
+                    "catalogReport" to null
+                )
+            )
+        }
+
+        val projection = countingLifecycle.projectMessage(assistant)
+
+        assertEquals(1, countingMapper.readTreeCallCount)
+        assertEquals("PLANNING", projection.intent)
+        assertNotEquals("unsafe planning claim", projection.message.content)
+        assertEquals("", projection.catalogItems.single().subtitle)
+        assertEquals("", projection.catalogItems.single().summary)
+        assertEquals(mapOf("reference price" to "$888"), projection.catalogItems.single().attributes)
+    }
+
+    @Test
     fun `malformed catalog report does not discard a valid comparison request`() {
         val assistant = message(2, "ASSISTANT", "comparison").apply {
             metadataJson = objectMapper.writeValueAsString(
@@ -1537,4 +1606,13 @@ class AgentWorkflowCoreTest {
         comparisonDimensions = listOf("PRICE", "RATING"),
         warnings = emptyList()
     )
+
+    private class CountingObjectMapper : ObjectMapper() {
+        var readTreeCallCount = 0
+
+        override fun readTree(content: String): JsonNode {
+            readTreeCallCount += 1
+            return super.readTree(content)
+        }
+    }
 }

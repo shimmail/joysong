@@ -80,36 +80,65 @@ class TurnLifecycleService(
 
     fun projectMessage(message: ChatMessageEntity): AgentMessageProjection {
         if (!message.role.equals("ASSISTANT", ignoreCase = true)) return AgentMessageProjection(message)
-        val projectedMessage = PlanningCatalogProjection.projectStoredMessage(message, objectMapper)
-        val metadata = runCatching { objectMapper.readTree(projectedMessage.metadataJson.ifBlank { "{}" }) }
-            .getOrNull() ?: return AgentMessageProjection(projectedMessage)
+        val metadata = runCatching { objectMapper.readTree(message.metadataJson.ifBlank { "{}" }) }
+            .getOrNull() ?: return AgentMessageProjection(message)
         val intent = metadata.path("intent").asText("GENERAL_CHAT")
-        val catalogItems = metadata.get("catalogItems")
+        val queryTarget = metadata.get("queryTarget")?.takeUnless { it.isNull }?.asText()
+        val nextAction = metadata.path("nextAction").asText("NONE")
+        val parsedCatalogItems = metadata.get("catalogItems")
             ?.takeIf { it.isArray }
             ?.mapNotNull { node ->
                 runCatching { objectMapper.treeToValue(node, AgentCatalogItemResponse::class.java) }
                     .getOrNull()
-                    ?.takeIf { it.type.uppercase() in supportedCatalogTypes }
             }
             .orEmpty()
         val comparisonRequest = metadata.get("comparisonRequest")
             ?.takeUnless { it.isNull }
             ?.takeIf { intent.equals("COMPARISON", ignoreCase = true) }
             ?.let { node ->
-                runCatching { objectMapper.treeToValue(node, ComparisonRequest::class.java) }
-                    .getOrNull()
-                    ?.let(comparisonRequestBuilder::normalize)
+                runCatching {
+                    comparisonRequestBuilder.normalize(objectMapper.treeToValue(node, ComparisonRequest::class.java))
+                }.getOrNull()
             }
-        val catalogReport = metadata.get("catalogReport")
+        val parsedCatalogReport = metadata.get("catalogReport")
             ?.takeUnless { it.isNull }
             ?.let { node ->
                 runCatching { objectMapper.treeToValue(node, AgentCatalogReportResponse::class.java) }.getOrNull()
             }
+        val planning = intent.equals("PLANNING", ignoreCase = true)
+        val projectedIntent = if (planning) "PLANNING" else intent
+        val projectedCatalogItems = if (planning) {
+            PlanningCatalogProjection.projectItems(parsedCatalogItems)
+        } else {
+            parsedCatalogItems
+        }
+        val catalogItems = projectedCatalogItems.filter { it.type.uppercase() in supportedCatalogTypes }
+        val catalogReport = if (planning) {
+            PlanningCatalogProjection.projectReport(parsedCatalogReport)
+        } else {
+            parsedCatalogReport
+        }
+        val projectedMessage = if (planning) {
+            message.copy(
+                content = PlanningCatalogProjection.safeContent(),
+                metadataJson = objectMapper.writeValueAsString(
+                    linkedMapOf(
+                        "intent" to "PLANNING",
+                        "queryTarget" to queryTarget,
+                        "nextAction" to nextAction,
+                        "catalogItems" to projectedCatalogItems,
+                        "catalogReport" to catalogReport
+                    )
+                )
+            )
+        } else {
+            message
+        }
         return AgentMessageProjection(
             message = projectedMessage,
-            intent = intent,
-            queryTarget = metadata.get("queryTarget")?.takeUnless { it.isNull }?.asText(),
-            nextAction = metadata.path("nextAction").asText("NONE"),
+            intent = projectedIntent,
+            queryTarget = queryTarget,
+            nextAction = nextAction,
             catalogItems = catalogItems,
             comparisonRequest = comparisonRequest,
             catalogReport = catalogReport
