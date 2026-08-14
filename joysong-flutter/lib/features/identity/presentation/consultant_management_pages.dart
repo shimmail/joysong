@@ -9,11 +9,13 @@ class ConsultantMembershipPage extends StatefulWidget {
   const ConsultantMembershipPage({
     required this.repository,
     required this.discoverRepository,
+    this.canApply = true,
     super.key,
   });
 
   final IdentityRepository repository;
   final DiscoverRepository discoverRepository;
+  final bool canApply;
 
   @override
   State<ConsultantMembershipPage> createState() =>
@@ -128,44 +130,54 @@ class _ConsultantMembershipPageState extends State<ConsultantMembershipPage> {
                       physics: const AlwaysScrollableScrollPhysics(),
                       padding: const EdgeInsets.all(16),
                       children: [
-                        ListTile(
-                          key: const Key('consultant-institution-picker'),
-                          enabled: !_submitting,
-                          contentPadding: EdgeInsets.zero,
-                          leading: const Icon(Icons.apartment_outlined),
-                          title: Text(_selection?.name ??
-                              context.localized('选择机构', 'Select institution')),
-                          subtitle: Text(context.localized(
-                              '搜索全部机构', 'Search all institutions')),
-                          trailing: const Icon(Icons.chevron_right_rounded),
-                          onTap: _submitting ? null : _pickInstitution,
-                        ),
-                        TextField(
-                          key: const Key('consultant-request-note'),
-                          controller: _note,
-                          enabled: !_submitting,
-                          maxLines: 3,
-                          decoration: InputDecoration(
-                            labelText:
-                                context.localized('申请说明', 'Request note'),
+                        if (widget.canApply) ...[
+                          ListTile(
+                            key: const Key('consultant-institution-picker'),
+                            enabled: !_submitting,
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(Icons.apartment_outlined),
+                            title: Text(_selection?.name ??
+                                context.localized(
+                                    '选择机构', 'Select institution')),
+                            subtitle: Text(context.localized(
+                                '搜索全部机构', 'Search all institutions')),
+                            trailing: const Icon(Icons.chevron_right_rounded),
+                            onTap: _submitting ? null : _pickInstitution,
                           ),
-                        ),
-                        const SizedBox(height: 12),
-                        FilledButton.icon(
-                          key: const Key('consultant-submit'),
-                          onPressed: _submitting ? null : _submit,
-                          icon: _submitting
-                              ? const SizedBox.square(
-                                  dimension: 18,
-                                  child:
-                                      CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Icon(Icons.send_outlined),
-                          label: Text(context.localized(
-                            _submitting ? '提交中…' : '提交申请',
-                            _submitting ? 'Submitting...' : 'Submit request',
-                          )),
-                        ),
+                          TextField(
+                            key: const Key('consultant-request-note'),
+                            controller: _note,
+                            enabled: !_submitting,
+                            maxLines: 3,
+                            decoration: InputDecoration(
+                              labelText:
+                                  context.localized('申请说明', 'Request note'),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          FilledButton.icon(
+                            key: const Key('consultant-submit'),
+                            onPressed: _submitting ? null : _submit,
+                            icon: _submitting
+                                ? const SizedBox.square(
+                                    dimension: 18,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
+                                  )
+                                : const Icon(Icons.send_outlined),
+                            label: Text(context.localized(
+                              _submitting ? '提交中…' : '提交申请',
+                              _submitting ? 'Submitting...' : 'Submit request',
+                            )),
+                          ),
+                        ] else
+                          Text(
+                            context.localized(
+                              '当前账号仅可查看机构归属记录',
+                              'This account can only view affiliation records.',
+                            ),
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
                         const SizedBox(height: 24),
                         Text(
                           context.localized('申请记录', 'Request history'),

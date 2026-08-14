@@ -26,7 +26,9 @@ enum IdentityRoleType {
 enum IdentityStatus {
   pending('PENDING', '审核中'),
   active('ACTIVE', '已认证'),
+  approved('APPROVED', '已通过'),
   rejected('REJECTED', '未通过'),
+  withdrawn('WITHDRAWN', '已撤回'),
   revoked('REVOKED', '已撤销'),
   unknown('UNKNOWN', '未知状态');
 

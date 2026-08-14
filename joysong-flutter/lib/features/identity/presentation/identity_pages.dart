@@ -105,35 +105,37 @@ class _IdentityOverviewView extends StatelessWidget {
       onRefresh: controller.load,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
-          Text('我的专业身份', style: Theme.of(context).textTheme.titleMedium),
+          _SectionHeading(
+            icon: Icons.badge_outlined,
+            title: context.localized('我的专业身份', 'My professional identities'),
+          ),
           const SizedBox(height: 10),
           if (overview.roles.isEmpty)
-            const _InfoCard(text: '尚未取得专业身份，普通用户功能不受影响。')
+            _InfoCard(
+              text: context.localized(
+                '尚未取得专业身份，普通用户功能不受影响。',
+                'You do not have a professional identity yet. Regular user features are unaffected.',
+              ),
+            )
           else
             for (final role in overview.roles)
               _StatusCard(
-                title: role.role.label,
+                title: _identityRoleLabel(context, role.role),
                 status: role.status,
                 detail: role.status == IdentityStatus.revoked
-                    ? '该身份已撤销，专业入口将立即关闭'
-                    : '认证状态由平台审核结果决定',
+                    ? context.localized(
+                        '该身份已撤销，专业入口将立即关闭',
+                        'This identity was revoked and professional access is now closed.',
+                      )
+                    : context.localized(
+                        '认证状态由平台审核结果决定',
+                        'Verification status is determined by the platform review.',
+                      ),
               ),
           const SizedBox(height: 20),
-          Text('申请记录', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 10),
-          if (overview.applications.isEmpty)
-            const _InfoCard(text: '暂无身份申请记录')
-          else
-            for (final application in overview.applications)
-              _StatusCard(
-                title: application.role.label,
-                status: application.status,
-                detail: application.reviewNote.isEmpty
-                    ? '已提交，审核结果会在此更新'
-                    : application.reviewNote,
-              ),
+          _ApplicationHistory(applications: overview.applications),
           const SizedBox(height: 20),
           FilledButton.icon(
             key: const Key('start-identity-application'),
@@ -141,11 +143,24 @@ class _IdentityOverviewView extends StatelessWidget {
                 ? null
                 : () => _selectRole(context),
             icon: const Icon(Icons.verified_user_outlined),
-            label: Text(overview.hasPendingApplication ? '已有申请正在审核' : '申请专业身份'),
+            label: Text(
+              overview.hasPendingApplication
+                  ? context.localized(
+                      '已有申请正在审核',
+                      'An application is under review',
+                    )
+                  : context.localized(
+                      '申请专业身份',
+                      'Apply for a professional identity',
+                    ),
+            ),
           ),
           const SizedBox(height: 12),
           Text(
-            '认证材料通过私有接口上传，不会进入公开图片库，也不会生成可公开访问的 URL。',
+            context.localized(
+              '认证材料通过私有接口上传，不会进入公开图片库，也不会生成可公开访问的 URL。',
+              'Verification documents are uploaded privately and never added to the public media library or exposed through a public URL.',
+            ),
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
@@ -164,13 +179,20 @@ class _IdentityOverviewView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const ListTile(title: Text('选择申请身份')),
+            ListTile(
+              title: Text(
+                context.localized(
+                  '选择申请身份',
+                  'Choose a professional identity',
+                ),
+              ),
+            ),
             for (final role in IdentityRoleType.values.where(
               (item) => item != IdentityRoleType.unknown,
             ))
               ListTile(
                 leading: Icon(_roleIcon(role)),
-                title: Text(role.label),
+                title: Text(_identityRoleLabel(context, role)),
                 onTap: () => Navigator.pop(context, role),
               ),
           ],
@@ -479,6 +501,7 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
                 context: _controller.context!,
                 repository: widget.repository,
                 discoverRepository: widget.discoverRepository,
+                onRefresh: _controller.enter,
                 institutionImagePicker: widget.institutionImagePicker,
                 doctorImagePicker: widget.doctorImagePicker,
                 professionalRepository: widget.professionalRepository,
@@ -495,6 +518,7 @@ class _ManagementCapabilities extends StatelessWidget {
     required this.context,
     required this.repository,
     required this.discoverRepository,
+    required this.onRefresh,
     this.institutionImagePicker,
     this.doctorImagePicker,
     this.professionalRepository,
@@ -503,6 +527,7 @@ class _ManagementCapabilities extends StatelessWidget {
   final ManagementContext context;
   final IdentityRepository repository;
   final DiscoverRepository discoverRepository;
+  final Future<void> Function() onRefresh;
   final InstitutionProfileImagePicker? institutionImagePicker;
   final Future<String?> Function()? doctorImagePicker;
   final ProfessionalRepository? professionalRepository;
@@ -518,9 +543,9 @@ class _ManagementCapabilities extends StatelessWidget {
       IdentityRoleType.consultant.code,
     );
     final groups = <({
+      String id,
       IconData icon,
       String title,
-      String emptyText,
       String? membershipRequestType,
       List<
           ({
@@ -531,13 +556,10 @@ class _ManagementCapabilities extends StatelessWidget {
           })> items,
     })>[
       (
+        id: 'legal-representative',
         icon: Icons.apartment_outlined,
         title: buildContext.localized('法人', 'Legal representative'),
         membershipRequestType: null,
-        emptyText: buildContext.localized(
-          '暂无机构法人可用配置',
-          'No legal representative settings available',
-        ),
         items: [
           (
             icon: Icons.menu_book_outlined,
@@ -545,7 +567,7 @@ class _ManagementCapabilities extends StatelessWidget {
             enabled: isLegalRepresentative &&
                 context.visibleInstitutionIds.isNotEmpty &&
                 discoverRepository is ProfessionalCatalogRepository,
-            action: _ManagementAction.professionalCatalog,
+            action: _ManagementAction.legalRepresentativeCatalog,
           ),
           (
             icon: Icons.apartment_outlined,
@@ -594,22 +616,11 @@ class _ManagementCapabilities extends StatelessWidget {
         ],
       ),
       (
+        id: 'platform-admin',
         icon: Icons.admin_panel_settings_outlined,
         title: buildContext.localized('平台管理', 'Platform administration'),
         membershipRequestType: null,
-        emptyText: buildContext.localized(
-          '暂无平台管理权限',
-          'No platform administration access',
-        ),
         items: [
-          (
-            icon: Icons.menu_book_outlined,
-            label: buildContext.localized('专业目录', 'Professional catalog'),
-            enabled: isDoctor &&
-                context.doctorId != null &&
-                discoverRepository is ProfessionalCatalogRepository,
-            action: _ManagementAction.professionalCatalog,
-          ),
           (
             icon: Icons.compare_arrows_outlined,
             label: buildContext.localized(
@@ -622,14 +633,19 @@ class _ManagementCapabilities extends StatelessWidget {
         ],
       ),
       (
+        id: 'doctor',
         icon: Icons.medical_services_outlined,
         title: buildContext.localized('医生', 'Doctor'),
         membershipRequestType: 'DOCTOR',
-        emptyText: buildContext.localized(
-          '暂无医生可用配置',
-          'No doctor settings available',
-        ),
         items: [
+          (
+            icon: Icons.menu_book_outlined,
+            label: buildContext.localized('专业目录', 'Professional catalog'),
+            enabled: isDoctor &&
+                context.doctorId != null &&
+                discoverRepository is ProfessionalCatalogRepository,
+            action: _ManagementAction.doctorCatalog,
+          ),
           (
             icon: Icons.medical_services_outlined,
             label: buildContext.localized('医生档案', 'Doctor profile'),
@@ -684,39 +700,35 @@ class _ManagementCapabilities extends StatelessWidget {
           (
             icon: Icons.article_outlined,
             label: buildContext.localized('专业文章', 'Professional articles'),
-            enabled: isDoctor && context.canManageArticles,
+            enabled: isDoctor &&
+                context.canManageArticles &&
+                professionalRepository != null,
             action: _ManagementAction.doctorArticles,
           ),
           (
             icon: Icons.receipt_long_outlined,
             label: buildContext.localized('专业订单', 'Professional orders'),
-            enabled: isDoctor && context.canManageOrders,
+            enabled: isDoctor &&
+                context.canManageOrders &&
+                professionalRepository != null,
             action: _ManagementAction.doctorOrders,
           ),
         ],
       ),
       (
+        id: 'consultant',
         icon: Icons.support_agent_outlined,
         title: buildContext.localized('顾问', 'Consultant'),
         membershipRequestType: null,
-        emptyText: buildContext.localized(
-          '暂无顾问可用配置',
-          'No consultant settings available',
-        ),
         items: [
-          (
-            icon: Icons.add_business_outlined,
-            label: buildContext.localized('申请加入机构', 'Apply to institution'),
-            enabled: isConsultant && context.canApplyToInstitutions,
-            action: _ManagementAction.consultantMembership,
-          ),
           (
             icon: Icons.badge_outlined,
             label: buildContext.localized(
-              '机构归属',
-              'Institution affiliation',
+              '机构归属与申请',
+              'Affiliations and applications',
             ),
-            enabled: isConsultant && context.canViewAffiliations,
+            enabled: isConsultant &&
+                (context.canApplyToInstitutions || context.canViewAffiliations),
             action: _ManagementAction.consultantMembership,
           ),
           (
@@ -728,51 +740,104 @@ class _ManagementCapabilities extends StatelessWidget {
         ],
       ),
     ];
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        _InfoCard(
-          text: buildContext.localized(
-            '以下能力来自服务端实时权限上下文。客户端不会根据身份名称自行推导权限。',
-            'Capabilities come from the live server access context. The app never infers access from role names alone.',
+    final availableGroups = [
+      for (final group in groups)
+        if (group.items.any((item) => item.enabled))
+          (
+            id: group.id,
+            icon: group.icon,
+            title: group.title,
+            membershipRequestType: group.membershipRequestType,
+            items: group.items
+                .where((item) => item.enabled)
+                .toList(growable: false),
           ),
-        ),
-        const SizedBox(height: 16),
-        for (final group in groups) ...[
-          ExpansionTile(
-            leading: Icon(group.icon),
-            title: Text(group.title),
-            initiallyExpanded: group.items.any(
-              (capability) => capability.enabled,
+    ];
+    final capabilityCount = availableGroups.fold<int>(
+      0,
+      (total, group) => total + group.items.length,
+    );
+
+    return RefreshIndicator(
+      onRefresh: onRefresh,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+        children: [
+          _SectionHeading(
+            icon: Icons.dashboard_customize_outlined,
+            title: buildContext.localized('当前可用功能', 'Available tools'),
+          ),
+          const SizedBox(height: 10),
+          _InfoCard(
+            text: buildContext.localized(
+              '${availableGroups.length} 个身份模块 · $capabilityCount 项功能。仅显示当前账号可使用的管理功能，权限会在进入和刷新时重新校验。',
+              '$capabilityCount available ${capabilityCount == 1 ? 'tool' : 'tools'} across ${availableGroups.length} ${availableGroups.length == 1 ? 'identity group' : 'identity groups'}. Access is checked again on entry and refresh.',
             ),
-            children: [
-              if (group.items.every((capability) => !capability.enabled))
-                ListTile(enabled: false, title: Text(group.emptyText))
-              else
-                for (final capability in group.items.where(
-                  (item) => item.enabled,
-                ))
-                  ListTile(
-                    leading: Icon(capability.icon),
-                    title: Text(capability.label),
-                    subtitle: Text(
-                      buildContext.localized(
-                        '数据范围由服务端逐对象校验',
-                        'Data scope is checked by the server per record',
-                      ),
+          ),
+          const SizedBox(height: 16),
+          if (availableGroups.isEmpty)
+            _InfoCard(
+              text: buildContext.localized(
+                '当前没有可展示的管理功能，请刷新权限或联系平台。',
+                'No management tools are currently available. Refresh access or contact the platform.',
+              ),
+            )
+          else
+            for (var index = 0; index < availableGroups.length; index++) ...[
+              Card(
+                margin: const EdgeInsets.only(bottom: 12),
+                clipBehavior: Clip.antiAlias,
+                child: ExpansionTile(
+                  key: ValueKey(
+                    'management-group-${availableGroups[index].id}',
+                  ),
+                  tilePadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  childrenPadding: const EdgeInsets.only(bottom: 8),
+                  leading: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: Theme.of(buildContext)
+                          .colorScheme
+                          .primaryContainer,
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () => _openCapability(
-                      buildContext,
-                      capability.action,
-                      membershipRequestType: group.membershipRequestType,
+                    child: Icon(
+                      availableGroups[index].icon,
+                      color: Theme.of(buildContext)
+                          .colorScheme
+                          .onPrimaryContainer,
                     ),
                   ),
+                  title: Text(availableGroups[index].title),
+                  subtitle: Text(
+                    buildContext.localized(
+                      '${availableGroups[index].items.length} 项可用功能',
+                      '${availableGroups[index].items.length} available ${availableGroups[index].items.length == 1 ? 'tool' : 'tools'}',
+                    ),
+                  ),
+                  initiallyExpanded: availableGroups.length == 1 || index == 0,
+                  children: [
+                    for (final capability in availableGroups[index].items)
+                      ListTile(
+                        leading: Icon(capability.icon),
+                        title: Text(capability.label),
+                        trailing: const Icon(Icons.chevron_right_rounded),
+                        onTap: () => _openCapability(
+                          buildContext,
+                          capability.action,
+                          membershipRequestType:
+                              availableGroups[index].membershipRequestType,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             ],
-          ),
-          const Divider(height: 1),
         ],
-      ],
+      ),
     );
   }
 
@@ -781,16 +846,14 @@ class _ManagementCapabilities extends StatelessWidget {
     _ManagementAction action, {
     String? membershipRequestType,
   }) {
-    if (action == _ManagementAction.professionalCatalog &&
+    if ((action == _ManagementAction.doctorCatalog ||
+            action == _ManagementAction.legalRepresentativeCatalog) &&
         discoverRepository is ProfessionalCatalogRepository) {
-      final isDoctor = this.context.activeRoles.contains(
-            IdentityRoleType.doctor.code,
-          );
       Navigator.of(context).push<void>(
         MaterialPageRoute(
           builder: (_) => ProfessionalCatalogPage(
             repository: discoverRepository as ProfessionalCatalogRepository,
-            scope: isDoctor
+            scope: action == _ManagementAction.doctorCatalog
                 ? ProfessionalCatalogScope.doctor
                 : ProfessionalCatalogScope.legalRepresentative,
           ),
@@ -875,6 +938,7 @@ class _ManagementCapabilities extends StatelessWidget {
           builder: (_) => ConsultantMembershipPage(
             repository: repository,
             discoverRepository: discoverRepository,
+            canApply: this.context.canApplyToInstitutions,
           ),
         ),
       );
@@ -978,7 +1042,8 @@ class _ManagementCapabilities extends StatelessWidget {
 }
 
 enum _ManagementAction {
-  professionalCatalog,
+  doctorCatalog,
+  legalRepresentativeCatalog,
   institutionProfile,
   membershipReviews,
   institutionProjectReviews,
@@ -1607,24 +1672,180 @@ class _DocumentTile extends StatelessWidget {
   }
 }
 
+class _ApplicationHistory extends StatelessWidget {
+  const _ApplicationHistory({required this.applications});
+
+  final List<IdentityApplication> applications;
+
+  @override
+  Widget build(BuildContext context) {
+    if (applications.isEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _SectionHeading(
+            icon: Icons.history_rounded,
+            title: context.localized('申请记录', 'Application history'),
+          ),
+          const SizedBox(height: 10),
+          _InfoCard(
+            text: context.localized(
+              '暂无身份申请记录',
+              'No identity applications yet.',
+            ),
+          ),
+        ],
+      );
+    }
+
+    final count = applications.length;
+    return Card(
+      margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      child: ExpansionTile(
+        key: const Key('identity-application-history'),
+        initiallyExpanded: false,
+        leading: const Icon(Icons.history_rounded),
+        title: Text(context.localized('申请记录', 'Application history')),
+        subtitle: Text(
+          context.localized(
+            '$count 条记录，点击展开或收起',
+            '$count ${count == 1 ? 'record' : 'records'} · Tap to expand or collapse',
+          ),
+        ),
+        childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        children: [
+          const Divider(height: 1),
+          const SizedBox(height: 8),
+          for (final application in applications)
+            _StatusCard(
+              key: ValueKey('identity-application-${application.id}'),
+              title: _identityRoleLabel(context, application.role),
+              status: application.status,
+              detail: _identityApplicationDetail(context, application),
+              metadata: _identityApplicationTimestamp(context, application),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionHeading extends StatelessWidget {
+  const _SectionHeading({required this.icon, required this.title});
+
+  final IconData icon;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 20, color: Theme.of(context).colorScheme.primary),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(title, style: Theme.of(context).textTheme.titleMedium),
+        ),
+      ],
+    );
+  }
+}
+
 class _StatusCard extends StatelessWidget {
   const _StatusCard({
+    super.key,
     required this.title,
     required this.status,
     required this.detail,
+    this.metadata,
   });
 
   final String title;
   final IdentityStatus status;
   final String detail;
+  final String? metadata;
 
   @override
   Widget build(BuildContext context) {
     return Card(
-      child: ListTile(
-        title: Text(title),
-        subtitle: Text(detail),
-        trailing: Chip(label: Text(status.label)),
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: Theme.of(context).textTheme.titleSmall),
+                  const SizedBox(height: 4),
+                  Text(
+                    detail,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color:
+                              Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                  ),
+                  if (metadata != null && metadata!.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      metadata!,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            _IdentityStatusBadge(status: status),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _IdentityStatusBadge extends StatelessWidget {
+  const _IdentityStatusBadge({required this.status});
+
+  final IdentityStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final (background, foreground) = switch (status) {
+      IdentityStatus.pending =>
+        (colors.tertiaryContainer, colors.onTertiaryContainer),
+      IdentityStatus.active || IdentityStatus.approved =>
+        (colors.primaryContainer, colors.onPrimaryContainer),
+      IdentityStatus.rejected || IdentityStatus.revoked =>
+        (colors.errorContainer, colors.onErrorContainer),
+      IdentityStatus.withdrawn || IdentityStatus.unknown =>
+        (colors.surfaceContainerHighest, colors.onSurfaceVariant),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(_identityStatusIcon(status), size: 14, color: foreground),
+          const SizedBox(width: 4),
+          Text(
+            _identityStatusLabel(context, status),
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: foreground,
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
+        ],
       ),
     );
   }
@@ -1772,6 +1993,92 @@ String _englishRoleLabel(IdentityRoleType role) => switch (role) {
         'institution legal representative',
       IdentityRoleType.unknown => 'professional',
     };
+
+String _identityRoleLabel(BuildContext context, IdentityRoleType role) =>
+    context.localized(
+      role.label,
+      switch (role) {
+        IdentityRoleType.doctor => 'Doctor',
+        IdentityRoleType.consultant => 'Medical aesthetics consultant',
+        IdentityRoleType.institutionLegalRepresentative =>
+          'Institution legal representative',
+        IdentityRoleType.unknown => 'Unknown identity',
+      },
+    );
+
+String _identityStatusLabel(BuildContext context, IdentityStatus status) =>
+    context.localized(
+      status.label,
+      switch (status) {
+        IdentityStatus.pending => 'Under review',
+        IdentityStatus.active => 'Verified',
+        IdentityStatus.approved => 'Approved',
+        IdentityStatus.rejected => 'Not approved',
+        IdentityStatus.withdrawn => 'Withdrawn',
+        IdentityStatus.revoked => 'Revoked',
+        IdentityStatus.unknown => 'Unknown status',
+      },
+    );
+
+IconData _identityStatusIcon(IdentityStatus status) => switch (status) {
+      IdentityStatus.pending => Icons.schedule_rounded,
+      IdentityStatus.active => Icons.verified_rounded,
+      IdentityStatus.approved => Icons.check_circle_outline_rounded,
+      IdentityStatus.rejected => Icons.cancel_outlined,
+      IdentityStatus.withdrawn => Icons.undo_rounded,
+      IdentityStatus.revoked => Icons.block_rounded,
+      IdentityStatus.unknown => Icons.help_outline_rounded,
+    };
+
+String _identityApplicationDetail(
+  BuildContext context,
+  IdentityApplication application,
+) {
+  final reviewNote = application.reviewNote.trim();
+  if (reviewNote.isNotEmpty) return reviewNote;
+  return switch (application.status) {
+    IdentityStatus.pending => context.localized(
+        '已提交，审核结果会在此更新',
+        'Submitted. The review result will appear here.',
+      ),
+    IdentityStatus.approved || IdentityStatus.active => context.localized(
+        '审核已通过，专业身份已更新',
+        'Approved. Your professional identity has been updated.',
+      ),
+    IdentityStatus.rejected => context.localized(
+        '审核未通过，可完善材料后重新申请',
+        'Not approved. You can update your documents and apply again.',
+      ),
+    IdentityStatus.withdrawn => context.localized(
+        '该申请已撤回',
+        'This application was withdrawn.',
+      ),
+    IdentityStatus.revoked => context.localized(
+        '该申请对应的身份已撤销',
+        'The identity associated with this application was revoked.',
+      ),
+    IdentityStatus.unknown => context.localized(
+        '申请状态正在同步，请稍后刷新',
+        'The application status is syncing. Refresh shortly.',
+      ),
+  };
+}
+
+String? _identityApplicationTimestamp(
+  BuildContext context,
+  IdentityApplication application,
+) {
+  final value = application.reviewedAt ?? application.submittedAt;
+  if (value == null) return null;
+  final local = value.toLocal();
+  String twoDigits(int number) => number.toString().padLeft(2, '0');
+  final formatted = '${local.year}-${twoDigits(local.month)}-'
+      '${twoDigits(local.day)} ${twoDigits(local.hour)}:'
+      '${twoDigits(local.minute)}';
+  return application.reviewedAt == null
+      ? context.localized('提交于 $formatted', 'Submitted $formatted')
+      : context.localized('审核于 $formatted', 'Reviewed $formatted');
+}
 
 String _englishDocumentLabel(IdentityDocumentType type) => switch (type) {
       IdentityDocumentType.businessLicense => 'Business license',
