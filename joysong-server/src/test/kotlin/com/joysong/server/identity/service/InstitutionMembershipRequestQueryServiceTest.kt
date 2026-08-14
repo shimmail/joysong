@@ -65,6 +65,30 @@ class InstitutionMembershipRequestQueryServiceTest {
     }
 
     @Test
+    fun `compatibility alone adds scoped legacy rows while normalized queries remain ledger only`() {
+        val store = FakeInstitutionMembershipRequestQueryStore(
+            rows = listOf(
+                request("ledger-owned", MembershipRequestType.DOCTOR, "user-1", "institution-9", 4),
+                request("ledger-managed", MembershipRequestType.CONSULTANT, "other-1", "managed-1", 3)
+            ),
+            legacyRows = listOf(
+                request("legacy-owned", MembershipRequestType.CONSULTANT, "user-1", "institution-8", 2),
+                request("legacy-managed", MembershipRequestType.DOCTOR, "other-2", "managed-1", 1),
+                request("legacy-hidden", MembershipRequestType.DOCTOR, "other-3", "managed-2", 5)
+            )
+        )
+        val actor = dualActor().copy(managedInstitutionIds = setOf("managed-1"))
+        val service = InstitutionMembershipRequestQueryService(store)
+
+        assertEquals(listOf("ledger-owned"), service.listOwned(actor).map { it.id })
+        assertEquals(listOf("ledger-managed"), service.listReviewable(actor).map { it.id })
+        assertEquals(
+            listOf("ledger-managed", "ledger-owned", "legacy-managed", "legacy-owned"),
+            service.listCompatibility(actor).map { it.id }.sorted()
+        )
+    }
+
+    @Test
     fun `jdbc projections compute current relationship status in one query`() {
         val jdbc = mockk<JdbcTemplate>()
         val sql = slot<String>()
@@ -81,6 +105,36 @@ class InstitutionMembershipRequestQueryServiceTest {
         assertTrue(sql.captured.contains("LEFT JOIN institution_memberships relationship"))
         assertTrue(sql.captured.contains("relationship_status"))
         assertTrue(sql.captured.contains("ORDER BY request.submitted_at DESC, request.id DESC"))
+    }
+
+    @Test
+    fun `jdbc legacy compatibility is scoped and excludes every pair with ledger history`() {
+        val jdbc = mockk<JdbcTemplate>()
+        val sql = slot<String>()
+        every {
+            jdbc.query(
+                capture(sql),
+                any<RowMapper<InstitutionMembershipRequestView>>(),
+                "doctor-1",
+                "managed-1",
+                "managed-2"
+            )
+        } returns emptyList()
+        val store = JdbcInstitutionMembershipRequestQueryStore(jdbc)
+
+        store.listLegacyCompatibility(
+            MembershipRequestType.DOCTOR,
+            "doctor-1",
+            setOf("managed-2", "managed-1"),
+            includeAll = false
+        )
+
+        assertTrue(sql.isCaptured)
+        assertTrue(sql.captured.contains("FROM doctor_institutions relationship"))
+        assertTrue(sql.captured.contains("NOT EXISTS"))
+        assertTrue(sql.captured.contains("FROM doctor_institution_change_requests ledger"))
+        assertTrue(sql.captured.contains("ledger.doctor_id = relationship.doctor_id"))
+        assertTrue(sql.captured.contains("ledger.institution_id = relationship.institution_id"))
     }
 
     private fun request(
@@ -125,7 +179,8 @@ class InstitutionMembershipRequestQueryServiceTest {
 }
 
 private class FakeInstitutionMembershipRequestQueryStore(
-    private val rows: List<InstitutionMembershipRequestView>
+    private val rows: List<InstitutionMembershipRequestView>,
+    private val legacyRows: List<InstitutionMembershipRequestView> = emptyList()
 ) : InstitutionMembershipRequestQueryStore {
     override fun listOwned(
         requestType: MembershipRequestType,
@@ -140,5 +195,15 @@ private class FakeInstitutionMembershipRequestQueryStore(
         includeAll: Boolean
     ): List<InstitutionMembershipRequestView> = rows.filter {
         it.requestType == requestType && (includeAll || it.institutionId in managedInstitutionIds)
+    }
+
+    override fun listLegacyCompatibility(
+        requestType: MembershipRequestType,
+        applicantId: String?,
+        managedInstitutionIds: Set<String>,
+        includeAll: Boolean
+    ): List<InstitutionMembershipRequestView> = legacyRows.filter {
+        it.requestType == requestType &&
+            (includeAll || it.applicantId == applicantId || it.institutionId in managedInstitutionIds)
     }
 }

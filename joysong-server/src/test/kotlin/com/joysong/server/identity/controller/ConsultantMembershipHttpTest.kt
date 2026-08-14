@@ -52,9 +52,9 @@ class ConsultantMembershipHttpTest {
 
     @Test
     @WithMockUser(username = "consultant-1")
-    fun `GET reads the new owned ledger projection and POST dispatches strict JOIN`() {
+    fun `GET reads the scoped compatibility projection and POST dispatches strict JOIN`() {
         every { access.actor(any()) } returns actor
-        every { queries.listOwned(actor) } returns listOf(unifiedView())
+        every { queries.listConsultantCompatibility(actor) } returns listOf(unifiedView())
         every {
             service.submit(
                 actor,
@@ -85,6 +85,7 @@ class ConsultantMembershipHttpTest {
                 "加入"
             )
         }
+        verify(exactly = 1) { queries.listConsultantCompatibility(actor) }
     }
 
     @Test

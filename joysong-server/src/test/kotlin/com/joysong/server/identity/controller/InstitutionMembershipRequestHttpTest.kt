@@ -6,6 +6,14 @@ import com.joysong.server.common.GlobalExceptionHandler
 import com.joysong.server.config.JwtAuthenticationFilter
 import com.joysong.server.config.JwtTokenProvider
 import com.joysong.server.config.SecurityConfig
+import com.joysong.server.identity.service.ConsultantInstitutionChangeRequestService
+import com.joysong.server.identity.service.DoctorInstitutionAction
+import com.joysong.server.identity.service.DoctorInstitutionChangeRequestService
+import com.joysong.server.identity.service.DoctorInstitutionChangeRequestStore
+import com.joysong.server.identity.service.DoctorInstitutionChangeRequestView
+import com.joysong.server.identity.service.DoctorInstitutionRelationshipService
+import com.joysong.server.identity.service.DoctorInstitutionRequestConflictException
+import com.joysong.server.identity.service.DoctorInstitutionRequestStatus
 import com.joysong.server.identity.service.InstitutionMembershipRequestConflictException
 import com.joysong.server.identity.service.InstitutionMembershipRequestNotFoundException
 import com.joysong.server.identity.service.InstitutionMembershipRequestQueryService
@@ -250,4 +258,123 @@ class InstitutionMembershipRequestHttpConfig {
     @Bean fun queries(): InstitutionMembershipRequestQueryService = mockk()
     @Bean fun token(): JwtTokenProvider = mockk(relaxed = true)
     @Bean fun users(): UserRepository = mockk(relaxed = true)
+}
+
+@WebMvcTest
+@ContextConfiguration(
+    classes = [
+        InstitutionMembershipDoctorConflictHttpConfig::class,
+        SecurityConfig::class,
+        GlobalExceptionHandler::class
+    ]
+)
+class InstitutionMembershipDoctorConflictHttpTest {
+    @Autowired lateinit var mvc: MockMvc
+    @Autowired lateinit var access: ManagementAccessService
+    @Autowired lateinit var relationships: DoctorInstitutionRelationshipService
+    @Autowired lateinit var store: PendingDoctorRequestStore
+
+    private val legal = ManagementActor(
+        "legal-1", false, setOf("INSTITUTION_LEGAL_REPRESENTATIVE"), null,
+        setOf("institution-1"), emptySet(), emptySet()
+    )
+
+    @BeforeEach
+    fun resetState() {
+        clearMocks(access, relationships)
+        store.reset()
+    }
+
+    @Test
+    @WithMockUser(username = "legal-1")
+    fun `invalidated doctor approval is HTTP 409 and leaves the request pending`() {
+        every { access.actor(any()) } returns legal
+        every {
+            relationships.approveJoin("doctor-1", "institution-1", "legal-1")
+        } throws DoctorInstitutionRequestConflictException("医生身份已失效")
+
+        mvc.perform(
+            post("/api/management/institution-membership-requests/DOCTOR/request-1/review")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"decision":"APPROVED"}""")
+        )
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.code").value(409))
+            .andExpect(jsonPath("$.message").value("医生身份已失效"))
+
+        assertEquals(DoctorInstitutionRequestStatus.PENDING, store.request.status)
+        assertEquals(0, store.statusChangeCount)
+    }
+}
+
+@TestConfiguration
+@Import(InstitutionMembershipRequestController::class, JwtAuthenticationFilter::class)
+class InstitutionMembershipDoctorConflictHttpConfig {
+    @Bean fun access(): ManagementAccessService = mockk()
+    @Bean fun relationships(): DoctorInstitutionRelationshipService = mockk()
+    @Bean fun doctorStore() = PendingDoctorRequestStore()
+    @Bean
+    fun doctorRequests(
+        store: PendingDoctorRequestStore,
+        relationships: DoctorInstitutionRelationshipService
+    ) = DoctorInstitutionChangeRequestService(store, relationships)
+    @Bean fun consultantRequests(): ConsultantInstitutionChangeRequestService = mockk()
+    @Bean
+    fun mutations(
+        doctor: DoctorInstitutionChangeRequestService,
+        consultant: ConsultantInstitutionChangeRequestService
+    ) = InstitutionMembershipRequestService(doctor, consultant)
+    @Bean fun queries(): InstitutionMembershipRequestQueryService = mockk()
+    @Bean fun token(): JwtTokenProvider = mockk(relaxed = true)
+    @Bean fun users(): UserRepository = mockk(relaxed = true)
+}
+
+class PendingDoctorRequestStore : DoctorInstitutionChangeRequestStore {
+    lateinit var request: DoctorInstitutionChangeRequestView
+        private set
+    var statusChangeCount: Int = 0
+        private set
+
+    init {
+        reset()
+    }
+
+    fun reset() {
+        val now = LocalDateTime.of(2026, 8, 14, 10, 0)
+        request = DoctorInstitutionChangeRequestView(
+            "request-1", "doctor-1", "医生一", "institution-1", "机构一",
+            DoctorInstitutionAction.JOIN, DoctorInstitutionRequestStatus.PENDING, "", "",
+            "doctor-1", null, now, null, now, now
+        )
+        statusChangeCount = 0
+    }
+
+    override fun exists(id: String) = id == request.id
+    override fun lock(id: String) = request.takeIf { it.id == id }
+    override fun changeStatus(
+        id: String,
+        status: DoctorInstitutionRequestStatus,
+        actorId: String,
+        reviewNote: String
+    ): Boolean {
+        statusChangeCount += 1
+        request = request.copy(status = status, reviewedBy = actorId, reviewNote = reviewNote)
+        return true
+    }
+
+    override fun isCertifiedDoctor(doctorId: String) = error("not used")
+    override fun isActiveInstitution(institutionId: String) = error("not used")
+    override fun hasActiveRelationship(doctorId: String, institutionId: String) = error("not used")
+    override fun hasPending(doctorId: String, institutionId: String) = error("not used")
+    override fun create(
+        doctorId: String,
+        institutionId: String,
+        action: DoctorInstitutionAction,
+        requestNote: String
+    ): DoctorInstitutionChangeRequestView = error("not used")
+    override fun listVisible(
+        doctorId: String?,
+        managedInstitutionIds: Set<String>,
+        includeAll: Boolean
+    ): List<DoctorInstitutionChangeRequestView> = error("not used")
 }

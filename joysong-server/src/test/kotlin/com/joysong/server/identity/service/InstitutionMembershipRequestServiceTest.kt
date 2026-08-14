@@ -150,6 +150,32 @@ class InstitutionMembershipRequestServiceTest {
     }
 
     @Test
+    fun `doctor invalidation conflict is translated by type without message matching`() {
+        val legal = legalActor()
+        every { doctor.exists("doctor-request") } returns true
+        every {
+            doctor.review(
+                legal,
+                "doctor-request",
+                MembershipRequestDecision.APPROVED,
+                ""
+            )
+        } throws DoctorInstitutionRequestConflictException("医生身份已失效")
+
+        val error = assertThrows<InstitutionMembershipRequestConflictException> {
+            service.review(
+                legal,
+                MembershipRequestType.DOCTOR,
+                "doctor-request",
+                MembershipRequestDecision.APPROVED,
+                ""
+            )
+        }
+
+        assertEquals("医生身份已失效", error.message)
+    }
+
+    @Test
     fun `doctor leave relationship race is a typed conflict`() {
         val legal = legalActor()
         every { doctor.exists("doctor-leave") } returns true

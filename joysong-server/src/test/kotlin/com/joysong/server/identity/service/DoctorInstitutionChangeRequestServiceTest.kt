@@ -384,6 +384,31 @@ class DoctorInstitutionRelationshipServiceTest {
     }
 
     @Test
+    fun `join approval reports an invalidated doctor as a typed conflict`() {
+        every {
+            jdbcTemplate.queryForList(
+                match<String> { it.contains("FROM doctors d") && it.contains("FOR UPDATE") },
+                String::class.java,
+                "doctor-1"
+            )
+        } returns emptyList()
+
+        val error = assertThrows<DoctorInstitutionRequestConflictException> {
+            service.approveJoin("doctor-1", "institution-1", "legal-1")
+        }
+
+        assertEquals("医生身份已失效", error.message)
+        verify(exactly = 0) {
+            jdbcTemplate.queryForList(
+                match<String> { it.contains("FROM institutions") },
+                String::class.java,
+                any()
+            )
+        }
+        verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
+    }
+
+    @Test
     fun `join approval restores relationship selects first primary and never binds projects`() {
         every {
             jdbcTemplate.queryForList(

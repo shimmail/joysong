@@ -84,6 +84,10 @@ class InstitutionMembershipRequestService(
         block()
     } catch (error: InstitutionMembershipRequestNotFoundException) {
         throw error
+    } catch (error: DoctorInstitutionRequestConflictException) {
+        throw InstitutionMembershipRequestConflictException(
+            error.message ?: "机构关系申请已被其他操作处理"
+        )
     } catch (error: IllegalStateException) {
         throw InstitutionMembershipRequestConflictException(
             error.message ?: "机构关系申请已被其他操作处理"

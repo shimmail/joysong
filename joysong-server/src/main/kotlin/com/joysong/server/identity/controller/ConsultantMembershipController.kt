@@ -32,8 +32,7 @@ class ConsultantMembershipController(
             throw AccessDeniedException("只有本人已激活的顾问可以访问机构关系")
         }
         return BaseResponse.success(
-            queryService.listOwned(actor)
-                .filter { it.requestType == MembershipRequestType.CONSULTANT }
+            queryService.listConsultantCompatibility(actor)
                 .map { it.toConsultantCompatibilityResponse() }
         )
     }
@@ -95,5 +94,7 @@ private fun InstitutionMembershipRequestView.toConsultantCompatibilityResponse()
         updatedAt = updatedAt,
         confirmedBy = reviewedBy,
         confirmedAt = reviewedAt.takeIf { action == "JOIN" && status == "APPROVED" },
-        revokedAt = reviewedAt.takeIf { action == "LEAVE" && status == "APPROVED" }
+        revokedAt = reviewedAt.takeIf {
+            status == "REVOKED" || (action == "LEAVE" && status == "APPROVED")
+        }
     )

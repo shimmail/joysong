@@ -17,6 +17,37 @@ import java.time.LocalDateTime
 
 class ConsultantMembershipControllerTest {
     @Test
+    fun `compatibility GET uses the ledger plus legacy read adapter`() {
+        val auth = mockk<Authentication>()
+        val access = mockk<ManagementAccessService>()
+        val service = mockk<InstitutionMembershipRequestService>()
+        val queries = mockk<InstitutionMembershipRequestQueryService>()
+        val actor = ManagementActor(
+            "consultant-1", false, setOf("CONSULTANT"), null,
+            emptySet(), emptySet(), emptySet()
+        )
+        every { access.actor(auth) } returns actor
+        every { queries.listConsultantCompatibility(actor) } returns listOf(
+            view().copy(id = "ledger"),
+            view().copy(id = "legacy", status = "APPROVED", relationshipStatus = "APPROVED"),
+            view().copy(
+                id = "legacy-revoked",
+                status = "REVOKED",
+                relationshipStatus = "NONE",
+                reviewedAt = NOW
+            )
+        )
+
+        val rows = ConsultantMembershipController(access, service, queries).list(auth).data!!
+
+        assertEquals(listOf("ledger", "legacy", "legacy-revoked"), rows.map { it.id })
+        assertEquals("REVOKED", rows.last().status)
+        assertEquals(NOW, rows.last().revokedAt)
+        assertEquals(null, rows.last().confirmedAt)
+        verify(exactly = 1) { queries.listConsultantCompatibility(actor) }
+    }
+
+    @Test
     fun `compatibility submit dispatches a fixed consultant join`() {
         val auth = mockk<Authentication>()
         val access = mockk<ManagementAccessService>()

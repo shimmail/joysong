@@ -29,6 +29,8 @@ enum class DoctorInstitutionRequestStatus {
     WITHDRAWN
 }
 
+class DoctorInstitutionRequestConflictException(message: String) : RuntimeException(message)
+
 data class DoctorInstitutionChangeRequestView(
     val id: String,
     val doctorId: String,
@@ -390,7 +392,9 @@ class DoctorInstitutionRelationshipService(
 
     @Transactional
     fun approveJoin(doctorId: String, institutionId: String, reviewerId: String) {
-        require(lockCertifiedDoctor(doctorId)) { "医生身份已失效" }
+        if (!lockCertifiedDoctor(doctorId)) {
+            throw DoctorInstitutionRequestConflictException("医生身份已失效")
+        }
         requireNotNull(lockActiveInstitution(institutionId)) { "机构不存在、未认证或已删除" }
         val activeRelationshipCount = count(
             """
