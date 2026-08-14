@@ -154,28 +154,25 @@ final class ApiIdentityRepository implements IdentityRepository {
 
   @override
   Future<List<ConsultantMembership>> listConsultantMemberships() async {
-    return await _apiClient.get<List<ConsultantMembership>>(
-          '/management/consultant-memberships',
-          decodeData: (json) => _objectList(
-            json,
-          ).map(ConsultantMembership.fromJson).toList(growable: false),
-        ) ??
-        const [];
+    final requests = await listOwnedInstitutionMembershipRequests();
+    return requests
+        .where(
+          (request) =>
+              request.requestType ==
+              InstitutionMembershipRequestType.consultant,
+        )
+        .map(ConsultantMembership.fromMembershipRequest)
+        .toList(growable: false);
   }
 
   @override
   Future<ConsultantMembership> submitConsultantMembership(
     ConsultantMembershipDraft draft,
   ) async {
-    final result = await _apiClient.post<ConsultantMembership>(
-      '/management/consultant-memberships',
-      body: draft.toJson(),
-      decodeData: ConsultantMembership.fromJson,
+    final request = await submitInstitutionMembershipRequest(
+      draft.toNormalizedDraft(),
     );
-    if (result == null) {
-      throw const FormatException('顾问机构申请响应为空');
-    }
-    return result;
+    return ConsultantMembership.fromMembershipRequest(request);
   }
 
   @override
@@ -228,8 +225,31 @@ final class ApiIdentityRepository implements IdentityRepository {
   @override
   Future<List<InstitutionMembershipRequest>>
       listInstitutionMembershipRequests() async {
+    return _listInstitutionMembershipRequestsAt(
+      '/management/institution-membership-requests',
+    );
+  }
+
+  @override
+  Future<List<InstitutionMembershipRequest>>
+      listOwnedInstitutionMembershipRequests() async {
+    return _listInstitutionMembershipRequestsAt(
+      '/management/institution-membership-requests/owned',
+    );
+  }
+
+  @override
+  Future<List<InstitutionMembershipRequest>>
+      listReviewableInstitutionMembershipRequests() async {
+    return _listInstitutionMembershipRequestsAt(
+      '/management/institution-membership-requests/reviewable',
+    );
+  }
+
+  Future<List<InstitutionMembershipRequest>>
+      _listInstitutionMembershipRequestsAt(String path) async {
     return await _apiClient.get<List<InstitutionMembershipRequest>>(
-          '/management/institution-membership-requests',
+          path,
           decodeData: (json) => _objectList(
             json,
           ).map(InstitutionMembershipRequest.fromJson).toList(growable: false),
@@ -238,65 +258,100 @@ final class ApiIdentityRepository implements IdentityRepository {
   }
 
   @override
-  Future<void> submitInstitutionMembershipRequest({
-    required String requestType,
-    required String institutionId,
-    required String requestNote,
+  Future<InstitutionMembershipCandidatePage>
+      listInstitutionMembershipCandidates({
+    required InstitutionMembershipRequestType requestType,
+    required InstitutionMembershipAction action,
+    required String query,
+    required int offset,
+    required int limit,
   }) async {
-    await _apiClient.post<void>(
-      '/management/institution-membership-requests',
-      body: {
-        'requestType': requestType,
-        'institutionId': institutionId,
-        'requestNote': requestNote,
+    final result = await _apiClient.get<InstitutionMembershipCandidatePage>(
+      '/management/institution-membership-candidates',
+      query: {
+        'requestType': requestType.code,
+        'action': action.code,
+        'query': query,
+        'offset': offset,
+        'limit': limit,
       },
-      decodeData: (_) {},
+      decodeData: InstitutionMembershipCandidatePage.fromJson,
     );
+    if (result == null) {
+      throw const FormatException('候选机构响应为空');
+    }
+    return result;
   }
 
   @override
-  Future<void> reviewInstitutionMembershipRequest({
-    required String requestType,
+  Future<InstitutionMembershipRequest> submitInstitutionMembershipRequest(
+    InstitutionMembershipRequestDraft draft,
+  ) async {
+    final result = await _apiClient.post<InstitutionMembershipRequest>(
+      '/management/institution-membership-requests',
+      body: draft.toJson(),
+      decodeData: InstitutionMembershipRequest.fromJson,
+    );
+    return _requiredMembershipMutation(result);
+  }
+
+  @override
+  Future<InstitutionMembershipRequest> withdrawInstitutionMembershipRequest({
+    required InstitutionMembershipRequestType requestType,
     required String id,
-    required String decision,
+  }) async {
+    final result = await _apiClient.post<InstitutionMembershipRequest>(
+      '/management/institution-membership-requests/'
+      '${requestType.code}/${id.trim()}/withdraw',
+      decodeData: InstitutionMembershipRequest.fromJson,
+    );
+    return _requiredMembershipMutation(result);
+  }
+
+  @override
+  Future<InstitutionMembershipRequest> reviewInstitutionMembershipRequest({
+    required InstitutionMembershipRequestType requestType,
+    required String id,
+    required InstitutionMembershipDecision decision,
     required String reviewNote,
   }) async {
-    await _apiClient.post<void>(
-      '/management/institution-membership-requests/$requestType/$id/review',
-      body: {'decision': decision, 'reviewNote': reviewNote},
-      decodeData: (_) {},
+    final result = await _apiClient.post<InstitutionMembershipRequest>(
+      '/management/institution-membership-requests/'
+      '${requestType.code}/${id.trim()}/review',
+      body: {
+        'decision': decision.code,
+        'reviewNote': reviewNote.trim(),
+      },
+      decodeData: InstitutionMembershipRequest.fromJson,
     );
+    return _requiredMembershipMutation(result);
   }
 
   @override
   Future<List<DoctorInstitutionChangeRequest>>
       listDoctorInstitutionChangeRequests() async {
-    return await _apiClient.get<List<DoctorInstitutionChangeRequest>>(
-          '/management/institution-membership-requests',
-          decodeData: (json) => _objectList(json)
-              .where(_isDoctorInstitutionRequest)
-              .map(DoctorInstitutionChangeRequest.fromJson)
-              .toList(growable: false),
-        ) ??
-        const [];
+    final requests = await listInstitutionMembershipRequests();
+    return requests
+        .where(
+          (request) =>
+              request.requestType == InstitutionMembershipRequestType.doctor,
+        )
+        .map(DoctorInstitutionChangeRequest.fromMembershipRequest)
+        .toList(growable: false);
   }
 
   @override
   Future<void> submitDoctorInstitutionChangeRequest(
     DoctorInstitutionChangeRequestDraft draft,
   ) async {
-    await _apiClient.post<void>(
-      '/management/institution-membership-requests',
-      body: draft.toJson(),
-      decodeData: (_) {},
-    );
+    await submitInstitutionMembershipRequest(draft.toNormalizedDraft());
   }
 
   @override
   Future<void> withdrawDoctorInstitutionChangeRequest(String id) async {
-    await _apiClient.post<void>(
-      '/management/institution-membership-requests/DOCTOR/$id/withdraw',
-      decodeData: (_) {},
+    await withdrawInstitutionMembershipRequest(
+      requestType: InstitutionMembershipRequestType.doctor,
+      id: id,
     );
   }
 
@@ -306,10 +361,11 @@ final class ApiIdentityRepository implements IdentityRepository {
     required String decision,
     required String reviewNote,
   }) async {
-    await _apiClient.post<void>(
-      '/management/institution-membership-requests/DOCTOR/$id/review',
-      body: {'decision': decision, 'reviewNote': reviewNote},
-      decodeData: (_) {},
+    await reviewInstitutionMembershipRequest(
+      requestType: InstitutionMembershipRequestType.doctor,
+      id: id,
+      decision: InstitutionMembershipDecision.fromCode(decision),
+      reviewNote: reviewNote,
     );
   }
 
@@ -465,6 +521,11 @@ final class ApiIdentityRepository implements IdentityRepository {
 
 List<Object?> _objectList(Object? value) => value is List ? value : const [];
 
-bool _isDoctorInstitutionRequest(Object? value) =>
-    value is Map &&
-    value['requestType']?.toString().trim().toUpperCase() == 'DOCTOR';
+InstitutionMembershipRequest _requiredMembershipMutation(
+  InstitutionMembershipRequest? result,
+) {
+  if (result == null) {
+    throw const FormatException('机构关系申请响应为空');
+  }
+  return result;
+}

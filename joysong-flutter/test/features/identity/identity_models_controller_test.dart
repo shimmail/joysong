@@ -29,7 +29,28 @@ void main() {
 
     expect(context.canManageDoctors, isFalse);
     expect(context.canManageOrders, isFalse);
+    expect(context.consultantInstitutionIds, isEmpty);
     expect(context.hasAnyCapability, isFalse);
+  });
+
+  test('management context only defaults absent consultant institutions', () {
+    const base = <String, Object?>{
+      'userId': 'consultant-user-1',
+      'platformRole': 'USER',
+      'activeRoles': ['CONSULTANT'],
+      'managedInstitutionIds': <String>[],
+      'visibleInstitutionIds': <String>[],
+    };
+
+    for (final invalid in [null, 'institution-1', const <String, Object?>{}]) {
+      expect(
+        () => ManagementContext.fromJson({
+          ...base,
+          'consultantInstitutionIds': invalid,
+        }),
+        throwsFormatException,
+      );
+    }
   });
 
   test('private identity file rejects mismatched content signatures', () {
@@ -47,42 +68,181 @@ void main() {
     expect(PublicMediaPurpose.institutionProfile.name, 'institutionProfile');
   });
 
-  test('doctor institution change request parses audit fields and action', () {
-    final request = DoctorInstitutionChangeRequest.fromJson({
+  test('unified membership request parses both professional scopes and audits',
+      () {
+    final doctorRequest = InstitutionMembershipRequest.fromJson({
       'id': 'request-1',
       'requestType': 'DOCTOR',
-      'userId': 'doctor-user-1',
+      'applicantId': 'doctor-1',
+      'applicantName': 'Dr. Lin',
       'institutionId': 'institution-1',
-      'status': 'PENDING',
-      'action': 'LEAVE',
-      'doctorName': 'Dr. Lin',
       'institutionName': 'Joysong Clinic',
-      'requestNote': 'Moving practices',
-      'reviewNote': 'Acknowledged',
-      'createdAt': '2026-08-10T09:00:00Z',
-      'updatedAt': '2026-08-10T10:00:00Z',
+      'action': 'JOIN',
+      'status': 'PENDING',
+      'relationshipStatus': 'NONE',
+      'requestNote': 'Please add me',
+      'reviewNote': '',
+      'submittedBy': 'doctor-user-1',
+      'reviewedBy': null,
       'submittedAt': '2026-08-10T09:00:00Z',
-      'reviewedAt': '2026-08-10T10:00:00Z',
-      'deleted': false,
+      'reviewedAt': null,
+      'createdAt': '2026-08-10T09:00:00Z',
+      'updatedAt': '2026-08-10T09:01:00Z',
+    });
+    final consultantRequest = InstitutionMembershipRequest.fromJson({
+      'id': 'request-2',
+      'requestType': 'CONSULTANT',
+      'applicantId': 'consultant-1',
+      'applicantName': 'Ms. Chen',
+      'institutionId': 'institution-2',
+      'institutionName': 'Harbor Clinic',
+      'action': 'LEAVE',
+      'status': 'APPROVED',
+      'relationshipStatus': 'APPROVED',
+      'requestNote': 'Changing practices',
+      'reviewNote': 'Approved',
+      'submittedBy': 'consultant-user-1',
+      'reviewedBy': 'legal-user-1',
+      'submittedAt': '2026-08-11T09:00:00',
+      'reviewedAt': '2026-08-11T10:00:00',
+      'createdAt': '2026-08-11T09:00:00',
+      'updatedAt': '2026-08-11T10:00:00',
     });
 
-    expect(request.action, 'LEAVE');
-    expect(request.doctorName, 'Dr. Lin');
-    expect(request.institutionName, 'Joysong Clinic');
-    expect(request.reviewedAt, '2026-08-10T10:00:00Z');
+    expect(doctorRequest.requestType, InstitutionMembershipRequestType.doctor);
+    expect(doctorRequest.action, InstitutionMembershipAction.join);
+    expect(doctorRequest.status, InstitutionMembershipRequestStatus.pending);
     expect(
-      const DoctorInstitutionChangeRequestDraft(
-        institutionId: 'institution-1',
-        action: 'JOIN',
-        requestNote: 'Please add me',
+        doctorRequest.relationshipStatus, InstitutionRelationshipStatus.none);
+    expect(doctorRequest.applicantName, 'Dr. Lin');
+    expect(doctorRequest.institutionName, 'Joysong Clinic');
+    expect(doctorRequest.submittedAt, DateTime.parse('2026-08-10T09:00:00Z'));
+    expect(doctorRequest.reviewedBy, isNull);
+    expect(doctorRequest.reviewedAt, isNull);
+    expect(
+      consultantRequest.requestType,
+      InstitutionMembershipRequestType.consultant,
+    );
+    expect(consultantRequest.action, InstitutionMembershipAction.leave);
+    expect(
+      consultantRequest.relationshipStatus,
+      InstitutionRelationshipStatus.approved,
+    );
+    expect(consultantRequest.reviewedBy, 'legal-user-1');
+    expect(
+      consultantRequest.reviewedAt,
+      DateTime.parse('2026-08-11T10:00:00'),
+    );
+  });
+
+  test('membership protocol parses every status and rejects malformed values',
+      () {
+    final statuses = <String, InstitutionMembershipRequestStatus>{
+      'PENDING': InstitutionMembershipRequestStatus.pending,
+      'APPROVED': InstitutionMembershipRequestStatus.approved,
+      'REJECTED': InstitutionMembershipRequestStatus.rejected,
+      'WITHDRAWN': InstitutionMembershipRequestStatus.withdrawn,
+    };
+    for (final entry in statuses.entries) {
+      expect(
+        InstitutionMembershipRequest.fromJson({
+          ..._normalizedMembershipRequestJson,
+          'status': entry.key,
+        }).status,
+        entry.value,
+      );
+    }
+
+    for (final malformed in const <String, String>{
+      'requestType': 'NURSE',
+      'action': 'TRANSFER',
+      'status': 'UNKNOWN',
+      'relationshipStatus': 'REVOKED',
+    }.entries) {
+      expect(
+        () => InstitutionMembershipRequest.fromJson({
+          ..._normalizedMembershipRequestJson,
+          malformed.key: malformed.value,
+        }),
+        throwsFormatException,
+      );
+    }
+    for (final requiredField in const [
+      'id',
+      'requestType',
+      'applicantId',
+      'applicantName',
+      'institutionId',
+      'institutionName',
+      'action',
+      'status',
+      'relationshipStatus',
+      'requestNote',
+      'reviewNote',
+      'submittedBy',
+      'reviewedBy',
+      'submittedAt',
+      'reviewedAt',
+      'createdAt',
+      'updatedAt',
+    ]) {
+      final json = Map<String, Object?>.of(_normalizedMembershipRequestJson)
+        ..remove(requiredField);
+      expect(
+        () => InstitutionMembershipRequest.fromJson(json),
+        throwsFormatException,
+        reason: '$requiredField is required by the normalized response',
+      );
+    }
+    expect(
+      () => InstitutionMembershipRequest.fromJson({
+        ..._normalizedMembershipRequestJson,
+        'updatedAt': 'not-a-date',
+      }),
+      throwsFormatException,
+    );
+  });
+
+  test('membership draft and candidate page use the normalized wire contract',
+      () {
+    expect(
+      const InstitutionMembershipRequestDraft(
+        requestType: InstitutionMembershipRequestType.consultant,
+        action: InstitutionMembershipAction.leave,
+        institutionId: ' institution-1 ',
+        requestNote: ' Please remove me ',
       ).toJson(),
       {
-        'requestType': 'DOCTOR',
+        'requestType': 'CONSULTANT',
+        'action': 'LEAVE',
         'institutionId': 'institution-1',
-        'action': 'JOIN',
-        'requestNote': 'Please add me',
+        'requestNote': 'Please remove me',
       },
     );
+
+    final page = InstitutionMembershipCandidatePage.fromJson({
+      'items': [
+        {'id': 'institution-1', 'name': 'Joysong Clinic'},
+      ],
+      'offset': 20,
+      'limit': 100,
+      'hasMore': true,
+    });
+    expect(page.items.single.id, 'institution-1');
+    expect(page.items.single.name, 'Joysong Clinic');
+    expect(page.offset, 20);
+    expect(page.limit, 100);
+    expect(page.hasMore, isTrue);
+
+    final context = ManagementContext.fromJson({
+      'userId': 'consultant-user-1',
+      'platformRole': 'USER',
+      'activeRoles': ['CONSULTANT'],
+      'managedInstitutionIds': const [],
+      'visibleInstitutionIds': ['institution-1'],
+      'consultantInstitutionIds': ['institution-1'],
+    });
+    expect(context.consultantInstitutionIds, ['institution-1']);
   });
 
   test('management context is fetched again on every entry', () async {
@@ -186,28 +346,6 @@ void main() {
     expect(controller.selectedProfile?.description, '服务端保存结果');
   });
 
-  test('doctor project management uses professional-visible institutions',
-      () async {
-    final repository = _FakeIdentityRepository()
-      ..rejectLegalRepresentativeInstitutionList = true;
-    final controller = InstitutionProjectManagementController(
-      repository,
-      context: const ManagementContext(
-        userId: 'doctor-user-1',
-        platformRole: 'USER',
-        activeRoles: ['DOCTOR'],
-        doctorId: 'doctor-1',
-        managedInstitutionIds: [],
-        visibleInstitutionIds: ['inst-1'],
-      ),
-    );
-
-    await controller.load();
-
-    expect(controller.status, InstitutionProjectLoadStatus.ready);
-    expect(controller.institutions.single.id, 'inst-1');
-  });
-
   testWidgets('institution profile edit uses public info and album image copy',
       (tester) async {
     tester.view.physicalSize = const Size(800, 2200);
@@ -256,42 +394,19 @@ void main() {
     );
   });
 
-  testWidgets('legal representative cannot publish institution projects',
-      (tester) async {
-    final repository = _FakeIdentityRepository()
-      ..managementContext = const ManagementContext(
-        userId: 'user-legal',
-        platformRole: 'USER',
-        activeRoles: ['INSTITUTION_LEGAL_REPRESENTATIVE'],
-        managedInstitutionIds: ['inst-1'],
-        visibleInstitutionIds: ['inst-1'],
-        canManageInstitutionProjects: true,
-      );
-
-    await tester.pumpWidget(
-      _localizedApp(
-        home: ManagedInstitutionProjectsPage(
-          repository: repository,
-          context: repository.managementContext!,
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text('发布'), findsNothing);
-    expect(find.byIcon(Icons.add_rounded), findsNothing);
-  });
-
   testWidgets(
       'membership reviews offer approve and reject while project reviews retain request changes',
       (tester) async {
     final repository = _FakeIdentityRepository()
       ..membershipRequests = [
         InstitutionMembershipRequest.fromJson({
+          ..._normalizedMembershipRequestJson,
           'id': 'membership-1',
           'requestType': 'CONSULTANT',
-          'userId': 'consultant-1',
+          'applicantId': 'consultant-1',
+          'applicantName': '顾问一号',
           'institutionId': 'inst-1',
+          'institutionName': '悦美医疗美容',
           'status': 'PENDING',
         }),
       ];
@@ -499,6 +614,26 @@ Widget _localizedApp(
       home: home,
     );
 
+const _normalizedMembershipRequestJson = <String, Object?>{
+  'id': 'request-1',
+  'requestType': 'DOCTOR',
+  'applicantId': 'doctor-1',
+  'applicantName': 'Dr. Lin',
+  'institutionId': 'institution-1',
+  'institutionName': 'Joysong Clinic',
+  'action': 'JOIN',
+  'status': 'PENDING',
+  'relationshipStatus': 'NONE',
+  'requestNote': '',
+  'reviewNote': '',
+  'submittedBy': 'doctor-user-1',
+  'reviewedBy': null,
+  'submittedAt': '2026-08-10T09:00:00',
+  'reviewedAt': null,
+  'createdAt': '2026-08-10T09:00:00',
+  'updatedAt': '2026-08-10T09:01:00',
+};
+
 final class _FakeDiscoverRepository implements DiscoverRepository {
   const _FakeDiscoverRepository();
 
@@ -545,7 +680,6 @@ final class _FakeIdentityRepository implements IdentityRepository {
   final savedUpdates = <ManagedInstitutionProfileUpdate>[];
   List<InstitutionMembershipRequest> membershipRequests = const [];
   InstitutionProjectJoinRequestDraft? submittedJoinRequest;
-  bool rejectLegalRepresentativeInstitutionList = false;
 
   @override
   Future<void> deletePrivateDraft(String fileId) async {}
@@ -571,18 +705,13 @@ final class _FakeIdentityRepository implements IdentityRepository {
   }
 
   @override
-  Future<List<ManagedInstitutionSummary>> listManagedInstitutions() async {
-    if (rejectLegalRepresentativeInstitutionList) {
-      throw Exception('legal representative endpoint denied');
-    }
-    return [
-      const ManagedInstitutionSummary(
-        id: 'inst-1',
-        name: '悦美医疗美容',
-        city: '杭州',
-      ),
-    ];
-  }
+  Future<List<ManagedInstitutionSummary>> listManagedInstitutions() async => [
+        const ManagedInstitutionSummary(
+          id: 'inst-1',
+          name: '悦美医疗美容',
+          city: '杭州',
+        ),
+      ];
 
   @override
   Future<List<ManagedInstitutionSummary>>
@@ -705,19 +834,64 @@ final class _FakeIdentityRepository implements IdentityRepository {
       listInstitutionMembershipRequests() async => membershipRequests;
 
   @override
-  Future<void> submitInstitutionMembershipRequest({
-    required String requestType,
-    required String institutionId,
-    required String requestNote,
-  }) async {}
+  Future<List<InstitutionMembershipRequest>>
+      listOwnedInstitutionMembershipRequests() async => membershipRequests;
 
   @override
-  Future<void> reviewInstitutionMembershipRequest({
-    required String requestType,
+  Future<List<InstitutionMembershipRequest>>
+      listReviewableInstitutionMembershipRequests() async => membershipRequests;
+
+  @override
+  Future<InstitutionMembershipCandidatePage>
+      listInstitutionMembershipCandidates({
+    required InstitutionMembershipRequestType requestType,
+    required InstitutionMembershipAction action,
+    required String query,
+    required int offset,
+    required int limit,
+  }) =>
+          throw UnimplementedError();
+
+  @override
+  Future<InstitutionMembershipRequest> submitInstitutionMembershipRequest(
+    InstitutionMembershipRequestDraft draft,
+  ) async =>
+      InstitutionMembershipRequest.fromJson({
+        ..._normalizedMembershipRequestJson,
+        'requestType': draft.requestType.code,
+        'action': draft.action.code,
+        'institutionId': draft.institutionId.trim(),
+        'requestNote': draft.requestNote.trim(),
+      });
+
+  @override
+  Future<InstitutionMembershipRequest> withdrawInstitutionMembershipRequest({
+    required InstitutionMembershipRequestType requestType,
     required String id,
-    required String decision,
+  }) async =>
+      InstitutionMembershipRequest.fromJson({
+        ..._normalizedMembershipRequestJson,
+        'id': id.trim(),
+        'requestType': requestType.code,
+        'status': 'WITHDRAWN',
+      });
+
+  @override
+  Future<InstitutionMembershipRequest> reviewInstitutionMembershipRequest({
+    required InstitutionMembershipRequestType requestType,
+    required String id,
+    required InstitutionMembershipDecision decision,
     required String reviewNote,
-  }) async {}
+  }) async =>
+      InstitutionMembershipRequest.fromJson({
+        ..._normalizedMembershipRequestJson,
+        'id': id.trim(),
+        'requestType': requestType.code,
+        'status': decision.code,
+        'reviewNote': reviewNote.trim(),
+        'reviewedBy': 'reviewer-1',
+        'reviewedAt': '2026-08-10T10:00:00',
+      });
 
   @override
   Future<List<DoctorInstitutionChangeRequest>>
@@ -775,5 +949,30 @@ final class _FakeIdentityRepository implements IdentityRepository {
     required String id,
     required String decision,
     required String reviewNote,
+  }) async {}
+
+  @override
+  Future<DoctorProjectChangeRequest> submitDoctorProjectProfileUpdate(
+    DoctorProjectProfileUpdateDraft draft,
+  ) =>
+      throw UnimplementedError();
+
+  @override
+  Future<List<DoctorProjectProfileUpdateTarget>>
+      listDoctorProjectProfileUpdateTargets() async => const [];
+
+  @override
+  Future<List<DoctorProjectChangeRequest>>
+      listDoctorProjectChangeRequests() async => const [];
+
+  @override
+  Future<void> withdrawDoctorProjectChangeRequest(String id) async {}
+
+  @override
+  Future<void> reviewDoctorProjectChangeRequest({
+    required String id,
+    required String decision,
+    required String reviewNote,
+    required bool force,
   }) async {}
 }

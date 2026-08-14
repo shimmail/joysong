@@ -380,12 +380,12 @@ class InstitutionMembershipRequestsPage extends StatefulWidget {
     required String requestType,
     this.reviewMode = false,
     super.key,
-  }) : requestType = _validateMembershipRequestType(requestType);
+  }) : requestType = InstitutionMembershipRequestType.fromCode(requestType);
 
   final IdentityRepository repository;
   final DiscoverRepository discoverRepository;
   final ManagementContext context;
-  final String requestType;
+  final InstitutionMembershipRequestType requestType;
   final bool reviewMode;
 
   @override
@@ -452,7 +452,7 @@ class _InstitutionMembershipRequestsPageState
       if (!widget.reviewMode && item.requestType != widget.requestType) {
         return false;
       }
-      if (!widget.reviewMode && item.userId != widget.context.userId) {
+      if (!widget.reviewMode && item.applicantId != widget.context.userId) {
         return false;
       }
       return true;
@@ -530,10 +530,10 @@ class _InstitutionMembershipRequestsPageState
                         contentPadding: EdgeInsets.zero,
                         leading: const Icon(Icons.apartment_outlined),
                         title: Text(widget.reviewMode
-                            ? '${_institutionName(request.institutionId)} · ${request.userId}'
-                            : _institutionName(request.institutionId)),
+                            ? '${_institutionName(request)} · ${request.applicantName}'
+                            : _institutionName(request)),
                         subtitle: Text([
-                          _statusLabel(request.status),
+                          _statusLabel(request.status.code),
                           if (request.requestNote.isNotEmpty)
                             request.requestNote,
                           if (request.reviewNote.isNotEmpty)
@@ -542,14 +542,15 @@ class _InstitutionMembershipRequestsPageState
                               'Review: ${request.reviewNote}',
                             ),
                         ].join('\n')),
-                        trailing:
-                            widget.reviewMode && request.status == 'PENDING'
-                                ? IconButton(
-                                    tooltip: context.localized('审核', 'Review'),
-                                    icon: const Icon(Icons.fact_check_outlined),
-                                    onPressed: () => _review(request),
-                                  )
-                                : null,
+                        trailing: widget.reviewMode &&
+                                request.status ==
+                                    InstitutionMembershipRequestStatus.pending
+                            ? IconButton(
+                                tooltip: context.localized('审核', 'Review'),
+                                icon: const Icon(Icons.fact_check_outlined),
+                                onPressed: () => _review(request),
+                              )
+                            : null,
                       ),
                 ],
               ),
@@ -569,9 +570,12 @@ class _InstitutionMembershipRequestsPageState
     setState(() => _saving = true);
     try {
       await widget.repository.submitInstitutionMembershipRequest(
-        requestType: widget.requestType,
-        institutionId: institutionId,
-        requestNote: _note.text,
+        InstitutionMembershipRequestDraft(
+          requestType: widget.requestType,
+          action: InstitutionMembershipAction.join,
+          institutionId: institutionId,
+          requestNote: _note.text,
+        ),
       );
       _note.clear();
       await _load();
@@ -587,7 +591,7 @@ class _InstitutionMembershipRequestsPageState
         .push<InstitutionPickerSelection>(MaterialPageRoute(
       builder: (_) => InstitutionPickerPage(
         repository: widget.discoverRepository,
-        role: IdentityRoleType.fromCode(widget.requestType),
+        role: IdentityRoleType.fromCode(widget.requestType.code),
       ),
     ));
     if (!mounted || selection == null) return;
@@ -604,7 +608,7 @@ class _InstitutionMembershipRequestsPageState
       await widget.repository.reviewInstitutionMembershipRequest(
         requestType: request.requestType,
         id: request.id,
-        decision: review.decision,
+        decision: InstitutionMembershipDecision.fromCode(review.decision),
         reviewNote: review.note,
       );
       await _load();
@@ -613,19 +617,12 @@ class _InstitutionMembershipRequestsPageState
     }
   }
 
-  String _institutionName(String id) =>
+  String _institutionName(InstitutionMembershipRequest request) =>
       _institutions
-          .where((item) => item.id == id)
+          .where((item) => item.id == request.institutionId)
           .map((item) => item.name)
           .firstOrNull ??
-      id;
-}
-
-String _validateMembershipRequestType(String value) {
-  if (value != 'DOCTOR') {
-    throw ArgumentError.value(value, 'requestType');
-  }
-  return value;
+      request.institutionName;
 }
 
 class PlatformProjectRequestPage extends StatefulWidget {

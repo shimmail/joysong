@@ -307,6 +307,7 @@ final class ManagementContext {
     required this.managedInstitutionIds,
     required this.visibleInstitutionIds,
     this.doctorInstitutionIds = const [],
+    this.consultantInstitutionIds = const [],
     this.doctorId,
     this.canManageDoctors = false,
     this.canManageInstitutions = false,
@@ -332,6 +333,11 @@ final class ManagementContext {
       managedInstitutionIds: _stringList(map['managedInstitutionIds']),
       visibleInstitutionIds: _stringList(map['visibleInstitutionIds']),
       doctorInstitutionIds: _stringList(map['doctorInstitutionIds']),
+      consultantInstitutionIds: _optionalWireStringList(
+        map,
+        'consultantInstitutionIds',
+        '顾问机构列表',
+      ),
       canManageDoctors: _boolean(map['canManageDoctors']),
       canManageInstitutions: _boolean(map['canManageInstitutions']),
       canManageInstitutionProjects:
@@ -359,6 +365,7 @@ final class ManagementContext {
   final List<String> managedInstitutionIds;
   final List<String> visibleInstitutionIds;
   final List<String> doctorInstitutionIds;
+  final List<String> consultantInstitutionIds;
   final bool canManageDoctors;
   final bool canManageInstitutions;
   final bool canManageInstitutionProjects;
@@ -1027,6 +1034,22 @@ List<String> _stringList(Object? value) {
   return const [];
 }
 
+List<String> _optionalWireStringList(
+  Map<String, Object?> map,
+  String key,
+  String field,
+) {
+  if (!map.containsKey(key)) return const [];
+  final value = map[key];
+  if (value is! List) throw FormatException('响应包含无效的 $field');
+  return value.map((item) {
+    if (item is! String || item.trim().isEmpty) {
+      throw FormatException('响应包含无效的 $field');
+    }
+    return item.trim();
+  }).toList(growable: false);
+}
+
 List<String> _normalizedStrings(Iterable<String> values) => values
     .map((value) => value.trim())
     .where((value) => value.isNotEmpty)
@@ -1047,37 +1070,220 @@ final class InstitutionOption {
   final String name;
 }
 
+enum InstitutionMembershipRequestType {
+  doctor('DOCTOR'),
+  consultant('CONSULTANT');
+
+  const InstitutionMembershipRequestType(this.code);
+
+  final String code;
+
+  static InstitutionMembershipRequestType fromCode(Object? value) =>
+      _protocolEnum(
+        value,
+        InstitutionMembershipRequestType.values,
+        (item) => item.code,
+        'requestType',
+      );
+}
+
+enum InstitutionMembershipAction {
+  join('JOIN'),
+  leave('LEAVE');
+
+  const InstitutionMembershipAction(this.code);
+
+  final String code;
+
+  static InstitutionMembershipAction fromCode(Object? value) => _protocolEnum(
+        value,
+        InstitutionMembershipAction.values,
+        (item) => item.code,
+        'action',
+      );
+}
+
+enum InstitutionMembershipRequestStatus {
+  pending('PENDING'),
+  approved('APPROVED'),
+  rejected('REJECTED'),
+  withdrawn('WITHDRAWN');
+
+  const InstitutionMembershipRequestStatus(this.code);
+
+  final String code;
+
+  static InstitutionMembershipRequestStatus fromCode(Object? value) =>
+      _protocolEnum(
+        value,
+        InstitutionMembershipRequestStatus.values,
+        (item) => item.code,
+        'status',
+      );
+}
+
+enum InstitutionMembershipDecision {
+  approved('APPROVED'),
+  rejected('REJECTED');
+
+  const InstitutionMembershipDecision(this.code);
+
+  final String code;
+
+  static InstitutionMembershipDecision fromCode(Object? value) => _protocolEnum(
+        value,
+        InstitutionMembershipDecision.values,
+        (item) => item.code,
+        'decision',
+      );
+}
+
+enum InstitutionRelationshipStatus {
+  approved('APPROVED'),
+  none('NONE');
+
+  const InstitutionRelationshipStatus(this.code);
+
+  final String code;
+
+  static InstitutionRelationshipStatus fromCode(Object? value) => _protocolEnum(
+        value,
+        InstitutionRelationshipStatus.values,
+        (item) => item.code,
+        'relationshipStatus',
+      );
+}
+
 final class InstitutionMembershipRequest {
   const InstitutionMembershipRequest({
     required this.id,
     required this.requestType,
-    required this.userId,
+    required this.applicantId,
+    required this.applicantName,
     required this.institutionId,
+    required this.institutionName,
+    required this.action,
     required this.status,
-    this.requestNote = '',
-    this.reviewNote = '',
+    required this.relationshipStatus,
+    required this.requestNote,
+    required this.reviewNote,
+    required this.submittedBy,
+    required this.submittedAt,
+    required this.createdAt,
+    required this.updatedAt,
+    this.reviewedBy,
+    this.reviewedAt,
   });
 
   factory InstitutionMembershipRequest.fromJson(Object? json) {
     final map = _jsonMap(json, '机构加入申请');
     return InstitutionMembershipRequest(
       id: _requiredText(map['id'], '申请 id'),
-      requestType: _requiredText(map['requestType'], '申请类型'),
-      userId: _requiredText(map['userId'], '申请人'),
+      requestType: InstitutionMembershipRequestType.fromCode(
+        map['requestType'],
+      ),
+      applicantId: _requiredText(map['applicantId'], '申请人 id'),
+      applicantName: _requiredText(map['applicantName'], '申请人名称'),
       institutionId: _requiredText(map['institutionId'], '机构'),
-      status: _requiredText(map['status'], '申请状态'),
-      requestNote: map['requestNote']?.toString() ?? '',
-      reviewNote: map['reviewNote']?.toString() ?? '',
+      institutionName: _requiredText(map['institutionName'], '机构名称'),
+      action: InstitutionMembershipAction.fromCode(map['action']),
+      status: InstitutionMembershipRequestStatus.fromCode(map['status']),
+      relationshipStatus:
+          InstitutionRelationshipStatus.fromCode(map['relationshipStatus']),
+      requestNote: _requiredWireString(map, 'requestNote', '申请说明'),
+      reviewNote: _requiredWireString(map, 'reviewNote', '审核意见'),
+      submittedBy: _requiredText(map['submittedBy'], '提交人'),
+      reviewedBy: _nullableWireString(map, 'reviewedBy', '审核人'),
+      submittedAt: _requiredWireDateTime(map['submittedAt'], '提交时间'),
+      reviewedAt: _nullableWireDateTime(map, 'reviewedAt', '审核时间'),
+      createdAt: _requiredWireDateTime(map['createdAt'], '创建时间'),
+      updatedAt: _requiredWireDateTime(map['updatedAt'], '更新时间'),
     );
   }
 
   final String id;
-  final String requestType;
-  final String userId;
+  final InstitutionMembershipRequestType requestType;
+  final String applicantId;
+  final String applicantName;
   final String institutionId;
-  final String status;
+  final String institutionName;
+  final InstitutionMembershipAction action;
+  final InstitutionMembershipRequestStatus status;
+  final InstitutionRelationshipStatus relationshipStatus;
   final String requestNote;
   final String reviewNote;
+  final String submittedBy;
+  final String? reviewedBy;
+  final DateTime submittedAt;
+  final DateTime? reviewedAt;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+}
+
+final class InstitutionMembershipRequestDraft {
+  const InstitutionMembershipRequestDraft({
+    required this.requestType,
+    required this.action,
+    required this.institutionId,
+    this.requestNote = '',
+  });
+
+  final InstitutionMembershipRequestType requestType;
+  final InstitutionMembershipAction action;
+  final String institutionId;
+  final String requestNote;
+
+  Map<String, Object?> toJson() => {
+        'requestType': requestType.code,
+        'action': action.code,
+        'institutionId': institutionId.trim(),
+        'requestNote': requestNote.trim(),
+      };
+}
+
+final class InstitutionMembershipCandidate {
+  const InstitutionMembershipCandidate({required this.id, required this.name});
+
+  factory InstitutionMembershipCandidate.fromJson(Object? json) {
+    final map = _jsonMap(json, '候选机构');
+    return InstitutionMembershipCandidate(
+      id: _requiredText(map['id'], '机构 id'),
+      name: _requiredText(map['name'], '机构名称'),
+    );
+  }
+
+  final String id;
+  final String name;
+}
+
+final class InstitutionMembershipCandidatePage {
+  const InstitutionMembershipCandidatePage({
+    required this.items,
+    required this.offset,
+    required this.limit,
+    required this.hasMore,
+  });
+
+  factory InstitutionMembershipCandidatePage.fromJson(Object? json) {
+    final map = _jsonMap(json, '候选机构分页');
+    final rawItems = map['items'];
+    if (rawItems is! List) {
+      throw const FormatException('响应缺少候选机构列表');
+    }
+    return InstitutionMembershipCandidatePage(
+      items: rawItems
+          .map(InstitutionMembershipCandidate.fromJson)
+          .toList(growable: false),
+      offset: _requiredWireInteger(map['offset'], 'offset'),
+      limit: _requiredWireInteger(map['limit'], 'limit'),
+      hasMore: _requiredWireBoolean(map['hasMore'], 'hasMore'),
+    );
+  }
+
+  final List<InstitutionMembershipCandidate> items;
+  final int offset;
+  final int limit;
+  final bool hasMore;
 }
 
 final class DoctorInstitutionChangeRequest {
@@ -1120,6 +1326,26 @@ final class DoctorInstitutionChangeRequest {
     );
   }
 
+  factory DoctorInstitutionChangeRequest.fromMembershipRequest(
+    InstitutionMembershipRequest request,
+  ) =>
+      DoctorInstitutionChangeRequest(
+        id: request.id,
+        requestType: request.requestType.code,
+        userId: request.applicantId,
+        institutionId: request.institutionId,
+        status: request.status.code,
+        action: request.action.code,
+        requestNote: request.requestNote,
+        reviewNote: request.reviewNote,
+        doctorName: request.applicantName,
+        institutionName: request.institutionName,
+        createdAt: request.createdAt.toIso8601String(),
+        updatedAt: request.updatedAt.toIso8601String(),
+        submittedAt: request.submittedAt.toIso8601String(),
+        reviewedAt: request.reviewedAt?.toIso8601String() ?? '',
+      );
+
   final String id;
   final String requestType;
   final String userId;
@@ -1148,12 +1374,15 @@ final class DoctorInstitutionChangeRequestDraft {
   final String action;
   final String requestNote;
 
-  Map<String, Object?> toJson() => {
-        'requestType': 'DOCTOR',
-        'institutionId': institutionId.trim(),
-        'action': action,
-        'requestNote': requestNote.trim(),
-      };
+  InstitutionMembershipRequestDraft toNormalizedDraft() =>
+      InstitutionMembershipRequestDraft(
+        requestType: InstitutionMembershipRequestType.doctor,
+        action: InstitutionMembershipAction.fromCode(action),
+        institutionId: institutionId,
+        requestNote: requestNote,
+      );
+
+  Map<String, Object?> toJson() => toNormalizedDraft().toJson();
 }
 
 final class ProfessionalProjectRequest {
@@ -1599,6 +1828,29 @@ final class ConsultantMembership {
     );
   }
 
+  factory ConsultantMembership.fromMembershipRequest(
+    InstitutionMembershipRequest request,
+  ) =>
+      ConsultantMembership(
+        id: request.id,
+        institutionId: request.institutionId,
+        institutionName: request.institutionName,
+        status: request.status.code,
+        requestNote: request.requestNote,
+        reviewNote: request.reviewNote,
+        createdAt: request.createdAt,
+        updatedAt: request.updatedAt,
+        confirmedBy: request.reviewedBy,
+        confirmedAt: request.action == InstitutionMembershipAction.join &&
+                request.status == InstitutionMembershipRequestStatus.approved
+            ? request.reviewedAt
+            : null,
+        revokedAt: request.action == InstitutionMembershipAction.leave &&
+                request.status == InstitutionMembershipRequestStatus.approved
+            ? request.reviewedAt
+            : null,
+      );
+
   final String id;
   final String institutionId;
   final String institutionName;
@@ -1621,10 +1873,15 @@ final class ConsultantMembershipDraft {
   final String institutionId;
   final String requestNote;
 
-  Map<String, Object?> toJson() => {
-        'institutionId': institutionId.trim(),
-        'requestNote': requestNote.trim(),
-      };
+  InstitutionMembershipRequestDraft toNormalizedDraft() =>
+      InstitutionMembershipRequestDraft(
+        requestType: InstitutionMembershipRequestType.consultant,
+        action: InstitutionMembershipAction.join,
+        institutionId: institutionId,
+        requestNote: requestNote,
+      );
+
+  Map<String, Object?> toJson() => toNormalizedDraft().toJson();
 }
 
 final class InstitutionProjectRequestDraft {
@@ -1668,6 +1925,80 @@ String _requiredText(Object? value, String field) {
     throw FormatException('响应缺少 $field');
   }
   return result;
+}
+
+T _protocolEnum<T>(
+  Object? value,
+  Iterable<T> values,
+  String Function(T value) codeOf,
+  String field,
+) {
+  final code = value is String ? value.trim().toUpperCase() : '';
+  for (final candidate in values) {
+    if (codeOf(candidate) == code) return candidate;
+  }
+  throw FormatException('响应包含无效的 $field');
+}
+
+String _requiredWireString(
+  Map<String, Object?> map,
+  String key,
+  String field,
+) {
+  if (!map.containsKey(key) || map[key] is! String) {
+    throw FormatException('响应缺少 $field');
+  }
+  return map[key]! as String;
+}
+
+String? _nullableWireString(
+  Map<String, Object?> map,
+  String key,
+  String field,
+) {
+  if (!map.containsKey(key)) throw FormatException('响应缺少 $field');
+  if (map[key] == null) return null;
+  final value = map[key];
+  if (value is! String) throw FormatException('响应包含无效的 $field');
+  final normalized = value.trim();
+  return normalized.isEmpty ? null : normalized;
+}
+
+DateTime _requiredWireDateTime(Object? value, String field) {
+  final parsed = _nullableWireDateTimeValue(value);
+  if (parsed == null) throw FormatException('响应缺少有效的 $field');
+  return parsed;
+}
+
+DateTime? _nullableWireDateTime(
+  Map<String, Object?> map,
+  String key,
+  String field,
+) {
+  if (!map.containsKey(key)) throw FormatException('响应缺少 $field');
+  if (map[key] == null) return null;
+  final parsed = _nullableWireDateTimeValue(map[key]);
+  if (parsed == null) throw FormatException('响应包含无效的 $field');
+  return parsed;
+}
+
+DateTime? _nullableWireDateTimeValue(Object? value) {
+  if (value is! String) return null;
+  final text = value.trim();
+  return text.isEmpty ? null : DateTime.tryParse(text);
+}
+
+int _requiredWireInteger(Object? value, String field) {
+  if (value is int) return value;
+  if (value is num && value.isFinite && value == value.toInt()) {
+    return value.toInt();
+  }
+  throw FormatException('响应缺少有效的 $field');
+}
+
+bool _requiredWireBoolean(Object? value, String field) {
+  if (value is bool) return value;
+  throw FormatException('响应缺少有效的 $field');
 }
 
 String? _nullableText(Object? value) {

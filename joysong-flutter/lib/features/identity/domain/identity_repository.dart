@@ -47,16 +47,34 @@ abstract interface class IdentityRepository {
   Future<List<InstitutionMembershipRequest>>
       listInstitutionMembershipRequests();
 
-  Future<void> submitInstitutionMembershipRequest({
-    required String requestType,
-    required String institutionId,
-    required String requestNote,
+  Future<List<InstitutionMembershipRequest>>
+      listOwnedInstitutionMembershipRequests();
+
+  Future<List<InstitutionMembershipRequest>>
+      listReviewableInstitutionMembershipRequests();
+
+  Future<InstitutionMembershipCandidatePage>
+      listInstitutionMembershipCandidates({
+    required InstitutionMembershipRequestType requestType,
+    required InstitutionMembershipAction action,
+    required String query,
+    required int offset,
+    required int limit,
   });
 
-  Future<void> reviewInstitutionMembershipRequest({
-    required String requestType,
+  Future<InstitutionMembershipRequest> submitInstitutionMembershipRequest(
+    InstitutionMembershipRequestDraft draft,
+  );
+
+  Future<InstitutionMembershipRequest> withdrawInstitutionMembershipRequest({
+    required InstitutionMembershipRequestType requestType,
     required String id,
-    required String decision,
+  });
+
+  Future<InstitutionMembershipRequest> reviewInstitutionMembershipRequest({
+    required InstitutionMembershipRequestType requestType,
+    required String id,
+    required InstitutionMembershipDecision decision,
     required String reviewNote,
   });
 

@@ -30,7 +30,10 @@ void main() {
       entry: find.text('Apply to institution').first,
       expectedNote: 'doctor own request',
     );
-    expect(identityRepository.submittedTypes, ['DOCTOR']);
+    expect(
+      identityRepository.submittedTypes,
+      [InstitutionMembershipRequestType.doctor],
+    );
     expect(identityRepository.optionCalls, 0);
 
     await tester.pumpWidget(MaterialApp(
@@ -75,7 +78,7 @@ Future<void> _applyFromEntry(
 }
 
 final class _FakeIdentityRepository implements IdentityRepository {
-  final submittedTypes = <String>[];
+  final submittedTypes = <InstitutionMembershipRequestType>[];
   var optionCalls = 0;
 
   @override
@@ -98,52 +101,84 @@ final class _FakeIdentityRepository implements IdentityRepository {
   @override
   Future<List<InstitutionMembershipRequest>>
       listInstitutionMembershipRequests() async => [
-            InstitutionMembershipRequest.fromJson({
-              'id': 'doctor-own',
-              'requestType': 'DOCTOR',
-              'userId': 'professional-1',
-              'institutionId': 'inst-1',
-              'status': 'PENDING',
-              'requestNote': 'doctor own request',
-            }),
-            InstitutionMembershipRequest.fromJson({
-              'id': 'consultant-own',
-              'requestType': 'CONSULTANT',
-              'userId': 'professional-1',
-              'institutionId': 'inst-1',
-              'status': 'PENDING',
-              'requestNote': 'consultant own request',
-            }),
-            InstitutionMembershipRequest.fromJson({
-              'id': 'other-role',
-              'requestType': 'CONSULTANT',
-              'userId': 'other-user',
-              'institutionId': 'inst-1',
-              'status': 'PENDING',
-              'requestNote': 'other role request',
-            }),
-            InstitutionMembershipRequest.fromJson({
-              'id': 'other-user',
-              'requestType': 'DOCTOR',
-              'userId': 'other-user',
-              'institutionId': 'inst-1',
-              'status': 'PENDING',
-              'requestNote': 'other user request',
-            }),
+            _membershipRequest(
+              id: 'doctor-own',
+              requestType: InstitutionMembershipRequestType.doctor,
+              applicantId: 'professional-1',
+              requestNote: 'doctor own request',
+            ),
+            _membershipRequest(
+              id: 'consultant-own',
+              requestType: InstitutionMembershipRequestType.consultant,
+              applicantId: 'professional-1',
+              requestNote: 'consultant own request',
+            ),
+            _membershipRequest(
+              id: 'other-role',
+              requestType: InstitutionMembershipRequestType.consultant,
+              applicantId: 'other-user',
+              requestNote: 'other role request',
+            ),
+            _membershipRequest(
+              id: 'other-user',
+              requestType: InstitutionMembershipRequestType.doctor,
+              applicantId: 'other-user',
+              requestNote: 'other user request',
+            ),
           ];
 
   @override
-  Future<void> submitInstitutionMembershipRequest({
-    required String requestType,
-    required String institutionId,
-    required String requestNote,
-  }) async {
-    submittedTypes.add(requestType);
+  Future<List<InstitutionMembershipRequest>>
+      listOwnedInstitutionMembershipRequests() =>
+          listInstitutionMembershipRequests();
+
+  @override
+  Future<List<InstitutionMembershipRequest>>
+      listReviewableInstitutionMembershipRequests() =>
+          listInstitutionMembershipRequests();
+
+  @override
+  Future<InstitutionMembershipRequest> submitInstitutionMembershipRequest(
+    InstitutionMembershipRequestDraft draft,
+  ) async {
+    submittedTypes.add(draft.requestType);
+    return _membershipRequest(
+      id: 'submitted-request',
+      requestType: draft.requestType,
+      applicantId: 'professional-1',
+      requestNote: draft.requestNote.trim(),
+    );
   }
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
+
+InstitutionMembershipRequest _membershipRequest({
+  required String id,
+  required InstitutionMembershipRequestType requestType,
+  required String applicantId,
+  required String requestNote,
+}) =>
+    InstitutionMembershipRequest.fromJson({
+      'id': id,
+      'requestType': requestType.code,
+      'applicantId': applicantId,
+      'applicantName': 'Alex Chen',
+      'institutionId': 'inst-1',
+      'institutionName': 'Joysong Clinic',
+      'action': 'JOIN',
+      'status': 'PENDING',
+      'relationshipStatus': 'NONE',
+      'requestNote': requestNote,
+      'reviewNote': '',
+      'submittedBy': applicantId,
+      'reviewedBy': null,
+      'submittedAt': '2026-08-10T09:00:00',
+      'reviewedAt': null,
+      'createdAt': '2026-08-10T09:00:00',
+      'updatedAt': '2026-08-10T09:00:00',
+    });
 
 final class _FakeDiscoverRepository implements DiscoverRepository {
   @override

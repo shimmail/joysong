@@ -10,7 +10,7 @@ import 'package:joysong_flutter/features/identity/domain/identity_repository.dar
 import 'package:joysong_flutter/features/identity/presentation/consultant_management_pages.dart';
 
 void main() {
-  test('consultant management VO and repository use the normalized contracts',
+  test('legacy consultant repository methods delegate the normalized contract',
       () async {
     final client = _RecordingApiClient();
     final repository = ApiIdentityRepository(client);
@@ -24,10 +24,25 @@ void main() {
     );
     final projects = await repository.listManagementProjects();
 
-    expect(memberships.single.institutionName, 'Joysong Clinic');
-    expect(memberships.single.confirmedBy, 'legal-1');
+    final approvedJoin = memberships.firstWhere(
+      (membership) => membership.id == 'membership-1',
+    );
+    final approvedLeave = memberships.firstWhere(
+      (membership) => membership.id == 'membership-leave',
+    );
+    expect(memberships, hasLength(2));
+    expect(approvedJoin.institutionName, 'Joysong Clinic');
+    expect(approvedJoin.confirmedBy, 'legal-1');
     expect(
-        memberships.single.confirmedAt, DateTime.parse('2026-08-12T10:05:00'));
+      approvedJoin.confirmedAt,
+      DateTime.parse('2026-08-12T10:05:00'),
+    );
+    expect(approvedJoin.revokedAt, isNull);
+    expect(approvedLeave.confirmedAt, isNull);
+    expect(
+      approvedLeave.revokedAt,
+      DateTime.parse('2026-08-12T10:05:00'),
+    );
     expect(submitted.institutionId, 'institution-2');
     expect(projects.single.categoryTags, 'skin,laser');
     expect(projects.single.referencePrice, 980.50);
@@ -41,11 +56,16 @@ void main() {
       );
     }
     expect(client.requests, [
-      const _Request('GET', '/management/consultant-memberships'),
+      const _Request(
+        'GET',
+        '/management/institution-membership-requests/owned',
+      ),
       const _Request(
         'POST',
-        '/management/consultant-memberships',
+        '/management/institution-membership-requests',
         body: {
+          'requestType': 'CONSULTANT',
+          'action': 'JOIN',
           'institutionId': 'institution-2',
           'requestNote': '希望加入',
         },
@@ -124,6 +144,26 @@ const _membershipJson = <String, Object?>{
   'revokedAt': null,
 };
 
+const _normalizedMembershipJson = <String, Object?>{
+  'id': 'membership-1',
+  'requestType': 'CONSULTANT',
+  'applicantId': 'consultant-1',
+  'applicantName': 'Alex Chen',
+  'institutionId': 'institution-1',
+  'institutionName': 'Joysong Clinic',
+  'action': 'JOIN',
+  'status': 'APPROVED',
+  'relationshipStatus': 'APPROVED',
+  'requestNote': 'Experienced consultant',
+  'reviewNote': 'Welcome',
+  'submittedBy': 'consultant-1',
+  'reviewedBy': 'legal-1',
+  'submittedAt': '2026-08-12T10:00:00',
+  'reviewedAt': '2026-08-12T10:05:00',
+  'createdAt': '2026-08-12T10:00:00',
+  'updatedAt': '2026-08-12T10:05:00',
+};
+
 const _projectJson = <String, Object?>{
   'id': 'project-1',
   'name': 'Skin Renewal',
@@ -148,8 +188,22 @@ final class _RecordingApiClient extends ApiClient {
     required T Function(Object? json) decodeData,
   }) async {
     requests.add(_Request('GET', path));
-    return decodeData(
-        path.endsWith('/projects') ? [_projectJson] : [_membershipJson]);
+    return decodeData(path.endsWith('/projects')
+        ? [_projectJson]
+        : [
+            {
+              ..._normalizedMembershipJson,
+              'id': 'doctor-membership',
+              'requestType': 'DOCTOR',
+            },
+            _normalizedMembershipJson,
+            {
+              ..._normalizedMembershipJson,
+              'id': 'membership-leave',
+              'action': 'LEAVE',
+              'relationshipStatus': 'NONE',
+            },
+          ]);
   }
 
   @override
@@ -159,7 +213,18 @@ final class _RecordingApiClient extends ApiClient {
     required T Function(Object? json) decodeData,
   }) async {
     requests.add(_Request('POST', path, body: body));
-    return decodeData({..._membershipJson, 'institutionId': 'institution-2'});
+    return decodeData({
+      ..._normalizedMembershipJson,
+      'id': 'membership-2',
+      'institutionId': 'institution-2',
+      'institutionName': 'New Clinic',
+      'status': 'PENDING',
+      'relationshipStatus': 'NONE',
+      'requestNote': '希望加入',
+      'reviewNote': '',
+      'reviewedBy': null,
+      'reviewedAt': null,
+    });
   }
 }
 
