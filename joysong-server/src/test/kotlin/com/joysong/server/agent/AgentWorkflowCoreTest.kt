@@ -23,6 +23,10 @@ import com.joysong.server.agent.service.AgentRouteAssessment
 import com.joysong.server.agent.service.ParsedAgentRoute
 import com.joysong.server.agent.service.AgentPromptEvidence
 import com.joysong.server.agent.service.AgentQueryTarget
+import com.joysong.server.agent.service.ComparisonMissingField
+import com.joysong.server.agent.service.ComparisonOperand
+import com.joysong.server.agent.service.ComparisonRequest
+import com.joysong.server.agent.service.ComparisonRequestBuilder
 import com.joysong.server.agent.streaming.AgentStreamEvent
 import com.joysong.server.chat.dto.SendMessageRequest
 import com.joysong.server.chat.entity.ChatMessageEntity
@@ -94,7 +98,8 @@ class AgentWorkflowCoreTest {
         context,
         objectMapper,
         clock = clock,
-        turnLease = turnLease
+        turnLease = turnLease,
+        comparisonRequestBuilder = ComparisonRequestBuilder()
     )
 
     @BeforeEach
@@ -603,6 +608,7 @@ class AgentWorkflowCoreTest {
         every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns session()
         every { turns.findBySessionIdAndIdempotencyKey("session-1", "key-1") } returns turn
         every { messages.findByTurnIdAndRole(turn.id, "ASSISTANT") } returns replayed
+        every { messages.findByTurnIdAndRole(turn.id, "USER") } returns message(1, "USER", "hello")
 
         val result = lifecycle.beginTurn("session-1", "user-1", "hello", "key-1")
 
@@ -654,6 +660,7 @@ class AgentWorkflowCoreTest {
         every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns session()
         every { turns.findBySessionIdAndIdempotencyKey("session-1", "key-1") } returns turn
         every { messages.findByTurnIdAndRole(turn.id, "ASSISTANT") } returns replayed
+        every { messages.findByTurnIdAndRole(turn.id, "USER") } returns message(1, "USER", "hello")
 
         val previousLocale = LocaleContextHolder.getLocale()
         LocaleContextHolder.setLocale(Locale.ENGLISH)
@@ -787,6 +794,199 @@ class AgentWorkflowCoreTest {
     }
 
     @Test
+    fun `completion persists normalized comparison request and report in assistant metadata`() {
+        val running = turn(status = AgentTurnStatus.RUNNING)
+        val assistant = slot<ChatMessageEntity>()
+        val report = comparisonReport()
+        every { turns.findSessionIdById(running.id) } returns "session-1"
+        every { turns.findByIdForUpdate(running.id) } returns running
+        every { sessions.findByIdForUpdate("session-1") } returns session()
+        every { messages.findByTurnIdAndRole(running.id, "ASSISTANT") } returns null
+        every { messages.save(capture(assistant)) } answers { assistant.captured }
+        every { turns.save(any()) } answers { firstArg() }
+        every { sessions.save(any()) } answers { firstArg() }
+        every { messages.findSucceededTurnMessagesBySessionId("session-1") } returns emptyList()
+        every { messages.deleteAll(any<Iterable<ChatMessageEntity>>()) } just runs
+
+        val result = lifecycle.completeTurn(
+            CompleteTurnCommand(
+                turnId = running.id,
+                content = "comparison",
+                intent = "COMPARISON",
+                queryTarget = "PROJECT",
+                nextAction = "SHOW_COMPARISON",
+                catalogReport = report,
+                comparisonRequest = unnormalizedComparisonRequest()
+            )
+        )
+
+        val metadata = objectMapper.readTree(assistant.captured.metadataJson)
+        val storedRequest = metadata.path("comparisonRequest")
+        assertEquals(setOf("alpha", "beta"), storedRequest.path("operands").map { it.path("entityId").asText() }.toSet())
+        assertEquals(setOf("PRICE", "RATING"), storedRequest.path("dimensions").map { it.asText() }.toSet())
+        assertEquals("Shanghai", storedRequest.path("constraints").path("city").asText())
+        assertEquals("2000", storedRequest.path("constraints").path("budgetMax").asText())
+        assertFalse(storedRequest.path("constraints").has("medical"))
+        assertTrue(storedRequest.path("missingFields").isEmpty)
+        assertFalse(storedRequest.has("isComplete"))
+        assertEquals("Comparison", metadata.path("catalogReport").path("title").asText())
+        assertEquals("COMPARISON", result.catalogReport?.mode)
+        assertEquals("Comparison", result.catalogReport?.title)
+        assertEquals(setOf("PRICE", "RATING"), result.catalogReport?.comparisonDimensions?.toSet())
+        assertEquals(setOf("alpha", "beta"), result.comparisonRequest?.operands?.map { it.entityId }?.toSet())
+        assertEquals(setOf("PRICE", "RATING"), result.comparisonRequest?.dimensions?.toSet())
+        assertTrue(result.comparisonRequest?.missingFields?.isEmpty() == true)
+    }
+
+    @Test
+    fun `non comparison completion discards comparison request before persistence`() {
+        val running = turn(status = AgentTurnStatus.RUNNING)
+        val assistant = slot<ChatMessageEntity>()
+        every { turns.findSessionIdById(running.id) } returns "session-1"
+        every { turns.findByIdForUpdate(running.id) } returns running
+        every { sessions.findByIdForUpdate("session-1") } returns session()
+        every { messages.findByTurnIdAndRole(running.id, "ASSISTANT") } returns null
+        every { messages.save(capture(assistant)) } answers { assistant.captured }
+        every { turns.save(any()) } answers { firstArg() }
+        every { sessions.save(any()) } answers { firstArg() }
+        every { messages.findSucceededTurnMessagesBySessionId("session-1") } returns emptyList()
+        every { messages.deleteAll(any<Iterable<ChatMessageEntity>>()) } just runs
+
+        val result = lifecycle.completeTurn(
+            CompleteTurnCommand(
+                turnId = running.id,
+                content = "planning",
+                intent = "PLANNING",
+                queryTarget = "PROJECT",
+                nextAction = "START_PLANNING",
+                comparisonRequest = unnormalizedComparisonRequest()
+            )
+        )
+
+        val metadata = objectMapper.readTree(assistant.captured.metadataJson)
+        assertTrue(metadata.path("comparisonRequest").isNull)
+        assertEquals(null, result.comparisonRequest)
+    }
+
+    @Test
+    fun `idempotent replay restores the same normalized comparison request and report`() {
+        val running = turn(status = AgentTurnStatus.RUNNING)
+        val assistant = slot<ChatMessageEntity>()
+        val report = comparisonReport()
+        every { turns.findSessionIdById(running.id) } returns "session-1"
+        every { turns.findByIdForUpdate(running.id) } returns running
+        every { sessions.findByIdForUpdate("session-1") } returns session()
+        every { messages.findByTurnIdAndRole(running.id, "ASSISTANT") } returns null
+        every { messages.save(capture(assistant)) } answers { assistant.captured }
+        every { turns.save(any()) } answers { firstArg() }
+        every { sessions.save(any()) } answers { firstArg() }
+        every { messages.findSucceededTurnMessagesBySessionId("session-1") } returns emptyList()
+        every { messages.deleteAll(any<Iterable<ChatMessageEntity>>()) } just runs
+
+        val completed = lifecycle.completeTurn(
+            CompleteTurnCommand(
+                running.id,
+                "comparison",
+                "COMPARISON",
+                "PROJECT",
+                "SHOW_COMPARISON",
+                catalogReport = report,
+                comparisonRequest = unnormalizedComparisonRequest()
+            )
+        )
+        every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns session()
+        every { turns.findBySessionIdAndIdempotencyKey("session-1", "key-1") } returns running
+        every { messages.findByTurnIdAndRole(running.id, "ASSISTANT") } returns assistant.captured
+        every { messages.findByTurnIdAndRole(running.id, "USER") } returns message(1, "USER", "hello")
+
+        val replayed = lifecycle.beginTurn("session-1", "user-1", "hello", "key-1") as BeginTurnResult.Replayed
+
+        assertEquals(
+            completed.comparisonRequest?.operands?.map { it.entityId }?.toSet(),
+            replayed.turn.comparisonRequest?.operands?.map { it.entityId }?.toSet()
+        )
+        assertEquals(completed.comparisonRequest?.dimensions?.toSet(), replayed.turn.comparisonRequest?.dimensions?.toSet())
+        assertEquals(completed.comparisonRequest?.constraints, replayed.turn.comparisonRequest?.constraints)
+        assertEquals(completed.comparisonRequest?.missingFields, replayed.turn.comparisonRequest?.missingFields)
+        assertEquals(completed.catalogReport?.mode, replayed.turn.catalogReport?.mode)
+        assertEquals(completed.catalogReport?.title, replayed.turn.catalogReport?.title)
+        assertEquals(
+            completed.catalogReport?.comparisonDimensions?.toSet(),
+            replayed.turn.catalogReport?.comparisonDimensions?.toSet()
+        )
+        assertEquals("trace-1", replayed.turn.traceId)
+        verify(exactly = 1) { messages.save(any()) }
+    }
+
+    @Test
+    fun `malformed comparison request does not discard a valid catalog report`() {
+        val report = comparisonReport()
+        val assistant = message(2, "ASSISTANT", "comparison").apply {
+            metadataJson = objectMapper.writeValueAsString(
+                mapOf(
+                    "intent" to "COMPARISON",
+                    "comparisonRequest" to "not-an-object",
+                    "catalogReport" to report
+                )
+            )
+        }
+
+        val projection = lifecycle.projectMessage(assistant)
+
+        assertEquals(null, projection.comparisonRequest)
+        assertEquals("COMPARISON", projection.catalogReport?.mode)
+        assertEquals("Comparison", projection.catalogReport?.title)
+        assertEquals(setOf("PRICE", "RATING"), projection.catalogReport?.comparisonDimensions?.toSet())
+    }
+
+    @Test
+    fun `malformed catalog report does not discard a valid comparison request`() {
+        val assistant = message(2, "ASSISTANT", "comparison").apply {
+            metadataJson = objectMapper.writeValueAsString(
+                mapOf(
+                    "intent" to "COMPARISON",
+                    "comparisonRequest" to unnormalizedComparisonRequest(),
+                    "catalogReport" to "not-an-object"
+                )
+            )
+        }
+
+        val projection = lifecycle.projectMessage(assistant)
+
+        assertEquals(setOf("alpha", "beta"), projection.comparisonRequest?.operands?.map { it.entityId }?.toSet())
+        assertEquals(setOf("PRICE", "RATING"), projection.comparisonRequest?.dimensions?.toSet())
+        assertEquals(null, projection.catalogReport)
+    }
+
+    @Test
+    fun `legacy and malformed root metadata reconstruct with backward compatible defaults`() {
+        val legacyTurn = turn(id = "legacy-turn", status = AgentTurnStatus.SUCCEEDED)
+        val malformedTurn = turn(id = "malformed-turn", status = AgentTurnStatus.SUCCEEDED)
+        val legacy = message(2, "ASSISTANT", "legacy").apply { metadataJson = "{}" }
+        val malformed = message(4, "ASSISTANT", "malformed").apply { metadataJson = "{not-json" }
+        every { turns.findSessionIdById(any()) } returns "session-1"
+        every { sessions.findByIdForUpdate("session-1") } returns session()
+        every { turns.findByIdForUpdate("legacy-turn") } returns legacyTurn
+        every { turns.findByIdForUpdate("malformed-turn") } returns malformedTurn
+        every { messages.findByTurnIdAndRole("legacy-turn", "ASSISTANT") } returns legacy
+        every { messages.findByTurnIdAndRole("malformed-turn", "ASSISTANT") } returns malformed
+
+        val reconstructed = listOf(
+            lifecycle.completeTurn(CompleteTurnCommand("legacy-turn", "ignored", "GENERAL_CHAT", null, "NONE")),
+            lifecycle.completeTurn(CompleteTurnCommand("malformed-turn", "ignored", "GENERAL_CHAT", null, "NONE"))
+        )
+
+        reconstructed.forEach { turn ->
+            assertEquals("GENERAL_CHAT", turn.intent)
+            assertEquals(null, turn.queryTarget)
+            assertEquals("NONE", turn.nextAction)
+            assertTrue(turn.catalogItems.isEmpty())
+            assertEquals(null, turn.comparisonRequest)
+            assertEquals(null, turn.catalogReport)
+        }
+    }
+
+    @Test
     fun `does not duplicate assistant message when completion is repeated`() {
         val succeeded = turn(status = AgentTurnStatus.SUCCEEDED)
         val assistant = ChatMessageEntity(sessionId = "session-1", turnId = succeeded.id, sequenceNo = 2, role = "ASSISTANT", content = "final")
@@ -846,6 +1046,7 @@ class AgentWorkflowCoreTest {
         every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns session()
         every { turns.findBySessionIdAndIdempotencyKey("session-1", "key-1") } returns turn(status = AgentTurnStatus.SUCCEEDED)
         every { messages.findByTurnIdAndRole(any(), "ASSISTANT") } returns null
+        every { messages.findByTurnIdAndRole(any(), "USER") } returns message(1, "USER", "hello")
 
         assertEquals(BeginTurnResult.IdempotencyExpired, lifecycle.beginTurn("session-1", "user-1", "hello", "key-1"))
     }
@@ -1314,4 +1515,26 @@ class AgentWorkflowCoreTest {
 
     private fun message(sequenceNo: Long, role: String, content: String, createdAt: LocalDateTime = LocalDateTime.now()) =
         ChatMessageEntity(id = "message-$sequenceNo", sessionId = "session-1", sequenceNo = sequenceNo, role = role, content = content, createdAt = createdAt)
+
+    private fun unnormalizedComparisonRequest() = ComparisonRequest(
+        operands = listOf(
+            ComparisonOperand(AgentQueryTarget.PROJECT, " alpha ", " Alpha "),
+            ComparisonOperand(AgentQueryTarget.PROJECT, "alpha", "Duplicate Alpha"),
+            ComparisonOperand(AgentQueryTarget.PROJECT, "beta", "Beta"),
+            ComparisonOperand(AgentQueryTarget.DOCTOR, "doctor", "Doctor")
+        ),
+        targetType = AgentQueryTarget.PROJECT,
+        dimensions = listOf(" price ", "risk", "RATING", "PRICE"),
+        constraints = linkedMapOf("city" to " Shanghai ", "budgetMax" to " 2000 ", "medical" to "secret"),
+        missingFields = setOf(ComparisonMissingField.TARGET_TYPE, ComparisonMissingField.OPERANDS)
+    )
+
+    private fun comparisonReport() = AgentCatalogReportResponse(
+        mode = "COMPARISON",
+        title = "Comparison",
+        summary = "Compared safely",
+        items = emptyList(),
+        comparisonDimensions = listOf("PRICE", "RATING"),
+        warnings = emptyList()
+    )
 }

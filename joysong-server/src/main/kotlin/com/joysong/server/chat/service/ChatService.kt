@@ -34,6 +34,7 @@ import com.joysong.server.agent.service.AgentIntentDecision
 import com.joysong.server.agent.service.AgentIntentRouter
 import com.joysong.server.agent.service.AgentLabelPolarity
 import com.joysong.server.agent.service.AgentQueryTarget
+import com.joysong.server.agent.service.ComparisonRequest
 import com.joysong.server.agent.service.AgentPromptEvidence
 import com.joysong.server.agent.service.AgentRouteAssessment
 import com.joysong.server.agent.service.ParsedAgentRoute
@@ -204,7 +205,8 @@ data class ChatTurnResult(
     val intent: String = "GENERAL_CHAT",
     val queryTarget: String? = null,
     val nextAction: String = "NONE",
-    val traceId: String? = null
+    val traceId: String? = null,
+    val comparisonRequest: ComparisonRequest? = null
 )
 
 sealed interface PreparedChatTurn {

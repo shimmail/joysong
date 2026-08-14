@@ -7,6 +7,8 @@ import com.joysong.server.agent.dto.AgentCatalogReportResponse
 import com.joysong.server.agent.entity.AgentTurnEntity
 import com.joysong.server.agent.entity.AgentTurnStatus
 import com.joysong.server.agent.repository.AgentTurnRepository
+import com.joysong.server.agent.service.ComparisonRequest
+import com.joysong.server.agent.service.ComparisonRequestBuilder
 import com.joysong.server.agent.service.PlanningCatalogProjection
 import com.joysong.server.chat.entity.ChatMessageEntity
 import com.joysong.server.chat.repository.ChatMessageRepository
@@ -46,7 +48,18 @@ data class CompleteTurnCommand(
     val durationMs: Long = 0,
     val fallbackUsed: Boolean = false,
     val modelName: String = "",
-    val promptVersion: String = ""
+    val promptVersion: String = "",
+    val comparisonRequest: ComparisonRequest? = null
+)
+
+data class AgentMessageProjection(
+    val message: ChatMessageEntity,
+    val intent: String = "GENERAL_CHAT",
+    val queryTarget: String? = null,
+    val nextAction: String = "NONE",
+    val catalogItems: List<AgentCatalogItemResponse> = emptyList(),
+    val comparisonRequest: ComparisonRequest? = null,
+    val catalogReport: AgentCatalogReportResponse? = null
 )
 
 class IdempotencyKeyConflictException : IllegalStateException("IDEMPOTENCY_KEY_CONFLICT")
@@ -60,15 +73,18 @@ class TurnLifecycleService(
     private val objectMapper: ObjectMapper,
     private val clock: Clock,
     @Qualifier("turnLease")
-    private val turnLease: Duration
+    private val turnLease: Duration,
+    private val comparisonRequestBuilder: ComparisonRequestBuilder
 ) {
     private val supportedCatalogTypes = setOf("DOCTOR", "INSTITUTION", "PROJECT", "INSTITUTION_PROJECT")
 
-    fun catalogItemsForMessage(message: ChatMessageEntity): List<AgentCatalogItemResponse> {
-        if (!message.role.equals("ASSISTANT", ignoreCase = true)) return emptyList()
-        return runCatching { objectMapper.readTree(message.metadataJson.ifBlank { "{}" }) }
-            .getOrNull()
-            ?.get("catalogItems")
+    fun projectMessage(message: ChatMessageEntity): AgentMessageProjection {
+        if (!message.role.equals("ASSISTANT", ignoreCase = true)) return AgentMessageProjection(message)
+        val projectedMessage = PlanningCatalogProjection.projectStoredMessage(message, objectMapper)
+        val metadata = runCatching { objectMapper.readTree(projectedMessage.metadataJson.ifBlank { "{}" }) }
+            .getOrNull() ?: return AgentMessageProjection(projectedMessage)
+        val intent = metadata.path("intent").asText("GENERAL_CHAT")
+        val catalogItems = metadata.get("catalogItems")
             ?.takeIf { it.isArray }
             ?.mapNotNull { node ->
                 runCatching { objectMapper.treeToValue(node, AgentCatalogItemResponse::class.java) }
@@ -76,7 +92,33 @@ class TurnLifecycleService(
                     ?.takeIf { it.type.uppercase() in supportedCatalogTypes }
             }
             .orEmpty()
+        val comparisonRequest = metadata.get("comparisonRequest")
+            ?.takeUnless { it.isNull }
+            ?.takeIf { intent.equals("COMPARISON", ignoreCase = true) }
+            ?.let { node ->
+                runCatching { objectMapper.treeToValue(node, ComparisonRequest::class.java) }
+                    .getOrNull()
+                    ?.let(comparisonRequestBuilder::normalize)
+            }
+        val catalogReport = metadata.get("catalogReport")
+            ?.takeUnless { it.isNull }
+            ?.let { node ->
+                runCatching { objectMapper.treeToValue(node, AgentCatalogReportResponse::class.java) }.getOrNull()
+            }
+        return AgentMessageProjection(
+            message = projectedMessage,
+            intent = intent,
+            queryTarget = metadata.get("queryTarget")?.takeUnless { it.isNull }?.asText(),
+            nextAction = metadata.path("nextAction").asText("NONE"),
+            catalogItems = catalogItems,
+            comparisonRequest = comparisonRequest,
+            catalogReport = catalogReport
+        )
     }
+
+    fun catalogItemsForMessage(message: ChatMessageEntity): List<AgentCatalogItemResponse> =
+        projectMessage(message).catalogItems
+
     @Transactional
     fun beginTurn(sessionId: String, userId: String, content: String, idempotencyKey: String): BeginTurnResult {
         val canonicalContent = content.trim().also { require(it.isNotEmpty()) { "消息内容不能为空" } }
@@ -168,13 +210,18 @@ class TurnLifecycleService(
         if (turn.status == AgentTurnStatus.SUCCEEDED && existingAssistant != null) return reconstruct(turn, existingAssistant)
         check(turn.status == AgentTurnStatus.RUNNING) { "回合不是运行状态" }
         val now = LocalDateTime.now(clock)
-        val persistedCommand = if (command.intent.trim().equals("PLANNING", ignoreCase = true)) {
-            command.copy(
-                catalogItems = PlanningCatalogProjection.projectItems(command.catalogItems),
-                catalogReport = PlanningCatalogProjection.projectReport(command.catalogReport)
+        val normalizedCommand = command.copy(
+            comparisonRequest = command.comparisonRequest
+                ?.takeIf { command.intent.equals("COMPARISON", ignoreCase = true) }
+                ?.let(comparisonRequestBuilder::normalize)
+        )
+        val persistedCommand = if (normalizedCommand.intent.equals("PLANNING", ignoreCase = true)) {
+            normalizedCommand.copy(
+                catalogItems = PlanningCatalogProjection.projectItems(normalizedCommand.catalogItems),
+                catalogReport = PlanningCatalogProjection.projectReport(normalizedCommand.catalogReport)
             )
         } else {
-            command
+            normalizedCommand
         }
         val metadata = metadata(persistedCommand)
         val assistant = existingAssistant ?: messageRepository.save(
@@ -294,25 +341,22 @@ class TurnLifecycleService(
             "queryTarget" to command.queryTarget,
             "nextAction" to command.nextAction,
             "catalogItems" to command.catalogItems,
-            "catalogReport" to command.catalogReport
+            "catalogReport" to command.catalogReport,
+            "comparisonRequest" to command.comparisonRequest
         )
     )
 
     private fun reconstruct(turn: AgentTurnEntity, message: ChatMessageEntity): ChatTurnResult {
-        val projectedMessage = PlanningCatalogProjection.projectStoredMessage(message, objectMapper)
-        val metadata = objectMapper.readTree(projectedMessage.metadataJson.ifBlank { "{}" })
-        val intent = metadata.path("intent").asText("GENERAL_CHAT")
-        val catalogItems = catalogItemsForMessage(projectedMessage)
-        val catalogReport = metadata.get("catalogReport")?.takeUnless { it.isNull }
-            ?.let { objectMapper.treeToValue(it, AgentCatalogReportResponse::class.java) }
+        val projection = projectMessage(message)
         return ChatTurnResult(
-            message = projectedMessage,
-            catalogItems = catalogItems,
-            catalogReport = catalogReport,
-            intent = intent,
-            queryTarget = metadata.get("queryTarget")?.takeUnless { it.isNull }?.asText(),
-            nextAction = metadata.path("nextAction").asText("NONE"),
-            traceId = turn.traceId
+            message = projection.message,
+            catalogItems = projection.catalogItems,
+            catalogReport = projection.catalogReport,
+            intent = projection.intent,
+            queryTarget = projection.queryTarget,
+            nextAction = projection.nextAction,
+            traceId = turn.traceId,
+            comparisonRequest = projection.comparisonRequest
         )
     }
 
