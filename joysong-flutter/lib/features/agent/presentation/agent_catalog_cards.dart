@@ -297,6 +297,53 @@ class AgentCatalogReportCard extends StatelessWidget {
   }
 }
 
+class AgentComparisonStatusCard extends StatelessWidget {
+  const AgentComparisonStatusCard({required this.request, super.key});
+
+  final AgentComparisonRequest request;
+
+  @override
+  Widget build(BuildContext context) {
+    final isZh = Localizations.localeOf(context).languageCode == 'zh';
+    final guidance = request.missingFields
+        .map(
+          (field) => switch (field) {
+            'OPERANDS' => isZh
+                ? '请选择至少两个对比对象'
+                : 'Select at least two items to compare',
+            'TARGET_TYPE' => isZh
+                ? '请明确要比较机构、医生、项目还是机构项目'
+                : 'Specify whether to compare clinics, doctors, treatments, or clinic treatments',
+            _ => null,
+          },
+        )
+        .whereType<String>();
+    return Card(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              isZh ? '还需要补充对比信息' : 'More comparison details needed',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            if (request.operands.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(request.operands.map((item) => item.displayName).join(' · ')),
+            ],
+            for (final text in guidance) ...[
+              const SizedBox(height: 8),
+              Text(text),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class AgentComparisonTable extends StatelessWidget {
   const AgentComparisonTable({
     required this.report,
@@ -312,9 +359,11 @@ class AgentComparisonTable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final english = Localizations.localeOf(context).languageCode == 'en';
+    final visibleItems = report.items.take(4).toList(growable: false);
     final dimensions = report.comparisonDimensions.isNotEmpty
         ? report.comparisonDimensions
-        : _allAttributeKeys(report.items);
+        : _allAttributeKeys(visibleItems);
+    final missingValue = english ? 'Not available' : '暂无平台数据';
     return Scrollbar(
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
@@ -324,7 +373,7 @@ class AgentComparisonTable extends StatelessWidget {
           dataRowMaxHeight: 88,
           columns: [
             const DataColumn(label: Text('')),
-            for (final item in report.items)
+            for (final item in visibleItems)
               DataColumn(
                 label: SizedBox(
                   width: 124,
@@ -360,11 +409,13 @@ class AgentComparisonTable extends StatelessWidget {
                   child: Text(dimension,
                       style: Theme.of(context).textTheme.labelMedium),
                 )),
-                for (final item in report.items)
+                for (final item in visibleItems)
                   DataCell(SizedBox(
                     width: 124,
                     child: Text(
-                      item.attributes[dimension] ?? '—',
+                      item.attributes[dimension]?.trim().isNotEmpty == true
+                          ? item.attributes[dimension]!
+                          : missingValue,
                       maxLines: 3,
                       overflow: TextOverflow.ellipsis,
                     ),
