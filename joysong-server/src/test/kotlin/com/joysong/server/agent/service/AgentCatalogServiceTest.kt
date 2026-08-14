@@ -18,6 +18,7 @@ import com.joysong.server.institution.repository.InstitutionRepository
 import com.joysong.server.institution.service.InstitutionProjectDetailResolver
 import com.joysong.server.project.entity.ProjectEntity
 import com.joysong.server.project.repository.ProjectRepository
+import io.mockk.confirmVerified
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -185,6 +186,84 @@ class AgentCatalogServiceTest {
 
         assertEquals("COMPARISON", evidence.report!!.mode)
         verify(exactly = 1) { discoverSearchService.search(any<DiscoverSearchRequest>()) }
+    }
+
+    @Test
+    fun `auto report with unresolved target retains doctor practice institutions and city behavior`() {
+        val shanghaiDoctor = DoctorEntity(id = "doctor-shanghai", name = "李医生")
+        val beijingDoctor = DoctorEntity(id = "doctor-beijing", name = "王医生")
+        val shanghaiClinic = InstitutionEntity(id = "clinic-shanghai", name = "星颜", city = "上海", isVerified = true)
+        val beijingClinic = InstitutionEntity(id = "clinic-beijing", name = "京美", city = "北京", isVerified = true)
+        every { doctorInstitutionService.findByDoctorId(shanghaiDoctor.id) } returns listOf(
+            relationship("rel-shanghai", shanghaiDoctor.id, shanghaiClinic.id, "APPROVED")
+        )
+        every { doctorInstitutionService.findByDoctorId(beijingDoctor.id) } returns listOf(
+            relationship("rel-beijing", beijingDoctor.id, beijingClinic.id, "APPROVED")
+        )
+        stubCatalogSearch(
+            result = DiscoverSearchResult(doctors = listOf(shanghaiDoctor, beijingDoctor)),
+            institutions = listOf(shanghaiClinic, beijingClinic),
+            doctors = listOf(shanghaiDoctor, beijingDoctor)
+        )
+        every { discoverSearchService.citiesMentionedIn("上海星颜") } returns listOf("上海")
+
+        val evidence = service.promptEvidence(
+            query = "看看这些",
+            searchQuery = "上海星颜",
+            targetQuery = "看看这些"
+        )
+
+        val item = evidence.report!!.items.single()
+        assertEquals("SUMMARY", evidence.report!!.mode)
+        assertEquals(shanghaiDoctor.id, item.id)
+        assertEquals("星颜（上海）", item.attributes["出诊机构"])
+        assertEquals(shanghaiClinic.id, item.institutionId)
+        assertTrue(item.canChatWithHuman)
+        assertEquals(mapOf("DOCTOR" to listOf(shanghaiDoctor.id)), evidence.matchedEntityIds)
+    }
+
+    @Test
+    fun `filtering in-memory evidence does not touch any injected collaborator`() {
+        val localInstitutionRepository = mockk<InstitutionRepository>(relaxed = true)
+        val localDoctorRepository = mockk<DoctorRepository>(relaxed = true)
+        val localProjectRepository = mockk<ProjectRepository>(relaxed = true)
+        val localInstitutionProjectRepository = mockk<InstitutionProjectRepository>(relaxed = true)
+        val localDoctorProjectRepository = mockk<DoctorProjectRepository>(relaxed = true)
+        val localDiscoverSearchService = mockk<DiscoverSearchService>(relaxed = true)
+        val localDoctorInstitutionService = mockk<DoctorInstitutionService>(relaxed = true)
+        val localDetailResolver = mockk<InstitutionProjectDetailResolver>(relaxed = true)
+        val localService = AgentCatalogService(
+            localInstitutionRepository,
+            localDoctorRepository,
+            localProjectRepository,
+            localInstitutionProjectRepository,
+            localDoctorProjectRepository,
+            localDiscoverSearchService,
+            localDoctorInstitutionService,
+            localDetailResolver
+        )
+        val source = evidence(item("PROJECT", "project-1", "水光", mapOf("评分" to "4.8")))
+
+        val filtered = localService.filterComparisonEvidence(
+            source,
+            ComparisonRequest(
+                operands = listOf(ComparisonOperand(AgentQueryTarget.PROJECT, "project-1", "水光")),
+                targetType = AgentQueryTarget.PROJECT,
+                dimensions = listOf("RATING")
+            )
+        )
+
+        assertEquals(listOf("project-1"), filtered.report!!.items.map { it.id })
+        confirmVerified(
+            localInstitutionRepository,
+            localDoctorRepository,
+            localProjectRepository,
+            localInstitutionProjectRepository,
+            localDoctorProjectRepository,
+            localDiscoverSearchService,
+            localDoctorInstitutionService,
+            localDetailResolver
+        )
     }
 
     @Test

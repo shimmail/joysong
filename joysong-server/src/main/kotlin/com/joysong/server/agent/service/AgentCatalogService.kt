@@ -145,12 +145,10 @@ class AgentCatalogService(
             else -> unifiedSearch.doctors
         }
         val doctorInstitutionById = institutionRepository.findAll().associateBy { it.id }
-        val approvedDoctorInstitutions = if (reportTarget == ReportTarget.DOCTOR) {
-            doctorCandidates.associate { doctor ->
-                doctor.id to doctorInstitutionService.findByDoctorId(doctor.id)
-                    .filter { it.status == "APPROVED" && it.deletedAt == null }
-            }
-        } else emptyMap()
+        val approvedDoctorInstitutions = doctorCandidates.associate { doctor ->
+            doctor.id to doctorInstitutionService.findByDoctorId(doctor.id)
+                .filter { it.status == "APPROVED" && it.deletedAt == null }
+        }
         val doctors = doctorCandidates
             .filter { doctor ->
                 mentionedCities.isEmpty() || mentionedCities.any { city ->
