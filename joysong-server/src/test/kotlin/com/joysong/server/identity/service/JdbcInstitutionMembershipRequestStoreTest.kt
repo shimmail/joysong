@@ -15,14 +15,15 @@ import java.time.LocalDateTime
 
 class JdbcInstitutionMembershipRequestStoreTest {
     private val jdbcTemplate = mockk<JdbcTemplate>()
-    private val store = JdbcInstitutionMembershipRequestStore(jdbcTemplate)
+    private val legacyStore = JdbcInstitutionMembershipRequestStore(jdbcTemplate)
+    private val consultantStore = JdbcConsultantInstitutionChangeRequestStore(jdbcTemplate)
 
     @Test
     fun `doctor lookup includes soft deleted relationship so it can be restored`() {
         val sql = slot<String>()
         every { jdbcTemplate.query(capture(sql), any<RowMapper<Any>>(), *anyVararg()) } returns emptyList()
 
-        store.find(MembershipRequestType.DOCTOR, "doctor-1", "institution-1")
+        legacyStore.find(MembershipRequestType.DOCTOR, "doctor-1", "institution-1")
 
         assertFalse(sql.captured.contains("deleted_at IS NULL"))
     }
@@ -32,7 +33,7 @@ class JdbcInstitutionMembershipRequestStoreTest {
         val sql = slot<String>()
         every { jdbcTemplate.update(capture(sql), *anyVararg()) } returns 1
 
-        store.resubmit(request(), "重新申请")
+        legacyStore.resubmit(request(), "重新申请")
 
         assertTrue(sql.captured.contains("deleted_at = NULL"))
     }
@@ -41,51 +42,67 @@ class JdbcInstitutionMembershipRequestStoreTest {
     fun `review locks request and rejects lost concurrent update`() {
         val sql = slot<String>()
         every { jdbcTemplate.query(capture(sql), any<RowMapper<Any>>(), *anyVararg()) } returns emptyList()
-        store.findById(MembershipRequestType.DOCTOR, "request-1")
+        legacyStore.findById(MembershipRequestType.DOCTOR, "request-1")
         assertTrue(sql.captured.contains("FOR UPDATE"))
 
         every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 0
         assertThrows(IllegalStateException::class.java) {
-            store.review(request(), "legal-1", MembershipRequestDecision.APPROVED, "")
+            legacyStore.review(request(), "legal-1", MembershipRequestDecision.APPROVED, "")
         }
     }
 
     @Test
-    fun `consultant create returns joined projection and resubmit uses status compare and swap`() {
+    fun `consultant create appends a pending ledger row and returns display names with full audit projection`() {
         val updateSql = slot<String>()
-        val querySql = mutableListOf<String>()
-        val joined = consultantRequest().copy(institutionName = "机构一", confirmedBy = null)
+        val querySql = slot<String>()
+        val joined = consultantRequest()
         every { jdbcTemplate.update(capture(updateSql), *anyVararg()) } returns 1
         every { jdbcTemplate.query(capture(querySql), any<RowMapper<Any>>(), *anyVararg()) } returns listOf(joined)
 
-        val created = store.create(MembershipRequestType.CONSULTANT, "consultant-1", "institution-1", "加入")
+        val created = consultantStore.create(
+            "consultant-1",
+            "institution-1",
+            ConsultantInstitutionAction.JOIN,
+            "加入"
+        )
+
         assertEquals("机构一", created.institutionName)
-        assertTrue(querySql.single().contains("LEFT JOIN institutions"))
-
-        querySql.clear()
-        val resubmitted = store.resubmit(consultantRequest("REJECTED"), "再次加入")
-        assertEquals("机构一", resubmitted.institutionName)
-        assertTrue(updateSql.captured.contains("status IN ('REJECTED', 'REVOKED')"))
+        assertTrue(updateSql.captured.contains("INSERT INTO consultant_institution_change_requests"))
+        assertFalse(updateSql.captured.contains("INSERT INTO institution_memberships"))
+        assertTrue(querySql.captured.contains("JOIN users"))
+        assertTrue(querySql.captured.contains("JOIN institutions"))
+        assertTrue(querySql.captured.contains("submitted_at"))
+        assertTrue(querySql.captured.contains("reviewed_at"))
     }
 
     @Test
-    fun `consultant resubmit returns conflict when concurrent review changed status`() {
+    fun `consultant ledger lock and conditional close expose lost concurrent update`() {
+        val querySql = slot<String>()
+        every { jdbcTemplate.query(capture(querySql), any<RowMapper<Any>>(), *anyVararg()) } returns emptyList()
+        consultantStore.lock("request-1")
+        assertTrue(querySql.captured.contains("FOR UPDATE"))
+
         every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 0
-
-        assertThrows(ConsultantMembershipConflictException::class.java) {
-            store.resubmit(consultantRequest("REJECTED"), "再次加入")
-        }
+        assertFalse(
+            consultantStore.changeStatus(
+                "request-1",
+                ConsultantInstitutionRequestStatus.APPROVED,
+                "reviewer-1",
+                "approved"
+            )
+        )
     }
 
     @Test
-    fun `owned consultant list retains memberships whose institution is soft deleted`() {
+    fun `consultant active relationship lookup uses only approved non-revoked projection`() {
         val sql = slot<String>()
-        every { jdbcTemplate.query(capture(sql), any<RowMapper<Any>>(), *anyVararg()) } returns emptyList()
+        every { jdbcTemplate.queryForObject(capture(sql), Long::class.java, *anyVararg()) } returns 1L
 
-        store.listOwnedConsultant("consultant-1")
+        assertTrue(consultantStore.hasActiveRelationship("consultant-1", "institution-1"))
 
-        assertTrue(sql.captured.contains("LEFT JOIN institutions"))
-        assertTrue(sql.captured.contains("COALESCE(i.name"))
+        assertTrue(sql.captured.contains("member_role = 'CONSULTANT'"))
+        assertTrue(sql.captured.contains("status = 'APPROVED'"))
+        assertTrue(sql.captured.contains("revoked_at IS NULL"))
     }
 
     private fun request() = InstitutionMembershipRequestView(
@@ -100,9 +117,21 @@ class JdbcInstitutionMembershipRequestStoreTest {
         updatedAt = LocalDateTime.of(2026, 8, 10, 10, 0)
     )
 
-    private fun consultantRequest(status: String = "PENDING") = request().copy(
-        requestType = MembershipRequestType.CONSULTANT,
-        userId = "consultant-1",
-        status = status
+    private fun consultantRequest() = ConsultantInstitutionChangeRequestView(
+        id = "request-1",
+        consultantId = "consultant-1",
+        consultantName = "顾问一",
+        institutionId = "institution-1",
+        institutionName = "机构一",
+        action = ConsultantInstitutionAction.JOIN,
+        status = ConsultantInstitutionRequestStatus.PENDING,
+        requestNote = "加入",
+        reviewNote = "",
+        submittedBy = "consultant-1",
+        reviewedBy = null,
+        submittedAt = LocalDateTime.of(2026, 8, 10, 10, 0),
+        reviewedAt = null,
+        createdAt = LocalDateTime.of(2026, 8, 10, 10, 0),
+        updatedAt = LocalDateTime.of(2026, 8, 10, 10, 0)
     )
 }
