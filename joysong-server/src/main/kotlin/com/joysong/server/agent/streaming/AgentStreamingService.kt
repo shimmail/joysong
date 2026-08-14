@@ -64,18 +64,9 @@ class AgentStreamingService(
                 }
             }
         }
-        if (prepared is PreparedChatTurn.Replayed) {
+        if (prepared is PreparedChatTurn.Replayed || prepared is PreparedChatTurn.Completed) {
             taskExecutor.execute {
-                if (sink.isOpen) {
-                    sink.started(
-                        AgentStreamEvent.Started(
-                            traceId = prepared.traceId,
-                            turnId = prepared.turnId,
-                            userMessage = prepared.userMessage.toResponse()
-                        )
-                    )
-                }
-                if (sink.isOpen) sink.completed(AgentStreamEvent.Completed(prepared.turn.toResponse()))
+                emitTerminal(prepared, sink)
             }
             return subscription
         }
@@ -89,6 +80,37 @@ class AgentStreamingService(
             throw error
         }
         return subscription
+    }
+
+    private fun emitTerminal(prepared: PreparedChatTurn, sink: AgentStreamSink) {
+        when (prepared) {
+            is PreparedChatTurn.Replayed -> emitTerminal(
+                prepared.traceId, prepared.turnId, prepared.userMessage, prepared.turn, sink
+            )
+            is PreparedChatTurn.Completed -> emitTerminal(
+                prepared.traceId, prepared.turnId, prepared.userMessage, prepared.turn, sink
+            )
+            is PreparedChatTurn.Started -> return
+        }
+    }
+
+    private fun emitTerminal(
+        traceId: String,
+        turnId: String,
+        userMessage: ChatMessageEntity,
+        turn: ChatTurnResult,
+        sink: AgentStreamSink
+    ) {
+        if (sink.isOpen) {
+            sink.started(
+                AgentStreamEvent.Started(
+                    traceId = traceId,
+                    turnId = turnId,
+                    userMessage = userMessage.toResponse()
+                )
+            )
+        }
+        if (sink.isOpen) sink.completed(AgentStreamEvent.Completed(turn.toResponse()))
     }
 
     private fun consume(prepared: PreparedChatTurn.Started, sink: AgentStreamSink, state: AtomicReference<StreamState>, upstream: AtomicReference<InputStream>) {

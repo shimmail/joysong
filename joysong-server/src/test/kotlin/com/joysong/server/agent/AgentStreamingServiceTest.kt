@@ -96,6 +96,31 @@ class AgentStreamingServiceTest {
     }
 
     @Test
+    fun `deterministic incomplete comparison emits started and completed without opening provider stream`() {
+        val userMessage = prepared().userMessage
+        val completed = PreparedChatTurn.Completed(
+            traceId = "trace-local",
+            turnId = "turn-local",
+            userMessage = userMessage,
+            turn = completedTurn("请选择至少两个对比对象 / Select at least two items to compare")
+        )
+        val sink = RecordingSink()
+        every { chatService.prepareStreamingMessage("session-1", "user-1", any()) } returns completed
+
+        service().stream("session-1", "user-1", SendMessageRequest("Compare clinics"), sink)
+
+        assertEquals(listOf("started", "completed"), sink.order)
+        assertEquals(
+            "请选择至少两个对比对象 / Select at least two items to compare",
+            (sink.events.last() as AgentStreamEvent.Completed).turn.message.content
+        )
+        verify(exactly = 0) { chatService.completeStreamingMessage(any(), any()) }
+        verify(exactly = 0) { chatService.failStreamingMessage(any(), any()) }
+        verify(exactly = 0) { chatService.cancelStreamingMessage(any(), any()) }
+        provider.verify()
+    }
+
+    @Test
     fun `planning buffers the full provider answer and never exposes raw deltas`() {
         val prepared = prepared(planning = true)
         val sink = RecordingSink()
