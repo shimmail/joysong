@@ -3,6 +3,9 @@ package com.joysong.server.agent.streaming
 import com.joysong.server.agent.provider.AgentProviderRequestFactory
 import com.joysong.server.agent.provider.AgentRequestPurpose
 import com.joysong.server.agent.provider.QwenChatStreamParser
+import com.joysong.server.agent.dto.AgentCatalogItemResponse
+import com.joysong.server.agent.dto.AgentCatalogReportResponse
+import com.joysong.server.agent.service.ComparisonRequest
 import com.joysong.server.chat.dto.ChatMessageResponse
 import com.joysong.server.chat.dto.ChatTurnResponse
 import com.joysong.server.chat.dto.SendMessageRequest
@@ -245,16 +248,23 @@ class AgentStreamingService(
         }
     }
 
-    private fun ChatMessageEntity.toResponse() = ChatMessageResponse(
+    private fun ChatMessageEntity.toResponse(
+        catalogItems: List<AgentCatalogItemResponse> = emptyList(),
+        comparisonRequest: ComparisonRequest? = null,
+        catalogReport: AgentCatalogReportResponse? = null
+    ) = ChatMessageResponse(
         id = id,
         sessionId = sessionId,
         role = role,
         content = content,
-        createdAt = createdAt.toString()
+        createdAt = createdAt.toString(),
+        catalogItems = catalogItems,
+        comparisonRequest = comparisonRequest,
+        catalogReport = catalogReport
     )
 
     private fun ChatTurnResult.toResponse() = ChatTurnResponse(
-        message = message.toResponse(),
+        message = message.toResponse(catalogItems, comparisonRequest, catalogReport),
         catalogReport = catalogReport,
         catalogItems = catalogItems,
         intent = intent,

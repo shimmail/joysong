@@ -3,6 +3,11 @@ package com.joysong.server.agent
 import com.joysong.server.agent.streaming.AgentStreamEvent
 import com.joysong.server.agent.streaming.AgentStreamSink
 import com.joysong.server.agent.streaming.AgentStreamingService
+import com.joysong.server.agent.dto.AgentCatalogItemResponse
+import com.joysong.server.agent.dto.AgentCatalogReportResponse
+import com.joysong.server.agent.service.AgentQueryTarget
+import com.joysong.server.agent.service.ComparisonOperand
+import com.joysong.server.agent.service.ComparisonRequest
 import com.joysong.server.chat.dto.ChatMessageResponse
 import com.joysong.server.chat.dto.ChatTurnResponse
 import com.joysong.server.chat.dto.SendMessageRequest
@@ -70,13 +75,34 @@ class AgentStreamingServiceTest {
     }
 
     @Test
+    fun `stream completion binds comparison state and report to assistant message`() {
+        val prepared = prepared(planning = false)
+        val sink = RecordingSink()
+        val completed = comparisonTurn("hello")
+        every { chatService.prepareStreamingMessage("session-1", "user-1", any()) } returns prepared
+        every { chatService.completeStreamingMessage(prepared, "hello") } returns completed
+        provider.expect(content().json("""{"stream":true}""", false))
+            .andRespond(withSuccess(sse("hello"), MediaType.TEXT_EVENT_STREAM))
+
+        service().stream("session-1", "user-1", SendMessageRequest("compare", "comparison-key"), sink)
+
+        val event = sink.events.last() as AgentStreamEvent.Completed
+        assertEquals(completed.comparisonRequest, event.turn.message.comparisonRequest)
+        assertEquals(completed.catalogReport, event.turn.message.catalogReport)
+        assertEquals(event.turn.catalogReport, event.turn.message.catalogReport)
+        assertEquals(completed.catalogItems, event.turn.message.catalogItems)
+        provider.verify()
+    }
+
+    @Test
     fun `successful idempotent replay emits original started then completed without provider or persistence`() {
         val userMessage = prepared().userMessage
+        val completed = comparisonTurn("persisted answer")
         val replayed = PreparedChatTurn.Replayed(
             traceId = "original-trace",
             turnId = "original-turn",
             userMessage = userMessage,
-            turn = completedTurn("persisted answer")
+            turn = completed
         )
         val sink = RecordingSink()
         every { chatService.prepareStreamingMessage("session-1", "user-1", any()) } returns replayed
@@ -89,6 +115,13 @@ class AgentStreamingServiceTest {
         assertEquals("original-turn", started.turnId)
         assertEquals("user-message-1", started.userMessage.id)
         assertEquals("question", started.userMessage.content)
+        assertEquals(null, started.userMessage.comparisonRequest)
+        assertEquals(null, started.userMessage.catalogReport)
+        val terminal = sink.events.last() as AgentStreamEvent.Completed
+        assertEquals(completed.comparisonRequest, terminal.turn.message.comparisonRequest)
+        assertEquals(completed.catalogReport, terminal.turn.message.catalogReport)
+        assertEquals(terminal.turn.catalogReport, terminal.turn.message.catalogReport)
+        assertEquals(completed.catalogItems, terminal.turn.message.catalogItems)
         verify(exactly = 0) { chatService.completeStreamingMessage(any(), any()) }
         verify(exactly = 0) { chatService.failStreamingMessage(any(), any()) }
         verify(exactly = 0) { chatService.cancelStreamingMessage(any(), any()) }
@@ -98,11 +131,12 @@ class AgentStreamingServiceTest {
     @Test
     fun `deterministic incomplete comparison emits started and completed without opening provider stream`() {
         val userMessage = prepared().userMessage
+        val turn = comparisonTurn("请选择至少两个对比对象 / Select at least two items to compare")
         val completed = PreparedChatTurn.Completed(
             traceId = "trace-local",
             turnId = "turn-local",
             userMessage = userMessage,
-            turn = completedTurn("请选择至少两个对比对象 / Select at least two items to compare")
+            turn = turn
         )
         val sink = RecordingSink()
         every { chatService.prepareStreamingMessage("session-1", "user-1", any()) } returns completed
@@ -114,6 +148,10 @@ class AgentStreamingServiceTest {
             "请选择至少两个对比对象 / Select at least two items to compare",
             (sink.events.last() as AgentStreamEvent.Completed).turn.message.content
         )
+        val terminal = sink.events.last() as AgentStreamEvent.Completed
+        assertEquals(turn.comparisonRequest, terminal.turn.message.comparisonRequest)
+        assertEquals(turn.catalogReport, terminal.turn.message.catalogReport)
+        assertEquals(terminal.turn.catalogReport, terminal.turn.message.catalogReport)
         verify(exactly = 0) { chatService.completeStreamingMessage(any(), any()) }
         verify(exactly = 0) { chatService.failStreamingMessage(any(), any()) }
         verify(exactly = 0) { chatService.cancelStreamingMessage(any(), any()) }
@@ -386,6 +424,52 @@ class AgentStreamingServiceTest {
             content = content
         ),
         traceId = "trace-1"
+    )
+
+    private fun comparisonTurn(content: String): ChatTurnResult {
+        val items = listOf(
+            comparisonItem("project-alpha", "Alpha"),
+            comparisonItem("project-beta", "Beta")
+        )
+        val report = AgentCatalogReportResponse(
+            mode = "COMPARISON",
+            title = "Project comparison",
+            summary = "Structured comparison",
+            items = items,
+            comparisonDimensions = listOf("Reference price", "Rating"),
+            warnings = emptyList()
+        )
+        return ChatTurnResult(
+            message = ChatMessageEntity(
+                id = "assistant-message-1",
+                sessionId = "session-1",
+                role = "ASSISTANT",
+                content = content
+            ),
+            catalogReport = report,
+            catalogItems = items,
+            intent = "COMPARISON",
+            queryTarget = "PROJECT",
+            nextAction = "SHOW_COMPARISON",
+            traceId = "trace-1",
+            comparisonRequest = ComparisonRequest(
+                operands = listOf(
+                    ComparisonOperand(AgentQueryTarget.PROJECT, "project-alpha", "Alpha"),
+                    ComparisonOperand(AgentQueryTarget.PROJECT, "project-beta", "Beta")
+                ),
+                targetType = AgentQueryTarget.PROJECT,
+                dimensions = listOf("PRICE", "RATING")
+            )
+        )
+    }
+
+    private fun comparisonItem(id: String, name: String) = AgentCatalogItemResponse(
+        type = "PROJECT",
+        id = id,
+        name = name,
+        subtitle = "",
+        summary = "",
+        attributes = linkedMapOf("Reference price" to "1000", "Rating" to "4.8")
     )
 
     private fun sse(vararg chunks: String): String = chunks.joinToString("\n\n", postfix = "\n\ndata: [DONE]\n\n") {

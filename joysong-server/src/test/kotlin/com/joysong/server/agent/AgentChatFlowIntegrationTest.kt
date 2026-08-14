@@ -8,7 +8,13 @@ import com.joysong.server.agent.entity.AgentTurnStatus
 import com.joysong.server.agent.diagnostics.AgentOperationLogger
 import com.joysong.server.agent.orchestration.AgentChatException
 import com.joysong.server.agent.orchestration.BeginTurnResult
+import com.joysong.server.agent.orchestration.CompleteTurnCommand
 import com.joysong.server.agent.orchestration.TurnLifecycleService
+import com.joysong.server.agent.dto.AgentCatalogItemResponse
+import com.joysong.server.agent.dto.AgentCatalogReportResponse
+import com.joysong.server.agent.service.AgentQueryTarget
+import com.joysong.server.agent.service.ComparisonOperand
+import com.joysong.server.agent.service.ComparisonRequest
 import com.joysong.server.agent.streaming.AgentStreamEvent
 import com.joysong.server.agent.streaming.AgentStreamSink
 import com.joysong.server.agent.streaming.AgentStreamingService
@@ -255,6 +261,78 @@ class AgentChatFlowIntegrationTest {
             .andExpect(jsonPath("$.data[1].catalogItems.length()").value(4))
             .andExpect(jsonPath("$.data[1].catalogItems[0].type").value("DOCTOR"))
             .andExpect(jsonPath("$.data[1].catalogItems[3].type").value("INSTITUTION_PROJECT"))
+    }
+
+    @Test
+    @WithMockUser(username = "user-1")
+    fun `history restores comparison request and report on the producing assistant message only`() {
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+        completeComparisonTurn(session.id, "compare Alpha and Beta", "history-comparison-1")
+        val ordinary = turnLifecycleService.beginTurn(
+            session.id,
+            "user-1",
+            "ordinary question",
+            "history-ordinary-1"
+        ) as BeginTurnResult.Started
+        turnLifecycleService.completeTurn(
+            CompleteTurnCommand(
+                turnId = ordinary.turnId,
+                content = "ordinary answer",
+                intent = "GENERAL_CHAT",
+                queryTarget = null,
+                nextAction = "NONE"
+            )
+        )
+
+        val response = mockMvc.perform(get("/api/chat/sessions/{id}/messages", session.id))
+            .andExpect(status().isOk)
+            .andReturn().response.contentAsString
+        val messages = objectMapper.readTree(response).path("data")
+
+        assertEquals(4, messages.size())
+        assertTrue(messages[0].path("comparisonRequest").isNull)
+        assertTrue(messages[0].path("catalogReport").isNull)
+        assertEquals("project-alpha", messages[1].path("comparisonRequest").path("operands")[0].path("entityId").asText())
+        assertEquals("Project comparison", messages[1].path("catalogReport").path("title").asText())
+        assertTrue(messages[2].path("comparisonRequest").isNull)
+        assertTrue(messages[2].path("catalogReport").isNull)
+        assertTrue(messages[3].path("comparisonRequest").isNull)
+        assertTrue(messages[3].path("catalogReport").isNull)
+    }
+
+    @Test
+    @WithMockUser(username = "user-1")
+    fun `history independently degrades malformed optional comparison metadata`() {
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+        completeComparisonTurn(session.id, "first comparison", "history-malformed-request-1")
+        completeComparisonTurn(session.id, "second comparison", "history-malformed-report-1")
+        val assistants = messageRepository.findBySessionIdOrderBySequenceNoAsc(session.id)
+            .filter { it.role == "ASSISTANT" }
+        assistants[0].metadataJson = objectMapper.writeValueAsString(
+            mapOf(
+                "intent" to "COMPARISON",
+                "comparisonRequest" to "not-an-object",
+                "catalogReport" to comparisonReport()
+            )
+        )
+        assistants[1].metadataJson = objectMapper.writeValueAsString(
+            mapOf(
+                "intent" to "COMPARISON",
+                "comparisonRequest" to comparisonRequest(),
+                "catalogReport" to "not-an-object"
+            )
+        )
+        messageRepository.saveAllAndFlush(assistants)
+
+        val response = mockMvc.perform(get("/api/chat/sessions/{id}/messages", session.id))
+            .andExpect(status().isOk)
+            .andReturn().response.contentAsString
+        val messages = objectMapper.readTree(response).path("data")
+
+        assertTrue(messages[1].path("comparisonRequest").isNull)
+        assertEquals("Project comparison", messages[1].path("catalogReport").path("title").asText())
+        assertEquals("project-alpha", messages[3].path("comparisonRequest").path("operands")[0].path("entityId").asText())
+        assertTrue(messages[3].path("catalogReport").isNull)
     }
 
     @Test
@@ -602,6 +680,28 @@ class AgentChatFlowIntegrationTest {
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.data.message.content").value("测试回复"))
             .andExpect(jsonPath("$.data.traceId").isNotEmpty)
+    }
+
+    @Test
+    @WithMockUser(username = "user-1")
+    fun `HTTP synchronous completion binds comparison request and report to assistant message`() {
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+        completeComparisonTurn(session.id, "compare Alpha and Beta", "http-comparison-1")
+
+        val result = mockMvc.perform(
+            post("/api/chat/sessions/{id}/messages", session.id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"content":"compare Alpha and Beta","idempotencyKey":"http-comparison-1"}""")
+        )
+            .andExpect(status().isOk)
+            .andReturn()
+        val data = objectMapper.readTree(result.response.contentAsString).path("data")
+
+        assertEquals("project-alpha", data.path("message").path("comparisonRequest").path("operands")[0].path("entityId").asText())
+        assertEquals(data.path("catalogReport"), data.path("message").path("catalogReport"))
+        assertEquals("Project comparison", data.path("message").path("catalogReport").path("title").asText())
+        assertFalse(data.has("comparisonRequest"))
+        assertEquals(0, fakeLlmCalls.get())
     }
 
     @Test
@@ -1223,6 +1323,49 @@ class AgentChatFlowIntegrationTest {
 
     private fun turnCount(sessionId: String) = turnRepository.countBySessionId(sessionId).toInt()
 
+    private fun completeComparisonTurn(sessionId: String, content: String, idempotencyKey: String) {
+        val started = turnLifecycleService.beginTurn(sessionId, "user-1", content, idempotencyKey) as BeginTurnResult.Started
+        turnLifecycleService.completeTurn(
+            CompleteTurnCommand(
+                turnId = started.turnId,
+                content = "comparison answer",
+                intent = "COMPARISON",
+                queryTarget = "PROJECT",
+                nextAction = "SHOW_COMPARISON",
+                catalogReport = comparisonReport(),
+                comparisonRequest = comparisonRequest()
+            )
+        )
+    }
+
+    private fun comparisonRequest() = ComparisonRequest(
+        operands = listOf(
+            ComparisonOperand(AgentQueryTarget.PROJECT, "project-alpha", "Alpha"),
+            ComparisonOperand(AgentQueryTarget.PROJECT, "project-beta", "Beta")
+        ),
+        targetType = AgentQueryTarget.PROJECT,
+        dimensions = listOf("PRICE")
+    )
+
+    private fun comparisonReport(): AgentCatalogReportResponse {
+        val item = AgentCatalogItemResponse(
+            type = "PROJECT",
+            id = "project-alpha",
+            name = "Alpha",
+            subtitle = "",
+            summary = "",
+            attributes = linkedMapOf("Reference price" to "1000")
+        )
+        return AgentCatalogReportResponse(
+            mode = "COMPARISON",
+            title = "Project comparison",
+            summary = "Structured comparison",
+            items = listOf(item),
+            comparisonDimensions = listOf("Reference price"),
+            warnings = emptyList()
+        )
+    }
+
     companion object {
         private const val agentOperationLoggerName =
             "com.joysong.server.agent.diagnostics.AgentOperationLogger"
@@ -1330,7 +1473,7 @@ class ReportingAgentChatMySqlContainer(imageName: String) :
     override fun start() {
         println("AGENT_CHAT_TEST_DB_HOST=$host")
         println("AGENT_CHAT_TEST_DB_NAME=$databaseName")
-        require(databaseName == "myapp_worktree_qwen_agent_streaming") {
+        require(databaseName.startsWith("myapp_worktree_")) {
             "Refusing to start integration test with unexpected database: $databaseName"
         }
         super.start()
