@@ -13,7 +13,7 @@ When a user taps **Consult institution** on an institution detail page, load eve
 
 ## Architecture
 
-Add a small `InstitutionConsultant` domain model with `id` and `name`, matching the existing public endpoint. Extend the discover data source and repository with a method that retrieves the consultants for one institution.
+Reuse the existing `BookingConsultant` domain model and `BookingRepository.getConsultants(institutionId)` method, which already match and call the public endpoint. No duplicate consultant model or network implementation is needed.
 
 The institution detail view exposes the institution ID through a nullable consultation callback. The discover page and application shell pass this callback through to the existing composition point. The shell loads the consultants, presents the selection sheet, and, after selection, delegates to the existing `_openDirectMessage` flow.
 
@@ -31,11 +31,11 @@ Repeated taps while the sheet is already being opened must not create multiple s
 
 ## Components and Data Flow
 
-### Discover data layer
+### Existing booking data layer
 
-- Parse the endpoint response into immutable `InstitutionConsultant` values.
+- Reuse the immutable `BookingConsultant` values already parsed from the endpoint.
 - Preserve the backend order so the UI matches the service ordering.
-- Treat malformed collection entries as invalid rather than manufacturing placeholder users.
+- Keep the existing response validation and malformed-entry handling unchanged.
 
 ### Institution detail view
 
@@ -47,7 +47,7 @@ Repeated taps while the sheet is already being opened must not create multiple s
 
 - Own the asynchronous request and modal lifecycle because it already owns the repositories and DM navigation methods.
 - Render loading, success, empty, and failure states inside one scroll-controlled modal.
-- Pop the modal with the selected `InstitutionConsultant`; only then call `_openDirectMessage(consultant.id, title: consultant.name)`.
+- Pop the modal with the selected `BookingConsultant`; only then call `_openDirectMessage(consultant.id, title: consultant.name)`.
 
 ## Error Handling
 
@@ -61,7 +61,7 @@ Repeated taps while the sheet is already being opened must not create multiple s
 
 Follow test-driven development with the smallest related Flutter tests first:
 
-- Data-source/repository parsing of a valid consultant list.
+- Preserve the existing passing data-source contract test for consultant-list parsing.
 - Institution detail button emits the current institution ID.
 - Modal shows all returned consultant names in a scrollable list.
 - Selecting one consultant closes the modal and calls the DM-opening callback with the correct ID and name.
