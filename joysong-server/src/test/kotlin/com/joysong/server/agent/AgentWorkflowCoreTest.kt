@@ -41,6 +41,8 @@ import com.joysong.server.config.AiAgentProperties
 import com.joysong.server.config.AiAgentProvider
 import com.joysong.server.doctor.repository.DoctorRepository
 import com.joysong.server.doctor.service.DoctorInstitutionService
+import com.joysong.server.discover.repository.DoctorProjectRepository
+import com.joysong.server.discover.service.DiscoverSearchService
 import com.joysong.server.institution.repository.InstitutionProjectRepository
 import com.joysong.server.institution.repository.InstitutionRepository
 import com.joysong.server.institution.service.InstitutionProjectDetailResolver
@@ -433,10 +435,11 @@ class AgentWorkflowCoreTest {
     fun `later comparison restores the latest incomplete request from loaded assistant metadata`() {
         val content = "Compare Beta Clinic with clinics"
         val assistant = message(2, "ASSISTANT", "choose another").apply { turnId = "previous-turn" }
-        val previous = ComparisonRequest(
-            operands = listOf(ComparisonOperand(AgentQueryTarget.INSTITUTION, "alpha", "Alpha Clinic")),
-            targetType = AgentQueryTarget.INSTITUTION,
-            missingFields = setOf(ComparisonMissingField.OPERANDS)
+        val previous = ComparisonRequestBuilder().normalize(
+            ComparisonRequest(
+                operands = listOf(ComparisonOperand(AgentQueryTarget.INSTITUTION, " alpha ", " Alpha Clinic ")),
+                targetType = AgentQueryTarget.INSTITUTION
+            )
         )
         val completionTemplate = RestTemplate()
         val intentTemplate = RestTemplate()
@@ -445,9 +448,11 @@ class AgentWorkflowCoreTest {
         val catalog = mockk<AgentCatalogService>()
         val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
         val completed = slot<CompleteTurnCommand>()
+        val searchQuery = slot<String>()
+        val targetQuery = slot<String>()
+        val alpha = comparisonItem("alpha", "Alpha Clinic")
         val beta = comparisonItem("beta", "Beta Clinic")
-        val rawEvidence = comparisonEvidence(beta)
-        val filteredEvidence = comparisonEvidence(comparisonItem("alpha", "Alpha Clinic"), beta)
+        val realFilter = comparisonFilter()
         prepareChatGeneration(fixture, content)
         every { fixture.contextBuilder.load("user-1", "session-1", 20, 4_000) } returns
             AgentContext(AgentSessionSummary(), listOf(assistant))
@@ -464,15 +469,33 @@ class AgentWorkflowCoreTest {
         every { catalog.hasInstitutionProjectMatch(content) } returns false
         every { catalog.contextualSearchQuery(content, emptyList()) } returns content
         every {
-            catalog.promptEvidence(content, content, content, AgentQueryTarget.INSTITUTION, "COMPARISON")
-        } returns rawEvidence
-        every { catalog.filterComparisonEvidence(rawEvidence, any()) } returns filteredEvidence
+            catalog.promptEvidence(
+                content,
+                capture(searchQuery),
+                capture(targetQuery),
+                AgentQueryTarget.INSTITUTION,
+                "COMPARISON"
+            )
+        } answers {
+            comparisonEvidence(
+                *listOfNotNull(alpha.takeIf { secondArg<String>().contains(it.name) }, beta).toTypedArray()
+            )
+        }
+        every { catalog.filterComparisonEvidence(any(), any()) } answers {
+            realFilter.filterComparisonEvidence(firstArg(), secondArg())
+        }
         completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
             .andRespond(withSuccess("""{"choices":[{"message":{"content":"answer"}}]}""", MediaType.APPLICATION_JSON))
 
         fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
 
+        assertEquals("$content Alpha Clinic", searchQuery.captured)
+        assertEquals(searchQuery.captured, targetQuery.captured)
         assertEquals(listOf("alpha", "beta"), completed.captured.comparisonRequest?.operands?.map { it.entityId })
+        assertEquals(listOf("alpha", "beta"), completed.captured.catalogReport?.items?.map { it.id })
+        verify(exactly = 1) {
+            catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.INSTITUTION, "COMPARISON")
+        }
         verify(exactly = 1) { fixture.turnService.projectMessage(assistant) }
         intentServer.verify()
         completionServer.verify()
@@ -1858,6 +1881,17 @@ class AgentWorkflowCoreTest {
         subtitle = "Shanghai",
         summary = "",
         attributes = linkedMapOf("Rating" to "4.8", "Reviews" to "100")
+    )
+
+    private fun comparisonFilter() = AgentCatalogService(
+        institutionRepository = mockk(relaxed = true),
+        doctorRepository = mockk(relaxed = true),
+        projectRepository = mockk(relaxed = true),
+        institutionProjectRepository = mockk(relaxed = true),
+        doctorProjectRepository = mockk<DoctorProjectRepository>(relaxed = true),
+        discoverSearchService = mockk<DiscoverSearchService>(relaxed = true),
+        doctorInstitutionService = mockk(relaxed = true),
+        institutionProjectDetailResolver = InstitutionProjectDetailResolver()
     )
 
     private class CountingObjectMapper : ObjectMapper() {

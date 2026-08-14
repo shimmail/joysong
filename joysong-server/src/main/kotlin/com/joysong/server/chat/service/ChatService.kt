@@ -617,7 +617,11 @@ class ChatService(
             .joinToString(" ")
         val currentContextItems = currentContextCatalogItems(session.contextType, session.contextId)
         val comparisonSearchQuery = if (intentDecision.intent == AgentIntent.COMPARISON) {
-            (listOf(catalogSearchQuery) + currentContextItems.map { it.name })
+            (
+                listOf(catalogSearchQuery) +
+                    currentContextItems.map { it.name } +
+                    previousComparison?.takeUnless { it.isComplete }?.operands.orEmpty().map { it.displayName }
+                )
                 .filter(String::isNotBlank)
                 .distinct()
                 .joinToString(" ")
