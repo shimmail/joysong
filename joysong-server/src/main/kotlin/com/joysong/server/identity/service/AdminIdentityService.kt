@@ -28,7 +28,8 @@ class AdminIdentityService(
     private val jdbcTemplate: JdbcTemplate,
     private val objectMapper: ObjectMapper,
     private val doctorInstitutionRelationshipService: DoctorInstitutionRelationshipService,
-    private val walletRepository: WalletRepository
+    private val walletRepository: WalletRepository,
+    private val consultantInstitutionRelationships: ConsultantInstitutionRelationshipOperations
 ) {
     private val namedJdbcTemplate = NamedParameterJdbcTemplate(jdbcTemplate)
 
@@ -150,8 +151,9 @@ class AdminIdentityService(
         val normalizedInstitutionId = institutionId.trim().also { require(it.isNotEmpty()) { "机构不能为空" } }
         val normalizedConfirmerId = confirmerId.trim().also { require(it.isNotEmpty()) { "确认人不能为空" } }
 
+        consultantInstitutionRelationships.lockPair(normalizedUserId, normalizedInstitutionId)
         val user = jdbcTemplate.query(
-            "SELECT role, deleted_at FROM users WHERE id = ? FOR UPDATE",
+            "SELECT role, deleted_at FROM users WHERE id = ?",
             { rs, _ -> LockedBindingUser(rs.getString("role"), rs.getTimestamp("deleted_at")?.toLocalDateTime()) },
             normalizedUserId
         ).firstOrNull() ?: throw IllegalArgumentException("用户不存在")
@@ -159,11 +161,15 @@ class AdminIdentityService(
         require(user.role == "USER") { "只能绑定普通用户" }
 
         val institution = jdbcTemplate.query(
-            "SELECT deleted_at FROM institutions WHERE id = ? FOR UPDATE",
+            "SELECT deleted_at FROM institutions WHERE id = ?",
             { rs, _ -> LockedBindingInstitution(rs.getTimestamp("deleted_at")?.toLocalDateTime()) },
             normalizedInstitutionId
         ).firstOrNull() ?: throw IllegalArgumentException("机构不存在")
         require(institution.deletedAt == null) { "机构已删除" }
+        consultantInstitutionRelationships.requireActiveInstitution(normalizedInstitutionId)
+        if (hasPendingConsultantRequest(normalizedUserId, normalizedInstitutionId)) {
+            throw ConsultantInstitutionRequestConflictException("该机构存在待审核的顾问关系申请，请先完成审核")
+        }
 
         jdbcTemplate.update(
             """
@@ -283,6 +289,12 @@ class AdminIdentityService(
     fun revokeRole(userId: String, roleCode: String, reviewerId: String, reason: String) {
         val normalizedRole = roleCode.requiredRole()
         require(reason.isNotBlank()) { "撤销身份时必须填写原因" }
+        if (normalizedRole == "CONSULTANT") {
+            consultantInstitutionRelationships.lockUser(userId)
+            if (hasPendingConsultantRequest(userId)) {
+                throw ConsultantInstitutionRequestConflictException("顾问存在待审核的机构关系申请，请先完成审核")
+            }
+        }
         val updated = jdbcTemplate.update(
             """
             UPDATE user_roles
@@ -374,11 +386,14 @@ class AdminIdentityService(
     }
 
     @Transactional
-    fun createMembership(userId: String, institutionId: String, memberRole: String): String {
+    fun createMembership(userId: String, institutionId: String, memberRole: String, reviewerId: String): String {
         val normalizedUserId = userId.trim().also { require(it.isNotEmpty()) { "用户 ID 不能为空" } }
         val normalizedInstitutionId = institutionId.trim().also { require(it.isNotEmpty()) { "机构不能为空" } }
         val normalizedRole = memberRole.trim().uppercase().also {
             require(it in INSTITUTION_MEMBER_ROLES) { "医生执业关系请在医生执业审核中管理" }
+        }
+        if (normalizedRole == "CONSULTANT") {
+            return bindConsultant(normalizedUserId, normalizedInstitutionId, reviewerId).membershipId
         }
         requireActiveRole(normalizedUserId, normalizedRole)
         require(count("SELECT COUNT(*) FROM users WHERE id = ? AND deleted_at IS NULL", normalizedUserId) == 1L) { "用户不存在或已注销" }
@@ -413,7 +428,11 @@ class AdminIdentityService(
 
     @Transactional
     fun approveMembership(id: String, reviewerId: String) {
-        val target = membershipTarget(id)
+        val peek = membershipTarget(id, lock = false)
+        if (peek.roleCode == "CONSULTANT") {
+            throw ConsultantInstitutionRequestConflictException("请在顾问机构关系申请中完成审核")
+        }
+        val target = membershipTarget(id, lock = true)
         require(target.status == "PENDING") { "只有待审核成员关系可以通过" }
         requireActiveRole(target.userId, target.roleCode)
         val updated = jdbcTemplate.update(
@@ -425,8 +444,22 @@ class AdminIdentityService(
     }
 
     @Transactional
-    fun revokeMembership(id: String) {
-        val target = membershipTarget(id)
+    fun revokeMembership(id: String, reviewerId: String) {
+        val peek = membershipTarget(id, lock = false)
+        if (peek.roleCode == "CONSULTANT") {
+            consultantInstitutionRelationships.lockPair(peek.userId, peek.institutionId)
+            val target = membershipTarget(id, lock = true)
+            if (target.userId != peek.userId || target.institutionId != peek.institutionId || target.roleCode != peek.roleCode) {
+                throw ConsultantInstitutionRequestConflictException("顾问机构关系已被其他操作处理")
+            }
+            require(target.status != "REVOKED") { "成员关系已撤销" }
+            if (hasPendingConsultantRequest(target.userId, target.institutionId)) {
+                throw ConsultantInstitutionRequestConflictException("该机构存在待审核的顾问关系申请，请先完成审核")
+            }
+            consultantInstitutionRelationships.forceRevoke(target.userId, target.institutionId, reviewerId)
+            return
+        }
+        val target = membershipTarget(id, lock = true)
         require(target.status != "REVOKED") { "成员关系已撤销" }
         jdbcTemplate.update(
             "UPDATE institution_memberships SET status = 'REVOKED', revoked_at = NOW() WHERE id = ?",
@@ -502,22 +535,14 @@ class AdminIdentityService(
 
     @Transactional
     fun approveDoctorPractice(id: String, reviewerId: String) {
-        val target = doctorPracticeTarget(id)
-        require(target.status == "PENDING") { "只有待审核执业关系可以通过" }
-        requireActiveRole(target.userId, "DOCTOR")
-        val updated = jdbcTemplate.update(
-            "UPDATE doctor_institutions SET status = 'APPROVED', confirmed_by = ?, confirmed_at = NOW(), revoked_at = NULL WHERE id = ? AND status = 'PENDING'",
-            reviewerId,
-            id
-        )
-        check(updated == 1) { "执业关系状态已变化，请刷新后重试" }
+        throw DoctorInstitutionRequestConflictException("请在医生机构关系申请中完成审核")
     }
 
     @Transactional
-    fun revokeDoctorPractice(id: String) {
+    fun revokeDoctorPractice(id: String, reviewerId: String) {
         val target = doctorPracticeTarget(id)
         require(target.status != "REVOKED") { "执业关系已撤销" }
-        doctorInstitutionRelationshipService.revoke(target.userId, target.institutionId, null)
+        doctorInstitutionRelationshipService.revoke(target.userId, target.institutionId, reviewerId)
     }
 
     private fun documentsFor(applicationId: String): List<IdentityDocumentAdminView> = jdbcTemplate.query(
@@ -541,8 +566,8 @@ class AdminIdentityService(
         applicationId
     )
 
-    private fun membershipTarget(id: String): RelationTarget = jdbcTemplate.query(
-        "SELECT user_id, institution_id, member_role, status FROM institution_memberships WHERE id = ? FOR UPDATE",
+    private fun membershipTarget(id: String, lock: Boolean = true): RelationTarget = jdbcTemplate.query(
+        "SELECT user_id, institution_id, member_role, status FROM institution_memberships WHERE id = ?${if (lock) " FOR UPDATE" else ""}",
         { rs, _ -> RelationTarget(rs.getString("user_id"), rs.getString("institution_id"), rs.getString("member_role"), rs.getString("status")) },
         id
     ).firstOrNull() ?: throw IllegalArgumentException("机构成员关系不存在")
@@ -558,6 +583,27 @@ class AdminIdentityService(
             "用户尚未取得有效职业身份"
         }
     }
+
+    private fun hasPendingConsultantRequest(userId: String, institutionId: String): Boolean = jdbcTemplate.queryForList(
+        """
+        SELECT id FROM consultant_institution_change_requests
+        WHERE consultant_id = ? AND institution_id = ? AND status = 'PENDING'
+        FOR UPDATE
+        """.trimIndent(),
+        String::class.java,
+        userId,
+        institutionId
+    ).isNotEmpty()
+
+    private fun hasPendingConsultantRequest(userId: String): Boolean = jdbcTemplate.queryForList(
+        """
+        SELECT id FROM consultant_institution_change_requests
+        WHERE consultant_id = ? AND status = 'PENDING'
+        FOR UPDATE
+        """.trimIndent(),
+        String::class.java,
+        userId
+    ).isNotEmpty()
 
     private fun fallbackSessions(userId: String, roleCode: String) {
         jdbcTemplate.update(

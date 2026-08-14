@@ -25,6 +25,7 @@ interface ConsultantInstitutionChangeRequestStore {
         includeAll: Boolean
     ): List<ConsultantInstitutionChangeRequestView>
 
+    fun find(id: String): ConsultantInstitutionChangeRequestView?
     fun lock(id: String): ConsultantInstitutionChangeRequestView?
     fun changeStatus(
         id: String,
@@ -56,6 +57,8 @@ class ConsultantInstitutionChangeRequestService(
         val normalizedNote = requestNote.trim().also {
             require(it.length <= MAX_NOTE_LENGTH) { "申请说明不能超过1000个字符" }
         }
+        relationships.lockPair(actor.userId, normalizedInstitutionId)
+        relationships.requireActiveConsultant(actor.userId)
         relationships.requireActiveInstitution(normalizedInstitutionId)
         val activeRelationship = store.hasActiveRelationship(actor.userId, normalizedInstitutionId)
         when (action) {
@@ -106,9 +109,18 @@ class ConsultantInstitutionChangeRequestService(
         decision: MembershipRequestDecision,
         reviewNote: String
     ): ConsultantInstitutionChangeRequestView {
-        val request = locked(id)
-        if (!actor.isAdmin && request.institutionId !in actor.managedInstitutionIds) {
+        val normalizedId = normalizeId(id)
+        val peek = store.find(normalizedId)
+            ?: throw ConsultantInstitutionRequestNotFoundException("顾问机构关系申请不存在")
+        if (!actor.isAdmin && peek.institutionId !in actor.managedInstitutionIds) {
             throw AccessDeniedException("无权审核其他机构的关系申请")
+        }
+        relationships.lockPair(peek.consultantId, peek.institutionId)
+        relationships.requireActiveConsultant(peek.consultantId)
+        val request = store.lock(normalizedId)
+            ?: throw ConsultantInstitutionRequestNotFoundException("顾问机构关系申请不存在")
+        if (request.consultantId != peek.consultantId || request.institutionId != peek.institutionId) {
+            closedConflict()
         }
         if (request.status != ConsultantInstitutionRequestStatus.PENDING) closedConflict()
         val normalizedReviewNote = reviewNote.trim().also {
@@ -144,9 +156,13 @@ class ConsultantInstitutionChangeRequestService(
     }
 
     private fun locked(id: String): ConsultantInstitutionChangeRequestView {
-        val normalizedId = id.trim().also { require(it.isNotEmpty()) { "关系申请不能为空" } }
+        val normalizedId = normalizeId(id)
         return store.lock(normalizedId)
             ?: throw ConsultantInstitutionRequestNotFoundException("顾问机构关系申请不存在")
+    }
+
+    private fun normalizeId(id: String): String = id.trim().also {
+        require(it.isNotEmpty()) { "关系申请不能为空" }
     }
 
     private fun DuplicateKeyException.isPendingRequestConflict(): Boolean = generateSequence<Throwable>(this) {
@@ -222,6 +238,8 @@ class JdbcConsultantInstitutionChangeRequestStore(
 
     override fun lock(id: String): ConsultantInstitutionChangeRequestView? = find(id, lock = true)
 
+    override fun find(id: String): ConsultantInstitutionChangeRequestView? = find(id, lock = false)
+
     override fun changeStatus(
         id: String,
         status: ConsultantInstitutionRequestStatus,
@@ -253,24 +271,28 @@ class JdbcConsultantInstitutionChangeRequestStore(
         return updated == 1
     }
 
-    override fun hasPending(consultantId: String, institutionId: String): Boolean = count(
+    override fun hasPending(consultantId: String, institutionId: String): Boolean = jdbcTemplate.queryForList(
         """
-        SELECT COUNT(*) FROM consultant_institution_change_requests
+        SELECT id FROM consultant_institution_change_requests
         WHERE consultant_id = ? AND institution_id = ? AND status = 'PENDING'
+        FOR UPDATE
         """.trimIndent(),
+        String::class.java,
         consultantId,
         institutionId
-    ) > 0L
+    ).isNotEmpty()
 
-    override fun hasActiveRelationship(consultantId: String, institutionId: String): Boolean = count(
+    override fun hasActiveRelationship(consultantId: String, institutionId: String): Boolean = jdbcTemplate.queryForList(
         """
-        SELECT COUNT(*) FROM institution_memberships
+        SELECT id FROM institution_memberships
         WHERE user_id = ? AND institution_id = ? AND member_role = 'CONSULTANT'
           AND status = 'APPROVED' AND revoked_at IS NULL
+        FOR UPDATE
         """.trimIndent(),
+        String::class.java,
         consultantId,
         institutionId
-    ) > 0L
+    ).isNotEmpty()
 
     private fun find(id: String, lock: Boolean): ConsultantInstitutionChangeRequestView? = jdbcTemplate.query(
         selectSql() + " WHERE r.id = ?" + if (lock) " FOR UPDATE" else "",
@@ -310,9 +332,6 @@ class JdbcConsultantInstitutionChangeRequestStore(
             updatedAt = rs.getTimestamp("updated_at").toLocalDateTime()
         )
     }
-
-    private fun count(sql: String, vararg args: Any): Long =
-        jdbcTemplate.queryForObject(sql, Long::class.java, *args)
 
     private companion object {
         const val REVIEW_ORDER = " ORDER BY r.submitted_at DESC, r.id DESC"

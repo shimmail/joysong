@@ -14,7 +14,7 @@ data class DoctorInstitutionEntity(
     @Column(name = "doctor_id") val doctorId: String,
     @Column(name = "institution_id") val institutionId: String,
     @Column(name = "is_primary") val isPrimary: Boolean = false,
-    val status: String = "PENDING",
+    val status: String = "APPROVED",
     @Column(name = "registration_no") val registrationNo: String = "",
     @Column(name = "registration_file_id") val registrationFileId: String? = null,
     @Column(name = "confirmed_by") val confirmedBy: String? = null,

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.joysong.server.wallet.repository.WalletRepository
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -41,11 +42,17 @@ class AdminIdentityServiceTest {
         every { jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) } answers {
             listOf(secondArg<RowMapper<Any>>().mapRow(rs, 0))
         }
-        val service = AdminIdentityService(jdbcTemplate, ObjectMapper(), relationshipService, mockk(relaxed = true))
+        val service = AdminIdentityService(
+            jdbcTemplate,
+            ObjectMapper(),
+            relationshipService,
+            mockk(relaxed = true),
+            mockk(relaxed = true)
+        )
 
-        service.revokeDoctorPractice("practice-1")
+        service.revokeDoctorPractice("practice-1", "admin-1")
 
-        verify(exactly = 1) { relationshipService.revoke("doctor-1", "institution-1", null) }
+        verify(exactly = 1) { relationshipService.revoke("doctor-1", "institution-1", "admin-1") }
         verify(exactly = 0) {
             jdbcTemplate.update(match<String> { it.contains("UPDATE doctor_institutions") }, *anyVararg())
         }
@@ -56,11 +63,38 @@ class AdminIdentityServiceTest {
         val jdbcTemplate = mockk<JdbcTemplate>()
         val relationshipService = mockk<DoctorInstitutionRelationshipService>(relaxed = true)
         every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 1
-        val service = AdminIdentityService(jdbcTemplate, ObjectMapper(), relationshipService, mockk(relaxed = true))
+        val service = AdminIdentityService(
+            jdbcTemplate,
+            ObjectMapper(),
+            relationshipService,
+            mockk(relaxed = true),
+            mockk(relaxed = true)
+        )
 
         service.revokeRole("doctor-1", "DOCTOR", "admin-1", "认证撤销")
 
         verify(exactly = 1) { relationshipService.revokeAll("doctor-1", "admin-1") }
+    }
+
+    @Test
+    fun `legacy doctor approve rejects direct projection mutation with a typed conflict`() {
+        val jdbcTemplate = mockk<JdbcTemplate>(relaxed = true)
+        val service = AdminIdentityService(
+            jdbcTemplate,
+            ObjectMapper(),
+            mockk(relaxed = true),
+            mockk(relaxed = true),
+            mockk(relaxed = true)
+        )
+
+        val error = assertThrows(DoctorInstitutionRequestConflictException::class.java) {
+            service.approveDoctorPractice("request-ledger-id", "admin-1")
+        }
+
+        assertTrue(error.message.orEmpty().contains("关系申请"))
+        verify(exactly = 0) {
+            jdbcTemplate.update(match<String> { it.contains("doctor_institutions") }, *anyVararg())
+        }
     }
 
     @Test
@@ -75,6 +109,139 @@ class AdminIdentityServiceTest {
         assertTrue(fixture.upserts.none { it.sql.contains("INSTITUTION_LEGAL_REPRESENTATIVE") })
         assertEquals("CONSULTANT", fixture.membershipRoleCode)
         verify(exactly = 1) { fixture.walletRepository.createIfAbsent("CONSULTANT", "user-1", "USD") }
+    }
+
+    @Test
+    fun `generic consultant creation uses the approved platform override without pending projection`() {
+        val fixture = fixture()
+
+        val membershipId = fixture.service.createMembership(
+            "user-1",
+            "institution-1",
+            "CONSULTANT",
+            "admin-1"
+        )
+
+        assertEquals("membership-1", membershipId)
+        assertTrue(fixture.upserts.any { it.sql.contains("institution_memberships") && it.sql.contains("'APPROVED'") })
+        assertTrue(fixture.upserts.none { it.sql.contains("'PENDING'") })
+    }
+
+    @Test
+    fun `explicit consultant binding rejects a matching pending ledger request before writes`() {
+        val fixture = fixture(pendingRequestCount = 1)
+
+        val error = assertThrows(ConsultantInstitutionRequestConflictException::class.java) {
+            fixture.service.bindConsultant("user-1", "institution-1", "admin-1")
+        }
+
+        assertTrue(error.message.orEmpty().contains("审核"))
+        assertTrue(fixture.upserts.isEmpty())
+        verify(exactly = 1) {
+            fixture.consultantRelationships.lockPair("user-1", "institution-1")
+        }
+        assertTrue(fixture.pendingQueries.single().contains("FOR UPDATE"))
+    }
+
+    @Test
+    fun `legacy consultant approve is a typed conflict and never advances the projection`() {
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        val rs = resultSet(
+            strings = mapOf(
+                "user_id" to "user-1",
+                "institution_id" to "institution-1",
+                "member_role" to "CONSULTANT",
+                "status" to "PENDING"
+            )
+        )
+        every { jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) } answers {
+            listOf(secondArg<RowMapper<Any>>().mapRow(rs, 0))
+        }
+        val service = AdminIdentityService(
+            jdbcTemplate,
+            ObjectMapper(),
+            mockk(relaxed = true),
+            mockk(relaxed = true),
+            mockk(relaxed = true)
+        )
+
+        assertThrows(ConsultantInstitutionRequestConflictException::class.java) {
+            service.approveMembership("membership-1", "admin-1")
+        }
+
+        verify(exactly = 0) {
+            jdbcTemplate.update(match<String> { it.contains("institution_memberships") }, *anyVararg())
+        }
+    }
+
+    @Test
+    fun `force revoke rejects a matching pending consultant request without fabricating withdrawal`() {
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        val consultantRelationships = mockk<ConsultantInstitutionRelationshipOperations>(relaxed = true)
+        val pendingSql = slot<String>()
+        every { jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) } answers {
+            listOf(secondArg<RowMapper<Any>>().mapRow(resultSet(
+                strings = mapOf(
+                    "user_id" to "user-1",
+                    "institution_id" to "institution-1",
+                    "member_role" to "CONSULTANT",
+                    "status" to "APPROVED"
+                )
+            ), 0))
+        }
+        every {
+            jdbcTemplate.queryForList(
+                capture(pendingSql),
+                String::class.java,
+                "user-1",
+                "institution-1"
+            )
+        } returns listOf("request-1")
+        val service = AdminIdentityService(
+            jdbcTemplate,
+            ObjectMapper(),
+            mockk(relaxed = true),
+            mockk(relaxed = true),
+            consultantRelationships
+        )
+
+        assertThrows(ConsultantInstitutionRequestConflictException::class.java) {
+            service.revokeMembership("membership-1", "admin-1")
+        }
+
+        verify(exactly = 0) {
+            consultantRelationships.forceRevoke(any(), any(), any())
+        }
+        verify(exactly = 0) {
+            jdbcTemplate.update(match<String> { it.contains("WITHDRAWN") }, *anyVararg())
+        }
+        assertTrue(pendingSql.captured.contains("FOR UPDATE"))
+    }
+
+    @Test
+    fun `consultant role revoke locks the user and rejects any pending ledger before mutations`() {
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        val consultantRelationships = mockk<ConsultantInstitutionRelationshipOperations>(relaxed = true)
+        val pendingSql = slot<String>()
+        every {
+            jdbcTemplate.queryForList(capture(pendingSql), String::class.java, "user-1")
+        } returns listOf("request-1")
+        val service = AdminIdentityService(
+            jdbcTemplate,
+            ObjectMapper(),
+            mockk(relaxed = true),
+            mockk(relaxed = true),
+            consultantRelationships
+        )
+
+        assertThrows(ConsultantInstitutionRequestConflictException::class.java) {
+            service.revokeRole("user-1", "CONSULTANT", "admin-1", "role revoked")
+        }
+
+        verify(exactly = 1) { consultantRelationships.lockUser("user-1") }
+        verify(exactly = 0) { jdbcTemplate.update(match<String> { it.contains("user_roles") }, *anyVararg()) }
+        assertTrue(pendingSql.captured.contains("status = 'PENDING'"))
+        assertTrue(pendingSql.captured.contains("FOR UPDATE"))
     }
 
     @Test
@@ -116,16 +283,17 @@ class AdminIdentityServiceTest {
     }
 
     @Test
-    fun `bindConsultant locks user then institution before either upsert`() {
+    fun `bindConsultant uses the shared pair lock before either upsert`() {
         val fixture = fixture()
 
         fixture.service.bindConsultant("user-1", "institution-1", "admin-1")
 
+        verify(exactly = 1) {
+            fixture.consultantRelationships.lockPair("user-1", "institution-1")
+        }
         assertEquals(2, fixture.validationQueries.size)
         assertTrue(fixture.validationQueries[0].contains("FROM users"))
-        assertTrue(fixture.validationQueries[0].contains("FOR UPDATE"))
         assertTrue(fixture.validationQueries[1].contains("FROM institutions"))
-        assertTrue(fixture.validationQueries[1].contains("FOR UPDATE"))
     }
 
     @Test
@@ -236,16 +404,30 @@ class AdminIdentityServiceTest {
         institutionExists: Boolean = true,
         institutionDeleted: Boolean = false,
         failMembershipUpsert: Boolean = false,
-        finalMembershipFound: Boolean = true
+        finalMembershipFound: Boolean = true,
+        pendingRequestCount: Long = 0L
     ): Fixture {
         val jdbcTemplate = mockk<JdbcTemplate>()
         val walletRepository = mockk<WalletRepository>(relaxed = true)
+        val consultantRelationships = mockk<ConsultantInstitutionRelationshipOperations>(relaxed = true)
         val upserts = java.util.Collections.synchronizedList(mutableListOf<SqlCall>())
         val finalMembershipQueries = AtomicInteger()
         val preInsertMembershipSelects = AtomicInteger()
         val validationQueries = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val pendingQueries = java.util.Collections.synchronizedList(mutableListOf<String>())
         val finalMembershipSql = java.util.concurrent.atomic.AtomicReference("")
         var membershipRoleCode = ""
+        every {
+            jdbcTemplate.queryForList(
+                match<String> { it.contains("consultant_institution_change_requests") },
+                String::class.java,
+                "user-1",
+                "institution-1"
+            )
+        } answers {
+            pendingQueries += firstArg<String>()
+            if (pendingRequestCount == 0L) emptyList() else listOf("request-1")
+        }
         every { jdbcTemplate.update(any<String>(), *anyVararg()) } answers {
             val sql = firstArg<String>()
             val args = secondArg<Array<*>>().toList()
@@ -305,7 +487,8 @@ class AdminIdentityServiceTest {
                 jdbcTemplate,
                 ObjectMapper(),
                 mockk<DoctorInstitutionRelationshipService>(relaxed = true),
-                walletRepository
+                walletRepository,
+                consultantRelationships
             ),
             jdbcTemplate = jdbcTemplate,
             upserts = upserts,
@@ -314,7 +497,9 @@ class AdminIdentityServiceTest {
             membershipRoleCodeProvider = { membershipRoleCode },
             validationQueries = validationQueries,
             finalMembershipSqlProvider = finalMembershipSql::get,
-            walletRepository = walletRepository
+            walletRepository = walletRepository,
+            pendingQueries = pendingQueries,
+            consultantRelationships = consultantRelationships
         )
     }
 
@@ -356,7 +541,9 @@ class AdminIdentityServiceTest {
         private val membershipRoleCodeProvider: () -> String,
         val validationQueries: List<String>,
         private val finalMembershipSqlProvider: () -> String,
-        val walletRepository: WalletRepository
+        val walletRepository: WalletRepository,
+        val pendingQueries: List<String>,
+        val consultantRelationships: ConsultantInstitutionRelationshipOperations
     ) {
         val finalMembershipQueries get() = finalMembershipQueriesProvider()
         val preInsertMembershipSelects get() = preInsertMembershipSelectsProvider()

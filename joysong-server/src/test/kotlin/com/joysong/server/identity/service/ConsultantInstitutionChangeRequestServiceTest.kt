@@ -34,6 +34,18 @@ class ConsultantInstitutionChangeRequestServiceTest {
     }
 
     @Test
+    fun `submit locks the pair then revalidates the active consultant role before current reads`() {
+        relationships.activeConsultant = false
+
+        assertThrows(ConsultantInstitutionRequestConflictException::class.java) {
+            service.submit(actor(), "institution-1", ConsultantInstitutionAction.JOIN, "")
+        }
+
+        assertEquals(listOf("pair", "role"), events)
+        assertTrue(store.created.isEmpty())
+    }
+
+    @Test
     fun `join requires a verified institution and no active relationship`() {
         relationships.activeInstitutions.clear()
         assertThrows(ConsultantInstitutionRequestConflictException::class.java) {
@@ -213,6 +225,15 @@ class ConsultantInstitutionChangeRequestServiceTest {
     }
 
     @Test
+    fun `review peeks then locks the pair before relocking the request row`() {
+        store.locked = request()
+
+        service.review(admin(), "request-1", MembershipRequestDecision.REJECTED, "not eligible")
+
+        assertEquals(listOf("peek", "pair", "role", "request"), events.take(4))
+    }
+
+    @Test
     fun `withdrawal and rejection never apply a relationship effect`() {
         store.locked = request(action = ConsultantInstitutionAction.LEAVE)
         service.withdraw(actor(), "request-1")
@@ -292,7 +313,15 @@ class ConsultantInstitutionChangeRequestServiceTest {
         override fun listReviewable(managedInstitutionIds: Set<String>, includeAll: Boolean) =
             (history + created).filter { includeAll || it.institutionId in managedInstitutionIds }
 
-        override fun lock(id: String) = locked?.takeIf { it.id == id }
+        override fun find(id: String): ConsultantInstitutionChangeRequestView? {
+            events += "peek"
+            return locked?.takeIf { it.id == id }
+        }
+
+        override fun lock(id: String): ConsultantInstitutionChangeRequestView? {
+            events += "request"
+            return locked?.takeIf { it.id == id }
+        }
 
         override fun changeStatus(
             id: String,
@@ -312,9 +341,15 @@ class ConsultantInstitutionChangeRequestServiceTest {
             return true
         }
 
-        override fun hasPending(consultantId: String, institutionId: String) = pending
+        override fun hasPending(consultantId: String, institutionId: String): Boolean {
+            events += "pending"
+            return pending
+        }
 
-        override fun hasActiveRelationship(consultantId: String, institutionId: String) = activeRelationship
+        override fun hasActiveRelationship(consultantId: String, institutionId: String): Boolean {
+            events += "membership"
+            return activeRelationship
+        }
 
         private fun request(
             ordinal: Int,
@@ -346,7 +381,23 @@ class ConsultantInstitutionChangeRequestServiceTest {
     ) : ConsultantInstitutionRelationshipOperations {
         val activeInstitutions = mutableSetOf("institution-1", "institution-2")
         val approvedEffects = mutableListOf<ConsultantInstitutionAction>()
+        var activeConsultant = true
         var reviewFailure: RuntimeException? = null
+
+        override fun lockUser(consultantId: String) {
+            events += "user"
+        }
+
+        override fun lockPair(consultantId: String, institutionId: String) {
+            events += "pair"
+        }
+
+        override fun requireActiveConsultant(consultantId: String) {
+            events += "role"
+            if (!activeConsultant) {
+                throw ConsultantInstitutionRequestConflictException("顾问身份已失效")
+            }
+        }
 
         override fun requireActiveInstitution(institutionId: String) {
             if (institutionId !in activeInstitutions) {
@@ -360,6 +411,7 @@ class ConsultantInstitutionChangeRequestServiceTest {
             action: ConsultantInstitutionAction
         ) {
             reviewFailure?.let { throw it }
+            events += "relationship"
         }
 
         override fun applyApproved(
@@ -371,6 +423,10 @@ class ConsultantInstitutionChangeRequestServiceTest {
             reviewFailure?.let { throw it }
             events += "relationship"
             approvedEffects += action
+        }
+
+        override fun forceRevoke(consultantId: String, institutionId: String, reviewerId: String) {
+            events += "force-revoke"
         }
     }
 

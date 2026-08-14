@@ -53,17 +53,17 @@ class DoctorInstitutionChangeRequestServiceTest {
     }
 
     @Test
-    fun `join and leave reject relationship states that do not match the action`() {
+    fun `join and leave reject stale relationship states with typed conflicts`() {
         every { store.isCertifiedDoctor("doctor-1") } returns true
         every { store.hasActiveRelationship("doctor-1", "institution-1") } returns true
 
-        val joinError = assertThrows<IllegalArgumentException> {
+        val joinError = assertThrows<DoctorInstitutionRequestConflictException> {
             service.submit(doctorActor(), "institution-1", DoctorInstitutionAction.JOIN, "")
         }
         assertEquals("医生已加入该机构", joinError.message)
 
         every { store.hasActiveRelationship("doctor-1", "institution-1") } returns false
-        val leaveError = assertThrows<IllegalArgumentException> {
+        val leaveError = assertThrows<DoctorInstitutionRequestConflictException> {
             service.submit(doctorActor(), "institution-1", DoctorInstitutionAction.LEAVE, "")
         }
         assertEquals("医生尚未加入该机构", leaveError.message)
@@ -85,16 +85,39 @@ class DoctorInstitutionChangeRequestServiceTest {
     }
 
     @Test
-    fun `join submit rejects a missing or deleted institution before insert`() {
+    fun `join submit rejects a missing deleted or unverified institution before insert`() {
         every { store.isCertifiedDoctor("doctor-1") } returns true
         every { store.isActiveInstitution("institution-1") } returns false
 
-        val error = assertThrows<IllegalArgumentException> {
+        val error = assertThrows<DoctorInstitutionRequestNotFoundException> {
             service.submit(doctorActor(), "institution-1", DoctorInstitutionAction.JOIN, "")
         }
 
-        assertEquals("机构不存在或已删除", error.message)
+        assertEquals("机构不存在、未认证或已删除", error.message)
         verify(exactly = 0) { store.create(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `submit trims request note and rejects more than one thousand characters before insert`() {
+        every { store.isCertifiedDoctor("doctor-1") } returns true
+        every { store.hasActiveRelationship("doctor-1", "institution-1") } returns false
+        every { store.hasPending("doctor-1", "institution-1") } returns false
+        every { store.create("doctor-1", "institution-1", DoctorInstitutionAction.JOIN, "x".repeat(1000)) } returns
+            request(action = DoctorInstitutionAction.JOIN, requestNote = "x".repeat(1000))
+
+        val accepted = service.submit(
+            doctorActor(),
+            "institution-1",
+            DoctorInstitutionAction.JOIN,
+            "  ${"x".repeat(1000)}  "
+        )
+        assertEquals(1000, accepted.requestNote.length)
+
+        val error = assertThrows<IllegalArgumentException> {
+            service.submit(doctorActor(), "institution-1", DoctorInstitutionAction.JOIN, "x".repeat(1001))
+        }
+        assertEquals("申请说明不能超过1000个字符", error.message)
+        verify(exactly = 1) { store.create(any(), any(), any(), any()) }
     }
 
     @Test
@@ -103,14 +126,14 @@ class DoctorInstitutionChangeRequestServiceTest {
         every { store.hasActiveRelationship("doctor-1", "institution-1") } returns false
         every { store.hasPending("doctor-1", "institution-1") } returns true
 
-        val duplicate = assertThrows<IllegalStateException> {
+        val duplicate = assertThrows<DoctorInstitutionRequestConflictException> {
             service.submit(doctorActor(), "institution-1", DoctorInstitutionAction.JOIN, "")
         }
         assertEquals("该机构已有待处理的关系申请", duplicate.message)
 
         every { store.hasPending("doctor-1", "institution-1") } returns false
         every { store.create(any(), any(), any(), any()) } throws pendingConflict()
-        val race = assertThrows<IllegalStateException> {
+        val race = assertThrows<DoctorInstitutionRequestConflictException> {
             service.submit(doctorActor(), "institution-1", DoctorInstitutionAction.JOIN, "")
         }
         assertEquals("该机构已有待处理的关系申请", race.message)
@@ -269,15 +292,39 @@ class DoctorInstitutionChangeRequestServiceTest {
     }
 
     @Test
+    fun `rejection revalidates doctor institution and join relationship before closing request`() {
+        every { store.lock("request-1") } returns request()
+        every {
+            relationshipService.validateForReview(
+                "doctor-1",
+                "institution-1",
+                DoctorInstitutionAction.JOIN
+            )
+        } throws DoctorInstitutionRequestConflictException("医生身份已失效")
+
+        val error = assertThrows<DoctorInstitutionRequestConflictException> {
+            service.review(
+                legalActor(setOf("institution-1")),
+                "request-1",
+                MembershipRequestDecision.REJECTED,
+                "暂不通过"
+            )
+        }
+
+        assertEquals("医生身份已失效", error.message)
+        verify(exactly = 0) { store.changeStatus(any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `only pending requests can be withdrawn or reviewed`() {
         every { store.lock("request-1") } returns request(status = DoctorInstitutionRequestStatus.APPROVED)
 
-        val withdrawError = assertThrows<IllegalArgumentException> {
+        val withdrawError = assertThrows<DoctorInstitutionRequestConflictException> {
             service.withdraw(doctorActor(), "request-1")
         }
         assertEquals("只有待审核的关系申请可以撤回", withdrawError.message)
 
-        val reviewError = assertThrows<IllegalArgumentException> {
+        val reviewError = assertThrows<DoctorInstitutionRequestConflictException> {
             service.review(
                 legalActor(setOf("institution-1")),
                 "request-1",
@@ -297,6 +344,17 @@ class DoctorInstitutionChangeRequestServiceTest {
             MembershipRequestDecision.parse("CHANGES_REQUESTED")
         }
         assertEquals("不支持的审核决定", error.message)
+    }
+
+    @Test
+    fun `missing request is reported by a typed not found exception`() {
+        every { store.lock("missing") } returns null
+
+        val error = assertThrows<DoctorInstitutionRequestNotFoundException> {
+            service.review(adminActor(), "missing", MembershipRequestDecision.APPROVED, "")
+        }
+
+        assertEquals("医生机构关系申请不存在", error.message)
     }
 
     private fun request(
@@ -409,6 +467,66 @@ class DoctorInstitutionRelationshipServiceTest {
     }
 
     @Test
+    fun `review validation rejects an unverified institution with typed not found`() {
+        every {
+            jdbcTemplate.queryForList(
+                match<String> { it.contains("FROM doctors d") && it.contains("FOR UPDATE") },
+                String::class.java,
+                "doctor-1"
+            )
+        } returns listOf("doctor-1")
+        every {
+            jdbcTemplate.queryForList(
+                match<String> { it.contains("FROM institutions") && it.contains("is_verified = 1") },
+                String::class.java,
+                "institution-1"
+            )
+        } returns emptyList()
+
+        val error = assertThrows<DoctorInstitutionRequestNotFoundException> {
+            service.validateForReview("doctor-1", "institution-1", DoctorInstitutionAction.JOIN)
+        }
+
+        assertEquals("机构不存在、未认证或已删除", error.message)
+    }
+
+    @Test
+    fun `review validation rejects join when the relationship became active`() {
+        every {
+            jdbcTemplate.queryForList(
+                match<String> { it.contains("FROM doctors d") && it.contains("FOR UPDATE") },
+                String::class.java,
+                "doctor-1"
+            )
+        } returns listOf("doctor-1")
+        every {
+            jdbcTemplate.queryForList(
+                match<String> { it.contains("FROM institutions") && it.contains("is_verified = 1") },
+                String::class.java,
+                "institution-1"
+            )
+        } returns listOf("机构一")
+        every {
+            jdbcTemplate.queryForList(
+                match<String> {
+                    it.contains("FROM doctor_institutions") &&
+                        it.contains("status = 'APPROVED'") &&
+                        it.contains("FOR UPDATE")
+                },
+                String::class.java,
+                "doctor-1",
+                "institution-1"
+            )
+        } returns listOf("relationship-1")
+
+        val error = assertThrows<DoctorInstitutionRequestConflictException> {
+            service.validateForReview("doctor-1", "institution-1", DoctorInstitutionAction.JOIN)
+        }
+
+        assertEquals("医生已加入该机构", error.message)
+    }
+
+    @Test
     fun `join approval restores relationship selects first primary and never binds projects`() {
         every {
             jdbcTemplate.queryForList(
@@ -426,7 +544,21 @@ class DoctorInstitutionRelationshipServiceTest {
         } returns listOf("机构一")
         every {
             jdbcTemplate.queryForList(
-                match<String> { it.contains("FROM doctor_institutions") && it.contains("institution_id = ?") },
+                match<String> {
+                    it.contains("FROM doctor_institutions") && it.contains("institution_id = ?") &&
+                        it.contains("status = 'APPROVED'")
+                },
+                String::class.java,
+                "doctor-1",
+                "institution-1"
+            )
+        } returns emptyList()
+        every {
+            jdbcTemplate.queryForList(
+                match<String> {
+                    it.contains("FROM doctor_institutions") && it.contains("institution_id = ?") &&
+                        !it.contains("status = 'APPROVED'")
+                },
                 String::class.java,
                 "doctor-1",
                 "institution-1"
@@ -486,6 +618,31 @@ class DoctorInstitutionRelationshipServiceTest {
     @Test
     fun `leave approval removes only target live bindings reassigns primary and preserves orders`() {
         every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 1
+        every {
+            jdbcTemplate.queryForList(
+                match<String> { it.contains("FROM doctors d") && it.contains("FOR UPDATE") },
+                String::class.java,
+                "doctor-1"
+            )
+        } returns listOf("doctor-1")
+        every {
+            jdbcTemplate.queryForList(
+                match<String> { it.contains("FROM institutions") && it.contains("FOR UPDATE") },
+                String::class.java,
+                "institution-1"
+            )
+        } returns listOf("机构一")
+        every {
+            jdbcTemplate.queryForList(
+                match<String> {
+                    it.contains("SELECT id FROM doctor_institutions") &&
+                        it.contains("institution_id = ?") && it.contains("status = 'APPROVED'")
+                },
+                String::class.java,
+                "doctor-1",
+                "institution-1"
+            )
+        } returns listOf("relationship-1")
         every {
             jdbcTemplate.queryForList(
                 match<String> { it.contains("SELECT institution_id") && it.contains("doctor_institutions") },
@@ -550,5 +707,26 @@ class DoctorInstitutionRelationshipServiceTest {
             )
         }
         verify(exactly = 0) { jdbcTemplate.update(match<String> { it.contains("orders", ignoreCase = true) }, *anyVararg()) }
+    }
+}
+
+class JdbcDoctorInstitutionChangeRequestStoreTest {
+    @Test
+    fun `active institution query requires verified and not deleted`() {
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        every {
+            jdbcTemplate.queryForObject(
+                match<String> {
+                    it.contains("is_verified = 1") && it.contains("deleted_at IS NULL")
+                },
+                Long::class.java,
+                "institution-1"
+            )
+        } returns 1L
+
+        val active = JdbcDoctorInstitutionChangeRequestStore(jdbcTemplate)
+            .isActiveInstitution("institution-1")
+
+        assertTrue(active)
     }
 }

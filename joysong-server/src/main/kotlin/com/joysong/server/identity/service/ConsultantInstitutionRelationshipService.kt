@@ -5,6 +5,9 @@ import org.springframework.stereotype.Service
 import java.util.UUID
 
 interface ConsultantInstitutionRelationshipOperations {
+    fun lockUser(consultantId: String)
+    fun lockPair(consultantId: String, institutionId: String)
+    fun requireActiveConsultant(consultantId: String)
     fun requireActiveInstitution(institutionId: String)
 
     fun validateForReview(
@@ -19,14 +22,54 @@ interface ConsultantInstitutionRelationshipOperations {
         action: ConsultantInstitutionAction,
         reviewerId: String
     )
+
+    fun forceRevoke(consultantId: String, institutionId: String, reviewerId: String)
 }
 
 @Service
 class ConsultantInstitutionRelationshipService(
     private val jdbcTemplate: JdbcTemplate
 ) : ConsultantInstitutionRelationshipOperations {
+    override fun lockUser(consultantId: String) {
+        val userId = jdbcTemplate.queryForList(
+            "SELECT id FROM users WHERE id = ? FOR UPDATE",
+            String::class.java,
+            consultantId
+        ).firstOrNull()
+        if (userId == null) {
+            throw ConsultantInstitutionRequestNotFoundException("顾问不存在")
+        }
+    }
+
+    override fun lockPair(consultantId: String, institutionId: String) {
+        lockUser(consultantId)
+        val lockedInstitutionId = jdbcTemplate.queryForList(
+            "SELECT id FROM institutions WHERE id = ? FOR UPDATE",
+            String::class.java,
+            institutionId
+        ).firstOrNull()
+        if (lockedInstitutionId == null) {
+            throw ConsultantInstitutionRequestNotFoundException("机构不存在")
+        }
+    }
+
+    override fun requireActiveConsultant(consultantId: String) {
+        val activeRole = jdbcTemplate.queryForList(
+            """
+            SELECT role_code FROM user_roles
+            WHERE user_id = ? AND role_code = 'CONSULTANT' AND status = 'ACTIVE'
+            FOR UPDATE
+            """.trimIndent(),
+            String::class.java,
+            consultantId
+        ).firstOrNull()
+        if (activeRole == null) {
+            conflict("顾问身份已失效")
+        }
+    }
+
     override fun requireActiveInstitution(institutionId: String) {
-        if (activeInstitution(institutionId, lock = false) == null) {
+        if (activeInstitution(institutionId, lock = true) == null) {
             conflict("机构不存在、未认证或已删除")
         }
     }
@@ -71,6 +114,11 @@ class ConsultantInstitutionRelationshipService(
                 activeMembershipId
             )
         }
+    }
+
+    override fun forceRevoke(consultantId: String, institutionId: String, reviewerId: String) {
+        lockPair(consultantId, institutionId)
+        approveLeave(consultantId, institutionId, lockActiveMembership(consultantId, institutionId))
     }
 
     private fun approveJoin(
@@ -139,11 +187,7 @@ class ConsultantInstitutionRelationshipService(
         )
     }
 
-    private fun requireLockedInstitution(institutionId: String) {
-        if (activeInstitution(institutionId, lock = true) == null) {
-            conflict("机构不存在、未认证或已删除")
-        }
-    }
+    private fun requireLockedInstitution(institutionId: String) = requireActiveInstitution(institutionId)
 
     private fun activeInstitution(institutionId: String, lock: Boolean): String? = jdbcTemplate.queryForList(
         """

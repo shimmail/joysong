@@ -96,8 +96,11 @@ class DoctorInstitutionChangeMigrationTest {
         ).readText()
         val normalized = migration.replace(Regex("\\s+"), " ").trim()
 
-        assertContains(normalized, "CREATE TABLE doctor_institution_change_requests")
-        assertFalse(normalized.contains("information_schema.columns"))
+        assertContains(normalized, "CREATE TABLE IF NOT EXISTS doctor_institution_change_requests")
+        assertContains(normalized, "information_schema.columns")
+        assertContains(normalized, "table_schema = DATABASE()")
+        assertContains(normalized, "column_name = 'request_note'")
+        assertContains(normalized, "column_name = 'review_note'")
         assertContains(normalized, "action VARCHAR(20) NOT NULL")
         assertContains(normalized, "status VARCHAR(20) NOT NULL DEFAULT 'PENDING'")
         assertContains(normalized, "action IN ('JOIN', 'LEAVE')")

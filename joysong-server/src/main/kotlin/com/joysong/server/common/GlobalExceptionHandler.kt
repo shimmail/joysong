@@ -15,6 +15,8 @@ import com.joysong.server.doctor.service.DoctorProfileNotFoundException
 import com.joysong.server.institution.service.ManagedInstitutionProfileNotFoundException
 import com.joysong.server.identity.service.ConsultantInstitutionRequestConflictException
 import com.joysong.server.identity.service.ConsultantInstitutionRequestNotFoundException
+import com.joysong.server.identity.service.DoctorInstitutionRequestConflictException
+import com.joysong.server.identity.service.DoctorInstitutionRequestNotFoundException
 import com.joysong.server.identity.service.InstitutionMembershipRequestConflictException
 import com.joysong.server.identity.service.InstitutionMembershipRequestNotFoundException
 import com.joysong.server.institution.service.DoctorProjectChangeConflictException
@@ -64,6 +66,7 @@ class GlobalExceptionHandler {
 
     @ExceptionHandler(
         ConsultantInstitutionRequestNotFoundException::class,
+        DoctorInstitutionRequestNotFoundException::class,
         InstitutionMembershipRequestNotFoundException::class
     )
     fun handleInstitutionMembershipNotFound(e: RuntimeException) =
@@ -71,6 +74,7 @@ class GlobalExceptionHandler {
 
     @ExceptionHandler(
         ConsultantInstitutionRequestConflictException::class,
+        DoctorInstitutionRequestConflictException::class,
         InstitutionMembershipRequestConflictException::class
     )
     fun handleInstitutionMembershipConflict(e: RuntimeException) =

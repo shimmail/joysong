@@ -1,5 +1,8 @@
 package com.joysong.server.identity.service
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.joysong.server.wallet.repository.WalletRepository
+import io.mockk.mockk
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
@@ -22,9 +25,12 @@ import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
 import java.sql.DriverManager
 import java.sql.Timestamp
+import java.nio.file.Path
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.CyclicBarrier
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.function.Supplier
 import javax.sql.DataSource
 
@@ -270,6 +276,179 @@ class ConsultantInstitutionChangeMySqlIntegrationTest {
     }
 
     @Test
+    fun `submit join racing admin bind leaves exactly one legal outcome`() {
+        val fixture = seedUsersAndInstitution("submit-bind-race", userAccountRole = "USER")
+        lateinit var pausingStore: PauseBeforeCreateStore
+        serviceContext { delegate ->
+            PauseBeforeCreateStore(delegate).also { pausingStore = it }
+        }.use { context ->
+            val executor = Executors.newFixedThreadPool(2)
+            try {
+                val submit = executor.submit<Result<Any>> {
+                    runCatching {
+                        context.service.submit(
+                            consultantActor(fixture.consultantId),
+                            fixture.institutionId,
+                            ConsultantInstitutionAction.JOIN,
+                            "join"
+                        )
+                    }
+                }
+                assertTrue(pausingStore.beforeCreate.await(10, TimeUnit.SECONDS))
+                val bind = executor.submit<Result<Any>> {
+                    runCatching {
+                        context.adminService.bindConsultant(
+                            fixture.consultantId,
+                            fixture.institutionId,
+                            fixture.reviewerId
+                        )
+                    }
+                }
+                awaitAdminWindow(bind)
+                pausingStore.continueCreate.countDown()
+
+                val results = listOf(submit.get(30, TimeUnit.SECONDS), bind.get(30, TimeUnit.SECONDS))
+                val pending = pendingRequestCount(fixture.consultantId, fixture.institutionId)
+                val approved = activeMembershipCount(fixture.consultantId, fixture.institutionId)
+
+                assertEquals(1, results.count { it.isSuccess })
+                assertEquals(1, pending + approved)
+                assertTrue((pending == 1 && approved == 0) || (pending == 0 && approved == 1))
+                assertEquals(
+                    1,
+                    results.count { it.exceptionOrNull() is ConsultantInstitutionRequestConflictException }
+                )
+            } finally {
+                pausingStore.continueCreate.countDown()
+                executor.shutdownNow()
+            }
+        }
+    }
+
+    @Test
+    fun `submit leave racing admin force revoke leaves exactly one legal outcome`() {
+        val fixture = seedActiveRelationship("submit-revoke-race")
+        lateinit var pausingStore: PauseBeforeCreateStore
+        serviceContext { delegate ->
+            PauseBeforeCreateStore(delegate).also { pausingStore = it }
+        }.use { context ->
+            val executor = Executors.newFixedThreadPool(2)
+            try {
+                val submit = executor.submit<Result<Any>> {
+                    runCatching {
+                        context.service.submit(
+                            consultantActor(fixture.consultantId),
+                            fixture.institutionId,
+                            ConsultantInstitutionAction.LEAVE,
+                            "leave"
+                        )
+                    }
+                }
+                assertTrue(pausingStore.beforeCreate.await(10, TimeUnit.SECONDS))
+                val revoke = executor.submit<Result<Any>> {
+                    runCatching {
+                        context.adminService.revokeMembership(
+                            "submit-revoke-race-membership",
+                            fixture.reviewerId
+                        )
+                    }
+                }
+                awaitAdminWindow(revoke)
+                pausingStore.continueCreate.countDown()
+
+                val results = listOf(submit.get(30, TimeUnit.SECONDS), revoke.get(30, TimeUnit.SECONDS))
+                val pending = pendingRequestCount(fixture.consultantId, fixture.institutionId)
+                val status = membershipStatus(fixture.consultantId, fixture.institutionId)
+
+                assertEquals(1, results.count { it.isSuccess })
+                assertTrue((pending == 1 && status == "APPROVED") || (pending == 0 && status == "REVOKED"))
+                assertEquals(
+                    1,
+                    results.count { it.exceptionOrNull() is ConsultantInstitutionRequestConflictException }
+                )
+                assertEquals(
+                    0,
+                    jdbc.queryForObject(
+                        "SELECT COUNT(*) FROM consultant_institution_change_requests WHERE consultant_id = ? AND institution_id = ? AND status = 'WITHDRAWN'",
+                        Int::class.java,
+                        fixture.consultantId,
+                        fixture.institutionId
+                    )
+                )
+            } finally {
+                pausingStore.continueCreate.countDown()
+                executor.shutdownNow()
+            }
+        }
+    }
+
+    @Test
+    fun `admin force revoke cleans an inactive target institution and preserves unrelated identity history`() {
+        val fixture = seedActiveRelationship("force-inactive", includeOtherInstitution = true)
+        jdbc.update(
+            "INSERT INTO wallets (owner_type, owner_id, currency, available_minor) VALUES ('CONSULTANT', ?, 'USD', 77700)",
+            fixture.consultantId
+        )
+        jdbc.update(
+            """
+            INSERT INTO orders (id, user_id, project_name, consultant_id, consultant_name, status)
+            VALUES ('force-inactive-order', ?, 'Historical Project', ?, 'Consultant', 'COMPLETED')
+            """.trimIndent(),
+            fixture.customerId,
+            fixture.consultantId
+        )
+        jdbc.update(
+            """
+            INSERT INTO consultant_institution_change_requests
+                (id, consultant_id, institution_id, action, status, request_note, review_note,
+                 submitted_by, reviewed_by, reviewed_at)
+            VALUES ('force-inactive-history', ?, ?, 'JOIN', 'REJECTED', 'old', 'rejected', ?, ?, NOW())
+            """.trimIndent(),
+            fixture.consultantId,
+            fixture.institutionId,
+            fixture.consultantId,
+            fixture.reviewerId
+        )
+        jdbc.update(
+            "UPDATE institutions SET is_verified = 0, deleted_at = NOW() WHERE id = ?",
+            fixture.institutionId
+        )
+
+        serviceContext().use { context ->
+            context.adminService.revokeMembership("force-inactive-membership", fixture.reviewerId)
+        }
+
+        assertEquals("REVOKED", membershipStatus(fixture.consultantId, fixture.institutionId))
+        assertEquals("USER", sessionRole("force-inactive-target-session"))
+        assertEquals("APPROVED", membershipStatus(fixture.consultantId, fixture.otherInstitutionId!!))
+        assertEquals("CONSULTANT", sessionRole("force-inactive-other-session"))
+        assertEquals(
+            "ACTIVE",
+            jdbc.queryForObject(
+                "SELECT status FROM user_roles WHERE user_id = ? AND role_code = 'CONSULTANT'",
+                String::class.java,
+                fixture.consultantId
+            )
+        )
+        assertEquals(
+            77700L,
+            jdbc.queryForObject(
+                "SELECT available_minor FROM wallets WHERE owner_type = 'CONSULTANT' AND owner_id = ? AND currency = 'USD'",
+                Long::class.java,
+                fixture.consultantId
+            )
+        )
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM orders WHERE id = 'force-inactive-order' AND status = 'COMPLETED'",
+                Int::class.java
+            )
+        )
+        assertEquals("REJECTED", requestStatus("force-inactive-history"))
+    }
+
+    @Test
     fun `approving join restores the same revoked membership with reviewer metadata`() {
         val fixture = seedUsersAndInstitution("restore-join")
         val membershipId = "restore-join-membership"
@@ -394,7 +573,7 @@ class ConsultantInstitutionChangeMySqlIntegrationTest {
         }
     }
 
-    private fun seedUsersAndInstitution(prefix: String): Fixture {
+    private fun seedUsersAndInstitution(prefix: String, userAccountRole: String = "CONSULTANT"): Fixture {
         val fixture = Fixture(
             consultantId = "$prefix-consultant",
             reviewerId = "$prefix-reviewer",
@@ -404,11 +583,12 @@ class ConsultantInstitutionChangeMySqlIntegrationTest {
         jdbc.update(
             """
             INSERT INTO users (id, password_hash, nickname, role) VALUES
-                (?, 'hash', 'Consultant', 'CONSULTANT'),
+                (?, 'hash', 'Consultant', ?),
                 (?, 'hash', 'Reviewer', 'ADMIN'),
                 (?, 'hash', 'Customer', 'USER')
             """.trimIndent(),
             fixture.consultantId,
+            userAccountRole,
             fixture.reviewerId,
             fixture.customerId
         )
@@ -503,8 +683,21 @@ class ConsultantInstitutionChangeMySqlIntegrationTest {
                 context.getBean(ConsultantInstitutionRelationshipOperations::class.java)
             )
         })
+        context.registerBean(AdminIdentityService::class.java, Supplier {
+            AdminIdentityService(
+                context.getBean(JdbcTemplate::class.java),
+                ObjectMapper(),
+                DoctorInstitutionRelationshipService(context.getBean(JdbcTemplate::class.java)),
+                mockk<WalletRepository>(relaxed = true),
+                context.getBean(ConsultantInstitutionRelationshipOperations::class.java)
+            )
+        })
         context.refresh()
-        return ServiceContext(context, context.getBean(ConsultantInstitutionChangeRequestService::class.java))
+        return ServiceContext(
+            context,
+            context.getBean(ConsultantInstitutionChangeRequestService::class.java),
+            context.getBean(AdminIdentityService::class.java)
+        )
     }
 
     private fun dataSource(): DataSource = DriverManagerDataSource(serviceJdbcUrl(), "root", mysql.password)
@@ -569,6 +762,35 @@ class ConsultantInstitutionChangeMySqlIntegrationTest {
         institutionId
     )
 
+    private fun activeMembershipCount(consultantId: String, institutionId: String): Int = jdbc.queryForObject(
+        """
+        SELECT COUNT(*) FROM institution_memberships
+        WHERE user_id = ? AND institution_id = ? AND member_role = 'CONSULTANT'
+          AND status = 'APPROVED' AND revoked_at IS NULL
+        """.trimIndent(),
+        Int::class.java,
+        consultantId,
+        institutionId
+    )
+
+    private fun pendingRequestCount(consultantId: String, institutionId: String): Int = jdbc.queryForObject(
+        """
+        SELECT COUNT(*) FROM consultant_institution_change_requests
+        WHERE consultant_id = ? AND institution_id = ? AND status = 'PENDING'
+        """.trimIndent(),
+        Int::class.java,
+        consultantId,
+        institutionId
+    )
+
+    private fun awaitAdminWindow(future: java.util.concurrent.Future<Result<Any>>) {
+        try {
+            future.get(750, TimeUnit.MILLISECONDS)
+        } catch (_: TimeoutException) {
+            // A correctly locked admin mutation waits for the paused submit transaction.
+        }
+    }
+
     private fun sessionRole(id: String): String? = jdbc.queryForObject(
         "SELECT active_role FROM auth_sessions WHERE id = ?",
         String::class.java,
@@ -607,7 +829,8 @@ class ConsultantInstitutionChangeMySqlIntegrationTest {
 
     private data class ServiceContext(
         val context: AnnotationConfigApplicationContext,
-        val service: ConsultantInstitutionChangeRequestService
+        val service: ConsultantInstitutionChangeRequestService,
+        val adminService: AdminIdentityService
     ) : AutoCloseable {
         override fun close() = context.close()
     }
@@ -626,6 +849,24 @@ class ConsultantInstitutionChangeMySqlIntegrationTest {
         }
     }
 
+    private class PauseBeforeCreateStore(
+        private val delegate: ConsultantInstitutionChangeRequestStore
+    ) : ConsultantInstitutionChangeRequestStore by delegate {
+        val beforeCreate = CountDownLatch(1)
+        val continueCreate = CountDownLatch(1)
+
+        override fun create(
+            consultantId: String,
+            institutionId: String,
+            action: ConsultantInstitutionAction,
+            requestNote: String
+        ): ConsultantInstitutionChangeRequestView {
+            beforeCreate.countDown()
+            check(continueCreate.await(10, TimeUnit.SECONDS)) { "Timed out waiting to continue request insert" }
+            return delegate.create(consultantId, institutionId, action, requestNote)
+        }
+    }
+
     @Configuration(proxyBeanMethods = false)
     @EnableTransactionManagement(proxyTargetClass = true)
     class TransactionConfiguration {
@@ -635,8 +876,9 @@ class ConsultantInstitutionChangeMySqlIntegrationTest {
     }
 
     companion object {
-        private const val DATABASE_NAME = "myapp_worktree_institution_membership_application_review_service"
-        private const val BOOTSTRAP_DATABASE = "myapp_worktree_consultant_service_bootstrap"
+        private val DATABASE_NAME = membershipReadDatabaseName(Path.of(""))
+            .removeSuffix("_query") + "_svc"
+        private const val BOOTSTRAP_DATABASE = "task4_boot"
 
         @Container
         @JvmField

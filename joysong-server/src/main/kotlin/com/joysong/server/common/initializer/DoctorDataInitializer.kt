@@ -1,9 +1,9 @@
 package com.joysong.server.common.initializer
 
 import com.joysong.server.doctor.entity.DoctorEntity
+import com.joysong.server.doctor.entity.DoctorInstitutionEntity
 import com.joysong.server.doctor.repository.DoctorRepository
 import com.joysong.server.doctor.repository.DoctorInstitutionRepository
-import com.joysong.server.doctor.service.DoctorInstitutionService
 import com.joysong.server.discover.entity.DoctorProjectEntity
 import com.joysong.server.discover.repository.DoctorProjectRepository
 import org.springframework.boot.CommandLineRunner
@@ -12,6 +12,8 @@ import org.springframework.core.annotation.Order
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
+import java.time.LocalDateTime
+import java.util.UUID
 
 @Component
 @ConditionalOnProperty(prefix = "seed.demo", name = ["enabled"], havingValue = "true")
@@ -19,8 +21,7 @@ import java.math.BigDecimal
 class DoctorDataInitializer(
     private val doctorRepository: DoctorRepository,
     private val doctorProjectRepository: DoctorProjectRepository,
-    private val doctorInstitutionRepository: DoctorInstitutionRepository,
-    private val doctorInstitutionService: DoctorInstitutionService
+    private val doctorInstitutionRepository: DoctorInstitutionRepository
 ) : CommandLineRunner {
 
     @Transactional
@@ -147,11 +148,31 @@ class DoctorDataInitializer(
 
         // Flyway 在初始化器前执行；全新数据库需要在此为种子医生建立关联记录。
         if (doctorInstitutionRepository.count() == 0L) {
-            doctorRepository.findAll()
+            val confirmedAt = LocalDateTime.now()
+            val relationships = doctorRepository.findAll()
                 .filter { it.institutionId.isNotBlank() }
-                .forEach { doctor -> doctorInstitutionService.sync(doctor.id, listOf(doctor.institutionId), doctor.institutionId) }
+                .map { doctor ->
+                    DoctorInstitutionEntity(
+                        id = UUID.randomUUID().toString(),
+                        doctorId = doctor.id,
+                        institutionId = doctor.institutionId,
+                        isPrimary = true,
+                        status = "APPROVED",
+                        confirmedAt = confirmedAt
+                    )
+                }.toMutableList()
             // 示例：王医生可在上海娇颜颂及深圳美莱出诊；具体可预约项目仍由 doctor_projects 决定。
-            doctorInstitutionService.sync(SeedIds.DOC_ID_1, listOf(SeedIds.INST_ID_1, SeedIds.INST_ID_3), SeedIds.INST_ID_1)
+            if (relationships.any { it.doctorId == SeedIds.DOC_ID_1 }) {
+                relationships += DoctorInstitutionEntity(
+                    id = UUID.randomUUID().toString(),
+                    doctorId = SeedIds.DOC_ID_1,
+                    institutionId = SeedIds.INST_ID_3,
+                    isPrimary = false,
+                    status = "APPROVED",
+                    confirmedAt = confirmedAt
+                )
+            }
+            doctorInstitutionRepository.saveAll(relationships)
         }
 
         // ============================================================

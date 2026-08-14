@@ -30,6 +30,7 @@ enum class DoctorInstitutionRequestStatus {
 }
 
 class DoctorInstitutionRequestConflictException(message: String) : RuntimeException(message)
+class DoctorInstitutionRequestNotFoundException(message: String) : RuntimeException(message)
 
 data class DoctorInstitutionChangeRequestView(
     val id: String,
@@ -92,15 +93,20 @@ class DoctorInstitutionChangeRequestService(
         val normalizedInstitutionId = institutionId.trim().also {
             require(it.isNotEmpty()) { "机构不能为空" }
         }
-        require(store.isActiveInstitution(normalizedInstitutionId)) { "机构不存在或已删除" }
+        val normalizedNote = requestNote.trim().also {
+            require(it.length <= MAX_NOTE_LENGTH) { "申请说明不能超过1000个字符" }
+        }
+        if (!store.isActiveInstitution(normalizedInstitutionId)) {
+            throw DoctorInstitutionRequestNotFoundException("机构不存在、未认证或已删除")
+        }
         val activeRelationship = store.hasActiveRelationship(doctorId, normalizedInstitutionId)
         when (action) {
-            DoctorInstitutionAction.JOIN -> require(!activeRelationship) { "医生已加入该机构" }
-            DoctorInstitutionAction.LEAVE -> require(activeRelationship) { "医生尚未加入该机构" }
+            DoctorInstitutionAction.JOIN -> if (activeRelationship) conflict("医生已加入该机构")
+            DoctorInstitutionAction.LEAVE -> if (!activeRelationship) conflict("医生尚未加入该机构")
         }
         if (store.hasPending(doctorId, normalizedInstitutionId)) duplicatePending()
         return try {
-            store.create(doctorId, normalizedInstitutionId, action, requestNote.trim())
+            store.create(doctorId, normalizedInstitutionId, action, normalizedNote)
         } catch (error: DuplicateKeyException) {
             if (error.isPendingRequestConflict()) duplicatePending()
             throw error
@@ -118,9 +124,9 @@ class DoctorInstitutionChangeRequestService(
         if (request.doctorId != actor.doctorId || request.submittedBy != actor.userId) {
             throw AccessDeniedException("只能撤回本人提交的关系申请")
         }
-        require(request.status == DoctorInstitutionRequestStatus.PENDING) { "只有待审核的关系申请可以撤回" }
-        check(store.changeStatus(request.id, DoctorInstitutionRequestStatus.WITHDRAWN, actor.userId, "")) {
-            "关系申请已被其他操作处理"
+        if (request.status != DoctorInstitutionRequestStatus.PENDING) conflict("只有待审核的关系申请可以撤回")
+        if (!store.changeStatus(request.id, DoctorInstitutionRequestStatus.WITHDRAWN, actor.userId, "")) {
+            conflict("关系申请已被其他操作处理")
         }
         return request.copy(
             status = DoctorInstitutionRequestStatus.WITHDRAWN,
@@ -143,10 +149,13 @@ class DoctorInstitutionChangeRequestService(
         if (!actor.isAdmin && request.institutionId !in actor.managedInstitutionIds) {
             throw AccessDeniedException("无权审核其他机构的关系申请")
         }
-        require(request.status == DoctorInstitutionRequestStatus.PENDING) { "只有待审核的关系申请可以审核" }
-        val normalizedReviewNote = reviewNote.trim()
+        if (request.status != DoctorInstitutionRequestStatus.PENDING) conflict("只有待审核的关系申请可以审核")
+        val normalizedReviewNote = reviewNote.trim().also {
+            require(it.length <= MAX_NOTE_LENGTH) { "审核意见不能超过1000个字符" }
+        }
         if (decision == MembershipRequestDecision.REJECTED) {
             require(normalizedReviewNote.isNotEmpty()) { "驳回时必须填写审核意见" }
+            relationshipService.validateForReview(request.doctorId, request.institutionId, request.action)
         }
         if (decision == MembershipRequestDecision.APPROVED) {
             when (request.action) {
@@ -163,8 +172,8 @@ class DoctorInstitutionChangeRequestService(
                 )
             }
         }
-        check(store.changeStatus(request.id, status, actor.userId, normalizedReviewNote)) {
-            "关系申请已被其他操作处理"
+        if (!store.changeStatus(request.id, status, actor.userId, normalizedReviewNote)) {
+            conflict("关系申请已被其他操作处理")
         }
         return request.copy(
             status = status,
@@ -187,10 +196,12 @@ class DoctorInstitutionChangeRequestService(
 
     private fun locked(id: String): DoctorInstitutionChangeRequestView = store.lock(
         id.trim().also { require(it.isNotEmpty()) { "关系申请不能为空" } }
-    ) ?: throw IllegalArgumentException("机构关系申请不存在")
+    ) ?: throw DoctorInstitutionRequestNotFoundException("医生机构关系申请不存在")
 
     private fun duplicatePending(): Nothing =
-        throw IllegalStateException("该机构已有待处理的关系申请")
+        conflict("该机构已有待处理的关系申请")
+
+    private fun conflict(message: String): Nothing = throw DoctorInstitutionRequestConflictException(message)
 
     private fun DuplicateKeyException.isPendingRequestConflict(): Boolean {
         val sqlError = generateSequence(mostSpecificCause) { it.cause }
@@ -200,6 +211,10 @@ class DoctorInstitutionChangeRequestService(
         return sqlError.errorCode == 1062 &&
             sqlError.sqlState == "23000" &&
             sqlError.message.orEmpty().contains("uk_doctor_institution_change_requests_pending")
+    }
+
+    private companion object {
+        const val MAX_NOTE_LENGTH = 1000
     }
 }
 
@@ -213,7 +228,7 @@ class JdbcDoctorInstitutionChangeRequestStore(
     ) == 1L
 
     override fun isActiveInstitution(institutionId: String): Boolean = count(
-        "SELECT COUNT(*) FROM institutions WHERE id = ? AND deleted_at IS NULL",
+        "SELECT COUNT(*) FROM institutions WHERE id = ? AND is_verified = 1 AND deleted_at IS NULL",
         institutionId
     ) == 1L
 
@@ -390,12 +405,32 @@ class DoctorInstitutionRelationshipService(
         }
     }
 
-    @Transactional
-    fun approveJoin(doctorId: String, institutionId: String, reviewerId: String) {
+    fun validateForReview(
+        doctorId: String,
+        institutionId: String,
+        action: DoctorInstitutionAction
+    ) {
         if (!lockCertifiedDoctor(doctorId)) {
             throw DoctorInstitutionRequestConflictException("医生身份已失效")
         }
-        requireNotNull(lockActiveInstitution(institutionId)) { "机构不存在、未认证或已删除" }
+        if (lockActiveInstitution(institutionId) == null) {
+            throw DoctorInstitutionRequestNotFoundException("机构不存在、未认证或已删除")
+        }
+        val activeRelationshipId = lockActiveRelationship(doctorId, institutionId)
+        when (action) {
+            DoctorInstitutionAction.JOIN -> if (activeRelationshipId != null) {
+                throw DoctorInstitutionRequestConflictException("医生已加入该机构")
+            }
+
+            DoctorInstitutionAction.LEAVE -> if (activeRelationshipId == null) {
+                throw DoctorInstitutionRequestConflictException("医生已不具备该机构的有效执业关系")
+            }
+        }
+    }
+
+    @Transactional
+    fun approveJoin(doctorId: String, institutionId: String, reviewerId: String) {
+        validateForReview(doctorId, institutionId, DoctorInstitutionAction.JOIN)
         val activeRelationshipCount = count(
             """
             SELECT COUNT(*) FROM doctor_institutions
@@ -444,6 +479,7 @@ class DoctorInstitutionRelationshipService(
 
     @Transactional
     fun approveLeave(doctorId: String, institutionId: String, reviewerId: String) {
+        validateForReview(doctorId, institutionId, DoctorInstitutionAction.LEAVE)
         revokeInternal(doctorId, institutionId, reviewerId, requireApproved = true)
     }
 
@@ -482,7 +518,9 @@ class DoctorInstitutionRelationshipService(
             doctorId,
             institutionId
         )
-        require(updated == 1) { "医生已不具备该机构的有效执业关系" }
+        if (updated != 1) {
+            throw DoctorInstitutionRequestConflictException("医生已不具备该机构的有效执业关系")
+        }
 
         jdbcTemplate.update(
             """
@@ -565,6 +603,18 @@ class DoctorInstitutionRelationshipService(
         WHERE id = ? AND is_verified = 1 AND deleted_at IS NULL FOR UPDATE
         """.trimIndent(),
         String::class.java,
+        institutionId
+    ).firstOrNull()
+
+    private fun lockActiveRelationship(doctorId: String, institutionId: String): String? = jdbcTemplate.queryForList(
+        """
+        SELECT id FROM doctor_institutions
+        WHERE doctor_id = ? AND institution_id = ? AND status = 'APPROVED'
+          AND revoked_at IS NULL AND deleted_at IS NULL
+        FOR UPDATE
+        """.trimIndent(),
+        String::class.java,
+        doctorId,
         institutionId
     ).firstOrNull()
 

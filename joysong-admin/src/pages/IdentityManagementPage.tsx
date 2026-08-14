@@ -508,7 +508,9 @@ function MembershipSection({ institutionOptions }: { institutionOptions: Institu
     setCreating(true);
     try {
       await api.post('/admin/identity/memberships', values);
-      message.success('机构成员关系已创建，等待审核');
+      message.success(values.memberRole === 'CONSULTANT'
+        ? '顾问机构关系已创建并立即生效'
+        : '机构成员关系已创建，等待审核');
       setCreateOpen(false);
       await fetchData();
     } catch (error) {
@@ -590,7 +592,7 @@ function MembershipSection({ institutionOptions }: { institutionOptions: Institu
         title="新增机构任职关系"
         open={createOpen}
         confirmLoading={creating}
-        okText="创建并进入待审核"
+        okText={selectedMemberRole === 'CONSULTANT' ? '创建并立即生效' : '创建并进入待审核'}
         onOk={() => void submitCreate()}
         onCancel={() => setCreateOpen(false)}
         destroyOnHidden
@@ -695,7 +697,7 @@ function DoctorPracticeSection({ institutionOptions }: { institutionOptions: Ins
   ];
 
   return (
-    <Card title="医生执业审核" extra={<Tag color="purple">医生档案中的机构绑定默认进入待审核</Tag>}>
+    <Card title="医生执业审核" extra={<Tag color="purple">医生执业关系仅通过关系申请审核变更</Tag>}>
       <Space wrap style={{ marginBottom: 16 }}>
         <Select allowClear showSearch optionFilterProp="label" placeholder="全部机构" value={institutionId} onChange={setInstitutionId} style={{ width: 210 }} options={institutionOptions} />
         <Select allowClear placeholder="全部状态" value={status} onChange={setStatus} style={{ width: 130 }} options={relationStatusOptions} />

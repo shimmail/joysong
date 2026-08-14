@@ -59,15 +59,30 @@ class JdbcInstitutionMembershipRequestStoreTest {
     }
 
     @Test
+    fun `consultant ledger peek is non locking and pending lookup is a current locking read`() {
+        val querySql = mutableListOf<String>()
+        every { jdbcTemplate.query(capture(querySql), any<RowMapper<Any>>(), *anyVararg()) } returns emptyList()
+        every { jdbcTemplate.queryForList(capture(querySql), String::class.java, *anyVararg()) } returns emptyList()
+
+        consultantStore.find("request-1")
+        consultantStore.hasPending("consultant-1", "institution-1")
+
+        assertFalse(querySql[0].contains("FOR UPDATE"))
+        assertTrue(querySql[1].contains("status = 'PENDING'"))
+        assertTrue(querySql[1].contains("FOR UPDATE"))
+    }
+
+    @Test
     fun `consultant active relationship lookup uses only approved non-revoked projection`() {
         val sql = slot<String>()
-        every { jdbcTemplate.queryForObject(capture(sql), Long::class.java, *anyVararg()) } returns 1L
+        every { jdbcTemplate.queryForList(capture(sql), String::class.java, *anyVararg()) } returns listOf("membership-1")
 
         assertTrue(consultantStore.hasActiveRelationship("consultant-1", "institution-1"))
 
         assertTrue(sql.captured.contains("member_role = 'CONSULTANT'"))
         assertTrue(sql.captured.contains("status = 'APPROVED'"))
         assertTrue(sql.captured.contains("revoked_at IS NULL"))
+        assertTrue(sql.captured.contains("FOR UPDATE"))
     }
 
     private fun consultantRequest() = ConsultantInstitutionChangeRequestView(

@@ -2,11 +2,11 @@ package com.joysong.server.doctor.service
 
 import com.joysong.server.doctor.entity.DoctorInstitutionEntity
 import com.joysong.server.doctor.repository.DoctorInstitutionRepository
+import com.joysong.server.identity.service.DoctorInstitutionRequestConflictException
 import com.joysong.server.institution.entity.InstitutionEntity
 import com.joysong.server.institution.repository.InstitutionRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
-import java.util.UUID
 
 @Service
 class DoctorInstitutionService(
@@ -28,31 +28,31 @@ class DoctorInstitutionService(
     @Transactional
     fun sync(doctorId: String, requestedIds: Collection<String>, requestedPrimaryId: String?): DoctorInstitutionSelection {
         val ids = requestedIds.map(String::trim).filter(String::isNotBlank).distinct()
-        val institutions = institutionRepository.findAllById(ids).associateBy { it.id }
-        require(institutions.size == ids.size) { "存在无效的机构" }
-        require(requestedPrimaryId.isNullOrBlank() || requestedPrimaryId in ids) { "主机构必须在已绑定机构中" }
+        val normalizedPrimaryId = requestedPrimaryId?.trim()?.takeIf(String::isNotEmpty)
+        val current = findByDoctorId(doctorId)
+        val approved = current.filter { it.status == "APPROVED" && it.revokedAt == null && it.deletedAt == null }
+        val approvedIds = approved.map { it.institutionId }
 
-        val primaryId = requestedPrimaryId?.takeIf { it.isNotBlank() } ?: ids.firstOrNull()
-        val active = findByDoctorId(doctorId)
-        active.filter { it.institutionId !in ids }.forEach {
-            it.deletedAt = java.time.LocalDateTime.now()
-            repository.save(it)
+        if (ids.isEmpty() && normalizedPrimaryId == null) {
+            val institutions = institutionRepository.findAllById(approvedIds).associateBy { it.id }
+            return DoctorInstitutionSelection(
+                relations = current,
+                institutions = institutions,
+                primaryInstitutionId = approved.firstOrNull { it.isPrimary }?.institutionId ?: approvedIds.firstOrNull()
+            )
         }
-        ids.forEach { institutionId ->
-            val isPrimary = institutionId == primaryId
-            val existing = active.firstOrNull { it.institutionId == institutionId }
-            when {
-                existing != null -> repository.save(existing.copy(
-                    isPrimary = isPrimary,
-                    status = if (existing.status == "REVOKED") "PENDING" else existing.status,
-                    confirmedBy = if (existing.status == "REVOKED") null else existing.confirmedBy,
-                    confirmedAt = if (existing.status == "REVOKED") null else existing.confirmedAt,
-                    revokedAt = null,
-                    deletedAt = null
-                ))
-                repository.reactivate(doctorId, institutionId, isPrimary) == 0 -> repository.save(
-                    DoctorInstitutionEntity(UUID.randomUUID().toString(), doctorId, institutionId, isPrimary)
-                )
+        if (ids.toSet() != approvedIds.toSet()) {
+            throw DoctorInstitutionRequestConflictException("医生机构关系只能通过关系申请变更")
+        }
+        val primaryId = normalizedPrimaryId ?: approved.firstOrNull { it.isPrimary }?.institutionId ?: approvedIds.firstOrNull()
+        if (primaryId !in approvedIds) {
+            throw DoctorInstitutionRequestConflictException("主机构必须在已批准机构中")
+        }
+        val institutions = institutionRepository.findAllById(approvedIds).associateBy { it.id }
+        approved.forEach { relationship ->
+            val shouldBePrimary = relationship.institutionId == primaryId
+            if (relationship.isPrimary != shouldBePrimary) {
+                repository.save(relationship.copy(isPrimary = shouldBePrimary))
             }
         }
         return DoctorInstitutionSelection(

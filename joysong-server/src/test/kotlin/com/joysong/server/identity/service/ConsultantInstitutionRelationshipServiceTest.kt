@@ -15,6 +15,52 @@ class ConsultantInstitutionRelationshipServiceTest {
     private val service = ConsultantInstitutionRelationshipService(jdbc)
 
     @Test
+    fun `pair lock always locks user before institution without requiring active status`() {
+        val sql = mutableListOf<String>()
+        every { jdbc.queryForList(capture(sql), String::class.java, *anyVararg()) } answers {
+            if (firstArg<String>().contains("FROM users")) listOf("consultant-1") else listOf("institution-1")
+        }
+
+        service.lockPair("consultant-1", "institution-1")
+
+        assertEquals(2, sql.size)
+        assertTrue(sql[0].contains("FROM users"))
+        assertTrue(sql[0].contains("FOR UPDATE"))
+        assertTrue(sql[1].contains("FROM institutions"))
+        assertTrue(sql[1].contains("FOR UPDATE"))
+        assertFalse(sql[1].contains("is_verified"))
+        assertFalse(sql[1].contains("deleted_at"))
+    }
+
+    @Test
+    fun `active institution validation is a verified nondeleted locking current read`() {
+        val sql = slot<String>()
+        every { jdbc.queryForList(capture(sql), String::class.java, *anyVararg()) } returns emptyList()
+
+        assertThrows(ConsultantInstitutionRequestConflictException::class.java) {
+            service.requireActiveInstitution("institution-1")
+        }
+
+        assertTrue(sql.captured.contains("is_verified = 1"))
+        assertTrue(sql.captured.contains("deleted_at IS NULL"))
+        assertTrue(sql.captured.contains("FOR UPDATE"))
+    }
+
+    @Test
+    fun `active consultant role is revalidated with a locking current read`() {
+        val sql = slot<String>()
+        every { jdbc.queryForList(capture(sql), String::class.java, *anyVararg()) } returns emptyList()
+
+        assertThrows(ConsultantInstitutionRequestConflictException::class.java) {
+            service.requireActiveConsultant("consultant-1")
+        }
+
+        assertTrue(sql.captured.contains("FROM user_roles"))
+        assertTrue(sql.captured.contains("status = 'ACTIVE'"))
+        assertTrue(sql.captured.contains("FOR UPDATE"))
+    }
+
+    @Test
     fun `approving join creates one active consultant membership with reviewer metadata`() {
         activeInstitution()
         every {
@@ -78,6 +124,34 @@ class ConsultantInstitutionRelationshipServiceTest {
         assertTrue(sessionSql.contains("active_role = 'CONSULTANT'"))
         assertTrue(sessionSql.contains("active_institution_id = ?"))
         assertTrue(sessionSql.contains("SET active_role = 'USER', active_institution_id = NULL"))
+    }
+
+    @Test
+    fun `force revoke changes only the target consultant relationship and matching sessions`() {
+        val sql = mutableListOf<String>()
+        val lockSql = mutableListOf<String>()
+        every { jdbc.queryForList(match { it.contains("FROM users") }, String::class.java, *anyVararg()) } returns listOf("consultant-1")
+        every {
+            jdbc.queryForList(match { it.contains("FROM institutions") }, String::class.java, *anyVararg())
+        } answers {
+            lockSql += firstArg<String>()
+            listOf("institution-1")
+        }
+        every {
+            jdbc.queryForList(match { it.contains("FROM institution_memberships") }, String::class.java, *anyVararg())
+        } returns listOf("membership-1")
+        every { jdbc.update(capture(sql), *anyVararg()) } returns 1
+
+        service.forceRevoke("consultant-1", "institution-1", "admin-1")
+
+        assertEquals(2, sql.size)
+        assertTrue(sql[0].contains("WHERE id = ?"))
+        assertTrue(sql[0].contains("status = 'REVOKED'"))
+        assertFalse(sql[0].contains("user_roles"))
+        assertTrue(sql[1].contains("active_institution_id = ?"))
+        assertFalse(sql.any { it.contains("wallet") || it.contains("orders") })
+        assertFalse(lockSql.single().contains("is_verified"))
+        assertFalse(lockSql.single().contains("deleted_at"))
     }
 
     @Test

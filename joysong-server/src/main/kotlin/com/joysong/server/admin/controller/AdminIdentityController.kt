@@ -94,8 +94,13 @@ class AdminIdentityController(
     )
 
     @PostMapping("/memberships")
-    fun createMembership(@RequestBody request: CreateMembershipRequest): BaseResponse<*> = BaseResponse.success(
-        mapOf("id" to adminIdentityService.createMembership(request.userId, request.institutionId, request.memberRole))
+    fun createMembership(authentication: Authentication, @RequestBody request: CreateMembershipRequest): BaseResponse<*> = BaseResponse.success(
+        mapOf("id" to adminIdentityService.createMembership(
+            request.userId,
+            request.institutionId,
+            request.memberRole,
+            authentication.adminId()
+        ))
     )
 
     @PutMapping("/memberships/{id}/approve")
@@ -105,8 +110,8 @@ class AdminIdentityController(
     }
 
     @PutMapping("/memberships/{id}/revoke")
-    fun revokeMembership(@PathVariable id: String): BaseResponse<*> {
-        adminIdentityService.revokeMembership(id)
+    fun revokeMembership(authentication: Authentication, @PathVariable id: String): BaseResponse<*> {
+        adminIdentityService.revokeMembership(id, authentication.adminId())
         return BaseResponse.success(null)
     }
 
@@ -126,8 +131,8 @@ class AdminIdentityController(
     }
 
     @PutMapping("/doctor-practices/{id}/revoke")
-    fun revokeDoctorPractice(@PathVariable id: String): BaseResponse<*> {
-        adminIdentityService.revokeDoctorPractice(id)
+    fun revokeDoctorPractice(authentication: Authentication, @PathVariable id: String): BaseResponse<*> {
+        adminIdentityService.revokeDoctorPractice(id, authentication.adminId())
         return BaseResponse.success(null)
     }
 

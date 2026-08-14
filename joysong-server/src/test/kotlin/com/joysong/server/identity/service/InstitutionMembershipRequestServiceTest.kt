@@ -48,7 +48,6 @@ class InstitutionMembershipRequestServiceTest {
 
     @Test
     fun `withdraw dispatches both professions and missing doctor ledger never uses a legacy fallback`() {
-        every { doctor.exists("doctor-request") } returns true
         every { doctor.withdraw(doctorActor(), "doctor-request") } returns doctorRequest(
             status = DoctorInstitutionRequestStatus.WITHDRAWN
         )
@@ -67,17 +66,17 @@ class InstitutionMembershipRequestServiceTest {
             ).status
         )
 
-        every { doctor.exists("missing") } returns false
+        every { doctor.withdraw(doctorActor(), "missing") } throws
+            DoctorInstitutionRequestNotFoundException("医生机构关系申请不存在")
         assertThrows<InstitutionMembershipRequestNotFoundException> {
             service.withdraw(doctorActor(), MembershipRequestType.DOCTOR, "missing")
         }
-        verify(exactly = 0) { doctor.withdraw(any(), "missing") }
+        verify(exactly = 1) { doctor.withdraw(any(), "missing") }
     }
 
     @Test
     fun `review dispatches both professions and translates lost doctor updates to a typed conflict`() {
         val legal = legalActor()
-        every { doctor.exists("doctor-request") } returns true
         every {
             doctor.review(
                 legal, "doctor-request", MembershipRequestDecision.REJECTED, "资料不符"
@@ -110,10 +109,9 @@ class InstitutionMembershipRequestServiceTest {
             ).status
         )
 
-        every { doctor.exists("raced") } returns true
         every {
             doctor.review(legal, "raced", MembershipRequestDecision.APPROVED, "")
-        } throws IllegalStateException("关系申请已被其他操作处理")
+        } throws DoctorInstitutionRequestConflictException("关系申请已被其他操作处理")
         assertThrows<InstitutionMembershipRequestConflictException> {
             service.review(
                 legal,
@@ -128,7 +126,6 @@ class InstitutionMembershipRequestServiceTest {
     @Test
     fun `doctor review translates a missing or invalidated institution to typed not found`() {
         val legal = legalActor()
-        every { doctor.exists("doctor-request") } returns true
         every {
             doctor.review(
                 legal,
@@ -136,7 +133,7 @@ class InstitutionMembershipRequestServiceTest {
                 MembershipRequestDecision.APPROVED,
                 ""
             )
-        } throws IllegalArgumentException("机构不存在、未认证或已删除")
+        } throws DoctorInstitutionRequestNotFoundException("机构不存在、未认证或已删除")
 
         assertThrows<InstitutionMembershipRequestNotFoundException> {
             service.review(
@@ -152,7 +149,6 @@ class InstitutionMembershipRequestServiceTest {
     @Test
     fun `doctor invalidation conflict is translated by type without message matching`() {
         val legal = legalActor()
-        every { doctor.exists("doctor-request") } returns true
         every {
             doctor.review(
                 legal,
@@ -178,7 +174,6 @@ class InstitutionMembershipRequestServiceTest {
     @Test
     fun `doctor leave relationship race is a typed conflict`() {
         val legal = legalActor()
-        every { doctor.exists("doctor-leave") } returns true
         every {
             doctor.review(
                 legal,
@@ -186,7 +181,7 @@ class InstitutionMembershipRequestServiceTest {
                 MembershipRequestDecision.APPROVED,
                 ""
             )
-        } throws IllegalArgumentException("医生已不具备该机构的有效执业关系")
+        } throws DoctorInstitutionRequestConflictException("医生已不具备该机构的有效执业关系")
 
         assertThrows<InstitutionMembershipRequestConflictException> {
             service.review(
