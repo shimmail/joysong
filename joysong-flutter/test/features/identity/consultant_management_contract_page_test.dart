@@ -7,6 +7,7 @@ import 'package:joysong_flutter/features/identity/data/identity_repository_impl.
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
 import 'package:joysong_flutter/features/identity/presentation/consultant_management_pages.dart';
+import 'package:joysong_flutter/features/identity/presentation/institution_relationships_page.dart';
 
 void main() {
   test(
@@ -75,12 +76,9 @@ void main() {
     ]);
   });
 
-  testWidgets('consultant page picks an institution and submits a fixed JOIN',
+  testWidgets(
+      'legacy consultant page is only a consultant-scoped unified wrapper',
       (tester) async {
-    tester.view.physicalSize = const Size(900, 1800);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
     final repository = _FakeIdentityRepository();
 
     await tester.pumpWidget(MaterialApp(
@@ -91,27 +89,20 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.text('Joysong Clinic'), findsOneWidget);
-    expect(find.textContaining('Approved'), findsOneWidget);
-    expect(find.textContaining('Welcome'), findsOneWidget);
-    expect(find.textContaining('legal-1'), findsOneWidget);
-    await tester.tap(find.byKey(const Key('consultant-institution-picker')));
-    await tester.pumpAndSettle();
-    expect(repository.candidateTypes,
-        [InstitutionMembershipRequestType.consultant]);
-    expect(repository.candidateActions, [InstitutionMembershipAction.join]);
-    await tester.tap(find.text('New Clinic'));
-    await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const Key('consultant-request-note')),
-      'Please review',
+    expect(find.byType(InstitutionRelationshipsPage), findsOneWidget);
+    expect(
+      tester
+          .widget<InstitutionRelationshipsPage>(
+            find.byType(InstitutionRelationshipsPage),
+          )
+          .scope,
+      InstitutionRelationshipScope.consultant,
     );
-    await tester.tap(find.byKey(const Key('consultant-submit')));
-    await tester.pumpAndSettle();
-
-    expect(repository.submitted.single.institutionId, 'institution-2');
-    expect(repository.submitted.single.requestNote, 'Please review');
-    expect(repository.listCalls, 2);
+    expect(
+      find.byKey(const Key('consultant-institution-picker')),
+      findsNothing,
+    );
+    expect(find.byKey(const Key('consultant-submit')), findsNothing);
   });
 
   testWidgets('professional project catalog is read-only and renders metadata',
@@ -269,6 +260,21 @@ final class _FakeIdentityRepository implements IdentityRepository {
   final candidateTypes = <InstitutionMembershipRequestType>[];
   final candidateActions = <InstitutionMembershipAction>[];
   var listCalls = 0;
+
+  @override
+  Future<ManagementContext> loadManagementContext() async =>
+      const ManagementContext(
+        userId: 'consultant-1',
+        platformRole: 'USER',
+        activeRoles: ['CONSULTANT'],
+        managedInstitutionIds: [],
+        visibleInstitutionIds: [],
+        canApplyToInstitutions: true,
+      );
+
+  @override
+  Future<List<InstitutionMembershipRequest>>
+      listOwnedInstitutionMembershipRequests() async => const [];
 
   @override
   Future<List<ConsultantMembership>> listConsultantMemberships() async {

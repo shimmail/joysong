@@ -5,10 +5,12 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
+import 'package:joysong_flutter/features/discover/presentation/professional_catalog_page.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
 import 'package:joysong_flutter/features/identity/presentation/identity_controller.dart';
 import 'package:joysong_flutter/features/identity/presentation/identity_pages.dart';
+import 'package:joysong_flutter/features/identity/presentation/institution_relationships_page.dart';
 import 'package:joysong_flutter/features/identity/presentation/professional_request_pages.dart';
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
 
@@ -472,7 +474,16 @@ void main() {
   testWidgets(
       'membership reviews offer approve and reject while project reviews retain request changes',
       (tester) async {
+    const context = ManagementContext(
+      userId: 'legal-1',
+      platformRole: 'USER',
+      activeRoles: ['INSTITUTION_LEGAL_REPRESENTATIVE'],
+      managedInstitutionIds: ['inst-1'],
+      visibleInstitutionIds: ['inst-1'],
+      canReviewInstitutionRequests: true,
+    );
     final repository = _FakeIdentityRepository()
+      ..managementContext = context
       ..membershipRequests = [
         InstitutionMembershipRequest.fromJson({
           ..._normalizedMembershipRequestJson,
@@ -485,14 +496,6 @@ void main() {
           'status': 'PENDING',
         }),
       ];
-    const context = ManagementContext(
-      userId: 'legal-1',
-      platformRole: 'USER',
-      activeRoles: ['INSTITUTION_LEGAL_REPRESENTATIVE'],
-      managedInstitutionIds: ['inst-1'],
-      visibleInstitutionIds: ['inst-1'],
-    );
-
     await tester.pumpWidget(_localizedApp(
       home: InstitutionMembershipRequestsPage(
         repository: repository,
@@ -503,19 +506,10 @@ void main() {
       ),
     ));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('审核'));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byType(DropdownButtonFormField<String>));
-    await tester.pumpAndSettle();
-    expect(find.text('通过'), findsWidgets);
-    expect(find.text('驳回'), findsOneWidget);
+    expect(find.byKey(const Key('approve-membership-1')), findsOneWidget);
+    expect(find.byKey(const Key('reject-membership-1')), findsOneWidget);
     expect(find.text('要求修改'), findsNothing);
-    await tester.tap(find.text('通过').last);
-    await tester.pumpAndSettle();
 
-    await tester.tap(find.text('取消'));
-    await tester.pumpAndSettle();
     await tester.pumpWidget(_localizedApp(
       home: Builder(
         builder: (context) => TextButton(
@@ -574,7 +568,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('机构档案'), findsOneWidget);
-    expect(find.text('成员加入审核'), findsOneWidget);
+    expect(find.text('机构关系审核'), findsOneWidget);
     expect(find.text('机构项目申请审核'), findsOneWidget);
     expect(find.text('机构项目加入审核'), findsOneWidget);
     expect(find.text('机构项目'), findsNothing);
@@ -613,11 +607,30 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('医生档案'), findsOneWidget);
-    expect(find.text('申请加入机构'), findsOneWidget);
+    final relationshipAction = find.byKey(
+      const Key('management-institution-relationships-doctor'),
+    );
+    expect(relationshipAction, findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('management-group-doctor')),
+        matching: relationshipAction,
+      ),
+      findsOneWidget,
+    );
     expect(find.text('申请新增平台项目'), findsOneWidget);
     expect(find.text('申请新增机构项目'), findsOneWidget);
     expect(find.text('申请加入机构项目'), findsOneWidget);
     expect(find.text('机构项目'), findsNothing);
+
+    await tester.ensureVisible(relationshipAction);
+    await tester.tap(relationshipAction);
+    await tester.pumpAndSettle();
+
+    final page = tester.widget<InstitutionRelationshipsPage>(
+      find.byType(InstitutionRelationshipsPage),
+    );
+    expect(page.scope, InstitutionRelationshipScope.doctor);
   });
 
   testWidgets('admin without a doctor role does not see the self profile entry',
@@ -648,13 +661,15 @@ void main() {
     expect(find.text('Doctor profile'), findsNothing);
   });
 
-  testWidgets('consultant sees only institution application and affiliation',
+  testWidgets(
+      'dual doctor and consultant context has one scoped consultant relationship action',
       (tester) async {
     final repository = _FakeIdentityRepository()
       ..managementContext = const ManagementContext(
         userId: 'consultant-1',
         platformRole: 'USER',
-        activeRoles: ['CONSULTANT'],
+        activeRoles: ['DOCTOR', 'CONSULTANT'],
+        doctorId: 'doctor-1',
         managedInstitutionIds: [],
         visibleInstitutionIds: [],
         canApplyToInstitutions: true,
@@ -669,10 +684,152 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.text('申请加入机构'), findsOneWidget);
-    expect(find.text('机构归属'), findsOneWidget);
+    final consultantGroup = find.byKey(
+      const Key('management-group-consultant'),
+    );
+    final relationshipAction = find.byKey(
+      const Key('management-institution-relationships-consultant'),
+    );
+    expect(consultantGroup, findsOneWidget);
+    expect(
+      find.descendant(of: consultantGroup, matching: relationshipAction),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: consultantGroup,
+        matching: find.text('机构关系'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: consultantGroup,
+        matching: find.text('申请加入机构'),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: consultantGroup,
+        matching: find.text('机构归属'),
+      ),
+      findsNothing,
+    );
     expect(find.text('专业订单'), findsNothing);
     expect(find.text('机构项目'), findsNothing);
+
+    await tester.ensureVisible(relationshipAction);
+    await tester.tap(relationshipAction);
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .widget<InstitutionRelationshipsPage>(
+            find.byType(InstitutionRelationshipsPage),
+          )
+          .scope,
+      InstitutionRelationshipScope.consultant,
+    );
+  });
+
+  testWidgets(
+      'legal representative routes its stable relationship action with legal scope',
+      (tester) async {
+    final repository = _FakeIdentityRepository()
+      ..managementContext = const ManagementContext(
+        userId: 'legal-1',
+        platformRole: 'USER',
+        activeRoles: ['INSTITUTION_LEGAL_REPRESENTATIVE'],
+        managedInstitutionIds: ['inst-1'],
+        visibleInstitutionIds: ['inst-1'],
+        canReviewInstitutionRequests: true,
+      );
+
+    await tester.pumpWidget(_localizedApp(
+      home: ManagementCenterPage(
+        repository: repository,
+        discoverRepository: const _FakeDiscoverRepository(),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    final legalGroup = find.byKey(
+      const Key('management-group-legal-representative'),
+    );
+    final relationshipAction = find.byKey(
+      const Key('management-institution-relationships-legal-representative'),
+    );
+    expect(
+      find.descendant(of: legalGroup, matching: relationshipAction),
+      findsOneWidget,
+    );
+
+    await tester.ensureVisible(relationshipAction);
+    await tester.tap(relationshipAction);
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .widget<InstitutionRelationshipsPage>(
+            find.byType(InstitutionRelationshipsPage),
+          )
+          .scope,
+      InstitutionRelationshipScope.legalRepresentative,
+    );
+  });
+
+  testWidgets(
+      'doctor and legal catalog entries keep their explicit read-only scopes',
+      (tester) async {
+    final repository = _FakeIdentityRepository()
+      ..managementContext = const ManagementContext(
+        userId: 'doctor-legal-1',
+        platformRole: 'USER',
+        activeRoles: ['DOCTOR', 'INSTITUTION_LEGAL_REPRESENTATIVE'],
+        doctorId: 'doctor-1',
+        managedInstitutionIds: ['inst-1'],
+        visibleInstitutionIds: ['inst-1'],
+        canApplyToInstitutions: true,
+      );
+    const catalogRepository = _FakeProfessionalCatalogRepository();
+
+    await tester.pumpWidget(_localizedApp(
+      home: ManagementCenterPage(
+        repository: repository,
+        discoverRepository: catalogRepository,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    for (final testCase in const [
+      (
+        actionKey: 'management-professional-catalog-doctor',
+        scope: ProfessionalCatalogScope.doctor,
+      ),
+      (
+        actionKey: 'management-professional-catalog-legal-representative',
+        scope: ProfessionalCatalogScope.legalRepresentative,
+      ),
+    ]) {
+      final action = find.byKey(Key(testCase.actionKey));
+      await tester.ensureVisible(action);
+      await tester.tap(action);
+      await tester.pumpAndSettle();
+
+      final page = tester.widget<ProfessionalCatalogPage>(
+        find.byType(ProfessionalCatalogPage),
+      );
+      expect(page.scope, testCase.scope);
+      expect(find.byType(InstitutionRelationshipsPage), findsNothing);
+      expect(
+        find.byKey(const Key('relationship-institution-picker')),
+        findsNothing,
+      );
+
+      Navigator.of(tester.element(find.byType(ProfessionalCatalogPage))).pop();
+      await tester.pumpAndSettle();
+    }
   });
 }
 
@@ -734,6 +891,38 @@ final class _FakeDiscoverRepository implements DiscoverRepository {
     required String id,
   }) =>
       throw UnimplementedError();
+}
+
+final class _FakeProfessionalCatalogRepository
+    implements DiscoverRepository, ProfessionalCatalogRepository {
+  const _FakeProfessionalCatalogRepository();
+
+  @override
+  Future<List<DiscoverItem>> loadVisibleInstitutions() async => const [];
+
+  @override
+  Future<List<DiscoverItem>> loadVisibleInstitutionProjects() async => const [];
+
+  @override
+  Future<List<DiscoverItem>> loadVisibleProjects() async => const [];
+
+  @override
+  Future<DiscoverItem> loadVisibleInstitution(String id) =>
+      throw UnimplementedError();
+
+  @override
+  Future<List<DiscoverItem>> loadVisibleInstitutionDoctors(String id) =>
+      throw UnimplementedError();
+
+  @override
+  Future<List<DiscoverItem>> loadVisibleDoctorProjects(
+    String institutionId,
+    String doctorId,
+  ) =>
+      throw UnimplementedError();
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 final class _FakeIdentityRepository implements IdentityRepository {

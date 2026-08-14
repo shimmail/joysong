@@ -6,6 +6,7 @@ import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/routing/app_router.dart';
 import 'package:joysong_flutter/features/auth/domain/auth_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
+import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
 import 'package:joysong_flutter/features/identity/presentation/identity_pages.dart';
 import 'package:joysong_flutter/features/identity/presentation/institution_relationships_page.dart';
@@ -153,7 +154,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 ),
               ],
               if (widget.identityRepository != null &&
-                  widget.discoverRepository != null) ...[
+                  widget.discoverRepository != null)
                 _MenuItem(
                   icon: Icons.admin_panel_settings_outlined,
                   title: context.localized('专业管理', 'Professional management'),
@@ -161,6 +162,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       'Professional access is verified on entry'),
                   onTap: _openManagementCenter,
                 ),
+              if (widget.identityRepository != null)
                 _MenuItem(
                   icon: Icons.account_tree_outlined,
                   title: context.localized('机构关系', 'Institution relationships'),
@@ -170,7 +172,6 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                   onTap: _openInstitutionRelationships,
                 ),
-              ],
             ],
           ),
           const SizedBox(height: 12),
@@ -328,12 +329,82 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  void _openInstitutionRelationships() {
+  Future<void> _openInstitutionRelationships() async {
+    final repository = widget.identityRepository!;
+    late final ManagementContext managementContext;
+    try {
+      managementContext = await repository.loadManagementContext();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.localized(
+              '机构关系权限加载失败，请重试',
+              'Unable to load institution relationship access. Try again.',
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+    if (!mounted) return;
+
+    final scopes = <InstitutionRelationshipScope>[
+      if (managementContext.activeRoles.contains(IdentityRoleType.doctor.code))
+        InstitutionRelationshipScope.doctor,
+      if (managementContext.activeRoles
+          .contains(IdentityRoleType.consultant.code))
+        InstitutionRelationshipScope.consultant,
+      if (managementContext.activeRoles.contains(
+        IdentityRoleType.institutionLegalRepresentative.code,
+      ))
+        InstitutionRelationshipScope.legalRepresentative,
+    ];
+    if (scopes.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.localized(
+              '当前没有可用的专业身份',
+              'No eligible professional identity is available.',
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+
+    var scope = scopes.first;
+    if (scopes.length > 1) {
+      final selected = await showDialog<InstitutionRelationshipScope>(
+        context: context,
+        builder: (dialogContext) => SimpleDialog(
+          key: const Key('institution-relationship-role-picker'),
+          title: Text(
+            dialogContext.localized('选择专业身份', 'Choose professional role'),
+          ),
+          children: [
+            for (final option in scopes)
+              SimpleDialogOption(
+                key: Key(
+                  'institution-relationship-role-${_relationshipScopeCode(option)}',
+                ),
+                onPressed: () => Navigator.of(dialogContext).pop(option),
+                child: Text(_relationshipScopeLabel(dialogContext, option)),
+              ),
+          ],
+        ),
+      );
+      if (!mounted || selected == null) return;
+      scope = selected;
+    }
+
     Navigator.of(context).push<void>(
       MaterialPageRoute(
         builder: (_) => InstitutionRelationshipsPage(
-          repository: widget.identityRepository!,
-          discoverRepository: widget.discoverRepository!,
+          repository: repository,
+          scope: scope,
         ),
       ),
     );
@@ -373,6 +444,26 @@ class _ProfilePageState extends State<ProfilePage> {
     return url?.isEmpty == true ? null : url;
   }
 }
+
+String _relationshipScopeCode(InstitutionRelationshipScope scope) =>
+    switch (scope) {
+      InstitutionRelationshipScope.doctor => 'doctor',
+      InstitutionRelationshipScope.consultant => 'consultant',
+      InstitutionRelationshipScope.legalRepresentative =>
+        'legal-representative',
+    };
+
+String _relationshipScopeLabel(
+  BuildContext context,
+  InstitutionRelationshipScope scope,
+) =>
+    switch (scope) {
+      InstitutionRelationshipScope.doctor => context.localized('医生', 'Doctor'),
+      InstitutionRelationshipScope.consultant =>
+        context.localized('顾问', 'Consultant'),
+      InstitutionRelationshipScope.legalRepresentative =>
+        context.localized('机构法人', 'Legal representative'),
+    };
 
 class _UserHeaderCard extends StatelessWidget {
   const _UserHeaderCard({required this.controller, required this.onEdit});

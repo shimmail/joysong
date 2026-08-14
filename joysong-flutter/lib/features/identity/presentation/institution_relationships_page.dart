@@ -10,9 +10,7 @@ enum InstitutionRelationshipScope { doctor, consultant, legalRepresentative }
 class InstitutionRelationshipsPage extends StatefulWidget {
   const InstitutionRelationshipsPage({
     required this.repository,
-    this.scope = InstitutionRelationshipScope.doctor,
-    @Deprecated('The unified page uses management membership candidates.')
-    Object? discoverRepository,
+    required this.scope,
     super.key,
   });
 

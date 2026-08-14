@@ -7,6 +7,7 @@ import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
 import 'package:joysong_flutter/features/identity/presentation/consultant_management_pages.dart';
 import 'package:joysong_flutter/features/identity/presentation/identity_controller.dart';
+import 'package:joysong_flutter/features/identity/presentation/institution_relationships_page.dart';
 import 'package:joysong_flutter/features/identity/presentation/professional_request_pages.dart';
 import 'package:joysong_flutter/features/professional_management/data/professional_repository.dart';
 import 'package:joysong_flutter/features/professional_management/presentation/professional_pages.dart';
@@ -518,10 +519,10 @@ class _ManagementCapabilities extends StatelessWidget {
       IdentityRoleType.consultant.code,
     );
     final groups = <({
+      String key,
       IconData icon,
       String title,
       String emptyText,
-      String? membershipRequestType,
       List<
           ({
             IconData icon,
@@ -531,9 +532,9 @@ class _ManagementCapabilities extends StatelessWidget {
           })> items,
     })>[
       (
+        key: 'management-group-legal-representative',
         icon: Icons.apartment_outlined,
         title: buildContext.localized('法人', 'Legal representative'),
-        membershipRequestType: null,
         emptyText: buildContext.localized(
           '暂无机构法人可用配置',
           'No legal representative settings available',
@@ -545,7 +546,7 @@ class _ManagementCapabilities extends StatelessWidget {
             enabled: isLegalRepresentative &&
                 context.visibleInstitutionIds.isNotEmpty &&
                 discoverRepository is ProfessionalCatalogRepository,
-            action: _ManagementAction.professionalCatalog,
+            action: _ManagementAction.legalProfessionalCatalog,
           ),
           (
             icon: Icons.apartment_outlined,
@@ -555,10 +556,13 @@ class _ManagementCapabilities extends StatelessWidget {
           ),
           (
             icon: Icons.how_to_reg_outlined,
-            label: buildContext.localized('成员加入审核', 'Membership reviews'),
+            label: buildContext.localized(
+              '机构关系审核',
+              'Institution relationship reviews',
+            ),
             enabled:
                 isLegalRepresentative && context.canReviewInstitutionRequests,
-            action: _ManagementAction.membershipReviews,
+            action: _ManagementAction.legalInstitutionRelationships,
           ),
           (
             icon: Icons.fact_check_outlined,
@@ -594,22 +598,14 @@ class _ManagementCapabilities extends StatelessWidget {
         ],
       ),
       (
+        key: 'management-group-platform-administration',
         icon: Icons.admin_panel_settings_outlined,
         title: buildContext.localized('平台管理', 'Platform administration'),
-        membershipRequestType: null,
         emptyText: buildContext.localized(
           '暂无平台管理权限',
           'No platform administration access',
         ),
         items: [
-          (
-            icon: Icons.menu_book_outlined,
-            label: buildContext.localized('专业目录', 'Professional catalog'),
-            enabled: isDoctor &&
-                context.doctorId != null &&
-                discoverRepository is ProfessionalCatalogRepository,
-            action: _ManagementAction.professionalCatalog,
-          ),
           (
             icon: Icons.compare_arrows_outlined,
             label: buildContext.localized(
@@ -622,14 +618,22 @@ class _ManagementCapabilities extends StatelessWidget {
         ],
       ),
       (
+        key: 'management-group-doctor',
         icon: Icons.medical_services_outlined,
         title: buildContext.localized('医生', 'Doctor'),
-        membershipRequestType: 'DOCTOR',
         emptyText: buildContext.localized(
           '暂无医生可用配置',
           'No doctor settings available',
         ),
         items: [
+          (
+            icon: Icons.menu_book_outlined,
+            label: buildContext.localized('专业目录', 'Professional catalog'),
+            enabled: isDoctor &&
+                context.doctorId != null &&
+                discoverRepository is ProfessionalCatalogRepository,
+            action: _ManagementAction.doctorProfessionalCatalog,
+          ),
           (
             icon: Icons.medical_services_outlined,
             label: buildContext.localized('医生档案', 'Doctor profile'),
@@ -641,9 +645,9 @@ class _ManagementCapabilities extends StatelessWidget {
           ),
           (
             icon: Icons.add_business_outlined,
-            label: buildContext.localized('申请加入机构', 'Apply to institution'),
-            enabled: isDoctor && context.canApplyToInstitutions,
-            action: _ManagementAction.applyMembership,
+            label: buildContext.localized('机构关系', 'Institution relationships'),
+            enabled: isDoctor,
+            action: _ManagementAction.doctorInstitutionRelationships,
           ),
           (
             icon: Icons.post_add_outlined,
@@ -696,28 +700,19 @@ class _ManagementCapabilities extends StatelessWidget {
         ],
       ),
       (
+        key: 'management-group-consultant',
         icon: Icons.support_agent_outlined,
         title: buildContext.localized('顾问', 'Consultant'),
-        membershipRequestType: null,
         emptyText: buildContext.localized(
           '暂无顾问可用配置',
           'No consultant settings available',
         ),
         items: [
           (
-            icon: Icons.add_business_outlined,
-            label: buildContext.localized('申请加入机构', 'Apply to institution'),
-            enabled: isConsultant && context.canApplyToInstitutions,
-            action: _ManagementAction.consultantMembership,
-          ),
-          (
-            icon: Icons.badge_outlined,
-            label: buildContext.localized(
-              '机构归属',
-              'Institution affiliation',
-            ),
-            enabled: isConsultant && context.canViewAffiliations,
-            action: _ManagementAction.consultantMembership,
+            icon: Icons.account_tree_outlined,
+            label: buildContext.localized('机构关系', 'Institution relationships'),
+            enabled: isConsultant,
+            action: _ManagementAction.consultantInstitutionRelationships,
           ),
           (
             icon: Icons.spa_outlined,
@@ -740,6 +735,7 @@ class _ManagementCapabilities extends StatelessWidget {
         const SizedBox(height: 16),
         for (final group in groups) ...[
           ExpansionTile(
+            key: Key(group.key),
             leading: Icon(group.icon),
             title: Text(group.title),
             initiallyExpanded: group.items.any(
@@ -753,6 +749,7 @@ class _ManagementCapabilities extends StatelessWidget {
                   (item) => item.enabled,
                 ))
                   ListTile(
+                    key: _managementActionKey(capability.action),
                     leading: Icon(capability.icon),
                     title: Text(capability.label),
                     subtitle: Text(
@@ -765,7 +762,6 @@ class _ManagementCapabilities extends StatelessWidget {
                     onTap: () => _openCapability(
                       buildContext,
                       capability.action,
-                      membershipRequestType: group.membershipRequestType,
                     ),
                   ),
             ],
@@ -778,21 +774,42 @@ class _ManagementCapabilities extends StatelessWidget {
 
   void _openCapability(
     BuildContext context,
-    _ManagementAction action, {
-    String? membershipRequestType,
-  }) {
-    if (action == _ManagementAction.professionalCatalog &&
+    _ManagementAction action,
+  ) {
+    final catalogScope = switch (action) {
+      _ManagementAction.doctorProfessionalCatalog =>
+        ProfessionalCatalogScope.doctor,
+      _ManagementAction.legalProfessionalCatalog =>
+        ProfessionalCatalogScope.legalRepresentative,
+      _ => null,
+    };
+    if (catalogScope != null &&
         discoverRepository is ProfessionalCatalogRepository) {
-      final isDoctor = this.context.activeRoles.contains(
-            IdentityRoleType.doctor.code,
-          );
       Navigator.of(context).push<void>(
         MaterialPageRoute(
           builder: (_) => ProfessionalCatalogPage(
             repository: discoverRepository as ProfessionalCatalogRepository,
-            scope: isDoctor
-                ? ProfessionalCatalogScope.doctor
-                : ProfessionalCatalogScope.legalRepresentative,
+            scope: catalogScope,
+          ),
+        ),
+      );
+      return;
+    }
+    final relationshipScope = switch (action) {
+      _ManagementAction.doctorInstitutionRelationships =>
+        InstitutionRelationshipScope.doctor,
+      _ManagementAction.consultantInstitutionRelationships =>
+        InstitutionRelationshipScope.consultant,
+      _ManagementAction.legalInstitutionRelationships =>
+        InstitutionRelationshipScope.legalRepresentative,
+      _ => null,
+    };
+    if (relationshipScope != null) {
+      Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => InstitutionRelationshipsPage(
+            repository: repository,
+            scope: relationshipScope,
           ),
         ),
       );
@@ -819,20 +836,6 @@ class _ManagementCapabilities extends StatelessWidget {
       );
       return;
     }
-    if (action == _ManagementAction.applyMembership &&
-        membershipRequestType != null) {
-      Navigator.of(context).push<void>(
-        MaterialPageRoute(
-          builder: (_) => InstitutionMembershipRequestsPage(
-            repository: repository,
-            discoverRepository: discoverRepository,
-            context: this.context,
-            requestType: membershipRequestType,
-          ),
-        ),
-      );
-      return;
-    }
     if (action == _ManagementAction.doctorProfile) {
       Navigator.of(context).push<void>(
         MaterialPageRoute(
@@ -850,31 +853,6 @@ class _ManagementCapabilities extends StatelessWidget {
           builder: (_) => ManagedInstitutionProfilesPage(
             repository: repository,
             imagePicker: institutionImagePicker ?? _pickInstitutionProfileImage,
-          ),
-        ),
-      );
-      return;
-    }
-    if (action == _ManagementAction.membershipReviews) {
-      Navigator.of(context).push<void>(
-        MaterialPageRoute(
-          builder: (_) => InstitutionMembershipRequestsPage(
-            repository: repository,
-            discoverRepository: discoverRepository,
-            context: this.context,
-            requestType: 'DOCTOR',
-            reviewMode: true,
-          ),
-        ),
-      );
-      return;
-    }
-    if (action == _ManagementAction.consultantMembership) {
-      Navigator.of(context).push<void>(
-        MaterialPageRoute(
-          builder: (_) => ConsultantMembershipPage(
-            repository: repository,
-            discoverRepository: discoverRepository,
           ),
         ),
       );
@@ -978,23 +956,38 @@ class _ManagementCapabilities extends StatelessWidget {
 }
 
 enum _ManagementAction {
-  professionalCatalog,
+  doctorProfessionalCatalog,
+  legalProfessionalCatalog,
+  doctorInstitutionRelationships,
+  consultantInstitutionRelationships,
+  legalInstitutionRelationships,
   institutionProfile,
-  membershipReviews,
   institutionProjectReviews,
   institutionProjectJoinReviews,
   doctorProjectProfileReviews,
   doctorProfile,
-  applyMembership,
   platformProjectRequest,
   institutionProjectRequest,
   institutionProjectJoinRequest,
   doctorProjectProfileUpdate,
-  consultantMembership,
   consultantProjects,
   doctorArticles,
   doctorOrders,
 }
+
+Key? _managementActionKey(_ManagementAction action) => switch (action) {
+      _ManagementAction.doctorInstitutionRelationships =>
+        const Key('management-institution-relationships-doctor'),
+      _ManagementAction.consultantInstitutionRelationships =>
+        const Key('management-institution-relationships-consultant'),
+      _ManagementAction.legalInstitutionRelationships =>
+        const Key('management-institution-relationships-legal-representative'),
+      _ManagementAction.doctorProfessionalCatalog =>
+        const Key('management-professional-catalog-doctor'),
+      _ManagementAction.legalProfessionalCatalog =>
+        const Key('management-professional-catalog-legal-representative'),
+      _ => null,
+    };
 
 class ManagedInstitutionProfilesPage extends StatefulWidget {
   const ManagedInstitutionProfilesPage({

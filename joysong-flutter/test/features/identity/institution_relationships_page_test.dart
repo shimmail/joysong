@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
 import 'package:joysong_flutter/features/identity/presentation/institution_relationships_page.dart';
+import 'package:joysong_flutter/features/profile/presentation/profile_page.dart';
 
 void main() {
   final applicantCases = [
@@ -597,6 +598,83 @@ void main() {
     expect(find.byKey(const Key('relationship-retry')), findsOneWidget);
     expect(find.textContaining('backend detail'), findsNothing);
   });
+
+  testWidgets(
+    'profile relationship shortcut ignores missing discover repository and opens the sole consultant scope',
+    (tester) async {
+      final repository = _FakeIdentityRepository(
+        contexts: const [
+          ManagementContext(
+            userId: 'consultant-profile-user',
+            platformRole: 'USER',
+            activeRoles: ['CONSULTANT'],
+            managedInstitutionIds: [],
+            visibleInstitutionIds: [],
+            consultantInstitutionIds: ['consultant-current-uuid'],
+            canApplyToInstitutions: true,
+          ),
+        ],
+      );
+
+      await _mount(
+        tester,
+        ProfilePage(identityRepository: repository),
+      );
+
+      final shortcut = find.text('Institution relationships');
+      expect(shortcut, findsOneWidget);
+      await tester.ensureVisible(shortcut);
+      await tester.tap(shortcut);
+      await tester.pumpAndSettle();
+
+      expect(
+        tester
+            .widget<InstitutionRelationshipsPage>(
+              find.byType(InstitutionRelationshipsPage),
+            )
+            .scope,
+        InstitutionRelationshipScope.consultant,
+      );
+    },
+  );
+
+  testWidgets(
+    'profile asks a dual doctor consultant user to choose an explicit relationship scope',
+    (tester) async {
+      final repository = _FakeIdentityRepository(
+        contexts: [_dualContext()],
+      );
+
+      await _mount(
+        tester,
+        ProfilePage(identityRepository: repository),
+      );
+
+      final shortcut = find.text('Institution relationships');
+      await tester.ensureVisible(shortcut);
+      await tester.tap(shortcut);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('institution-relationship-role-picker')),
+        findsOneWidget,
+      );
+      expect(find.text('Choose professional role'), findsOneWidget);
+      await tester.tap(
+        find.byKey(const Key('institution-relationship-role-consultant')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        tester
+            .widget<InstitutionRelationshipsPage>(
+              find.byType(InstitutionRelationshipsPage),
+            )
+            .scope,
+        InstitutionRelationshipScope.consultant,
+      );
+    },
+  );
 }
 
 Future<void> _mount(
