@@ -30,7 +30,7 @@ class BaselineMigrationIntegrationTest {
     private lateinit var jdbcTemplate: JdbcTemplate
 
     @Test
-    fun `fresh database applies only B26 as SQL baseline`() {
+    fun `fresh database applies B26 baseline followed by V27`() {
         val history = jdbcTemplate.query(
             """
             SELECT version, type, script
@@ -40,7 +40,13 @@ class BaselineMigrationIntegrationTest {
             """.trimIndent()
         ) { rs, _ -> Triple(rs.getString("version"), rs.getString("type"), rs.getString("script")) }
 
-        assertEquals(listOf(Triple("26", "SQL_BASELINE", "B26__current_schema.sql")), history)
+        assertEquals(
+            listOf(
+                Triple("26", "SQL_BASELINE", "B26__current_schema.sql"),
+                Triple("27", "SQL", "V27__add_consultant_institution_change_requests.sql")
+            ),
+            history
+        )
     }
 
     companion object {
@@ -57,7 +63,7 @@ class IsolatedBaselineMySqlContainer(imageName: String) :
     MySQLContainer<IsolatedBaselineMySqlContainer>(imageName) {
     override fun start() {
         super.start()
-        println("Resolved database host: $host:$firstMappedPort")
-        println("Resolved database name: $databaseName")
+        println("Migration database host=$host:${getMappedPort(3306)}, database=$databaseName")
+        require(databaseName.startsWith("myapp_worktree_"))
     }
 }
