@@ -1,5 +1,7 @@
 package com.joysong.server.identity.controller
 
+import com.joysong.server.identity.service.InstitutionMembershipAction
+import com.joysong.server.identity.service.InstitutionMembershipRequestQueryService
 import com.joysong.server.identity.service.InstitutionMembershipRequestService
 import com.joysong.server.identity.service.InstitutionMembershipRequestView
 import com.joysong.server.identity.service.ManagementAccessService
@@ -15,23 +17,49 @@ import java.time.LocalDateTime
 
 class ConsultantMembershipControllerTest {
     @Test
-    fun `submit derives actor and exposes normalized consultant response`() {
+    fun `compatibility submit dispatches a fixed consultant join`() {
         val auth = mockk<Authentication>()
         val access = mockk<ManagementAccessService>()
         val service = mockk<InstitutionMembershipRequestService>()
-        val actor = ManagementActor("consultant-1", false, setOf("CONSULTANT"), null, emptySet(), emptySet(), emptySet())
-        val now = LocalDateTime.of(2026, 8, 12, 10, 0)
-        every { access.actor(auth) } returns actor
-        every { service.submitConsultant(actor, "institution-1", "join") } returns InstitutionMembershipRequestView(
-            "membership-1", MembershipRequestType.CONSULTANT, "consultant-1", "institution-1",
-            "PENDING", "join", "", now, now, institutionName = "机构一"
+        val queries = mockk<InstitutionMembershipRequestQueryService>()
+        val actor = ManagementActor(
+            "consultant-1", false, setOf("CONSULTANT"), null,
+            emptySet(), emptySet(), emptySet()
         )
+        every { access.actor(auth) } returns actor
+        every {
+            service.submit(
+                actor,
+                MembershipRequestType.CONSULTANT,
+                "institution-1",
+                InstitutionMembershipAction.JOIN,
+                "join"
+            )
+        } returns view()
 
-        val response = ConsultantMembershipController(access, service)
+        val response = ConsultantMembershipController(access, service, queries)
             .submit(auth, SubmitConsultantMembershipRequest("institution-1", "join")).data!!
 
         assertEquals("机构一", response.institutionName)
         assertEquals("PENDING", response.status)
-        verify(exactly = 1) { service.submitConsultant(actor, "institution-1", "join") }
+        verify(exactly = 1) {
+            service.submit(
+                actor,
+                MembershipRequestType.CONSULTANT,
+                "institution-1",
+                InstitutionMembershipAction.JOIN,
+                "join"
+            )
+        }
+    }
+
+    private fun view() = InstitutionMembershipRequestView(
+        "request-1", MembershipRequestType.CONSULTANT, "consultant-1", "顾问一",
+        "institution-1", "机构一", "JOIN", "PENDING", "NONE", "join", "",
+        "consultant-1", null, NOW, null, NOW, NOW
+    )
+
+    private companion object {
+        val NOW: LocalDateTime = LocalDateTime.of(2026, 8, 14, 10, 0)
     }
 }

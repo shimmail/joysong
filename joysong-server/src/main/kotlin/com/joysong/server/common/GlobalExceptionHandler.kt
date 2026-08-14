@@ -13,8 +13,10 @@ import org.springframework.security.access.AccessDeniedException
 import com.joysong.server.auth.service.InvalidRefreshTokenException
 import com.joysong.server.doctor.service.DoctorProfileNotFoundException
 import com.joysong.server.institution.service.ManagedInstitutionProfileNotFoundException
-import com.joysong.server.identity.service.ConsultantInstitutionNotFoundException
-import com.joysong.server.identity.service.ConsultantMembershipConflictException
+import com.joysong.server.identity.service.ConsultantInstitutionRequestConflictException
+import com.joysong.server.identity.service.ConsultantInstitutionRequestNotFoundException
+import com.joysong.server.identity.service.InstitutionMembershipRequestConflictException
+import com.joysong.server.identity.service.InstitutionMembershipRequestNotFoundException
 import com.joysong.server.institution.service.DoctorProjectChangeConflictException
 import com.joysong.server.institution.service.DoctorProjectChangeNotFoundException
 import com.joysong.server.article.service.ArticleNotFoundException
@@ -23,6 +25,8 @@ import com.joysong.server.order.service.OrderManagementNotFoundException
 import java.io.IOException
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
+import org.springframework.web.bind.MissingServletRequestParameterException
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
 
 @RestControllerAdvice
 class GlobalExceptionHandler {
@@ -58,13 +62,24 @@ class GlobalExceptionHandler {
         ResponseEntity.status(HttpStatus.NOT_FOUND)
             .body(BaseResponse.error(e.message ?: "机构档案不存在", 404))
 
-    @ExceptionHandler(ConsultantInstitutionNotFoundException::class)
-    fun handleConsultantInstitutionNotFound(e: ConsultantInstitutionNotFoundException) =
+    @ExceptionHandler(
+        ConsultantInstitutionRequestNotFoundException::class,
+        InstitutionMembershipRequestNotFoundException::class
+    )
+    fun handleInstitutionMembershipNotFound(e: RuntimeException) =
         ResponseEntity.status(HttpStatus.NOT_FOUND).body(BaseResponse.error<Nothing>(e.message ?: "机构不存在", 404))
 
-    @ExceptionHandler(ConsultantMembershipConflictException::class)
-    fun handleConsultantMembershipConflict(e: ConsultantMembershipConflictException) =
+    @ExceptionHandler(
+        ConsultantInstitutionRequestConflictException::class,
+        InstitutionMembershipRequestConflictException::class
+    )
+    fun handleInstitutionMembershipConflict(e: RuntimeException) =
         ResponseEntity.status(HttpStatus.CONFLICT).body(BaseResponse.error<Nothing>(e.message ?: "机构关系冲突", 409))
+
+    @ExceptionHandler(MissingServletRequestParameterException::class, MethodArgumentTypeMismatchException::class)
+    fun handleRequestParameter(e: Exception): ResponseEntity<BaseResponse<Nothing>> =
+        ResponseEntity.status(HttpStatus.BAD_REQUEST)
+            .body(BaseResponse.error(e.message ?: "请求参数错误", 400))
 
     @ExceptionHandler(DoctorProjectChangeConflictException::class)
     fun handleDoctorProjectChangeConflict(e: DoctorProjectChangeConflictException) =
@@ -195,6 +210,8 @@ class GlobalExceptionHandler {
             this == "/api/management/doctor-profile" ||
             startsWith("/api/management/institutions")
             || startsWith("/api/management/consultant-memberships")
+            || startsWith("/api/management/institution-membership-requests")
+            || startsWith("/api/management/institution-membership-candidates")
             || this == "/api/management/projects"
             || startsWith("/api/management/doctor-articles")
             || startsWith("/api/management/orders")

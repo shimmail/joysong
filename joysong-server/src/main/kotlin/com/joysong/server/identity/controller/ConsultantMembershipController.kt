@@ -1,12 +1,16 @@
 package com.joysong.server.identity.controller
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonAnySetter
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.joysong.server.common.BaseResponse
+import com.joysong.server.identity.service.InstitutionMembershipAction
+import com.joysong.server.identity.service.InstitutionMembershipRequestQueryService
 import com.joysong.server.identity.service.InstitutionMembershipRequestService
 import com.joysong.server.identity.service.InstitutionMembershipRequestView
 import com.joysong.server.identity.service.ManagementAccessService
+import com.joysong.server.identity.service.MembershipRequestType
 import org.springframework.security.core.Authentication
+import org.springframework.security.access.AccessDeniedException
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -18,11 +22,21 @@ import java.time.LocalDateTime
 @RequestMapping("/api/management/consultant-memberships")
 class ConsultantMembershipController(
     private val accessService: ManagementAccessService,
-    private val membershipService: InstitutionMembershipRequestService
+    private val requestService: InstitutionMembershipRequestService,
+    private val queryService: InstitutionMembershipRequestQueryService
 ) {
     @GetMapping
-    fun list(authentication: Authentication): BaseResponse<List<ConsultantMembershipResponse>> =
-        BaseResponse.success(membershipService.listOwnedConsultant(accessService.actor(authentication)).map { it.toResponse() })
+    fun list(authentication: Authentication): BaseResponse<List<ConsultantMembershipResponse>> {
+        val actor = accessService.actor(authentication)
+        if ("CONSULTANT" !in actor.activeRoles) {
+            throw AccessDeniedException("只有本人已激活的顾问可以访问机构关系")
+        }
+        return BaseResponse.success(
+            queryService.listOwned(actor)
+                .filter { it.requestType == MembershipRequestType.CONSULTANT }
+                .map { it.toConsultantCompatibilityResponse() }
+        )
+    }
 
     @PostMapping
     fun submit(
@@ -31,9 +45,13 @@ class ConsultantMembershipController(
     ): BaseResponse<ConsultantMembershipResponse> {
         require(request.unknownFields.isEmpty()) { "请求包含未知字段" }
         return BaseResponse.success(
-        membershipService.submitConsultant(
-            accessService.actor(authentication), request.institutionId, request.requestNote
-        ).toResponse()
+            requestService.submit(
+                accessService.actor(authentication),
+                MembershipRequestType.CONSULTANT,
+                request.institutionId,
+                InstitutionMembershipAction.JOIN,
+                request.requestNote
+            ).toConsultantCompatibilityResponse()
         )
     }
 }
@@ -65,7 +83,17 @@ data class ConsultantMembershipResponse(
     val revokedAt: LocalDateTime?
 )
 
-private fun InstitutionMembershipRequestView.toResponse() = ConsultantMembershipResponse(
-    id, institutionId, institutionName, status, requestNote, reviewNote,
-    createdAt, updatedAt, confirmedBy, confirmedAt, revokedAt
-)
+private fun InstitutionMembershipRequestView.toConsultantCompatibilityResponse() =
+    ConsultantMembershipResponse(
+        id = id,
+        institutionId = institutionId,
+        institutionName = institutionName,
+        status = status,
+        requestNote = requestNote,
+        reviewNote = reviewNote,
+        createdAt = createdAt,
+        updatedAt = updatedAt,
+        confirmedBy = reviewedBy,
+        confirmedAt = reviewedAt.takeIf { action == "JOIN" && status == "APPROVED" },
+        revokedAt = reviewedAt.takeIf { action == "LEAVE" && status == "APPROVED" }
+    )

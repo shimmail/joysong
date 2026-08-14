@@ -1,11 +1,9 @@
 package com.joysong.server.identity.controller
 
-import com.joysong.server.identity.service.DoctorInstitutionAction
-import com.joysong.server.identity.service.DoctorInstitutionChangeRequestService
-import com.joysong.server.identity.service.DoctorInstitutionChangeRequestView
-import com.joysong.server.identity.service.DoctorInstitutionRequestStatus
+import com.joysong.server.identity.service.InstitutionMembershipRequestQueryService
 import com.joysong.server.identity.service.InstitutionMembershipRequestService
 import com.joysong.server.identity.service.InstitutionMembershipRequestView
+import com.joysong.server.identity.service.InstitutionMembershipAction
 import com.joysong.server.identity.service.ManagementAccessService
 import com.joysong.server.identity.service.ManagementActor
 import com.joysong.server.identity.service.MembershipRequestDecision
@@ -14,267 +12,151 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.assertThrows
 import org.springframework.security.core.Authentication
 import java.time.LocalDateTime
 
 class InstitutionMembershipRequestControllerTest {
-    private val accessService = mockk<ManagementAccessService>()
-    private val legacyService = mockk<InstitutionMembershipRequestService>()
-    private val doctorService = mockk<DoctorInstitutionChangeRequestService>()
+    private val access = mockk<ManagementAccessService>()
+    private val mutations = mockk<InstitutionMembershipRequestService>()
+    private val queries = mockk<InstitutionMembershipRequestQueryService>()
     private val authentication = mockk<Authentication>()
-    private val actor = doctorActor()
-    private val controller = InstitutionMembershipRequestController(accessService, legacyService, doctorService)
+    private val controller = InstitutionMembershipRequestController(access, mutations, queries)
 
     @Test
-    fun `list combines consultant legacy requests and doctor ledger without active doctor relationships`() {
-        val consultant = legacyRequest(type = MembershipRequestType.CONSULTANT, id = "consultant-1")
-        val legacyPendingDoctor = legacyRequest(type = MembershipRequestType.DOCTOR, id = "legacy-doctor-1")
-        val activeDoctorRelationship = legacyRequest(
-            type = MembershipRequestType.DOCTOR,
-            id = "relationship-1",
-            status = "APPROVED"
+    fun `owned and reviewable use explicit scopes and normalized fields`() {
+        val actor = dualIdentityActor()
+        val legal = legalActor()
+        every { access.actor(authentication) } returnsMany listOf(actor, legal)
+        every { queries.listOwned(actor) } returns listOf(request("doctor-1", MembershipRequestType.DOCTOR))
+        every { queries.listReviewable(legal) } returns listOf(
+            request("consultant-1", MembershipRequestType.CONSULTANT)
         )
-        every { accessService.actor(authentication) } returns actor
-        every { legacyService.list(actor) } returns listOf(consultant, legacyPendingDoctor, activeDoctorRelationship)
-        every { doctorService.list(actor) } returns listOf(doctorRequest())
 
-        val response = controller.list(authentication)
-        val data = response.data as List<*>
+        val owned = controller.owned(authentication).data!!.single()
+        val reviewable = controller.reviewable(authentication).data!!.single()
+
+        assertEquals("doctor-1", owned.applicantId)
+        assertEquals("医生一", owned.applicantName)
+        assertEquals("APPROVED", owned.relationshipStatus)
+        assertEquals("consultant-1", reviewable.applicantId)
+        assertEquals("机构一", reviewable.institutionName)
+        verify(exactly = 1) { queries.listOwned(actor) }
+        verify(exactly = 1) { queries.listReviewable(legal) }
+    }
+
+    @Test
+    fun `root GET preserves userId alias only in its legacy representation`() {
+        val actor = dualIdentityActor()
+        every { access.actor(authentication) } returns actor
+        every { queries.listCompatibility(actor) } returns listOf(
+            request("doctor-1", MembershipRequestType.DOCTOR)
+        )
+        every { queries.listOwned(actor) } returns listOf(
+            request("doctor-1", MembershipRequestType.DOCTOR)
+        )
+
+        val legacy = controller.list(authentication).data!!.single()
+        val normalized = controller.owned(authentication).data!!.single()
+
+        assertEquals(legacy.applicantId, legacy.userId)
+        assertEquals("doctor-1", legacy.userId)
+        assertNull(normalized::class.members.firstOrNull { it.name == "userId" })
+    }
+
+    @Test
+    fun `submit withdraw and review forward explicit typed requests to the unified dispatcher`() {
+        val actor = dualIdentityActor()
+        val legal = legalActor()
+        every { access.actor(authentication) } returnsMany listOf(actor, actor, legal)
+        every {
+            mutations.submit(
+                actor,
+                MembershipRequestType.CONSULTANT,
+                "institution-1",
+                InstitutionMembershipAction.LEAVE,
+                "离开"
+            )
+        } returns request("consultant-1", MembershipRequestType.CONSULTANT, action = "LEAVE")
+        every {
+            mutations.withdraw(actor, MembershipRequestType.DOCTOR, "doctor-request")
+        } returns request("doctor-1", MembershipRequestType.DOCTOR, status = "WITHDRAWN")
+        every {
+            mutations.review(
+                legal,
+                MembershipRequestType.CONSULTANT,
+                "consultant-request",
+                MembershipRequestDecision.REJECTED,
+                "资料不符"
+            )
+        } returns request(
+            "consultant-1", MembershipRequestType.CONSULTANT, status = "REJECTED"
+        )
 
         assertEquals(
-            listOf("doctor-request-1", "legacy-doctor-1", "consultant-1"),
-            data.map { (it as InstitutionMembershipRequestResponse).id }
-        )
-        assertEquals(
-            listOf("LEAVE", "JOIN", "JOIN"),
-            data.map { (it as InstitutionMembershipRequestResponse).action }
-        )
-        val doctorResponse = data.first() as InstitutionMembershipRequestResponse
-        assertEquals("医生一", doctorResponse.doctorName)
-        assertEquals("机构一", doctorResponse.institutionName)
-        assertEquals(LocalDateTime.of(2026, 8, 10, 10, 0), doctorResponse.submittedAt)
-    }
-
-    @Test
-    fun `doctor submit defaults action to join and uses authenticated actor`() {
-        every { accessService.actor(authentication) } returns actor
-        every {
-            doctorService.submit(actor, "institution-1", DoctorInstitutionAction.JOIN, "申请加入")
-        } returns doctorRequest(action = DoctorInstitutionAction.JOIN)
-
-        val response = controller.submit(
-            authentication,
-            SubmitInstitutionMembershipRequest("DOCTOR", "institution-1", "申请加入")
-        )
-
-        assertEquals("JOIN", (response.data as InstitutionMembershipRequestResponse).action)
-        verify(exactly = 1) {
-            doctorService.submit(actor, "institution-1", DoctorInstitutionAction.JOIN, "申请加入")
-        }
-        verify(exactly = 0) { legacyService.submit(any(), any(), any(), any()) }
-    }
-
-    @Test
-    fun `doctor submit forwards explicit leave action`() {
-        every { accessService.actor(authentication) } returns actor
-        every {
-            doctorService.submit(actor, "institution-1", DoctorInstitutionAction.LEAVE, "调整安排")
-        } returns doctorRequest(action = DoctorInstitutionAction.LEAVE)
-
-        controller.submit(
-            authentication,
-            SubmitInstitutionMembershipRequest("DOCTOR", "institution-1", "调整安排", "leave")
-        )
-
-        verify(exactly = 1) {
-            doctorService.submit(actor, "institution-1", DoctorInstitutionAction.LEAVE, "调整安排")
-        }
-    }
-
-    @Test
-    fun `consultant submit stays on legacy service and rejects leave action`() {
-        val consultantActor = consultantActor()
-        every { accessService.actor(authentication) } returns consultantActor
-        every {
-            legacyService.submit(consultantActor, MembershipRequestType.CONSULTANT, "institution-1", "申请加入")
-        } returns legacyRequest(type = MembershipRequestType.CONSULTANT)
-
-        val response = controller.submit(
-            authentication,
-            SubmitInstitutionMembershipRequest("CONSULTANT", "institution-1", "申请加入")
-        )
-        assertEquals("JOIN", (response.data as InstitutionMembershipRequestResponse).action)
-
-        val error = assertThrows<IllegalArgumentException> {
+            "LEAVE",
             controller.submit(
                 authentication,
-                SubmitInstitutionMembershipRequest("CONSULTANT", "institution-1", "", "LEAVE")
-            )
-        }
-        assertEquals("顾问机构申请仅支持加入", error.message)
-    }
-
-    @Test
-    fun `review reuses membership decision and dispatches by request type`() {
-        val legal = legalActor()
-        every { accessService.actor(authentication) } returns legal
-        every { doctorService.exists("doctor-request-1") } returns true
-        every {
-            doctorService.review(legal, "doctor-request-1", MembershipRequestDecision.REJECTED, "资料不符")
-        } returns doctorRequest(status = DoctorInstitutionRequestStatus.REJECTED)
-        every {
-            legacyService.review(
-                legal,
-                MembershipRequestType.CONSULTANT,
-                "consultant-1",
-                MembershipRequestDecision.APPROVED,
-                ""
-            )
-        } returns legacyRequest(type = MembershipRequestType.CONSULTANT, status = "APPROVED")
-
-        controller.review(
-            authentication,
-            "DOCTOR",
-            "doctor-request-1",
-            ReviewInstitutionMembershipRequest("REJECTED", "资料不符")
+                SubmitInstitutionMembershipRequest(
+                    requestType = "CONSULTANT",
+                    institutionId = "institution-1",
+                    action = "LEAVE",
+                    requestNote = "离开"
+                )
+            ).data!!.action
         )
-        controller.review(
-            authentication,
-            "CONSULTANT",
-            "consultant-1",
-            ReviewInstitutionMembershipRequest("APPROVED")
+        assertEquals(
+            "WITHDRAWN",
+            controller.withdraw(authentication, "DOCTOR", "doctor-request").data!!.status
         )
-
-        verify(exactly = 1) {
-            doctorService.review(legal, "doctor-request-1", MembershipRequestDecision.REJECTED, "资料不符")
-        }
-        verify(exactly = 1) {
-            legacyService.review(
-                legal,
-                MembershipRequestType.CONSULTANT,
-                "consultant-1",
-                MembershipRequestDecision.APPROVED,
-                ""
-            )
-        }
-    }
-
-    @Test
-    fun `rolling legacy doctor request remains reviewable through legacy service`() {
-        val legal = legalActor()
-        every { accessService.actor(authentication) } returns legal
-        every { doctorService.exists("legacy-doctor-1") } returns false
-        every {
-            legacyService.review(
-                legal,
-                MembershipRequestType.DOCTOR,
-                "legacy-doctor-1",
-                MembershipRequestDecision.APPROVED,
-                ""
-            )
-        } returns legacyRequest(MembershipRequestType.DOCTOR, "legacy-doctor-1", "APPROVED")
-
-        val response = controller.review(
-            authentication,
-            "DOCTOR",
-            "legacy-doctor-1",
-            ReviewInstitutionMembershipRequest("APPROVED")
-        )
-
-        assertEquals("APPROVED", (response.data as InstitutionMembershipRequestResponse).status)
-        verify(exactly = 1) {
-            legacyService.review(
-                legal,
-                MembershipRequestType.DOCTOR,
-                "legacy-doctor-1",
-                MembershipRequestDecision.APPROVED,
-                ""
-            )
-        }
-    }
-
-    @Test
-    fun `rolling legacy doctor review still rejects changes requested decision`() {
-        val legal = legalActor()
-        every { accessService.actor(authentication) } returns legal
-
-        val error = assertThrows<IllegalArgumentException> {
+        assertEquals(
+            "REJECTED",
             controller.review(
                 authentication,
-                "DOCTOR",
-                "legacy-doctor-1",
-                ReviewInstitutionMembershipRequest("CHANGES_REQUESTED", "请修改")
-            )
-        }
-
-        assertEquals("不支持的审核决定", error.message)
-        verify(exactly = 0) { legacyService.review(any(), any(), any(), any(), any()) }
+                "CONSULTANT",
+                "consultant-request",
+                ReviewInstitutionMembershipRequest("REJECTED", "资料不符")
+            ).data!!.status
+        )
     }
 
-    @Test
-    fun `withdraw is available only for doctor ledger requests`() {
-        every { accessService.actor(authentication) } returns actor
-        every { doctorService.withdraw(actor, "doctor-request-1") } returns
-            doctorRequest(status = DoctorInstitutionRequestStatus.WITHDRAWN)
-
-        val response = controller.withdraw(authentication, "DOCTOR", "doctor-request-1")
-        assertEquals("WITHDRAWN", (response.data as InstitutionMembershipRequestResponse).status)
-
-        val error = assertThrows<IllegalArgumentException> {
-            controller.withdraw(authentication, "CONSULTANT", "consultant-1")
-        }
-        assertEquals("顾问加入申请暂不支持撤回", error.message)
-    }
-
-    private fun legacyRequest(
+    private fun request(
+        applicantId: String,
         type: MembershipRequestType,
-        id: String = "request-1",
+        action: String = "JOIN",
         status: String = "PENDING"
     ) = InstitutionMembershipRequestView(
-        id = id,
+        id = "${type.name.lowercase()}-request",
         requestType = type,
-        userId = if (type == MembershipRequestType.DOCTOR) "doctor-1" else "consultant-1",
-        institutionId = "institution-1",
-        status = status,
-        requestNote = "申请加入",
-        reviewNote = "",
-        createdAt = LocalDateTime.of(2026, 8, 10, 9, 0),
-        updatedAt = LocalDateTime.of(2026, 8, 10, 9, 0)
-    )
-
-    private fun doctorRequest(
-        action: DoctorInstitutionAction = DoctorInstitutionAction.LEAVE,
-        status: DoctorInstitutionRequestStatus = DoctorInstitutionRequestStatus.PENDING
-    ) = DoctorInstitutionChangeRequestView(
-        id = "doctor-request-1",
-        doctorId = "doctor-1",
-        doctorName = "医生一",
+        applicantId = applicantId,
+        applicantName = if (type == MembershipRequestType.DOCTOR) "医生一" else "顾问一",
         institutionId = "institution-1",
         institutionName = "机构一",
         action = action,
         status = status,
-        requestNote = "",
+        relationshipStatus = "APPROVED",
+        requestNote = "申请",
         reviewNote = "",
-        submittedBy = "doctor-1",
+        submittedBy = applicantId,
         reviewedBy = null,
-        submittedAt = LocalDateTime.of(2026, 8, 10, 10, 0),
+        submittedAt = NOW,
         reviewedAt = null,
-        createdAt = LocalDateTime.of(2026, 8, 10, 10, 0),
-        updatedAt = LocalDateTime.of(2026, 8, 10, 10, 0)
+        createdAt = NOW,
+        updatedAt = NOW
     )
 
-    private fun doctorActor() = ManagementActor(
-        "doctor-1", false, setOf("DOCTOR"), "doctor-1", emptySet(), emptySet(), setOf("doctor-1")
-    )
-
-    private fun consultantActor() = ManagementActor(
-        "consultant-1", false, setOf("CONSULTANT"), null, emptySet(), emptySet(), emptySet()
+    private fun dualIdentityActor() = ManagementActor(
+        "doctor-1", false, setOf("DOCTOR", "CONSULTANT"), "doctor-1",
+        emptySet(), emptySet(), setOf("doctor-1")
     )
 
     private fun legalActor() = ManagementActor(
         "legal-1", false, setOf("INSTITUTION_LEGAL_REPRESENTATIVE"), null,
         setOf("institution-1"), emptySet(), emptySet()
     )
+
+    private companion object {
+        val NOW: LocalDateTime = LocalDateTime.of(2026, 8, 14, 10, 0)
+    }
 }
