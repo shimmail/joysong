@@ -3,7 +3,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/core/network/api_client.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
-import 'package:joysong_flutter/features/discover/presentation/institution_picker_page.dart';
 import 'package:joysong_flutter/features/identity/data/identity_repository_impl.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
@@ -98,10 +97,9 @@ void main() {
     expect(find.textContaining('legal-1'), findsOneWidget);
     await tester.tap(find.byKey(const Key('consultant-institution-picker')));
     await tester.pumpAndSettle();
-    final picker = tester.widget<InstitutionPickerPage>(
-      find.byType(InstitutionPickerPage),
-    );
-    expect(picker.role, IdentityRoleType.consultant);
+    expect(repository.candidateTypes,
+        [InstitutionMembershipRequestType.consultant]);
+    expect(repository.candidateActions, [InstitutionMembershipAction.join]);
     await tester.tap(find.text('New Clinic'));
     await tester.pumpAndSettle();
     await tester.enterText(
@@ -268,6 +266,8 @@ bool _deepEquals(Object? left, Object? right) {
 
 final class _FakeIdentityRepository implements IdentityRepository {
   final submitted = <ConsultantMembershipDraft>[];
+  final candidateTypes = <InstitutionMembershipRequestType>[];
+  final candidateActions = <InstitutionMembershipAction>[];
   var listCalls = 0;
 
   @override
@@ -291,6 +291,30 @@ final class _FakeIdentityRepository implements IdentityRepository {
       'confirmedBy': null,
       'confirmedAt': null,
     });
+  }
+
+  @override
+  Future<InstitutionMembershipCandidatePage>
+      listInstitutionMembershipCandidates({
+    required InstitutionMembershipRequestType requestType,
+    required InstitutionMembershipAction action,
+    required String query,
+    required int offset,
+    required int limit,
+  }) async {
+    candidateTypes.add(requestType);
+    candidateActions.add(action);
+    return InstitutionMembershipCandidatePage(
+      items: const [
+        InstitutionMembershipCandidate(
+          id: 'institution-2',
+          name: 'New Clinic',
+        ),
+      ],
+      offset: offset,
+      limit: limit,
+      hasMore: false,
+    );
   }
 
   @override

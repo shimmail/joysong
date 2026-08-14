@@ -65,8 +65,14 @@ class _ConsultantMembershipPageState extends State<ConsultantMembershipPage> {
     final selection = await Navigator.of(context)
         .push<InstitutionPickerSelection>(MaterialPageRoute(
       builder: (_) => InstitutionPickerPage(
-        repository: widget.discoverRepository,
-        role: IdentityRoleType.consultant,
+        loadPage: ({required query, required offset, required limit}) =>
+            widget.repository.listInstitutionMembershipCandidates(
+          requestType: InstitutionMembershipRequestType.consultant,
+          action: InstitutionMembershipAction.join,
+          query: query,
+          offset: offset,
+          limit: limit,
+        ),
       ),
     ));
     if (mounted && selection != null) {

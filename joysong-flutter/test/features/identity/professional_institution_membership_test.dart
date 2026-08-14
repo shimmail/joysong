@@ -4,204 +4,245 @@ import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
-import 'package:joysong_flutter/features/identity/presentation/identity_pages.dart';
+import 'package:joysong_flutter/features/identity/presentation/institution_relationships_page.dart';
 import 'package:joysong_flutter/features/identity/presentation/professional_request_pages.dart';
 
 void main() {
-  testWidgets(
-      'doctor entry submits its explicit membership request type and legal review stays mixed',
+  final cases = [
+    const (
+      scope: InstitutionRelationshipScope.doctor,
+      type: InstitutionMembershipRequestType.doctor,
+      candidateId: 'doctor-candidate',
+      candidateName: 'Doctor Candidate Clinic',
+    ),
+    const (
+      scope: InstitutionRelationshipScope.consultant,
+      type: InstitutionMembershipRequestType.consultant,
+      candidateId: 'consultant-candidate',
+      candidateName: 'Consultant Candidate Clinic',
+    ),
+  ];
+
+  for (final testCase in cases) {
+    testWidgets(
+      'dual identity page obeys explicit ${testCase.type.code} scope for owned candidates and submit',
       (tester) async {
-    tester.view.physicalSize = const Size(900, 4000);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final identityRepository = _FakeIdentityRepository();
-    final discoverRepository = _FakeDiscoverRepository();
+        final repository = _ExplicitScopeRepository(
+          candidateId: testCase.candidateId,
+          candidateName: testCase.candidateName,
+        );
+        await _mount(
+          tester,
+          InstitutionRelationshipsPage(
+            repository: repository,
+            scope: testCase.scope,
+          ),
+        );
 
-    await tester.pumpWidget(MaterialApp(
-      home: ManagementCenterPage(
-        repository: identityRepository,
-        discoverRepository: discoverRepository,
-      ),
-    ));
-    await tester.pumpAndSettle();
-    await _applyFromEntry(
+        expect(find.text('${testCase.type.code} owned row'), findsOneWidget);
+        expect(
+          find.text(
+            testCase.type == InstitutionMembershipRequestType.doctor
+                ? 'CONSULTANT owned row'
+                : 'DOCTOR owned row',
+          ),
+          findsNothing,
+        );
+        expect(repository.candidateTypes, [testCase.type]);
+
+        await tester.tap(
+          find.byKey(const Key('relationship-institution-picker')),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(testCase.candidateName));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('relationship-submit')));
+        await tester.pumpAndSettle();
+
+        expect(repository.submitted.single.requestType, testCase.type);
+        expect(repository.submitted.single.action,
+            InstitutionMembershipAction.join);
+        expect(repository.submitted.single.institutionId, testCase.candidateId);
+        expect(
+          repository.candidateTypes.every((type) => type == testCase.type),
+          isTrue,
+        );
+      },
+    );
+  }
+
+  testWidgets('legacy membership symbol is only a scoped unified-page wrapper',
+      (tester) async {
+    final repository = _ExplicitScopeRepository(
+      candidateId: 'candidate',
+      candidateName: 'Candidate Clinic',
+    );
+    final legacyContext = const ManagementContext(
+      userId: 'legacy-context-user',
+      platformRole: 'USER',
+      activeRoles: ['DOCTOR'],
+      managedInstitutionIds: ['legacy-managed'],
+      visibleInstitutionIds: ['legacy-managed'],
+    );
+
+    await _mount(
       tester,
-      entry: find.text('Apply to institution').first,
-      expectedNote: 'doctor own request',
+      InstitutionMembershipRequestsPage(
+        repository: repository,
+        discoverRepository: const _UnusedDiscoverRepository(),
+        context: legacyContext,
+        requestType: 'CONSULTANT',
+      ),
     );
+    expect(find.byType(InstitutionRelationshipsPage), findsOneWidget);
     expect(
-      identityRepository.submittedTypes,
-      [InstitutionMembershipRequestType.doctor],
+      tester
+          .widget<InstitutionRelationshipsPage>(
+            find.byType(InstitutionRelationshipsPage),
+          )
+          .scope,
+      InstitutionRelationshipScope.consultant,
     );
-    expect(identityRepository.optionCalls, 0);
-    expect(identityRepository.ownedCalls, 2);
-    expect(identityRepository.rootCalls, 0);
 
-    await tester.pumpWidget(MaterialApp(
-      key: const ValueKey('mixed-membership-review-app'),
-      home: InstitutionMembershipRequestsPage(
-        key: const ValueKey('mixed-membership-review'),
+    await _mount(
+      tester,
+      InstitutionMembershipRequestsPage(
+        key: const ValueKey('legal-wrapper'),
+        repository: repository,
+        discoverRepository: const _UnusedDiscoverRepository(),
+        context: legacyContext,
         requestType: 'DOCTOR',
         reviewMode: true,
-        context: const ManagementContext(
-          userId: 'legal-user',
-          platformRole: 'USER',
-          activeRoles: ['INSTITUTION_LEGAL_REPRESENTATIVE'],
-          managedInstitutionIds: ['inst-1'],
-          visibleInstitutionIds: ['inst-1'],
-        ),
-        repository: identityRepository,
-        discoverRepository: discoverRepository,
       ),
-    ));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('doctor review request'), findsOneWidget);
-    expect(find.textContaining('consultant review request'), findsOneWidget);
-    expect(identityRepository.reviewableCalls, 1);
-    expect(identityRepository.rootCalls, 0);
+    );
+    expect(
+      tester
+          .widget<InstitutionRelationshipsPage>(
+            find.byType(InstitutionRelationshipsPage),
+          )
+          .scope,
+      InstitutionRelationshipScope.legalRepresentative,
+    );
   });
 }
 
-Future<void> _applyFromEntry(
-  WidgetTester tester, {
-  required Finder entry,
-  required String expectedNote,
-}) async {
-  await tester.tap(entry);
-  await tester.pumpAndSettle();
-  expect(find.textContaining(expectedNote), findsOneWidget);
-  expect(find.textContaining('doctor identity request'), findsOneWidget);
-  expect(find.textContaining('consultant own request'), findsNothing);
-  await tester.tap(find.byKey(const Key('membership-institution-picker')));
-  await tester.pumpAndSettle();
-  await tester.tap(find.text('Joysong Clinic'));
-  await tester.pumpAndSettle();
-  await tester.tap(find.text('Submit'));
+Future<void> _mount(WidgetTester tester, Widget child) async {
+  tester.view.physicalSize = const Size(900, 4000);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  await tester.pumpWidget(MaterialApp(locale: const Locale('en'), home: child));
   await tester.pumpAndSettle();
 }
 
-final class _FakeIdentityRepository implements IdentityRepository {
-  final submittedTypes = <InstitutionMembershipRequestType>[];
-  var optionCalls = 0;
-  var rootCalls = 0;
-  var ownedCalls = 0;
-  var reviewableCalls = 0;
+InstitutionMembershipRequest _request({
+  required String id,
+  required InstitutionMembershipRequestType type,
+  required String note,
+}) =>
+    InstitutionMembershipRequest(
+      id: id,
+      requestType: type,
+      applicantId: '${type.code.toLowerCase()}-profile-id',
+      applicantName: '${type.code} Applicant',
+      institutionId: '${type.code.toLowerCase()}-pending-id',
+      institutionName: '${type.code} Pending Clinic',
+      action: InstitutionMembershipAction.join,
+      status: InstitutionMembershipRequestStatus.pending,
+      relationshipStatus: InstitutionRelationshipStatus.none,
+      requestNote: note,
+      reviewNote: '',
+      submittedBy: '${type.code.toLowerCase()}-profile-id',
+      submittedAt: DateTime.utc(2026, 8, 14, 9),
+      createdAt: DateTime.utc(2026, 8, 14, 9),
+      updatedAt: DateTime.utc(2026, 8, 14, 9),
+    );
+
+final class _ExplicitScopeRepository implements IdentityRepository {
+  _ExplicitScopeRepository({
+    required this.candidateId,
+    required this.candidateName,
+  });
+
+  final String candidateId;
+  final String candidateName;
+  final candidateTypes = <InstitutionMembershipRequestType>[];
+  final submitted = <InstitutionMembershipRequestDraft>[];
 
   @override
   Future<ManagementContext> loadManagementContext() async =>
       const ManagementContext(
-        userId: 'professional-1',
+        userId: 'dual-session-user',
         platformRole: 'USER',
-        activeRoles: ['DOCTOR', 'CONSULTANT'],
+        activeRoles: ['CONSULTANT', 'DOCTOR'],
+        doctorId: 'doctor-profile-id',
         managedInstitutionIds: [],
         visibleInstitutionIds: [],
         canApplyToInstitutions: true,
       );
 
   @override
-  Future<List<InstitutionOption>> listInstitutionOptions() async {
-    optionCalls += 1;
-    throw StateError('legacy institution options must not be loaded');
-  }
+  Future<List<InstitutionMembershipRequest>>
+      listOwnedInstitutionMembershipRequests() async => [
+            _request(
+              id: 'doctor-owned',
+              type: InstitutionMembershipRequestType.doctor,
+              note: 'DOCTOR owned row',
+            ),
+            _request(
+              id: 'consultant-owned',
+              type: InstitutionMembershipRequestType.consultant,
+              note: 'CONSULTANT owned row',
+            ),
+          ];
 
   @override
-  Future<List<InstitutionMembershipRequest>>
-      listInstitutionMembershipRequests() async {
-    rootCalls += 1;
-    throw StateError('legacy root GET must not be consumed by this page');
-  }
-
-  @override
-  Future<List<InstitutionMembershipRequest>>
-      listOwnedInstitutionMembershipRequests() async {
-    ownedCalls += 1;
-    return [
-      _membershipRequest(
-        id: 'doctor-own',
-        requestType: InstitutionMembershipRequestType.doctor,
-        applicantId: 'professional-1',
-        requestNote: 'doctor own request',
-      ),
-      _membershipRequest(
-        id: 'consultant-own',
-        requestType: InstitutionMembershipRequestType.consultant,
-        applicantId: 'professional-1',
-        requestNote: 'consultant own request',
-      ),
-      _membershipRequest(
-        id: 'doctor-identity',
-        requestType: InstitutionMembershipRequestType.doctor,
-        applicantId: 'doctor-profile-1',
-        requestNote: 'doctor identity request',
-      ),
-    ];
-  }
-
-  @override
-  Future<List<InstitutionMembershipRequest>>
-      listReviewableInstitutionMembershipRequests() async {
-    reviewableCalls += 1;
-    return [
-      _membershipRequest(
-        id: 'doctor-review',
-        requestType: InstitutionMembershipRequestType.doctor,
-        applicantId: 'doctor-other',
-        requestNote: 'doctor review request',
-      ),
-      _membershipRequest(
-        id: 'consultant-review',
-        requestType: InstitutionMembershipRequestType.consultant,
-        applicantId: 'consultant-other',
-        requestNote: 'consultant review request',
-      ),
-    ];
+  Future<InstitutionMembershipCandidatePage>
+      listInstitutionMembershipCandidates({
+    required InstitutionMembershipRequestType requestType,
+    required InstitutionMembershipAction action,
+    required String query,
+    required int offset,
+    required int limit,
+  }) async {
+    candidateTypes.add(requestType);
+    return InstitutionMembershipCandidatePage(
+      items: [
+        InstitutionMembershipCandidate(id: candidateId, name: candidateName),
+      ],
+      offset: offset,
+      limit: limit,
+      hasMore: false,
+    );
   }
 
   @override
   Future<InstitutionMembershipRequest> submitInstitutionMembershipRequest(
     InstitutionMembershipRequestDraft draft,
   ) async {
-    submittedTypes.add(draft.requestType);
-    return _membershipRequest(
-      id: 'submitted-request',
-      requestType: draft.requestType,
-      applicantId: 'professional-1',
-      requestNote: draft.requestNote.trim(),
+    submitted.add(draft);
+    return _request(
+      id: 'submitted',
+      type: draft.requestType,
+      note: 'submitted',
     );
   }
+
+  @override
+  Future<List<InstitutionMembershipRequest>>
+      listReviewableInstitutionMembershipRequests() async => const [];
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
-InstitutionMembershipRequest _membershipRequest({
-  required String id,
-  required InstitutionMembershipRequestType requestType,
-  required String applicantId,
-  required String requestNote,
-}) =>
-    InstitutionMembershipRequest.fromJson({
-      'id': id,
-      'requestType': requestType.code,
-      'applicantId': applicantId,
-      'applicantName': 'Alex Chen',
-      'institutionId': 'inst-1',
-      'institutionName': 'Joysong Clinic',
-      'action': 'JOIN',
-      'status': 'PENDING',
-      'relationshipStatus': 'NONE',
-      'requestNote': requestNote,
-      'reviewNote': '',
-      'submittedBy': applicantId,
-      'reviewedBy': null,
-      'submittedAt': '2026-08-10T09:00:00',
-      'reviewedAt': null,
-      'createdAt': '2026-08-10T09:00:00',
-      'updatedAt': '2026-08-10T09:00:00',
-    });
+final class _UnusedDiscoverRepository implements DiscoverRepository {
+  const _UnusedDiscoverRepository();
 
-final class _FakeDiscoverRepository implements DiscoverRepository {
+  @override
+  Future<DiscoverFilterOptions> loadFilterOptions() =>
+      throw StateError('legacy discover dependency must not be used');
+
   @override
   Future<DiscoverPageResult> loadPage({
     required DiscoverContentType type,
@@ -211,26 +252,13 @@ final class _FakeDiscoverRepository implements DiscoverRepository {
     List<String> categories = const [],
     List<String> cities = const [],
     List<String> tags = const [],
-  }) async =>
-      const DiscoverPageResult(
-        items: [
-          DiscoverItem(
-            id: 'inst-1',
-            type: DiscoverContentType.institution,
-            title: 'Joysong Clinic',
-          ),
-        ],
-        hasMore: false,
-      );
+  }) =>
+      throw StateError('legacy discover dependency must not be used');
 
   @override
   Future<DiscoverItem> loadDetail({
     required DiscoverContentType type,
     required String id,
   }) =>
-      throw UnimplementedError();
-
-  @override
-  Future<DiscoverFilterOptions> loadFilterOptions() async =>
-      const DiscoverFilterOptions();
+      throw StateError('legacy discover dependency must not be used');
 }

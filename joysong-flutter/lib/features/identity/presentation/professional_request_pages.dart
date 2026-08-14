@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
-import 'package:joysong_flutter/features/discover/presentation/institution_picker_page.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
+import 'package:joysong_flutter/features/identity/presentation/institution_relationships_page.dart';
 
 class DoctorSelfProfilePage extends StatefulWidget {
   const DoctorSelfProfilePage({
@@ -372,7 +372,8 @@ class _DoctorProfileFormState extends State<_DoctorProfileForm> {
   }
 }
 
-class InstitutionMembershipRequestsPage extends StatefulWidget {
+@Deprecated('Use InstitutionRelationshipsPage with an explicit scope.')
+class InstitutionMembershipRequestsPage extends StatelessWidget {
   InstitutionMembershipRequestsPage({
     required this.repository,
     required this.discoverRepository,
@@ -383,245 +384,22 @@ class InstitutionMembershipRequestsPage extends StatefulWidget {
   }) : requestType = InstitutionMembershipRequestType.fromCode(requestType);
 
   final IdentityRepository repository;
+
+  // Retained only for source compatibility until Task 7 updates route call sites.
   final DiscoverRepository discoverRepository;
   final ManagementContext context;
   final InstitutionMembershipRequestType requestType;
   final bool reviewMode;
 
   @override
-  State<InstitutionMembershipRequestsPage> createState() =>
-      _InstitutionMembershipRequestsPageState();
-}
-
-class _InstitutionMembershipRequestsPageState
-    extends State<InstitutionMembershipRequestsPage> {
-  final _note = TextEditingController();
-  List<InstitutionOption> _institutions = const [];
-  List<InstitutionMembershipRequest> _requests = const [];
-  String? _institutionId;
-  String? _selectedInstitutionName;
-  String? _error;
-  var _loading = true;
-  var _saving = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  @override
-  void dispose() {
-    _note.dispose();
-    super.dispose();
-  }
-
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    try {
-      final requests = widget.reviewMode
-          ? await widget.repository
-              .listReviewableInstitutionMembershipRequests()
-          : await widget.repository.listOwnedInstitutionMembershipRequests();
-      if (!mounted) return;
-      setState(() {
-        _requests = requests;
-        _loading = false;
-      });
-      if (widget.reviewMode) {
-        try {
-          final institutions = await widget.repository.listInstitutionOptions();
-          if (mounted) setState(() => _institutions = institutions);
-        } catch (_) {
-          // Request data remains usable with institution ids as fallback names.
-        }
-      }
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = '机构申请加载失败，请重试';
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final visibleRequests = _requests.where((item) {
-      if (!widget.reviewMode && item.requestType != widget.requestType) {
-        return false;
-      }
-      return true;
-    }).toList();
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.reviewMode
-            ? context.localized('成员加入审核', 'Membership Reviews')
-            : context.localized('申请加入机构', 'Apply to Institution')),
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _load,
-              child: ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  if (!widget.reviewMode) ...[
-                    ListTile(
-                      key: const Key('membership-institution-picker'),
-                      enabled: !_saving,
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.apartment_outlined),
-                      title: Text(
-                        _selectedInstitutionName ??
-                            context.localized('选择机构', 'Select institution'),
-                      ),
-                      subtitle: _institutionId == null
-                          ? Text(context.localized(
-                              '搜索全部机构',
-                              'Search all institutions',
-                            ))
-                          : null,
-                      trailing: const Icon(Icons.chevron_right_rounded),
-                      onTap: _saving ? null : _selectInstitution,
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _note,
-                      maxLines: 3,
-                      decoration: InputDecoration(
-                        labelText:
-                            context.localized('申请说明', 'Application note'),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    FilledButton.icon(
-                      onPressed: _saving ? null : _submit,
-                      icon: const Icon(Icons.send_outlined),
-                      label: Text(context.localized('提交申请', 'Submit')),
-                    ),
-                    const SizedBox(height: 24),
-                  ],
-                  if (_error != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Text(
-                        _error!,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                      ),
-                    ),
-                  if (visibleRequests.isEmpty)
-                    ListTile(
-                      enabled: false,
-                      title: Text(context.localized(
-                        '暂无申请记录',
-                        'No requests',
-                      )),
-                    )
-                  else
-                    for (final request in visibleRequests)
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.apartment_outlined),
-                        title: Text(widget.reviewMode
-                            ? '${_institutionName(request)} · ${request.applicantName}'
-                            : _institutionName(request)),
-                        subtitle: Text([
-                          _statusLabel(request.status.code),
-                          if (request.requestNote.isNotEmpty)
-                            request.requestNote,
-                          if (request.reviewNote.isNotEmpty)
-                            context.localized(
-                              '审核意见：${request.reviewNote}',
-                              'Review: ${request.reviewNote}',
-                            ),
-                        ].join('\n')),
-                        trailing: widget.reviewMode &&
-                                request.status ==
-                                    InstitutionMembershipRequestStatus.pending
-                            ? IconButton(
-                                tooltip: context.localized('审核', 'Review'),
-                                icon: const Icon(Icons.fact_check_outlined),
-                                onPressed: () => _review(request),
-                              )
-                            : null,
-                      ),
-                ],
-              ),
-            ),
-    );
-  }
-
-  Future<void> _submit() async {
-    final institutionId = _institutionId;
-    if (institutionId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text(context.localized('请选择机构', 'Select an institution'))),
+  Widget build(BuildContext context) => InstitutionRelationshipsPage(
+        repository: repository,
+        scope: reviewMode
+            ? InstitutionRelationshipScope.legalRepresentative
+            : requestType == InstitutionMembershipRequestType.doctor
+                ? InstitutionRelationshipScope.doctor
+                : InstitutionRelationshipScope.consultant,
       );
-      return;
-    }
-    setState(() => _saving = true);
-    try {
-      await widget.repository.submitInstitutionMembershipRequest(
-        InstitutionMembershipRequestDraft(
-          requestType: widget.requestType,
-          action: InstitutionMembershipAction.join,
-          institutionId: institutionId,
-          requestNote: _note.text,
-        ),
-      );
-      _note.clear();
-      await _load();
-    } catch (_) {
-      if (mounted) setState(() => _error = '机构申请提交失败，请稍后重试');
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  Future<void> _selectInstitution() async {
-    final selection = await Navigator.of(context)
-        .push<InstitutionPickerSelection>(MaterialPageRoute(
-      builder: (_) => InstitutionPickerPage(
-        repository: widget.discoverRepository,
-        role: IdentityRoleType.fromCode(widget.requestType.code),
-      ),
-    ));
-    if (!mounted || selection == null) return;
-    setState(() {
-      _institutionId = selection.id;
-      _selectedInstitutionName = selection.name;
-    });
-  }
-
-  Future<void> _review(InstitutionMembershipRequest request) async {
-    final review = await showInstitutionMembershipReviewDialog(context);
-    if (review == null) return;
-    try {
-      await widget.repository.reviewInstitutionMembershipRequest(
-        requestType: request.requestType,
-        id: request.id,
-        decision: InstitutionMembershipDecision.fromCode(review.decision),
-        reviewNote: review.note,
-      );
-      await _load();
-    } catch (_) {
-      if (mounted) setState(() => _error = '审核提交失败，请稍后重试');
-    }
-  }
-
-  String _institutionName(InstitutionMembershipRequest request) =>
-      _institutions
-          .where((item) => item.id == request.institutionId)
-          .map((item) => item.name)
-          .firstOrNull ??
-      request.institutionName;
 }
 
 class PlatformProjectRequestPage extends StatefulWidget {
