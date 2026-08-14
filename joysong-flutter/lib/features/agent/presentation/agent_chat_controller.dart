@@ -482,6 +482,8 @@ class AgentChatController extends ChangeNotifier {
                   catalogItems: turn.message.catalogItems.isNotEmpty
                       ? turn.message.catalogItems
                       : turn.catalogItems,
+                  catalogReport:
+                      turn.message.catalogReport ?? turn.catalogReport,
                 );
                 _replaceMessage(placeholderId, assistantMessage);
                 _emit(

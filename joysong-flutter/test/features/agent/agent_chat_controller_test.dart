@@ -32,6 +32,89 @@ void main() {
     expect(legacy.catalogItems, isEmpty);
   });
 
+  test('ChatMessage decodes message-bound comparison workflow fields', () {
+    final message = ChatMessage.fromJson({
+      'id': 'assistant-1',
+      'sessionId': 'session-1',
+      'role': 'ASSISTANT',
+      'content': 'reply',
+      'createdAt': '2026-08-12T00:00:00',
+      'comparisonRequest': _comparisonRequestJson,
+      'catalogReport': _catalogReportJson,
+    });
+
+    expect(message.comparisonRequest?.operands.single.displayName, 'Project');
+    expect(message.comparisonRequest?.targetType, 'PROJECT');
+    expect(message.comparisonRequest?.isComplete, isTrue);
+    expect(message.catalogReport?.title, 'Comparison report');
+  });
+
+  test('ChatMessage keeps legacy payload compatible when comparison fields are absent',
+      () {
+    final message = ChatMessage.fromJson({
+      'id': 'assistant-1',
+      'sessionId': 'session-1',
+      'role': 'ASSISTANT',
+      'content': 'reply',
+      'createdAt': '2026-08-12T00:00:00',
+    });
+
+    expect(message.comparisonRequest, isNull);
+    expect(message.catalogReport, isNull);
+  });
+
+  test('ChatMessage degrades malformed comparison request and report independently',
+      () {
+    final malformedRequest = ChatMessage.fromJson({
+      'id': 'assistant-1',
+      'sessionId': 'session-1',
+      'role': 'ASSISTANT',
+      'content': 'reply',
+      'createdAt': '2026-08-12T00:00:00',
+      'comparisonRequest': {
+        ..._comparisonRequestJson,
+        'operands': [
+          {'entityType': 'PROJECT', 'entityId': 1, 'displayName': 'Project'},
+        ],
+      },
+      'catalogReport': _catalogReportJson,
+    });
+    final malformedReport = ChatMessage.fromJson({
+      'id': 'assistant-2',
+      'sessionId': 'session-1',
+      'role': 'ASSISTANT',
+      'content': 'reply',
+      'createdAt': '2026-08-12T00:00:01',
+      'comparisonRequest': _comparisonRequestJson,
+      'catalogReport': const ['not-a-report'],
+    });
+
+    expect(malformedRequest.comparisonRequest, isNull);
+    expect(malformedRequest.catalogReport?.title, 'Comparison report');
+    expect(malformedReport.comparisonRequest?.targetType, 'PROJECT');
+    expect(malformedReport.catalogReport, isNull);
+  });
+
+  test('ChatTurn keeps legacy top-level catalog report', () {
+    final turn = ChatTurn.fromJson({
+      'message': {
+        'id': 'assistant-1',
+        'sessionId': 'session-1',
+        'role': 'ASSISTANT',
+        'content': 'reply',
+        'createdAt': '2026-08-12T00:00:00',
+      },
+      'catalogReport': _catalogReportJson,
+      'catalogItems': const <Object?>[],
+      'intent': 'COMPARISON',
+      'queryTarget': 'PROJECT',
+      'nextAction': 'NONE',
+    });
+
+    expect(turn.message.catalogReport, isNull);
+    expect(turn.catalogReport?.title, 'Comparison report');
+  });
+
   test('openSession keeps only the latest 20 messages', () async {
     final messages = _messages(25);
     final controller = AgentChatController(
@@ -137,6 +220,69 @@ void main() {
     expect(controller.state.failedMessageId, isNull);
     expect(controller.state.latestTurn, _completeTurn);
     expect(controller.state.deliveryState, ChatDeliveryState.completed);
+  });
+
+  test('completed event prefers message-bound report over legacy top-level report',
+      () async {
+    final stream = StreamController<AgentStreamEvent>();
+    final controller = AgentChatController(
+      repository: _FakeAgentRepository(streams: [stream]),
+    );
+    final send = controller.send('比较项目');
+    await Future<void>.delayed(Duration.zero);
+    final messageReport = _catalogReport('Message report');
+    final legacyReport = _catalogReport('Legacy report');
+
+    stream.add(AgentStreamCompleted(
+      turn: _comparisonTurn(
+        messageReport: messageReport,
+        legacyReport: legacyReport,
+      ),
+    ));
+    await stream.close();
+    await send;
+
+    expect(controller.state.messages.last.catalogReport?.title, 'Message report');
+    expect(controller.state.messages.last.comparisonRequest?.targetType, 'PROJECT');
+  });
+
+  test('completed event falls back to legacy top-level report', () async {
+    final stream = StreamController<AgentStreamEvent>();
+    final controller = AgentChatController(
+      repository: _FakeAgentRepository(streams: [stream]),
+    );
+    final send = controller.send('比较项目');
+    await Future<void>.delayed(Duration.zero);
+
+    stream.add(AgentStreamCompleted(
+      turn: _comparisonTurn(legacyReport: _catalogReport('Legacy report')),
+    ));
+    await stream.close();
+    await send;
+
+    expect(controller.state.messages.last.catalogReport?.title, 'Legacy report');
+    expect(controller.state.messages.last.comparisonRequest?.targetType, 'PROJECT');
+  });
+
+  test('openSession restores message-bound comparison request and report', () async {
+    final controller = AgentChatController(
+      repository: _FakeAgentRepository(messages: [
+        ChatMessage(
+          id: 'assistant-1',
+          sessionId: _session.id,
+          role: 'ASSISTANT',
+          content: 'comparison',
+          createdAt: '2026-08-12T00:00:00',
+          comparisonRequest: _comparisonRequest,
+          catalogReport: _catalogReport('History report'),
+        ),
+      ]),
+    );
+
+    await controller.openSession(_session);
+
+    expect(controller.state.messages.single.comparisonRequest, _comparisonRequest);
+    expect(controller.state.messages.single.catalogReport?.title, 'History report');
   });
 
   test('failed event retains partial text and marks local assistant retryable',
@@ -367,6 +513,73 @@ const _catalogItemJson = <String, Object?>{
   'summary': '',
   'attributes': <String, String>{},
 };
+
+const _comparisonRequestJson = <String, Object?>{
+  'operands': [
+    {
+      'entityType': 'PROJECT',
+      'entityId': 'project-1',
+      'displayName': 'Project',
+    },
+  ],
+  'targetType': 'PROJECT',
+  'dimensions': ['PRICE'],
+  'constraints': {'city': 'Shanghai'},
+  'missingFields': <String>[],
+};
+
+const _catalogReportJson = <String, Object?>{
+  'mode': 'COMPARISON',
+  'title': 'Comparison report',
+  'summary': 'summary',
+  'items': [_catalogItemJson],
+  'comparisonDimensions': ['PRICE'],
+  'warnings': <String>[],
+};
+
+const _comparisonRequest = AgentComparisonRequest(
+  operands: [
+    AgentComparisonOperand(
+      entityType: 'PROJECT',
+      entityId: 'project-1',
+      displayName: 'Project',
+    ),
+  ],
+  targetType: 'PROJECT',
+  dimensions: ['PRICE'],
+  constraints: {'city': 'Shanghai'},
+  missingFields: {},
+);
+
+AgentCatalogReport _catalogReport(String title) => AgentCatalogReport(
+      mode: 'COMPARISON',
+      title: title,
+      summary: 'summary',
+      items: const [],
+      comparisonDimensions: const ['PRICE'],
+      warnings: const [],
+    );
+
+ChatTurn _comparisonTurn({
+  AgentCatalogReport? messageReport,
+  AgentCatalogReport? legacyReport,
+}) =>
+    ChatTurn(
+      message: ChatMessage(
+        id: 'assistant-1',
+        sessionId: 'session-1',
+        role: 'ASSISTANT',
+        content: 'comparison',
+        createdAt: '2026-08-06T10:01:00',
+        comparisonRequest: _comparisonRequest,
+        catalogReport: messageReport,
+      ),
+      catalogReport: legacyReport,
+      catalogItems: const [],
+      intent: 'COMPARISON',
+      queryTarget: 'PROJECT',
+      nextAction: 'NONE',
+    );
 
 ChatTurn _turn(String content) => ChatTurn(
       message: ChatMessage(
