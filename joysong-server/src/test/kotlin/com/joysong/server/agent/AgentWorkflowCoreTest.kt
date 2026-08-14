@@ -989,7 +989,7 @@ class AgentWorkflowCoreTest {
         val assistant = message(2, "ASSISTANT", "unsafe planning claim").apply {
             metadataJson = countingMapper.writeValueAsString(
                 mapOf(
-                    "intent" to "planning",
+                    "intent" to " PLANNING ",
                     "queryTarget" to "PROJECT",
                     "nextAction" to "START_PLANNING",
                     "catalogItems" to listOf(unsafeItem),
@@ -999,10 +999,14 @@ class AgentWorkflowCoreTest {
         }
 
         val projection = countingLifecycle.projectMessage(assistant)
+        val projectedMetadata = objectMapper.readTree(projection.message.metadataJson)
 
         assertEquals(1, countingMapper.readTreeCallCount)
         assertEquals("PLANNING", projection.intent)
         assertNotEquals("unsafe planning claim", projection.message.content)
+        assertEquals("PLANNING", projectedMetadata.path("intent").asText())
+        assertEquals("", projectedMetadata.path("catalogItems").single().path("subtitle").asText())
+        assertFalse(projectedMetadata.has("comparisonRequest"))
         assertEquals("", projection.catalogItems.single().subtitle)
         assertEquals("", projection.catalogItems.single().summary)
         assertEquals(mapOf("reference price" to "$888"), projection.catalogItems.single().attributes)

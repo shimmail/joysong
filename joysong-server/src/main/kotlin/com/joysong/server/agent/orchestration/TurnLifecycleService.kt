@@ -82,7 +82,7 @@ class TurnLifecycleService(
         if (!message.role.equals("ASSISTANT", ignoreCase = true)) return AgentMessageProjection(message)
         val metadata = runCatching { objectMapper.readTree(message.metadataJson.ifBlank { "{}" }) }
             .getOrNull() ?: return AgentMessageProjection(message)
-        val intent = metadata.path("intent").asText("GENERAL_CHAT")
+        val intent = metadata.path("intent").asText("GENERAL_CHAT").trim()
         val queryTarget = metadata.get("queryTarget")?.takeUnless { it.isNull }?.asText()
         val nextAction = metadata.path("nextAction").asText("NONE")
         val parsedCatalogItems = metadata.get("catalogItems")
