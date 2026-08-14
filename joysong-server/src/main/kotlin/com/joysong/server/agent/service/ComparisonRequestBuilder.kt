@@ -17,17 +17,12 @@ class ComparisonRequestBuilder {
         val currentOperands = (candidates.filter { it.isNamedIn(content) } + contextCandidates)
             .mapNotNull(::toOperand)
         val resolvedTarget = targetType ?: currentOperands.map { it.entityType }.distinct().singleOrNull() ?: inherited?.targetType
-        val compatibleCurrentOperands = if (resolvedTarget == null) {
-            currentOperands
-        } else {
-            currentOperands.filter { it.entityType == resolvedTarget }
-        }
         val mergedOperands = when {
-            compatibleCurrentOperands.size >= 2 -> compatibleCurrentOperands
-            compatibleCurrentOperands.isEmpty() -> inherited?.operands.orEmpty()
+            currentOperands.size >= 2 -> currentOperands
+            currentOperands.isEmpty() -> inherited?.operands.orEmpty()
             inherited != null && !inherited.isComplete && inherited.targetType == resolvedTarget ->
-                inherited.operands + compatibleCurrentOperands
-            else -> compatibleCurrentOperands
+                inherited.operands + currentOperands
+            else -> currentOperands
         }
         val currentDimensions = detectedDimensions(content)
         val mergedDimensions = (inherited?.dimensions.orEmpty() + currentDimensions).distinct()
@@ -72,8 +67,8 @@ class ComparisonRequestBuilder {
                 val normalizedKey = key.trim().take(MAX_CONSTRAINT_KEY_LENGTH)
                 val normalizedValue = value.trim().take(MAX_CONSTRAINT_VALUE_LENGTH)
                 if (
-                    normalizedKey in allowedConstraints && normalizedValue.isNotBlank() &&
-                    normalizedValue.containsNoHealthSafetyText() && size < MAX_CONSTRAINTS
+                    normalizedKey in allowedConstraints && normalizedValue.isValidConstraintValue(normalizedKey) &&
+                    size < MAX_CONSTRAINTS
                 ) {
                     put(normalizedKey, normalizedValue)
                 }
@@ -100,7 +95,10 @@ class ComparisonRequestBuilder {
 
     private fun toOperand(item: AgentCatalogItemResponse): ComparisonOperand? {
         val entityType = runCatching { AgentQueryTarget.valueOf(item.type.uppercase()) }.getOrNull() ?: return null
-        return ComparisonOperand(entityType, item.id, item.name)
+        val entityId = item.id.trim()
+        val displayName = item.name.trim()
+        if (entityId.isBlank() || displayName.isBlank()) return null
+        return ComparisonOperand(entityType, entityId, displayName)
     }
 
     private fun detectedDimensions(content: String): List<String> {
@@ -119,6 +117,13 @@ class ComparisonRequestBuilder {
         budgetMinPattern.find(content)?.groupValues?.getOrNull(1)?.let { put("budgetMin", it) }
         budgetMaxPattern.find(content)?.groupValues?.getOrNull(1)?.let { put("budgetMax", it) }
         downtimePattern.find(content)?.groupValues?.getOrNull(1)?.let { put("downtimeDays", it) }
+    }
+
+    private fun String.isValidConstraintValue(key: String): Boolean = when (key) {
+        "city" -> cityPattern.matches(this) && containsNoHealthSafetyText()
+        "budgetMin", "budgetMax" -> decimalPattern.matches(this)
+        "downtimeDays" -> wholeNumberPattern.matches(this)
+        else -> false
     }
 
     private fun String.containsNoHealthSafetyText(): Boolean {
@@ -164,8 +169,12 @@ class ComparisonRequestBuilder {
             """(?:恢复期|恢复|downtime|recovery)\D{0,12}(\d{1,3})\s*(?:天|days?)""",
             RegexOption.IGNORE_CASE
         )
+        val cityPattern = Regex("""[\p{IsHan}A-Za-z][\p{IsHan}A-Za-z .·'-]{0,119}""")
+        val decimalPattern = Regex("""\d{1,9}(?:\.\d{1,2})?""")
+        val wholeNumberPattern = Regex("""\d{1,3}""")
         val healthSafetyTerms = listOf(
             "怀孕", "孕期", "备孕", "哺乳", "过敏", "瘢痕", "疤痕", "服药", "感染",
+            "糖尿病", "高血压", "高血糖", "心脏病", "diabetes", "hypertension", "high blood pressure",
             "pregnant", "pregnancy", "breastfeeding", "allergy", "keloid", "medication", "infection"
         )
     }

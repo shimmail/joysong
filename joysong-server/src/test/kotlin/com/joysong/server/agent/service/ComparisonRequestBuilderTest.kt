@@ -165,6 +165,67 @@ class ComparisonRequestBuilderTest {
         assertFalse(ComparisonMissingField.TARGET_TYPE in result.missingFields)
     }
 
+    @Test
+    fun `does not append an incomplete inherited operand when current operands are mixed`() {
+        val result = builder.build(
+            content = "Compare New Clinic",
+            targetType = AgentQueryTarget.INSTITUTION,
+            candidates = listOf(institution("new", "New Clinic")),
+            contextCandidates = listOf(doctor("doctor", "Dr Context")),
+            previous = ComparisonRequest(
+                operands = listOf(ComparisonOperand(AgentQueryTarget.INSTITUTION, "old", "Old Clinic")),
+                targetType = AgentQueryTarget.INSTITUTION
+            )
+        )
+
+        assertEquals(listOf("new"), result.operands.map { it.entityId })
+        assertEquals(setOf(ComparisonMissingField.OPERANDS), result.missingFields)
+    }
+
+    @Test
+    fun `ignores blank id and name context candidates before inference and merge`() {
+        val result = builder.build(
+            content = "Compare Alpha Treatment",
+            targetType = null,
+            candidates = listOf(project("alpha", "Alpha Treatment")),
+            contextCandidates = listOf(
+                item("DOCTOR", " ", "Dr Missing Id"),
+                item("DOCTOR", "doctor", " ")
+            ),
+            previous = ComparisonRequest(
+                operands = listOf(ComparisonOperand(AgentQueryTarget.INSTITUTION, "old", "Old Clinic")),
+                targetType = AgentQueryTarget.INSTITUTION
+            )
+        )
+
+        assertEquals(AgentQueryTarget.PROJECT, result.targetType)
+        assertEquals(listOf("alpha"), result.operands.map { it.entityId })
+        assertEquals(setOf(ComparisonMissingField.OPERANDS), result.missingFields)
+    }
+
+    @Test
+    fun `rejects recovered health city text and nonnumeric constraint values`() {
+        listOf("diabetes", "高血压").forEach { unsafeCity ->
+            val result = builder.normalize(
+                ComparisonRequest(
+                    operands = listOf(
+                        ComparisonOperand(AgentQueryTarget.PROJECT, "alpha", "Alpha Treatment"),
+                        ComparisonOperand(AgentQueryTarget.PROJECT, "beta", "Beta Treatment")
+                    ),
+                    targetType = AgentQueryTarget.PROJECT,
+                    constraints = linkedMapOf(
+                        "city" to unsafeCity,
+                        "budgetMin" to "ten thousand",
+                        "budgetMax" to "500x",
+                        "downtimeDays" to "three"
+                    )
+                )
+            )
+
+            assertTrue(result.constraints.isEmpty())
+        }
+    }
+
     private fun institution(id: String, name: String) = item("INSTITUTION", id, name)
 
     private fun doctor(id: String, name: String) = item("DOCTOR", id, name)
