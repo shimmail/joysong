@@ -21,6 +21,7 @@ class CatalogInstitutionDetailView extends StatelessWidget {
     this.onViewAllDiaries,
     this.onViewAllReviews,
     this.onViewAllDoctors,
+    this.onConsultInstitution,
     this.onAiChat,
     this.socialController,
     super.key,
@@ -34,6 +35,7 @@ class CatalogInstitutionDetailView extends StatelessWidget {
   final VoidCallback? onViewAllDiaries;
   final VoidCallback? onViewAllReviews;
   final VoidCallback? onViewAllDoctors;
+  final ValueChanged<String>? onConsultInstitution;
   final VoidCallback? onAiChat;
   final SocialController? socialController;
 
@@ -195,10 +197,9 @@ class CatalogInstitutionDetailView extends StatelessWidget {
       ),
       CatalogBottomBar(
         primaryLabel: context.localized('咨询机构', 'Consult institution'),
-        onPrimary: () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(context.localized(
-              '可从消息页联系机构', 'Open Messages to contact this institution')),
-        )),
+        onPrimary: institutionId.isEmpty || onConsultInstitution == null
+            ? null
+            : () => onConsultInstitution!(institutionId),
         secondaryLabel: context.localized('与AI聊聊', 'Chat with AI'),
         onSecondary: onAiChat,
       ),
