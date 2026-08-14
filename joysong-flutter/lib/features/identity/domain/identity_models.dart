@@ -1178,21 +1178,21 @@ final class InstitutionMembershipRequest {
   factory InstitutionMembershipRequest.fromJson(Object? json) {
     final map = _jsonMap(json, '机构加入申请');
     return InstitutionMembershipRequest(
-      id: _requiredText(map['id'], '申请 id'),
+      id: _requiredWireText(map['id'], '申请 id'),
       requestType: InstitutionMembershipRequestType.fromCode(
         map['requestType'],
       ),
-      applicantId: _requiredText(map['applicantId'], '申请人 id'),
-      applicantName: _requiredText(map['applicantName'], '申请人名称'),
-      institutionId: _requiredText(map['institutionId'], '机构'),
-      institutionName: _requiredText(map['institutionName'], '机构名称'),
+      applicantId: _requiredWireText(map['applicantId'], '申请人 id'),
+      applicantName: _requiredWireText(map['applicantName'], '申请人名称'),
+      institutionId: _requiredWireText(map['institutionId'], '机构'),
+      institutionName: _requiredWireText(map['institutionName'], '机构名称'),
       action: InstitutionMembershipAction.fromCode(map['action']),
       status: InstitutionMembershipRequestStatus.fromCode(map['status']),
       relationshipStatus:
           InstitutionRelationshipStatus.fromCode(map['relationshipStatus']),
       requestNote: _requiredWireString(map, 'requestNote', '申请说明'),
       reviewNote: _requiredWireString(map, 'reviewNote', '审核意见'),
-      submittedBy: _requiredText(map['submittedBy'], '提交人'),
+      submittedBy: _requiredWireText(map['submittedBy'], '提交人'),
       reviewedBy: _nullableWireString(map, 'reviewedBy', '审核人'),
       submittedAt: _requiredWireDateTime(map['submittedAt'], '提交时间'),
       reviewedAt: _nullableWireDateTime(map, 'reviewedAt', '审核时间'),
@@ -1247,8 +1247,8 @@ final class InstitutionMembershipCandidate {
   factory InstitutionMembershipCandidate.fromJson(Object? json) {
     final map = _jsonMap(json, '候选机构');
     return InstitutionMembershipCandidate(
-      id: _requiredText(map['id'], '机构 id'),
-      name: _requiredText(map['name'], '机构名称'),
+      id: _requiredWireText(map['id'], '机构 id'),
+      name: _requiredWireText(map['name'], '机构名称'),
     );
   }
 
@@ -1933,7 +1933,7 @@ T _protocolEnum<T>(
   String Function(T value) codeOf,
   String field,
 ) {
-  final code = value is String ? value.trim().toUpperCase() : '';
+  final code = value is String ? value : '';
   for (final candidate in values) {
     if (codeOf(candidate) == code) return candidate;
   }
@@ -1949,6 +1949,13 @@ String _requiredWireString(
     throw FormatException('响应缺少 $field');
   }
   return map[key]! as String;
+}
+
+String _requiredWireText(Object? value, String field) {
+  if (value is! String) throw FormatException('响应缺少 $field');
+  final normalized = value.trim();
+  if (normalized.isEmpty) throw FormatException('响应缺少 $field');
+  return normalized;
 }
 
 String? _nullableWireString(
@@ -1990,9 +1997,6 @@ DateTime? _nullableWireDateTimeValue(Object? value) {
 
 int _requiredWireInteger(Object? value, String field) {
   if (value is int) return value;
-  if (value is num && value.isFinite && value == value.toInt()) {
-    return value.toInt();
-  }
   throw FormatException('响应缺少有效的 $field');
 }
 

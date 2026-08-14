@@ -154,15 +154,13 @@ final class ApiIdentityRepository implements IdentityRepository {
 
   @override
   Future<List<ConsultantMembership>> listConsultantMemberships() async {
-    final requests = await listOwnedInstitutionMembershipRequests();
-    return requests
-        .where(
-          (request) =>
-              request.requestType ==
-              InstitutionMembershipRequestType.consultant,
-        )
-        .map(ConsultantMembership.fromMembershipRequest)
-        .toList(growable: false);
+    return await _apiClient.get<List<ConsultantMembership>>(
+          '/management/consultant-memberships',
+          decodeData: (json) => _objectList(json)
+              .map(ConsultantMembership.fromJson)
+              .toList(growable: false),
+        ) ??
+        const [];
   }
 
   @override
@@ -225,9 +223,7 @@ final class ApiIdentityRepository implements IdentityRepository {
   @override
   Future<List<InstitutionMembershipRequest>>
       listInstitutionMembershipRequests() async {
-    return _listInstitutionMembershipRequestsAt(
-      '/management/institution-membership-requests',
-    );
+    return listOwnedInstitutionMembershipRequests();
   }
 
   @override
@@ -330,7 +326,7 @@ final class ApiIdentityRepository implements IdentityRepository {
   @override
   Future<List<DoctorInstitutionChangeRequest>>
       listDoctorInstitutionChangeRequests() async {
-    final requests = await listInstitutionMembershipRequests();
+    final requests = await listOwnedInstitutionMembershipRequests();
     return requests
         .where(
           (request) =>

@@ -52,6 +52,28 @@ void main() {
     ]);
   });
 
+  test('legacy normalized adapters never decode revoked root rows', () async {
+    final client = _RecordingApiClient();
+    final repository = ApiIdentityRepository(client);
+
+    final compatibility = await repository.listInstitutionMembershipRequests();
+    final doctors = await repository.listDoctorInstitutionChangeRequests();
+
+    expect(compatibility.single.requestType,
+        InstitutionMembershipRequestType.doctor);
+    expect(doctors.single.id, 'request-1');
+    expect(client.requests, [
+      const _Request(
+        'GET',
+        '/management/institution-membership-requests/owned',
+      ),
+      const _Request(
+        'GET',
+        '/management/institution-membership-requests/owned',
+      ),
+    ]);
+  });
+
   test('doctor and consultant mutations share one normalized wire contract',
       () async {
     final client = _RecordingApiClient();
@@ -202,6 +224,15 @@ final class _RecordingApiClient extends ApiClient {
         'limit': 100,
         'hasMore': false,
       });
+    }
+    if (path == '/management/institution-membership-requests') {
+      return decodeData([
+        _membershipResponse(
+          requestType: 'CONSULTANT',
+          action: 'JOIN',
+          status: 'REVOKED',
+        ),
+      ]);
     }
     return decodeData([
       _membershipResponse(

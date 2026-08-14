@@ -422,8 +422,10 @@ class _InstitutionMembershipRequestsPageState
       _error = null;
     });
     try {
-      final requests =
-          await widget.repository.listInstitutionMembershipRequests();
+      final requests = widget.reviewMode
+          ? await widget.repository
+              .listReviewableInstitutionMembershipRequests()
+          : await widget.repository.listOwnedInstitutionMembershipRequests();
       if (!mounted) return;
       setState(() {
         _requests = requests;
@@ -450,9 +452,6 @@ class _InstitutionMembershipRequestsPageState
   Widget build(BuildContext context) {
     final visibleRequests = _requests.where((item) {
       if (!widget.reviewMode && item.requestType != widget.requestType) {
-        return false;
-      }
-      if (!widget.reviewMode && item.applicantId != widget.context.userId) {
         return false;
       }
       return true;

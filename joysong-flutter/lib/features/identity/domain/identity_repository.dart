@@ -44,6 +44,7 @@ abstract interface class IdentityRepository {
 
   Future<List<InstitutionOption>> listInstitutionOptions();
 
+  @Deprecated('Use listOwnedInstitutionMembershipRequests instead')
   Future<List<InstitutionMembershipRequest>>
       listInstitutionMembershipRequests();
 

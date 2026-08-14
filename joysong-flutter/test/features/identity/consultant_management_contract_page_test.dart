@@ -10,7 +10,8 @@ import 'package:joysong_flutter/features/identity/domain/identity_repository.dar
 import 'package:joysong_flutter/features/identity/presentation/consultant_management_pages.dart';
 
 void main() {
-  test('legacy consultant repository methods delegate the normalized contract',
+  test(
+      'legacy consultant list preserves revoked history while submit is unified',
       () async {
     final client = _RecordingApiClient();
     final repository = ApiIdentityRepository(client);
@@ -27,8 +28,8 @@ void main() {
     final approvedJoin = memberships.firstWhere(
       (membership) => membership.id == 'membership-1',
     );
-    final approvedLeave = memberships.firstWhere(
-      (membership) => membership.id == 'membership-leave',
+    final revoked = memberships.firstWhere(
+      (membership) => membership.id == 'membership-revoked',
     );
     expect(memberships, hasLength(2));
     expect(approvedJoin.institutionName, 'Joysong Clinic');
@@ -38,10 +39,11 @@ void main() {
       DateTime.parse('2026-08-12T10:05:00'),
     );
     expect(approvedJoin.revokedAt, isNull);
-    expect(approvedLeave.confirmedAt, isNull);
+    expect(revoked.status, 'REVOKED');
+    expect(revoked.confirmedAt, isNull);
     expect(
-      approvedLeave.revokedAt,
-      DateTime.parse('2026-08-12T10:05:00'),
+      revoked.revokedAt,
+      DateTime.parse('2026-08-13T11:30:00'),
     );
     expect(submitted.institutionId, 'institution-2');
     expect(projects.single.categoryTags, 'skin,laser');
@@ -58,7 +60,7 @@ void main() {
     expect(client.requests, [
       const _Request(
         'GET',
-        '/management/institution-membership-requests/owned',
+        '/management/consultant-memberships',
       ),
       const _Request(
         'POST',
@@ -144,6 +146,20 @@ const _membershipJson = <String, Object?>{
   'revokedAt': null,
 };
 
+const _revokedMembershipJson = <String, Object?>{
+  'id': 'membership-revoked',
+  'institutionId': 'institution-legacy',
+  'institutionName': 'Legacy Clinic',
+  'status': 'REVOKED',
+  'requestNote': 'Historical membership',
+  'reviewNote': 'Membership ended',
+  'createdAt': '2026-08-01T09:00:00',
+  'updatedAt': '2026-08-13T11:30:00',
+  'confirmedBy': 'legal-legacy',
+  'confirmedAt': null,
+  'revokedAt': '2026-08-13T11:30:00',
+};
+
 const _normalizedMembershipJson = <String, Object?>{
   'id': 'membership-1',
   'requestType': 'CONSULTANT',
@@ -188,22 +204,11 @@ final class _RecordingApiClient extends ApiClient {
     required T Function(Object? json) decodeData,
   }) async {
     requests.add(_Request('GET', path));
-    return decodeData(path.endsWith('/projects')
-        ? [_projectJson]
-        : [
-            {
-              ..._normalizedMembershipJson,
-              'id': 'doctor-membership',
-              'requestType': 'DOCTOR',
-            },
-            _normalizedMembershipJson,
-            {
-              ..._normalizedMembershipJson,
-              'id': 'membership-leave',
-              'action': 'LEAVE',
-              'relationshipStatus': 'NONE',
-            },
-          ]);
+    if (path.endsWith('/projects')) return decodeData([_projectJson]);
+    if (path == '/management/consultant-memberships') {
+      return decodeData([_membershipJson, _revokedMembershipJson]);
+    }
+    throw StateError('unexpected GET $path');
   }
 
   @override

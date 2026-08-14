@@ -203,6 +203,81 @@ void main() {
     );
   });
 
+  test('normalized membership text fields require JSON strings', () {
+    for (final field in const [
+      'id',
+      'applicantId',
+      'applicantName',
+      'institutionId',
+      'institutionName',
+      'submittedBy',
+    ]) {
+      expect(
+        () => InstitutionMembershipRequest.fromJson({
+          ..._normalizedMembershipRequestJson,
+          field: 42,
+        }),
+        throwsFormatException,
+        reason: '$field must remain a JSON string',
+      );
+    }
+
+    for (final field in const ['id', 'name']) {
+      expect(
+        () => InstitutionMembershipCandidate.fromJson({
+          'id': 'institution-1',
+          'name': 'Joysong Clinic',
+          field: true,
+        }),
+        throwsFormatException,
+        reason: 'candidate $field must remain a JSON string',
+      );
+    }
+  });
+
+  test('membership enums require exact uppercase wire codes', () {
+    const malformedCodes = <String, List<String>>{
+      'requestType': ['doctor', ' DOCTOR'],
+      'action': ['join', 'JOIN '],
+      'status': ['pending', ' PENDING'],
+      'relationshipStatus': ['none', 'NONE '],
+    };
+    for (final entry in malformedCodes.entries) {
+      for (final code in entry.value) {
+        expect(
+          () => InstitutionMembershipRequest.fromJson({
+            ..._normalizedMembershipRequestJson,
+            entry.key: code,
+          }),
+          throwsFormatException,
+          reason: '${entry.key} must reject noncanonical $code',
+        );
+      }
+    }
+    for (final code in const ['approved', ' APPROVED']) {
+      expect(
+        () => InstitutionMembershipDecision.fromCode(code),
+        throwsFormatException,
+      );
+    }
+  });
+
+  test('candidate pagination requires JSON integers', () {
+    for (final field in const ['offset', 'limit']) {
+      expect(
+        () => InstitutionMembershipCandidatePage.fromJson({
+          'items': const <Object?>[],
+          'offset': 20,
+          'limit': 100,
+          'hasMore': false,
+          field: 20.0,
+        }),
+        throwsFormatException,
+        reason: '$field must reject an integral double',
+      );
+    }
+  });
+
   test('membership draft and candidate page use the normalized wire contract',
       () {
     expect(

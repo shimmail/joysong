@@ -35,6 +35,8 @@ void main() {
       [InstitutionMembershipRequestType.doctor],
     );
     expect(identityRepository.optionCalls, 0);
+    expect(identityRepository.ownedCalls, 2);
+    expect(identityRepository.rootCalls, 0);
 
     await tester.pumpWidget(MaterialApp(
       key: const ValueKey('mixed-membership-review-app'),
@@ -54,8 +56,10 @@ void main() {
       ),
     ));
     await tester.pumpAndSettle();
-    expect(find.textContaining('doctor own request'), findsOneWidget);
-    expect(find.textContaining('consultant own request'), findsOneWidget);
+    expect(find.textContaining('doctor review request'), findsOneWidget);
+    expect(find.textContaining('consultant review request'), findsOneWidget);
+    expect(identityRepository.reviewableCalls, 1);
+    expect(identityRepository.rootCalls, 0);
   });
 }
 
@@ -67,8 +71,8 @@ Future<void> _applyFromEntry(
   await tester.tap(entry);
   await tester.pumpAndSettle();
   expect(find.textContaining(expectedNote), findsOneWidget);
-  expect(find.textContaining('other role request'), findsNothing);
-  expect(find.textContaining('other user request'), findsNothing);
+  expect(find.textContaining('doctor identity request'), findsOneWidget);
+  expect(find.textContaining('consultant own request'), findsNothing);
   await tester.tap(find.byKey(const Key('membership-institution-picker')));
   await tester.pumpAndSettle();
   await tester.tap(find.text('Joysong Clinic'));
@@ -80,6 +84,9 @@ Future<void> _applyFromEntry(
 final class _FakeIdentityRepository implements IdentityRepository {
   final submittedTypes = <InstitutionMembershipRequestType>[];
   var optionCalls = 0;
+  var rootCalls = 0;
+  var ownedCalls = 0;
+  var reviewableCalls = 0;
 
   @override
   Future<ManagementContext> loadManagementContext() async =>
@@ -100,42 +107,56 @@ final class _FakeIdentityRepository implements IdentityRepository {
 
   @override
   Future<List<InstitutionMembershipRequest>>
-      listInstitutionMembershipRequests() async => [
-            _membershipRequest(
-              id: 'doctor-own',
-              requestType: InstitutionMembershipRequestType.doctor,
-              applicantId: 'professional-1',
-              requestNote: 'doctor own request',
-            ),
-            _membershipRequest(
-              id: 'consultant-own',
-              requestType: InstitutionMembershipRequestType.consultant,
-              applicantId: 'professional-1',
-              requestNote: 'consultant own request',
-            ),
-            _membershipRequest(
-              id: 'other-role',
-              requestType: InstitutionMembershipRequestType.consultant,
-              applicantId: 'other-user',
-              requestNote: 'other role request',
-            ),
-            _membershipRequest(
-              id: 'other-user',
-              requestType: InstitutionMembershipRequestType.doctor,
-              applicantId: 'other-user',
-              requestNote: 'other user request',
-            ),
-          ];
+      listInstitutionMembershipRequests() async {
+    rootCalls += 1;
+    throw StateError('legacy root GET must not be consumed by this page');
+  }
 
   @override
   Future<List<InstitutionMembershipRequest>>
-      listOwnedInstitutionMembershipRequests() =>
-          listInstitutionMembershipRequests();
+      listOwnedInstitutionMembershipRequests() async {
+    ownedCalls += 1;
+    return [
+      _membershipRequest(
+        id: 'doctor-own',
+        requestType: InstitutionMembershipRequestType.doctor,
+        applicantId: 'professional-1',
+        requestNote: 'doctor own request',
+      ),
+      _membershipRequest(
+        id: 'consultant-own',
+        requestType: InstitutionMembershipRequestType.consultant,
+        applicantId: 'professional-1',
+        requestNote: 'consultant own request',
+      ),
+      _membershipRequest(
+        id: 'doctor-identity',
+        requestType: InstitutionMembershipRequestType.doctor,
+        applicantId: 'doctor-profile-1',
+        requestNote: 'doctor identity request',
+      ),
+    ];
+  }
 
   @override
   Future<List<InstitutionMembershipRequest>>
-      listReviewableInstitutionMembershipRequests() =>
-          listInstitutionMembershipRequests();
+      listReviewableInstitutionMembershipRequests() async {
+    reviewableCalls += 1;
+    return [
+      _membershipRequest(
+        id: 'doctor-review',
+        requestType: InstitutionMembershipRequestType.doctor,
+        applicantId: 'doctor-other',
+        requestNote: 'doctor review request',
+      ),
+      _membershipRequest(
+        id: 'consultant-review',
+        requestType: InstitutionMembershipRequestType.consultant,
+        applicantId: 'consultant-other',
+        requestNote: 'consultant review request',
+      ),
+    ];
+  }
 
   @override
   Future<InstitutionMembershipRequest> submitInstitutionMembershipRequest(
