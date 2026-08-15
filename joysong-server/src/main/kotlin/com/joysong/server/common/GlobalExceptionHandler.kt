@@ -229,5 +229,6 @@ class GlobalExceptionHandler {
             || this == "/api/management/projects"
             || startsWith("/api/management/doctor-articles")
             || startsWith("/api/management/orders")
-            || startsWith("/api/management/project-requests")
+            || this == "/api/management/project-requests"
+            || startsWith("/api/management/project-requests/")
 }

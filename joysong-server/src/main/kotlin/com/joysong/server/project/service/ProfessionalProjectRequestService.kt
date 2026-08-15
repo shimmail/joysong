@@ -1,7 +1,6 @@
 package com.joysong.server.project.service
 
 import com.fasterxml.jackson.annotation.JsonAnySetter
-import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.joysong.server.common.money.CurrencyCode
 import com.joysong.server.identity.service.ManagementActor
@@ -347,14 +346,14 @@ data class DoctorPlatformProjectRequest(
     val categoryTags: List<String> = emptyList(),
     val notes: String = ""
 ) {
-    @JsonIgnore
-    val unknownFields: MutableMap<String, Any?> = linkedMapOf()
+    private val capturedUnsupportedFields: MutableMap<String, Any?> = linkedMapOf()
 
     @JsonAnySetter
     fun unknown(name: String, value: Any?) {
-        unknownFields[name] = value
+        capturedUnsupportedFields[name] = value
     }
 
+    fun containsUnsupportedFields(): Boolean = capturedUnsupportedFields.isNotEmpty()
 }
 
 @JsonIgnoreProperties(ignoreUnknown = false)
@@ -378,14 +377,14 @@ data class DoctorInstitutionProjectRequest(
     val institutionRate: BigDecimal = BigDecimal.ZERO,
     val notes: String = ""
 ) {
-    @JsonIgnore
-    val unknownFields: MutableMap<String, Any?> = linkedMapOf()
+    private val capturedUnsupportedFields: MutableMap<String, Any?> = linkedMapOf()
 
     @JsonAnySetter
     fun unknown(name: String, value: Any?) {
-        unknownFields[name] = value
+        capturedUnsupportedFields[name] = value
     }
 
+    fun containsUnsupportedFields(): Boolean = capturedUnsupportedFields.isNotEmpty()
 }
 
 data class InstitutionProjectApplicationFormConfig(

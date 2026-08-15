@@ -17,6 +17,9 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 
+private fun ManagementAccessService.authenticatedActor(authentication: Authentication?): com.joysong.server.identity.service.ManagementActor =
+    authentication?.let(::actor) ?: throw AccessDeniedException("请先登录")
+
 private fun validateProjectRequestReview(request: ProjectRequestReview) {
     val decision = request.decision.trim().uppercase()
     require(decision in setOf("APPROVED", "REJECTED")) { "审核决定不正确" }
@@ -31,43 +34,45 @@ class ProfessionalProjectRequestController(
     private val splitRatePolicy: OrderSplitRatePolicy
 ) {
     @GetMapping
-    fun list(authentication: Authentication): BaseResponse<*> =
-        BaseResponse.success(service.list(managementAccessService.actor(authentication)))
+    fun list(authentication: Authentication?): BaseResponse<*> =
+        BaseResponse.success(service.list(managementAccessService.authenticatedActor(authentication)))
 
     @PostMapping("/platform")
     fun submitPlatform(
-        authentication: Authentication,
+        authentication: Authentication?,
         @RequestBody request: DoctorPlatformProjectRequest
     ): BaseResponse<*> {
-        require(request.unknownFields.isEmpty()) { "请求包含不支持的字段" }
-        return BaseResponse.success(service.submitPlatform(managementAccessService.actor(authentication), request))
+        require(!request.containsUnsupportedFields()) { "请求包含不支持的字段" }
+        return BaseResponse.success(service.submitPlatform(managementAccessService.authenticatedActor(authentication), request))
     }
 
     @PostMapping("/institutions/{institutionId}")
     fun submitInstitution(
-        authentication: Authentication,
+        authentication: Authentication?,
         @PathVariable institutionId: String,
         @RequestBody request: DoctorInstitutionProjectRequest
     ): BaseResponse<*> {
-        require(request.unknownFields.isEmpty()) { "请求包含不支持的字段" }
-        return BaseResponse.success(service.submitInstitution(managementAccessService.actor(authentication), institutionId, request))
+        require(!request.containsUnsupportedFields()) { "请求包含不支持的字段" }
+        return BaseResponse.success(service.submitInstitution(managementAccessService.authenticatedActor(authentication), institutionId, request))
     }
 
     @GetMapping("/institution-form-config")
-    fun institutionFormConfig(authentication: Authentication): BaseResponse<InstitutionProjectApplicationFormConfig> {
-        val actor = managementAccessService.actor(authentication)
-        if (actor.doctorId == null) throw AccessDeniedException("只有已认证的在职医生可以查看项目申请配置")
+    fun institutionFormConfig(authentication: Authentication?): BaseResponse<InstitutionProjectApplicationFormConfig> {
+        val actor = managementAccessService.authenticatedActor(authentication)
+        if (actor.doctorId == null || "DOCTOR" !in actor.activeRoles) {
+            throw AccessDeniedException("只有已认证的在职医生可以查看项目申请配置")
+        }
         return BaseResponse.success(InstitutionProjectApplicationFormConfig(splitRatePolicy.currentPlatformRate()))
     }
 
     @PostMapping("/{id}/review")
     fun reviewInstitution(
-        authentication: Authentication,
+        authentication: Authentication?,
         @PathVariable id: String,
         @RequestBody request: ProjectRequestReview
     ): BaseResponse<*> {
         validateProjectRequestReview(request)
-        return BaseResponse.success(service.reviewInstitution(managementAccessService.actor(authentication), id, request))
+        return BaseResponse.success(service.reviewInstitution(managementAccessService.authenticatedActor(authentication), id, request))
     }
 }
 
@@ -78,16 +83,16 @@ class AdminProfessionalProjectRequestController(
     private val managementAccessService: ManagementAccessService
 ) {
     @GetMapping
-    fun list(authentication: Authentication): BaseResponse<*> =
-        BaseResponse.success(service.list(managementAccessService.actor(authentication)))
+    fun list(authentication: Authentication?): BaseResponse<*> =
+        BaseResponse.success(service.list(managementAccessService.authenticatedActor(authentication)))
 
     @PostMapping("/{id}/review")
     fun review(
-        authentication: Authentication,
+        authentication: Authentication?,
         @PathVariable id: String,
         @RequestBody request: ProjectRequestReview
     ): BaseResponse<*> {
         validateProjectRequestReview(request)
-        return BaseResponse.success(service.reviewPlatform(managementAccessService.actor(authentication), id, request))
+        return BaseResponse.success(service.reviewPlatform(managementAccessService.authenticatedActor(authentication), id, request))
     }
 }

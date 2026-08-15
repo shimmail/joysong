@@ -1,9 +1,12 @@
 package com.joysong.server.project.controller
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.joysong.server.common.GlobalExceptionHandler
 import com.joysong.server.identity.service.ManagementAccessService
 import com.joysong.server.identity.service.ManagementActor
 import com.joysong.server.order.service.OrderSplitRatePolicy
+import com.joysong.server.project.service.DoctorInstitutionProjectRequest
+import com.joysong.server.project.service.DoctorPlatformProjectRequest
 import com.joysong.server.project.service.ProfessionalProjectRequestService
 import com.joysong.server.project.service.ProfessionalProjectRequestConflictException
 import com.joysong.server.project.service.ProfessionalProjectRequestNotFoundException
@@ -12,6 +15,7 @@ import com.joysong.server.project.service.ProjectRequestSubmissionResult
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.springframework.http.MediaType
 import org.springframework.security.access.AccessDeniedException
@@ -21,6 +25,10 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
+import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder
+import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RestController
 
 class ProfessionalProjectRequestHttpTest {
     @Test
@@ -53,9 +61,17 @@ class ProfessionalProjectRequestHttpTest {
 
         fixture.mvc.perform(post("/api/management/project-requests/platform").json(platformBody("\"unexpected\":true")))
             .andExpect(status().isBadRequest)
+        fixture.mvc.perform(post("/api/management/project-requests/platform").json(platformBody("\"unknownFields\":{}")))
+            .andExpect(status().isBadRequest)
+        fixture.mvc.perform(post("/api/management/project-requests/platform").json(platformBody("\"capturedUnsupportedFields\":{}")))
+            .andExpect(status().isBadRequest)
         fixture.mvc.perform(post("/api/management/project-requests/platform").json(platformBody("\"institutionId\":\"body-institution\"")))
             .andExpect(status().isBadRequest)
         fixture.mvc.perform(post("/api/management/project-requests/institutions/institution-1").json(institutionBody("\"institutionId\":\"body-institution\"")))
+            .andExpect(status().isBadRequest)
+        fixture.mvc.perform(post("/api/management/project-requests/institutions/institution-1").json(institutionBody("\"unknownFields\":{}")))
+            .andExpect(status().isBadRequest)
+        fixture.mvc.perform(post("/api/management/project-requests/institutions/institution-1").json(institutionBody("\"capturedUnsupportedFields\":{}")))
             .andExpect(status().isBadRequest)
 
         verify(exactly = 0) { fixture.service.submitPlatform(any(), any()) }
@@ -66,11 +82,14 @@ class ProfessionalProjectRequestHttpTest {
     fun `institution form configuration exposes only policy platform rate to an active doctor`() {
         val fixture = fixture()
 
-        fixture.mvc.perform(get("/api/management/project-requests/institution-form-config").principal(fixture.authentication))
+        val response = fixture.mvc.perform(get("/api/management/project-requests/institution-form-config").principal(fixture.authentication))
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.data.platformRate").value(17.5))
             .andExpect(jsonPath("$.data").isMap)
             .andExpect(jsonPath("$.data.institutionRate").doesNotExist())
+            .andReturn()
+
+        assertEquals(1, productionObjectMapper.readTree(response.response.contentAsString).path("data").size())
     }
 
     @Test
@@ -80,6 +99,47 @@ class ProfessionalProjectRequestHttpTest {
         fixture.mvc.perform(get("/api/management/project-requests/institution-form-config").principal(fixture.authentication))
             .andExpect(status().isForbidden)
             .andExpect(jsonPath("$.code").value(403))
+    }
+
+    @Test
+    fun `institution form configuration rejects a doctor id without an active doctor role`() {
+        val fixture = fixture(actor = ManagementActor("doctor-1", false, emptySet(), "doctor-1", emptySet(), emptySet(), setOf("doctor-1")))
+
+        fixture.mvc.perform(get("/api/management/project-requests/institution-form-config").principal(fixture.authentication))
+            .andExpect(status().isForbidden)
+            .andExpect(jsonPath("$.code").value(403))
+    }
+
+    @Test
+    fun `project request endpoints reject missing principal as HTTP forbidden`() {
+        val fixture = fixture()
+
+        fixture.mvc.perform(
+            post("/api/management/project-requests/platform")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(platformBody())
+        )
+            .andExpect(status().isForbidden)
+            .andExpect(jsonPath("$.code").value(403))
+    }
+
+    @Test
+    fun `application request VOs expose exactly their documented writable JSON keys`() {
+        assertEquals(
+            setOf(
+                "name", "category", "description", "referencePrice", "currency", "slogan", "salesCount",
+                "coverImage", "images", "detailContent", "tags", "categoryTags", "notes"
+            ),
+            writableProperties(DoctorPlatformProjectRequest::class.java)
+        )
+        assertEquals(
+            setOf(
+                "projectId", "name", "category", "description", "tags", "slogan", "detailContent", "price",
+                "originalPrice", "currency", "coverImage", "images", "salesCount", "isActive", "consultationFee",
+                "commissionRate", "institutionRate", "notes"
+            ),
+            writableProperties(DoctorInstitutionProjectRequest::class.java)
+        )
     }
 
     @Test
@@ -155,6 +215,25 @@ class ProfessionalProjectRequestHttpTest {
         }
     }
 
+    @Test
+    fun `project request legacy sibling keeps legacy HTTP status behavior`() {
+        val mvc = MockMvcBuilders.standaloneSetup(LegacyProjectRequestsController())
+            .setControllerAdvice(GlobalExceptionHandler())
+            .build()
+
+        mvc.perform(get("/api/management/project-requests-legacy"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.code").value(400))
+    }
+
+    private fun writableProperties(type: Class<*>): Set<String> =
+        productionObjectMapper.deserializationConfig
+            .introspect(productionObjectMapper.constructType(type))
+            .findProperties()
+            .filter { it.couldDeserialize() }
+            .map { it.name }
+            .toSet()
+
     private fun fixture(actor: ManagementActor = ManagementActor("doctor-1", false, setOf("DOCTOR"), "doctor-1", emptySet(), emptySet(), setOf("doctor-1"))): Fixture {
         val access = mockk<ManagementAccessService>()
         val service = mockk<ProfessionalProjectRequestService>()
@@ -191,4 +270,15 @@ class ProfessionalProjectRequestHttpTest {
         val authentication: UsernamePasswordAuthenticationToken,
         val splitRatePolicy: OrderSplitRatePolicy
     )
+
+    @RestController
+    @RequestMapping("/api/management/project-requests-legacy")
+    private class LegacyProjectRequestsController {
+        @GetMapping
+        fun list(): Nothing = throw IllegalArgumentException("legacy request")
+    }
+
+    private companion object {
+        val productionObjectMapper: ObjectMapper = Jackson2ObjectMapperBuilder.json().build()
+    }
 }
