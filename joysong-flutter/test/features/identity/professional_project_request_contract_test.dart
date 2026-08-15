@@ -102,6 +102,55 @@ void main() {
     expect(draft.doctorRate, 35.25);
   });
 
+  test('institution draft keeps all nullable inheritance overrides explicit',
+      () {
+    const draft = InstitutionProjectRequestDraft(
+      institutionId: ' institution-1 ',
+      projectId: ' project-1 ',
+      name: null,
+      category: null,
+      description: null,
+      tags: null,
+      slogan: null,
+      detailContent: null,
+      price: 0,
+      originalPrice: null,
+      currency: ' cny ',
+      coverImage: null,
+      images: null,
+      salesCount: 0,
+      isActive: true,
+      consultationFee: 0,
+      commissionRate: 0,
+      institutionRate: 0,
+      platformRate: 0,
+      notes: '   ',
+    );
+
+    expect(draft.toJson(), {
+      'projectId': 'project-1',
+      'name': null,
+      'category': null,
+      'description': null,
+      'tags': null,
+      'slogan': null,
+      'detailContent': null,
+      'price': 0,
+      'originalPrice': null,
+      'currency': 'CNY',
+      'coverImage': null,
+      'images': null,
+      'salesCount': 0,
+      'isActive': true,
+      'consultationFee': 0,
+      'commissionRate': 0,
+      'institutionRate': 0,
+      'notes': '',
+    });
+    expect(draft.toJson(), hasLength(18));
+    expect(draft.toJson(), isNot(contains('institutionId')));
+  });
+
   test('draft validation mirrors backend amount count currency and rate limits',
       () {
     expect(
@@ -222,6 +271,67 @@ void main() {
     );
   });
 
+  test('draft validation rejects hidden JSON precision without float rounding',
+      () {
+    expect(
+      () => const PlatformProjectRequestDraft(
+        name: 'Name',
+        category: 'Skin',
+        description: 'Description',
+        referencePrice: 1.2300000001,
+      ).validate(),
+      throwsArgumentError,
+    );
+    expect(
+      () => const PlatformProjectRequestDraft(
+        name: 'Name',
+        category: 'Skin',
+        description: 'Description',
+        referencePrice: 1e-7,
+      ).validate(),
+      throwsArgumentError,
+    );
+    expect(
+      () => InstitutionProjectRequestDraft(
+        institutionId: 'institution-1',
+        projectId: 'project-1',
+        price: 0.1 + 0.2,
+        consultationFee: 0,
+        commissionRate: 0,
+        institutionRate: 0,
+        platformRate: 0,
+      ).validate(),
+      throwsArgumentError,
+    );
+    expect(
+      () => InstitutionProjectRequestDraft(
+        institutionId: 'institution-1',
+        projectId: 'project-1',
+        price: 0,
+        consultationFee: 0,
+        commissionRate: 0.1 + 0.2,
+        institutionRate: 0,
+        platformRate: 0,
+      ).validate(),
+      throwsArgumentError,
+    );
+  });
+
+  test('draft validation sums exact hundredths without binary float drift', () {
+    expect(
+      () => const InstitutionProjectRequestDraft(
+        institutionId: 'institution-1',
+        projectId: 'project-1',
+        price: 0,
+        consultationFee: 0,
+        commissionRate: 35.95,
+        institutionRate: 64.04,
+        platformRate: 0.01,
+      ).validate(),
+      returnsNormally,
+    );
+  });
+
   test('parses complete immutable review snapshot and nested split', () {
     final request = ProfessionalProjectRequest.fromJson(_requestSnapshot);
 
@@ -270,6 +380,36 @@ void main() {
     });
     expect(legacy.status, 'CHANGES_REQUESTED');
     expect(legacy.isCreationReviewable, isFalse);
+
+    final platform = ProfessionalProjectRequest.fromJson({
+      ..._requestSnapshot,
+      'requestType': 'PLATFORM',
+      'institutionId': null,
+      'institutionName': null,
+      'projectId': null,
+      'projectName': null,
+      'slogan': '',
+      'coverImage': '',
+      'price': null,
+      'originalPrice': null,
+      'isActive': null,
+      'institutionSplit': null,
+    });
+    expect(platform.slogan, '');
+    expect(platform.coverImage, '');
+    expect(platform.institutionId, isNull);
+    expect(platform.price, isNull);
+    expect(platform.originalPrice, isNull);
+    expect(platform.isActive, isNull);
+    expect(platform.institutionSplit, isNull);
+
+    final institutionWithoutOverrides = ProfessionalProjectRequest.fromJson({
+      ..._requestSnapshot,
+      'slogan': null,
+      'coverImage': null,
+    });
+    expect(institutionWithoutOverrides.slogan, isNull);
+    expect(institutionWithoutOverrides.coverImage, isNull);
   });
 
   test('parses form config and all 13 management inheritance values', () {
@@ -405,7 +545,7 @@ const _requestSnapshot = <String, Object?>{
   },
   'notes': 'Clinic note',
   'status': 'PENDING',
-  'reviewNote': '',
+  'reviewNote': null,
   'reviewedBy': null,
   'reviewedAt': null,
   'resultingProjectId': null,

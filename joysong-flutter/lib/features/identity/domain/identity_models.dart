@@ -1464,10 +1464,10 @@ final class ProfessionalProjectRequest {
       category: _nullableText(map['category']),
       description: _nullableText(map['description']),
       tags: map['tags'] == null ? null : _stringList(map['tags']),
-      slogan: _nullableText(map['slogan']),
+      slogan: _nullableSnapshotText(map['slogan']),
       detailContent: _nullableText(map['detailContent']),
       currency: _requiredText(map['currency'], '币种'),
-      coverImage: _nullableText(map['coverImage']),
+      coverImage: _nullableSnapshotText(map['coverImage']),
       images: map['images'] == null ? null : _stringList(map['images']),
       salesCount: _integer(map['salesCount']),
       referencePrice: _nullableDecimal(map['referencePrice']),
@@ -1887,8 +1887,36 @@ final class DoctorProjectChangeRequest {
 }
 
 bool _validDecimal(num value, num max) {
-  if (!value.isFinite || value < 0 || value > max) return false;
-  return ((value * 100).roundToDouble() - value * 100).abs() < 0.0000001;
+  final scaled = _decimalHundredths(value);
+  final scaledMax = _decimalHundredths(max);
+  return scaled != null &&
+      scaledMax != null &&
+      scaled >= BigInt.zero &&
+      scaled <= scaledMax;
+}
+
+BigInt? _decimalHundredths(num value) {
+  if (!value.isFinite) return null;
+  final match = RegExp(
+    r'^([+-]?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$',
+  ).firstMatch(value.toString());
+  if (match == null) return null;
+
+  final fraction = match.group(3) ?? '';
+  final exponent = int.tryParse(match.group(4) ?? '0');
+  if (exponent == null) return null;
+  var unscaled = BigInt.parse('${match.group(2)}$fraction');
+  if (match.group(1) == '-') unscaled = -unscaled;
+  if (unscaled == BigInt.zero) return BigInt.zero;
+
+  var scale = fraction.length - exponent;
+  while (scale > 2 && unscaled.remainder(BigInt.from(10)) == BigInt.zero) {
+    unscaled ~/= BigInt.from(10);
+    scale--;
+  }
+  if (scale > 2) return null;
+  if (scale < 2) unscaled *= BigInt.from(10).pow(2 - scale);
+  return unscaled;
 }
 
 final class PlatformProjectRequestDraft {
@@ -2130,7 +2158,10 @@ final class InstitutionProjectRequestDraft {
         throw ArgumentError('分账比例必须在 0 到 100 之间且最多两位小数');
       }
     }
-    if (platformRate + institutionRate + commissionRate > 100) {
+    final totalRate = _decimalHundredths(platformRate)! +
+        _decimalHundredths(institutionRate)! +
+        _decimalHundredths(commissionRate)!;
+    if (totalRate > BigInt.from(10000)) {
       throw ArgumentError('平台、机构和顾问比例合计不能超过 100%');
     }
   }
@@ -2314,6 +2345,8 @@ String? _nullableText(Object? value) {
   final result = value?.toString().trim();
   return result == null || result.isEmpty ? null : result;
 }
+
+String? _nullableSnapshotText(Object? value) => value?.toString().trim();
 
 DateTime? _dateTime(Object? value) {
   final text = value?.toString().trim();
