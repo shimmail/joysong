@@ -177,7 +177,9 @@ class AgentWorkflowCoreTest {
                 "我想改善脸部松弛",
                 "我想改善脸部松弛 fixture-keyword",
                 "我想改善脸部松弛 fixture-keyword",
-                AgentQueryTarget.PROJECT
+                AgentQueryTarget.PROJECT,
+                "AUTO",
+                "我想改善脸部松弛"
             )
         } returns AgentPromptEvidence()
         intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
@@ -377,7 +379,7 @@ class AgentWorkflowCoreTest {
         every { catalog.hasInstitutionProjectMatch(content) } returns false
         every { catalog.contextualSearchQuery(content, emptyList()) } returns content
         every {
-            catalog.promptEvidence(content, content, content, AgentQueryTarget.INSTITUTION, "COMPARISON")
+            catalog.promptEvidence(content, content, content, AgentQueryTarget.INSTITUTION, "COMPARISON", content)
         } returns rawEvidence
         every { catalog.filterComparisonEvidence(rawEvidence, capture(filteredRequest)) } returns filteredEvidence
         completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
@@ -392,7 +394,7 @@ class AgentWorkflowCoreTest {
         assertEquals(listOf("alpha", "beta"), filteredRequest.captured.operands.map { it.entityId })
         assertEquals(listOf("alpha", "beta"), completed.captured.comparisonRequest?.operands?.map { it.entityId })
         verify(exactly = 1) {
-            catalog.promptEvidence(content, content, content, AgentQueryTarget.INSTITUTION, "COMPARISON")
+            catalog.promptEvidence(content, content, content, AgentQueryTarget.INSTITUTION, "COMPARISON", content)
         }
         intentServer.verify()
         completionServer.verify()
@@ -416,7 +418,7 @@ class AgentWorkflowCoreTest {
         every { catalog.hasInstitutionProjectMatch(content) } returns false
         every { catalog.contextualSearchQuery(content, emptyList()) } returns content
         every {
-            catalog.promptEvidence(content, content, content, AgentQueryTarget.INSTITUTION, "COMPARISON")
+            catalog.promptEvidence(content, content, content, AgentQueryTarget.INSTITUTION, "COMPARISON", content)
         } returns rawEvidence
 
         fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
@@ -474,7 +476,8 @@ class AgentWorkflowCoreTest {
                 capture(searchQuery),
                 capture(targetQuery),
                 AgentQueryTarget.INSTITUTION,
-                "COMPARISON"
+                "COMPARISON",
+                content
             )
         } answers {
             comparisonEvidence(
@@ -494,7 +497,7 @@ class AgentWorkflowCoreTest {
         assertEquals(listOf("alpha", "beta"), completed.captured.comparisonRequest?.operands?.map { it.entityId })
         assertEquals(listOf("alpha", "beta"), completed.captured.catalogReport?.items?.map { it.id })
         verify(exactly = 1) {
-            catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.INSTITUTION, "COMPARISON")
+            catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.INSTITUTION, "COMPARISON", any())
         }
         verify(exactly = 1) { fixture.turnService.projectMessage(assistant) }
         intentServer.verify()
@@ -553,7 +556,8 @@ class AgentWorkflowCoreTest {
                 capture(searchQuery),
                 capture(targetQuery),
                 AgentQueryTarget.INSTITUTION,
-                "COMPARISON"
+                "COMPARISON",
+                content
             )
         } answers {
             if (secondArg<String>().contains(alpha.name) && secondArg<String>().contains(beta.name)) {
@@ -581,7 +585,7 @@ class AgentWorkflowCoreTest {
         assertEquals(listOf("alpha", "beta"), completed.captured.comparisonRequest?.operands?.map { it.entityId })
         assertEquals(listOf("alpha", "beta"), completed.captured.catalogReport?.items?.map { it.id })
         verify(exactly = 1) {
-            catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.INSTITUTION, "COMPARISON")
+            catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.INSTITUTION, "COMPARISON", any())
         }
         verify(exactly = 1) { catalog.filterComparisonEvidence(any(), any()) }
         verify(exactly = 1) { fixture.turnService.projectMessage(assistant) }
@@ -631,7 +635,8 @@ class AgentWorkflowCoreTest {
                 "$content Alpha Clinic Beta Clinic",
                 "$content Alpha Clinic Beta Clinic",
                 AgentQueryTarget.INSTITUTION,
-                "COMPARISON"
+                "COMPARISON",
+                content
             )
         } returns rawEvidence
 
@@ -669,7 +674,7 @@ class AgentWorkflowCoreTest {
 
         assertEquals(null, completed.captured.comparisonRequest)
         verify(exactly = 0) { fixture.turnService.projectMessage(any()) }
-        verify(exactly = 0) { catalog.promptEvidence(any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { catalog.promptEvidence(any(), any(), any(), any(), any(), any()) }
         intentServer.verify()
         completionServer.verify()
     }
@@ -690,7 +695,7 @@ class AgentWorkflowCoreTest {
         every { catalog.hasInstitutionProjectMatch(content) } returns false
         every { catalog.contextualSearchQuery(content, emptyList()) } returns content
         every {
-            catalog.promptEvidence(content, content, content, AgentQueryTarget.INSTITUTION, "COMPARISON")
+            catalog.promptEvidence(content, content, content, AgentQueryTarget.INSTITUTION, "COMPARISON", content)
         } returns rawEvidence
         every { catalog.filterComparisonEvidence(rawEvidence, any()) } returns rawEvidence
         intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
@@ -706,7 +711,7 @@ class AgentWorkflowCoreTest {
         fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
 
         verify(exactly = 1) {
-            catalog.promptEvidence(content, content, content, AgentQueryTarget.INSTITUTION, "COMPARISON")
+            catalog.promptEvidence(content, content, content, AgentQueryTarget.INSTITUTION, "COMPARISON", content)
         }
         verify(exactly = 1) { catalog.filterComparisonEvidence(rawEvidence, any()) }
         intentServer.verify()
@@ -759,7 +764,7 @@ class AgentWorkflowCoreTest {
         )
         every { catalog.hasInstitutionProjectMatch("恢复期多久") } returns false
         every { catalog.contextualSearchQuery("恢复期多久", emptyList()) } returns "恢复期多久"
-        every { catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.PROJECT) } returns AgentPromptEvidence()
+        every { catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.PROJECT, any(), any()) } returns AgentPromptEvidence()
         completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
             .andRespond(withSuccess("""{"choices":[{"message":{"content":"answer"}}]}""", MediaType.APPLICATION_JSON))
 
@@ -791,7 +796,7 @@ class AgentWorkflowCoreTest {
         )
         every { catalog.hasInstitutionProjectMatch(content) } returns false
         every { catalog.contextualSearchQuery(content, emptyList()) } returns content
-        every { catalog.promptEvidence(content, content, content, AgentQueryTarget.PROJECT) } returns AgentPromptEvidence()
+        every { catalog.promptEvidence(content, content, content, AgentQueryTarget.PROJECT, "AUTO", content) } returns AgentPromptEvidence()
         completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
             .andRespond(withSuccess("""{"choices":[{"message":{"content":"answer"}}]}""", MediaType.APPLICATION_JSON))
 
@@ -832,7 +837,8 @@ class AgentWorkflowCoreTest {
                 "$content Show doctors",
                 "$content Show doctors",
                 AgentQueryTarget.INSTITUTION,
-                "COMPARISON"
+                "COMPARISON",
+                content
             )
         } returns evidence
         every { catalog.filterComparisonEvidence(evidence, any()) } returns evidence
@@ -871,7 +877,7 @@ class AgentWorkflowCoreTest {
         )
         every { catalog.contextualSearchQuery("对比一下", listOf("对比医生和机构")) } returns "对比一下 对比医生和机构"
         every {
-            catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.INSTITUTION, "COMPARISON")
+            catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.INSTITUTION, "COMPARISON", any())
         } returns comparisonEvidence()
         intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
             .andRespond(withSuccess(
@@ -899,7 +905,7 @@ class AgentWorkflowCoreTest {
         every { catalog.hasInstitutionProjectMatch("对比上海的热玛吉机构") } returns false
         every { catalog.contextualSearchQuery("对比上海的热玛吉机构", emptyList()) } returns "对比上海的热玛吉机构"
         every {
-            catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.INSTITUTION, "COMPARISON")
+            catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.INSTITUTION, "COMPARISON", any())
         } returns comparisonEvidence()
 
         chat.sendMessage("session-1", "user-1", SendMessageRequest(content = "对比上海的热玛吉机构"))
@@ -1775,7 +1781,9 @@ class AgentWorkflowCoreTest {
                 "我想改善脸部松弛",
                 "我想改善脸部松弛",
                 "我想改善脸部松弛",
-                null
+                null,
+                "AUTO",
+                "我想改善脸部松弛"
             )
         } returns AgentPromptEvidence()
         every {
@@ -1783,7 +1791,9 @@ class AgentWorkflowCoreTest {
                 "我想改善脸部松弛",
                 "我想改善脸部松弛 fixture-keyword",
                 "我想改善脸部松弛 fixture-keyword",
-                AgentQueryTarget.PROJECT
+                AgentQueryTarget.PROJECT,
+                "AUTO",
+                "我想改善脸部松弛"
             )
         } returns AgentPromptEvidence()
         intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
@@ -1826,7 +1836,7 @@ class AgentWorkflowCoreTest {
                 comparisonItem("beta", "Beta", type = "PROJECT")
             )
         } else AgentPromptEvidence()
-        every { catalog.promptEvidence(any(), any(), any(), any(), any()) } returns evidence
+        every { catalog.promptEvidence(any(), any(), any(), any(), any(), any()) } returns evidence
         if (expectedPrimaryIntent == "COMPARISON") {
             every { catalog.filterComparisonEvidence(evidence, any()) } returns evidence
         }

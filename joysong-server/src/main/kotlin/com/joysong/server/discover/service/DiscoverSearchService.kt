@@ -34,7 +34,17 @@ class DiscoverSearchService(
                 query = request.query,
                 tags = request.tags,
                 fallbackWhenNoMatch = request.fallbackWhenNoMatch
-            ).take(request.limit)
+            )
+                .prioritizeBy { project ->
+                    val projectPriority = if (project.name.isNotBlank() && request.priorityQuery.contains(project.name, ignoreCase = true)) 3 else 4
+                    minOf(
+                        projectPriority,
+                        project.institutionProjects.minOfOrNull { offering ->
+                            institutionProjectPriority(request.priorityQuery, offering.institutionName, project.name, offering.name)
+                        } ?: 4
+                    )
+                }
+                .take(request.limit)
         } else emptyList()
 
         val institutions = if (DiscoverSearchScope.INSTITUTION in request.scopes) {
@@ -48,7 +58,10 @@ class DiscoverSearchService(
                         terms,
                         "${institution.name} ${institution.city} ${institution.specialties} ${institution.tags}"
                     )
-            }.sortedByDescending { it.rating }.take(request.limit)
+            }
+                .sortedByDescending { it.rating }
+                .prioritizeBy { exactNamePriority(request.priorityQuery, it.name) }
+                .take(request.limit)
         } else emptyList()
 
         val doctorInstitutionNames = doctorRepository.findAll().associate { doctor ->
@@ -61,7 +74,10 @@ class DiscoverSearchService(
                     terms,
                     "${doctor.name} ${doctorInstitutionNames[doctor.id].orEmpty()} ${doctor.title} ${doctor.specialties}"
                 )
-            }.sortedByDescending { it.rating }.take(request.limit)
+            }
+                .sortedByDescending { it.rating }
+                .prioritizeBy { exactNamePriority(request.priorityQuery, it.name) }
+                .take(request.limit)
         } else emptyList()
 
         return DiscoverSearchResult(projects, institutions, doctors)
@@ -178,6 +194,30 @@ class DiscoverSearchService(
                 rating = project.rating, reviewCount = project.reviewCount, institutionProjects = offerings
             )
         }.sortedWith(compareByDescending<ProjectWithInstitutionsResponse> { it.rating }.thenByDescending { it.reviewCount })
+    }
+
+    private fun <T> List<T>.prioritizeBy(priority: (T) -> Int): List<T> = sortedBy(priority)
+
+    private fun exactNamePriority(query: String, name: String): Int =
+        if (name.isNotBlank() && query.contains(name, ignoreCase = true)) 0 else 1
+
+    private fun institutionProjectPriority(
+        query: String,
+        institutionName: String,
+        projectName: String,
+        effectiveName: String
+    ): Int {
+        val institutionMatched = institutionName.isNotBlank() && query.contains(institutionName, ignoreCase = true)
+        val effectiveMatched = effectiveName.isNotBlank() && query.contains(effectiveName, ignoreCase = true)
+        val projectMatched = projectName.isNotBlank() && query.contains(projectName, ignoreCase = true)
+        return when {
+            institutionMatched && effectiveName.isNotBlank() && query.contains("$institutionName · $effectiveName", ignoreCase = true) -> 0
+            institutionMatched && effectiveMatched -> 1
+            effectiveMatched -> 2
+            institutionMatched && projectMatched -> 3
+            institutionMatched || projectMatched -> 4
+            else -> 5
+        }
     }
 
     fun citiesMentionedIn(query: String): List<String> = institutionRepository.findAll()
@@ -363,7 +403,8 @@ data class DiscoverSearchRequest(
     val tags: Collection<String> = emptyList(),
     val fallbackWhenNoMatch: Boolean = false,
     val scopes: Set<DiscoverSearchScope> = DiscoverSearchScope.entries.toSet(),
-    val limit: Int = Int.MAX_VALUE
+    val limit: Int = Int.MAX_VALUE,
+    val priorityQuery: String = ""
 )
 
 data class DiscoverSearchResult(

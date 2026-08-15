@@ -90,6 +90,7 @@ class AgentCatalogService(
         mentionedCities: List<String>,
         explicitlyRequestedTypes: Set<RequestedEntityType>,
         searchQuery: String = request.query,
+        priorityQuery: String = request.query,
         targetOverride: AgentQueryTarget? = null
     ): AgentCatalogReportResponse {
         val query = request.query.trim()
@@ -105,7 +106,8 @@ class AgentCatalogService(
                 query = effectiveSearchQuery,
                 cities = mentionedCities,
                 fallbackWhenNoMatch = explicitlyRequestedTypes.isEmpty(),
-                limit = 12
+                limit = 12,
+                priorityQuery = priorityQuery
             )
         )
         val discoveredProjects = unifiedSearch.projects
@@ -118,7 +120,13 @@ class AgentCatalogService(
                     it.second.rating
                 }.thenByDescending { it.second.salesCount }
             )
-            .distinctBy { it.second.institutionId }
+            .prioritizeBy { (project, offering) ->
+                institutionProjectPriority(priorityQuery, offering.institutionName, project.name, offering.name)
+            }
+            .let { offerings ->
+                if (reportTarget == ReportTarget.INSTITUTION_PROJECT) offerings.distinctBy { it.second.id }
+                else offerings.distinctBy { it.second.institutionId }
+            }
             .take(requestedCount)
 
         val offeringInstitutions = if (reportTarget == ReportTarget.INSTITUTION) {
@@ -128,7 +136,7 @@ class AgentCatalogService(
         val institutions = institutionCandidates
             .distinctBy { it.id }
             .sortedByDescending { it.rating }
-            .prioritizeExactNameMatches(query) { it.name }
+            .prioritizeBy { exactNamePriority(priorityQuery, listOf(it.name)) }
             .take(4)
         val relatedDoctorIds = if (reportTarget == ReportTarget.DOCTOR && discoveredProjects.isNotEmpty()) {
             val discoveredProjectIds = discoveredProjects.map { it.id }.toSet()
@@ -159,13 +167,13 @@ class AgentCatalogService(
                 }
             }
             .sortedByDescending { it.rating }
-            .prioritizeExactNameMatches(query) { it.name }
+            .prioritizeBy { exactNamePriority(priorityQuery, listOf(it.name)) }
             .take(4)
         val searchedProjectEntities = projectRepository.findAllById(unifiedSearch.projects.map { it.id })
             .associateBy { it.id }
         val projects = unifiedSearch.projects
             .mapNotNull { searchedProjectEntities[it.id] }
-            .prioritizeExactNameMatches(query) { it.name }
+            .prioritizeBy { exactNamePriority(priorityQuery, listOf(it.name)) }
             .take(4)
 
         val institutionIds = institutions.map { it.id }.toSet()
@@ -203,11 +211,12 @@ class AgentCatalogService(
         val institutionProjects = when {
             reportTarget != ReportTarget.DOCTOR && directlyMatchedInstitutionProjects.isNotEmpty() ->
                 directlyMatchedInstitutionProjects
-                    .prioritizeExactNameMatches(query) { offering ->
+                    .prioritizeBy { offering ->
                         val institution = allInstitutions[offering.institutionId]
                         val project = allProjectsById[offering.projectId]
-                        if (institution == null || project == null) "" else {
-                            "${institution.name} · ${institutionProjectDetailResolver.resolve(offering, project).name}"
+                        if (institution == null || project == null) Int.MAX_VALUE else {
+                            val effective = institutionProjectDetailResolver.resolve(offering, project)
+                            institutionProjectPriority(priorityQuery, institution.name, project.name, effective.name)
                         }
                     }
                     .take(8)
@@ -220,11 +229,12 @@ class AgentCatalogService(
                     else -> effectiveSearchQuery.contains(it.id, true)
                 }
             }
-                .prioritizeExactNameMatches(query) { offering ->
+                .prioritizeBy { offering ->
                     val institution = allInstitutions[offering.institutionId]
                     val project = allProjectsById[offering.projectId]
-                    if (institution == null || project == null) "" else {
-                        "${institution.name} · ${institutionProjectDetailResolver.resolve(offering, project).name}"
+                    if (institution == null || project == null) Int.MAX_VALUE else {
+                        val effective = institutionProjectDetailResolver.resolve(offering, project)
+                        institutionProjectPriority(priorityQuery, institution.name, project.name, effective.name)
                     }
                 }
                 .take(8)
@@ -492,7 +502,8 @@ class AgentCatalogService(
         searchQuery: String = query,
         targetQuery: String = query,
         queryTarget: AgentQueryTarget? = null,
-        reportMode: String = "AUTO"
+        reportMode: String = "AUTO",
+        priorityQuery: String = query
     ): AgentPromptEvidence {
         val detectedCities = discoverSearchService.citiesMentionedIn(searchQuery)
         val detectedKeywords = catalogContextKeywords(searchQuery).all.toList()
@@ -503,6 +514,7 @@ class AgentCatalogService(
             mentionedCities = detectedCities,
             explicitlyRequestedTypes = explicitlyRequestedTypes,
             searchQuery = searchQuery,
+            priorityQuery = priorityQuery,
             targetOverride = queryTarget
         )
         val matchedRequestedTypes = explicitlyRequestedTypes.filterTo(linkedSetOf()) { requestedType ->
@@ -599,14 +611,28 @@ class AgentCatalogService(
         )
     }
 
-    private fun <T> List<T>.prioritizeExactNameMatches(
+    private fun <T> List<T>.prioritizeBy(priority: (T) -> Int): List<T> = sortedBy(priority)
+
+    private fun exactNamePriority(query: String, names: List<String>): Int =
+        if (names.any { name -> name.isNotBlank() && query.contains(name, ignoreCase = true) }) 0 else 1
+
+    private fun institutionProjectPriority(
         query: String,
-        entityName: (T) -> String
-    ): List<T> {
-        val (currentMatches, remaining) = partition { item ->
-            entityName(item).let { name -> name.isNotBlank() && query.contains(name, ignoreCase = true) }
+        institutionName: String,
+        projectName: String,
+        effectiveName: String
+    ): Int {
+        val institutionMatched = institutionName.isNotBlank() && query.contains(institutionName, ignoreCase = true)
+        val effectiveMatched = effectiveName.isNotBlank() && query.contains(effectiveName, ignoreCase = true)
+        val projectMatched = projectName.isNotBlank() && query.contains(projectName, ignoreCase = true)
+        return when {
+            institutionMatched && effectiveName.isNotBlank() && query.contains("$institutionName · $effectiveName", ignoreCase = true) -> 0
+            institutionMatched && effectiveMatched -> 1
+            effectiveMatched -> 2
+            institutionMatched && projectMatched -> 3
+            institutionMatched || projectMatched -> 4
+            else -> 5
         }
-        return currentMatches + remaining
     }
 
     private fun requestedInstitutionCount(query: String): Int {

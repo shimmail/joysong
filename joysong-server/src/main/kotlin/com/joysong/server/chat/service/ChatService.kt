@@ -717,6 +717,7 @@ class ChatService(
             query = content,
             searchQuery = searchQuery,
             targetQuery = searchQuery,
+            priorityQuery = content,
             queryTarget = intentDecision.queryTarget,
             reportMode = if (intentDecision.intent == AgentIntent.COMPARISON) "COMPARISON" else "AUTO"
         )

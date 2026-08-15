@@ -2,6 +2,8 @@ package com.joysong.server.agent.service
 
 import com.joysong.server.agent.dto.AgentCatalogItemResponse
 import com.joysong.server.agent.dto.AgentCatalogReportResponse
+import com.joysong.server.discover.dto.InstitutionProjectItemResponse
+import com.joysong.server.discover.dto.ProjectWithInstitutionsResponse
 import com.joysong.server.discover.service.DiscoverSearchRequest
 import com.joysong.server.discover.service.DiscoverSearchResult
 import com.joysong.server.discover.repository.DoctorProjectRepository
@@ -190,6 +192,8 @@ class AgentCatalogServiceTest {
 
     @Test
     fun `current institution names survive inherited search candidate truncation`() {
+        val currentQuery = "本轮甲机构和本轮乙机构对比"
+        val expandedSearchQuery = "历史机构1、历史机构2、历史机构3、历史机构4、$currentQuery"
         val inheritedCandidates = (1..4).map { index ->
             InstitutionEntity(
                 id = "prior-$index",
@@ -209,9 +213,10 @@ class AgentCatalogServiceTest {
         )
 
         val evidence = service.promptEvidence(
-            query = "本轮甲机构和本轮乙机构对比",
-            searchQuery = "历史机构1、历史机构2、历史机构3、历史机构4、本轮甲机构和本轮乙机构对比",
-            targetQuery = "本轮甲机构和本轮乙机构对比",
+            query = currentQuery,
+            searchQuery = expandedSearchQuery,
+            targetQuery = expandedSearchQuery,
+            priorityQuery = currentQuery,
             queryTarget = AgentQueryTarget.INSTITUTION,
             reportMode = "COMPARISON"
         )
@@ -220,6 +225,105 @@ class AgentCatalogServiceTest {
             listOf("current-a", "current-b", "prior-1", "prior-2"),
             evidence.report!!.items.map { it.id }
         )
+        verify(exactly = 1) { discoverSearchService.search(any<DiscoverSearchRequest>()) }
+    }
+
+    @Test
+    fun `current institution project names survive direct report truncation`() {
+        val baseProject = ProjectEntity(id = "base-project", name = "基础项目", category = "护理")
+        val inheritedOfferings = (1..9).map { index ->
+            institutionProjectCandidate("prior-$index", "共享机构", "历史套餐$index", baseProject.id, 100 - index, "shared-institution")
+        }
+        val currentOfferings = listOf(
+            institutionProjectCandidate("current-a", "共享机构", "当前套餐甲", baseProject.id, 10, "shared-institution"),
+            institutionProjectCandidate("current-b", "共享机构", "当前套餐乙", baseProject.id, 9, "shared-institution")
+        )
+        val candidates = inheritedOfferings + currentOfferings
+        val institutions = candidates.map { InstitutionEntity(id = it.institutionId, name = it.institutionName, city = "上海") }
+        val offeringEntities = candidates.map { offering ->
+            InstitutionProjectEntity(
+                id = offering.id,
+                institutionId = offering.institutionId,
+                projectId = offering.projectId,
+                name = offering.name,
+                price = offering.price,
+                salesCount = offering.salesCount
+            )
+        }
+        every { discoverSearchService.search(any<DiscoverSearchRequest>()) } returns DiscoverSearchResult(
+            projects = listOf(projectWithOfferings(baseProject, candidates))
+        )
+        every { institutionRepository.findAll() } returns institutions
+        every { institutionRepository.findAllById(any()) } returns institutions
+        every { projectRepository.findAll() } returns listOf(baseProject)
+        every { projectRepository.findAllById(any()) } returns listOf(baseProject)
+        every { institutionProjectRepository.findAll() } returns offeringEntities
+        every { discoverSearchService.citiesMentionedIn(any()) } returns emptyList()
+        every { discoverSearchService.extractMatchingFragments(any()) } returns emptySet()
+        every { discoverSearchService.explicitlyRequestedEntityTypes(any()) } returns emptySet<RequestedEntityType>()
+        val currentQuery = "共享机构的基础项目：当前套餐甲和当前套餐乙对比"
+
+        val evidence = service.promptEvidence(
+            query = currentQuery,
+            searchQuery = "${inheritedOfferings.joinToString(" ") { "${it.institutionName} · ${it.name}" }} $currentQuery",
+            targetQuery = "${inheritedOfferings.joinToString(" ") { "${it.institutionName} · ${it.name}" }} $currentQuery",
+            priorityQuery = currentQuery,
+            queryTarget = AgentQueryTarget.INSTITUTION_PROJECT,
+            reportMode = "COMPARISON"
+        )
+
+        assertEquals(
+            listOf("current-a", "current-b", "prior-1", "prior-2", "prior-3", "prior-4", "prior-5", "prior-6"),
+            evidence.report!!.items.map { it.id }
+        )
+        verify(exactly = 1) { discoverSearchService.search(any<DiscoverSearchRequest>()) }
+    }
+
+    @Test
+    fun `current same institution offerings survive discovered offering deduplication`() {
+        val baseProject = ProjectEntity(id = "base-project", name = "基础项目", category = "护理")
+        val inheritedOfferings = (1..4).map { index ->
+            institutionProjectCandidate("prior-$index", "共享机构", "历史套餐$index", baseProject.id, 100 - index, "shared-institution")
+        }
+        val currentOfferings = listOf(
+            institutionProjectCandidate("current-a", "共享机构", "当前套餐甲", baseProject.id, 10, "shared-institution"),
+            institutionProjectCandidate("current-b", "共享机构", "当前套餐乙", baseProject.id, 9, "shared-institution")
+        )
+        val candidates = inheritedOfferings + currentOfferings
+        val institutions = candidates.map { InstitutionEntity(id = it.institutionId, name = it.institutionName, city = "上海") }
+        val offeringEntities = candidates.map { offering ->
+            InstitutionProjectEntity(
+                id = offering.id,
+                institutionId = offering.institutionId,
+                projectId = offering.projectId,
+                name = offering.name,
+                price = offering.price,
+                salesCount = offering.salesCount
+            )
+        }
+        every { discoverSearchService.search(any<DiscoverSearchRequest>()) } returns DiscoverSearchResult(
+            projects = listOf(projectWithOfferings(baseProject, candidates))
+        )
+        every { institutionRepository.findAll() } returns institutions
+        every { institutionRepository.findAllById(any()) } returns institutions
+        every { projectRepository.findAll() } returns listOf(baseProject)
+        every { projectRepository.findAllById(any()) } returns listOf(baseProject)
+        every { institutionProjectRepository.findAll() } returns offeringEntities
+        every { discoverSearchService.citiesMentionedIn(any()) } returns emptyList()
+        every { discoverSearchService.extractMatchingFragments(any()) } returns emptySet()
+        every { discoverSearchService.explicitlyRequestedEntityTypes(any()) } returns emptySet<RequestedEntityType>()
+        val currentQuery = "共享机构的基础项目：当前套餐甲和当前套餐乙对比"
+
+        val evidence = service.promptEvidence(
+            query = currentQuery,
+            searchQuery = "不匹配的历史上下文",
+            targetQuery = "不匹配的历史上下文",
+            priorityQuery = currentQuery,
+            queryTarget = AgentQueryTarget.INSTITUTION_PROJECT,
+            reportMode = "COMPARISON"
+        )
+
+        assertEquals(listOf("current-a", "current-b"), evidence.report!!.items.map { it.id })
         verify(exactly = 1) { discoverSearchService.search(any<DiscoverSearchRequest>()) }
     }
 
@@ -462,6 +566,56 @@ class AgentCatalogServiceTest {
         institutionId = institutionId,
         status = status,
         deletedAt = deletedAt
+    )
+
+    private fun institutionProjectCandidate(
+        id: String,
+        institutionName: String,
+        name: String,
+        projectId: String,
+        salesCount: Int,
+        institutionId: String = "institution-$id"
+    ) = InstitutionProjectItemResponse(
+        id = id,
+        institutionId = institutionId,
+        institutionName = institutionName,
+        institutionCity = "上海",
+        projectId = projectId,
+        name = name,
+        category = "护理",
+        description = "",
+        rating = BigDecimal("4.0"),
+        reviewCount = 0,
+        tags = "",
+        slogan = "",
+        detailContent = null,
+        price = BigDecimal("100"),
+        originalPrice = null,
+        coverImage = "",
+        images = "",
+        salesCount = salesCount,
+        isActive = true
+    )
+
+    private fun projectWithOfferings(
+        project: ProjectEntity,
+        offerings: List<InstitutionProjectItemResponse>
+    ) = ProjectWithInstitutionsResponse(
+        id = project.id,
+        name = project.name,
+        category = project.category,
+        description = project.description,
+        tags = project.tags,
+        categoryTags = project.categoryTags,
+        coverImage = project.coverImage,
+        images = project.images,
+        referencePrice = project.referencePrice,
+        slogan = project.slogan,
+        detailContent = project.detailContent,
+        salesCount = project.salesCount,
+        rating = project.rating,
+        reviewCount = project.reviewCount,
+        institutionProjects = offerings
     )
 
     private fun stubCatalogSearch(
