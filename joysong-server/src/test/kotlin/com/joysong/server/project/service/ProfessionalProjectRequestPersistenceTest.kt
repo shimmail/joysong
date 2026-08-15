@@ -50,6 +50,7 @@ class ProfessionalProjectRequestPersistenceTest {
     private lateinit var transactionManager: DataSourceTransactionManager
     private lateinit var transaction: TransactionTemplate
     private lateinit var service: ProfessionalProjectRequestService
+    private val objectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
 
     @BeforeAll
     fun migrateAndPrepare() {
@@ -229,11 +230,13 @@ class ProfessionalProjectRequestPersistenceTest {
 
     @Test
     fun `project caches stay populated until commit clear after commit and survive rollback`() {
-        val cacheManager = ConcurrentMapCacheManager("discover", "home")
+        val cacheManager = ConcurrentMapCacheManager("discover", "home", "projects")
         val discover = requireNotNull(cacheManager.getCache("discover"))
         val home = requireNotNull(cacheManager.getCache("home"))
+        val projects = requireNotNull(cacheManager.getCache("projects"))
         discover.put("proof", "discover-before-commit")
         home.put("proof", "home-before-commit")
+        projects.put("proof", "projects-before-commit")
         seedInstitutionRequest("cache-success", "tx-cache-success-doctor")
         val cacheService = serviceUsing(jdbc, cacheManager = cacheManager)
 
@@ -245,13 +248,16 @@ class ProfessionalProjectRequestPersistenceTest {
             )
             assertEquals("discover-before-commit", discover.get("proof")?.get())
             assertEquals("home-before-commit", home.get("proof")?.get())
+            assertEquals("projects-before-commit", projects.get("proof")?.get())
         }
 
         assertEquals(null, discover.get("proof"))
         assertEquals(null, home.get("proof"))
+        assertEquals(null, projects.get("proof"))
 
         discover.put("proof", "discover-before-rollback")
         home.put("proof", "home-before-rollback")
+        projects.put("proof", "projects-before-rollback")
         seedInstitutionRequest("cache-rollback", "tx-cache-rollback-doctor")
 
         val rollback = assertThrows<IllegalStateException> {
@@ -268,6 +274,7 @@ class ProfessionalProjectRequestPersistenceTest {
                 assertEquals(1, count("doctor_institution_project_configs", "doctor_id", "tx-cache-rollback-doctor"))
                 assertEquals("discover-before-rollback", discover.get("proof")?.get())
                 assertEquals("home-before-rollback", home.get("proof")?.get())
+                assertEquals("projects-before-rollback", projects.get("proof")?.get())
 
                 error("force outer rollback after cache synchronization registration")
             }
@@ -276,10 +283,113 @@ class ProfessionalProjectRequestPersistenceTest {
         assertEquals("force outer rollback after cache synchronization registration", rollback.message)
         assertEquals("discover-before-rollback", discover.get("proof")?.get())
         assertEquals("home-before-rollback", home.get("proof")?.get())
+        assertEquals("projects-before-rollback", projects.get("proof")?.get())
         assertEquals("PENDING", requestStatus("cache-rollback-request"))
         assertEquals(0, count("institution_projects", "institution_id", "cache-rollback-institution"))
         assertEquals(0, count("doctor_projects", "doctor_id", "tx-cache-rollback-doctor"))
         assertEquals(0, count("doctor_institution_project_configs", "doctor_id", "tx-cache-rollback-doctor"))
+    }
+
+    @Test
+    fun `platform and institution approvals persist exact target list column boundaries`() {
+        val tagsAtLimit = List(5) { index -> "t".repeat(if (index == 4) 96 else 100) }
+        val categoryTagsAtLimit = List(5) { index -> "c".repeat(if (index == 4) 96 else 100) }
+        val imagesAtLimit = List(4) { index -> "i".repeat(if (index == 3) 497 else 500) }
+        assertEquals(500, tagsAtLimit.joinToString(",").length)
+        assertEquals(500, categoryTagsAtLimit.joinToString(",").length)
+        assertEquals(2_000, imagesAtLimit.joinToString(",").length)
+        seedPlatformRequest(
+            "boundary-platform",
+            "tx-boundary-platform-doctor",
+            tagsAtLimit,
+            categoryTagsAtLimit,
+            imagesAtLimit
+        )
+        seedInstitutionRequest(
+            "boundary-institution",
+            "tx-boundary-institution-doctor",
+            tagsAtLimit,
+            imagesAtLimit
+        )
+
+        val platformResult = inTransaction {
+            service.reviewPlatform(adminActor(), "boundary-platform-request", ProjectRequestReview("APPROVED"))
+        }
+        val institutionResult = inTransaction {
+            service.reviewInstitution(adminActor(), "boundary-institution-request", ProjectRequestReview("APPROVED"))
+        }
+
+        assertEquals(
+            listOf(500, 500, 2_000),
+            jdbc.queryForObject(
+                "SELECT CHAR_LENGTH(tags), CHAR_LENGTH(category_tags), CHAR_LENGTH(images) FROM projects WHERE id = ?",
+                { rs, _ -> listOf(rs.getInt(1), rs.getInt(2), rs.getInt(3)) },
+                platformResult.resultingProjectId
+            )
+        )
+        assertEquals(
+            listOf(500, 2_000),
+            jdbc.queryForObject(
+                "SELECT CHAR_LENGTH(tags), CHAR_LENGTH(images) FROM institution_projects WHERE id = ?",
+                { rs, _ -> listOf(rs.getInt(1), rs.getInt(2)) },
+                institutionResult.resultingInstitutionProjectId
+            )
+        )
+        assertEquals(
+            listOf(500, 2_000),
+            jdbc.queryForObject(
+                "SELECT CHAR_LENGTH(service_tags), CHAR_LENGTH(images) FROM doctor_projects WHERE institution_project_id = ?",
+                { rs, _ -> listOf(rs.getInt(1), rs.getInt(2)) },
+                institutionResult.resultingInstitutionProjectId
+            )
+        )
+    }
+
+    @Test
+    fun `legacy oversized target lists fail validation before approval writes`() {
+        val oversizedTags = List(5) { "t".repeat(100) }
+        val oversizedImages = List(4) { "i".repeat(500) }
+        assertEquals(504, oversizedTags.joinToString(",").length)
+        assertEquals(2_003, oversizedImages.joinToString(",").length)
+        seedPlatformRequest(
+            "oversized-platform",
+            "tx-oversized-platform-doctor",
+            oversizedTags,
+            emptyList(),
+            emptyList()
+        )
+        seedInstitutionRequest(
+            "oversized-institution",
+            "tx-oversized-institution-doctor",
+            emptyList(),
+            oversizedImages
+        )
+
+        val platformError = assertThrows<IllegalArgumentException> {
+            inTransaction {
+                service.reviewPlatform(adminActor(), "oversized-platform-request", ProjectRequestReview("APPROVED"))
+            }
+        }
+        val institutionError = assertThrows<IllegalArgumentException> {
+            inTransaction {
+                service.reviewInstitution(adminActor(), "oversized-institution-request", ProjectRequestReview("APPROVED"))
+            }
+        }
+
+        assertEquals("项目标签不能超过 500 个字符", platformError.message)
+        assertEquals("项目图片不能超过 2000 个字符", institutionError.message)
+        assertEquals("PENDING", requestStatus("oversized-platform-request"))
+        assertEquals("PENDING", requestStatus("oversized-institution-request"))
+        assertEquals(0, count("institution_projects", "institution_id", "oversized-institution-institution"))
+        assertEquals(0, count("doctor_projects", "doctor_id", "tx-oversized-institution-doctor"))
+        assertEquals(0, count("doctor_institution_project_configs", "doctor_id", "tx-oversized-institution-doctor"))
+        assertEquals(
+            0,
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM projects WHERE name = 'oversized-platform Project'",
+                Int::class.java
+            )
+        )
     }
 
     @Test
@@ -330,7 +440,43 @@ class ProfessionalProjectRequestPersistenceTest {
         assertEquals(1, count("doctor_institution_project_configs", "doctor_id", "tx-concurrent-doctor"))
     }
 
-    private fun seedInstitutionRequest(prefix: String, doctorId: String) {
+    private fun seedPlatformRequest(
+        prefix: String,
+        doctorId: String,
+        tags: List<String>,
+        categoryTags: List<String>,
+        images: List<String>
+    ) {
+        jdbc.update(
+            "INSERT INTO users (id, password_hash, nickname, role) VALUES (?, 'hash', ?, 'DOCTOR')",
+            doctorId,
+            "$prefix Doctor"
+        )
+        jdbc.update("INSERT INTO doctors (id, name) VALUES (?, ?)", doctorId, "$prefix Doctor")
+        jdbc.update(
+            """
+            INSERT INTO professional_project_requests
+                (id, request_type, doctor_id, name, category, description, tags, slogan,
+                 detail_content, currency, cover_image, images, sales_count, reference_price,
+                 category_tags, notes)
+            VALUES (?, 'PLATFORM', ?, ?, 'BOUNDARY', 'boundary description', ?, '',
+                    NULL, 'USD', '', ?, 0, 99.00, ?, 'approval fixture')
+            """.trimIndent(),
+            "$prefix-request",
+            doctorId,
+            "$prefix Project",
+            objectMapper.writeValueAsString(tags),
+            objectMapper.writeValueAsString(images),
+            objectMapper.writeValueAsString(categoryTags)
+        )
+    }
+
+    private fun seedInstitutionRequest(
+        prefix: String,
+        doctorId: String,
+        requestTags: List<String>? = emptyList(),
+        requestImages: List<String>? = emptyList()
+    ) {
         jdbc.update(
             "INSERT INTO users (id, password_hash, nickname, role) VALUES (?, 'hash', ?, 'DOCTOR')",
             doctorId,
@@ -372,13 +518,15 @@ class ProfessionalProjectRequestPersistenceTest {
                  reference_price, category_tags, price, original_price, is_active,
                  consultation_fee, commission_rate, institution_rate, notes)
             VALUES (?, 'INSTITUTION', ?, ?, ?, NULL, NULL, NULL,
-                    NULL, '', NULL, 'USD', '', NULL, 3,
+                    ?, '', NULL, 'USD', '', ?, 3,
                     NULL, NULL, 99.00, 120.00, 1, 10.00, 20.00, 30.00, 'approval fixture')
             """.trimIndent(),
             "$prefix-request",
             doctorId,
             "$prefix-institution",
-            "$prefix-project"
+            "$prefix-project",
+            requestTags?.let(objectMapper::writeValueAsString),
+            requestImages?.let(objectMapper::writeValueAsString)
         )
     }
 
@@ -390,7 +538,7 @@ class ProfessionalProjectRequestPersistenceTest {
         cacheManager: CacheManager = ConcurrentMapCacheManager("discover", "home")
     ) = ProfessionalProjectRequestService(
         template,
-        jacksonObjectMapper().registerModule(JavaTimeModule()),
+        objectMapper,
         OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("40.00") }),
         authority,
         cacheManager

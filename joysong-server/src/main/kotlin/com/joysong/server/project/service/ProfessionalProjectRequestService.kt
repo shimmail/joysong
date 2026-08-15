@@ -1,6 +1,5 @@
 package com.joysong.server.project.service
 
-import com.fasterxml.jackson.annotation.JsonAnySetter
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -36,6 +35,8 @@ private const val MAX_IMAGE_ITEMS = 20
 private const val MAX_TAG_ITEM_LENGTH = 100
 private const val MAX_IMAGE_ITEM_LENGTH = 500
 private const val MAX_ENCODED_LIST_LENGTH = 20_000
+private const val MAX_TARGET_TAGS_LENGTH = 500
+private const val MAX_TARGET_IMAGES_LENGTH = 2_000
 
 @Service
 class ProfessionalProjectRequestService(
@@ -56,9 +57,15 @@ class ProfessionalProjectRequestService(
         val description = requiredText("项目说明", request.description, MAX_DESCRIPTION_LENGTH)
         requireMoney("参考价格", request.referencePrice)
         requireCount("销量", request.salesCount)
-        val tags = normalizeList("项目标签", request.tags, MAX_TAG_ITEMS, MAX_TAG_ITEM_LENGTH)
-        val categoryTags = normalizeList("分类标签", request.categoryTags, MAX_TAG_ITEMS, MAX_TAG_ITEM_LENGTH)
-        val images = normalizeList("项目图片", request.images, MAX_IMAGE_ITEMS, MAX_IMAGE_ITEM_LENGTH)
+        val tags = normalizeTargetList(
+            "项目标签", request.tags, MAX_TAG_ITEMS, MAX_TAG_ITEM_LENGTH, MAX_TARGET_TAGS_LENGTH
+        )
+        val categoryTags = normalizeTargetList(
+            "分类标签", request.categoryTags, MAX_TAG_ITEMS, MAX_TAG_ITEM_LENGTH, MAX_TARGET_TAGS_LENGTH
+        )
+        val images = normalizeTargetList(
+            "项目图片", request.images, MAX_IMAGE_ITEMS, MAX_IMAGE_ITEM_LENGTH, MAX_TARGET_IMAGES_LENGTH
+        )
         val slogan = normalizeText("项目标语", request.slogan, MAX_SLOGAN_LENGTH)
         val detailContent = normalizeOptionalText("项目详情", request.detailContent, MAX_DETAIL_CONTENT_LENGTH)
         val coverImage = normalizeText("封面图片", request.coverImage, MAX_COVER_IMAGE_LENGTH)
@@ -109,15 +116,33 @@ class ProfessionalProjectRequestService(
         if (targetInstitutionId !in actor.doctorInstitutionIds) {
             throw AccessDeniedException("只能向已通过执业关系的机构提交项目申请")
         }
+        if (count(
+            "SELECT COUNT(*) FROM institutions WHERE id = ? AND deleted_at IS NULL",
+            targetInstitutionId
+        ) != 1L) {
+            throw ProfessionalProjectRequestNotFoundException("机构不存在")
+        }
         val projectId = required(request.projectId, "平台项目不能为空")
         val name = normalizeOptionalText("项目名称", request.name, MAX_NAME_LENGTH)
         val category = normalizeOptionalText("项目分类", request.category, MAX_CATEGORY_LENGTH)
         val description = normalizeOptionalText("服务内容", request.description, MAX_DESCRIPTION_LENGTH)
-        val tags = request.tags?.let { normalizeList("项目标签", it, MAX_TAG_ITEMS, MAX_TAG_ITEM_LENGTH) }
+        val tags = request.tags
+            ?.takeIf(List<String>::isNotEmpty)
+            ?.let {
+                normalizeTargetList(
+                    "项目标签", it, MAX_TAG_ITEMS, MAX_TAG_ITEM_LENGTH, MAX_TARGET_TAGS_LENGTH
+                )
+            }
         val slogan = normalizeOptionalText("项目标语", request.slogan, MAX_SLOGAN_LENGTH).orEmpty()
         val detailContent = normalizeOptionalText("项目详情", request.detailContent, MAX_DETAIL_CONTENT_LENGTH)
         val coverImage = normalizeOptionalText("封面图片", request.coverImage, MAX_COVER_IMAGE_LENGTH).orEmpty()
-        val images = request.images?.let { normalizeList("项目图片", it, MAX_IMAGE_ITEMS, MAX_IMAGE_ITEM_LENGTH) }
+        val images = request.images
+            ?.takeIf(List<String>::isNotEmpty)
+            ?.let {
+                normalizeTargetList(
+                    "项目图片", it, MAX_IMAGE_ITEMS, MAX_IMAGE_ITEM_LENGTH, MAX_TARGET_IMAGES_LENGTH
+                )
+            }
         val notes = normalizeOptionalText("申请备注", request.notes, MAX_NOTES_LENGTH)
         requireMoney("项目价格", request.price)
         optionalMoney("原价", request.originalPrice)
@@ -349,6 +374,15 @@ class ProfessionalProjectRequestService(
     private fun createProject(target: ProjectRequestTarget): String {
         requireMoney("参考价格", requireNotNull(target.referencePrice))
         requireCount("销量", target.salesCount)
+        val tags = toTargetList(
+            "项目标签", target.tags, MAX_TAG_ITEMS, MAX_TAG_ITEM_LENGTH, MAX_TARGET_TAGS_LENGTH
+        ).orEmpty()
+        val categoryTags = toTargetList(
+            "分类标签", target.categoryTags, MAX_TAG_ITEMS, MAX_TAG_ITEM_LENGTH, MAX_TARGET_TAGS_LENGTH
+        ).orEmpty()
+        val images = toTargetList(
+            "项目图片", target.images, MAX_IMAGE_ITEMS, MAX_IMAGE_ITEM_LENGTH, MAX_TARGET_IMAGES_LENGTH
+        ).orEmpty()
         val projectId = UUID.randomUUID().toString()
         jdbcTemplate.update(
             """
@@ -361,10 +395,10 @@ class ProfessionalProjectRequestService(
             requireNotNull(target.name),
             requireNotNull(target.category),
             requireNotNull(target.description),
-            toTargetList(target.tags).orEmpty(),
-            toTargetList(target.categoryTags).orEmpty(),
+            tags,
+            categoryTags,
             target.coverImage.orEmpty(),
-            toTargetList(target.images).orEmpty(),
+            images,
             target.referencePrice,
             target.currency.name,
             target.slogan.orEmpty(),
@@ -507,11 +541,21 @@ class ProfessionalProjectRequestService(
         name = target.name?.takeIf(String::isNotBlank) ?: platformProject.name,
         category = target.category?.takeIf(String::isNotBlank) ?: platformProject.category,
         description = target.description?.takeIf(String::isNotBlank) ?: platformProject.description,
-        tags = target.tags?.let(::toTargetList) ?: platformProject.tags,
+        tags = target.tags
+            ?.takeIf(List<String>::isNotEmpty)
+            ?.let {
+                toTargetList("项目标签", it, MAX_TAG_ITEMS, MAX_TAG_ITEM_LENGTH, MAX_TARGET_TAGS_LENGTH)
+            }
+            ?: platformProject.tags,
         slogan = target.slogan?.takeIf(String::isNotBlank) ?: platformProject.slogan,
         detailContent = target.detailContent?.takeIf(String::isNotBlank) ?: platformProject.detailContent,
         coverImage = target.coverImage?.takeIf(String::isNotBlank) ?: platformProject.coverImage,
-        images = target.images?.let(::toTargetList) ?: platformProject.images
+        images = target.images
+            ?.takeIf(List<String>::isNotEmpty)
+            ?.let {
+                toTargetList("项目图片", it, MAX_IMAGE_ITEMS, MAX_IMAGE_ITEM_LENGTH, MAX_TARGET_IMAGES_LENGTH)
+            }
+            ?: platformProject.images
     )
 
     private fun normalizeReview(review: ProjectRequestReview): NormalizedProjectRequestReview {
@@ -522,12 +566,21 @@ class ProfessionalProjectRequestService(
         return NormalizedProjectRequestReview(decision, reviewNote)
     }
 
-    private fun toTargetList(values: List<String>?): String? = values?.joinToString(",")
+    private fun toTargetList(
+        label: String,
+        values: List<String>?,
+        maxItems: Int,
+        maxItemLength: Int,
+        maxTargetLength: Int
+    ): String? = values?.let {
+        normalizeTargetList(label, it, maxItems, maxItemLength, maxTargetLength).joinToString(",")
+    }
 
     private fun evictProjectCatalogCachesAfterCommit() {
         val evict = {
             cacheManager.getCache("discover")?.clear()
             cacheManager.getCache("home")?.clear()
+            cacheManager.getCache("projects")?.clear()
         }
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             evict()
@@ -654,6 +707,18 @@ class ProfessionalProjectRequestService(
         }
     }
 
+    private fun normalizeTargetList(
+        label: String,
+        values: List<String>?,
+        maxItems: Int,
+        maxItemLength: Int,
+        maxTargetLength: Int
+    ): List<String> = normalizeList(label, values, maxItems, maxItemLength).also { normalized ->
+        require(normalized.joinToString(",").length <= maxTargetLength) {
+            "$label\u4e0d\u80fd\u8d85\u8fc7 $maxTargetLength \u4e2a\u5b57\u7b26"
+        }
+    }
+
     private fun encodeList(values: List<String>?): String? = values?.let {
         objectMapper.writeValueAsString(it).also { encoded ->
             require(encoded.length <= MAX_ENCODED_LIST_LENGTH) { "\u6570\u7ec4\u5185\u5bb9\u8fc7\u957f" }
@@ -691,14 +756,6 @@ data class DoctorPlatformProjectRequest(
     val categoryTags: List<String> = emptyList(),
     val notes: String = ""
 ) {
-    private val capturedUnsupportedFields: MutableMap<String, Any?> = linkedMapOf()
-
-    @JsonAnySetter
-    fun unknown(name: String, value: Any?) {
-        capturedUnsupportedFields[name] = value
-    }
-
-    fun containsUnsupportedFields(): Boolean = capturedUnsupportedFields.isNotEmpty()
 }
 
 @JsonIgnoreProperties(ignoreUnknown = false)
@@ -722,14 +779,6 @@ data class DoctorInstitutionProjectRequest(
     val institutionRate: BigDecimal = BigDecimal.ZERO,
     val notes: String = ""
 ) {
-    private val capturedUnsupportedFields: MutableMap<String, Any?> = linkedMapOf()
-
-    @JsonAnySetter
-    fun unknown(name: String, value: Any?) {
-        capturedUnsupportedFields[name] = value
-    }
-
-    fun containsUnsupportedFields(): Boolean = capturedUnsupportedFields.isNotEmpty()
 }
 
 data class InstitutionProjectApplicationFormConfig(

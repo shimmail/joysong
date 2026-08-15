@@ -1,5 +1,6 @@
 package com.joysong.server.project.controller
 
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.joysong.server.identity.service.ManagementAccessService
 import com.joysong.server.identity.service.ManagementActor
 import com.joysong.server.order.service.OrderSplitRatePolicy
@@ -36,7 +37,7 @@ class ProfessionalProjectRequestControllerTest {
         every { access.actor(authentication) } returns actor
         every { service.reviewInstitution(actor, "request-1", request) } returns mockk()
 
-        ProfessionalProjectRequestController(service, access, mockk<OrderSplitRatePolicy>())
+        ProfessionalProjectRequestController(service, access, mockk<OrderSplitRatePolicy>(), jacksonObjectMapper())
             .reviewInstitution(authentication, "request-1", request)
 
         verify(exactly = 1) { service.reviewInstitution(actor, "request-1", request) }

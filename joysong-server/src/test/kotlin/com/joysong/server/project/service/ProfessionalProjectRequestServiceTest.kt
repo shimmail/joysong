@@ -40,6 +40,16 @@ class ProfessionalProjectRequestServiceTest {
         cacheManager
     )
 
+    init {
+        every {
+            jdbcTemplate.queryForObject(
+                match<String> { it.contains("FROM institutions") },
+                Long::class.java,
+                *anyVararg()
+            )
+        } returns 1L
+    }
+
     @Test
     fun `platform submission persists a complete trimmed immutable snapshot`() {
         every { jdbcTemplate.queryForObject(match<String> { it.contains("professional_project_requests") }, Long::class.java, *anyVararg()) } returns 0L
@@ -147,8 +157,8 @@ class ProfessionalProjectRequestServiceTest {
             "institution-1",
             DoctorInstitutionProjectRequest(
                 projectId = "project-1",
-                name = " ", category = null, description = " ", tags = null, slogan = " ",
-                detailContent = " ", coverImage = null, images = null,
+                name = " ", category = null, description = " ", tags = emptyList(), slogan = " ",
+                detailContent = " ", coverImage = null, images = emptyList(),
                 price = BigDecimal("0.00"), consultationFee = BigDecimal("0.00"),
                 commissionRate = BigDecimal("0.00"), institutionRate = BigDecimal("0.00")
             )
@@ -188,6 +198,75 @@ class ProfessionalProjectRequestServiceTest {
 
         invalidPlatformRequests.forEach { request ->
             assertThrows<IllegalArgumentException> { service.submitPlatform(doctorActor(), request) }
+        }
+        verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
+    }
+
+    @Test
+    fun `submission accepts exact comma separated target column boundaries`() {
+        val tagsAtLimit = List(5) { index -> "t".repeat(if (index == 4) 96 else 100) }
+        val categoryTagsAtLimit = List(5) { index -> "c".repeat(if (index == 4) 96 else 100) }
+        val imagesAtLimit = List(4) { index -> "i".repeat(if (index == 3) 497 else 500) }
+        assertEquals(500, tagsAtLimit.joinToString(",").length)
+        assertEquals(500, categoryTagsAtLimit.joinToString(",").length)
+        assertEquals(2_000, imagesAtLimit.joinToString(",").length)
+        every { jdbcTemplate.queryForObject(match<String> { it.contains("professional_project_requests") }, Long::class.java, *anyVararg()) } returns 0L
+        every { jdbcTemplate.queryForObject(match<String> { it.contains("FROM projects") }, Long::class.java, *anyVararg()) } returns 1L
+        every { jdbcTemplate.queryForObject(match<String> { it.contains("FROM institution_projects") }, Long::class.java, *anyVararg()) } returns 0L
+        every { jdbcTemplate.update(match<String> { it.contains("INSERT INTO professional_project_requests") }, *anyVararg()) } returns 1
+
+        service.submitPlatform(
+            doctorActor(),
+            DoctorPlatformProjectRequest(
+                name = "P", category = "C", description = "D",
+                tags = tagsAtLimit, categoryTags = categoryTagsAtLimit, images = imagesAtLimit
+            )
+        )
+        service.submitInstitution(
+            doctorActor(),
+            "institution-1",
+            DoctorInstitutionProjectRequest(
+                projectId = "project-1", tags = tagsAtLimit, images = imagesAtLimit
+            )
+        )
+
+        verify(exactly = 2) {
+            jdbcTemplate.update(match<String> { it.contains("INSERT INTO professional_project_requests") }, *anyVararg())
+        }
+    }
+
+    @Test
+    fun `submission rejects comma separated target values over target columns before insert`() {
+        val tagsOverLimit = List(5) { "t".repeat(100) }
+        val imagesOverLimit = List(4) { "i".repeat(500) }
+        assertEquals(504, tagsOverLimit.joinToString(",").length)
+        assertEquals(2_003, imagesOverLimit.joinToString(",").length)
+        every {
+            jdbcTemplate.queryForObject(
+                match<String> { it.contains("FROM institutions") },
+                Long::class.java,
+                "institution-1"
+            )
+        } returns 1L
+        every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 1
+
+        val platformRequests = listOf(
+            DoctorPlatformProjectRequest(name = "P", category = "C", description = "D", tags = tagsOverLimit),
+            DoctorPlatformProjectRequest(name = "P", category = "C", description = "D", categoryTags = tagsOverLimit),
+            DoctorPlatformProjectRequest(name = "P", category = "C", description = "D", images = imagesOverLimit)
+        )
+        val institutionRequests = listOf(
+            DoctorInstitutionProjectRequest(projectId = "project-1", tags = tagsOverLimit),
+            DoctorInstitutionProjectRequest(projectId = "project-1", images = imagesOverLimit)
+        )
+
+        platformRequests.forEach { request ->
+            assertThrows<IllegalArgumentException> { service.submitPlatform(doctorActor(), request) }
+        }
+        institutionRequests.forEach { request ->
+            assertThrows<IllegalArgumentException> {
+                service.submitInstitution(doctorActor(), "institution-1", request)
+            }
         }
         verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
     }
@@ -378,6 +457,35 @@ class ProfessionalProjectRequestServiceTest {
     }
 
     @Test
+    fun `institution submission rejects a missing or soft deleted institution despite actor scope`() {
+        every {
+            jdbcTemplate.queryForObject(
+                match<String> { it.contains("FROM institutions") && it.contains("deleted_at IS NULL") },
+                Long::class.java,
+                "institution-1"
+            )
+        } returns 0L
+        every { jdbcTemplate.queryForObject(match<String> { it.contains("FROM projects") }, Long::class.java, *anyVararg()) } returns 1L
+        every { jdbcTemplate.queryForObject(match<String> { it.contains("FROM institution_projects") }, Long::class.java, *anyVararg()) } returns 0L
+        every { jdbcTemplate.queryForObject(match<String> { it.contains("professional_project_requests") }, Long::class.java, *anyVararg()) } returns 0L
+        every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 1
+
+        val error = assertThrows<ProfessionalProjectRequestNotFoundException> {
+            service.submitInstitution(
+                doctorActor(approvedInstitutions = setOf("institution-1")),
+                "institution-1",
+                DoctorInstitutionProjectRequest(projectId = "project-1")
+            )
+        }
+
+        assertEquals("机构不存在", error.message)
+        verify(exactly = 0) {
+            jdbcTemplate.queryForObject(match<String> { it.contains("FROM projects") }, Long::class.java, *anyVararg())
+        }
+        verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
+    }
+
+    @Test
     fun `institution request reports a missing platform project as not found`() {
         every { jdbcTemplate.queryForObject(match<String> { it.contains("FROM projects") }, Long::class.java, *anyVararg()) } returns 0L
 
@@ -478,6 +586,85 @@ class ProfessionalProjectRequestServiceTest {
                 any(), "doctor-1", any(), BigDecimal("10.00"), BigDecimal("20.00"), BigDecimal("30.00")
             )
         }
+    }
+
+    @Test
+    fun `institution approval treats legacy empty tag and image arrays as inheritance sentinels`() {
+        stubLockedRequest(
+            targetResultSet(
+                "INSTITUTION",
+                "institution-1",
+                tagsJson = "[]",
+                imagesJson = "[]"
+            )
+        )
+        stubInstitutionLock(found = true)
+        stubRelationshipLock(found = true)
+        stubCurrentProject(found = true)
+        stubInstitutionProjectLookup(found = false)
+        every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 1
+
+        service.reviewInstitution(adminActor(), "request-1", ProjectRequestReview("APPROVED"))
+
+        verify(exactly = 1) {
+            jdbcTemplate.update(
+                match<String> { it.contains("INSERT INTO institution_projects") },
+                any(), "institution-1", "project-1", "Project", "Category", "Service",
+                BigDecimal.ZERO, 0, "base-tag", "Slogan", "Service details", BigDecimal("99.00"),
+                null, "USD", "cover.png", "base-one.png,base-two.png", 1, true
+            )
+        }
+        verify(exactly = 1) {
+            jdbcTemplate.update(
+                match<String> { it.contains("INSERT INTO doctor_projects") },
+                "doctor-1", "project-1", any(), "Service", "base-tag", "", "cover.png",
+                "base-one.png,base-two.png", BigDecimal("99.00")
+            )
+        }
+    }
+
+    @Test
+    fun `platform approval rejects legacy target lists over destination columns before writes`() {
+        val oversizedTags = List(5) { "t".repeat(100) }
+        stubLockedRequest(
+            targetResultSet(
+                "PLATFORM",
+                null,
+                tagsJson = objectMapper.writeValueAsString(oversizedTags)
+            )
+        )
+        every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 1
+
+        val error = assertThrows<IllegalArgumentException> {
+            service.reviewPlatform(adminActor(), "request-1", ProjectRequestReview("APPROVED"))
+        }
+
+        assertEquals("项目标签不能超过 500 个字符", error.message)
+        verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
+    }
+
+    @Test
+    fun `institution approval rejects legacy target lists over destination columns before writes`() {
+        val oversizedImages = List(4) { "i".repeat(500) }
+        stubLockedRequest(
+            targetResultSet(
+                "INSTITUTION",
+                "institution-1",
+                imagesJson = objectMapper.writeValueAsString(oversizedImages)
+            )
+        )
+        stubInstitutionLock(found = true)
+        stubRelationshipLock(found = true)
+        stubCurrentProject(found = true)
+        stubInstitutionProjectLookup(found = false)
+        every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 1
+
+        val error = assertThrows<IllegalArgumentException> {
+            service.reviewInstitution(adminActor(), "request-1", ProjectRequestReview("APPROVED"))
+        }
+
+        assertEquals("项目图片不能超过 2000 个字符", error.message)
+        verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
     }
 
     @Test
@@ -762,7 +949,10 @@ class ProfessionalProjectRequestServiceTest {
         type: String,
         institutionId: String?,
         status: String = "PENDING",
-        driftedSplit: Boolean = false
+        driftedSplit: Boolean = false,
+        tagsJson: String = "[\"tag\"]",
+        categoryTagsJson: String = "[\"category-tag\"]",
+        imagesJson: String = "[\"one.png\"]"
     ): ResultSet = mockk<ResultSet>(relaxed = true).also { rs ->
         every { rs.getString("id") } returns "request-1"
         every { rs.getString("request_type") } returns type
@@ -772,15 +962,15 @@ class ProfessionalProjectRequestServiceTest {
         every { rs.getString("name") } returns "Project"
         every { rs.getString("category") } returns "Category"
         every { rs.getString("description") } returns "Service"
-        every { rs.getString("tags") } returns "[\"tag\"]"
+        every { rs.getString("tags") } returns tagsJson
         every { rs.getString("slogan") } returns "Slogan"
         every { rs.getString("detail_content") } returns "Service details"
         every { rs.getString("currency") } returns "USD"
         every { rs.getString("cover_image") } returns "cover.png"
-        every { rs.getString("images") } returns "[\"one.png\"]"
+        every { rs.getString("images") } returns imagesJson
         every { rs.getInt("sales_count") } returns 1
         every { rs.getBigDecimal("reference_price") } returns BigDecimal("199.00")
-        every { rs.getString("category_tags") } returns "[\"category-tag\"]"
+        every { rs.getString("category_tags") } returns categoryTagsJson
         every { rs.getBigDecimal("price") } returns BigDecimal("99.00")
         every { rs.getBigDecimal("original_price") } returns null
         every { rs.getBoolean("is_active") } returns true

@@ -1,5 +1,7 @@
 package com.joysong.server.project.controller
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.ObjectNode
 import com.joysong.server.common.BaseResponse
 import com.joysong.server.identity.service.ManagementAccessService
 import com.joysong.server.order.service.OrderSplitRatePolicy
@@ -26,12 +28,35 @@ private fun validateProjectRequestReview(request: ProjectRequestReview) {
     require(decision != "REJECTED" || request.reviewNote.isNotBlank()) { "拒绝时必须填写审核意见" }
 }
 
+private val PLATFORM_REQUEST_FIELDS = setOf(
+    "name", "category", "description", "referencePrice", "currency", "slogan", "salesCount",
+    "coverImage", "images", "detailContent", "tags", "categoryTags", "notes"
+)
+
+private val INSTITUTION_REQUEST_FIELDS = setOf(
+    "projectId", "name", "category", "description", "tags", "slogan", "detailContent", "price",
+    "originalPrice", "currency", "coverImage", "images", "salesCount", "isActive", "consultationFee",
+    "commissionRate", "institutionRate", "notes"
+)
+
+private fun <T> ObjectMapper.readExactRequest(
+    request: ObjectNode,
+    expectedFields: Set<String>,
+    type: Class<T>
+): T {
+    require(request.fieldNames().asSequence().toSet() == expectedFields) {
+        "请求字段不完整或包含不支持的字段"
+    }
+    return treeToValue(request, type)
+}
+
 @RestController
 @RequestMapping("/api/management/project-requests")
 class ProfessionalProjectRequestController(
     private val service: ProfessionalProjectRequestService,
     private val managementAccessService: ManagementAccessService,
-    private val splitRatePolicy: OrderSplitRatePolicy
+    private val splitRatePolicy: OrderSplitRatePolicy,
+    private val objectMapper: ObjectMapper
 ) {
     @GetMapping
     fun list(authentication: Authentication?): BaseResponse<*> =
@@ -40,20 +65,26 @@ class ProfessionalProjectRequestController(
     @PostMapping("/platform")
     fun submitPlatform(
         authentication: Authentication?,
-        @RequestBody request: DoctorPlatformProjectRequest
+        @RequestBody request: ObjectNode
     ): BaseResponse<*> {
-        require(!request.containsUnsupportedFields()) { "请求包含不支持的字段" }
-        return BaseResponse.success(service.submitPlatform(managementAccessService.authenticatedActor(authentication), request))
+        val typedRequest = objectMapper.readExactRequest(request, PLATFORM_REQUEST_FIELDS, DoctorPlatformProjectRequest::class.java)
+        return BaseResponse.success(service.submitPlatform(managementAccessService.authenticatedActor(authentication), typedRequest))
     }
 
     @PostMapping("/institutions/{institutionId}")
     fun submitInstitution(
         authentication: Authentication?,
         @PathVariable institutionId: String,
-        @RequestBody request: DoctorInstitutionProjectRequest
+        @RequestBody request: ObjectNode
     ): BaseResponse<*> {
-        require(!request.containsUnsupportedFields()) { "请求包含不支持的字段" }
-        return BaseResponse.success(service.submitInstitution(managementAccessService.authenticatedActor(authentication), institutionId, request))
+        val typedRequest = objectMapper.readExactRequest(
+            request,
+            INSTITUTION_REQUEST_FIELDS,
+            DoctorInstitutionProjectRequest::class.java
+        )
+        return BaseResponse.success(
+            service.submitInstitution(managementAccessService.authenticatedActor(authentication), institutionId, typedRequest)
+        )
     }
 
     @GetMapping("/institution-form-config")

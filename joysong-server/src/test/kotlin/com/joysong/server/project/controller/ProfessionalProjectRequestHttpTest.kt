@@ -1,6 +1,7 @@
 package com.joysong.server.project.controller
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.ObjectNode
 import com.joysong.server.common.GlobalExceptionHandler
 import com.joysong.server.identity.service.ManagementAccessService
 import com.joysong.server.identity.service.ManagementActor
@@ -53,6 +54,38 @@ class ProfessionalProjectRequestHttpTest {
             .andExpect(jsonPath("$.data.requestType").value("INSTITUTION"))
 
         verify(exactly = 1) { fixture.service.submitInstitution(fixture.actor, "institution-1", any()) }
+    }
+
+    @Test
+    fun `platform application rejects each missing documented key before service invocation`() {
+        val fixture = fixture()
+        every { fixture.service.submitPlatform(any(), any()) } returns
+            ProjectRequestSubmissionResult("unexpected", "PLATFORM", "PENDING")
+
+        platformRequestFields.forEach { missingField ->
+            fixture.mvc.perform(
+                post("/api/management/project-requests/platform")
+                    .json(withoutField(platformBody(), missingField))
+            ).andExpect(status().isBadRequest)
+        }
+
+        verify(exactly = 0) { fixture.service.submitPlatform(any(), any()) }
+    }
+
+    @Test
+    fun `institution application rejects each missing documented key before service invocation`() {
+        val fixture = fixture()
+        every { fixture.service.submitInstitution(any(), any(), any()) } returns
+            ProjectRequestSubmissionResult("unexpected", "INSTITUTION", "PENDING")
+
+        institutionRequestFields.forEach { missingField ->
+            fixture.mvc.perform(
+                post("/api/management/project-requests/institutions/institution-1")
+                    .json(withoutField(institutionBody(), missingField))
+            ).andExpect(status().isBadRequest)
+        }
+
+        verify(exactly = 0) { fixture.service.submitInstitution(any(), any(), any()) }
     }
 
     @Test
@@ -255,7 +288,9 @@ class ProfessionalProjectRequestHttpTest {
         every { access.actor(any()) } returns actor
         every { splitRatePolicy.currentPlatformRate() } returns java.math.BigDecimal("17.50")
         return Fixture(
-            MockMvcBuilders.standaloneSetup(ProfessionalProjectRequestController(service, access, splitRatePolicy))
+            MockMvcBuilders.standaloneSetup(
+                ProfessionalProjectRequestController(service, access, splitRatePolicy, productionObjectMapper)
+            )
                 .setControllerAdvice(GlobalExceptionHandler())
                 .build(),
             service,
@@ -276,6 +311,12 @@ class ProfessionalProjectRequestHttpTest {
         "projectId":"project-1","name":"Hydra facial","category":"SKIN","description":"Hydrating facial treatment","tags":["hydration"],"slogan":"Glow today","detailContent":"Details","price":199.99,"originalPrice":249.99,"currency":"USD","coverImage":"cover.png","images":["one.png"],"salesCount":5,"isActive":true,"consultationFee":10.00,"commissionRate":20.00,"institutionRate":30.00,"notes":"launch"${if (extra.isBlank()) "" else ",$extra"}
     }"""
 
+    private fun withoutField(body: String, field: String): String =
+        (productionObjectMapper.readTree(body) as ObjectNode)
+            .deepCopy()
+            .also { it.remove(field) }
+            .toString()
+
     private data class Fixture(
         val mvc: org.springframework.test.web.servlet.MockMvc,
         val service: ProfessionalProjectRequestService,
@@ -293,5 +334,14 @@ class ProfessionalProjectRequestHttpTest {
 
     private companion object {
         val productionObjectMapper: ObjectMapper = Jackson2ObjectMapperBuilder.json().build()
+        val platformRequestFields = listOf(
+            "name", "category", "description", "referencePrice", "currency", "slogan", "salesCount",
+            "coverImage", "images", "detailContent", "tags", "categoryTags", "notes"
+        )
+        val institutionRequestFields = listOf(
+            "projectId", "name", "category", "description", "tags", "slogan", "detailContent", "price",
+            "originalPrice", "currency", "coverImage", "images", "salesCount", "isActive", "consultationFee",
+            "commissionRate", "institutionRate", "notes"
+        )
     }
 }
