@@ -1187,27 +1187,6 @@ final class _FakeIdentityRepository implements IdentityRepository {
       );
 
   @override
-  Future<ManagedInstitutionProject> createManagedInstitutionProject(
-    ManagedInstitutionProjectDraft draft,
-  ) async {
-    return ManagedInstitutionProject.fromJson({
-      ...draft.toJson(),
-      'id': 'institution-project-1',
-      'effectiveName': draft.name,
-    });
-  }
-
-  @override
-  Future<ManagementProjectOption> createManagementProject(
-    ManagementProjectDraft draft,
-  ) async {
-    return ManagementProjectOption.fromJson({
-      ...draft.toJson(),
-      'id': 'project-1',
-    });
-  }
-
-  @override
   Future<List<ManagedInstitutionProject>>
       listManagedInstitutionProjects() async => [
             ManagedInstitutionProject.fromJson({
@@ -1229,17 +1208,6 @@ final class _FakeIdentityRepository implements IdentityRepository {
   @override
   Future<void> submitSplitConfigProposal(
       SplitConfigProposalDraft draft) async {}
-
-  @override
-  Future<ManagedInstitutionProject> updateManagedInstitutionProject(
-    ManagedInstitutionProjectDraft draft,
-  ) async {
-    return ManagedInstitutionProject.fromJson({
-      ...draft.toJson(),
-      'id': draft.id ?? 'institution-project-1',
-      'effectiveName': draft.name,
-    });
-  }
 
   @override
   Future<DoctorSelfProfile> loadDoctorSelfProfile() {

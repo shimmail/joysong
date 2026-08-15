@@ -105,8 +105,9 @@ class _WalletPageState extends State<WalletPage> {
                       ))
                   .toList(growable: false),
               onChanged: (walletId) {
-                if (walletId != null)
+                if (walletId != null) {
                   unawaited(controller.selectWallet(walletId));
+                }
               },
             ),
             const SizedBox(height: 12),

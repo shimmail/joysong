@@ -12,7 +12,8 @@ Future<void> shareDiary(
   final title = diary.title.trim();
   final author = diary.authorName.trim();
   final content = diary.content.trim();
-  final summary = content.length > 300 ? '${content.substring(0, 300)}…' : content;
+  final summary =
+      content.length > 300 ? '${content.substring(0, 300)}…' : content;
   final tags = diary.tags
       .map((tag) => tag.trim())
       .where((tag) => tag.isNotEmpty)
@@ -21,12 +22,14 @@ Future<void> shareDiary(
   final lines = <String>[
     context.localized('分享一篇医美日记', 'Sharing a medical aesthetics diary'),
     if (title.isNotEmpty) title,
-    if (author.isNotEmpty)
-      context.localized('作者：$author', 'By $author'),
+    if (author.isNotEmpty) context.localized('作者：$author', 'By $author'),
     if (summary.isNotEmpty) summary,
     if (tags.isNotEmpty) tags,
     context.localized('来自 Joysong', 'Shared from Joysong'),
   ];
+  final subject = title.isEmpty
+      ? context.localized('医美日记', 'Medical aesthetics diary')
+      : title;
 
   final renderObject = context.findRenderObject();
   final origin = renderObject is RenderBox && renderObject.hasSize
@@ -37,9 +40,7 @@ Future<void> shareDiary(
     final shareUrl = await repository.createDiaryShareUrl(diary.id);
     await Share.share(
       [...lines, shareUrl].join('\n\n'),
-      subject: title.isEmpty
-          ? context.localized('医美日记', 'Medical aesthetics diary')
-          : title,
+      subject: subject,
       sharePositionOrigin: origin,
     );
   } catch (_) {

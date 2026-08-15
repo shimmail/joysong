@@ -189,14 +189,14 @@ class ProductionProfileTest {
             "started",
             "delta",
             "completed",
-            "failed",
+            "error",
             "PLANNING",
             "partial"
         ).forEach { term ->
             assertTrue(streamingContract.contains(term), "streaming documentation is missing: $term")
         }
         assertTrue(streamingContract.contains("Qwen-only"), "streaming provider boundary must be explicit")
-        assertTrue(streamingContract.contains("不持久化"), "failed partial output must be documented as non-persistent")
+        assertTrue(streamingContract.contains("不持久化"), "error partial output must be documented as non-persistent")
     }
 
     @Test

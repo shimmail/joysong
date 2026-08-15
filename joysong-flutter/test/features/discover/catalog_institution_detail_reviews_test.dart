@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:joysong_flutter/core/network/optimized_network_image.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/presentation/catalog_institution_detail_view.dart';
+import 'package:joysong_flutter/features/discover/presentation/catalog_review_section.dart';
 
 void main() {
   testWidgets('shows complete institution review information in Chinese', (
@@ -28,26 +30,35 @@ void main() {
 
     await _scrollToReviews(tester);
 
-    final card = find.byKey(const Key('review-card-review-1'));
+    final card = find.byType(CatalogReviewCard);
     expect(card, findsOneWidget);
     expect(
-        find.descendant(of: card, matching: find.text('4.0')), findsOneWidget);
-    expect(
-      find.descendant(of: card, matching: find.byIcon(Icons.star_rounded)),
-      findsNWidgets(4),
+      find.descendant(of: card, matching: find.text('★ 4.0')),
+      findsOneWidget,
     );
     expect(find.text('医生沟通耐心，服务流程也很清晰。'), findsOneWidget);
     expect(find.text('耐心'), findsOneWidget);
     expect(find.text('专业'), findsOneWidget);
     expect(find.text('王女士'), findsOneWidget);
     expect(find.text('2026-08-06'), findsOneWidget);
+    final imageList = find.descendant(
+      of: card,
+      matching: find.byWidgetPredicate(
+        (widget) =>
+            widget is ListView && widget.scrollDirection == Axis.horizontal,
+      ),
+    );
+    expect(imageList, findsOneWidget);
     expect(
-      find.byKey(const Key('review-image-review-1-0')),
-      findsOneWidget,
+      tester.widget<ListView>(imageList).semanticChildCount,
+      2,
     );
     expect(
-      find.byKey(const Key('review-image-review-1-1')),
-      findsOneWidget,
+      find.descendant(
+        of: card,
+        matching: find.byType(OptimizedNetworkImage),
+      ),
+      findsWidgets,
     );
   });
 
@@ -61,7 +72,7 @@ void main() {
     await _scrollToReviews(tester);
 
     expect(find.text('Patient reviews'), findsOneWidget);
-    expect(find.text('No reviews'), findsOneWidget);
+    expect(find.text('No reviews yet'), findsOneWidget);
   });
 
   testWidgets('shows English fallbacks for missing optional review text', (
@@ -86,11 +97,11 @@ void main() {
 
     await _scrollToReviews(tester);
 
-    final card = find.byKey(const Key('review-card-review-2'));
+    final card = find.byType(CatalogReviewCard);
     expect(find.text('No written review'), findsOneWidget);
-    expect(find.text('Anonymous'), findsOneWidget);
-    expect(
-        find.descendant(of: card, matching: find.text('5.0')), findsOneWidget);
+    expect(find.text('Anonymous user'), findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('★ 5.0')),
+        findsOneWidget);
   });
 }
 

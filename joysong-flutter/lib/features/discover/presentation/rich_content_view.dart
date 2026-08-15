@@ -106,7 +106,7 @@ bool _looksLikeHtml(String value) =>
     RegExp(r'<\/?[a-z][^>]*>', caseSensitive: false).hasMatch(value);
 
 String _markdownToMarkup(String value) {
-  var source = value
+  final source = value
       .replaceAllMapped(
         RegExp(r'!\[([^\]]*)\]\(([^)]+)\)'),
         (match) => '<img src="${match.group(2)}" alt="${match.group(1)}">',
@@ -148,13 +148,18 @@ List<InlineSpan> _inlineSpans(
   String markup,
   TextStyle baseStyle,
 ) {
-  var source = markup
+  final source = markup
       .replaceAll(RegExp(r'<\s*br\s*\/?>', caseSensitive: false), '\n')
       .replaceAll(RegExp(r'<\s*li\b[^>]*>', caseSensitive: false), '\n• ')
       .replaceAll(RegExp(r'<\s*\/\s*li\s*>', caseSensitive: false), '')
-      .replaceAll(RegExp(r'<\s*blockquote\b[^>]*>', caseSensitive: false), '\n“')
-      .replaceAll(RegExp(r'<\s*\/\s*blockquote\s*>', caseSensitive: false), '”\n')
-      .replaceAll(RegExp(r'<\s*\/?\s*(p|div|section|ul|ol)\b[^>]*>', caseSensitive: false), '\n');
+      .replaceAll(
+          RegExp(r'<\s*blockquote\b[^>]*>', caseSensitive: false), '\n“')
+      .replaceAll(
+          RegExp(r'<\s*\/\s*blockquote\s*>', caseSensitive: false), '”\n')
+      .replaceAll(
+          RegExp(r'<\s*\/?\s*(p|div|section|ul|ol)\b[^>]*>',
+              caseSensitive: false),
+          '\n');
 
   final spans = <InlineSpan>[];
   final styleStack = <TextStyle>[baseStyle];

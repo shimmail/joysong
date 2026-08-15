@@ -49,7 +49,8 @@ void main() {
     expect(message.catalogReport?.title, 'Comparison report');
   });
 
-  test('ChatMessage keeps legacy payload compatible when comparison fields are absent',
+  test(
+      'ChatMessage keeps legacy payload compatible when comparison fields are absent',
       () {
     final message = ChatMessage.fromJson({
       'id': 'assistant-1',
@@ -63,7 +64,8 @@ void main() {
     expect(message.catalogReport, isNull);
   });
 
-  test('ChatMessage degrades malformed comparison request and report independently',
+  test(
+      'ChatMessage degrades malformed comparison request and report independently',
       () {
     final malformedRequest = ChatMessage.fromJson({
       'id': 'assistant-1',
@@ -251,7 +253,8 @@ void main() {
     expect(controller.state.deliveryState, ChatDeliveryState.completed);
   });
 
-  test('completed event prefers message-bound report over legacy top-level report',
+  test(
+      'completed event prefers message-bound report over legacy top-level report',
       () async {
     final stream = StreamController<AgentStreamEvent>();
     final controller = AgentChatController(
@@ -271,8 +274,10 @@ void main() {
     await stream.close();
     await send;
 
-    expect(controller.state.messages.last.catalogReport?.title, 'Message report');
-    expect(controller.state.messages.last.comparisonRequest?.targetType, 'PROJECT');
+    expect(
+        controller.state.messages.last.catalogReport?.title, 'Message report');
+    expect(controller.state.messages.last.comparisonRequest?.targetType,
+        'PROJECT');
   });
 
   test('completed event falls back to legacy top-level report', () async {
@@ -289,11 +294,14 @@ void main() {
     await stream.close();
     await send;
 
-    expect(controller.state.messages.last.catalogReport?.title, 'Legacy report');
-    expect(controller.state.messages.last.comparisonRequest?.targetType, 'PROJECT');
+    expect(
+        controller.state.messages.last.catalogReport?.title, 'Legacy report');
+    expect(controller.state.messages.last.comparisonRequest?.targetType,
+        'PROJECT');
   });
 
-  test('openSession restores message-bound comparison request and report', () async {
+  test('openSession restores message-bound comparison request and report',
+      () async {
     final controller = AgentChatController(
       repository: _FakeAgentRepository(messages: [
         ChatMessage(
@@ -310,8 +318,10 @@ void main() {
 
     await controller.openSession(_session);
 
-    expect(controller.state.messages.single.comparisonRequest, _comparisonRequest);
-    expect(controller.state.messages.single.catalogReport?.title, 'History report');
+    expect(
+        controller.state.messages.single.comparisonRequest, _comparisonRequest);
+    expect(controller.state.messages.single.catalogReport?.title,
+        'History report');
   });
 
   test('failed event retains partial text and marks local assistant retryable',
@@ -607,21 +617,6 @@ ChatTurn _comparisonTurn({
       catalogItems: const [],
       intent: 'COMPARISON',
       queryTarget: 'PROJECT',
-      nextAction: 'NONE',
-    );
-
-ChatTurn _turn(String content) => ChatTurn(
-      message: ChatMessage(
-        id: 'assistant-1',
-        sessionId: 'session-1',
-        role: 'ASSISTANT',
-        content: content,
-        createdAt: '2026-08-06T10:01:00',
-      ),
-      catalogReport: null,
-      catalogItems: const [],
-      intent: 'GENERAL_CHAT',
-      queryTarget: null,
       nextAction: 'NONE',
     );
 

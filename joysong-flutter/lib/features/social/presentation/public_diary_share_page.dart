@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/network/api_client.dart';
 import 'package:joysong_flutter/core/network/public_media_url.dart';
-import 'package:joysong_flutter/features/social/domain/social_models.dart';
 import 'package:joysong_flutter/features/social/presentation/diary_media_grid.dart';
 
 final class PublicDiarySharePage extends StatefulWidget {
@@ -260,10 +259,7 @@ List<String> _stringList(Object? value) {
   final raw = value.toString().trim();
   if (raw.isEmpty) return const [];
   return List.unmodifiable(
-    raw
-        .split(',')
-        .map((item) => item.trim())
-        .where((item) => item.isNotEmpty),
+    raw.split(',').map((item) => item.trim()).where((item) => item.isNotEmpty),
   );
 }
 
@@ -330,8 +326,11 @@ final class _ShareHeader extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             children: [
-              _StatChip(label: english ? 'Likes' : '点赞', value: share.likeCount),
-              _StatChip(label: english ? 'Comments' : '评论', value: share.commentCount),
+              _StatChip(
+                  label: english ? 'Likes' : '点赞', value: share.likeCount),
+              _StatChip(
+                  label: english ? 'Comments' : '评论',
+                  value: share.commentCount),
               _StatChip(label: english ? 'Rating' : '评分', value: share.rating),
             ],
           ),
@@ -369,17 +368,23 @@ final class _AssociationChips extends StatelessWidget {
     final chips = <Widget>[
       if (share.project != null)
         Chip(
-          label: Text(english ? 'Project: ${share.project!.name}' : '项目：${share.project!.name}'),
+          label: Text(english
+              ? 'Project: ${share.project!.name}'
+              : '项目：${share.project!.name}'),
           visualDensity: VisualDensity.compact,
         ),
       if (share.doctor != null)
         Chip(
-          label: Text(english ? 'Doctor: ${share.doctor!.name}' : '医生：${share.doctor!.name}'),
+          label: Text(english
+              ? 'Doctor: ${share.doctor!.name}'
+              : '医生：${share.doctor!.name}'),
           visualDensity: VisualDensity.compact,
         ),
       if (share.institution != null)
         Chip(
-          label: Text(english ? 'Institution: ${share.institution!.name}' : '机构：${share.institution!.name}'),
+          label: Text(english
+              ? 'Institution: ${share.institution!.name}'
+              : '机构：${share.institution!.name}'),
           visualDensity: VisualDensity.compact,
         ),
     ];

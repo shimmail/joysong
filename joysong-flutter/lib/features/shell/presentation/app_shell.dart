@@ -168,7 +168,8 @@ class _AppShellState extends State<AppShell> {
     _messagingRepository = MessagingRepositoryImpl(
       ApiMessagingRemoteDataSource(apiClient),
     );
-    _walletRepository = WalletRepositoryImpl(ApiWalletRemoteDataSource(apiClient));
+    _walletRepository =
+        WalletRepositoryImpl(ApiWalletRemoteDataSource(apiClient));
     _walletController = WalletController(_walletRepository!);
     _notificationController = NotificationController(_messagingRepository!);
     _notificationController!.addListener(_handleNotificationStateChanged);
@@ -1210,14 +1211,8 @@ class _AppShellState extends State<AppShell> {
       context,
       rootNavigator: true,
     ).widget.onGenerateRoute;
-    return WillPopScope(
-      onWillPop: () async {
-        if (_contentNavigator.canPop()) {
-          _contentNavigator.pop();
-          return false;
-        }
-        return true;
-      },
+    return NavigatorPopHandler<void>(
+      onPopWithResult: (_) => _contentNavigator.pop(),
       child: Scaffold(
         body: SafeArea(
           bottom: false,
@@ -1230,7 +1225,7 @@ class _AppShellState extends State<AppShell> {
               ),
             ],
             onGenerateRoute: authenticatedRouteFactory,
-            onPopPage: (route, result) => route.didPop(result),
+            onDidRemovePage: (_) {},
           ),
         ),
         bottomNavigationBar: _KeyboardAwareBottomNavigation(

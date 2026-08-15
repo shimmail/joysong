@@ -258,6 +258,15 @@ class CatalogReviewCard extends StatelessWidget {
                         url: images[index],
                         width: 88,
                         height: 88,
+                        errorBuilder: (context, _, __) => Container(
+                          width: 88,
+                          height: 88,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .surfaceContainerHighest,
+                          alignment: Alignment.center,
+                          child: const Icon(Icons.broken_image_outlined),
+                        ),
                       ),
                     ),
                   ),

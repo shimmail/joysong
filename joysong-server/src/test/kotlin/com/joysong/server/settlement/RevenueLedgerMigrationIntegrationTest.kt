@@ -13,10 +13,12 @@ class RevenueLedgerMigrationIntegrationTest {
     fun `isolated database names derive from active worktree directory`() {
         val fresh = databaseName("fresh")
         val duplicates = databaseName("duplicates")
+        val expectedWorktreeId = activeWorktreeDirectory().fileName.toString().lowercase()
+            .replace(Regex("[^a-z0-9]+"), "_")
+            .trim('_')
 
-        assertTrue(fresh.startsWith("myapp_worktree_"))
-        assertTrue(fresh.contains("revenue_sharing"))
-        assertTrue(fresh != duplicates)
+        assertEquals("myapp_worktree_${expectedWorktreeId}_fresh", fresh)
+        assertEquals("myapp_worktree_${expectedWorktreeId}_duplicates", duplicates)
     }
 
     @Test
@@ -83,13 +85,15 @@ class RevenueLedgerMigrationIntegrationTest {
     }
 
     private fun databaseName(scenario: String): String {
-        val current = Paths.get("").toAbsolutePath().normalize()
-        val worktreeDirectory = if (current.fileName.toString() == "joysong-server") current.parent else current
-        val worktreeId = worktreeDirectory.fileName.toString().lowercase()
+        val worktreeId = activeWorktreeDirectory().fileName.toString().lowercase()
             .replace(Regex("[^a-z0-9]+"), "_")
             .trim('_')
         require(worktreeId.isNotBlank())
         return "myapp_worktree_${worktreeId}_$scenario"
+    }
+
+    private fun activeWorktreeDirectory() = Paths.get("").toAbsolutePath().normalize().let { current ->
+        if (current.fileName.toString() == "joysong-server") current.parent else current
     }
 
     private fun databaseUrl(rootUrl: String, database: String) = rootUrl.replace(Regex("/mysql(?:\\?.*)?$"), "/$database")
