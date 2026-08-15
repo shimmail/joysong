@@ -90,10 +90,9 @@ end
 
 == 最终 COMPARISON 专用序列 ==
 alt final intent == COMPARISON
-    Chat -> Lifecycle: 仅在最终 COMPARISON 从最新 message-bound assistant message 恢复 ComparisonRequest
-    Lifecycle -> DB: 读取已持久化 message metadata
-    DB --> Lifecycle: 最新 message-bound request（可为空）
-    Lifecycle --> Chat: previous incomplete request（仅对比路由使用）
+    Chat -> Lifecycle: 仅在最终 COMPARISON 投影已加载的历史 assistant messages
+    Lifecycle -> Lifecycle: 从 message metadata 恢复并规范化 request（内存）
+    Lifecycle --> Chat: latest valid comparison request（完整或未完成，可为空）
 
     Chat -> Catalog: promptEvidence(..., reportMode=COMPARISON)【唯一一次目录检索】
     Catalog -> Search: 统一关键词搜索
@@ -103,7 +102,7 @@ alt final intent == COMPARISON
     Catalog -> Catalog: 去重、排序、限量
     Catalog --> Chat: raw catalog evidence
 
-    Chat -> Compare: build + normalize（当前命名对象、上下文、未完成请求）
+    Chat -> Compare: build + normalize（当前命名对象、上下文、历史有效请求）
     Compare --> Chat: normalized request（同类型、2～4 operands、target、dimensions/constraints）
 
     alt request incomplete
