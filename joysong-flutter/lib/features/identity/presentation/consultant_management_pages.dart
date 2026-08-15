@@ -9,6 +9,7 @@ class ConsultantMembershipPage extends StatelessWidget {
   const ConsultantMembershipPage({
     required this.repository,
     required this.discoverRepository,
+    this.canApply = true,
     super.key,
   });
 
@@ -16,6 +17,7 @@ class ConsultantMembershipPage extends StatelessWidget {
 
   // Retained only so older route call sites continue to compile.
   final DiscoverRepository discoverRepository;
+  final bool canApply;
 
   @override
   Widget build(BuildContext context) => InstitutionRelationshipsPage(
