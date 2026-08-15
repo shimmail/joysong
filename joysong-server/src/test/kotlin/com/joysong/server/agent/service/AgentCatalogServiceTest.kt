@@ -189,6 +189,41 @@ class AgentCatalogServiceTest {
     }
 
     @Test
+    fun `current institution names survive inherited search candidate truncation`() {
+        val inheritedCandidates = (1..4).map { index ->
+            InstitutionEntity(
+                id = "prior-$index",
+                name = "历史机构$index",
+                city = "上海",
+                rating = BigDecimal("4.${9 - index}")
+            )
+        }
+        val currentCandidates = listOf(
+            InstitutionEntity(id = "current-a", name = "本轮甲机构", city = "上海", rating = BigDecimal("4.2")),
+            InstitutionEntity(id = "current-b", name = "本轮乙机构", city = "上海", rating = BigDecimal("4.1"))
+        )
+        val candidates = inheritedCandidates + currentCandidates
+        stubCatalogSearch(
+            result = DiscoverSearchResult(institutions = candidates),
+            institutions = candidates
+        )
+
+        val evidence = service.promptEvidence(
+            query = "本轮甲机构和本轮乙机构对比",
+            searchQuery = "历史机构1、历史机构2、历史机构3、历史机构4、本轮甲机构和本轮乙机构对比",
+            targetQuery = "本轮甲机构和本轮乙机构对比",
+            queryTarget = AgentQueryTarget.INSTITUTION,
+            reportMode = "COMPARISON"
+        )
+
+        assertEquals(
+            listOf("current-a", "current-b", "prior-1", "prior-2"),
+            evidence.report!!.items.map { it.id }
+        )
+        verify(exactly = 1) { discoverSearchService.search(any<DiscoverSearchRequest>()) }
+    }
+
+    @Test
     fun `auto report with unresolved target retains doctor practice institutions and city behavior`() {
         val shanghaiDoctor = DoctorEntity(id = "doctor-shanghai", name = "李医生")
         val beijingDoctor = DoctorEntity(id = "doctor-beijing", name = "王医生")

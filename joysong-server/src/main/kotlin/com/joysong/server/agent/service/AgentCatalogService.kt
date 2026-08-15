@@ -128,6 +128,7 @@ class AgentCatalogService(
         val institutions = institutionCandidates
             .distinctBy { it.id }
             .sortedByDescending { it.rating }
+            .prioritizeExactNameMatches(query) { it.name }
             .take(4)
         val relatedDoctorIds = if (reportTarget == ReportTarget.DOCTOR && discoveredProjects.isNotEmpty()) {
             val discoveredProjectIds = discoveredProjects.map { it.id }.toSet()
@@ -158,10 +159,14 @@ class AgentCatalogService(
                 }
             }
             .sortedByDescending { it.rating }
+            .prioritizeExactNameMatches(query) { it.name }
             .take(4)
         val searchedProjectEntities = projectRepository.findAllById(unifiedSearch.projects.map { it.id })
             .associateBy { it.id }
-        val projects = unifiedSearch.projects.mapNotNull { searchedProjectEntities[it.id] }.take(4)
+        val projects = unifiedSearch.projects
+            .mapNotNull { searchedProjectEntities[it.id] }
+            .prioritizeExactNameMatches(query) { it.name }
+            .take(4)
 
         val institutionIds = institutions.map { it.id }.toSet()
         val projectIds = (projects.map { it.id } + discoveredProjects.map { it.id }).toSet()
@@ -197,7 +202,15 @@ class AgentCatalogService(
         val directlyMatchedInstitutionProjectIds = directlyMatchedInstitutionProjects.map { it.id }.toSet()
         val institutionProjects = when {
             reportTarget != ReportTarget.DOCTOR && directlyMatchedInstitutionProjects.isNotEmpty() ->
-                directlyMatchedInstitutionProjects.take(8)
+                directlyMatchedInstitutionProjects
+                    .prioritizeExactNameMatches(query) { offering ->
+                        val institution = allInstitutions[offering.institutionId]
+                        val project = allProjectsById[offering.projectId]
+                        if (institution == null || project == null) "" else {
+                            "${institution.name} · ${institutionProjectDetailResolver.resolve(offering, project).name}"
+                        }
+                    }
+                    .take(8)
             discoveredOfferingIds.isNotEmpty() -> allInstitutionProjects.filter { it.id in discoveredOfferingIds }
             else -> allInstitutionProjects.filter {
                 it.isActive && when {
@@ -206,7 +219,15 @@ class AgentCatalogService(
                     explicitlyNamedInstitutionIds.isNotEmpty() -> it.institutionId in explicitlyNamedInstitutionIds
                     else -> effectiveSearchQuery.contains(it.id, true)
                 }
-            }.take(8)
+            }
+                .prioritizeExactNameMatches(query) { offering ->
+                    val institution = allInstitutions[offering.institutionId]
+                    val project = allProjectsById[offering.projectId]
+                    if (institution == null || project == null) "" else {
+                        "${institution.name} · ${institutionProjectDetailResolver.resolve(offering, project).name}"
+                    }
+                }
+                .take(8)
         }
         val institutionById = institutionRepository.findAllById(institutionProjects.map { it.institutionId }).associateBy { it.id }
         val projectById = projectRepository.findAllById(institutionProjects.map { it.projectId }).associateBy { it.id }
@@ -576,6 +597,16 @@ class AgentCatalogService(
             noMatch = items.isEmpty(),
             report = report
         )
+    }
+
+    private fun <T> List<T>.prioritizeExactNameMatches(
+        query: String,
+        entityName: (T) -> String
+    ): List<T> {
+        val (currentMatches, remaining) = partition { item ->
+            entityName(item).let { name -> name.isNotBlank() && query.contains(name, ignoreCase = true) }
+        }
+        return currentMatches + remaining
     }
 
     private fun requestedInstitutionCount(query: String): Int {
