@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -81,6 +83,28 @@ void main() {
         findsOneWidget);
     expect(find.text('https://cdn.example.com/platform-gallery.jpg'),
         findsOneWidget);
+    final coverRemove = find.byWidgetPredicate(
+        (widget) => widget is IconButton && widget.tooltip == '移除封面图');
+    final galleryRemove = find.byWidgetPredicate(
+        (widget) => widget is IconButton && widget.tooltip == '移除项目图片');
+    expect(coverRemove, findsOneWidget);
+    expect(galleryRemove, findsOneWidget);
+    expect(
+      find.ancestor(
+        of: coverRemove,
+        matching: find.byWidgetPredicate((widget) =>
+            widget is Semantics && widget.properties.label == '移除封面图'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.ancestor(
+        of: galleryRemove,
+        matching: find.byWidgetPredicate((widget) =>
+            widget is Semantics && widget.properties.label == '移除项目图片'),
+      ),
+      findsOneWidget,
+    );
 
     await tester.tap(find.byKey(const Key('platform-gallery-upload')));
     await tester.pump();
@@ -131,16 +155,22 @@ void main() {
       expect(find.textContaining(inherited), findsWidgets,
           reason: 'missing inherited value $inherited');
     }
-    for (final key in const [
-      'institution-name',
-      'institution-category',
-      'institution-description',
-      'institution-tags',
-      'institution-slogan',
-      'institution-detail-content',
-    ]) {
-      expect(_text(tester, key), isEmpty,
-          reason: '$key must remain override-only');
+    const inheritedHints = {
+      'institution-name': 'Hydrating Facial',
+      'institution-category': 'Skin',
+      'institution-description': 'Inherited description',
+      'institution-tags': 'hydration,gentle',
+      'institution-slogan': 'Glow naturally',
+      'institution-detail-content': 'Inherited plain detail',
+      'institution-price': '899.25',
+      'institution-sales-count': '18',
+    };
+    for (final entry in inheritedHints.entries) {
+      final field = tester.widget<TextField>(find.byKey(Key(entry.key)));
+      expect(field.controller!.text, isEmpty,
+          reason: '${entry.key} must remain override-only');
+      expect(field.decoration?.hintText, entry.value,
+          reason: '${entry.key} must expose its inherited hint');
     }
     expect(_dropdownValue(tester, 'institution-currency'), 'USD');
     expect(
@@ -153,11 +183,44 @@ void main() {
     );
     expect(find.text('平台比例（只读）：10.25%'), findsOneWidget);
 
+    final orderedFinders = <Finder>[
+      _dropdown('institution-id'),
+      _dropdown('institution-project'),
+      find.byKey(const Key('institution-applicant-notice')),
+      find.byKey(const Key('institution-inheritance-preview')),
+      find.byKey(const Key('institution-name')),
+      find.byKey(const Key('institution-category')),
+      find.byKey(const Key('institution-description')),
+      find.byKey(const Key('institution-tags')),
+      find.byKey(const Key('institution-slogan')),
+      find.byKey(const Key('institution-detail-content')),
+      find.byKey(const Key('institution-price')),
+      find.byKey(const Key('institution-original-price')),
+      _dropdown('institution-currency'),
+      find.byKey(const Key('institution-cover-upload')),
+      find.byKey(const Key('institution-gallery-upload')),
+      find.byKey(const Key('institution-sales-count')),
+      find.byKey(const Key('institution-is-active')),
+      find.byKey(const Key('institution-consultation-fee')),
+      find.byKey(const Key('institution-consultant-rate')),
+      find.byKey(const Key('institution-rate')),
+      find.byKey(const Key('institution-platform-rate')),
+      find.byKey(const Key('institution-doctor-rate')),
+      find.byKey(const Key('institution-notes')),
+    ];
+    final tops =
+        orderedFinders.map(tester.getTopLeft).map((p) => p.dy).toList();
+    expect(tops, orderedEquals([...tops]..sort()));
+    expect(find.textContaining('评分'), findsNothing);
+    expect(find.textContaining('评价数'), findsNothing);
+    expect(find.textContaining('选择医生'), findsNothing);
+    expect(find.textContaining('多医生'), findsNothing);
+
     await tester.enterText(
-        find.byKey(const Key('institution-consultant-rate')), '9.5');
-    await tester.enterText(find.byKey(const Key('institution-rate')), '40.25');
+        find.byKey(const Key('institution-consultant-rate')), '33.33');
+    await tester.enterText(find.byKey(const Key('institution-rate')), '33.33');
     await tester.pump();
-    expect(find.text('医生比例（自动推导）：40%'), findsOneWidget);
+    expect(find.text('医生比例（自动推导）：23.09%'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('institution-cover-upload')));
     await tester.pump();
@@ -284,13 +347,64 @@ void main() {
   });
 
   testWidgets(
+      'platform submit ignores a successful refresh completed after the page is disposed',
+      (tester) async {
+    _useLargeSurface(tester);
+    final repository = _ProjectRequestRepository();
+    await tester.pumpWidget(_app(PlatformProjectRequestPage(
+      repository: repository,
+      context: _doctorContext,
+    )));
+    await tester.pumpAndSettle();
+    await _fillPlatformDraft(tester, referencePrice: '199.99');
+    final refresh = Completer<List<ProfessionalProjectRequest>>();
+    final refreshStarted = Completer<void>();
+    repository.nextRequestList = refresh;
+    repository.requestListStarted = refreshStarted;
+    final nameController = tester
+        .widget<TextField>(find.byKey(const Key('platform-name')))
+        .controller!;
+
+    await tester.tap(find.byKey(const Key('platform-submit')));
+    await tester.pump();
+    await refreshStarted.future;
+    expect(repository.platformSubmissions, hasLength(1));
+    expect(nameController.text, 'Retained platform name');
+
+    await tester.pumpWidget(_app(const SizedBox.shrink()));
+    refresh.complete(const []);
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(nameController.text, 'Retained platform name',
+        reason: 'a disposed form must not be cleared by a late refresh');
+  });
+
+  testWidgets(
       'immutable history is role scoped and creation reviews dispatch to the exact authority endpoint',
       (tester) async {
     _useLargeSurface(tester);
     final repository = _ProjectRequestRepository()
       ..requests = [
-        _request(id: 'platform-own', type: 'PLATFORM', doctorId: 'doctor-1'),
-        _request(id: 'platform-other', type: 'PLATFORM', doctorId: 'doctor-2'),
+        _request(
+          id: 'platform-own',
+          type: 'PLATFORM',
+          doctorId: 'doctor-1',
+          slogan: '',
+          coverImage: '',
+          images: const [],
+          categoryTags: const [],
+        ),
+        _request(
+          id: 'platform-other',
+          type: 'PLATFORM',
+          doctorId: 'doctor-2',
+          slogan: null,
+          coverImage: null,
+          images: null,
+          categoryTags: null,
+        ),
         _request(
           id: 'institution-target',
           type: 'INSTITUTION',
@@ -343,22 +457,40 @@ void main() {
     expect(find.byKey(const Key('professional-request-platform-own')),
         findsNothing);
     expect(find.textContaining('Complete immutable detail'), findsOneWidget);
+    expect(find.text('申请编号：institution-target'), findsOneWidget);
+    expect(find.text('机构编号：inst-1'), findsOneWidget);
+    expect(find.text('机构名称：Joysong Clinic'), findsOneWidget);
+    expect(find.text('平台项目编号：project-1'), findsOneWidget);
+    expect(find.text('平台项目名称：Hydrating Facial'), findsOneWidget);
     expect(find.text('面诊费：80.25'), findsOneWidget);
     expect(find.text('顾问比例：12.5%'), findsOneWidget);
     expect(find.text('机构比例：42.25%'), findsOneWidget);
-    expect(find.text('平台比例：10%'), findsOneWidget);
-    expect(find.text('医生比例：35.25%'), findsOneWidget);
+    expect(find.text('当前平台比例：10%'), findsOneWidget);
+    expect(find.text('按当前平台比例推导的医生净比例：35.25%'), findsOneWidget);
+    expect(find.text('审核意见：未提供'), findsOneWidget);
+    expect(find.text('审核人：未提供'), findsOneWidget);
+    expect(find.text('生成平台项目：未提供'), findsOneWidget);
     expect(find.byType(TextField), findsNothing,
         reason: 'the submitted snapshot must be immutable');
 
     await tester
         .tap(find.byKey(const Key('review-creation-institution-target')));
     await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<DropdownButtonFormField<String>>(
+            find.byKey(const Key('creation-review-decision')),
+          )
+          .decoration
+          .labelText,
+      '审核决定',
+    );
     await _selectReviewDecision(tester, 'REJECTED');
     await tester.tap(find.byKey(const Key('creation-review-confirm')));
     await tester.pump();
     expect(find.byType(AlertDialog), findsOneWidget,
         reason: 'blank rejection note must not close the dialog');
+    expect(find.text('驳回时必须填写审核意见'), findsOneWidget);
     await tester.enterText(
         find.byKey(const Key('creation-review-note')), 'Not ready');
     await tester.tap(find.byKey(const Key('creation-review-confirm')));
@@ -378,6 +510,19 @@ void main() {
         findsNothing);
 
     await tester.pumpWidget(_app(PlatformProjectRequestPage(
+      key: const ValueKey('non-admin-platform-review'),
+      repository: repository,
+      context: _legalContext,
+      reviewMode: true,
+    )));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('professional-request-platform-own')),
+        findsNothing);
+    expect(find.byKey(const Key('professional-request-platform-other')),
+        findsNothing);
+    expect(find.byKey(const Key('review-creation-platform-own')), findsNothing);
+
+    await tester.pumpWidget(_app(PlatformProjectRequestPage(
       key: const ValueKey('admin-platform'),
       repository: repository,
       context: _adminContext,
@@ -388,6 +533,14 @@ void main() {
         findsOneWidget);
     expect(find.byKey(const Key('professional-request-institution-target')),
         findsNothing);
+    expect(find.text('项目标语：空字符串'), findsOneWidget);
+    expect(find.text('封面图：空字符串'), findsOneWidget);
+    expect(find.text('项目图片：空列表'), findsOneWidget);
+    expect(find.text('分类标签：空列表'), findsOneWidget);
+    expect(find.text('项目标语：未提供'), findsOneWidget);
+    expect(find.text('封面图：未提供'), findsOneWidget);
+    expect(find.text('项目图片：未提供'), findsOneWidget);
+    expect(find.text('分类标签：未提供'), findsOneWidget);
     await tester.tap(find.byKey(const Key('review-creation-platform-own')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('creation-review-confirm')));
@@ -551,6 +704,10 @@ ProfessionalProjectRequest _request({
   required String type,
   required String doctorId,
   String? institutionId,
+  String? slogan = 'Clinic glow',
+  String? coverImage = 'cover.jpg',
+  List<String>? images = const ['one.jpg', 'two.jpg'],
+  List<String>? categoryTags = const ['facial'],
 }) =>
     ProfessionalProjectRequest.fromJson({
       'id': id,
@@ -569,14 +726,14 @@ ProfessionalProjectRequest _request({
       'category': 'Skin',
       'description': 'Clinic description',
       'tags': ['hydration', 'signature'],
-      'slogan': 'Clinic glow',
+      'slogan': slogan,
       'detailContent': 'Complete immutable detail',
       'currency': 'CNY',
-      'coverImage': 'cover.jpg',
-      'images': ['one.jpg', 'two.jpg'],
+      'coverImage': coverImage,
+      'images': images,
       'salesCount': 7,
       'referencePrice': type == 'PLATFORM' ? 899.25 : null,
-      'categoryTags': type == 'PLATFORM' ? ['facial'] : null,
+      'categoryTags': type == 'PLATFORM' ? categoryTags : null,
       'price': type == 'INSTITUTION' ? 799.5 : null,
       'originalPrice': type == 'INSTITUTION' ? 999.99 : null,
       'isActive': type == 'INSTITUTION' ? true : null,
@@ -610,6 +767,8 @@ final class _ProjectRequestRepository implements IdentityRepository {
   bool platformSubmitError = false;
   bool institutionSubmitError = false;
   bool failNextRequestList = false;
+  Completer<List<ProfessionalProjectRequest>>? nextRequestList;
+  Completer<void>? requestListStarted;
 
   @override
   Future<ManagementContext> loadManagementContext() async => managementContext;
@@ -617,6 +776,13 @@ final class _ProjectRequestRepository implements IdentityRepository {
   @override
   Future<List<ProfessionalProjectRequest>>
       listProfessionalProjectRequests() async {
+    final pending = nextRequestList;
+    if (pending != null) {
+      nextRequestList = null;
+      requestListStarted?.complete();
+      requestListStarted = null;
+      return pending.future;
+    }
     if (failNextRequestList) {
       failNextRequestList = false;
       throw StateError('refresh failed');

@@ -1053,6 +1053,7 @@ class _ManagementCapabilities extends StatelessWidget {
             repository: repository,
             context: this.context,
             reviewMode: true,
+            pickAndUploadImage: doctorImagePicker,
           ),
         ),
       );
@@ -1077,6 +1078,7 @@ class _ManagementCapabilities extends StatelessWidget {
             repository: repository,
             context: this.context,
             reviewMode: true,
+            pickAndUploadImage: doctorImagePicker,
           ),
         ),
       );

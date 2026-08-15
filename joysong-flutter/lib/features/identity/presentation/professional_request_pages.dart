@@ -469,15 +469,14 @@ class _PlatformProjectRequestPageState
     try {
       final requests =
           await widget.repository.listProfessionalProjectRequests();
-      if (mounted) {
-        setState(() {
-          _requests = requests
-              .where((item) => item.requestType == 'PLATFORM')
-              .where(_isVisible)
-              .toList(growable: false);
-          _error = null;
-        });
-      }
+      if (!mounted) return false;
+      setState(() {
+        _requests = requests
+            .where((item) => item.requestType == 'PLATFORM')
+            .where(_isVisible)
+            .toList(growable: false);
+        _error = null;
+      });
       return true;
     } catch (_) {
       if (mounted) setState(() => _error = '项目申请加载失败，请重试');
@@ -563,6 +562,7 @@ class _PlatformProjectRequestPageState
                 values: _coverImage.isEmpty ? const [] : [_coverImage],
                 addKey: const Key('platform-cover-upload'),
                 addLabel: context.localized('上传封面图', 'Upload cover'),
+                removeLabel: context.localized('移除封面图', 'Remove cover image'),
                 enabled: !_saving &&
                     !_uploading &&
                     widget.pickAndUploadImage != null,
@@ -575,6 +575,8 @@ class _PlatformProjectRequestPageState
                 values: _images,
                 addKey: const Key('platform-gallery-upload'),
                 addLabel: context.localized('添加项目图片', 'Add gallery image'),
+                removeLabel:
+                    context.localized('移除项目图片', 'Remove gallery image'),
                 enabled: !_saving &&
                     !_uploading &&
                     widget.pickAndUploadImage != null,
@@ -678,7 +680,8 @@ class _PlatformProjectRequestPageState
     });
     try {
       await widget.repository.submitPlatformProjectRequest(draft);
-      if (await _load()) _clearDraft();
+      final refreshed = await _load();
+      if (refreshed && mounted) _clearDraft();
     } catch (_) {
       if (mounted) setState(() => _error = '项目申请提交失败，请稍后重试');
     } finally {
@@ -709,6 +712,7 @@ class _PlatformProjectRequestPageState
   }
 
   void _clearDraft() {
+    if (!mounted) return;
     for (final controller in [
       _name,
       _referencePrice,
@@ -1041,6 +1045,8 @@ class _InstitutionProjectRequestsPageState
                           : [_selectedProject!.coverImage],
                       addKey: const Key('institution-cover-upload'),
                       addLabel: context.localized('上传封面图', 'Upload cover'),
+                      removeLabel:
+                          context.localized('移除封面图', 'Remove cover image'),
                       enabled: !_saving &&
                           !_uploading &&
                           widget.pickAndUploadImage != null,
@@ -1056,6 +1062,8 @@ class _InstitutionProjectRequestsPageState
                       addKey: const Key('institution-gallery-upload'),
                       addLabel:
                           context.localized('添加项目图片', 'Add gallery image'),
+                      removeLabel:
+                          context.localized('移除项目图片', 'Remove gallery image'),
                       enabled: !_saving &&
                           !_uploading &&
                           widget.pickAndUploadImage != null,
@@ -1113,7 +1121,7 @@ class _InstitutionProjectRequestsPageState
                       key: const Key('institution-platform-rate'),
                     ),
                     Text(
-                      '${context.localized('医生比例（自动推导）', 'Doctor rate (derived)')}：${_formatNumber(_derivedDoctorRate)}%',
+                      '${context.localized('医生比例（自动推导）', 'Doctor rate (derived)')}：${_formatRateHundredths(_derivedDoctorRateHundredths)}%',
                       key: const Key('institution-doctor-rate'),
                     ),
                     const SizedBox(height: 12),
@@ -1237,14 +1245,14 @@ class _InstitutionProjectRequestsPageState
     });
   }
 
-  num? get _derivedDoctorRate {
-    final platform = _platformRate;
-    final institution = num.tryParse(_institutionRate.text.trim());
-    final consultant = num.tryParse(_consultantRate.text.trim());
+  int? get _derivedDoctorRateHundredths {
+    final platform = _rateHundredths('${_platformRate ?? ''}');
+    final institution = _rateHundredths(_institutionRate.text);
+    final consultant = _rateHundredths(_consultantRate.text);
     if (platform == null || institution == null || consultant == null) {
       return null;
     }
-    return 100 - platform - institution - consultant;
+    return 10000 - platform - institution - consultant;
   }
 
   Future<bool> _refreshRequests() async {
@@ -1289,6 +1297,7 @@ class _InstitutionProjectRequestsPageState
   }
 
   void _clearDraft() {
+    if (!mounted) return;
     for (final controller in [
       _name,
       _category,
@@ -2272,6 +2281,7 @@ class _ReviewDialog extends StatefulWidget {
 class _ReviewDialogState extends State<_ReviewDialog> {
   final _note = TextEditingController();
   String _decision = 'APPROVED';
+  String? _noteError;
 
   @override
   void dispose() {
@@ -2288,17 +2298,28 @@ class _ReviewDialogState extends State<_ReviewDialog> {
             DropdownButtonFormField<String>(
               key: widget.decisionKey,
               initialValue: _decision,
+              decoration: InputDecoration(
+                labelText: context.localized('审核决定', 'Review decision'),
+              ),
               items: widget.decisions,
-              onChanged: (value) =>
-                  setState(() => _decision = value ?? 'APPROVED'),
+              onChanged: (value) => setState(() {
+                _decision = value ?? 'APPROVED';
+                _noteError = null;
+              }),
             ),
             const SizedBox(height: 12),
             TextField(
               key: widget.noteKey,
               controller: _note,
               maxLines: 3,
+              onChanged: (value) {
+                if (_noteError != null && value.trim().isNotEmpty) {
+                  setState(() => _noteError = null);
+                }
+              },
               decoration: InputDecoration(
                 labelText: context.localized('审核意见', 'Review note'),
+                errorText: _noteError,
               ),
             ),
           ],
@@ -2311,7 +2332,16 @@ class _ReviewDialogState extends State<_ReviewDialog> {
           FilledButton(
             key: widget.confirmKey,
             onPressed: () {
-              if (_decision != 'APPROVED' && _note.text.trim().isEmpty) return;
+              if (_decision != 'APPROVED' && _note.text.trim().isEmpty) {
+                setState(() {
+                  _noteError = _decision == 'REJECTED'
+                      ? context.localized('驳回时必须填写审核意见',
+                          'A review note is required when rejecting.')
+                      : context.localized('要求修改时必须填写审核意见',
+                          'A review note is required when requesting changes.');
+                });
+                return;
+              }
               Navigator.of(context).pop((
                 decision: _decision,
                 note: _note.text.trim(),
@@ -2350,6 +2380,7 @@ Widget _imageUploadField(
   required List<String> values,
   required Key addKey,
   required String addLabel,
+  required String removeLabel,
   required bool enabled,
   required Future<void> Function() onAdd,
   required ValueChanged<String> onRemove,
@@ -2372,10 +2403,15 @@ Widget _imageUploadField(
                 contentPadding: EdgeInsets.zero,
                 leading: const Icon(Icons.image_outlined),
                 title: Text(entry.$2),
-                trailing: IconButton(
-                  key: ValueKey('${addKey.toString()}-remove-${entry.$1}'),
-                  onPressed: enabled ? () => onRemove(entry.$2) : null,
-                  icon: const Icon(Icons.delete_outline),
+                trailing: Semantics(
+                  label: removeLabel,
+                  button: true,
+                  child: IconButton(
+                    key: ValueKey('${addKey.toString()}-remove-${entry.$1}'),
+                    tooltip: removeLabel,
+                    onPressed: enabled ? () => onRemove(entry.$2) : null,
+                    icon: const Icon(Icons.delete_outline),
+                  ),
                 ),
               ),
             OutlinedButton.icon(
@@ -2423,41 +2459,44 @@ Widget _professionalRequestSnapshot(
 }) {
   final split = request.institutionSplit;
   final rows = <String>[
+    '${context.localized('申请编号', 'Request ID')}：${request.id}',
     '${context.localized('申请类型', 'Request type')}：${request.requestType}',
-    '${context.localized('申请医生', 'Applicant doctor')}：${request.doctorName} (${request.doctorId})',
-    '${context.localized('机构', 'Institution')}：${request.institutionName ?? request.institutionId ?? '-'}',
-    '${context.localized('平台项目', 'Platform project')}：${request.projectName ?? request.projectId ?? '-'}',
-    '${context.localized('项目名称', 'Name')}：${request.name ?? '-'}',
-    '${context.localized('项目分类', 'Category')}：${request.category ?? '-'}',
-    '${context.localized('项目说明', 'Description')}：${request.description ?? '-'}',
-    '${context.localized('项目标签', 'Tags')}：${request.tags?.join(', ') ?? '-'}',
-    '${context.localized('项目标语', 'Slogan')}：${request.slogan ?? '-'}',
-    '${context.localized('项目详情', 'Detail')}：${request.detailContent ?? '-'}',
+    '${context.localized('申请医生', 'Applicant doctor')}：${_snapshotText(context, request.doctorName)} (${request.doctorId})',
+    '${context.localized('机构编号', 'Institution ID')}：${_snapshotText(context, request.institutionId)}',
+    '${context.localized('机构名称', 'Institution name')}：${_snapshotText(context, request.institutionName)}',
+    '${context.localized('平台项目编号', 'Platform project ID')}：${_snapshotText(context, request.projectId)}',
+    '${context.localized('平台项目名称', 'Platform project name')}：${_snapshotText(context, request.projectName)}',
+    '${context.localized('项目名称', 'Name')}：${_snapshotText(context, request.name)}',
+    '${context.localized('项目分类', 'Category')}：${_snapshotText(context, request.category)}',
+    '${context.localized('项目说明', 'Description')}：${_snapshotText(context, request.description)}',
+    '${context.localized('项目标签', 'Tags')}：${_snapshotItems(context, request.tags)}',
+    '${context.localized('项目标语', 'Slogan')}：${_snapshotText(context, request.slogan)}',
+    '${context.localized('项目详情', 'Detail')}：${_snapshotText(context, request.detailContent)}',
     '${context.localized('币种', 'Currency')}：${request.currency}',
-    '${context.localized('封面图', 'Cover')}：${request.coverImage ?? '-'}',
-    '${context.localized('项目图片', 'Images')}：${request.images?.join(', ') ?? '-'}',
+    '${context.localized('封面图', 'Cover')}：${_snapshotText(context, request.coverImage)}',
+    '${context.localized('项目图片', 'Images')}：${_snapshotItems(context, request.images)}',
     '${context.localized('销量', 'Sales count')}：${request.salesCount}',
     '${context.localized('参考价格', 'Reference price')}：${request.referencePrice ?? '-'}',
-    '${context.localized('分类标签', 'Category tags')}：${request.categoryTags?.join(', ') ?? '-'}',
+    '${context.localized('分类标签', 'Category tags')}：${_snapshotItems(context, request.categoryTags)}',
     '${context.localized('价格', 'Price')}：${request.price ?? '-'}',
     '${context.localized('原价', 'Original price')}：${request.originalPrice ?? '-'}',
     '${context.localized('上架', 'Active')}：${request.isActive ?? '-'}',
     if (split != null) ...[
-      '${context.localized('面诊费', 'Consultation fee')}：${split.consultationFee}',
-      '${context.localized('顾问比例', 'Consultant rate')}：${split.commissionRate}%',
-      '${context.localized('机构比例', 'Institution rate')}：${split.institutionRate}%',
-      '${context.localized('平台比例', 'Platform rate')}：${split.platformRate}%',
-      '${context.localized('医生比例', 'Doctor rate')}：${split.doctorRate}%',
+      '${context.localized('面诊费', 'Consultation fee')}：${_formatNumber(split.consultationFee)}',
+      '${context.localized('顾问比例', 'Consultant rate')}：${_formatNumber(split.commissionRate)}%',
+      '${context.localized('机构比例', 'Institution rate')}：${_formatNumber(split.institutionRate)}%',
+      '${context.localized('当前平台比例', 'Current platform rate')}：${_formatNumber(split.platformRate)}%',
+      '${context.localized('按当前平台比例推导的医生净比例', 'Doctor net rate derived from the current platform rate')}：${_formatNumber(split.doctorRate)}%',
     ],
-    '${context.localized('申请说明', 'Notes')}：${request.notes ?? '-'}',
+    '${context.localized('申请说明', 'Notes')}：${_snapshotText(context, request.notes)}',
     '${context.localized('状态', 'Status')}：${_statusLabel(request.status)}',
-    '${context.localized('审核意见', 'Review note')}：${request.reviewNote ?? '-'}',
+    '${context.localized('审核意见', 'Review note')}：${_snapshotText(context, request.reviewNote)}',
     '${context.localized('提交时间', 'Submitted at')}：${request.submittedAt.toIso8601String()}',
     '${context.localized('更新时间', 'Updated at')}：${request.updatedAt.toIso8601String()}',
-    '${context.localized('审核人', 'Reviewed by')}：${request.reviewedBy ?? '-'}',
+    '${context.localized('审核人', 'Reviewed by')}：${_snapshotText(context, request.reviewedBy)}',
     '${context.localized('审核时间', 'Reviewed at')}：${request.reviewedAt?.toIso8601String() ?? '-'}',
-    '${context.localized('生成平台项目', 'Resulting platform project')}：${request.resultingProjectId ?? '-'}',
-    '${context.localized('生成机构项目', 'Resulting institution project')}：${request.resultingInstitutionProjectId ?? '-'}',
+    '${context.localized('生成平台项目', 'Resulting platform project')}：${_snapshotText(context, request.resultingProjectId)}',
+    '${context.localized('生成机构项目', 'Resulting institution project')}：${_snapshotText(context, request.resultingInstitutionProjectId)}',
   ];
   return Card(
     key: Key('professional-request-${request.id}'),
@@ -2504,6 +2543,39 @@ String _formatNumber(num? value) {
   return value == value.roundToDouble()
       ? value.toInt().toString()
       : value.toString();
+}
+
+String _snapshotText(BuildContext context, String? value) {
+  if (value == null) return context.localized('未提供', 'Not provided');
+  if (value.isEmpty) return context.localized('空字符串', 'Empty string');
+  return value;
+}
+
+String _snapshotItems(BuildContext context, List<String>? values) {
+  if (values == null) return context.localized('未提供', 'Not provided');
+  if (values.isEmpty) return context.localized('空列表', 'Empty list');
+  return values.join(', ');
+}
+
+int? _rateHundredths(String value) {
+  final match =
+      RegExp(r'^([+-]?)(\d+)(?:\.(\d{1,2}))?$').firstMatch(value.trim());
+  if (match == null) return null;
+  final sign = match.group(1) == '-' ? -1 : 1;
+  final whole = int.parse(match.group(2)!);
+  final fraction = int.parse((match.group(3) ?? '').padRight(2, '0'));
+  return sign * (whole * 100 + fraction);
+}
+
+String _formatRateHundredths(int? value) {
+  if (value == null) return '-';
+  final remainder = value.abs() % 100;
+  final precision = remainder == 0
+      ? 0
+      : remainder % 10 == 0
+          ? 1
+          : 2;
+  return (value / 100).toStringAsFixed(precision);
 }
 
 List<String> _parseCsv(String value) => value
