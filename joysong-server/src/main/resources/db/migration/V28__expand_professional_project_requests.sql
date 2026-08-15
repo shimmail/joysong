@@ -11,7 +11,7 @@ ALTER TABLE professional_project_requests
     ADD COLUMN cover_image VARCHAR(500) NOT NULL DEFAULT '' AFTER currency,
     ADD COLUMN images JSON DEFAULT (JSON_ARRAY()) AFTER cover_image,
     ADD COLUMN sales_count INT NOT NULL DEFAULT 0 AFTER images,
-    ADD COLUMN reference_price DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER sales_count,
+    ADD COLUMN reference_price DECIMAL(10,2) NULL DEFAULT 0.00 AFTER sales_count,
     ADD COLUMN category_tags JSON DEFAULT (JSON_ARRAY()) AFTER reference_price,
     ADD COLUMN original_price DECIMAL(10,2) NULL AFTER price,
     ADD COLUMN is_active TINYINT(1) NULL AFTER original_price,
