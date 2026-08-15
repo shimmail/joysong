@@ -3,6 +3,9 @@ package com.joysong.server.agent.streaming
 import com.joysong.server.agent.provider.AgentProviderRequestFactory
 import com.joysong.server.agent.provider.AgentRequestPurpose
 import com.joysong.server.agent.provider.QwenChatStreamParser
+import com.joysong.server.agent.dto.AgentCatalogItemResponse
+import com.joysong.server.agent.dto.AgentCatalogReportResponse
+import com.joysong.server.agent.service.ComparisonRequest
 import com.joysong.server.chat.dto.ChatMessageResponse
 import com.joysong.server.chat.dto.ChatTurnResponse
 import com.joysong.server.chat.dto.SendMessageRequest
@@ -64,18 +67,9 @@ class AgentStreamingService(
                 }
             }
         }
-        if (prepared is PreparedChatTurn.Replayed) {
+        if (prepared is PreparedChatTurn.Replayed || prepared is PreparedChatTurn.Completed) {
             taskExecutor.execute {
-                if (sink.isOpen) {
-                    sink.started(
-                        AgentStreamEvent.Started(
-                            traceId = prepared.traceId,
-                            turnId = prepared.turnId,
-                            userMessage = prepared.userMessage.toResponse()
-                        )
-                    )
-                }
-                if (sink.isOpen) sink.completed(AgentStreamEvent.Completed(prepared.turn.toResponse()))
+                emitTerminal(prepared, sink)
             }
             return subscription
         }
@@ -89,6 +83,37 @@ class AgentStreamingService(
             throw error
         }
         return subscription
+    }
+
+    private fun emitTerminal(prepared: PreparedChatTurn, sink: AgentStreamSink) {
+        when (prepared) {
+            is PreparedChatTurn.Replayed -> emitTerminal(
+                prepared.traceId, prepared.turnId, prepared.userMessage, prepared.turn, sink
+            )
+            is PreparedChatTurn.Completed -> emitTerminal(
+                prepared.traceId, prepared.turnId, prepared.userMessage, prepared.turn, sink
+            )
+            is PreparedChatTurn.Started -> return
+        }
+    }
+
+    private fun emitTerminal(
+        traceId: String,
+        turnId: String,
+        userMessage: ChatMessageEntity,
+        turn: ChatTurnResult,
+        sink: AgentStreamSink
+    ) {
+        if (sink.isOpen) {
+            sink.started(
+                AgentStreamEvent.Started(
+                    traceId = traceId,
+                    turnId = turnId,
+                    userMessage = userMessage.toResponse()
+                )
+            )
+        }
+        if (sink.isOpen) sink.completed(AgentStreamEvent.Completed(turn.toResponse()))
     }
 
     private fun consume(prepared: PreparedChatTurn.Started, sink: AgentStreamSink, state: AtomicReference<StreamState>, upstream: AtomicReference<InputStream>) {
@@ -223,16 +248,23 @@ class AgentStreamingService(
         }
     }
 
-    private fun ChatMessageEntity.toResponse() = ChatMessageResponse(
+    private fun ChatMessageEntity.toResponse(
+        catalogItems: List<AgentCatalogItemResponse> = emptyList(),
+        comparisonRequest: ComparisonRequest? = null,
+        catalogReport: AgentCatalogReportResponse? = null
+    ) = ChatMessageResponse(
         id = id,
         sessionId = sessionId,
         role = role,
         content = content,
-        createdAt = createdAt.toString()
+        createdAt = createdAt.toString(),
+        catalogItems = catalogItems,
+        comparisonRequest = comparisonRequest,
+        catalogReport = catalogReport
     )
 
     private fun ChatTurnResult.toResponse() = ChatTurnResponse(
-        message = message.toResponse(),
+        message = message.toResponse(catalogItems, comparisonRequest, catalogReport),
         catalogReport = catalogReport,
         catalogItems = catalogItems,
         intent = intent,

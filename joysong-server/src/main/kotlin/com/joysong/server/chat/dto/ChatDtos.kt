@@ -2,6 +2,7 @@ package com.joysong.server.chat.dto
 
 import com.joysong.server.agent.dto.AgentCatalogReportResponse
 import com.joysong.server.agent.dto.AgentCatalogItemResponse
+import com.joysong.server.agent.service.ComparisonRequest
 
 data class CreateSessionRequest(
     val persona: String = "BESTIE",          // BESTIE | CONSULTANT
@@ -32,7 +33,9 @@ data class ChatMessageResponse(
     val role: String,
     val content: String,
     val createdAt: String,
-    val catalogItems: List<AgentCatalogItemResponse> = emptyList()
+    val catalogItems: List<AgentCatalogItemResponse> = emptyList(),
+    val comparisonRequest: ComparisonRequest? = null,
+    val catalogReport: AgentCatalogReportResponse? = null
 )
 
 data class ChatTurnResponse(

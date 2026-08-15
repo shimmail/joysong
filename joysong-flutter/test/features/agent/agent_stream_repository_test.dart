@@ -58,6 +58,36 @@ void main() {
     expect((events[2] as AgentStreamCompleted).turn.message.content, '完整答复');
   });
 
+  test('completed SSE decodes message-bound comparison request and report',
+      () async {
+    final fixture = await _StreamFixture.start((request) async {
+      await utf8.decoder.bind(request).join();
+      request.response
+        ..statusCode = HttpStatus.ok
+        ..headers.contentType =
+            ContentType('text', 'event-stream', charset: 'utf-8')
+        ..write(
+          'event: completed\n'
+          'data: {"turn":${jsonEncode(_comparisonTurnJson('完整答复'))}}\n\n',
+        );
+      await request.response.close();
+    });
+    addTearDown(fixture.close);
+
+    final event = await fixture.repository
+        .streamMessage(
+          sessionId: 'session-1',
+          content: '比较项目',
+          idempotencyKey: 'comparison-key',
+        )
+        .single;
+
+    final completed = event as AgentStreamCompleted;
+    expect(completed.turn.message.comparisonRequest?.operands.single.entityId,
+        'project-1');
+    expect(completed.turn.message.catalogReport?.title, 'Message report');
+  });
+
   test('decodes a stable terminal failure without exposing raw SSE', () async {
     final fixture = await _StreamFixture.start((request) async {
       await utf8.decoder.bind(request).join();
@@ -421,4 +451,33 @@ Map<String, Object?> _turnJson(String content) => {
       'intent': 'GENERAL_CHAT',
       'queryTarget': null,
       'nextAction': 'NONE',
+    };
+
+Map<String, Object?> _comparisonTurnJson(String content) => {
+      ..._turnJson(content),
+      'message': {
+        ..._messageJson('assistant-1', content),
+        'role': 'ASSISTANT',
+        'comparisonRequest': {
+          'operands': [
+            {
+              'entityType': 'PROJECT',
+              'entityId': 'project-1',
+              'displayName': 'Project',
+            },
+          ],
+          'targetType': 'PROJECT',
+          'dimensions': ['PRICE'],
+          'constraints': {'city': 'Shanghai'},
+          'missingFields': <String>[],
+        },
+        'catalogReport': {
+          'mode': 'COMPARISON',
+          'title': 'Message report',
+          'summary': 'summary',
+          'items': const <Object?>[],
+          'comparisonDimensions': ['PRICE'],
+          'warnings': const <String>[],
+        },
+      },
     };

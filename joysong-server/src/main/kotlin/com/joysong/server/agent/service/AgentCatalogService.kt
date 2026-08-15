@@ -90,6 +90,7 @@ class AgentCatalogService(
         mentionedCities: List<String>,
         explicitlyRequestedTypes: Set<RequestedEntityType>,
         searchQuery: String = request.query,
+        priorityQuery: String = request.query,
         targetOverride: AgentQueryTarget? = null
     ): AgentCatalogReportResponse {
         val query = request.query.trim()
@@ -105,7 +106,8 @@ class AgentCatalogService(
                 query = effectiveSearchQuery,
                 cities = mentionedCities,
                 fallbackWhenNoMatch = explicitlyRequestedTypes.isEmpty(),
-                limit = 12
+                limit = 12,
+                priorityQuery = priorityQuery
             )
         )
         val discoveredProjects = unifiedSearch.projects
@@ -118,7 +120,13 @@ class AgentCatalogService(
                     it.second.rating
                 }.thenByDescending { it.second.salesCount }
             )
-            .distinctBy { it.second.institutionId }
+            .prioritizeBy { (project, offering) ->
+                institutionProjectPriority(priorityQuery, offering.institutionName, project.name, offering.name)
+            }
+            .let { offerings ->
+                if (reportTarget == ReportTarget.INSTITUTION_PROJECT) offerings.distinctBy { it.second.id }
+                else offerings.distinctBy { it.second.institutionId }
+            }
             .take(requestedCount)
 
         val offeringInstitutions = if (reportTarget == ReportTarget.INSTITUTION) {
@@ -128,6 +136,7 @@ class AgentCatalogService(
         val institutions = institutionCandidates
             .distinctBy { it.id }
             .sortedByDescending { it.rating }
+            .prioritizeBy { exactNamePriority(priorityQuery, listOf(it.name)) }
             .take(4)
         val relatedDoctorIds = if (reportTarget == ReportTarget.DOCTOR && discoveredProjects.isNotEmpty()) {
             val discoveredProjectIds = discoveredProjects.map { it.id }.toSet()
@@ -144,20 +153,28 @@ class AgentCatalogService(
                 RequestedEntityType.TREATMENT !in explicitlyRequestedTypes -> doctorRepository.findAll()
             else -> unifiedSearch.doctors
         }
-        val doctorInstitutionCities = institutionRepository.findAll().associate { it.id to it.city }
+        val doctorInstitutionById = institutionRepository.findAll().associateBy { it.id }
+        val approvedDoctorInstitutions = doctorCandidates.associate { doctor ->
+            doctor.id to doctorInstitutionService.findByDoctorId(doctor.id)
+                .filter { it.status == "APPROVED" && it.deletedAt == null }
+        }
         val doctors = doctorCandidates
             .filter { doctor ->
                 mentionedCities.isEmpty() || mentionedCities.any { city ->
-                    doctorInstitutionService.findByDoctorId(doctor.id).any { relation ->
-                        doctorInstitutionCities[relation.institutionId]?.equals(city, true) == true
+                    approvedDoctorInstitutions[doctor.id].orEmpty().any { relation ->
+                        doctorInstitutionById[relation.institutionId]?.city?.equals(city, true) == true
                     }
                 }
             }
             .sortedByDescending { it.rating }
+            .prioritizeBy { exactNamePriority(priorityQuery, listOf(it.name)) }
             .take(4)
         val searchedProjectEntities = projectRepository.findAllById(unifiedSearch.projects.map { it.id })
             .associateBy { it.id }
-        val projects = unifiedSearch.projects.mapNotNull { searchedProjectEntities[it.id] }.take(4)
+        val projects = unifiedSearch.projects
+            .mapNotNull { searchedProjectEntities[it.id] }
+            .prioritizeBy { exactNamePriority(priorityQuery, listOf(it.name)) }
+            .take(4)
 
         val institutionIds = institutions.map { it.id }.toSet()
         val projectIds = (projects.map { it.id } + discoveredProjects.map { it.id }).toSet()
@@ -193,7 +210,16 @@ class AgentCatalogService(
         val directlyMatchedInstitutionProjectIds = directlyMatchedInstitutionProjects.map { it.id }.toSet()
         val institutionProjects = when {
             reportTarget != ReportTarget.DOCTOR && directlyMatchedInstitutionProjects.isNotEmpty() ->
-                directlyMatchedInstitutionProjects.take(8)
+                directlyMatchedInstitutionProjects
+                    .prioritizeBy { offering ->
+                        val institution = allInstitutions[offering.institutionId]
+                        val project = allProjectsById[offering.projectId]
+                        if (institution == null || project == null) Int.MAX_VALUE else {
+                            val effective = institutionProjectDetailResolver.resolve(offering, project)
+                            institutionProjectPriority(priorityQuery, institution.name, project.name, effective.name)
+                        }
+                    }
+                    .take(8)
             discoveredOfferingIds.isNotEmpty() -> allInstitutionProjects.filter { it.id in discoveredOfferingIds }
             else -> allInstitutionProjects.filter {
                 it.isActive && when {
@@ -202,7 +228,16 @@ class AgentCatalogService(
                     explicitlyNamedInstitutionIds.isNotEmpty() -> it.institutionId in explicitlyNamedInstitutionIds
                     else -> effectiveSearchQuery.contains(it.id, true)
                 }
-            }.take(8)
+            }
+                .prioritizeBy { offering ->
+                    val institution = allInstitutions[offering.institutionId]
+                    val project = allProjectsById[offering.projectId]
+                    if (institution == null || project == null) Int.MAX_VALUE else {
+                        val effective = institutionProjectDetailResolver.resolve(offering, project)
+                        institutionProjectPriority(priorityQuery, institution.name, project.name, effective.name)
+                    }
+                }
+                .take(8)
         }
         val institutionById = institutionRepository.findAllById(institutionProjects.map { it.institutionId }).associateBy { it.id }
         val projectById = projectRepository.findAllById(institutionProjects.map { it.projectId }).associateBy { it.id }
@@ -212,36 +247,52 @@ class AgentCatalogService(
                 add(AgentCatalogItemResponse(
                     type = "INSTITUTION", id = institution.id, name = institution.name,
                     subtitle = institution.city,
-                    summary = institution.description,
+                    summary = institution.description.takeUnless { mode == "COMPARISON" }.orEmpty(),
                     attributes = linkedMapOf(
+                        AgentText.value("城市", "City") to institution.city,
+                        AgentText.value("机构认证", "Clinic verified") to AgentText.value(if (institution.isVerified) "已认证" else "未认证", if (institution.isVerified) "Verified" else "Not verified"),
                         AgentText.value("评分", "Rating") to institution.rating.toPlainString(),
-                        AgentText.value("评价数", "Reviews") to institution.reviewCount.toString(),
-                        AgentText.value("认证", "Verified") to AgentText.value(if (institution.isVerified) "已认证" else "未认证", if (institution.isVerified) "Verified" else "Not verified"),
+                        AgentText.value("评价数", "Review count") to institution.reviewCount.toString(),
                         AgentText.value("医生数", "Doctors") to institution.doctorCount.toString(),
-                        AgentText.value("特色", "Specialties") to institution.specialties
+                        AgentText.value("擅长领域", "Specialties") to institution.specialties
                     ).filterValues { it.isNotBlank() },
                     institutionId = institution.id, canChatWithHuman = true
                 ))
             }
             doctors.forEach { doctor ->
-                val doctorInstitutions = doctorInstitutionService.institutionsFor(doctor.id)
-                val selectedInstitution = doctorInstitutions.firstOrNull { institution ->
-                    institution.name.isNotBlank() && effectiveSearchQuery.contains(institution.name, ignoreCase = true) ||
-                        institution.city.isNotBlank() && effectiveSearchQuery.contains(institution.city, ignoreCase = true)
-                } ?: doctorInstitutions.firstOrNull()
-                val institutionLabel = doctorInstitutions.take(2).joinToString("、") { it.name } +
-                    if (doctorInstitutions.size > 2) AgentText.value("等${doctorInstitutions.size}家", " +${doctorInstitutions.size - 2}") else ""
+                val doctorInstitutions = approvedDoctorInstitutions[doctor.id].orEmpty()
+                    .mapNotNull { doctorInstitutionById[it.institutionId] }
+                    .distinctBy { it.id }
+                    .sortedByDescending { institution ->
+                        institution.name.isNotBlank() && effectiveSearchQuery.contains(institution.name, ignoreCase = true) ||
+                            institution.city.isNotBlank() && effectiveSearchQuery.contains(institution.city, ignoreCase = true)
+                    }
+                val selectedInstitution = doctorInstitutions.firstOrNull()
+                val displayedInstitutions = doctorInstitutions.take(3).joinToString(AgentText.value("、", ", ")) { institution ->
+                    if (institution.city.isBlank()) institution.name else AgentText.value(
+                        "${institution.name}（${institution.city}）",
+                        "${institution.name} (${institution.city})"
+                    )
+                }
+                val remainder = doctorInstitutions.size - 3
+                val institutionLabel = displayedInstitutions + if (remainder > 0) {
+                    AgentText.value("；另有 $remainder 家", "; $remainder more")
+                } else ""
+                val verifiedInstitutionCount = doctorInstitutions.count { it.isVerified }
                 add(AgentCatalogItemResponse(
                     type = "DOCTOR", id = doctor.id, name = doctor.name,
                     subtitle = listOf(doctor.title, institutionLabel).filter { it.isNotBlank() }.joinToString(" · "),
-                    summary = doctor.bio,
+                    summary = doctor.bio.takeUnless { mode == "COMPARISON" }.orEmpty(),
                     attributes = linkedMapOf(
-                        AgentText.value("评分", "Rating") to doctor.rating.toPlainString(),
-                        AgentText.value("评价数", "Reviews") to doctor.reviewCount.toString(),
-                        AgentText.value("认证", "Verified") to AgentText.value(if (doctor.isVerified) "已认证" else "未认证", if (doctor.isVerified) "Verified" else "Not verified"),
-                        AgentText.value("专长", "Specialties") to doctor.specialties,
+                        AgentText.value("职称", "Title") to doctor.title,
+                        AgentText.value("医生认证", "Doctor verified") to AgentText.value(if (doctor.isVerified) "已认证" else "未认证", if (doctor.isVerified) "Verified" else "Not verified"),
                         AgentText.value("资质", "Credentials") to doctor.credentials,
-                        AgentText.value("出诊机构", "Clinics") to doctorInstitutions.joinToString("、") { it.name }
+                        AgentText.value("擅长领域", "Specialties") to doctor.specialties,
+                        AgentText.value("评分", "Rating") to doctor.rating.toPlainString(),
+                        AgentText.value("评价数", "Review count") to doctor.reviewCount.toString(),
+                        AgentText.value("出诊机构", "Practice institutions") to institutionLabel,
+                        AgentText.value("出诊机构认证", "Practice institution verification") to
+                            if (doctorInstitutions.isEmpty()) "" else "$verifiedInstitutionCount/${doctorInstitutions.size}"
                     ).filterValues { it.isNotBlank() },
                     institutionId = selectedInstitution?.id,
                     canChatWithHuman = selectedInstitution != null
@@ -250,9 +301,10 @@ class AgentCatalogService(
             projects.forEach { project ->
                 add(AgentCatalogItemResponse(
                     type = "PROJECT", id = project.id, name = project.name, subtitle = project.category,
-                    summary = project.description,
+                    summary = project.description.takeUnless { mode == "COMPARISON" }.orEmpty(),
                     attributes = linkedMapOf(
-                        AgentText.value("参考价", "Reference price") to "$${project.referencePrice.toPlainString()}",
+                        AgentText.value("项目分类", "Category") to project.category,
+                        AgentText.value("项目参考价", "Reference price") to "$${project.referencePrice.toPlainString()}",
                         AgentText.value("评分", "Rating") to project.rating.toPlainString(),
                         AgentText.value("标签", "Tags") to project.tags
                     ).filterValues { it.isNotBlank() },
@@ -266,17 +318,17 @@ class AgentCatalogService(
                 add(AgentCatalogItemResponse(
                     type = "INSTITUTION_PROJECT", id = offering.id, name = "${institution.name} · ${effective.name}",
                     subtitle = listOf(institution.city, effective.category).filter { it.isNotBlank() }.joinToString(" · "),
-                    summary = effective.description,
+                    summary = effective.description.takeUnless { mode == "COMPARISON" }.orEmpty(),
                     attributes = linkedMapOf(
+                        AgentText.value("城市", "City") to institution.city,
+                        AgentText.value("项目分类", "Category") to effective.category,
                         AgentText.value("机构价格", "Clinic price") to "$${offering.price.toPlainString()}",
                         AgentText.value("项目参考价", "Reference price") to "$${project.referencePrice.toPlainString()}",
                         AgentText.value("评分", "Rating") to effective.rating.toPlainString(),
                         AgentText.value("评价数", "Review count") to effective.reviewCount.toString(),
-                        AgentText.value("标签", "Tags") to effective.tags,
-                        AgentText.value("宣传语", "Slogan") to effective.slogan,
-                        AgentText.value("详情摘要", "Detail summary") to catalogDetailSummary(effective.detailContent),
                         AgentText.value("销量", "Sales") to offering.salesCount.toString(),
-                        AgentText.value("机构认证", "Clinic verified") to AgentText.value(if (institution.isVerified) "已认证" else "未认证", if (institution.isVerified) "Verified" else "Not verified")
+                        AgentText.value("机构认证", "Clinic verified") to AgentText.value(if (institution.isVerified) "已认证" else "未认证", if (institution.isVerified) "Verified" else "Not verified"),
+                        AgentText.value("标签", "Tags") to effective.tags
                     ).filterValues { it.isNotBlank() },
                     institutionId = institution.id, projectId = project.id, canChatWithHuman = true
                 ))
@@ -302,7 +354,7 @@ class AgentCatalogService(
             title = reportTitle(mode, reportTarget),
             summary = summary,
             items = items,
-            comparisonDimensions = comparisonDimensions(reportTarget),
+            comparisonDimensions = comparisonRows(reportTarget, allComparisonGroups),
             warnings = listOf(AgentText.value("平台数据仅用于信息比较，不代表医疗适用性或效果保证。", "Platform data supports information comparison only and does not establish medical suitability or guarantee results."))
         )
     }
@@ -449,17 +501,20 @@ class AgentCatalogService(
         query: String,
         searchQuery: String = query,
         targetQuery: String = query,
-        queryTarget: AgentQueryTarget? = null
+        queryTarget: AgentQueryTarget? = null,
+        reportMode: String = "AUTO",
+        priorityQuery: String = query
     ): AgentPromptEvidence {
         val detectedCities = discoverSearchService.citiesMentionedIn(searchQuery)
         val detectedKeywords = catalogContextKeywords(searchQuery).all.toList()
         val explicitlyRequestedTypes = discoverSearchService.explicitlyRequestedEntityTypes(query)
         val reportTarget = queryTarget?.toReportTarget() ?: detectReportTarget(targetQuery)
         val report = report(
-            request = AgentCatalogReportRequest(targetQuery),
+            request = AgentCatalogReportRequest(targetQuery, reportMode),
             mentionedCities = detectedCities,
             explicitlyRequestedTypes = explicitlyRequestedTypes,
             searchQuery = searchQuery,
+            priorityQuery = priorityQuery,
             targetOverride = queryTarget
         )
         val matchedRequestedTypes = explicitlyRequestedTypes.filterTo(linkedSetOf()) { requestedType ->
@@ -507,6 +562,77 @@ class AgentCatalogService(
             explicitlyRequestedEntityTypes = explicitlyRequestedTypes.map { it.name }.toSet(),
             report = report
         )
+    }
+
+    fun filterComparisonEvidence(
+        evidence: AgentPromptEvidence,
+        request: ComparisonRequest
+    ): AgentPromptEvidence {
+        val target = request.targetType?.toReportTarget()
+        val dimensions = comparisonRows(target, request.dimensions)
+        val index = evidence.report?.items.orEmpty().associateBy { "${it.type.uppercase()}:${it.id}" }
+        val items = request.operands.mapNotNull { operand ->
+            index["${operand.entityType.name}:${operand.entityId}"]
+        }.take(4).map { item ->
+            val structured = linkedMapOf<String, String>()
+            dimensions.forEach { key ->
+                item.attributes[key]?.takeIf(String::isNotBlank)?.let { structured[key] = it }
+            }
+            item.copy(summary = "", attributes = structured)
+        }
+        val matchedEntityIds = items.groupBy { it.type }.mapValues { (_, values) -> values.map { it.id } }
+        val structuredEvidence = items.joinToString("\n") { item ->
+            "[${item.type}:${item.id}] ${item.name}; " + item.attributes.entries.joinToString { "${it.key}=${it.value}" }
+        }
+        val context = if (items.isEmpty()) {
+            "Platform database comparison evidence: no requested operands matched. Do not substitute unrelated records."
+        } else {
+            """
+                Platform database comparison evidence:
+                $structuredEvidence
+                Instruction: Compare only these structured values. Missing values are unknown and must not be inferred.
+            """.trimIndent()
+        }
+        val report = evidence.report?.copy(
+            mode = "COMPARISON",
+            title = reportTitle("COMPARISON", target),
+            summary = AgentText.value(
+                "已从平台数据库提取 ${items.size} 条可核验记录进行横向比较。",
+                "${items.size} verifiable platform records were retrieved for comparison."
+            ),
+            items = items,
+            comparisonDimensions = dimensions
+        )
+        return evidence.copy(
+            context = context,
+            matchedEntityIds = matchedEntityIds,
+            noMatch = items.isEmpty(),
+            report = report
+        )
+    }
+
+    private fun <T> List<T>.prioritizeBy(priority: (T) -> Int): List<T> = sortedBy(priority)
+
+    private fun exactNamePriority(query: String, names: List<String>): Int =
+        if (names.any { name -> name.isNotBlank() && query.contains(name, ignoreCase = true) }) 0 else 1
+
+    private fun institutionProjectPriority(
+        query: String,
+        institutionName: String,
+        projectName: String,
+        effectiveName: String
+    ): Int {
+        val institutionMatched = institutionName.isNotBlank() && query.contains(institutionName, ignoreCase = true)
+        val effectiveMatched = effectiveName.isNotBlank() && query.contains(effectiveName, ignoreCase = true)
+        val projectMatched = projectName.isNotBlank() && query.contains(projectName, ignoreCase = true)
+        return when {
+            institutionMatched && effectiveName.isNotBlank() && query.contains("$institutionName · $effectiveName", ignoreCase = true) -> 0
+            institutionMatched && effectiveMatched -> 1
+            effectiveMatched -> 2
+            institutionMatched && projectMatched -> 3
+            institutionMatched || projectMatched -> 4
+            else -> 5
+        }
     }
 
     private fun requestedInstitutionCount(query: String): Int {
@@ -562,13 +688,45 @@ class AgentCatalogService(
         )
     }
 
-    private fun comparisonDimensions(target: ReportTarget?): List<String> = when (target) {
-        ReportTarget.INSTITUTION -> listOf("资质与认证" to "Credentials", "评分与评价量" to "Ratings and reviews", "特色与项目匹配" to "Specialty fit")
-        ReportTarget.DOCTOR -> listOf("资质与职称" to "Credentials and title", "专长匹配" to "Specialty fit", "评分与案例" to "Ratings and cases")
-        ReportTarget.PROJECT -> listOf("项目定位" to "Treatment purpose", "参考价格" to "Reference price", "适用诉求" to "Suitable concerns")
-        ReportTarget.INSTITUTION_PROJECT -> listOf("机构价格" to "Clinic price", "销量" to "Sales", "机构认证" to "Clinic verification")
-        null -> listOf("资质与认证" to "Credentials", "价格" to "Price", "评分与评价量" to "Ratings and reviews")
-    }.map { (zh, en) -> AgentText.value(zh, en) }
+    private fun comparisonRows(target: ReportTarget?, groups: List<String>): List<String> = when (target) {
+        ReportTarget.INSTITUTION -> listOf(
+            "城市" to "City", "机构认证" to "Clinic verified", "评分" to "Rating",
+            "评价数" to "Review count", "医生数" to "Doctors", "擅长领域" to "Specialties"
+        )
+        ReportTarget.DOCTOR -> listOf(
+            "职称" to "Title", "医生认证" to "Doctor verified", "资质" to "Credentials",
+            "擅长领域" to "Specialties", "评分" to "Rating", "评价数" to "Review count",
+            "出诊机构" to "Practice institutions", "出诊机构认证" to "Practice institution verification"
+        )
+        ReportTarget.PROJECT -> listOf(
+            "项目分类" to "Category", "项目参考价" to "Reference price",
+            "评分" to "Rating", "标签" to "Tags"
+        )
+        ReportTarget.INSTITUTION_PROJECT -> listOf(
+            "城市" to "City", "项目分类" to "Category", "机构价格" to "Clinic price",
+            "项目参考价" to "Reference price", "评分" to "Rating", "评价数" to "Review count",
+            "销量" to "Sales", "机构认证" to "Clinic verified", "标签" to "Tags"
+        )
+        null -> emptyList()
+    }.filter { rowAllowed(target, groups, it) }.map { (zh, en) -> AgentText.value(zh, en) }
+
+    @Suppress("UNUSED_PARAMETER")
+    private fun rowAllowed(
+        target: ReportTarget?,
+        groups: List<String>,
+        row: Pair<String, String>
+    ): Boolean {
+        val requiredGroup = when (row.second) {
+            "Clinic price", "Reference price" -> "PRICE"
+            "Clinic verified", "Doctor verified", "Credentials",
+            "Practice institution verification" -> "CREDENTIALS"
+            "Rating", "Review count", "Sales" -> "RATING"
+            else -> null
+        }
+        return requiredGroup == null || requiredGroup in groups
+    }
+
+    private val allComparisonGroups = listOf("PRICE", "CREDENTIALS", "RATING")
 
 }
 

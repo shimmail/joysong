@@ -106,6 +106,8 @@ class ChatMessage {
     required this.content,
     required this.createdAt,
     this.catalogItems = const [],
+    this.comparisonRequest,
+    this.catalogReport,
     this.isTemporary = false,
   });
 
@@ -115,6 +117,8 @@ class ChatMessage {
   final String content;
   final String createdAt;
   final List<AgentCatalogItem> catalogItems;
+  final AgentComparisonRequest? comparisonRequest;
+  final AgentCatalogReport? catalogReport;
   final bool isTemporary;
 
   bool get isUser => role.toUpperCase() == 'USER';
@@ -122,6 +126,8 @@ class ChatMessage {
   ChatMessage copyWith({
     String? content,
     List<AgentCatalogItem>? catalogItems,
+    AgentComparisonRequest? comparisonRequest,
+    AgentCatalogReport? catalogReport,
     bool? isTemporary,
   }) =>
       ChatMessage(
@@ -131,6 +137,8 @@ class ChatMessage {
         content: content ?? this.content,
         createdAt: createdAt,
         catalogItems: catalogItems ?? this.catalogItems,
+        comparisonRequest: comparisonRequest ?? this.comparisonRequest,
+        catalogReport: catalogReport ?? this.catalogReport,
         isTemporary: isTemporary ?? this.isTemporary,
       );
 
@@ -144,6 +152,65 @@ class ChatMessage {
       createdAt: stringValue(map['createdAt']),
       catalogItems:
           jsonList(map['catalogItems']).map(AgentCatalogItem.fromJson).toList(),
+      comparisonRequest: _comparisonRequestOrNull(map['comparisonRequest']),
+      catalogReport: _catalogReportOrNull(map['catalogReport']),
+    );
+  }
+}
+
+class AgentComparisonOperand {
+  const AgentComparisonOperand({
+    required this.entityType,
+    required this.entityId,
+    required this.displayName,
+  });
+
+  final String entityType;
+  final String entityId;
+  final String displayName;
+
+  factory AgentComparisonOperand.fromJson(Object? json) {
+    final map = requireJsonMap(json, '对比对象');
+    return AgentComparisonOperand(
+      entityType: _requireWireString(map, 'entityType'),
+      entityId: _requireWireString(map, 'entityId'),
+      displayName: _requireWireString(map, 'displayName'),
+    );
+  }
+}
+
+class AgentComparisonRequest {
+  const AgentComparisonRequest({
+    required this.operands,
+    required this.targetType,
+    required this.dimensions,
+    required this.constraints,
+    required this.missingFields,
+  });
+
+  final List<AgentComparisonOperand> operands;
+  final String? targetType;
+  final List<String> dimensions;
+  final Map<String, String> constraints;
+  final Set<String> missingFields;
+
+  bool get isComplete => missingFields.isEmpty;
+
+  factory AgentComparisonRequest.fromJson(Object? json) {
+    final map = requireJsonMap(json, '对比请求');
+    final targetType = map['targetType'];
+    if (targetType != null && targetType is! String) {
+      throw FormatException('对比请求 targetType 无效');
+    }
+    return AgentComparisonRequest(
+      operands: List.unmodifiable(_requireWireList(map, 'operands')
+          .map(AgentComparisonOperand.fromJson)),
+      targetType: targetType as String?,
+      dimensions: List.unmodifiable(_requireWireStringList(map, 'dimensions')),
+      constraints: Map.unmodifiable(_requireWireStringMap(map, 'constraints')),
+      missingFields: Set.unmodifiable(
+        _requireWireStringList(map, 'missingFields'),
+      ),
     );
   }
 }
@@ -221,6 +288,86 @@ class AgentCatalogReport {
     );
   }
 }
+
+AgentComparisonRequest? _comparisonRequestOrNull(Object? json) {
+  if (json == null) return null;
+  try {
+    return AgentComparisonRequest.fromJson(json);
+  } on Object {
+    return null;
+  }
+}
+
+AgentCatalogReport? _catalogReportOrNull(Object? json) {
+  if (json == null || !_isValidMessageCatalogReport(json)) return null;
+  try {
+    return AgentCatalogReport.fromJson(json);
+  } on Object {
+    return null;
+  }
+}
+
+bool _isValidMessageCatalogReport(Object? json) {
+  if (json is! Map) return false;
+  return _hasOnlyStringValues(json, const ['mode', 'title', 'summary']) &&
+      _hasOnlyStringList(json, 'comparisonDimensions') &&
+      _hasOnlyStringList(json, 'warnings') &&
+      _hasOnlyCatalogItems(json, 'items');
+}
+
+bool _hasOnlyStringValues(Map<dynamic, dynamic> map, List<String> keys) =>
+    keys.every((key) => !map.containsKey(key) || map[key] is String);
+
+bool _hasOnlyStringList(Map<dynamic, dynamic> map, String key) {
+  if (!map.containsKey(key)) return true;
+  final value = map[key];
+  return value is List && value.every((item) => item is String);
+}
+
+bool _hasOnlyCatalogItems(Map<dynamic, dynamic> map, String key) {
+  if (!map.containsKey(key)) return true;
+  final value = map[key];
+  return value is List && value.every(_isValidMessageCatalogItem);
+}
+
+bool _isValidMessageCatalogItem(Object? json) {
+  if (json is! Map) return false;
+  if (!_hasOnlyStringValues(
+    json,
+    const [
+      'type',
+      'id',
+      'name',
+      'subtitle',
+      'summary',
+    ],
+  )) {
+    return false;
+  }
+  if (!_hasOnlyNullableStringValues(
+    json,
+    const ['institutionId', 'projectId'],
+  )) {
+    return false;
+  }
+  final attributes = json['attributes'];
+  if (attributes != null &&
+      (attributes is! Map ||
+          attributes.entries.any(
+            (entry) => entry.key is! String || entry.value is! String,
+          ))) {
+    return false;
+  }
+  final canChatWithHuman = json['canChatWithHuman'];
+  return canChatWithHuman == null || canChatWithHuman is bool;
+}
+
+bool _hasOnlyNullableStringValues(
+  Map<dynamic, dynamic> map,
+  List<String> keys,
+) =>
+    keys.every((key) =>
+        !map.containsKey(key) || map[key] == null || map[key] is String);
 
 class ChatTurn {
   const ChatTurn({
@@ -507,6 +654,48 @@ String requireString(Map<String, dynamic> map, String key) {
     throw FormatException('响应缺少 $key');
   }
   return value;
+}
+
+String _requireWireString(Map<String, dynamic> map, String key) {
+  final value = map[key];
+  if (value is! String || value.isEmpty) {
+    throw FormatException('响应缺少有效 $key');
+  }
+  return value;
+}
+
+List<Object?> _requireWireList(Map<String, dynamic> map, String key) {
+  final value = map[key];
+  if (value is! List) {
+    throw FormatException('响应缺少有效 $key');
+  }
+  return value;
+}
+
+List<String> _requireWireStringList(Map<String, dynamic> map, String key) {
+  final values = _requireWireList(map, key);
+  if (values.any((value) => value is! String)) {
+    throw FormatException('响应 $key 包含无效值');
+  }
+  return values.cast<String>();
+}
+
+Map<String, String> _requireWireStringMap(
+  Map<String, dynamic> map,
+  String key,
+) {
+  final value = map[key];
+  if (value is! Map) {
+    throw FormatException('响应缺少有效 $key');
+  }
+  final result = <String, String>{};
+  for (final entry in value.entries) {
+    if (entry.key is! String || entry.value is! String) {
+      throw FormatException('响应 $key 包含无效值');
+    }
+    result[entry.key as String] = entry.value as String;
+  }
+  return result;
 }
 
 String stringValue(Object? value, {String fallback = ''}) {

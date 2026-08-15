@@ -3,9 +3,15 @@ package com.joysong.server.chat.controller
 import com.joysong.server.agent.controller.AgentChatExceptionHandler
 import com.joysong.server.agent.orchestration.AgentChatException
 import com.joysong.server.agent.orchestration.TurnLifecycleService
+import com.joysong.server.agent.dto.AgentCatalogItemResponse
+import com.joysong.server.agent.dto.AgentCatalogReportResponse
+import com.joysong.server.agent.service.AgentQueryTarget
+import com.joysong.server.agent.service.ComparisonOperand
+import com.joysong.server.agent.service.ComparisonRequest
 import com.joysong.server.agent.streaming.AgentStreamEvent
 import com.joysong.server.agent.streaming.AgentStreamingService
 import com.joysong.server.agent.streaming.AgentStreamSubscription
+import com.joysong.server.chat.dto.ChatTurnResponse
 import com.joysong.server.chat.service.ChatService
 import io.mockk.every
 import io.mockk.mockk
@@ -59,6 +65,69 @@ class ChatStreamingControllerTest {
         assertTrue(!response.contains("event:failed"))
         assertTrue(response.contains("\"traceId\":\"trace-1\""))
         verify { streaming.stream("session-1", "captured-user", any(), any()) }
+    }
+
+    @Test
+    fun `completed SSE serializes message comparison state and retains top level report`() {
+        val sink = slot<com.joysong.server.agent.streaming.AgentStreamSink>()
+        val item = AgentCatalogItemResponse(
+            type = "PROJECT",
+            id = "project-alpha",
+            name = "Alpha",
+            subtitle = "",
+            summary = "",
+            attributes = linkedMapOf("Reference price" to "1000")
+        )
+        val request = ComparisonRequest(
+            operands = listOf(
+                ComparisonOperand(AgentQueryTarget.PROJECT, "project-alpha", "Alpha"),
+                ComparisonOperand(AgentQueryTarget.PROJECT, "project-beta", "Beta")
+            ),
+            targetType = AgentQueryTarget.PROJECT,
+            dimensions = listOf("PRICE")
+        )
+        val report = AgentCatalogReportResponse(
+            mode = "COMPARISON",
+            title = "Project comparison",
+            summary = "Structured comparison",
+            items = listOf(item),
+            comparisonDimensions = listOf("Reference price"),
+            warnings = emptyList()
+        )
+        every { streaming.stream("session-1", "captured-user", any(), capture(sink)) } answers {
+            sink.captured.completed(
+                AgentStreamEvent.Completed(
+                    ChatTurnResponse(
+                        message = message("ASSISTANT", "answer").copy(
+                            catalogItems = listOf(item),
+                            comparisonRequest = request,
+                            catalogReport = report
+                        ),
+                        catalogReport = report,
+                        catalogItems = listOf(item),
+                        intent = "COMPARISON"
+                    )
+                )
+            )
+            subscription
+        }
+
+        val initial = mvc.perform(
+            post("/api/chat/sessions/session-1/messages/stream")
+                .principal(UsernamePasswordAuthenticationToken("captured-user", "n/a"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"content":"compare"}""")
+        ).andReturn()
+        val response = mvc.perform(asyncDispatch(initial))
+            .andExpect(status().isOk)
+            .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+            .andReturn().response.contentAsString
+
+        assertTrue(response.contains("event:completed"))
+        assertTrue(response.contains("\"comparisonRequest\""))
+        assertTrue(response.contains("\"operands\":[{\"entityType\":\"PROJECT\",\"entityId\":\"project-alpha\""))
+        assertEquals(2, "\"catalogReport\"".toRegex().findAll(response).count())
+        assertTrue(response.contains("\"comparisonDimensions\":[\"Reference price\"]"))
     }
 
     @Test

@@ -90,34 +90,75 @@ void main() {
     expect(find.text('生成中断，可重试'), findsNothing);
   });
 
-  testWidgets('catalog card is bound to the assistant message and opens item',
+  testWidgets('incomplete comparison shows status card and suppresses catalog links',
       (tester) async {
     final repository = _CatalogRepository(
-      _turn(catalogItems: const [_project]),
-    );
-    AgentCatalogItem? opened;
-
-    await _pumpPage(tester, repository, onOpen: (item) => opened = item);
-    await _sendAndSettle(tester);
-
-    expect(find.byType(AgentCatalogReportCard), findsNothing);
-    expect(find.byType(AgentCatalogLinkCard), findsOneWidget);
-    expect(find.text('项目一'), findsOneWidget);
-    await tester.tap(find.byType(AgentCatalogLinkCard));
-    expect(opened?.id, 'project-1');
-  });
-
-  testWidgets('catalog items render when no report is available',
-      (tester) async {
-    final repository = _CatalogRepository(
-      _turn(catalogItems: const [_project]),
+      _turn(
+        catalogItems: const [_project],
+        comparisonRequest: _incompleteRequest,
+      ),
     );
 
     await _pumpPage(tester, repository);
     await _sendAndSettle(tester);
 
+    expect(find.byType(AgentComparisonStatusCard), findsOneWidget);
+    expect(find.byType(AgentCatalogReportCard), findsNothing);
+    expect(find.byType(AgentCatalogLinkCard), findsNothing);
+  });
+
+  testWidgets('complete comparison shows message-bound report and suppresses duplicate links',
+      (tester) async {
+    final repository = _CatalogRepository(
+      _turn(
+        catalogItems: const [_project],
+        comparisonRequest: _completeRequest,
+        messageReport: _comparisonReport,
+      ),
+    );
+
+    await _pumpPage(tester, repository);
+    await _sendAndSettle(tester);
+
+    expect(find.byType(AgentComparisonStatusCard), findsNothing);
+    expect(find.byType(AgentCatalogReportCard), findsOneWidget);
+    expect(find.byType(AgentComparisonTable), findsOneWidget);
+    expect(find.byType(AgentCatalogDetailCard), findsNothing);
+    expect(find.byType(AgentCatalogLinkCard), findsNothing);
+  });
+
+  testWidgets('complete comparison without report suppresses all attachments',
+      (tester) async {
+    final repository = _CatalogRepository(
+      _turn(
+        catalogItems: const [_project],
+        comparisonRequest: _completeRequest,
+      ),
+    );
+
+    await _pumpPage(tester, repository);
+    await _sendAndSettle(tester);
+
+    expect(find.byType(AgentComparisonStatusCard), findsNothing);
+    expect(find.byType(AgentCatalogReportCard), findsNothing);
+    expect(find.byType(AgentCatalogLinkCard), findsNothing);
+  });
+
+  testWidgets('ordinary catalog message still shows lightweight links',
+      (tester) async {
+    AgentCatalogItem? opened;
+    final repository = _CatalogRepository(
+      _turn(catalogItems: const [_project]),
+    );
+
+    await _pumpPage(tester, repository, onOpen: (item) => opened = item);
+    await _sendAndSettle(tester);
+
+    expect(find.byType(AgentComparisonStatusCard), findsNothing);
     expect(find.byType(AgentCatalogReportCard), findsNothing);
     expect(find.byType(AgentCatalogLinkCard), findsOneWidget);
+    await tester.tap(find.byType(AgentCatalogLinkCard));
+    expect(opened?.id, 'project-1');
   });
 
   testWidgets('unknown catalog type is hidden and cannot navigate',
@@ -243,15 +284,20 @@ class _CatalogRepository extends Fake implements AgentRepository {
 
 ChatTurn _turn({
   AgentCatalogReport? report,
+  AgentCatalogReport? messageReport,
+  AgentComparisonRequest? comparisonRequest,
   List<AgentCatalogItem> catalogItems = const [],
 }) =>
     ChatTurn(
-      message: const ChatMessage(
+      message: ChatMessage(
         id: 'assistant-1',
         sessionId: 'session-1',
         role: 'ASSISTANT',
         content: '参考结果',
         createdAt: '2026-08-11T10:01:00',
+        catalogItems: catalogItems,
+        comparisonRequest: comparisonRequest,
+        catalogReport: messageReport,
       ),
       catalogReport: report,
       catalogItems: catalogItems,
@@ -305,6 +351,48 @@ const _unknown = AgentCatalogItem(
   institutionId: null,
   projectId: null,
   canChatWithHuman: false,
+);
+
+const _incompleteRequest = AgentComparisonRequest(
+  operands: [
+    AgentComparisonOperand(
+      entityType: 'PROJECT',
+      entityId: 'project-1',
+      displayName: '项目一',
+    ),
+  ],
+  targetType: 'PROJECT',
+  dimensions: [],
+  constraints: {},
+  missingFields: {'OPERANDS'},
+);
+
+const _completeRequest = AgentComparisonRequest(
+  operands: [
+    AgentComparisonOperand(
+      entityType: 'PROJECT',
+      entityId: 'project-1',
+      displayName: '项目一',
+    ),
+    AgentComparisonOperand(
+      entityType: 'PROJECT',
+      entityId: 'project-2',
+      displayName: '项目二',
+    ),
+  ],
+  targetType: 'PROJECT',
+  dimensions: ['PRICE'],
+  constraints: {},
+  missingFields: {},
+);
+
+const _comparisonReport = AgentCatalogReport(
+  mode: 'COMPARISON',
+  title: '项目对比',
+  summary: '',
+  items: [_project],
+  comparisonDimensions: ['Reference price'],
+  warnings: [],
 );
 
 class _DiscoverRepository extends Fake implements DiscoverRepository {}

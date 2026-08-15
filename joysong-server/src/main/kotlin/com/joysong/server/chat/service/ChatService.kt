@@ -34,6 +34,9 @@ import com.joysong.server.agent.service.AgentIntentDecision
 import com.joysong.server.agent.service.AgentIntentRouter
 import com.joysong.server.agent.service.AgentLabelPolarity
 import com.joysong.server.agent.service.AgentQueryTarget
+import com.joysong.server.agent.service.ComparisonRequest
+import com.joysong.server.agent.service.ComparisonMissingField
+import com.joysong.server.agent.service.ComparisonRequestBuilder
 import com.joysong.server.agent.service.AgentPromptEvidence
 import com.joysong.server.agent.service.AgentRouteAssessment
 import com.joysong.server.agent.service.ParsedAgentRoute
@@ -71,7 +74,9 @@ data class GeneratedTurn(
     val intentDecision: AgentIntentDecision,
     val llmResult: LlmCallResult,
     val catalogReport: AgentCatalogReportResponse?,
-    val catalogItems: List<AgentCatalogItemResponse>
+    val catalogItems: List<AgentCatalogItemResponse>,
+    val comparisonRequest: ComparisonRequest? = null,
+    val answerModelRequired: Boolean = true
 )
 
 private data class BoundedRouteContext(
@@ -204,11 +209,19 @@ data class ChatTurnResult(
     val intent: String = "GENERAL_CHAT",
     val queryTarget: String? = null,
     val nextAction: String = "NONE",
-    val traceId: String? = null
+    val traceId: String? = null,
+    val comparisonRequest: ComparisonRequest? = null
 )
 
 sealed interface PreparedChatTurn {
     data class Replayed(
+        val traceId: String,
+        val turnId: String,
+        val userMessage: ChatMessageEntity,
+        val turn: ChatTurnResult
+    ) : PreparedChatTurn
+
+    data class Completed(
         val traceId: String,
         val turnId: String,
         val userMessage: ChatMessageEntity,
@@ -240,6 +253,7 @@ class ChatService(
     private val institutionProjectDetailResolver: InstitutionProjectDetailResolver,
     private val agentCatalogService: AgentCatalogService,
     private val agentIntentRouter: AgentIntentRouter,
+    private val comparisonRequestBuilder: ComparisonRequestBuilder,
     private val turnLifecycleService: TurnLifecycleService,
     private val agentOperationLogger: AgentOperationLogger,
     private val agentContextBuilder: AgentContextBuilder,
@@ -350,6 +364,20 @@ class ChatService(
             }
             val userMessage = messageRepository.findByTurnIdAndRole(begin.turnId, "USER")
                 ?: ChatMessageEntity(sessionId = sessionId, turnId = begin.turnId, role = "USER", content = content)
+            if (!generated.answerModelRequired) {
+                return PreparedChatTurn.Completed(
+                    traceId = begin.traceId,
+                    turnId = begin.turnId,
+                    userMessage = userMessage,
+                    turn = completeGeneratedTurn(
+                        turnId = begin.turnId,
+                        traceId = begin.traceId,
+                        sessionId = sessionId,
+                        startedAt = startedAt,
+                        generated = generated
+                    )
+                )
+            }
             return PreparedChatTurn.Started(
                 traceId = begin.traceId,
                 turnId = begin.turnId,
@@ -378,22 +406,13 @@ class ChatService(
             ),
             llmResult = LlmCallResult(providerContent, false)
         )
-        val durationMs = elapsedMs(prepared.startedAt)
-        val completed = turnLifecycleService.completeTurn(
-            CompleteTurnCommand(
-                turnId = prepared.turnId,
-                content = generated.content,
-                intent = generated.intentDecision.intent.name,
-                queryTarget = generated.intentDecision.queryTarget?.name,
-                nextAction = generated.intentDecision.nextAction.name,
-                catalogReport = generated.catalogReport,
-                catalogItems = generated.catalogItems,
-                durationMs = durationMs,
-                modelName = aiAgentProperties.model
-            )
+        return completeGeneratedTurn(
+            turnId = prepared.turnId,
+            traceId = prepared.traceId,
+            sessionId = prepared.sessionId,
+            startedAt = prepared.startedAt,
+            generated = generated
         )
-        agentOperationLogger.completed(prepared.traceId, prepared.turnId, prepared.sessionId, durationMs, aiAgentProperties.model)
-        return completed
     }
 
     fun failStreamingMessage(prepared: PreparedChatTurn.Started, error: Throwable): String {
@@ -499,10 +518,27 @@ class ChatService(
             providerCallContext = ProviderCallContext(begin.traceId, begin.turnId),
             llmCaller = llmCaller
         )
-        val durationMs = elapsedMs(totalStartedAt)
+        return completeGeneratedTurn(
+            turnId = begin.turnId,
+            traceId = begin.traceId,
+            sessionId = sessionId,
+            startedAt = totalStartedAt,
+            generated = generated
+        )
+    }
+
+    private fun completeGeneratedTurn(
+        turnId: String,
+        traceId: String,
+        sessionId: String,
+        startedAt: Long,
+        generated: GeneratedTurn
+    ): ChatTurnResult {
+        val durationMs = elapsedMs(startedAt)
+        val modelName = aiAgentProperties.model.takeIf { generated.answerModelRequired }.orEmpty()
         val completed = turnLifecycleService.completeTurn(
             CompleteTurnCommand(
-                turnId = begin.turnId,
+                turnId = turnId,
                 content = generated.content,
                 intent = generated.intentDecision.intent.name,
                 queryTarget = generated.intentDecision.queryTarget?.name,
@@ -511,10 +547,11 @@ class ChatService(
                 catalogItems = generated.catalogItems,
                 durationMs = durationMs,
                 fallbackUsed = generated.llmResult.fallbackUsed,
-                modelName = aiAgentProperties.model
+                modelName = modelName,
+                comparisonRequest = generated.comparisonRequest
             )
         )
-        agentOperationLogger.completed(begin.traceId, begin.turnId, sessionId, durationMs, aiAgentProperties.model)
+        agentOperationLogger.completed(traceId, turnId, sessionId, durationMs, modelName)
         return completed
     }
 
@@ -563,6 +600,13 @@ class ChatService(
         } else null
         val intentDecision = agentIntentRouter.mergeParsedRoute(routeAssessment, parsedRoute)
         val labelSummary = generationLabelSummary(routeAssessment, parsedRoute, intentDecision)
+        val previousComparison = if (intentDecision.intent == AgentIntent.COMPARISON) {
+            historyMessages.asReversed()
+                .asSequence()
+                .filter { it.role.equals("ASSISTANT", ignoreCase = true) }
+                .map { turnLifecycleService.projectMessage(it).comparisonRequest }
+                .firstOrNull { it != null }
+        } else null
         val previousUserQueries = historyMessages.filter { it.role.equals("USER", true) }
             .map { it.content }
             .takeLast(4)
@@ -571,14 +615,53 @@ class ChatService(
         val catalogSearchQuery = listOf(contextualQuery, parsedRoute?.keywords.orEmpty().joinToString(" "))
             .filter { it.isNotBlank() }
             .joinToString(" ")
+        val currentContextItems = currentContextCatalogItems(session.contextType, session.contextId)
+        val comparisonSearchQuery = if (intentDecision.intent == AgentIntent.COMPARISON) {
+            (
+                listOf(catalogSearchQuery) +
+                    currentContextItems.map { it.name } +
+                    previousComparison?.operands.orEmpty().map { it.displayName }
+                )
+                .filter(String::isNotBlank)
+                .distinct()
+                .joinToString(" ")
+        } else catalogSearchQuery
+        val rawEvidence = catalogEvidence(
+            content = content,
+            searchQuery = comparisonSearchQuery,
+            intentDecision = intentDecision
+        )
+        val comparisonRequest = if (intentDecision.intent == AgentIntent.COMPARISON) {
+            comparisonRequestBuilder.build(
+                content = content,
+                targetType = intentDecision.queryTarget,
+                candidates = rawEvidence.report?.items.orEmpty(),
+                contextCandidates = currentContextItems,
+                previous = previousComparison,
+                detectedCities = rawEvidence.detectedCities
+            )
+        } else null
+        if (comparisonRequest != null && !comparisonRequest.isComplete) {
+            return GeneratedTurn(
+                content = comparisonClarification(comparisonRequest.missingFields),
+                intentDecision = intentDecision,
+                llmResult = LlmCallResult(content = "", fallbackUsed = false),
+                catalogReport = null,
+                catalogItems = emptyList(),
+                comparisonRequest = comparisonRequest,
+                answerModelRequired = false
+            )
+        }
+        val evidence = comparisonRequest?.let {
+            agentCatalogService.filterComparisonEvidence(rawEvidence, it)
+        } ?: rawEvidence
         val promptBuild = getSystemPrompt(
-            session.persona,
-            session.contextType,
-            session.contextId,
-            content,
-            catalogSearchQuery,
-            intentDecision,
-            labelSummary
+            persona = session.persona,
+            contextType = session.contextType,
+            contextId = session.contextId,
+            intentDecision = intentDecision,
+            labelSummary = labelSummary,
+            evidence = evidence
         )
         llmMessages.add(mapOf("role" to "system", "content" to promptBuild.prompt))
         if (summary != null && summary != AgentSessionSummary()) {
@@ -602,7 +685,6 @@ class ChatService(
             intent = intentDecision.intent,
             content = naturalizeUserFacingLanguage(llmResult.content)
         )
-        val currentContextItems = currentContextCatalogItems(session.contextType, session.contextId)
         val visibleReport = promptBuild.evidence.report?.takeIf {
             intentDecision.intent == AgentIntent.COMPARISON && it.items.isNotEmpty()
         }
@@ -618,9 +700,37 @@ class ChatService(
             intentDecision = intentDecision,
             llmResult = llmResult,
             catalogReport = visibleReport,
-            catalogItems = visibleItems
+            catalogItems = visibleItems,
+            comparisonRequest = comparisonRequest
         )
     }
+
+    private fun catalogEvidence(
+        content: String,
+        searchQuery: String,
+        intentDecision: AgentIntentDecision
+    ): AgentPromptEvidence {
+        if (!intentDecision.searchCatalog || intentDecision.intent == AgentIntent.DETAIL_SUMMARY) {
+            return AgentPromptEvidence()
+        }
+        return agentCatalogService.promptEvidence(
+            query = content,
+            searchQuery = searchQuery,
+            targetQuery = searchQuery,
+            priorityQuery = content,
+            queryTarget = intentDecision.queryTarget,
+            reportMode = if (intentDecision.intent == AgentIntent.COMPARISON) "COMPARISON" else "AUTO"
+        )
+    }
+
+    private fun comparisonClarification(missingFields: Set<ComparisonMissingField>): String = buildList {
+        if (ComparisonMissingField.OPERANDS in missingFields) {
+            add("请选择至少两个对比对象 / Select at least two items to compare")
+        }
+        if (ComparisonMissingField.TARGET_TYPE in missingFields) {
+            add("请明确要比较机构、医生、项目还是机构项目 / Specify whether to compare clinics, doctors, treatments, or clinic treatments")
+        }
+    }.joinToString("；")
 
     /**
      * 删除消息（验证会话归属后删除）
@@ -916,10 +1026,9 @@ class ChatService(
         persona: String,
         contextType: String,
         contextId: String,
-        userQuery: String,
-        catalogSearchQuery: String,
         intentDecision: AgentIntentDecision,
-        labelSummary: GenerationLabelSummary
+        labelSummary: GenerationLabelSummary,
+        evidence: AgentPromptEvidence
     ): PromptBuildResult {
         val basePrompt = when (persona) {
             "BESTIE" -> "你是娇颜颂的AI闺蜜「小颜」。你性格活泼开朗、善解人意，像一个贴心的好朋友。你关心用户的日常状态，会适时提醒术后护理、鼓励记录变美日记。聊天语气轻松友好，偶尔用可爱的表情。当用户问到专业医美问题时，温柔地建议咨询专业美学咨询师。"
@@ -949,15 +1058,6 @@ class ChatService(
             当前处于详情会话。回答时优先围绕当前页面实体，不要跳出到泛泛科普；如果用户追问价格、恢复期、风险、医生或机构，直接基于当前页面给出简短回答。
         """.trimIndent() else ""
         val summaryMode = intentDecision.intent == AgentIntent.DETAIL_SUMMARY
-        val shouldSearch = intentDecision.searchCatalog && !summaryMode
-        val evidence = if (shouldSearch) {
-            agentCatalogService.promptEvidence(
-                query = userQuery,
-                searchQuery = catalogSearchQuery,
-                targetQuery = catalogSearchQuery,
-                queryTarget = intentDecision.queryTarget
-            )
-        } else AgentPromptEvidence()
         val databaseContext = evidence.context
         val evidenceInstruction = when {
             summaryMode -> """

@@ -203,13 +203,26 @@ class _AgentChatPageState extends State<AgentChatPage> {
                                   label: const Text('生成中断，可重试'),
                                 ),
                               ),
-                            if (!message.isUser &&
-                                _supportedCatalogItems(message).isNotEmpty)
-                              AgentCatalogLinkList(
-                                items: _supportedCatalogItems(message),
-                                onOpen: widget.onOpenCatalogItem,
-                                canOpen: _canOpenCatalogItem,
-                              ),
+                            if (!message.isUser)
+                              if (message.comparisonRequest case final request?
+                                  when !request.isComplete)
+                                AgentComparisonStatusCard(request: request)
+                              else if (message.comparisonRequest
+                                      case final request?
+                                  when request.isComplete &&
+                                      message.catalogReport != null)
+                                AgentCatalogReportCard(
+                                  report: message.catalogReport!,
+                                  onOpen: widget.onOpenCatalogItem,
+                                  canOpen: _canOpenCatalogItem,
+                                )
+                              else if (message.comparisonRequest == null &&
+                                  _supportedCatalogItems(message).isNotEmpty)
+                                AgentCatalogLinkList(
+                                  items: _supportedCatalogItems(message),
+                                  onOpen: widget.onOpenCatalogItem,
+                                  canOpen: _canOpenCatalogItem,
+                                ),
                           ],
                         ],
                       ),

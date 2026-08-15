@@ -12,6 +12,9 @@ import com.joysong.server.agent.streaming.AgentStreamEvent
 import com.joysong.server.agent.streaming.AgentStreamSink
 import com.joysong.server.agent.streaming.AgentStreamingService
 import com.joysong.server.agent.orchestration.TurnLifecycleService
+import com.joysong.server.agent.dto.AgentCatalogItemResponse
+import com.joysong.server.agent.dto.AgentCatalogReportResponse
+import com.joysong.server.agent.service.ComparisonRequest
 import com.joysong.server.common.BaseResponse
 import org.springframework.http.ResponseEntity
 import org.springframework.http.MediaType
@@ -71,7 +74,11 @@ class ChatController(
         return ResponseEntity.ok(
             BaseResponse.success(
                 ChatTurnResponse(
-                    message = turn.message.toResponse(turn.catalogItems),
+                    message = turn.message.toResponse(
+                        catalogItems = turn.catalogItems,
+                        comparisonRequest = turn.comparisonRequest,
+                        catalogReport = turn.catalogReport
+                    ),
                     catalogReport = turn.catalogReport,
                     catalogItems = turn.catalogItems,
                     intent = turn.intent,
@@ -95,8 +102,13 @@ class ChatController(
         @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
         before: LocalDateTime?
     ): BaseResponse<List<ChatMessageResponse>> = BaseResponse.success(
-        chatService.getMessages(id, authentication.name, limit, before).map {
-            it.toResponse(turnLifecycleService.catalogItemsForMessage(it))
+        chatService.getMessages(id, authentication.name, limit, before).map { message ->
+            val projection = turnLifecycleService.projectMessage(message)
+            message.toResponse(
+                catalogItems = projection.catalogItems,
+                comparisonRequest = projection.comparisonRequest,
+                catalogReport = projection.catalogReport
+            )
         }
     )
 
@@ -178,14 +190,20 @@ class ChatController(
         )
     }
 
-    private fun ChatMessageEntity.toResponse(catalogItems: List<com.joysong.server.agent.dto.AgentCatalogItemResponse> = emptyList()): ChatMessageResponse {
+    private fun ChatMessageEntity.toResponse(
+        catalogItems: List<AgentCatalogItemResponse> = emptyList(),
+        comparisonRequest: ComparisonRequest? = null,
+        catalogReport: AgentCatalogReportResponse? = null
+    ): ChatMessageResponse {
         return ChatMessageResponse(
             id = id,
             sessionId = sessionId,
             role = role,
             content = content,
             createdAt = createdAt.toString(),
-            catalogItems = catalogItems
+            catalogItems = catalogItems,
+            comparisonRequest = comparisonRequest,
+            catalogReport = catalogReport
         )
     }
 
