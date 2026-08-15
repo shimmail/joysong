@@ -1,0 +1,114 @@
+@startuml
+title Doctor and consultant institution relationship workflow
+
+skinparam backgroundColor #FFFFFF
+skinparam sequenceArrowThickness 1
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 12
+skinparam BoxPadding 8
+
+actor "Doctor applicant" as Doctor
+actor "Consultant applicant" as Consultant
+participant "Flutter\n(scoped relationship page)" as Flutter
+participant "Canonical API\n/management/institution-membership-*" as API
+database "Doctor request ledger\ndoctor_institution_change_requests" as DoctorLedger
+database "Consultant request ledger (V27)\nconsultant_institution_change_requests" as ConsultantLedger
+actor "Institution legal representative\nor platform administrator" as Reviewer
+database "Doctor relationship projection\ndoctor_institutions" as DoctorProjection
+database "Consultant relationship projection\ninstitution_memberships" as ConsultantProjection
+database "Active sessions\nauth_sessions" as Sessions
+
+note over Flutter,API
+  Flutter always supplies an explicit DOCTOR, CONSULTANT,
+  or legal-representative scope. Current relationships come
+  from management-context projection IDs, never approved history.
+end note
+
+group Submit JOIN or LEAVE
+  alt DOCTOR
+    Doctor -> Flutter: choose eligible institution and action
+    Flutter -> API: POST request\n{requestType: DOCTOR, institutionId, action, requestNote}
+    API -> DoctorLedger: INSERT fresh PENDING request
+    DoctorLedger --> API: normalized 17-field request
+    API --> Flutter: PENDING
+  else CONSULTANT
+    Consultant -> Flutter: choose eligible institution and action
+    Flutter -> API: POST request\n{requestType: CONSULTANT, institutionId, action, requestNote}
+    API -> ConsultantLedger: INSERT fresh PENDING request
+    ConsultantLedger --> API: normalized 17-field request
+    API --> Flutter: PENDING
+  end
+end
+
+note over DoctorLedger,ConsultantProjection
+  New submissions never write PENDING or REJECTED into
+  relationship projections. One pending request per applicant,
+  profession, and institution is enforced by locking/unique keys.
+end note
+
+group Applicant withdrawal
+  Doctor -> Flutter: withdraw own PENDING (doctor flow)
+  Consultant -> Flutter: withdraw own PENDING (consultant flow)
+  Flutter -> API: POST /{requestType}/{id}/withdraw
+  alt DOCTOR request
+    API -> DoctorLedger: PENDING -> WITHDRAWN
+  else CONSULTANT request
+    API -> ConsultantLedger: PENDING -> WITHDRAWN
+  end
+  note right of API: WITHDRAW is a projection no-op
+  API --> Flutter: normalized WITHDRAWN request
+end
+
+group Legal/platform review
+  Reviewer -> Flutter: open /reviewable scoped queue
+  Flutter -> API: GET /reviewable
+  API --> Flutter: only managed institutions, or all for platform admin
+  Reviewer -> Flutter: approve or reject exact type/action
+  Flutter -> API: POST /{requestType}/{id}/review\n{decision, reviewNote}
+
+  alt REJECTED (non-blank reason required)
+    alt DOCTOR request
+      API -> DoctorLedger: PENDING -> REJECTED
+    else CONSULTANT request
+      API -> ConsultantLedger: PENDING -> REJECTED
+    end
+    note right of API: REJECT is a projection and session no-op
+  else APPROVED JOIN
+    group one transaction
+      alt DOCTOR request
+        API -> DoctorProjection: create or reactivate APPROVED relation
+        API -> DoctorLedger: PENDING -> APPROVED
+      else CONSULTANT request
+        API -> ConsultantProjection: create or reactivate APPROVED relation
+        API -> ConsultantLedger: PENDING -> APPROVED
+      end
+    end
+  else APPROVED LEAVE
+    group one transaction
+      alt DOCTOR request
+        API -> DoctorProjection: revoke target relation only
+        API -> Sessions: clear target DOCTOR session only
+        API -> DoctorLedger: PENDING -> APPROVED
+      else CONSULTANT request
+        API -> ConsultantProjection: revoke target relation only
+        API -> Sessions: clear target CONSULTANT session only
+        API -> ConsultantLedger: PENDING -> APPROVED
+      end
+    end
+  end
+
+  alt every transactional write succeeds
+    API --> Flutter: normalized reviewed request
+  else projection, session, or ledger close fails
+    API -> API: roll back the whole review transaction
+    API --> Flutter: conflict/error; request and relation remain unchanged
+  end
+end
+
+note over DoctorProjection,Sessions
+  PENDING, WITHDRAWN, and REJECTED LEAVE keep the current relation.
+  APPROVED LEAVE affects only the target institution; other relations,
+  identities, wallet, orders, and history remain intact.
+end note
+
+@enduml

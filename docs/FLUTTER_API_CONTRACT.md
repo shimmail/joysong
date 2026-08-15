@@ -1,7 +1,7 @@
 # 娇颜颂 Flutter API 接入契约
 
-> 状态：服务端当前实现基线（2026-08-05）  
-> 适用：Flutter Android/iOS 用户端，以及医生、机构法人的专业管理入口  
+> 状态：服务端当前实现基线（2026-08-15）
+> 适用：Flutter Android/iOS 用户端，以及医生、顾问、机构法人的专业管理入口
 > API 根路径：`{baseUrl}/api`
 
 ## 1. 契约来源与接入原则
@@ -459,7 +459,9 @@ Flutter 可以完成页面和接口抽象，但生产发布前必须等待支付
 |---|---|
 | 医生本人档案 | `GET /management/doctor-profile`、`PUT /management/doctor-profile` |
 | 法人自助机构档案 | `GET /management/institutions`、`GET /management/institutions/{institutionId}`、`PUT /management/institutions/{institutionId}` |
-| 顾问本人机构关系 | `GET /management/consultant-memberships`、`POST /management/consultant-memberships` |
+| 医生/顾问本人机构关系申请 | `GET /management/institution-membership-requests/owned`、`GET /management/institution-membership-candidates`、`POST /management/institution-membership-requests`、`POST /management/institution-membership-requests/{requestType}/{id}/withdraw` |
+| 机构关系审核 | `GET /management/institution-membership-requests/reviewable`、`POST /management/institution-membership-requests/{requestType}/{id}/review` |
+| 顾问滚动兼容接口 | `GET/POST /management/consultant-memberships`；新 Flutter 不调用，不能作为新关系状态机 |
 | 已认证专业用户只读项目目录 | `GET /management/projects` |
 | 专业端兼容只读机构数据（迁移期） | `GET /admin/institutions`、`GET /admin/institutions/{id}`、`GET /admin/institutions/{id}/doctors`、`GET /admin/institutions/{id}/projects`、`GET /admin/institution-projects`；已认证专业用户仅可读 `visibleInstitutionIds` 范围 |
 | 专业端兼容只读项目目录（迁移期） | `GET /admin/projects`；这是不含机构写权限的全局项目目录 |
@@ -470,6 +472,110 @@ Flutter 可以完成页面和接口抽象，但生产发布前必须等待支付
 | 当前分账 | `GET /admin/doctor-institution-project-configs` |
 | 分账提案 | `GET/POST /admin/doctor-institution-project-config-proposals`、`POST /{id}/confirm`、`/reject`、`/withdraw` |
 | 相关订单 | `GET /management/orders?status=...`、`GET /management/orders/{id}`、核销接口见上节 |
+
+### 11.1 医生/顾问机构关系申请统一契约
+
+Flutter 的医生、顾问申请页和机构法人审核页统一使用以下规范接口。所有路径均位于 `/api` 下；根
+`GET /management/institution-membership-requests` 与
+`GET/POST /management/consultant-memberships` 仅为旧客户端滚动兼容接口，不是新 Flutter 的读取、写入或状态判断来源。
+
+| 方法 | 路径 | 语义与权限 |
+|---|---|---|
+| GET | `/management/institution-membership-requests/owned` | 当前登录用户以本人已激活的 `DOCTOR` 和/或 `CONSULTANT` 身份提交的完整账本历史 |
+| GET | `/management/institution-membership-requests/reviewable` | 已确认机构法人仅取得 `managedInstitutionIds` 内的医生/顾问申请；平台管理员取得全部申请 |
+| GET | `/management/institution-membership-candidates` | 当前专业身份的 `JOIN`/`LEAVE` 候选机构分页 |
+| POST | `/management/institution-membership-requests` | 本人提交医生或顾问 `JOIN`/`LEAVE` 申请 |
+| POST | `/management/institution-membership-requests/{requestType}/{id}/withdraw` | 仅申请人本人撤回仍为 `PENDING` 的申请 |
+| POST | `/management/institution-membership-requests/{requestType}/{id}/review` | 目标机构已确认法人或平台管理员批准/驳回申请 |
+
+提交请求必须且只能包含这些字段（`requestNote` 可省略，服务端按空字符串处理）：
+
+```json
+{
+  "requestType": "DOCTOR",
+  "institutionId": "institution-id",
+  "action": "JOIN",
+  "requestNote": "申请说明"
+}
+```
+
+- `requestType` 只允许 `DOCTOR`、`CONSULTANT`；`action` 只允许 `JOIN`、`LEAVE`。
+- `institutionId` 去除首尾空白后不能为空；`requestNote` 去除首尾空白后最多 1000 个字符。
+- `JOIN` 要求申请人当前没有目标机构的有效关系；`LEAVE` 要求当前关系有效。同一专业身份与机构同时最多一条 `PENDING`。
+- 医生必须是本人已认证且激活的医生；顾问必须是本人已激活的顾问。候选接口和提交/审核都会在服务端重新校验，客户端列表不是权限边界。
+
+审核请求必须且只能包含：
+
+```json
+{
+  "decision": "REJECTED",
+  "reviewNote": "驳回原因"
+}
+```
+
+`decision` 只允许 `APPROVED`、`REJECTED`；`reviewNote` 去除首尾空白后最多 1000 个字符，`REJECTED` 时不能为空。非平台管理员只能审核目标 `institutionId` 属于本人 `managedInstitutionIds` 的申请；审核人本人提交给其他机构的申请不会混入 `/reviewable`。
+
+候选查询参数是 `requestType=DOCTOR|CONSULTANT`、`action=JOIN|LEAVE`、可选 `query`、默认
+`offset=0` 和默认 `limit=20`。`offset` 必须大于等于 0，`limit` 必须大于 0且服务端最多返回 100；响应为：
+
+```json
+{
+  "items": [{ "id": "institution-id", "name": "机构名称" }],
+  "offset": 0,
+  "limit": 20,
+  "hasMore": false
+}
+```
+
+`JOIN` 候选只含已认证、未删除、有非空名称、当前未绑定且没有待审申请的机构；`LEAVE` 候选只含当前有效绑定且没有待审申请的机构。`query` 去除首尾空白后按机构名进行不区分大小写的字面量包含查询，`%`、`_`、反斜杠不会被当作通配符；结果按机构名、机构 ID 稳定升序。Flutter 必须使用响应中的 `offset`、`limit`、`hasMore` 驱动分页，并按 ID 去重。
+
+`/owned`、`/reviewable` 以及所有三个写接口的 `data` 使用同一个严格 17 字段对象；列表接口的 `data` 是该对象数组：
+
+```json
+{
+  "id": "request-id",
+  "requestType": "CONSULTANT",
+  "applicantId": "user-id",
+  "applicantName": "顾问姓名",
+  "institutionId": "institution-id",
+  "institutionName": "机构名称",
+  "action": "LEAVE",
+  "status": "PENDING",
+  "relationshipStatus": "APPROVED",
+  "requestNote": "申请退出",
+  "reviewNote": "",
+  "submittedBy": "user-id",
+  "reviewedBy": null,
+  "submittedAt": "2026-08-15T10:00:00",
+  "reviewedAt": null,
+  "createdAt": "2026-08-15T10:00:00",
+  "updatedAt": "2026-08-15T10:00:00"
+}
+```
+
+字段必须全部存在；只有 `reviewedBy`、`reviewedAt` 可显式为 `null`。新账本状态严格为
+`PENDING`、`APPROVED`、`REJECTED`、`WITHDRAWN`。`relationshipStatus` 只描述查询时的当前关系投影：
+
+- `APPROVED`：当前关系仍有效；例如 `LEAVE/PENDING`、`LEAVE/REJECTED`、`LEAVE/WITHDRAWN`。
+- `NONE`：当前没有有效关系；例如未批准的 `JOIN`，或已批准的 `LEAVE`。
+
+Flutter 展示当前机构时必须读取 `/management/context` 的 `doctorInstitutionIds` 或
+`consultantInstitutionIds`；不得用历史 `APPROVED` 申请推断当前绑定。申请重提会新增账本记录，不覆盖已处理历史。
+
+状态效果与事务边界：撤回、驳回以及仍待审的申请都不改变关系投影；批准 `JOIN` 创建或重新激活唯一有效关系；批准 `LEAVE` 只撤销目标机构关系，并只清理目标机构上的 active 专业会话。关系投影、目标会话清理和账本关闭处于同一事务，任一步失败全部回滚。新请求绝不把 `PENDING` 或 `REJECTED` 写入 `doctor_institutions` 或 `institution_memberships`。
+
+本接口族使用真实 HTTP 状态：未登录为 401；参数/枚举/分页非法、未知 JSON 字段、说明过长或驳回原因空白为 400；专业身份不匹配、非本人撤回或跨机构审核为 403；机构或账本申请不存在为 404；关系状态不满足、重复待审、重复/并发处理或审核时状态已变化为 409。写请求不得自动重放；409 后刷新管理上下文、候选和账本列表。
+
+#### V27、滚动兼容与部署顺序
+
+`V27__add_consultant_institution_change_requests.sql` 新增独立顾问申请账本
+`consultant_institution_change_requests`。它把旧 `institution_memberships` 的顾问
+`PENDING`、`REJECTED`、`APPROVED` 行分别回填为 `JOIN` 同状态账本记录并沿用原 ID；旧
+`REVOKED` 关系只保留关系历史，不伪造用户主动 `LEAVE`。迁移不更新或删除既有 membership，因此现有
+`APPROVED`/`REVOKED` 顾问绑定无需重建。旧 `PENDING`/`REJECTED` membership 行也暂时保留用于滚动兼容，但新关系投影读取和写入不再依赖它们。
+
+部署必须按“停止并排空旧写入实例 → 运行 V27 → 启动新写入实例”执行。V27 完成后不得再让旧实例向
+`institution_memberships` 写入顾问 `PENDING`/`REJECTED`；新写入中该表只保存顾问当前/历史关系投影，所有新顾问申请写入独立账本。根 `GET /management/institution-membership-requests` 仍合并受权限约束的账本与无同机构账本历史的旧关系投影；它额外包含旧 `userId` 字段，旧投影还可能返回 `REVOKED` 等原始关系状态，严禁交给四状态规范模型解析。`GET /management/consultant-memberships` 仍为旧 Flutter 保留包括 legacy `REVOKED` 在内的兼容视图，兼容 POST 固定转发为严格的 `CONSULTANT/JOIN`。这些兼容入口不提供第二套更宽松校验，也不能替代 `/owned`、`/reviewable`、候选和 typed mutation 路径。
 
 权限规则：
 
@@ -487,9 +593,7 @@ Flutter 可以完成页面和接口抽象，但生产发布前必须等待支付
 - 法人 PUT 是严格完整替换：请求必须且只能发送 `name`、`address`、`city`、`description`、`coverImage`、`images`、`establishedYear`、`credentials`、`credentialImages`、`specialties`、`tags`、`contactPhone`、`businessHours` 这 13 个键。`establishedYear` 键必须存在，值可为 `null` 或 1800 至当前年的整数；`images`、`credentialImages`、`specialties`、`tags` 必须为 JSON 字符串数组，不能改用遗留的逗号分隔格式。
 - 法人机构档案响应中的 `id`、`createdAt`、`updatedAt`、`rating`、`reviewCount`、`isVerified`、`certificationTime`、`projectCount`、`doctorCount`、`consultationCount`、`userCount`、`caseCount` 是只读字段。`credentialImages` 是机构自行上传的公开展示材料，UI 不得暗示这些图片已经由平台核验。
 - 法人可审核本机构的成员关系和机构项目申请；不能编辑医生档案，也不能绕过项目申请/审核流程直接创建、修改或删除机构项目。旧专业端 `/admin/institutions/{id}` PUT 已移除；`POST/PUT/DELETE /api/admin/institutions...` 等机构写操作及平台全量 CRUD 始终仅限 `ADMIN`。上表列出的机构范围 GET 旧读路径仅在后续切换完成前向已认证专业用户兼容，并由服务端按 `visibleInstitutionIds` 做对象级只读过滤；`GET /admin/projects` 则只提供全局项目目录。所有兼容 GET 均不授予任何写权限。
-- 顾问机构关系必须改用本人专用接口。`GET /management/consultant-memberships` 只返回当前 `ACTIVE CONSULTANT` 自己的 `CONSULTANT` 记录；每项包含 `id`、`institutionId`、`institutionName`、`status`、`requestNote`、`reviewNote`、`createdAt`、`updatedAt`、`confirmedBy`、`confirmedAt`、`revokedAt`。Flutter 仅将 `status == APPROVED` 的项目呈现为当前 affiliation，不能依据历史申请推断关系。
-- `POST /management/consultant-memberships` 固定表达本人 `CONSULTANT + JOIN`，请求必须只发送 `institutionId` 和 `requestNote`；不得发送 `requestType`、`action` 或 `userId`。`institutionId` 去除首尾空白后不能为空，`requestNote` 去除首尾空白后最多 1000 字符。同一顾问与机构已有 `REJECTED` 或 `REVOKED` 记录时复用原记录并回到 `PENDING`；其他既有状态或并发重复提交返回 HTTP 409。机构不存在或已删除返回 404。顾问不能通过该接口撤回或审核。
-- 顾问加入申请仍由机构法人或平台管理员通过通用审核接口处理：`GET /management/institution-membership-requests` 与 `POST /management/institution-membership-requests/{requestType}/{id}/review`。通用接口继续按管理员或 `managedInstitutionIds` 限定可见和可审核对象；顾问专用接口不改变这一兼容边界。
+- 医生和顾问机构关系统一遵循 11.1 的独立申请账本契约；两种身份都可提交 `JOIN`/`LEAVE` 并撤回本人 `PENDING`，法人从 `/reviewable` 审核本机构申请。旧顾问接口只承担滚动兼容，已处理申请不会被重提覆盖。
 - Flutter 专业项目选择统一使用 `GET /management/projects`，不得继续调用 `/admin/projects`。该目录只允许拥有至少一个活跃 `DOCTOR`、`CONSULTANT` 或 `INSTITUTION_LEGAL_REPRESENTATIVE` 身份且不是平台管理员的用户访问，返回全局只读数组，按 `name`、`id` 排序。每项固定包含 `id`、`name`、`category`、`description`、`tags`、`categoryTags`、`coverImage`、`referencePrice`、`currency`；不接受查询参数，也不授予任何项目写能力。
 - `POST /admin/institution-project-requests` 的 `PROFILE_UPDATE` 是医生修改本人医生级项目资料、价格、面诊费和分账的唯一生效前申请入口。Flutter 请求 VO 必须精确包含 12 个键：`institutionProjectId`、固定值 `requestType: PROFILE_UPDATE`、`serviceDescription`、`priceSuggestion`、`notes`、`serviceTags`、`scheduleNote`、`coverImage`、`images`、`consultationFee`、`commissionRate`、`institutionRate`；其中 `serviceTags`、`images` 是 JSON 字符串数组，不能发送 `doctorId`、`platformRate`、`doctorRate` 或基线字段。
 - `GET /admin/institution-project-requests/profile-update-targets` 是表单唯一的当前值来源，只返回已认证医生本人仍有效的医生—机构项目。响应是数组，每项 `DoctorProjectProfileUpdateTargetView` 精确包含：`institutionProjectId`、`projectName`、`institutionId`、`institutionName`、`currentPrice`、`serviceDescription`、`serviceTags`、`scheduleNote`、`coverImage`、`images`、`consultationFee`、`commissionRate`、`institutionRate`、`platformRate`、`doctorRate`。15 个字段全部非 null；无有效配置时返回面诊费 0、顾问率 0、策略默认机构率以及当前平台率和推导医生率。Flutter 不得用机构项目价或本地默认比例伪造基线。
