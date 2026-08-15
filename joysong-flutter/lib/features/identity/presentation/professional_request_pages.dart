@@ -403,9 +403,18 @@ class InstitutionMembershipRequestsPage extends StatelessWidget {
 }
 
 class PlatformProjectRequestPage extends StatefulWidget {
-  const PlatformProjectRequestPage({required this.repository, super.key});
+  const PlatformProjectRequestPage({
+    required this.repository,
+    required this.context,
+    this.reviewMode = false,
+    this.pickAndUploadImage,
+    super.key,
+  });
 
   final IdentityRepository repository;
+  final ManagementContext context;
+  final bool reviewMode;
+  final Future<String?> Function()? pickAndUploadImage;
 
   @override
   State<PlatformProjectRequestPage> createState() =>
@@ -415,11 +424,20 @@ class PlatformProjectRequestPage extends StatefulWidget {
 class _PlatformProjectRequestPageState
     extends State<PlatformProjectRequestPage> {
   final _name = TextEditingController();
+  final _referencePrice = TextEditingController();
+  final _slogan = TextEditingController();
+  final _salesCount = TextEditingController();
   final _category = TextEditingController();
   final _description = TextEditingController();
+  final _detailContent = TextEditingController();
+  final _tags = TextEditingController();
+  final _categoryTags = TextEditingController();
   final _notes = TextEditingController();
+  String _currency = 'CNY';
+  String _coverImage = '';
+  List<String> _images = const [];
   List<ProfessionalProjectRequest> _requests = const [];
-  var _saving = false;
+  var _saving = false, _uploading = false;
   String? _error;
 
   @override
@@ -430,49 +448,185 @@ class _PlatformProjectRequestPageState
 
   @override
   void dispose() {
-    _name.dispose();
-    _category.dispose();
-    _description.dispose();
-    _notes.dispose();
+    for (final controller in [
+      _name,
+      _referencePrice,
+      _slogan,
+      _salesCount,
+      _category,
+      _description,
+      _detailContent,
+      _tags,
+      _categoryTags,
+      _notes,
+    ]) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
-  Future<void> _load() async {
+  Future<bool> _load() async {
     try {
       final requests =
           await widget.repository.listProfessionalProjectRequests();
       if (mounted) {
-        setState(() => _requests =
-            requests.where((item) => item.requestType == 'PLATFORM').toList());
+        setState(() {
+          _requests = requests
+              .where((item) => item.requestType == 'PLATFORM')
+              .where(_isVisible)
+              .toList(growable: false);
+          _error = null;
+        });
       }
+      return true;
     } catch (_) {
       if (mounted) setState(() => _error = '项目申请加载失败，请重试');
+      return false;
     }
   }
+
+  bool _isVisible(ProfessionalProjectRequest request) {
+    if (widget.reviewMode) return widget.context.platformRole == 'ADMIN';
+    return widget.context.doctorId != null &&
+        request.doctorId == widget.context.doctorId;
+  }
+
+  bool get _canReview =>
+      widget.reviewMode && widget.context.platformRole == 'ADMIN';
 
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(
-          title:
-              Text(context.localized('申请新增平台项目', 'Request Platform Project')),
+          title: Text(context.localized(
+            widget.reviewMode ? '平台项目申请审核' : '申请新增平台项目',
+            widget.reviewMode
+                ? 'Platform Project Reviews'
+                : 'Request Platform Project',
+          )),
         ),
         body: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            _requestField(_name, context.localized('项目名称', 'Project name')),
-            _requestField(_category, context.localized('项目分类', 'Category')),
-            _requestField(
-              _description,
-              context.localized('项目说明', 'Description'),
-              maxLines: 4,
-            ),
-            _requestField(_notes, context.localized('补充说明', 'Notes'),
-                maxLines: 3),
-            FilledButton.icon(
-              onPressed: _saving ? null : _submit,
-              icon: const Icon(Icons.send_outlined),
-              label: Text(context.localized('提交申请', 'Submit')),
-            ),
+            if (!widget.reviewMode) ...[
+              _requestField(
+                _name,
+                context.localized('项目名称', 'Project name'),
+                fieldKey: const Key('platform-name'),
+              ),
+              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Expanded(
+                  child: _requestField(
+                    _referencePrice,
+                    context.localized('参考价格', 'Reference price'),
+                    fieldKey: const Key('platform-reference-price'),
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: KeyedSubtree(
+                    key: const Key('platform-currency'),
+                    child: DropdownButtonFormField<String>(
+                      key: ValueKey('platform-currency-$_currency'),
+                      initialValue: _currency,
+                      decoration: InputDecoration(
+                        labelText: context.localized('币种', 'Currency'),
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 'CNY', child: Text('CNY')),
+                        DropdownMenuItem(value: 'USD', child: Text('USD')),
+                      ],
+                      onChanged: _saving
+                          ? null
+                          : (value) =>
+                              setState(() => _currency = value ?? 'CNY'),
+                    ),
+                  ),
+                ),
+              ]),
+              const SizedBox(height: 12),
+              _requestField(
+                _slogan,
+                context.localized('项目标语', 'Slogan'),
+                fieldKey: const Key('platform-slogan'),
+              ),
+              _requestField(
+                _salesCount,
+                context.localized('销量', 'Sales count'),
+                fieldKey: const Key('platform-sales-count'),
+                keyboardType: TextInputType.number,
+              ),
+              _imageUploadField(
+                context,
+                title: context.localized('封面图', 'Cover image'),
+                values: _coverImage.isEmpty ? const [] : [_coverImage],
+                addKey: const Key('platform-cover-upload'),
+                addLabel: context.localized('上传封面图', 'Upload cover'),
+                enabled: !_saving &&
+                    !_uploading &&
+                    widget.pickAndUploadImage != null,
+                onAdd: () => _uploadImage(cover: true),
+                onRemove: (_) => setState(() => _coverImage = ''),
+              ),
+              _imageUploadField(
+                context,
+                title: context.localized('项目图片', 'Gallery images'),
+                values: _images,
+                addKey: const Key('platform-gallery-upload'),
+                addLabel: context.localized('添加项目图片', 'Add gallery image'),
+                enabled: !_saving &&
+                    !_uploading &&
+                    widget.pickAndUploadImage != null,
+                onAdd: () => _uploadImage(cover: false),
+                onRemove: (value) => setState(
+                  () =>
+                      _images = _images.where((item) => item != value).toList(),
+                ),
+              ),
+              _requestField(
+                _category,
+                context.localized('项目分类', 'Category'),
+                fieldKey: const Key('platform-category'),
+              ),
+              _requestField(
+                _description,
+                context.localized('项目说明', 'Description'),
+                fieldKey: const Key('platform-description'),
+                maxLines: 4,
+              ),
+              _requestField(
+                _detailContent,
+                context.localized('项目详情（纯文本）', 'Detail (plain text)'),
+                fieldKey: const Key('platform-detail-content'),
+                maxLines: 6,
+              ),
+              _requestField(
+                _tags,
+                context.localized('项目标签（逗号分隔）', 'Tags (comma separated)'),
+                fieldKey: const Key('platform-tags'),
+              ),
+              _requestField(
+                _categoryTags,
+                context.localized(
+                  '分类标签（逗号分隔）',
+                  'Category tags (comma separated)',
+                ),
+                fieldKey: const Key('platform-category-tags'),
+              ),
+              _requestField(
+                _notes,
+                context.localized('补充说明', 'Notes'),
+                fieldKey: const Key('platform-notes'),
+                maxLines: 3,
+              ),
+              FilledButton.icon(
+                key: const Key('platform-submit'),
+                onPressed: _saving || _uploading ? null : _submit,
+                icon: const Icon(Icons.send_outlined),
+                label: Text(context.localized('提交申请', 'Submit')),
+              ),
+            ],
             if (_error != null) ...[
               const SizedBox(height: 12),
               Text(_error!,
@@ -480,24 +634,42 @@ class _PlatformProjectRequestPageState
             ],
             const SizedBox(height: 24),
             for (final request in _requests)
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(request.name ?? ''),
-                subtitle: Text([
-                  request.category ?? '',
-                  _statusLabel(request.status),
-                  if ((request.reviewNote ?? '').isNotEmpty)
-                    '审核意见：${request.reviewNote}',
-                ].where((item) => item.isNotEmpty).join('\n')),
+              _professionalRequestSnapshot(
+                context,
+                request,
+                canReview: _canReview && request.isCreationReviewable,
+                onReview: () => _review(request),
               ),
           ],
         ),
       );
 
   Future<void> _submit() async {
-    if ([_name, _category, _description]
-        .any((controller) => controller.text.trim().isEmpty)) {
-      setState(() => _error = '请完整填写项目名称、分类和说明');
+    final referencePrice = num.tryParse(_referencePrice.text.trim());
+    final salesCount = int.tryParse(_salesCount.text.trim());
+    if (referencePrice == null || salesCount == null) {
+      setState(() => _error = '请填写有效的参考价格和非负整数销量');
+      return;
+    }
+    final draft = PlatformProjectRequestDraft(
+      name: _name.text,
+      category: _category.text,
+      description: _description.text,
+      referencePrice: referencePrice,
+      currency: _currency,
+      slogan: _slogan.text,
+      salesCount: salesCount,
+      coverImage: _coverImage,
+      images: _images,
+      detailContent: _detailContent.text,
+      tags: _csv(_tags.text),
+      categoryTags: _csv(_categoryTags.text),
+      notes: _notes.text,
+    );
+    try {
+      draft.validate();
+    } on ArgumentError catch (error) {
+      setState(() => _error = error.message.toString());
       return;
     }
     setState(() {
@@ -505,23 +677,71 @@ class _PlatformProjectRequestPageState
       _error = null;
     });
     try {
-      await widget.repository.submitPlatformProjectRequest(
-        PlatformProjectRequestDraft(
-          name: _name.text,
-          category: _category.text,
-          description: _description.text,
-          notes: _notes.text,
-        ),
-      );
-      _name.clear();
-      _category.clear();
-      _description.clear();
-      _notes.clear();
-      await _load();
+      await widget.repository.submitPlatformProjectRequest(draft);
+      if (await _load()) _clearDraft();
     } catch (_) {
       if (mounted) setState(() => _error = '项目申请提交失败，请稍后重试');
     } finally {
       if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _uploadImage({required bool cover}) async {
+    setState(() {
+      _uploading = true;
+      _error = null;
+    });
+    try {
+      final value = (await widget.pickAndUploadImage?.call())?.trim();
+      if (!mounted || value == null || value.isEmpty) return;
+      setState(() {
+        if (cover) {
+          _coverImage = value;
+        } else {
+          _images = [..._images, value];
+        }
+      });
+    } catch (_) {
+      if (mounted) setState(() => _error = '图片上传失败，请重试');
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  void _clearDraft() {
+    for (final controller in [
+      _name,
+      _referencePrice,
+      _slogan,
+      _salesCount,
+      _category,
+      _description,
+      _detailContent,
+      _tags,
+      _categoryTags,
+      _notes,
+    ]) {
+      controller.clear();
+    }
+    setState(() {
+      _currency = 'CNY';
+      _coverImage = '';
+      _images = const [];
+    });
+  }
+
+  Future<void> _review(ProfessionalProjectRequest request) async {
+    final review = await showProfessionalProjectCreationReviewDialog(context);
+    if (review == null) return;
+    try {
+      await widget.repository.reviewPlatformProjectRequest(
+        id: request.id,
+        decision: review.decision,
+        reviewNote: review.note,
+      );
+      await _load();
+    } catch (_) {
+      if (mounted) setState(() => _error = '审核提交失败，请稍后重试');
     }
   }
 }
@@ -531,12 +751,14 @@ class InstitutionProjectRequestsPage extends StatefulWidget {
     required this.repository,
     required this.context,
     this.reviewMode = false,
+    this.pickAndUploadImage,
     super.key,
   });
 
   final IdentityRepository repository;
   final ManagementContext context;
   final bool reviewMode;
+  final Future<String?> Function()? pickAndUploadImage;
 
   @override
   State<InstitutionProjectRequestsPage> createState() =>
@@ -545,17 +767,32 @@ class InstitutionProjectRequestsPage extends StatefulWidget {
 
 class _InstitutionProjectRequestsPageState
     extends State<InstitutionProjectRequestsPage> {
-  final _serviceContent = TextEditingController();
+  final _name = TextEditingController();
+  final _category = TextEditingController();
+  final _description = TextEditingController();
+  final _tags = TextEditingController();
+  final _slogan = TextEditingController();
+  final _detailContent = TextEditingController();
   final _price = TextEditingController();
+  final _originalPrice = TextEditingController();
+  final _cover = TextEditingController();
+  final _salesCount = TextEditingController();
+  final _consultationFee = TextEditingController();
+  final _consultantRate = TextEditingController();
+  final _institutionRate = TextEditingController();
   final _notes = TextEditingController();
   List<InstitutionOption> _institutions = const [];
   List<ManagementProjectOption> _projects = const [];
   List<ProfessionalProjectRequest> _requests = const [];
+  List<String> _images = const [];
   String? _institutionId;
   String? _projectId;
+  String _currency = 'CNY';
+  bool _isActive = true;
+  num? _platformRate;
   String? _error;
   var _loading = true;
-  var _saving = false;
+  var _saving = false, _uploading = false;
 
   @override
   void initState() {
@@ -565,37 +802,60 @@ class _InstitutionProjectRequestsPageState
 
   @override
   void dispose() {
-    _serviceContent.dispose();
-    _price.dispose();
-    _notes.dispose();
+    for (final controller in [
+      _name,
+      _category,
+      _description,
+      _tags,
+      _slogan,
+      _detailContent,
+      _price,
+      _originalPrice,
+      _cover,
+      _salesCount,
+      _consultationFee,
+      _consultantRate,
+      _institutionRate,
+      _notes,
+    ]) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
   Future<void> _load() async {
     try {
-      final requests =
-          await widget.repository.listProfessionalProjectRequests();
       final values = widget.reviewMode
-          ? null
-          : await Future.wait([
+          ? <Object>[
+              await widget.repository.listProfessionalProjectRequests(),
+            ]
+          : await Future.wait<Object>([
+              widget.repository.listProfessionalProjectRequests(),
               widget.repository.listInstitutionOptions(),
               widget.repository.listManagementProjects(),
+              widget.repository.loadInstitutionProjectApplicationFormConfig(),
             ]);
       if (!mounted) return;
       final allowedIds = widget.context.doctorInstitutionIds.toSet();
       setState(() {
-        _institutions = values == null
-            ? const []
-            : (values[0] as List<InstitutionOption>)
-                .where((item) => allowedIds.contains(item.id))
-                .toList();
-        _projects = values == null
-            ? const []
-            : values[1] as List<ManagementProjectOption>;
-        _requests = requests
+        _requests = (values[0] as List<ProfessionalProjectRequest>)
             .where((item) => item.requestType == 'INSTITUTION')
-            .toList();
+            .where(_isVisible)
+            .toList(growable: false);
+        _institutions = widget.reviewMode
+            ? const []
+            : (values[1] as List<InstitutionOption>)
+                .where((item) => allowedIds.contains(item.id))
+                .toList(growable: false);
+        _projects = widget.reviewMode
+            ? const []
+            : values[2] as List<ManagementProjectOption>;
+        _platformRate = widget.reviewMode
+            ? null
+            : (values[3] as InstitutionProjectApplicationFormConfig)
+                .platformRate;
         _loading = false;
+        _error = null;
       });
     } catch (_) {
       if (mounted) {
@@ -605,6 +865,34 @@ class _InstitutionProjectRequestsPageState
         });
       }
     }
+  }
+
+  bool _isVisible(ProfessionalProjectRequest request) {
+    if (widget.reviewMode) {
+      if (widget.context.platformRole == 'ADMIN') return true;
+      final legal = widget.context.activeRoles
+          .contains(IdentityRoleType.institutionLegalRepresentative.code);
+      return legal &&
+          request.institutionId != null &&
+          widget.context.managedInstitutionIds.contains(request.institutionId);
+    }
+    return widget.context.doctorId != null &&
+        request.doctorId == widget.context.doctorId;
+  }
+
+  bool _canReview(ProfessionalProjectRequest request) {
+    if (!widget.reviewMode || !request.isCreationReviewable) return false;
+    if (widget.context.platformRole == 'ADMIN') return true;
+    return widget.context.canReviewInstitutionProjectRequests &&
+        request.institutionId != null &&
+        widget.context.managedInstitutionIds.contains(request.institutionId);
+  }
+
+  ManagementProjectOption? get _selectedProject {
+    for (final project in _projects) {
+      if (project.id == _projectId) return project;
+    }
+    return null;
   }
 
   @override
@@ -621,6 +909,7 @@ class _InstitutionProjectRequestsPageState
                 children: [
                   if (!widget.reviewMode) ...[
                     DropdownButtonFormField<String>(
+                      key: ValueKey('institution-id-$_institutionId'),
                       initialValue: _institutionId,
                       decoration: InputDecoration(
                         labelText: context.localized('目标机构', 'Institution'),
@@ -631,11 +920,13 @@ class _InstitutionProjectRequestsPageState
                                 child: Text(item.name),
                               ))
                           .toList(),
-                      onChanged: (value) =>
-                          setState(() => _institutionId = value),
+                      onChanged: _saving
+                          ? null
+                          : (value) => setState(() => _institutionId = value),
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
+                      key: ValueKey('institution-project-$_projectId'),
                       initialValue: _projectId,
                       decoration: InputDecoration(
                         labelText:
@@ -647,23 +938,194 @@ class _InstitutionProjectRequestsPageState
                                 child: Text(item.name),
                               ))
                           .toList(),
-                      onChanged: (value) => setState(() => _projectId = value),
+                      onChanged: _saving
+                          ? null
+                          : (value) {
+                              if (value != null) _selectProject(value);
+                            },
                     ),
                     const SizedBox(height: 12),
+                    Text(
+                      context.localized(
+                        '当前认证医生：${widget.context.doctorId ?? '-'}。该医生是唯一申请医生，审批后仅关联本人。',
+                        'Current authenticated doctor: ${widget.context.doctorId ?? '-'}. This is the only applicant and binding created after approval.',
+                      ),
+                      key: const Key('institution-applicant-notice'),
+                    ),
+                    const SizedBox(height: 12),
+                    if (_selectedProject != null)
+                      _inheritancePreview(context, _selectedProject!),
                     _requestField(
-                      _serviceContent,
-                      context.localized('服务内容', 'Service content'),
+                      _name,
+                      context.localized('项目名称（可选覆盖）', 'Name override'),
+                      fieldKey: const Key('institution-name'),
+                      hintText: _selectedProject?.name,
+                    ),
+                    _requestField(
+                      _category,
+                      context.localized('项目分类（可选覆盖）', 'Category override'),
+                      fieldKey: const Key('institution-category'),
+                      hintText: _selectedProject?.category,
+                    ),
+                    _requestField(
+                      _description,
+                      context.localized('项目说明（可选覆盖）', 'Description override'),
+                      fieldKey: const Key('institution-description'),
                       maxLines: 4,
+                      hintText: _selectedProject?.description,
+                    ),
+                    _requestField(
+                      _tags,
+                      context.localized('项目标签（可选覆盖）', 'Tags override'),
+                      fieldKey: const Key('institution-tags'),
+                      hintText: _selectedProject?.tags,
+                    ),
+                    _requestField(
+                      _slogan,
+                      context.localized('项目标语（可选覆盖）', 'Slogan override'),
+                      fieldKey: const Key('institution-slogan'),
+                      hintText: _selectedProject?.slogan,
+                    ),
+                    _requestField(
+                      _detailContent,
+                      context.localized(
+                        '项目详情（可选纯文本覆盖）',
+                        'Detail override (plain text)',
+                      ),
+                      fieldKey: const Key('institution-detail-content'),
+                      maxLines: 6,
+                      hintText: _selectedProject?.detailContent,
                     ),
                     _requestField(
                       _price,
-                      context.localized('价格建议', 'Price suggestion'),
-                      keyboardType: TextInputType.number,
+                      context.localized('价格', 'Price'),
+                      fieldKey: const Key('institution-price'),
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      hintText: _selectedProject == null
+                          ? null
+                          : '${_selectedProject!.referencePrice}',
                     ),
-                    _requestField(_notes, context.localized('说明', 'Notes'),
-                        maxLines: 3),
+                    _requestField(
+                      _originalPrice,
+                      context.localized('原价（可选）', 'Original price (optional)'),
+                      fieldKey: const Key('institution-original-price'),
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                    ),
+                    DropdownButtonFormField<String>(
+                      key: ValueKey('institution-currency-$_currency'),
+                      initialValue: _currency,
+                      decoration: InputDecoration(
+                        labelText: context.localized('币种', 'Currency'),
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 'CNY', child: Text('CNY')),
+                        DropdownMenuItem(value: 'USD', child: Text('USD')),
+                      ],
+                      onChanged: _saving
+                          ? null
+                          : (value) =>
+                              setState(() => _currency = value ?? 'CNY'),
+                    ),
+                    const SizedBox(height: 12),
+                    _imageUploadField(
+                      context,
+                      title: context.localized('封面图（可选覆盖）', 'Cover override'),
+                      values: _cover.text.trim().isEmpty
+                          ? const []
+                          : [_cover.text.trim()],
+                      inheritedValues: _selectedProject == null ||
+                              _selectedProject!.coverImage.isEmpty
+                          ? const []
+                          : [_selectedProject!.coverImage],
+                      addKey: const Key('institution-cover-upload'),
+                      addLabel: context.localized('上传封面图', 'Upload cover'),
+                      enabled: !_saving &&
+                          !_uploading &&
+                          widget.pickAndUploadImage != null,
+                      onAdd: () => _uploadImage(cover: true),
+                      onRemove: (_) => setState(_cover.clear),
+                    ),
+                    _imageUploadField(
+                      context,
+                      title:
+                          context.localized('项目图片（可选覆盖）', 'Gallery override'),
+                      values: _images,
+                      inheritedValues: _selectedProject?.images ?? const [],
+                      addKey: const Key('institution-gallery-upload'),
+                      addLabel:
+                          context.localized('添加项目图片', 'Add gallery image'),
+                      enabled: !_saving &&
+                          !_uploading &&
+                          widget.pickAndUploadImage != null,
+                      onAdd: () => _uploadImage(cover: false),
+                      onRemove: (value) => setState(
+                        () => _images = _images
+                            .where((item) => item != value)
+                            .toList(growable: false),
+                      ),
+                    ),
+                    _requestField(
+                      _salesCount,
+                      context.localized('销量', 'Sales count'),
+                      fieldKey: const Key('institution-sales-count'),
+                      keyboardType: TextInputType.number,
+                      hintText: _selectedProject == null
+                          ? null
+                          : '${_selectedProject!.salesCount}',
+                    ),
+                    SwitchListTile(
+                      key: const Key('institution-is-active'),
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(context.localized(
+                          '审批后立即上架', 'Active after approval')),
+                      value: _isActive,
+                      onChanged: _saving
+                          ? null
+                          : (value) => setState(() => _isActive = value),
+                    ),
+                    _requestField(
+                      _consultationFee,
+                      context.localized('面诊费', 'Consultation fee'),
+                      fieldKey: const Key('institution-consultation-fee'),
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                    ),
+                    _requestField(
+                      _consultantRate,
+                      context.localized('医美顾问比例（%）', 'Consultant rate (%)'),
+                      fieldKey: const Key('institution-consultant-rate'),
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                    _requestField(
+                      _institutionRate,
+                      context.localized('机构比例（%）', 'Institution rate (%)'),
+                      fieldKey: const Key('institution-rate'),
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                    Text(
+                      '${context.localized('平台比例（只读）', 'Platform rate (read only)')}：${_formatNumber(_platformRate)}%',
+                      key: const Key('institution-platform-rate'),
+                    ),
+                    Text(
+                      '${context.localized('医生比例（自动推导）', 'Doctor rate (derived)')}：${_formatNumber(_derivedDoctorRate)}%',
+                      key: const Key('institution-doctor-rate'),
+                    ),
+                    const SizedBox(height: 12),
+                    _requestField(
+                      _notes,
+                      context.localized('说明', 'Notes'),
+                      fieldKey: const Key('institution-notes'),
+                      maxLines: 3,
+                    ),
                     FilledButton.icon(
-                      onPressed: _saving ? null : _submit,
+                      key: const Key('institution-submit'),
+                      onPressed: _saving || _uploading ? null : _submit,
                       icon: const Icon(Icons.send_outlined),
                       label: Text(context.localized('提交申请', 'Submit')),
                     ),
@@ -674,29 +1136,11 @@ class _InstitutionProjectRequestsPageState
                         style: TextStyle(
                             color: Theme.of(context).colorScheme.error)),
                   for (final request in _requests)
-                    ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.medical_services_outlined),
-                      title:
-                          Text(request.projectName ?? request.projectId ?? ''),
-                      subtitle: Text([
-                        request.institutionName ?? request.institutionId ?? '',
-                        if ((request.doctorName).isNotEmpty) request.doctorName,
-                        if ((request.serviceContent ?? '').isNotEmpty)
-                          request.serviceContent!,
-                        if (request.priceSuggestion != null)
-                          '价格建议：${request.priceSuggestion}',
-                        _statusLabel(request.status),
-                        if ((request.reviewNote ?? '').isNotEmpty)
-                          '审核意见：${request.reviewNote}',
-                      ].where((item) => item.isNotEmpty).join('\n')),
-                      trailing: widget.reviewMode && request.status == 'PENDING'
-                          ? IconButton(
-                              tooltip: context.localized('审核', 'Review'),
-                              icon: const Icon(Icons.fact_check_outlined),
-                              onPressed: () => _review(request),
-                            )
-                          : null,
+                    _professionalRequestSnapshot(
+                      context,
+                      request,
+                      canReview: _canReview(request),
+                      onReview: () => _review(request),
                     ),
                 ],
               ),
@@ -706,12 +1150,53 @@ class _InstitutionProjectRequestsPageState
     final institutionId = _institutionId;
     final projectId = _projectId;
     final price = num.tryParse(_price.text.trim());
+    final originalPrice = _originalPrice.text.trim().isEmpty
+        ? null
+        : num.tryParse(_originalPrice.text.trim());
+    final consultationFee = num.tryParse(_consultationFee.text.trim());
+    final consultantRate = num.tryParse(_consultantRate.text.trim());
+    final institutionRate = num.tryParse(_institutionRate.text.trim());
+    final salesCount = _salesCount.text.trim().isEmpty
+        ? _selectedProject?.salesCount
+        : int.tryParse(_salesCount.text.trim());
     if (institutionId == null ||
         projectId == null ||
-        _serviceContent.text.trim().isEmpty ||
         price == null ||
-        price < 0) {
-      setState(() => _error = '请选择机构和平台项目，并填写服务内容与有效价格建议');
+        consultationFee == null ||
+        consultantRate == null ||
+        institutionRate == null ||
+        salesCount == null ||
+        _platformRate == null ||
+        (_originalPrice.text.trim().isNotEmpty && originalPrice == null)) {
+      setState(() => _error = '请选择机构和平台项目，并填写有效金额、销量与分账比例');
+      return;
+    }
+    final draft = InstitutionProjectRequestDraft(
+      institutionId: institutionId,
+      projectId: projectId,
+      name: _optionalText(_name.text),
+      category: _optionalText(_category.text),
+      description: _optionalText(_description.text),
+      tags: _optionalItems(_tags.text),
+      slogan: _optionalText(_slogan.text),
+      detailContent: _optionalText(_detailContent.text),
+      price: price,
+      originalPrice: originalPrice,
+      currency: _currency,
+      coverImage: _optionalText(_cover.text),
+      images: _images.isEmpty ? null : _images,
+      salesCount: salesCount,
+      isActive: _isActive,
+      consultationFee: consultationFee,
+      commissionRate: consultantRate,
+      institutionRate: institutionRate,
+      platformRate: _platformRate!,
+      notes: _notes.text,
+    );
+    try {
+      draft.validate();
+    } on ArgumentError catch (error) {
+      setState(() => _error = error.message.toString());
       return;
     }
     setState(() {
@@ -719,19 +1204,8 @@ class _InstitutionProjectRequestsPageState
       _error = null;
     });
     try {
-      await widget.repository.submitInstitutionProjectRequest(
-        InstitutionProjectRequestDraft(
-          institutionId: institutionId,
-          projectId: projectId,
-          serviceContent: _serviceContent.text,
-          priceSuggestion: price,
-          notes: _notes.text,
-        ),
-      );
-      _serviceContent.clear();
-      _price.clear();
-      _notes.clear();
-      await _load();
+      await widget.repository.submitInstitutionProjectRequest(draft);
+      if (await _refreshRequests()) _clearDraft();
     } catch (_) {
       if (mounted) setState(() => _error = '机构项目申请提交失败，请稍后重试');
     } finally {
@@ -740,7 +1214,7 @@ class _InstitutionProjectRequestsPageState
   }
 
   Future<void> _review(ProfessionalProjectRequest request) async {
-    final review = await showProfessionalProjectReviewDialog(context);
+    final review = await showProfessionalProjectCreationReviewDialog(context);
     if (review == null) return;
     try {
       await widget.repository.reviewInstitutionProjectRequest(
@@ -752,6 +1226,94 @@ class _InstitutionProjectRequestsPageState
     } catch (_) {
       if (mounted) setState(() => _error = '审核提交失败，请稍后重试');
     }
+  }
+
+  void _selectProject(String projectId) {
+    final project = _projects.firstWhere((item) => item.id == projectId);
+    setState(() {
+      _projectId = projectId;
+      _currency = project.currency;
+      _error = null;
+    });
+  }
+
+  num? get _derivedDoctorRate {
+    final platform = _platformRate;
+    final institution = num.tryParse(_institutionRate.text.trim());
+    final consultant = num.tryParse(_consultantRate.text.trim());
+    if (platform == null || institution == null || consultant == null) {
+      return null;
+    }
+    return 100 - platform - institution - consultant;
+  }
+
+  Future<bool> _refreshRequests() async {
+    try {
+      final requests =
+          await widget.repository.listProfessionalProjectRequests();
+      if (!mounted) return false;
+      setState(() {
+        _requests = requests
+            .where((item) => item.requestType == 'INSTITUTION')
+            .where(_isVisible)
+            .toList(growable: false);
+        _error = null;
+      });
+      return true;
+    } catch (_) {
+      if (mounted) setState(() => _error = '机构项目申请加载失败，请重试');
+      return false;
+    }
+  }
+
+  Future<void> _uploadImage({required bool cover}) async {
+    setState(() {
+      _uploading = true;
+      _error = null;
+    });
+    try {
+      final value = (await widget.pickAndUploadImage?.call())?.trim();
+      if (!mounted || value == null || value.isEmpty) return;
+      setState(() {
+        if (cover) {
+          _cover.text = value;
+        } else {
+          _images = [..._images, value];
+        }
+      });
+    } catch (_) {
+      if (mounted) setState(() => _error = '图片上传失败，请重试');
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  void _clearDraft() {
+    for (final controller in [
+      _name,
+      _category,
+      _description,
+      _tags,
+      _slogan,
+      _detailContent,
+      _price,
+      _originalPrice,
+      _cover,
+      _salesCount,
+      _consultationFee,
+      _consultantRate,
+      _institutionRate,
+      _notes,
+    ]) {
+      controller.clear();
+    }
+    setState(() {
+      _institutionId = null;
+      _projectId = null;
+      _currency = 'CNY';
+      _images = const [];
+      _isActive = true;
+    });
   }
 }
 
@@ -1652,29 +2214,88 @@ Future<({String decision, String note})?> showProfessionalProjectReviewDialog(
       ],
     );
 
+Future<({String decision, String note})?>
+    showProfessionalProjectCreationReviewDialog(BuildContext context) =>
+        _showReviewDialog(
+          context,
+          decisionKey: const Key('creation-review-decision'),
+          noteKey: const Key('creation-review-note'),
+          confirmKey: const Key('creation-review-confirm'),
+          decisions: const [
+            DropdownMenuItem(
+              key: Key('creation-review-APPROVED'),
+              value: 'APPROVED',
+              child: Text('通过'),
+            ),
+            DropdownMenuItem(
+              key: Key('creation-review-REJECTED'),
+              value: 'REJECTED',
+              child: Text('驳回'),
+            ),
+          ],
+        );
+
 Future<({String decision, String note})?> _showReviewDialog(
   BuildContext context, {
   required List<DropdownMenuItem<String>> decisions,
-}) async {
-  final note = TextEditingController();
-  var decision = 'APPROVED';
-  final result = await showDialog<({String decision, String note})>(
-    context: context,
-    builder: (dialogContext) => StatefulBuilder(
-      builder: (context, setDialogState) => AlertDialog(
+  Key? decisionKey,
+  Key? noteKey,
+  Key? confirmKey,
+}) =>
+    showDialog<({String decision, String note})>(
+      context: context,
+      builder: (_) => _ReviewDialog(
+        decisions: decisions,
+        decisionKey: decisionKey,
+        noteKey: noteKey,
+        confirmKey: confirmKey,
+      ),
+    );
+
+class _ReviewDialog extends StatefulWidget {
+  const _ReviewDialog({
+    required this.decisions,
+    this.decisionKey,
+    this.noteKey,
+    this.confirmKey,
+  });
+
+  final List<DropdownMenuItem<String>> decisions;
+  final Key? decisionKey;
+  final Key? noteKey;
+  final Key? confirmKey;
+
+  @override
+  State<_ReviewDialog> createState() => _ReviewDialogState();
+}
+
+class _ReviewDialogState extends State<_ReviewDialog> {
+  final _note = TextEditingController();
+  String _decision = 'APPROVED';
+
+  @override
+  void dispose() {
+    _note.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
         title: Text(context.localized('审核申请', 'Review Request')),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             DropdownButtonFormField<String>(
-              initialValue: decision,
-              items: decisions,
+              key: widget.decisionKey,
+              initialValue: _decision,
+              items: widget.decisions,
               onChanged: (value) =>
-                  setDialogState(() => decision = value ?? 'APPROVED'),
+                  setState(() => _decision = value ?? 'APPROVED'),
             ),
             const SizedBox(height: 12),
             TextField(
-              controller: note,
+              key: widget.noteKey,
+              controller: _note,
               maxLines: 3,
               decoration: InputDecoration(
                 labelText: context.localized('审核意见', 'Review note'),
@@ -1684,25 +2305,22 @@ Future<({String decision, String note})?> _showReviewDialog(
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
+            onPressed: () => Navigator.of(context).pop(),
             child: Text(context.localized('取消', 'Cancel')),
           ),
           FilledButton(
+            key: widget.confirmKey,
             onPressed: () {
-              if (decision != 'APPROVED' && note.text.trim().isEmpty) return;
-              Navigator.of(dialogContext).pop((
-                decision: decision,
-                note: note.text.trim(),
+              if (_decision != 'APPROVED' && _note.text.trim().isEmpty) return;
+              Navigator.of(context).pop((
+                decision: _decision,
+                note: _note.text.trim(),
               ));
             },
             child: Text(context.localized('确认', 'Confirm')),
           ),
         ],
-      ),
-    ),
-  );
-  note.dispose();
-  return result;
+      );
 }
 
 Widget _requestField(
@@ -1711,6 +2329,8 @@ Widget _requestField(
   Key? fieldKey,
   int maxLines = 1,
   TextInputType? keyboardType,
+  String? hintText,
+  ValueChanged<String>? onChanged,
 }) =>
     Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -1719,9 +2339,172 @@ Widget _requestField(
         controller: controller,
         maxLines: maxLines,
         keyboardType: keyboardType,
-        decoration: InputDecoration(labelText: label),
+        onChanged: onChanged,
+        decoration: InputDecoration(labelText: label, hintText: hintText),
       ),
     );
+
+Widget _imageUploadField(
+  BuildContext context, {
+  required String title,
+  required List<String> values,
+  required Key addKey,
+  required String addLabel,
+  required bool enabled,
+  required Future<void> Function() onAdd,
+  required ValueChanged<String> onRemove,
+  List<String> inheritedValues = const [],
+}) =>
+    Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: Theme.of(context).textTheme.titleSmall),
+            if (values.isEmpty && inheritedValues.isNotEmpty)
+              Text(
+                '${context.localized('继承值', 'Inherited')}: ${inheritedValues.join(', ')}',
+              ),
+            for (final entry in values.indexed)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.image_outlined),
+                title: Text(entry.$2),
+                trailing: IconButton(
+                  key: ValueKey('${addKey.toString()}-remove-${entry.$1}'),
+                  onPressed: enabled ? () => onRemove(entry.$2) : null,
+                  icon: const Icon(Icons.delete_outline),
+                ),
+              ),
+            OutlinedButton.icon(
+              key: addKey,
+              onPressed: enabled ? onAdd : null,
+              icon: const Icon(Icons.add_photo_alternate_outlined),
+              label: Text(addLabel),
+            ),
+          ],
+        ),
+      ),
+    );
+
+Widget _inheritancePreview(
+  BuildContext context,
+  ManagementProjectOption project,
+) =>
+    Card(
+      key: const Key('institution-inheritance-preview'),
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Text([
+          '${context.localized('继承项目', 'Inherited project')}: ${project.name}',
+          '${context.localized('分类', 'Category')}: ${project.category}',
+          '${context.localized('说明', 'Description')}: ${project.description}',
+          '${context.localized('标签', 'Tags')}: ${project.tags}',
+          '${context.localized('分类标签', 'Category tags')}: ${project.categoryTags}',
+          '${context.localized('封面', 'Cover')}: ${project.coverImage}',
+          '${context.localized('参考价格', 'Reference price')}: ${project.referencePrice}',
+          '${context.localized('币种', 'Currency')}: ${project.currency}',
+          '${context.localized('标语', 'Slogan')}: ${project.slogan}',
+          '${context.localized('详情', 'Detail')}: ${project.detailContent ?? ''}',
+          '${context.localized('图片', 'Images')}: ${project.images.join(', ')}',
+          '${context.localized('销量', 'Sales')}: ${project.salesCount}',
+        ].join('\n')),
+      ),
+    );
+
+Widget _professionalRequestSnapshot(
+  BuildContext context,
+  ProfessionalProjectRequest request, {
+  required bool canReview,
+  required VoidCallback onReview,
+}) {
+  final split = request.institutionSplit;
+  final rows = <String>[
+    '${context.localized('申请类型', 'Request type')}：${request.requestType}',
+    '${context.localized('申请医生', 'Applicant doctor')}：${request.doctorName} (${request.doctorId})',
+    '${context.localized('机构', 'Institution')}：${request.institutionName ?? request.institutionId ?? '-'}',
+    '${context.localized('平台项目', 'Platform project')}：${request.projectName ?? request.projectId ?? '-'}',
+    '${context.localized('项目名称', 'Name')}：${request.name ?? '-'}',
+    '${context.localized('项目分类', 'Category')}：${request.category ?? '-'}',
+    '${context.localized('项目说明', 'Description')}：${request.description ?? '-'}',
+    '${context.localized('项目标签', 'Tags')}：${request.tags?.join(', ') ?? '-'}',
+    '${context.localized('项目标语', 'Slogan')}：${request.slogan ?? '-'}',
+    '${context.localized('项目详情', 'Detail')}：${request.detailContent ?? '-'}',
+    '${context.localized('币种', 'Currency')}：${request.currency}',
+    '${context.localized('封面图', 'Cover')}：${request.coverImage ?? '-'}',
+    '${context.localized('项目图片', 'Images')}：${request.images?.join(', ') ?? '-'}',
+    '${context.localized('销量', 'Sales count')}：${request.salesCount}',
+    '${context.localized('参考价格', 'Reference price')}：${request.referencePrice ?? '-'}',
+    '${context.localized('分类标签', 'Category tags')}：${request.categoryTags?.join(', ') ?? '-'}',
+    '${context.localized('价格', 'Price')}：${request.price ?? '-'}',
+    '${context.localized('原价', 'Original price')}：${request.originalPrice ?? '-'}',
+    '${context.localized('上架', 'Active')}：${request.isActive ?? '-'}',
+    if (split != null) ...[
+      '${context.localized('面诊费', 'Consultation fee')}：${split.consultationFee}',
+      '${context.localized('顾问比例', 'Consultant rate')}：${split.commissionRate}%',
+      '${context.localized('机构比例', 'Institution rate')}：${split.institutionRate}%',
+      '${context.localized('平台比例', 'Platform rate')}：${split.platformRate}%',
+      '${context.localized('医生比例', 'Doctor rate')}：${split.doctorRate}%',
+    ],
+    '${context.localized('申请说明', 'Notes')}：${request.notes ?? '-'}',
+    '${context.localized('状态', 'Status')}：${_statusLabel(request.status)}',
+    '${context.localized('审核意见', 'Review note')}：${request.reviewNote ?? '-'}',
+    '${context.localized('提交时间', 'Submitted at')}：${request.submittedAt.toIso8601String()}',
+    '${context.localized('更新时间', 'Updated at')}：${request.updatedAt.toIso8601String()}',
+    '${context.localized('审核人', 'Reviewed by')}：${request.reviewedBy ?? '-'}',
+    '${context.localized('审核时间', 'Reviewed at')}：${request.reviewedAt?.toIso8601String() ?? '-'}',
+    '${context.localized('生成平台项目', 'Resulting platform project')}：${request.resultingProjectId ?? '-'}',
+    '${context.localized('生成机构项目', 'Resulting institution project')}：${request.resultingInstitutionProjectId ?? '-'}',
+  ];
+  return Card(
+    key: Key('professional-request-${request.id}'),
+    margin: const EdgeInsets.only(bottom: 12),
+    child: Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(request.name ?? request.projectName ?? request.id,
+              style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          for (final row in rows)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 3),
+              child: Text(row),
+            ),
+          if (canReview)
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.tonalIcon(
+                key: Key('review-creation-${request.id}'),
+                onPressed: onReview,
+                icon: const Icon(Icons.fact_check_outlined),
+                label: Text(context.localized('审核', 'Review')),
+              ),
+            ),
+        ],
+      ),
+    ),
+  );
+}
+
+String? _optionalText(String value) =>
+    value.trim().isEmpty ? null : value.trim();
+
+List<String>? _optionalItems(String value) {
+  final items = _csv(value);
+  return items.isEmpty ? null : items;
+}
+
+String _formatNumber(num? value) {
+  if (value == null) return '-';
+  return value == value.roundToDouble()
+      ? value.toInt().toString()
+      : value.toString();
+}
 
 List<String> _parseCsv(String value) => value
     .split(',')

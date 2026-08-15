@@ -631,7 +631,7 @@ void main() {
   });
 
   testWidgets(
-      'membership reviews offer approve and reject while project reviews retain request changes',
+      'creation review has two decisions while the legacy JOIN review retains request changes',
       (tester) async {
     const context = ManagementContext(
       userId: 'legal-1',
@@ -672,17 +672,38 @@ void main() {
     await tester.pumpWidget(_localizedApp(
       home: Builder(
         builder: (context) => TextButton(
-          onPressed: () => showProfessionalProjectReviewDialog(context),
-          child: const Text('open project review'),
+          onPressed: () => showProfessionalProjectCreationReviewDialog(context),
+          child: const Text('open creation review'),
         ),
       ),
     ));
-    await tester.tap(find.text('open project review'));
+    await tester.tap(find.text('open creation review'));
     await tester.pumpAndSettle();
 
+    await tester.tap(find.byKey(const Key('creation-review-decision')));
+    await tester.pumpAndSettle();
+    expect(find.text('通过'), findsWidgets);
+    expect(find.text('驳回'), findsOneWidget);
+    expect(find.text('要求修改'), findsNothing);
+
+    await tester.tap(find.text('通过').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(_localizedApp(
+      home: Builder(
+        builder: (context) => TextButton(
+          onPressed: () => showProfessionalProjectReviewDialog(context),
+          child: const Text('open JOIN review'),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('open JOIN review'));
+    await tester.pumpAndSettle();
     await tester.tap(find.byType(DropdownButtonFormField<String>));
     await tester.pumpAndSettle();
-    expect(find.text('要求修改'), findsOneWidget);
+    expect(find.text('要求修改'), findsOneWidget,
+        reason: 'the unrelated legacy JOIN workflow keeps three decisions');
   });
 
   testWidgets(
@@ -700,7 +721,37 @@ void main() {
           'institutionName': 'Joysong Clinic',
           'projectId': 'project-1',
           'projectName': 'Skin Renewal',
+          'name': 'Clinic Skin Renewal',
+          'category': 'Skin',
+          'description': 'Immutable description',
+          'tags': ['skin'],
+          'slogan': 'Renew naturally',
+          'detailContent': 'Immutable detail',
+          'currency': 'CNY',
+          'coverImage': null,
+          'images': null,
+          'salesCount': 0,
+          'referencePrice': null,
+          'categoryTags': null,
+          'price': 699,
+          'originalPrice': null,
+          'isActive': true,
+          'institutionSplit': {
+            'consultationFee': 0,
+            'commissionRate': 0,
+            'institutionRate': 50,
+            'platformRate': 10,
+            'doctorRate': 40,
+          },
+          'notes': '',
           'status': 'PENDING',
+          'reviewNote': null,
+          'reviewedBy': null,
+          'reviewedAt': null,
+          'resultingProjectId': null,
+          'resultingInstitutionProjectId': null,
+          'submittedAt': '2026-08-16T08:00:00',
+          'updatedAt': '2026-08-16T08:00:00',
         }),
       ]
       ..managementContext = const ManagementContext(
@@ -730,12 +781,13 @@ void main() {
     expect(find.text('机构关系审核'), findsOneWidget);
     expect(find.text('机构项目申请审核'), findsOneWidget);
     expect(find.text('机构项目加入审核'), findsOneWidget);
+    expect(find.text('平台项目申请审核'), findsNothing);
     expect(find.text('机构项目'), findsNothing);
     expect(find.text('专业订单'), findsNothing);
 
     await tester.tap(find.text('机构项目申请审核'));
     await tester.pumpAndSettle();
-    expect(find.text('Skin Renewal'), findsOneWidget);
+    expect(find.textContaining('Skin Renewal'), findsWidgets);
     expect(find.text('机构项目申请加载失败，请重试'), findsNothing);
   });
 
@@ -818,6 +870,37 @@ void main() {
 
     expect(find.text('医生档案'), findsNothing);
     expect(find.text('Doctor profile'), findsNothing);
+  });
+
+  testWidgets('administrator receives both creation review entry points',
+      (tester) async {
+    final repository = _FakeIdentityRepository()
+      ..managementContext = const ManagementContext(
+        userId: 'admin-1',
+        platformRole: 'ADMIN',
+        activeRoles: [],
+        managedInstitutionIds: [],
+        visibleInstitutionIds: [],
+        canReviewInstitutionProjectRequests: true,
+      );
+
+    await tester.pumpWidget(_localizedApp(
+      home: ManagementCenterPage(
+        repository: repository,
+        discoverRepository: const _FakeDiscoverRepository(),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    final adminGroup = find.byKey(const Key('management-group-platform-admin'));
+    expect(
+      find.descendant(of: adminGroup, matching: find.text('平台项目申请审核')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: adminGroup, matching: find.text('机构项目申请审核')),
+      findsOneWidget,
+    );
   });
 
   testWidgets(

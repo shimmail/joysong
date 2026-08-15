@@ -713,6 +713,24 @@ class _ManagementCapabilities extends StatelessWidget {
         title: buildContext.localized('平台管理', 'Platform administration'),
         items: [
           (
+            icon: Icons.fact_check_outlined,
+            label: buildContext.localized(
+              '平台项目申请审核',
+              'Platform project creation reviews',
+            ),
+            enabled: isAdmin && context.canReviewInstitutionProjectRequests,
+            action: _ManagementAction.platformProjectReviews,
+          ),
+          (
+            icon: Icons.add_task_outlined,
+            label: buildContext.localized(
+              '机构项目申请审核',
+              'Institution project creation reviews',
+            ),
+            enabled: isAdmin && context.canReviewInstitutionProjectRequests,
+            action: _ManagementAction.institutionProjectReviews,
+          ),
+          (
             icon: Icons.compare_arrows_outlined,
             label: buildContext.localized(
               '医生项目资料审核',
@@ -1019,7 +1037,23 @@ class _ManagementCapabilities extends StatelessWidget {
     if (action == _ManagementAction.platformProjectRequest) {
       Navigator.of(context).push<void>(
         MaterialPageRoute(
-          builder: (_) => PlatformProjectRequestPage(repository: repository),
+          builder: (_) => PlatformProjectRequestPage(
+            repository: repository,
+            context: this.context,
+            pickAndUploadImage: doctorImagePicker,
+          ),
+        ),
+      );
+      return;
+    }
+    if (action == _ManagementAction.platformProjectReviews) {
+      Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => PlatformProjectRequestPage(
+            repository: repository,
+            context: this.context,
+            reviewMode: true,
+          ),
         ),
       );
       return;
@@ -1030,6 +1064,7 @@ class _ManagementCapabilities extends StatelessWidget {
           builder: (_) => InstitutionProjectRequestsPage(
             repository: repository,
             context: this.context,
+            pickAndUploadImage: doctorImagePicker,
           ),
         ),
       );
@@ -1117,6 +1152,7 @@ enum _ManagementAction {
   doctorProjectProfileReviews,
   doctorProfile,
   platformProjectRequest,
+  platformProjectReviews,
   institutionProjectRequest,
   institutionProjectJoinRequest,
   doctorProjectProfileUpdate,
