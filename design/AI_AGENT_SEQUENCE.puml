@@ -1,33 +1,37 @@
 @startuml
-title JoySong AI Agent 高效混合路由主流程
+title JoySong AI Agent 高效混合路由与对比请求流程
 
 hide footbox
 autonumber
 skinparam sequenceMessageAlign center
 skinparam responseMessageBelowArrow true
-skinparam maxMessageSize 100
+skinparam maxMessageSize 110
 skinparam ParticipantPadding 8
 
 actor 用户 as User
-participant "AI页面" as App
-participant "Chat API" as API
+participant "AI页面\nFlutter" as App
+participant "Chat API\nREST / SSE / 历史" as API
 participant "ChatService" as Chat
 participant "上下文解析" as Context
 participant "IntentRouter" as Router
 participant "轻量LLM解析" as Parser
+participant "ComparisonRequestBuilder\n纯内存" as Compare
 participant "CatalogService" as Catalog
 participant "DiscoverSearch" as Search
+participant "TurnLifecycleService" as Lifecycle
 participant "SafetyService" as Safety
 participant "PlanService" as Plan
 database "JoySong DB" as DB
 participant "回答LLM" as LLM
 
-== 理解与路由 ==
+== 理解与最终路由 ==
 User -> App: 发送问题
 App -> API: 提交消息
-API -> Chat: sendMessage()
-Chat -> DB: 保存消息并读取短历史
-DB --> Chat: 最近对话
+API -> Chat: sendMessage() / prepareStreamingMessage()
+Chat -> Lifecycle: beginTurn（保存用户消息、幂等/重放）
+Lifecycle -> DB: 保存消息并读取短历史
+DB --> Lifecycle: 最近对话或已完成回放
+Lifecycle --> Chat: 当前轮次 + message-bound 历史
 Chat -> Context: 补全当前查询
 Context --> Chat: contextualQuery
 Chat -> Router: assess(query, contextType)
@@ -46,48 +50,112 @@ alt 高可靠度且无冲突
 else 低可靠度或复杂问题
     Chat -> Parser: 解析意图、目标和关键词
     Parser --> Chat: intent + target + keywords
-    Chat -> Chat: 校验或回退本地决策
 end
+Chat -> Router: mergeParsedRoute（校验/锁定当前证据）
+Router --> Chat: final intent + target + action
 
-== 意图执行 ==
-alt GENERAL_CHAT
-    Chat -> Chat: 不查询目录
-else SAFETY_SCREENING
+note over Router,Chat
+安全路由保持最高优先级；规划路由及其边界保持不变。
+仅 final intent == COMPARISON 才恢复和构建对比请求，
+不会让历史对比状态覆盖 SAFETY_SCREENING / PLANNING。
+end note
+
+== 意图执行（保持既有安全、规划、详情和目录行为） ==
+alt final intent == SAFETY_SCREENING
     Chat -> Chat: 停止推荐；action=风险筛查
-else PLANNING
+else final intent == PLANNING
     opt target不为空
         Chat -> Catalog: 查询规划参考资料
         Catalog -> Search: search(query, target)
         Search -> DB: 查询候选数据
         DB --> Search: 搜索结果
         Search --> Catalog: 分类结果
-        Catalog --> Chat: 参考资料
+        Catalog --> Chat: 规划参考资料
     end
     Chat -> Chat: action=开始规划
-else DETAIL_SUMMARY
+else final intent == DETAIL_SUMMARY
     Chat -> DB: 按contextType/contextId查询
     DB --> Chat: 详情及关联资料
-else CATALOG_QA或COMPARISON
-    Chat -> Catalog: promptEvidence(query, target)
+else final intent == CATALOG_QA
+    Chat -> Catalog: promptEvidence(..., AUTO)
     Catalog -> Search: 统一关键词搜索
     Search -> DB: 按target查询
-    DB --> Search: 分类数据
-    Search --> Catalog: 搜索结果
-    Catalog -> Catalog: 去重、排序、限量
-    alt COMPARISON
-        Catalog -> Catalog: 保留同类型；生成报告
-    else CATALOG_QA
-        Catalog -> Catalog: 生成发现页卡片
-    end
-    Catalog --> Chat: 数据证据 + 卡片/报告
+    DB --> Search: 搜索结果
+    Search --> Catalog: 分类结果
+    Catalog -> Catalog: 去重、排序、限量；生成普通卡片
+    Catalog --> Chat: 数据证据 + 普通卡片
+else final intent == GENERAL_CHAT
+    Chat -> Chat: 不查询目录
 end
 
-== 回答与下一步 ==
-Chat -> LLM: 生成一次简短回答
-LLM --> Chat: 回答内容
-Chat -> DB: 保存AI回复
-Chat --> API: message + intent + target + action + cards/report
-API --> App: 返回本轮结果
+== 最终 COMPARISON 专用序列 ==
+alt final intent == COMPARISON
+    Chat -> Lifecycle: 仅在最终 COMPARISON 从最新 message-bound assistant message 恢复 ComparisonRequest
+    Lifecycle -> DB: 读取已持久化 message metadata
+    DB --> Lifecycle: 最新 message-bound request（可为空）
+    Lifecycle --> Chat: previous incomplete request（仅对比路由使用）
+
+    Chat -> Catalog: promptEvidence(..., reportMode=COMPARISON)【唯一一次目录检索】
+    Catalog -> Search: 统一关键词搜索
+    Search -> DB: 按target查询候选与结构化字段
+    DB --> Search: 搜索结果
+    Search --> Catalog: 分类数据
+    Catalog -> Catalog: 去重、排序、限量
+    Catalog --> Chat: raw catalog evidence
+
+    Chat -> Compare: build + normalize（当前命名对象、上下文、未完成请求）
+    Compare --> Chat: normalized request（同类型、2～4 operands、target、dimensions/constraints）
+
+    alt request incomplete
+        Chat -> Chat: 生成确定性双语 clarification
+        note right of Chat
+        回答模型调用 = 0
+        不展示无关候选卡片或 report
+        end note
+        Chat -> Lifecycle: completeTurn（确定性 clarification + normalized request）
+        Lifecycle -> DB: 持久化 assistant message metadata
+    else request complete
+        Chat -> Catalog: filterComparisonEvidence(raw, request)【纯内存精确 operand evidence 过滤】
+        note over Chat,Catalog
+        此步骤不调用 Search/DB，不是第二次目录查询；
+        report 和 grounding 仅包含确认 operands。
+        缺失结构化值保持 unknown，不推断。
+        end note
+        Catalog --> Chat: exact evidence + comparison report
+        Chat -> LLM: 一次 grounded answer request
+        LLM --> Chat: 简短回答
+        Chat -> Lifecycle: completeTurn（answer + normalized request + report）
+        Lifecycle -> DB: 持久化同一 assistant message metadata
+    end
+end
+
+note over Chat,LLM
+调用预算：每个最终 COMPARISON 恰好 1 次 catalog lookup；
+不完整请求 0 次回答模型，完整请求最多 1 次回答模型；
+无新增模型调用、数据库迁移或工作流循环。
+end note
+
+== HTTP / SSE / 历史 / 重放与逐消息渲染 ==
+Lifecycle --> Chat: message-bound comparisonRequest + catalogReport
+Chat --> API: 当前 REST 结果 / SSE terminal result
+API --> App: 可选 request/report 字段（旧客户端兼容）
+API -> Lifecycle: 历史加载或幂等 replay
+Lifecycle -> DB: 读取 assistant message metadata
+DB --> Lifecycle: 持久化 request + report
+Lifecycle --> API: 重建相同的 message-bound request + report
+API --> App: history / replay
+
+loop 每条 assistant message 独立渲染
+    alt request 不完整
+        App --> User: 仅展示 comparison status
+    else request 完整且 report 存在
+        App --> User: 仅展示 comparison report
+    else request 为空且存在普通 catalogItems
+        App --> User: 仅展示 ordinary catalog links
+    else 无结构化内容
+        App --> User: 仅展示普通回答
+    end
+end
 
 alt action=风险筛查
     App --> User: 展示风险筛查入口
@@ -107,7 +175,5 @@ else action=开始规划
         DB --> Plan: 档案与项目
         Plan --> App: 分阶段规划
     end
-else 无结构化动作
-    App --> User: 展示回答、卡片或报告
 end
 @enduml
