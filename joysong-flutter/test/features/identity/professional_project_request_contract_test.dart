@@ -1,0 +1,479 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:joysong_flutter/core/network/api_client.dart';
+import 'package:joysong_flutter/features/identity/data/identity_repository_impl.dart';
+import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
+
+void main() {
+  const prohibitedKeys = {
+    'doctorId',
+    'doctorIds',
+    'doctorBindings',
+    'rating',
+    'reviewCount',
+    'platformRate',
+    'doctorRate',
+  };
+
+  test('platform draft emits the exact 13-key creation snapshot', () {
+    const draft = PlatformProjectRequestDraft(
+      name: ' Hydrating Facial ',
+      category: ' Skin ',
+      description: ' Deep hydration ',
+      referencePrice: 899.25,
+      currency: ' usd ',
+      slogan: ' Glow naturally ',
+      salesCount: 12,
+      coverImage: ' cover.jpg ',
+      images: [' first.jpg ', 'second.jpg'],
+      detailContent: ' Multi-line detail ',
+      tags: [' hydration ', 'gentle'],
+      categoryTags: [' facial '],
+      notes: ' Review this ',
+    );
+
+    expect(draft.toJson(), {
+      'name': 'Hydrating Facial',
+      'category': 'Skin',
+      'description': 'Deep hydration',
+      'referencePrice': 899.25,
+      'currency': 'USD',
+      'slogan': 'Glow naturally',
+      'salesCount': 12,
+      'coverImage': 'cover.jpg',
+      'images': ['first.jpg', 'second.jpg'],
+      'detailContent': 'Multi-line detail',
+      'tags': ['hydration', 'gentle'],
+      'categoryTags': ['facial'],
+      'notes': 'Review this',
+    });
+    expect(draft.toJson(), hasLength(13));
+    expect(draft.toJson().keys.toSet().intersection(prohibitedKeys), isEmpty);
+  });
+
+  test(
+      'institution draft emits 18 body keys and keeps institution id path-only',
+      () {
+    const draft = InstitutionProjectRequestDraft(
+      institutionId: ' institution-1 ',
+      projectId: ' project-1 ',
+      name: ' Clinic Facial ',
+      category: ' Clinic Skin ',
+      description: ' Clinic description ',
+      tags: [' clinic ', 'signature'],
+      slogan: ' Clinic glow ',
+      detailContent: ' Clinic details ',
+      price: 799.5,
+      originalPrice: 999.99,
+      currency: ' cny ',
+      coverImage: ' clinic-cover.jpg ',
+      images: [' clinic-1.jpg ', 'clinic-2.jpg'],
+      salesCount: 5,
+      isActive: false,
+      consultationFee: 80.25,
+      commissionRate: 12.5,
+      institutionRate: 42.25,
+      platformRate: 10,
+      notes: ' Clinic note ',
+    );
+
+    expect(draft.toJson(), {
+      'projectId': 'project-1',
+      'name': 'Clinic Facial',
+      'category': 'Clinic Skin',
+      'description': 'Clinic description',
+      'tags': ['clinic', 'signature'],
+      'slogan': 'Clinic glow',
+      'detailContent': 'Clinic details',
+      'price': 799.5,
+      'originalPrice': 999.99,
+      'currency': 'CNY',
+      'coverImage': 'clinic-cover.jpg',
+      'images': ['clinic-1.jpg', 'clinic-2.jpg'],
+      'salesCount': 5,
+      'isActive': false,
+      'consultationFee': 80.25,
+      'commissionRate': 12.5,
+      'institutionRate': 42.25,
+      'notes': 'Clinic note',
+    });
+    expect(draft.toJson(), hasLength(18));
+    expect(draft.toJson(), isNot(contains('institutionId')));
+    expect(draft.toJson().keys.toSet().intersection(prohibitedKeys), isEmpty);
+    expect(draft.doctorRate, 35.25);
+  });
+
+  test('draft validation mirrors backend amount count currency and rate limits',
+      () {
+    expect(
+      () => const PlatformProjectRequestDraft(
+        name: ' ',
+        category: 'Skin',
+        description: 'Description',
+      ).validate(),
+      throwsArgumentError,
+    );
+    expect(
+      () => const PlatformProjectRequestDraft(
+        name: 'Name',
+        category: 'Skin',
+        description: 'Description',
+        referencePrice: 0.001,
+      ).validate(),
+      throwsArgumentError,
+    );
+    expect(
+      () => const PlatformProjectRequestDraft(
+        name: 'Name',
+        category: 'Skin',
+        description: 'Description',
+        currency: 'EUR',
+      ).validate(),
+      throwsArgumentError,
+    );
+    expect(
+      () => const PlatformProjectRequestDraft(
+        name: 'Name',
+        category: 'Skin',
+        description: 'Description',
+        salesCount: -1,
+      ).validate(),
+      throwsArgumentError,
+    );
+    expect(
+      () => PlatformProjectRequestDraft(
+        name: 'Name',
+        category: 'Skin',
+        description: 'Description',
+        tags: List.filled(21, 'tag'),
+      ).validate(),
+      throwsArgumentError,
+    );
+    expect(
+      () => const PlatformProjectRequestDraft(
+        name: 'Name',
+        category: 'Skin',
+        description: 'Description',
+        images: [' '],
+      ).validate(),
+      throwsArgumentError,
+    );
+    expect(
+      () => const InstitutionProjectRequestDraft(
+        institutionId: 'institution-1',
+        projectId: 'project-1',
+        price: 100000000,
+        consultationFee: 0,
+        commissionRate: 0,
+        institutionRate: 0,
+        platformRate: 0,
+      ).validate(),
+      throwsArgumentError,
+    );
+    expect(
+      () => const InstitutionProjectRequestDraft(
+        institutionId: 'institution-1',
+        projectId: 'project-1',
+        price: 0,
+        consultationFee: 0,
+        commissionRate: 45.001,
+        institutionRate: 45,
+        platformRate: 10,
+      ).validate(),
+      throwsArgumentError,
+    );
+    expect(
+      () => const InstitutionProjectRequestDraft(
+        institutionId: 'institution-1',
+        projectId: 'project-1',
+        price: 0,
+        consultationFee: 0,
+        commissionRate: 45.01,
+        institutionRate: 45,
+        platformRate: 10,
+      ).validate(),
+      throwsArgumentError,
+    );
+    expect(
+      () => InstitutionProjectRequestDraft(
+        institutionId: 'institution-1',
+        projectId: 'project-1',
+        description: List.filled(5001, 'x').join(),
+        price: 0,
+        consultationFee: 0,
+        commissionRate: 45,
+        institutionRate: 45,
+        platformRate: 10,
+      ).validate(),
+      throwsArgumentError,
+    );
+
+    expect(
+      () => const InstitutionProjectRequestDraft(
+        institutionId: 'institution-1',
+        projectId: 'project-1',
+        price: 99999999.99,
+        originalPrice: 0,
+        consultationFee: 99999999.99,
+        commissionRate: 45,
+        institutionRate: 45,
+        platformRate: 10,
+      ).validate(),
+      returnsNormally,
+    );
+  });
+
+  test('parses complete immutable review snapshot and nested split', () {
+    final request = ProfessionalProjectRequest.fromJson(_requestSnapshot);
+
+    expect(request.id, 'request-1');
+    expect(request.requestType, 'INSTITUTION');
+    expect(request.doctorId, 'doctor-1');
+    expect(request.doctorName, 'Dr. Chen');
+    expect(request.institutionId, 'institution-1');
+    expect(request.institutionName, 'Joysong Clinic');
+    expect(request.projectId, 'project-1');
+    expect(request.projectName, 'Hydrating Facial');
+    expect(request.name, 'Clinic Hydrating Facial');
+    expect(request.category, 'Skin');
+    expect(request.description, 'Clinic description');
+    expect(request.tags, ['hydration', 'signature']);
+    expect(request.slogan, 'Clinic glow');
+    expect(request.detailContent, 'Complete immutable detail');
+    expect(request.currency, 'CNY');
+    expect(request.coverImage, 'cover.jpg');
+    expect(request.images, ['one.jpg', 'two.jpg']);
+    expect(request.salesCount, 7);
+    expect(request.referencePrice, 899.25);
+    expect(request.categoryTags, ['facial']);
+    expect(request.price, 799.5);
+    expect(request.originalPrice, 999.99);
+    expect(request.isActive, isTrue);
+    expect(request.institutionSplit?.consultationFee, 80.25);
+    expect(request.institutionSplit?.commissionRate, 12.5);
+    expect(request.institutionSplit?.institutionRate, 42.25);
+    expect(request.institutionSplit?.platformRate, 10);
+    expect(request.institutionSplit?.doctorRate, 35.25);
+    expect(request.notes, 'Clinic note');
+    expect(request.status, 'PENDING');
+    expect(request.reviewNote, isNull);
+    expect(request.reviewedBy, isNull);
+    expect(request.reviewedAt, isNull);
+    expect(request.resultingProjectId, isNull);
+    expect(request.resultingInstitutionProjectId, isNull);
+    expect(request.submittedAt, DateTime.parse('2026-08-16T08:00:00'));
+    expect(request.updatedAt, DateTime.parse('2026-08-16T08:05:00'));
+    expect(request.isCreationReviewable, isTrue);
+
+    final legacy = ProfessionalProjectRequest.fromJson({
+      ..._requestSnapshot,
+      'status': 'CHANGES_REQUESTED',
+    });
+    expect(legacy.status, 'CHANGES_REQUESTED');
+    expect(legacy.isCreationReviewable, isFalse);
+  });
+
+  test('parses form config and all 13 management inheritance values', () {
+    final config = InstitutionProjectApplicationFormConfig.fromJson({
+      'platformRate': 10.25,
+    });
+    final project = ManagementProjectOption.fromJson({
+      'id': 'project-1',
+      'name': 'Hydrating Facial',
+      'category': 'Skin',
+      'description': 'Description',
+      'tags': 'hydration,gentle',
+      'categoryTags': 'facial,skin',
+      'coverImage': 'cover.jpg',
+      'referencePrice': 899.25,
+      'currency': 'CNY',
+      'slogan': 'Glow naturally',
+      'detailContent': 'Details',
+      'images': '["one.jpg","two.jpg"]',
+      'salesCount': 18,
+    });
+
+    expect(config.platformRate, 10.25);
+    expect(project.id, 'project-1');
+    expect(project.name, 'Hydrating Facial');
+    expect(project.category, 'Skin');
+    expect(project.description, 'Description');
+    expect(project.tags, 'hydration,gentle');
+    expect(project.categoryTags, 'facial,skin');
+    expect(project.coverImage, 'cover.jpg');
+    expect(project.referencePrice, 899.25);
+    expect(project.currency, 'CNY');
+    expect(project.slogan, 'Glow naturally');
+    expect(project.detailContent, 'Details');
+    expect(project.images, ['one.jpg', 'two.jpg']);
+    expect(project.salesCount, 18);
+  });
+
+  test('repository records distinct submission config and review routes',
+      () async {
+    final client = _RecordingApiClient();
+    final repository = ApiIdentityRepository(client);
+    final config =
+        await repository.loadInstitutionProjectApplicationFormConfig();
+    const platformDraft = PlatformProjectRequestDraft(
+      name: 'Name',
+      category: 'Category',
+      description: 'Description',
+    );
+    const institutionDraft = InstitutionProjectRequestDraft(
+      institutionId: ' institution-1 ',
+      projectId: 'project-1',
+      price: 100,
+      consultationFee: 5,
+      commissionRate: 10,
+      institutionRate: 40,
+      platformRate: 10,
+    );
+
+    await repository.submitPlatformProjectRequest(platformDraft);
+    await repository.submitInstitutionProjectRequest(institutionDraft);
+    await repository.reviewInstitutionProjectRequest(
+      id: ' request-1 ',
+      decision: ' approved ',
+      reviewNote: ' Looks good ',
+    );
+    await repository.reviewPlatformProjectRequest(
+      id: ' request-2 ',
+      decision: ' rejected ',
+      reviewNote: ' Needs evidence ',
+    );
+
+    expect(config.platformRate, 10);
+    expect(client.requests, [
+      const _Request(
+        'GET',
+        '/management/project-requests/institution-form-config',
+      ),
+      _Request(
+        'POST',
+        '/management/project-requests/platform',
+        body: platformDraft.toJson(),
+      ),
+      _Request(
+        'POST',
+        '/management/project-requests/institutions/institution-1',
+        body: institutionDraft.toJson(),
+      ),
+      const _Request(
+        'POST',
+        '/management/project-requests/request-1/review',
+        body: {'decision': 'APPROVED', 'reviewNote': 'Looks good'},
+      ),
+      const _Request(
+        'POST',
+        '/admin/project-requests/request-2/review',
+        body: {'decision': 'REJECTED', 'reviewNote': 'Needs evidence'},
+      ),
+    ]);
+  });
+}
+
+const _requestSnapshot = <String, Object?>{
+  'id': 'request-1',
+  'requestType': 'INSTITUTION',
+  'doctorId': 'doctor-1',
+  'doctorName': 'Dr. Chen',
+  'institutionId': 'institution-1',
+  'institutionName': 'Joysong Clinic',
+  'projectId': 'project-1',
+  'projectName': 'Hydrating Facial',
+  'name': 'Clinic Hydrating Facial',
+  'category': 'Skin',
+  'description': 'Clinic description',
+  'tags': ['hydration', 'signature'],
+  'slogan': 'Clinic glow',
+  'detailContent': 'Complete immutable detail',
+  'currency': 'CNY',
+  'coverImage': 'cover.jpg',
+  'images': ['one.jpg', 'two.jpg'],
+  'salesCount': 7,
+  'referencePrice': 899.25,
+  'categoryTags': ['facial'],
+  'price': 799.5,
+  'originalPrice': 999.99,
+  'isActive': true,
+  'institutionSplit': {
+    'consultationFee': 80.25,
+    'commissionRate': 12.5,
+    'institutionRate': 42.25,
+    'platformRate': 10,
+    'doctorRate': 35.25,
+  },
+  'notes': 'Clinic note',
+  'status': 'PENDING',
+  'reviewNote': '',
+  'reviewedBy': null,
+  'reviewedAt': null,
+  'resultingProjectId': null,
+  'resultingInstitutionProjectId': null,
+  'submittedAt': '2026-08-16T08:00:00',
+  'updatedAt': '2026-08-16T08:05:00',
+};
+
+final class _RecordingApiClient extends ApiClient {
+  _RecordingApiClient() : super(apiRoot: Uri.parse('http://localhost/api/'));
+
+  final List<_Request> requests = [];
+
+  @override
+  Future<T?> get<T>(
+    String path, {
+    Map<String, Object?> query = const {},
+    required T Function(Object? json) decodeData,
+  }) async {
+    requests.add(_Request('GET', path));
+    return decodeData({'platformRate': 10});
+  }
+
+  @override
+  Future<T?> post<T>(
+    String path, {
+    Object? body,
+    required T Function(Object? json) decodeData,
+  }) async {
+    requests.add(_Request('POST', path, body: body));
+    return decodeData(null);
+  }
+}
+
+final class _Request {
+  const _Request(this.method, this.path, {this.body});
+
+  final String method;
+  final String path;
+  final Object? body;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _Request &&
+      other.method == method &&
+      other.path == path &&
+      _deepEquals(other.body, body);
+
+  @override
+  int get hashCode => Object.hash(method, path, body);
+
+  @override
+  String toString() => '$method $path body=$body';
+}
+
+bool _deepEquals(Object? left, Object? right) {
+  if (left is Map && right is Map) {
+    return left.length == right.length &&
+        left.entries.every(
+          (entry) =>
+              right.containsKey(entry.key) &&
+              _deepEquals(entry.value, right[entry.key]),
+        );
+  }
+  if (left is List && right is List) {
+    return left.length == right.length &&
+        Iterable.generate(left.length)
+            .every((index) => _deepEquals(left[index], right[index]));
+  }
+  return left == right;
+}

@@ -378,9 +378,24 @@ final class ApiIdentityRepository implements IdentityRepository {
   }
 
   @override
+  Future<InstitutionProjectApplicationFormConfig>
+      loadInstitutionProjectApplicationFormConfig() async {
+    final config =
+        await _apiClient.get<InstitutionProjectApplicationFormConfig>(
+      '/management/project-requests/institution-form-config',
+      decodeData: InstitutionProjectApplicationFormConfig.fromJson,
+    );
+    if (config == null) {
+      throw const FormatException('机构项目申请配置响应为空');
+    }
+    return config;
+  }
+
+  @override
   Future<void> submitPlatformProjectRequest(
     PlatformProjectRequestDraft draft,
   ) async {
+    draft.validate();
     await _apiClient.post<void>(
       '/management/project-requests/platform',
       body: draft.toJson(),
@@ -392,8 +407,9 @@ final class ApiIdentityRepository implements IdentityRepository {
   Future<void> submitInstitutionProjectRequest(
     InstitutionProjectRequestDraft draft,
   ) async {
+    draft.validate();
     await _apiClient.post<void>(
-      '/management/project-requests/institutions/${draft.institutionId}',
+      '/management/project-requests/institutions/${draft.institutionId.trim()}',
       body: draft.toJson(),
       decodeData: (_) {},
     );
@@ -406,8 +422,21 @@ final class ApiIdentityRepository implements IdentityRepository {
     required String reviewNote,
   }) async {
     await _apiClient.post<void>(
-      '/management/project-requests/$id/review',
-      body: {'decision': decision, 'reviewNote': reviewNote},
+      '/management/project-requests/${id.trim()}/review',
+      body: _projectReviewBody(decision, reviewNote),
+      decodeData: (_) {},
+    );
+  }
+
+  @override
+  Future<void> reviewPlatformProjectRequest({
+    required String id,
+    required String decision,
+    required String reviewNote,
+  }) async {
+    await _apiClient.post<void>(
+      '/admin/project-requests/${id.trim()}/review',
+      body: _projectReviewBody(decision, reviewNote),
       decodeData: (_) {},
     );
   }
@@ -513,6 +542,18 @@ final class ApiIdentityRepository implements IdentityRepository {
       decodeData: (_) {},
     );
   }
+}
+
+Map<String, Object?> _projectReviewBody(String decision, String reviewNote) {
+  final normalizedDecision = decision.trim().toUpperCase();
+  if (!const {'APPROVED', 'REJECTED'}.contains(normalizedDecision)) {
+    throw ArgumentError('审核决定不正确');
+  }
+  final normalizedNote = reviewNote.trim();
+  if (normalizedDecision == 'REJECTED' && normalizedNote.isEmpty) {
+    throw ArgumentError('拒绝时必须填写审核意见');
+  }
+  return {'decision': normalizedDecision, 'reviewNote': normalizedNote};
 }
 
 List<Object?> _objectList(Object? value) => value is List ? value : const [];

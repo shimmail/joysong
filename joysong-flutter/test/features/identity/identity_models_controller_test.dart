@@ -1314,6 +1314,11 @@ final class _FakeIdentityRepository implements IdentityRepository {
       listProfessionalProjectRequests() async => professionalProjectRequests;
 
   @override
+  Future<InstitutionProjectApplicationFormConfig>
+      loadInstitutionProjectApplicationFormConfig() async =>
+          const InstitutionProjectApplicationFormConfig(platformRate: 0);
+
+  @override
   Future<void> submitPlatformProjectRequest(
     PlatformProjectRequestDraft draft,
   ) async {}
@@ -1325,6 +1330,13 @@ final class _FakeIdentityRepository implements IdentityRepository {
 
   @override
   Future<void> reviewInstitutionProjectRequest({
+    required String id,
+    required String decision,
+    required String reviewNote,
+  }) async {}
+
+  @override
+  Future<void> reviewPlatformProjectRequest({
     required String id,
     required String decision,
     required String reviewNote,

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 enum IdentityRoleType {
@@ -784,6 +785,10 @@ final class ManagementProjectOption {
     this.coverImage = '',
     this.referencePrice = 0,
     this.currency = '',
+    this.slogan = '',
+    this.detailContent,
+    this.images = const [],
+    this.salesCount = 0,
   });
 
   factory ManagementProjectOption.fromJson(Object? json) {
@@ -798,6 +803,10 @@ final class ManagementProjectOption {
       coverImage: map['coverImage']?.toString() ?? '',
       referencePrice: _decimal(map['referencePrice']),
       currency: _requiredText(map['currency'], '币种'),
+      slogan: map['slogan']?.toString() ?? '',
+      detailContent: _nullableText(map['detailContent']),
+      images: _jsonStringList(map['images']),
+      salesCount: _integer(map['salesCount']),
     );
   }
 
@@ -810,6 +819,10 @@ final class ManagementProjectOption {
   final String coverImage;
   final num referencePrice;
   final String currency;
+  final String slogan;
+  final String? detailContent;
+  final List<String> images;
+  final int salesCount;
 }
 
 final class ManagementProjectDraft {
@@ -1035,6 +1048,17 @@ List<String> _stringList(Object? value) {
         .toList(growable: false);
   }
   return const [];
+}
+
+List<String> _jsonStringList(Object? value) {
+  if (value is! String) return _stringList(value);
+  final normalized = value.trim();
+  if (normalized.isEmpty) return const [];
+  try {
+    return _stringList(jsonDecode(normalized));
+  } on FormatException {
+    return _stringList(normalized);
+  }
 }
 
 List<String> _optionalWireStringList(
@@ -1402,10 +1426,27 @@ final class ProfessionalProjectRequest {
     this.name,
     this.category,
     this.description,
-    this.serviceContent,
-    this.priceSuggestion,
+    this.tags,
+    this.slogan,
+    this.detailContent,
+    required this.currency,
+    this.coverImage,
+    this.images,
+    required this.salesCount,
+    this.referencePrice,
+    this.categoryTags,
+    this.price,
+    this.originalPrice,
+    this.isActive,
+    this.institutionSplit,
     this.notes,
     this.reviewNote,
+    this.reviewedBy,
+    this.reviewedAt,
+    this.resultingProjectId,
+    this.resultingInstitutionProjectId,
+    required this.submittedAt,
+    required this.updatedAt,
   });
 
   factory ProfessionalProjectRequest.fromJson(Object? json) {
@@ -1422,11 +1463,34 @@ final class ProfessionalProjectRequest {
       name: _nullableText(map['name']),
       category: _nullableText(map['category']),
       description: _nullableText(map['description']),
-      serviceContent: _nullableText(map['serviceContent']),
-      priceSuggestion: _nullableDecimal(map['priceSuggestion']),
+      tags: map['tags'] == null ? null : _stringList(map['tags']),
+      slogan: _nullableText(map['slogan']),
+      detailContent: _nullableText(map['detailContent']),
+      currency: _requiredText(map['currency'], '币种'),
+      coverImage: _nullableText(map['coverImage']),
+      images: map['images'] == null ? null : _stringList(map['images']),
+      salesCount: _integer(map['salesCount']),
+      referencePrice: _nullableDecimal(map['referencePrice']),
+      categoryTags:
+          map['categoryTags'] == null ? null : _stringList(map['categoryTags']),
+      price: _nullableDecimal(map['price']),
+      originalPrice: _nullableDecimal(map['originalPrice']),
+      isActive: map['isActive'] is bool ? map['isActive']! as bool : null,
+      institutionSplit: map['institutionSplit'] == null
+          ? null
+          : InstitutionProjectSplit.fromJson(map['institutionSplit']),
       notes: _nullableText(map['notes']),
       status: _requiredText(map['status'], '申请状态'),
       reviewNote: _nullableText(map['reviewNote']),
+      reviewedBy: _nullableText(map['reviewedBy']),
+      reviewedAt: _dateTime(map['reviewedAt']),
+      resultingProjectId: _nullableText(map['resultingProjectId']),
+      resultingInstitutionProjectId:
+          _nullableText(map['resultingInstitutionProjectId']),
+      submittedAt: _dateTime(map['submittedAt']) ??
+          (throw const FormatException('响应缺少提交时间')),
+      updatedAt: _dateTime(map['updatedAt']) ??
+          (throw const FormatException('响应缺少更新时间')),
     );
   }
 
@@ -1441,11 +1505,62 @@ final class ProfessionalProjectRequest {
   final String? name;
   final String? category;
   final String? description;
-  final String? serviceContent;
-  final num? priceSuggestion;
+  final List<String>? tags;
+  final String? slogan;
+  final String? detailContent;
+  final String currency;
+  final String? coverImage;
+  final List<String>? images;
+  final int salesCount;
+  final num? referencePrice;
+  final List<String>? categoryTags;
+  final num? price;
+  final num? originalPrice;
+  final bool? isActive;
+  final InstitutionProjectSplit? institutionSplit;
   final String? notes;
   final String status;
   final String? reviewNote;
+  final String? reviewedBy;
+  final DateTime? reviewedAt;
+  final String? resultingProjectId;
+  final String? resultingInstitutionProjectId;
+  final DateTime submittedAt;
+  final DateTime updatedAt;
+
+  // Compatibility aliases for the pre-full-snapshot presentation. Task 8
+  // switches the page to the canonical fields above.
+  String? get serviceContent => description;
+  num? get priceSuggestion => price;
+
+  bool get isCreationReviewable => status == 'PENDING';
+}
+
+final class InstitutionProjectSplit {
+  const InstitutionProjectSplit({
+    required this.consultationFee,
+    required this.commissionRate,
+    required this.institutionRate,
+    required this.platformRate,
+    required this.doctorRate,
+  });
+
+  factory InstitutionProjectSplit.fromJson(Object? json) {
+    final map = _jsonMap(json, '机构项目分账');
+    return InstitutionProjectSplit(
+      consultationFee: _requiredDecimal(map['consultationFee'], '咨询费'),
+      commissionRate: _requiredDecimal(map['commissionRate'], '顾问比例'),
+      institutionRate: _requiredDecimal(map['institutionRate'], '机构比例'),
+      platformRate: _requiredDecimal(map['platformRate'], '平台比例'),
+      doctorRate: _requiredDecimal(map['doctorRate'], '医生比例'),
+    );
+  }
+
+  final num consultationFee;
+  final num commissionRate;
+  final num institutionRate;
+  final num platformRate;
+  final num doctorRate;
 }
 
 final class InstitutionProjectJoinRequest {
@@ -1781,20 +1896,68 @@ final class PlatformProjectRequestDraft {
     required this.name,
     required this.category,
     required this.description,
+    this.referencePrice = 0,
+    this.currency = 'CNY',
+    this.slogan = '',
+    this.salesCount = 0,
+    this.coverImage = '',
+    this.images = const [],
+    this.detailContent,
+    this.tags = const [],
+    this.categoryTags = const [],
     this.notes = '',
   });
 
   final String name;
   final String category;
   final String description;
+  final num referencePrice;
+  final String currency;
+  final String slogan;
+  final int salesCount;
+  final String coverImage;
+  final List<String> images;
+  final String? detailContent;
+  final List<String> tags;
+  final List<String> categoryTags;
   final String notes;
 
-  Map<String, Object?> toJson() => {
-        'name': name.trim(),
-        'category': category.trim(),
-        'description': description.trim(),
-        'notes': notes.trim(),
-      };
+  void validate() {
+    _validateText('项目名称', name, 200, required: true);
+    _validateText('项目分类', category, 100, required: true);
+    _validateText('项目说明', description, 5000, required: true);
+    _validateText('项目标语', slogan, 500);
+    _validateText('封面图片', coverImage, 500);
+    _validateText('项目详情', detailContent, 20000);
+    _validateText('申请备注', notes, 2000);
+    if (!_validDecimal(referencePrice, 99999999.99)) {
+      throw ArgumentError('参考价格必须在 0 到 99999999.99 之间且最多两位小数');
+    }
+    if (salesCount < 0) throw ArgumentError('销量不能小于 0');
+    _validateCurrency(currency);
+    _validateItems('项目图片', images, 20, 500);
+    _validateItems('项目标签', tags, 20, 100);
+    _validateItems('分类标签', categoryTags, 20, 100);
+  }
+
+  Map<String, Object?> toJson() {
+    validate();
+    return {
+      'name': name.trim(),
+      'category': category.trim(),
+      'description': description.trim(),
+      'referencePrice': referencePrice,
+      'currency': currency.trim().toUpperCase(),
+      'slogan': slogan.trim(),
+      'salesCount': salesCount,
+      'coverImage': coverImage.trim(),
+      'images': _normalizedItems(images),
+      'detailContent': detailContent?.trim(),
+      'tags': _normalizedItems(tags),
+      'categoryTags': _normalizedItems(categoryTags),
+      'notes': notes.trim(),
+    };
+  }
 }
 
 final class ConsultantMembership {
@@ -1891,24 +2054,163 @@ final class InstitutionProjectRequestDraft {
   const InstitutionProjectRequestDraft({
     required this.institutionId,
     required this.projectId,
-    required this.serviceContent,
-    required this.priceSuggestion,
+    this.name,
+    this.category,
+    String? description,
+    String? serviceContent,
+    this.tags,
+    this.slogan,
+    this.detailContent,
+    num? price,
+    num? priceSuggestion,
+    this.originalPrice,
+    this.currency = 'CNY',
+    this.coverImage,
+    this.images,
+    this.salesCount = 0,
+    this.isActive = true,
+    this.consultationFee = 0,
+    this.commissionRate = 0,
+    this.institutionRate = 0,
+    this.platformRate = 0,
     this.notes = '',
-  });
+  })  : description = description ?? serviceContent,
+        price = price ?? priceSuggestion ?? 0;
 
   final String institutionId;
   final String projectId;
-  final String serviceContent;
-  final num priceSuggestion;
+  final String? name;
+  final String? category;
+  final String? description;
+  final List<String>? tags;
+  final String? slogan;
+  final String? detailContent;
+  final num price;
+  final num? originalPrice;
+  final String currency;
+  final String? coverImage;
+  final List<String>? images;
+  final int salesCount;
+  final bool isActive;
+  final num consultationFee;
+  final num commissionRate;
+  final num institutionRate;
+  final num platformRate;
   final String notes;
 
-  Map<String, Object?> toJson() => {
-        'projectId': projectId.trim(),
-        'serviceContent': serviceContent.trim(),
-        'priceSuggestion': priceSuggestion,
-        'notes': notes.trim(),
-      };
+  String? get serviceContent => description;
+  num get priceSuggestion => price;
+  num get doctorRate => 100 - platformRate - institutionRate - commissionRate;
+
+  void validate() {
+    _validateText('机构', institutionId, 200, required: true);
+    _validateText('平台项目', projectId, 200, required: true);
+    _validateText('项目名称', name, 200);
+    _validateText('项目分类', category, 100);
+    _validateText('服务内容', description, 5000);
+    _validateText('项目标语', slogan, 500);
+    _validateText('项目详情', detailContent, 20000);
+    _validateText('封面图片', coverImage, 500);
+    _validateText('申请备注', notes, 2000);
+    for (final amount in [
+      price,
+      consultationFee,
+      if (originalPrice != null) originalPrice!
+    ]) {
+      if (!_validDecimal(amount, 99999999.99)) {
+        throw ArgumentError('金额必须在 0 到 99999999.99 之间且最多两位小数');
+      }
+    }
+    if (salesCount < 0) throw ArgumentError('销量不能小于 0');
+    _validateCurrency(currency);
+    if (tags != null) _validateItems('项目标签', tags!, 20, 100);
+    if (images != null) _validateItems('项目图片', images!, 20, 500);
+    for (final rate in [commissionRate, institutionRate, platformRate]) {
+      if (!_validDecimal(rate, 100)) {
+        throw ArgumentError('分账比例必须在 0 到 100 之间且最多两位小数');
+      }
+    }
+    if (platformRate + institutionRate + commissionRate > 100) {
+      throw ArgumentError('平台、机构和顾问比例合计不能超过 100%');
+    }
+  }
+
+  Map<String, Object?> toJson() {
+    validate();
+    return {
+      'projectId': projectId.trim(),
+      'name': name?.trim(),
+      'category': category?.trim(),
+      'description': description?.trim(),
+      'tags': tags == null ? null : _normalizedItems(tags!),
+      'slogan': slogan?.trim(),
+      'detailContent': detailContent?.trim(),
+      'price': price,
+      'originalPrice': originalPrice,
+      'currency': currency.trim().toUpperCase(),
+      'coverImage': coverImage?.trim(),
+      'images': images == null ? null : _normalizedItems(images!),
+      'salesCount': salesCount,
+      'isActive': isActive,
+      'consultationFee': consultationFee,
+      'commissionRate': commissionRate,
+      'institutionRate': institutionRate,
+      'notes': notes.trim(),
+    };
+  }
 }
+
+final class InstitutionProjectApplicationFormConfig {
+  const InstitutionProjectApplicationFormConfig({required this.platformRate});
+
+  factory InstitutionProjectApplicationFormConfig.fromJson(Object? json) {
+    final map = _jsonMap(json, '机构项目申请配置');
+    final platformRate = _requiredDecimal(map['platformRate'], '平台比例');
+    if (!_validDecimal(platformRate, 100)) {
+      throw const FormatException('响应包含无效的平台比例');
+    }
+    return InstitutionProjectApplicationFormConfig(platformRate: platformRate);
+  }
+
+  final num platformRate;
+}
+
+void _validateText(
+  String label,
+  String? value,
+  int maxLength, {
+  bool required = false,
+}) {
+  final normalized = value?.trim() ?? '';
+  if (required && normalized.isEmpty) throw ArgumentError('$label不能为空');
+  if (normalized.length > maxLength) {
+    throw ArgumentError('$label不能超过 $maxLength 个字符');
+  }
+}
+
+void _validateCurrency(String value) {
+  if (!const {'USD', 'CNY'}.contains(value.trim().toUpperCase())) {
+    throw ArgumentError('币种仅支持 USD 或 CNY');
+  }
+}
+
+void _validateItems(
+  String label,
+  List<String> values,
+  int maxItems,
+  int maxItemLength,
+) {
+  if (values.length > maxItems ||
+      values.any((value) {
+        final normalized = value.trim();
+        return normalized.isEmpty || normalized.length > maxItemLength;
+      })) {
+    throw ArgumentError('$label不能超过 $maxItems 项，每项最多 $maxItemLength 个字符');
+  }
+}
+
+List<String> _normalizedItems(List<String> values) =>
+    values.map((value) => value.trim()).toList(growable: false);
 
 String _csvText(Object? value) {
   final values = switch (value) {
@@ -2036,6 +2338,18 @@ num _decimal(Object? value) => switch (value) {
       final num number => number,
       _ => num.tryParse(value?.toString() ?? '') ?? 0,
     };
+
+num _requiredDecimal(Object? value, String field) {
+  final parsed = switch (value) {
+    final num number => number,
+    final String text => num.tryParse(text.trim()),
+    _ => null,
+  };
+  if (parsed == null || !parsed.isFinite) {
+    throw FormatException('响应缺少有效的 $field');
+  }
+  return parsed;
+}
 
 num? _nullableDecimal(Object? value) {
   final text = value?.toString().trim();

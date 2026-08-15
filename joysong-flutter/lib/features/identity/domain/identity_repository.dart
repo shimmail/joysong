@@ -96,6 +96,9 @@ abstract interface class IdentityRepository {
 
   Future<List<ProfessionalProjectRequest>> listProfessionalProjectRequests();
 
+  Future<InstitutionProjectApplicationFormConfig>
+      loadInstitutionProjectApplicationFormConfig();
+
   Future<void> submitPlatformProjectRequest(PlatformProjectRequestDraft draft);
 
   Future<void> submitInstitutionProjectRequest(
@@ -103,6 +106,12 @@ abstract interface class IdentityRepository {
   );
 
   Future<void> reviewInstitutionProjectRequest({
+    required String id,
+    required String decision,
+    required String reviewNote,
+  });
+
+  Future<void> reviewPlatformProjectRequest({
     required String id,
     required String decision,
     required String reviewNote,
