@@ -194,6 +194,7 @@ internal fun summaryContextDecision(
         when (intent) {
             AgentIntent.GENERAL_CHAT -> target == null && action == null
             AgentIntent.SAFETY_SCREENING -> target == null
+            AgentIntent.HUMAN_CONSULTATION -> true
             AgentIntent.PLANNING,
             AgentIntent.CATALOG_QA,
             AgentIntent.COMPARISON,
@@ -1299,6 +1300,11 @@ class ChatService(
 
     private fun generationProfile(intent: AgentIntent): GenerationProfile = when (intent) {
         AgentIntent.GENERAL_CHAT -> GenerationProfile(
+            historyMessageLimit = 4,
+            maxOutputTokens = 280
+        )
+        // HUMAN_CONSULTATION will short-circuit before generation in the later handoff slice.
+        AgentIntent.HUMAN_CONSULTATION -> GenerationProfile(
             historyMessageLimit = 4,
             maxOutputTokens = 280
         )
