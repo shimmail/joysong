@@ -186,6 +186,19 @@ class ProfessionalProjectRequestHttpTest {
     }
 
     @Test
+    fun `institution review exposes wrong target institution authority as HTTP forbidden`() {
+        val fixture = fixture()
+        every { fixture.service.reviewInstitution(fixture.actor, "request-1", any()) } throws AccessDeniedException("只能审核本机构的项目申请")
+
+        fixture.mvc.perform(post("/api/management/project-requests/request-1/review").json("""{"decision":"APPROVED"}"""))
+            .andExpect(status().isForbidden)
+            .andExpect(jsonPath("$.code").value(403))
+
+        verify(exactly = 1) { fixture.service.reviewInstitution(fixture.actor, "request-1", any()) }
+        verify(exactly = 0) { fixture.service.reviewPlatform(any(), any(), any()) }
+    }
+
+    @Test
     fun `missing project request institution or project is exposed as HTTP not found`() {
         listOf("项目申请不存在", "机构不存在", "平台项目不存在").forEach { message ->
             val fixture = fixture()
