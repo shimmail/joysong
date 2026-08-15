@@ -1,0 +1,194 @@
+package com.joysong.server.project.controller
+
+import com.joysong.server.common.GlobalExceptionHandler
+import com.joysong.server.identity.service.ManagementAccessService
+import com.joysong.server.identity.service.ManagementActor
+import com.joysong.server.order.service.OrderSplitRatePolicy
+import com.joysong.server.project.service.ProfessionalProjectRequestService
+import com.joysong.server.project.service.ProfessionalProjectRequestConflictException
+import com.joysong.server.project.service.ProfessionalProjectRequestNotFoundException
+import com.joysong.server.project.service.ProjectRequestReviewResult
+import com.joysong.server.project.service.ProjectRequestSubmissionResult
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.verify
+import org.junit.jupiter.api.Test
+import org.springframework.http.MediaType
+import org.springframework.security.access.AccessDeniedException
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import org.springframework.test.web.servlet.setup.MockMvcBuilders
+
+class ProfessionalProjectRequestHttpTest {
+    @Test
+    fun `platform application accepts exactly the complete platform shape`() {
+        val fixture = fixture()
+        every { fixture.service.submitPlatform(any(), any()) } returns ProjectRequestSubmissionResult("request-1", "PLATFORM", "PENDING")
+
+        fixture.mvc.perform(post("/api/management/project-requests/platform").json(platformBody()))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.requestType").value("PLATFORM"))
+
+        verify(exactly = 1) { fixture.service.submitPlatform(fixture.actor, any()) }
+    }
+
+    @Test
+    fun `institution application accepts exactly the complete institution shape with institution only in path`() {
+        val fixture = fixture()
+        every { fixture.service.submitInstitution(any(), any(), any()) } returns ProjectRequestSubmissionResult("request-2", "INSTITUTION", "PENDING")
+
+        fixture.mvc.perform(post("/api/management/project-requests/institutions/institution-1").json(institutionBody()))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.requestType").value("INSTITUTION"))
+
+        verify(exactly = 1) { fixture.service.submitInstitution(fixture.actor, "institution-1", any()) }
+    }
+
+    @Test
+    fun `application payloads reject arbitrary and prohibited fields before service invocation`() {
+        val fixture = fixture()
+
+        fixture.mvc.perform(post("/api/management/project-requests/platform").json(platformBody("\"unexpected\":true")))
+            .andExpect(status().isBadRequest)
+        fixture.mvc.perform(post("/api/management/project-requests/platform").json(platformBody("\"institutionId\":\"body-institution\"")))
+            .andExpect(status().isBadRequest)
+        fixture.mvc.perform(post("/api/management/project-requests/institutions/institution-1").json(institutionBody("\"institutionId\":\"body-institution\"")))
+            .andExpect(status().isBadRequest)
+
+        verify(exactly = 0) { fixture.service.submitPlatform(any(), any()) }
+        verify(exactly = 0) { fixture.service.submitInstitution(any(), any(), any()) }
+    }
+
+    @Test
+    fun `institution form configuration exposes only policy platform rate to an active doctor`() {
+        val fixture = fixture()
+
+        fixture.mvc.perform(get("/api/management/project-requests/institution-form-config").principal(fixture.authentication))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.platformRate").value(17.5))
+            .andExpect(jsonPath("$.data").isMap)
+            .andExpect(jsonPath("$.data.institutionRate").doesNotExist())
+    }
+
+    @Test
+    fun `institution form configuration rejects non-doctors`() {
+        val fixture = fixture(actor = ManagementActor("user-2", false, emptySet(), null, emptySet(), emptySet(), emptySet()))
+
+        fixture.mvc.perform(get("/api/management/project-requests/institution-form-config").principal(fixture.authentication))
+            .andExpect(status().isForbidden)
+            .andExpect(jsonPath("$.code").value(403))
+    }
+
+    @Test
+    fun `review accepts approved and rejected but rejects changes requested and blank rejection note`() {
+        val fixture = fixture()
+        every { fixture.service.reviewInstitution(any(), any(), any()) } returns ProjectRequestReviewResult("request-1", "APPROVED", null, null)
+
+        fixture.mvc.perform(post("/api/management/project-requests/request-1/review").json("""{"decision":"APPROVED"}"""))
+            .andExpect(status().isOk)
+        fixture.mvc.perform(post("/api/management/project-requests/request-1/review").json("""{"decision":"REJECTED","reviewNote":"duplicate"}"""))
+            .andExpect(status().isOk)
+        fixture.mvc.perform(post("/api/management/project-requests/request-1/review").json("""{"decision":"CHANGES_REQUESTED","reviewNote":"revise"}"""))
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.code").value(400))
+        fixture.mvc.perform(post("/api/management/project-requests/request-1/review").json("""{"decision":"REJECTED","reviewNote":" "}"""))
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.code").value(400))
+    }
+
+    @Test
+    fun `admin project review rejects changes requested at the API boundary`() {
+        val access = mockk<ManagementAccessService>()
+        val service = mockk<ProfessionalProjectRequestService>()
+        val actor = ManagementActor("admin-1", true, setOf("ADMIN"), null, emptySet(), emptySet(), emptySet())
+        every { access.actor(any()) } returns actor
+        every { service.reviewPlatform(any(), any(), any()) } returns ProjectRequestReviewResult("request-1", "CHANGES_REQUESTED", null, null)
+        val mvc = MockMvcBuilders.standaloneSetup(AdminProfessionalProjectRequestController(service, access))
+            .setControllerAdvice(GlobalExceptionHandler())
+            .build()
+
+        mvc.perform(post("/api/admin/project-requests/request-1/review").json("""{"decision":"CHANGES_REQUESTED","reviewNote":"revise"}"""))
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.code").value(400))
+    }
+
+    @Test
+    fun `access denial is exposed as HTTP forbidden for project request routes`() {
+        val fixture = fixture()
+        every { fixture.service.submitPlatform(any(), any()) } throws AccessDeniedException("无权提交")
+
+        fixture.mvc.perform(post("/api/management/project-requests/platform").json(platformBody()))
+            .andExpect(status().isForbidden)
+            .andExpect(jsonPath("$.code").value(403))
+    }
+
+    @Test
+    fun `missing project request institution or project is exposed as HTTP not found`() {
+        listOf("项目申请不存在", "机构不存在", "平台项目不存在").forEach { message ->
+            val fixture = fixture()
+            every { fixture.service.submitInstitution(any(), any(), any()) } throws ProfessionalProjectRequestNotFoundException(message)
+
+            fixture.mvc.perform(post("/api/management/project-requests/institutions/institution-1").json(institutionBody()))
+                .andExpect(status().isNotFound)
+                .andExpect(jsonPath("$.code").value(404))
+        }
+    }
+
+    @Test
+    fun `project request conflicts are exposed as HTTP conflict`() {
+        listOf(
+            "同一项目已有待处理申请",
+            "项目申请已处理",
+            "医生已不具备该机构的有效执业关系",
+            "该机构已存在此平台项目",
+            "平台分账比例已变更"
+        ).forEach { message ->
+            val fixture = fixture()
+            every { fixture.service.submitPlatform(any(), any()) } throws ProfessionalProjectRequestConflictException(message)
+
+            fixture.mvc.perform(post("/api/management/project-requests/platform").json(platformBody()))
+                .andExpect(status().isConflict)
+                .andExpect(jsonPath("$.code").value(409))
+        }
+    }
+
+    private fun fixture(actor: ManagementActor = ManagementActor("doctor-1", false, setOf("DOCTOR"), "doctor-1", emptySet(), emptySet(), setOf("doctor-1"))): Fixture {
+        val access = mockk<ManagementAccessService>()
+        val service = mockk<ProfessionalProjectRequestService>()
+        val splitRatePolicy = mockk<OrderSplitRatePolicy>()
+        val authentication = UsernamePasswordAuthenticationToken("doctor-1", "", emptyList())
+        every { access.actor(any()) } returns actor
+        every { splitRatePolicy.currentPlatformRate() } returns java.math.BigDecimal("17.50")
+        return Fixture(
+            MockMvcBuilders.standaloneSetup(ProfessionalProjectRequestController(service, access, splitRatePolicy))
+                .setControllerAdvice(GlobalExceptionHandler())
+                .build(),
+            service,
+            actor,
+            authentication,
+            splitRatePolicy
+        )
+    }
+
+    private fun org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder.json(body: String) =
+        contentType(MediaType.APPLICATION_JSON).content(body).principal(UsernamePasswordAuthenticationToken("doctor-1", "", emptyList()))
+
+    private fun platformBody(extra: String = "") = """{
+        "name":"Hydra facial","category":"SKIN","description":"Hydrating facial treatment","referencePrice":199.99,"currency":"USD","slogan":"Glow today","salesCount":5,"coverImage":"cover.png","images":["one.png"],"detailContent":"Details","tags":["hydration"],"categoryTags":["skin"],"notes":"launch"${if (extra.isBlank()) "" else ",$extra"}
+    }"""
+
+    private fun institutionBody(extra: String = "") = """{
+        "projectId":"project-1","name":"Hydra facial","category":"SKIN","description":"Hydrating facial treatment","tags":["hydration"],"slogan":"Glow today","detailContent":"Details","price":199.99,"originalPrice":249.99,"currency":"USD","coverImage":"cover.png","images":["one.png"],"salesCount":5,"isActive":true,"consultationFee":10.00,"commissionRate":20.00,"institutionRate":30.00,"notes":"launch"${if (extra.isBlank()) "" else ",$extra"}
+    }"""
+
+    private data class Fixture(
+        val mvc: org.springframework.test.web.servlet.MockMvc,
+        val service: ProfessionalProjectRequestService,
+        val actor: ManagementActor,
+        val authentication: UsernamePasswordAuthenticationToken,
+        val splitRatePolicy: OrderSplitRatePolicy
+    )
+}

@@ -24,6 +24,8 @@ import com.joysong.server.institution.service.DoctorProjectChangeNotFoundExcepti
 import com.joysong.server.article.service.ArticleNotFoundException
 import com.joysong.server.order.service.OrderManagementConflictException
 import com.joysong.server.order.service.OrderManagementNotFoundException
+import com.joysong.server.project.service.ProfessionalProjectRequestConflictException
+import com.joysong.server.project.service.ProfessionalProjectRequestNotFoundException
 import java.io.IOException
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
@@ -104,6 +106,14 @@ class GlobalExceptionHandler {
     @ExceptionHandler(OrderManagementConflictException::class)
     fun handleOrderManagementConflict(e: OrderManagementConflictException) =
         ResponseEntity.status(HttpStatus.CONFLICT).body(BaseResponse.error<Nothing>(e.message ?: "订单状态冲突", 409))
+
+    @ExceptionHandler(ProfessionalProjectRequestNotFoundException::class)
+    fun handleProfessionalProjectRequestNotFound(e: ProfessionalProjectRequestNotFoundException) =
+        ResponseEntity.status(HttpStatus.NOT_FOUND).body(BaseResponse.error<Nothing>(e.message ?: "项目申请不存在", 404))
+
+    @ExceptionHandler(ProfessionalProjectRequestConflictException::class)
+    fun handleProfessionalProjectRequestConflict(e: ProfessionalProjectRequestConflictException) =
+        ResponseEntity.status(HttpStatus.CONFLICT).body(BaseResponse.error<Nothing>(e.message ?: "项目申请冲突", 409))
 
     @ExceptionHandler(IllegalArgumentException::class)
     fun handleIllegalArgument(
@@ -219,4 +229,5 @@ class GlobalExceptionHandler {
             || this == "/api/management/projects"
             || startsWith("/api/management/doctor-articles")
             || startsWith("/api/management/orders")
+            || startsWith("/api/management/project-requests")
 }

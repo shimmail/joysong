@@ -2,6 +2,7 @@ package com.joysong.server.project.controller
 
 import com.joysong.server.identity.service.ManagementAccessService
 import com.joysong.server.identity.service.ManagementActor
+import com.joysong.server.order.service.OrderSplitRatePolicy
 import com.joysong.server.project.service.ProfessionalProjectRequestService
 import com.joysong.server.project.service.ProjectRequestReview
 import io.mockk.every
@@ -14,11 +15,6 @@ import org.springframework.web.bind.annotation.RequestMapping
 
 class ProfessionalProjectRequestControllerTest {
     @Test
-    fun `review request contains only decision and review note`() {
-        assertEquals(setOf("decision", "reviewNote"), ProjectRequestReview::class.java.declaredFields.map { it.name }.toSet())
-    }
-
-    @Test
     fun `management and admin controllers use separate route roots`() {
         assertEquals(
             "/api/management/project-requests",
@@ -28,6 +24,22 @@ class ProfessionalProjectRequestControllerTest {
             "/api/admin/project-requests",
             AdminProfessionalProjectRequestController::class.java.getAnnotation(RequestMapping::class.java).value.single()
         )
+    }
+
+    @Test
+    fun `management review resolves actor and delegates institution review`() {
+        val authentication = mockk<Authentication>()
+        val access = mockk<ManagementAccessService>()
+        val service = mockk<ProfessionalProjectRequestService>()
+        val actor = ManagementActor("representative-1", false, setOf("INSTITUTION_LEGAL_REPRESENTATIVE"), null, setOf("institution-1"), emptySet(), emptySet())
+        val request = ProjectRequestReview("APPROVED")
+        every { access.actor(authentication) } returns actor
+        every { service.reviewInstitution(actor, "request-1", request) } returns mockk()
+
+        ProfessionalProjectRequestController(service, access, mockk<OrderSplitRatePolicy>())
+            .reviewInstitution(authentication, "request-1", request)
+
+        verify(exactly = 1) { service.reviewInstitution(actor, "request-1", request) }
     }
 
     @Test

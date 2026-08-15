@@ -1,5 +1,9 @@
 package com.joysong.server.project.service
 
+import com.fasterxml.jackson.annotation.JsonAnySetter
+import com.fasterxml.jackson.annotation.JsonIgnore
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.joysong.server.common.money.CurrencyCode
 import com.joysong.server.identity.service.ManagementActor
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.JdbcTemplate
@@ -19,7 +23,7 @@ class ProfessionalProjectRequestService(
     @Transactional
     fun submitPlatform(
         actor: ManagementActor,
-        request: PlatformProjectRequestSubmission
+        request: DoctorPlatformProjectRequest
     ): ProjectRequestSubmissionResult {
         val doctorId = requireDoctor(actor)
         val name = required(request.name, "项目名称不能为空")
@@ -46,7 +50,7 @@ class ProfessionalProjectRequestService(
     fun submitInstitution(
         actor: ManagementActor,
         institutionId: String,
-        request: InstitutionProjectRequestSubmission
+        request: DoctorInstitutionProjectRequest
     ): ProjectRequestSubmissionResult {
         val doctorId = requireDoctor(actor)
         val targetInstitutionId = required(institutionId, "机构不能为空")
@@ -62,8 +66,8 @@ class ProfessionalProjectRequestService(
             targetInstitutionId,
             projectId
         ) == 0L) { "该机构已存在此平台项目，请申请加入机构项目" }
-        val serviceContent = required(request.serviceContent, "服务内容不能为空")
-        require(request.priceSuggestion >= BigDecimal.ZERO) { "建议价格不能为负数" }
+        val serviceContent = required(request.description.orEmpty(), "服务内容不能为空")
+        require(request.price >= BigDecimal.ZERO) { "建议价格不能为负数" }
         require(count(
             """
             SELECT COUNT(*) FROM professional_project_requests
@@ -76,7 +80,7 @@ class ProfessionalProjectRequestService(
         val id = UUID.randomUUID().toString()
         insertRequest(
             id, "INSTITUTION", doctorId, targetInstitutionId, projectId, null, null, null,
-            serviceContent, request.priceSuggestion, request.notes.trim().takeIf(String::isNotEmpty)
+            serviceContent, request.price, request.notes.trim().takeIf(String::isNotEmpty)
         )
         return ProjectRequestSubmissionResult(id, "INSTITUTION", "PENDING")
     }
@@ -327,18 +331,65 @@ class ProfessionalProjectRequestService(
         jdbcTemplate.queryForObject(sql, Long::class.java, *args)
 }
 
-data class PlatformProjectRequestSubmission(
+@JsonIgnoreProperties(ignoreUnknown = false)
+data class DoctorPlatformProjectRequest(
     val name: String = "",
     val category: String = "",
     val description: String = "",
+    val referencePrice: BigDecimal = BigDecimal.ZERO,
+    val currency: CurrencyCode = CurrencyCode.DEFAULT,
+    val slogan: String = "",
+    val salesCount: Int = 0,
+    val coverImage: String = "",
+    val images: List<String> = emptyList(),
+    val detailContent: String? = null,
+    val tags: List<String> = emptyList(),
+    val categoryTags: List<String> = emptyList(),
     val notes: String = ""
-)
+) {
+    @JsonIgnore
+    val unknownFields: MutableMap<String, Any?> = linkedMapOf()
 
-data class InstitutionProjectRequestSubmission(
+    @JsonAnySetter
+    fun unknown(name: String, value: Any?) {
+        unknownFields[name] = value
+    }
+
+}
+
+@JsonIgnoreProperties(ignoreUnknown = false)
+data class DoctorInstitutionProjectRequest(
     val projectId: String = "",
-    val serviceContent: String = "",
-    val priceSuggestion: BigDecimal = BigDecimal.ZERO,
+    val name: String? = null,
+    val category: String? = null,
+    val description: String? = null,
+    val tags: List<String>? = null,
+    val slogan: String? = null,
+    val detailContent: String? = null,
+    val price: BigDecimal = BigDecimal.ZERO,
+    val originalPrice: BigDecimal? = null,
+    val currency: CurrencyCode = CurrencyCode.DEFAULT,
+    val coverImage: String? = null,
+    val images: List<String>? = null,
+    val salesCount: Int = 0,
+    val isActive: Boolean = true,
+    val consultationFee: BigDecimal = BigDecimal.ZERO,
+    val commissionRate: BigDecimal = BigDecimal.ZERO,
+    val institutionRate: BigDecimal = BigDecimal.ZERO,
     val notes: String = ""
+) {
+    @JsonIgnore
+    val unknownFields: MutableMap<String, Any?> = linkedMapOf()
+
+    @JsonAnySetter
+    fun unknown(name: String, value: Any?) {
+        unknownFields[name] = value
+    }
+
+}
+
+data class InstitutionProjectApplicationFormConfig(
+    val platformRate: BigDecimal
 )
 
 data class ProjectRequestReview(
@@ -398,3 +449,7 @@ private data class ProjectRequestTarget(
     val notes: String?,
     val status: String
 )
+
+class ProfessionalProjectRequestNotFoundException(message: String) : RuntimeException(message)
+
+class ProfessionalProjectRequestConflictException(message: String) : RuntimeException(message)

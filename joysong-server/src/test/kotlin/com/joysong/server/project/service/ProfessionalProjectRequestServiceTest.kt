@@ -24,7 +24,12 @@ class ProfessionalProjectRequestServiceTest {
 
         val result = service.submitPlatform(
             doctorActor(),
-            PlatformProjectRequestSubmission("  Laser  ", " Skin ", " Description ", " Notes ")
+            DoctorPlatformProjectRequest(
+                name = "  Laser  ",
+                category = " Skin ",
+                description = " Description ",
+                notes = " Notes "
+            )
         )
 
         assertEquals("PLATFORM", result.requestType)
@@ -44,7 +49,7 @@ class ProfessionalProjectRequestServiceTest {
             service.submitInstitution(
                 doctorActor(approvedInstitutions = setOf("institution-1")),
                 "institution-2",
-                InstitutionProjectRequestSubmission("project-1", "service", BigDecimal("99.00"), "notes")
+                DoctorInstitutionProjectRequest(projectId = "project-1", description = "service", price = BigDecimal("99.00"), notes = "notes")
             )
         }
 
@@ -62,7 +67,7 @@ class ProfessionalProjectRequestServiceTest {
             service.submitInstitution(
                 doctorActor(),
                 "institution-1",
-                InstitutionProjectRequestSubmission("project-1", "service", BigDecimal("99.00"), "notes")
+                DoctorInstitutionProjectRequest(projectId = "project-1", description = "service", price = BigDecimal("99.00"), notes = "notes")
             )
         }
 
@@ -79,7 +84,7 @@ class ProfessionalProjectRequestServiceTest {
             service.submitInstitution(
                 doctorActor(),
                 "institution-1",
-                InstitutionProjectRequestSubmission("project-1", "service", BigDecimal("99.00"), "notes")
+                DoctorInstitutionProjectRequest(projectId = "project-1", description = "service", price = BigDecimal("99.00"), notes = "notes")
             )
         }
 
