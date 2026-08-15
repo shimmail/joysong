@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' show Tristate;
 
 import 'package:flutter/material.dart';
@@ -403,6 +404,232 @@ void main() {
         Tristate.isTrue,
       );
       expect(repository.candidateCalls, isEmpty);
+    },
+  );
+
+  testWidgets(
+    'A to B to A prime responses keep only the newest current action candidates',
+    (tester) async {
+      final olderJoin = Completer<InstitutionMembershipCandidatePage>();
+      final newerJoin = Completer<InstitutionMembershipCandidatePage>();
+      var invocation = 0;
+      final repository = _FakeIdentityRepository(
+        contexts: [_dualContext()],
+        candidateHandler: (call) {
+          invocation += 1;
+          if (invocation == 1) {
+            return Future.value(_candidatePage(const [
+              InstitutionMembershipCandidate(
+                id: 'initial-join',
+                name: 'Initial Join Clinic',
+              ),
+            ]));
+          }
+          if (invocation == 2 || invocation == 4) {
+            return Future.value(_candidatePage(const [
+              InstitutionMembershipCandidate(
+                id: 'doctor-current-uuid',
+                name: 'Current Leave Clinic',
+              ),
+            ]));
+          }
+          if (invocation == 3) return olderJoin.future;
+          if (invocation == 5) return newerJoin.future;
+          throw StateError('Unexpected candidate invocation $invocation');
+        },
+      );
+
+      await _mount(
+        tester,
+        InstitutionRelationshipsPage(
+          repository: repository,
+          scope: InstitutionRelationshipScope.doctor,
+        ),
+      );
+      await tester.tap(find.text('Leave institution').first);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Join institution').first);
+      await tester.pump();
+      expect(invocation, 3);
+      await tester.tap(find.text('Leave institution').first);
+      await tester.pump();
+      await tester.pump();
+      expect(invocation, 4);
+      await tester.tap(find.text('Join institution').first);
+      await tester.pump();
+      expect(invocation, 5);
+
+      newerJoin.complete(_candidatePage(const [
+        InstitutionMembershipCandidate(
+          id: 'newest-join',
+          name: 'Newest Join Clinic',
+        ),
+      ]));
+      await tester.pump();
+      olderJoin.complete(_candidatePage(const [
+        InstitutionMembershipCandidate(
+          id: 'stale-join',
+          name: 'Stale Join Clinic',
+        ),
+      ]));
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const Key('relationship-institution-picker')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Stale Join Clinic'), findsNothing);
+      expect(find.text('Newest Join Clinic'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'slow JOIN refresh cannot replace a newer fast LEAVE candidate cache',
+    (tester) async {
+      final slowJoinRefresh = Completer<InstitutionMembershipCandidatePage>();
+      var invocation = 0;
+      final repository = _FakeIdentityRepository(
+        contexts: [_dualContext()],
+        candidateHandler: (call) {
+          invocation += 1;
+          if (invocation == 1) {
+            return Future.value(_candidatePage(const [
+              InstitutionMembershipCandidate(
+                id: 'initial-join',
+                name: 'Initial Join Clinic',
+              ),
+            ]));
+          }
+          if (invocation == 2) return slowJoinRefresh.future;
+          if (invocation == 3) {
+            return Future.value(_candidatePage(const [
+              InstitutionMembershipCandidate(
+                id: 'doctor-current-uuid',
+                name: 'Newest Leave Clinic',
+              ),
+            ]));
+          }
+          throw StateError('Unexpected candidate invocation $invocation');
+        },
+      );
+
+      await _mount(
+        tester,
+        InstitutionRelationshipsPage(
+          repository: repository,
+          scope: InstitutionRelationshipScope.doctor,
+        ),
+      );
+      final refreshFuture = tester
+          .widget<RefreshIndicator>(find.byType(RefreshIndicator))
+          .onRefresh();
+      await tester.pump();
+      expect(invocation, 2);
+
+      await tester.tap(find.text('Leave institution').first);
+      await tester.pump();
+      await tester.pump();
+      expect(invocation, 3);
+
+      slowJoinRefresh.complete(_candidatePage(const [
+        InstitutionMembershipCandidate(
+          id: 'stale-refresh-join',
+          name: 'Stale Refresh Join Clinic',
+        ),
+      ]));
+      await refreshFuture;
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const Key('relationship-institution-picker')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Newest Leave Clinic'), findsOneWidget);
+      expect(find.text('Stale Refresh Join Clinic'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'slow refresh context and failed candidate keep a newer action prime cache',
+    (tester) async {
+      final slowRefreshContext = Completer<ManagementContext>();
+      var candidateInvocation = 0;
+      final repository = _FakeIdentityRepository(
+        contexts: [_dualContext()],
+        contextHandler: (call) {
+          if (call == 0) return Future.value(_dualContext());
+          if (call == 1) return slowRefreshContext.future;
+          throw StateError('Unexpected context invocation $call');
+        },
+        candidateHandler: (call) {
+          candidateInvocation += 1;
+          if (candidateInvocation == 1) {
+            return Future.value(_candidatePage(const [
+              InstitutionMembershipCandidate(
+                id: 'initial-join',
+                name: 'Initial Join Clinic',
+              ),
+            ]));
+          }
+          if (candidateInvocation == 2) {
+            return Future.value(_candidatePage(const [
+              InstitutionMembershipCandidate(
+                id: 'doctor-current-uuid',
+                name: 'Newest Leave Prime Clinic',
+              ),
+            ]));
+          }
+          if (candidateInvocation == 3) {
+            return Future.error(
+              StateError('refresh candidate unavailable'),
+            );
+          }
+          if (candidateInvocation == 4) {
+            return Future.value(_candidatePage(const [
+              InstitutionMembershipCandidate(
+                id: 'doctor-current-uuid',
+                name: 'Unexpected Picker Reload Clinic',
+              ),
+            ]));
+          }
+          throw StateError(
+            'Unexpected candidate invocation $candidateInvocation',
+          );
+        },
+      );
+
+      await _mount(
+        tester,
+        InstitutionRelationshipsPage(
+          repository: repository,
+          scope: InstitutionRelationshipScope.doctor,
+        ),
+      );
+      final refreshFuture = tester
+          .widget<RefreshIndicator>(find.byType(RefreshIndicator))
+          .onRefresh();
+      await tester.pump();
+      expect(repository.contextCalls, 2);
+      expect(candidateInvocation, 1);
+
+      await tester.tap(find.text('Leave institution').first);
+      await tester.pump();
+      await tester.pump();
+      expect(candidateInvocation, 2);
+
+      slowRefreshContext.complete(_dualContext());
+      await refreshFuture;
+      await tester.pumpAndSettle();
+      expect(candidateInvocation, 3);
+
+      await tester.tap(
+        find.byKey(const Key('relationship-institution-picker')),
+      );
+      await tester.pumpAndSettle();
+      expect(candidateInvocation, 3);
+      expect(find.text('Newest Leave Prime Clinic'), findsOneWidget);
+      expect(find.text('Unexpected Picker Reload Clinic'), findsNothing);
     },
   );
 
@@ -934,6 +1161,7 @@ final class _FakeIdentityRepository implements IdentityRepository {
     required List<ManagementContext> contexts,
     List<List<InstitutionMembershipRequest>> ownedResponses = const [[]],
     List<List<InstitutionMembershipRequest>> reviewableResponses = const [[]],
+    this.contextHandler,
     this.candidateHandler,
     this.reviewableError,
   })  : _contexts = List.of(contexts),
@@ -943,6 +1171,7 @@ final class _FakeIdentityRepository implements IdentityRepository {
   final List<ManagementContext> _contexts;
   final List<List<InstitutionMembershipRequest>> _ownedResponses;
   final List<List<InstitutionMembershipRequest>> _reviewableResponses;
+  final Future<ManagementContext> Function(int call)? contextHandler;
   final Future<InstitutionMembershipCandidatePage> Function(_CandidateCall)?
       candidateHandler;
   final Object? reviewableError;
@@ -959,9 +1188,11 @@ final class _FakeIdentityRepository implements IdentityRepository {
 
   @override
   Future<ManagementContext> loadManagementContext() async {
-    final result = _response(_contexts, contextCalls);
+    final call = contextCalls;
     contextCalls += 1;
-    return result;
+    final handler = contextHandler;
+    if (handler != null) return handler(call);
+    return _response(_contexts, call);
   }
 
   @override

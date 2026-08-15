@@ -90,7 +90,7 @@ class _IdentityCenterPageState extends State<IdentityCenterPage> {
   }
 }
 
-class _IdentityOverviewView extends StatelessWidget {
+class _IdentityOverviewView extends StatefulWidget {
   const _IdentityOverviewView({
     required this.controller,
     required this.filePicker,
@@ -100,10 +100,24 @@ class _IdentityOverviewView extends StatelessWidget {
   final IdentityFilePicker? filePicker;
 
   @override
+  State<_IdentityOverviewView> createState() => _IdentityOverviewViewState();
+}
+
+class _IdentityOverviewViewState extends State<_IdentityOverviewView> {
+  var _applicationsExpanded = false;
+
+  @override
   Widget build(BuildContext context) {
-    final overview = controller.overview;
+    final overview = widget.controller.overview;
+    final applications = overview.applications;
+    final historyToggleText = _applicationsExpanded
+        ? context.localized('收起申请记录', 'Hide application history')
+        : context.localized(
+            '展开全部申请记录（${applications.length}）',
+            'Show all applications (${applications.length})',
+          );
     return RefreshIndicator(
-      onRefresh: controller.load,
+      onRefresh: widget.controller.load,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),
@@ -124,17 +138,43 @@ class _IdentityOverviewView extends StatelessWidget {
           const SizedBox(height: 20),
           Text('申请记录', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 10),
-          if (overview.applications.isEmpty)
-            const _InfoCard(text: '暂无身份申请记录')
-          else
-            for (final application in overview.applications)
-              _StatusCard(
-                title: application.role.label,
-                status: application.status,
-                detail: application.reviewNote.isEmpty
-                    ? '已提交，审核结果会在此更新'
-                    : application.reviewNote,
+          if (applications.isEmpty)
+            _InfoCard(
+              text: context.localized(
+                '暂无身份申请记录',
+                'No identity applications yet',
               ),
+            )
+          else ...[
+            Semantics(
+              key: const Key('identity-application-history-toggle'),
+              container: true,
+              button: true,
+              expanded: _applicationsExpanded,
+              label: historyToggleText,
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(historyToggleText),
+                trailing: Icon(
+                  _applicationsExpanded
+                      ? Icons.expand_less_rounded
+                      : Icons.expand_more_rounded,
+                ),
+                onTap: () => setState(
+                  () => _applicationsExpanded = !_applicationsExpanded,
+                ),
+              ),
+            ),
+            if (_applicationsExpanded)
+              for (final application in applications)
+                _StatusCard(
+                  title: application.role.label,
+                  status: application.status,
+                  detail: application.reviewNote.isEmpty
+                      ? '已提交，审核结果会在此更新'
+                      : application.reviewNote,
+                ),
+          ],
           const SizedBox(height: 20),
           FilledButton.icon(
             key: const Key('start-identity-application'),
@@ -184,9 +224,9 @@ class _IdentityOverviewView extends StatelessWidget {
     await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         builder: (_) => IdentityApplicationPage(
-          controller: controller,
+          controller: widget.controller,
           role: role,
-          filePicker: filePicker,
+          filePicker: widget.filePicker,
         ),
       ),
     );
@@ -1617,7 +1657,9 @@ class _StatusCard extends StatelessWidget {
       child: ListTile(
         title: Text(title),
         subtitle: Text(detail),
-        trailing: Chip(label: Text(status.label)),
+        trailing: Chip(
+          label: Text(context.localized(status.label, status.englishLabel)),
+        ),
       ),
     );
   }

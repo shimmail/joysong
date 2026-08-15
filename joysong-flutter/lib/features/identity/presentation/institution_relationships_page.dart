@@ -40,6 +40,7 @@ class _InstitutionRelationshipsPageState
   var _initialLoading = true;
   var _historyExpanded = false;
   var _loadGeneration = 0;
+  var _candidateRequestToken = 0;
 
   bool get _isLegal =>
       widget.scope == InstitutionRelationshipScope.legalRepresentative;
@@ -61,13 +62,20 @@ class _InstitutionRelationshipsPageState
   @override
   void dispose() {
     _loadGeneration += 1;
+    _candidateRequestToken += 1;
     _requestNote.dispose();
     super.dispose();
   }
 
   Future<void> _refresh({bool initial = false}) async {
     final generation = ++_loadGeneration;
-    if (!initial && mounted) setState(() => _error = null);
+    final refreshCandidateToken = ++_candidateRequestToken;
+    if (!initial && mounted) {
+      setState(() {
+        _error = null;
+        _loadingCandidatesFor = null;
+      });
+    }
     try {
       final managementContext = await widget.repository.loadManagementContext();
       if (generation != _loadGeneration || !mounted) return;
@@ -97,40 +105,53 @@ class _InstitutionRelationshipsPageState
       final requests = owned
           .where((request) => request.requestType == requestType)
           .toList(growable: false);
-      InstitutionMembershipCandidatePage? candidatePage;
-      var names = _namesFromRequests(requests);
-      if (managementContext.canApplyToInstitutions) {
-        try {
-          final raw =
-              await widget.repository.listInstitutionMembershipCandidates(
-            requestType: requestType,
-            action: _action,
-            query: '',
-            offset: 0,
-            limit: _candidateLimit,
-          );
-          if (generation != _loadGeneration || !mounted) return;
-          names = _mergeCandidateNames(names, raw.items);
-          candidatePage = _filterCandidates(
-            raw,
-            action: _action,
-            managementContext: managementContext,
-            requests: requests,
-          );
-        } catch (_) {
-          if (generation != _loadGeneration || !mounted) return;
-        }
-      }
+      final refreshOwnsCandidateState =
+          refreshCandidateToken == _candidateRequestToken;
+      final requestNames = _namesFromRequests(requests);
       setState(() {
         _managementContext = managementContext;
         _requests = requests;
-        _institutionNames = names;
-        _candidateCache.clear();
-        if (candidatePage != null) {
-          _candidateCache[_action] = candidatePage;
+        _institutionNames = refreshOwnsCandidateState
+            ? requestNames
+            : {..._institutionNames, ...requestNames};
+        if (refreshOwnsCandidateState) {
+          _candidateCache.clear();
         }
+        _loadingCandidatesFor = null;
         _initialLoading = false;
         _error = null;
+      });
+      if (!managementContext.canApplyToInstitutions) return;
+
+      final requestedAction = _action;
+      final candidateToken = ++_candidateRequestToken;
+      InstitutionMembershipCandidatePage raw;
+      try {
+        raw = await widget.repository.listInstitutionMembershipCandidates(
+          requestType: requestType,
+          action: requestedAction,
+          query: '',
+          offset: 0,
+          limit: _candidateLimit,
+        );
+      } catch (_) {
+        return;
+      }
+      if (!mounted ||
+          generation != _loadGeneration ||
+          candidateToken != _candidateRequestToken ||
+          requestedAction != _action) {
+        return;
+      }
+      final candidatePage = _filterCandidates(
+        raw,
+        action: requestedAction,
+        managementContext: managementContext,
+        requests: requests,
+      );
+      setState(() {
+        _institutionNames = _mergeCandidateNames(_institutionNames, raw.items);
+        _candidateCache[requestedAction] = candidatePage;
       });
     } catch (_) {
       if (generation != _loadGeneration || !mounted) return;
@@ -559,10 +580,12 @@ class _InstitutionRelationshipsPageState
 
   Future<void> _changeAction(InstitutionMembershipAction action) async {
     if (action == _action) return;
+    _candidateRequestToken += 1;
     setState(() {
       _action = action;
       _selection = null;
       _candidateCache.remove(action);
+      _loadingCandidatesFor = null;
     });
     await _primeCandidates(action);
   }
@@ -575,7 +598,7 @@ class _InstitutionRelationshipsPageState
         !managementContext.canApplyToInstitutions) {
       return;
     }
-    final generation = _loadGeneration;
+    final candidateToken = ++_candidateRequestToken;
     setState(() => _loadingCandidatesFor = action);
     try {
       final raw = await widget.repository.listInstitutionMembershipCandidates(
@@ -585,7 +608,9 @@ class _InstitutionRelationshipsPageState
         offset: 0,
         limit: _candidateLimit,
       );
-      if (!mounted || generation != _loadGeneration || action != _action) {
+      if (!mounted ||
+          candidateToken != _candidateRequestToken ||
+          action != _action) {
         return;
       }
       setState(() {
@@ -598,12 +623,15 @@ class _InstitutionRelationshipsPageState
         );
       });
     } catch (_) {
-      if (mounted && generation == _loadGeneration && action == _action) {
+      if (mounted &&
+          candidateToken == _candidateRequestToken &&
+          action == _action) {
         setState(() => _candidateCache.remove(action));
       }
     } finally {
       if (mounted &&
-          generation == _loadGeneration &&
+          candidateToken == _candidateRequestToken &&
+          action == _action &&
           _loadingCandidatesFor == action) {
         setState(() => _loadingCandidatesFor = null);
       }
@@ -621,7 +649,8 @@ class _InstitutionRelationshipsPageState
     final managementContext = _managementContext!;
     final requestType = _requestType!;
     final action = _action;
-    final generation = _loadGeneration;
+    final requests = _requests;
+    final candidateToken = ++_candidateRequestToken;
     final raw = await widget.repository.listInstitutionMembershipCandidates(
       requestType: requestType,
       action: action,
@@ -633,9 +662,11 @@ class _InstitutionRelationshipsPageState
       raw,
       action: action,
       managementContext: managementContext,
-      requests: _requests,
+      requests: requests,
     );
-    if (mounted && generation == _loadGeneration && action == _action) {
+    if (mounted &&
+        candidateToken == _candidateRequestToken &&
+        action == _action) {
       setState(() {
         _institutionNames = _mergeCandidateNames(_institutionNames, raw.items);
         if (query.isEmpty && offset == 0) _candidateCache[action] = filtered;

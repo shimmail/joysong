@@ -24,16 +24,19 @@ enum IdentityRoleType {
 }
 
 enum IdentityStatus {
-  pending('PENDING', '审核中'),
-  active('ACTIVE', '已认证'),
-  rejected('REJECTED', '未通过'),
-  revoked('REVOKED', '已撤销'),
-  unknown('UNKNOWN', '未知状态');
+  pending('PENDING', '审核中', 'Pending review'),
+  approved('APPROVED', '已通过', 'Approved'),
+  active('ACTIVE', '已认证', 'Verified'),
+  rejected('REJECTED', '未通过', 'Rejected'),
+  withdrawn('WITHDRAWN', '已撤回', 'Withdrawn'),
+  revoked('REVOKED', '已撤销', 'Revoked'),
+  unknown('UNKNOWN', '未知状态', 'Unknown status');
 
-  const IdentityStatus(this.code, this.label);
+  const IdentityStatus(this.code, this.label, this.englishLabel);
 
   final String code;
   final String label;
+  final String englishLabel;
 
   static IdentityStatus fromCode(Object? value) {
     final code = value?.toString().trim().toUpperCase();

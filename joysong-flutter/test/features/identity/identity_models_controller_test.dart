@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:ui' show Tristate;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -18,6 +19,164 @@ void main() {
   test('uses medical aesthetics consultant product labels', () {
     expect(IdentityRoleType.fromCode('CONSULTANT').label, '医美顾问');
     expect(IdentityDocumentType.consultantProof.label, '医美顾问证明');
+  });
+
+  test('identity application protocol decodes all application and role states',
+      () {
+    final applicationStatuses = <String, IdentityStatus>{
+      'PENDING': IdentityStatus.pending,
+      'APPROVED': IdentityStatus.approved,
+      'REJECTED': IdentityStatus.rejected,
+      'WITHDRAWN': IdentityStatus.withdrawn,
+    };
+
+    for (final entry in applicationStatuses.entries) {
+      final application = IdentityApplication.fromJson({
+        'id': 'application-${entry.key.toLowerCase()}',
+        'roleCode': 'DOCTOR',
+        'status': entry.key,
+        'reviewNote': '',
+        'submittedAt': '2026-08-15T09:00:00Z',
+        'reviewedAt': null,
+      });
+      expect(application.status, entry.value);
+      expect(application.status, isNot(IdentityStatus.unknown));
+    }
+
+    expect(IdentityStatus.approved.label, '已通过');
+    expect(IdentityStatus.approved.englishLabel, 'Approved');
+    expect(IdentityStatus.withdrawn.label, '已撤回');
+    expect(IdentityStatus.withdrawn.englishLabel, 'Withdrawn');
+
+    for (final entry in const <String, IdentityStatus>{
+      'ACTIVE': IdentityStatus.active,
+      'REVOKED': IdentityStatus.revoked,
+    }.entries) {
+      final role = IdentityRoleRecord.fromJson({
+        'roleCode': 'DOCTOR',
+        'status': entry.key,
+        'activatedAt': '2026-08-15T09:00:00Z',
+        'revokedAt': null,
+      });
+      expect(role.status, entry.value);
+    }
+  });
+
+  testWidgets(
+      'identity application history is controlled collapsed localized and survives controller notifications',
+      (tester) async {
+    tester.view.physicalSize = const Size(800, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repository = _FakeIdentityRepository()
+      ..identityOverview = IdentityOverview.fromJson({
+        'roles': const <Object?>[],
+        'applications': [
+          {
+            'id': 'approved-application',
+            'roleCode': 'DOCTOR',
+            'status': 'APPROVED',
+            'reviewNote': 'Approved application note',
+            'submittedAt': '2026-08-15T09:00:00Z',
+            'reviewedAt': '2026-08-15T10:00:00Z',
+          },
+          {
+            'id': 'withdrawn-application',
+            'roleCode': 'CONSULTANT',
+            'status': 'WITHDRAWN',
+            'reviewNote': 'Withdrawn application note',
+            'submittedAt': '2026-08-14T09:00:00Z',
+            'reviewedAt': null,
+          },
+        ],
+      });
+    final page = IdentityCenterPage(
+      key: const ValueKey('identity-center-history'),
+      repository: repository,
+    );
+
+    await tester
+        .pumpWidget(_localizedApp(home: page, locale: const Locale('en')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Approved application note'), findsNothing);
+    expect(find.text('Withdrawn application note'), findsNothing);
+    expect(find.text('Unknown status'), findsNothing);
+    expect(find.text('未知状态'), findsNothing);
+    expect(find.text('Show all applications (2)'), findsOneWidget);
+    final semantics = tester.getSemantics(
+      find.byKey(const Key('identity-application-history-toggle')),
+    );
+    expect(semantics.flagsCollection.isButton, isTrue);
+    expect(semantics.flagsCollection.isExpanded, Tristate.isFalse);
+
+    await tester.tap(
+      find.byKey(const Key('identity-application-history-toggle')),
+    );
+    await tester.pump();
+    expect(find.text('Approved application note'), findsOneWidget);
+    expect(find.text('Withdrawn application note'), findsOneWidget);
+    expect(find.text('Approved'), findsOneWidget);
+    expect(find.text('Withdrawn'), findsOneWidget);
+
+    final controller = tester
+        .widget<ListenableBuilder>(find.byWidgetPredicate(
+          (widget) =>
+              widget is ListenableBuilder &&
+              widget.listenable is IdentityController,
+        ))
+        .listenable as IdentityController;
+    await controller.upload(IdentityFileDraft(
+      bytes: Uint8List.fromList(const [0x89, 0x50, 0x4e, 0x47]),
+      fileName: 'notification.png',
+      contentType: 'image/png',
+      purpose: IdentityDocumentType.idCardFront,
+    ));
+    await tester.pump();
+    expect(find.text('Approved application note'), findsOneWidget);
+    expect(
+      tester
+          .getSemantics(
+            find.byKey(const Key('identity-application-history-toggle')),
+          )
+          .flagsCollection
+          .isExpanded,
+      Tristate.isTrue,
+    );
+
+    await tester.tap(
+      find.byKey(const Key('identity-application-history-toggle')),
+    );
+    await tester.pump();
+    expect(find.text('Approved application note'), findsNothing);
+    expect(find.text('Withdrawn application note'), findsNothing);
+    expect(find.text('Show all applications (2)'), findsOneWidget);
+
+    await tester.pumpWidget(_localizedApp(home: page));
+    await tester.pumpAndSettle();
+    expect(find.text('展开全部申请记录（2）'), findsOneWidget);
+    await tester.tap(
+      find.byKey(const Key('identity-application-history-toggle')),
+    );
+    await tester.pump();
+    expect(find.text('收起申请记录'), findsOneWidget);
+    expect(find.text('已通过'), findsOneWidget);
+    expect(find.text('已撤回'), findsOneWidget);
+
+    await tester.pumpWidget(_localizedApp(
+      home: IdentityCenterPage(
+        key: const ValueKey('identity-center-empty'),
+        repository: _FakeIdentityRepository(),
+      ),
+      locale: const Locale('en'),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('No identity applications yet'), findsOneWidget);
+    expect(
+      find.byKey(const Key('identity-application-history-toggle')),
+      findsNothing,
+    );
   });
 
   test('management capabilities fail closed when booleans are missing', () {
@@ -941,6 +1100,7 @@ final class _FakeIdentityRepository implements IdentityRepository {
   var contextCalls = 0;
   var allowManagement = true;
   ManagementContext? managementContext;
+  IdentityOverview identityOverview = const IdentityOverview();
   final savedUpdates = <ManagedInstitutionProfileUpdate>[];
   List<InstitutionMembershipRequest> membershipRequests = const [];
   InstitutionProjectJoinRequestDraft? submittedJoinRequest;
@@ -949,7 +1109,7 @@ final class _FakeIdentityRepository implements IdentityRepository {
   Future<void> deletePrivateDraft(String fileId) async {}
 
   @override
-  Future<IdentityOverview> loadOverview() async => const IdentityOverview();
+  Future<IdentityOverview> loadOverview() async => identityOverview;
 
   @override
   Future<ManagementContext> loadManagementContext() async {
@@ -1017,9 +1177,14 @@ final class _FakeIdentityRepository implements IdentityRepository {
   }
 
   @override
-  Future<PrivateIdentityFile> uploadPrivateFile(IdentityFileDraft file) {
-    throw UnimplementedError();
-  }
+  Future<PrivateIdentityFile> uploadPrivateFile(IdentityFileDraft file) async =>
+      PrivateIdentityFile(
+        fileId: 'uploaded-${file.purpose.name}',
+        purpose: file.purpose,
+        originalName: file.fileName,
+        contentType: file.contentType,
+        sizeBytes: file.bytes.length,
+      );
 
   @override
   Future<ManagedInstitutionProject> createManagedInstitutionProject(
