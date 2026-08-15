@@ -71,6 +71,24 @@ class ComparisonRequestBuilderTest {
     }
 
     @Test
+    fun `completes an incomplete previous request when current operand is duplicated across sources`() {
+        val result = builder.build(
+            content = "Add Beta Treatment and compare price",
+            targetType = null,
+            candidates = listOf(project("beta", "Beta Treatment")),
+            contextCandidates = listOf(project("beta", "Beta Treatment")),
+            previous = ComparisonRequest(
+                operands = listOf(ComparisonOperand(AgentQueryTarget.PROJECT, "alpha", "Alpha Treatment")),
+                targetType = AgentQueryTarget.PROJECT
+            )
+        )
+
+        assertEquals(AgentQueryTarget.PROJECT, result.targetType)
+        assertEquals(listOf("alpha", "beta"), result.operands.map { it.entityId })
+        assertTrue(result.missingFields.isEmpty())
+    }
+
+    @Test
     fun `does not append one operand to a complete previous request`() {
         val result = builder.build(
             content = "Compare Gamma Treatment",

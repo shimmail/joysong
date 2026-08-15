@@ -16,6 +16,7 @@ class ComparisonRequestBuilder {
         val inherited = previous?.let(::normalize)
         val currentOperands = (candidates.filter { it.isNamedIn(content) } + contextCandidates)
             .mapNotNull(::toOperand)
+            .distinctBy { "${it.entityType.name}:${it.entityId}" }
         val resolvedTarget = targetType ?: currentOperands.map { it.entityType }.distinct().singleOrNull() ?: inherited?.targetType
         val mergedOperands = when {
             currentOperands.size >= 2 -> currentOperands
