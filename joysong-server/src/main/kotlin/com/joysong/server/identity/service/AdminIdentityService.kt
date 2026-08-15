@@ -27,7 +27,7 @@ private val RELATION_STATUSES = setOf("PENDING", "APPROVED", "REVOKED")
 class AdminIdentityService(
     private val jdbcTemplate: JdbcTemplate,
     private val objectMapper: ObjectMapper,
-    private val doctorInstitutionRelationshipService: DoctorInstitutionRelationshipService,
+    private val doctorInstitutionRelationshipService: DoctorInstitutionRelationshipOperations,
     private val walletRepository: WalletRepository,
     private val consultantInstitutionRelationships: ConsultantInstitutionRelationshipOperations
 ) {
@@ -294,6 +294,13 @@ class AdminIdentityService(
             if (hasPendingConsultantRequest(userId)) {
                 throw ConsultantInstitutionRequestConflictException("顾问存在待审核的机构关系申请，请先完成审核")
             }
+        } else {
+            doctorInstitutionRelationshipService.lockUser(userId)
+            if (normalizedRole == "DOCTOR" &&
+                doctorInstitutionRelationshipService.hasPendingRequestForUpdate(userId)
+            ) {
+                throw DoctorInstitutionRequestConflictException("医生存在待审核的机构关系申请，请先完成审核")
+            }
         }
         val updated = jdbcTemplate.update(
             """
@@ -540,9 +547,17 @@ class AdminIdentityService(
 
     @Transactional
     fun revokeDoctorPractice(id: String, reviewerId: String) {
-        val target = doctorPracticeTarget(id)
+        val peek = doctorPracticeTarget(id, lock = false)
+        doctorInstitutionRelationshipService.lockPair(listOf(peek.userId), peek.institutionId)
+        val target = doctorPracticeTarget(id, lock = true)
+        if (target.userId != peek.userId || target.institutionId != peek.institutionId) {
+            throw DoctorInstitutionRequestConflictException("医生执业关系已被其他操作处理")
+        }
         require(target.status != "REVOKED") { "执业关系已撤销" }
-        doctorInstitutionRelationshipService.revoke(target.userId, target.institutionId, reviewerId)
+        if (doctorInstitutionRelationshipService.hasPendingRequestForUpdate(target.userId, target.institutionId)) {
+            throw DoctorInstitutionRequestConflictException("该机构存在待审核的医生关系申请，请先完成审核")
+        }
+        doctorInstitutionRelationshipService.forceRevokeLocked(target.userId, target.institutionId, reviewerId)
     }
 
     private fun documentsFor(applicationId: String): List<IdentityDocumentAdminView> = jdbcTemplate.query(
@@ -572,8 +587,8 @@ class AdminIdentityService(
         id
     ).firstOrNull() ?: throw IllegalArgumentException("机构成员关系不存在")
 
-    private fun doctorPracticeTarget(id: String): RelationTarget = jdbcTemplate.query(
-        "SELECT doctor_id, institution_id, 'DOCTOR' AS member_role, status FROM doctor_institutions WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
+    private fun doctorPracticeTarget(id: String, lock: Boolean): RelationTarget = jdbcTemplate.query(
+        "SELECT doctor_id, institution_id, 'DOCTOR' AS member_role, status FROM doctor_institutions WHERE id = ? AND deleted_at IS NULL${if (lock) " FOR UPDATE" else ""}",
         { rs, _ -> RelationTarget(rs.getString("doctor_id"), rs.getString("institution_id"), rs.getString("member_role"), rs.getString("status")) },
         id
     ).firstOrNull() ?: throw IllegalArgumentException("医生执业关系不存在")

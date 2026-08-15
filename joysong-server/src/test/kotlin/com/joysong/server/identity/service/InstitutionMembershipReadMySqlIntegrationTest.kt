@@ -4,12 +4,14 @@ import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
+import org.springframework.security.access.AccessDeniedException
 import org.testcontainers.containers.MySQLContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
@@ -64,7 +66,10 @@ class InstitutionMembershipReadMySqlIntegrationTest {
     @Test
     fun `candidate JDBC filters all four branches and applies escaping ordering and pagination`() {
         seedCandidateFixtures()
-        val service = InstitutionMembershipCandidateService(JdbcInstitutionMembershipCandidateStore(jdbc))
+        val service = InstitutionMembershipCandidateService(
+            JdbcInstitutionMembershipCandidateStore(jdbc),
+            DoctorInstitutionRelationshipService(jdbc)
+        )
 
         assertEquals(
             listOf("dj-a", "dj-b"),
@@ -102,6 +107,46 @@ class InstitutionMembershipReadMySqlIntegrationTest {
             service, doctorActor(), MembershipRequestType.DOCTOR, InstitutionMembershipAction.JOIN, "", limit = 100
         )
         assertTrue(allDoctorJoin.items.none { it.name.isBlank() || it.name == it.id })
+    }
+
+    @Test
+    fun `active role without current verified doctor profile cannot query candidates`() {
+        val doctorId = "candidate-unverified-doctor"
+        jdbc.update(
+            "INSERT INTO users (id, password_hash, nickname, role) VALUES (?, 'hash', '未认证医生', 'DOCTOR')",
+            doctorId
+        )
+        jdbc.update(
+            "INSERT INTO user_roles (user_id, role_code, status) VALUES (?, 'DOCTOR', 'ACTIVE')",
+            doctorId
+        )
+        jdbc.update(
+            "INSERT INTO doctors (id, name, is_verified) VALUES (?, '未认证医生', 0)",
+            doctorId
+        )
+        jdbc.update(
+            "INSERT INTO institutions (id, name, is_verified) VALUES ('candidate-unverified-target', '候选机构', 1)"
+        )
+        val actor = doctorActor().copy(
+            userId = doctorId,
+            doctorId = doctorId,
+            manageableDoctorIds = setOf(doctorId)
+        )
+        val service = InstitutionMembershipCandidateService(
+            JdbcInstitutionMembershipCandidateStore(jdbc),
+            DoctorInstitutionRelationshipService(jdbc)
+        )
+
+        assertThrows(AccessDeniedException::class.java) {
+            service.list(
+                actor,
+                MembershipRequestType.DOCTOR,
+                InstitutionMembershipAction.JOIN,
+                "候选机构",
+                0,
+                20
+            )
+        }
     }
 
     @Test
@@ -207,6 +252,18 @@ class InstitutionMembershipReadMySqlIntegrationTest {
         }
         jdbc.update("INSERT INTO doctors (id, name, is_verified) VALUES (?, '医生一', 1)", DOCTOR_ID)
         jdbc.update("INSERT INTO doctors (id, name, is_verified) VALUES (?, '医生二', 1)", OTHER_DOCTOR_ID)
+        listOf(
+            DOCTOR_ID to "DOCTOR",
+            CONSULTANT_ID to "CONSULTANT",
+            OTHER_DOCTOR_ID to "DOCTOR",
+            FOREIGN_CONSULTANT_ID to "CONSULTANT"
+        ).forEach { (userId, roleCode) ->
+            jdbc.update(
+                "INSERT INTO user_roles (user_id, role_code, status) VALUES (?, ?, 'ACTIVE')",
+                userId,
+                roleCode
+            )
+        }
     }
 
     private fun seedCandidateFixtures() {

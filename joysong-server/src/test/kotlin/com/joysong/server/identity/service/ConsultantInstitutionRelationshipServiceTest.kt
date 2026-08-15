@@ -33,6 +33,22 @@ class ConsultantInstitutionRelationshipServiceTest {
     }
 
     @Test
+    fun `reviewer and applicant user locks use stable sorted order`() {
+        val lockedUsers = mutableListOf<String>()
+        every {
+            jdbc.queryForList(any<String>(), String::class.java, *anyVararg())
+        } answers {
+            val userId = thirdArg<Array<*>>().single() as String
+            lockedUsers += userId
+            listOf(userId)
+        }
+
+        service.lockUsers(listOf("reviewer-2", "consultant-1", "consultant-1"))
+
+        assertEquals(listOf("consultant-1", "reviewer-2"), lockedUsers)
+    }
+
+    @Test
     fun `active institution validation is a verified nondeleted locking current read`() {
         val sql = slot<String>()
         every { jdbc.queryForList(capture(sql), String::class.java, *anyVararg()) } returns emptyList()

@@ -18,7 +18,7 @@ class InstitutionMembershipCandidateServiceTest {
         val store = RecordingCandidateStore(
             (1..101).map { InstitutionMembershipCandidateView("id-$it", "机构-$it") }
         )
-        val page = InstitutionMembershipCandidateService(store).list(
+        val page = service(store).list(
             doctorActor(),
             MembershipRequestType.DOCTOR,
             InstitutionMembershipAction.JOIN,
@@ -41,7 +41,7 @@ class InstitutionMembershipCandidateServiceTest {
         val store = RecordingCandidateStore(
             listOf(InstitutionMembershipCandidateView("institution-1", "机构一"))
         )
-        val page = InstitutionMembershipCandidateService(store).list(
+        val page = service(store).list(
             consultantActor(),
             MembershipRequestType.CONSULTANT,
             InstitutionMembershipAction.LEAVE,
@@ -58,7 +58,7 @@ class InstitutionMembershipCandidateServiceTest {
 
     @Test
     fun `candidate identity and pagination validation reject invalid access`() {
-        val service = InstitutionMembershipCandidateService(RecordingCandidateStore(emptyList()))
+        val service = service(RecordingCandidateStore(emptyList()))
 
         assertThrows<AccessDeniedException> {
             service.list(
@@ -78,6 +78,26 @@ class InstitutionMembershipCandidateServiceTest {
                 "", 0, 0
             )
         }
+    }
+
+    @Test
+    fun `doctor candidate query denies a stale active actor when current certification is missing`() {
+        val store = RecordingCandidateStore(
+            listOf(InstitutionMembershipCandidateView("institution-1", "机构一"))
+        )
+
+        assertThrows<AccessDeniedException> {
+            service(store, doctorEligible = false).list(
+                doctorActor(),
+                MembershipRequestType.DOCTOR,
+                InstitutionMembershipAction.JOIN,
+                "",
+                0,
+                20
+            )
+        }
+
+        assertEquals(null, store.applicantId)
     }
 
     @Test
@@ -126,6 +146,17 @@ class InstitutionMembershipCandidateServiceTest {
     private fun consultantActor() = ManagementActor(
         "consultant-1", false, setOf("CONSULTANT"), null, emptySet(), emptySet(), emptySet()
     )
+
+    private fun service(
+        store: InstitutionMembershipCandidateStore,
+        doctorEligible: Boolean = true
+    ): InstitutionMembershipCandidateService {
+        val doctorRelationships = mockk<DoctorInstitutionRelationshipOperations>()
+        every {
+            doctorRelationships.hasActiveCertifiedDoctorForUpdate(any())
+        } returns doctorEligible
+        return InstitutionMembershipCandidateService(store, doctorRelationships)
+    }
 }
 
 private class RecordingCandidateStore(

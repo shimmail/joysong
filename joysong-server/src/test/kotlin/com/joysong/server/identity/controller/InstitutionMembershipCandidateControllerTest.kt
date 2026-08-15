@@ -22,6 +22,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
+import org.springframework.security.access.AccessDeniedException
 import org.springframework.security.test.context.support.WithMockUser
 import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.web.servlet.MockMvc
@@ -109,6 +110,31 @@ class InstitutionMembershipCandidateControllerTest {
                 .andExpect(status().isBadRequest)
                 .andExpect(jsonPath("$.code").value(400))
         }
+    }
+
+    @Test
+    @WithMockUser(username = "doctor-1")
+    fun `candidate current doctor certification failure is real HTTP 403`() {
+        every { access.actor(any()) } returns actor
+        every {
+            candidates.list(
+                actor,
+                MembershipRequestType.DOCTOR,
+                InstitutionMembershipAction.JOIN,
+                "",
+                0,
+                20
+            )
+        } throws AccessDeniedException("只有本人已认证且激活的医生可以查询候选机构")
+
+        mvc.perform(
+            get("/api/management/institution-membership-candidates")
+                .param("requestType", "DOCTOR")
+                .param("action", "JOIN")
+        )
+            .andExpect(status().isForbidden)
+            .andExpect(jsonPath("$.code").value(403))
+            .andExpect(jsonPath("$.message").value("只有本人已认证且激活的医生可以查询候选机构"))
     }
 
     @Test

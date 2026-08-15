@@ -16,10 +16,12 @@ import java.sql.SQLIntegrityConstraintViolationException
 class DoctorInstitutionChangeRequestServiceTest {
     private val store = mockk<DoctorInstitutionChangeRequestStore>()
     private val relationshipService = mockk<DoctorInstitutionRelationshipService>(relaxed = true)
-    private val service = DoctorInstitutionChangeRequestService(store, relationshipService)
+    private val reviewAuthority = mockk<InstitutionRelationshipReviewAuthorityOperations>(relaxed = true)
+    private val service = DoctorInstitutionChangeRequestService(store, relationshipService, reviewAuthority)
 
     init {
         every { store.isActiveInstitution(any()) } returns true
+        every { relationshipService.hasActiveCertifiedDoctorForUpdate(any()) } returns true
     }
 
     @Test
@@ -53,6 +55,29 @@ class DoctorInstitutionChangeRequestServiceTest {
     }
 
     @Test
+    fun `submit revalidates the current doctor role under the relationship transaction lock`() {
+        every { relationshipService.hasActiveCertifiedDoctorForUpdate("doctor-1") } returns false
+        every { store.hasActiveRelationship("doctor-1", "institution-1") } returns false
+        every { store.hasPending("doctor-1", "institution-1") } returns false
+        every { store.create("doctor-1", "institution-1", DoctorInstitutionAction.JOIN, "") } returns request()
+        every {
+            relationshipService.validateForReview(
+                "doctor-1",
+                "institution-1",
+                DoctorInstitutionAction.JOIN
+            )
+        } throws DoctorInstitutionRequestConflictException("医生身份已失效")
+
+        val error = assertThrows<AccessDeniedException> {
+            service.submit(doctorActor(), "institution-1", DoctorInstitutionAction.JOIN, "")
+        }
+
+        assertEquals("只有已认证医生本人可以提交机构关系申请", error.message)
+        verify(exactly = 0) { store.create(any(), any(), any(), any()) }
+        verify(exactly = 1) { relationshipService.lockPair(listOf("doctor-1"), "institution-1") }
+    }
+
+    @Test
     fun `join and leave reject stale relationship states with typed conflicts`() {
         every { store.isCertifiedDoctor("doctor-1") } returns true
         every { store.hasActiveRelationship("doctor-1", "institution-1") } returns true
@@ -77,7 +102,14 @@ class DoctorInstitutionChangeRequestServiceTest {
             service.submit(wrongDoctor, "institution-1", DoctorInstitutionAction.JOIN, "")
         }
 
-        every { store.isCertifiedDoctor("doctor-1") } returns false
+        every { relationshipService.hasActiveCertifiedDoctorForUpdate("doctor-1") } returns false
+        every {
+            relationshipService.validateForReview(
+                "doctor-1",
+                "institution-1",
+                DoctorInstitutionAction.JOIN
+            )
+        } throws DoctorInstitutionRequestConflictException("医生身份已失效")
         val error = assertThrows<AccessDeniedException> {
             service.submit(doctorActor(), "institution-1", DoctorInstitutionAction.JOIN, "")
         }
@@ -86,8 +118,13 @@ class DoctorInstitutionChangeRequestServiceTest {
 
     @Test
     fun `join submit rejects a missing deleted or unverified institution before insert`() {
-        every { store.isCertifiedDoctor("doctor-1") } returns true
-        every { store.isActiveInstitution("institution-1") } returns false
+        every {
+            relationshipService.validateForReview(
+                "doctor-1",
+                "institution-1",
+                DoctorInstitutionAction.JOIN
+            )
+        } throws DoctorInstitutionRequestNotFoundException("机构不存在、未认证或已删除")
 
         val error = assertThrows<DoctorInstitutionRequestNotFoundException> {
             service.submit(doctorActor(), "institution-1", DoctorInstitutionAction.JOIN, "")
@@ -170,6 +207,16 @@ class DoctorInstitutionChangeRequestServiceTest {
     }
 
     @Test
+    fun `request owner can still list history after the doctor role was revoked`() {
+        val staleActor = doctorActor().copy(activeRoles = emptySet(), doctorId = null)
+        every { store.listVisible("doctor-1", emptySet(), false) } returns listOf(request())
+
+        val result = service.list(staleActor)
+
+        assertEquals(listOf("request-1"), result.map { it.id })
+    }
+
+    @Test
     fun `admin list requests all doctor relationship changes`() {
         every { store.listVisible(null, emptySet(), true) } returns listOf(request())
 
@@ -188,6 +235,7 @@ class DoctorInstitutionChangeRequestServiceTest {
 
     @Test
     fun `request owner withdraws a pending request with a conditional update`() {
+        every { store.find("request-1") } returns request()
         every { store.lock("request-1") } returns request()
         every { store.changeStatus("request-1", DoctorInstitutionRequestStatus.WITHDRAWN, "doctor-1", "") } returns true
 
@@ -200,7 +248,22 @@ class DoctorInstitutionChangeRequestServiceTest {
     }
 
     @Test
+    fun `request owner can withdraw after the doctor role was revoked`() {
+        every { store.find("request-1") } returns request()
+        every { store.lock("request-1") } returns request()
+        every {
+            store.changeStatus("request-1", DoctorInstitutionRequestStatus.WITHDRAWN, "doctor-1", "")
+        } returns true
+        val staleActor = doctorActor().copy(activeRoles = emptySet(), doctorId = null)
+
+        val result = service.withdraw(staleActor, "request-1")
+
+        assertEquals(DoctorInstitutionRequestStatus.WITHDRAWN, result.status)
+    }
+
+    @Test
     fun `another actor cannot withdraw a request`() {
+        every { store.find("request-1") } returns request()
         every { store.lock("request-1") } returns request()
 
         val error = assertThrows<AccessDeniedException> {
@@ -213,6 +276,7 @@ class DoctorInstitutionChangeRequestServiceTest {
 
     @Test
     fun `join approval applies relationship before closing request`() {
+        every { store.find("request-1") } returns request()
         every { store.lock("request-1") } returns request()
         every { store.changeStatus("request-1", DoctorInstitutionRequestStatus.APPROVED, "legal-1", "同意") } returns true
 
@@ -225,7 +289,14 @@ class DoctorInstitutionChangeRequestServiceTest {
 
         assertEquals(DoctorInstitutionRequestStatus.APPROVED, result.status)
         assertEquals("同意", result.reviewNote)
-        verify(exactly = 1) { relationshipService.approveJoin("doctor-1", "institution-1", "legal-1") }
+        verify(exactly = 1) {
+            relationshipService.applyApprovedLocked(
+                "doctor-1",
+                "institution-1",
+                DoctorInstitutionAction.JOIN,
+                "legal-1"
+            )
+        }
         verify(exactly = 1) {
             store.changeStatus("request-1", DoctorInstitutionRequestStatus.APPROVED, "legal-1", "同意")
         }
@@ -233,6 +304,7 @@ class DoctorInstitutionChangeRequestServiceTest {
 
     @Test
     fun `leave approval cleans relationship before closing request`() {
+        every { store.find("request-1") } returns request(action = DoctorInstitutionAction.LEAVE)
         every { store.lock("request-1") } returns request(action = DoctorInstitutionAction.LEAVE)
         every { store.changeStatus("request-1", DoctorInstitutionRequestStatus.APPROVED, "legal-1", "") } returns true
 
@@ -243,7 +315,14 @@ class DoctorInstitutionChangeRequestServiceTest {
             ""
         )
 
-        verify(exactly = 1) { relationshipService.approveLeave("doctor-1", "institution-1", "legal-1") }
+        verify(exactly = 1) {
+            relationshipService.applyApprovedLocked(
+                "doctor-1",
+                "institution-1",
+                DoctorInstitutionAction.LEAVE,
+                "legal-1"
+            )
+        }
         verify(exactly = 1) {
             store.changeStatus("request-1", DoctorInstitutionRequestStatus.APPROVED, "legal-1", "")
         }
@@ -251,8 +330,11 @@ class DoctorInstitutionChangeRequestServiceTest {
 
     @Test
     fun `failed relationship effect leaves request pending for transaction rollback`() {
+        every { store.find("request-1") } returns request()
         every { store.lock("request-1") } returns request()
-        every { relationshipService.approveJoin(any(), any(), any()) } throws IllegalStateException("关系已变化")
+        every {
+            relationshipService.applyApprovedLocked(any(), any(), any(), any())
+        } throws IllegalStateException("关系已变化")
 
         assertThrows<IllegalStateException> {
             service.review(
@@ -268,6 +350,7 @@ class DoctorInstitutionChangeRequestServiceTest {
 
     @Test
     fun `review denies cross institution actor and requires rejection reason`() {
+        every { store.find("request-1") } returns request()
         every { store.lock("request-1") } returns request()
 
         val forbidden = assertThrows<AccessDeniedException> {
@@ -293,6 +376,7 @@ class DoctorInstitutionChangeRequestServiceTest {
 
     @Test
     fun `rejection revalidates doctor institution and join relationship before closing request`() {
+        every { store.find("request-1") } returns request()
         every { store.lock("request-1") } returns request()
         every {
             relationshipService.validateForReview(
@@ -316,8 +400,27 @@ class DoctorInstitutionChangeRequestServiceTest {
     }
 
     @Test
+    fun `withdraw peeks then pair locks before relocking the request`() {
+        val pending = request()
+        every { store.find("request-1") } returns pending
+        every { store.lock("request-1") } returns pending
+        every {
+            store.changeStatus("request-1", DoctorInstitutionRequestStatus.WITHDRAWN, "doctor-1", "")
+        } returns true
+
+        service.withdraw(doctorActor(), "request-1")
+
+        io.mockk.verifyOrder {
+            store.find("request-1")
+            relationshipService.lockPair(listOf("doctor-1"), "institution-1")
+            store.lock("request-1")
+        }
+    }
+
+    @Test
     fun `only pending requests can be withdrawn or reviewed`() {
         every { store.lock("request-1") } returns request(status = DoctorInstitutionRequestStatus.APPROVED)
+        every { store.find("request-1") } returns request(status = DoctorInstitutionRequestStatus.APPROVED)
 
         val withdrawError = assertThrows<DoctorInstitutionRequestConflictException> {
             service.withdraw(doctorActor(), "request-1")
@@ -348,13 +451,71 @@ class DoctorInstitutionChangeRequestServiceTest {
 
     @Test
     fun `missing request is reported by a typed not found exception`() {
-        every { store.lock("missing") } returns null
+        every { store.find("missing") } returns null
 
         val error = assertThrows<DoctorInstitutionRequestNotFoundException> {
             service.review(adminActor(), "missing", MembershipRequestDecision.APPROVED, "")
         }
 
         assertEquals("医生机构关系申请不存在", error.message)
+    }
+
+    @Test
+    fun `review uses sorted user and institution locks then current authority before request lock`() {
+        val peek = request()
+        every { store.find("request-1") } returns peek
+        every { store.lock("request-1") } returns peek
+        every {
+            store.changeStatus("request-1", DoctorInstitutionRequestStatus.REJECTED, "legal-1", "不通过")
+        } returns true
+        val actor = legalActor(setOf("institution-1"))
+
+        service.review(actor, "request-1", MembershipRequestDecision.REJECTED, "不通过")
+
+        io.mockk.verifyOrder {
+            store.find("request-1")
+            relationshipService.lockPair(listOf("doctor-1", "legal-1"), "institution-1")
+            relationshipService.validateForReview("doctor-1", "institution-1", DoctorInstitutionAction.JOIN)
+            reviewAuthority.requireCurrentAuthority(actor, "institution-1")
+            store.lock("request-1")
+        }
+    }
+
+    @Test
+    fun `stale legal representative is denied by current authority before request mutation`() {
+        val peek = request()
+        every { store.find("request-1") } returns peek
+        every {
+            reviewAuthority.requireCurrentAuthority(any(), "institution-1")
+        } throws AccessDeniedException("当前法人权限已失效")
+
+        assertThrows<AccessDeniedException> {
+            service.review(
+                legalActor(setOf("institution-1")),
+                "request-1",
+                MembershipRequestDecision.APPROVED,
+                ""
+            )
+        }
+
+        verify(exactly = 0) { store.lock(any()) }
+        verify(exactly = 0) { store.changeStatus(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `platform admin review still passes through the common authority check`() {
+        val peek = request()
+        every { store.find("request-1") } returns peek
+        every { store.lock("request-1") } returns peek
+        every {
+            store.changeStatus("request-1", DoctorInstitutionRequestStatus.REJECTED, "admin-1", "不通过")
+        } returns true
+        val actor = adminActor()
+
+        val result = service.review(actor, "request-1", MembershipRequestDecision.REJECTED, "不通过")
+
+        assertEquals(DoctorInstitutionRequestStatus.REJECTED, result.status)
+        verify(exactly = 1) { reviewAuthority.requireCurrentAuthority(actor, "institution-1") }
     }
 
     private fun request(
@@ -439,6 +600,26 @@ class DoctorInstitutionRelationshipServiceTest {
         assertThrows<AccessDeniedException> {
             service.requireActiveRelationshipForUpdate("doctor-1", "institution-1")
         }
+    }
+
+    @Test
+    fun `pair coordination locks sorted users before the institution`() {
+        val lockedRows = mutableListOf<String>()
+        every {
+            jdbcTemplate.queryForList(any<String>(), String::class.java, *anyVararg())
+        } answers {
+            val sql = firstArg<String>()
+            val id = thirdArg<Array<*>>().single() as String
+            lockedRows += if (sql.contains("FROM users")) "user:$id" else "institution:$id"
+            listOf(id)
+        }
+
+        service.lockPair(listOf("reviewer-2", "doctor-1", "doctor-1"), "institution-1")
+
+        assertEquals(
+            listOf("user:doctor-1", "user:reviewer-2", "institution:institution-1"),
+            lockedRows
+        )
     }
 
     @Test
@@ -728,5 +909,26 @@ class JdbcDoctorInstitutionChangeRequestStoreTest {
             .isActiveInstitution("institution-1")
 
         assertTrue(active)
+    }
+
+    @Test
+    fun `pending request eligibility uses a current locking ledger read`() {
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        every {
+            jdbcTemplate.queryForList(
+                match<String> {
+                    it.contains("doctor_institution_change_requests") &&
+                        it.contains("status = 'PENDING'") && it.contains("FOR UPDATE")
+                },
+                String::class.java,
+                "doctor-1",
+                "institution-1"
+            )
+        } returns listOf("request-1")
+
+        val pending = JdbcDoctorInstitutionChangeRequestStore(jdbcTemplate)
+            .hasPending("doctor-1", "institution-1")
+
+        assertTrue(pending)
     }
 }

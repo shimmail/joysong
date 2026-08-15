@@ -52,7 +52,9 @@ class AdminIdentityServiceTest {
 
         service.revokeDoctorPractice("practice-1", "admin-1")
 
-        verify(exactly = 1) { relationshipService.revoke("doctor-1", "institution-1", "admin-1") }
+        verify(exactly = 1) {
+            relationshipService.forceRevokeLocked("doctor-1", "institution-1", "admin-1")
+        }
         verify(exactly = 0) {
             jdbcTemplate.update(match<String> { it.contains("UPDATE doctor_institutions") }, *anyVararg())
         }
@@ -74,6 +76,138 @@ class AdminIdentityServiceTest {
         service.revokeRole("doctor-1", "DOCTOR", "admin-1", "认证撤销")
 
         verify(exactly = 1) { relationshipService.revokeAll("doctor-1", "admin-1") }
+    }
+
+    @Test
+    fun `doctor role revoke rejects a pending relationship request before any mutation`() {
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        every {
+            jdbcTemplate.queryForList(
+                match<String> {
+                    it.contains("doctor_institution_change_requests") &&
+                        it.contains("status = 'PENDING'") && it.contains("FOR UPDATE")
+                },
+                String::class.java,
+                "doctor-1"
+            )
+        } returns listOf("request-1")
+        every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 1
+        val relationshipService = mockk<DoctorInstitutionRelationshipService>(relaxed = true)
+        every { relationshipService.hasPendingRequestForUpdate("doctor-1", null) } returns true
+        val service = AdminIdentityService(
+            jdbcTemplate,
+            ObjectMapper(),
+            relationshipService,
+            mockk(relaxed = true),
+            mockk(relaxed = true)
+        )
+
+        assertThrows(DoctorInstitutionRequestConflictException::class.java) {
+            service.revokeRole("doctor-1", "DOCTOR", "admin-1", "认证撤销")
+        }
+
+        verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
+        verify(exactly = 0) { relationshipService.revokeAll(any(), any()) }
+        verify(exactly = 1) { relationshipService.lockUser("doctor-1") }
+    }
+
+    @Test
+    fun `doctor practice revoke rejects only a matching pending relationship request`() {
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        val relationshipService = mockk<DoctorInstitutionRelationshipService>(relaxed = true)
+        every {
+            relationshipService.hasPendingRequestForUpdate("doctor-1", "institution-1")
+        } returns true
+        val rs = mockk<ResultSet>()
+        every { rs.getString("doctor_id") } returns "doctor-1"
+        every { rs.getString("institution_id") } returns "institution-1"
+        every { rs.getString("member_role") } returns "DOCTOR"
+        every { rs.getString("status") } returns "APPROVED"
+        every { jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) } answers {
+            listOf(secondArg<RowMapper<Any>>().mapRow(rs, 0))
+        }
+        every {
+            jdbcTemplate.queryForList(
+                match<String> {
+                    it.contains("doctor_institution_change_requests") &&
+                        it.contains("doctor_id = ?") && it.contains("institution_id = ?") &&
+                        it.contains("status = 'PENDING'") && it.contains("FOR UPDATE")
+                },
+                String::class.java,
+                "doctor-1",
+                "institution-1"
+            )
+        } returns listOf("request-1")
+        val service = AdminIdentityService(
+            jdbcTemplate,
+            ObjectMapper(),
+            relationshipService,
+            mockk(relaxed = true),
+            mockk(relaxed = true)
+        )
+
+        assertThrows(DoctorInstitutionRequestConflictException::class.java) {
+            service.revokeDoctorPractice("practice-1", "admin-1")
+        }
+
+        verify(exactly = 0) { relationshipService.forceRevokeLocked(any(), any(), any()) }
+    }
+
+    @Test
+    fun `doctor practice revoke ignores pending requests for another institution`() {
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        val relationshipService = mockk<DoctorInstitutionRelationshipService>(relaxed = true)
+        every {
+            relationshipService.hasPendingRequestForUpdate("doctor-1", "institution-1")
+        } returns false
+        every {
+            relationshipService.hasPendingRequestForUpdate("doctor-1", null)
+        } returns true
+        val rs = mockk<ResultSet>()
+        every { rs.getString("doctor_id") } returns "doctor-1"
+        every { rs.getString("institution_id") } returns "institution-1"
+        every { rs.getString("member_role") } returns "DOCTOR"
+        every { rs.getString("status") } returns "APPROVED"
+        every { jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) } answers {
+            listOf(secondArg<RowMapper<Any>>().mapRow(rs, 0))
+        }
+        val service = AdminIdentityService(
+            jdbcTemplate,
+            ObjectMapper(),
+            relationshipService,
+            mockk(relaxed = true),
+            mockk(relaxed = true)
+        )
+
+        service.revokeDoctorPractice("practice-1", "admin-1")
+
+        verify(exactly = 1) {
+            relationshipService.forceRevokeLocked("doctor-1", "institution-1", "admin-1")
+        }
+        verify(exactly = 0) { relationshipService.hasPendingRequestForUpdate("doctor-1", null) }
+    }
+
+    @Test
+    fun `legal representative role revoke joins the shared user lock protocol`() {
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 1
+        val relationshipService = mockk<DoctorInstitutionRelationshipService>(relaxed = true)
+        val service = AdminIdentityService(
+            jdbcTemplate,
+            ObjectMapper(),
+            relationshipService,
+            mockk(relaxed = true),
+            mockk(relaxed = true)
+        )
+
+        service.revokeRole(
+            "legal-1",
+            "INSTITUTION_LEGAL_REPRESENTATIVE",
+            "admin-1",
+            "法人权限撤销"
+        )
+
+        verify(exactly = 1) { relationshipService.lockUser("legal-1") }
     }
 
     @Test

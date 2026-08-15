@@ -13,7 +13,8 @@ class ConsultantInstitutionChangeRequestServiceTest {
     private val events = mutableListOf<String>()
     private val store = FakeChangeRequestStore(events)
     private val relationships = FakeRelationshipOperations(events)
-    private val service = ConsultantInstitutionChangeRequestService(store, relationships)
+    private val reviewAuthority = FakeReviewAuthority(events)
+    private val service = ConsultantInstitutionChangeRequestService(store, relationships, reviewAuthority)
 
     @Test
     fun `only the active consultant submits a request for self`() {
@@ -173,6 +174,15 @@ class ConsultantInstitutionChangeRequestServiceTest {
     }
 
     @Test
+    fun `withdraw peeks then pair locks before relocking the request`() {
+        store.locked = request()
+
+        service.withdraw(actor(), "request-1")
+
+        assertEquals(listOf("peek", "pair", "request", "status"), events)
+    }
+
+    @Test
     fun `legal representative reviews only a managed institution while admin reviews globally`() {
         store.locked = request(institutionId = "institution-1")
         assertThrows(AccessDeniedException::class.java) {
@@ -225,12 +235,52 @@ class ConsultantInstitutionChangeRequestServiceTest {
     }
 
     @Test
-    fun `review peeks then locks the pair before relocking the request row`() {
+    fun `review locks sorted users and institution then current authority before relocking request`() {
         store.locked = request()
 
         service.review(admin(), "request-1", MembershipRequestDecision.REJECTED, "not eligible")
 
-        assertEquals(listOf("peek", "pair", "role", "request"), events.take(4))
+        assertEquals(
+            listOf("peek", "users:admin-1,consultant-1", "institution", "role", "authority", "relationship", "request"),
+            events.take(7)
+        )
+    }
+
+    @Test
+    fun `stale legal representative is denied by the common current authority check`() {
+        store.locked = request()
+        reviewAuthority.failure = AccessDeniedException("当前法人权限已失效")
+
+        assertThrows(AccessDeniedException::class.java) {
+            service.review(
+                actor(
+                    userId = "legal-1",
+                    activeRoles = setOf("INSTITUTION_LEGAL_REPRESENTATIVE"),
+                    managed = setOf("institution-1")
+                ),
+                "request-1",
+                MembershipRequestDecision.APPROVED,
+                ""
+            )
+        }
+
+        assertEquals(0, store.statusChanges)
+        assertTrue(relationships.approvedEffects.isEmpty())
+    }
+
+    @Test
+    fun `platform admin remains an explicit common authority bypass`() {
+        store.locked = request()
+
+        val reviewed = service.review(
+            admin(),
+            "request-1",
+            MembershipRequestDecision.REJECTED,
+            "not eligible"
+        )
+
+        assertEquals(ConsultantInstitutionRequestStatus.REJECTED, reviewed.status)
+        assertEquals(listOf("admin-1"), reviewAuthority.checkedActors)
     }
 
     @Test
@@ -388,6 +438,15 @@ class ConsultantInstitutionChangeRequestServiceTest {
             events += "user"
         }
 
+        override fun lockUsers(userIds: Collection<String>) {
+            val sortedIds = userIds.sorted().joinToString(",")
+            events += "users:$sortedIds"
+        }
+
+        override fun lockInstitution(institutionId: String) {
+            events += "institution"
+        }
+
         override fun lockPair(consultantId: String, institutionId: String) {
             events += "pair"
         }
@@ -427,6 +486,19 @@ class ConsultantInstitutionChangeRequestServiceTest {
 
         override fun forceRevoke(consultantId: String, institutionId: String, reviewerId: String) {
             events += "force-revoke"
+        }
+    }
+
+    private class FakeReviewAuthority(
+        private val events: MutableList<String>
+    ) : InstitutionRelationshipReviewAuthorityOperations {
+        var failure: AccessDeniedException? = null
+        val checkedActors = mutableListOf<String>()
+
+        override fun requireCurrentAuthority(actor: ManagementActor, institutionId: String) {
+            events += "authority"
+            checkedActors += actor.userId
+            failure?.let { throw it }
         }
     }
 

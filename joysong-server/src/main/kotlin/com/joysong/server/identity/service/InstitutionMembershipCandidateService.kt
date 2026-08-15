@@ -5,6 +5,7 @@ import org.springframework.jdbc.core.RowMapper
 import org.springframework.security.access.AccessDeniedException
 import org.springframework.stereotype.Repository
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
 
 data class InstitutionMembershipCandidateView(
     val id: String,
@@ -31,8 +32,10 @@ interface InstitutionMembershipCandidateStore {
 
 @Service
 class InstitutionMembershipCandidateService(
-    private val store: InstitutionMembershipCandidateStore
+    private val store: InstitutionMembershipCandidateStore,
+    private val doctorRelationships: DoctorInstitutionRelationshipOperations
 ) {
+    @Transactional
     fun list(
         actor: ManagementActor,
         requestType: MembershipRequestType,
@@ -45,6 +48,11 @@ class InstitutionMembershipCandidateService(
         require(limit > 0) { "limit必须大于0" }
         val boundedLimit = limit.coerceAtMost(MAX_LIMIT)
         val applicantId = applicantId(actor, requestType)
+        if (requestType == MembershipRequestType.DOCTOR &&
+            !doctorRelationships.hasActiveCertifiedDoctorForUpdate(applicantId)
+        ) {
+            throw AccessDeniedException("只有本人已认证且激活的医生可以查询候选机构")
+        }
         val queryPattern = query.trim().takeIf { it.isNotEmpty() }?.let(::likePattern)
         val rows = store.search(
             requestType,

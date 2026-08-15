@@ -201,6 +201,47 @@ class ManagementAccessService(
         jdbcTemplate.queryForObject(sql, Long::class.java, *args)
 }
 
+interface InstitutionRelationshipReviewAuthorityOperations {
+    fun requireCurrentAuthority(actor: ManagementActor, institutionId: String)
+}
+
+@Service
+class InstitutionRelationshipReviewAuthorityService(
+    private val jdbcTemplate: JdbcTemplate
+) : InstitutionRelationshipReviewAuthorityOperations {
+    override fun requireCurrentAuthority(actor: ManagementActor, institutionId: String) {
+        if (actor.isAdmin) return
+        val activeRole = jdbcTemplate.queryForList(
+            """
+            SELECT role_code FROM user_roles
+            WHERE user_id = ? AND role_code = 'INSTITUTION_LEGAL_REPRESENTATIVE'
+              AND status = 'ACTIVE'
+            FOR UPDATE
+            """.trimIndent(),
+            String::class.java,
+            actor.userId
+        ).firstOrNull()
+        if (activeRole == null) {
+            throw AccessDeniedException("当前法人权限已失效")
+        }
+        val membershipId = jdbcTemplate.queryForList(
+            """
+            SELECT id FROM institution_memberships
+            WHERE user_id = ? AND institution_id = ?
+              AND member_role IN ('INSTITUTION_LEGAL_REPRESENTATIVE', 'LEGAL_REPRESENTATIVE')
+              AND status = 'APPROVED' AND revoked_at IS NULL
+            FOR UPDATE
+            """.trimIndent(),
+            String::class.java,
+            actor.userId,
+            institutionId
+        ).firstOrNull()
+        if (membershipId == null) {
+            throw AccessDeniedException("无权审核其他机构的关系申请")
+        }
+    }
+}
+
 data class ManagementActor(
     val userId: String,
     val isAdmin: Boolean,

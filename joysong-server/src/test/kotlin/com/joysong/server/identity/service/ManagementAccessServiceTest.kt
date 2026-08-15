@@ -197,3 +197,81 @@ class ManagementAccessServiceTest {
         }
     }
 }
+
+class InstitutionRelationshipReviewAuthorityServiceTest {
+    @Test
+    fun `stale legal role is denied using a current locking read`() {
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        every {
+            jdbcTemplate.queryForList(
+                match<String> {
+                    it.contains("FROM user_roles") && it.contains("status = 'ACTIVE'") &&
+                        it.contains("FOR UPDATE")
+                },
+                String::class.java,
+                "legal-1"
+            )
+        } returns emptyList()
+        val service = InstitutionRelationshipReviewAuthorityService(jdbcTemplate)
+
+        assertThrows(AccessDeniedException::class.java) {
+            service.requireCurrentAuthority(legalActor(), "institution-1")
+        }
+    }
+
+    @Test
+    fun `stale legal membership is denied and platform admin remains a database free bypass`() {
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        every {
+            jdbcTemplate.queryForList(
+                match<String> { it.contains("FROM user_roles") && it.contains("FOR UPDATE") },
+                String::class.java,
+                "legal-1"
+            )
+        } returns listOf("INSTITUTION_LEGAL_REPRESENTATIVE")
+        every {
+            jdbcTemplate.queryForList(
+                match<String> {
+                    it.contains("FROM institution_memberships") &&
+                        it.contains("status = 'APPROVED'") && it.contains("FOR UPDATE")
+                },
+                String::class.java,
+                "legal-1",
+                "institution-1"
+            )
+        } returns emptyList()
+        val service = InstitutionRelationshipReviewAuthorityService(jdbcTemplate)
+
+        assertThrows(AccessDeniedException::class.java) {
+            service.requireCurrentAuthority(legalActor(), "institution-1")
+        }
+        service.requireCurrentAuthority(adminActor(), "institution-1")
+
+        io.mockk.verify(exactly = 1) {
+            jdbcTemplate.queryForList(any<String>(), String::class.java, "legal-1")
+        }
+        io.mockk.verify(exactly = 1) {
+            jdbcTemplate.queryForList(any<String>(), String::class.java, "legal-1", "institution-1")
+        }
+    }
+
+    private fun legalActor() = ManagementActor(
+        userId = "legal-1",
+        isAdmin = false,
+        activeRoles = setOf("INSTITUTION_LEGAL_REPRESENTATIVE"),
+        doctorId = null,
+        managedInstitutionIds = setOf("institution-1"),
+        doctorInstitutionIds = emptySet(),
+        manageableDoctorIds = emptySet()
+    )
+
+    private fun adminActor() = ManagementActor(
+        userId = "admin-1",
+        isAdmin = true,
+        activeRoles = setOf("ADMIN"),
+        doctorId = null,
+        managedInstitutionIds = emptySet(),
+        doctorInstitutionIds = emptySet(),
+        manageableDoctorIds = emptySet()
+    )
+}

@@ -68,6 +68,7 @@ interface DoctorInstitutionChangeRequestStore {
         includeAll: Boolean
     ): List<DoctorInstitutionChangeRequestView>
     fun exists(id: String): Boolean
+    fun find(id: String): DoctorInstitutionChangeRequestView?
     fun lock(id: String): DoctorInstitutionChangeRequestView?
     fun changeStatus(
         id: String,
@@ -80,7 +81,8 @@ interface DoctorInstitutionChangeRequestStore {
 @Service
 class DoctorInstitutionChangeRequestService(
     private val store: DoctorInstitutionChangeRequestStore,
-    private val relationshipService: DoctorInstitutionRelationshipService
+    private val relationshipService: DoctorInstitutionRelationshipOperations,
+    private val reviewAuthority: InstitutionRelationshipReviewAuthorityOperations
 ) {
     @Transactional
     fun submit(
@@ -89,16 +91,18 @@ class DoctorInstitutionChangeRequestService(
         action: DoctorInstitutionAction,
         requestNote: String
     ): DoctorInstitutionChangeRequestView {
-        val doctorId = requireCertifiedDoctor(actor)
+        val doctorId = requireDoctorActor(actor)
         val normalizedInstitutionId = institutionId.trim().also {
             require(it.isNotEmpty()) { "机构不能为空" }
         }
         val normalizedNote = requestNote.trim().also {
             require(it.length <= MAX_NOTE_LENGTH) { "申请说明不能超过1000个字符" }
         }
-        if (!store.isActiveInstitution(normalizedInstitutionId)) {
-            throw DoctorInstitutionRequestNotFoundException("机构不存在、未认证或已删除")
+        relationshipService.lockPair(listOf(doctorId), normalizedInstitutionId)
+        if (!relationshipService.hasActiveCertifiedDoctorForUpdate(doctorId)) {
+            throw AccessDeniedException("只有已认证医生本人可以提交机构关系申请")
         }
+        relationshipService.validateForReview(doctorId, normalizedInstitutionId, action)
         val activeRelationship = store.hasActiveRelationship(doctorId, normalizedInstitutionId)
         when (action) {
             DoctorInstitutionAction.JOIN -> if (activeRelationship) conflict("医生已加入该机构")
@@ -114,14 +118,25 @@ class DoctorInstitutionChangeRequestService(
     }
 
     fun list(actor: ManagementActor): List<DoctorInstitutionChangeRequestView> =
-        store.listVisible(actor.doctorId, actor.managedInstitutionIds, actor.isAdmin)
+        store.listVisible(actor.userId.takeUnless { actor.isAdmin }, actor.managedInstitutionIds, actor.isAdmin)
 
     fun exists(id: String): Boolean = store.exists(id.trim())
 
     @Transactional
     fun withdraw(actor: ManagementActor, id: String): DoctorInstitutionChangeRequestView {
-        val request = locked(id)
-        if (request.doctorId != actor.doctorId || request.submittedBy != actor.userId) {
+        val normalizedId = normalizeId(id)
+        val peek = store.find(normalizedId)
+            ?: throw DoctorInstitutionRequestNotFoundException("医生机构关系申请不存在")
+        if (peek.doctorId != actor.userId || peek.submittedBy != actor.userId) {
+            throw AccessDeniedException("只能撤回本人提交的关系申请")
+        }
+        relationshipService.lockPair(listOf(peek.doctorId), peek.institutionId)
+        val request = store.lock(normalizedId)
+            ?: throw DoctorInstitutionRequestNotFoundException("医生机构关系申请不存在")
+        if (request.doctorId != peek.doctorId || request.institutionId != peek.institutionId) {
+            conflict("关系申请已被其他操作处理")
+        }
+        if (request.doctorId != actor.userId || request.submittedBy != actor.userId) {
             throw AccessDeniedException("只能撤回本人提交的关系申请")
         }
         if (request.status != DoctorInstitutionRequestStatus.PENDING) conflict("只有待审核的关系申请可以撤回")
@@ -145,9 +160,19 @@ class DoctorInstitutionChangeRequestService(
             "不支持的审核决定"
         }
         val status = DoctorInstitutionRequestStatus.valueOf(decision.name)
-        val request = locked(id)
-        if (!actor.isAdmin && request.institutionId !in actor.managedInstitutionIds) {
+        val normalizedId = normalizeId(id)
+        val peek = store.find(normalizedId)
+            ?: throw DoctorInstitutionRequestNotFoundException("医生机构关系申请不存在")
+        if (!actor.isAdmin && peek.institutionId !in actor.managedInstitutionIds) {
             throw AccessDeniedException("无权审核其他机构的关系申请")
+        }
+        relationshipService.lockPair(listOf(actor.userId, peek.doctorId).distinct().sorted(), peek.institutionId)
+        relationshipService.validateForReview(peek.doctorId, peek.institutionId, peek.action)
+        reviewAuthority.requireCurrentAuthority(actor, peek.institutionId)
+        val request = store.lock(normalizedId)
+            ?: throw DoctorInstitutionRequestNotFoundException("医生机构关系申请不存在")
+        if (request.doctorId != peek.doctorId || request.institutionId != peek.institutionId) {
+            conflict("关系申请已被其他操作处理")
         }
         if (request.status != DoctorInstitutionRequestStatus.PENDING) conflict("只有待审核的关系申请可以审核")
         val normalizedReviewNote = reviewNote.trim().also {
@@ -155,22 +180,14 @@ class DoctorInstitutionChangeRequestService(
         }
         if (decision == MembershipRequestDecision.REJECTED) {
             require(normalizedReviewNote.isNotEmpty()) { "驳回时必须填写审核意见" }
-            relationshipService.validateForReview(request.doctorId, request.institutionId, request.action)
         }
         if (decision == MembershipRequestDecision.APPROVED) {
-            when (request.action) {
-                DoctorInstitutionAction.JOIN -> relationshipService.approveJoin(
-                    request.doctorId,
-                    request.institutionId,
-                    actor.userId
-                )
-
-                DoctorInstitutionAction.LEAVE -> relationshipService.approveLeave(
-                    request.doctorId,
-                    request.institutionId,
-                    actor.userId
-                )
-            }
+            relationshipService.applyApprovedLocked(
+                request.doctorId,
+                request.institutionId,
+                request.action,
+                actor.userId
+            )
         }
         if (!store.changeStatus(request.id, status, actor.userId, normalizedReviewNote)) {
             conflict("关系申请已被其他操作处理")
@@ -184,19 +201,17 @@ class DoctorInstitutionChangeRequestService(
         )
     }
 
-    private fun requireCertifiedDoctor(actor: ManagementActor): String {
+    private fun requireDoctorActor(actor: ManagementActor): String {
         val doctorId = actor.doctorId
-        if ("DOCTOR" !in actor.activeRoles || doctorId == null || doctorId != actor.userId ||
-            !store.isCertifiedDoctor(doctorId)
-        ) {
+        if ("DOCTOR" !in actor.activeRoles || doctorId == null || doctorId != actor.userId) {
             throw AccessDeniedException("只有已认证医生本人可以提交机构关系申请")
         }
         return doctorId
     }
 
-    private fun locked(id: String): DoctorInstitutionChangeRequestView = store.lock(
-        id.trim().also { require(it.isNotEmpty()) { "关系申请不能为空" } }
-    ) ?: throw DoctorInstitutionRequestNotFoundException("医生机构关系申请不存在")
+    private fun normalizeId(id: String): String = id.trim().also {
+        require(it.isNotEmpty()) { "关系申请不能为空" }
+    }
 
     private fun duplicatePending(): Nothing =
         conflict("该机构已有待处理的关系申请")
@@ -242,14 +257,16 @@ class JdbcDoctorInstitutionChangeRequestStore(
         institutionId
     ) > 0L
 
-    override fun hasPending(doctorId: String, institutionId: String): Boolean = count(
+    override fun hasPending(doctorId: String, institutionId: String): Boolean = jdbcTemplate.queryForList(
         """
-        SELECT COUNT(*) FROM doctor_institution_change_requests
+        SELECT id FROM doctor_institution_change_requests
         WHERE doctor_id = ? AND institution_id = ? AND status = 'PENDING'
+        FOR UPDATE
         """.trimIndent(),
+        String::class.java,
         doctorId,
         institutionId
-    ) > 0L
+    ).isNotEmpty()
 
     override fun create(
         doctorId: String,
@@ -308,6 +325,8 @@ class JdbcDoctorInstitutionChangeRequestStore(
         "SELECT COUNT(*) FROM doctor_institution_change_requests WHERE id = ?",
         id
     ) == 1L
+
+    override fun find(id: String): DoctorInstitutionChangeRequestView? = find(id, lock = false)
 
     override fun lock(id: String): DoctorInstitutionChangeRequestView? = find(id, lock = true)
 
@@ -384,11 +403,54 @@ class JdbcDoctorInstitutionChangeRequestStore(
         jdbcTemplate.queryForObject(sql, Long::class.java, *args)
 }
 
+interface DoctorInstitutionRelationshipOperations {
+    fun lockUser(userId: String)
+    fun lockPair(userIds: Collection<String>, institutionId: String)
+    fun hasActiveCertifiedDoctorForUpdate(doctorId: String): Boolean
+    fun requireActiveRelationshipForUpdate(doctorId: String, institutionId: String)
+    fun validateForReview(doctorId: String, institutionId: String, action: DoctorInstitutionAction)
+    fun applyApprovedLocked(
+        doctorId: String,
+        institutionId: String,
+        action: DoctorInstitutionAction,
+        reviewerId: String
+    )
+    fun hasPendingRequestForUpdate(doctorId: String, institutionId: String? = null): Boolean
+    fun forceRevokeLocked(doctorId: String, institutionId: String, reviewerId: String?)
+    fun approveJoin(doctorId: String, institutionId: String, reviewerId: String)
+    fun approveLeave(doctorId: String, institutionId: String, reviewerId: String)
+    fun revoke(doctorId: String, institutionId: String, reviewerId: String?)
+    fun revokeAll(doctorId: String, reviewerId: String?)
+}
+
 @Service
 class DoctorInstitutionRelationshipService(
     private val jdbcTemplate: JdbcTemplate
-) {
-    fun requireActiveRelationshipForUpdate(doctorId: String, institutionId: String) {
+) : DoctorInstitutionRelationshipOperations {
+    override fun lockUser(userId: String) {
+        val lockedUser = jdbcTemplate.queryForList(
+            "SELECT id FROM users WHERE id = ? FOR UPDATE",
+            String::class.java,
+            userId
+        ).firstOrNull()
+        if (lockedUser == null) {
+            throw DoctorInstitutionRequestNotFoundException("用户不存在")
+        }
+    }
+
+    override fun lockPair(userIds: Collection<String>, institutionId: String) {
+        userIds.distinct().sorted().forEach(::lockUser)
+        val lockedInstitution = jdbcTemplate.queryForList(
+            "SELECT id FROM institutions WHERE id = ? FOR UPDATE",
+            String::class.java,
+            institutionId
+        ).firstOrNull()
+        if (lockedInstitution == null) {
+            throw DoctorInstitutionRequestNotFoundException("机构不存在、未认证或已删除")
+        }
+    }
+
+    override fun requireActiveRelationshipForUpdate(doctorId: String, institutionId: String) {
         val relationshipId = jdbcTemplate.queryForList(
             """
             SELECT id FROM doctor_institutions
@@ -405,12 +467,12 @@ class DoctorInstitutionRelationshipService(
         }
     }
 
-    fun validateForReview(
+    override fun validateForReview(
         doctorId: String,
         institutionId: String,
         action: DoctorInstitutionAction
     ) {
-        if (!lockCertifiedDoctor(doctorId)) {
+        if (!hasActiveCertifiedDoctorForUpdate(doctorId)) {
             throw DoctorInstitutionRequestConflictException("医生身份已失效")
         }
         if (lockActiveInstitution(institutionId) == null) {
@@ -428,9 +490,46 @@ class DoctorInstitutionRelationshipService(
         }
     }
 
+    override fun applyApprovedLocked(
+        doctorId: String,
+        institutionId: String,
+        action: DoctorInstitutionAction,
+        reviewerId: String
+    ) {
+        when (action) {
+            DoctorInstitutionAction.JOIN -> approveJoinAfterValidation(doctorId, institutionId, reviewerId)
+            DoctorInstitutionAction.LEAVE -> revokeInternal(doctorId, institutionId, reviewerId, requireApproved = true)
+        }
+    }
+
+    override fun hasPendingRequestForUpdate(doctorId: String, institutionId: String?): Boolean {
+        val args = mutableListOf<Any>(doctorId)
+        val pairCondition = if (institutionId == null) "" else " AND institution_id = ?".also {
+            args += institutionId
+        }
+        return jdbcTemplate.queryForList(
+            """
+            SELECT id FROM doctor_institution_change_requests
+            WHERE doctor_id = ?$pairCondition AND status = 'PENDING'
+            ORDER BY institution_id, id
+            FOR UPDATE
+            """.trimIndent(),
+            String::class.java,
+            *args.toTypedArray()
+        ).isNotEmpty()
+    }
+
+    override fun forceRevokeLocked(doctorId: String, institutionId: String, reviewerId: String?) {
+        revokeInternal(doctorId, institutionId, reviewerId, requireApproved = false)
+    }
+
     @Transactional
-    fun approveJoin(doctorId: String, institutionId: String, reviewerId: String) {
+    override fun approveJoin(doctorId: String, institutionId: String, reviewerId: String) {
         validateForReview(doctorId, institutionId, DoctorInstitutionAction.JOIN)
+        approveJoinAfterValidation(doctorId, institutionId, reviewerId)
+    }
+
+    private fun approveJoinAfterValidation(doctorId: String, institutionId: String, reviewerId: String) {
         val activeRelationshipCount = count(
             """
             SELECT COUNT(*) FROM doctor_institutions
@@ -478,18 +577,18 @@ class DoctorInstitutionRelationshipService(
     }
 
     @Transactional
-    fun approveLeave(doctorId: String, institutionId: String, reviewerId: String) {
+    override fun approveLeave(doctorId: String, institutionId: String, reviewerId: String) {
         validateForReview(doctorId, institutionId, DoctorInstitutionAction.LEAVE)
         revokeInternal(doctorId, institutionId, reviewerId, requireApproved = true)
     }
 
     @Transactional
-    fun revoke(doctorId: String, institutionId: String, reviewerId: String?) {
+    override fun revoke(doctorId: String, institutionId: String, reviewerId: String?) {
         revokeInternal(doctorId, institutionId, reviewerId, requireApproved = false)
     }
 
     @Transactional
-    fun revokeAll(doctorId: String, reviewerId: String?) {
+    override fun revokeAll(doctorId: String, reviewerId: String?) {
         val institutionIds = jdbcTemplate.queryForList(
             """
             SELECT institution_id FROM doctor_institutions
@@ -587,7 +686,7 @@ class DoctorInstitutionRelationshipService(
         synchronizePrimary(doctorId)
     }
 
-    private fun lockCertifiedDoctor(doctorId: String): Boolean = jdbcTemplate.queryForList(
+    override fun hasActiveCertifiedDoctorForUpdate(doctorId: String): Boolean = jdbcTemplate.queryForList(
         """
         SELECT d.id FROM doctors d
         JOIN user_roles ur ON ur.user_id = d.id AND ur.role_code = 'DOCTOR' AND ur.status = 'ACTIVE'

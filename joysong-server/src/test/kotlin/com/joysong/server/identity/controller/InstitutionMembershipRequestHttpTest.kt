@@ -19,6 +19,7 @@ import com.joysong.server.identity.service.InstitutionMembershipRequestNotFoundE
 import com.joysong.server.identity.service.InstitutionMembershipRequestQueryService
 import com.joysong.server.identity.service.InstitutionMembershipRequestService
 import com.joysong.server.identity.service.InstitutionMembershipRequestView
+import com.joysong.server.identity.service.InstitutionRelationshipReviewAuthorityOperations
 import com.joysong.server.identity.service.ManagementAccessService
 import com.joysong.server.identity.service.ManagementActor
 import com.joysong.server.identity.service.MembershipRequestType
@@ -278,6 +279,10 @@ class InstitutionMembershipDoctorConflictHttpTest {
         "legal-1", false, setOf("INSTITUTION_LEGAL_REPRESENTATIVE"), null,
         setOf("institution-1"), emptySet(), emptySet()
     )
+    private val doctor = ManagementActor(
+        "doctor-1", false, setOf("DOCTOR"), "doctor-1",
+        emptySet(), emptySet(), setOf("doctor-1")
+    )
 
     @BeforeEach
     fun resetState() {
@@ -290,7 +295,14 @@ class InstitutionMembershipDoctorConflictHttpTest {
     fun `invalidated doctor approval is HTTP 409 and leaves the request pending`() {
         every { access.actor(any()) } returns legal
         every {
-            relationships.approveJoin("doctor-1", "institution-1", "legal-1")
+            relationships.lockPair(listOf("doctor-1", "legal-1"), "institution-1")
+        } returns Unit
+        every {
+            relationships.validateForReview(
+                "doctor-1",
+                "institution-1",
+                DoctorInstitutionAction.JOIN
+            )
         } throws DoctorInstitutionRequestConflictException("医生身份已失效")
 
         mvc.perform(
@@ -305,6 +317,36 @@ class InstitutionMembershipDoctorConflictHttpTest {
         assertEquals(DoctorInstitutionRequestStatus.PENDING, store.request.status)
         assertEquals(0, store.statusChangeCount)
     }
+
+    @Test
+    @WithMockUser(username = "doctor-1")
+    fun `stale current doctor identity on submit is HTTP 403`() {
+        every { access.actor(any()) } returns doctor
+        every {
+            relationships.lockPair(listOf("doctor-1"), "institution-1")
+        } returns Unit
+        every {
+            relationships.hasActiveCertifiedDoctorForUpdate("doctor-1")
+        } returns false
+        every {
+            relationships.validateForReview(
+                "doctor-1",
+                "institution-1",
+                DoctorInstitutionAction.JOIN
+            )
+        } throws DoctorInstitutionRequestConflictException("医生身份已失效")
+
+        mvc.perform(
+            post("/api/management/institution-membership-requests")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """{"requestType":"DOCTOR","institutionId":"institution-1","action":"JOIN"}"""
+                )
+        )
+            .andExpect(status().isForbidden)
+            .andExpect(jsonPath("$.code").value(403))
+            .andExpect(jsonPath("$.message").value("只有已认证医生本人可以提交机构关系申请"))
+    }
 }
 
 @TestConfiguration
@@ -317,7 +359,11 @@ class InstitutionMembershipDoctorConflictHttpConfig {
     fun doctorRequests(
         store: PendingDoctorRequestStore,
         relationships: DoctorInstitutionRelationshipService
-    ) = DoctorInstitutionChangeRequestService(store, relationships)
+    ) = DoctorInstitutionChangeRequestService(
+        store,
+        relationships,
+        mockk<InstitutionRelationshipReviewAuthorityOperations>(relaxed = true)
+    )
     @Bean fun consultantRequests(): ConsultantInstitutionChangeRequestService = mockk()
     @Bean
     fun mutations(
@@ -350,6 +396,7 @@ class PendingDoctorRequestStore : DoctorInstitutionChangeRequestStore {
     }
 
     override fun exists(id: String) = id == request.id
+    override fun find(id: String) = request.takeIf { it.id == id }
     override fun lock(id: String) = request.takeIf { it.id == id }
     override fun changeStatus(
         id: String,

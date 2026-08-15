@@ -6,6 +6,8 @@ import java.util.UUID
 
 interface ConsultantInstitutionRelationshipOperations {
     fun lockUser(consultantId: String)
+    fun lockUsers(userIds: Collection<String>)
+    fun lockInstitution(institutionId: String)
     fun lockPair(consultantId: String, institutionId: String)
     fun requireActiveConsultant(consultantId: String)
     fun requireActiveInstitution(institutionId: String)
@@ -41,8 +43,11 @@ class ConsultantInstitutionRelationshipService(
         }
     }
 
-    override fun lockPair(consultantId: String, institutionId: String) {
-        lockUser(consultantId)
+    override fun lockUsers(userIds: Collection<String>) {
+        userIds.distinct().sorted().forEach(::lockUser)
+    }
+
+    override fun lockInstitution(institutionId: String) {
         val lockedInstitutionId = jdbcTemplate.queryForList(
             "SELECT id FROM institutions WHERE id = ? FOR UPDATE",
             String::class.java,
@@ -51,6 +56,11 @@ class ConsultantInstitutionRelationshipService(
         if (lockedInstitutionId == null) {
             throw ConsultantInstitutionRequestNotFoundException("机构不存在")
         }
+    }
+
+    override fun lockPair(consultantId: String, institutionId: String) {
+        lockUsers(listOf(consultantId))
+        lockInstitution(institutionId)
     }
 
     override fun requireActiveConsultant(consultantId: String) {

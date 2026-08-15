@@ -41,7 +41,8 @@ interface ConsultantInstitutionChangeRequestStore {
 @Service
 class ConsultantInstitutionChangeRequestService(
     private val store: ConsultantInstitutionChangeRequestStore,
-    private val relationships: ConsultantInstitutionRelationshipOperations
+    private val relationships: ConsultantInstitutionRelationshipOperations,
+    private val reviewAuthority: InstitutionRelationshipReviewAuthorityOperations
 ) {
     @Transactional
     fun submit(
@@ -88,7 +89,18 @@ class ConsultantInstitutionChangeRequestService(
 
     @Transactional
     fun withdraw(actor: ManagementActor, id: String): ConsultantInstitutionChangeRequestView {
-        val request = locked(id)
+        val normalizedId = normalizeId(id)
+        val peek = store.find(normalizedId)
+            ?: throw ConsultantInstitutionRequestNotFoundException("顾问机构关系申请不存在")
+        if (peek.consultantId != actor.userId || peek.submittedBy != actor.userId) {
+            throw AccessDeniedException("只能撤回本人提交的关系申请")
+        }
+        relationships.lockPair(peek.consultantId, peek.institutionId)
+        val request = store.lock(normalizedId)
+            ?: throw ConsultantInstitutionRequestNotFoundException("顾问机构关系申请不存在")
+        if (request.consultantId != peek.consultantId || request.institutionId != peek.institutionId) {
+            closedConflict()
+        }
         if (request.consultantId != actor.userId || request.submittedBy != actor.userId) {
             throw AccessDeniedException("只能撤回本人提交的关系申请")
         }
@@ -115,8 +127,12 @@ class ConsultantInstitutionChangeRequestService(
         if (!actor.isAdmin && peek.institutionId !in actor.managedInstitutionIds) {
             throw AccessDeniedException("无权审核其他机构的关系申请")
         }
-        relationships.lockPair(peek.consultantId, peek.institutionId)
+        relationships.lockUsers(listOf(actor.userId, peek.consultantId))
+        relationships.lockInstitution(peek.institutionId)
         relationships.requireActiveConsultant(peek.consultantId)
+        relationships.requireActiveInstitution(peek.institutionId)
+        reviewAuthority.requireCurrentAuthority(actor, peek.institutionId)
+        relationships.validateForReview(peek.consultantId, peek.institutionId, peek.action)
         val request = store.lock(normalizedId)
             ?: throw ConsultantInstitutionRequestNotFoundException("顾问机构关系申请不存在")
         if (request.consultantId != peek.consultantId || request.institutionId != peek.institutionId) {
@@ -128,7 +144,6 @@ class ConsultantInstitutionChangeRequestService(
         }
         if (decision == MembershipRequestDecision.REJECTED) {
             require(normalizedReviewNote.isNotEmpty()) { "驳回时必须填写审核意见" }
-            relationships.validateForReview(request.consultantId, request.institutionId, request.action)
         } else {
             relationships.applyApproved(
                 request.consultantId,
@@ -153,12 +168,6 @@ class ConsultantInstitutionChangeRequestService(
         if (CONSULTANT_ROLE !in actor.activeRoles) {
             throw AccessDeniedException("只有本人已激活的顾问可以提交机构关系申请")
         }
-    }
-
-    private fun locked(id: String): ConsultantInstitutionChangeRequestView {
-        val normalizedId = normalizeId(id)
-        return store.lock(normalizedId)
-            ?: throw ConsultantInstitutionRequestNotFoundException("顾问机构关系申请不存在")
     }
 
     private fun normalizeId(id: String): String = id.trim().also {
