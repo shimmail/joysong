@@ -285,12 +285,7 @@ class DiscoverSearchService(
 
         val normalized = query.trim().lowercase()
         val institutions = institutionRepository.findAll()
-        val namedUnknownInstitution = namedInstitutionPattern.findAll(query).any { match ->
-            val candidate = match.groupValues[1].trim().lowercase()
-            candidate !in genericInstitutionPrefixes &&
-                genericInstitutionPhrases.none(candidate::contains) &&
-                explicitTreatmentTerms.none(candidate::contains)
-        }
+        val namedUnknownInstitution = hasNamedInstitutionPhrase(query)
         if (institutions.any { it.name.length >= 2 && normalized.contains(it.name.lowercase()) } || namedUnknownInstitution) {
             requested += RequestedEntityType.INSTITUTION
         }
@@ -306,6 +301,14 @@ class DiscoverSearchService(
         if (knownDoctorRequested || namedDoctorRequested) requested += RequestedEntityType.DOCTOR
         return requested
     }
+
+    fun hasNamedInstitutionPhrase(query: String): Boolean =
+        namedInstitutionPattern.findAll(query).any { match ->
+            val candidate = match.groupValues[1].trim().lowercase()
+            candidate !in genericInstitutionPrefixes &&
+                genericInstitutionPhrases.none(candidate::contains) &&
+                explicitTreatmentTerms.none(candidate::contains)
+        }
 
     private fun fuzzyTermsFor(query: String): Set<String> = concernVocabulary
         .filterKeys { triggers -> triggers.any(query::contains) }

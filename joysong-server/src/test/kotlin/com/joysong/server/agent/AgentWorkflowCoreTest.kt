@@ -21,6 +21,7 @@ import com.joysong.server.agent.repository.AgentTurnRepository
 import com.joysong.server.agent.service.AgentCatalogService
 import com.joysong.server.agent.service.AgentIntent
 import com.joysong.server.agent.service.AgentIntentRouter
+import com.joysong.server.agent.service.AgentProfileService
 import com.joysong.server.agent.service.AgentRouteAssessment
 import com.joysong.server.agent.service.ParsedAgentRoute
 import com.joysong.server.agent.service.AgentPromptEvidence
@@ -46,6 +47,7 @@ import com.joysong.server.discover.service.DiscoverSearchService
 import com.joysong.server.institution.repository.InstitutionProjectRepository
 import com.joysong.server.institution.repository.InstitutionRepository
 import com.joysong.server.institution.service.InstitutionProjectDetailResolver
+import com.joysong.server.identity.service.InstitutionConsultantService
 import com.joysong.server.project.repository.ProjectRepository
 import io.mockk.every
 import io.mockk.just
@@ -1999,7 +2001,9 @@ class AgentWorkflowCoreTest {
         doctorProjectRepository = mockk<DoctorProjectRepository>(relaxed = true),
         discoverSearchService = mockk<DiscoverSearchService>(relaxed = true),
         doctorInstitutionService = mockk(relaxed = true),
-        institutionProjectDetailResolver = InstitutionProjectDetailResolver()
+        institutionProjectDetailResolver = InstitutionProjectDetailResolver(),
+        institutionConsultantService = mockk<InstitutionConsultantService>(relaxed = true),
+        agentProfileService = mockk<AgentProfileService>(relaxed = true)
     )
 
     private class CountingObjectMapper : ObjectMapper() {

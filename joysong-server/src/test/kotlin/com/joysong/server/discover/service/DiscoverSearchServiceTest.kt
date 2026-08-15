@@ -43,6 +43,15 @@ class DiscoverSearchServiceTest {
     }
 
     @Test
+    fun `named institution phrase detection excludes generic institution requests`() {
+        assertTrue(service.hasNamedInstitutionPhrase("星颜医疗美容医院"))
+        assertTrue(service.hasNamedInstitutionPhrase("Aurora clinic"))
+        assertFalse(service.hasNamedInstitutionPhrase("推荐医美机构"))
+        assertFalse(service.hasNamedInstitutionPhrase("find a clinic"))
+        assertFalse(service.hasNamedInstitutionPhrase("我想找真人咨询"))
+    }
+
+    @Test
     fun `priority query keeps current lower rated entities before search limit`() {
         val projectRepository = mockk<ProjectRepository>(relaxed = true)
         val institutionRepository = mockk<InstitutionRepository>(relaxed = true)
