@@ -33,6 +33,7 @@ import com.joysong.server.agent.service.AgentIntent
 import com.joysong.server.agent.service.AgentIntentDecision
 import com.joysong.server.agent.service.AgentIntentRouter
 import com.joysong.server.agent.service.AgentLabelPolarity
+import com.joysong.server.agent.service.AgentNextAction
 import com.joysong.server.agent.service.AgentQueryTarget
 import com.joysong.server.agent.service.ComparisonRequest
 import com.joysong.server.agent.service.ComparisonMissingField
@@ -194,7 +195,7 @@ internal fun summaryContextDecision(
         when (intent) {
             AgentIntent.GENERAL_CHAT -> target == null && action == null
             AgentIntent.SAFETY_SCREENING -> target == null
-            AgentIntent.HUMAN_CONSULTATION -> true
+            AgentIntent.HUMAN_CONSULTATION -> target == AgentQueryTarget.INSTITUTION
             AgentIntent.PLANNING,
             AgentIntent.CATALOG_QA,
             AgentIntent.COMPARISON,
@@ -600,6 +601,9 @@ class ChatService(
             parseAmbiguousRoute(content, routeAssessment, boundedContext.decisions, providerCallContext)
         } else null
         val intentDecision = agentIntentRouter.mergeParsedRoute(routeAssessment, parsedRoute)
+        if (intentDecision.intent == AgentIntent.HUMAN_CONSULTATION) {
+            return generateHumanConsultationTurn(session, content, intentDecision)
+        }
         val labelSummary = generationLabelSummary(routeAssessment, parsedRoute, intentDecision)
         val previousComparison = if (intentDecision.intent == AgentIntent.COMPARISON) {
             historyMessages.asReversed()
@@ -703,6 +707,60 @@ class ChatService(
             catalogReport = visibleReport,
             catalogItems = visibleItems,
             comparisonRequest = comparisonRequest
+        )
+    }
+
+    private fun consultationContextInstitutionId(session: ChatSessionEntity): String? =
+        when (session.contextType.trim().uppercase()) {
+            "INSTITUTION" -> session.contextId.trim().takeIf(String::isNotBlank)
+            "INSTITUTION_PROJECT" -> institutionProjectRepository.findById(session.contextId)
+                .orElse(null)
+                ?.institutionId
+            else -> null
+        }
+
+    private fun generateHumanConsultationTurn(
+        session: ChatSessionEntity,
+        content: String,
+        decision: AgentIntentDecision
+    ): GeneratedTurn {
+        val selection = agentCatalogService.selectConsultableInstitutions(
+            userId = session.userId,
+            query = content,
+            contextInstitutionId = consultationContextInstitutionId(session)
+        )
+        val items = selection.items.filter {
+            it.type.equals("INSTITUTION", ignoreCase = true) &&
+                it.id.isNotBlank() &&
+                !it.institutionId.isNullOrBlank() &&
+                it.canChatWithHuman
+        }.take(4)
+        val resolvedDecision = decision.copy(
+            queryTarget = AgentQueryTarget.INSTITUTION,
+            searchCatalog = false,
+            nextAction = if (items.isEmpty()) AgentNextAction.NONE else AgentNextAction.SELECT_INSTITUTION
+        )
+        val response = when {
+            items.isEmpty() -> AgentText.value(
+                "目前没有可转接真人咨询的机构，请稍后再试。",
+                "No institutions are currently available for a human-consultation handoff. Please try again later."
+            )
+            selection.requestedInstitutionUnavailable -> AgentText.value(
+                "你提到的机构目前无法提供真人转接。你可以选择下方其他机构，查看其当前可联系的咨询师。",
+                "The institution you mentioned cannot currently provide a handoff. Choose another institution below to see its currently available consultants."
+            )
+            else -> AgentText.value(
+                "我可以为你转接真人咨询。请选择希望咨询的机构，随后可查看该机构当前可联系的咨询师。",
+                "I can help connect you with a real consultant. Choose an institution to see its currently available consultants."
+            )
+        }
+        return GeneratedTurn(
+            content = response,
+            intentDecision = resolvedDecision,
+            llmResult = LlmCallResult("", fallbackUsed = false),
+            catalogReport = null,
+            catalogItems = items,
+            answerModelRequired = false
         )
     }
 
@@ -886,8 +944,11 @@ class ChatService(
             }.ifBlank { "NONE" }
             val instruction = """
                 Classify one medical-aesthetic chat request. Return JSON only:
-                {"intent":"GENERAL_CHAT|CATALOG_QA|COMPARISON|PLANNING|DETAIL_SUMMARY|SAFETY_SCREENING","intents":["optional additional intent labels"],"queryTarget":"INSTITUTION|DOCTOR|PROJECT|INSTITUTION_PROJECT|null","keywords":["..."]}
+                {"intent":"GENERAL_CHAT|CATALOG_QA|COMPARISON|PLANNING|DETAIL_SUMMARY|HUMAN_CONSULTATION|SAFETY_SCREENING","intents":["optional additional intent labels"],"queryTarget":"INSTITUTION|DOCTOR|PROJECT|INSTITUTION_PROJECT|null","keywords":["..."]}
                 Use SAFETY_SCREENING for possible contraindications or health risks. Use PLANNING for goals with budget, downtime or personal constraints.
+                Use HUMAN_CONSULTATION only when the user asks to speak with or transfer to a real person or consultant.
+                For HUMAN_CONSULTATION, queryTarget must be INSTITUTION or null.
+                Never return a consultant user ID or invent an institution.
                 Keywords may contain only useful cities, treatments, categories, tags, clinic names or doctor names from the text. Maximum 8 items. Do not invent IDs or facts.
                 Local decision: ${local.decision.intent}/${local.decision.queryTarget ?: "NONE"}. Locked fields: intent=${local.explicitIntent}, queryTarget=${local.explicitQueryTarget}.
                 You may fill only unlocked fields. Do not change locked fields.
@@ -996,6 +1057,11 @@ class ChatService(
         val parsedIntents = intents + intent
         if (local.unresolvedSafetyNegation && AgentIntent.SAFETY_SCREENING in parsedIntents) return true
         if (intent in setOf(AgentIntent.GENERAL_CHAT, AgentIntent.SAFETY_SCREENING) && target != null) return false
+        if (
+            AgentIntent.HUMAN_CONSULTATION in parsedIntents &&
+            target != null &&
+            target != AgentQueryTarget.INSTITUTION
+        ) return false
         if (local.explicitIntent && local.decision.intent !in parsedIntents) return false
         if (local.explicitQueryTarget && target != local.decision.queryTarget) return false
         if (local.unresolvedSafetyNegation && parsedIntents.none {
@@ -1303,10 +1369,9 @@ class ChatService(
             historyMessageLimit = 4,
             maxOutputTokens = 280
         )
-        // HUMAN_CONSULTATION will short-circuit before generation in the later handoff slice.
         AgentIntent.HUMAN_CONSULTATION -> GenerationProfile(
-            historyMessageLimit = 4,
-            maxOutputTokens = 280
+            historyMessageLimit = 0,
+            maxOutputTokens = 0
         )
         AgentIntent.CATALOG_QA -> GenerationProfile(
             historyMessageLimit = 4,
