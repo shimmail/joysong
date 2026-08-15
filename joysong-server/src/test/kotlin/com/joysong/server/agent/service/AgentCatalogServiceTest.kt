@@ -166,17 +166,17 @@ class AgentCatalogServiceTest {
             institution("named", "星颜医疗美容医院", "北京", "4.3")
         )
         stubConsultableInstitutions(institutions, institutions.map { it.id }.toSet(), profileCity = "上海")
-        every { discoverSearchService.citiesMentionedIn("上海真人咨询") } returns listOf("上海")
+        every { discoverSearchService.citiesMentionedIn("北京真人咨询") } returns listOf("北京")
         every { discoverSearchService.hasNamedInstitutionPhrase("未知医疗美容医院") } returns true
 
         val withoutCurrentInstitutionOrCity = service.selectConsultableInstitutions("user-1", "真人咨询", "context")
         val withCurrentInstitution = service.selectConsultableInstitutions("user-1", "星颜医疗美容医院", "context")
-        val withCurrentCity = service.selectConsultableInstitutions("user-1", "上海真人咨询", "context")
+        val withCurrentCity = service.selectConsultableInstitutions("user-1", "北京真人咨询", "context")
         val withUnknownInstitution = service.selectConsultableInstitutions("user-1", "未知医疗美容医院", "context")
 
         assertEquals("context", withoutCurrentInstitutionOrCity.items.first().id)
         assertEquals("named", withCurrentInstitution.items.first().id)
-        assertEquals("profile", withCurrentCity.items.first().id)
+        assertEquals("named", withCurrentCity.items.first().id)
         assertEquals("profile", withUnknownInstitution.items.first().id)
     }
 

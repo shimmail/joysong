@@ -304,11 +304,27 @@ class DiscoverSearchService(
 
     fun hasNamedInstitutionPhrase(query: String): Boolean =
         namedInstitutionPattern.findAll(query).any { match ->
-            val candidate = match.groupValues[1].trim().lowercase()
-            candidate !in genericInstitutionPrefixes &&
+            val rawCandidate = match.groupValues[1].trim().lowercase()
+            val candidate = normalizedInstitutionCandidate(rawCandidate)
+            candidate.length >= 2 &&
+                candidate !in genericInstitutionPrefixes &&
+                candidate !in genericInstitutionLabels &&
+                !isHumanHandoffCandidate(rawCandidate) &&
+                !isHumanHandoffCandidate(candidate) &&
                 genericInstitutionPhrases.none(candidate::contains) &&
                 explicitTreatmentTerms.none(candidate::contains)
         }
+
+    private fun normalizedInstitutionCandidate(value: String): String {
+        var candidate = value.trim().lowercase()
+        while (true) {
+            val prefix = conversationalInstitutionPrefixes.firstOrNull(candidate::startsWith) ?: return candidate
+            candidate = candidate.removePrefix(prefix).trim()
+        }
+    }
+
+    private fun isHumanHandoffCandidate(candidate: String): Boolean =
+        humanHandoffCandidates.any { candidate == it || candidate.endsWith(it) }
 
     private fun fuzzyTermsFor(query: String): Set<String> = concernVocabulary
         .filterKeys { triggers -> triggers.any(query::contains) }
@@ -373,6 +389,12 @@ class DiscoverSearchService(
             "recommend", "find", "which", "good", "a", "the"
         )
         val genericInstitutionPrefixes = setOf("医美", "美容", "整形", "医疗", "正规", "靠谱", "专业", "好的", "clinic", "hospital")
+        val genericInstitutionLabels = setOf("医疗美容", "医美机构", "医疗美容机构", "medical", "beauty", "aesthetic", "medicine")
+        val conversationalInstitutionPrefixes = listOf("请帮我", "帮我", "我想", "想要", "请问", "推荐", "寻找", "咨询", "联系", "找", "想", "请")
+        val humanHandoffCandidates = setOf(
+            "真人咨询", "人工咨询", "真人客服", "人工客服", "转人工", "转接真人", "转接咨询师", "联系咨询师",
+            "找咨询师", "找真人", "真人顾问", "人工服务"
+        )
         val genericInstitutionPhrases = setOf(
             "推荐", "哪家", "哪些", "有什么", "有没有", "找", "附近", "当地", "北京", "上海", "广州", "深圳",
             "recommend", "which", "find", "nearby", "best"

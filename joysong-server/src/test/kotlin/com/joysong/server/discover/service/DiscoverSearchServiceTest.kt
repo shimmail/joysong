@@ -46,9 +46,17 @@ class DiscoverSearchServiceTest {
     fun `named institution phrase detection excludes generic institution requests`() {
         assertTrue(service.hasNamedInstitutionPhrase("星颜医疗美容医院"))
         assertTrue(service.hasNamedInstitutionPhrase("Aurora clinic"))
+        assertTrue(service.hasNamedInstitutionPhrase("我想星颜医疗美容医院"))
         assertFalse(service.hasNamedInstitutionPhrase("推荐医美机构"))
         assertFalse(service.hasNamedInstitutionPhrase("find a clinic"))
+        assertFalse(service.hasNamedInstitutionPhrase("medical beauty clinic"))
+        assertFalse(service.hasNamedInstitutionPhrase("aesthetic medicine clinic"))
         assertFalse(service.hasNamedInstitutionPhrase("我想找真人咨询"))
+        assertFalse(service.hasNamedInstitutionPhrase("医疗美容医院"))
+        assertFalse(service.hasNamedInstitutionPhrase("真人咨询医美机构"))
+        assertFalse(service.hasNamedInstitutionPhrase("我想真人咨询医美机构"))
+        assertFalse(service.hasNamedInstitutionPhrase("帮我找咨询师医美机构"))
+        assertFalse(service.hasNamedInstitutionPhrase("找真人医美机构"))
     }
 
     @Test
