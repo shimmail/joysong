@@ -197,15 +197,16 @@ class AgentContextBuilder(
             "SAFETY_SCREENING" -> target == null && action in setOf(null, "COMPLETE_SAFETY_SCREENING")
             "PLANNING" -> action in setOf(null, "START_PLANNING")
             "CATALOG_QA", "COMPARISON", "DETAIL_SUMMARY" -> action in setOf(null, "SHOW_CATALOG")
+            "HUMAN_CONSULTATION" -> target == "INSTITUTION" && action in setOf(null, "SELECT_INSTITUTION")
             else -> false
         }
     }
 
     private companion object {
         const val summarySchemaVersion = 1
-        val validIntents = setOf("GENERAL_CHAT", "CATALOG_QA", "COMPARISON", "PLANNING", "DETAIL_SUMMARY", "SAFETY_SCREENING")
+        val validIntents = setOf("GENERAL_CHAT", "CATALOG_QA", "COMPARISON", "PLANNING", "DETAIL_SUMMARY", "HUMAN_CONSULTATION", "SAFETY_SCREENING")
         val validQueryTargets = setOf("INSTITUTION", "DOCTOR", "PROJECT", "INSTITUTION_PROJECT")
-        val validNextActions = setOf("NONE", "SHOW_CATALOG", "START_PLANNING", "COMPLETE_SAFETY_SCREENING")
+        val validNextActions = setOf("NONE", "SHOW_CATALOG", "START_PLANNING", "SELECT_INSTITUTION", "COMPLETE_SAFETY_SCREENING")
         val platformEntityTypes = validQueryTargets
     }
 }

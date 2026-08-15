@@ -1384,6 +1384,119 @@ class AgentWorkflowCoreTest {
     }
 
     @Test
+    fun `human consultation completion persists intent target action and institution cards`() {
+        val running = turn(status = AgentTurnStatus.RUNNING)
+        val assistant = slot<ChatMessageEntity>()
+        val institution = humanInstitutionItem()
+        every { turns.findSessionIdById(running.id) } returns "session-1"
+        every { turns.findByIdForUpdate(running.id) } returns running
+        every { sessions.findByIdForUpdate("session-1") } returns session()
+        every { messages.findByTurnIdAndRole(running.id, "ASSISTANT") } returns null
+        every { messages.save(capture(assistant)) } answers { assistant.captured }
+        every { turns.save(any()) } answers { firstArg() }
+        every { sessions.save(any()) } answers { firstArg() }
+        every { messages.findSucceededTurnMessagesBySessionId("session-1") } returns emptyList()
+        every { messages.deleteAll(any<Iterable<ChatMessageEntity>>()) } just runs
+
+        val result = lifecycle.completeTurn(
+            CompleteTurnCommand(
+                turnId = running.id,
+                content = "Choose an institution to continue.",
+                intent = "HUMAN_CONSULTATION",
+                queryTarget = "INSTITUTION",
+                nextAction = "SELECT_INSTITUTION",
+                catalogItems = listOf(institution)
+            )
+        )
+
+        val metadata = objectMapper.readTree(assistant.captured.metadataJson)
+        assertEquals("HUMAN_CONSULTATION", metadata.path("intent").asText())
+        assertEquals("INSTITUTION", metadata.path("queryTarget").asText())
+        assertEquals("SELECT_INSTITUTION", metadata.path("nextAction").asText())
+        assertEquals(institution, result.catalogItems.single())
+        assertEquals(institution.id, metadata.path("catalogItems").single().path("institutionId").asText())
+        assertTrue(metadata.path("catalogItems").single().path("canChatWithHuman").asBoolean())
+    }
+
+    @Test
+    fun `idempotent replay restores the same human consultation card snapshot`() {
+        val completed = turn(status = AgentTurnStatus.SUCCEEDED)
+        val institution = humanInstitutionItem()
+        val assistant = message(2, "ASSISTANT", "Choose an institution to continue.").apply {
+            turnId = completed.id
+            metadataJson = objectMapper.writeValueAsString(
+                linkedMapOf(
+                    "intent" to "HUMAN_CONSULTATION",
+                    "queryTarget" to "INSTITUTION",
+                    "nextAction" to "SELECT_INSTITUTION",
+                    "catalogItems" to listOf(institution),
+                    "catalogReport" to null
+                )
+            )
+        }
+        every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns session()
+        every { turns.findBySessionIdAndIdempotencyKey("session-1", "key-1") } returns completed
+        every { messages.findByTurnIdAndRole(completed.id, "ASSISTANT") } returns assistant
+        every { messages.findByTurnIdAndRole(completed.id, "USER") } returns message(1, "USER", "hello")
+
+        val replay = lifecycle.beginTurn("session-1", "user-1", "hello", "key-1") as BeginTurnResult.Replayed
+
+        assertEquals("HUMAN_CONSULTATION", replay.turn.intent)
+        assertEquals("INSTITUTION", replay.turn.queryTarget)
+        assertEquals("SELECT_INSTITUTION", replay.turn.nextAction)
+        assertEquals(listOf(institution), replay.turn.catalogItems)
+        verify(exactly = 0) { messages.save(any()) }
+        verify(exactly = 0) { turns.save(any()) }
+        verify(exactly = 0) { sessions.save(any()) }
+
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
+        every { fixture.availabilityGuard.requireGenerationEnabled() } just runs
+        every { fixture.turnService.beginTurn("session-1", "user-1", "hello", "key-1") } returns replay
+
+        val replayedByChat = fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest("hello", "key-1"))
+
+        assertEquals(listOf(institution), replayedByChat.catalogItems)
+        verify(exactly = 0) { fixture.turnService.completeTurn(any()) }
+        verify(exactly = 0) { catalog.selectConsultableInstitutions(any(), any(), any()) }
+        completionServer.verify()
+        intentServer.verify()
+    }
+
+    @Test
+    fun `human consultation metadata never stores a consultant user id`() {
+        val running = turn(status = AgentTurnStatus.RUNNING)
+        val assistant = slot<ChatMessageEntity>()
+        every { turns.findSessionIdById(running.id) } returns "session-1"
+        every { turns.findByIdForUpdate(running.id) } returns running
+        every { sessions.findByIdForUpdate("session-1") } returns session()
+        every { messages.findByTurnIdAndRole(running.id, "ASSISTANT") } returns null
+        every { messages.save(capture(assistant)) } answers { assistant.captured }
+        every { turns.save(any()) } answers { firstArg() }
+        every { sessions.save(any()) } answers { firstArg() }
+        every { messages.findSucceededTurnMessagesBySessionId("session-1") } returns emptyList()
+        every { messages.deleteAll(any<Iterable<ChatMessageEntity>>()) } just runs
+
+        lifecycle.completeTurn(
+            CompleteTurnCommand(
+                turnId = running.id,
+                content = "Choose an institution to continue.",
+                intent = "HUMAN_CONSULTATION",
+                queryTarget = "INSTITUTION",
+                nextAction = "SELECT_INSTITUTION",
+                catalogItems = listOf(humanInstitutionItem())
+            )
+        )
+
+        assertFalse(assistant.captured.metadataJson.contains("consultant-user-1"))
+        assertFalse(objectMapper.readTree(assistant.captured.metadataJson).has("consultantUserId"))
+    }
+
+    @Test
     fun `completion persists normalized comparison request and report in assistant metadata`() {
         val running = turn(status = AgentTurnStatus.RUNNING)
         val assistant = slot<ChatMessageEntity>()
@@ -1894,6 +2007,26 @@ class AgentWorkflowCoreTest {
     }
 
     @Test
+    fun `summary keeps only valid human consultation institution topics`() {
+        val session = session(
+            """{"schemaVersion":1,"unresolvedTopics":["HUMAN_CONSULTATION:INSTITUTION:SELECT_INSTITUTION","HUMAN_CONSULTATION:INSTITUTION","HUMAN_CONSULTATION:DOCTOR:SELECT_INSTITUTION","HUMAN_CONSULTATION:INSTITUTION:SHOW_CATALOG"]}"""
+        )
+        every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns session
+        every { sessions.save(any()) } answers { firstArg() }
+        every { messages.findSucceededTurnMessagesBySessionId("session-1") } returns emptyList()
+
+        val loaded = context.load("user-1", "session-1", 20, 100)
+
+        assertEquals(
+            listOf(
+                "HUMAN_CONSULTATION:INSTITUTION:SELECT_INSTITUTION",
+                "HUMAN_CONSULTATION:INSTITUTION"
+            ),
+            loaded.summary.unresolvedTopics
+        )
+    }
+
+    @Test
     fun `uses a character budget for chinese and no space content`() {
         every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns session()
         every { sessions.save(any()) } answers { firstArg() }
@@ -2191,6 +2324,17 @@ class AgentWorkflowCoreTest {
 
     private fun message(sequenceNo: Long, role: String, content: String, createdAt: LocalDateTime = LocalDateTime.now()) =
         ChatMessageEntity(id = "message-$sequenceNo", sessionId = "session-1", sequenceNo = sequenceNo, role = role, content = content, createdAt = createdAt)
+
+    private fun humanInstitutionItem() = AgentCatalogItemResponse(
+        type = "INSTITUTION",
+        id = "123e4567-e89b-12d3-a456-426614174000",
+        name = "Harmony Clinic",
+        subtitle = "Shanghai",
+        summary = "",
+        attributes = emptyMap(),
+        institutionId = "123e4567-e89b-12d3-a456-426614174000",
+        canChatWithHuman = true
+    )
 
     private fun unnormalizedComparisonRequest() = ComparisonRequest(
         operands = listOf(
