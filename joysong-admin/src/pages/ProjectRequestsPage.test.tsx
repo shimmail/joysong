@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import api, { type ManagementContext, setAdminToken } from '../api';
-import ProjectRequestsPage from './ProjectRequestsPage';
+import ProjectRequestsPage, { type ProfessionalProjectRequestResponse } from './ProjectRequestsPage';
 
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>();
@@ -51,7 +51,7 @@ const platformRequest = {
   reviewNote: null, reviewedBy: null, reviewedAt: null,
   resultingProjectId: null, resultingInstitutionProjectId: null,
   submittedAt: '2026-08-16T09:10:00', updatedAt: '2026-08-16T09:10:00',
-};
+} satisfies ProfessionalProjectRequestResponse;
 
 const institutionRequest = {
   id: 'institution-request', requestType: 'INSTITUTION', doctorId: 'doctor-1', doctorName: '张医生',
@@ -69,7 +69,21 @@ const institutionRequest = {
   notes: '机构申请备注', status: 'PENDING', reviewNote: null, reviewedBy: null, reviewedAt: null,
   resultingProjectId: null, resultingInstitutionProjectId: null,
   submittedAt: '2026-08-16T10:20:00', updatedAt: '2026-08-16T10:20:00',
-};
+} satisfies ProfessionalProjectRequestResponse;
+
+const representativeRequest = {
+  ...institutionRequest,
+  name: null,
+  category: null,
+  description: null,
+  tags: [],
+  slogan: null,
+  detailContent: null,
+  coverImage: null,
+  images: [],
+  originalPrice: null,
+  notes: null,
+} satisfies ProfessionalProjectRequestResponse;
 
 const joinRequest = {
   id: 'join-request', requestType: 'JOIN', doctorId: 'doctor-2', doctorName: '王医生',
@@ -83,15 +97,34 @@ function setContext(context: ManagementContext) {
   setAdminToken('header.payload.signature', context);
 }
 
-function mockLists(professional: unknown[] = [], joins: unknown[] = []) {
-  vi.mocked(api.get).mockImplementation(async (url) => ({ data: {
-    code: 200,
-    message: 'OK',
-    data: url === '/admin/project-requests' || url === '/management/project-requests'
-      ? professional
-      : joins,
-  } }));
+type ProfessionalListPath = '/admin/project-requests' | '/management/project-requests';
+
+function mockLists(
+  professionalPath: ProfessionalListPath,
+  professional: ProfessionalProjectRequestResponse[] = [],
+  joins: unknown[] = [],
+) {
+  vi.mocked(api.get).mockImplementation(async (url) => {
+    let data: unknown[];
+    switch (url) {
+      case professionalPath:
+        data = professional;
+        break;
+      case '/admin/institution-project-requests':
+        data = joins;
+        break;
+      default:
+        throw new Error(`Unexpected GET ${url}`);
+    }
+    return { data: { code: 200, message: 'OK', data } };
+  });
   vi.mocked(api.post).mockResolvedValue({ data: { code: 200, message: 'OK', data: null } });
+}
+
+async function expectListPair(professionalPath: ProfessionalListPath) {
+  await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
+  expect(api.get).toHaveBeenNthCalledWith(1, professionalPath);
+  expect(api.get).toHaveBeenNthCalledWith(2, '/admin/institution-project-requests');
 }
 
 function rowFor(text: string) {
@@ -101,9 +134,23 @@ function rowFor(text: string) {
 }
 
 function expandRow(text: string) {
-  const button = rowFor(text).querySelector<HTMLButtonElement>('button.ant-table-row-expand-icon');
+  const row = rowFor(text);
+  const button = row.querySelector<HTMLButtonElement>('button.ant-table-row-expand-icon');
   if (!button) throw new Error(`expand button not found for ${text}`);
   fireEvent.click(button);
+  const expandedRow = row.nextElementSibling;
+  if (!(expandedRow instanceof HTMLElement)) throw new Error(`expanded detail not found for ${text}`);
+  return within(expandedRow);
+}
+
+function descriptionItem(detail: ReturnType<typeof within>, label: string) {
+  const item = detail.getByText(label).closest('.ant-descriptions-item') as HTMLElement | null;
+  if (!item) throw new Error(`description item not found for ${label}`);
+  return within(item);
+}
+
+function expectDescriptionValue(detail: ReturnType<typeof within>, label: string, value: string) {
+  expect(descriptionItem(detail, label).getByText(value)).toBeInTheDocument();
 }
 
 beforeAll(() => {
@@ -125,40 +172,59 @@ afterEach(() => {
 describe('ProjectRequestsPage', () => {
   it('renders complete immutable platform and institution snapshots with response currencies and nested split values', async () => {
     setContext(adminContext);
-    mockLists([platformRequest, institutionRequest]);
+    mockLists('/admin/project-requests', [platformRequest, institutionRequest]);
 
     render(<ProjectRequestsPage />);
 
     expect(await screen.findByText('光子焕肤')).toBeInTheDocument();
-    expect(screen.getByText('USD 399.5')).toBeInTheDocument();
-    expect(screen.getByText('CNY 1200')).toBeInTheDocument();
-    expandRow('光子焕肤');
-    expandRow('机构定制光子');
+    await expectListPair('/admin/project-requests');
+    expect(within(rowFor('光子焕肤')).getByText('USD 399.5')).toBeInTheDocument();
+    expect(within(rowFor('机构定制光子')).getByText('CNY 1200')).toBeInTheDocument();
+    const platformDetail = expandRow('光子焕肤');
+    const institutionDetail = expandRow('机构定制光子');
 
-    for (const text of [
-      '完整平台项目说明', '舒适、午休', '午休也能焕新', '完整的平台详情正文',
-      'https://img.test/platform-cover.jpg', 'https://img.test/platform-1.jpg',
-      'https://img.test/platform-2.jpg', '12', '光电、面部', '平台申请备注',
-      '完整机构项目说明', '机构专享', '定制焕肤', '完整的机构项目详情',
-      'https://img.test/institution-cover.jpg', 'https://img.test/institution-1.jpg',
-      'https://img.test/institution-2.jpg', '8', 'CNY 1680', '是',
-      'CNY 100', '12.5%', '32.5%', '10%', '45%', '机构申请备注',
-      '2026-08-16T09:10:00', '2026-08-16T10:20:00',
-    ]) {
-      expect(screen.getAllByText(text).length).toBeGreaterThan(0);
-    }
-    expect(screen.queryByText(/评分/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/评价数/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/选择医生/)).not.toBeInTheDocument();
+    expectDescriptionValue(platformDetail, '项目说明', '完整平台项目说明');
+    expectDescriptionValue(platformDetail, '标签', '舒适、午休');
+    expectDescriptionValue(platformDetail, '宣传语', '午休也能焕新');
+    expectDescriptionValue(platformDetail, '详情内容', '完整的平台详情正文');
+    expectDescriptionValue(platformDetail, '封面图', 'https://img.test/platform-cover.jpg');
+    expect(descriptionItem(platformDetail, '项目图集').getByText('https://img.test/platform-1.jpg')).toBeInTheDocument();
+    expect(descriptionItem(platformDetail, '项目图集').getByText('https://img.test/platform-2.jpg')).toBeInTheDocument();
+    expectDescriptionValue(platformDetail, '销量', '12');
+    expectDescriptionValue(platformDetail, '分类标签', '光电、面部');
+    expectDescriptionValue(platformDetail, '补充说明', '平台申请备注');
+    expectDescriptionValue(platformDetail, '提交时间', '2026-08-16T09:10:00');
+
+    expectDescriptionValue(institutionDetail, '项目说明', '完整机构项目说明');
+    expectDescriptionValue(institutionDetail, '标签', '机构专享');
+    expectDescriptionValue(institutionDetail, '宣传语', '定制焕肤');
+    expectDescriptionValue(institutionDetail, '详情内容', '完整的机构项目详情');
+    expectDescriptionValue(institutionDetail, '封面图', 'https://img.test/institution-cover.jpg');
+    expect(descriptionItem(institutionDetail, '项目图集').getByText('https://img.test/institution-1.jpg')).toBeInTheDocument();
+    expect(descriptionItem(institutionDetail, '项目图集').getByText('https://img.test/institution-2.jpg')).toBeInTheDocument();
+    expectDescriptionValue(institutionDetail, '销量', '8');
+    expectDescriptionValue(institutionDetail, '原价', 'CNY 1680');
+    expectDescriptionValue(institutionDetail, '是否上架', '是');
+    expectDescriptionValue(institutionDetail, '面诊费', 'CNY 100');
+    expectDescriptionValue(institutionDetail, '顾问分成', '12.5%');
+    expectDescriptionValue(institutionDetail, '机构分成', '32.5%');
+    expectDescriptionValue(institutionDetail, '当前平台比例', '10%');
+    expectDescriptionValue(institutionDetail, '按当前平台比例推导的医生净比例', '45%');
+    expectDescriptionValue(institutionDetail, '补充说明', '机构申请备注');
+    expectDescriptionValue(institutionDetail, '提交时间', '2026-08-16T10:20:00');
+
+    expect(platformDetail.queryByText(/评分|评价数|选择医生/)).not.toBeInTheDocument();
+    expect(institutionDetail.queryByText(/评分|评价数|选择医生/)).not.toBeInTheDocument();
   });
 
   it('offers only approve and reject for professional creation requests and uses the two exact review routes', async () => {
     const user = userEvent.setup();
     setContext(adminContext);
-    mockLists([platformRequest, institutionRequest]);
+    mockLists('/admin/project-requests', [platformRequest, institutionRequest]);
 
     render(<ProjectRequestsPage />);
     await screen.findByText('光子焕肤');
+    await expectListPair('/admin/project-requests');
 
     expect(screen.getAllByRole('button', { name: '通过' })).toHaveLength(2);
     expect(screen.getAllByRole('button', { name: '驳回' })).toHaveLength(2);
@@ -180,9 +246,10 @@ describe('ProjectRequestsPage', () => {
   it('requires a nonblank rejection note and sends exactly the professional reject body', async () => {
     const user = userEvent.setup();
     setContext(adminContext);
-    mockLists([platformRequest]);
+    mockLists('/admin/project-requests', [platformRequest]);
 
     render(<ProjectRequestsPage />);
+    await expectListPair('/admin/project-requests');
     await user.click(await screen.findByRole('button', { name: '驳回' }));
     await user.click(screen.getByRole('button', { name: /确\s*认/ }));
     expect(api.post).not.toHaveBeenCalled();
@@ -199,11 +266,12 @@ describe('ProjectRequestsPage', () => {
 
   it('renders supplied applicant rows without review actions', async () => {
     setContext(doctorContext);
-    mockLists([platformRequest, institutionRequest]);
+    mockLists('/management/project-requests', [platformRequest, institutionRequest]);
 
     render(<ProjectRequestsPage />);
 
     expect(await screen.findByText('光子焕肤')).toBeInTheDocument();
+    await expectListPair('/management/project-requests');
     expect(screen.getByText('机构定制光子')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '通过' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '驳回' })).not.toBeInTheDocument();
@@ -212,13 +280,25 @@ describe('ProjectRequestsPage', () => {
   it('lets a target legal representative review only its scoped institution row through management', async () => {
     const user = userEvent.setup();
     setContext(representativeContext);
-    mockLists([institutionRequest]);
+    mockLists('/management/project-requests', [representativeRequest]);
 
     render(<ProjectRequestsPage />);
 
-    expect(await screen.findByText('机构定制光子')).toBeInTheDocument();
+    expect(await screen.findByText('基础光子')).toBeInTheDocument();
+    await expectListPair('/management/project-requests');
     expect(screen.queryByText('光子焕肤')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '要求修改' })).not.toBeInTheDocument();
+    const representativeDetail = expandRow('基础光子');
+    expectDescriptionValue(representativeDetail, '项目名称', '-');
+    expectDescriptionValue(representativeDetail, '分类', '-');
+    expectDescriptionValue(representativeDetail, '项目说明', '-');
+    expectDescriptionValue(representativeDetail, '标签', '-');
+    expectDescriptionValue(representativeDetail, '宣传语', '-');
+    expectDescriptionValue(representativeDetail, '详情内容', '-');
+    expectDescriptionValue(representativeDetail, '封面图', '-');
+    expectDescriptionValue(representativeDetail, '项目图集', '-');
+    expectDescriptionValue(representativeDetail, '原价', '-');
+    expectDescriptionValue(representativeDetail, '补充说明', '-');
     await user.click(screen.getByRole('button', { name: '通过' }));
     await waitFor(() => expect(api.post).toHaveBeenCalledWith(
       '/management/project-requests/institution-request/review',
@@ -233,11 +313,11 @@ describe('ProjectRequestsPage', () => {
       managedInstitutionIds: ['institution-2'],
       visibleInstitutionIds: ['institution-2'],
     });
-    mockLists([]);
+    mockLists('/management/project-requests');
 
     render(<ProjectRequestsPage />);
 
-    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/management/project-requests'));
+    await expectListPair('/management/project-requests');
     expect(screen.queryByText('机构定制光子')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '通过' })).not.toBeInTheDocument();
   });
@@ -245,11 +325,12 @@ describe('ProjectRequestsPage', () => {
   it('preserves legacy JOIN rendering, three-decision review, and route', async () => {
     const user = userEvent.setup();
     setContext(adminContext);
-    mockLists([], [joinRequest]);
+    mockLists('/admin/project-requests', [], [joinRequest]);
 
     render(<ProjectRequestsPage />);
 
     expect(await screen.findByText('已有机构项目')).toBeInTheDocument();
+    await expectListPair('/admin/project-requests');
     expect(screen.getByText('个性化治疗')).toBeInTheDocument();
     expect(screen.getByText('¥1500')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '通过' })).toBeInTheDocument();

@@ -6,7 +6,7 @@ import { identityStatusColor, identityStatusLabel } from '../identity';
 
 type ProjectRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CHANGES_REQUESTED';
 
-interface InstitutionProjectSplit {
+export interface InstitutionProjectSplit {
   consultationFee: number;
   commissionRate: number;
   institutionRate: number;
@@ -14,42 +14,45 @@ interface InstitutionProjectSplit {
   doctorRate: number;
 }
 
-interface ProfessionalProjectRequest {
+export interface ProfessionalProjectRequestResponse {
   id: string;
-  requestSource: 'PROFESSIONAL';
   requestType: 'PLATFORM' | 'INSTITUTION';
   doctorId: string;
   doctorName: string;
-  institutionId?: string | null;
-  institutionName?: string | null;
-  projectId?: string | null;
-  projectName?: string | null;
-  name?: string | null;
-  category?: string | null;
-  description?: string | null;
-  tags?: string[] | null;
-  slogan?: string | null;
-  detailContent?: string | null;
+  institutionId: string | null;
+  institutionName: string | null;
+  projectId: string | null;
+  projectName: string | null;
+  name: string | null;
+  category: string | null;
+  description: string | null;
+  tags: string[] | null;
+  slogan: string | null;
+  detailContent: string | null;
   currency: string;
-  coverImage?: string | null;
-  images?: string[] | null;
+  coverImage: string | null;
+  images: string[] | null;
   salesCount: number;
-  referencePrice?: number | null;
-  categoryTags?: string[] | null;
-  price?: number | null;
-  originalPrice?: number | null;
-  isActive?: boolean | null;
-  institutionSplit?: InstitutionProjectSplit | null;
-  notes?: string | null;
+  referencePrice: number | null;
+  categoryTags: string[] | null;
+  price: number | null;
+  originalPrice: number | null;
+  isActive: boolean | null;
+  institutionSplit: InstitutionProjectSplit | null;
+  notes: string | null;
   status: ProjectRequestStatus;
-  reviewNote?: string | null;
-  reviewedBy?: string | null;
-  reviewedAt?: string | null;
-  resultingProjectId?: string | null;
-  resultingInstitutionProjectId?: string | null;
+  reviewNote: string | null;
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  resultingProjectId: string | null;
+  resultingInstitutionProjectId: string | null;
   submittedAt: string;
   updatedAt: string;
 }
+
+type ProfessionalProjectRequest = ProfessionalProjectRequestResponse & {
+  requestSource: 'PROFESSIONAL';
+};
 
 interface JoinProjectRequest {
   id: string;
@@ -97,7 +100,7 @@ export default function ProjectRequestsPage() {
         api.get(isAdmin ? '/admin/project-requests' : '/management/project-requests'),
         api.get('/admin/institution-project-requests'),
       ]);
-      const professional = (getData<Omit<ProfessionalProjectRequest, 'requestSource'>[]>(professionalResponse as any) || [])
+      const professional = (getData<ProfessionalProjectRequestResponse[]>(professionalResponse as any) || [])
         .map(item => ({ ...item, requestSource: 'PROFESSIONAL' as const }));
       const joins = (getData<Omit<JoinProjectRequest, 'requestSource'>[]>(joinResponse as any) || [])
         .filter(item => item.requestType === 'JOIN')
@@ -287,8 +290,8 @@ export default function ProjectRequestsPage() {
       { key: 'consultationFee', label: '面诊费', children: moneyOrDash(item.currency, split?.consultationFee) },
       { key: 'commissionRate', label: '顾问分成', children: split ? `${split.commissionRate}%` : '-' },
       { key: 'institutionRate', label: '机构分成', children: split ? `${split.institutionRate}%` : '-' },
-      { key: 'platformRate', label: '平台分成', children: split ? `${split.platformRate}%` : '-' },
-      { key: 'doctorRate', label: '医生分成', children: split ? `${split.doctorRate}%` : '-' },
+      { key: 'platformRate', label: '当前平台比例', children: split ? `${split.platformRate}%` : '-' },
+      { key: 'doctorRate', label: '按当前平台比例推导的医生净比例', children: split ? `${split.doctorRate}%` : '-' },
     ];
   };
 
