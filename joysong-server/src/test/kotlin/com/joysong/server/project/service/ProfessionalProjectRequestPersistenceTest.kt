@@ -253,24 +253,33 @@ class ProfessionalProjectRequestPersistenceTest {
         discover.put("proof", "discover-before-rollback")
         home.put("proof", "home-before-rollback")
         seedInstitutionRequest("cache-rollback", "tx-cache-rollback-doctor")
-        val failingCacheService = serviceUsing(
-            FailingConfigJdbcTemplate(dataSource),
-            cacheManager = cacheManager
-        )
 
-        assertThrows<DataAccessException> {
+        val rollback = assertThrows<IllegalStateException> {
             inTransaction {
-                failingCacheService.reviewInstitution(
+                val result = cacheService.reviewInstitution(
                     adminActor(),
                     "cache-rollback-request",
                     ProjectRequestReview("APPROVED")
                 )
+                assertEquals("APPROVED", result.status)
+                assertEquals("APPROVED", requestStatus("cache-rollback-request"))
+                assertEquals(1, count("institution_projects", "institution_id", "cache-rollback-institution"))
+                assertEquals(1, count("doctor_projects", "doctor_id", "tx-cache-rollback-doctor"))
+                assertEquals(1, count("doctor_institution_project_configs", "doctor_id", "tx-cache-rollback-doctor"))
+                assertEquals("discover-before-rollback", discover.get("proof")?.get())
+                assertEquals("home-before-rollback", home.get("proof")?.get())
+
+                error("force outer rollback after cache synchronization registration")
             }
         }
 
+        assertEquals("force outer rollback after cache synchronization registration", rollback.message)
         assertEquals("discover-before-rollback", discover.get("proof")?.get())
         assertEquals("home-before-rollback", home.get("proof")?.get())
         assertEquals("PENDING", requestStatus("cache-rollback-request"))
+        assertEquals(0, count("institution_projects", "institution_id", "cache-rollback-institution"))
+        assertEquals(0, count("doctor_projects", "doctor_id", "tx-cache-rollback-doctor"))
+        assertEquals(0, count("doctor_institution_project_configs", "doctor_id", "tx-cache-rollback-doctor"))
     }
 
     @Test
