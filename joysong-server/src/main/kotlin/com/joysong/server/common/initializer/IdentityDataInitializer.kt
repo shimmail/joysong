@@ -1,17 +1,20 @@
 package com.joysong.server.common.initializer
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.boot.CommandLineRunner
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.core.annotation.Order
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
+import java.math.BigDecimal
 
 @Component
 @ConditionalOnProperty(prefix = "seed.demo", name = ["enabled"], havingValue = "true")
 @Order(4)
 class IdentityDataInitializer(
-    private val jdbcTemplate: JdbcTemplate
+    private val jdbcTemplate: JdbcTemplate,
+    private val objectMapper: ObjectMapper
 ) : CommandLineRunner {
 
     @Transactional
@@ -192,19 +195,55 @@ class IdentityDataInitializer(
 
     /** 为医生申请、机构审核和双方分账确认提供可直接操作的测试记录。 */
     private fun seedProjectCollaboration() {
+        seedProfessionalProjectRequests()
         jdbcTemplate.update(
             """
-            INSERT IGNORE INTO doctor_project_change_requests
+            INSERT INTO doctor_project_change_requests
                 (id, doctor_id, institution_id, institution_project_id, request_type,
-                 service_description, service_tags, schedule_note, status, submitted_by)
-            VALUES (?, ?, ?, ?, 'PROFILE_UPDATE',
-                    '专注眼部年轻化方案，申请更新个人项目介绍。', '眼部整形,面部年轻化',
-                    '每周二、周四下午出诊', 'PENDING', ?)
+                 service_description, price_suggestion, consultation_fee, commission_rate, institution_rate,
+                 current_price, current_service_description, current_service_tags, current_schedule_note,
+                 current_cover_image, current_images, current_consultation_fee, current_commission_rate,
+                 current_institution_rate, current_platform_rate, current_doctor_rate,
+                 notes, service_tags, schedule_note, cover_image, images, status, submitted_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
+            ON DUPLICATE KEY UPDATE
+                service_description = VALUES(service_description), price_suggestion = VALUES(price_suggestion),
+                consultation_fee = VALUES(consultation_fee), commission_rate = VALUES(commission_rate),
+                institution_rate = VALUES(institution_rate), current_price = VALUES(current_price),
+                current_service_description = VALUES(current_service_description), current_service_tags = VALUES(current_service_tags),
+                current_schedule_note = VALUES(current_schedule_note), current_cover_image = VALUES(current_cover_image),
+                current_images = VALUES(current_images), current_consultation_fee = VALUES(current_consultation_fee),
+                current_commission_rate = VALUES(current_commission_rate), current_institution_rate = VALUES(current_institution_rate),
+                current_platform_rate = VALUES(current_platform_rate), current_doctor_rate = VALUES(current_doctor_rate),
+                notes = VALUES(notes), service_tags = VALUES(service_tags), schedule_note = VALUES(schedule_note),
+                cover_image = VALUES(cover_image), images = VALUES(images), status = 'PENDING', submitted_by = VALUES(submitted_by)
             """.trimIndent(),
             SeedIds.PROJECT_CHANGE_REQUEST_ID,
             SeedIds.DOC_ID_2,
             SeedIds.INST_ID_1,
             SeedIds.IP_ID_4,
+            "PROFILE_UPDATE",
+            "专注眼部年轻化方案，申请更新个人项目介绍。",
+            BigDecimal("5299.00"),
+            BigDecimal("80.00"),
+            BigDecimal("10.00"),
+            BigDecimal("40.00"),
+            BigDecimal("4999.00"),
+            "双眼皮成形的现有个人服务介绍。",
+            jsonArray("双眼皮", "眼部整形"),
+            "每周二、周四下午出诊",
+            "https://via.placeholder.com/800x500?text=EyeCurrentCover",
+            jsonArray("https://via.placeholder.com/800x500?text=EyeCurrent1"),
+            BigDecimal("50.00"),
+            BigDecimal("10.00"),
+            BigDecimal("40.00"),
+            BigDecimal("40.00"),
+            BigDecimal("10.00"),
+            "更新双眼皮项目资料与分账方案。",
+            jsonArray("双眼皮", "面部年轻化"),
+            "每周二、周四下午出诊",
+            "https://via.placeholder.com/800x500?text=EyeProposalCover",
+            jsonArray("https://via.placeholder.com/800x500?text=EyeProposal1", "https://via.placeholder.com/800x500?text=EyeProposal2"),
             SeedIds.DOC_ID_2
         )
         jdbcTemplate.update(
@@ -232,4 +271,69 @@ class IdentityDataInitializer(
             SeedIds.DOC_ID_1
         )
     }
+
+    private fun seedProfessionalProjectRequests() {
+        jdbcTemplate.update(
+            """
+            INSERT IGNORE INTO professional_project_requests
+                (id, request_type, doctor_id, institution_id, project_id, name, category, description,
+                 tags, slogan, detail_content, currency, cover_image, images, sales_count, reference_price,
+                 category_tags, price, original_price, is_active, consultation_fee, commission_rate,
+                 institution_rate, notes, status, submitted_by)
+            VALUES (?, 'PLATFORM', ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    NULL, NULL, NULL, NULL, NULL, NULL, ?, 'PENDING', ?)
+            """.trimIndent(),
+            SeedIds.PLATFORM_PROJECT_REQUEST_ID,
+            SeedIds.DOC_ID_4,
+            "热玛吉焕肤疗程",
+            "抗衰紧致",
+            "面向熟龄肌肤的热玛吉紧致抗衰方案。",
+            jsonArray("热玛吉", "紧致抗衰"),
+            "重塑紧致轮廓",
+            "采用分层能量设计，帮助改善松弛与细纹。",
+            "CNY",
+            "https://via.placeholder.com/800x500?text=ThermageCover",
+            jsonArray("https://via.placeholder.com/800x500?text=Thermage1", "https://via.placeholder.com/800x500?text=Thermage2"),
+            36,
+            BigDecimal("9800.00"),
+            jsonArray("抗衰紧致", "光电美容"),
+            "申请创建完整平台项目快照。",
+            SeedIds.DOC_ID_4
+        )
+        jdbcTemplate.update(
+            """
+            INSERT IGNORE INTO professional_project_requests
+                (id, request_type, doctor_id, institution_id, project_id, name, category, description,
+                 tags, slogan, detail_content, currency, cover_image, images, sales_count, reference_price,
+                 category_tags, price, original_price, is_active, consultation_fee, commission_rate,
+                 institution_rate, notes, status, submitted_by)
+            VALUES (?, 'INSTITUTION', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL,
+                    ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
+            """.trimIndent(),
+            SeedIds.INSTITUTION_PROJECT_REQUEST_ID,
+            SeedIds.DOC_ID_3,
+            SeedIds.INST_ID_2,
+            SeedIds.PROJ_ID_1,
+            "皮秒焕肤玻尿酸联合方案",
+            "注射美容",
+            "在机构内提供玻尿酸填充与术后皮肤管理服务。",
+            jsonArray("玻尿酸", "术后修护"),
+            "定制联合美肤方案",
+            "由张医生完成面诊、注射与恢复期随访。",
+            "CNY",
+            "https://via.placeholder.com/800x500?text=BeijingFillerCover",
+            jsonArray("https://via.placeholder.com/800x500?text=BeijingFiller1", "https://via.placeholder.com/800x500?text=BeijingFiller2"),
+            12,
+            BigDecimal("3280.00"),
+            BigDecimal("3980.00"),
+            true,
+            BigDecimal("50.00"),
+            BigDecimal("10.00"),
+            BigDecimal("40.00"),
+            "申请加入北京机构的玻尿酸服务目录。",
+            SeedIds.DOC_ID_3
+        )
+    }
+
+    private fun jsonArray(vararg values: String): String = objectMapper.writeValueAsString(values.toList())
 }
