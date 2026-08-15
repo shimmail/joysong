@@ -477,6 +477,39 @@ class AgentWorkflowCoreTest {
     }
 
     @Test
+    fun `human parser target rejection precedes safety negation upgrade`() {
+        val content = "I am not not pregnant; compare treatments"
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
+        val completed = slot<CompleteTurnCommand>()
+        prepareChatGeneration(fixture, content)
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "clarification")
+        )
+        every { catalog.contextualSearchQuery(content, emptyList()) } returns content
+        every {
+            catalog.promptEvidence(content, content, content, AgentQueryTarget.PROJECT, "COMPARISON", content)
+        } returns AgentPromptEvidence()
+        intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess(
+                """{"choices":[{"message":{"content":"{\"intent\":\"COMPARISON\",\"intents\":[\"COMPARISON\",\"SAFETY_SCREENING\",\"HUMAN_CONSULTATION\"],\"queryTarget\":\"DOCTOR\",\"keywords\":[]}"}}]}""",
+                MediaType.APPLICATION_JSON
+            ))
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("COMPARISON", completed.captured.intent)
+        assertEquals("PROJECT", completed.captured.queryTarget)
+        assertEquals("", completed.captured.modelName)
+        intentServer.verify()
+        completionServer.verify()
+    }
+
+    @Test
     fun `invalid optional intents member keeps local route and still completes`() {
         assertParserFailureStillCompletes(
             withSuccess(

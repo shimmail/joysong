@@ -1055,13 +1055,13 @@ class ChatService(
         target: AgentQueryTarget?
     ): Boolean {
         val parsedIntents = intents + intent
-        if (local.unresolvedSafetyNegation && AgentIntent.SAFETY_SCREENING in parsedIntents) return true
-        if (intent in setOf(AgentIntent.GENERAL_CHAT, AgentIntent.SAFETY_SCREENING) && target != null) return false
         if (
             AgentIntent.HUMAN_CONSULTATION in parsedIntents &&
             target != null &&
             target != AgentQueryTarget.INSTITUTION
         ) return false
+        if (local.unresolvedSafetyNegation && AgentIntent.SAFETY_SCREENING in parsedIntents) return true
+        if (intent in setOf(AgentIntent.GENERAL_CHAT, AgentIntent.SAFETY_SCREENING) && target != null) return false
         if (local.explicitIntent && local.decision.intent !in parsedIntents) return false
         if (local.explicitQueryTarget && target != local.decision.queryTarget) return false
         if (local.unresolvedSafetyNegation && parsedIntents.none {
