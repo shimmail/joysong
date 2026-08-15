@@ -48,9 +48,14 @@ data class ManagementProjectSummary(
     val categoryTags: String,
     val coverImage: String,
     val referencePrice: BigDecimal,
-    val currency: String
+    val currency: String,
+    val slogan: String,
+    val detailContent: String?,
+    val images: String,
+    val salesCount: Int
 )
 
 private fun ProjectEntity.toSummary() = ManagementProjectSummary(
-    id, name, category, description, tags, categoryTags, coverImage, referencePrice, currency
+    id, name, category, description, tags, categoryTags, coverImage, referencePrice, currency,
+    slogan, detailContent, images, salesCount
 )
