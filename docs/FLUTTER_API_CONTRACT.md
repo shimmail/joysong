@@ -513,7 +513,7 @@ Flutter 的医生、顾问申请页和机构法人审核页统一使用以下规
 }
 ```
 
-`decision` 只允许 `APPROVED`、`REJECTED`；`reviewNote` 去除首尾空白后最多 1000 个字符，`REJECTED` 时不能为空。非平台管理员只能审核目标 `institutionId` 属于本人 `managedInstitutionIds` 的申请；审核人本人提交给其他机构的申请不会混入 `/reviewable`。
+`decision` 只允许 `APPROVED`、`REJECTED`；`reviewNote` 去除首尾空白后最多 1000 个字符，`REJECTED` 时不能为空，`APPROVED` 时可省略或为空。非平台管理员只能审核目标 `institutionId` 属于本人 `managedInstitutionIds` 的申请；审核人本人提交给其他机构的申请不会混入 `/reviewable`。
 
 候选查询参数是 `requestType=DOCTOR|CONSULTANT`、`action=JOIN|LEAVE`、可选 `query`、默认
 `offset=0` 和默认 `limit=20`。`offset` 必须大于等于 0，`limit` 必须大于 0且服务端最多返回 100；响应为：
@@ -554,7 +554,7 @@ Flutter 的医生、顾问申请页和机构法人审核页统一使用以下规
 ```
 
 字段必须全部存在；只有 `reviewedBy`、`reviewedAt` 可显式为 `null`。新账本状态严格为
-`PENDING`、`APPROVED`、`REJECTED`、`WITHDRAWN`。`relationshipStatus` 只描述查询时的当前关系投影：
+`PENDING`、`APPROVED`、`REJECTED`、`WITHDRAWN`。`relationshipStatus` 是关系结果快照：`/owned`、`/reviewable` 在查询时读取当前投影，写接口返回该写事务完成时应成立的关系结果；它不是长期不变的缓存字段，后续合法关系变更后客户端必须刷新管理上下文和账本列表：
 
 - `APPROVED`：当前关系仍有效；例如 `LEAVE/PENDING`、`LEAVE/REJECTED`、`LEAVE/WITHDRAWN`。
 - `NONE`：当前没有有效关系；例如未批准的 `JOIN`，或已批准的 `LEAVE`。
