@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Button, Descriptions, Form, Input, message, Modal, Select, Space, Table, Tag } from 'antd';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, Button, Descriptions, Form, Input, message, Modal, Select, Space, Table, Tag } from 'antd';
 import { CheckOutlined, CloseOutlined, EditOutlined } from '@ant-design/icons';
 import api, { getApiErrorMessage, getData, getManagementContext } from '../api';
 import { identityStatusColor, identityStatusLabel } from '../identity';
@@ -50,7 +50,41 @@ export interface ProfessionalProjectRequestResponse {
   updatedAt: string;
 }
 
-type ProfessionalProjectRequest = ProfessionalProjectRequestResponse & {
+type PlatformProjectRequest = ProfessionalProjectRequestResponse & {
+  requestType: 'PLATFORM';
+  institutionId: null;
+  institutionName: null;
+  projectId: null;
+  projectName: null;
+  name: string;
+  category: string;
+  description: string;
+  tags: string[];
+  slogan: string;
+  coverImage: string;
+  images: string[];
+  referencePrice: number;
+  categoryTags: string[];
+  price: null;
+  originalPrice: null;
+  isActive: null;
+  institutionSplit: null;
+};
+
+type InstitutionProjectRequest = ProfessionalProjectRequestResponse & {
+  requestType: 'INSTITUTION';
+  institutionId: string;
+  institutionName: string;
+  projectId: string;
+  projectName: string;
+  price: number;
+  isActive: boolean;
+  institutionSplit: InstitutionProjectSplit;
+};
+
+type CompleteProfessionalProjectRequestResponse = PlatformProjectRequest | InstitutionProjectRequest;
+
+type ProfessionalProjectRequest = CompleteProfessionalProjectRequestResponse & {
   requestSource: 'PROFESSIONAL';
 };
 
@@ -82,12 +116,108 @@ const imageListOrDash = (values?: string[] | null) => values?.length
   ? <Space orientation="vertical" size={0}>{values.map(value => <span key={value}>{value}</span>)}</Space>
   : '-';
 
+const hasOwn = (value: Record<string, unknown>, key: string) => Object.prototype.hasOwnProperty.call(value, key);
+const isRecord = (value: unknown): value is Record<string, unknown> => value != null && typeof value === 'object' && !Array.isArray(value);
+const isNonblankString = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
+const isNullableString = (value: unknown): value is string | null => value === null || typeof value === 'string';
+const isStringList = (value: unknown): value is string[] => Array.isArray(value) && value.every(item => typeof item === 'string');
+const isNullableStringList = (value: unknown): value is string[] | null => value === null || isStringList(value);
+const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+const isNullableNumber = (value: unknown): value is number | null => value === null || isFiniteNumber(value);
+
+const hasTypedKeys = (
+  value: Record<string, unknown>,
+  keys: string[],
+  predicate: (field: unknown) => boolean,
+) => keys.every(key => hasOwn(value, key) && predicate(value[key]));
+
+function isCompleteSplit(value: unknown): value is InstitutionProjectSplit {
+  return isRecord(value)
+    && hasTypedKeys(value, ['consultationFee', 'commissionRate', 'institutionRate', 'platformRate', 'doctorRate'], isFiniteNumber);
+}
+
+function isCompleteProfessionalProjectRequest(value: unknown): value is CompleteProfessionalProjectRequestResponse {
+  if (!isRecord(value)) return false;
+
+  const hasCompleteCommonFields = hasTypedKeys(
+    value,
+    ['id', 'doctorId', 'doctorName', 'currency', 'submittedAt', 'updatedAt'],
+    isNonblankString,
+  )
+    && hasTypedKeys(
+      value,
+      [
+        'institutionId', 'institutionName', 'projectId', 'projectName', 'name', 'category', 'description',
+        'slogan', 'detailContent', 'coverImage', 'notes', 'reviewNote', 'reviewedBy', 'reviewedAt',
+        'resultingProjectId', 'resultingInstitutionProjectId',
+      ],
+      isNullableString,
+    )
+    && hasTypedKeys(value, ['tags', 'images', 'categoryTags'], isNullableStringList)
+    && hasTypedKeys(value, ['referencePrice', 'price', 'originalPrice'], isNullableNumber)
+    && hasOwn(value, 'salesCount')
+    && Number.isInteger(value.salesCount)
+    && (value.salesCount as number) >= 0
+    && hasOwn(value, 'status')
+    && ['PENDING', 'APPROVED', 'REJECTED', 'CHANGES_REQUESTED'].includes(String(value.status))
+    && hasOwn(value, 'isActive')
+    && (value.isActive === null || typeof value.isActive === 'boolean')
+    && hasOwn(value, 'institutionSplit')
+    && (value.institutionSplit === null || isCompleteSplit(value.institutionSplit));
+
+  if (!hasCompleteCommonFields) return false;
+
+  if (value.requestType === 'PLATFORM') {
+    return value.institutionId === null
+      && value.institutionName === null
+      && value.projectId === null
+      && value.projectName === null
+      && isNonblankString(value.name)
+      && isNonblankString(value.category)
+      && isNonblankString(value.description)
+      && isStringList(value.tags)
+      && typeof value.slogan === 'string'
+      && typeof value.coverImage === 'string'
+      && isStringList(value.images)
+      && isFiniteNumber(value.referencePrice)
+      && isStringList(value.categoryTags)
+      && value.price === null
+      && value.originalPrice === null
+      && value.isActive === null
+      && value.institutionSplit === null;
+  }
+
+  return value.requestType === 'INSTITUTION'
+    && isNonblankString(value.institutionId)
+    && isNonblankString(value.institutionName)
+    && isNonblankString(value.projectId)
+    && isNonblankString(value.projectName)
+    && isFiniteNumber(value.price)
+    && typeof value.isActive === 'boolean'
+    && isCompleteSplit(value.institutionSplit);
+}
+
+function getHttpResponseStatus(error: unknown) {
+  if (!isRecord(error) || !isRecord(error.response)) return null;
+  return typeof error.response.status === 'number' ? error.response.status : null;
+}
+
+const requestKey = (request: ProjectRequest) => `${request.requestSource}:${request.id}`;
+const reviewAriaLabel = (action: string, request: ProjectRequest) => {
+  const name = request.requestSource === 'JOIN'
+    ? request.projectName
+    : request.name?.trim() || '项目名称留空，使用继承值';
+  return `${action} ${name}，申请ID ${request.id}`;
+};
+
 export default function ProjectRequestsPage() {
   const managementContext = getManagementContext();
   const isAdmin = managementContext?.platformRole === 'ADMIN';
   const [requests, setRequests] = useState<ProjectRequest[]>([]);
   const [loading, setLoading] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  const [malformedProfessionalCount, setMalformedProfessionalCount] = useState(0);
+  const inFlightReviewRef = useRef<string | null>(null);
+  const [reviewingRequestKey, setReviewingRequestKey] = useState<string | null>(null);
   const [status, setStatus] = useState<ProjectRequestStatus | 'ALL'>('PENDING');
   const [reviewTarget, setReviewTarget] = useState<ProjectRequest | null>(null);
   const [reviewDecision, setReviewDecision] = useState<ReviewDecision>('REJECTED');
@@ -100,11 +230,19 @@ export default function ProjectRequestsPage() {
         api.get(isAdmin ? '/admin/project-requests' : '/management/project-requests'),
         api.get('/admin/institution-project-requests'),
       ]);
-      const professional = (getData<ProfessionalProjectRequestResponse[]>(professionalResponse as any) || [])
+      const professionalPayload = getData<unknown>(professionalResponse as any);
+      const professionalItems = Array.isArray(professionalPayload) ? professionalPayload : [];
+      const professional = professionalItems
+        .filter(isCompleteProfessionalProjectRequest)
         .map(item => ({ ...item, requestSource: 'PROFESSIONAL' as const }));
       const joins = (getData<Omit<JoinProjectRequest, 'requestSource'>[]>(joinResponse as any) || [])
         .filter(item => item.requestType === 'JOIN')
         .map(item => ({ ...item, requestSource: 'JOIN' as const }));
+      setMalformedProfessionalCount(
+        Array.isArray(professionalPayload)
+          ? professionalItems.length - professional.length
+          : 1,
+      );
       setRequests([...professional, ...joins]);
     } catch (error) {
       message.error(getApiErrorMessage(error, '平台项目申请加载失败'));
@@ -114,6 +252,32 @@ export default function ProjectRequestsPage() {
   };
 
   useEffect(() => { void refresh(); }, []);
+
+  const submitting = reviewingRequestKey !== null;
+
+  const beginReview = (request: ProjectRequest) => {
+    if (inFlightReviewRef.current !== null) return false;
+    const key = requestKey(request);
+    inFlightReviewRef.current = key;
+    setReviewingRequestKey(key);
+    return true;
+  };
+
+  const finishReview = (request: ProjectRequest) => {
+    const key = requestKey(request);
+    if (inFlightReviewRef.current !== key) return;
+    inFlightReviewRef.current = null;
+    setReviewingRequestKey(null);
+  };
+
+  const handleReviewError = async (error: unknown) => {
+    if (getHttpResponseStatus(error) === 409) {
+      await refresh();
+      message.warning('审核状态或审批基线已变化，已刷新最新数据，请核对当前比例和申请状态后重试');
+      return;
+    }
+    message.error(getApiErrorMessage(error, '审核失败'));
+  };
 
   const canReview = (request: ProjectRequest) => {
     if (request.status !== 'PENDING') return false;
@@ -138,7 +302,7 @@ export default function ProjectRequestsPage() {
   };
 
   const approve = async (request: ProjectRequest) => {
-    setSubmitting(true);
+    if (!beginReview(request)) return;
     try {
       await api.post(reviewPath(request), {
         decision: 'APPROVED',
@@ -151,13 +315,14 @@ export default function ProjectRequestsPage() {
           : '申请已通过，机构项目已创建');
       await refresh();
     } catch (error) {
-      message.error(getApiErrorMessage(error, '审核失败'));
+      await handleReviewError(error);
     } finally {
-      setSubmitting(false);
+      finishReview(request);
     }
   };
 
   const openReview = (request: ProjectRequest, decision: ReviewDecision) => {
+    if (inFlightReviewRef.current !== null) return;
     reviewForm.resetFields();
     setReviewTarget(request);
     setReviewDecision(decision);
@@ -165,20 +330,24 @@ export default function ProjectRequestsPage() {
 
   const submitReview = async () => {
     if (!reviewTarget) return;
+    const target = reviewTarget;
+    const decision = reviewDecision;
+    let started = false;
     try {
       const values = await reviewForm.validateFields();
-      setSubmitting(true);
-      await api.post(reviewPath(reviewTarget), {
-        decision: reviewDecision,
+      started = beginReview(target);
+      if (!started) return;
+      await api.post(reviewPath(target), {
+        decision,
         reviewNote: values.reviewNote,
       });
-      message.success(reviewDecision === 'REJECTED' ? '申请已驳回' : '已要求医生修改申请');
+      message.success(decision === 'REJECTED' ? '申请已驳回' : '已要求医生修改申请');
       setReviewTarget(null);
       await refresh();
-    } catch (error: any) {
-      if (!error?.errorFields) message.error(getApiErrorMessage(error, '审核失败'));
+    } catch (error: unknown) {
+      if (!isRecord(error) || !Array.isArray(error.errorFields)) await handleReviewError(error);
     } finally {
-      setSubmitting(false);
+      if (started) finishReview(target);
     }
   };
 
@@ -189,9 +358,30 @@ export default function ProjectRequestsPage() {
   const renderActions = (item: ProjectRequest) => {
     if (!canReview(item)) return null;
     return <Space wrap>
-      <Button aria-label="通过" size="small" type="primary" icon={<CheckOutlined />} loading={submitting} onClick={() => void approve(item)}>通过</Button>
-      {item.requestSource === 'JOIN' && <Button aria-label="要求修改" size="small" icon={<EditOutlined />} onClick={() => openReview(item, 'CHANGES_REQUESTED')}>要求修改</Button>}
-      <Button aria-label="驳回" size="small" danger icon={<CloseOutlined />} onClick={() => openReview(item, 'REJECTED')}>驳回</Button>
+      <Button
+        aria-label={reviewAriaLabel('通过', item)}
+        size="small"
+        type="primary"
+        icon={<CheckOutlined />}
+        loading={reviewingRequestKey === requestKey(item)}
+        disabled={submitting}
+        onClick={() => void approve(item)}
+      >通过</Button>
+      {item.requestSource === 'JOIN' && <Button
+        aria-label={reviewAriaLabel('要求修改', item)}
+        size="small"
+        icon={<EditOutlined />}
+        disabled={submitting}
+        onClick={() => openReview(item, 'CHANGES_REQUESTED')}
+      >要求修改</Button>}
+      <Button
+        aria-label={reviewAriaLabel('驳回', item)}
+        size="small"
+        danger
+        icon={<CloseOutlined />}
+        disabled={submitting}
+        onClick={() => openReview(item, 'REJECTED')}
+      >驳回</Button>
     </Space>;
   };
 
@@ -246,12 +436,12 @@ export default function ProjectRequestsPage() {
 
     const common = [
       { key: 'id', label: '申请 ID', children: item.id },
-      { key: 'doctorId', label: '申请医生 ID', children: item.doctorId },
-      { key: 'doctorName', label: '申请医生', children: item.doctorName },
-      { key: 'institutionId', label: '目标机构 ID', children: textOrDash(item.institutionId) },
-      { key: 'institutionName', label: '目标机构', children: textOrDash(item.institutionName) },
-      { key: 'projectId', label: '目标公共项目 ID', children: textOrDash(item.projectId) },
-      { key: 'projectName', label: '目标公共项目', children: textOrDash(item.projectName) },
+      { key: 'doctorId', label: '申请医生 ID（不可变）', children: item.doctorId },
+      { key: 'doctorName', label: '当前医生名称', children: item.doctorName },
+      { key: 'institutionId', label: '目标机构 ID（不可变）', children: textOrDash(item.institutionId) },
+      { key: 'institutionName', label: '当前机构名称', children: textOrDash(item.institutionName) },
+      { key: 'projectId', label: '目标平台项目 ID（不可变）', children: textOrDash(item.projectId) },
+      { key: 'projectName', label: '当前平台项目名称', children: textOrDash(item.projectName) },
       { key: 'name', label: '项目名称', children: textOrDash(item.name) },
       { key: 'category', label: '分类', children: textOrDash(item.category) },
       { key: 'description', label: '项目说明', children: textOrDash(item.description) },
@@ -311,6 +501,13 @@ export default function ProjectRequestsPage() {
         ]}
       />
     </div>
+    {malformedProfessionalCount > 0 && <Alert
+      type="error"
+      showIcon
+      title="申请快照数据不完整，已禁止审核"
+      description="请刷新页面；若问题持续存在，请联系技术人员。"
+      style={{ marginBottom: 16 }}
+    />}
     <Table
       rowKey={item => `${item.requestSource}-${item.id}`}
       dataSource={filteredRequests}
