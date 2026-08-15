@@ -16,19 +16,30 @@ import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.junit.jupiter.api.assertThrows
+import org.springframework.aop.framework.ProxyFactory
 import org.springframework.cache.concurrent.ConcurrentMapCacheManager
+import org.springframework.aop.support.AopUtils
+import org.springframework.cache.CacheManager
 import org.springframework.dao.DataAccessException
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
 import org.springframework.jdbc.datasource.DriverManagerDataSource
+import org.springframework.transaction.TransactionManager
+import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource
+import org.springframework.transaction.interceptor.TransactionInterceptor
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
 import java.math.BigDecimal
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.CyclicBarrier
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 @Tag("mysql-integration")
 @Testcontainers
@@ -36,6 +47,7 @@ import java.util.concurrent.TimeUnit
 class ProfessionalProjectRequestPersistenceTest {
     private lateinit var dataSource: DriverManagerDataSource
     private lateinit var jdbc: JdbcTemplate
+    private lateinit var transactionManager: DataSourceTransactionManager
     private lateinit var transaction: TransactionTemplate
     private lateinit var service: ProfessionalProjectRequestService
 
@@ -53,7 +65,8 @@ class ProfessionalProjectRequestPersistenceTest {
 
         dataSource = DriverManagerDataSource(mysql.jdbcUrl, mysql.username, mysql.password)
         jdbc = JdbcTemplate(dataSource)
-        transaction = TransactionTemplate(DataSourceTransactionManager(dataSource))
+        transactionManager = DataSourceTransactionManager(dataSource)
+        transaction = TransactionTemplate(transactionManager)
         service = serviceUsing(jdbc)
         jdbc.update("INSERT INTO users (id, password_hash, nickname, role) VALUES ('tx-admin', 'hash', 'Admin', 'ADMIN')")
     }
@@ -179,9 +192,97 @@ class ProfessionalProjectRequestPersistenceTest {
     }
 
     @Test
+    fun `non admin institution review runs through an annotation transaction proxy`() {
+        seedInstitutionRequest("proxy", "tx-proxy-doctor")
+        jdbc.update(
+            "INSERT INTO users (id, password_hash, nickname, role) VALUES ('tx-proxy-legal', 'hash', 'Legal', 'USER')"
+        )
+        val authorityCalled = AtomicBoolean(false)
+        val authority = object : InstitutionRelationshipReviewAuthorityOperations {
+            override fun requireCurrentAuthority(actor: ManagementActor, institutionId: String) {
+                assertTrue(TransactionSynchronizationManager.isActualTransactionActive())
+                authorityCalled.set(true)
+            }
+        }
+        val rawService = serviceUsing(jdbc, authority)
+        val transactionAdvice = TransactionInterceptor(
+            transactionManager as TransactionManager,
+            AnnotationTransactionAttributeSource()
+        )
+        val proxyFactory = ProxyFactory(rawService).apply {
+            isProxyTargetClass = true
+            addAdvice(transactionAdvice)
+        }
+        val proxiedService = proxyFactory.proxy as ProfessionalProjectRequestService
+
+        assertTrue(AopUtils.isAopProxy(proxiedService))
+        val result = proxiedService.reviewInstitution(
+            legalRepresentativeActor("proxy-institution"),
+            "proxy-request",
+            ProjectRequestReview("REJECTED", "Proxy transaction proof")
+        )
+
+        assertTrue(authorityCalled.get())
+        assertEquals("REJECTED", result.status)
+        assertEquals("REJECTED", requestStatus("proxy-request"))
+    }
+
+    @Test
+    fun `project caches stay populated until commit clear after commit and survive rollback`() {
+        val cacheManager = ConcurrentMapCacheManager("discover", "home")
+        val discover = requireNotNull(cacheManager.getCache("discover"))
+        val home = requireNotNull(cacheManager.getCache("home"))
+        discover.put("proof", "discover-before-commit")
+        home.put("proof", "home-before-commit")
+        seedInstitutionRequest("cache-success", "tx-cache-success-doctor")
+        val cacheService = serviceUsing(jdbc, cacheManager = cacheManager)
+
+        inTransaction {
+            cacheService.reviewInstitution(
+                adminActor(),
+                "cache-success-request",
+                ProjectRequestReview("APPROVED")
+            )
+            assertEquals("discover-before-commit", discover.get("proof")?.get())
+            assertEquals("home-before-commit", home.get("proof")?.get())
+        }
+
+        assertEquals(null, discover.get("proof"))
+        assertEquals(null, home.get("proof"))
+
+        discover.put("proof", "discover-before-rollback")
+        home.put("proof", "home-before-rollback")
+        seedInstitutionRequest("cache-rollback", "tx-cache-rollback-doctor")
+        val failingCacheService = serviceUsing(
+            FailingConfigJdbcTemplate(dataSource),
+            cacheManager = cacheManager
+        )
+
+        assertThrows<DataAccessException> {
+            inTransaction {
+                failingCacheService.reviewInstitution(
+                    adminActor(),
+                    "cache-rollback-request",
+                    ProjectRequestReview("APPROVED")
+                )
+            }
+        }
+
+        assertEquals("discover-before-rollback", discover.get("proof")?.get())
+        assertEquals("home-before-rollback", home.get("proof")?.get())
+        assertEquals("PENDING", requestStatus("cache-rollback-request"))
+    }
+
+    @Test
     fun `two concurrent reviews produce one success one conflict and no duplicate targets`() {
         seedInstitutionRequest("concurrent", "tx-concurrent-doctor")
         val start = CountDownLatch(1)
+        val transactionsReady = CyclicBarrier(2)
+        val lockAttemptsReady = CyclicBarrier(2)
+        val lockAttempts = AtomicInteger(0)
+        val coordinatingService = serviceUsing(
+            LockCoordinatingJdbcTemplate(dataSource, lockAttemptsReady, lockAttempts)
+        )
         val executor = Executors.newFixedThreadPool(2)
         try {
             val attempts = List(2) {
@@ -189,7 +290,12 @@ class ProfessionalProjectRequestPersistenceTest {
                     start.await()
                     try {
                         inTransaction {
-                            service.reviewInstitution(adminActor(), "concurrent-request", ProjectRequestReview("APPROVED"))
+                            transactionsReady.await(10, TimeUnit.SECONDS)
+                            coordinatingService.reviewInstitution(
+                                adminActor(),
+                                "concurrent-request",
+                                ProjectRequestReview("APPROVED")
+                            )
                         }
                         null
                     } catch (error: Throwable) {
@@ -200,6 +306,7 @@ class ProfessionalProjectRequestPersistenceTest {
             start.countDown()
             val outcomes = attempts.map { it.get(30, TimeUnit.SECONDS) }
 
+            assertEquals(2, lockAttempts.get())
             assertEquals(1, outcomes.count { it == null })
             val conflict = outcomes.filterNotNull().single()
             assertInstanceOf(ProfessionalProjectRequestConflictException::class.java, conflict)
@@ -268,16 +375,16 @@ class ProfessionalProjectRequestPersistenceTest {
 
     private fun <T> inTransaction(action: () -> T): T = requireNotNull(transaction.execute { action() })
 
-    private fun serviceUsing(template: JdbcTemplate) = ProfessionalProjectRequestService(
+    private fun serviceUsing(
+        template: JdbcTemplate,
+        authority: InstitutionRelationshipReviewAuthorityOperations = adminOnlyAuthority,
+        cacheManager: CacheManager = ConcurrentMapCacheManager("discover", "home")
+    ) = ProfessionalProjectRequestService(
         template,
         jacksonObjectMapper().registerModule(JavaTimeModule()),
         OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("40.00") }),
-        object : InstitutionRelationshipReviewAuthorityOperations {
-            override fun requireCurrentAuthority(actor: ManagementActor, institutionId: String) {
-                error("Admin persistence scenarios must not call institution authority")
-            }
-        },
-        ConcurrentMapCacheManager("discover", "home")
+        authority,
+        cacheManager
     )
 
     private fun requestStatus(id: String): String = jdbc.queryForObject(
@@ -295,6 +402,22 @@ class ProfessionalProjectRequestPersistenceTest {
     private fun adminActor() = ManagementActor(
         "tx-admin", true, setOf("ADMIN"), null, emptySet(), emptySet(), emptySet()
     )
+
+    private fun legalRepresentativeActor(institutionId: String) = ManagementActor(
+        "tx-proxy-legal",
+        false,
+        setOf("INSTITUTION_LEGAL_REPRESENTATIVE"),
+        null,
+        setOf(institutionId),
+        emptySet(),
+        emptySet()
+    )
+
+    private val adminOnlyAuthority = object : InstitutionRelationshipReviewAuthorityOperations {
+        override fun requireCurrentAuthority(actor: ManagementActor, institutionId: String) {
+            error("Admin persistence scenarios must not call institution authority")
+        }
+    }
 
     private data class InstitutionProjectSnapshot(
         val name: String,
@@ -342,5 +465,23 @@ private class FailingConfigJdbcTemplate(dataSource: DriverManagerDataSource) : J
             throw DataIntegrityViolationException("forced config failure")
         }
         return super.update(sql, *args)
+    }
+}
+
+private class LockCoordinatingJdbcTemplate(
+    dataSource: DriverManagerDataSource,
+    private val lockAttemptsReady: CyclicBarrier,
+    private val lockAttempts: AtomicInteger
+) : JdbcTemplate(dataSource) {
+    override fun <T : Any?> query(
+        sql: String,
+        rowMapper: RowMapper<T>,
+        vararg args: Any?
+    ): MutableList<T> {
+        if (sql.contains("FROM professional_project_requests") && sql.contains("FOR UPDATE")) {
+            lockAttempts.incrementAndGet()
+            lockAttemptsReady.await(10, TimeUnit.SECONDS)
+        }
+        return super.query(sql, rowMapper, *args)
     }
 }
