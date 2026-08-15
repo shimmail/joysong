@@ -1,5 +1,6 @@
 package com.joysong.server.migration
 
+import com.joysong.server.support.WorktreeTestDatabase
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
@@ -30,7 +31,7 @@ class BaselineMigrationIntegrationTest {
     private lateinit var jdbcTemplate: JdbcTemplate
 
     @Test
-    fun `fresh database applies B26 baseline followed by V27`() {
+    fun `fresh database applies B26 baseline followed by V28`() {
         val history = jdbcTemplate.query(
             """
             SELECT version, type, script
@@ -43,7 +44,8 @@ class BaselineMigrationIntegrationTest {
         assertEquals(
             listOf(
                 Triple("26", "SQL_BASELINE", "B26__current_schema.sql"),
-                Triple("27", "SQL", "V27__add_consultant_institution_change_requests.sql")
+                Triple("27", "SQL", "V27__add_consultant_institution_change_requests.sql"),
+                Triple("28", "SQL", "V28__expand_professional_project_requests.sql")
             ),
             history
         )
@@ -54,7 +56,7 @@ class BaselineMigrationIntegrationTest {
         @ServiceConnection
         @JvmField
         val mysql = IsolatedBaselineMySqlContainer("mysql:8.0.39")
-            .withDatabaseName("myapp_worktree_joysong_b26_test")
+            .withDatabaseName(WorktreeTestDatabase.databaseName())
             .withTmpFs(mapOf("/var/lib/mysql" to "rw"))
     }
 }
@@ -63,7 +65,6 @@ class IsolatedBaselineMySqlContainer(imageName: String) :
     MySQLContainer<IsolatedBaselineMySqlContainer>(imageName) {
     override fun start() {
         super.start()
-        println("Migration database host=$host:${getMappedPort(3306)}, database=$databaseName")
-        require(databaseName.startsWith("myapp_worktree_"))
+        WorktreeTestDatabase.validateAndPrint(this)
     }
 }
