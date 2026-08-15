@@ -2558,13 +2558,13 @@ String _snapshotItems(BuildContext context, List<String>? values) {
 }
 
 int? _rateHundredths(String value) {
-  final match =
-      RegExp(r'^([+-]?)(\d+)(?:\.(\d{1,2}))?$').firstMatch(value.trim());
-  if (match == null) return null;
-  final sign = match.group(1) == '-' ? -1 : 1;
-  final whole = int.parse(match.group(2)!);
-  final fraction = int.parse((match.group(3) ?? '').padRight(2, '0'));
-  return sign * (whole * 100 + fraction);
+  final parsed = num.tryParse(value.trim());
+  if (parsed == null || !parsed.isFinite || parsed < 0 || parsed > 100) {
+    return null;
+  }
+  final hundredths = (parsed * 100).round();
+  if (parsed != hundredths / 100) return null;
+  return hundredths;
 }
 
 String _formatRateHundredths(int? value) {

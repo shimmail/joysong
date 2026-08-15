@@ -233,6 +233,81 @@ void main() {
   });
 
   testWidgets(
+      'institution rate preview rejects an oversized paste without throwing or submitting',
+      (tester) async {
+    _useLargeSurface(tester);
+    final repository = _ProjectRequestRepository();
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      repository: repository,
+      context: _doctorContext,
+    )));
+    await tester.pumpAndSettle();
+    await _choose(tester, const Key('institution-id'), 'Joysong Clinic');
+    await _choose(tester, const Key('institution-project'), 'Hydrating Facial');
+    await _fillInstitutionDraft(
+      tester,
+      price: '799.99',
+      institutionRate: '40',
+    );
+
+    await tester.enterText(
+      find.byKey(const Key('institution-consultant-rate')),
+      '999999999999999999999',
+    );
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('医生比例（自动推导）：-%'), findsOneWidget);
+    await _submit(tester, const Key('institution-submit'));
+    expect(find.text('分账比例必须在 0 到 100 之间且最多两位小数'), findsOneWidget);
+    expect(repository.institutionSubmissions, isEmpty);
+  });
+
+  testWidgets(
+      'institution rate preview normalizes decimal shorthand scientific notation and trailing zeros like the draft',
+      (tester) async {
+    _useLargeSurface(tester);
+    final repository = _ProjectRequestRepository();
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      repository: repository,
+      context: _doctorContext,
+    )));
+    await tester.pumpAndSettle();
+    await _choose(tester, const Key('institution-id'), 'Joysong Clinic');
+    await _choose(tester, const Key('institution-project'), 'Hydrating Facial');
+    await _fillInstitutionDraft(
+      tester,
+      price: '799.99',
+      institutionRate: '40.25',
+    );
+
+    for (final accepted in const ['.5', '5e-1', '0.5000']) {
+      await tester.enterText(
+        find.byKey(const Key('institution-consultant-rate')),
+        accepted,
+      );
+      await tester.pump();
+      expect(find.text('医生比例（自动推导）：49%'), findsOneWidget,
+          reason: '$accepted parses to the exact two-decimal value 0.5');
+    }
+
+    await tester.enterText(
+      find.byKey(const Key('institution-consultant-rate')),
+      '5.01e-1',
+    );
+    await tester.pump();
+    expect(find.text('医生比例（自动推导）：-%'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const Key('institution-consultant-rate')),
+      '.5',
+    );
+    await _submit(tester, const Key('institution-submit'));
+    expect(repository.institutionSubmissions, hasLength(1));
+    expect(repository.institutionSubmissions.single.commissionRate, 0.5);
+  });
+
+  testWidgets(
       'platform draft blocks malformed values, survives submit and refresh failures, and clears only after both succeed',
       (tester) async {
     _useLargeSurface(tester);
