@@ -1,0 +1,92 @@
+@startuml
+title Doctor project-creation application workflow
+
+skinparam backgroundColor #FFFFFF
+skinparam sequenceArrowThickness 1
+skinparam responseMessageBelowArrow true
+skinparam ParticipantPadding 12
+skinparam BoxPadding 8
+
+actor "Authenticated active\ndoctor applicant" as Doctor
+participant "Flutter\n(project application)" as Flutter
+participant "Management API\n/project-requests" as API
+database "Immutable request ledger\nprofessional_project_requests" as Ledger
+actor "Platform administrator" as Admin
+actor "Target institution\nlegal representative" as LegalRep
+database "Projects\nprojects" as Projects
+database "Institution projects\ninstitution_projects" as InstitutionProjects
+database "Applicant bindings\ndoctor_projects" as DoctorProjects
+database "Applicant split configs\ndoctor_institution_project_configs" as Configs
+
+note over Doctor,Ledger
+  No doctor selector exists. The authenticated doctor is stored as the
+  sole applicant and is the only doctor binding created after approval.
+  Submitted request fields are immutable snapshots.
+end note
+
+group Platform-project application
+  Doctor -> Flutter: enter complete platform project form
+  Flutter -> API: POST /platform\nexact 13-key JSON body
+  API -> API: require active DOCTOR\nvalidate text, arrays, money, count
+  API -> Ledger: INSERT PLATFORM snapshot (PENDING, applicant doctor)
+  Ledger --> API: request id
+  API --> Flutter: {id, requestType: PLATFORM, status: PENDING}
+
+  Admin -> API: POST /api/admin/project-requests/{id}/review\n{decision: APPROVED|REJECTED, reviewNote}
+  API -> Ledger: lock pending immutable snapshot
+  API -> API: require platform administrator\nREJECTED requires non-blank note
+  alt APPROVED
+    group one transaction
+      API -> Projects: INSERT project\nrating = 0, review_count = 0
+      API -> Ledger: close APPROVED + resultingProjectId
+    end
+  else REJECTED
+    API -> Ledger: close REJECTED + review note
+  end
+  API --> Admin: review result
+end
+
+group Institution-project application
+  Doctor -> Flutter: choose approved institution + platform project
+  Flutter -> API: GET /institution-form-config
+  API --> Flutter: {platformRate} (read only)
+  Flutter -> API: POST /institutions/{institutionId}\nexact 18-key JSON body
+  API -> API: require applicant approved relationship\nvalidate inheritance, money, count and split
+  API -> Ledger: INSERT INSTITUTION snapshot (PENDING, applicant doctor)
+  Ledger --> API: request id
+  API --> Flutter: {id, requestType: INSTITUTION, status: PENDING}
+
+  alt Target institution legal representative
+    LegalRep -> API: POST /api/management/project-requests/{id}/review
+    API -> API: require current managedInstitutionIds authority
+  else Platform administrator
+    Admin -> API: POST /api/management/project-requests/{id}/review
+    API -> API: require administrator authority
+  end
+  API -> Ledger: lock pending immutable snapshot
+  API -> API: revalidate current institution, applicant relationship,\nplatform project, uniqueness, current platform rate and split
+  alt REJECTED
+    API -> Ledger: close REJECTED + non-blank review note
+  else APPROVED
+    group one atomic transaction; rollback all writes on any failure
+      API -> InstitutionProjects: INSERT effective inherited content\nrating = 0, review_count = 0
+      API -> DoctorProjects: INSERT binding for applicant doctor only
+      API -> Configs: INSERT applicant split configuration
+      API -> Ledger: close APPROVED + resultingInstitutionProjectId
+    end
+  end
+  alt any write or revalidation fails
+    API -> API: rollback transaction; ledger remains PENDING
+    API --> Flutter: 409/error; no partial project, binding, or config
+  else transaction succeeds
+    API --> Flutter: review result
+  end
+end
+
+note over InstitutionProjects,Configs
+  Approval order is fixed: institution_projects -> doctor_projects(applicant)
+  -> doctor_institution_project_configs -> close request. Reviewers never
+  edit submitted fields. JOIN and PROFILE_UPDATE use separate contracts.
+end note
+
+@enduml

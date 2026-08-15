@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1650" viewBox="0 0 1600 1650" role="img" aria-labelledby="title desc">
+  <title id="title">Doctor project-creation application workflow</title>
+  <desc id="desc">Two sequence flows: platform project application reviewed by an administrator, and institution project application reviewed by a target legal representative or administrator. Institution approval is atomic and binds only the applicant doctor.</desc>
+  <style>
+    text { font-family: Arial, &quot;Microsoft YaHei&quot;, sans-serif; fill: #172033; }
+    .title { font-size: 28px; font-weight: 700; }
+    .subtitle { font-size: 15px; fill: #4b5563; }
+    .actor { fill: #ecf4ff; stroke: #3b82f6; stroke-width: 2; }
+    .api { fill: #f0fdf4; stroke: #16a34a; stroke-width: 2; }
+    .ledger { fill: #fdf4ff; stroke: #a855f7; stroke-width: 2; }
+    .store { fill: #fff7ed; stroke: #f97316; stroke-width: 2; }
+    .band { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.5; }
+    .note { fill: #fffbeb; stroke: #f59e0b; stroke-width: 1.5; }
+    .tx { fill: #eff6ff; stroke: #60a5fa; stroke-width: 2; stroke-dasharray: 7 5; }
+    .line { stroke: #94a3b8; stroke-width: 1.2; stroke-dasharray: 5 5; }
+    .arrow { stroke: #334155; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+    .return { stroke: #16a34a; stroke-width: 2; fill: none; marker-end: url(#greenArrow); }
+    .label { font-size: 14px; font-weight: 600; }
+    .body { font-size: 13px; }
+    .small { font-size: 12px; fill: #475569; }
+    .section { font-size: 20px; font-weight: 700; fill: #0f172a; }
+  </style>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L10,3 L0,6 Z" fill="#334155"/></marker>
+    <marker id="greenArrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L10,3 L0,6 Z" fill="#16a34a"/></marker>
+  </defs>
+
+  <text x="800" y="42" text-anchor="middle" class="title">Doctor project-creation application workflow</text>
+  <text x="800" y="68" text-anchor="middle" class="subtitle">Immutable snapshots · No doctor selector · approved targets explicitly start with rating 0 / review count 0</text>
+
+  <rect x="30" y="92" width="1540" height="72" rx="8" class="note"/>
+  <text x="52" y="120" class="label">Binding authority</text>
+  <text x="52" y="145" class="body">The authenticated active doctor is captured in the request ledger. Approval can create only that applicant&apos;s doctor_projects binding and split configuration; reviewers cannot edit the submitted snapshot.</text>
+
+  <text x="52" y="204" class="section">1. Platform-project application — platform administrator only</text>
+  <rect x="30" y="222" width="1540" height="512" rx="12" class="band"/>
+  <rect x="72" y="245" width="150" height="48" rx="7" class="actor"/><text x="147" y="266" text-anchor="middle" class="label">Doctor applicant</text><text x="147" y="284" text-anchor="middle" class="small">active DOCTOR</text>
+  <rect x="340" y="245" width="160" height="48" rx="7" class="actor"/><text x="420" y="266" text-anchor="middle" class="label">Flutter form</text><text x="420" y="284" text-anchor="middle" class="small">exact body serializer</text>
+  <rect x="650" y="245" width="170" height="48" rx="7" class="api"/><text x="735" y="266" text-anchor="middle" class="label">Management API</text><text x="735" y="284" text-anchor="middle" class="small">/project-requests</text>
+  <rect x="970" y="245" width="170" height="48" rx="7" class="ledger"/><text x="1055" y="266" text-anchor="middle" class="label">Immutable ledger</text><text x="1055" y="284" text-anchor="middle" class="small">request snapshot</text>
+  <rect x="1300" y="245" width="170" height="48" rx="7" class="actor"/><text x="1385" y="266" text-anchor="middle" class="label">Platform admin</text><text x="1385" y="284" text-anchor="middle" class="small">sole reviewer</text>
+  <g class="line"><line x1="147" y1="293" x2="147" y2="714"/><line x1="420" y1="293" x2="420" y2="714"/><line x1="735" y1="293" x2="735" y2="714"/><line x1="1055" y1="293" x2="1055" y2="714"/><line x1="1385" y1="293" x2="1385" y2="714"/></g>
+  <path d="M147 325 H420" class="arrow"/><text x="284" y="317" text-anchor="middle" class="body">complete platform-project form</text>
+  <path d="M420 370 H735" class="arrow"/><text x="577" y="352" text-anchor="middle" class="label">POST /platform</text><text x="577" y="369" text-anchor="middle" class="small">exact 13-key JSON; no rating, review count, rates, or doctor IDs</text>
+  <path d="M735 420 H1055" class="arrow"/><text x="895" y="411" text-anchor="middle" class="body">validate → INSERT PLATFORM PENDING snapshot</text>
+  <path d="M1055 462 H420" class="return"/><text x="737" y="454" text-anchor="middle" class="body">{ id, requestType: PLATFORM, status: PENDING }</text>
+  <path d="M1385 510 H735" class="arrow"/><text x="1060" y="492" text-anchor="middle" class="label">POST /api/admin/project-requests/{id}/review</text><text x="1060" y="509" text-anchor="middle" class="small">decision APPROVED or REJECTED; rejection note must be non-blank</text>
+  <rect x="620" y="540" width="520" height="134" rx="8" class="tx"/>
+  <text x="640" y="565" class="label">APPROVED — one transaction</text>
+  <path d="M735 592 H1055" class="arrow"/><text x="895" y="584" text-anchor="middle" class="body">lock immutable PENDING request</text>
+  <path d="M735 628 H1055" class="arrow"/><text x="895" y="620" text-anchor="middle" class="body">create projects row: rating = 0, review_count = 0</text>
+  <path d="M735 655 H1055" class="arrow"/><text x="895" y="647" text-anchor="middle" class="body">close APPROVED + resultingProjectId</text>
+  <text x="640" y="700" class="small">REJECTED instead closes only the immutable ledger row; it never creates a project.</text>
+
+  <text x="52" y="776" class="section">2. Institution-project application — target legal representative or administrator</text>
+  <rect x="30" y="794" width="1540" height="800" rx="12" class="band"/>
+  <rect x="60" y="817" width="140" height="48" rx="7" class="actor"/><text x="130" y="838" text-anchor="middle" class="label">Doctor applicant</text><text x="130" y="856" text-anchor="middle" class="small">approved relationship</text>
+  <rect x="280" y="817" width="135" height="48" rx="7" class="actor"/><text x="348" y="838" text-anchor="middle" class="label">Flutter</text><text x="348" y="856" text-anchor="middle" class="small">split form</text>
+  <rect x="500" y="817" width="150" height="48" rx="7" class="api"/><text x="575" y="838" text-anchor="middle" class="label">Management API</text><text x="575" y="856" text-anchor="middle" class="small">authority + policy</text>
+  <rect x="735" y="817" width="150" height="48" rx="7" class="ledger"/><text x="810" y="838" text-anchor="middle" class="label">Immutable ledger</text><text x="810" y="856" text-anchor="middle" class="small">INSTITUTION snapshot</text>
+  <rect x="970" y="817" width="155" height="48" rx="7" class="actor"/><text x="1048" y="838" text-anchor="middle" class="label">Legal representative</text><text x="1048" y="856" text-anchor="middle" class="small">target scope only</text>
+  <rect x="1210" y="817" width="135" height="48" rx="7" class="actor"/><text x="1278" y="838" text-anchor="middle" class="label">Platform admin</text><text x="1278" y="856" text-anchor="middle" class="small">all targets</text>
+  <rect x="1390" y="817" width="130" height="48" rx="7" class="store"/><text x="1455" y="838" text-anchor="middle" class="label">Target writes</text><text x="1455" y="856" text-anchor="middle" class="small">3 dependent rows</text>
+  <g class="line"><line x1="130" y1="865" x2="130" y2="1570"/><line x1="348" y1="865" x2="348" y2="1570"/><line x1="575" y1="865" x2="575" y2="1570"/><line x1="810" y1="865" x2="810" y2="1570"/><line x1="1048" y1="865" x2="1048" y2="1570"/><line x1="1278" y1="865" x2="1278" y2="1570"/><line x1="1455" y1="865" x2="1455" y2="1570"/></g>
+  <path d="M348 900 H575" class="arrow"/><text x="462" y="891" text-anchor="middle" class="body">GET /institution-form-config</text>
+  <path d="M575 929 H348" class="return"/><text x="462" y="920" text-anchor="middle" class="body">read-only { platformRate }</text>
+  <path d="M130 970 H348" class="arrow"/><text x="239" y="961" text-anchor="middle" class="body">select target + project; edit split</text>
+  <path d="M348 1018 H575" class="arrow"/><text x="462" y="998" text-anchor="middle" class="label">POST /institutions/{institutionId}</text><text x="462" y="1015" text-anchor="middle" class="small">exact 18-key JSON; optional null/blank display values inherit</text>
+  <path d="M575 1062 H810" class="arrow"/><text x="693" y="1053" text-anchor="middle" class="body">validate relationship, money, count, rates → PENDING snapshot</text>
+  <path d="M810 1098 H348" class="return"/><text x="579" y="1089" text-anchor="middle" class="body">request id; submitted values remain immutable</text>
+  <path d="M1048 1146 H575" class="arrow"/><text x="812" y="1137" text-anchor="middle" class="body">review only if target institution is in managedInstitutionIds</text>
+  <path d="M1278 1180 H575" class="arrow"/><text x="926" y="1171" text-anchor="middle" class="body">administrator may review any target institution request</text>
+  <path d="M575 1220 H810" class="arrow"/><text x="693" y="1211" text-anchor="middle" class="body">lock PENDING snapshot; revalidate current relationship, project, uniqueness, platform rate</text>
+  <rect x="482" y="1250" width="1010" height="210" rx="8" class="tx"/>
+  <text x="504" y="1277" class="label">APPROVED — one atomic transaction, fixed order</text>
+  <path d="M575 1310 H1455" class="arrow"/><text x="1015" y="1301" text-anchor="middle" class="body">1. INSERT institution_projects with effective inherited content; rating = 0, review_count = 0</text>
+  <path d="M575 1350 H1455" class="arrow"/><text x="1015" y="1341" text-anchor="middle" class="body">2. INSERT doctor_projects binding for applicant doctor only</text>
+  <path d="M575 1390 H1455" class="arrow"/><text x="1015" y="1381" text-anchor="middle" class="body">3. INSERT doctor_institution_project_configs for that applicant</text>
+  <path d="M575 1430 H810" class="arrow"/><text x="693" y="1421" text-anchor="middle" class="body">4. close APPROVED + resultingInstitutionProjectId</text>
+  <rect x="88" y="1490" width="1328" height="72" rx="8" class="note"/>
+  <text x="110" y="1517" class="label">Rollback boundary</text>
+  <text x="110" y="1542" class="body">Any revalidation or write failure triggers transaction rollback: every target row is undone and the ledger remains PENDING. The client receives 409/error; no partial project, binding, configuration, or status closure exists.</text>
+  <text x="800" y="1625" text-anchor="middle" class="small">JOIN and PROFILE_UPDATE retain their separate legacy contracts and decision sets. V28 changes only the request-ledger DDL; operators manually clear old real institution-creation requests before deployment.</text>
+</svg>
