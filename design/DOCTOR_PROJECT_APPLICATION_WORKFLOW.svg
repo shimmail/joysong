@@ -34,23 +34,24 @@
 
   <text x="52" y="204" class="section">1. Platform-project application — platform administrator only</text>
   <rect x="30" y="222" width="1540" height="512" rx="12" class="band"/>
-  <rect x="72" y="245" width="150" height="48" rx="7" class="actor"/><text x="147" y="266" text-anchor="middle" class="label">Doctor applicant</text><text x="147" y="284" text-anchor="middle" class="small">active DOCTOR</text>
-  <rect x="340" y="245" width="160" height="48" rx="7" class="actor"/><text x="420" y="266" text-anchor="middle" class="label">Flutter form</text><text x="420" y="284" text-anchor="middle" class="small">exact body serializer</text>
-  <rect x="650" y="245" width="170" height="48" rx="7" class="api"/><text x="735" y="266" text-anchor="middle" class="label">Management API</text><text x="735" y="284" text-anchor="middle" class="small">/project-requests</text>
-  <rect x="970" y="245" width="170" height="48" rx="7" class="ledger"/><text x="1055" y="266" text-anchor="middle" class="label">Immutable ledger</text><text x="1055" y="284" text-anchor="middle" class="small">request snapshot</text>
+  <rect x="70" y="245" width="150" height="48" rx="7" class="actor"/><text x="145" y="266" text-anchor="middle" class="label">Doctor applicant</text><text x="145" y="284" text-anchor="middle" class="small">active DOCTOR</text>
+  <rect x="315" y="245" width="160" height="48" rx="7" class="actor"/><text x="395" y="266" text-anchor="middle" class="label">Flutter form</text><text x="395" y="284" text-anchor="middle" class="small">exact body serializer</text>
+  <rect x="550" y="245" width="165" height="48" rx="7" class="api"/><text x="633" y="266" text-anchor="middle" class="label">Management API</text><text x="633" y="284" text-anchor="middle" class="small">/project-requests</text>
+  <rect x="810" y="245" width="160" height="48" rx="7" class="ledger"/><text x="890" y="266" text-anchor="middle" class="label">Immutable ledger</text><text x="890" y="284" text-anchor="middle" class="small">request snapshot</text>
+  <rect x="1060" y="245" width="160" height="48" rx="7" class="store"/><text x="1140" y="266" text-anchor="middle" class="label">Projects</text><text x="1140" y="284" text-anchor="middle" class="small">projects table</text>
   <rect x="1300" y="245" width="170" height="48" rx="7" class="actor"/><text x="1385" y="266" text-anchor="middle" class="label">Platform admin</text><text x="1385" y="284" text-anchor="middle" class="small">sole reviewer</text>
-  <g class="line"><line x1="147" y1="293" x2="147" y2="714"/><line x1="420" y1="293" x2="420" y2="714"/><line x1="735" y1="293" x2="735" y2="714"/><line x1="1055" y1="293" x2="1055" y2="714"/><line x1="1385" y1="293" x2="1385" y2="714"/></g>
-  <path d="M147 325 H420" class="arrow"/><text x="284" y="317" text-anchor="middle" class="body">complete platform-project form</text>
-  <path d="M420 370 H735" class="arrow"/><text x="577" y="352" text-anchor="middle" class="label">POST /platform</text><text x="577" y="369" text-anchor="middle" class="small">exact 13-key JSON; no rating, review count, rates, or doctor IDs</text>
-  <path d="M735 420 H1055" class="arrow"/><text x="895" y="411" text-anchor="middle" class="body">validate → INSERT PLATFORM PENDING snapshot</text>
-  <path d="M1055 462 H420" class="return"/><text x="737" y="454" text-anchor="middle" class="body">{ id, requestType: PLATFORM, status: PENDING }</text>
-  <path d="M1385 510 H735" class="arrow"/><text x="1060" y="492" text-anchor="middle" class="label">POST /api/admin/project-requests/{id}/review</text><text x="1060" y="509" text-anchor="middle" class="small">decision APPROVED or REJECTED; rejection note must be non-blank</text>
-  <rect x="620" y="540" width="520" height="134" rx="8" class="tx"/>
-  <text x="640" y="565" class="label">APPROVED — one transaction</text>
-  <path d="M735 592 H1055" class="arrow"/><text x="895" y="584" text-anchor="middle" class="body">lock immutable PENDING request</text>
-  <path d="M735 628 H1055" class="arrow"/><text x="895" y="620" text-anchor="middle" class="body">create projects row: rating = 0, review_count = 0</text>
-  <path d="M735 655 H1055" class="arrow"/><text x="895" y="647" text-anchor="middle" class="body">close APPROVED + resultingProjectId</text>
-  <text x="640" y="700" class="small">REJECTED instead closes only the immutable ledger row; it never creates a project.</text>
+  <g class="line"><line x1="145" y1="293" x2="145" y2="714"/><line x1="395" y1="293" x2="395" y2="714"/><line x1="633" y1="293" x2="633" y2="714"/><line x1="890" y1="293" x2="890" y2="714"/><line x1="1140" y1="293" x2="1140" y2="714"/><line x1="1385" y1="293" x2="1385" y2="714"/></g>
+  <path d="M145 325 H395" class="arrow"/><text x="270" y="317" text-anchor="middle" class="body">complete platform-project form</text>
+  <path d="M395 370 H633" class="arrow"/><text x="514" y="352" text-anchor="middle" class="label">POST /platform</text><text x="514" y="369" text-anchor="middle" class="small">exact 13-key JSON; no rating, review count, rates, or doctor IDs</text>
+  <path d="M633 420 H890" class="arrow"/><text x="762" y="411" text-anchor="middle" class="body">validate → INSERT PLATFORM PENDING snapshot</text>
+  <path d="M890 462 H395" class="return"/><text x="643" y="454" text-anchor="middle" class="body">{ id, requestType: PLATFORM, status: PENDING }</text>
+  <path d="M1385 510 H633" class="arrow"/><text x="1009" y="492" text-anchor="middle" class="label">POST /api/admin/project-requests/{id}/review</text><text x="1009" y="509" text-anchor="middle" class="small">decision APPROVED or REJECTED; rejection note must be non-blank</text>
+  <rect x="520" y="540" width="660" height="134" rx="8" class="tx"/>
+  <text x="540" y="565" class="label">APPROVED — one transaction</text>
+  <path d="M633 592 H890" class="arrow"/><text x="762" y="584" text-anchor="middle" class="body">lock immutable PENDING request</text>
+  <path d="M633 628 H1140" class="arrow"/><text x="887" y="620" text-anchor="middle" class="body">INSERT projects row: rating = 0, review_count = 0</text>
+  <path d="M633 655 H890" class="arrow"/><text x="762" y="647" text-anchor="middle" class="body">close ledger APPROVED + resultingProjectId</text>
+  <text x="540" y="700" class="small">REJECTED instead closes only the immutable ledger row; it never creates a project.</text>
 
   <text x="52" y="776" class="section">2. Institution-project application — target legal representative or administrator</text>
   <rect x="30" y="794" width="1540" height="800" rx="12" class="band"/>

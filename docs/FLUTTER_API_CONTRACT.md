@@ -463,7 +463,7 @@ Flutter 可以完成页面和接口抽象，但生产发布前必须等待支付
 | 机构关系审核 | `GET /management/institution-membership-requests/reviewable`、`POST /management/institution-membership-requests/{requestType}/{id}/review` |
 | 顾问滚动兼容接口 | `GET/POST /management/consultant-memberships`；新 Flutter 不调用，不能作为新关系状态机 |
 | 已认证专业用户只读项目目录 | `GET /management/projects` |
-| 医生项目创建申请 | `GET/POST /management/project-requests`、`POST /management/project-requests/platform`、`POST /management/project-requests/institutions/{institutionId}`、`GET /management/project-requests/institution-form-config`、`POST /management/project-requests/{id}/review`、`GET/POST /admin/project-requests`、`POST /admin/project-requests/{id}/review` |
+| 医生项目创建申请 | `GET /management/project-requests`、`POST /management/project-requests/platform`、`POST /management/project-requests/institutions/{institutionId}`、`GET /management/project-requests/institution-form-config`、`POST /management/project-requests/{id}/review`、`GET /admin/project-requests`、`POST /admin/project-requests/{id}/review` |
 | 专业端兼容只读机构数据（迁移期） | `GET /admin/institutions`、`GET /admin/institutions/{id}`、`GET /admin/institutions/{id}/doctors`、`GET /admin/institutions/{id}/projects`、`GET /admin/institution-projects`；已认证专业用户仅可读 `visibleInstitutionIds` 范围 |
 | 专业端兼容只读项目目录（迁移期） | `GET /admin/projects`；这是不含机构写权限的全局项目目录 |
 | 平台管理员全量机构 CRUD | `GET/POST /admin/institutions`、`GET/PUT/DELETE /admin/institutions/{id}`；其中写操作仅限 `ADMIN`，GET 对专业用户仅提供下行所述对象级兼容读取 |
@@ -584,7 +584,7 @@ Flutter 展示当前机构时必须读取 `/management/context` 的 `doctorInsti
 
 | 方法 | 路径 | 权限与结果 |
 |---|---|---|
-| GET | `/management/projects` | 非管理员且至少拥有一个活跃 `DOCTOR`、`CONSULTANT` 或 `INSTITUTION_LEGAL_REPRESENTATIVE` 身份的只读全局目录；按 `name`、`id` 排序，无查询参数、无写权限 |
+| GET | `/management/projects` | 拥有至少一个活跃 `DOCTOR`、`CONSULTANT` 或 `INSTITUTION_LEGAL_REPRESENTATIVE` 身份的只读全局目录；不因同时具备 `ADMIN` 身份而拒绝，按 `name`、`id` 排序，无查询参数、无写权限 |
 | GET | `/management/project-requests` | 本人申请；机构法人额外可见其当前 `managedInstitutionIds` 内的机构项目申请；平台管理员可见全部 |
 | POST | `/management/project-requests/platform` | 活跃认证医生提交平台项目创建申请；仅平台管理员审核 |
 | POST | `/management/project-requests/institutions/{institutionId}` | 已有目标机构有效已批准执业关系的活跃认证医生提交机构项目创建申请 |
@@ -668,7 +668,7 @@ doctorRate = 100 - platformRate - institutionRate - commissionRate
 
 #### 不可变审核视图与审核决定
 
-`GET /api/management/project-requests` 和 `GET /api/admin/project-requests` 的 `data` 是按提交时保存的不可变 `ProfessionalProjectRequestView` 数组。每个对象完整包含：
+`GET /api/management/project-requests` 和 `GET /api/admin/project-requests` 的 `data` 是 `ProfessionalProjectRequestView` 数组。提交的项目内容、机构覆盖项、价格与申请备注来自请求账本的不可变快照；状态、审核信息、结果 ID 和生命周期时间字段则反映申请后续处理结果。每个对象完整包含：
 
 ```text
 id, requestType, doctorId, doctorName, institutionId, institutionName,
@@ -690,6 +690,8 @@ resultingInstitutionProjectId, submittedAt, updatedAt
   "doctorRate": 60.00
 }
 ```
+
+这里的五个字段不应统称为“不可变 split 快照”：`consultationFee`、`commissionRate`、`institutionRate` 是提交时保存、不可由审核人编辑的申请快照；`platformRate` 是列表读取时从当前服务端策略取得的比例，`doctorRate` 在该次读取时按当前 `platformRate` 和上述三个已提交比例重新推导。平台策略变化时，同一申请在列表中可显示新的平台率和医生净比例；批准前服务端仍会按当前平台率再次校验，若方案不再有效则返回 409，账本申请保持未处理且不会产生部分目标记录。
 
 列表中的申请快照不允许审核人修改。创建申请审核 body 使用 `decision` 和 `reviewNote`：`decision` 只允许 `APPROVED`、`REJECTED`，`REJECTED` 的去除首尾空白后的 `reviewNote` 必须非空；`APPROVED` 的备注可为空。创建申请的新状态仅为 `PENDING`、`APPROVED`、`REJECTED`。这不会改变 11.1 的 `JOIN` 决策，也不会移除 `PROFILE_UPDATE` 的既有 `CHANGES_REQUESTED`；数据库只为历史创建申请可读性保留 legacy `CHANGES_REQUESTED`，新 API 不会创建或提供该审核动作。
 
@@ -719,7 +721,7 @@ resultingInstitutionProjectId, submittedAt, updatedAt
 - 法人机构档案响应中的 `id`、`createdAt`、`updatedAt`、`rating`、`reviewCount`、`isVerified`、`certificationTime`、`projectCount`、`doctorCount`、`consultationCount`、`userCount`、`caseCount` 是只读字段。`credentialImages` 是机构自行上传的公开展示材料，UI 不得暗示这些图片已经由平台核验。
 - 法人可审核本机构的成员关系和机构项目申请；不能编辑医生档案，也不能绕过项目申请/审核流程直接创建、修改或删除机构项目。旧专业端 `/admin/institutions/{id}` PUT 已移除；`POST/PUT/DELETE /api/admin/institutions...` 等机构写操作及平台全量 CRUD 始终仅限 `ADMIN`。上表列出的机构范围 GET 旧读路径仅在后续切换完成前向已认证专业用户兼容，并由服务端按 `visibleInstitutionIds` 做对象级只读过滤；`GET /admin/projects` 则只提供全局项目目录。所有兼容 GET 均不授予任何写权限。
 - 医生和顾问机构关系统一遵循 11.1 的独立申请账本契约；两种身份都可提交 `JOIN`/`LEAVE` 并撤回本人 `PENDING`，法人从 `/reviewable` 审核本机构申请。旧顾问接口只承担滚动兼容，已处理申请不会被重提覆盖。
-- Flutter 专业项目选择统一使用 `GET /management/projects`，不得继续调用 `/admin/projects`。该目录只允许拥有至少一个活跃 `DOCTOR`、`CONSULTANT` 或 `INSTITUTION_LEGAL_REPRESENTATIVE` 身份且不是平台管理员的用户访问，返回全局只读数组，按 `name`、`id` 排序。每项固定包含 `id`、`name`、`category`、`description`、`tags`、`categoryTags`、`coverImage`、`referencePrice`、`currency`；不接受查询参数，也不授予任何项目写能力。
+- Flutter 专业项目选择统一使用 `GET /management/projects`，不得继续调用 `/admin/projects`。该目录只检查用户是否拥有至少一个活跃 `DOCTOR`、`CONSULTANT` 或 `INSTITUTION_LEGAL_REPRESENTATIVE` 身份；同时具有 `ADMIN` 身份不会改变该授权结果。它返回全局只读数组，按 `name`、`id` 排序。每项完整固定包含 13 个字段：`id`、`name`、`category`、`description`、`tags`、`categoryTags`、`coverImage`、`referencePrice`、`currency`、`slogan`、`detailContent`、`images`、`salesCount`；不接受查询参数，也不授予任何项目写能力。
 - `POST /admin/institution-project-requests` 的 `PROFILE_UPDATE` 是医生修改本人医生级项目资料、价格、面诊费和分账的唯一生效前申请入口。Flutter 请求 VO 必须精确包含 12 个键：`institutionProjectId`、固定值 `requestType: PROFILE_UPDATE`、`serviceDescription`、`priceSuggestion`、`notes`、`serviceTags`、`scheduleNote`、`coverImage`、`images`、`consultationFee`、`commissionRate`、`institutionRate`；其中 `serviceTags`、`images` 是 JSON 字符串数组，不能发送 `doctorId`、`platformRate`、`doctorRate` 或基线字段。
 - `GET /admin/institution-project-requests/profile-update-targets` 是表单唯一的当前值来源，只返回已认证医生本人仍有效的医生—机构项目。响应是数组，每项 `DoctorProjectProfileUpdateTargetView` 精确包含：`institutionProjectId`、`projectName`、`institutionId`、`institutionName`、`currentPrice`、`serviceDescription`、`serviceTags`、`scheduleNote`、`coverImage`、`images`、`consultationFee`、`commissionRate`、`institutionRate`、`platformRate`、`doctorRate`。15 个字段全部非 null；无有效配置时返回面诊费 0、顾问率 0、策略默认机构率以及当前平台率和推导医生率。Flutter 不得用机构项目价或本地默认比例伪造基线。
 - `serviceDescription` 非空且最长 5000；`notes`/`scheduleNote`/`coverImage` 最长分别为 2000/500/500；两个数组各最多 20 项，标签每项非空且最长 100，图片每项最长 500。`priceSuggestion`、`consultationFee` 为 `0..99999999.99` 的最多两位小数；`commissionRate`（兼容字段名，语义为顾问率）和 `institutionRate`（机构率）均为 `0..100` 的最多两位小数。
