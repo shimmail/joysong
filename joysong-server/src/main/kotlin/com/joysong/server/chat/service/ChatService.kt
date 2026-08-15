@@ -620,7 +620,7 @@ class ChatService(
             (
                 listOf(catalogSearchQuery) +
                     currentContextItems.map { it.name } +
-                    previousComparison?.takeUnless { it.isComplete }?.operands.orEmpty().map { it.displayName }
+                    previousComparison?.operands.orEmpty().map { it.displayName }
                 )
                 .filter(String::isNotBlank)
                 .distinct()

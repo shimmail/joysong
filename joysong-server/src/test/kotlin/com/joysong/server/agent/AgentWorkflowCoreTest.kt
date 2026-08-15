@@ -502,6 +502,94 @@ class AgentWorkflowCoreTest {
     }
 
     @Test
+    fun `operand free comparison restores complete request after operand names leave query window`() {
+        val content = "Compare those clinics again"
+        val priorUser = message(1, "USER", "Compare Alpha Clinic and Beta Clinic")
+        val assistant = message(2, "ASSISTANT", "prior comparison")
+        val interveningUsers = (3L..7L).map { sequenceNo ->
+            message(sequenceNo, "USER", "Unrelated follow-up $sequenceNo")
+        }
+        val previous = ComparisonRequest(
+            operands = listOf(
+                ComparisonOperand(AgentQueryTarget.INSTITUTION, "alpha", "Alpha Clinic"),
+                ComparisonOperand(AgentQueryTarget.INSTITUTION, "beta", "Beta Clinic")
+            ),
+            targetType = AgentQueryTarget.INSTITUTION
+        )
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
+        val completed = slot<CompleteTurnCommand>()
+        val searchQuery = slot<String>()
+        val targetQuery = slot<String>()
+        val filteredEvidence = slot<AgentPromptEvidence>()
+        val filteredRequest = slot<ComparisonRequest>()
+        val alpha = comparisonItem("alpha", "Alpha Clinic")
+        val beta = comparisonItem("beta", "Beta Clinic")
+        val rawEvidence = comparisonEvidence(alpha, beta)
+        val realFilter = comparisonFilter()
+        val contextualUserQueries = interveningUsers.takeLast(4).map { it.content }
+        prepareChatGeneration(fixture, content)
+        every { fixture.contextBuilder.load("user-1", "session-1", 20, 4_000) } returns
+            AgentContext(AgentSessionSummary(), listOf(priorUser, assistant) + interveningUsers)
+        every { fixture.turnService.projectMessage(assistant) } returns AgentMessageProjection(
+            message = assistant,
+            intent = "COMPARISON",
+            queryTarget = "INSTITUTION",
+            nextAction = "SHOW_CATALOG",
+            comparisonRequest = previous
+        )
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "answer")
+        )
+        every { catalog.hasInstitutionProjectMatch(content) } returns false
+        every { catalog.contextualSearchQuery(content, contextualUserQueries) } returns content
+        every {
+            catalog.promptEvidence(
+                content,
+                capture(searchQuery),
+                capture(targetQuery),
+                AgentQueryTarget.INSTITUTION,
+                "COMPARISON"
+            )
+        } answers {
+            if (secondArg<String>().contains(alpha.name) && secondArg<String>().contains(beta.name)) {
+                rawEvidence
+            } else {
+                comparisonEvidence()
+            }
+        }
+        every {
+            catalog.filterComparisonEvidence(capture(filteredEvidence), capture(filteredRequest))
+        } answers {
+            realFilter.filterComparisonEvidence(firstArg(), secondArg())
+        }
+        completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andExpect(content().string(containsString("Alpha Clinic")))
+            .andExpect(content().string(containsString("Beta Clinic")))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"answer"}}]}""", MediaType.APPLICATION_JSON))
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("$content Alpha Clinic Beta Clinic", searchQuery.captured)
+        assertEquals(searchQuery.captured, targetQuery.captured)
+        assertEquals(rawEvidence, filteredEvidence.captured)
+        assertEquals(listOf("alpha", "beta"), filteredRequest.captured.operands.map { it.entityId })
+        assertEquals(listOf("alpha", "beta"), completed.captured.comparisonRequest?.operands?.map { it.entityId })
+        assertEquals(listOf("alpha", "beta"), completed.captured.catalogReport?.items?.map { it.id })
+        verify(exactly = 1) {
+            catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.INSTITUTION, "COMPARISON")
+        }
+        verify(exactly = 1) { catalog.filterComparisonEvidence(any(), any()) }
+        verify(exactly = 1) { fixture.turnService.projectMessage(assistant) }
+        intentServer.verify()
+        completionServer.verify()
+    }
+
+    @Test
     fun `one current operand does not extend a complete previous request`() {
         val content = "Compare Gamma Clinic with clinics"
         val assistant = message(2, "ASSISTANT", "prior comparison")
@@ -519,7 +607,11 @@ class AgentWorkflowCoreTest {
         val catalog = mockk<AgentCatalogService>()
         val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
         val completed = slot<CompleteTurnCommand>()
-        val rawEvidence = comparisonEvidence(comparisonItem("gamma", "Gamma Clinic"))
+        val rawEvidence = comparisonEvidence(
+            comparisonItem("alpha", "Alpha Clinic"),
+            comparisonItem("beta", "Beta Clinic"),
+            comparisonItem("gamma", "Gamma Clinic")
+        )
         prepareChatGeneration(fixture, content)
         every { fixture.contextBuilder.load("user-1", "session-1", 20, 4_000) } returns
             AgentContext(AgentSessionSummary(), listOf(assistant))
@@ -534,7 +626,13 @@ class AgentWorkflowCoreTest {
         every { catalog.hasInstitutionProjectMatch(content) } returns false
         every { catalog.contextualSearchQuery(content, emptyList()) } returns content
         every {
-            catalog.promptEvidence(content, content, content, AgentQueryTarget.INSTITUTION, "COMPARISON")
+            catalog.promptEvidence(
+                content,
+                "$content Alpha Clinic Beta Clinic",
+                "$content Alpha Clinic Beta Clinic",
+                AgentQueryTarget.INSTITUTION,
+                "COMPARISON"
+            )
         } returns rawEvidence
 
         fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
