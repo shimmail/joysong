@@ -5,16 +5,19 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.joysong.server.common.money.CurrencyCode
 import com.joysong.server.config.OrderSplitProperties
+import com.joysong.server.identity.service.InstitutionRelationshipReviewAuthorityOperations
 import com.joysong.server.identity.service.ManagementActor
 import com.joysong.server.order.service.OrderSplitRatePolicy
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import io.mockk.verifyOrder
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
+import org.springframework.cache.CacheManager
 import org.springframework.security.access.AccessDeniedException
 import java.math.BigDecimal
 import java.sql.ResultSet
@@ -27,7 +30,15 @@ class ProfessionalProjectRequestServiceTest {
     private val splitRatePolicy = OrderSplitRatePolicy(OrderSplitProperties().apply {
         platformRate = BigDecimal("40.00")
     })
-    private val service = ProfessionalProjectRequestService(jdbcTemplate, objectMapper, splitRatePolicy)
+    private val reviewAuthority = mockk<InstitutionRelationshipReviewAuthorityOperations>(relaxed = true)
+    private val cacheManager = mockk<CacheManager>(relaxed = true)
+    private val service = ProfessionalProjectRequestService(
+        jdbcTemplate,
+        objectMapper,
+        splitRatePolicy,
+        reviewAuthority,
+        cacheManager
+    )
 
     @Test
     fun `platform submission persists a complete trimmed immutable snapshot`() {
@@ -383,22 +394,98 @@ class ProfessionalProjectRequestServiceTest {
     }
 
     @Test
-    fun `rejected and changes requested decisions require review note before database access`() {
-        listOf("REJECTED", "CHANGES_REQUESTED").forEach { decision ->
-            val error = assertThrows<IllegalArgumentException> {
-                service.reviewPlatform(adminActor(), "request-1", ProjectRequestReview(decision, "  "))
-            }
-            assertEquals("拒绝或要求修改时必须填写审核意见", error.message)
+    fun `rejected decision requires review note before database access`() {
+        val error = assertThrows<IllegalArgumentException> {
+            service.reviewPlatform(adminActor(), "request-1", ProjectRequestReview("REJECTED", "  "))
         }
+        assertEquals("拒绝时必须填写审核意见", error.message)
         verify(exactly = 0) { jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) }
     }
 
     @Test
-    fun `institution reviewer cannot review another institution request`() {
+    fun `changes requested is rejected before database access even with a note`() {
+        val error = assertThrows<IllegalArgumentException> {
+            service.reviewPlatform(
+                adminActor(),
+                "request-1",
+                ProjectRequestReview("CHANGES_REQUESTED", "Please revise")
+            )
+        }
+
+        assertEquals("审核决定不正确", error.message)
+        verify(exactly = 0) { jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) }
+    }
+
+    @Test
+    fun `platform approval writes the complete immutable snapshot with zero rating and reviews`() {
         every { jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) } answers {
             val mapper = secondArg<RowMapper<Any>>()
-            listOf(mapper.mapRow(targetResultSet("INSTITUTION", "institution-2"), 0))
+            listOf(mapper.mapRow(targetResultSet("PLATFORM", null), 0))
         }
+        every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 1
+
+        service.reviewPlatform(adminActor(), "request-1", ProjectRequestReview("APPROVED"))
+
+        verify(exactly = 1) {
+            jdbcTemplate.update(
+                match<String> {
+                    it.contains("INSERT INTO projects") &&
+                        it.contains("rating") && it.contains("review_count") &&
+                        it.contains("reference_price") && it.contains("category_tags")
+                },
+                any(), "Project", "Category", "Service", "tag", "category-tag", "cover.png", "one.png",
+                BigDecimal("199.00"), "USD", "Slogan", "Service details",
+                BigDecimal.ZERO, 0, 1
+            )
+        }
+    }
+
+    @Test
+    fun `institution approval writes the complete target snapshot binding and split config`() {
+        stubLockedRequest(targetResultSet("INSTITUTION", "institution-1"))
+        stubInstitutionLock(found = true)
+        stubRelationshipLock(found = true)
+        stubCurrentProject(found = true)
+        stubInstitutionProjectLookup(found = false)
+        every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 1
+
+        service.reviewInstitution(adminActor(), "request-1", ProjectRequestReview("APPROVED"))
+
+        verify(exactly = 1) {
+            jdbcTemplate.update(
+                match<String> {
+                    it.contains("INSERT INTO institution_projects") &&
+                        it.contains("rating") && it.contains("review_count") && it.contains("is_active")
+                },
+                any(), "institution-1", "project-1", "Project", "Category", "Service",
+                BigDecimal.ZERO, 0, "tag", "Slogan", "Service details", BigDecimal("99.00"),
+                null, "USD", "cover.png", "one.png", 1, true
+            )
+        }
+        verify(exactly = 1) {
+            jdbcTemplate.update(
+                match<String> {
+                    it.contains("INSERT INTO doctor_projects") && it.contains("service_tags") &&
+                        it.contains("cover_image") && it.contains("images")
+                },
+                "doctor-1", "project-1", any(), "Service", "tag", "", "cover.png", "one.png",
+                BigDecimal("99.00")
+            )
+        }
+        verify(exactly = 1) {
+            jdbcTemplate.update(
+                match<String> { it.contains("INSERT INTO doctor_institution_project_configs") },
+                any(), "doctor-1", any(), BigDecimal("10.00"), BigDecimal("20.00"), BigDecimal("30.00")
+            )
+        }
+    }
+
+    @Test
+    fun `institution reviewer cannot review another institution request`() {
+        stubLockedRequest(targetResultSet("INSTITUTION", "institution-2"))
+        every {
+            reviewAuthority.requireCurrentAuthority(any(), "institution-2")
+        } throws AccessDeniedException("无权审核其他机构的关系申请")
 
         val error = assertThrows<AccessDeniedException> {
             service.reviewInstitution(
@@ -408,30 +495,173 @@ class ProfessionalProjectRequestServiceTest {
             )
         }
 
-        assertEquals("只能审核本机构的项目申请", error.message)
+        assertEquals("无权审核其他机构的关系申请", error.message)
         verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
     }
 
     @Test
-    fun `institution approval creates institution project binds doctor and closes request`() {
-        every { jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) } answers {
-            val mapper = secondArg<RowMapper<Any>>()
-            listOf(mapper.mapRow(targetResultSet("INSTITUTION", "institution-1"), 0))
+    fun `platform review checks administrator after locking the pending request`() {
+        stubLockedRequest(targetResultSet("PLATFORM", null))
+
+        val error = assertThrows<AccessDeniedException> {
+            service.reviewPlatform(doctorActor(), "request-1", ProjectRequestReview("APPROVED"))
         }
-        every { jdbcTemplate.queryForObject(any<String>(), Long::class.java, *anyVararg()) } answers {
-            if (firstArg<String>().contains("institution_projects")) 0L else 1L
-        }
-        every {
-            jdbcTemplate.queryForObject(
-                match<String> { it.contains("FROM institutions") && it.contains("FOR UPDATE") },
-                String::class.java,
-                "institution-1"
+
+        assertEquals("该操作仅限平台管理员", error.message)
+        verify(exactly = 1) {
+            jdbcTemplate.query(
+                match<String> { it.contains("professional_project_requests") && it.contains("FOR UPDATE") },
+                any<RowMapper<Any>>(),
+                "request-1"
             )
-        } returns "institution-1"
+        }
+        verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
+    }
+
+    @Test
+    fun `current target institution authority is checked after locking pending request`() {
+        stubLockedRequest(targetResultSet("INSTITUTION", "institution-1"))
+        every { jdbcTemplate.update(match<String> { it.contains("UPDATE professional_project_requests") }, *anyVararg()) } returns 1
+
+        val actor = legalRepresentativeActor(emptySet())
+        val result = service.reviewInstitution(actor, "request-1", ProjectRequestReview("REJECTED", "Not eligible"))
+
+        assertEquals("REJECTED", result.status)
+        verifyOrder {
+            jdbcTemplate.query(
+                match<String> { it.contains("professional_project_requests") && it.contains("FOR UPDATE") },
+                any<RowMapper<Any>>(),
+                "request-1"
+            )
+            reviewAuthority.requireCurrentAuthority(actor, "institution-1")
+        }
+        verify(exactly = 0) { cacheManager.getCache(any()) }
+    }
+
+    @Test
+    fun `approved review accepts an omitted note`() {
+        stubLockedRequest(targetResultSet("PLATFORM", null))
         every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 1
 
+        val result = service.reviewPlatform(adminActor(), "request-1", ProjectRequestReview("APPROVED"))
+
+        assertEquals("APPROVED", result.status)
+        verify {
+            jdbcTemplate.update(
+                match<String> { it.contains("UPDATE professional_project_requests") },
+                "APPROVED", null, "admin-1", any(), null, "request-1"
+            )
+        }
+    }
+
+    @Test
+    fun `processed request produces conflict before target writes`() {
+        stubLockedRequest(targetResultSet("PLATFORM", null, status = "APPROVED"))
+
+        val error = assertThrows<ProfessionalProjectRequestConflictException> {
+            service.reviewPlatform(adminActor(), "request-1", ProjectRequestReview("APPROVED"))
+        }
+
+        assertEquals("项目申请已处理", error.message)
+        verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
+    }
+
+    @Test
+    fun `concurrent compare and set loss produces conflict`() {
+        stubLockedRequest(targetResultSet("PLATFORM", null))
+        every { jdbcTemplate.update(match<String> { it.contains("INSERT INTO projects") }, *anyVararg()) } returns 1
+        every { jdbcTemplate.update(match<String> { it.contains("UPDATE professional_project_requests") }, *anyVararg()) } returns 0
+
+        val error = assertThrows<ProfessionalProjectRequestConflictException> {
+            service.reviewPlatform(adminActor(), "request-1", ProjectRequestReview("APPROVED"))
+        }
+
+        assertEquals("项目申请已被其他审核人处理", error.message)
+    }
+
+    @Test
+    fun `vanished institution produces not found before target writes`() {
+        stubLockedRequest(targetResultSet("INSTITUTION", "institution-1"))
+        stubInstitutionLock(found = false)
+
+        assertThrows<ProfessionalProjectRequestNotFoundException> {
+            service.reviewInstitution(adminActor(), "request-1", ProjectRequestReview("APPROVED"))
+        }
+        verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
+    }
+
+    @Test
+    fun `inactive applicant relationship produces conflict before target writes`() {
+        stubLockedRequest(targetResultSet("INSTITUTION", "institution-1"))
+        stubInstitutionLock(found = true)
+        stubRelationshipLock(found = false)
+
+        val error = assertThrows<ProfessionalProjectRequestConflictException> {
+            service.reviewInstitution(adminActor(), "request-1", ProjectRequestReview("APPROVED"))
+        }
+
+        assertEquals("医生已不具备该机构的有效执业关系", error.message)
+        verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
+    }
+
+    @Test
+    fun `vanished platform project produces not found before target writes`() {
+        stubLockedRequest(targetResultSet("INSTITUTION", "institution-1"))
+        stubInstitutionLock(found = true)
+        stubRelationshipLock(found = true)
+        stubCurrentProject(found = false)
+
+        assertThrows<ProfessionalProjectRequestNotFoundException> {
+            service.reviewInstitution(adminActor(), "request-1", ProjectRequestReview("APPROVED"))
+        }
+        verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
+    }
+
+    @Test
+    fun `duplicate institution target produces conflict before writes`() {
+        stubLockedRequest(targetResultSet("INSTITUTION", "institution-1"))
+        stubInstitutionLock(found = true)
+        stubRelationshipLock(found = true)
+        stubCurrentProject(found = true)
+        stubInstitutionProjectLookup(found = true)
+
+        val error = assertThrows<ProfessionalProjectRequestConflictException> {
+            service.reviewInstitution(adminActor(), "request-1", ProjectRequestReview("APPROVED"))
+        }
+
+        assertEquals("该机构已存在此平台项目，请改为申请加入机构项目", error.message)
+        verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
+    }
+
+    @Test
+    fun `platform rate drift produces conflict before writes`() {
+        stubLockedRequest(targetResultSet("INSTITUTION", "institution-1", driftedSplit = true))
+        stubInstitutionLock(found = true)
+        stubRelationshipLock(found = true)
+        stubCurrentProject(found = true)
+        stubInstitutionProjectLookup(found = false)
+
+        val error = assertThrows<ProfessionalProjectRequestConflictException> {
+            service.reviewInstitution(adminActor(), "request-1", ProjectRequestReview("APPROVED"))
+        }
+
+        assertEquals("申请分账比例与当前平台规则冲突", error.message)
+        verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
+        verify(exactly = 0) { cacheManager.getCache(any()) }
+    }
+
+    @Test
+    fun `institution approval creates institution project binds doctor and closes request`() {
+        stubLockedRequest(targetResultSet("INSTITUTION", "institution-1"))
+        stubInstitutionLock(found = true)
+        stubRelationshipLock(found = true)
+        stubCurrentProject(found = true)
+        stubInstitutionProjectLookup(found = false)
+        every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 1
+
+        val actor = legalRepresentativeActor(setOf("institution-1"))
         val result = service.reviewInstitution(
-            legalRepresentativeActor(setOf("institution-1")),
+            actor,
             "request-1",
             ProjectRequestReview("APPROVED")
         )
@@ -443,49 +673,97 @@ class ProfessionalProjectRequestServiceTest {
         verify(exactly = 1) {
             jdbcTemplate.update(
                 match<String> { it.contains("INSERT INTO doctor_projects") && it.contains("price") },
-                "doctor-1", "project-1", any(), "Service", "", BigDecimal("99.00")
+                "doctor-1", "project-1", any(), "Service", "tag", "", "cover.png", "one.png", BigDecimal("99.00")
             )
         }
         verify(exactly = 1) {
-            jdbcTemplate.queryForObject(
-                match<String> { it.contains("FROM institutions") && it.contains("FOR UPDATE") },
-                String::class.java,
-                "institution-1"
-            )
+            reviewAuthority.requireCurrentAuthority(actor, "institution-1")
         }
         verify(exactly = 1) {
             jdbcTemplate.update(match<String> { it.contains("UPDATE professional_project_requests") }, *anyVararg())
         }
     }
 
-    @Test
-    fun `institution approval revalidates current doctor membership`() {
-        every { jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) } answers {
-            val mapper = secondArg<RowMapper<Any>>()
-            listOf(mapper.mapRow(targetResultSet("INSTITUTION", "institution-1"), 0))
-        }
+    private fun stubLockedRequest(row: ResultSet) {
         every {
-            jdbcTemplate.queryForObject(
-                match<String> { it.contains("FROM institutions") && it.contains("FOR UPDATE") },
-                String::class.java,
-                "institution-1"
+            jdbcTemplate.query(
+                match<String> { it.contains("professional_project_requests") && it.contains("FOR UPDATE") },
+                any<RowMapper<Any>>(),
+                *anyVararg()
             )
-        } returns "institution-1"
-        every { jdbcTemplate.queryForObject(match<String> { it.contains("doctor_institutions") }, Long::class.java, *anyVararg()) } returns 0L
-
-        val error = assertThrows<IllegalArgumentException> {
-            service.reviewInstitution(
-                legalRepresentativeActor(setOf("institution-1")),
-                "request-1",
-                ProjectRequestReview("APPROVED")
-            )
+        } answers {
+            val mapper = secondArg<RowMapper<Any>>()
+            listOf(mapper.mapRow(row, 0))
         }
-
-        assertEquals("医生已不具备该机构的有效执业关系", error.message)
-        verify(exactly = 0) { jdbcTemplate.update(match<String> { it.contains("INSERT INTO institution_projects") }, *anyVararg()) }
     }
 
-    private fun targetResultSet(type: String, institutionId: String?): ResultSet = mockk<ResultSet>(relaxed = true).also { rs ->
+    private fun stubInstitutionLock(found: Boolean) {
+        every {
+            jdbcTemplate.queryForList(
+                match<String> { it.contains("FROM institutions") && it.contains("FOR UPDATE") },
+                String::class.java,
+                *anyVararg()
+            )
+        } returns if (found) listOf("institution-1") else emptyList()
+    }
+
+    private fun stubRelationshipLock(found: Boolean) {
+        every {
+            jdbcTemplate.queryForList(
+                match<String> { it.contains("FROM doctor_institutions") && it.contains("FOR UPDATE") },
+                String::class.java,
+                *anyVararg()
+            )
+        } returns if (found) listOf("relationship-1") else emptyList()
+    }
+
+    private fun stubCurrentProject(found: Boolean) {
+        every {
+            jdbcTemplate.query(
+                match<String> { it.contains("FROM projects") && it.contains("FOR UPDATE") },
+                any<RowMapper<Any>>(),
+                *anyVararg()
+            )
+        } answers {
+            if (!found) emptyList() else {
+                val mapper = secondArg<RowMapper<Any>>()
+                listOf(mapper.mapRow(platformProjectResultSet(), 0))
+            }
+        }
+    }
+
+    private fun stubInstitutionProjectLookup(found: Boolean) {
+        every {
+            jdbcTemplate.queryForList(
+                match<String> { it.contains("FROM institution_projects") },
+                String::class.java,
+                *anyVararg()
+            )
+        } returns if (found) listOf("institution-project-1") else emptyList()
+    }
+
+    private fun platformProjectResultSet(): ResultSet = mockk<ResultSet>(relaxed = true).also { rs ->
+        every { rs.getString("id") } returns "project-1"
+        every { rs.getString("name") } returns "Base Project"
+        every { rs.getString("category") } returns "Base Category"
+        every { rs.getString("description") } returns "Base Description"
+        every { rs.getString("tags") } returns "base-tag"
+        every { rs.getString("category_tags") } returns "base-category"
+        every { rs.getString("cover_image") } returns "base-cover.png"
+        every { rs.getString("images") } returns "base-one.png,base-two.png"
+        every { rs.getBigDecimal("reference_price") } returns BigDecimal("199.00")
+        every { rs.getString("currency") } returns "CNY"
+        every { rs.getString("slogan") } returns "Base Slogan"
+        every { rs.getString("detail_content") } returns "Base details"
+        every { rs.getInt("sales_count") } returns 5
+    }
+
+    private fun targetResultSet(
+        type: String,
+        institutionId: String?,
+        status: String = "PENDING",
+        driftedSplit: Boolean = false
+    ): ResultSet = mockk<ResultSet>(relaxed = true).also { rs ->
         every { rs.getString("id") } returns "request-1"
         every { rs.getString("request_type") } returns type
         every { rs.getString("doctor_id") } returns "doctor-1"
@@ -501,15 +779,17 @@ class ProfessionalProjectRequestServiceTest {
         every { rs.getString("cover_image") } returns "cover.png"
         every { rs.getString("images") } returns "[\"one.png\"]"
         every { rs.getInt("sales_count") } returns 1
-        every { rs.getString("category_tags") } returns null
+        every { rs.getBigDecimal("reference_price") } returns BigDecimal("199.00")
+        every { rs.getString("category_tags") } returns "[\"category-tag\"]"
         every { rs.getBigDecimal("price") } returns BigDecimal("99.00")
+        every { rs.getBigDecimal("original_price") } returns null
         every { rs.getBoolean("is_active") } returns true
         every { rs.getObject("is_active") } returns true
         every { rs.getBigDecimal("consultation_fee") } returns BigDecimal("10.00")
-        every { rs.getBigDecimal("commission_rate") } returns BigDecimal("20.00")
+        every { rs.getBigDecimal("commission_rate") } returns BigDecimal(if (driftedSplit) "40.00" else "20.00")
         every { rs.getBigDecimal("institution_rate") } returns BigDecimal("30.00")
         every { rs.getString("notes") } returns "Notes"
-        every { rs.getString("status") } returns "PENDING"
+        every { rs.getString("status") } returns status
     }
 
     private fun stubListRows(vararg rows: ResultSet) {

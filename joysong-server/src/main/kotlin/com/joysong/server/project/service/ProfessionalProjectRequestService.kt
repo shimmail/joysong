@@ -5,18 +5,22 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.joysong.server.common.money.CurrencyCode
+import com.joysong.server.identity.service.InstitutionRelationshipReviewAuthorityOperations
 import com.joysong.server.identity.service.ManagementActor
 import com.joysong.server.order.service.OrderSplitRatePolicy
+import org.springframework.cache.CacheManager
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.security.access.AccessDeniedException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionSynchronization
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.math.BigDecimal
 import java.time.LocalDateTime
 import java.util.UUID
 
-private val PROJECT_REQUEST_DECISIONS = setOf("APPROVED", "REJECTED", "CHANGES_REQUESTED")
+private val PROJECT_REQUEST_DECISIONS = setOf("APPROVED", "REJECTED")
 private val MAX_PROJECT_REQUEST_MONEY = BigDecimal("99999999.99")
 private val HUNDRED_PERCENT = BigDecimal("100.00")
 
@@ -37,7 +41,9 @@ private const val MAX_ENCODED_LIST_LENGTH = 20_000
 class ProfessionalProjectRequestService(
     private val jdbcTemplate: JdbcTemplate,
     private val objectMapper: ObjectMapper,
-    private val splitRatePolicy: OrderSplitRatePolicy
+    private val splitRatePolicy: OrderSplitRatePolicy,
+    private val reviewAuthority: InstitutionRelationshipReviewAuthorityOperations,
+    private val cacheManager: CacheManager
 ) {
     @Transactional
     fun submitPlatform(
@@ -274,8 +280,8 @@ class ProfessionalProjectRequestService(
         id: String,
         review: ProjectRequestReview
     ): ProjectRequestReviewResult {
-        if (!actor.isAdmin) throw AccessDeniedException("该操作仅限平台管理员")
-        return review(actor, id, review, "PLATFORM")
+        val normalizedReview = normalizeReview(review)
+        return review(actor, id, normalizedReview, "PLATFORM")
     }
 
     @Transactional
@@ -283,36 +289,44 @@ class ProfessionalProjectRequestService(
         actor: ManagementActor,
         id: String,
         review: ProjectRequestReview
-    ): ProjectRequestReviewResult = review(actor, id, review, "INSTITUTION")
+    ): ProjectRequestReviewResult = review(actor, id, normalizeReview(review), "INSTITUTION")
 
     private fun review(
         actor: ManagementActor,
         id: String,
-        review: ProjectRequestReview,
+        review: NormalizedProjectRequestReview,
         expectedType: String
     ): ProjectRequestReviewResult {
-        val decision = review.decision.trim().uppercase()
-        require(decision in PROJECT_REQUEST_DECISIONS) { "审核决定不正确" }
-        val reviewNote = review.reviewNote.trim().takeIf(String::isNotEmpty)
-        require(decision == "APPROVED" || reviewNote != null) { "拒绝或要求修改时必须填写审核意见" }
-
         val target = lockedTarget(required(id, "申请不能为空"))
-            ?: throw IllegalArgumentException("项目申请不存在")
+            ?: throw ProfessionalProjectRequestNotFoundException("项目申请不存在")
         require(target.requestType == expectedType) { "项目申请类型不正确" }
-        require(target.status == "PENDING") { "项目申请已处理" }
-        if (expectedType == "INSTITUTION" && !actor.isAdmin && target.institutionId !in actor.managedInstitutionIds) {
-            throw AccessDeniedException("只能审核本机构的项目申请")
+        if (target.status != "PENDING") {
+            throw ProfessionalProjectRequestConflictException("项目申请已处理")
+        }
+        if (expectedType == "PLATFORM" && !actor.isAdmin) {
+            throw AccessDeniedException("该操作仅限平台管理员")
+        }
+        if (expectedType == "INSTITUTION" && !actor.isAdmin) {
+            reviewAuthority.requireCurrentAuthority(actor, requireNotNull(target.institutionId))
         }
 
         var resultingProjectId: String? = null
         var resultingInstitutionProjectId: String? = null
-        if (decision == "APPROVED") {
+        if (review.decision == "APPROVED") {
             if (expectedType == "PLATFORM") {
                 resultingProjectId = createProject(target)
             } else {
-                lockInstitution(requireNotNull(target.institutionId))
-                validateInstitutionApproval(target)
-                resultingInstitutionProjectId = createInstitutionProject(target)
+                val institutionId = requireNotNull(target.institutionId)
+                lockInstitution(institutionId)
+                lockActiveApplicantRelationship(target.doctorId, institutionId)
+                val platformProject = lockPlatformProject(requireNotNull(target.projectId))
+                requireNoInstitutionProject(institutionId, platformProject.id)
+                revalidateInstitutionApproval(target)
+                resultingInstitutionProjectId = try {
+                    createInstitutionProject(target, platformProject)
+                } catch (_: DuplicateKeyException) {
+                    throw ProfessionalProjectRequestConflictException("该机构已存在此平台项目，请改为申请加入机构项目")
+                }
             }
         }
         val updated = jdbcTemplate.update(
@@ -322,71 +336,208 @@ class ProfessionalProjectRequestService(
                 resulting_project_id = ?, resulting_institution_project_id = ?
             WHERE id = ? AND status = 'PENDING'
             """.trimIndent(),
-            decision, reviewNote, actor.userId, resultingProjectId, resultingInstitutionProjectId, target.id
+            review.decision, review.reviewNote, actor.userId,
+            resultingProjectId, resultingInstitutionProjectId, target.id
         )
-        check(updated == 1) { "项目申请已被其他审核人处理" }
-        return ProjectRequestReviewResult(target.id, decision, resultingProjectId, resultingInstitutionProjectId)
+        if (updated != 1) {
+            throw ProfessionalProjectRequestConflictException("项目申请已被其他审核人处理")
+        }
+        if (review.decision == "APPROVED") evictProjectCatalogCachesAfterCommit()
+        return ProjectRequestReviewResult(target.id, review.decision, resultingProjectId, resultingInstitutionProjectId)
     }
 
     private fun createProject(target: ProjectRequestTarget): String {
+        requireMoney("参考价格", requireNotNull(target.referencePrice))
+        requireCount("销量", target.salesCount)
         val projectId = UUID.randomUUID().toString()
         jdbcTemplate.update(
-            "INSERT INTO projects (id, name, category, description) VALUES (?, ?, ?, ?)",
-            projectId, target.name, target.category, target.description
+            """
+            INSERT INTO projects
+                (id, name, category, description, tags, category_tags, cover_image, images,
+                 reference_price, currency, slogan, detail_content, rating, review_count, sales_count)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """.trimIndent(),
+            projectId,
+            requireNotNull(target.name),
+            requireNotNull(target.category),
+            requireNotNull(target.description),
+            toTargetList(target.tags).orEmpty(),
+            toTargetList(target.categoryTags).orEmpty(),
+            target.coverImage.orEmpty(),
+            toTargetList(target.images).orEmpty(),
+            target.referencePrice,
+            target.currency.name,
+            target.slogan.orEmpty(),
+            target.detailContent,
+            BigDecimal.ZERO,
+            0,
+            target.salesCount
         )
         return projectId
     }
 
-    private fun createInstitutionProject(target: ProjectRequestTarget): String {
+    private fun createInstitutionProject(
+        target: ProjectRequestTarget,
+        platformProject: LockedPlatformProject
+    ): String {
+        val effective = resolveInstitutionProject(target, platformProject)
         val institutionProjectId = UUID.randomUUID().toString()
         jdbcTemplate.update(
             """
             INSERT INTO institution_projects
-                (id, institution_id, project_id, description, detail_content, price)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (id, institution_id, project_id, name, category, description, rating, review_count,
+                 tags, slogan, detail_content, price, original_price, currency, cover_image, images,
+                 sales_count, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """.trimIndent(),
-            institutionProjectId, target.institutionId, target.projectId,
-            target.serviceContent, target.serviceContent, target.priceSuggestion
+            institutionProjectId, target.institutionId, platformProject.id,
+            effective.name, effective.category, effective.description,
+            BigDecimal.ZERO, 0, effective.tags, effective.slogan, effective.detailContent,
+            requireNotNull(target.price), target.originalPrice, target.currency.name,
+            effective.coverImage, effective.images, target.salesCount, requireNotNull(target.isActive)
         )
         jdbcTemplate.update(
             """
             INSERT INTO doctor_projects
-                (doctor_id, project_id, institution_project_id, service_description, schedule_note, price)
+                (doctor_id, project_id, institution_project_id, service_description, service_tags,
+                 schedule_note, cover_image, images, price)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """.trimIndent(),
+            target.doctorId, platformProject.id, institutionProjectId,
+            effective.description, effective.tags, "", effective.coverImage, effective.images,
+            target.price
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO doctor_institution_project_configs
+                (id, doctor_id, institution_project_id, consultation_fee, commission_rate, institution_rate)
             VALUES (?, ?, ?, ?, ?, ?)
             """.trimIndent(),
-            target.doctorId, target.projectId, institutionProjectId,
-            target.serviceContent, "", target.priceSuggestion
+            UUID.randomUUID().toString(), target.doctorId, institutionProjectId,
+            requireNotNull(target.consultationFee), requireNotNull(target.commissionRate),
+            requireNotNull(target.institutionRate)
         )
         return institutionProjectId
     }
 
     private fun lockInstitution(institutionId: String) {
-        requireNotNull(jdbcTemplate.queryForObject(
-            "SELECT id FROM institutions WHERE id = ? FOR UPDATE",
+        val locked = jdbcTemplate.queryForList(
+            "SELECT id FROM institutions WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
             String::class.java,
             institutionId
-        )) { "机构不存在" }
+        ).firstOrNull()
+        if (locked == null) throw ProfessionalProjectRequestNotFoundException("机构不存在")
     }
 
-    private fun validateInstitutionApproval(target: ProjectRequestTarget) {
-        require(count(
+    private fun lockActiveApplicantRelationship(doctorId: String, institutionId: String) {
+        val relationship = jdbcTemplate.queryForList(
             """
-            SELECT COUNT(*) FROM doctor_institutions
+            SELECT id FROM doctor_institutions
             WHERE doctor_id = ? AND institution_id = ? AND status = 'APPROVED'
               AND revoked_at IS NULL AND deleted_at IS NULL
+            FOR UPDATE
             """.trimIndent(),
-            target.doctorId,
-            requireNotNull(target.institutionId)
-        ) == 1L) { "医生已不具备该机构的有效执业关系" }
-        require(count(
-            "SELECT COUNT(*) FROM projects WHERE id = ? AND deleted_at IS NULL",
-            requireNotNull(target.projectId)
-        ) == 1L) { "平台项目已失效" }
-        require(count(
-            "SELECT COUNT(*) FROM institution_projects WHERE institution_id = ? AND project_id = ?",
-            target.institutionId,
-            target.projectId
-        ) == 0L) { "该机构已存在此平台项目，请改为申请加入机构项目" }
+            String::class.java,
+            doctorId,
+            institutionId
+        ).firstOrNull()
+        if (relationship == null) {
+            throw ProfessionalProjectRequestConflictException("医生已不具备该机构的有效执业关系")
+        }
+    }
+
+    private fun lockPlatformProject(projectId: String): LockedPlatformProject = jdbcTemplate.query(
+        """
+        SELECT id, name, category, description, tags, category_tags, cover_image, images,
+               reference_price, currency, slogan, detail_content, sales_count
+        FROM projects
+        WHERE id = ? AND deleted_at IS NULL
+        FOR UPDATE
+        """.trimIndent(),
+        { rs, _ ->
+            LockedPlatformProject(
+                id = rs.getString("id"),
+                name = rs.getString("name"),
+                category = rs.getString("category"),
+                description = rs.getString("description"),
+                tags = rs.getString("tags").orEmpty(),
+                categoryTags = rs.getString("category_tags").orEmpty(),
+                coverImage = rs.getString("cover_image").orEmpty(),
+                images = rs.getString("images").orEmpty(),
+                referencePrice = rs.getBigDecimal("reference_price") ?: BigDecimal.ZERO,
+                currency = parseCurrency(rs.getString("currency")),
+                slogan = rs.getString("slogan").orEmpty(),
+                detailContent = rs.getString("detail_content"),
+                salesCount = rs.getInt("sales_count")
+            )
+        },
+        projectId
+    ).firstOrNull() ?: throw ProfessionalProjectRequestNotFoundException("平台项目不存在")
+
+    private fun requireNoInstitutionProject(institutionId: String, projectId: String) {
+        val existing = jdbcTemplate.queryForList(
+            "SELECT id FROM institution_projects WHERE institution_id = ? AND project_id = ? LIMIT 1",
+            String::class.java,
+            institutionId,
+            projectId
+        ).firstOrNull()
+        if (existing != null) {
+            throw ProfessionalProjectRequestConflictException("该机构已存在此平台项目，请改为申请加入机构项目")
+        }
+    }
+
+    private fun revalidateInstitutionApproval(target: ProjectRequestTarget) {
+        try {
+            requireMoney("项目价格", requireNotNull(target.price))
+            optionalMoney("原价", target.originalPrice)
+            requireMoney("咨询费", requireNotNull(target.consultationFee))
+            requireCount("销量", target.salesCount)
+            splitRatePolicy.resolve(requireNotNull(target.institutionRate), requireNotNull(target.commissionRate))
+        } catch (_: IllegalArgumentException) {
+            throw ProfessionalProjectRequestConflictException("申请分账比例与当前平台规则冲突")
+        } catch (_: IllegalStateException) {
+            throw ProfessionalProjectRequestConflictException("申请分账比例与当前平台规则冲突")
+        }
+    }
+
+    private fun resolveInstitutionProject(
+        target: ProjectRequestTarget,
+        platformProject: LockedPlatformProject
+    ): EffectiveInstitutionProject = EffectiveInstitutionProject(
+        name = target.name?.takeIf(String::isNotBlank) ?: platformProject.name,
+        category = target.category?.takeIf(String::isNotBlank) ?: platformProject.category,
+        description = target.description?.takeIf(String::isNotBlank) ?: platformProject.description,
+        tags = target.tags?.let(::toTargetList) ?: platformProject.tags,
+        slogan = target.slogan?.takeIf(String::isNotBlank) ?: platformProject.slogan,
+        detailContent = target.detailContent?.takeIf(String::isNotBlank) ?: platformProject.detailContent,
+        coverImage = target.coverImage?.takeIf(String::isNotBlank) ?: platformProject.coverImage,
+        images = target.images?.let(::toTargetList) ?: platformProject.images
+    )
+
+    private fun normalizeReview(review: ProjectRequestReview): NormalizedProjectRequestReview {
+        val decision = review.decision.trim().uppercase()
+        require(decision in PROJECT_REQUEST_DECISIONS) { "审核决定不正确" }
+        val reviewNote = review.reviewNote.trim().takeIf(String::isNotEmpty)
+        require(decision != "REJECTED" || reviewNote != null) { "拒绝时必须填写审核意见" }
+        return NormalizedProjectRequestReview(decision, reviewNote)
+    }
+
+    private fun toTargetList(values: List<String>?): String? = values?.joinToString(",")
+
+    private fun evictProjectCatalogCachesAfterCommit() {
+        val evict = {
+            cacheManager.getCache("discover")?.clear()
+            cacheManager.getCache("home")?.clear()
+        }
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            evict()
+            return
+        }
+        TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
+            override fun afterCommit() {
+                evict()
+            }
+        })
     }
 
     private fun lockedTarget(id: String): ProjectRequestTarget? = jdbcTemplate.query(
@@ -674,6 +825,38 @@ private data class ProjectRequestSnapshot(
     val notes: String? = null
 )
 
+private data class NormalizedProjectRequestReview(
+    val decision: String,
+    val reviewNote: String?
+)
+
+private data class LockedPlatformProject(
+    val id: String,
+    val name: String,
+    val category: String,
+    val description: String?,
+    val tags: String,
+    val categoryTags: String,
+    val coverImage: String,
+    val images: String,
+    val referencePrice: BigDecimal,
+    val currency: CurrencyCode,
+    val slogan: String,
+    val detailContent: String?,
+    val salesCount: Int
+)
+
+private data class EffectiveInstitutionProject(
+    val name: String,
+    val category: String,
+    val description: String?,
+    val tags: String?,
+    val slogan: String,
+    val detailContent: String?,
+    val coverImage: String,
+    val images: String?
+)
+
 private data class ProjectRequestTarget(
     val id: String,
     val requestType: String,
@@ -700,13 +883,7 @@ private data class ProjectRequestTarget(
     val institutionRate: BigDecimal?,
     val notes: String?,
     val status: String
-) {
-    val serviceContent: String?
-        get() = description
-
-    val priceSuggestion: BigDecimal?
-        get() = price
-}
+)
 
 class ProfessionalProjectRequestNotFoundException(message: String) : RuntimeException(message)
 
