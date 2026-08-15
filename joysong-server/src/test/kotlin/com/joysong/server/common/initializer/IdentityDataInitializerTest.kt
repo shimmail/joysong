@@ -32,6 +32,8 @@ class IdentityDataInitializerTest {
         assertRequestPayloadsDoNotContainForbiddenFields(projectRequests)
         val platformRequest = projectRequests.single { it.args.first() == PLATFORM_PROJECT_REQUEST_ID }
         val institutionRequest = projectRequests.single { it.args.first() == INSTITUTION_PROJECT_REQUEST_ID }
+        assertRequestTypeAndPendingStatus(platformRequest, "PLATFORM")
+        assertRequestTypeAndPendingStatus(institutionRequest, "INSTITUTION")
         assertRequestSqlContainsFields(
             platformRequest,
             listOf("name", "category", "description", "reference_price", "currency", "slogan", "sales_count", "cover_image", "images", "detail_content", "tags", "category_tags", "notes")
@@ -139,6 +141,11 @@ class IdentityDataInitializerTest {
     private fun assertRequestSqlContainsFields(request: JdbcWrite, fields: List<String>) {
         val sql = request.sql.lowercase()
         fields.forEach { field -> assertTrue(sql.contains(field)) }
+    }
+
+    private fun assertRequestTypeAndPendingStatus(request: JdbcWrite, requestType: String) {
+        assertTrue(request.sql.contains("'$requestType'"))
+        assertTrue(request.sql.contains("'PENDING'"))
     }
 
     private data class JdbcWrite(val sql: String, val args: List<Any?>)
