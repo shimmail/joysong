@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
@@ -83,17 +84,21 @@ void main() {
         findsOneWidget);
     expect(find.text('https://cdn.example.com/platform-gallery.jpg'),
         findsOneWidget);
+    const coverRemoveLabel =
+        '移除封面图 1：https://cdn.example.com/platform-cover.jpg';
+    const galleryRemoveLabel =
+        '移除项目图片 1：https://cdn.example.com/platform-gallery.jpg';
     final coverRemove = find.byWidgetPredicate(
-        (widget) => widget is IconButton && widget.tooltip == '移除封面图');
-    final galleryRemove = find.byWidgetPredicate(
-        (widget) => widget is IconButton && widget.tooltip == '移除项目图片');
+        (widget) => widget is IconButton && widget.tooltip == coverRemoveLabel);
+    final galleryRemove = find.byWidgetPredicate((widget) =>
+        widget is IconButton && widget.tooltip == galleryRemoveLabel);
     expect(coverRemove, findsOneWidget);
     expect(galleryRemove, findsOneWidget);
     expect(
       find.ancestor(
         of: coverRemove,
         matching: find.byWidgetPredicate((widget) =>
-            widget is Semantics && widget.properties.label == '移除封面图'),
+            widget is Semantics && widget.properties.label == coverRemoveLabel),
       ),
       findsOneWidget,
     );
@@ -101,7 +106,8 @@ void main() {
       find.ancestor(
         of: galleryRemove,
         matching: find.byWidgetPredicate((widget) =>
-            widget is Semantics && widget.properties.label == '移除项目图片'),
+            widget is Semantics &&
+            widget.properties.label == galleryRemoveLabel),
       ),
       findsOneWidget,
     );
@@ -457,6 +463,230 @@ void main() {
   });
 
   testWidgets(
+      'malformed direct review rows show a warning and fail closed without review actions',
+      (tester) async {
+    _useLargeSurface(tester);
+    final repository = _ProjectRequestRepository()
+      ..requests = [
+        _malformedRequest(id: 'malformed-platform', type: 'PLATFORM'),
+        _malformedRequest(id: 'malformed-institution', type: 'INSTITUTION'),
+      ];
+
+    await tester.pumpWidget(_app(PlatformProjectRequestPage(
+      repository: repository,
+      context: _adminContext,
+      reviewMode: true,
+    )));
+    await tester.pumpAndSettle();
+    expect(
+        find.byKey(const Key('malformed-review-snapshot-malformed-platform')),
+        findsOneWidget);
+    expect(find.text('申请快照不完整，无法审核，请刷新后重试'), findsOneWidget);
+    expect(find.byKey(const Key('review-creation-malformed-platform')),
+        findsNothing);
+
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      repository: repository,
+      context: _adminContext,
+      reviewMode: true,
+    )));
+    await tester.pumpAndSettle();
+    expect(
+        find.byKey(
+            const Key('malformed-review-snapshot-malformed-institution')),
+        findsOneWidget);
+    expect(find.text('申请快照不完整，无法审核，请刷新后重试'), findsOneWidget);
+    expect(find.byKey(const Key('review-creation-malformed-institution')),
+        findsNothing);
+  });
+
+  testWidgets(
+      'platform and institution creation review actions synchronously block re-entry',
+      (tester) async {
+    _useLargeSurface(tester);
+    final platformGate = Completer<void>();
+    final platformRepository = _ProjectRequestRepository()
+      ..requests = [
+        _request(id: 'platform-pending', type: 'PLATFORM', doctorId: 'doctor-1')
+      ]
+      ..platformReviewGate = platformGate;
+    await tester.pumpWidget(_app(PlatformProjectRequestPage(
+      repository: platformRepository,
+      context: _adminContext,
+      reviewMode: true,
+    )));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('review-creation-platform-pending')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('creation-review-confirm')));
+    await tester.pumpAndSettle();
+    expect(platformRepository.platformReviews, hasLength(1));
+    expect(
+      tester
+          .widget<FilledButton>(
+              find.byKey(const Key('review-creation-platform-pending')))
+          .onPressed,
+      isNull,
+    );
+    await tester.tap(
+      find.byKey(const Key('review-creation-platform-pending')),
+      warnIfMissed: false,
+    );
+    await tester.pump();
+    expect(find.byType(AlertDialog), findsNothing,
+        reason: 'reject re-entry must not open while approval is pending');
+    expect(platformRepository.platformReviews, hasLength(1));
+    platformGate.complete();
+    await tester.pumpAndSettle();
+
+    final institutionGate = Completer<void>();
+    final institutionRepository = _ProjectRequestRepository()
+      ..requests = [
+        _request(
+          id: 'institution-pending',
+          type: 'INSTITUTION',
+          doctorId: 'doctor-1',
+          institutionId: 'inst-1',
+        )
+      ]
+      ..institutionReviewGate = institutionGate;
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      repository: institutionRepository,
+      context: _adminContext,
+      reviewMode: true,
+    )));
+    await tester.pumpAndSettle();
+    await tester
+        .tap(find.byKey(const Key('review-creation-institution-pending')));
+    await tester.pumpAndSettle();
+    await _selectReviewDecision(tester, 'REJECTED');
+    await tester.enterText(
+        find.byKey(const Key('creation-review-note')), 'Reject later');
+    await tester.tap(find.byKey(const Key('creation-review-confirm')));
+    await tester.pumpAndSettle();
+    expect(institutionRepository.institutionReviews, hasLength(1));
+    expect(
+      tester
+          .widget<FilledButton>(
+              find.byKey(const Key('review-creation-institution-pending')))
+          .onPressed,
+      isNull,
+    );
+    await tester.tap(
+      find.byKey(const Key('review-creation-institution-pending')),
+      warnIfMissed: false,
+    );
+    await tester.pump();
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(
+        institutionRepository.institutionReviews.single.decision, 'REJECTED');
+    institutionGate.complete();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets(
+      'review conflicts refresh current snapshots and institution catalog without clearing its draft',
+      (tester) async {
+    _useLargeSurface(tester);
+    final platformRepository = _ProjectRequestRepository()
+      ..requests = [
+        _request(
+            id: 'platform-conflict', type: 'PLATFORM', doctorId: 'doctor-1')
+      ]
+      ..platformReviewError =
+          const ApiException(message: 'conflict', httpStatus: 409);
+    platformRepository.onPlatformReview = () {
+      platformRepository.requests = [
+        _request(
+          id: 'platform-conflict',
+          type: 'PLATFORM',
+          doctorId: 'doctor-1',
+          doctorName: 'Dr. Chen Updated',
+          status: 'APPROVED',
+        ),
+      ];
+    };
+    await tester.pumpWidget(_app(PlatformProjectRequestPage(
+      repository: platformRepository,
+      context: _adminContext,
+      reviewMode: true,
+    )));
+    await tester.pumpAndSettle();
+    await tester
+        .tap(find.byKey(const Key('review-creation-platform-conflict')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('creation-review-confirm')));
+    await tester.pumpAndSettle();
+    expect(find.text('审核状态已变化，申请列表已刷新，请基于最新内容重试'), findsOneWidget);
+    expect(find.text('当前医生名称：Dr. Chen Updated'), findsOneWidget);
+    expect(find.byKey(const Key('review-creation-platform-conflict')),
+        findsNothing);
+
+    const institutionPageKey = ValueKey('institution-conflict-page');
+    final institutionRepository = _ProjectRequestRepository()
+      ..requests = [
+        _request(
+          id: 'institution-conflict',
+          type: 'INSTITUTION',
+          doctorId: 'doctor-1',
+          institutionId: 'inst-1',
+        ),
+      ]
+      ..institutionReviewError =
+          const ApiException(message: 'conflict', httpStatus: 409);
+    institutionRepository.onInstitutionReview = () {
+      institutionRepository
+        ..formPlatformRate = 12
+        ..requests = [
+          _request(
+            id: 'institution-conflict',
+            type: 'INSTITUTION',
+            doctorId: 'doctor-1',
+            institutionId: 'inst-1',
+            platformRate: 12,
+            doctorRate: 33.25,
+          ),
+        ];
+    };
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      key: institutionPageKey,
+      repository: institutionRepository,
+      context: _doctorContext,
+    )));
+    await tester.pumpAndSettle();
+    expect(institutionRepository.formConfigLoads, 1);
+    await tester.enterText(
+        find.byKey(const Key('institution-name')), 'Unsubmitted draft');
+
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      key: institutionPageKey,
+      repository: institutionRepository,
+      context: _adminContext,
+      reviewMode: true,
+    )));
+    await tester.pump();
+    await tester
+        .tap(find.byKey(const Key('review-creation-institution-conflict')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('creation-review-confirm')));
+    await tester.pumpAndSettle();
+    expect(find.text('审核状态已变化，申请、项目配置与目录已刷新，请基于最新内容重试'), findsOneWidget);
+    expect(find.text('当前平台比例：12%'), findsOneWidget);
+    expect(find.text('按当前平台比例推导的医生净比例：33.25%'), findsOneWidget);
+    expect(institutionRepository.formConfigLoads, 2);
+    expect(institutionRepository.institutionOptionLoads, 2);
+    expect(institutionRepository.managementProjectLoads, 2);
+
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      key: institutionPageKey,
+      repository: institutionRepository,
+      context: _doctorContext,
+    )));
+    await tester.pump();
+    expect(_text(tester, 'institution-name'), 'Unsubmitted draft');
+  });
+
+  testWidgets(
       'immutable history is role scoped and creation reviews dispatch to the exact authority endpoint',
       (tester) async {
     _useLargeSurface(tester);
@@ -475,10 +705,6 @@ void main() {
           id: 'platform-other',
           type: 'PLATFORM',
           doctorId: 'doctor-2',
-          slogan: null,
-          coverImage: null,
-          images: null,
-          categoryTags: null,
         ),
         _request(
           id: 'institution-target',
@@ -491,6 +717,9 @@ void main() {
           type: 'INSTITUTION',
           doctorId: 'doctor-2',
           institutionId: 'inst-2',
+          slogan: null,
+          coverImage: null,
+          images: null,
         ),
       ];
 
@@ -534,9 +763,11 @@ void main() {
     expect(find.textContaining('Complete immutable detail'), findsOneWidget);
     expect(find.text('申请编号：institution-target'), findsOneWidget);
     expect(find.text('机构编号：inst-1'), findsOneWidget);
-    expect(find.text('机构名称：Joysong Clinic'), findsOneWidget);
+    expect(find.text('申请医生编号：doctor-1'), findsOneWidget);
+    expect(find.text('当前医生名称：Dr. Chen'), findsOneWidget);
+    expect(find.text('当前机构名称：Joysong Clinic'), findsOneWidget);
     expect(find.text('平台项目编号：project-1'), findsOneWidget);
-    expect(find.text('平台项目名称：Hydrating Facial'), findsOneWidget);
+    expect(find.text('当前平台项目名称：Hydrating Facial'), findsOneWidget);
     expect(find.text('面诊费：80.25'), findsOneWidget);
     expect(find.text('顾问比例：12.5%'), findsOneWidget);
     expect(find.text('机构比例：42.25%'), findsOneWidget);
@@ -612,10 +843,6 @@ void main() {
     expect(find.text('封面图：空字符串'), findsOneWidget);
     expect(find.text('项目图片：空列表'), findsOneWidget);
     expect(find.text('分类标签：空列表'), findsOneWidget);
-    expect(find.text('项目标语：未提供'), findsOneWidget);
-    expect(find.text('封面图：未提供'), findsOneWidget);
-    expect(find.text('项目图片：未提供'), findsOneWidget);
-    expect(find.text('分类标签：未提供'), findsOneWidget);
     await tester.tap(find.byKey(const Key('review-creation-platform-own')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('creation-review-confirm')));
@@ -630,6 +857,10 @@ void main() {
       reviewMode: true,
     )));
     await tester.pumpAndSettle();
+    expect(find.text('项目标语：未提供'), findsOneWidget);
+    expect(find.text('封面图：未提供'), findsOneWidget);
+    expect(find.text('项目图片：未提供'), findsOneWidget);
+    expect(find.text('分类标签：未提供'), findsWidgets);
     await tester
         .tap(find.byKey(const Key('review-creation-institution-other')));
     await tester.pumpAndSettle();
@@ -778,25 +1009,32 @@ ProfessionalProjectRequest _request({
   required String id,
   required String type,
   required String doctorId,
+  String? doctorName,
   String? institutionId,
+  String? institutionName,
+  String? projectName,
   String? slogan = 'Clinic glow',
   String? coverImage = 'cover.jpg',
   List<String>? images = const ['one.jpg', 'two.jpg'],
   List<String>? categoryTags = const ['facial'],
+  String status = 'PENDING',
+  num platformRate = 10,
+  num doctorRate = 35.25,
 }) =>
     ProfessionalProjectRequest.fromJson({
       'id': id,
       'requestType': type,
       'doctorId': doctorId,
-      'doctorName': doctorId == 'doctor-1' ? 'Dr. Chen' : 'Dr. Other',
+      'doctorName':
+          doctorName ?? (doctorId == 'doctor-1' ? 'Dr. Chen' : 'Dr. Other'),
       'institutionId': type == 'INSTITUTION' ? institutionId : null,
       'institutionName': type == 'INSTITUTION'
-          ? institutionId == 'inst-1'
-              ? 'Joysong Clinic'
-              : 'Other Clinic'
+          ? institutionName ??
+              (institutionId == 'inst-1' ? 'Joysong Clinic' : 'Other Clinic')
           : null,
       'projectId': type == 'INSTITUTION' ? 'project-1' : null,
-      'projectName': type == 'INSTITUTION' ? 'Hydrating Facial' : null,
+      'projectName':
+          type == 'INSTITUTION' ? projectName ?? 'Hydrating Facial' : null,
       'name': 'Clinic Hydrating Facial $id',
       'category': 'Skin',
       'description': 'Clinic description',
@@ -817,12 +1055,12 @@ ProfessionalProjectRequest _request({
               'consultationFee': 80.25,
               'commissionRate': 12.5,
               'institutionRate': 42.25,
-              'platformRate': 10,
-              'doctorRate': 35.25,
+              'platformRate': platformRate,
+              'doctorRate': doctorRate,
             }
           : null,
       'notes': 'Clinic note',
-      'status': 'PENDING',
+      'status': status,
       'reviewNote': null,
       'reviewedBy': null,
       'reviewedAt': null,
@@ -831,6 +1069,39 @@ ProfessionalProjectRequest _request({
       'submittedAt': '2026-08-16T08:00:00',
       'updatedAt': '2026-08-16T08:05:00',
     });
+
+ProfessionalProjectRequest _malformedRequest({
+  required String id,
+  required String type,
+}) =>
+    ProfessionalProjectRequest(
+      id: id,
+      requestType: type,
+      doctorId: 'doctor-1',
+      doctorName: 'Dr. Chen',
+      institutionId: type == 'INSTITUTION' ? 'inst-1' : null,
+      institutionName: type == 'INSTITUTION' ? 'Joysong Clinic' : null,
+      projectId: type == 'INSTITUTION' ? 'project-1' : null,
+      projectName: type == 'INSTITUTION' ? 'Hydrating Facial' : null,
+      name: 'Malformed project',
+      category: type == 'PLATFORM' ? null : 'Skin',
+      description: 'Description',
+      tags: const [],
+      slogan: '',
+      currency: 'CNY',
+      coverImage: '',
+      images: const [],
+      salesCount: 0,
+      referencePrice: type == 'PLATFORM' ? 1 : null,
+      categoryTags: type == 'PLATFORM' ? const [] : null,
+      price: type == 'INSTITUTION' ? 1 : null,
+      isActive: type == 'INSTITUTION' ? true : null,
+      institutionSplit: null,
+      notes: '',
+      status: 'PENDING',
+      submittedAt: DateTime(2026, 8, 16, 8),
+      updatedAt: DateTime(2026, 8, 16, 8, 5),
+    );
 
 final class _ProjectRequestRepository implements IdentityRepository {
   ManagementContext managementContext = _doctorContext;
@@ -844,6 +1115,16 @@ final class _ProjectRequestRepository implements IdentityRepository {
   bool failNextRequestList = false;
   Completer<List<ProfessionalProjectRequest>>? nextRequestList;
   Completer<void>? requestListStarted;
+  Completer<void>? platformReviewGate;
+  Completer<void>? institutionReviewGate;
+  Object? platformReviewError;
+  Object? institutionReviewError;
+  void Function()? onPlatformReview;
+  void Function()? onInstitutionReview;
+  num formPlatformRate = 10.25;
+  int institutionOptionLoads = 0;
+  int managementProjectLoads = 0;
+  int formConfigLoads = 0;
 
   @override
   Future<ManagementContext> loadManagementContext() async => managementContext;
@@ -866,37 +1147,43 @@ final class _ProjectRequestRepository implements IdentityRepository {
   }
 
   @override
-  Future<List<InstitutionOption>> listInstitutionOptions() async => const [
-        InstitutionOption(id: 'inst-1', name: 'Joysong Clinic'),
-      ];
+  Future<List<InstitutionOption>> listInstitutionOptions() async {
+    institutionOptionLoads++;
+    return const [InstitutionOption(id: 'inst-1', name: 'Joysong Clinic')];
+  }
 
   @override
-  Future<List<ManagementProjectOption>> listManagementProjects() async =>
-      const [
-        ManagementProjectOption(
-          id: 'project-1',
-          name: 'Hydrating Facial',
-          category: 'Skin',
-          description: 'Inherited description',
-          tags: 'hydration,gentle',
-          categoryTags: 'facial,skin',
-          coverImage: 'https://cdn.example.com/inherited-cover.jpg',
-          referencePrice: 899.25,
-          currency: 'USD',
-          slogan: 'Glow naturally',
-          detailContent: 'Inherited plain detail',
-          images: [
-            'https://cdn.example.com/inherited-one.jpg',
-            'https://cdn.example.com/inherited-two.jpg',
-          ],
-          salesCount: 18,
-        ),
-      ];
+  Future<List<ManagementProjectOption>> listManagementProjects() async {
+    managementProjectLoads++;
+    return const [
+      ManagementProjectOption(
+        id: 'project-1',
+        name: 'Hydrating Facial',
+        category: 'Skin',
+        description: 'Inherited description',
+        tags: 'hydration,gentle',
+        categoryTags: 'facial,skin',
+        coverImage: 'https://cdn.example.com/inherited-cover.jpg',
+        referencePrice: 899.25,
+        currency: 'USD',
+        slogan: 'Glow naturally',
+        detailContent: 'Inherited plain detail',
+        images: [
+          'https://cdn.example.com/inherited-one.jpg',
+          'https://cdn.example.com/inherited-two.jpg',
+        ],
+        salesCount: 18,
+      ),
+    ];
+  }
 
   @override
   Future<InstitutionProjectApplicationFormConfig>
-      loadInstitutionProjectApplicationFormConfig() async =>
-          const InstitutionProjectApplicationFormConfig(platformRate: 10.25);
+      loadInstitutionProjectApplicationFormConfig() async {
+    formConfigLoads++;
+    return InstitutionProjectApplicationFormConfig(
+        platformRate: formPlatformRate);
+  }
 
   @override
   Future<void> submitPlatformProjectRequest(
@@ -919,6 +1206,10 @@ final class _ProjectRequestRepository implements IdentityRepository {
     required String reviewNote,
   }) async {
     institutionReviews.add((id: id, decision: decision, note: reviewNote));
+    onInstitutionReview?.call();
+    final error = institutionReviewError;
+    if (error != null) throw error;
+    await institutionReviewGate?.future;
   }
 
   @override
@@ -928,6 +1219,10 @@ final class _ProjectRequestRepository implements IdentityRepository {
     required String reviewNote,
   }) async {
     platformReviews.add((id: id, decision: decision, note: reviewNote));
+    onPlatformReview?.call();
+    final error = platformReviewError;
+    if (error != null) throw error;
+    await platformReviewGate?.future;
   }
 
   @override

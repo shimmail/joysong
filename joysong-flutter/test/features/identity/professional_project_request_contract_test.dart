@@ -332,6 +332,53 @@ void main() {
     );
   });
 
+  test('draft sales count accepts Int32 max and rejects values outside it', () {
+    expect(
+      () => const PlatformProjectRequestDraft(
+        name: 'Name',
+        category: 'Skin',
+        description: 'Description',
+        salesCount: 2147483647,
+      ).validate(),
+      returnsNormally,
+    );
+    expect(
+      () => const PlatformProjectRequestDraft(
+        name: 'Name',
+        category: 'Skin',
+        description: 'Description',
+        salesCount: 2147483648,
+      ).validate(),
+      throwsArgumentError,
+    );
+    expect(
+      () => const InstitutionProjectRequestDraft(
+        institutionId: 'institution-1',
+        projectId: 'project-1',
+        price: 0,
+        salesCount: 2147483647,
+        consultationFee: 0,
+        commissionRate: 0,
+        institutionRate: 0,
+        platformRate: 0,
+      ).validate(),
+      returnsNormally,
+    );
+    expect(
+      () => const InstitutionProjectRequestDraft(
+        institutionId: 'institution-1',
+        projectId: 'project-1',
+        price: 0,
+        salesCount: 2147483648,
+        consultationFee: 0,
+        commissionRate: 0,
+        institutionRate: 0,
+        platformRate: 0,
+      ).validate(),
+      throwsArgumentError,
+    );
+  });
+
   test('parses complete immutable review snapshot and nested split', () {
     final request = ProfessionalProjectRequest.fromJson(_requestSnapshot);
 
@@ -381,20 +428,8 @@ void main() {
     expect(legacy.status, 'CHANGES_REQUESTED');
     expect(legacy.isCreationReviewable, isFalse);
 
-    final platform = ProfessionalProjectRequest.fromJson({
-      ..._requestSnapshot,
-      'requestType': 'PLATFORM',
-      'institutionId': null,
-      'institutionName': null,
-      'projectId': null,
-      'projectName': null,
-      'slogan': '',
-      'coverImage': '',
-      'price': null,
-      'originalPrice': null,
-      'isActive': null,
-      'institutionSplit': null,
-    });
+    final platform =
+        ProfessionalProjectRequest.fromJson(_platformRequestSnapshot());
     expect(platform.slogan, '');
     expect(platform.coverImage, '');
     expect(platform.institutionId, isNull);
@@ -410,6 +445,77 @@ void main() {
     });
     expect(institutionWithoutOverrides.slogan, isNull);
     expect(institutionWithoutOverrides.coverImage, isNull);
+  });
+
+  test('review snapshot parsing fails closed for missing or invalid invariants',
+      () {
+    for (final field in [
+      'currency',
+      'salesCount',
+      'reviewedAt',
+      'submittedAt',
+      'updatedAt',
+    ]) {
+      final snapshot = <String, Object?>{..._requestSnapshot}..remove(field);
+      expect(
+        () => ProfessionalProjectRequest.fromJson(snapshot),
+        throwsFormatException,
+        reason: 'missing common response key $field must fail closed',
+      );
+    }
+
+    for (final field in [
+      'name',
+      'category',
+      'description',
+      'referencePrice',
+      'tags',
+      'categoryTags',
+      'images',
+    ]) {
+      final snapshot = _platformRequestSnapshot()..remove(field);
+      expect(
+        () => ProfessionalProjectRequest.fromJson(snapshot),
+        throwsFormatException,
+        reason: 'missing platform snapshot field $field must fail closed',
+      );
+    }
+
+    for (final field in [
+      'institutionId',
+      'projectId',
+      'price',
+      'isActive',
+      'institutionSplit',
+    ]) {
+      final snapshot = <String, Object?>{..._requestSnapshot}..remove(field);
+      expect(
+        () => ProfessionalProjectRequest.fromJson(snapshot),
+        throwsFormatException,
+        reason: 'missing institution snapshot field $field must fail closed',
+      );
+    }
+
+    final incompleteSplit = <String, Object?>{
+      ..._requestSnapshot,
+      'institutionSplit': <String, Object?>{
+        ...(_requestSnapshot['institutionSplit']! as Map<String, Object?>),
+      }..remove('doctorRate'),
+    };
+    expect(
+      () => ProfessionalProjectRequest.fromJson(incompleteSplit),
+      throwsFormatException,
+    );
+    expect(
+      () => ProfessionalProjectRequest.fromJson({
+        ..._requestSnapshot,
+        'requestType': 'UNKNOWN',
+      }),
+      throwsFormatException,
+    );
+
+    final parsed = ProfessionalProjectRequest.fromJson(_requestSnapshot);
+    expect((parsed as dynamic).hasCompleteReviewSnapshot, isTrue);
   });
 
   test('parses form config and all 13 management inheritance values', () {
@@ -553,6 +659,21 @@ const _requestSnapshot = <String, Object?>{
   'submittedAt': '2026-08-16T08:00:00',
   'updatedAt': '2026-08-16T08:05:00',
 };
+
+Map<String, Object?> _platformRequestSnapshot() => <String, Object?>{
+      ..._requestSnapshot,
+      'requestType': 'PLATFORM',
+      'institutionId': null,
+      'institutionName': null,
+      'projectId': null,
+      'projectName': null,
+      'slogan': '',
+      'coverImage': '',
+      'price': null,
+      'originalPrice': null,
+      'isActive': null,
+      'institutionSplit': null,
+    };
 
 final class _RecordingApiClient extends ApiClient {
   _RecordingApiClient() : super(apiRoot: Uri.parse('http://localhost/api/'));

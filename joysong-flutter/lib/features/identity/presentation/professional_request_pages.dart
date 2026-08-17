@@ -437,7 +437,7 @@ class _PlatformProjectRequestPageState
   String _coverImage = '';
   List<String> _images = const [];
   List<ProfessionalProjectRequest> _requests = const [];
-  var _saving = false, _uploading = false;
+  var _saving = false, _uploading = false, _reviewing = false;
   String? _error;
 
   @override
@@ -640,6 +640,7 @@ class _PlatformProjectRequestPageState
                 context,
                 request,
                 canReview: _canReview && request.isCreationReviewable,
+                reviewEnabled: !_reviewing,
                 onReview: () => _review(request),
               ),
           ],
@@ -735,17 +736,41 @@ class _PlatformProjectRequestPageState
   }
 
   Future<void> _review(ProfessionalProjectRequest request) async {
-    final review = await showProfessionalProjectCreationReviewDialog(context);
-    if (review == null) return;
+    if (_reviewing || !request.hasCompleteReviewSnapshot) return;
+    setState(() {
+      _reviewing = true;
+      _error = null;
+    });
     try {
+      final review = await showProfessionalProjectCreationReviewDialog(context);
+      if (!mounted || review == null) return;
       await widget.repository.reviewPlatformProjectRequest(
         id: request.id,
         decision: review.decision,
         reviewNote: review.note,
       );
       await _load();
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      if (error.httpStatus == 409) {
+        final refreshed = await _load();
+        if (!mounted) return;
+        setState(() => _error = refreshed
+            ? context.localized(
+                '审核状态已变化，申请列表已刷新，请基于最新内容重试',
+                'The review state changed. The request list was refreshed; retry from the latest content.',
+              )
+            : context.localized(
+                '审核状态已变化，但列表刷新失败，请手动刷新后重试',
+                'The review state changed, but refresh failed. Refresh manually and retry.',
+              ));
+      } else {
+        setState(() => _error = '审核提交失败，请稍后重试');
+      }
     } catch (_) {
       if (mounted) setState(() => _error = '审核提交失败，请稍后重试');
+    } finally {
+      if (mounted) setState(() => _reviewing = false);
     }
   }
 }
@@ -796,7 +821,7 @@ class _InstitutionProjectRequestsPageState
   num? _platformRate;
   String? _error;
   var _loading = true;
-  var _saving = false, _uploading = false;
+  var _saving = false, _uploading = false, _reviewing = false;
 
   @override
   void initState() {
@@ -827,9 +852,10 @@ class _InstitutionProjectRequestsPageState
     super.dispose();
   }
 
-  Future<void> _load() async {
+  Future<bool> _load({bool refreshFormData = false}) async {
     try {
-      final values = widget.reviewMode
+      final includeFormData = !widget.reviewMode || refreshFormData;
+      final values = !includeFormData
           ? <Object>[
               await widget.repository.listProfessionalProjectRequests(),
             ]
@@ -839,28 +865,33 @@ class _InstitutionProjectRequestsPageState
               widget.repository.listManagementProjects(),
               widget.repository.loadInstitutionProjectApplicationFormConfig(),
             ]);
-      if (!mounted) return;
+      if (!mounted) return false;
       final allowedIds = widget.context.doctorInstitutionIds.toSet();
       setState(() {
         _requests = (values[0] as List<ProfessionalProjectRequest>)
             .where((item) => item.requestType == 'INSTITUTION')
             .where(_isVisible)
             .toList(growable: false);
-        _institutions = widget.reviewMode
-            ? const []
-            : (values[1] as List<InstitutionOption>)
+        if (includeFormData) {
+          final options = values[1] as List<InstitutionOption>;
+          if (!widget.reviewMode) {
+            _institutions = options
                 .where((item) => allowedIds.contains(item.id))
                 .toList(growable: false);
-        _projects = widget.reviewMode
-            ? const []
-            : values[2] as List<ManagementProjectOption>;
-        _platformRate = widget.reviewMode
-            ? null
-            : (values[3] as InstitutionProjectApplicationFormConfig)
-                .platformRate;
+          } else if (_institutions.isNotEmpty) {
+            final retainedIds = _institutions.map((item) => item.id).toSet();
+            _institutions = options
+                .where((item) => retainedIds.contains(item.id))
+                .toList(growable: false);
+          }
+          _projects = values[2] as List<ManagementProjectOption>;
+          _platformRate = (values[3] as InstitutionProjectApplicationFormConfig)
+              .platformRate;
+        }
         _loading = false;
         _error = null;
       });
+      return true;
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -868,6 +899,7 @@ class _InstitutionProjectRequestsPageState
           _error = '机构项目申请加载失败，请重试';
         });
       }
+      return false;
     }
   }
 
@@ -1148,6 +1180,7 @@ class _InstitutionProjectRequestsPageState
                       context,
                       request,
                       canReview: _canReview(request),
+                      reviewEnabled: !_reviewing,
                       onReview: () => _review(request),
                     ),
                 ],
@@ -1222,17 +1255,41 @@ class _InstitutionProjectRequestsPageState
   }
 
   Future<void> _review(ProfessionalProjectRequest request) async {
-    final review = await showProfessionalProjectCreationReviewDialog(context);
-    if (review == null) return;
+    if (_reviewing || !request.hasCompleteReviewSnapshot) return;
+    setState(() {
+      _reviewing = true;
+      _error = null;
+    });
     try {
+      final review = await showProfessionalProjectCreationReviewDialog(context);
+      if (!mounted || review == null) return;
       await widget.repository.reviewInstitutionProjectRequest(
         id: request.id,
         decision: review.decision,
         reviewNote: review.note,
       );
       await _load();
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      if (error.httpStatus == 409) {
+        final refreshed = await _load(refreshFormData: true);
+        if (!mounted) return;
+        setState(() => _error = refreshed
+            ? context.localized(
+                '审核状态已变化，申请、项目配置与目录已刷新，请基于最新内容重试',
+                'The review state changed. Requests, project configuration, and catalogs were refreshed; retry from the latest content.',
+              )
+            : context.localized(
+                '审核状态已变化，但刷新失败，请手动刷新后重试',
+                'The review state changed, but refresh failed. Refresh manually and retry.',
+              ));
+      } else {
+        setState(() => _error = '审核提交失败，请稍后重试');
+      }
     } catch (_) {
       if (mounted) setState(() => _error = '审核提交失败，请稍后重试');
+    } finally {
+      if (mounted) setState(() => _reviewing = false);
     }
   }
 
@@ -2404,11 +2461,21 @@ Widget _imageUploadField(
                 leading: const Icon(Icons.image_outlined),
                 title: Text(entry.$2),
                 trailing: Semantics(
-                  label: removeLabel,
+                  label: _indexedImageRemoveLabel(
+                    context,
+                    removeLabel,
+                    entry.$1,
+                    entry.$2,
+                  ),
                   button: true,
                   child: IconButton(
                     key: ValueKey('${addKey.toString()}-remove-${entry.$1}'),
-                    tooltip: removeLabel,
+                    tooltip: _indexedImageRemoveLabel(
+                      context,
+                      removeLabel,
+                      entry.$1,
+                      entry.$2,
+                    ),
                     onPressed: enabled ? () => onRemove(entry.$2) : null,
                     icon: const Icon(Icons.delete_outline),
                   ),
@@ -2423,6 +2490,17 @@ Widget _imageUploadField(
           ],
         ),
       ),
+    );
+
+String _indexedImageRemoveLabel(
+  BuildContext context,
+  String removeLabel,
+  int index,
+  String identity,
+) =>
+    context.localized(
+      '$removeLabel ${index + 1}：$identity',
+      '$removeLabel ${index + 1}: $identity',
     );
 
 Widget _inheritancePreview(
@@ -2455,17 +2533,20 @@ Widget _professionalRequestSnapshot(
   BuildContext context,
   ProfessionalProjectRequest request, {
   required bool canReview,
+  required bool reviewEnabled,
   required VoidCallback onReview,
 }) {
   final split = request.institutionSplit;
+  final hasCompleteSnapshot = request.hasCompleteReviewSnapshot;
   final rows = <String>[
     '${context.localized('申请编号', 'Request ID')}：${request.id}',
     '${context.localized('申请类型', 'Request type')}：${request.requestType}',
-    '${context.localized('申请医生', 'Applicant doctor')}：${_snapshotText(context, request.doctorName)} (${request.doctorId})',
+    '${context.localized('申请医生编号', 'Applicant doctor ID')}：${request.doctorId}',
+    '${context.localized('当前医生名称', 'Current doctor name')}：${_snapshotText(context, request.doctorName)}',
     '${context.localized('机构编号', 'Institution ID')}：${_snapshotText(context, request.institutionId)}',
-    '${context.localized('机构名称', 'Institution name')}：${_snapshotText(context, request.institutionName)}',
+    '${context.localized('当前机构名称', 'Current institution name')}：${_snapshotText(context, request.institutionName)}',
     '${context.localized('平台项目编号', 'Platform project ID')}：${_snapshotText(context, request.projectId)}',
-    '${context.localized('平台项目名称', 'Platform project name')}：${_snapshotText(context, request.projectName)}',
+    '${context.localized('当前平台项目名称', 'Current platform project name')}：${_snapshotText(context, request.projectName)}',
     '${context.localized('项目名称', 'Name')}：${_snapshotText(context, request.name)}',
     '${context.localized('项目分类', 'Category')}：${_snapshotText(context, request.category)}',
     '${context.localized('项目说明', 'Description')}：${_snapshotText(context, request.description)}',
@@ -2514,12 +2595,24 @@ Widget _professionalRequestSnapshot(
               padding: const EdgeInsets.only(bottom: 3),
               child: Text(row),
             ),
-          if (canReview)
+          if (!hasCompleteSnapshot)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                context.localized(
+                  '申请快照不完整，无法审核，请刷新后重试',
+                  'The request snapshot is incomplete and cannot be reviewed. Refresh and retry.',
+                ),
+                key: Key('malformed-review-snapshot-${request.id}'),
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
+          if (canReview && hasCompleteSnapshot)
             Align(
               alignment: Alignment.centerRight,
               child: FilledButton.tonalIcon(
                 key: Key('review-creation-${request.id}'),
-                onPressed: onReview,
+                onPressed: reviewEnabled ? onReview : null,
                 icon: const Icon(Icons.fact_check_outlined),
                 label: Text(context.localized('审核', 'Review')),
               ),

@@ -1412,6 +1412,98 @@ final class DoctorInstitutionChangeRequestDraft {
   Map<String, Object?> toJson() => toNormalizedDraft().toJson();
 }
 
+const _professionalProjectRequestResponseKeys = <String>{
+  'id',
+  'requestType',
+  'doctorId',
+  'doctorName',
+  'institutionId',
+  'institutionName',
+  'projectId',
+  'projectName',
+  'name',
+  'category',
+  'description',
+  'tags',
+  'slogan',
+  'detailContent',
+  'currency',
+  'coverImage',
+  'images',
+  'salesCount',
+  'referencePrice',
+  'categoryTags',
+  'price',
+  'originalPrice',
+  'isActive',
+  'institutionSplit',
+  'notes',
+  'status',
+  'reviewNote',
+  'reviewedBy',
+  'reviewedAt',
+  'resultingProjectId',
+  'resultingInstitutionProjectId',
+  'submittedAt',
+  'updatedAt',
+};
+
+void _requireProfessionalProjectRequestKeys(Map<String, Object?> map) {
+  for (final key in _professionalProjectRequestResponseKeys) {
+    if (!map.containsKey(key)) {
+      throw FormatException('项目申请响应缺少 $key');
+    }
+  }
+}
+
+String? _nullableProfessionalSnapshotText(
+  Map<String, Object?> map,
+  String key,
+  String field,
+) {
+  final value = map[key];
+  if (value == null) return null;
+  if (value is! String) throw FormatException('响应包含无效的 $field');
+  return value.trim();
+}
+
+List<String>? _nullableProfessionalSnapshotItems(
+  Map<String, Object?> map,
+  String key,
+  String field,
+) {
+  final value = map[key];
+  if (value == null) return null;
+  if (value is! List || value.any((item) => item is! String)) {
+    throw FormatException('响应包含无效的 $field');
+  }
+  return value
+      .cast<String>()
+      .map((item) => item.trim())
+      .where((item) => item.isNotEmpty)
+      .toList(growable: false);
+}
+
+num? _nullableProfessionalSnapshotDecimal(
+  Map<String, Object?> map,
+  String key,
+  String field,
+) =>
+    map[key] == null ? null : _requiredDecimal(map[key], field);
+
+bool? _nullableProfessionalSnapshotBoolean(
+  Map<String, Object?> map,
+  String key,
+  String field,
+) {
+  final value = map[key];
+  if (value == null) return null;
+  if (value is! bool) throw FormatException('响应包含无效的 $field');
+  return value;
+}
+
+bool _hasText(String? value) => value != null && value.trim().isNotEmpty;
+
 final class ProfessionalProjectRequest {
   const ProfessionalProjectRequest({
     required this.id,
@@ -1451,47 +1543,58 @@ final class ProfessionalProjectRequest {
 
   factory ProfessionalProjectRequest.fromJson(Object? json) {
     final map = _jsonMap(json, '项目申请');
-    return ProfessionalProjectRequest(
-      id: _requiredText(map['id'], '申请 id'),
-      requestType: _requiredText(map['requestType'], '申请类型'),
-      doctorId: _requiredText(map['doctorId'], '医生'),
-      doctorName: map['doctorName']?.toString() ?? '',
-      institutionId: _nullableText(map['institutionId']),
-      institutionName: _nullableText(map['institutionName']),
-      projectId: _nullableText(map['projectId']),
-      projectName: _nullableText(map['projectName']),
-      name: _nullableText(map['name']),
-      category: _nullableText(map['category']),
-      description: _nullableText(map['description']),
-      tags: map['tags'] == null ? null : _stringList(map['tags']),
-      slogan: _nullableSnapshotText(map['slogan']),
-      detailContent: _nullableText(map['detailContent']),
-      currency: _requiredText(map['currency'], '币种'),
-      coverImage: _nullableSnapshotText(map['coverImage']),
-      images: map['images'] == null ? null : _stringList(map['images']),
-      salesCount: _integer(map['salesCount']),
-      referencePrice: _nullableDecimal(map['referencePrice']),
+    _requireProfessionalProjectRequestKeys(map);
+    final request = ProfessionalProjectRequest(
+      id: _requiredWireText(map['id'], '申请 id'),
+      requestType: _requiredWireText(map['requestType'], '申请类型'),
+      doctorId: _requiredWireText(map['doctorId'], '医生'),
+      doctorName: _requiredWireText(map['doctorName'], '医生名称'),
+      institutionId:
+          _nullableProfessionalSnapshotText(map, 'institutionId', '机构 id'),
+      institutionName:
+          _nullableProfessionalSnapshotText(map, 'institutionName', '机构名称'),
+      projectId: _nullableProfessionalSnapshotText(map, 'projectId', '平台项目 id'),
+      projectName:
+          _nullableProfessionalSnapshotText(map, 'projectName', '平台项目名称'),
+      name: _nullableProfessionalSnapshotText(map, 'name', '项目名称'),
+      category: _nullableProfessionalSnapshotText(map, 'category', '项目分类'),
+      description:
+          _nullableProfessionalSnapshotText(map, 'description', '项目说明'),
+      tags: _nullableProfessionalSnapshotItems(map, 'tags', '项目标签'),
+      slogan: _nullableProfessionalSnapshotText(map, 'slogan', '项目标语'),
+      detailContent:
+          _nullableProfessionalSnapshotText(map, 'detailContent', '项目详情'),
+      currency: _requiredWireText(map['currency'], '币种'),
+      coverImage: _nullableProfessionalSnapshotText(map, 'coverImage', '封面图'),
+      images: _nullableProfessionalSnapshotItems(map, 'images', '项目图片'),
+      salesCount: _requiredWireInteger(map['salesCount'], '销量'),
+      referencePrice:
+          _nullableProfessionalSnapshotDecimal(map, 'referencePrice', '参考价格'),
       categoryTags:
-          map['categoryTags'] == null ? null : _stringList(map['categoryTags']),
-      price: _nullableDecimal(map['price']),
-      originalPrice: _nullableDecimal(map['originalPrice']),
-      isActive: map['isActive'] is bool ? map['isActive']! as bool : null,
+          _nullableProfessionalSnapshotItems(map, 'categoryTags', '分类标签'),
+      price: _nullableProfessionalSnapshotDecimal(map, 'price', '价格'),
+      originalPrice:
+          _nullableProfessionalSnapshotDecimal(map, 'originalPrice', '原价'),
+      isActive: _nullableProfessionalSnapshotBoolean(map, 'isActive', '上架状态'),
       institutionSplit: map['institutionSplit'] == null
           ? null
           : InstitutionProjectSplit.fromJson(map['institutionSplit']),
-      notes: _nullableText(map['notes']),
-      status: _requiredText(map['status'], '申请状态'),
-      reviewNote: _nullableText(map['reviewNote']),
-      reviewedBy: _nullableText(map['reviewedBy']),
-      reviewedAt: _dateTime(map['reviewedAt']),
-      resultingProjectId: _nullableText(map['resultingProjectId']),
-      resultingInstitutionProjectId:
-          _nullableText(map['resultingInstitutionProjectId']),
-      submittedAt: _dateTime(map['submittedAt']) ??
-          (throw const FormatException('响应缺少提交时间')),
-      updatedAt: _dateTime(map['updatedAt']) ??
-          (throw const FormatException('响应缺少更新时间')),
+      notes: _nullableProfessionalSnapshotText(map, 'notes', '申请说明'),
+      status: _requiredWireText(map['status'], '申请状态'),
+      reviewNote: _nullableProfessionalSnapshotText(map, 'reviewNote', '审核意见'),
+      reviewedBy: _nullableProfessionalSnapshotText(map, 'reviewedBy', '审核人'),
+      reviewedAt: _nullableWireDateTime(map, 'reviewedAt', '审核时间'),
+      resultingProjectId: _nullableProfessionalSnapshotText(
+          map, 'resultingProjectId', '生成平台项目'),
+      resultingInstitutionProjectId: _nullableProfessionalSnapshotText(
+          map, 'resultingInstitutionProjectId', '生成机构项目'),
+      submittedAt: _requiredWireDateTime(map['submittedAt'], '提交时间'),
+      updatedAt: _requiredWireDateTime(map['updatedAt'], '更新时间'),
     );
+    if (!request.hasCompleteReviewSnapshot) {
+      throw const FormatException('响应包含不完整的项目申请快照');
+    }
+    return request;
   }
 
   final String id;
@@ -1534,6 +1637,43 @@ final class ProfessionalProjectRequest {
   num? get priceSuggestion => price;
 
   bool get isCreationReviewable => status == 'PENDING';
+
+  bool get hasCompleteReviewSnapshot {
+    if (id.trim().isEmpty ||
+        doctorId.trim().isEmpty ||
+        doctorName.trim().isEmpty ||
+        status.trim().isEmpty ||
+        !const {'CNY', 'USD'}.contains(currency.trim().toUpperCase()) ||
+        salesCount < 0 ||
+        salesCount > 2147483647) {
+      return false;
+    }
+    if (requestType == 'PLATFORM') {
+      return _hasText(name) &&
+          _hasText(category) &&
+          _hasText(description) &&
+          tags != null &&
+          slogan != null &&
+          coverImage != null &&
+          images != null &&
+          referencePrice != null &&
+          _validDecimal(referencePrice!, 99999999.99) &&
+          categoryTags != null;
+    }
+    if (requestType == 'INSTITUTION') {
+      final split = institutionSplit;
+      return _hasText(institutionId) &&
+          _hasText(projectId) &&
+          price != null &&
+          _validDecimal(price!, 99999999.99) &&
+          (originalPrice == null ||
+              _validDecimal(originalPrice!, 99999999.99)) &&
+          isActive != null &&
+          split != null &&
+          split.hasCompleteReviewSnapshot;
+    }
+    return false;
+  }
 }
 
 final class InstitutionProjectSplit {
@@ -1547,6 +1687,17 @@ final class InstitutionProjectSplit {
 
   factory InstitutionProjectSplit.fromJson(Object? json) {
     final map = _jsonMap(json, '机构项目分账');
+    for (final key in const {
+      'consultationFee',
+      'commissionRate',
+      'institutionRate',
+      'platformRate',
+      'doctorRate',
+    }) {
+      if (!map.containsKey(key)) {
+        throw const FormatException('响应包含不完整的机构项目分账快照');
+      }
+    }
     return InstitutionProjectSplit(
       consultationFee: _requiredDecimal(map['consultationFee'], '咨询费'),
       commissionRate: _requiredDecimal(map['commissionRate'], '顾问比例'),
@@ -1561,6 +1712,21 @@ final class InstitutionProjectSplit {
   final num institutionRate;
   final num platformRate;
   final num doctorRate;
+
+  bool get hasCompleteReviewSnapshot {
+    if (!_validDecimal(consultationFee, 99999999.99) ||
+        !_validDecimal(commissionRate, 100) ||
+        !_validDecimal(institutionRate, 100) ||
+        !_validDecimal(platformRate, 100) ||
+        !_validDecimal(doctorRate, 100)) {
+      return false;
+    }
+    return _decimalHundredths(commissionRate)! +
+            _decimalHundredths(institutionRate)! +
+            _decimalHundredths(platformRate)! +
+            _decimalHundredths(doctorRate)! ==
+        BigInt.from(10000);
+  }
 }
 
 final class InstitutionProjectJoinRequest {
@@ -1961,7 +2127,9 @@ final class PlatformProjectRequestDraft {
     if (!_validDecimal(referencePrice, 99999999.99)) {
       throw ArgumentError('参考价格必须在 0 到 99999999.99 之间且最多两位小数');
     }
-    if (salesCount < 0) throw ArgumentError('销量不能小于 0');
+    if (salesCount < 0 || salesCount > 2147483647) {
+      throw ArgumentError('销量必须在 0 到 2147483647 之间');
+    }
     _validateCurrency(currency);
     _validateItems('项目图片', images, 20, 500);
     _validateItems('项目标签', tags, 20, 100);
@@ -2149,7 +2317,9 @@ final class InstitutionProjectRequestDraft {
         throw ArgumentError('金额必须在 0 到 99999999.99 之间且最多两位小数');
       }
     }
-    if (salesCount < 0) throw ArgumentError('销量不能小于 0');
+    if (salesCount < 0 || salesCount > 2147483647) {
+      throw ArgumentError('销量必须在 0 到 2147483647 之间');
+    }
     _validateCurrency(currency);
     if (tags != null) _validateItems('项目标签', tags!, 20, 100);
     if (images != null) _validateItems('项目图片', images!, 20, 500);
@@ -2345,8 +2515,6 @@ String? _nullableText(Object? value) {
   final result = value?.toString().trim();
   return result == null || result.isEmpty ? null : result;
 }
-
-String? _nullableSnapshotText(Object? value) => value?.toString().trim();
 
 DateTime? _dateTime(Object? value) {
   final text = value?.toString().trim();
