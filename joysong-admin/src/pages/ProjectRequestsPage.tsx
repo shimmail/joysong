@@ -125,7 +125,8 @@ const isNullableString = (value: unknown): value is string | null => value === n
 const isStringList = (value: unknown): value is string[] => Array.isArray(value) && value.every(item => typeof item === 'string');
 const isNullableStringList = (value: unknown): value is string[] | null => value === null || isStringList(value);
 const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
-const isNullableNumber = (value: unknown): value is number | null => value === null || isFiniteNumber(value);
+const isMoney = (value: unknown): value is number => toHundredths(value, 0, 99_999_999.99) !== null;
+const isNullableMoney = (value: unknown): value is number | null => value === null || isMoney(value);
 
 const hasTypedKeys = (
   value: Record<string, unknown>,
@@ -174,7 +175,7 @@ function isCompleteProfessionalProjectRequest(value: unknown): value is Complete
       isNullableString,
     )
     && hasTypedKeys(value, ['tags', 'images', 'categoryTags'], isNullableStringList)
-    && hasTypedKeys(value, ['referencePrice', 'price', 'originalPrice'], isNullableNumber)
+    && hasTypedKeys(value, ['referencePrice', 'price', 'originalPrice'], isNullableMoney)
     && hasOwn(value, 'salesCount')
     && Number.isInteger(value.salesCount)
     && (value.salesCount as number) >= 0
@@ -200,7 +201,7 @@ function isCompleteProfessionalProjectRequest(value: unknown): value is Complete
       && typeof value.slogan === 'string'
       && typeof value.coverImage === 'string'
       && isStringList(value.images)
-      && isFiniteNumber(value.referencePrice)
+      && isMoney(value.referencePrice)
       && isStringList(value.categoryTags)
       && value.price === null
       && value.originalPrice === null
@@ -215,7 +216,7 @@ function isCompleteProfessionalProjectRequest(value: unknown): value is Complete
     && isNonblankString(value.projectName)
     && value.referencePrice === null
     && value.categoryTags === null
-    && isFiniteNumber(value.price)
+    && isMoney(value.price)
     && typeof value.isActive === 'boolean'
     && isCompleteSplit(value.institutionSplit);
 }

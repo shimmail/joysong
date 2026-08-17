@@ -107,9 +107,18 @@ const malformedProfessionalCases: [string, unknown][] = [
   ['missing platform category', withoutKey(platformRequest, 'category')],
   ['missing platform description', withoutKey(platformRequest, 'description')],
   ['missing platform reference price', withoutKey(platformRequest, 'referencePrice')],
+  ['negative platform reference price', { ...platformRequest, referencePrice: -0.01 }],
+  ['platform reference price exceeds DECIMAL(10,2)', { ...platformRequest, referencePrice: 100_000_000 }],
+  ['platform reference price exceeds two decimals', { ...platformRequest, referencePrice: 399.501 }],
   ['missing institution ID', withoutKey(institutionRequest, 'institutionId')],
   ['missing platform-project ID', withoutKey(institutionRequest, 'projectId')],
   ['missing institution price', withoutKey(institutionRequest, 'price')],
+  ['negative institution price', { ...institutionRequest, price: -0.01 }],
+  ['institution price exceeds DECIMAL(10,2)', { ...institutionRequest, price: 100_000_000 }],
+  ['institution price exceeds two decimals', { ...institutionRequest, price: 1200.001 }],
+  ['negative institution original price', { ...institutionRequest, originalPrice: -0.01 }],
+  ['institution original price exceeds DECIMAL(10,2)', { ...institutionRequest, originalPrice: 100_000_000 }],
+  ['institution original price exceeds two decimals', { ...institutionRequest, originalPrice: 1680.001 }],
   ['missing institution active flag', withoutKey(institutionRequest, 'isActive')],
   ['institution includes contradictory reference price', { ...institutionRequest, referencePrice: 1200 }],
   ['institution includes contradictory category tags', { ...institutionRequest, categoryTags: ['不应出现'] }],
@@ -140,6 +149,41 @@ function institutionWithSplit(overrides: Partial<InstitutionProjectSplit>) {
     institutionSplit: { ...institutionRequest.institutionSplit, ...overrides },
   } satisfies ProfessionalProjectRequestResponse;
 }
+
+const validMoneyBoundaryCases = [
+  {
+    caseName: 'maximum platform reference price',
+    request: { ...platformRequest, referencePrice: 99_999_999.99 } satisfies ProfessionalProjectRequestResponse,
+    rowName: '光子焕肤',
+    detailLabel: '参考价格',
+    detailValue: 'USD 99999999.99',
+    approveLabel: '通过 光子焕肤，申请ID platform-request',
+  },
+  {
+    caseName: 'maximum institution price',
+    request: { ...institutionRequest, price: 99_999_999.99 } satisfies ProfessionalProjectRequestResponse,
+    rowName: '机构定制光子',
+    detailLabel: '价格',
+    detailValue: 'CNY 99999999.99',
+    approveLabel: '通过 机构定制光子，申请ID institution-request',
+  },
+  {
+    caseName: 'maximum institution original price',
+    request: { ...institutionRequest, originalPrice: 99_999_999.99 } satisfies ProfessionalProjectRequestResponse,
+    rowName: '机构定制光子',
+    detailLabel: '原价',
+    detailValue: 'CNY 99999999.99',
+    approveLabel: '通过 机构定制光子，申请ID institution-request',
+  },
+  {
+    caseName: 'nullable institution original price',
+    request: { ...institutionRequest, originalPrice: null } satisfies ProfessionalProjectRequestResponse,
+    rowName: '机构定制光子',
+    detailLabel: '原价',
+    detailValue: '-',
+    approveLabel: '通过 机构定制光子，申请ID institution-request',
+  },
+] as const;
 
 function setContext(context: ManagementContext) {
   setAdminToken('header.payload.signature', context);
@@ -310,6 +354,19 @@ describe('ProjectRequestsPage', () => {
     expect(screen.getByText(/请刷新页面；若问题持续存在，请联系技术人员/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^通过 / })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^驳回 / })).not.toBeInTheDocument();
+  });
+
+  it.each(validMoneyBoundaryCases)('accepts valid snapshot money: $caseName', async (moneyCase) => {
+    setContext(adminContext);
+    mockLists('/admin/project-requests', [moneyCase.request]);
+
+    render(<ProjectRequestsPage />);
+
+    expect(await screen.findByText(moneyCase.rowName)).toBeInTheDocument();
+    await expectListPair('/admin/project-requests');
+    expect(screen.queryByText('申请快照数据不完整，已禁止审核')).not.toBeInTheDocument();
+    expectDescriptionValue(expandRow(moneyCase.rowName), moneyCase.detailLabel, moneyCase.detailValue);
+    expect(screen.getByRole('button', { name: moneyCase.approveLabel })).toBeEnabled();
   });
 
   it('accepts the maximum signed Int32 sales count', async () => {
