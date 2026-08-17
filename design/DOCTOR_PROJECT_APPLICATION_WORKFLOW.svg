@@ -42,7 +42,7 @@
   <rect x="1300" y="245" width="170" height="48" rx="7" class="actor"/><text x="1385" y="266" text-anchor="middle" class="label">Platform admin</text><text x="1385" y="284" text-anchor="middle" class="small">sole reviewer</text>
   <g class="line"><line x1="145" y1="293" x2="145" y2="714"/><line x1="395" y1="293" x2="395" y2="714"/><line x1="633" y1="293" x2="633" y2="714"/><line x1="890" y1="293" x2="890" y2="714"/><line x1="1140" y1="293" x2="1140" y2="714"/><line x1="1385" y1="293" x2="1385" y2="714"/></g>
   <path d="M145 325 H395" class="arrow"/><text x="270" y="317" text-anchor="middle" class="body">complete platform-project form</text>
-  <path d="M395 370 H633" class="arrow"/><text x="514" y="352" text-anchor="middle" class="label">POST /platform</text><text x="514" y="369" text-anchor="middle" class="small">exact 13-key JSON; no rating, review count, rates, or doctor IDs</text>
+  <path d="M395 370 H633" class="arrow"/><text x="514" y="352" text-anchor="middle" class="label">POST /platform</text><text x="514" y="369" text-anchor="middle" class="small">all exact 13 keys; no rating, review count, rates, or doctor IDs</text>
   <path d="M633 420 H890" class="arrow"/><text x="762" y="411" text-anchor="middle" class="body">validate → INSERT PLATFORM PENDING snapshot</text>
   <path d="M890 462 H395" class="return"/><text x="643" y="454" text-anchor="middle" class="body">{ id, requestType: PLATFORM, status: PENDING }</text>
   <path d="M1385 510 H633" class="arrow"/><text x="1009" y="492" text-anchor="middle" class="label">POST /api/admin/project-requests/{id}/review</text><text x="1009" y="509" text-anchor="middle" class="small">decision APPROVED or REJECTED; rejection note must be non-blank</text>
@@ -66,18 +66,19 @@
   <path d="M348 900 H575" class="arrow"/><text x="462" y="891" text-anchor="middle" class="body">GET /institution-form-config</text>
   <path d="M575 929 H348" class="return"/><text x="462" y="920" text-anchor="middle" class="body">read-only { platformRate }</text>
   <path d="M130 970 H348" class="arrow"/><text x="239" y="961" text-anchor="middle" class="body">select target + project; edit split</text>
-  <path d="M348 1018 H575" class="arrow"/><text x="462" y="998" text-anchor="middle" class="label">POST /institutions/{institutionId}</text><text x="462" y="1015" text-anchor="middle" class="small">exact 18-key JSON; optional null/blank display values inherit</text>
+  <path d="M348 1018 H575" class="arrow"/><text x="462" y="998" text-anchor="middle" class="label">POST /institutions/{institutionId}</text><text x="462" y="1015" text-anchor="middle" class="small">all exact 18 keys; null / blank / [] display values inherit</text>
   <path d="M575 1062 H810" class="arrow"/><text x="693" y="1053" text-anchor="middle" class="body">validate relationship, money, count, rates → PENDING snapshot</text>
   <path d="M810 1098 H348" class="return"/><text x="579" y="1089" text-anchor="middle" class="body">request id; submitted values remain immutable</text>
   <path d="M1048 1146 H575" class="arrow"/><text x="812" y="1137" text-anchor="middle" class="body">review only if target institution is in managedInstitutionIds</text>
   <path d="M1278 1180 H575" class="arrow"/><text x="926" y="1171" text-anchor="middle" class="body">administrator may review any target institution request</text>
   <path d="M575 1220 H810" class="arrow"/><text x="693" y="1211" text-anchor="middle" class="body">lock PENDING snapshot; revalidate current relationship, project, uniqueness, platform rate</text>
-  <rect x="482" y="1250" width="1010" height="210" rx="8" class="tx"/>
-  <text x="504" y="1277" class="label">APPROVED — one atomic transaction, fixed order</text>
-  <path d="M575 1310 H1455" class="arrow"/><text x="1015" y="1301" text-anchor="middle" class="body">1. INSERT institution_projects with effective inherited content; rating = 0, review_count = 0</text>
-  <path d="M575 1350 H1455" class="arrow"/><text x="1015" y="1341" text-anchor="middle" class="body">2. INSERT doctor_projects binding for applicant doctor only</text>
-  <path d="M575 1390 H1455" class="arrow"/><text x="1015" y="1381" text-anchor="middle" class="body">3. INSERT doctor_institution_project_configs for that applicant</text>
-  <path d="M575 1430 H810" class="arrow"/><text x="693" y="1421" text-anchor="middle" class="body">4. close APPROVED + resultingInstitutionProjectId</text>
+  <path d="M575 1250 H810" class="arrow"/><text x="693" y="1241" text-anchor="middle" class="body">REJECTED — close immutable ledger + non-blank review note</text>
+  <rect x="482" y="1280" width="1010" height="180" rx="8" class="tx"/>
+  <text x="504" y="1307" class="label">APPROVED — one atomic transaction, fixed order</text>
+  <path d="M575 1330 H1455" class="arrow"/><text x="1015" y="1321" text-anchor="middle" class="body">1. INSERT institution_projects with effective inherited content; rating = 0, review_count = 0</text>
+  <path d="M575 1370 H1455" class="arrow"/><text x="1015" y="1361" text-anchor="middle" class="body">2. INSERT doctor_projects binding for applicant doctor only</text>
+  <path d="M575 1410 H1455" class="arrow"/><text x="1015" y="1401" text-anchor="middle" class="body">3. INSERT doctor_institution_project_configs for that applicant</text>
+  <path d="M575 1440 H810" class="arrow"/><text x="693" y="1431" text-anchor="middle" class="body">4. close APPROVED + resultingInstitutionProjectId</text>
   <rect x="88" y="1490" width="1328" height="72" rx="8" class="note"/>
   <text x="110" y="1517" class="label">Rollback boundary</text>
   <text x="110" y="1542" class="body">Any revalidation or write failure triggers transaction rollback: every target row is undone and the ledger remains PENDING. The client receives 409/error; no partial project, binding, configuration, or status closure exists.</text>

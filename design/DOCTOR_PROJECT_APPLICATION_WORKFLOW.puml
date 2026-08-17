@@ -26,7 +26,7 @@ end note
 
 group Platform-project application
   Doctor -> Flutter: enter complete platform project form
-  Flutter -> API: POST /platform\nexact 13-key JSON body
+  Flutter -> API: POST /platform\nall exact 13 keys; every key present
   API -> API: require active DOCTOR\nvalidate text, arrays, money, count
   API -> Ledger: INSERT PLATFORM snapshot (PENDING, applicant doctor)
   Ledger --> API: request id
@@ -50,7 +50,7 @@ group Institution-project application
   Doctor -> Flutter: choose approved institution + platform project
   Flutter -> API: GET /institution-form-config
   API --> Flutter: {platformRate} (read only)
-  Flutter -> API: POST /institutions/{institutionId}\nexact 18-key JSON body
+  Flutter -> API: POST /institutions/{institutionId}\nall exact 18 keys; null/blank/[] inherits
   API -> API: require applicant approved relationship\nvalidate inheritance, money, count and split
   API -> Ledger: INSERT INSTITUTION snapshot (PENDING, applicant doctor)
   Ledger --> API: request id
