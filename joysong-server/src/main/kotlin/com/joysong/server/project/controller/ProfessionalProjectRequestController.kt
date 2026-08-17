@@ -2,6 +2,7 @@ package com.joysong.server.project.controller
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
+import com.fasterxml.jackson.core.JsonProcessingException
 import com.joysong.server.common.BaseResponse
 import com.joysong.server.identity.service.ManagementAccessService
 import com.joysong.server.order.service.OrderSplitRatePolicy
@@ -28,26 +29,87 @@ private fun validateProjectRequestReview(request: ProjectRequestReview) {
     require(decision != "REJECTED" || request.reviewNote.isNotBlank()) { "拒绝时必须填写审核意见" }
 }
 
-private val PLATFORM_REQUEST_FIELDS = setOf(
-    "name", "category", "description", "referencePrice", "currency", "slogan", "salesCount",
-    "coverImage", "images", "detailContent", "tags", "categoryTags", "notes"
+private class ProjectRequestShape(
+    val fields: Set<String>,
+    private val nullableFields: Set<String>,
+    private val textFields: Set<String>,
+    private val decimalFields: Set<String>,
+    private val integerFields: Set<String>,
+    private val booleanFields: Set<String>,
+    private val stringArrayFields: Set<String>
+) {
+    fun validate(request: ObjectNode) {
+        require(request.fieldNames().asSequence().toSet() == fields) {
+            "请求字段不完整或包含不支持的字段"
+        }
+        (fields - nullableFields).forEach { field ->
+            require(!requireNotNull(request.get(field)).isNull) { "请求字段值不能为空" }
+        }
+        requireTypes(request, textFields) { it.isTextual }
+        requireTypes(request, decimalFields) { it.isNumber }
+        requireTypes(request, integerFields) { it.isIntegralNumber }
+        requireTypes(request, booleanFields) { it.isBoolean }
+        requireTypes(request, stringArrayFields) { value ->
+            value.isArray && value.all { element -> element.isTextual }
+        }
+    }
+
+    private fun requireTypes(
+        request: ObjectNode,
+        fields: Set<String>,
+        predicate: (com.fasterxml.jackson.databind.JsonNode) -> Boolean
+    ) {
+        fields.forEach { field ->
+            val value = requireNotNull(request.get(field))
+            require(value.isNull || predicate(value)) { "请求字段值格式不正确" }
+        }
+    }
+}
+
+private val PLATFORM_REQUEST_SHAPE = ProjectRequestShape(
+    fields = setOf(
+        "name", "category", "description", "referencePrice", "currency", "slogan", "salesCount",
+        "coverImage", "images", "detailContent", "tags", "categoryTags", "notes"
+    ),
+    nullableFields = setOf("detailContent"),
+    textFields = setOf("name", "category", "description", "currency", "slogan", "coverImage", "detailContent", "notes"),
+    decimalFields = setOf("referencePrice"),
+    integerFields = setOf("salesCount"),
+    booleanFields = emptySet(),
+    stringArrayFields = setOf("images", "tags", "categoryTags")
 )
 
-private val INSTITUTION_REQUEST_FIELDS = setOf(
-    "projectId", "name", "category", "description", "tags", "slogan", "detailContent", "price",
-    "originalPrice", "currency", "coverImage", "images", "salesCount", "isActive", "consultationFee",
-    "commissionRate", "institutionRate", "notes"
+private val INSTITUTION_REQUEST_SHAPE = ProjectRequestShape(
+    fields = setOf(
+        "projectId", "name", "category", "description", "tags", "slogan", "detailContent", "price",
+        "originalPrice", "currency", "coverImage", "images", "salesCount", "isActive", "consultationFee",
+        "commissionRate", "institutionRate", "notes"
+    ),
+    nullableFields = setOf(
+        "name", "category", "description", "tags", "slogan", "detailContent", "originalPrice", "coverImage", "images"
+    ),
+    textFields = setOf(
+        "projectId", "name", "category", "description", "slogan", "detailContent", "currency", "coverImage", "notes"
+    ),
+    decimalFields = setOf("price", "originalPrice", "consultationFee", "commissionRate", "institutionRate"),
+    integerFields = setOf("salesCount"),
+    booleanFields = setOf("isActive"),
+    stringArrayFields = setOf("tags", "images")
 )
 
 private fun <T> ObjectMapper.readExactRequest(
     request: ObjectNode,
-    expectedFields: Set<String>,
+    shape: ProjectRequestShape,
     type: Class<T>
 ): T {
-    require(request.fieldNames().asSequence().toSet() == expectedFields) {
-        "请求字段不完整或包含不支持的字段"
+    shape.validate(request)
+    return try {
+        treeToValue(request, type)
+    } catch (error: JsonProcessingException) {
+        throw IllegalArgumentException("请求字段值格式不正确", error)
+    } catch (error: IllegalArgumentException) {
+        throw IllegalArgumentException("请求字段值格式不正确", error)
     }
-    return treeToValue(request, type)
 }
 
 @RestController
@@ -67,7 +129,7 @@ class ProfessionalProjectRequestController(
         authentication: Authentication?,
         @RequestBody request: ObjectNode
     ): BaseResponse<*> {
-        val typedRequest = objectMapper.readExactRequest(request, PLATFORM_REQUEST_FIELDS, DoctorPlatformProjectRequest::class.java)
+        val typedRequest = objectMapper.readExactRequest(request, PLATFORM_REQUEST_SHAPE, DoctorPlatformProjectRequest::class.java)
         return BaseResponse.success(service.submitPlatform(managementAccessService.authenticatedActor(authentication), typedRequest))
     }
 
@@ -79,7 +141,7 @@ class ProfessionalProjectRequestController(
     ): BaseResponse<*> {
         val typedRequest = objectMapper.readExactRequest(
             request,
-            INSTITUTION_REQUEST_FIELDS,
+            INSTITUTION_REQUEST_SHAPE,
             DoctorInstitutionProjectRequest::class.java
         )
         return BaseResponse.success(

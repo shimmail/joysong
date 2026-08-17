@@ -89,6 +89,118 @@ class ProfessionalProjectRequestHttpTest {
     }
 
     @Test
+    fun `platform application rejects explicit null for every non nullable field before service invocation`() {
+        val fixture = fixture()
+        every { fixture.service.submitPlatform(any(), any()) } returns
+            ProjectRequestSubmissionResult("unexpected", "PLATFORM", "PENDING")
+
+        platformNonNullableFields.forEach { nullField ->
+            fixture.mvc.perform(
+                post("/api/management/project-requests/platform")
+                    .json(withField(platformBody(), nullField, "null"))
+            )
+                .andExpect(status().isBadRequest)
+                .andExpect(jsonPath("$.code").value(400))
+        }
+
+        verify(exactly = 0) { fixture.service.submitPlatform(any(), any()) }
+    }
+
+    @Test
+    fun `institution application rejects explicit null for every non nullable field before service invocation`() {
+        val fixture = fixture()
+        every { fixture.service.submitInstitution(any(), any(), any()) } returns
+            ProjectRequestSubmissionResult("unexpected", "INSTITUTION", "PENDING")
+
+        institutionNonNullableFields.forEach { nullField ->
+            fixture.mvc.perform(
+                post("/api/management/project-requests/institutions/institution-1")
+                    .json(withField(institutionBody(), nullField, "null"))
+            )
+                .andExpect(status().isBadRequest)
+                .andExpect(jsonPath("$.code").value(400))
+        }
+
+        verify(exactly = 0) { fixture.service.submitInstitution(any(), any(), any()) }
+    }
+
+    @Test
+    fun `application payloads reject malformed enum number boolean string and array values before service invocation`() {
+        val fixture = fixture()
+        every { fixture.service.submitPlatform(any(), any()) } returns
+            ProjectRequestSubmissionResult("unexpected-platform", "PLATFORM", "PENDING")
+        every { fixture.service.submitInstitution(any(), any(), any()) } returns
+            ProjectRequestSubmissionResult("unexpected-institution", "INSTITUTION", "PENDING")
+        val malformedPlatformFields = mapOf(
+            "salesCount" to "false",
+            "currency" to "\"EUR\"",
+            "referencePrice" to "{}",
+            "images" to "[\"one.png\",null]",
+            "tags" to "[\"skin\",5]",
+            "categoryTags" to "{}"
+        )
+        val malformedInstitutionFields = mapOf(
+            "isActive" to "0",
+            "projectId" to "123",
+            "currency" to "\"EUR\"",
+            "price" to "[]",
+            "salesCount" to "\"five\"",
+            "consultationFee" to "true",
+            "commissionRate" to "\"twenty\"",
+            "institutionRate" to "{}",
+            "images" to "[null]",
+            "tags" to "[{}]"
+        )
+
+        malformedPlatformFields.forEach { (field, value) ->
+            fixture.mvc.perform(
+                post("/api/management/project-requests/platform")
+                    .json(withField(platformBody(), field, value))
+            )
+                .andExpect(status().isBadRequest)
+                .andExpect(jsonPath("$.code").value(400))
+        }
+        malformedInstitutionFields.forEach { (field, value) ->
+            fixture.mvc.perform(
+                post("/api/management/project-requests/institutions/institution-1")
+                    .json(withField(institutionBody(), field, value))
+            )
+                .andExpect(status().isBadRequest)
+                .andExpect(jsonPath("$.code").value(400))
+        }
+
+        verify(exactly = 0) { fixture.service.submitPlatform(any(), any()) }
+        verify(exactly = 0) { fixture.service.submitInstitution(any(), any(), any()) }
+    }
+
+    @Test
+    fun `application payloads continue to accept explicit null for nullable fields`() {
+        val fixture = fixture()
+        every { fixture.service.submitPlatform(any(), any()) } returns
+            ProjectRequestSubmissionResult("nullable-platform", "PLATFORM", "PENDING")
+        every { fixture.service.submitInstitution(any(), any(), any()) } returns
+            ProjectRequestSubmissionResult("nullable-institution", "INSTITUTION", "PENDING")
+
+        platformNullableFields.forEach { nullableField ->
+            fixture.mvc.perform(
+                post("/api/management/project-requests/platform")
+                    .json(withField(platformBody(), nullableField, "null"))
+            ).andExpect(status().isOk)
+        }
+        institutionNullableFields.forEach { nullableField ->
+            fixture.mvc.perform(
+                post("/api/management/project-requests/institutions/institution-1")
+                    .json(withField(institutionBody(), nullableField, "null"))
+            ).andExpect(status().isOk)
+        }
+
+        verify(exactly = platformNullableFields.size) { fixture.service.submitPlatform(fixture.actor, any()) }
+        verify(exactly = institutionNullableFields.size) {
+            fixture.service.submitInstitution(fixture.actor, "institution-1", any())
+        }
+    }
+
+    @Test
     fun `application payloads reject arbitrary and prohibited fields before service invocation`() {
         val fixture = fixture()
 
@@ -317,6 +429,12 @@ class ProfessionalProjectRequestHttpTest {
             .also { it.remove(field) }
             .toString()
 
+    private fun withField(body: String, field: String, value: String): String =
+        (productionObjectMapper.readTree(body) as ObjectNode)
+            .deepCopy()
+            .also { it.set<com.fasterxml.jackson.databind.JsonNode>(field, productionObjectMapper.readTree(value)) }
+            .toString()
+
     private data class Fixture(
         val mvc: org.springframework.test.web.servlet.MockMvc,
         val service: ProfessionalProjectRequestService,
@@ -342,6 +460,19 @@ class ProfessionalProjectRequestHttpTest {
             "projectId", "name", "category", "description", "tags", "slogan", "detailContent", "price",
             "originalPrice", "currency", "coverImage", "images", "salesCount", "isActive", "consultationFee",
             "commissionRate", "institutionRate", "notes"
+        )
+        val platformNonNullableFields = listOf(
+            "salesCount", "referencePrice", "currency", "name", "category", "description", "slogan",
+            "coverImage", "images", "tags", "categoryTags", "notes"
+        )
+        val institutionNonNullableFields = listOf(
+            "isActive", "price", "consultationFee", "commissionRate", "institutionRate", "salesCount",
+            "currency", "projectId", "notes"
+        )
+        val platformNullableFields = listOf("detailContent")
+        val institutionNullableFields = listOf(
+            "name", "category", "description", "tags", "slogan", "detailContent", "originalPrice",
+            "coverImage", "images"
         )
     }
 }
