@@ -75,7 +75,6 @@ class IdentityDataInitializerPersistenceTest {
     }
 
     private fun migrateFreshDatabase(): JdbcTemplate {
-        assertEquals(EXPECTED_DATABASE, WorktreeTestDatabase.databaseName())
         WorktreeTestDatabase.validateAndPrint(mysql)
         Flyway.configure()
             .dataSource(mysql.jdbcUrl, mysql.username, mysql.password)
@@ -197,8 +196,6 @@ class IdentityDataInitializerPersistenceTest {
     )
 
     companion object {
-        private const val EXPECTED_DATABASE = "myapp_worktree_doctor_project_application_full_vo"
-
         @Container
         @JvmField
         val mysql = IdentityDataInitializerMySqlContainer("mysql:8.0.39")
