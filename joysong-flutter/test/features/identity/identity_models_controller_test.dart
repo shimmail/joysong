@@ -743,7 +743,7 @@ void main() {
             'platformRate': 10,
             'doctorRate': 40,
           },
-          'notes': '',
+          'notes': null,
           'status': 'PENDING',
           'reviewNote': null,
           'reviewedBy': null,

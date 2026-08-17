@@ -1009,6 +1009,31 @@ void main() {
     expect(project.salesCount, 18);
   });
 
+  test(
+      'repository project request list rejects missing or malformed data instead of defaulting to empty',
+      () async {
+    for (final client in [
+      _ProjectRequestListApiClient(data: const <String, Object?>{}),
+      _ProjectRequestListApiClient(data: 'not-a-list'),
+      _ProjectRequestListApiClient(data: null),
+      _ProjectRequestListApiClient.missing(),
+      _ProjectRequestListApiClient(data: const [
+        <String, Object?>{'id': 'incomplete-request'},
+      ]),
+    ]) {
+      final repository = ApiIdentityRepository(client);
+      await expectLater(
+        repository.listProfessionalProjectRequests(),
+        throwsFormatException,
+      );
+    }
+
+    final empty = await ApiIdentityRepository(
+      _ProjectRequestListApiClient(data: const <Object?>[]),
+    ).listProfessionalProjectRequests();
+    expect(empty, isEmpty);
+  });
+
   test('repository records distinct submission config and review routes',
       () async {
     final client = _RecordingApiClient();
@@ -1155,6 +1180,30 @@ final class _RecordingApiClient extends ApiClient {
   }) async {
     requests.add(_Request('POST', path, body: body));
     return decodeData(null);
+  }
+}
+
+final class _ProjectRequestListApiClient extends ApiClient {
+  _ProjectRequestListApiClient({required this.data})
+      : hasData = true,
+        super(apiRoot: Uri.parse('http://localhost/api/'));
+
+  _ProjectRequestListApiClient.missing()
+      : data = null,
+        hasData = false,
+        super(apiRoot: Uri.parse('http://localhost/api/'));
+
+  final Object? data;
+  final bool hasData;
+
+  @override
+  Future<T?> get<T>(
+    String path, {
+    Map<String, Object?> query = const {},
+    required T Function(Object? json) decodeData,
+  }) async {
+    if (!hasData) return null;
+    return decodeData(data);
   }
 }
 

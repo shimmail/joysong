@@ -368,13 +368,14 @@ final class ApiIdentityRepository implements IdentityRepository {
   @override
   Future<List<ProfessionalProjectRequest>>
       listProfessionalProjectRequests() async {
-    return await _apiClient.get<List<ProfessionalProjectRequest>>(
-          '/management/project-requests',
-          decodeData: (json) => _objectList(
-            json,
-          ).map(ProfessionalProjectRequest.fromJson).toList(growable: false),
-        ) ??
-        const [];
+    final requests = await _apiClient.get<List<ProfessionalProjectRequest>>(
+      '/management/project-requests',
+      decodeData: _professionalProjectRequestList,
+    );
+    if (requests == null) {
+      throw const FormatException('项目申请列表响应缺少 data');
+    }
+    return requests;
   }
 
   @override
@@ -557,6 +558,14 @@ Map<String, Object?> _projectReviewBody(String decision, String reviewNote) {
 }
 
 List<Object?> _objectList(Object? value) => value is List ? value : const [];
+
+List<ProfessionalProjectRequest> _professionalProjectRequestList(
+    Object? value) {
+  if (value is! List) {
+    throw const FormatException('项目申请列表 data 必须为数组');
+  }
+  return value.map(ProfessionalProjectRequest.fromJson).toList(growable: false);
+}
 
 InstitutionMembershipRequest _requiredMembershipMutation(
   InstitutionMembershipRequest? result,
