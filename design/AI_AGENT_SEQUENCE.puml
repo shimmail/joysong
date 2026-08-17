@@ -1,12 +1,12 @@
 @startuml
-title JoySong AI Agent 高效混合路由与对比请求流程
+title JoySong AI Agent 混合路由、对比与真人咨询流程
+scale 0.60
 
 hide footbox
 autonumber
 skinparam sequenceMessageAlign center
 skinparam responseMessageBelowArrow true
 skinparam maxMessageSize 110
-skinparam ParticipantPadding 8
 
 actor 用户 as User
 participant "AI页面\nFlutter" as App
@@ -39,9 +39,11 @@ Router --> Chat: LocalAssessment
 
 note over Router,Parser
 |= 返回内容 |= 可选值 |
-| intent | GENERAL_CHAT · CATALOG_QA · COMPARISON · PLANNING · DETAIL_SUMMARY · SAFETY_SCREENING |
+| intent | GENERAL_CHAT · CATALOG_QA · COMPARISON · PLANNING |
+| | DETAIL_SUMMARY · SAFETY_SCREENING · HUMAN_CONSULTATION |
 | target | INSTITUTION · DOCTOR · PROJECT · INSTITUTION_PROJECT |
-| action | NONE · SHOW_CATALOG · START_PLANNING · COMPLETE_SAFETY_SCREENING |
+| action | NONE · SHOW_CATALOG · START_PLANNING |
+| | COMPLETE_SAFETY_SCREENING · SELECT_INSTITUTION |
 | assessment | confidence · ambiguityReasons · requiresLlmParsing |
 end note
 
@@ -55,7 +57,9 @@ Chat -> Router: mergeParsedRoute（校验/锁定当前证据）
 Router --> Chat: final intent + target + action
 
 note over Router,Chat
-安全路由保持最高优先级；规划路由及其边界保持不变。
+安全路由保持最高优先级；当前明确否定高于历史和模型结果。
+HUMAN_CONSULTATION 固定 target=INSTITUTION，模型不能提供咨询师或私聊用户 ID。
+规划路由及其边界保持不变。
 仅 final intent == COMPARISON 才恢复和构建对比请求，
 不会让历史对比状态覆盖 SAFETY_SCREENING / PLANNING。
 end note
@@ -63,6 +67,23 @@ end note
 == 意图执行（保持既有安全、规划、详情和目录行为） ==
 alt final intent == SAFETY_SCREENING
     Chat -> Chat: 停止推荐；action=风险筛查
+else final intent == HUMAN_CONSULTATION
+    Chat -> DB: 一次集合查询最多4个可咨询机构
+    DB --> Chat: 已验证机构 + 当前合格咨询师存在性
+    note over Chat,DB
+    精确机构 → 显式城市 → 档案城市 → 全国；
+    级内 rating 降序、institution ID 升序，去重补齐。
+    end note
+    alt 有候选机构
+        Chat -> Lifecycle: completeTurn(固定双语文案,\nSELECT_INSTITUTION, institution cards)
+    else 全国无候选机构
+        Chat -> Lifecycle: completeTurn(固定空态,\nNONE, empty cards)
+    end
+    Lifecycle -> DB: 持久化 HUMAN/INSTITUTION/action/机构快照
+    note right of Chat
+    回答模型调用 = 0
+    原始真人咨询短语不进入普通 catalog search
+    end note
 else final intent == PLANNING
     opt target不为空
         Chat -> Catalog: 查询规划参考资料
@@ -135,17 +156,19 @@ note over Chat,LLM
 end note
 
 == HTTP / SSE / 历史 / 重放与逐消息渲染 ==
-Lifecycle --> Chat: message-bound comparisonRequest + catalogReport
+Lifecycle --> Chat: message-bound intent + action + cards/request/report
 Chat --> API: 当前 REST 结果 / SSE terminal result
-API --> App: 可选 request/report 字段（旧客户端兼容）
+API --> App: REST 结果 / SSE started→completed（HUMAN 无 delta）
 API -> Lifecycle: 历史加载或幂等 replay
 Lifecycle -> DB: 读取 assistant message metadata
-DB --> Lifecycle: 持久化 request + report
-Lifecycle --> API: 重建相同的 message-bound request + report
+DB --> Lifecycle: request/report 或机构卡片快照（无咨询师 ID）
+Lifecycle --> API: 重建相同的 message-bound 结果
 API --> App: history / replay
 
 loop 每条 assistant message 独立渲染
-    alt request 不完整
+    alt intent == HUMAN_CONSULTATION
+        App --> User: 固定本地化文案 + 机构卡片 / 空态
+    else request 不完整
         App --> User: 仅展示 comparison status
     else request 完整且 report 存在
         App --> User: 仅展示 comparison report
@@ -156,7 +179,34 @@ loop 每条 assistant message 独立渲染
     end
 end
 
-alt action=风险筛查
+alt action=SELECT_INSTITUTION
+    note over App,API
+    INSTITUTION: institutionId，否则自身 id；
+    INSTITUTION_PROJECT: 仅显式 institutionId；
+    DOCTOR / PROJECT / unknown / blank: 不显示真人咨询动作。
+    历史只恢复机构快照；每次点击都重查当前 consultants。
+    end note
+    User -> App: 点击当前或历史机构卡片
+    App -> API: GET /discover/institutions/{institutionId}/consultants
+    API -> DB: 查询当前合格咨询师
+    DB --> API: approved / non-revoked / non-deleted users
+    API --> App: BookingConsultant(id, name, ...)
+    alt 当前有可联系咨询师
+        App --> User: 展示现有 consultant picker
+        User -> App: 选择咨询师
+        App -> API: POST /dm/conversations\n{targetId: BookingConsultant.id}
+        API -> DB: 创建或读取 generic user-pair DM
+        DB --> API: conversation
+        API --> App: DM conversation
+        App --> User: 导航到现有 DM thread
+    else 当前咨询师已为空
+        App --> User: 展示现有本地化空态
+    end
+    note over API,DB
+    仅所选 BookingConsultant.id 可成为 DM target；
+    首版不保存机构归属，也不在 DM 创建时原子复核成员关系。
+    end note
+else action=风险筛查
     App --> User: 展示风险筛查入口
     User -> App: 填写并确认
     App -> Safety: 提交结构化筛查

@@ -32,9 +32,17 @@ data: {"code":"AI_PROVIDER_TIMEOUT","traceId":"trace-1","retryable":true}
 
 ## 意图路由与模型配置
 
-路由先检查当前请求的中英文关键词，并识别否定表达；只有当前信息不足时，才使用受限的近期上下文补全。仍无法确定时才调用模型解析。当前请求中已明确的意图或目录目标优先于历史，解析结果不能覆盖它。
+路由先检查当前请求的中英文关键词，并识别否定表达；只有当前信息不足时，才使用受限的近期上下文补全。仍无法确定时才调用模型解析。当前请求中已明确的意图或目录目标优先于历史，解析结果不能覆盖它。`SAFETY_SCREENING` 始终高于商业转接，当前消息中的明确否定也高于历史和模型结果。
 
 意图解析器固定启用。生产环境的五项 Agent 变量全部必填：`AI_AGENT_MODEL` 仅用于最终回答，`AI_AGENT_INTENT_MODEL` 仅用于意图分类，两个模型 ID 必须分别配置。解析器与最终生成共享 `AI_AGENT_API_KEY`、`AI_AGENT_BASE_URL` 和 Provider 协议；两类客户端均固定直连，超时分别为 3 秒/8 秒和 10 秒/60 秒。
+
+## 真人咨询确定性转接
+
+明确的中英文真人咨询表达由本地高精度规则直接识别为 `HUMAN_CONSULTATION`；只有语义仍然歧义时才允许意图模型分类。该意图固定 `queryTarget=INSTITUTION`，模型不能提供咨询师或私聊用户 ID，也不能绕过安全、否定和目标校验。
+
+候选机构通过一次集合查询取得：机构必须已验证、未删除，并且当前至少存在一名符合咨询师接口资格规则的咨询师。结果依次按“当前请求精确机构、当前请求显式城市、无显式城市时的用户档案城市、全国”四级去重补齐，级内按评分降序、机构 ID 升序稳定排序，最多返回 4 家。
+
+有候选时，服务端返回固定本地化文案，中文为“我可以为你转接真人咨询。请选择希望咨询的机构，随后可查看该机构当前可联系的咨询师。”，英文为“I can help connect you with a real consultant. Choose an institution to see its currently available consultants.”，并设置 `nextAction=SELECT_INSTITUTION`。全国无候选时返回固定空态、空卡片列表和 `nextAction=NONE`。这两种结果都不调用回答模型。
 
 ## 数据模型与保留策略
 
@@ -51,11 +59,15 @@ Agent 使用且仅使用以下八张表：
 
 会话摘要保留在 MySQL；对话上下文只读取最近 20 条消息并限制在最近 7 天内。超过该窗口的消息不自动回灌为模型上下文。该限制是上下文读取策略，不等同于删除历史记录的作业。
 
+真人咨询复用既有字符串与 JSON 元数据字段，不需要数据库迁移。历史消息只保存当轮机构卡片快照及最终 intent、target、action，不保存咨询师或私聊用户 ID。
+
 ## REST 语义
 
 同步接口使用稳定的 HTTP 状态：成功响应为 `2xx`，输入不合法为 `400`，找不到资源为 `404`，同一请求冲突为 `409`，上游模型不可用或超时为 `503`，未预期服务端错误为 `500`。调用方应按 HTTP 状态处理结果，不能依赖错误文本匹配。流式接口建立 SSE 后，使用 `error` 事件携带稳定错误码、`traceId` 与可重试标记。
 
 流式生成当前是 **Qwen-only**：只支持 `AI_AGENT_PROVIDER=qwen` 的百炼 OpenAI-compatible 流响应，不承诺其他 Provider 的流式格式兼容。`PLANNING` 意图不会向客户端发送上游 `delta`；服务端先完整缓冲模型输出，执行规划安全边界并完成持久化后，只通过 `completed` 交付最终安全内容。
+
+`HUMAN_CONSULTATION` 的 REST 与 SSE 使用同一完成和持久化路径。SSE 只发送 `started` → `completed`，不发送回答模型 `delta`；相同幂等键会重放已持久化的固定文案和机构卡片快照，不重新调用回答模型。
 
 若上游、客户端连接或最终化失败，已经展示在客户端的 partial assistant output 仅存在于客户端本地 UI，服务端不持久化该 partial 内容；turn 会以失败或取消状态结束，历史消息接口不会返回这段不完整回答。客户端可保留并标记本地 partial 消息，并按 `error.retryable` 决定是否允许重试。
 
@@ -65,7 +77,9 @@ Agent 使用且仅使用以下八张表：
 
 结构化卡片可以使用自身的目录 `id` 以及 `doctorId`、`projectId`、`institutionId` 打开医生、项目或机构详情。这些 ID 表示业务资源，**不能**当作私聊对端用户 ID。
 
-当前 Agent 目录响应没有显式的 `humanUserId`（或等价、经服务端授权的真人账号字段），因此客户端有意隐藏结构化卡片上的“真人咨询”入口。不得使用 doctor、project、institution 或 institution-project ID 猜测/替代聊天用户 ID。后续只有在服务端增加明确的真人用户字段、访问授权语义和对应契约测试后，客户端才能接入并显示该入口。
+真人咨询入口只在 `canChatWithHuman=true` 且能解析安全机构 ID 时显示：`INSTITUTION` 优先使用显式 `institutionId`，否则使用自身 `id`；`INSTITUTION_PROJECT` 只能使用显式 `institutionId`；`DOCTOR`、`PROJECT`、未知类型或空 ID 均不显示入口。机构、项目和医生资源 ID 永远不能直接成为私聊目标。
+
+用户点击当前或历史机构卡片时，客户端都重新调用机构咨询师接口并展示当前可联系人员。只有该接口返回且由用户选中的 `BookingConsultant.id` 可以传给现有 DM 创建流程；被撤销或删除的历史咨询师不会从 Agent 历史恢复。首版继续复用通用 user-pair DM，不保存机构归属，也不在创建 DM 时原子复核机构成员关系。
 
 ## 可观测性与隐私
 
