@@ -118,7 +118,7 @@ final class _AgentHandoffApiClient extends ApiClient {
     Map<String, Object?> query = const {},
     required T Function(Object? json) decodeData,
   }) async {
-    final Object? data = switch (path) {
+    final Object data = switch (path) {
       'notifications/unread-count' => 0,
       'notifications' ||
       'dm/conversations' ||

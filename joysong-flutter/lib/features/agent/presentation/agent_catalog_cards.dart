@@ -110,7 +110,7 @@ class AgentCatalogLinkCard extends StatelessWidget {
                 alignment: Alignment.centerRight,
                 child: TextButton.icon(
                   key: ValueKey('agent-human-consult-${item.type}-${item.id}'),
-                  onPressed: () => onHumanChat!(institutionId!),
+                  onPressed: () => onHumanChat!(institutionId),
                   icon: const Icon(Icons.chat_bubble_outline, size: 18),
                   label: Text(
                     Localizations.localeOf(context).languageCode == 'en'
@@ -246,7 +246,7 @@ class AgentCatalogDetailCard extends StatelessWidget {
                         key: ValueKey(
                           'agent-human-consult-${item.type}-${item.id}',
                         ),
-                        onPressed: () => onHumanChat!(institutionId!),
+                        onPressed: () => onHumanChat!(institutionId),
                         icon: const Icon(Icons.chat_bubble_outline, size: 18),
                         label: Text(english ? 'Ask a specialist' : '真人咨询'),
                       ),
@@ -376,7 +376,7 @@ class AgentCatalogReportCard extends StatelessWidget {
           alignment: Alignment.centerRight,
           child: TextButton.icon(
             key: ValueKey('agent-human-consult-${item.type}-${item.id}'),
-            onPressed: () => onHumanChat!(institutionId!),
+            onPressed: () => onHumanChat!(institutionId),
             icon: const Icon(Icons.support_agent, size: 18),
             label: Text('${english ? 'Consult' : '咨询'} ${item.name}'),
           ),
