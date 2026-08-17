@@ -708,7 +708,7 @@ resultingInstitutionProjectId, submittedAt, updatedAt
 
 409 恢复必须按当前身份与页面模式收敛：
 
-- 审核模式的 `ADMIN` 只刷新其有权的 `GET /api/admin/project-requests`，机构法人只刷新其有权且经服务端范围过滤的 `GET /api/management/project-requests`。两者都不得盲调仅医生可用的 `institution-form-config`，也不得为审核冲突盲调专业项目目录；这些调用既不是审核快照的权威来源，也可能无权。
+- 审核模式只刷新当前客户端页面原本使用且该身份有权的申请列表：Flutter 管理中心中的 `ADMIN` 使用 `/api/management/project-requests`（GET），由服务端按当前身份范围过滤；机构法人同样只使用其有权且经服务端范围过滤的管理端列表。Web Admin 使用 `/api/admin/project-requests`（GET），并可同时刷新其独立且已授权的 `JOIN` 列表。审核模式不得盲调仅医生可用的 `institution-form-config`，也不得为审核冲突盲调专业项目目录；这些调用既不是审核快照的权威来源，也可能无权。
 - 只有医生填写草稿相关的提交冲突，才在保留草稿的前提下刷新本人申请列表，并按该医生当前授权、冲突是否涉及分账/目标项目，刷新 `institution-form-config` 和/或专业项目目录。任何模式都不得自动重试或自动重放提交/审核 POST，必须由用户确认后重新提交或决定。
 
 #### V28 部署边界
