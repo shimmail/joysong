@@ -279,9 +279,9 @@ class IdentityDataInitializer(
                 (id, request_type, doctor_id, institution_id, project_id, name, category, description,
                  tags, slogan, detail_content, currency, cover_image, images, sales_count, reference_price,
                  category_tags, price, original_price, is_active, consultation_fee, commission_rate,
-                 institution_rate, notes, status, submitted_by)
+                 institution_rate, notes, status)
             VALUES (?, 'PLATFORM', ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    NULL, NULL, NULL, NULL, NULL, NULL, ?, 'PENDING', ?)
+                    NULL, NULL, NULL, NULL, NULL, NULL, ?, 'PENDING')
             """.trimIndent(),
             SeedIds.PLATFORM_PROJECT_REQUEST_ID,
             SeedIds.DOC_ID_4,
@@ -297,8 +297,7 @@ class IdentityDataInitializer(
             36,
             BigDecimal("9800.00"),
             jsonArray("抗衰紧致", "光电美容"),
-            "申请创建完整平台项目快照。",
-            SeedIds.DOC_ID_4
+            "申请创建完整平台项目快照。"
         )
         jdbcTemplate.update(
             """
@@ -306,9 +305,9 @@ class IdentityDataInitializer(
                 (id, request_type, doctor_id, institution_id, project_id, name, category, description,
                  tags, slogan, detail_content, currency, cover_image, images, sales_count, reference_price,
                  category_tags, price, original_price, is_active, consultation_fee, commission_rate,
-                 institution_rate, notes, status, submitted_by)
+                 institution_rate, notes, status)
             VALUES (?, 'INSTITUTION', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL,
-                    ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
+                    ?, ?, ?, ?, ?, ?, ?, 'PENDING')
             """.trimIndent(),
             SeedIds.INSTITUTION_PROJECT_REQUEST_ID,
             SeedIds.DOC_ID_3,
@@ -330,8 +329,7 @@ class IdentityDataInitializer(
             BigDecimal("50.00"),
             BigDecimal("10.00"),
             BigDecimal("40.00"),
-            "申请加入北京机构的玻尿酸服务目录。",
-            SeedIds.DOC_ID_3
+            "申请加入北京机构的玻尿酸服务目录。"
         )
     }
 

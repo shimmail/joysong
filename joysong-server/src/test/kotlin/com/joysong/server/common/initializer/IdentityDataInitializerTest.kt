@@ -59,8 +59,7 @@ class IdentityDataInitializerTest {
                 36,
                 BigDecimal("9800.00"),
                 "[\"抗衰紧致\",\"光电美容\"]",
-                "申请创建完整平台项目快照。",
-                SeedIds.DOC_ID_4
+                "申请创建完整平台项目快照。"
             ),
             platformRequest.args
         )
@@ -87,8 +86,7 @@ class IdentityDataInitializerTest {
                 BigDecimal("50.00"),
                 BigDecimal("10.00"),
                 BigDecimal("40.00"),
-                "申请加入北京机构的玻尿酸服务目录。",
-                SeedIds.DOC_ID_3
+                "申请加入北京机构的玻尿酸服务目录。"
             ),
             institutionRequest.args
         )
@@ -133,7 +131,7 @@ class IdentityDataInitializerTest {
     }
 
     private fun assertRequestPayloadsDoNotContainForbiddenFields(requests: List<JdbcWrite>) {
-        val forbiddenFields = listOf("rating", "review_count", "reviewcount", "doctor_ids", "doctorbindings", "platform_rate", "doctor_rate")
+        val forbiddenFields = listOf("rating", "review_count", "reviewcount", "doctor_ids", "doctorbindings", "platform_rate", "doctor_rate", "submitted_by")
         val requestPayload = requests.joinToString("\n") { "${it.sql}\n${it.args}" }.lowercase()
         forbiddenFields.forEach { forbidden -> assertFalse(requestPayload.contains(forbidden)) }
     }
