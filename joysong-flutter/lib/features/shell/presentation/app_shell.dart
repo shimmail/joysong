@@ -268,11 +268,7 @@ class _AppShellState extends State<AppShell> {
             onOpenActivityMessages: () => _openNotificationCategory(true),
           )
         else if (_agentChatController != null && _agentPlanController != null)
-          AgentChatPage(
-            chatController: _agentChatController!,
-            planController: _agentPlanController!,
-            onOpenCatalogItem: _openAgentCatalogItem,
-          )
+          _buildAgentChatPage()
         else
           const SizedBox.shrink(),
         ProfilePage(
@@ -457,20 +453,33 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
+  AgentChatPage _buildAgentChatPage({
+    ChatContextType? initialContextType,
+    String? initialContextId,
+    String? initialContextName,
+  }) =>
+      AgentChatPage(
+        chatController: _agentChatController!,
+        planController: _agentPlanController!,
+        initialContextType: initialContextType,
+        initialContextId: initialContextId,
+        initialContextName: initialContextName,
+        onOpenCatalogItem: _openAgentCatalogItem,
+        onHumanConsult:
+            _bookingRepository == null || _messagingRepository == null
+                ? null
+                : _openInstitutionConsultants,
+      );
+
   void _openAiChat([DiscoverItem? detail]) {
-    final chatController = _agentChatController;
-    final planController = _agentPlanController;
-    if (chatController == null || planController == null) return;
+    if (_agentChatController == null || _agentPlanController == null) return;
     final context = detail == null ? null : _agentContextFor(detail);
     _contentNavigator.push<void>(
       MaterialPageRoute(
-        builder: (_) => AgentChatPage(
-          chatController: chatController,
-          planController: planController,
+        builder: (_) => _buildAgentChatPage(
           initialContextType: context?.$1,
           initialContextId: context?.$2,
           initialContextName: context?.$3,
-          onOpenCatalogItem: _openAgentCatalogItem,
         ),
       ),
     );
