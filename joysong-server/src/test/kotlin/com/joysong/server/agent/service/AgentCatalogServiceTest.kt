@@ -158,17 +158,54 @@ class AgentCatalogServiceTest {
     }
 
     @Test
-    fun `soft deleted named institution is unavailable and returns only active alternatives`() {
-        val alternative = institution("alternative", "可咨询机构", "北京", "4.4")
-        stubConsultableInstitutions(listOf(alternative), setOf(alternative.id))
+    fun `soft deleted named institution suppresses stale detail context and returns active alternatives`() {
+        val context = institution("context", "杭州安心", "杭州", "4.1")
+        val alternatives = (1..4).map { index ->
+            institution(
+                id = "alternative-$index",
+                name = "上海优选$index",
+                city = "上海",
+                rating = "4.${10 - index}"
+            )
+        }
+        val institutions = listOf(context) + alternatives
+        every { institutionRepository.findAll() } returns institutions
+        every { institutionConsultantService.listConsultableInstitutionIds() } returns institutions.map { it.id }.toSet()
+        every { agentProfileService.get("user-1") } returns profile("上海")
         every {
             institutionRepository.countSoftDeletedNamesMentionedInQuery("我想联系星颜做真人咨询")
         } returns 1
+        val realDiscoverSearchService = DiscoverSearchService(
+            projectRepository = projectRepository,
+            institutionRepository = institutionRepository,
+            institutionProjectRepository = institutionProjectRepository,
+            doctorRepository = doctorRepository,
+            keywordExtractor = DiscoverKeywordExtractor(),
+            doctorInstitutionService = doctorInstitutionService,
+            institutionProjectDetailResolver = InstitutionProjectDetailResolver()
+        )
+        val localService = AgentCatalogService(
+            institutionRepository,
+            doctorRepository,
+            projectRepository,
+            institutionProjectRepository,
+            doctorProjectRepository,
+            realDiscoverSearchService,
+            doctorInstitutionService,
+            InstitutionProjectDetailResolver(),
+            institutionConsultantService,
+            agentProfileService
+        )
 
-        val result = service.selectConsultableInstitutions("user-1", "我想联系星颜做真人咨询")
+        val result = localService.selectConsultableInstitutions(
+            userId = "user-1",
+            query = "我想联系星颜做真人咨询",
+            contextInstitutionId = context.id
+        )
 
         assertTrue(result.requestedInstitutionUnavailable)
-        assertEquals(listOf(alternative.id), result.items.map { it.id })
+        assertEquals(alternatives.map { it.id }, result.items.map { it.id })
+        assertFalse(result.items.any { it.id == context.id })
         verify(exactly = 1) {
             institutionRepository.countSoftDeletedNamesMentionedInQuery("我想联系星颜做真人咨询")
         }

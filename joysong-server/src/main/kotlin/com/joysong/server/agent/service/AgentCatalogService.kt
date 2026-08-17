@@ -125,7 +125,12 @@ class AgentCatalogService(
         }
 
         addTier(ranked.filter { candidate -> explicitlyNamed.any { it.id == candidate.id } })
-        if (explicitlyNamed.isEmpty() && explicitCities.isEmpty() && !hasNamedInstitutionPhrase) {
+        if (
+            explicitlyNamed.isEmpty() &&
+            explicitCities.isEmpty() &&
+            !hasNamedInstitutionPhrase &&
+            !mentionsSoftDeletedInstitution
+        ) {
             addTier(ranked.filter { it.id == contextInstitutionId })
         }
         addTier(ranked.filter { candidate ->
