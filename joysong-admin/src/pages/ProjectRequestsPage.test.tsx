@@ -775,6 +775,142 @@ describe('ProjectRequestsPage', () => {
     successWarning.mockRestore();
   });
 
+  it.each([
+    {
+      latestState: 'approved',
+      latestRequests: [{
+        ...institutionRequest,
+        status: 'APPROVED',
+        reviewNote: '其他审核人已通过',
+        reviewedBy: 'admin-2',
+        reviewedAt: '2026-08-16T11:00:00',
+        resultingInstitutionProjectId: 'created-project',
+      } satisfies ProfessionalProjectRequestResponse],
+    },
+    { latestState: 'missing', latestRequests: [] },
+  ])('keeps an open modal bound to current requests when the latest target is $latestState', async ({ latestRequests }) => {
+    const user = userEvent.setup();
+    setContext(adminContext);
+    const reads = new Map<string, number>();
+    vi.mocked(api.get).mockImplementation(async (url) => {
+      const readCount = (reads.get(url) ?? 0) + 1;
+      reads.set(url, readCount);
+      switch (url) {
+        case '/admin/project-requests':
+          if (readCount === 2) throw new Error('conflict refresh failed');
+          return {
+            data: {
+              code: 200,
+              message: 'OK',
+              data: readCount === 1 ? [institutionRequest] : latestRequests,
+            },
+          };
+        case '/admin/institution-project-requests':
+          return { data: { code: 200, message: 'OK', data: [] } };
+        default:
+          throw new Error(`Unexpected GET ${url}`);
+      }
+    });
+    const conflict = Object.assign(new Error('申请已被其他审核人处理'), {
+      response: { status: 409, data: { message: '申请已被其他审核人处理' } },
+    });
+    vi.mocked(api.post).mockRejectedValueOnce(conflict);
+
+    render(<ProjectRequestsPage />);
+    await screen.findByText('机构定制光子');
+    await expectListPair('/admin/project-requests');
+    await user.click(screen.getByRole('button', { name: '驳回 机构定制光子，申请ID institution-request' }));
+    await user.type(screen.getByLabelText('审核意见'), '保留这条审核草稿');
+    await user.click(screen.getByRole('button', { name: /确\s*认/ }));
+
+    expect(await screen.findByText('审核状态已变化，但最新项目申请刷新失败')).toBeInTheDocument();
+    expect(api.post).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: '重新加载申请' }));
+
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(6));
+    expect(api.get).toHaveBeenNthCalledWith(5, '/admin/project-requests');
+    expect(api.get).toHaveBeenNthCalledWith(6, '/admin/institution-project-requests');
+    expect(await screen.findByText('审核目标已变化')).toBeInTheDocument();
+    expect(screen.getByText('最新列表中该申请已不再处于待审核状态，请关闭窗口并核对最新数据。')).toBeInTheDocument();
+    expect(screen.getByLabelText('审核意见')).toHaveValue('保留这条审核草稿');
+    const confirm = screen.getByRole('button', { name: /确\s*认/ });
+    expect(confirm).toBeDisabled();
+
+    confirm.removeAttribute('disabled');
+    await act(async () => {
+      fireEvent.click(confirm);
+      await Promise.resolve();
+    });
+    expect(api.post).toHaveBeenCalledTimes(1);
+  });
+
+  it('rebinds an open modal to the refreshed pending request and preserves its draft', async () => {
+    const user = userEvent.setup();
+    const refreshedPending = {
+      ...institutionRequest,
+      institutionSplit: {
+        ...institutionRequest.institutionSplit,
+        platformRate: 65,
+        doctorRate: -10,
+      },
+      updatedAt: '2026-08-16T11:30:00',
+    } satisfies ProfessionalProjectRequestResponse;
+    setContext(adminContext);
+    let professionalReadCount = 0;
+    vi.mocked(api.get).mockImplementation(async (url) => {
+      switch (url) {
+        case '/admin/project-requests':
+          professionalReadCount += 1;
+          if (professionalReadCount === 2) throw new Error('conflict refresh failed');
+          return {
+            data: {
+              code: 200,
+              message: 'OK',
+              data: professionalReadCount === 1 ? [institutionRequest] : [refreshedPending],
+            },
+          };
+        case '/admin/institution-project-requests':
+          return { data: { code: 200, message: 'OK', data: [] } };
+        default:
+          throw new Error(`Unexpected GET ${url}`);
+      }
+    });
+    const conflict = Object.assign(new Error('申请已被其他审核人处理'), {
+      response: { status: 409, data: { message: '申请已被其他审核人处理' } },
+    });
+    vi.mocked(api.post)
+      .mockRejectedValueOnce(conflict)
+      .mockResolvedValueOnce({ data: { code: 200, message: 'OK', data: null } });
+
+    render(<ProjectRequestsPage />);
+    await screen.findByText('机构定制光子');
+    await expectListPair('/admin/project-requests');
+    await user.click(screen.getByRole('button', { name: '驳回 机构定制光子，申请ID institution-request' }));
+    await user.type(screen.getByLabelText('审核意见'), '按最新负比例驳回');
+    await user.click(screen.getByRole('button', { name: /确\s*认/ }));
+
+    expect(await screen.findByText('审核状态已变化，但最新项目申请刷新失败')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '重新加载申请' }));
+
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(6));
+    await waitFor(() => expect(screen.queryByText('审核状态已变化，但最新项目申请刷新失败')).not.toBeInTheDocument());
+    expect(screen.queryByText('审核目标已变化')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('审核意见')).toHaveValue('按最新负比例驳回');
+    expect(screen.getByRole('button', { name: /确\s*认/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '通过 机构定制光子，申请ID institution-request' })).toBeDisabled();
+    const detail = expandRow('机构定制光子');
+    expectDescriptionValue(detail, '当前平台比例', '65%');
+    expectDescriptionValue(detail, '按当前平台比例推导的医生净比例', '-10%');
+
+    await user.click(screen.getByRole('button', { name: /确\s*认/ }));
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(2));
+    expect(api.post).toHaveBeenNthCalledWith(2, '/management/project-requests/institution-request/review', {
+      decision: 'REJECTED',
+      reviewNote: '按最新负比例驳回',
+    });
+  });
+
   it('renders supplied applicant rows without review actions', async () => {
     setContext(doctorContext);
     mockLists('/management/project-requests', [platformRequest, institutionRequest]);

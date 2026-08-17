@@ -75,9 +75,9 @@ type PlatformProjectRequest = ProfessionalProjectRequestResponse & {
 type InstitutionProjectRequest = ProfessionalProjectRequestResponse & {
   requestType: 'INSTITUTION';
   institutionId: string;
-  institutionName: string;
+  institutionName: string | null;
   projectId: string;
-  projectName: string;
+  projectName: string | null;
   referencePrice: null;
   categoryTags: null;
   price: number;
@@ -295,6 +295,7 @@ export default function ProjectRequestsPage() {
   const managementContext = getManagementContext();
   const isAdmin = managementContext?.platformRole === 'ADMIN';
   const [requests, setRequests] = useState<ProjectRequest[]>([]);
+  const requestsRef = useRef<ProjectRequest[]>([]);
   const [loading, setLoading] = useState(false);
   const [malformedProfessionalCount, setMalformedProfessionalCount] = useState(0);
   const staleReviewDataRef = useRef(false);
@@ -331,7 +332,13 @@ export default function ProjectRequestsPage() {
           ? professionalItems.length - professional.length
           : 1,
       );
-      setRequests([...professional, ...joins]);
+      const refreshedRequests = [...professional, ...joins];
+      requestsRef.current = refreshedRequests;
+      setRequests(refreshedRequests);
+      setReviewTarget(currentTarget => {
+        if (!currentTarget) return null;
+        return refreshedRequests.find(item => requestKey(item) === requestKey(currentTarget)) ?? currentTarget;
+      });
       updateStaleReviewData(false);
       return true;
     } catch (error) {
@@ -425,7 +432,8 @@ export default function ProjectRequestsPage() {
 
   const submitReview = async () => {
     if (!reviewTarget || staleReviewDataRef.current) return;
-    const target = reviewTarget;
+    const target = requestsRef.current.find(item => requestKey(item) === requestKey(reviewTarget));
+    if (!target || !canReview(target)) return;
     const decision = reviewDecision;
     let started = false;
     try {
@@ -450,6 +458,11 @@ export default function ProjectRequestsPage() {
     ? requests
     : requests.filter(item => item.status === status);
   const hasReviewableSplitConflict = filteredRequests.some(item => canReview(item) && hasNegativeDoctorRate(item));
+  const currentReviewTarget = reviewTarget
+    ? requests.find(item => requestKey(item) === requestKey(reviewTarget)) ?? null
+    : null;
+  const reviewTargetChanged = reviewTarget !== null
+    && (currentReviewTarget === null || !canReview(currentReviewTarget));
 
   const renderActions = (item: ProjectRequest) => {
     if (!canReview(item)) return null;
@@ -637,9 +650,16 @@ export default function ProjectRequestsPage() {
       onCancel={() => setReviewTarget(null)}
       confirmLoading={submitting}
       okText="确认"
-      okButtonProps={{ danger: reviewDecision === 'REJECTED', disabled: staleReviewData }}
+      okButtonProps={{ danger: reviewDecision === 'REJECTED', disabled: staleReviewData || reviewTargetChanged }}
       destroyOnHidden
     >
+      {reviewTargetChanged && <Alert
+        type="warning"
+        showIcon
+        title="审核目标已变化"
+        description="最新列表中该申请已不再处于待审核状态，请关闭窗口并核对最新数据。"
+        style={{ marginBottom: 16 }}
+      />}
       <Form form={reviewForm} layout="vertical">
         <Form.Item
           name="reviewNote"
