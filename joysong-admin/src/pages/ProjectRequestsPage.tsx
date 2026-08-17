@@ -121,20 +121,63 @@ const imageListOrDash = (values?: string[] | null) => values?.length
 
 const hasOwn = (value: Record<string, unknown>, key: string) => Object.prototype.hasOwnProperty.call(value, key);
 const isRecord = (value: unknown): value is Record<string, unknown> => value != null && typeof value === 'object' && !Array.isArray(value);
-const isNonblankString = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
-const isNullableString = (value: unknown): value is string | null => value === null || typeof value === 'string';
-const isStringList = (value: unknown): value is string[] => Array.isArray(value) && value.every(item => typeof item === 'string');
-const isNullableStringList = (value: unknown): value is string[] | null => value === null || isStringList(value);
+const isBoundedString = (value: unknown, maximumLength: number): value is string =>
+  typeof value === 'string' && value.length <= maximumLength;
+const isNullableBoundedString = (value: unknown, maximumLength: number): value is string | null =>
+  value === null || isBoundedString(value, maximumLength);
+const isNormalizedText = (value: unknown, maximumLength: number, allowEmpty = false): value is string =>
+  typeof value === 'string'
+  && value.length <= maximumLength
+  && value.trim() === value
+  && (allowEmpty || value.length > 0);
+const isNullableNormalizedText = (value: unknown, maximumLength: number): value is string | null =>
+  value === null || isNormalizedText(value, maximumLength);
+const isIdentifier = (value: unknown): value is string => isNormalizedText(value, 36);
+const isNullableIdentifier = (value: unknown): value is string | null => value === null || isIdentifier(value);
+const isBoundedStringList = (
+  value: unknown,
+  maximumItems: number,
+  maximumItemLength: number,
+  maximumJoinedLength: number,
+): value is string[] => Array.isArray(value)
+  && value.length <= maximumItems
+  && value.every(item => isNormalizedText(item, maximumItemLength))
+  && value.join(',').length <= maximumJoinedLength;
+const isNullableBoundedStringList = (
+  value: unknown,
+  maximumItems: number,
+  maximumItemLength: number,
+  maximumJoinedLength: number,
+): value is string[] | null => value === null
+  || isBoundedStringList(value, maximumItems, maximumItemLength, maximumJoinedLength);
 const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 const isProjectCurrency = (value: unknown): value is ProjectCurrency => value === 'CNY' || value === 'USD';
 const isMoney = (value: unknown): value is number => toHundredths(value, 0, 99_999_999.99) !== null;
 const isNullableMoney = (value: unknown): value is number | null => value === null || isMoney(value);
-
-const hasTypedKeys = (
+const isProjectRequestStatus = (value: unknown): value is ProjectRequestStatus => typeof value === 'string'
+  && ['PENDING', 'APPROVED', 'REJECTED', 'CHANGES_REQUESTED'].includes(value);
+const isIsoLocalDateTime = (value: unknown): value is string => {
+  if (typeof value !== 'string') return false;
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?$/.exec(value);
+  if (!match) return false;
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59) return false;
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day >= 1 && day <= daysInMonth[month - 1];
+};
+const isNullableIsoLocalDateTime = (value: unknown): value is string | null => value === null || isIsoLocalDateTime(value);
+const hasValidField = (
   value: Record<string, unknown>,
-  keys: string[],
+  key: string,
   predicate: (field: unknown) => boolean,
-) => keys.every(key => hasOwn(value, key) && predicate(value[key]));
+) => hasOwn(value, key) && predicate(value[key]);
 
 function isCompleteSplit(value: unknown): value is InstitutionProjectSplit {
   if (!isRecord(value)) return false;
@@ -163,34 +206,33 @@ function toHundredths(value: unknown, minimum: number, maximum: number) {
 function isCompleteProfessionalProjectRequest(value: unknown): value is CompleteProfessionalProjectRequestResponse {
   if (!isRecord(value)) return false;
 
-  const hasCompleteCommonFields = hasTypedKeys(
-    value,
-    ['id', 'doctorId', 'doctorName', 'submittedAt', 'updatedAt'],
-    isNonblankString,
-  )
-    && hasOwn(value, 'currency')
-    && isProjectCurrency(value.currency)
-    && hasTypedKeys(
-      value,
-      [
-        'institutionId', 'institutionName', 'projectId', 'projectName', 'name', 'category', 'description',
-        'slogan', 'detailContent', 'coverImage', 'notes', 'reviewNote', 'reviewedBy', 'reviewedAt',
-        'resultingProjectId', 'resultingInstitutionProjectId',
-      ],
-      isNullableString,
-    )
-    && hasTypedKeys(value, ['tags', 'images', 'categoryTags'], isNullableStringList)
-    && hasTypedKeys(value, ['referencePrice', 'price', 'originalPrice'], isNullableMoney)
-    && hasOwn(value, 'salesCount')
-    && Number.isInteger(value.salesCount)
-    && (value.salesCount as number) >= 0
-    && (value.salesCount as number) <= 2_147_483_647
-    && hasOwn(value, 'status')
-    && ['PENDING', 'APPROVED', 'REJECTED', 'CHANGES_REQUESTED'].includes(String(value.status))
-    && hasOwn(value, 'isActive')
-    && (value.isActive === null || typeof value.isActive === 'boolean')
-    && hasOwn(value, 'institutionSplit')
-    && (value.institutionSplit === null || isCompleteSplit(value.institutionSplit));
+  const hasCompleteCommonFields = hasValidField(value, 'requestType', field => field === 'PLATFORM' || field === 'INSTITUTION')
+    && hasValidField(value, 'id', isIdentifier)
+    && hasValidField(value, 'doctorId', isIdentifier)
+    && hasValidField(value, 'doctorName', field => isBoundedString(field, 100))
+    && hasValidField(value, 'institutionId', isNullableIdentifier)
+    && hasValidField(value, 'institutionName', field => isNullableBoundedString(field, 200))
+    && hasValidField(value, 'projectId', isNullableIdentifier)
+    && hasValidField(value, 'projectName', field => isNullableBoundedString(field, 200))
+    && hasValidField(value, 'currency', isProjectCurrency)
+    && hasValidField(value, 'notes', field => isNullableNormalizedText(field, 2_000))
+    && hasValidField(value, 'reviewNote', field => isNullableNormalizedText(field, 1_000))
+    && hasValidField(value, 'reviewedBy', isNullableIdentifier)
+    && hasValidField(value, 'reviewedAt', isNullableIsoLocalDateTime)
+    && hasValidField(value, 'resultingProjectId', isNullableIdentifier)
+    && hasValidField(value, 'resultingInstitutionProjectId', isNullableIdentifier)
+    && hasValidField(value, 'submittedAt', isIsoLocalDateTime)
+    && hasValidField(value, 'updatedAt', isIsoLocalDateTime)
+    && hasValidField(value, 'referencePrice', isNullableMoney)
+    && hasValidField(value, 'price', isNullableMoney)
+    && hasValidField(value, 'originalPrice', isNullableMoney)
+    && hasValidField(value, 'salesCount', field => typeof field === 'number'
+      && Number.isInteger(field)
+      && field >= 0
+      && field <= 2_147_483_647)
+    && hasValidField(value, 'status', isProjectRequestStatus)
+    && hasValidField(value, 'isActive', field => field === null || typeof field === 'boolean')
+    && hasValidField(value, 'institutionSplit', field => field === null || isCompleteSplit(field));
 
   if (!hasCompleteCommonFields) return false;
 
@@ -199,15 +241,16 @@ function isCompleteProfessionalProjectRequest(value: unknown): value is Complete
       && value.institutionName === null
       && value.projectId === null
       && value.projectName === null
-      && isNonblankString(value.name)
-      && isNonblankString(value.category)
-      && isNonblankString(value.description)
-      && isStringList(value.tags)
-      && typeof value.slogan === 'string'
-      && typeof value.coverImage === 'string'
-      && isStringList(value.images)
+      && hasValidField(value, 'name', field => isNormalizedText(field, 200))
+      && hasValidField(value, 'category', field => isNormalizedText(field, 100))
+      && hasValidField(value, 'description', field => isNormalizedText(field, 5_000))
+      && hasValidField(value, 'tags', field => isBoundedStringList(field, 20, 100, 500))
+      && hasValidField(value, 'slogan', field => isNormalizedText(field, 500, true))
+      && hasValidField(value, 'detailContent', field => isNullableNormalizedText(field, 20_000))
+      && hasValidField(value, 'coverImage', field => isNormalizedText(field, 500, true))
+      && hasValidField(value, 'images', field => isBoundedStringList(field, 20, 500, 2_000))
       && isMoney(value.referencePrice)
-      && isStringList(value.categoryTags)
+      && hasValidField(value, 'categoryTags', field => isBoundedStringList(field, 20, 100, 500))
       && value.price === null
       && value.originalPrice === null
       && value.isActive === null
@@ -215,10 +258,16 @@ function isCompleteProfessionalProjectRequest(value: unknown): value is Complete
   }
 
   return value.requestType === 'INSTITUTION'
-    && isNonblankString(value.institutionId)
-    && isNonblankString(value.institutionName)
-    && isNonblankString(value.projectId)
-    && isNonblankString(value.projectName)
+    && isIdentifier(value.institutionId)
+    && isIdentifier(value.projectId)
+    && hasValidField(value, 'name', field => isNullableNormalizedText(field, 200))
+    && hasValidField(value, 'category', field => isNullableNormalizedText(field, 100))
+    && hasValidField(value, 'description', field => isNullableNormalizedText(field, 5_000))
+    && hasValidField(value, 'tags', field => isNullableBoundedStringList(field, 20, 100, 500))
+    && hasValidField(value, 'slogan', field => isNullableNormalizedText(field, 500))
+    && hasValidField(value, 'detailContent', field => isNullableNormalizedText(field, 20_000))
+    && hasValidField(value, 'coverImage', field => isNullableNormalizedText(field, 500))
+    && hasValidField(value, 'images', field => isNullableBoundedStringList(field, 20, 500, 2_000))
     && value.referencePrice === null
     && value.categoryTags === null
     && isMoney(value.price)
@@ -248,6 +297,8 @@ export default function ProjectRequestsPage() {
   const [requests, setRequests] = useState<ProjectRequest[]>([]);
   const [loading, setLoading] = useState(false);
   const [malformedProfessionalCount, setMalformedProfessionalCount] = useState(0);
+  const staleReviewDataRef = useRef(false);
+  const [staleReviewData, setStaleReviewData] = useState(false);
   const inFlightReviewRef = useRef<string | null>(null);
   const [reviewingRequestKey, setReviewingRequestKey] = useState<string | null>(null);
   const [status, setStatus] = useState<ProjectRequestStatus | 'ALL'>('PENDING');
@@ -255,7 +306,12 @@ export default function ProjectRequestsPage() {
   const [reviewDecision, setReviewDecision] = useState<ReviewDecision>('REJECTED');
   const [reviewForm] = Form.useForm();
 
-  const refresh = async () => {
+  const updateStaleReviewData = (stale: boolean) => {
+    staleReviewDataRef.current = stale;
+    setStaleReviewData(stale);
+  };
+
+  const refresh = async (): Promise<boolean> => {
     setLoading(true);
     try {
       const [professionalResponse, joinResponse] = await Promise.all([
@@ -276,8 +332,12 @@ export default function ProjectRequestsPage() {
           : 1,
       );
       setRequests([...professional, ...joins]);
+      updateStaleReviewData(false);
+      return true;
     } catch (error) {
+      updateStaleReviewData(true);
       message.error(getApiErrorMessage(error, '平台项目申请加载失败'));
+      return false;
     } finally {
       setLoading(false);
     }
@@ -288,7 +348,7 @@ export default function ProjectRequestsPage() {
   const submitting = reviewingRequestKey !== null;
 
   const beginReview = (request: ProjectRequest) => {
-    if (inFlightReviewRef.current !== null) return false;
+    if (staleReviewDataRef.current || inFlightReviewRef.current !== null) return false;
     const key = requestKey(request);
     inFlightReviewRef.current = key;
     setReviewingRequestKey(key);
@@ -304,8 +364,11 @@ export default function ProjectRequestsPage() {
 
   const handleReviewError = async (error: unknown) => {
     if (getHttpResponseStatus(error) === 409) {
-      await refresh();
-      message.warning('审核状态或审批基线已变化，已刷新最新数据，请核对当前比例和申请状态后重试');
+      updateStaleReviewData(true);
+      const refreshed = await refresh();
+      if (refreshed) {
+        message.warning('审核状态或审批基线已变化，已刷新最新数据，请核对当前比例和申请状态后重试');
+      }
       return;
     }
     message.error(getApiErrorMessage(error, '审核失败'));
@@ -354,14 +417,14 @@ export default function ProjectRequestsPage() {
   };
 
   const openReview = (request: ProjectRequest, decision: ReviewDecision) => {
-    if (inFlightReviewRef.current !== null) return;
+    if (staleReviewDataRef.current || inFlightReviewRef.current !== null) return;
     reviewForm.resetFields();
     setReviewTarget(request);
     setReviewDecision(decision);
   };
 
   const submitReview = async () => {
-    if (!reviewTarget) return;
+    if (!reviewTarget || staleReviewDataRef.current) return;
     const target = reviewTarget;
     const decision = reviewDecision;
     let started = false;
@@ -397,14 +460,14 @@ export default function ProjectRequestsPage() {
         type="primary"
         icon={<CheckOutlined />}
         loading={reviewingRequestKey === requestKey(item)}
-        disabled={submitting || hasNegativeDoctorRate(item)}
+        disabled={submitting || staleReviewData || hasNegativeDoctorRate(item)}
         onClick={() => void approve(item)}
       >通过</Button>
       {item.requestSource === 'JOIN' && <Button
         aria-label={reviewAriaLabel('要求修改', item)}
         size="small"
         icon={<EditOutlined />}
-        disabled={submitting}
+        disabled={submitting || staleReviewData}
         onClick={() => openReview(item, 'CHANGES_REQUESTED')}
       >要求修改</Button>}
       <Button
@@ -412,7 +475,7 @@ export default function ProjectRequestsPage() {
         size="small"
         danger
         icon={<CloseOutlined />}
-        disabled={submitting}
+        disabled={submitting || staleReviewData}
         onClick={() => openReview(item, 'REJECTED')}
       >驳回</Button>
     </Space>;
@@ -541,6 +604,14 @@ export default function ProjectRequestsPage() {
       description="请刷新页面；若问题持续存在，请联系技术人员。"
       style={{ marginBottom: 16 }}
     />}
+    {staleReviewData && <Alert
+      type="error"
+      showIcon
+      title="审核状态已变化，但最新项目申请刷新失败"
+      description="当前页面数据可能已过期，所有审核操作已禁用。请重新加载后再审核。"
+      action={<Button size="small" loading={loading} onClick={() => void refresh()}>重新加载申请</Button>}
+      style={{ marginBottom: 16 }}
+    />}
     {hasReviewableSplitConflict && <Alert
       type="warning"
       showIcon
@@ -566,7 +637,7 @@ export default function ProjectRequestsPage() {
       onCancel={() => setReviewTarget(null)}
       confirmLoading={submitting}
       okText="确认"
-      okButtonProps={{ danger: reviewDecision === 'REJECTED' }}
+      okButtonProps={{ danger: reviewDecision === 'REJECTED', disabled: staleReviewData }}
       destroyOnHidden
     >
       <Form form={reviewForm} layout="vertical">
