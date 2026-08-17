@@ -122,6 +122,70 @@ class AgentIntentRouterTest {
     }
 
     @Test
+    fun `clear Chinese and English consultation requests use the local human route`() {
+        listOf(
+            "我想找真人咨询",
+            "帮我找咨询师",
+            "Connect me to a human consultant",
+            "I want to speak to a specialist"
+        ).forEach { query ->
+            val result = router.assessCurrent(query, "GENERAL")
+
+            assertEquals(AgentIntent.HUMAN_CONSULTATION, result.decision.intent)
+            assertEquals(AgentQueryTarget.INSTITUTION, result.decision.queryTarget)
+            assertEquals(AgentNextAction.SELECT_INSTITUTION, result.decision.nextAction)
+            assertFalse(result.decision.searchCatalog)
+            assertFalse(result.requiresLlmParsing)
+        }
+    }
+
+    @Test
+    fun `negated consultation does not trigger or inherit the human route`() {
+        listOf("不需要真人咨询", "Do not connect me to a person").forEach { query ->
+            val result = router.supplementWithContext(
+                router.assessCurrent(query, "GENERAL"),
+                listOf(router.validatedDecision(AgentIntent.HUMAN_CONSULTATION, null))
+            )
+
+            assertEquals(
+                AgentLabelPolarity.NEGATIVE,
+                result.intentEvidence.single { it.intent == AgentIntent.HUMAN_CONSULTATION }.polarity
+            )
+            assertEquals(AgentIntent.GENERAL_CHAT, result.decision.intent)
+        }
+    }
+
+    @Test
+    fun `safety remains primary over a request for a person`() {
+        val result = router.assessCurrent("我怀孕了，请帮我转真人咨询", "GENERAL")
+
+        assertEquals(AgentIntent.SAFETY_SCREENING, result.decision.intent)
+        assertEquals(null, result.decision.queryTarget)
+        assertEquals(AgentNextAction.COMPLETE_SAFETY_SCREENING, result.decision.nextAction)
+    }
+
+    @Test
+    fun `unrelated follow up does not inherit prior human consultation`() {
+        val result = router.supplementWithContext(
+            router.assessCurrent("今天天气不错", "GENERAL"),
+            listOf(router.validatedDecision(AgentIntent.HUMAN_CONSULTATION, null))
+        )
+
+        assertEquals(AgentIntent.GENERAL_CHAT, result.decision.intent)
+    }
+
+    @Test
+    fun `unresolved reference may retain prior human consultation`() {
+        val result = router.supplementWithContext(
+            router.assessCurrent("那家呢", "GENERAL"),
+            listOf(router.validatedDecision(AgentIntent.HUMAN_CONSULTATION, null))
+        )
+
+        assertEquals(AgentIntent.HUMAN_CONSULTATION, result.decision.intent)
+        assertEquals(AgentQueryTarget.INSTITUTION, result.decision.queryTarget)
+    }
+
+    @Test
     fun `clear catalog request stays on fast local path`() {
         val result = router.assess("对比上海的热玛吉机构项目", "GENERAL")
         assertFalse(result.requiresLlmParsing)

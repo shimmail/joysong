@@ -9,6 +9,24 @@ import org.springframework.data.repository.query.Param
 interface InstitutionRepository : JpaRepository<InstitutionEntity, String> {
     fun findByNameContainingOrCityContaining(name: String, city: String): List<InstitutionEntity>
 
+    @Query(
+        value = """
+            SELECT COUNT(*)
+            FROM institutions deleted
+            WHERE deleted.deleted_at IS NOT NULL
+              AND CHAR_LENGTH(TRIM(deleted.name)) >= 2
+              AND LOCATE(LOWER(TRIM(deleted.name)), LOWER(:query)) > 0
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM institutions active
+                  WHERE active.deleted_at IS NULL
+                    AND LOWER(TRIM(active.name)) = LOWER(TRIM(deleted.name))
+              )
+        """,
+        nativeQuery = true
+    )
+    fun countSoftDeletedNamesMentionedInQuery(@Param("query") query: String): Long
+
     @Query("SELECT i FROM InstitutionEntity i WHERE i.name LIKE %:keyword% OR i.id = :keyword")
     fun searchInstitutions(@Param("keyword") keyword: String): List<InstitutionEntity>
 

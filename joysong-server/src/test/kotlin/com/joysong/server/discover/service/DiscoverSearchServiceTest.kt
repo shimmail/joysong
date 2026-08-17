@@ -43,6 +43,39 @@ class DiscoverSearchServiceTest {
     }
 
     @Test
+    fun `named institution phrase detection excludes generic institution requests`() {
+        assertTrue(service.hasNamedInstitutionPhrase("星颜医疗美容医院"))
+        assertTrue(service.hasNamedInstitutionPhrase("Aurora clinic"))
+        assertTrue(service.hasNamedInstitutionPhrase("我想星颜医疗美容医院"))
+        assertFalse(service.hasNamedInstitutionPhrase("推荐医美机构"))
+        assertFalse(service.hasNamedInstitutionPhrase("find a clinic"))
+        assertFalse(service.hasNamedInstitutionPhrase("medical beauty clinic"))
+        assertFalse(service.hasNamedInstitutionPhrase("aesthetic medicine clinic"))
+        assertFalse(service.hasNamedInstitutionPhrase("我想找真人咨询"))
+        assertFalse(service.hasNamedInstitutionPhrase("医疗美容医院"))
+        assertFalse(service.hasNamedInstitutionPhrase("真人咨询医美机构"))
+        assertFalse(service.hasNamedInstitutionPhrase("我想真人咨询医美机构"))
+        assertFalse(service.hasNamedInstitutionPhrase("帮我找咨询师医美机构"))
+        assertFalse(service.hasNamedInstitutionPhrase("找真人医美机构"))
+        assertFalse(service.hasNamedInstitutionPhrase("我想找真人咨询的医美机构"))
+        assertFalse(service.hasNamedInstitutionPhrase("human consultation clinic"))
+        assertFalse(service.hasNamedInstitutionPhrase("human consultant clinic"))
+        assertFalse(service.hasNamedInstitutionPhrase("live agent clinic"))
+        assertFalse(service.hasNamedInstitutionPhrase("speak to a specialist clinic"))
+        assertTrue(service.hasNamedInstitutionPhrase("Aurora Consultation Clinic"))
+        assertTrue(service.hasNamedInstitutionPhrase("Humanity Consultation Clinic"))
+        assertTrue(service.hasNamedInstitutionPhrase("human consultation at Aurora clinic"))
+    }
+
+    @Test
+    fun `deictic institution references are not explicit institution names`() {
+        assertFalse(service.hasNamedInstitutionPhrase("我想咨询这家诊所的真人顾问"))
+        assertFalse(service.hasNamedInstitutionPhrase("talk to a specialist at that clinic"))
+        assertTrue(service.hasNamedInstitutionPhrase("Aurora clinic"))
+        assertTrue(service.hasNamedInstitutionPhrase("talk to a specialist at Aurora clinic"))
+    }
+
+    @Test
     fun `priority query keeps current lower rated entities before search limit`() {
         val projectRepository = mockk<ProjectRepository>(relaxed = true)
         val institutionRepository = mockk<InstitutionRepository>(relaxed = true)

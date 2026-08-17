@@ -9,6 +9,7 @@ import com.joysong.server.agent.context.AgentSessionSummary
 import com.joysong.server.agent.diagnostics.AgentOperationLogger
 import com.joysong.server.agent.dto.AgentCatalogItemResponse
 import com.joysong.server.agent.dto.AgentCatalogReportResponse
+import com.joysong.server.agent.dto.AgentProfileResponse
 import com.joysong.server.agent.entity.AgentTurnEntity
 import com.joysong.server.agent.entity.AgentTurnStatus
 import com.joysong.server.agent.orchestration.AiAgentAvailabilityGuard
@@ -19,8 +20,10 @@ import com.joysong.server.agent.orchestration.IdempotencyKeyConflictException
 import com.joysong.server.agent.orchestration.TurnLifecycleService
 import com.joysong.server.agent.repository.AgentTurnRepository
 import com.joysong.server.agent.service.AgentCatalogService
+import com.joysong.server.agent.service.ConsultableInstitutionSelection
 import com.joysong.server.agent.service.AgentIntent
 import com.joysong.server.agent.service.AgentIntentRouter
+import com.joysong.server.agent.service.AgentProfileService
 import com.joysong.server.agent.service.AgentRouteAssessment
 import com.joysong.server.agent.service.ParsedAgentRoute
 import com.joysong.server.agent.service.AgentPromptEvidence
@@ -37,15 +40,19 @@ import com.joysong.server.chat.repository.ChatMessageRepository
 import com.joysong.server.chat.repository.ChatSessionRepository
 import com.joysong.server.chat.service.ChatService
 import com.joysong.server.chat.service.ChatTurnResult
+import com.joysong.server.chat.service.PreparedChatTurn
 import com.joysong.server.config.AiAgentProperties
 import com.joysong.server.config.AiAgentProvider
 import com.joysong.server.doctor.repository.DoctorRepository
 import com.joysong.server.doctor.service.DoctorInstitutionService
 import com.joysong.server.discover.repository.DoctorProjectRepository
+import com.joysong.server.discover.service.DiscoverKeywordExtractor
 import com.joysong.server.discover.service.DiscoverSearchService
+import com.joysong.server.institution.entity.InstitutionEntity
 import com.joysong.server.institution.repository.InstitutionProjectRepository
 import com.joysong.server.institution.repository.InstitutionRepository
 import com.joysong.server.institution.service.InstitutionProjectDetailResolver
+import com.joysong.server.identity.service.InstitutionConsultantService
 import com.joysong.server.project.repository.ProjectRepository
 import io.mockk.every
 import io.mockk.just
@@ -79,6 +86,7 @@ import org.springframework.test.web.client.response.MockRestResponseCreators.wit
 import org.springframework.test.web.client.response.MockRestResponseCreators.withStatus
 import org.springframework.web.client.RestTemplate
 import java.net.SocketTimeoutException
+import java.math.BigDecimal
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -201,6 +209,394 @@ class AgentWorkflowCoreTest {
     }
 
     @Test
+    fun `clear human consultation persists fixed localized response without either model`() {
+        val chineseContent = "我想转人工咨询"
+        val institutionItem = AgentCatalogItemResponse(
+            type = "INSTITUTION",
+            id = "institution-1",
+            name = "安心医美",
+            subtitle = "Shanghai",
+            summary = "",
+            attributes = emptyMap(),
+            institutionId = "institution-1",
+            canChatWithHuman = true
+        )
+        val selection = ConsultableInstitutionSelection(listOf(institutionItem), false)
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
+        val completed = slot<CompleteTurnCommand>()
+        prepareChatGeneration(fixture, chineseContent)
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "handoff")
+        )
+        every { catalog.selectConsultableInstitutions("user-1", chineseContent, null) } returns selection
+
+        val previousLocale = LocaleContextHolder.getLocale()
+        LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE)
+        try {
+            fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = chineseContent))
+
+            assertEquals("我可以为你转接真人咨询。请选择希望咨询的机构，随后可查看该机构当前可联系的咨询师。", completed.captured.content)
+            assertEquals("HUMAN_CONSULTATION", completed.captured.intent)
+            assertEquals("INSTITUTION", completed.captured.queryTarget)
+            assertEquals("SELECT_INSTITUTION", completed.captured.nextAction)
+            assertEquals(institutionItem, completed.captured.catalogItems.single())
+            assertEquals("", completed.captured.modelName)
+            verify(exactly = 0) {
+                catalog.contextualSearchQuery(any(), any())
+                catalog.promptEvidence(any(), any(), any(), any(), any(), any())
+            }
+        } finally {
+            LocaleContextHolder.setLocale(previousLocale)
+        }
+        intentServer.verify()
+        completionServer.verify()
+
+        val englishContent = "I want to speak to a person"
+        val streamingCompletionTemplate = RestTemplate()
+        val streamingIntentTemplate = RestTemplate()
+        val streamingCompletionServer = MockRestServiceServer.bindTo(streamingCompletionTemplate).build()
+        val streamingIntentServer = MockRestServiceServer.bindTo(streamingIntentTemplate).build()
+        val streamingCatalog = mockk<AgentCatalogService>()
+        val streamingFixture = chatFixture(streamingCompletionTemplate, streamingIntentTemplate, streamingCatalog)
+        val streamingCompleted = slot<CompleteTurnCommand>()
+        prepareChatGeneration(streamingFixture, englishContent)
+        every { streamingFixture.turnService.completeTurn(capture(streamingCompleted)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "handoff")
+        )
+        every { messages.findByTurnIdAndRole("turn-1", "USER") } returns null
+        every { streamingCatalog.selectConsultableInstitutions("user-1", englishContent, null) } returns selection
+
+        LocaleContextHolder.setLocale(Locale.ENGLISH)
+        try {
+            val prepared = streamingFixture.chat.prepareStreamingMessage(
+                "session-1",
+                "user-1",
+                SendMessageRequest(content = englishContent)
+            )
+
+            assertTrue(prepared is PreparedChatTurn.Completed)
+            assertEquals(
+                "I can help connect you with a real consultant. Choose an institution to see its currently available consultants.",
+                streamingCompleted.captured.content
+            )
+        } finally {
+            LocaleContextHolder.setLocale(previousLocale)
+        }
+        streamingIntentServer.verify()
+        streamingCompletionServer.verify()
+    }
+
+    @Test
+    fun `bilingual deictic human consultation keeps detail context without answer model`() {
+        val contextInstitution = InstitutionEntity(
+            id = "context",
+            name = "杭州安心",
+            city = "杭州",
+            rating = BigDecimal("4.1"),
+            isVerified = true
+        )
+        val alternatives = (1..4).map { index ->
+            InstitutionEntity(
+                id = "alternative-$index",
+                name = "上海优选$index",
+                city = "上海",
+                rating = BigDecimal("4.${10 - index}"),
+                isVerified = true
+            )
+        }
+        val institutions = listOf(contextInstitution) + alternatives
+        val institutionRepository = mockk<InstitutionRepository>()
+        val doctorRepository = mockk<DoctorRepository>(relaxed = true)
+        val projectRepository = mockk<ProjectRepository>(relaxed = true)
+        val institutionProjectRepository = mockk<InstitutionProjectRepository>(relaxed = true)
+        val doctorProjectRepository = mockk<DoctorProjectRepository>(relaxed = true)
+        val doctorInstitutionService = mockk<DoctorInstitutionService>(relaxed = true)
+        val institutionConsultantService = mockk<InstitutionConsultantService>()
+        val agentProfileService = mockk<AgentProfileService>()
+        every { institutionRepository.findAll() } returns institutions
+        every { institutionRepository.countSoftDeletedNamesMentionedInQuery(any()) } returns 0
+        every { institutionConsultantService.listConsultableInstitutionIds() } returns institutions.map { it.id }.toSet()
+        every { agentProfileService.get("user-1") } returns AgentProfileResponse(
+            id = null,
+            city = "上海",
+            goals = emptyList(),
+            budgetMin = null,
+            budgetMax = null,
+            acceptableDowntimeDays = null,
+            painTolerance = "",
+            preferences = emptyList(),
+            excludedProjects = emptyList(),
+            consentVersion = "",
+            confirmedAt = null,
+            completenessScore = 0,
+            missingFields = emptyList()
+        )
+        val discoverSearchService = DiscoverSearchService(
+            projectRepository = projectRepository,
+            institutionRepository = institutionRepository,
+            institutionProjectRepository = institutionProjectRepository,
+            doctorRepository = doctorRepository,
+            keywordExtractor = DiscoverKeywordExtractor(),
+            doctorInstitutionService = doctorInstitutionService,
+            institutionProjectDetailResolver = InstitutionProjectDetailResolver()
+        )
+        val catalog = AgentCatalogService(
+            institutionRepository = institutionRepository,
+            doctorRepository = doctorRepository,
+            projectRepository = projectRepository,
+            institutionProjectRepository = institutionProjectRepository,
+            doctorProjectRepository = doctorProjectRepository,
+            discoverSearchService = discoverSearchService,
+            doctorInstitutionService = doctorInstitutionService,
+            institutionProjectDetailResolver = InstitutionProjectDetailResolver(),
+            institutionConsultantService = institutionConsultantService,
+            agentProfileService = agentProfileService
+        )
+        val cases = listOf(
+            Triple(
+                "我想咨询这家诊所的真人顾问",
+                Locale.SIMPLIFIED_CHINESE,
+                "我可以为你转接真人咨询。请选择希望咨询的机构，随后可查看该机构当前可联系的咨询师。"
+            ),
+            Triple(
+                "talk to a specialist at that clinic",
+                Locale.ENGLISH,
+                "I can help connect you with a real consultant. Choose an institution to see its currently available consultants."
+            )
+        )
+        val previousLocale = LocaleContextHolder.getLocale()
+        try {
+            cases.forEach { (content, locale, expectedCopy) ->
+                val completionTemplate = RestTemplate()
+                val intentTemplate = RestTemplate()
+                val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+                val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+                intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+                    .andRespond(withSuccess(
+                        """{"choices":[{"message":{"content":"{\"intent\":\"HUMAN_CONSULTATION\",\"queryTarget\":\"INSTITUTION\",\"keywords\":[]}"}}]}""",
+                        MediaType.APPLICATION_JSON
+                    ))
+                val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
+                val completed = slot<CompleteTurnCommand>()
+                prepareChatGeneration(
+                    fixture,
+                    content,
+                    session(contextType = "INSTITUTION", contextId = contextInstitution.id)
+                )
+                every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+                    ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "handoff")
+                )
+                LocaleContextHolder.setLocale(locale)
+
+                fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+                assertEquals(expectedCopy, completed.captured.content)
+                assertEquals("HUMAN_CONSULTATION", completed.captured.intent)
+                assertEquals("INSTITUTION", completed.captured.queryTarget)
+                assertEquals("SELECT_INSTITUTION", completed.captured.nextAction)
+                assertEquals(contextInstitution.id, completed.captured.catalogItems.first().id)
+                assertEquals("", completed.captured.modelName)
+                intentServer.verify()
+                completionServer.verify()
+            }
+        } finally {
+            LocaleContextHolder.setLocale(previousLocale)
+        }
+    }
+
+    @Test
+    fun `ambiguous consultation uses the intent model and skips the answer model`() {
+        val content = "Could someone help me with this?"
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
+        val completed = slot<CompleteTurnCommand>()
+        val institutionItem = AgentCatalogItemResponse(
+            type = "INSTITUTION", id = "institution-1", name = "安心医美", subtitle = "Shanghai", summary = "",
+            attributes = emptyMap(), institutionId = "institution-1", canChatWithHuman = true
+        )
+        prepareChatGeneration(fixture, content)
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "handoff")
+        )
+        every { catalog.hasInstitutionProjectMatch(content) } returns false
+        every { catalog.selectConsultableInstitutions("user-1", content, null) } returns
+            ConsultableInstitutionSelection(listOf(institutionItem), false)
+        intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess(
+                """{"choices":[{"message":{"content":"{\"intent\":\"HUMAN_CONSULTATION\",\"queryTarget\":null,\"keywords\":[]}"}}]}""",
+                MediaType.APPLICATION_JSON
+            ))
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("HUMAN_CONSULTATION", completed.captured.intent)
+        assertEquals("", completed.captured.modelName)
+        intentServer.verify()
+        completionServer.verify()
+    }
+
+    @Test
+    fun `human parser route rejects a doctor target`() {
+        val content = "Could someone help me with this?"
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
+        val completed = slot<CompleteTurnCommand>()
+        prepareChatGeneration(fixture, content)
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "answer")
+        )
+        every { catalog.hasInstitutionProjectMatch(content) } returns false
+        every { catalog.contextualSearchQuery(content, emptyList()) } returns content
+        every { catalog.promptEvidence(content, content, content, null, "AUTO", content) } returns AgentPromptEvidence()
+        intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess(
+                """{"choices":[{"message":{"content":"{\"intent\":\"HUMAN_CONSULTATION\",\"queryTarget\":\"DOCTOR\",\"keywords\":[]}"}}]}""",
+                MediaType.APPLICATION_JSON
+            ))
+        completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"answer"}}]}""", MediaType.APPLICATION_JSON))
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("GENERAL_CHAT", completed.captured.intent)
+        intentServer.verify()
+        completionServer.verify()
+    }
+
+    @Test
+    fun `empty human consultation candidates persist NONE summary and replay snapshot`() {
+        val content = "我想转人工咨询"
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog, lifecycle, context)
+        val ownedSession = session()
+        val persistedTurns = linkedMapOf<String, AgentTurnEntity>()
+        val persistedMessages = linkedMapOf<Pair<String, String>, ChatMessageEntity>()
+        var turnSaveCount = 0
+        var messageSaveCount = 0
+        var sessionSaveCount = 0
+        every { fixture.availabilityGuard.requireGenerationEnabled() } just runs
+        every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns ownedSession
+        every { sessions.findByIdAndUserIdAndDeletedAtIsNull("session-1", "user-1") } returns ownedSession
+        every { sessions.findByIdForUpdate("session-1") } returns ownedSession
+        every { sessions.save(any()) } answers {
+            sessionSaveCount += 1
+            firstArg()
+        }
+        every { turns.findBySessionIdAndIdempotencyKey("session-1", "key-1") } answers {
+            persistedTurns.values.singleOrNull()
+        }
+        every { turns.findBySessionIdAndStatus("session-1", AgentTurnStatus.RUNNING) } returns null
+        every { turns.findSessionIdById(any()) } answers { persistedTurns[firstArg()]?.sessionId }
+        every { turns.findByIdForUpdate(any()) } answers { persistedTurns[firstArg()] }
+        every { turns.save(any()) } answers {
+            turnSaveCount += 1
+            firstArg<AgentTurnEntity>().also { persistedTurns[it.id] = it }
+        }
+        every { messages.findByTurnIdAndRole(any(), any()) } answers {
+            persistedMessages[firstArg<String>() to secondArg<String>()]
+        }
+        every { messages.save(any()) } answers {
+            messageSaveCount += 1
+            firstArg<ChatMessageEntity>().also { message ->
+                persistedMessages[requireNotNull(message.turnId) to message.role] = message
+            }
+        }
+        every { messages.findBySessionIdOrderBySequenceNoAsc("session-1") } answers {
+            persistedMessages.values.sortedBy { it.sequenceNo }
+        }
+        every { messages.findSucceededTurnMessagesBySessionId("session-1") } returns emptyList()
+        every { messages.deleteAll(any<Iterable<ChatMessageEntity>>()) } just runs
+        every { fixture.operationLogger.completed(any(), any(), any(), any(), any()) } just runs
+        every { catalog.selectConsultableInstitutions("user-1", content, null) } returns
+            ConsultableInstitutionSelection(emptyList(), false)
+
+        val completed = fixture.chat.sendMessage(
+            "session-1",
+            "user-1",
+            SendMessageRequest(content = content, idempotencyKey = "key-1")
+        )
+
+        val persistedAssistant = persistedMessages.values.single { it.role == "ASSISTANT" }
+        val metadata = objectMapper.readTree(persistedAssistant.metadataJson)
+        val summary = objectMapper.readTree(ownedSession.summaryJson)
+        assertEquals("NONE", completed.nextAction)
+        assertTrue(completed.catalogItems.isEmpty())
+        assertEquals("HUMAN_CONSULTATION", metadata.path("intent").asText())
+        assertEquals("INSTITUTION", metadata.path("queryTarget").asText())
+        assertEquals("NONE", metadata.path("nextAction").asText())
+        assertTrue(metadata.path("catalogItems").isEmpty)
+        assertEquals(
+            listOf("HUMAN_CONSULTATION:INSTITUTION"),
+            summary.path("unresolvedTopics").map { it.asText() }
+        )
+        assertFalse(ownedSession.summaryJson.contains(":NONE"))
+
+        val savesBeforeReplay = Triple(turnSaveCount, messageSaveCount, sessionSaveCount)
+        val replay = fixture.chat.sendMessage(
+            "session-1",
+            "user-1",
+            SendMessageRequest(content = content, idempotencyKey = "key-1")
+        )
+
+        assertEquals("HUMAN_CONSULTATION", replay.intent)
+        assertEquals("INSTITUTION", replay.queryTarget)
+        assertEquals("NONE", replay.nextAction)
+        assertTrue(replay.catalogItems.isEmpty())
+        assertEquals(savesBeforeReplay, Triple(turnSaveCount, messageSaveCount, sessionSaveCount))
+        verify(exactly = 1) { catalog.selectConsultableInstitutions("user-1", content, null) }
+        intentServer.verify()
+        completionServer.verify()
+    }
+
+    @Test
+    fun `unavailable named institution returns alternatives with SELECT_INSTITUTION`() {
+        val content = "请帮我转接安心医美的真人咨询"
+        val institutionItem = AgentCatalogItemResponse(
+            type = "INSTITUTION", id = "institution-2", name = "星辰医美", subtitle = "Shanghai", summary = "",
+            attributes = emptyMap(), institutionId = "institution-2", canChatWithHuman = true
+        )
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
+        val completed = slot<CompleteTurnCommand>()
+        prepareChatGeneration(fixture, content)
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "handoff")
+        )
+        every { catalog.selectConsultableInstitutions("user-1", content, null) } returns
+            ConsultableInstitutionSelection(listOf(institutionItem), true)
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("SELECT_INSTITUTION", completed.captured.nextAction)
+        assertEquals(institutionItem, completed.captured.catalogItems.single())
+        assertEquals("你提到的机构目前无法提供真人转接。你可以选择下方其他机构，查看其当前可联系的咨询师。", completed.captured.content)
+        assertEquals("", completed.captured.modelName)
+        intentServer.verify()
+        completionServer.verify()
+    }
+
+    @Test
     fun `parser cannot replace explicit comparison intent or institution target`() {
         val local = AgentRouteAssessment(
             decision = AgentIntentRouter().validatedDecision(AgentIntent.COMPARISON, AgentQueryTarget.INSTITUTION),
@@ -263,6 +659,39 @@ class AgentWorkflowCoreTest {
                 MediaType.APPLICATION_JSON
             )
         )
+    }
+
+    @Test
+    fun `human parser target rejection precedes safety negation upgrade`() {
+        val content = "I am not not pregnant; compare treatments"
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
+        val completed = slot<CompleteTurnCommand>()
+        prepareChatGeneration(fixture, content)
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "clarification")
+        )
+        every { catalog.contextualSearchQuery(content, emptyList()) } returns content
+        every {
+            catalog.promptEvidence(content, content, content, AgentQueryTarget.PROJECT, "COMPARISON", content)
+        } returns AgentPromptEvidence()
+        intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess(
+                """{"choices":[{"message":{"content":"{\"intent\":\"COMPARISON\",\"intents\":[\"COMPARISON\",\"SAFETY_SCREENING\",\"HUMAN_CONSULTATION\"],\"queryTarget\":\"DOCTOR\",\"keywords\":[]}"}}]}""",
+                MediaType.APPLICATION_JSON
+            ))
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("COMPARISON", completed.captured.intent)
+        assertEquals("PROJECT", completed.captured.queryTarget)
+        assertEquals("", completed.captured.modelName)
+        intentServer.verify()
+        completionServer.verify()
     }
 
     @Test
@@ -1140,6 +1569,90 @@ class AgentWorkflowCoreTest {
     }
 
     @Test
+    fun `human consultation completion persists intent target action and institution cards`() {
+        val running = turn(status = AgentTurnStatus.RUNNING)
+        val assistant = slot<ChatMessageEntity>()
+        val institution = humanInstitutionItem()
+        every { turns.findSessionIdById(running.id) } returns "session-1"
+        every { turns.findByIdForUpdate(running.id) } returns running
+        every { sessions.findByIdForUpdate("session-1") } returns session()
+        every { messages.findByTurnIdAndRole(running.id, "ASSISTANT") } returns null
+        every { messages.save(capture(assistant)) } answers { assistant.captured }
+        every { turns.save(any()) } answers { firstArg() }
+        every { sessions.save(any()) } answers { firstArg() }
+        every { messages.findSucceededTurnMessagesBySessionId("session-1") } returns emptyList()
+        every { messages.deleteAll(any<Iterable<ChatMessageEntity>>()) } just runs
+
+        val result = lifecycle.completeTurn(
+            CompleteTurnCommand(
+                turnId = running.id,
+                content = "Choose an institution to continue.",
+                intent = "HUMAN_CONSULTATION",
+                queryTarget = "INSTITUTION",
+                nextAction = "SELECT_INSTITUTION",
+                catalogItems = listOf(institution)
+            )
+        )
+
+        val metadata = objectMapper.readTree(assistant.captured.metadataJson)
+        assertEquals("HUMAN_CONSULTATION", metadata.path("intent").asText())
+        assertEquals("INSTITUTION", metadata.path("queryTarget").asText())
+        assertEquals("SELECT_INSTITUTION", metadata.path("nextAction").asText())
+        assertEquals(institution, result.catalogItems.single())
+        assertEquals(institution.id, metadata.path("catalogItems").single().path("institutionId").asText())
+        assertTrue(metadata.path("catalogItems").single().path("canChatWithHuman").asBoolean())
+    }
+
+    @Test
+    fun `idempotent replay restores the same human consultation card snapshot`() {
+        val completed = turn(status = AgentTurnStatus.SUCCEEDED)
+        val institution = humanInstitutionItem()
+        val assistant = message(2, "ASSISTANT", "Choose an institution to continue.").apply {
+            turnId = completed.id
+            metadataJson = objectMapper.writeValueAsString(
+                linkedMapOf(
+                    "intent" to "HUMAN_CONSULTATION",
+                    "queryTarget" to "INSTITUTION",
+                    "nextAction" to "SELECT_INSTITUTION",
+                    "catalogItems" to listOf(institution),
+                    "catalogReport" to null
+                )
+            )
+        }
+        every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns session()
+        every { turns.findBySessionIdAndIdempotencyKey("session-1", "key-1") } returns completed
+        every { messages.findByTurnIdAndRole(completed.id, "ASSISTANT") } returns assistant
+        every { messages.findByTurnIdAndRole(completed.id, "USER") } returns message(1, "USER", "hello")
+
+        val replay = lifecycle.beginTurn("session-1", "user-1", "hello", "key-1") as BeginTurnResult.Replayed
+
+        assertEquals("HUMAN_CONSULTATION", replay.turn.intent)
+        assertEquals("INSTITUTION", replay.turn.queryTarget)
+        assertEquals("SELECT_INSTITUTION", replay.turn.nextAction)
+        assertEquals(listOf(institution), replay.turn.catalogItems)
+        verify(exactly = 0) { messages.save(any()) }
+        verify(exactly = 0) { turns.save(any()) }
+        verify(exactly = 0) { sessions.save(any()) }
+
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
+        every { fixture.availabilityGuard.requireGenerationEnabled() } just runs
+        every { fixture.turnService.beginTurn("session-1", "user-1", "hello", "key-1") } returns replay
+
+        val replayedByChat = fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest("hello", "key-1"))
+
+        assertEquals(listOf(institution), replayedByChat.catalogItems)
+        verify(exactly = 0) { fixture.turnService.completeTurn(any()) }
+        verify(exactly = 0) { catalog.selectConsultableInstitutions(any(), any(), any()) }
+        completionServer.verify()
+        intentServer.verify()
+    }
+
+    @Test
     fun `completion persists normalized comparison request and report in assistant metadata`() {
         val running = turn(status = AgentTurnStatus.RUNNING)
         val assistant = slot<ChatMessageEntity>()
@@ -1650,6 +2163,26 @@ class AgentWorkflowCoreTest {
     }
 
     @Test
+    fun `summary keeps only valid human consultation institution topics`() {
+        val session = session(
+            """{"schemaVersion":1,"unresolvedTopics":["HUMAN_CONSULTATION:INSTITUTION:SELECT_INSTITUTION","HUMAN_CONSULTATION:INSTITUTION","HUMAN_CONSULTATION:DOCTOR:SELECT_INSTITUTION","HUMAN_CONSULTATION:INSTITUTION:SHOW_CATALOG"]}"""
+        )
+        every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns session
+        every { sessions.save(any()) } answers { firstArg() }
+        every { messages.findSucceededTurnMessagesBySessionId("session-1") } returns emptyList()
+
+        val loaded = context.load("user-1", "session-1", 20, 100)
+
+        assertEquals(
+            listOf(
+                "HUMAN_CONSULTATION:INSTITUTION:SELECT_INSTITUTION",
+                "HUMAN_CONSULTATION:INSTITUTION"
+            ),
+            loaded.summary.unresolvedTopics
+        )
+    }
+
+    @Test
     fun `uses a character budget for chinese and no space content`() {
         every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns session()
         every { sessions.save(any()) } answers { firstArg() }
@@ -1869,11 +2402,11 @@ class AgentWorkflowCoreTest {
     private fun chatFixture(
         completionTemplate: RestTemplate,
         intentTemplate: RestTemplate,
-        catalog: AgentCatalogService
+        catalog: AgentCatalogService,
+        turnService: TurnLifecycleService = mockk(),
+        contextBuilder: AgentContextBuilder = mockk()
     ): ChatFixture {
-        val turnService = mockk<TurnLifecycleService>()
         val operationLogger = mockk<AgentOperationLogger>()
-        val contextBuilder = mockk<AgentContextBuilder>()
         val availabilityGuard = mockk<AiAgentAvailabilityGuard>()
         return ChatFixture(
             chat = ChatService(
@@ -1948,6 +2481,17 @@ class AgentWorkflowCoreTest {
     private fun message(sequenceNo: Long, role: String, content: String, createdAt: LocalDateTime = LocalDateTime.now()) =
         ChatMessageEntity(id = "message-$sequenceNo", sessionId = "session-1", sequenceNo = sequenceNo, role = role, content = content, createdAt = createdAt)
 
+    private fun humanInstitutionItem() = AgentCatalogItemResponse(
+        type = "INSTITUTION",
+        id = "123e4567-e89b-12d3-a456-426614174000",
+        name = "Harmony Clinic",
+        subtitle = "Shanghai",
+        summary = "",
+        attributes = emptyMap(),
+        institutionId = "123e4567-e89b-12d3-a456-426614174000",
+        canChatWithHuman = true
+    )
+
     private fun unnormalizedComparisonRequest() = ComparisonRequest(
         operands = listOf(
             ComparisonOperand(AgentQueryTarget.PROJECT, " alpha ", " Alpha "),
@@ -1999,7 +2543,9 @@ class AgentWorkflowCoreTest {
         doctorProjectRepository = mockk<DoctorProjectRepository>(relaxed = true),
         discoverSearchService = mockk<DiscoverSearchService>(relaxed = true),
         doctorInstitutionService = mockk(relaxed = true),
-        institutionProjectDetailResolver = InstitutionProjectDetailResolver()
+        institutionProjectDetailResolver = InstitutionProjectDetailResolver(),
+        institutionConsultantService = mockk<InstitutionConsultantService>(relaxed = true),
+        agentProfileService = mockk<AgentProfileService>(relaxed = true)
     )
 
     private class CountingObjectMapper : ObjectMapper() {

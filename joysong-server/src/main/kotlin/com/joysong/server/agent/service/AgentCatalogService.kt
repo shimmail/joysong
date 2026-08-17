@@ -14,6 +14,7 @@ import com.joysong.server.institution.entity.InstitutionProjectEntity
 import com.joysong.server.institution.repository.InstitutionProjectRepository
 import com.joysong.server.institution.repository.InstitutionRepository
 import com.joysong.server.institution.service.InstitutionProjectDetailResolver
+import com.joysong.server.identity.service.InstitutionConsultantService
 import com.joysong.server.project.entity.ProjectEntity
 import com.joysong.server.project.repository.ProjectRepository
 import org.springframework.stereotype.Service
@@ -38,6 +39,11 @@ private data class EffectiveCatalogOffering(
     val detail: ProjectEntity
 )
 
+data class ConsultableInstitutionSelection(
+    val items: List<AgentCatalogItemResponse>,
+    val requestedInstitutionUnavailable: Boolean
+)
+
 @Service
 class AgentCatalogService(
     private val institutionRepository: InstitutionRepository,
@@ -47,7 +53,9 @@ class AgentCatalogService(
     private val doctorProjectRepository: DoctorProjectRepository,
     private val discoverSearchService: DiscoverSearchService,
     private val doctorInstitutionService: DoctorInstitutionService,
-    private val institutionProjectDetailResolver: InstitutionProjectDetailResolver
+    private val institutionProjectDetailResolver: InstitutionProjectDetailResolver,
+    private val institutionConsultantService: InstitutionConsultantService,
+    private val agentProfileService: AgentProfileService
 ) {
     /**
      * Detects a concrete institution-project reference before intent routing.
@@ -82,6 +90,65 @@ class AgentCatalogService(
             request = request,
             mentionedCities = discoverSearchService.citiesMentionedIn(query),
             explicitlyRequestedTypes = discoverSearchService.explicitlyRequestedEntityTypes(query)
+        )
+    }
+
+    fun selectConsultableInstitutions(
+        userId: String,
+        query: String,
+        contextInstitutionId: String? = null
+    ): ConsultableInstitutionSelection {
+        val allInstitutions = institutionRepository.findAll()
+        val consultableIds = institutionConsultantService.listConsultableInstitutionIds()
+        val ranked = allInstitutions
+            .filter { it.id in consultableIds && it.isVerified && it.deletedAt == null }
+            .sortedWith(compareByDescending<InstitutionEntity> { it.rating }.thenBy { it.id })
+        val explicitlyNamed = allInstitutions.filter {
+            it.name.isNotBlank() && query.contains(it.name, ignoreCase = true)
+        }
+        val mentionsSoftDeletedInstitution = explicitlyNamed.isEmpty() &&
+            institutionRepository.countSoftDeletedNamesMentionedInQuery(query) > 0L
+        val explicitCities = discoverSearchService.citiesMentionedIn(query)
+        val hasNamedInstitutionPhrase = discoverSearchService.hasNamedInstitutionPhrase(query)
+        val hasNegatedInstitutionReference = discoverSearchService.hasNegatedInstitutionReference(query)
+        val profileCity = if (explicitCities.isEmpty()) {
+            runCatching { agentProfileService.get(userId).city.trim().takeIf(String::isNotBlank) }
+                .getOrNull()
+        } else {
+            null
+        }
+        val selected = linkedMapOf<String, InstitutionEntity>()
+
+        fun addTier(values: Iterable<InstitutionEntity>) {
+            values.forEach { candidate ->
+                if (selected.size < 4) selected.putIfAbsent(candidate.id, candidate)
+            }
+        }
+
+        addTier(ranked.filter { candidate -> explicitlyNamed.any { it.id == candidate.id } })
+        if (
+            explicitlyNamed.isEmpty() &&
+            explicitCities.isEmpty() &&
+            !hasNamedInstitutionPhrase &&
+            !mentionsSoftDeletedInstitution &&
+            !hasNegatedInstitutionReference
+        ) {
+            addTier(ranked.filter { it.id == contextInstitutionId })
+        }
+        addTier(ranked.filter { candidate ->
+            explicitCities.any { it.equals(candidate.city, ignoreCase = true) }
+        })
+        if (explicitCities.isEmpty() && profileCity != null) {
+            addTier(ranked.filter { it.city.equals(profileCity, ignoreCase = true) })
+        }
+        addTier(ranked)
+
+        val requestedInstitutionUnavailable =
+            (explicitlyNamed.isEmpty() && (hasNamedInstitutionPhrase || mentionsSoftDeletedInstitution)) ||
+                explicitlyNamed.any { it.id !in consultableIds || !it.isVerified || it.deletedAt != null }
+        return ConsultableInstitutionSelection(
+            items = selected.values.map { institutionCatalogItem(it, includeSummary = false) },
+            requestedInstitutionUnavailable = requestedInstitutionUnavailable
         )
     }
 
@@ -244,20 +311,7 @@ class AgentCatalogService(
 
         val items = buildList {
             institutions.forEach { institution ->
-                add(AgentCatalogItemResponse(
-                    type = "INSTITUTION", id = institution.id, name = institution.name,
-                    subtitle = institution.city,
-                    summary = institution.description.takeUnless { mode == "COMPARISON" }.orEmpty(),
-                    attributes = linkedMapOf(
-                        AgentText.value("城市", "City") to institution.city,
-                        AgentText.value("机构认证", "Clinic verified") to AgentText.value(if (institution.isVerified) "已认证" else "未认证", if (institution.isVerified) "Verified" else "Not verified"),
-                        AgentText.value("评分", "Rating") to institution.rating.toPlainString(),
-                        AgentText.value("评价数", "Review count") to institution.reviewCount.toString(),
-                        AgentText.value("医生数", "Doctors") to institution.doctorCount.toString(),
-                        AgentText.value("擅长领域", "Specialties") to institution.specialties
-                    ).filterValues { it.isNotBlank() },
-                    institutionId = institution.id, canChatWithHuman = true
-                ))
+                add(institutionCatalogItem(institution, includeSummary = mode != "COMPARISON"))
             }
             doctors.forEach { doctor ->
                 val doctorInstitutions = approvedDoctorInstitutions[doctor.id].orEmpty()
@@ -644,6 +698,30 @@ class AgentCatalogService(
             else -> 2
         }
     }
+
+    private fun institutionCatalogItem(
+        institution: InstitutionEntity,
+        includeSummary: Boolean
+    ): AgentCatalogItemResponse = AgentCatalogItemResponse(
+        type = "INSTITUTION",
+        id = institution.id,
+        name = institution.name,
+        subtitle = institution.city,
+        summary = institution.description.takeIf { includeSummary }.orEmpty(),
+        attributes = linkedMapOf(
+            AgentText.value("城市", "City") to institution.city,
+            AgentText.value("机构认证", "Clinic verified") to AgentText.value(
+                if (institution.isVerified) "已认证" else "未认证",
+                if (institution.isVerified) "Verified" else "Not verified"
+            ),
+            AgentText.value("评分", "Rating") to institution.rating.toPlainString(),
+            AgentText.value("评价数", "Review count") to institution.reviewCount.toString(),
+            AgentText.value("医生数", "Doctors") to institution.doctorCount.toString(),
+            AgentText.value("擅长领域", "Specialties") to institution.specialties
+        ).filterValues { it.isNotBlank() },
+        institutionId = institution.id,
+        canChatWithHuman = true
+    )
 
     private fun detectReportTarget(query: String): ReportTarget? = when {
         listOf("机构项目", "机构套餐", "项目套餐", "套餐", "报价", "institution project", "clinic package", "package", "offering")

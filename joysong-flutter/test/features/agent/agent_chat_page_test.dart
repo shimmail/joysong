@@ -90,7 +90,8 @@ void main() {
     expect(find.text('生成中断，可重试'), findsNothing);
   });
 
-  testWidgets('incomplete comparison shows status card and suppresses catalog links',
+  testWidgets(
+      'incomplete comparison shows status card and suppresses catalog links',
       (tester) async {
     final repository = _CatalogRepository(
       _turn(
@@ -107,7 +108,8 @@ void main() {
     expect(find.byType(AgentCatalogLinkCard), findsNothing);
   });
 
-  testWidgets('complete comparison shows message-bound report and suppresses duplicate links',
+  testWidgets(
+      'complete comparison shows message-bound report and suppresses duplicate links',
       (tester) async {
     final repository = _CatalogRepository(
       _turn(
@@ -161,6 +163,93 @@ void main() {
     expect(opened?.id, 'project-1');
   });
 
+  testWidgets(
+      'ordinary institution consultation forwards the safe institution id',
+      (tester) async {
+    String? consultedInstitutionId;
+    final repository = _CatalogRepository(
+      _turn(catalogItems: const [_institution]),
+    );
+
+    await _pumpPage(
+      tester,
+      repository,
+      onHumanConsult: (institutionId) {
+        consultedInstitutionId = institutionId;
+      },
+    );
+    await _sendAndSettle(tester);
+
+    final action = find.byKey(
+      const ValueKey(
+        'agent-human-consult-INSTITUTION-institution-record-1',
+      ),
+    );
+    expect(action, findsOneWidget);
+    await tester.ensureVisible(action);
+    await tester.tap(action);
+
+    expect(consultedInstitutionId, 'institution-safe-1');
+  });
+
+  testWidgets('comparison report consultation forwards the safe institution id',
+      (tester) async {
+    String? consultedInstitutionId;
+    final repository = _CatalogRepository(
+      _turn(
+        catalogItems: const [_institution],
+        comparisonRequest: _institutionComparisonRequest,
+        messageReport: _institutionComparisonReport,
+      ),
+    );
+
+    await _pumpPage(
+      tester,
+      repository,
+      onHumanConsult: (institutionId) {
+        consultedInstitutionId = institutionId;
+      },
+    );
+    await _sendAndSettle(tester);
+
+    final action = find.byKey(
+      const ValueKey(
+        'agent-human-consult-INSTITUTION-institution-record-1',
+      ),
+    );
+    expect(action, findsOneWidget);
+    await tester.ensureVisible(action);
+    await tester.tap(action);
+
+    expect(consultedInstitutionId, 'institution-safe-1');
+  });
+
+  testWidgets('restored institution card remains actionable', (tester) async {
+    String? consultedInstitutionId;
+    final repository = _CatalogRepository.restored(
+      const [_restoredInstitutionMessage],
+    );
+
+    await _pumpPage(
+      tester,
+      repository,
+      onHumanConsult: (institutionId) {
+        consultedInstitutionId = institutionId;
+      },
+    );
+
+    final action = find.byKey(
+      const ValueKey(
+        'agent-human-consult-INSTITUTION-institution-record-1',
+      ),
+    );
+    expect(action, findsOneWidget);
+    await tester.ensureVisible(action);
+    await tester.tap(action);
+
+    expect(consultedInstitutionId, 'institution-safe-1');
+  });
+
   testWidgets('unknown catalog type is hidden and cannot navigate',
       (tester) async {
     final repository = _CatalogRepository(
@@ -176,7 +265,8 @@ void main() {
     expect(openCalls, 0);
   });
 
-  testWidgets('human consultation stays hidden without an explicit user id',
+  testWidgets(
+      'doctor catalog record id is never forwarded as a consultation target',
       (tester) async {
     final repository = _CatalogRepository(
       _turn(catalogItems: const [_doctor]),
@@ -190,7 +280,12 @@ void main() {
     );
     await _sendAndSettle(tester);
 
-    expect(find.text('真人咨询'), findsNothing);
+    expect(
+      find.byKey(
+        const ValueKey('agent-human-consult-DOCTOR-doctor-record-1'),
+      ),
+      findsNothing,
+    );
     expect(consultCalls, 0);
   });
 
@@ -210,7 +305,7 @@ Future<void> _pumpPage(
   WidgetTester tester,
   AgentRepository repository, {
   ValueChanged<AgentCatalogItem>? onOpen,
-  ValueChanged<AgentCatalogItem>? onHumanConsult,
+  AgentHumanConsultationAction? onHumanConsult,
 }) async {
   final chatController = AgentChatController(repository: repository);
   final planController = AgentPlanController(repository);
@@ -243,12 +338,25 @@ Future<void> _sendAndSettle(WidgetTester tester) async {
 }
 
 class _CatalogRepository extends Fake implements AgentRepository {
-  _CatalogRepository(this.turn) : streams = const [];
+  _CatalogRepository(this.turn)
+      : streams = const [],
+        sessions = const [],
+        messages = const [];
 
-  _CatalogRepository.streams(this.streams) : turn = null;
+  _CatalogRepository.streams(this.streams)
+      : turn = null,
+        sessions = const [],
+        messages = const [];
+
+  _CatalogRepository.restored(this.messages)
+      : turn = null,
+        streams = const [],
+        sessions = const [_session];
 
   final ChatTurn? turn;
   final List<StreamController<AgentStreamEvent>> streams;
+  final List<ChatSession> sessions;
+  final List<ChatMessage> messages;
   int streamCalls = 0;
 
   @override
@@ -262,7 +370,16 @@ class _CatalogRepository extends Fake implements AgentRepository {
           : streams[streamCalls++].stream;
 
   @override
-  Future<List<ChatSession>> getSessions({ChatPersona? persona}) async => [];
+  Future<List<ChatSession>> getSessions({ChatPersona? persona}) async =>
+      sessions;
+
+  @override
+  Future<List<ChatMessage>> getMessages(
+    String sessionId, {
+    int limit = 30,
+    String? before,
+  }) async =>
+      messages;
 
   @override
   Future<ChatSession> createSession({
@@ -329,6 +446,18 @@ const _project = AgentCatalogItem(
   canChatWithHuman: false,
 );
 
+const _institution = AgentCatalogItem(
+  type: 'INSTITUTION',
+  id: 'institution-record-1',
+  name: '机构一',
+  subtitle: '上海',
+  summary: '',
+  attributes: {'City': '上海'},
+  institutionId: 'institution-safe-1',
+  projectId: null,
+  canChatWithHuman: true,
+);
+
 const _doctor = AgentCatalogItem(
   type: 'DOCTOR',
   id: 'doctor-record-1',
@@ -336,7 +465,7 @@ const _doctor = AgentCatalogItem(
   subtitle: '',
   summary: '',
   attributes: {},
-  institutionId: null,
+  institutionId: 'institution-must-not-leak',
   projectId: null,
   canChatWithHuman: true,
 );
@@ -386,6 +515,25 @@ const _completeRequest = AgentComparisonRequest(
   missingFields: {},
 );
 
+const _institutionComparisonRequest = AgentComparisonRequest(
+  operands: [
+    AgentComparisonOperand(
+      entityType: 'INSTITUTION',
+      entityId: 'institution-record-1',
+      displayName: '机构一',
+    ),
+    AgentComparisonOperand(
+      entityType: 'INSTITUTION',
+      entityId: 'institution-record-2',
+      displayName: '机构二',
+    ),
+  ],
+  targetType: 'INSTITUTION',
+  dimensions: ['CITY'],
+  constraints: {},
+  missingFields: {},
+);
+
 const _comparisonReport = AgentCatalogReport(
   mode: 'COMPARISON',
   title: '项目对比',
@@ -393,6 +541,24 @@ const _comparisonReport = AgentCatalogReport(
   items: [_project],
   comparisonDimensions: ['Reference price'],
   warnings: [],
+);
+
+const _institutionComparisonReport = AgentCatalogReport(
+  mode: 'COMPARISON',
+  title: '机构对比',
+  summary: '',
+  items: [_institution],
+  comparisonDimensions: ['City'],
+  warnings: [],
+);
+
+const _restoredInstitutionMessage = ChatMessage(
+  id: 'assistant-restored',
+  sessionId: 'session-1',
+  role: 'ASSISTANT',
+  content: '请选择希望咨询的机构。',
+  createdAt: '2026-08-11T10:01:00',
+  catalogItems: [_institution],
 );
 
 class _DiscoverRepository extends Fake implements DiscoverRepository {}

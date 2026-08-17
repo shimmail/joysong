@@ -8,12 +8,13 @@ enum class AgentIntent {
     COMPARISON,
     PLANNING,
     DETAIL_SUMMARY,
+    HUMAN_CONSULTATION,
     SAFETY_SCREENING
 }
 
 enum class AgentQueryTarget { INSTITUTION, DOCTOR, PROJECT, INSTITUTION_PROJECT }
 
-enum class AgentNextAction { NONE, SHOW_CATALOG, START_PLANNING, COMPLETE_SAFETY_SCREENING }
+enum class AgentNextAction { NONE, SHOW_CATALOG, START_PLANNING, SELECT_INSTITUTION, COMPLETE_SAFETY_SCREENING }
 
 enum class AgentLabelPolarity { POSITIVE, NEGATIVE, UNCERTAIN }
 
@@ -103,6 +104,7 @@ class AgentIntentRouter {
         val normalized = normalize(query)
         val annotatedSignals = annotateSignals(normalized)
         val safetySignals = matchSignals(annotatedSignals, safetyTerms)
+        val humanConsultationSignals = matchSignals(annotatedSignals, humanConsultationTerms)
         val detailSummarySignals = matchSignals(annotatedSignals, detailSummaryTerms)
         val comparisonSignals = matchSignals(annotatedSignals, comparisonTerms)
         val planningSignals = matchSignals(annotatedSignals, planningTerms)
@@ -135,6 +137,7 @@ class AgentIntentRouter {
         val unresolvedReferenceSignals = matchSignals(annotatedSignals, unresolvedReferenceTerms)
         val specificIntentEvidence = setOfNotNull(
             intentEvidence(AgentIntent.SAFETY_SCREENING, safetySignals),
+            intentEvidence(AgentIntent.HUMAN_CONSULTATION, humanConsultationSignals),
             intentEvidence(AgentIntent.DETAIL_SUMMARY, detailSummarySignals),
             intentEvidence(AgentIntent.COMPARISON, comparisonSignals),
             intentEvidence(AgentIntent.PLANNING, planningSignals)
@@ -235,8 +238,13 @@ class AgentIntentRouter {
     ): AgentRouteAssessment {
         if (current.decision.intent == AgentIntent.SAFETY_SCREENING) return current
 
+        val currentAllowsHumanContext = current.intentEvidence.any {
+            it.intent == AgentIntent.HUMAN_CONSULTATION &&
+                it.polarity != AgentLabelPolarity.NEGATIVE
+        } || "UNRESOLVED_CURRENT_REFERENCE" in current.ambiguityReasons
         val usableContexts = contextDecisions.filter { candidate ->
-            candidate.intent != AgentIntent.SAFETY_SCREENING && (
+            candidate.intent != AgentIntent.SAFETY_SCREENING &&
+                (candidate.intent != AgentIntent.HUMAN_CONSULTATION || currentAllowsHumanContext) && (
                 candidate.queryTarget != null ||
                     (!current.explicitIntent &&
                         current.decision.intent == AgentIntent.GENERAL_CHAT &&
@@ -372,17 +380,23 @@ class AgentIntentRouter {
     }
 
     fun validatedDecision(intent: AgentIntent, queryTarget: AgentQueryTarget?): AgentIntentDecision {
+        val effectiveTarget = if (intent == AgentIntent.HUMAN_CONSULTATION) {
+            AgentQueryTarget.INSTITUTION
+        } else {
+            queryTarget
+        }
         val searchCatalog = intent in setOf(
             AgentIntent.CATALOG_QA,
             AgentIntent.COMPARISON,
             AgentIntent.DETAIL_SUMMARY
-        ) || (intent == AgentIntent.PLANNING && queryTarget != null)
+        ) || (intent == AgentIntent.PLANNING && effectiveTarget != null)
         return AgentIntentDecision(
             intent = intent,
-            queryTarget = queryTarget,
+            queryTarget = effectiveTarget,
             searchCatalog = intent != AgentIntent.SAFETY_SCREENING && searchCatalog,
             nextAction = when (intent) {
                 AgentIntent.SAFETY_SCREENING -> AgentNextAction.COMPLETE_SAFETY_SCREENING
+                AgentIntent.HUMAN_CONSULTATION -> AgentNextAction.SELECT_INSTITUTION
                 AgentIntent.PLANNING -> AgentNextAction.START_PLANNING
                 AgentIntent.CATALOG_QA, AgentIntent.COMPARISON, AgentIntent.DETAIL_SUMMARY -> AgentNextAction.SHOW_CATALOG
                 AgentIntent.GENERAL_CHAT -> AgentNextAction.NONE
@@ -423,6 +437,7 @@ class AgentIntentRouter {
             )
         val intent = when {
             AgentIntent.SAFETY_SCREENING in positiveIntents -> AgentIntent.SAFETY_SCREENING
+            AgentIntent.HUMAN_CONSULTATION in positiveIntents -> AgentIntent.HUMAN_CONSULTATION
             detailSummaryIsPrimary -> AgentIntent.DETAIL_SUMMARY
             preferredIntent in positiveIntents -> preferredIntent!!
             AgentIntent.COMPARISON in positiveIntents -> AgentIntent.COMPARISON
@@ -644,7 +659,7 @@ class AgentIntentRouter {
 
     private fun signalFamily(term: String): SignalFamily? = when (term) {
         in safetyTerms -> SignalFamily.SAFETY_STATE
-        in comparisonTerms, in planningTerms, in detailSummaryTerms -> SignalFamily.BUSINESS_ACTION
+        in humanConsultationTerms, in comparisonTerms, in planningTerms, in detailSummaryTerms -> SignalFamily.BUSINESS_ACTION
         in catalogActionTerms -> SignalFamily.CATALOG_ACTION
         in institutionProjectTerms, in doctorTerms, in institutionTerms, in projectTerms -> SignalFamily.TARGET
         else -> null
@@ -779,6 +794,16 @@ class AgentIntentRouter {
         )
         val comparisonTerms = listOf("对比", "比较", "区别", "compare", "comparison", "versus", " vs ")
         val planningTerms = listOf("规划", "方案", "怎么安排", "适合我", "plan", "planning", "suitable for me")
+        val humanConsultationTerms = listOf(
+            "真人咨询", "人工咨询", "真人客服", "人工客服",
+            "转人工", "转接真人", "转接咨询师", "联系咨询师", "找咨询师",
+            "找真人", "真人顾问", "人工服务",
+            "human consultation", "human consultant", "human advisor",
+            "real person", "live agent", "manual service",
+            "speak to a person", "talk to a person",
+            "speak to a specialist", "talk to a specialist",
+            "connect me to a person", "transfer me to a consultant"
+        )
         val unresolvedReferenceTerms = listOf("这个", "那个", "那这个", "那它", "它呢", "这家", "那家", "这个呢", "那个呢", "this", "that", "what about it", "how about that")
         val constraintSignalGroups = listOf(
             listOf("预算", "budget"),
@@ -804,7 +829,7 @@ class AgentIntentRouter {
             "推荐", "展示", "显示", "查找", "查一下", "找一下", "看看",
             "recommend", "show", "find", "list"
         )
-        val intentActionTerms = comparisonTerms + planningTerms + detailSummaryTerms + catalogActionTerms
+        val intentActionTerms = humanConsultationTerms + comparisonTerms + planningTerms + detailSummaryTerms + catalogActionTerms
         val safetyTerms = listOf(
             "怀孕", "孕期", "备孕", "哺乳", "严重过敏", "过敏史", "瘢痕体质", "疤痕体质",
             "正在吃药", "正在服药", "皮肤感染", "伤口未愈合", "保证效果", "百分百有效",
@@ -820,7 +845,7 @@ class AgentIntentRouter {
             "appointment", "ipl", "aopt", "dpl", "laser", "botox", "filler", "thermage",
             "skin", "dull", "pores", "texture", "spots", "pigmentation", "acne", "wrinkle", "aging", "sagging", "hollow"
         )
-        val routingTerms = safetyTerms + detailSummaryTerms + comparisonTerms + planningTerms + catalogActionTerms + catalogTerms +
+        val routingTerms = safetyTerms + humanConsultationTerms + detailSummaryTerms + comparisonTerms + planningTerms + catalogActionTerms + catalogTerms +
             institutionProjectTerms + doctorTerms + institutionTerms + projectTerms + unresolvedReferenceTerms +
             constraintSignalGroups.flatten() + aestheticConcernTerms
         val uncertaintyPhrases = listOf(

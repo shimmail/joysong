@@ -37,7 +37,7 @@ class AgentChatPage extends StatefulWidget {
   final String? initialContextId;
   final String? initialContextName;
   final AgentCatalogItemAction? onOpenCatalogItem;
-  final AgentCatalogItemAction? onHumanConsult;
+  final AgentHumanConsultationAction? onHumanConsult;
 
   @override
   State<AgentChatPage> createState() => _AgentChatPageState();
@@ -208,12 +208,13 @@ class _AgentChatPageState extends State<AgentChatPage> {
                                   when !request.isComplete)
                                 AgentComparisonStatusCard(request: request)
                               else if (message.comparisonRequest
-                                      case final request?
+                                  case final request?
                                   when request.isComplete &&
                                       message.catalogReport != null)
                                 AgentCatalogReportCard(
                                   report: message.catalogReport!,
                                   onOpen: widget.onOpenCatalogItem,
+                                  onHumanChat: widget.onHumanConsult,
                                   canOpen: _canOpenCatalogItem,
                                 )
                               else if (message.comparisonRequest == null &&
@@ -221,6 +222,7 @@ class _AgentChatPageState extends State<AgentChatPage> {
                                 AgentCatalogLinkList(
                                   items: _supportedCatalogItems(message),
                                   onOpen: widget.onOpenCatalogItem,
+                                  onHumanChat: widget.onHumanConsult,
                                   canOpen: _canOpenCatalogItem,
                                 ),
                           ],

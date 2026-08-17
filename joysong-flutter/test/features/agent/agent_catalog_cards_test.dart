@@ -5,8 +5,9 @@ import 'package:joysong_flutter/features/agent/domain/agent_models.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_catalog_cards.dart';
 
 void main() {
-  testWidgets('status card renders operand and target guidance in Chinese',
-      (tester) async {
+  testWidgets('status card renders operand and target guidance in Chinese', (
+    tester,
+  ) async {
     await _pumpCard(
       tester,
       const AgentComparisonStatusCard(request: _incompleteRequest),
@@ -18,8 +19,9 @@ void main() {
     expect(find.text('请明确要比较机构、医生、项目还是机构项目'), findsOneWidget);
   });
 
-  testWidgets('status card renders operand and target guidance in English',
-      (tester) async {
+  testWidgets('status card renders operand and target guidance in English', (
+    tester,
+  ) async {
     await _pumpCard(
       tester,
       const AgentComparisonStatusCard(request: _incompleteRequest),
@@ -38,27 +40,29 @@ void main() {
   });
 
   testWidgets(
-      'status card trims operand names and ignores unknown missing fields',
-      (tester) async {
-    await _pumpCard(
-      tester,
-      const AgentComparisonStatusCard(request: _whitespaceRequest),
-      locale: const Locale('en'),
-    );
+    'status card trims operand names and ignores unknown missing fields',
+    (tester) async {
+      await _pumpCard(
+        tester,
+        const AgentComparisonStatusCard(request: _whitespaceRequest),
+        locale: const Locale('en'),
+      );
 
-    expect(find.text('Clinic A · Clinic B'), findsOneWidget);
-    expect(find.textContaining('FUTURE_FIELD'), findsNothing);
-    expect(find.text('Select at least two items to compare'), findsNothing);
-    expect(
-      find.text(
-        'Specify whether to compare clinics, doctors, treatments, or clinic treatments',
-      ),
-      findsNothing,
-    );
-  });
+      expect(find.text('Clinic A · Clinic B'), findsOneWidget);
+      expect(find.textContaining('FUTURE_FIELD'), findsNothing);
+      expect(find.text('Select at least two items to compare'), findsNothing);
+      expect(
+        find.text(
+          'Specify whether to compare clinics, doctors, treatments, or clinic treatments',
+        ),
+        findsNothing,
+      );
+    },
+  );
 
-  testWidgets('single item comparison report still uses comparison table',
-      (tester) async {
+  testWidgets('single item comparison report still uses comparison table', (
+    tester,
+  ) async {
     await _pumpCard(
       tester,
       AgentCatalogReportCard(report: _projectReport),
@@ -80,8 +84,9 @@ void main() {
     expect(find.text('Price should not render'), findsNothing);
   });
 
-  testWidgets('project table shows category reference price rating and tags',
-      (tester) async {
+  testWidgets('project table shows category reference price rating and tags', (
+    tester,
+  ) async {
     await _pumpCard(tester, AgentComparisonTable(report: _projectReport));
 
     for (final entry in const {
@@ -96,64 +101,68 @@ void main() {
   });
 
   testWidgets(
-      'institution project table shows city category prices rating reviews sales verification and tags',
-      (tester) async {
-    await _pumpCard(
-      tester,
-      AgentComparisonTable(report: _institutionProjectReport),
-    );
+    'institution project table shows city category prices rating reviews sales verification and tags',
+    (tester) async {
+      await _pumpCard(
+        tester,
+        AgentComparisonTable(report: _institutionProjectReport),
+      );
 
-    for (final entry in const {
-      'City': 'Shanghai',
-      'Category': 'Skin',
-      'Clinic price': r'$90',
-      'Reference price': r'$100',
-      'Rating': '4.7',
-      'Review count': '20',
-      'Sales': '30',
-      'Clinic verified': 'Verified',
-      'Tags': 'Popular',
-    }.entries) {
-      expect(find.text(entry.key), findsOneWidget);
-      expect(find.text(entry.value), findsOneWidget);
-    }
-  });
-
-  testWidgets(
-      'doctor table keeps one column per doctor and shows multiple practice institutions and verification summary',
-      (tester) async {
-    await _pumpCard(tester, AgentComparisonTable(report: _doctorReport));
-
-    expect(find.text('Dr. One'), findsOneWidget);
-    expect(find.text('Clinic A (Shanghai), Clinic B (Beijing)'), findsOneWidget);
-    expect(find.text('2/2'), findsOneWidget);
-  });
+      for (final entry in const {
+        'City': 'Shanghai',
+        'Category': 'Skin',
+        'Clinic price': r'$90',
+        'Reference price': r'$100',
+        'Rating': '4.7',
+        'Review count': '20',
+        'Sales': '30',
+        'Clinic verified': 'Verified',
+        'Tags': 'Popular',
+      }.entries) {
+        expect(find.text(entry.key), findsOneWidget);
+        expect(find.text(entry.value), findsOneWidget);
+      }
+    },
+  );
 
   testWidgets(
-      'doctor practice institutions cell lays out the complete value without ellipsis',
-      (tester) async {
-    await _pumpCard(
-      tester,
-      AgentComparisonTable(report: _longDoctorReport),
-      locale: const Locale('en'),
-      textScaler: const TextScaler.linear(2),
-      width: 300,
-    );
+    'doctor table keeps one column per doctor and shows multiple practice institutions and verification summary',
+    (tester) async {
+      await _pumpCard(tester, AgentComparisonTable(report: _doctorReport));
 
-    final valueFinder = find.text(_longPracticeInstitutions);
-    final value = tester.widget<Text>(valueFinder);
-    expect(value.maxLines, isNull);
-    expect(value.overflow, isNull);
-    expect(tester.getSize(valueFinder).height, greaterThan(88));
-    expect(tester.takeException(), isNull);
-  });
+      expect(find.text('Dr. One'), findsOneWidget);
+      expect(
+        find.text('Clinic A (Shanghai), Clinic B (Beijing)'),
+        findsOneWidget,
+      );
+      expect(find.text('2/2'), findsOneWidget);
+    },
+  );
 
-  testWidgets('comparison table localizes missing structured values',
-      (tester) async {
-    await _pumpCard(
-      tester,
-      AgentComparisonTable(report: _missingValueReport),
-    );
+  testWidgets(
+    'doctor practice institutions cell lays out the complete value without ellipsis',
+    (tester) async {
+      await _pumpCard(
+        tester,
+        AgentComparisonTable(report: _longDoctorReport),
+        locale: const Locale('en'),
+        textScaler: const TextScaler.linear(2),
+        width: 300,
+      );
+
+      final valueFinder = find.text(_longPracticeInstitutions);
+      final value = tester.widget<Text>(valueFinder);
+      expect(value.maxLines, isNull);
+      expect(value.overflow, isNull);
+      expect(tester.getSize(valueFinder).height, greaterThan(88));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('comparison table localizes missing structured values', (
+    tester,
+  ) async {
+    await _pumpCard(tester, AgentComparisonTable(report: _missingValueReport));
     expect(find.text('暂无平台数据'), findsNWidgets(2));
 
     await _pumpCard(
@@ -165,33 +174,35 @@ void main() {
   });
 
   testWidgets(
-      'comparison table renders at most four operand columns and remains horizontally scrollable',
-      (tester) async {
-    await _pumpCard(tester, AgentComparisonTable(report: _fiveItemReport));
+    'comparison table renders at most four operand columns and remains horizontally scrollable',
+    (tester) async {
+      await _pumpCard(tester, AgentComparisonTable(report: _fiveItemReport));
 
-    expect(find.text('Item 1'), findsOneWidget);
-    expect(find.text('Item 4'), findsOneWidget);
-    expect(find.text('Item 5'), findsNothing);
-    expect(
-      find.byWidgetPredicate(
-        (widget) =>
-            widget is SingleChildScrollView &&
-            widget.scrollDirection == Axis.horizontal,
-      ),
-      findsOneWidget,
-    );
-  });
+      expect(find.text('Item 1'), findsOneWidget);
+      expect(find.text('Item 4'), findsOneWidget);
+      expect(find.text('Item 5'), findsNothing);
+      expect(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is SingleChildScrollView &&
+              widget.scrollDirection == Axis.horizontal,
+        ),
+        findsOneWidget,
+      );
+    },
+  );
 
   testWidgets(
-      'comparison table falls back to the union of structured attribute keys',
-      (tester) async {
-    await _pumpCard(tester, AgentComparisonTable(report: _fallbackReport));
+    'comparison table falls back to the union of structured attribute keys',
+    (tester) async {
+      await _pumpCard(tester, AgentComparisonTable(report: _fallbackReport));
 
-    expect(find.text('Backend key A'), findsOneWidget);
-    expect(find.text('Alpha value'), findsOneWidget);
-    expect(find.text('Backend key B'), findsOneWidget);
-    expect(find.text('Beta value'), findsOneWidget);
-  });
+      expect(find.text('Backend key A'), findsOneWidget);
+      expect(find.text('Alpha value'), findsOneWidget);
+      expect(find.text('Backend key B'), findsOneWidget);
+      expect(find.text('Beta value'), findsOneWidget);
+    },
+  );
 
   testWidgets('comparison report honors onOpen and canOpen', (tester) async {
     AgentCatalogItem? opened;
@@ -212,6 +223,212 @@ void main() {
     expect(opened?.id, 'project-open');
     expect(find.text('Information is incomplete'), findsOneWidget);
   });
+
+  testWidgets(
+    'ordinary institution action prefers institutionId and falls back to item id',
+    (tester) async {
+      final received = <String>[];
+      final explicit = _item(
+        type: 'INSTITUTION',
+        id: 'institution-record',
+        name: 'Explicit institution',
+        institutionId: 'institution-explicit',
+        canChatWithHuman: true,
+        attributes: const {},
+      );
+      final fallback = _item(
+        type: 'INSTITUTION',
+        id: 'institution-fallback',
+        name: 'Fallback institution',
+        canChatWithHuman: true,
+        attributes: const {},
+      );
+
+      await _pumpCard(
+        tester,
+        AgentCatalogLinkList(
+          items: [explicit, fallback],
+          onHumanChat: received.add,
+        ),
+      );
+
+      await tester.tap(
+        find.byKey(
+          const ValueKey('agent-human-consult-INSTITUTION-institution-record'),
+        ),
+      );
+      await tester.tap(
+        find.byKey(
+          const ValueKey(
+            'agent-human-consult-INSTITUTION-institution-fallback',
+          ),
+        ),
+      );
+
+      expect(received, ['institution-explicit', 'institution-fallback']);
+    },
+  );
+
+  testWidgets(
+    'institution project action emits only its explicit institutionId',
+    (tester) async {
+      Object? received;
+      final item = _item(
+        type: 'INSTITUTION_PROJECT',
+        id: 'offering-record',
+        name: 'Institution project',
+        institutionId: 'institution-safe',
+        projectId: 'project-record',
+        canChatWithHuman: true,
+        attributes: const {},
+      );
+
+      await _pumpCard(
+        tester,
+        AgentCatalogDetailCard(
+          item: item,
+          onHumanChat: (value) => received = value,
+        ),
+      );
+
+      await tester.tap(
+        find.byKey(
+          const ValueKey(
+            'agent-human-consult-INSTITUTION_PROJECT-offering-record',
+          ),
+        ),
+      );
+
+      expect(received, 'institution-safe');
+    },
+  );
+
+  testWidgets(
+    'doctor project unknown and blank ids never expose human consultation',
+    (tester) async {
+      final received = <String>[];
+      final doctor = _item(
+        type: 'DOCTOR',
+        id: 'doctor-record-1',
+        name: 'Doctor',
+        institutionId: 'institution-must-not-leak',
+        canChatWithHuman: true,
+        attributes: const {},
+      );
+      final project = _item(
+        type: 'PROJECT',
+        id: 'project-record-1',
+        name: 'Project',
+        canChatWithHuman: true,
+        attributes: const {},
+      );
+      final unknown = _item(
+        type: 'ARTICLE',
+        id: 'article-record-1',
+        name: 'Unknown',
+        canChatWithHuman: true,
+        attributes: const {},
+      );
+      final blankInstitution = _item(
+        type: 'INSTITUTION',
+        id: '   ',
+        name: 'Blank institution',
+        institutionId: '   ',
+        canChatWithHuman: true,
+        attributes: const {},
+      );
+      final blankInstitutionProject = _item(
+        type: 'INSTITUTION_PROJECT',
+        id: 'offering-record-1',
+        name: 'Blank institution project',
+        institutionId: '   ',
+        projectId: 'project-record-2',
+        canChatWithHuman: true,
+        attributes: const {},
+      );
+
+      await _pumpCard(
+        tester,
+        AgentCatalogLinkList(
+          items: [
+            doctor,
+            project,
+            unknown,
+            blankInstitution,
+            blankInstitutionProject,
+          ],
+          onHumanChat: received.add,
+        ),
+      );
+
+      expect(find.byType(TextButton), findsNothing);
+      expect(received, isEmpty);
+    },
+  );
+
+  testWidgets('human consultation requires callback and canChatWithHuman', (
+    tester,
+  ) async {
+    final item = _item(
+      type: 'INSTITUTION',
+      id: 'institution-1',
+      name: 'Institution',
+      institutionId: 'institution-1',
+      canChatWithHuman: true,
+      attributes: const {},
+    );
+    final disabledItem = _item(
+      type: 'INSTITUTION',
+      id: 'institution-1',
+      name: 'Institution',
+      institutionId: 'institution-1',
+      attributes: const {},
+    );
+
+    await _pumpCard(tester, AgentCatalogLinkCard(item: item));
+    expect(find.byType(TextButton), findsNothing);
+
+    await _pumpCard(
+      tester,
+      AgentCatalogLinkCard(item: disabledItem, onHumanChat: (_) {}),
+    );
+    expect(find.byType(TextButton), findsNothing);
+  });
+
+  testWidgets('catalog report action emits the safe institution id', (
+    tester,
+  ) async {
+    Object? received;
+    final report = _report(
+      items: [
+        _item(
+          type: 'INSTITUTION',
+          id: 'institution-record',
+          name: 'Institution',
+          institutionId: 'institution-safe',
+          canChatWithHuman: true,
+          attributes: const {'City': 'Shanghai'},
+        ),
+      ],
+      dimensions: const ['City'],
+    );
+
+    await _pumpCard(
+      tester,
+      AgentCatalogReportCard(
+        report: report,
+        onHumanChat: (value) => received = value,
+      ),
+    );
+
+    await tester.tap(
+      find.byKey(
+        const ValueKey('agent-human-consult-INSTITUTION-institution-record'),
+      ),
+    );
+
+    expect(received, 'institution-safe');
+  });
 }
 
 Future<void> _pumpCard(
@@ -220,24 +437,23 @@ Future<void> _pumpCard(
   Locale locale = const Locale('zh'),
   TextScaler textScaler = TextScaler.noScaling,
   double? width,
-}) =>
-    tester.pumpWidget(
-      MaterialApp(
-        locale: locale,
-        supportedLocales: const [Locale('zh'), Locale('en')],
-        localizationsDelegates: const [
-          GlobalMaterialLocalizations.delegate,
-          GlobalWidgetsLocalizations.delegate,
-          GlobalCupertinoLocalizations.delegate,
-        ],
-        home: MediaQuery(
-          data: MediaQueryData(textScaler: textScaler),
-          child: Scaffold(
-            body: SizedBox(width: width, child: child),
-          ),
-        ),
+}) => tester.pumpWidget(
+  MaterialApp(
+    locale: locale,
+    supportedLocales: const [Locale('zh'), Locale('en')],
+    localizationsDelegates: const [
+      GlobalMaterialLocalizations.delegate,
+      GlobalWidgetsLocalizations.delegate,
+      GlobalCupertinoLocalizations.delegate,
+    ],
+    home: MediaQuery(
+      data: MediaQueryData(textScaler: textScaler),
+      child: Scaffold(
+        body: SizedBox(width: width, child: child),
       ),
-    );
+    ),
+  ),
+);
 
 const _incompleteRequest = AgentComparisonRequest(
   operands: [
@@ -344,9 +560,7 @@ final _longDoctorReport = _report(
       type: 'DOCTOR',
       id: 'doctor-long',
       name: 'Dr',
-      attributes: const {
-        'Practice institutions': _longPracticeInstitutions,
-      },
+      attributes: const {'Practice institutions': _longPracticeInstitutions},
     ),
   ],
   dimensions: const ['Practice institutions'],
@@ -471,30 +685,31 @@ final _actionReport = _report(
 AgentCatalogReport _report({
   required List<AgentCatalogItem> items,
   required List<String> dimensions,
-}) =>
-    AgentCatalogReport(
-      mode: 'COMPARISON',
-      title: '',
-      summary: '',
-      items: items,
-      comparisonDimensions: dimensions,
-      warnings: const [],
-    );
+}) => AgentCatalogReport(
+  mode: 'COMPARISON',
+  title: '',
+  summary: '',
+  items: items,
+  comparisonDimensions: dimensions,
+  warnings: const [],
+);
 
 AgentCatalogItem _item({
   required String type,
   required String id,
   required String name,
   required Map<String, String> attributes,
-}) =>
-    AgentCatalogItem(
-      type: type,
-      id: id,
-      name: name,
-      subtitle: '',
-      summary: '',
-      attributes: attributes,
-      institutionId: null,
-      projectId: null,
-      canChatWithHuman: false,
-    );
+  String? institutionId,
+  String? projectId,
+  bool canChatWithHuman = false,
+}) => AgentCatalogItem(
+  type: type,
+  id: id,
+  name: name,
+  subtitle: '',
+  summary: '',
+  attributes: attributes,
+  institutionId: institutionId,
+  projectId: projectId,
+  canChatWithHuman: canChatWithHuman,
+);

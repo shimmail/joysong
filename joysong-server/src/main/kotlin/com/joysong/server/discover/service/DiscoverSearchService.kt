@@ -285,12 +285,7 @@ class DiscoverSearchService(
 
         val normalized = query.trim().lowercase()
         val institutions = institutionRepository.findAll()
-        val namedUnknownInstitution = namedInstitutionPattern.findAll(query).any { match ->
-            val candidate = match.groupValues[1].trim().lowercase()
-            candidate !in genericInstitutionPrefixes &&
-                genericInstitutionPhrases.none(candidate::contains) &&
-                explicitTreatmentTerms.none(candidate::contains)
-        }
+        val namedUnknownInstitution = hasNamedInstitutionPhrase(query)
         if (institutions.any { it.name.length >= 2 && normalized.contains(it.name.lowercase()) } || namedUnknownInstitution) {
             requested += RequestedEntityType.INSTITUTION
         }
@@ -305,6 +300,47 @@ class DiscoverSearchService(
         }
         if (knownDoctorRequested || namedDoctorRequested) requested += RequestedEntityType.DOCTOR
         return requested
+    }
+
+    fun hasNamedInstitutionPhrase(query: String): Boolean =
+        namedInstitutionPattern.findAll(query).any { match ->
+            val captureEnd = match.groups[1]?.range?.last ?: return@any false
+            val rawCandidate = match.groupValues[1].trim().lowercase()
+            val candidate = normalizedInstitutionCandidate(rawCandidate)
+            val prefixCandidate = query.substring(0, captureEnd + 1).trim().lowercase()
+            val normalizedPrefixCandidate = normalizedInstitutionCandidate(prefixCandidate)
+            candidate.length >= 2 &&
+                !deicticInstitutionReferencePattern.containsMatchIn(match.value) &&
+                candidate !in genericInstitutionPrefixes &&
+                candidate !in genericInstitutionLabels &&
+                !isHumanHandoffCandidate(rawCandidate) &&
+                !isHumanHandoffCandidate(candidate) &&
+                !isHumanHandoffCandidate(prefixCandidate) &&
+                !isHumanHandoffCandidate(normalizedPrefixCandidate) &&
+                genericInstitutionPhrases.none(candidate::contains) &&
+                explicitTreatmentTerms.none(candidate::contains)
+        }
+
+    fun hasNegatedInstitutionReference(query: String): Boolean =
+        negatedDeicticInstitutionReferencePattern.containsMatchIn(query)
+
+    private fun normalizedInstitutionCandidate(value: String): String {
+        var candidate = value.trim().lowercase()
+        while (true) {
+            val prefix = conversationalInstitutionPrefixes.firstOrNull(candidate::startsWith) ?: return candidate
+            candidate = candidate.removePrefix(prefix).trim()
+        }
+    }
+
+    private fun isHumanHandoffCandidate(value: String): Boolean {
+        val candidate = value.trim().lowercase().removeSuffix("的").trim()
+        return humanHandoffCandidates.any { phrase ->
+            candidate == phrase || if (phrase.first().code < 128) {
+                candidate.endsWith(" $phrase")
+            } else {
+                candidate.endsWith(phrase)
+            }
+        }
     }
 
     private fun fuzzyTermsFor(query: String): Set<String> = concernVocabulary
@@ -357,6 +393,17 @@ class DiscoverSearchService(
             "([\\p{L}\\p{N}·•]{2,30})\\s*(?:医院|医疗美容(?:医院|门诊部|诊所)?|医美机构|诊所|clinic|hospital)",
             RegexOption.IGNORE_CASE
         )
+        val deicticInstitutionReferencePattern = Regex(
+            "(?:这家|那家)\\s*(?:医院|医疗美容(?:医院|门诊部|诊所)?|医美机构|诊所)|" +
+                "\\b(?:this|that)\\s+(?:clinic|hospital|institution)\\b",
+            RegexOption.IGNORE_CASE
+        )
+        val negatedDeicticInstitutionReferencePattern = Regex(
+            "(?:不要|不选|别选)\\s*(?:这家|那家)\\s*(?:医院|医疗美容(?:医院|门诊部|诊所)?|医美机构|诊所)|" +
+                "\\b(?:not|do\\s+not|don't|avoid|skip|exclude)\\s+" +
+                "(?:(?:use|choose|select)\\s+)?(?:this|that)\\s+(?:clinic|hospital|institution)\\b",
+            RegexOption.IGNORE_CASE
+        )
         val namedDoctorPattern = Regex(
             "([\\p{L}·•]{2,30})\\s*(?:医生|医师|主任|院长|doctor|dr\\.?)",
             RegexOption.IGNORE_CASE
@@ -370,6 +417,15 @@ class DiscoverSearchService(
             "recommend", "find", "which", "good", "a", "the"
         )
         val genericInstitutionPrefixes = setOf("医美", "美容", "整形", "医疗", "正规", "靠谱", "专业", "好的", "clinic", "hospital")
+        val genericInstitutionLabels = setOf("医疗美容", "医美机构", "医疗美容机构", "medical", "beauty", "aesthetic", "medicine")
+        val conversationalInstitutionPrefixes = listOf("请帮我", "帮我", "我想", "想要", "请问", "推荐", "寻找", "咨询", "联系", "找", "想", "请")
+        val humanHandoffCandidates = setOf(
+            "真人咨询", "人工咨询", "真人客服", "人工客服", "转人工", "转接真人", "转接咨询师", "联系咨询师",
+            "找咨询师", "找真人", "真人顾问", "人工服务",
+            "human consultation", "human consultant", "human advisor", "real person", "live agent", "manual service",
+            "speak to a person", "talk to a person", "speak to a specialist", "talk to a specialist",
+            "connect me to a person", "transfer me to a consultant"
+        )
         val genericInstitutionPhrases = setOf(
             "推荐", "哪家", "哪些", "有什么", "有没有", "找", "附近", "当地", "北京", "上海", "广州", "深圳",
             "recommend", "which", "find", "nearby", "best"

@@ -2,10 +2,12 @@ package com.joysong.server.agent.service
 
 import com.joysong.server.agent.dto.AgentCatalogItemResponse
 import com.joysong.server.agent.dto.AgentCatalogReportResponse
+import com.joysong.server.agent.dto.AgentProfileResponse
 import com.joysong.server.discover.dto.InstitutionProjectItemResponse
 import com.joysong.server.discover.dto.ProjectWithInstitutionsResponse
 import com.joysong.server.discover.service.DiscoverSearchRequest
 import com.joysong.server.discover.service.DiscoverSearchResult
+import com.joysong.server.discover.service.DiscoverKeywordExtractor
 import com.joysong.server.discover.repository.DoctorProjectRepository
 import com.joysong.server.discover.service.DiscoverSearchService
 import com.joysong.server.discover.service.RequestedEntityType
@@ -18,6 +20,7 @@ import com.joysong.server.institution.entity.InstitutionProjectEntity
 import com.joysong.server.institution.repository.InstitutionProjectRepository
 import com.joysong.server.institution.repository.InstitutionRepository
 import com.joysong.server.institution.service.InstitutionProjectDetailResolver
+import com.joysong.server.identity.service.InstitutionConsultantService
 import com.joysong.server.project.entity.ProjectEntity
 import com.joysong.server.project.repository.ProjectRepository
 import io.mockk.confirmVerified
@@ -44,6 +47,8 @@ class AgentCatalogServiceTest {
     private val doctorProjectRepository = mockk<DoctorProjectRepository>(relaxed = true)
     private val discoverSearchService = mockk<DiscoverSearchService>(relaxed = true)
     private val doctorInstitutionService = mockk<DoctorInstitutionService>(relaxed = true)
+    private val institutionConsultantService = mockk<InstitutionConsultantService>(relaxed = true)
+    private val agentProfileService = mockk<AgentProfileService>(relaxed = true)
     private val service = AgentCatalogService(
         institutionRepository,
         doctorRepository,
@@ -52,7 +57,9 @@ class AgentCatalogServiceTest {
         doctorProjectRepository,
         discoverSearchService,
         doctorInstitutionService,
-        InstitutionProjectDetailResolver()
+        InstitutionProjectDetailResolver(),
+        institutionConsultantService,
+        agentProfileService
     )
 
     @BeforeEach
@@ -63,6 +70,294 @@ class AgentCatalogServiceTest {
     @AfterEach
     fun resetLocale() {
         LocaleContextHolder.resetLocaleContext()
+    }
+
+    @Test
+    fun `consultable institutions accumulate exact city profile and nationwide tiers stably`() {
+        val institutions = listOf(
+            institution("explicit-low", "星颜医疗美容医院", "北京", "4.1"),
+            institution("shanghai-high", "上海优选", "上海", "4.9"),
+            institution("shanghai-low", "上海安心", "上海", "4.2"),
+            institution("national-high", "全国优选", "广州", "4.8")
+        )
+        stubConsultableInstitutions(institutions, institutions.map { it.id }.toSet(), profileCity = "上海")
+
+        val result = service.selectConsultableInstitutions("user-1", "我想联系星颜医疗美容医院咨询")
+
+        assertEquals(
+            listOf("explicit-low", "shanghai-high", "shanghai-low", "national-high"),
+            result.items.map { it.id }
+        )
+        assertTrue(result.items.all {
+            it.type == "INSTITUTION" &&
+                it.institutionId == it.id &&
+                it.canChatWithHuman
+        })
+        verify(exactly = 1) { institutionConsultantService.listConsultableInstitutionIds() }
+        verify(exactly = 0) { institutionConsultantService.listApprovedConsultants(any()) }
+    }
+
+    @Test
+    fun `consultable institutions exclude unverified and unavailable active rows`() {
+        val institutions = listOf(
+            institution("eligible", "可咨询机构", "上海", "4.2"),
+            institution("unverified", "未认证机构", "上海", "4.9", isVerified = false),
+            institution("unavailable", "无顾问机构", "上海", "4.8")
+        )
+        stubConsultableInstitutions(institutions, setOf("eligible", "unverified"))
+
+        val result = service.selectConsultableInstitutions("user-1", "真人咨询")
+
+        assertEquals(listOf("eligible"), result.items.map { it.id })
+    }
+
+    @Test
+    fun `profile lookup failure falls back nationwide`() {
+        val institutions = listOf(
+            institution("nation-low", "全国安心", "北京", "4.2"),
+            institution("nation-high", "全国优选", "广州", "4.9")
+        )
+        every { institutionRepository.findAll() } returns institutions
+        every { institutionConsultantService.listConsultableInstitutionIds() } returns institutions.map { it.id }.toSet()
+        every { discoverSearchService.citiesMentionedIn(any()) } returns emptyList()
+        every { agentProfileService.get("user-1") } throws IllegalStateException("profile unavailable")
+
+        val result = service.selectConsultableInstitutions("user-1", "真人咨询")
+
+        assertEquals(listOf("nation-high", "nation-low"), result.items.map { it.id })
+    }
+
+    @Test
+    fun `consultable institutions use rating then id and stop at four`() {
+        val institutions = listOf(
+            institution("c", "机构C", "北京", "4.8"),
+            institution("b", "机构B", "北京", "4.9"),
+            institution("a", "机构A", "北京", "4.9"),
+            institution("d", "机构D", "北京", "4.7"),
+            institution("e", "机构E", "北京", "4.6")
+        )
+        stubConsultableInstitutions(institutions, institutions.map { it.id }.toSet())
+
+        val result = service.selectConsultableInstitutions("user-1", "真人咨询")
+
+        assertEquals(listOf("a", "b", "c", "d"), result.items.map { it.id })
+    }
+
+    @Test
+    fun `unavailable named institution returns eligible alternatives`() {
+        val institutions = listOf(
+            institution("unavailable", "星颜医疗美容医院", "上海", "4.9"),
+            institution("alternative", "可咨询机构", "北京", "4.4")
+        )
+        stubConsultableInstitutions(institutions, setOf("alternative"))
+
+        val result = service.selectConsultableInstitutions("user-1", "星颜医疗美容医院")
+
+        assertTrue(result.requestedInstitutionUnavailable)
+        assertEquals(listOf("alternative"), result.items.map { it.id })
+    }
+
+    @Test
+    fun `soft deleted named institution suppresses stale detail context and returns active alternatives`() {
+        val context = institution("context", "杭州安心", "杭州", "4.1")
+        val alternatives = (1..4).map { index ->
+            institution(
+                id = "alternative-$index",
+                name = "上海优选$index",
+                city = "上海",
+                rating = "4.${10 - index}"
+            )
+        }
+        val institutions = listOf(context) + alternatives
+        every { institutionRepository.findAll() } returns institutions
+        every { institutionConsultantService.listConsultableInstitutionIds() } returns institutions.map { it.id }.toSet()
+        every { agentProfileService.get("user-1") } returns profile("上海")
+        every {
+            institutionRepository.countSoftDeletedNamesMentionedInQuery("我想联系星颜做真人咨询")
+        } returns 1
+        val realDiscoverSearchService = DiscoverSearchService(
+            projectRepository = projectRepository,
+            institutionRepository = institutionRepository,
+            institutionProjectRepository = institutionProjectRepository,
+            doctorRepository = doctorRepository,
+            keywordExtractor = DiscoverKeywordExtractor(),
+            doctorInstitutionService = doctorInstitutionService,
+            institutionProjectDetailResolver = InstitutionProjectDetailResolver()
+        )
+        val localService = AgentCatalogService(
+            institutionRepository,
+            doctorRepository,
+            projectRepository,
+            institutionProjectRepository,
+            doctorProjectRepository,
+            realDiscoverSearchService,
+            doctorInstitutionService,
+            InstitutionProjectDetailResolver(),
+            institutionConsultantService,
+            agentProfileService
+        )
+
+        val result = localService.selectConsultableInstitutions(
+            userId = "user-1",
+            query = "我想联系星颜做真人咨询",
+            contextInstitutionId = context.id
+        )
+
+        assertTrue(result.requestedInstitutionUnavailable)
+        assertEquals(alternatives.map { it.id }, result.items.map { it.id })
+        assertFalse(result.items.any { it.id == context.id })
+        verify(exactly = 1) {
+            institutionRepository.countSoftDeletedNamesMentionedInQuery("我想联系星颜做真人咨询")
+        }
+    }
+
+    @Test
+    fun `eligible detail context precedes profile only when current text has no institution or city`() {
+        val institutions = listOf(
+            institution("context", "上下文机构", "杭州", "4.1"),
+            institution("profile", "上海优选", "上海", "4.9"),
+            institution("named", "星颜医疗美容医院", "北京", "4.3")
+        )
+        stubConsultableInstitutions(institutions, institutions.map { it.id }.toSet(), profileCity = "上海")
+        every { discoverSearchService.citiesMentionedIn("北京真人咨询") } returns listOf("北京")
+        every { discoverSearchService.hasNamedInstitutionPhrase("未知医疗美容医院") } returns true
+
+        val withoutCurrentInstitutionOrCity = service.selectConsultableInstitutions("user-1", "真人咨询", "context")
+        val withCurrentInstitution = service.selectConsultableInstitutions("user-1", "星颜医疗美容医院", "context")
+        val withCurrentCity = service.selectConsultableInstitutions("user-1", "北京真人咨询", "context")
+        val withUnknownInstitution = service.selectConsultableInstitutions("user-1", "未知医疗美容医院", "context")
+
+        assertEquals("context", withoutCurrentInstitutionOrCity.items.first().id)
+        assertEquals("named", withCurrentInstitution.items.first().id)
+        assertEquals("named", withCurrentCity.items.first().id)
+        assertEquals("profile", withUnknownInstitution.items.first().id)
+    }
+
+    @Test
+    fun `generic handoff wording keeps eligible detail context ahead of higher rated profile candidates`() {
+        val context = institution("context", "杭州安心", "杭州", "4.1")
+        val profileCandidates = (1..4).map { index ->
+            institution(
+                id = "profile-$index",
+                name = "上海优选$index",
+                city = "上海",
+                rating = "4.${10 - index}"
+            )
+        }
+        val institutions = listOf(context) + profileCandidates
+        every { institutionRepository.findAll() } returns institutions
+        every { institutionConsultantService.listConsultableInstitutionIds() } returns institutions.map { it.id }.toSet()
+        every { agentProfileService.get("user-1") } returns profile("上海")
+        val realDiscoverSearchService = DiscoverSearchService(
+            projectRepository = projectRepository,
+            institutionRepository = institutionRepository,
+            institutionProjectRepository = institutionProjectRepository,
+            doctorRepository = doctorRepository,
+            keywordExtractor = DiscoverKeywordExtractor(),
+            doctorInstitutionService = doctorInstitutionService,
+            institutionProjectDetailResolver = InstitutionProjectDetailResolver()
+        )
+        val localService = AgentCatalogService(
+            institutionRepository,
+            doctorRepository,
+            projectRepository,
+            institutionProjectRepository,
+            doctorProjectRepository,
+            realDiscoverSearchService,
+            doctorInstitutionService,
+            InstitutionProjectDetailResolver(),
+            institutionConsultantService,
+            agentProfileService
+        )
+
+        val result = localService.selectConsultableInstitutions(
+            userId = "user-1",
+            query = "我想找真人咨询的医美机构",
+            contextInstitutionId = context.id
+        )
+
+        assertEquals(listOf("context", "profile-1", "profile-2", "profile-3"), result.items.map { it.id })
+        assertFalse(result.requestedInstitutionUnavailable)
+    }
+
+    @Test
+    fun `deictic institution polarity controls detail context without unavailable copy`() {
+        val context = institution("context", "杭州安心", "杭州", "4.1")
+        val alternatives = (1..4).map { index ->
+            institution(
+                id = "alternative-$index",
+                name = "上海优选$index",
+                city = "上海",
+                rating = "4.${10 - index}"
+            )
+        }
+        val institutions = listOf(context) + alternatives
+        every { institutionRepository.findAll() } returns institutions
+        every { institutionRepository.countSoftDeletedNamesMentionedInQuery(any()) } returns 0
+        every { institutionConsultantService.listConsultableInstitutionIds() } returns institutions.map { it.id }.toSet()
+        every { agentProfileService.get("user-1") } returns profile("上海")
+        val realDiscoverSearchService = DiscoverSearchService(
+            projectRepository = projectRepository,
+            institutionRepository = institutionRepository,
+            institutionProjectRepository = institutionProjectRepository,
+            doctorRepository = doctorRepository,
+            keywordExtractor = DiscoverKeywordExtractor(),
+            doctorInstitutionService = doctorInstitutionService,
+            institutionProjectDetailResolver = InstitutionProjectDetailResolver()
+        )
+        val localService = AgentCatalogService(
+            institutionRepository,
+            doctorRepository,
+            projectRepository,
+            institutionProjectRepository,
+            doctorProjectRepository,
+            realDiscoverSearchService,
+            doctorInstitutionService,
+            InstitutionProjectDetailResolver(),
+            institutionConsultantService,
+            agentProfileService
+        )
+
+        val chinese = localService.selectConsultableInstitutions(
+            "user-1",
+            "我想咨询这家诊所的真人顾问",
+            context.id
+        )
+        val english = localService.selectConsultableInstitutions(
+            "user-1",
+            "talk to a specialist at that clinic",
+            context.id
+        )
+        val negated = localService.selectConsultableInstitutions(
+            "user-1",
+            "不要这家诊所，我想找真人顾问",
+            context.id
+        )
+        val englishNegated = localService.selectConsultableInstitutions(
+            "user-1",
+            "do not use that clinic; talk to a specialist",
+            context.id
+        )
+
+        listOf(chinese, english).forEach { result ->
+            assertEquals(context.id, result.items.first().id)
+            assertFalse(result.requestedInstitutionUnavailable)
+        }
+        listOf(negated, englishNegated).forEach { result ->
+            assertEquals(alternatives.map { it.id }, result.items.map { it.id })
+            assertFalse(result.items.any { it.id == context.id })
+            assertFalse(result.requestedInstitutionUnavailable)
+        }
+    }
+
+    @Test
+    fun `empty consultable institution set returns an empty selection`() {
+        stubConsultableInstitutions(listOf(institution("clinic", "可咨询机构", "上海", "4.8")), emptySet())
+
+        val result = service.selectConsultableInstitutions("user-1", "真人咨询")
+
+        assertTrue(result.items.isEmpty())
+        assertFalse(result.requestedInstitutionUnavailable)
     }
 
     @Test
@@ -371,6 +666,8 @@ class AgentCatalogServiceTest {
         val localDiscoverSearchService = mockk<DiscoverSearchService>(relaxed = true)
         val localDoctorInstitutionService = mockk<DoctorInstitutionService>(relaxed = true)
         val localDetailResolver = mockk<InstitutionProjectDetailResolver>(relaxed = true)
+        val localInstitutionConsultantService = mockk<InstitutionConsultantService>(relaxed = true)
+        val localAgentProfileService = mockk<AgentProfileService>(relaxed = true)
         val localService = AgentCatalogService(
             localInstitutionRepository,
             localDoctorRepository,
@@ -379,7 +676,9 @@ class AgentCatalogServiceTest {
             localDoctorProjectRepository,
             localDiscoverSearchService,
             localDoctorInstitutionService,
-            localDetailResolver
+            localDetailResolver,
+            localInstitutionConsultantService,
+            localAgentProfileService
         )
         val source = evidence(item("PROJECT", "project-1", "水光", mapOf("评分" to "4.8")))
 
@@ -401,7 +700,9 @@ class AgentCatalogServiceTest {
             localDoctorProjectRepository,
             localDiscoverSearchService,
             localDoctorInstitutionService,
-            localDetailResolver
+            localDetailResolver,
+            localInstitutionConsultantService,
+            localAgentProfileService
         )
     }
 
@@ -616,6 +917,48 @@ class AgentCatalogServiceTest {
         rating = project.rating,
         reviewCount = project.reviewCount,
         institutionProjects = offerings
+    )
+
+    private fun institution(
+        id: String,
+        name: String,
+        city: String,
+        rating: String,
+        isVerified: Boolean = true
+    ) = InstitutionEntity(
+        id = id,
+        name = name,
+        city = city,
+        rating = BigDecimal(rating),
+        isVerified = isVerified
+    )
+
+    private fun stubConsultableInstitutions(
+        institutions: List<InstitutionEntity>,
+        consultableIds: Set<String>,
+        profileCity: String = ""
+    ) {
+        every { institutionRepository.findAll() } returns institutions
+        every { institutionRepository.countSoftDeletedNamesMentionedInQuery(any()) } returns 0
+        every { institutionConsultantService.listConsultableInstitutionIds() } returns consultableIds
+        every { discoverSearchService.citiesMentionedIn(any()) } returns emptyList()
+        every { agentProfileService.get(any()) } returns profile(profileCity)
+    }
+
+    private fun profile(city: String) = AgentProfileResponse(
+        id = null,
+        city = city,
+        goals = emptyList(),
+        budgetMin = null,
+        budgetMax = null,
+        acceptableDowntimeDays = null,
+        painTolerance = "",
+        preferences = emptyList(),
+        excludedProjects = emptyList(),
+        consentVersion = "",
+        confirmedAt = null,
+        completenessScore = 0,
+        missingFields = emptyList()
     )
 
     private fun stubCatalogSearch(

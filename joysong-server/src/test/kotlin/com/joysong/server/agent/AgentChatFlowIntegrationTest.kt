@@ -26,8 +26,12 @@ import com.joysong.server.chat.entity.ChatMessageEntity
 import com.joysong.server.chat.repository.ChatMessageRepository
 import com.joysong.server.chat.repository.ChatSessionRepository
 import com.joysong.server.chat.service.ChatService
+import com.joysong.server.institution.entity.InstitutionEntity
+import com.joysong.server.institution.repository.InstitutionRepository
 import com.joysong.server.project.entity.ProjectEntity
 import com.joysong.server.project.repository.ProjectRepository
+import com.joysong.server.user.entity.UserEntity
+import com.joysong.server.user.repository.UserRepository
 import com.sun.net.httpserver.HttpServer
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
@@ -61,6 +65,7 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPat
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.request
 import org.springframework.transaction.support.TransactionSynchronizationManager
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.web.client.RestTemplate
 import org.slf4j.LoggerFactory
 import org.testcontainers.containers.MySQLContainer
@@ -70,6 +75,7 @@ import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
 import java.nio.file.Paths
 import java.time.LocalDateTime
+import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -111,6 +117,15 @@ class AgentChatFlowIntegrationTest {
 
     @Autowired
     private lateinit var projectRepository: ProjectRepository
+
+    @Autowired
+    private lateinit var institutionRepository: InstitutionRepository
+
+    @Autowired
+    private lateinit var userRepository: UserRepository
+
+    @Autowired
+    private lateinit var jdbcTemplate: JdbcTemplate
 
     @Autowired
     private lateinit var turnLifecycleService: TurnLifecycleService
@@ -863,6 +878,97 @@ class AgentChatFlowIntegrationTest {
 
     @Test
     @WithMockUser(username = "user-1")
+    fun `HTTP human consultation returns and restores a fixed institution handoff without model calls`() {
+        val seed = seedConsultableInstitution()
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+
+        val current = mockMvc.perform(
+            post("/api/chat/sessions/{id}/messages", session.id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"content":"我想转人工咨询","idempotencyKey":"http-human-handoff-1"}""")
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.intent").value("HUMAN_CONSULTATION"))
+            .andExpect(jsonPath("$.data.queryTarget").value("INSTITUTION"))
+            .andExpect(jsonPath("$.data.nextAction").value("SELECT_INSTITUTION"))
+            .andExpect(jsonPath("$.data.catalogItems[0].type").value("INSTITUTION"))
+            .andExpect(jsonPath("$.data.catalogItems[0].institutionId").value(seed.institution.id))
+            .andExpect(jsonPath("$.data.catalogItems[0].canChatWithHuman").value(true))
+            .andReturn().response.contentAsString
+        assertFalse(current.contains(seed.consultantId))
+        assertEquals(0, fakeLlmCalls.get())
+
+        val history = mockMvc.perform(get("/api/chat/sessions/{id}/messages", session.id))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data[1].catalogItems[0].type").value("INSTITUTION"))
+            .andExpect(jsonPath("$.data[1].catalogItems[0].institutionId").value(seed.institution.id))
+            .andExpect(jsonPath("$.data[1].catalogItems[0].canChatWithHuman").value(true))
+            .andReturn().response.contentAsString
+        assertFalse(history.contains(seed.consultantId))
+        val assistantMetadata = messages(session.id).single { it.role == "ASSISTANT" }.metadataJson
+        assertFalse(assistantMetadata.contains(seed.consultantId))
+    }
+
+    @Test
+    @WithMockUser(username = "user-1")
+    fun `HTTP human consultation reports a soft deleted named institution as unavailable`() {
+        jdbcTemplate.update("UPDATE institution_memberships SET status = 'PENDING' WHERE status = 'APPROVED'")
+        val alternative = seedConsultableInstitution(
+            name = "可咨询机构 ${UUID.randomUUID()}",
+            rating = "5.0"
+        )
+        val deletedId = UUID.randomUUID().toString()
+        institutionRepository.saveAndFlush(
+            InstitutionEntity(
+                id = deletedId,
+                name = "星颜",
+                city = "上海",
+                isVerified = true
+            )
+        )
+        institutionRepository.deleteById(deletedId)
+        institutionRepository.flush()
+
+        assertFalse(institutionRepository.findAll().any { it.id == deletedId })
+        assertEquals(
+            1L,
+            institutionRepository.countSoftDeletedNamesMentionedInQuery("我想联系星颜做真人咨询")
+        )
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+
+        val responseBody = mockMvc.perform(
+            post("/api/chat/sessions/{id}/messages", session.id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"content":"我想联系星颜做真人咨询","idempotencyKey":"http-soft-deleted-handoff-1"}""")
+        )
+            .andExpect(status().isOk)
+            .andExpect(
+                jsonPath("$.data.message.content").value(
+                    "你提到的机构目前无法提供真人转接。你可以选择下方其他机构，查看其当前可联系的咨询师。"
+                )
+            )
+            .andExpect(jsonPath("$.data.catalogItems.length()").value(1))
+            .andExpect(jsonPath("$.data.catalogItems[0].institutionId").value(alternative.institution.id))
+            .andReturn().response.contentAsString
+        assertFalse(responseBody.contains(deletedId))
+        assertEquals(0, fakeLlmCalls.get())
+    }
+
+    @Test
+    @WithMockUser(username = "user-1")
+    fun `HTTP human consultation stream emits started then completed without delta`() {
+        seedConsultableInstitution()
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+
+        val response = stream(session.id, "我想转人工咨询", "http-human-handoff-stream-1")
+
+        assertEventOrder(response, "event:started", "event:completed")
+        assertFalse(response.contains("event:delta"))
+        assertEquals(0, streamingProviderCallCount())
+    }
+
+    @Test
+    @WithMockUser(username = "user-1")
     fun `HTTP planning stream suppresses unsafe deltas and persists only policy safe content`() {
         fakeLlmStreamResponse.set(streamResponse("结合你低痛偏好，建议选择A"))
         val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
@@ -1336,6 +1442,45 @@ class AgentChatFlowIntegrationTest {
                 comparisonRequest = comparisonRequest()
             )
         )
+    }
+
+    private data class ConsultableInstitutionSeed(
+        val institution: InstitutionEntity,
+        val consultantId: String
+    )
+
+    private fun seedConsultableInstitution(
+        name: String = "Human Handoff Clinic ${UUID.randomUUID()}",
+        rating: String = "0"
+    ): ConsultableInstitutionSeed {
+        val institution = institutionRepository.saveAndFlush(
+            InstitutionEntity(
+                id = UUID.randomUUID().toString(),
+                name = name,
+                city = "Shanghai",
+                rating = rating.toBigDecimal(),
+                isVerified = true
+            )
+        )
+        val consultantId = UUID.randomUUID().toString()
+        userRepository.saveAndFlush(
+            UserEntity(
+                id = consultantId,
+                passwordHash = "test-password-hash",
+                nickname = "Consultant ${UUID.randomUUID()}"
+            )
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO institution_memberships
+                (id, user_id, institution_id, member_role, status, confirmed_at)
+            VALUES (?, ?, ?, 'CONSULTANT', 'APPROVED', CURRENT_TIMESTAMP)
+            """.trimIndent(),
+            UUID.randomUUID().toString(),
+            consultantId,
+            institution.id
+        )
+        return ConsultableInstitutionSeed(institution, consultantId)
     }
 
     private fun comparisonRequest() = ComparisonRequest(

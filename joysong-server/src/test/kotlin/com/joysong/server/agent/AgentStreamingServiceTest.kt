@@ -159,6 +159,50 @@ class AgentStreamingServiceTest {
     }
 
     @Test
+    fun `completed human consultation emits started then completed without a delta`() {
+        val userMessage = prepared().userMessage
+        val institution = AgentCatalogItemResponse(
+            type = "INSTITUTION",
+            id = "123e4567-e89b-12d3-a456-426614174000",
+            name = "Harmony Clinic",
+            subtitle = "Shanghai",
+            summary = "",
+            attributes = emptyMap(),
+            institutionId = "123e4567-e89b-12d3-a456-426614174000",
+            canChatWithHuman = true
+        )
+        val turn = ChatTurnResult(
+            message = ChatMessageEntity(
+                id = "assistant-message-1",
+                sessionId = "session-1",
+                role = "ASSISTANT",
+                content = "Choose an institution to continue."
+            ),
+            catalogItems = listOf(institution),
+            intent = "HUMAN_CONSULTATION",
+            queryTarget = "INSTITUTION",
+            nextAction = "SELECT_INSTITUTION",
+            traceId = "trace-human"
+        )
+        val completed = PreparedChatTurn.Completed(
+            traceId = "trace-human",
+            turnId = "turn-human",
+            userMessage = userMessage,
+            turn = turn
+        )
+        val sink = RecordingSink()
+        every { chatService.prepareStreamingMessage("session-1", "user-1", any()) } returns completed
+
+        service().stream("session-1", "user-1", SendMessageRequest("Speak to a person"), sink)
+
+        assertEquals(listOf("started", "completed"), sink.order)
+        assertFalse(sink.events.any { it is AgentStreamEvent.Delta })
+        assertEquals(institution, (sink.events.last() as AgentStreamEvent.Completed).turn.catalogItems.single())
+        verify(exactly = 0) { chatService.completeStreamingMessage(any(), any()) }
+        provider.verify()
+    }
+
+    @Test
     fun `planning buffers the full provider answer and never exposes raw deltas`() {
         val prepared = prepared(planning = true)
         val sink = RecordingSink()
