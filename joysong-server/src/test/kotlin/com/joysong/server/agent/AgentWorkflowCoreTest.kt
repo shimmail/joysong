@@ -9,6 +9,7 @@ import com.joysong.server.agent.context.AgentSessionSummary
 import com.joysong.server.agent.diagnostics.AgentOperationLogger
 import com.joysong.server.agent.dto.AgentCatalogItemResponse
 import com.joysong.server.agent.dto.AgentCatalogReportResponse
+import com.joysong.server.agent.dto.AgentProfileResponse
 import com.joysong.server.agent.entity.AgentTurnEntity
 import com.joysong.server.agent.entity.AgentTurnStatus
 import com.joysong.server.agent.orchestration.AiAgentAvailabilityGuard
@@ -45,7 +46,9 @@ import com.joysong.server.config.AiAgentProvider
 import com.joysong.server.doctor.repository.DoctorRepository
 import com.joysong.server.doctor.service.DoctorInstitutionService
 import com.joysong.server.discover.repository.DoctorProjectRepository
+import com.joysong.server.discover.service.DiscoverKeywordExtractor
 import com.joysong.server.discover.service.DiscoverSearchService
+import com.joysong.server.institution.entity.InstitutionEntity
 import com.joysong.server.institution.repository.InstitutionProjectRepository
 import com.joysong.server.institution.repository.InstitutionRepository
 import com.joysong.server.institution.service.InstitutionProjectDetailResolver
@@ -83,6 +86,7 @@ import org.springframework.test.web.client.response.MockRestResponseCreators.wit
 import org.springframework.test.web.client.response.MockRestResponseCreators.withStatus
 import org.springframework.web.client.RestTemplate
 import java.net.SocketTimeoutException
+import java.math.BigDecimal
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -285,6 +289,124 @@ class AgentWorkflowCoreTest {
         }
         streamingIntentServer.verify()
         streamingCompletionServer.verify()
+    }
+
+    @Test
+    fun `bilingual deictic human consultation keeps detail context without answer model`() {
+        val contextInstitution = InstitutionEntity(
+            id = "context",
+            name = "杭州安心",
+            city = "杭州",
+            rating = BigDecimal("4.1"),
+            isVerified = true
+        )
+        val alternatives = (1..4).map { index ->
+            InstitutionEntity(
+                id = "alternative-$index",
+                name = "上海优选$index",
+                city = "上海",
+                rating = BigDecimal("4.${10 - index}"),
+                isVerified = true
+            )
+        }
+        val institutions = listOf(contextInstitution) + alternatives
+        val institutionRepository = mockk<InstitutionRepository>()
+        val doctorRepository = mockk<DoctorRepository>(relaxed = true)
+        val projectRepository = mockk<ProjectRepository>(relaxed = true)
+        val institutionProjectRepository = mockk<InstitutionProjectRepository>(relaxed = true)
+        val doctorProjectRepository = mockk<DoctorProjectRepository>(relaxed = true)
+        val doctorInstitutionService = mockk<DoctorInstitutionService>(relaxed = true)
+        val institutionConsultantService = mockk<InstitutionConsultantService>()
+        val agentProfileService = mockk<AgentProfileService>()
+        every { institutionRepository.findAll() } returns institutions
+        every { institutionRepository.countSoftDeletedNamesMentionedInQuery(any()) } returns 0
+        every { institutionConsultantService.listConsultableInstitutionIds() } returns institutions.map { it.id }.toSet()
+        every { agentProfileService.get("user-1") } returns AgentProfileResponse(
+            id = null,
+            city = "上海",
+            goals = emptyList(),
+            budgetMin = null,
+            budgetMax = null,
+            acceptableDowntimeDays = null,
+            painTolerance = "",
+            preferences = emptyList(),
+            excludedProjects = emptyList(),
+            consentVersion = "",
+            confirmedAt = null,
+            completenessScore = 0,
+            missingFields = emptyList()
+        )
+        val discoverSearchService = DiscoverSearchService(
+            projectRepository = projectRepository,
+            institutionRepository = institutionRepository,
+            institutionProjectRepository = institutionProjectRepository,
+            doctorRepository = doctorRepository,
+            keywordExtractor = DiscoverKeywordExtractor(),
+            doctorInstitutionService = doctorInstitutionService,
+            institutionProjectDetailResolver = InstitutionProjectDetailResolver()
+        )
+        val catalog = AgentCatalogService(
+            institutionRepository = institutionRepository,
+            doctorRepository = doctorRepository,
+            projectRepository = projectRepository,
+            institutionProjectRepository = institutionProjectRepository,
+            doctorProjectRepository = doctorProjectRepository,
+            discoverSearchService = discoverSearchService,
+            doctorInstitutionService = doctorInstitutionService,
+            institutionProjectDetailResolver = InstitutionProjectDetailResolver(),
+            institutionConsultantService = institutionConsultantService,
+            agentProfileService = agentProfileService
+        )
+        val cases = listOf(
+            Triple(
+                "我想咨询这家诊所的真人顾问",
+                Locale.SIMPLIFIED_CHINESE,
+                "我可以为你转接真人咨询。请选择希望咨询的机构，随后可查看该机构当前可联系的咨询师。"
+            ),
+            Triple(
+                "talk to a specialist at that clinic",
+                Locale.ENGLISH,
+                "I can help connect you with a real consultant. Choose an institution to see its currently available consultants."
+            )
+        )
+        val previousLocale = LocaleContextHolder.getLocale()
+        try {
+            cases.forEach { (content, locale, expectedCopy) ->
+                val completionTemplate = RestTemplate()
+                val intentTemplate = RestTemplate()
+                val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+                val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+                intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+                    .andRespond(withSuccess(
+                        """{"choices":[{"message":{"content":"{\"intent\":\"HUMAN_CONSULTATION\",\"queryTarget\":\"INSTITUTION\",\"keywords\":[]}"}}]}""",
+                        MediaType.APPLICATION_JSON
+                    ))
+                val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
+                val completed = slot<CompleteTurnCommand>()
+                prepareChatGeneration(
+                    fixture,
+                    content,
+                    session(contextType = "INSTITUTION", contextId = contextInstitution.id)
+                )
+                every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+                    ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "handoff")
+                )
+                LocaleContextHolder.setLocale(locale)
+
+                fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+                assertEquals(expectedCopy, completed.captured.content)
+                assertEquals("HUMAN_CONSULTATION", completed.captured.intent)
+                assertEquals("INSTITUTION", completed.captured.queryTarget)
+                assertEquals("SELECT_INSTITUTION", completed.captured.nextAction)
+                assertEquals(contextInstitution.id, completed.captured.catalogItems.first().id)
+                assertEquals("", completed.captured.modelName)
+                intentServer.verify()
+                completionServer.verify()
+            }
+        } finally {
+            LocaleContextHolder.setLocale(previousLocale)
+        }
     }
 
     @Test

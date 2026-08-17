@@ -281,6 +281,76 @@ class AgentCatalogServiceTest {
     }
 
     @Test
+    fun `deictic institution polarity controls detail context without unavailable copy`() {
+        val context = institution("context", "杭州安心", "杭州", "4.1")
+        val alternatives = (1..4).map { index ->
+            institution(
+                id = "alternative-$index",
+                name = "上海优选$index",
+                city = "上海",
+                rating = "4.${10 - index}"
+            )
+        }
+        val institutions = listOf(context) + alternatives
+        every { institutionRepository.findAll() } returns institutions
+        every { institutionRepository.countSoftDeletedNamesMentionedInQuery(any()) } returns 0
+        every { institutionConsultantService.listConsultableInstitutionIds() } returns institutions.map { it.id }.toSet()
+        every { agentProfileService.get("user-1") } returns profile("上海")
+        val realDiscoverSearchService = DiscoverSearchService(
+            projectRepository = projectRepository,
+            institutionRepository = institutionRepository,
+            institutionProjectRepository = institutionProjectRepository,
+            doctorRepository = doctorRepository,
+            keywordExtractor = DiscoverKeywordExtractor(),
+            doctorInstitutionService = doctorInstitutionService,
+            institutionProjectDetailResolver = InstitutionProjectDetailResolver()
+        )
+        val localService = AgentCatalogService(
+            institutionRepository,
+            doctorRepository,
+            projectRepository,
+            institutionProjectRepository,
+            doctorProjectRepository,
+            realDiscoverSearchService,
+            doctorInstitutionService,
+            InstitutionProjectDetailResolver(),
+            institutionConsultantService,
+            agentProfileService
+        )
+
+        val chinese = localService.selectConsultableInstitutions(
+            "user-1",
+            "我想咨询这家诊所的真人顾问",
+            context.id
+        )
+        val english = localService.selectConsultableInstitutions(
+            "user-1",
+            "talk to a specialist at that clinic",
+            context.id
+        )
+        val negated = localService.selectConsultableInstitutions(
+            "user-1",
+            "不要这家诊所，我想找真人顾问",
+            context.id
+        )
+        val englishNegated = localService.selectConsultableInstitutions(
+            "user-1",
+            "do not use that clinic; talk to a specialist",
+            context.id
+        )
+
+        listOf(chinese, english).forEach { result ->
+            assertEquals(context.id, result.items.first().id)
+            assertFalse(result.requestedInstitutionUnavailable)
+        }
+        listOf(negated, englishNegated).forEach { result ->
+            assertEquals(alternatives.map { it.id }, result.items.map { it.id })
+            assertFalse(result.items.any { it.id == context.id })
+            assertFalse(result.requestedInstitutionUnavailable)
+        }
+    }
+
+    @Test
     fun `empty consultable institution set returns an empty selection`() {
         stubConsultableInstitutions(listOf(institution("clinic", "可咨询机构", "上海", "4.8")), emptySet())
 

@@ -68,6 +68,14 @@ class DiscoverSearchServiceTest {
     }
 
     @Test
+    fun `deictic institution references are not explicit institution names`() {
+        assertFalse(service.hasNamedInstitutionPhrase("我想咨询这家诊所的真人顾问"))
+        assertFalse(service.hasNamedInstitutionPhrase("talk to a specialist at that clinic"))
+        assertTrue(service.hasNamedInstitutionPhrase("Aurora clinic"))
+        assertTrue(service.hasNamedInstitutionPhrase("talk to a specialist at Aurora clinic"))
+    }
+
+    @Test
     fun `priority query keeps current lower rated entities before search limit`() {
         val projectRepository = mockk<ProjectRepository>(relaxed = true)
         val institutionRepository = mockk<InstitutionRepository>(relaxed = true)

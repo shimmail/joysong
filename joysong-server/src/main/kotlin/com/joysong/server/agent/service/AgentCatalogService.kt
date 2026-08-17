@@ -110,6 +110,7 @@ class AgentCatalogService(
             institutionRepository.countSoftDeletedNamesMentionedInQuery(query) > 0L
         val explicitCities = discoverSearchService.citiesMentionedIn(query)
         val hasNamedInstitutionPhrase = discoverSearchService.hasNamedInstitutionPhrase(query)
+        val hasNegatedInstitutionReference = discoverSearchService.hasNegatedInstitutionReference(query)
         val profileCity = if (explicitCities.isEmpty()) {
             runCatching { agentProfileService.get(userId).city.trim().takeIf(String::isNotBlank) }
                 .getOrNull()
@@ -129,7 +130,8 @@ class AgentCatalogService(
             explicitlyNamed.isEmpty() &&
             explicitCities.isEmpty() &&
             !hasNamedInstitutionPhrase &&
-            !mentionsSoftDeletedInstitution
+            !mentionsSoftDeletedInstitution &&
+            !hasNegatedInstitutionReference
         ) {
             addTier(ranked.filter { it.id == contextInstitutionId })
         }

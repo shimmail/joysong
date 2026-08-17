@@ -310,6 +310,7 @@ class DiscoverSearchService(
             val prefixCandidate = query.substring(0, captureEnd + 1).trim().lowercase()
             val normalizedPrefixCandidate = normalizedInstitutionCandidate(prefixCandidate)
             candidate.length >= 2 &&
+                !deicticInstitutionReferencePattern.containsMatchIn(match.value) &&
                 candidate !in genericInstitutionPrefixes &&
                 candidate !in genericInstitutionLabels &&
                 !isHumanHandoffCandidate(rawCandidate) &&
@@ -319,6 +320,9 @@ class DiscoverSearchService(
                 genericInstitutionPhrases.none(candidate::contains) &&
                 explicitTreatmentTerms.none(candidate::contains)
         }
+
+    fun hasNegatedInstitutionReference(query: String): Boolean =
+        negatedDeicticInstitutionReferencePattern.containsMatchIn(query)
 
     private fun normalizedInstitutionCandidate(value: String): String {
         var candidate = value.trim().lowercase()
@@ -387,6 +391,17 @@ class DiscoverSearchService(
         )
         val namedInstitutionPattern = Regex(
             "([\\p{L}\\p{N}·•]{2,30})\\s*(?:医院|医疗美容(?:医院|门诊部|诊所)?|医美机构|诊所|clinic|hospital)",
+            RegexOption.IGNORE_CASE
+        )
+        val deicticInstitutionReferencePattern = Regex(
+            "(?:这家|那家)\\s*(?:医院|医疗美容(?:医院|门诊部|诊所)?|医美机构|诊所)|" +
+                "\\b(?:this|that)\\s+(?:clinic|hospital|institution)\\b",
+            RegexOption.IGNORE_CASE
+        )
+        val negatedDeicticInstitutionReferencePattern = Regex(
+            "(?:不要|不选|别选)\\s*(?:这家|那家)\\s*(?:医院|医疗美容(?:医院|门诊部|诊所)?|医美机构|诊所)|" +
+                "\\b(?:not|do\\s+not|don't|avoid|skip|exclude)\\s+" +
+                "(?:(?:use|choose|select)\\s+)?(?:this|that)\\s+(?:clinic|hospital|institution)\\b",
             RegexOption.IGNORE_CASE
         )
         val namedDoctorPattern = Regex(

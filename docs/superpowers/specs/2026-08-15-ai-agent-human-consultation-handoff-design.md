@@ -111,8 +111,8 @@ The model parser's allowed `intent` and `intents` values are extended with `HUMA
 
 - `SAFETY_SCREENING` remains the highest-priority intent. A turn containing safety risk and a request for a person follows the safety workflow and does not show commercial institution cards in that turn.
 - Clear current-message intent and negation remain authoritative over history and model output.
-- A prior human-consultation turn does not make unrelated follow-up text inherit the intent. Context can only complete an institution or city reference when the current message itself contains a consultation or unresolved-reference signal.
-- Detail context may supply the current institution if it is eligible, but it cannot bypass verification or consultant-availability filtering.
+- A prior human-consultation turn does not make unrelated follow-up text inherit the intent. Context can only complete an institution or city reference when the current message itself contains a consultation or positive unresolved-reference signal; a negated institution reference suppresses detail-context promotion.
+- Detail context may supply the current institution only when the current request has no explicit institution or city and does not negate that reference. It cannot bypass verification or consultant-availability filtering.
 
 ## Consultable Institution Selection
 
@@ -123,7 +123,7 @@ An institution is selectable only when:
 - the institution is verified and not deleted; and
 - at least one consultant satisfies the same current eligibility predicate used by `InstitutionConsultantService.listApprovedConsultants`: approved consultant membership, no revocation, non-deleted user and institution, and a non-blank nickname.
 
-The eligibility query must be performed as one set-based query or one query returning eligible institution IDs. It must not call the consultant-list query once per institution.
+Only the consultant-eligibility institution IDs must be obtained by one set-based query. Institution, profile, and detail-context reads remain separate; the selector must not call the consultant-list query once per institution.
 
 The candidate query and the consultant-list endpoint must share the same eligibility definition so an institution is not advertised using a weaker predicate than the picker uses.
 
@@ -133,8 +133,9 @@ Candidate tiers are accumulated without duplicates until four results are availa
 
 1. an eligible institution explicitly named in the current request;
 2. eligible institutions in a city explicitly named in the current request;
-3. eligible institutions in the saved Agent profile city when the request has no explicit city;
-4. remaining eligible institutions nationwide.
+3. the eligible detail-context institution when the request has no explicit institution or city and does not negate that reference;
+4. eligible institutions in the saved Agent profile city when the request has no explicit city;
+5. remaining eligible institutions nationwide.
 
 Within a tier, order by rating descending and institution ID ascending for deterministic ties. An explicit exact-name match is always first in its tier.
 
