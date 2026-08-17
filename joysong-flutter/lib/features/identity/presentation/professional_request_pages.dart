@@ -852,9 +852,9 @@ class _InstitutionProjectRequestsPageState
     super.dispose();
   }
 
-  Future<bool> _load({bool refreshFormData = false}) async {
+  Future<bool> _load() async {
     try {
-      final includeFormData = !widget.reviewMode || refreshFormData;
+      final includeFormData = !widget.reviewMode;
       final values = !includeFormData
           ? <Object>[
               await widget.repository.listProfessionalProjectRequests(),
@@ -1261,8 +1261,18 @@ class _InstitutionProjectRequestsPageState
       _error = null;
     });
     try {
-      final review = await showProfessionalProjectCreationReviewDialog(context);
+      final review = await showProfessionalProjectCreationReviewDialog(
+        context,
+        allowApproval: request.isCurrentlyApprovable,
+      );
       if (!mounted || review == null) return;
+      if (review.decision == 'APPROVED' && !request.isCurrentlyApprovable) {
+        setState(() => _error = context.localized(
+              '当前医生净比例为负，无法批准；可驳回申请并说明原因',
+              'The current doctor net rate is negative and cannot be approved. Reject the request with a reason instead.',
+            ));
+        return;
+      }
       await widget.repository.reviewInstitutionProjectRequest(
         id: request.id,
         decision: review.decision,
@@ -1272,12 +1282,12 @@ class _InstitutionProjectRequestsPageState
     } on ApiException catch (error) {
       if (!mounted) return;
       if (error.httpStatus == 409) {
-        final refreshed = await _load(refreshFormData: true);
+        final refreshed = await _refreshRequests();
         if (!mounted) return;
         setState(() => _error = refreshed
             ? context.localized(
-                '审核状态已变化，申请、项目配置与目录已刷新，请基于最新内容重试',
-                'The review state changed. Requests, project configuration, and catalogs were refreshed; retry from the latest content.',
+                '审核状态已变化，申请列表已刷新，请基于最新内容重试',
+                'The review state changed. The request list was refreshed; retry from the latest content.',
               )
             : context.localized(
                 '审核状态已变化，但刷新失败，请手动刷新后重试',
@@ -2281,19 +2291,29 @@ Future<({String decision, String note})?> showProfessionalProjectReviewDialog(
     );
 
 Future<({String decision, String note})?>
-    showProfessionalProjectCreationReviewDialog(BuildContext context) =>
+    showProfessionalProjectCreationReviewDialog(
+  BuildContext context, {
+  bool allowApproval = true,
+}) =>
         _showReviewDialog(
           context,
           decisionKey: const Key('creation-review-decision'),
           noteKey: const Key('creation-review-note'),
           confirmKey: const Key('creation-review-confirm'),
-          decisions: const [
-            DropdownMenuItem(
-              key: Key('creation-review-APPROVED'),
-              value: 'APPROVED',
-              child: Text('通过'),
-            ),
-            DropdownMenuItem(
+          warning: allowApproval
+              ? null
+              : context.localized(
+                  '当前医生净比例为负，无法批准；可驳回申请并说明原因',
+                  'The current doctor net rate is negative and cannot be approved. Reject the request with a reason instead.',
+                ),
+          decisions: [
+            if (allowApproval)
+              const DropdownMenuItem(
+                key: Key('creation-review-APPROVED'),
+                value: 'APPROVED',
+                child: Text('通过'),
+              ),
+            const DropdownMenuItem(
               key: Key('creation-review-REJECTED'),
               value: 'REJECTED',
               child: Text('驳回'),
@@ -2307,6 +2327,7 @@ Future<({String decision, String note})?> _showReviewDialog(
   Key? decisionKey,
   Key? noteKey,
   Key? confirmKey,
+  String? warning,
 }) =>
     showDialog<({String decision, String note})>(
       context: context,
@@ -2315,6 +2336,7 @@ Future<({String decision, String note})?> _showReviewDialog(
         decisionKey: decisionKey,
         noteKey: noteKey,
         confirmKey: confirmKey,
+        warning: warning,
       ),
     );
 
@@ -2324,12 +2346,14 @@ class _ReviewDialog extends StatefulWidget {
     this.decisionKey,
     this.noteKey,
     this.confirmKey,
+    this.warning,
   });
 
   final List<DropdownMenuItem<String>> decisions;
   final Key? decisionKey;
   final Key? noteKey;
   final Key? confirmKey;
+  final String? warning;
 
   @override
   State<_ReviewDialog> createState() => _ReviewDialogState();
@@ -2337,8 +2361,14 @@ class _ReviewDialog extends StatefulWidget {
 
 class _ReviewDialogState extends State<_ReviewDialog> {
   final _note = TextEditingController();
-  String _decision = 'APPROVED';
+  late String _decision;
   String? _noteError;
+
+  @override
+  void initState() {
+    super.initState();
+    _decision = widget.decisions.first.value!;
+  }
 
   @override
   void dispose() {
@@ -2352,6 +2382,14 @@ class _ReviewDialogState extends State<_ReviewDialog> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (widget.warning != null) ...[
+              Text(
+                widget.warning!,
+                key: const Key('creation-review-approval-blocked'),
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+              const SizedBox(height: 12),
+            ],
             DropdownButtonFormField<String>(
               key: widget.decisionKey,
               initialValue: _decision,
@@ -2360,7 +2398,7 @@ class _ReviewDialogState extends State<_ReviewDialog> {
               ),
               items: widget.decisions,
               onChanged: (value) => setState(() {
-                _decision = value ?? 'APPROVED';
+                _decision = value ?? _decision;
                 _noteError = null;
               }),
             ),
@@ -2587,7 +2625,7 @@ Widget _professionalRequestSnapshot(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(request.name ?? request.projectName ?? request.id,
+          Text(request.name ?? request.id,
               style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           for (final row in rows)

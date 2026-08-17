@@ -50,6 +50,26 @@ void main() {
     expect(draft.toJson().keys.toSet().intersection(prohibitedKeys), isEmpty);
   });
 
+  test('platform detail content keeps its key and normalizes blank to null',
+      () {
+    const blank = PlatformProjectRequestDraft(
+      name: 'Name',
+      category: 'Skin',
+      description: 'Description',
+      detailContent: '   ',
+    );
+    const filled = PlatformProjectRequestDraft(
+      name: 'Name',
+      category: 'Skin',
+      description: 'Description',
+      detailContent: '  Plain detail  ',
+    );
+
+    expect(blank.toJson(), hasLength(13));
+    expect(blank.toJson()['detailContent'], isNull);
+    expect(filled.toJson()['detailContent'], 'Plain detail');
+  });
+
   test(
       'institution draft emits 18 body keys and keeps institution id path-only',
       () {
@@ -271,6 +291,108 @@ void main() {
     );
   });
 
+  test('draft target lists include commas in backend length boundaries', () {
+    final tagBoundary = <String>[
+      List.filled(100, 'a').join(),
+      List.filled(100, 'b').join(),
+      List.filled(100, 'c').join(),
+      List.filled(100, 'd').join(),
+      List.filled(96, 'e').join(),
+    ];
+    final tagOverBoundary = <String>[
+      ...tagBoundary.take(4),
+      List.filled(97, 'e').join(),
+    ];
+    final imageBoundary = <String>[
+      List.filled(500, 'a').join(),
+      List.filled(500, 'b').join(),
+      List.filled(500, 'c').join(),
+      List.filled(497, 'd').join(),
+    ];
+    final imageOverBoundary = <String>[
+      ...imageBoundary.take(3),
+      List.filled(498, 'd').join(),
+    ];
+
+    expect(tagBoundary.join(',').length, 500);
+    expect(tagOverBoundary.join(',').length, 501);
+    expect(imageBoundary.join(',').length, 2000);
+    expect(imageOverBoundary.join(',').length, 2001);
+
+    expect(
+      () => PlatformProjectRequestDraft(
+        name: 'Name',
+        category: 'Skin',
+        description: 'Description',
+        tags: tagBoundary,
+        categoryTags: tagBoundary,
+        images: imageBoundary,
+      ).validate(),
+      returnsNormally,
+    );
+    for (final draft in [
+      PlatformProjectRequestDraft(
+        name: 'Name',
+        category: 'Skin',
+        description: 'Description',
+        tags: tagOverBoundary,
+      ),
+      PlatformProjectRequestDraft(
+        name: 'Name',
+        category: 'Skin',
+        description: 'Description',
+        categoryTags: tagOverBoundary,
+      ),
+      PlatformProjectRequestDraft(
+        name: 'Name',
+        category: 'Skin',
+        description: 'Description',
+        images: imageOverBoundary,
+      ),
+    ]) {
+      expect(draft.validate, throwsArgumentError);
+    }
+
+    expect(
+      () => InstitutionProjectRequestDraft(
+        institutionId: 'institution-1',
+        projectId: 'project-1',
+        tags: tagBoundary,
+        images: imageBoundary,
+        price: 0,
+        consultationFee: 0,
+        commissionRate: 0,
+        institutionRate: 0,
+        platformRate: 0,
+      ).validate(),
+      returnsNormally,
+    );
+    for (final draft in [
+      InstitutionProjectRequestDraft(
+        institutionId: 'institution-1',
+        projectId: 'project-1',
+        tags: tagOverBoundary,
+        price: 0,
+        consultationFee: 0,
+        commissionRate: 0,
+        institutionRate: 0,
+        platformRate: 0,
+      ),
+      InstitutionProjectRequestDraft(
+        institutionId: 'institution-1',
+        projectId: 'project-1',
+        images: imageOverBoundary,
+        price: 0,
+        consultationFee: 0,
+        commissionRate: 0,
+        institutionRate: 0,
+        platformRate: 0,
+      ),
+    ]) {
+      expect(draft.validate, throwsArgumentError);
+    }
+  });
+
   test('draft validation rejects hidden JSON precision without float rounding',
       () {
     expect(
@@ -400,8 +522,8 @@ void main() {
     expect(request.coverImage, 'cover.jpg');
     expect(request.images, ['one.jpg', 'two.jpg']);
     expect(request.salesCount, 7);
-    expect(request.referencePrice, 899.25);
-    expect(request.categoryTags, ['facial']);
+    expect(request.referencePrice, isNull);
+    expect(request.categoryTags, isNull);
     expect(request.price, 799.5);
     expect(request.originalPrice, 999.99);
     expect(request.isActive, isTrue);
@@ -445,6 +567,92 @@ void main() {
     });
     expect(institutionWithoutOverrides.slogan, isNull);
     expect(institutionWithoutOverrides.coverImage, isNull);
+  });
+
+  test(
+      'current platform drift keeps an exact negative doctor rate structurally complete but not approvable',
+      () {
+    final request = ProfessionalProjectRequest.fromJson({
+      ..._requestSnapshot,
+      'institutionSplit': {
+        'consultationFee': 80.25,
+        'commissionRate': 50,
+        'institutionRate': 50,
+        'platformRate': 100,
+        'doctorRate': -100,
+      },
+    });
+
+    expect(request.hasCompleteReviewSnapshot, isTrue);
+    expect(request.isCurrentlyApprovable, isFalse);
+    expect(request.institutionSplit?.doctorRate, -100);
+
+    for (final invalidSplit in [
+      {
+        'consultationFee': 80.25,
+        'commissionRate': 50,
+        'institutionRate': 50,
+        'platformRate': 100,
+        'doctorRate': -100.001,
+      },
+      {
+        'consultationFee': 80.25,
+        'commissionRate': 60,
+        'institutionRate': 60,
+        'platformRate': 0,
+        'doctorRate': -20,
+      },
+    ]) {
+      expect(
+        () => ProfessionalProjectRequest.fromJson({
+          ..._requestSnapshot,
+          'institutionSplit': invalidSplit,
+        }),
+        throwsFormatException,
+      );
+    }
+  });
+
+  test('review snapshots enforce the V28 request-type-exclusive shape', () {
+    for (final contradiction in <String, Object?>{
+      'institutionId': 'institution-1',
+      'institutionName': 'Current clinic',
+      'projectId': 'project-1',
+      'projectName': 'Current project',
+      'price': 1,
+      'originalPrice': 2,
+      'isActive': true,
+      'institutionSplit': const {
+        'consultationFee': 0,
+        'commissionRate': 0,
+        'institutionRate': 0,
+        'platformRate': 0,
+        'doctorRate': 100,
+      },
+    }.entries) {
+      expect(
+        () => ProfessionalProjectRequest.fromJson({
+          ..._platformRequestSnapshot(),
+          contradiction.key: contradiction.value,
+        }),
+        throwsFormatException,
+        reason: 'PLATFORM must reject ${contradiction.key}',
+      );
+    }
+
+    for (final contradiction in <String, Object?>{
+      'referencePrice': 1,
+      'categoryTags': const ['skin'],
+    }.entries) {
+      expect(
+        () => ProfessionalProjectRequest.fromJson({
+          ..._requestSnapshot,
+          contradiction.key: contradiction.value,
+        }),
+        throwsFormatException,
+        reason: 'INSTITUTION must reject ${contradiction.key}',
+      );
+    }
   });
 
   test('review snapshot parsing fails closed for missing or invalid invariants',
@@ -637,8 +845,8 @@ const _requestSnapshot = <String, Object?>{
   'coverImage': 'cover.jpg',
   'images': ['one.jpg', 'two.jpg'],
   'salesCount': 7,
-  'referencePrice': 899.25,
-  'categoryTags': ['facial'],
+  'referencePrice': null,
+  'categoryTags': null,
   'price': 799.5,
   'originalPrice': 999.99,
   'isActive': true,
@@ -669,6 +877,8 @@ Map<String, Object?> _platformRequestSnapshot() => <String, Object?>{
       'projectName': null,
       'slogan': '',
       'coverImage': '',
+      'referencePrice': 899.25,
+      'categoryTags': ['facial'],
       'price': null,
       'originalPrice': null,
       'isActive': null,

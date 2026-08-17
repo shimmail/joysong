@@ -1638,6 +1638,11 @@ final class ProfessionalProjectRequest {
 
   bool get isCreationReviewable => status == 'PENDING';
 
+  bool get isCurrentlyApprovable =>
+      hasCompleteReviewSnapshot &&
+      (requestType != 'INSTITUTION' ||
+          _decimalHundredths(institutionSplit!.doctorRate)! >= BigInt.zero);
+
   bool get hasCompleteReviewSnapshot {
     if (id.trim().isEmpty ||
         doctorId.trim().isEmpty ||
@@ -1649,7 +1654,15 @@ final class ProfessionalProjectRequest {
       return false;
     }
     if (requestType == 'PLATFORM') {
-      return _hasText(name) &&
+      return institutionId == null &&
+          institutionName == null &&
+          projectId == null &&
+          projectName == null &&
+          price == null &&
+          originalPrice == null &&
+          isActive == null &&
+          institutionSplit == null &&
+          _hasText(name) &&
           _hasText(category) &&
           _hasText(description) &&
           tags != null &&
@@ -1662,7 +1675,9 @@ final class ProfessionalProjectRequest {
     }
     if (requestType == 'INSTITUTION') {
       final split = institutionSplit;
-      return _hasText(institutionId) &&
+      return referencePrice == null &&
+          categoryTags == null &&
+          _hasText(institutionId) &&
           _hasText(projectId) &&
           price != null &&
           _validDecimal(price!, 99999999.99) &&
@@ -1714,18 +1729,27 @@ final class InstitutionProjectSplit {
   final num doctorRate;
 
   bool get hasCompleteReviewSnapshot {
+    final commission = _decimalHundredths(commissionRate);
+    final institution = _decimalHundredths(institutionRate);
+    final platform = _decimalHundredths(platformRate);
+    final doctor = _decimalHundredths(doctorRate);
     if (!_validDecimal(consultationFee, 99999999.99) ||
-        !_validDecimal(commissionRate, 100) ||
-        !_validDecimal(institutionRate, 100) ||
-        !_validDecimal(platformRate, 100) ||
-        !_validDecimal(doctorRate, 100)) {
+        commission == null ||
+        commission < BigInt.zero ||
+        commission > BigInt.from(10000) ||
+        institution == null ||
+        institution < BigInt.zero ||
+        institution > BigInt.from(10000) ||
+        platform == null ||
+        platform < BigInt.zero ||
+        platform > BigInt.from(10000) ||
+        doctor == null ||
+        doctor < BigInt.from(-10000) ||
+        doctor > BigInt.from(10000) ||
+        commission + institution > BigInt.from(10000)) {
       return false;
     }
-    return _decimalHundredths(commissionRate)! +
-            _decimalHundredths(institutionRate)! +
-            _decimalHundredths(platformRate)! +
-            _decimalHundredths(doctorRate)! ==
-        BigInt.from(10000);
+    return commission + institution + platform + doctor == BigInt.from(10000);
   }
 }
 
@@ -2131,13 +2155,14 @@ final class PlatformProjectRequestDraft {
       throw ArgumentError('销量必须在 0 到 2147483647 之间');
     }
     _validateCurrency(currency);
-    _validateItems('项目图片', images, 20, 500);
-    _validateItems('项目标签', tags, 20, 100);
-    _validateItems('分类标签', categoryTags, 20, 100);
+    _validateItems('项目图片', images, 20, 500, 2000);
+    _validateItems('项目标签', tags, 20, 100, 500);
+    _validateItems('分类标签', categoryTags, 20, 100, 500);
   }
 
   Map<String, Object?> toJson() {
     validate();
+    final normalizedDetailContent = detailContent?.trim();
     return {
       'name': name.trim(),
       'category': category.trim(),
@@ -2148,7 +2173,10 @@ final class PlatformProjectRequestDraft {
       'salesCount': salesCount,
       'coverImage': coverImage.trim(),
       'images': _normalizedItems(images),
-      'detailContent': detailContent?.trim(),
+      'detailContent':
+          normalizedDetailContent == null || normalizedDetailContent.isEmpty
+              ? null
+              : normalizedDetailContent,
       'tags': _normalizedItems(tags),
       'categoryTags': _normalizedItems(categoryTags),
       'notes': notes.trim(),
@@ -2321,8 +2349,8 @@ final class InstitutionProjectRequestDraft {
       throw ArgumentError('销量必须在 0 到 2147483647 之间');
     }
     _validateCurrency(currency);
-    if (tags != null) _validateItems('项目标签', tags!, 20, 100);
-    if (images != null) _validateItems('项目图片', images!, 20, 500);
+    if (tags != null) _validateItems('项目标签', tags!, 20, 100, 500);
+    if (images != null) _validateItems('项目图片', images!, 20, 500, 2000);
     for (final rate in [commissionRate, institutionRate, platformRate]) {
       if (!_validDecimal(rate, 100)) {
         throw ArgumentError('分账比例必须在 0 到 100 之间且最多两位小数');
@@ -2400,6 +2428,7 @@ void _validateItems(
   List<String> values,
   int maxItems,
   int maxItemLength,
+  int maxTargetLength,
 ) {
   if (values.length > maxItems ||
       values.any((value) {
@@ -2407,6 +2436,9 @@ void _validateItems(
         return normalized.isEmpty || normalized.length > maxItemLength;
       })) {
     throw ArgumentError('$label不能超过 $maxItems 项，每项最多 $maxItemLength 个字符');
+  }
+  if (_normalizedItems(values).join(',').length > maxTargetLength) {
+    throw ArgumentError('$label不能超过 $maxTargetLength 个字符');
   }
 }
 

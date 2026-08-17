@@ -501,6 +501,114 @@ void main() {
   });
 
   testWidgets(
+      'negative current doctor rate stays visible and rejectable but cannot be approved',
+      (tester) async {
+    _useLargeSurface(tester);
+    final repository = _ProjectRequestRepository()
+      ..requests = [
+        _negativeDriftRequest(
+          id: 'institution-negative-initial',
+          projectName: 'Current live project',
+        ),
+      ];
+
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      repository: repository,
+      context: _adminContext,
+      reviewMode: true,
+    )));
+    await tester.pumpAndSettle();
+    expect(
+        find.byKey(
+            const Key('professional-request-institution-negative-initial')),
+        findsOneWidget);
+    expect(find.text('按当前平台比例推导的医生净比例：-54.75%'), findsOneWidget);
+    expect(
+        find.byKey(const Key(
+            'malformed-review-snapshot-institution-negative-initial')),
+        findsNothing);
+
+    await tester.tap(
+        find.byKey(const Key('review-creation-institution-negative-initial')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('creation-review-approval-blocked')),
+        findsOneWidget);
+    expect(find.text('当前医生净比例为负，无法批准；可驳回申请并说明原因'), findsOneWidget);
+    final decisionField = find.byKey(const Key('creation-review-decision'));
+    final decision = tester.widget<DropdownButton<String>>(find.descendant(
+      of: decisionField,
+      matching: find.byType(DropdownButton<String>),
+    ));
+    expect(decision.items!.map((item) => item.value), ['REJECTED']);
+    expect(
+      tester
+          .widget<DropdownButtonFormField<String>>(decisionField)
+          .initialValue,
+      'REJECTED',
+    );
+    await tester.enterText(find.byKey(const Key('creation-review-note')),
+        'Current split is invalid');
+    await tester.tap(find.byKey(const Key('creation-review-confirm')));
+    await tester.pumpAndSettle();
+    expect(repository.institutionReviews, [
+      (
+        id: 'institution-negative-initial',
+        decision: 'REJECTED',
+        note: 'Current split is invalid'
+      ),
+    ]);
+  });
+
+  testWidgets(
+      'institution request without a name uses stable request id instead of the live project name as its title',
+      (tester) async {
+    _useLargeSurface(tester);
+    final repository = _ProjectRequestRepository()
+      ..requests = [
+        _request(
+          id: 'institution-stable-title',
+          type: 'INSTITUTION',
+          doctorId: 'doctor-1',
+          institutionId: 'inst-1',
+          inheritName: true,
+          projectName: 'Live project v1',
+        ),
+      ];
+
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      key: const ValueKey('stable-title-v1'),
+      repository: repository,
+      context: _adminContext,
+      reviewMode: true,
+    )));
+    await tester.pumpAndSettle();
+    expect(find.text('institution-stable-title'), findsOneWidget);
+    expect(find.text('Live project v1'), findsNothing);
+    expect(find.text('当前平台项目名称：Live project v1'), findsOneWidget);
+
+    repository.requests = [
+      _request(
+        id: 'institution-stable-title',
+        type: 'INSTITUTION',
+        doctorId: 'doctor-1',
+        institutionId: 'inst-1',
+        inheritName: true,
+        projectName: 'Live project v2',
+      ),
+    ];
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      key: const ValueKey('stable-title-v2'),
+      repository: repository,
+      context: _adminContext,
+      reviewMode: true,
+    )));
+    await tester.pumpAndSettle();
+    expect(find.text('institution-stable-title'), findsOneWidget);
+    expect(find.text('Live project v2'), findsNothing);
+    expect(find.text('当前平台项目名称：Live project v2'), findsOneWidget);
+  });
+
+  testWidgets(
       'platform and institution creation review actions synchronously block re-entry',
       (tester) async {
     _useLargeSurface(tester);
@@ -585,7 +693,7 @@ void main() {
   });
 
   testWidgets(
-      'review conflicts refresh current snapshots and institution catalog without clearing its draft',
+      'review conflicts refresh current snapshots without submission-only loads or clearing its draft',
       (tester) async {
     _useLargeSurface(tester);
     final platformRepository = _ProjectRequestRepository()
@@ -636,15 +744,15 @@ void main() {
           const ApiException(message: 'conflict', httpStatus: 409);
     institutionRepository.onInstitutionReview = () {
       institutionRepository
-        ..formPlatformRate = 12
+        ..formPlatformRate = 100
         ..requests = [
           _request(
             id: 'institution-conflict',
             type: 'INSTITUTION',
             doctorId: 'doctor-1',
             institutionId: 'inst-1',
-            platformRate: 12,
-            doctorRate: 33.25,
+            platformRate: 100,
+            doctorRate: -54.75,
           ),
         ];
     };
@@ -670,12 +778,33 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('creation-review-confirm')));
     await tester.pumpAndSettle();
-    expect(find.text('审核状态已变化，申请、项目配置与目录已刷新，请基于最新内容重试'), findsOneWidget);
-    expect(find.text('当前平台比例：12%'), findsOneWidget);
-    expect(find.text('按当前平台比例推导的医生净比例：33.25%'), findsOneWidget);
-    expect(institutionRepository.formConfigLoads, 2);
-    expect(institutionRepository.institutionOptionLoads, 2);
-    expect(institutionRepository.managementProjectLoads, 2);
+    expect(find.text('审核状态已变化，申请列表已刷新，请基于最新内容重试'), findsOneWidget);
+    expect(find.text('当前平台比例：100%'), findsOneWidget);
+    expect(find.text('按当前平台比例推导的医生净比例：-54.75%'), findsOneWidget);
+    expect(institutionRepository.formConfigLoads, 1);
+    expect(institutionRepository.institutionOptionLoads, 1);
+    expect(institutionRepository.managementProjectLoads, 1);
+
+    await tester
+        .tap(find.byKey(const Key('review-creation-institution-conflict')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('creation-review-approval-blocked')),
+        findsOneWidget);
+    final refreshedDecision = tester.widget<DropdownButton<String>>(
+      find.descendant(
+        of: find.byKey(const Key('creation-review-decision')),
+        matching: find.byType(DropdownButton<String>),
+      ),
+    );
+    expect(refreshedDecision.items!.map((item) => item.value), ['REJECTED']);
+    await tester.enterText(find.byKey(const Key('creation-review-note')),
+        'Reject refreshed split');
+    await tester.tap(find.byKey(const Key('creation-review-confirm')));
+    await tester.pumpAndSettle();
+    expect(
+      institutionRepository.institutionReviews.map((review) => review.decision),
+      ['APPROVED', 'REJECTED'],
+    );
 
     await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
       key: institutionPageKey,
@@ -684,6 +813,95 @@ void main() {
     )));
     await tester.pump();
     expect(_text(tester, 'institution-name'), 'Unsubmitted draft');
+  });
+
+  testWidgets(
+      'admin and legal review conflicts refresh requests without doctor-only form loads',
+      (tester) async {
+    _useLargeSurface(tester);
+    final adminRepository = _ProjectRequestRepository()
+      ..requests = [
+        _request(
+          id: 'admin-conflict',
+          type: 'INSTITUTION',
+          doctorId: 'doctor-1',
+          institutionId: 'inst-1',
+        ),
+      ]
+      ..institutionReviewError =
+          const ApiException(message: 'conflict', httpStatus: 409);
+    adminRepository.onInstitutionReview = () {
+      adminRepository.requests = [
+        _request(
+          id: 'admin-conflict',
+          type: 'INSTITUTION',
+          doctorId: 'doctor-1',
+          doctorName: 'Admin refreshed doctor',
+          institutionId: 'inst-1',
+          status: 'APPROVED',
+        ),
+      ];
+    };
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      repository: adminRepository,
+      context: _adminContext,
+      reviewMode: true,
+    )));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('review-creation-admin-conflict')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('creation-review-confirm')));
+    await tester.pumpAndSettle();
+    expect(adminRepository.requestListLoads, 2);
+    expect(find.text('当前医生名称：Admin refreshed doctor'), findsOneWidget);
+    expect(find.text('审核状态已变化，申请列表已刷新，请基于最新内容重试'), findsOneWidget);
+    expect(adminRepository.formConfigLoads, 0);
+    expect(adminRepository.institutionOptionLoads, 0);
+    expect(adminRepository.managementProjectLoads, 0);
+
+    final legalRepository = _ProjectRequestRepository()
+      ..requests = [
+        _request(
+          id: 'legal-conflict',
+          type: 'INSTITUTION',
+          doctorId: 'doctor-1',
+          institutionId: 'inst-1',
+        ),
+      ]
+      ..institutionReviewError =
+          const ApiException(message: 'conflict', httpStatus: 409);
+    legalRepository.onInstitutionReview = () {
+      legalRepository.requests = [
+        _request(
+          id: 'legal-conflict',
+          type: 'INSTITUTION',
+          doctorId: 'doctor-1',
+          doctorName: 'Legal refreshed doctor',
+          institutionId: 'inst-1',
+          status: 'REJECTED',
+        ),
+      ];
+    };
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      key: const ValueKey('legal-conflict-page'),
+      repository: legalRepository,
+      context: _legalContext,
+      reviewMode: true,
+    )));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('review-creation-legal-conflict')));
+    await tester.pumpAndSettle();
+    await _selectReviewDecision(tester, 'REJECTED');
+    await tester.enterText(
+        find.byKey(const Key('creation-review-note')), 'Legal reject');
+    await tester.tap(find.byKey(const Key('creation-review-confirm')));
+    await tester.pumpAndSettle();
+    expect(legalRepository.requestListLoads, 2);
+    expect(find.text('当前医生名称：Legal refreshed doctor'), findsOneWidget);
+    expect(find.text('审核状态已变化，申请列表已刷新，请基于最新内容重试'), findsOneWidget);
+    expect(legalRepository.formConfigLoads, 0);
+    expect(legalRepository.institutionOptionLoads, 0);
+    expect(legalRepository.managementProjectLoads, 0);
   });
 
   testWidgets(
@@ -1017,6 +1235,7 @@ ProfessionalProjectRequest _request({
   String? coverImage = 'cover.jpg',
   List<String>? images = const ['one.jpg', 'two.jpg'],
   List<String>? categoryTags = const ['facial'],
+  bool inheritName = false,
   String status = 'PENDING',
   num platformRate = 10,
   num doctorRate = 35.25,
@@ -1035,7 +1254,7 @@ ProfessionalProjectRequest _request({
       'projectId': type == 'INSTITUTION' ? 'project-1' : null,
       'projectName':
           type == 'INSTITUTION' ? projectName ?? 'Hydrating Facial' : null,
-      'name': 'Clinic Hydrating Facial $id',
+      'name': inheritName ? null : 'Clinic Hydrating Facial $id',
       'category': 'Skin',
       'description': 'Clinic description',
       'tags': ['hydration', 'signature'],
@@ -1103,6 +1322,35 @@ ProfessionalProjectRequest _malformedRequest({
       updatedAt: DateTime(2026, 8, 16, 8, 5),
     );
 
+ProfessionalProjectRequest _negativeDriftRequest({
+  required String id,
+  required String projectName,
+}) =>
+    ProfessionalProjectRequest(
+      id: id,
+      requestType: 'INSTITUTION',
+      doctorId: 'doctor-1',
+      doctorName: 'Dr. Chen',
+      institutionId: 'inst-1',
+      institutionName: 'Joysong Clinic',
+      projectId: 'project-1',
+      projectName: projectName,
+      currency: 'CNY',
+      salesCount: 7,
+      price: 799.5,
+      isActive: true,
+      institutionSplit: const InstitutionProjectSplit(
+        consultationFee: 80.25,
+        commissionRate: 12.5,
+        institutionRate: 42.25,
+        platformRate: 100,
+        doctorRate: -54.75,
+      ),
+      status: 'PENDING',
+      submittedAt: DateTime(2026, 8, 16, 8),
+      updatedAt: DateTime(2026, 8, 16, 8, 5),
+    );
+
 final class _ProjectRequestRepository implements IdentityRepository {
   ManagementContext managementContext = _doctorContext;
   List<ProfessionalProjectRequest> requests = const [];
@@ -1125,6 +1373,7 @@ final class _ProjectRequestRepository implements IdentityRepository {
   int institutionOptionLoads = 0;
   int managementProjectLoads = 0;
   int formConfigLoads = 0;
+  int requestListLoads = 0;
 
   @override
   Future<ManagementContext> loadManagementContext() async => managementContext;
@@ -1132,6 +1381,7 @@ final class _ProjectRequestRepository implements IdentityRepository {
   @override
   Future<List<ProfessionalProjectRequest>>
       listProfessionalProjectRequests() async {
+    requestListLoads++;
     final pending = nextRequestList;
     if (pending != null) {
       nextRequestList = null;
@@ -1206,9 +1456,12 @@ final class _ProjectRequestRepository implements IdentityRepository {
     required String reviewNote,
   }) async {
     institutionReviews.add((id: id, decision: decision, note: reviewNote));
-    onInstitutionReview?.call();
     final error = institutionReviewError;
-    if (error != null) throw error;
+    onInstitutionReview?.call();
+    if (error != null) {
+      institutionReviewError = null;
+      throw error;
+    }
     await institutionReviewGate?.future;
   }
 
@@ -1219,9 +1472,12 @@ final class _ProjectRequestRepository implements IdentityRepository {
     required String reviewNote,
   }) async {
     platformReviews.add((id: id, decision: decision, note: reviewNote));
-    onPlatformReview?.call();
     final error = platformReviewError;
-    if (error != null) throw error;
+    onPlatformReview?.call();
+    if (error != null) {
+      platformReviewError = null;
+      throw error;
+    }
     await platformReviewGate?.future;
   }
 
