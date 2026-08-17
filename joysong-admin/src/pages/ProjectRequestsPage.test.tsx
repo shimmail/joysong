@@ -2,7 +2,10 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import api, { type ManagementContext, setAdminToken } from '../api';
-import ProjectRequestsPage, { type ProfessionalProjectRequestResponse } from './ProjectRequestsPage';
+import ProjectRequestsPage, {
+  type InstitutionProjectSplit,
+  type ProfessionalProjectRequestResponse,
+} from './ProjectRequestsPage';
 
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>();
@@ -99,6 +102,7 @@ const malformedProfessionalCases: [string, unknown][] = [
   ['missing common submitted time', withoutKey(platformRequest, 'submittedAt')],
   ['missing common currency', withoutKey(platformRequest, 'currency')],
   ['missing common sales count', withoutKey(platformRequest, 'salesCount')],
+  ['sales count exceeds signed Int32', { ...platformRequest, salesCount: 2_147_483_648 }],
   ['missing platform name', withoutKey(platformRequest, 'name')],
   ['missing platform category', withoutKey(platformRequest, 'category')],
   ['missing platform description', withoutKey(platformRequest, 'description')],
@@ -107,12 +111,35 @@ const malformedProfessionalCases: [string, unknown][] = [
   ['missing platform-project ID', withoutKey(institutionRequest, 'projectId')],
   ['missing institution price', withoutKey(institutionRequest, 'price')],
   ['missing institution active flag', withoutKey(institutionRequest, 'isActive')],
+  ['institution includes contradictory reference price', { ...institutionRequest, referencePrice: 1200 }],
+  ['institution includes contradictory category tags', { ...institutionRequest, categoryTags: ['不应出现'] }],
   ['missing institution split', withoutKey(institutionRequest, 'institutionSplit')],
   ['missing derived doctor rate', {
     ...institutionRequest,
     institutionSplit: withoutKey(institutionRequest.institutionSplit, 'doctorRate'),
   }],
+  ['negative consultation fee', institutionWithSplit({ consultationFee: -0.01 })],
+  ['consultation fee exceeds DECIMAL(10,2)', institutionWithSplit({ consultationFee: 100_000_000 })],
+  ['consultation fee exceeds two decimals', institutionWithSplit({ consultationFee: 100.001 })],
+  ['negative commission rate', institutionWithSplit({ commissionRate: -0.01, doctorRate: 57.51 })],
+  ['institution rate exceeds 100', institutionWithSplit({ institutionRate: 100.01, doctorRate: -22.51 })],
+  ['platform rate exceeds 100', institutionWithSplit({ platformRate: 100.01, doctorRate: -45.01 })],
+  ['doctor rate is below negative 100', institutionWithSplit({
+    commissionRate: 100,
+    institutionRate: 90.01,
+    platformRate: 10,
+    doctorRate: -100.01,
+  })],
+  ['rate exceeds two decimals', institutionWithSplit({ commissionRate: 12.345, doctorRate: 45.155 })],
+  ['four rates do not total exactly 100', institutionWithSplit({ doctorRate: 44.99 })],
 ];
+
+function institutionWithSplit(overrides: Partial<InstitutionProjectSplit>) {
+  return {
+    ...institutionRequest,
+    institutionSplit: { ...institutionRequest.institutionSplit, ...overrides },
+  } satisfies ProfessionalProjectRequestResponse;
+}
 
 function setContext(context: ManagementContext) {
   setAdminToken('header.payload.signature', context);
@@ -283,6 +310,75 @@ describe('ProjectRequestsPage', () => {
     expect(screen.getByText(/请刷新页面；若问题持续存在，请联系技术人员/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^通过 / })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^驳回 / })).not.toBeInTheDocument();
+  });
+
+  it('accepts the maximum signed Int32 sales count', async () => {
+    setContext(adminContext);
+    mockLists('/admin/project-requests', [{ ...platformRequest, salesCount: 2_147_483_647 }]);
+
+    render(<ProjectRequestsPage />);
+
+    expect(await screen.findByText('光子焕肤')).toBeInTheDocument();
+    await expectListPair('/admin/project-requests');
+    expect(screen.queryByText('申请快照数据不完整，已禁止审核')).not.toBeInTheDocument();
+    expectDescriptionValue(expandRow('光子焕肤'), '销量', '2147483647');
+    expect(screen.getByRole('button', { name: '通过 光子焕肤，申请ID platform-request' })).toBeEnabled();
+  });
+
+  it('accepts exact hundredth split boundaries without floating-point sum drift', async () => {
+    setContext(adminContext);
+    mockLists('/admin/project-requests', [institutionWithSplit({
+      consultationFee: 99_999_999.99,
+      commissionRate: 33.33,
+      institutionRate: 33.33,
+      platformRate: 33.33,
+      doctorRate: 0.01,
+    })]);
+
+    render(<ProjectRequestsPage />);
+
+    expect(await screen.findByText('机构定制光子')).toBeInTheDocument();
+    await expectListPair('/admin/project-requests');
+    expect(screen.queryByText('申请快照数据不完整，已禁止审核')).not.toBeInTheDocument();
+    expectDescriptionValue(expandRow('机构定制光子'), '按当前平台比例推导的医生净比例', '0.01%');
+    expect(screen.getByRole('button', { name: '通过 机构定制光子，申请ID institution-request' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '驳回 机构定制光子，申请ID institution-request' })).toBeEnabled();
+  });
+
+  it('renders a valid negative doctor rate as a reject-only current split conflict', async () => {
+    const user = userEvent.setup();
+    setContext(adminContext);
+    mockLists('/admin/project-requests', [institutionWithSplit({
+      consultationFee: 99_999_999.99,
+      commissionRate: 40,
+      institutionRate: 40,
+      platformRate: 30,
+      doctorRate: -10,
+    })]);
+
+    render(<ProjectRequestsPage />);
+
+    expect(await screen.findByText('机构定制光子')).toBeInTheDocument();
+    await expectListPair('/admin/project-requests');
+    expect(screen.queryByText('申请快照数据不完整，已禁止审核')).not.toBeInTheDocument();
+    expect(screen.getByText('当前分成比例冲突：按当前平台比例推导的医生净比例为负数，该申请仅可驳回。')).toBeInTheDocument();
+    expectDescriptionValue(expandRow('机构定制光子'), '按当前平台比例推导的医生净比例', '-10%');
+    const approve = screen.getByRole('button', { name: '通过 机构定制光子，申请ID institution-request' });
+    const reject = screen.getByRole('button', { name: '驳回 机构定制光子，申请ID institution-request' });
+    expect(approve).toBeDisabled();
+    expect(reject).toBeEnabled();
+
+    await user.click(approve);
+    expect(api.post).not.toHaveBeenCalled();
+    await user.click(reject);
+    await user.type(screen.getByLabelText('审核意见'), '当前分成比例已冲突');
+    await user.click(screen.getByRole('button', { name: /确\s*认/ }));
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    expect(api.post).toHaveBeenCalledWith('/management/project-requests/institution-request/review', {
+      decision: 'REJECTED',
+      reviewNote: '当前分成比例已冲突',
+    });
   });
 
   it('offers only approve and reject for professional creation requests and uses the two exact review routes', async () => {

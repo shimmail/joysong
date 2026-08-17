@@ -77,6 +77,8 @@ type InstitutionProjectRequest = ProfessionalProjectRequestResponse & {
   institutionName: string;
   projectId: string;
   projectName: string;
+  referencePrice: null;
+  categoryTags: null;
   price: number;
   isActive: boolean;
   institutionSplit: InstitutionProjectSplit;
@@ -132,8 +134,26 @@ const hasTypedKeys = (
 ) => keys.every(key => hasOwn(value, key) && predicate(value[key]));
 
 function isCompleteSplit(value: unknown): value is InstitutionProjectSplit {
-  return isRecord(value)
-    && hasTypedKeys(value, ['consultationFee', 'commissionRate', 'institutionRate', 'platformRate', 'doctorRate'], isFiniteNumber);
+  if (!isRecord(value)) return false;
+  const consultationFee = toHundredths(value.consultationFee, 0, 99_999_999.99);
+  const commissionRate = toHundredths(value.commissionRate, 0, 100);
+  const institutionRate = toHundredths(value.institutionRate, 0, 100);
+  const platformRate = toHundredths(value.platformRate, 0, 100);
+  const doctorRate = toHundredths(value.doctorRate, -100, 100);
+  return consultationFee !== null
+    && commissionRate !== null
+    && institutionRate !== null
+    && platformRate !== null
+    && doctorRate !== null
+    && commissionRate + institutionRate + platformRate + doctorRate === 10_000;
+}
+
+function toHundredths(value: unknown, minimum: number, maximum: number) {
+  if (!isFiniteNumber(value) || value < minimum || value > maximum) return null;
+  const scaled = value * 100;
+  const rounded = Math.round(scaled);
+  const tolerance = Math.max(1e-9, Number.EPSILON * Math.max(1, Math.abs(scaled)) * 4);
+  return Math.abs(scaled - rounded) <= tolerance ? rounded : null;
 }
 
 function isCompleteProfessionalProjectRequest(value: unknown): value is CompleteProfessionalProjectRequestResponse {
@@ -158,6 +178,7 @@ function isCompleteProfessionalProjectRequest(value: unknown): value is Complete
     && hasOwn(value, 'salesCount')
     && Number.isInteger(value.salesCount)
     && (value.salesCount as number) >= 0
+    && (value.salesCount as number) <= 2_147_483_647
     && hasOwn(value, 'status')
     && ['PENDING', 'APPROVED', 'REJECTED', 'CHANGES_REQUESTED'].includes(String(value.status))
     && hasOwn(value, 'isActive')
@@ -192,6 +213,8 @@ function isCompleteProfessionalProjectRequest(value: unknown): value is Complete
     && isNonblankString(value.institutionName)
     && isNonblankString(value.projectId)
     && isNonblankString(value.projectName)
+    && value.referencePrice === null
+    && value.categoryTags === null
     && isFiniteNumber(value.price)
     && typeof value.isActive === 'boolean'
     && isCompleteSplit(value.institutionSplit);
@@ -203,6 +226,9 @@ function getHttpResponseStatus(error: unknown) {
 }
 
 const requestKey = (request: ProjectRequest) => `${request.requestSource}:${request.id}`;
+const hasNegativeDoctorRate = (request: ProjectRequest) => request.requestSource === 'PROFESSIONAL'
+  && request.requestType === 'INSTITUTION'
+  && request.institutionSplit.doctorRate < 0;
 const reviewAriaLabel = (action: string, request: ProjectRequest) => {
   const name = request.requestSource === 'JOIN'
     ? request.projectName
@@ -302,7 +328,7 @@ export default function ProjectRequestsPage() {
   };
 
   const approve = async (request: ProjectRequest) => {
-    if (!beginReview(request)) return;
+    if (hasNegativeDoctorRate(request) || !beginReview(request)) return;
     try {
       await api.post(reviewPath(request), {
         decision: 'APPROVED',
@@ -354,6 +380,7 @@ export default function ProjectRequestsPage() {
   const filteredRequests = status === 'ALL'
     ? requests
     : requests.filter(item => item.status === status);
+  const hasReviewableSplitConflict = filteredRequests.some(item => canReview(item) && hasNegativeDoctorRate(item));
 
   const renderActions = (item: ProjectRequest) => {
     if (!canReview(item)) return null;
@@ -364,7 +391,7 @@ export default function ProjectRequestsPage() {
         type="primary"
         icon={<CheckOutlined />}
         loading={reviewingRequestKey === requestKey(item)}
-        disabled={submitting}
+        disabled={submitting || hasNegativeDoctorRate(item)}
         onClick={() => void approve(item)}
       >通过</Button>
       {item.requestSource === 'JOIN' && <Button
@@ -506,6 +533,12 @@ export default function ProjectRequestsPage() {
       showIcon
       title="申请快照数据不完整，已禁止审核"
       description="请刷新页面；若问题持续存在，请联系技术人员。"
+      style={{ marginBottom: 16 }}
+    />}
+    {hasReviewableSplitConflict && <Alert
+      type="warning"
+      showIcon
+      title="当前分成比例冲突：按当前平台比例推导的医生净比例为负数，该申请仅可驳回。"
       style={{ marginBottom: 16 }}
     />}
     <Table
