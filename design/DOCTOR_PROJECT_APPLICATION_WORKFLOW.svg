@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1650" viewBox="0 0 1600 1650" role="img" aria-labelledby="title desc">
   <title id="title">Doctor project-creation application workflow</title>
-  <desc id="desc">Two sequence flows: platform project application reviewed by an administrator, and institution project application reviewed by a target legal representative or administrator. Institution approval is atomic and binds only the applicant doctor.</desc>
+  <desc id="desc">Two sequence flows: platform project application reviewed by an administrator, and institution project application reviewed by a target legal representative or administrator. Institution rejection directly closes the ledger; only approval revalidates current state and atomically creates the applicant-only target rows.</desc>
   <style>
     text { font-family: Arial, &quot;Microsoft YaHei&quot;, sans-serif; fill: #172033; }
     .title { font-size: 28px; font-weight: 700; }
@@ -71,16 +71,17 @@
   <path d="M810 1098 H348" class="return"/><text x="579" y="1089" text-anchor="middle" class="body">request id; submitted values remain immutable</text>
   <path d="M1048 1146 H575" class="arrow"/><text x="812" y="1137" text-anchor="middle" class="body">review only if target institution is in managedInstitutionIds</text>
   <path d="M1278 1180 H575" class="arrow"/><text x="926" y="1171" text-anchor="middle" class="body">administrator may review any target institution request</text>
-  <path d="M575 1220 H810" class="arrow"/><text x="693" y="1211" text-anchor="middle" class="body">lock PENDING snapshot; revalidate current relationship, project, uniqueness, platform rate</text>
-  <path d="M575 1250 H810" class="arrow"/><text x="693" y="1241" text-anchor="middle" class="body">REJECTED — close immutable ledger + non-blank review note</text>
-  <rect x="482" y="1280" width="1010" height="180" rx="8" class="tx"/>
-  <text x="504" y="1307" class="label">APPROVED — one atomic transaction, fixed order</text>
-  <path d="M575 1330 H1455" class="arrow"/><text x="1015" y="1321" text-anchor="middle" class="body">1. INSERT institution_projects with effective inherited content; rating = 0, review_count = 0</text>
-  <path d="M575 1370 H1455" class="arrow"/><text x="1015" y="1361" text-anchor="middle" class="body">2. INSERT doctor_projects binding for applicant doctor only</text>
-  <path d="M575 1410 H1455" class="arrow"/><text x="1015" y="1401" text-anchor="middle" class="body">3. INSERT doctor_institution_project_configs for that applicant</text>
-  <path d="M575 1440 H810" class="arrow"/><text x="693" y="1431" text-anchor="middle" class="body">4. close APPROVED + resultingInstitutionProjectId</text>
-  <rect x="88" y="1490" width="1328" height="72" rx="8" class="note"/>
-  <text x="110" y="1517" class="label">Rollback boundary</text>
-  <text x="110" y="1542" class="body">Any revalidation or write failure triggers transaction rollback: every target row is undone and the ledger remains PENDING. The client receives 409/error; no partial project, binding, configuration, or status closure exists.</text>
+  <path d="M575 1220 H810" class="arrow"/><text x="693" y="1211" text-anchor="middle" class="body">lock PENDING snapshot; choose exactly one decision</text>
+  <path d="M575 1250 H810" class="arrow"/><text x="693" y="1241" text-anchor="middle" class="body">REJECTED branch — close immutable ledger + non-blank review note</text>
+  <rect x="482" y="1280" width="1010" height="200" rx="8" class="tx"/>
+  <text x="504" y="1307" class="label">APPROVED branch — one atomic transaction, fixed order</text>
+  <path d="M575 1330 H810" class="arrow"/><text x="504" y="1321" class="body">revalidate current relationship, project, uniqueness, platform rate and split</text>
+  <path d="M575 1360 H1455" class="arrow"/><text x="1015" y="1351" text-anchor="middle" class="body">1. INSERT institution_projects with effective inherited content; rating = 0, review_count = 0</text>
+  <path d="M575 1390 H1455" class="arrow"/><text x="1015" y="1381" text-anchor="middle" class="body">2. INSERT doctor_projects binding for applicant doctor only</text>
+  <path d="M575 1420 H1455" class="arrow"/><text x="1015" y="1411" text-anchor="middle" class="body">3. INSERT doctor_institution_project_configs for that applicant</text>
+  <path d="M575 1450 H810" class="arrow"/><text x="693" y="1441" text-anchor="middle" class="body">4. close APPROVED + resultingInstitutionProjectId</text>
+  <rect x="88" y="1500" width="1328" height="72" rx="8" class="note"/>
+  <text x="110" y="1527" class="label">Rollback boundary</text>
+  <text x="110" y="1552" class="body">Only an APPROVED-path revalidation or write failure triggers transaction rollback: every target row is undone and the ledger remains PENDING. The client receives 409/error; no partial project, binding, configuration, or status closure exists.</text>
   <text x="800" y="1625" text-anchor="middle" class="small">JOIN and PROFILE_UPDATE retain their separate legacy contracts and decision sets. V28 changes only the request-ledger DDL; operators manually clear old real institution-creation requests before deployment.</text>
 </svg>

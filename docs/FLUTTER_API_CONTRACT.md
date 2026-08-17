@@ -662,7 +662,7 @@ Flutter 必须先调用 `GET /api/management/project-requests/institution-form-c
 doctorRate = 100 - platformRate - institutionRate - commissionRate
 ```
 
-`doctorRate` 不得小于 0，且绝不发送给服务端。`referencePrice`、`price`、可选 `originalPrice` 和 `consultationFee` 都必须在 `0..99999999.99`，最多两位小数；`salesCount` 必须为 `0..2147483647` 的整数。`commissionRate` 与 `institutionRate` 均为 `0..100`、最多两位小数，连同当前 `platformRate` 的总和不得超过 100。文本经 trim 后的上限为：名称 200、分类 100、描述 5000、标语 500、封面 URL 500、详情 20000、备注 2000；`tags`、`categoryTags`、`images` 各最多 20 项，标签项最多 100 字符、图片项最多 500 字符，且每项不得为空。除 JSON 数组本身外，写入目标表时的逗号序列化还受长度限制：`tags`、`categoryTags` 目标逗号序列化后最多 500 个字符，`images` 目标逗号序列化后最多 2000 个字符。
+**提交态**的 `doctorRate` 只按上式在表单本地派生：它绝不发送给服务端，并且按刚读取的 `platformRate` 计算时不得小于 0，否则禁止提交。`referencePrice`、`price`、可选 `originalPrice` 和 `consultationFee` 都必须在 `0..99999999.99`，最多两位小数；`salesCount` 必须为 `0..2147483647` 的整数。`commissionRate` 与 `institutionRate` 均为 `0..100`、最多两位小数，连同当前 `platformRate` 的总和不得超过 100。文本经 trim 后的上限为：名称 200、分类 100、描述 5000、标语 500、封面 URL 500、详情 20000、备注 2000；`tags`、`categoryTags`、`images` 各最多 20 项，标签项最多 100 字符、图片项最多 500 字符，且每项不得为空。除 JSON 数组本身外，写入目标表时的逗号序列化还受长度限制：`tags`、`categoryTags` 目标逗号序列化后最多 500 个字符，`images` 目标逗号序列化后最多 2000 个字符。
 
 提交时创建 `PENDING` 账本快照。批准机构申请时服务端在同一事务中再次校验申请医生的有效机构关系、目标机构、平台项目、机构项目唯一性、金额和当前平台比例；平台比例漂移而使方案无效时返回 409。任何客户端写操作不得自动重试。
 
@@ -679,6 +679,13 @@ status, reviewNote, reviewedBy, reviewedAt, resultingProjectId,
 resultingInstitutionProjectId, submittedAt, updatedAt
 ```
 
+这是严格的 `requestType` 判别联合：上述列表中的**每个键都必须出现**，不适用或没有值的键也必须显式为 JSON `null`，不能省略。共同必需且有效的审核字段是 `id`、`requestType`、`doctorId`、`doctorName`、`currency`、`salesCount`、`status`、`submittedAt`、`updatedAt`；`doctorName` 是当前 JOIN 名称，而机构/平台项目身份始终以 ID 为准。
+
+- `requestType: "PLATFORM"`：平台必需快照字段 `name`、`category`、`description`、`tags`、`slogan`、`coverImage`、`images`、`referencePrice`、`categoryTags` 必须非 null 且通过各自校验；`detailContent`、`notes` 可为 null。`institutionId`、`institutionName`、`projectId`、`projectName`、`price`、`originalPrice`、`isActive`、`institutionSplit` **必须显式为 null**。
+- `requestType: "INSTITUTION"`：`institutionId`、`projectId`、`price`、`isActive`、`institutionSplit` 必须存在且有效；`originalPrice` 可为 null 或为有效金额。`institutionSplit` 必须完整。`referencePrice`、`categoryTags` **必须显式为 null**；其余机构显示覆盖快照仍可按提交值为 null/空白/非空数组的继承规则出现。`institutionName`、`projectName` 仅是当前 JOIN 名称，不能替代上述必需 ID。
+
+`requestType` 非法、类型专属的“必须为 null”字段出现值、平台/机构必需字段缺失或无效、或 `institutionSplit` 不完整/相互矛盾，都是协议错误。审核 UI 必须 **fail closed**：不得跨类型猜测、用当前目录/默认值补齐，且不得显示批准或驳回动作。
+
 `institutionSplit` 仅在 `requestType: "INSTITUTION"` 时存在，且精确包含五个数值字段：
 
 ```json
@@ -691,13 +698,18 @@ resultingInstitutionProjectId, submittedAt, updatedAt
 }
 ```
 
-这里的五个字段不应统称为“不可变 split 快照”：`consultationFee`、`commissionRate`、`institutionRate` 是提交时保存、不可由审核人编辑的申请快照；`platformRate` 是列表读取时从当前服务端策略取得的比例，`doctorRate` 在该次读取时按当前 `platformRate` 和上述三个已提交比例重新推导。平台策略变化时，同一申请在列表中可显示新的平台率和医生净比例；批准前服务端仍会按当前平台率再次校验，若方案不再有效则返回 409，账本申请保持未处理且不会产生部分目标记录。审核 UI 若缺少主键、按申请类型必需的目标 ID、已提交的关键快照字段，或机构申请缺少 `institutionSplit`/其中三个已提交比例，必须视为协议错误并 **fail closed**：不得用当前目录、默认值或其他医生数据补齐，也不得显示批准/驳回动作。
+这里的五个字段不应统称为“不可变 split 快照”：`consultationFee`、`commissionRate`、`institutionRate` 是提交时保存、不可由审核人编辑的申请快照；`platformRate` 是审核列表读取时从当前服务端策略取得的比例，`doctorRate` 在该次读取时按当前 `platformRate` 和上述三个已提交比例重新推导。**审核态**与提交态不同：由于平台策略漂移，完整 `institutionSplit` 中的 `doctorRate` 可为 `-100..100`、最多两位小数；`commissionRate + institutionRate + platformRate + doctorRate` 四项比例始终精确等于 `100`，`consultationFee` 仍是金额而非比例。快照其他字段完整时，负的审核态 `doctorRate` 仍可显示该申请并允许 `REJECTED`；UI 必须禁止 `APPROVED`，即使恶意/过期客户端仍调用批准，服务端会按当前比例再次校验并返回 409，账本保持 `PENDING` 且不会产生部分目标记录。
 
 列表中的申请快照不允许审核人修改。创建申请审核 body 使用 `decision` 和 `reviewNote`：`decision` 只允许 `APPROVED`、`REJECTED`，`REJECTED` 的去除首尾空白后的 `reviewNote` 必须非空；`APPROVED` 的备注可为空。创建申请的新状态仅为 `PENDING`、`APPROVED`、`REJECTED`。这不会改变 11.1 的 `JOIN` 决策，也不会移除 `PROFILE_UPDATE` 的既有 `CHANGES_REQUESTED`；数据库只为历史创建申请可读性保留 legacy `CHANGES_REQUESTED`，新 API 不会创建或提供该审核动作。
 
 平台项目批准会在同一事务创建一条 `projects` 记录，并**显式初始化** `rating: 0`、`reviewCount: 0`。机构项目批准在同一事务中按固定顺序：创建 `institution_projects`（同样显式 `rating: 0`、`reviewCount: 0`）→ 仅创建申请医生的 `doctor_projects` 绑定及其有效继承显示内容 → 创建该申请医生的 `doctor_institution_project_configs` → 关闭申请并记录结果 ID。任一步失败会回滚项目、申请医生绑定、配置和申请状态，不会留下部分数据，也绝不影响同一项目的其他医生。
 
-本接口族使用真实 HTTP 状态：400 表示精确 body/未知字段、金额/比例/数量/文本/数组非法、审核决定非法或拒绝备注空白；403 表示非认证医生提交、未批准机构关系、跨机构法人审核或非管理员审核平台申请；404 表示申请、目标机构或平台项目不存在；409 表示重复 `PENDING`、机构已公开该平台项目、并发/已处理审核、申请医生关系失效或当前平台比例导致分账无效。409 后刷新申请、项目目录与表单配置，保留草稿并提示重新提交；不得自动重试或自动重放任何提交/审核 POST。
+本接口族使用真实 HTTP 状态：400 表示精确 body/未知字段、金额/比例/数量/文本/数组非法、审核决定非法或拒绝备注空白；403 表示非认证医生提交、未批准机构关系、跨机构法人审核或非管理员审核平台申请；404 表示申请、目标机构或平台项目不存在；409 表示重复 `PENDING`、机构已公开该平台项目、并发/已处理审核、申请医生关系失效或当前平台比例导致分账无效。
+
+409 恢复必须按当前身份与页面模式收敛：
+
+- 审核模式的 `ADMIN` 只刷新其有权的 `GET /api/admin/project-requests`，机构法人只刷新其有权且经服务端范围过滤的 `GET /api/management/project-requests`。两者都不得盲调仅医生可用的 `institution-form-config`，也不得为审核冲突盲调专业项目目录；这些调用既不是审核快照的权威来源，也可能无权。
+- 只有医生填写草稿相关的提交冲突，才在保留草稿的前提下刷新本人申请列表，并按该医生当前授权、冲突是否涉及分账/目标项目，刷新 `institution-form-config` 和/或专业项目目录。任何模式都不得自动重试或自动重放提交/审核 POST，必须由用户确认后重新提交或决定。
 
 #### V28 部署边界
 

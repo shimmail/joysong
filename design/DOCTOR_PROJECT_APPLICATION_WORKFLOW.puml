@@ -64,22 +64,23 @@ group Institution-project application
     API -> API: require administrator authority
   end
   API -> Ledger: lock pending immutable snapshot
-  API -> API: revalidate current institution, applicant relationship,\nplatform project, uniqueness, current platform rate and split
   alt REJECTED
     API -> Ledger: close REJECTED + non-blank review note
+    API --> Flutter: review result
   else APPROVED
     group one atomic transaction; rollback all writes on any failure
-      API -> InstitutionProjects: INSERT effective inherited content\nrating = 0, review_count = 0
-      API -> DoctorProjects: INSERT binding for applicant doctor only
-      API -> Configs: INSERT applicant split configuration
-      API -> Ledger: close APPROVED + resultingInstitutionProjectId
+      API -> API: revalidate current institution, applicant relationship,\nplatform project, uniqueness, current platform rate and split
+      alt any revalidation or write fails
+        API -> API: rollback transaction; ledger remains PENDING
+        API --> Flutter: 409/error; no partial project, binding, or config
+      else all current checks pass
+        API -> InstitutionProjects: INSERT effective inherited content\nrating = 0, review_count = 0
+        API -> DoctorProjects: INSERT binding for applicant doctor only
+        API -> Configs: INSERT applicant split configuration
+        API -> Ledger: close APPROVED + resultingInstitutionProjectId
+        API --> Flutter: review result
+      end
     end
-  end
-  alt any write or revalidation fails
-    API -> API: rollback transaction; ledger remains PENDING
-    API --> Flutter: 409/error; no partial project, binding, or config
-  else transaction succeeds
-    API --> Flutter: review result
   end
 end
 
