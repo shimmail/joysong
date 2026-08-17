@@ -68,11 +68,16 @@ end note
 alt final intent == SAFETY_SCREENING
     Chat -> Chat: 停止推荐；action=风险筛查
 else final intent == HUMAN_CONSULTATION
-    Chat -> DB: 一次集合查询最多4个可咨询机构
-    DB --> Chat: 已验证机构 + 当前合格咨询师存在性
+    Chat -> DB: 读取机构、城市和详情 context
+    DB --> Chat: 机构候选及请求/档案/详情上下文
+    Chat -> DB: 一次集合式查询当前合格咨询师资格 ID
+    DB --> Chat: 合格咨询师 ID 集合
     note over Chat,DB
-    精确机构 → 显式城市 → 档案城市 → 全国；
+    点名机构 → 显式城市 → 无点名机构/城市时的可咨询详情 context
+    → 档案城市 → 全国；
     级内 rating 降序、institution ID 升序，去重补齐。
+    仅咨询师资格 ID 查询是一次集合式查询；
+    机构、城市和 context 读取不属于该一次查询。
     end note
     alt 有候选机构
         Chat -> Lifecycle: completeTurn(固定双语文案,\nSELECT_INSTITUTION, institution cards)
