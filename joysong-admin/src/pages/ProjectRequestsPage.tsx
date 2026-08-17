@@ -5,6 +5,7 @@ import api, { getApiErrorMessage, getData, getManagementContext } from '../api';
 import { identityStatusColor, identityStatusLabel } from '../identity';
 
 type ProjectRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CHANGES_REQUESTED';
+type ProjectCurrency = 'CNY' | 'USD';
 
 export interface InstitutionProjectSplit {
   consultationFee: number;
@@ -29,7 +30,7 @@ export interface ProfessionalProjectRequestResponse {
   tags: string[] | null;
   slogan: string | null;
   detailContent: string | null;
-  currency: string;
+  currency: ProjectCurrency;
   coverImage: string | null;
   images: string[] | null;
   salesCount: number;
@@ -125,6 +126,7 @@ const isNullableString = (value: unknown): value is string | null => value === n
 const isStringList = (value: unknown): value is string[] => Array.isArray(value) && value.every(item => typeof item === 'string');
 const isNullableStringList = (value: unknown): value is string[] | null => value === null || isStringList(value);
 const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+const isProjectCurrency = (value: unknown): value is ProjectCurrency => value === 'CNY' || value === 'USD';
 const isMoney = (value: unknown): value is number => toHundredths(value, 0, 99_999_999.99) !== null;
 const isNullableMoney = (value: unknown): value is number | null => value === null || isMoney(value);
 
@@ -146,6 +148,7 @@ function isCompleteSplit(value: unknown): value is InstitutionProjectSplit {
     && institutionRate !== null
     && platformRate !== null
     && doctorRate !== null
+    && commissionRate + institutionRate <= 10_000
     && commissionRate + institutionRate + platformRate + doctorRate === 10_000;
 }
 
@@ -162,9 +165,11 @@ function isCompleteProfessionalProjectRequest(value: unknown): value is Complete
 
   const hasCompleteCommonFields = hasTypedKeys(
     value,
-    ['id', 'doctorId', 'doctorName', 'currency', 'submittedAt', 'updatedAt'],
+    ['id', 'doctorId', 'doctorName', 'submittedAt', 'updatedAt'],
     isNonblankString,
   )
+    && hasOwn(value, 'currency')
+    && isProjectCurrency(value.currency)
     && hasTypedKeys(
       value,
       [

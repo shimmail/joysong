@@ -101,6 +101,9 @@ const malformedProfessionalCases: [string, unknown][] = [
   ['missing common status', withoutKey(platformRequest, 'status')],
   ['missing common submitted time', withoutKey(platformRequest, 'submittedAt')],
   ['missing common currency', withoutKey(platformRequest, 'currency')],
+  ['unsupported common currency', { ...platformRequest, currency: 'EUR' }],
+  ['blank common currency', { ...platformRequest, currency: '' }],
+  ['non-string common currency', { ...platformRequest, currency: 123 }],
   ['missing common sales count', withoutKey(platformRequest, 'salesCount')],
   ['sales count exceeds signed Int32', { ...platformRequest, salesCount: 2_147_483_648 }],
   ['missing platform name', withoutKey(platformRequest, 'name')],
@@ -141,6 +144,12 @@ const malformedProfessionalCases: [string, unknown][] = [
   })],
   ['rate exceeds two decimals', institutionWithSplit({ commissionRate: 12.345, doctorRate: 45.155 })],
   ['four rates do not total exactly 100', institutionWithSplit({ doctorRate: 44.99 })],
+  ['submitted commission and institution rates exceed 100 despite a total of 100', institutionWithSplit({
+    commissionRate: 60,
+    institutionRate: 60,
+    platformRate: 0,
+    doctorRate: -20,
+  })],
 ];
 
 function institutionWithSplit(overrides: Partial<InstitutionProjectSplit>) {
@@ -181,6 +190,32 @@ const validMoneyBoundaryCases = [
     rowName: '机构定制光子',
     detailLabel: '原价',
     detailValue: '-',
+    approveLabel: '通过 机构定制光子，申请ID institution-request',
+  },
+] as const;
+
+const validSnapshotInvariantCases = [
+  {
+    caseName: 'USD currency',
+    request: { ...platformRequest, currency: 'USD' } satisfies ProfessionalProjectRequestResponse,
+    rowName: '光子焕肤',
+    approveLabel: '通过 光子焕肤，申请ID platform-request',
+  },
+  {
+    caseName: 'CNY currency',
+    request: { ...institutionRequest, currency: 'CNY' } satisfies ProfessionalProjectRequestResponse,
+    rowName: '机构定制光子',
+    approveLabel: '通过 机构定制光子，申请ID institution-request',
+  },
+  {
+    caseName: 'submitted commission and institution rates total exactly 100',
+    request: institutionWithSplit({
+      commissionRate: 60,
+      institutionRate: 40,
+      platformRate: 0,
+      doctorRate: 0,
+    }),
+    rowName: '机构定制光子',
     approveLabel: '通过 机构定制光子，申请ID institution-request',
   },
 ] as const;
@@ -367,6 +402,18 @@ describe('ProjectRequestsPage', () => {
     expect(screen.queryByText('申请快照数据不完整，已禁止审核')).not.toBeInTheDocument();
     expectDescriptionValue(expandRow(moneyCase.rowName), moneyCase.detailLabel, moneyCase.detailValue);
     expect(screen.getByRole('button', { name: moneyCase.approveLabel })).toBeEnabled();
+  });
+
+  it.each(validSnapshotInvariantCases)('accepts valid snapshot invariant: $caseName', async (invariantCase) => {
+    setContext(adminContext);
+    mockLists('/admin/project-requests', [invariantCase.request]);
+
+    render(<ProjectRequestsPage />);
+
+    expect(await screen.findByText(invariantCase.rowName)).toBeInTheDocument();
+    await expectListPair('/admin/project-requests');
+    expect(screen.queryByText('申请快照数据不完整，已禁止审核')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: invariantCase.approveLabel })).toBeEnabled();
   });
 
   it('accepts the maximum signed Int32 sales count', async () => {
