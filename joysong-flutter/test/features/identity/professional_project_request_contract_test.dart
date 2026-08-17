@@ -726,6 +726,253 @@ void main() {
     expect((parsed as dynamic).hasCompleteReviewSnapshot, isTrue);
   });
 
+  test(
+      'project response decoder rejects numeric coercion, unnormalized text, malformed lists, limits, and invalid ISO times',
+      () {
+    String repeated(int length) => List.filled(length, 'x').join();
+    final split = _requestSnapshot['institutionSplit']! as Map<String, Object?>;
+
+    final malformed = <({Map<String, Object?> snapshot, String reason})>[
+      (
+        snapshot: {..._platformRequestSnapshot(), 'referencePrice': '899.25'},
+        reason: 'money numeric string',
+      ),
+      (
+        snapshot: {..._requestSnapshot, 'price': '799.5'},
+        reason: 'institution money numeric string',
+      ),
+      (
+        snapshot: {
+          ..._requestSnapshot,
+          'institutionSplit': {...split, 'doctorRate': '35.25'},
+        },
+        reason: 'rate numeric string',
+      ),
+      (
+        snapshot: {..._requestSnapshot, 'salesCount': '7'},
+        reason: 'integer numeric string',
+      ),
+      (
+        snapshot: {..._platformRequestSnapshot(), 'name': ' Name '},
+        reason: 'unnormalized required text',
+      ),
+      (
+        snapshot: {
+          ..._platformRequestSnapshot(),
+          'detailContent': '   ',
+        },
+        reason: 'blank optional text',
+      ),
+      (
+        snapshot: {
+          ..._platformRequestSnapshot(),
+          'tags': const ['hydration', '   '],
+        },
+        reason: 'blank list item',
+      ),
+      (
+        snapshot: {
+          ..._platformRequestSnapshot(),
+          'tags': const <Object>['hydration', 1],
+        },
+        reason: 'non-string list item',
+      ),
+      (
+        snapshot: {
+          ..._platformRequestSnapshot(),
+          'tags': List<String>.filled(21, 'tag'),
+        },
+        reason: 'too many tag items',
+      ),
+      (
+        snapshot: {
+          ..._platformRequestSnapshot(),
+          'tags': [repeated(101)],
+        },
+        reason: 'overlong tag item',
+      ),
+      (
+        snapshot: {
+          ..._platformRequestSnapshot(),
+          'tags': [
+            repeated(100),
+            repeated(100),
+            repeated(100),
+            repeated(100),
+            repeated(97),
+          ],
+        },
+        reason: '501-character target tag list',
+      ),
+      (
+        snapshot: {
+          ..._platformRequestSnapshot(),
+          'images': [
+            repeated(500),
+            repeated(500),
+            repeated(500),
+            repeated(498),
+          ],
+        },
+        reason: '2001-character target image list',
+      ),
+      (
+        snapshot: {..._platformRequestSnapshot(), 'name': repeated(201)},
+        reason: 'overlong name',
+      ),
+      (
+        snapshot: {..._platformRequestSnapshot(), 'category': repeated(101)},
+        reason: 'overlong category',
+      ),
+      (
+        snapshot: {
+          ..._platformRequestSnapshot(),
+          'description': repeated(5001),
+        },
+        reason: 'overlong description',
+      ),
+      (
+        snapshot: {..._platformRequestSnapshot(), 'slogan': repeated(501)},
+        reason: 'overlong slogan',
+      ),
+      (
+        snapshot: {
+          ..._platformRequestSnapshot(),
+          'detailContent': repeated(20001),
+        },
+        reason: 'overlong detail',
+      ),
+      (
+        snapshot: {
+          ..._platformRequestSnapshot(),
+          'coverImage': repeated(501),
+        },
+        reason: 'overlong cover image',
+      ),
+      (
+        snapshot: {..._platformRequestSnapshot(), 'notes': repeated(2001)},
+        reason: 'overlong notes',
+      ),
+      (
+        snapshot: {..._requestSnapshot, 'name': repeated(201)},
+        reason: 'overlong nullable institution override',
+      ),
+      (
+        snapshot: {..._requestSnapshot, 'salesCount': 2147483648},
+        reason: 'sales count above Int32',
+      ),
+      (
+        snapshot: {..._platformRequestSnapshot(), 'currency': 'cny'},
+        reason: 'non-canonical currency',
+      ),
+      (
+        snapshot: {..._platformRequestSnapshot(), 'status': 'UNKNOWN'},
+        reason: 'unknown status',
+      ),
+      (
+        snapshot: {
+          ..._platformRequestSnapshot(),
+          'submittedAt': '2026-02-30T08:00:00',
+        },
+        reason: 'normalized invalid calendar date',
+      ),
+      (
+        snapshot: {
+          ..._platformRequestSnapshot(),
+          'updatedAt': ' 2026-08-16T08:05:00 ',
+        },
+        reason: 'non-canonical ISO time',
+      ),
+    ];
+
+    for (final entry in malformed) {
+      expect(
+        () => ProfessionalProjectRequest.fromJson(entry.snapshot),
+        throwsFormatException,
+        reason: entry.reason,
+      );
+    }
+  });
+
+  test(
+      'project response decoder accepts exact text list money and rate boundaries',
+      () {
+    String repeated(int length, String value) =>
+        List.filled(length, value).join();
+    final tagBoundary = [
+      repeated(100, 'a'),
+      repeated(100, 'b'),
+      repeated(100, 'c'),
+      repeated(100, 'd'),
+      repeated(96, 'e'),
+    ];
+    final imageBoundary = [
+      repeated(500, 'a'),
+      repeated(500, 'b'),
+      repeated(500, 'c'),
+      repeated(497, 'd'),
+    ];
+    expect(tagBoundary.join(',').length, 500);
+    expect(imageBoundary.join(',').length, 2000);
+
+    final platform = ProfessionalProjectRequest.fromJson({
+      ..._platformRequestSnapshot(),
+      'name': repeated(200, 'n'),
+      'category': repeated(100, 'c'),
+      'description': repeated(5000, 'd'),
+      'slogan': repeated(500, 's'),
+      'detailContent': repeated(20000, 't'),
+      'coverImage': repeated(500, 'u'),
+      'notes': repeated(2000, 'o'),
+      'tags': tagBoundary,
+      'categoryTags': tagBoundary,
+      'images': imageBoundary,
+      'salesCount': 2147483647,
+      'referencePrice': 99999999.99,
+      'submittedAt': '2024-02-29T23:59:59.123456789',
+      'updatedAt': '2024-03-01T00:00:00',
+    });
+    expect(platform.hasCompleteReviewSnapshot, isTrue);
+    expect(platform.tags, tagBoundary,
+        reason: 'strict response decoding must not rewrite valid list items');
+
+    final institution = ProfessionalProjectRequest.fromJson({
+      ..._requestSnapshot,
+      'name': repeated(200, 'n'),
+      'category': repeated(100, 'c'),
+      'description': repeated(5000, 'd'),
+      'slogan': repeated(500, 's'),
+      'detailContent': repeated(20000, 't'),
+      'coverImage': repeated(500, 'u'),
+      'notes': repeated(2000, 'o'),
+      'tags': tagBoundary,
+      'images': imageBoundary,
+      'salesCount': 2147483647,
+      'price': 99999999.99,
+      'originalPrice': 99999999.99,
+      'institutionSplit': const {
+        'consultationFee': 99999999.99,
+        'commissionRate': 50,
+        'institutionRate': 50,
+        'platformRate': 100,
+        'doctorRate': -100,
+      },
+    });
+    expect(institution.hasCompleteReviewSnapshot, isTrue);
+    expect(institution.isCurrentlyApprovable, isFalse);
+    expect(institution.tags, tagBoundary);
+    expect(institution.images, imageBoundary);
+
+    final legacy = ProfessionalProjectRequest.fromJson({
+      ..._requestSnapshot,
+      'status': 'CHANGES_REQUESTED',
+      'tags': const <String>[],
+      'images': const <String>[],
+    });
+    expect(legacy.status, 'CHANGES_REQUESTED');
+    expect(legacy.hasCompleteReviewSnapshot, isTrue);
+  });
+
   test('parses form config and all 13 management inheritance values', () {
     final config = InstitutionProjectApplicationFormConfig.fromJson({
       'platformRate': 10.25,

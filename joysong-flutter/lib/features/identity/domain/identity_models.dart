@@ -1464,7 +1464,17 @@ String? _nullableProfessionalSnapshotText(
   final value = map[key];
   if (value == null) return null;
   if (value is! String) throw FormatException('响应包含无效的 $field');
-  return value.trim();
+  return value;
+}
+
+String _requiredProfessionalSnapshotText(
+  Map<String, Object?> map,
+  String key,
+  String field,
+) {
+  final value = map[key];
+  if (value is! String) throw FormatException('响应包含无效的 $field');
+  return value;
 }
 
 List<String>? _nullableProfessionalSnapshotItems(
@@ -1477,11 +1487,18 @@ List<String>? _nullableProfessionalSnapshotItems(
   if (value is! List || value.any((item) => item is! String)) {
     throw FormatException('响应包含无效的 $field');
   }
-  return value
-      .cast<String>()
-      .map((item) => item.trim())
-      .where((item) => item.isNotEmpty)
-      .toList(growable: false);
+  final items = value.cast<String>().toList(growable: false);
+  if (items.any((item) => item.trim().isEmpty)) {
+    throw FormatException('响应包含无效的 $field');
+  }
+  return items;
+}
+
+num _requiredProfessionalSnapshotDecimal(Object? value, String field) {
+  if (value is! num || !value.isFinite) {
+    throw FormatException('响应包含无效的 $field');
+  }
+  return value;
 }
 
 num? _nullableProfessionalSnapshotDecimal(
@@ -1489,7 +1506,9 @@ num? _nullableProfessionalSnapshotDecimal(
   String key,
   String field,
 ) =>
-    map[key] == null ? null : _requiredDecimal(map[key], field);
+    map[key] == null
+        ? null
+        : _requiredProfessionalSnapshotDecimal(map[key], field);
 
 bool? _nullableProfessionalSnapshotBoolean(
   Map<String, Object?> map,
@@ -1502,7 +1521,88 @@ bool? _nullableProfessionalSnapshotBoolean(
   return value;
 }
 
-bool _hasText(String? value) => value != null && value.trim().isNotEmpty;
+final _professionalSnapshotIsoTime = RegExp(
+  r'^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?$',
+);
+
+DateTime _requiredProfessionalSnapshotDateTime(Object? value, String field) {
+  if (value is! String) throw FormatException('响应包含无效的 $field');
+  final match = _professionalSnapshotIsoTime.firstMatch(value);
+  final parsed = DateTime.tryParse(value);
+  if (match == null || parsed == null) {
+    throw FormatException('响应包含无效的 $field');
+  }
+  final parts = [
+    parsed.year,
+    parsed.month,
+    parsed.day,
+    parsed.hour,
+    parsed.minute,
+    parsed.second,
+  ];
+  for (var index = 0; index < parts.length; index++) {
+    if (parts[index] != int.parse(match.group(index + 1)!)) {
+      throw FormatException('响应包含无效的 $field');
+    }
+  }
+  return parsed;
+}
+
+DateTime? _nullableProfessionalSnapshotDateTime(
+  Map<String, Object?> map,
+  String key,
+  String field,
+) =>
+    map[key] == null
+        ? null
+        : _requiredProfessionalSnapshotDateTime(map[key], field);
+
+bool _validProfessionalSnapshotText(
+  String? value,
+  int maxLength, {
+  bool required = false,
+  bool allowEmpty = false,
+}) {
+  if (value == null) return !required;
+  return value == value.trim() &&
+      value.length <= maxLength &&
+      (allowEmpty || value.isNotEmpty);
+}
+
+bool _validProfessionalSnapshotItems(
+  List<String>? values,
+  int maxItems,
+  int maxItemLength,
+  int maxTargetLength, {
+  bool required = false,
+}) {
+  if (values == null) return !required;
+  if (values.length > maxItems ||
+      values.any((value) =>
+          value.isEmpty ||
+          value != value.trim() ||
+          value.length > maxItemLength)) {
+    return false;
+  }
+  return values.join(',').length <= maxTargetLength;
+}
+
+bool _validProfessionalSnapshotMoney(num? value, {bool required = false}) {
+  if (value == null) return !required;
+  return value.isFinite &&
+      value >= 0 &&
+      value <= 99999999.99 &&
+      _decimalHundredths(value) != null;
+}
+
+BigInt? _professionalSnapshotRateHundredths(
+  num value, {
+  required num minimum,
+  required num maximum,
+}) {
+  if (!value.isFinite || value < minimum || value > maximum) return null;
+  return _decimalHundredths(value);
+}
 
 final class ProfessionalProjectRequest {
   const ProfessionalProjectRequest({
@@ -1545,10 +1645,11 @@ final class ProfessionalProjectRequest {
     final map = _jsonMap(json, '项目申请');
     _requireProfessionalProjectRequestKeys(map);
     final request = ProfessionalProjectRequest(
-      id: _requiredWireText(map['id'], '申请 id'),
-      requestType: _requiredWireText(map['requestType'], '申请类型'),
-      doctorId: _requiredWireText(map['doctorId'], '医生'),
-      doctorName: _requiredWireText(map['doctorName'], '医生名称'),
+      id: _requiredProfessionalSnapshotText(map, 'id', '申请 id'),
+      requestType:
+          _requiredProfessionalSnapshotText(map, 'requestType', '申请类型'),
+      doctorId: _requiredProfessionalSnapshotText(map, 'doctorId', '医生'),
+      doctorName: _requiredProfessionalSnapshotText(map, 'doctorName', '医生名称'),
       institutionId:
           _nullableProfessionalSnapshotText(map, 'institutionId', '机构 id'),
       institutionName:
@@ -1564,7 +1665,7 @@ final class ProfessionalProjectRequest {
       slogan: _nullableProfessionalSnapshotText(map, 'slogan', '项目标语'),
       detailContent:
           _nullableProfessionalSnapshotText(map, 'detailContent', '项目详情'),
-      currency: _requiredWireText(map['currency'], '币种'),
+      currency: _requiredProfessionalSnapshotText(map, 'currency', '币种'),
       coverImage: _nullableProfessionalSnapshotText(map, 'coverImage', '封面图'),
       images: _nullableProfessionalSnapshotItems(map, 'images', '项目图片'),
       salesCount: _requiredWireInteger(map['salesCount'], '销量'),
@@ -1580,16 +1681,19 @@ final class ProfessionalProjectRequest {
           ? null
           : InstitutionProjectSplit.fromJson(map['institutionSplit']),
       notes: _nullableProfessionalSnapshotText(map, 'notes', '申请说明'),
-      status: _requiredWireText(map['status'], '申请状态'),
+      status: _requiredProfessionalSnapshotText(map, 'status', '申请状态'),
       reviewNote: _nullableProfessionalSnapshotText(map, 'reviewNote', '审核意见'),
       reviewedBy: _nullableProfessionalSnapshotText(map, 'reviewedBy', '审核人'),
-      reviewedAt: _nullableWireDateTime(map, 'reviewedAt', '审核时间'),
+      reviewedAt:
+          _nullableProfessionalSnapshotDateTime(map, 'reviewedAt', '审核时间'),
       resultingProjectId: _nullableProfessionalSnapshotText(
           map, 'resultingProjectId', '生成平台项目'),
       resultingInstitutionProjectId: _nullableProfessionalSnapshotText(
           map, 'resultingInstitutionProjectId', '生成机构项目'),
-      submittedAt: _requiredWireDateTime(map['submittedAt'], '提交时间'),
-      updatedAt: _requiredWireDateTime(map['updatedAt'], '更新时间'),
+      submittedAt:
+          _requiredProfessionalSnapshotDateTime(map['submittedAt'], '提交时间'),
+      updatedAt:
+          _requiredProfessionalSnapshotDateTime(map['updatedAt'], '更新时间'),
     );
     if (!request.hasCompleteReviewSnapshot) {
       throw const FormatException('响应包含不完整的项目申请快照');
@@ -1644,13 +1748,20 @@ final class ProfessionalProjectRequest {
           _decimalHundredths(institutionSplit!.doctorRate)! >= BigInt.zero);
 
   bool get hasCompleteReviewSnapshot {
-    if (id.trim().isEmpty ||
-        doctorId.trim().isEmpty ||
-        doctorName.trim().isEmpty ||
-        status.trim().isEmpty ||
-        !const {'CNY', 'USD'}.contains(currency.trim().toUpperCase()) ||
+    if (!_validProfessionalSnapshotText(id, 200, required: true) ||
+        !_validProfessionalSnapshotText(doctorId, 200, required: true) ||
+        !_validProfessionalSnapshotText(doctorName, 200, required: true) ||
+        !const {'PLATFORM', 'INSTITUTION'}.contains(requestType) ||
+        !const {'PENDING', 'APPROVED', 'REJECTED', 'CHANGES_REQUESTED'}
+            .contains(status) ||
+        !const {'CNY', 'USD'}.contains(currency) ||
         salesCount < 0 ||
-        salesCount > 2147483647) {
+        salesCount > 2147483647 ||
+        !_validProfessionalSnapshotText(notes, 2000) ||
+        !_validProfessionalSnapshotText(reviewNote, 1000) ||
+        !_validProfessionalSnapshotText(reviewedBy, 200) ||
+        !_validProfessionalSnapshotText(resultingProjectId, 200) ||
+        !_validProfessionalSnapshotText(resultingInstitutionProjectId, 200)) {
       return false;
     }
     if (requestType == 'PLATFORM') {
@@ -1662,27 +1773,39 @@ final class ProfessionalProjectRequest {
           originalPrice == null &&
           isActive == null &&
           institutionSplit == null &&
-          _hasText(name) &&
-          _hasText(category) &&
-          _hasText(description) &&
-          tags != null &&
-          slogan != null &&
-          coverImage != null &&
-          images != null &&
-          referencePrice != null &&
-          _validDecimal(referencePrice!, 99999999.99) &&
-          categoryTags != null;
+          _validProfessionalSnapshotText(name, 200, required: true) &&
+          _validProfessionalSnapshotText(category, 100, required: true) &&
+          _validProfessionalSnapshotText(description, 5000, required: true) &&
+          _validProfessionalSnapshotItems(tags, 20, 100, 500, required: true) &&
+          _validProfessionalSnapshotText(slogan, 500,
+              required: true, allowEmpty: true) &&
+          _validProfessionalSnapshotText(detailContent, 20000) &&
+          _validProfessionalSnapshotText(coverImage, 500,
+              required: true, allowEmpty: true) &&
+          _validProfessionalSnapshotItems(images, 20, 500, 2000,
+              required: true) &&
+          _validProfessionalSnapshotMoney(referencePrice, required: true) &&
+          _validProfessionalSnapshotItems(categoryTags, 20, 100, 500,
+              required: true);
     }
     if (requestType == 'INSTITUTION') {
       final split = institutionSplit;
       return referencePrice == null &&
           categoryTags == null &&
-          _hasText(institutionId) &&
-          _hasText(projectId) &&
-          price != null &&
-          _validDecimal(price!, 99999999.99) &&
-          (originalPrice == null ||
-              _validDecimal(originalPrice!, 99999999.99)) &&
+          _validProfessionalSnapshotText(institutionId, 200, required: true) &&
+          _validProfessionalSnapshotText(institutionName, 200) &&
+          _validProfessionalSnapshotText(projectId, 200, required: true) &&
+          _validProfessionalSnapshotText(projectName, 200) &&
+          _validProfessionalSnapshotText(name, 200) &&
+          _validProfessionalSnapshotText(category, 100) &&
+          _validProfessionalSnapshotText(description, 5000) &&
+          _validProfessionalSnapshotItems(tags, 20, 100, 500) &&
+          _validProfessionalSnapshotText(slogan, 500) &&
+          _validProfessionalSnapshotText(detailContent, 20000) &&
+          _validProfessionalSnapshotText(coverImage, 500) &&
+          _validProfessionalSnapshotItems(images, 20, 500, 2000) &&
+          _validProfessionalSnapshotMoney(price, required: true) &&
+          _validProfessionalSnapshotMoney(originalPrice) &&
           isActive != null &&
           split != null &&
           split.hasCompleteReviewSnapshot;
@@ -1714,11 +1837,16 @@ final class InstitutionProjectSplit {
       }
     }
     return InstitutionProjectSplit(
-      consultationFee: _requiredDecimal(map['consultationFee'], '咨询费'),
-      commissionRate: _requiredDecimal(map['commissionRate'], '顾问比例'),
-      institutionRate: _requiredDecimal(map['institutionRate'], '机构比例'),
-      platformRate: _requiredDecimal(map['platformRate'], '平台比例'),
-      doctorRate: _requiredDecimal(map['doctorRate'], '医生比例'),
+      consultationFee:
+          _requiredProfessionalSnapshotDecimal(map['consultationFee'], '咨询费'),
+      commissionRate:
+          _requiredProfessionalSnapshotDecimal(map['commissionRate'], '顾问比例'),
+      institutionRate:
+          _requiredProfessionalSnapshotDecimal(map['institutionRate'], '机构比例'),
+      platformRate:
+          _requiredProfessionalSnapshotDecimal(map['platformRate'], '平台比例'),
+      doctorRate:
+          _requiredProfessionalSnapshotDecimal(map['doctorRate'], '医生比例'),
     );
   }
 
@@ -1729,23 +1857,19 @@ final class InstitutionProjectSplit {
   final num doctorRate;
 
   bool get hasCompleteReviewSnapshot {
-    final commission = _decimalHundredths(commissionRate);
-    final institution = _decimalHundredths(institutionRate);
-    final platform = _decimalHundredths(platformRate);
-    final doctor = _decimalHundredths(doctorRate);
-    if (!_validDecimal(consultationFee, 99999999.99) ||
+    final commission = _professionalSnapshotRateHundredths(commissionRate,
+        minimum: 0, maximum: 100);
+    final institution = _professionalSnapshotRateHundredths(institutionRate,
+        minimum: 0, maximum: 100);
+    final platform = _professionalSnapshotRateHundredths(platformRate,
+        minimum: 0, maximum: 100);
+    final doctor = _professionalSnapshotRateHundredths(doctorRate,
+        minimum: -100, maximum: 100);
+    if (!_validProfessionalSnapshotMoney(consultationFee, required: true) ||
         commission == null ||
-        commission < BigInt.zero ||
-        commission > BigInt.from(10000) ||
         institution == null ||
-        institution < BigInt.zero ||
-        institution > BigInt.from(10000) ||
         platform == null ||
-        platform < BigInt.zero ||
-        platform > BigInt.from(10000) ||
         doctor == null ||
-        doctor < BigInt.from(-10000) ||
-        doctor > BigInt.from(10000) ||
         commission + institution > BigInt.from(10000)) {
       return false;
     }

@@ -428,6 +428,60 @@ void main() {
   });
 
   testWidgets(
+      'platform and institution creation submissions synchronously block same-frame re-entry',
+      (tester) async {
+    _useLargeSurface(tester);
+    final platformGate = Completer<void>();
+    final platformRepository = _ProjectRequestRepository()
+      ..platformSubmitGate = platformGate;
+
+    await tester.pumpWidget(_app(PlatformProjectRequestPage(
+      repository: platformRepository,
+      context: _doctorContext,
+    )));
+    await tester.pumpAndSettle();
+    await _fillPlatformDraft(tester, referencePrice: '199.99');
+    final platformSubmit = tester
+        .widget<FilledButton>(find.byKey(const Key('platform-submit')))
+        .onPressed!;
+
+    platformSubmit();
+    platformSubmit();
+    await tester.pump();
+
+    expect(platformRepository.platformSubmissions, hasLength(1));
+    platformGate.complete();
+    await tester.pumpAndSettle();
+
+    final institutionGate = Completer<void>();
+    final institutionRepository = _ProjectRequestRepository()
+      ..institutionSubmitGate = institutionGate;
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      repository: institutionRepository,
+      context: _doctorContext,
+    )));
+    await tester.pumpAndSettle();
+    await _choose(tester, const Key('institution-id'), 'Joysong Clinic');
+    await _choose(tester, const Key('institution-project'), 'Hydrating Facial');
+    await _fillInstitutionDraft(
+      tester,
+      price: '799.99',
+      institutionRate: '40',
+    );
+    final institutionSubmit = tester
+        .widget<FilledButton>(find.byKey(const Key('institution-submit')))
+        .onPressed!;
+
+    institutionSubmit();
+    institutionSubmit();
+    await tester.pump();
+
+    expect(institutionRepository.institutionSubmissions, hasLength(1));
+    institutionGate.complete();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets(
       'platform submission conflict refreshes the latest own requests without replaying or clearing the draft',
       (tester) async {
     _useLargeSurface(tester);
@@ -595,6 +649,98 @@ void main() {
       find.text('提交冲突，申请、项目目录与分账配置已刷新；草稿已保留，请核对后重新提交'),
       findsOneWidget,
     );
+  });
+
+  testWidgets(
+      'institution submission conflict refreshes management context first and clears a relationship-revoked target',
+      (tester) async {
+    _useLargeSurface(tester);
+    final uploads = [
+      'https://cdn.example.com/conflict-clinic-cover.jpg',
+      'https://cdn.example.com/conflict-clinic-gallery.jpg',
+    ];
+    final repository = _ProjectRequestRepository()
+      ..institutionSubmitException =
+          const ApiException(message: 'conflict', httpStatus: 409);
+    repository.onInstitutionSubmit = () {
+      repository
+        ..managementContext = _doctorWithoutInstitutionsContext
+        ..formPlatformRate = 12.5;
+    };
+
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      repository: repository,
+      context: _doctorContext,
+      pickAndUploadImage: () async => uploads.removeAt(0),
+    )));
+    await tester.pumpAndSettle();
+    await _prepareInstitutionConflictDraft(tester);
+    repository.calls.clear();
+
+    await _submit(tester, const Key('institution-submit'));
+
+    expect(repository.institutionSubmissions, hasLength(1),
+        reason: 'the conflicted POST must not be replayed');
+    expect(repository.managementContextLoads, 1);
+    expect(repository.calls, [
+      'submit-institution',
+      'management-context',
+      'requests',
+      'institution-options',
+      'management-projects',
+      'form-config',
+    ]);
+    expect(repository.institutionOptions.single.id, 'inst-1',
+        reason: 'the public directory deliberately still contains the target');
+    expect(_dropdownValue(tester, 'institution-id'), isNull,
+        reason: 'the refreshed doctor relationship, not the public directory, '
+            'must authorize the selection');
+    expect(_dropdownValue(tester, 'institution-project'), 'project-1');
+    _expectInstitutionConflictDraftValuesRetained(tester);
+    expect(find.text('平台比例（只读）：12.5%'), findsOneWidget);
+
+    await _submit(tester, const Key('institution-submit'));
+    expect(repository.institutionSubmissions, hasLength(1));
+    expect(find.text('请选择机构和平台项目，并填写有效金额、销量与分账比例'), findsOneWidget);
+  });
+
+  testWidgets(
+      'institution submission conflict reports stale authorization and skips form refresh when management context fails',
+      (tester) async {
+    _useLargeSurface(tester);
+    final uploads = [
+      'https://cdn.example.com/conflict-clinic-cover.jpg',
+      'https://cdn.example.com/conflict-clinic-gallery.jpg',
+    ];
+    final repository = _ProjectRequestRepository()
+      ..institutionSubmitException =
+          const ApiException(message: 'conflict', httpStatus: 409);
+
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      repository: repository,
+      context: _doctorContext,
+      pickAndUploadImage: () async => uploads.removeAt(0),
+    )));
+    await tester.pumpAndSettle();
+    await _prepareInstitutionConflictDraft(tester);
+    repository
+      ..calls.clear()
+      ..failNextManagementContext = true;
+
+    await _submit(tester, const Key('institution-submit'));
+
+    expect(repository.institutionSubmissions, hasLength(1));
+    expect(repository.managementContextLoads, 1);
+    expect(repository.requestListLoads, 1);
+    expect(repository.institutionOptionLoads, 1);
+    expect(repository.managementProjectLoads, 1);
+    expect(repository.formConfigLoads, 1);
+    expect(repository.calls, ['submit-institution', 'management-context']);
+    _expectInstitutionConflictDraftRetained(tester);
+    expect(find.textContaining('权限刷新失败'), findsOneWidget);
+    expect(find.textContaining('可能已过期'), findsOneWidget);
+    expect(find.textContaining('已刷新；草稿已保留'), findsNothing,
+        reason: 'a failed context refresh must not claim fresh authorization');
   });
 
   testWidgets(
@@ -1588,6 +1734,19 @@ const _doctorContext = ManagementContext(
   canSubmitInstitutionProjectRequests: true,
 );
 
+const _doctorWithoutInstitutionsContext = ManagementContext(
+  userId: 'doctor-user-1',
+  platformRole: 'USER',
+  activeRoles: ['DOCTOR'],
+  doctorId: 'doctor-1',
+  managedInstitutionIds: [],
+  visibleInstitutionIds: ['inst-1'],
+  doctorInstitutionIds: [],
+  canManageDoctors: true,
+  canSubmitPlatformProjectRequests: true,
+  canSubmitInstitutionProjectRequests: true,
+);
+
 const _multiInstitutionDoctorContext = ManagementContext(
   userId: 'doctor-user-1',
   platformRole: 'USER',
@@ -1768,8 +1927,11 @@ final class _ProjectRequestRepository implements IdentityRepository {
   Object? platformSubmitException;
   Object? institutionSubmitException;
   bool failNextRequestList = false;
+  bool failNextManagementContext = false;
   Completer<List<ProfessionalProjectRequest>>? nextRequestList;
   Completer<void>? requestListStarted;
+  Completer<void>? platformSubmitGate;
+  Completer<void>? institutionSubmitGate;
   Completer<void>? platformReviewGate;
   Completer<void>? institutionReviewGate;
   Object? platformReviewError;
@@ -1806,14 +1968,25 @@ final class _ProjectRequestRepository implements IdentityRepository {
   int managementProjectLoads = 0;
   int formConfigLoads = 0;
   int requestListLoads = 0;
+  int managementContextLoads = 0;
+  final calls = <String>[];
 
   @override
-  Future<ManagementContext> loadManagementContext() async => managementContext;
+  Future<ManagementContext> loadManagementContext() async {
+    managementContextLoads++;
+    calls.add('management-context');
+    if (failNextManagementContext) {
+      failNextManagementContext = false;
+      throw StateError('management context refresh failed');
+    }
+    return managementContext;
+  }
 
   @override
   Future<List<ProfessionalProjectRequest>>
       listProfessionalProjectRequests() async {
     requestListLoads++;
+    calls.add('requests');
     final pending = nextRequestList;
     if (pending != null) {
       nextRequestList = null;
@@ -1831,12 +2004,14 @@ final class _ProjectRequestRepository implements IdentityRepository {
   @override
   Future<List<InstitutionOption>> listInstitutionOptions() async {
     institutionOptionLoads++;
+    calls.add('institution-options');
     return institutionOptions;
   }
 
   @override
   Future<List<ManagementProjectOption>> listManagementProjects() async {
     managementProjectLoads++;
+    calls.add('management-projects');
     return managementProjects;
   }
 
@@ -1844,6 +2019,7 @@ final class _ProjectRequestRepository implements IdentityRepository {
   Future<InstitutionProjectApplicationFormConfig>
       loadInstitutionProjectApplicationFormConfig() async {
     formConfigLoads++;
+    calls.add('form-config');
     return InstitutionProjectApplicationFormConfig(
         platformRate: formPlatformRate);
   }
@@ -1852,7 +2028,9 @@ final class _ProjectRequestRepository implements IdentityRepository {
   Future<void> submitPlatformProjectRequest(
       PlatformProjectRequestDraft draft) async {
     platformSubmissions.add(draft);
+    calls.add('submit-platform');
     onPlatformSubmit?.call();
+    await platformSubmitGate?.future;
     final exception = platformSubmitException;
     if (exception != null) throw exception;
     if (platformSubmitError) throw StateError('submit failed');
@@ -1862,7 +2040,9 @@ final class _ProjectRequestRepository implements IdentityRepository {
   Future<void> submitInstitutionProjectRequest(
       InstitutionProjectRequestDraft draft) async {
     institutionSubmissions.add(draft);
+    calls.add('submit-institution');
     onInstitutionSubmit?.call();
+    await institutionSubmitGate?.future;
     final exception = institutionSubmitException;
     if (exception != null) throw exception;
     if (institutionSubmitError) throw StateError('submit failed');

@@ -648,6 +648,7 @@ class _PlatformProjectRequestPageState
       );
 
   Future<void> _submit() async {
+    if (_saving || _uploading) return;
     final referencePrice = num.tryParse(_referencePrice.text.trim());
     final salesCount = int.tryParse(_salesCount.text.trim());
     if (referencePrice == null || salesCount == null) {
@@ -839,11 +840,21 @@ class _InstitutionProjectRequestsPageState
   String? _error;
   var _loading = true;
   var _saving = false, _uploading = false, _reviewing = false;
+  late ManagementContext _currentContext;
 
   @override
   void initState() {
     super.initState();
+    _currentContext = widget.context;
     _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant InstitutionProjectRequestsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.context != widget.context) {
+      _currentContext = widget.context;
+    }
   }
 
   @override
@@ -883,7 +894,7 @@ class _InstitutionProjectRequestsPageState
               widget.repository.loadInstitutionProjectApplicationFormConfig(),
             ]);
       if (!mounted) return false;
-      final allowedIds = widget.context.doctorInstitutionIds.toSet();
+      final allowedIds = _currentContext.doctorInstitutionIds.toSet();
       setState(() {
         _requests = (values[0] as List<ProfessionalProjectRequest>)
             .where((item) => item.requestType == 'INSTITUTION')
@@ -932,23 +943,23 @@ class _InstitutionProjectRequestsPageState
 
   bool _isVisible(ProfessionalProjectRequest request) {
     if (widget.reviewMode) {
-      if (widget.context.platformRole == 'ADMIN') return true;
-      final legal = widget.context.activeRoles
+      if (_currentContext.platformRole == 'ADMIN') return true;
+      final legal = _currentContext.activeRoles
           .contains(IdentityRoleType.institutionLegalRepresentative.code);
       return legal &&
           request.institutionId != null &&
-          widget.context.managedInstitutionIds.contains(request.institutionId);
+          _currentContext.managedInstitutionIds.contains(request.institutionId);
     }
-    return widget.context.doctorId != null &&
-        request.doctorId == widget.context.doctorId;
+    return _currentContext.doctorId != null &&
+        request.doctorId == _currentContext.doctorId;
   }
 
   bool _canReview(ProfessionalProjectRequest request) {
     if (!widget.reviewMode || !request.isCreationReviewable) return false;
-    if (widget.context.platformRole == 'ADMIN') return true;
-    return widget.context.canReviewInstitutionProjectRequests &&
+    if (_currentContext.platformRole == 'ADMIN') return true;
+    return _currentContext.canReviewInstitutionProjectRequests &&
         request.institutionId != null &&
-        widget.context.managedInstitutionIds.contains(request.institutionId);
+        _currentContext.managedInstitutionIds.contains(request.institutionId);
   }
 
   ManagementProjectOption? get _selectedProject {
@@ -1010,8 +1021,8 @@ class _InstitutionProjectRequestsPageState
                     const SizedBox(height: 12),
                     Text(
                       context.localized(
-                        '当前认证医生：${widget.context.doctorId ?? '-'}。该医生是唯一申请医生，审批后仅关联本人。',
-                        'Current authenticated doctor: ${widget.context.doctorId ?? '-'}. This is the only applicant and binding created after approval.',
+                        '当前认证医生：${_currentContext.doctorId ?? '-'}。该医生是唯一申请医生，审批后仅关联本人。',
+                        'Current authenticated doctor: ${_currentContext.doctorId ?? '-'}. This is the only applicant and binding created after approval.',
                       ),
                       key: const Key('institution-applicant-notice'),
                     ),
@@ -1215,6 +1226,7 @@ class _InstitutionProjectRequestsPageState
       );
 
   Future<void> _submit() async {
+    if (_saving || _uploading) return;
     final institutionId = _institutionId;
     final projectId = _projectId;
     final price = num.tryParse(_price.text.trim());
@@ -1277,6 +1289,19 @@ class _InstitutionProjectRequestsPageState
     } on ApiException catch (error) {
       if (!mounted) return;
       if (error.httpStatus == 409) {
+        try {
+          final currentContext =
+              await widget.repository.loadManagementContext();
+          if (!mounted) return;
+          _currentContext = currentContext;
+        } catch (_) {
+          if (!mounted) return;
+          setState(() => _error = context.localized(
+                '提交冲突，但当前权限刷新失败；草稿已保留，机构关系可能已过期，请重新进入页面后再提交',
+                'Submission conflict, but current authorization could not be refreshed. The draft was retained and the institution relationship may be stale; reopen the page before submitting again.',
+              ));
+          return;
+        }
         final refreshed = await _load();
         if (!mounted) return;
         setState(() => _error = refreshed
