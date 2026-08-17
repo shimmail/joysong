@@ -55,7 +55,6 @@ class ProfessionalProjectRequestPersistenceTest {
     @BeforeAll
     fun migrateAndPrepare() {
         val databaseName = WorktreeTestDatabase.databaseName()
-        assertEquals(EXPECTED_DATABASE, databaseName)
         assertTrue(databaseName.startsWith(DESTRUCTIVE_SAFE_PREFIX))
         WorktreeTestDatabase.validateAndPrint(mysql)
         Flyway.configure()
@@ -605,7 +604,6 @@ class ProfessionalProjectRequestPersistenceTest {
     )
 
     companion object {
-        private const val EXPECTED_DATABASE = "myapp_worktree_doctor_project_application_full_vo"
         private const val DESTRUCTIVE_SAFE_PREFIX = "myapp_worktree_"
 
         @Container

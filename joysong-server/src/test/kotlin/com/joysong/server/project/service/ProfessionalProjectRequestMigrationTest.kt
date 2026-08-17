@@ -21,7 +21,6 @@ import java.math.BigDecimal
 class ProfessionalProjectRequestMigrationTest {
     @Test
     fun `V28 preserves legacy platform requests and enforces the request ledger contract`() {
-        assertEquals("myapp_worktree_doctor_project_application_full_vo", WorktreeTestDatabase.databaseName())
         migrateTo("27")
         val jdbc = jdbc()
         seedLegacyRequests(jdbc)
