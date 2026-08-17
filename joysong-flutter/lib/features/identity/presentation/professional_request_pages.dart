@@ -683,6 +683,23 @@ class _PlatformProjectRequestPageState
       await widget.repository.submitPlatformProjectRequest(draft);
       final refreshed = await _load();
       if (refreshed && mounted) _clearDraft();
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      if (error.httpStatus == 409) {
+        final refreshed = await _load();
+        if (!mounted) return;
+        setState(() => _error = refreshed
+            ? context.localized(
+                '提交冲突，申请列表已刷新；草稿已保留，请核对最新申请后再决定是否重新提交',
+                'Submission conflict. The request list was refreshed and the draft was retained; review the latest requests before submitting again.',
+              )
+            : context.localized(
+                '提交冲突，申请列表刷新失败；草稿已保留，请手动刷新后再提交',
+                'Submission conflict. The request list could not be refreshed; the draft was retained. Refresh manually before submitting again.',
+              ));
+      } else {
+        setState(() => _error = '项目申请提交失败，请稍后重试');
+      }
     } catch (_) {
       if (mounted) setState(() => _error = '项目申请提交失败，请稍后重试');
     } finally {
@@ -1247,6 +1264,23 @@ class _InstitutionProjectRequestsPageState
     try {
       await widget.repository.submitInstitutionProjectRequest(draft);
       if (await _refreshRequests()) _clearDraft();
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      if (error.httpStatus == 409) {
+        final refreshed = await _load();
+        if (!mounted) return;
+        setState(() => _error = refreshed
+            ? context.localized(
+                '提交冲突，申请、项目目录与分账配置已刷新；草稿已保留，请核对后重新提交',
+                'Submission conflict. Requests, the project catalog, and split configuration were refreshed; the draft was retained. Review them before submitting again.',
+              )
+            : context.localized(
+                '提交冲突，申请、项目目录或分账配置刷新失败；草稿已保留，请手动刷新后再提交',
+                'Submission conflict. Requests, the project catalog, or split configuration could not be refreshed; the draft was retained. Refresh manually before submitting again.',
+              ));
+      } else {
+        setState(() => _error = '机构项目申请提交失败，请稍后重试');
+      }
     } catch (_) {
       if (mounted) setState(() => _error = '机构项目申请提交失败，请稍后重试');
     } finally {

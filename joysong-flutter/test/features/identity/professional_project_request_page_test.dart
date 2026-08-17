@@ -428,6 +428,212 @@ void main() {
   });
 
   testWidgets(
+      'platform submission conflict refreshes the latest own requests without replaying or clearing the draft',
+      (tester) async {
+    _useLargeSurface(tester);
+    final uploads = [
+      'https://cdn.example.com/conflict-platform-cover.jpg',
+      'https://cdn.example.com/conflict-platform-gallery.jpg',
+    ];
+    final repository = _ProjectRequestRepository()
+      ..platformSubmitException =
+          const ApiException(message: 'conflict', httpStatus: 409);
+    repository.onPlatformSubmit = () {
+      repository.requests = [
+        _request(
+          id: 'platform-conflict-latest',
+          type: 'PLATFORM',
+          doctorId: 'doctor-1',
+        ),
+      ];
+    };
+
+    await tester.pumpWidget(_app(PlatformProjectRequestPage(
+      repository: repository,
+      context: _doctorContext,
+      pickAndUploadImage: () async => uploads.removeAt(0),
+    )));
+    await tester.pumpAndSettle();
+    await _preparePlatformConflictDraft(tester);
+    expect(repository.requestListLoads, 1);
+
+    await _submit(tester, const Key('platform-submit'));
+
+    expect(repository.platformSubmissions, hasLength(1),
+        reason: 'a 409 must never auto-replay the POST');
+    expect(repository.requestListLoads, 2);
+    expect(repository.institutionOptionLoads, 0);
+    expect(repository.managementProjectLoads, 0);
+    expect(repository.formConfigLoads, 0);
+    _expectPlatformConflictDraftRetained(tester);
+    expect(
+      find.byKey(const Key('professional-request-platform-conflict-latest')),
+      findsOneWidget,
+    );
+    expect(
+      find.text('提交冲突，申请列表已刷新；草稿已保留，请核对最新申请后再决定是否重新提交'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
+      'platform submission conflict keeps its draft and gives recovery guidance when refresh fails',
+      (tester) async {
+    _useLargeSurface(tester);
+    final uploads = [
+      'https://cdn.example.com/conflict-platform-cover.jpg',
+      'https://cdn.example.com/conflict-platform-gallery.jpg',
+    ];
+    final repository = _ProjectRequestRepository()
+      ..platformSubmitException =
+          const ApiException(message: 'conflict', httpStatus: 409);
+
+    await tester.pumpWidget(_app(PlatformProjectRequestPage(
+      key: const ValueKey('platform-conflict-refresh-failure'),
+      repository: repository,
+      context: _doctorContext,
+      pickAndUploadImage: () async => uploads.removeAt(0),
+    )));
+    await tester.pumpAndSettle();
+    await _preparePlatformConflictDraft(tester);
+    repository.failNextRequestList = true;
+
+    await _submit(tester, const Key('platform-submit'));
+
+    expect(repository.platformSubmissions, hasLength(1));
+    expect(repository.requestListLoads, 2);
+    _expectPlatformConflictDraftRetained(tester);
+    expect(
+      find.text('提交冲突，申请列表刷新失败；草稿已保留，请手动刷新后再提交'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
+      'institution submission conflict refreshes authorized form data without replaying or clearing the draft',
+      (tester) async {
+    _useLargeSurface(tester);
+    final uploads = [
+      'https://cdn.example.com/conflict-clinic-cover.jpg',
+      'https://cdn.example.com/conflict-clinic-gallery.jpg',
+    ];
+    final repository = _ProjectRequestRepository()
+      ..institutionSubmitException =
+          const ApiException(message: 'conflict', httpStatus: 409);
+    repository.onInstitutionSubmit = () {
+      repository
+        ..requests = [
+          _request(
+            id: 'institution-conflict-latest',
+            type: 'INSTITUTION',
+            doctorId: 'doctor-1',
+            institutionId: 'inst-1',
+            platformRate: 12.5,
+            doctorRate: 32.75,
+          ),
+        ]
+        ..formPlatformRate = 12.5
+        ..institutionOptions = const [
+          InstitutionOption(id: 'inst-1', name: 'Refreshed Joysong Clinic'),
+        ]
+        ..managementProjects = const [
+          ManagementProjectOption(
+            id: 'project-1',
+            name: 'Refreshed Hydrating Facial',
+            category: 'Refreshed Skin',
+            description: 'Refreshed inherited description',
+            tags: 'refreshed,hydration',
+            categoryTags: 'refreshed,facial',
+            coverImage: 'https://cdn.example.com/refreshed-cover.jpg',
+            referencePrice: 777.77,
+            currency: 'USD',
+            slogan: 'Refreshed glow',
+            detailContent: 'Refreshed inherited detail',
+            images: ['https://cdn.example.com/refreshed-gallery.jpg'],
+            salesCount: 27,
+          ),
+        ];
+    };
+
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      repository: repository,
+      context: _doctorContext,
+      pickAndUploadImage: () async => uploads.removeAt(0),
+    )));
+    await tester.pumpAndSettle();
+    await _prepareInstitutionConflictDraft(tester);
+    expect(repository.requestListLoads, 1);
+    expect(repository.institutionOptionLoads, 1);
+    expect(repository.managementProjectLoads, 1);
+    expect(repository.formConfigLoads, 1);
+
+    await _submit(tester, const Key('institution-submit'));
+
+    expect(repository.institutionSubmissions, hasLength(1),
+        reason: 'a 409 must never auto-replay the POST');
+    expect(repository.requestListLoads, 2);
+    expect(repository.institutionOptionLoads, 2);
+    expect(repository.managementProjectLoads, 2);
+    expect(repository.formConfigLoads, 2);
+    _expectInstitutionConflictDraftRetained(tester);
+    expect(find.text('Refreshed Joysong Clinic'), findsOneWidget);
+    expect(find.text('Refreshed Hydrating Facial'), findsWidgets);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('institution-name')))
+          .decoration
+          ?.hintText,
+      'Refreshed Hydrating Facial',
+    );
+    expect(find.text('当前平台比例：12.5%'), findsOneWidget);
+    expect(find.text('医生比例（自动推导）：17.5%'), findsOneWidget);
+    expect(
+      find.byKey(const Key('professional-request-institution-conflict-latest')),
+      findsOneWidget,
+    );
+    expect(
+      find.text('提交冲突，申请、项目目录与分账配置已刷新；草稿已保留，请核对后重新提交'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
+      'institution submission conflict keeps selections and gives recovery guidance when form refresh fails',
+      (tester) async {
+    _useLargeSurface(tester);
+    final uploads = [
+      'https://cdn.example.com/conflict-clinic-cover.jpg',
+      'https://cdn.example.com/conflict-clinic-gallery.jpg',
+    ];
+    final repository = _ProjectRequestRepository()
+      ..institutionSubmitException =
+          const ApiException(message: 'conflict', httpStatus: 409);
+
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      key: const ValueKey('institution-conflict-refresh-failure'),
+      repository: repository,
+      context: _doctorContext,
+      pickAndUploadImage: () async => uploads.removeAt(0),
+    )));
+    await tester.pumpAndSettle();
+    await _prepareInstitutionConflictDraft(tester);
+    repository.failNextRequestList = true;
+
+    await _submit(tester, const Key('institution-submit'));
+
+    expect(repository.institutionSubmissions, hasLength(1));
+    expect(repository.requestListLoads, 2);
+    expect(repository.institutionOptionLoads, 2);
+    expect(repository.managementProjectLoads, 2);
+    expect(repository.formConfigLoads, 2);
+    _expectInstitutionConflictDraftRetained(tester);
+    expect(
+      find.text('提交冲突，申请、项目目录或分账配置刷新失败；草稿已保留，请手动刷新后再提交'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
       'platform submit ignores a successful refresh completed after the page is disposed',
       (tester) async {
     _useLargeSurface(tester);
@@ -1176,6 +1382,87 @@ Future<void> _fillInstitutionDraft(
   }
 }
 
+Future<void> _preparePlatformConflictDraft(WidgetTester tester) async {
+  await _fillPlatformDraft(tester, referencePrice: '199.99');
+  await _choose(tester, const Key('platform-currency'), 'USD');
+  await tester.tap(find.byKey(const Key('platform-cover-upload')));
+  await tester.pump();
+  await tester.tap(find.byKey(const Key('platform-gallery-upload')));
+  await tester.pump();
+}
+
+void _expectPlatformConflictDraftRetained(WidgetTester tester) {
+  for (final entry in const {
+    'platform-name': 'Retained platform name',
+    'platform-reference-price': '199.99',
+    'platform-slogan': 'Retained slogan',
+    'platform-sales-count': '8',
+    'platform-category': 'Skin',
+    'platform-description': 'Retained description',
+    'platform-detail-content': 'Retained plain detail',
+    'platform-tags': 'hydration, gentle',
+    'platform-category-tags': 'facial, skin',
+    'platform-notes': 'Retained notes',
+  }.entries) {
+    expect(_text(tester, entry.key), entry.value);
+  }
+  expect(_dropdownValue(tester, 'platform-currency'), 'USD');
+  expect(find.text('https://cdn.example.com/conflict-platform-cover.jpg'),
+      findsOneWidget);
+  expect(find.text('https://cdn.example.com/conflict-platform-gallery.jpg'),
+      findsOneWidget);
+}
+
+Future<void> _prepareInstitutionConflictDraft(WidgetTester tester) async {
+  await _choose(tester, const Key('institution-id'), 'Joysong Clinic');
+  await _choose(tester, const Key('institution-project'), 'Hydrating Facial');
+  await _fillInstitutionDraft(
+    tester,
+    price: '799.99',
+    institutionRate: '40',
+  );
+  await _choose(tester, const Key('institution-currency'), 'USD');
+  await tester.tap(find.byKey(const Key('institution-is-active')));
+  await tester.pump();
+  await tester.tap(find.byKey(const Key('institution-cover-upload')));
+  await tester.pump();
+  await tester.tap(find.byKey(const Key('institution-gallery-upload')));
+  await tester.pump();
+}
+
+void _expectInstitutionConflictDraftRetained(WidgetTester tester) {
+  for (final entry in const {
+    'institution-name': 'Clinic override',
+    'institution-category': 'Clinic category',
+    'institution-description': 'Clinic description',
+    'institution-tags': 'clinic,signature',
+    'institution-slogan': 'Clinic glow',
+    'institution-detail-content': 'Override plain detail',
+    'institution-price': '799.99',
+    'institution-original-price': '999.99',
+    'institution-sales-count': '7',
+    'institution-consultation-fee': '80.25',
+    'institution-consultant-rate': '30',
+    'institution-rate': '40',
+    'institution-notes': 'Clinic notes',
+  }.entries) {
+    expect(_text(tester, entry.key), entry.value);
+  }
+  expect(_dropdownValue(tester, 'institution-id'), 'inst-1');
+  expect(_dropdownValue(tester, 'institution-project'), 'project-1');
+  expect(_dropdownValue(tester, 'institution-currency'), 'USD');
+  expect(
+    tester
+        .widget<SwitchListTile>(find.byKey(const Key('institution-is-active')))
+        .value,
+    isFalse,
+  );
+  expect(find.text('https://cdn.example.com/conflict-clinic-cover.jpg'),
+      findsOneWidget);
+  expect(find.text('https://cdn.example.com/conflict-clinic-gallery.jpg'),
+      findsOneWidget);
+}
+
 Future<void> _selectReviewDecision(WidgetTester tester, String decision) async {
   await tester.tap(find.byKey(const Key('creation-review-decision')));
   await tester.pumpAndSettle();
@@ -1360,6 +1647,8 @@ final class _ProjectRequestRepository implements IdentityRepository {
   final institutionReviews = <({String id, String decision, String note})>[];
   bool platformSubmitError = false;
   bool institutionSubmitError = false;
+  Object? platformSubmitException;
+  Object? institutionSubmitException;
   bool failNextRequestList = false;
   Completer<List<ProfessionalProjectRequest>>? nextRequestList;
   Completer<void>? requestListStarted;
@@ -1369,7 +1658,32 @@ final class _ProjectRequestRepository implements IdentityRepository {
   Object? institutionReviewError;
   void Function()? onPlatformReview;
   void Function()? onInstitutionReview;
+  void Function()? onPlatformSubmit;
+  void Function()? onInstitutionSubmit;
   num formPlatformRate = 10.25;
+  List<InstitutionOption> institutionOptions = const [
+    InstitutionOption(id: 'inst-1', name: 'Joysong Clinic'),
+  ];
+  List<ManagementProjectOption> managementProjects = const [
+    ManagementProjectOption(
+      id: 'project-1',
+      name: 'Hydrating Facial',
+      category: 'Skin',
+      description: 'Inherited description',
+      tags: 'hydration,gentle',
+      categoryTags: 'facial,skin',
+      coverImage: 'https://cdn.example.com/inherited-cover.jpg',
+      referencePrice: 899.25,
+      currency: 'USD',
+      slogan: 'Glow naturally',
+      detailContent: 'Inherited plain detail',
+      images: [
+        'https://cdn.example.com/inherited-one.jpg',
+        'https://cdn.example.com/inherited-two.jpg',
+      ],
+      salesCount: 18,
+    ),
+  ];
   int institutionOptionLoads = 0;
   int managementProjectLoads = 0;
   int formConfigLoads = 0;
@@ -1399,32 +1713,13 @@ final class _ProjectRequestRepository implements IdentityRepository {
   @override
   Future<List<InstitutionOption>> listInstitutionOptions() async {
     institutionOptionLoads++;
-    return const [InstitutionOption(id: 'inst-1', name: 'Joysong Clinic')];
+    return institutionOptions;
   }
 
   @override
   Future<List<ManagementProjectOption>> listManagementProjects() async {
     managementProjectLoads++;
-    return const [
-      ManagementProjectOption(
-        id: 'project-1',
-        name: 'Hydrating Facial',
-        category: 'Skin',
-        description: 'Inherited description',
-        tags: 'hydration,gentle',
-        categoryTags: 'facial,skin',
-        coverImage: 'https://cdn.example.com/inherited-cover.jpg',
-        referencePrice: 899.25,
-        currency: 'USD',
-        slogan: 'Glow naturally',
-        detailContent: 'Inherited plain detail',
-        images: [
-          'https://cdn.example.com/inherited-one.jpg',
-          'https://cdn.example.com/inherited-two.jpg',
-        ],
-        salesCount: 18,
-      ),
-    ];
+    return managementProjects;
   }
 
   @override
@@ -1439,6 +1734,9 @@ final class _ProjectRequestRepository implements IdentityRepository {
   Future<void> submitPlatformProjectRequest(
       PlatformProjectRequestDraft draft) async {
     platformSubmissions.add(draft);
+    onPlatformSubmit?.call();
+    final exception = platformSubmitException;
+    if (exception != null) throw exception;
     if (platformSubmitError) throw StateError('submit failed');
   }
 
@@ -1446,6 +1744,9 @@ final class _ProjectRequestRepository implements IdentityRepository {
   Future<void> submitInstitutionProjectRequest(
       InstitutionProjectRequestDraft draft) async {
     institutionSubmissions.add(draft);
+    onInstitutionSubmit?.call();
+    final exception = institutionSubmitException;
+    if (exception != null) throw exception;
     if (institutionSubmitError) throw StateError('submit failed');
   }
 
