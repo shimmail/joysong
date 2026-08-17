@@ -879,10 +879,10 @@ class AgentChatFlowIntegrationTest {
     @Test
     @WithMockUser(username = "user-1")
     fun `HTTP human consultation returns and restores a fixed institution handoff without model calls`() {
-        val institution = seedConsultableInstitution()
+        val seed = seedConsultableInstitution()
         val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
 
-        mockMvc.perform(
+        val current = mockMvc.perform(
             post("/api/chat/sessions/{id}/messages", session.id)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""{"content":"我想转人工咨询","idempotencyKey":"http-human-handoff-1"}""")
@@ -892,15 +892,21 @@ class AgentChatFlowIntegrationTest {
             .andExpect(jsonPath("$.data.queryTarget").value("INSTITUTION"))
             .andExpect(jsonPath("$.data.nextAction").value("SELECT_INSTITUTION"))
             .andExpect(jsonPath("$.data.catalogItems[0].type").value("INSTITUTION"))
-            .andExpect(jsonPath("$.data.catalogItems[0].institutionId").value(institution.id))
+            .andExpect(jsonPath("$.data.catalogItems[0].institutionId").value(seed.institution.id))
             .andExpect(jsonPath("$.data.catalogItems[0].canChatWithHuman").value(true))
+            .andReturn().response.contentAsString
+        assertFalse(current.contains(seed.consultantId))
         assertEquals(0, fakeLlmCalls.get())
 
-        mockMvc.perform(get("/api/chat/sessions/{id}/messages", session.id))
+        val history = mockMvc.perform(get("/api/chat/sessions/{id}/messages", session.id))
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.data[1].catalogItems[0].type").value("INSTITUTION"))
-            .andExpect(jsonPath("$.data[1].catalogItems[0].institutionId").value(institution.id))
+            .andExpect(jsonPath("$.data[1].catalogItems[0].institutionId").value(seed.institution.id))
             .andExpect(jsonPath("$.data[1].catalogItems[0].canChatWithHuman").value(true))
+            .andReturn().response.contentAsString
+        assertFalse(history.contains(seed.consultantId))
+        val assistantMetadata = messages(session.id).single { it.role == "ASSISTANT" }.metadataJson
+        assertFalse(assistantMetadata.contains(seed.consultantId))
     }
 
     @Test
@@ -1393,7 +1399,12 @@ class AgentChatFlowIntegrationTest {
         )
     }
 
-    private fun seedConsultableInstitution(): InstitutionEntity {
+    private data class ConsultableInstitutionSeed(
+        val institution: InstitutionEntity,
+        val consultantId: String
+    )
+
+    private fun seedConsultableInstitution(): ConsultableInstitutionSeed {
         val institution = institutionRepository.saveAndFlush(
             InstitutionEntity(
                 id = UUID.randomUUID().toString(),
@@ -1420,7 +1431,7 @@ class AgentChatFlowIntegrationTest {
             consultantId,
             institution.id
         )
-        return institution
+        return ConsultableInstitutionSeed(institution, consultantId)
     }
 
     private fun comparisonRequest() = ComparisonRequest(

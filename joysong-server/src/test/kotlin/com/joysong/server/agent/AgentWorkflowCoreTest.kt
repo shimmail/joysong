@@ -355,27 +355,90 @@ class AgentWorkflowCoreTest {
     }
 
     @Test
-    fun `empty human consultation candidates persist NONE and no cards`() {
+    fun `empty human consultation candidates persist NONE summary and replay snapshot`() {
         val content = "我想转人工咨询"
         val completionTemplate = RestTemplate()
         val intentTemplate = RestTemplate()
         val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
         val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
         val catalog = mockk<AgentCatalogService>()
-        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
-        val completed = slot<CompleteTurnCommand>()
-        prepareChatGeneration(fixture, content)
-        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
-            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "handoff")
-        )
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog, lifecycle, context)
+        val ownedSession = session()
+        val persistedTurns = linkedMapOf<String, AgentTurnEntity>()
+        val persistedMessages = linkedMapOf<Pair<String, String>, ChatMessageEntity>()
+        var turnSaveCount = 0
+        var messageSaveCount = 0
+        var sessionSaveCount = 0
+        every { fixture.availabilityGuard.requireGenerationEnabled() } just runs
+        every { sessions.findByIdAndUserIdForUpdate("session-1", "user-1") } returns ownedSession
+        every { sessions.findByIdAndUserIdAndDeletedAtIsNull("session-1", "user-1") } returns ownedSession
+        every { sessions.findByIdForUpdate("session-1") } returns ownedSession
+        every { sessions.save(any()) } answers {
+            sessionSaveCount += 1
+            firstArg()
+        }
+        every { turns.findBySessionIdAndIdempotencyKey("session-1", "key-1") } answers {
+            persistedTurns.values.singleOrNull()
+        }
+        every { turns.findBySessionIdAndStatus("session-1", AgentTurnStatus.RUNNING) } returns null
+        every { turns.findSessionIdById(any()) } answers { persistedTurns[firstArg()]?.sessionId }
+        every { turns.findByIdForUpdate(any()) } answers { persistedTurns[firstArg()] }
+        every { turns.save(any()) } answers {
+            turnSaveCount += 1
+            firstArg<AgentTurnEntity>().also { persistedTurns[it.id] = it }
+        }
+        every { messages.findByTurnIdAndRole(any(), any()) } answers {
+            persistedMessages[firstArg<String>() to secondArg<String>()]
+        }
+        every { messages.save(any()) } answers {
+            messageSaveCount += 1
+            firstArg<ChatMessageEntity>().also { message ->
+                persistedMessages[requireNotNull(message.turnId) to message.role] = message
+            }
+        }
+        every { messages.findBySessionIdOrderBySequenceNoAsc("session-1") } answers {
+            persistedMessages.values.sortedBy { it.sequenceNo }
+        }
+        every { messages.findSucceededTurnMessagesBySessionId("session-1") } returns emptyList()
+        every { messages.deleteAll(any<Iterable<ChatMessageEntity>>()) } just runs
+        every { fixture.operationLogger.completed(any(), any(), any(), any(), any()) } just runs
         every { catalog.selectConsultableInstitutions("user-1", content, null) } returns
             ConsultableInstitutionSelection(emptyList(), false)
 
-        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+        val completed = fixture.chat.sendMessage(
+            "session-1",
+            "user-1",
+            SendMessageRequest(content = content, idempotencyKey = "key-1")
+        )
 
-        assertEquals("NONE", completed.captured.nextAction)
-        assertTrue(completed.captured.catalogItems.isEmpty())
-        assertEquals("", completed.captured.modelName)
+        val persistedAssistant = persistedMessages.values.single { it.role == "ASSISTANT" }
+        val metadata = objectMapper.readTree(persistedAssistant.metadataJson)
+        val summary = objectMapper.readTree(ownedSession.summaryJson)
+        assertEquals("NONE", completed.nextAction)
+        assertTrue(completed.catalogItems.isEmpty())
+        assertEquals("HUMAN_CONSULTATION", metadata.path("intent").asText())
+        assertEquals("INSTITUTION", metadata.path("queryTarget").asText())
+        assertEquals("NONE", metadata.path("nextAction").asText())
+        assertTrue(metadata.path("catalogItems").isEmpty)
+        assertEquals(
+            listOf("HUMAN_CONSULTATION:INSTITUTION"),
+            summary.path("unresolvedTopics").map { it.asText() }
+        )
+        assertFalse(ownedSession.summaryJson.contains(":NONE"))
+
+        val savesBeforeReplay = Triple(turnSaveCount, messageSaveCount, sessionSaveCount)
+        val replay = fixture.chat.sendMessage(
+            "session-1",
+            "user-1",
+            SendMessageRequest(content = content, idempotencyKey = "key-1")
+        )
+
+        assertEquals("HUMAN_CONSULTATION", replay.intent)
+        assertEquals("INSTITUTION", replay.queryTarget)
+        assertEquals("NONE", replay.nextAction)
+        assertTrue(replay.catalogItems.isEmpty())
+        assertEquals(savesBeforeReplay, Triple(turnSaveCount, messageSaveCount, sessionSaveCount))
+        verify(exactly = 1) { catalog.selectConsultableInstitutions("user-1", content, null) }
         intentServer.verify()
         completionServer.verify()
     }
@@ -1468,35 +1531,6 @@ class AgentWorkflowCoreTest {
     }
 
     @Test
-    fun `human consultation metadata never stores a consultant user id`() {
-        val running = turn(status = AgentTurnStatus.RUNNING)
-        val assistant = slot<ChatMessageEntity>()
-        every { turns.findSessionIdById(running.id) } returns "session-1"
-        every { turns.findByIdForUpdate(running.id) } returns running
-        every { sessions.findByIdForUpdate("session-1") } returns session()
-        every { messages.findByTurnIdAndRole(running.id, "ASSISTANT") } returns null
-        every { messages.save(capture(assistant)) } answers { assistant.captured }
-        every { turns.save(any()) } answers { firstArg() }
-        every { sessions.save(any()) } answers { firstArg() }
-        every { messages.findSucceededTurnMessagesBySessionId("session-1") } returns emptyList()
-        every { messages.deleteAll(any<Iterable<ChatMessageEntity>>()) } just runs
-
-        lifecycle.completeTurn(
-            CompleteTurnCommand(
-                turnId = running.id,
-                content = "Choose an institution to continue.",
-                intent = "HUMAN_CONSULTATION",
-                queryTarget = "INSTITUTION",
-                nextAction = "SELECT_INSTITUTION",
-                catalogItems = listOf(humanInstitutionItem())
-            )
-        )
-
-        assertFalse(assistant.captured.metadataJson.contains("consultant-user-1"))
-        assertFalse(objectMapper.readTree(assistant.captured.metadataJson).has("consultantUserId"))
-    }
-
-    @Test
     fun `completion persists normalized comparison request and report in assistant metadata`() {
         val running = turn(status = AgentTurnStatus.RUNNING)
         val assistant = slot<ChatMessageEntity>()
@@ -2246,11 +2280,11 @@ class AgentWorkflowCoreTest {
     private fun chatFixture(
         completionTemplate: RestTemplate,
         intentTemplate: RestTemplate,
-        catalog: AgentCatalogService
+        catalog: AgentCatalogService,
+        turnService: TurnLifecycleService = mockk(),
+        contextBuilder: AgentContextBuilder = mockk()
     ): ChatFixture {
-        val turnService = mockk<TurnLifecycleService>()
         val operationLogger = mockk<AgentOperationLogger>()
-        val contextBuilder = mockk<AgentContextBuilder>()
         val availabilityGuard = mockk<AiAgentAvailabilityGuard>()
         return ChatFixture(
             chat = ChatService(
