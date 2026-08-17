@@ -7,6 +7,7 @@ import com.joysong.server.discover.dto.InstitutionProjectItemResponse
 import com.joysong.server.discover.dto.ProjectWithInstitutionsResponse
 import com.joysong.server.discover.service.DiscoverSearchRequest
 import com.joysong.server.discover.service.DiscoverSearchResult
+import com.joysong.server.discover.service.DiscoverKeywordExtractor
 import com.joysong.server.discover.repository.DoctorProjectRepository
 import com.joysong.server.discover.service.DiscoverSearchService
 import com.joysong.server.discover.service.RequestedEntityType
@@ -97,15 +98,13 @@ class AgentCatalogServiceTest {
     }
 
     @Test
-    fun `consultable institutions exclude unverified deleted and unavailable rows`() {
-        val deleted = institution("deleted", "已删除机构", "上海", "4.9").apply { deletedAt = LocalDateTime.of(2026, 8, 15, 0, 0) }
+    fun `consultable institutions exclude unverified and unavailable active rows`() {
         val institutions = listOf(
             institution("eligible", "可咨询机构", "上海", "4.2"),
             institution("unverified", "未认证机构", "上海", "4.9", isVerified = false),
-            deleted,
             institution("unavailable", "无顾问机构", "上海", "4.8")
         )
-        stubConsultableInstitutions(institutions, setOf("eligible", "unverified", "deleted"))
+        stubConsultableInstitutions(institutions, setOf("eligible", "unverified"))
 
         val result = service.selectConsultableInstitutions("user-1", "真人咨询")
 
@@ -159,6 +158,23 @@ class AgentCatalogServiceTest {
     }
 
     @Test
+    fun `soft deleted named institution is unavailable and returns only active alternatives`() {
+        val alternative = institution("alternative", "可咨询机构", "北京", "4.4")
+        stubConsultableInstitutions(listOf(alternative), setOf(alternative.id))
+        every {
+            institutionRepository.countSoftDeletedNamesMentionedInQuery("我想联系星颜做真人咨询")
+        } returns 1
+
+        val result = service.selectConsultableInstitutions("user-1", "我想联系星颜做真人咨询")
+
+        assertTrue(result.requestedInstitutionUnavailable)
+        assertEquals(listOf(alternative.id), result.items.map { it.id })
+        verify(exactly = 1) {
+            institutionRepository.countSoftDeletedNamesMentionedInQuery("我想联系星颜做真人咨询")
+        }
+    }
+
+    @Test
     fun `eligible detail context precedes profile only when current text has no institution or city`() {
         val institutions = listOf(
             institution("context", "上下文机构", "杭州", "4.1"),
@@ -178,6 +194,53 @@ class AgentCatalogServiceTest {
         assertEquals("named", withCurrentInstitution.items.first().id)
         assertEquals("named", withCurrentCity.items.first().id)
         assertEquals("profile", withUnknownInstitution.items.first().id)
+    }
+
+    @Test
+    fun `generic handoff wording keeps eligible detail context ahead of higher rated profile candidates`() {
+        val context = institution("context", "杭州安心", "杭州", "4.1")
+        val profileCandidates = (1..4).map { index ->
+            institution(
+                id = "profile-$index",
+                name = "上海优选$index",
+                city = "上海",
+                rating = "4.${10 - index}"
+            )
+        }
+        val institutions = listOf(context) + profileCandidates
+        every { institutionRepository.findAll() } returns institutions
+        every { institutionConsultantService.listConsultableInstitutionIds() } returns institutions.map { it.id }.toSet()
+        every { agentProfileService.get("user-1") } returns profile("上海")
+        val realDiscoverSearchService = DiscoverSearchService(
+            projectRepository = projectRepository,
+            institutionRepository = institutionRepository,
+            institutionProjectRepository = institutionProjectRepository,
+            doctorRepository = doctorRepository,
+            keywordExtractor = DiscoverKeywordExtractor(),
+            doctorInstitutionService = doctorInstitutionService,
+            institutionProjectDetailResolver = InstitutionProjectDetailResolver()
+        )
+        val localService = AgentCatalogService(
+            institutionRepository,
+            doctorRepository,
+            projectRepository,
+            institutionProjectRepository,
+            doctorProjectRepository,
+            realDiscoverSearchService,
+            doctorInstitutionService,
+            InstitutionProjectDetailResolver(),
+            institutionConsultantService,
+            agentProfileService
+        )
+
+        val result = localService.selectConsultableInstitutions(
+            userId = "user-1",
+            query = "我想找真人咨询的医美机构",
+            contextInstitutionId = context.id
+        )
+
+        assertEquals(listOf("context", "profile-1", "profile-2", "profile-3"), result.items.map { it.id })
+        assertFalse(result.requestedInstitutionUnavailable)
     }
 
     @Test
@@ -769,6 +832,7 @@ class AgentCatalogServiceTest {
         profileCity: String = ""
     ) {
         every { institutionRepository.findAll() } returns institutions
+        every { institutionRepository.countSoftDeletedNamesMentionedInQuery(any()) } returns 0
         every { institutionConsultantService.listConsultableInstitutionIds() } returns consultableIds
         every { discoverSearchService.citiesMentionedIn(any()) } returns emptyList()
         every { agentProfileService.get(any()) } returns profile(profileCity)

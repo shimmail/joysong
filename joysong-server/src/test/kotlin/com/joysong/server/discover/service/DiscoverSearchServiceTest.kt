@@ -57,6 +57,14 @@ class DiscoverSearchServiceTest {
         assertFalse(service.hasNamedInstitutionPhrase("我想真人咨询医美机构"))
         assertFalse(service.hasNamedInstitutionPhrase("帮我找咨询师医美机构"))
         assertFalse(service.hasNamedInstitutionPhrase("找真人医美机构"))
+        assertFalse(service.hasNamedInstitutionPhrase("我想找真人咨询的医美机构"))
+        assertFalse(service.hasNamedInstitutionPhrase("human consultation clinic"))
+        assertFalse(service.hasNamedInstitutionPhrase("human consultant clinic"))
+        assertFalse(service.hasNamedInstitutionPhrase("live agent clinic"))
+        assertFalse(service.hasNamedInstitutionPhrase("speak to a specialist clinic"))
+        assertTrue(service.hasNamedInstitutionPhrase("Aurora Consultation Clinic"))
+        assertTrue(service.hasNamedInstitutionPhrase("Humanity Consultation Clinic"))
+        assertTrue(service.hasNamedInstitutionPhrase("human consultation at Aurora clinic"))
     }
 
     @Test

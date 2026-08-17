@@ -106,6 +106,8 @@ class AgentCatalogService(
         val explicitlyNamed = allInstitutions.filter {
             it.name.isNotBlank() && query.contains(it.name, ignoreCase = true)
         }
+        val mentionsSoftDeletedInstitution = explicitlyNamed.isEmpty() &&
+            institutionRepository.countSoftDeletedNamesMentionedInQuery(query) > 0L
         val explicitCities = discoverSearchService.citiesMentionedIn(query)
         val hasNamedInstitutionPhrase = discoverSearchService.hasNamedInstitutionPhrase(query)
         val profileCity = if (explicitCities.isEmpty()) {
@@ -135,7 +137,7 @@ class AgentCatalogService(
         addTier(ranked)
 
         val requestedInstitutionUnavailable =
-            (explicitlyNamed.isEmpty() && hasNamedInstitutionPhrase) ||
+            (explicitlyNamed.isEmpty() && (hasNamedInstitutionPhrase || mentionsSoftDeletedInstitution)) ||
                 explicitlyNamed.any { it.id !in consultableIds || !it.isVerified || it.deletedAt != null }
         return ConsultableInstitutionSelection(
             items = selected.values.map { institutionCatalogItem(it, includeSummary = false) },

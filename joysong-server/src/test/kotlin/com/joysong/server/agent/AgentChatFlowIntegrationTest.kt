@@ -911,6 +911,51 @@ class AgentChatFlowIntegrationTest {
 
     @Test
     @WithMockUser(username = "user-1")
+    fun `HTTP human consultation reports a soft deleted named institution as unavailable`() {
+        jdbcTemplate.update("UPDATE institution_memberships SET status = 'PENDING' WHERE status = 'APPROVED'")
+        val alternative = seedConsultableInstitution(
+            name = "可咨询机构 ${UUID.randomUUID()}",
+            rating = "5.0"
+        )
+        val deletedId = UUID.randomUUID().toString()
+        institutionRepository.saveAndFlush(
+            InstitutionEntity(
+                id = deletedId,
+                name = "星颜",
+                city = "上海",
+                isVerified = true
+            )
+        )
+        institutionRepository.deleteById(deletedId)
+        institutionRepository.flush()
+
+        assertFalse(institutionRepository.findAll().any { it.id == deletedId })
+        assertEquals(
+            1L,
+            institutionRepository.countSoftDeletedNamesMentionedInQuery("我想联系星颜做真人咨询")
+        )
+        val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
+
+        val responseBody = mockMvc.perform(
+            post("/api/chat/sessions/{id}/messages", session.id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"content":"我想联系星颜做真人咨询","idempotencyKey":"http-soft-deleted-handoff-1"}""")
+        )
+            .andExpect(status().isOk)
+            .andExpect(
+                jsonPath("$.data.message.content").value(
+                    "你提到的机构目前无法提供真人转接。你可以选择下方其他机构，查看其当前可联系的咨询师。"
+                )
+            )
+            .andExpect(jsonPath("$.data.catalogItems.length()").value(1))
+            .andExpect(jsonPath("$.data.catalogItems[0].institutionId").value(alternative.institution.id))
+            .andReturn().response.contentAsString
+        assertFalse(responseBody.contains(deletedId))
+        assertEquals(0, fakeLlmCalls.get())
+    }
+
+    @Test
+    @WithMockUser(username = "user-1")
     fun `HTTP human consultation stream emits started then completed without delta`() {
         seedConsultableInstitution()
         val session = chatService.createSession("user-1", CreateSessionRequest(persona = "CONSULTANT"))
@@ -1404,12 +1449,16 @@ class AgentChatFlowIntegrationTest {
         val consultantId: String
     )
 
-    private fun seedConsultableInstitution(): ConsultableInstitutionSeed {
+    private fun seedConsultableInstitution(
+        name: String = "Human Handoff Clinic ${UUID.randomUUID()}",
+        rating: String = "0"
+    ): ConsultableInstitutionSeed {
         val institution = institutionRepository.saveAndFlush(
             InstitutionEntity(
                 id = UUID.randomUUID().toString(),
-                name = "Human Handoff Clinic ${UUID.randomUUID()}",
+                name = name,
                 city = "Shanghai",
+                rating = rating.toBigDecimal(),
                 isVerified = true
             )
         )
