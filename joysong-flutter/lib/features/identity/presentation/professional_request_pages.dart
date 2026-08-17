@@ -902,6 +902,16 @@ class _InstitutionProjectRequestsPageState
                 .toList(growable: false);
           }
           _projects = values[2] as List<ManagementProjectOption>;
+          final institutionId = _institutionId;
+          if (institutionId != null &&
+              !_institutions.any((item) => item.id == institutionId)) {
+            _institutionId = null;
+          }
+          final projectId = _projectId;
+          if (projectId != null &&
+              !_projects.any((item) => item.id == projectId)) {
+            _projectId = null;
+          }
           _platformRate = (values[3] as InstitutionProjectApplicationFormConfig)
               .platformRate;
         }

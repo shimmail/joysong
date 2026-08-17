@@ -598,6 +598,107 @@ void main() {
   });
 
   testWidgets(
+      'institution submission conflict clears only targets removed from refreshed authorized catalogs and requires reselection',
+      (tester) async {
+    _useLargeSurface(tester);
+    for (final scenario in const [
+      (
+        name: 'institution-removed',
+        removeInstitution: true,
+        removeProject: false,
+        expectedInstitution: null,
+        expectedProject: 'project-1',
+      ),
+      (
+        name: 'project-removed',
+        removeInstitution: false,
+        removeProject: true,
+        expectedInstitution: 'inst-1',
+        expectedProject: null,
+      ),
+      (
+        name: 'both-removed',
+        removeInstitution: true,
+        removeProject: true,
+        expectedInstitution: null,
+        expectedProject: null,
+      ),
+    ]) {
+      final uploads = [
+        'https://cdn.example.com/conflict-clinic-cover.jpg',
+        'https://cdn.example.com/conflict-clinic-gallery.jpg',
+      ];
+      final repository = _ProjectRequestRepository()
+        ..institutionSubmitException =
+            const ApiException(message: 'conflict', httpStatus: 409);
+      repository.onInstitutionSubmit = () {
+        repository
+          ..formPlatformRate = 12.5
+          ..institutionOptions = scenario.removeInstitution
+              ? const [
+                  InstitutionOption(
+                    id: 'inst-2',
+                    name: 'Alternative Authorized Clinic',
+                  ),
+                ]
+              : repository.institutionOptions
+          ..managementProjects = scenario.removeProject
+              ? const [
+                  ManagementProjectOption(
+                    id: 'project-2',
+                    name: 'Alternative Platform Project',
+                    category: 'Alternative category',
+                    description: 'Alternative description',
+                    tags: 'alternative',
+                    categoryTags: 'alternative',
+                    coverImage: '',
+                    referencePrice: 500,
+                    currency: 'CNY',
+                    slogan: '',
+                    detailContent: null,
+                    images: [],
+                    salesCount: 0,
+                  ),
+                ]
+              : repository.managementProjects;
+      };
+
+      await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+        key: ValueKey('stale-target-${scenario.name}'),
+        repository: repository,
+        context: _multiInstitutionDoctorContext,
+        pickAndUploadImage: () async => uploads.removeAt(0),
+      )));
+      await tester.pumpAndSettle();
+      await _prepareInstitutionConflictDraft(tester);
+
+      await _submit(tester, const Key('institution-submit'));
+
+      expect(tester.takeException(), isNull,
+          reason:
+              '${scenario.name} must render without a stale-value assertion');
+      expect(repository.institutionSubmissions, hasLength(1));
+      expect(_dropdownValue(tester, 'institution-id'),
+          scenario.expectedInstitution);
+      expect(_dropdownValue(tester, 'institution-project'),
+          scenario.expectedProject);
+      _expectInstitutionConflictDraftValuesRetained(tester);
+      expect(find.text('平台比例（只读）：12.5%'), findsOneWidget);
+      expect(find.text('医生比例（自动推导）：17.5%'), findsOneWidget);
+      expect(
+        find.text('提交冲突，申请、项目目录与分账配置已刷新；草稿已保留，请核对后重新提交'),
+        findsOneWidget,
+      );
+
+      await _submit(tester, const Key('institution-submit'));
+      expect(repository.institutionSubmissions, hasLength(1),
+          reason: '${scenario.name} must require a new valid target selection');
+      expect(find.text('请选择机构和平台项目，并填写有效金额、销量与分账比例'), findsOneWidget);
+      _expectInstitutionConflictDraftValuesRetained(tester);
+    }
+  });
+
+  testWidgets(
       'institution submission conflict keeps selections and gives recovery guidance when form refresh fails',
       (tester) async {
     _useLargeSurface(tester);
@@ -1431,6 +1532,12 @@ Future<void> _prepareInstitutionConflictDraft(WidgetTester tester) async {
 }
 
 void _expectInstitutionConflictDraftRetained(WidgetTester tester) {
+  _expectInstitutionConflictDraftValuesRetained(tester);
+  expect(_dropdownValue(tester, 'institution-id'), 'inst-1');
+  expect(_dropdownValue(tester, 'institution-project'), 'project-1');
+}
+
+void _expectInstitutionConflictDraftValuesRetained(WidgetTester tester) {
   for (final entry in const {
     'institution-name': 'Clinic override',
     'institution-category': 'Clinic category',
@@ -1448,8 +1555,6 @@ void _expectInstitutionConflictDraftRetained(WidgetTester tester) {
   }.entries) {
     expect(_text(tester, entry.key), entry.value);
   }
-  expect(_dropdownValue(tester, 'institution-id'), 'inst-1');
-  expect(_dropdownValue(tester, 'institution-project'), 'project-1');
   expect(_dropdownValue(tester, 'institution-currency'), 'USD');
   expect(
     tester
@@ -1478,6 +1583,19 @@ const _doctorContext = ManagementContext(
   managedInstitutionIds: [],
   visibleInstitutionIds: ['inst-1'],
   doctorInstitutionIds: ['inst-1'],
+  canManageDoctors: true,
+  canSubmitPlatformProjectRequests: true,
+  canSubmitInstitutionProjectRequests: true,
+);
+
+const _multiInstitutionDoctorContext = ManagementContext(
+  userId: 'doctor-user-1',
+  platformRole: 'USER',
+  activeRoles: ['DOCTOR'],
+  doctorId: 'doctor-1',
+  managedInstitutionIds: [],
+  visibleInstitutionIds: ['inst-1', 'inst-2'],
+  doctorInstitutionIds: ['inst-1', 'inst-2'],
   canManageDoctors: true,
   canSubmitPlatformProjectRequests: true,
   canSubmitInstitutionProjectRequests: true,
