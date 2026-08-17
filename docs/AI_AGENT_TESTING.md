@@ -4,7 +4,7 @@
 
 ## 隔离要求
 
-所有测试均在当前 worktree 的 `joysong-server` 目录执行。测试或迁移前先打印解析后的数据库 host 与名称；数据库名必须为 `myapp_<WORKTREE_ID>`，Docker Compose 项目名必须为 `myapp-<WORKTREE_ID>`。不得连接共享开发数据库，也不得删除或重置名称不以 `myapp_worktree_` 开头的数据库。
+所有后端测试均在当前 worktree 的 `joysong-server` 目录执行。测试或迁移前先打印解析后的数据库 host 与名称；数据库名必须为 `myapp_<WORKTREE_ID>`，Docker Compose 项目名必须为 `myapp-<WORKTREE_ID>`。不得连接共享开发数据库，也不得删除或重置名称不以 `myapp_worktree_` 开头的数据库。
 
 ```powershell
 $repoRoot = git rev-parse --show-toplevel
