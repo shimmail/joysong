@@ -20,6 +20,8 @@ enum class AgentLabelPolarity { POSITIVE, NEGATIVE, UNCERTAIN }
 
 enum class AgentLabelSource { CURRENT, CONTEXT, MODEL }
 
+enum class ContextCompletionMode { NONE, DETERMINISTIC_FOLLOW_UP, BARE_DEICTIC }
+
 data class AgentIntentEvidence(
     val intent: AgentIntent,
     val polarity: AgentLabelPolarity,
@@ -54,7 +56,9 @@ data class AgentRouteAssessment(
     val unresolvedSafetyNegation: Boolean = false,
     val intentEvidence: Set<AgentIntentEvidence> = emptySet(),
     val targetEvidence: Set<AgentTargetEvidence> = emptySet(),
-    val contextType: String = "GENERAL"
+    val contextType: String = "GENERAL",
+    val contextResolvedQueryTarget: Boolean = false,
+    val contextCompletionMode: ContextCompletionMode = ContextCompletionMode.NONE
 )
 
 data class ParsedAgentRoute(
@@ -73,7 +77,7 @@ data class ParsedAgentRoute(
 class AgentIntentRouter {
     fun assess(query: String, contextType: String): AgentRouteAssessment {
         val currentAssessment = assessCurrent(query, contextType)
-        val decision = completeDetailContext(currentAssessment.decision, contextType)
+        val decision = completeDetailContext(currentAssessment, contextType)
         if (decision == currentAssessment.decision) return currentAssessment
 
         val reasons = if (decision.queryTarget != null) {
@@ -135,6 +139,12 @@ class AgentIntentRouter {
         )
         val independentProjectSignals = matchSignals(annotatedSignals, projectTerms, includeAttachedToNegatedAction = false)
         val unresolvedReferenceSignals = matchSignals(annotatedSignals, unresolvedReferenceTerms)
+        val alternativeEntitySignals = matchSignals(annotatedSignals, alternativeEntityTerms)
+        val negatedCurrentReference = hasNegatedCurrentReference(normalized)
+        val alternativeEntityRequest = alternativeEntitySignals.positiveTerms.isNotEmpty() &&
+            (hasAlternativeEntityRequest(normalized) || hasEntitySwitchRequest(normalized))
+        val socialInterjection = isSocialInterjection(normalized)
+        val explicitTopicBoundary = hasExplicitTopicBoundary(normalized)
         val specificIntentEvidence = setOfNotNull(
             intentEvidence(AgentIntent.SAFETY_SCREENING, safetySignals),
             intentEvidence(AgentIntent.HUMAN_CONSULTATION, humanConsultationSignals),
@@ -159,7 +169,32 @@ class AgentIntentRouter {
             targetEvidence(AgentQueryTarget.INSTITUTION, independentInstitutionSignals),
             targetEvidence(AgentQueryTarget.PROJECT, independentProjectSignals)
         )
-        val decision = selectPrimary(intentEvidence, primaryTargetEvidence, contextType)
+        val contextTarget = runCatching { AgentQueryTarget.valueOf(contextType.uppercase()) }.getOrNull()
+        val positiveTargets = primaryTargetEvidence.filter { it.polarity == AgentLabelPolarity.POSITIVE }
+            .mapTo(mutableSetOf()) { it.target }
+        val alternativeTarget = alternativeRequestTarget(normalized).takeIf { alternativeEntityRequest }
+        val scopedResultTarget = deicticScopedResultTarget(normalized, positiveTargets)
+        val selectedDecision = selectPrimary(
+            intentEvidence,
+            primaryTargetEvidence,
+            contextType,
+            preferredTarget = alternativeTarget ?: scopedResultTarget
+        )
+        val decision = when {
+            selectedDecision.intent == AgentIntent.SAFETY_SCREENING -> selectedDecision
+            selectedDecision.intent == AgentIntent.HUMAN_CONSULTATION -> selectedDecision
+            alternativeEntityRequest -> validatedDecision(
+                AgentIntent.CATALOG_QA,
+                alternativeTarget ?: selectedDecision.queryTarget ?: contextTarget
+            )
+            explicitTopicBoundary && selectedDecision.queryTarget == null &&
+                (selectedDecision.intent == AgentIntent.GENERAL_CHAT ||
+                    (selectedDecision.intent == AgentIntent.CATALOG_QA &&
+                        catalogActionSignals.positiveTerms.isEmpty())) ->
+                validatedDecision(AgentIntent.GENERAL_CHAT, null)
+            scopedResultTarget != null -> validatedDecision(selectedDecision.intent, scopedResultTarget)
+            else -> selectedDecision
+        }
         val intent = decision.intent
         val queryTarget = decision.queryTarget
         val reasons = mutableListOf<String>()
@@ -174,11 +209,16 @@ class AgentIntentRouter {
             independentInstitutionSignals.positiveTerms.isNotEmpty(),
             independentProjectSignals.positiveTerms.isNotEmpty()
         ).count { it }
-        if (targetCount > 1 && independentInstitutionProjectSignals.positiveTerms.isEmpty()) {
+        if (
+            targetCount > 1 && independentInstitutionProjectSignals.positiveTerms.isEmpty() &&
+            alternativeTarget == null && scopedResultTarget == null
+        ) {
             score -= 0.20
             reasons += "CONFLICTING_CURRENT_TARGETS"
         }
-        if (unresolvedReferenceSignals.positiveTerms.isNotEmpty()) {
+        if (negatedCurrentReference) {
+            reasons += "NEGATED_CURRENT_REFERENCE"
+        } else if (unresolvedReferenceSignals.positiveTerms.isNotEmpty()) {
             score -= 0.20
             reasons += "UNRESOLVED_CURRENT_REFERENCE"
         }
@@ -191,10 +231,23 @@ class AgentIntentRouter {
             score -= 0.20
             reasons += "MULTIPLE_CONSTRAINTS_WITHOUT_TARGET"
         }
+        val standaloneConstraintFollowUp = constraintCount > 0 && queryTarget == null &&
+            isStandaloneConstraintQuery(normalized)
+        if (standaloneConstraintFollowUp) {
+            reasons += "CONSTRAINT_WITHOUT_TARGET"
+        }
         if (intent == AgentIntent.GENERAL_CHAT && matchSignals(annotatedSignals, aestheticConcernTerms).positiveTerms.isNotEmpty()) {
             score -= 0.30
             reasons += "UNCLASSIFIED_AESTHETIC_REQUEST"
         }
+        val sameTargetQuestion = intent == AgentIntent.CATALOG_QA && queryTarget == contextTarget &&
+            catalogActionSignals.positiveTerms.isEmpty() && !alternativeEntityRequest
+        val detailContextFollowUp = !negatedCurrentReference && contextTarget != null &&
+            ((intent == AgentIntent.GENERAL_CHAT && standaloneConstraintFollowUp) || sameTargetQuestion)
+        if (detailContextFollowUp) reasons += "DETAIL_CONTEXT_FOLLOW_UP"
+        if (alternativeEntityRequest) reasons += "ALTERNATIVE_ENTITY_REQUEST"
+        if (intent == AgentIntent.GENERAL_CHAT && socialInterjection) reasons += "SOCIAL_INTERJECTION"
+        if (explicitTopicBoundary) reasons += "EXPLICIT_TOPIC_BOUNDARY"
 
         val selectedIntentEvidence = intentEvidence.singleOrNull { it.intent == intent }
         val selectedTargetEvidence = primaryTargetEvidence.singleOrNull { it.target == queryTarget }
@@ -210,12 +263,43 @@ class AgentIntentRouter {
         val confidence = score.coerceIn(0.0, 1.0)
         val hasUnlockedUncertainEvidence = hasUnlockedUncertainEvidence(intentEvidence, targetEvidence)
         val detailSessionMissingTarget = intent != AgentIntent.SAFETY_SCREENING &&
-            contextType.uppercase() in detailContextTypes && queryTarget == null
-        val requiresContextCompletion = hasUnlockedUncertainEvidence || detailSessionMissingTarget ||
-            (intent in intentsRequiringTarget && queryTarget == null) ||
-            "UNRESOLVED_CURRENT_REFERENCE" in reasons ||
-            "MULTIPLE_CONSTRAINTS_WITHOUT_TARGET" in reasons
-        val needsLlm = requiresLlmParsing(intent, confidence, reasons, requiresContextCompletion)
+            contextType.uppercase() in detailContextTypes && queryTarget == null &&
+            (intent != AgentIntent.GENERAL_CHAT || detailContextFollowUp)
+        val requiresContextCompletion = !explicitTopicBoundary && (
+            hasUnlockedUncertainEvidence || detailSessionMissingTarget ||
+                (intent in intentsRequiringTarget && queryTarget == null) ||
+                ("UNRESOLVED_CURRENT_REFERENCE" in reasons && scopedResultTarget == null) ||
+                "CONSTRAINT_WITHOUT_TARGET" in reasons
+            )
+        val parsingReasons = if (scopedResultTarget == null) {
+            reasons
+        } else {
+            reasons.filterNot { it == "UNRESOLVED_CURRENT_REFERENCE" }
+        }
+        val boundaryOnlyGeneral = explicitTopicBoundary &&
+            intent == AgentIntent.GENERAL_CHAT && queryTarget == null &&
+            !hasUnlockedUncertainEvidence && !unresolvedSafetyNegation &&
+            parsingReasons.none {
+                it in setOf(
+                    "AMBIGUOUS_NEGATION",
+                    "CONFLICTING_CURRENT_TARGETS",
+                    "UNRESOLVED_CURRENT_REFERENCE",
+                    "UNCLASSIFIED_AESTHETIC_REQUEST"
+                )
+            }
+        val needsLlm = !boundaryOnlyGeneral &&
+            requiresLlmParsing(intent, confidence, parsingReasons, requiresContextCompletion)
+        val contextCompletionMode = when {
+            queryTarget != null -> ContextCompletionMode.NONE
+            standaloneConstraintFollowUp || "DETAIL_CONTEXT_FOLLOW_UP" in reasons ->
+                ContextCompletionMode.DETERMINISTIC_FOLLOW_UP
+            "UNRESOLVED_CURRENT_REFERENCE" in reasons && constraintCount == 0 &&
+                intentEvidence.none { it.polarity == AgentLabelPolarity.POSITIVE } &&
+                primaryTargetEvidence.none { it.polarity == AgentLabelPolarity.POSITIVE } &&
+                !negatedCurrentReference && !alternativeEntityRequest && !explicitTopicBoundary ->
+                ContextCompletionMode.BARE_DEICTIC
+            else -> ContextCompletionMode.NONE
+        }
         return AgentRouteAssessment(
             decision = decision,
             confidence = confidence,
@@ -227,7 +311,8 @@ class AgentIntentRouter {
             unresolvedSafetyNegation = unresolvedSafetyNegation,
             intentEvidence = intentEvidence,
             targetEvidence = targetEvidence,
-            contextType = contextType
+            contextType = contextType,
+            contextCompletionMode = contextCompletionMode
         )
     }
 
@@ -327,7 +412,10 @@ class AgentIntentRouter {
             ),
             requiresContextCompletion = requiresContextCompletion,
             intentEvidence = mergedIntentEvidence,
-            targetEvidence = mergedTargetEvidence
+            targetEvidence = mergedTargetEvidence,
+            contextResolvedQueryTarget = current.contextResolvedQueryTarget ||
+                (contextFilled && !targetConflict && !contextCandidateConflict && !uncertainContext &&
+                    currentDecision.queryTarget == null && resolvedTarget != null)
         )
     }
 
@@ -336,8 +424,15 @@ class AgentIntentRouter {
         parsed: ParsedAgentRoute?
     ): AgentIntentDecision {
         if (parsed == null || local.decision.intent == AgentIntent.SAFETY_SCREENING) return local.decision
+        if (!isCompatibleParsedRoute(local, parsed)) return local.decision
 
         val parsedIntents = parsed.intents + parsed.intent
+        if (AgentIntent.SAFETY_SCREENING in parsedIntents) {
+            return validatedDecision(AgentIntent.SAFETY_SCREENING, null)
+        }
+        if (allowsHumanContextOverride(local) && AgentIntent.HUMAN_CONSULTATION in parsedIntents) {
+            return validatedDecision(AgentIntent.HUMAN_CONSULTATION, AgentQueryTarget.INSTITUTION)
+        }
         val modelIntentEvidence = parsedIntents.mapTo(mutableSetOf()) { intent ->
             AgentIntentEvidence(
                 intent = intent,
@@ -367,16 +462,58 @@ class AgentIntentRouter {
             contextType = local.contextType,
             preferredIntent = when {
                 safetyUpgrade -> AgentIntent.SAFETY_SCREENING
-                local.unresolvedSafetyNegation || local.explicitIntent -> local.decision.intent
+                local.unresolvedSafetyNegation || local.explicitIntent ->
+                    local.decision.intent
                 else -> parsed.intent
             },
-            preferredTarget = if (local.explicitQueryTarget) local.decision.queryTarget else parsed.queryTarget
+            preferredTarget = if (local.explicitQueryTarget || local.contextResolvedQueryTarget) {
+                local.decision.queryTarget
+            } else {
+                parsed.queryTarget
+            }
         )
         return if (decision.intent == AgentIntent.SAFETY_SCREENING) {
             validatedDecision(AgentIntent.SAFETY_SCREENING, null)
         } else {
             decision
         }
+    }
+
+    fun allowsHumanContextOverride(local: AgentRouteAssessment): Boolean =
+        local.contextResolvedQueryTarget &&
+            local.contextCompletionMode == ContextCompletionMode.BARE_DEICTIC &&
+            !local.explicitIntent && !local.explicitQueryTarget
+
+    fun isCompatibleParsedRoute(local: AgentRouteAssessment, parsed: ParsedAgentRoute): Boolean {
+        val parsedIntents = parsed.intents + parsed.intent
+        if (
+            AgentIntent.HUMAN_CONSULTATION in parsedIntents &&
+            parsed.queryTarget != null && parsed.queryTarget != AgentQueryTarget.INSTITUTION
+        ) return false
+        if (AgentIntent.SAFETY_SCREENING in parsedIntents) return true
+        if (
+            local.explicitIntent && local.decision.intent != AgentIntent.HUMAN_CONSULTATION &&
+            AgentIntent.HUMAN_CONSULTATION in parsedIntents
+        ) return false
+        if (parsed.intent in setOf(AgentIntent.GENERAL_CHAT, AgentIntent.SAFETY_SCREENING) && parsed.queryTarget != null) {
+            return false
+        }
+        if (local.explicitIntent && local.decision.intent !in parsedIntents) return false
+        val deterministicFollowUpLock = local.contextResolvedQueryTarget &&
+            local.contextCompletionMode == ContextCompletionMode.DETERMINISTIC_FOLLOW_UP
+        if (deterministicFollowUpLock && parsedIntents.any { it != local.decision.intent }) return false
+        val humanOverride = allowsHumanContextOverride(local) &&
+            AgentIntent.HUMAN_CONSULTATION in parsedIntents
+        if (
+            (local.explicitQueryTarget || local.contextResolvedQueryTarget) &&
+            effectiveParsedTarget(parsedIntents, parsed.queryTarget) != local.decision.queryTarget &&
+            !humanOverride
+        ) return false
+        if (local.unresolvedSafetyNegation && parsedIntents.none {
+                it in setOf(local.decision.intent, AgentIntent.SAFETY_SCREENING)
+            }
+        ) return false
+        return true
     }
 
     fun validatedDecision(intent: AgentIntent, queryTarget: AgentQueryTarget?): AgentIntentDecision {
@@ -405,16 +542,23 @@ class AgentIntentRouter {
     }
 
     fun decide(query: String, contextType: String): AgentIntentDecision {
-        val currentDecision = assessCurrent(query, contextType).decision
-        return completeDetailContext(currentDecision, contextType)
+        val currentAssessment = assessCurrent(query, contextType)
+        return completeDetailContext(currentAssessment, contextType)
     }
 
     private fun completeDetailContext(
-        currentDecision: AgentIntentDecision,
+        current: AgentRouteAssessment,
         contextType: String
     ): AgentIntentDecision {
+        val currentDecision = current.decision
         val detailContext = contextType.uppercase() in detailContextTypes
-        if (!detailContext || currentDecision.intent == AgentIntent.SAFETY_SCREENING) return currentDecision
+        if (!detailContext || currentDecision.intent == AgentIntent.SAFETY_SCREENING) {
+            return currentDecision
+        }
+        if ("EXPLICIT_TOPIC_BOUNDARY" in current.ambiguityReasons) return currentDecision
+        val implicitFollowUp = currentDecision.intent == AgentIntent.GENERAL_CHAT &&
+            current.ambiguityReasons.any { it in setOf("DETAIL_CONTEXT_FOLLOW_UP", "UNRESOLVED_CURRENT_REFERENCE") }
+        if (currentDecision.intent == AgentIntent.GENERAL_CHAT && !implicitFollowUp) return currentDecision
         val queryTarget = currentDecision.queryTarget ?: AgentQueryTarget.valueOf(contextType.uppercase())
         val intent = if (currentDecision.intent == AgentIntent.GENERAL_CHAT) AgentIntent.CATALOG_QA else currentDecision.intent
         return validatedDecision(intent, queryTarget)
@@ -561,7 +705,8 @@ class AgentIntentRouter {
         val normalizedQuery = normalize(query)
         val normalizedTerms = routingTerms.map(::normalize).distinct().sortedByDescending(String::length)
         val actionTerms = intentActionTerms.map(::normalize).toSet()
-        val stateTerms = (safetyTerms + institutionProjectTerms + doctorTerms + institutionTerms + projectTerms)
+        val stateTerms = (safetyTerms + institutionProjectTerms + doctorTerms + institutionTerms + projectTerms +
+            alternativeEntityTerms)
             .map(::normalize)
             .toSet()
         val targetTerms = (institutionProjectTerms + doctorTerms + institutionTerms + projectTerms)
@@ -590,6 +735,7 @@ class AgentIntentRouter {
                 .filterNot { negator -> uncertaintyPhrases.any { phrase ->
                     rangesOverlap(negator.index, negator.term.length, phrase.index, phrase.term.length)
                 } }
+                .filterNot { negator -> isPriceConfirmationNegator(clause, negator) }
                 .forEach { negator ->
                     val constrainedMatches = nearestMatches(
                         negator.index + negator.term.length,
@@ -782,6 +928,65 @@ class AgentIntentRouter {
     private fun rangesOverlap(firstStart: Int, firstLength: Int, secondStart: Int, secondLength: Int): Boolean =
         firstStart < secondStart + secondLength && secondStart < firstStart + firstLength
 
+    private fun hasNegatedCurrentReference(query: String): Boolean =
+        negatedCurrentReferencePatterns.any { it.containsMatchIn(query) }
+
+    private fun hasAlternativeEntityRequest(query: String): Boolean =
+        alternativeEntityRequestPatterns.any { it.containsMatchIn(query) }
+
+    private fun hasEntitySwitchRequest(query: String): Boolean =
+        entitySwitchRequestPatterns.any { it.containsMatchIn(query) }
+
+    private fun hasExplicitTopicBoundary(query: String): Boolean =
+        explicitTopicBoundaryPatterns.any { it.containsMatchIn(query) }
+
+    private fun alternativeRequestTarget(query: String): AgentQueryTarget? = when {
+        alternativeInstitutionPattern.containsMatchIn(query) -> AgentQueryTarget.INSTITUTION
+        alternativeDoctorPattern.containsMatchIn(query) -> AgentQueryTarget.DOCTOR
+        alternativeProjectPattern.containsMatchIn(query) -> AgentQueryTarget.PROJECT
+        else -> null
+    }
+
+    private fun deicticScopedResultTarget(
+        query: String,
+        positiveTargets: Set<AgentQueryTarget>
+    ): AgentQueryTarget? {
+        val scopeTarget = deicticScopeTargetPatterns.firstNotNullOfOrNull { (pattern, target) ->
+            target.takeIf { pattern.containsMatchIn(query) }
+        } ?: return null
+        return (positiveTargets - scopeTarget).singleOrNull()
+    }
+
+    private fun effectiveParsedTarget(
+        parsedIntents: Set<AgentIntent>,
+        parsedTarget: AgentQueryTarget?
+    ): AgentQueryTarget? = if (AgentIntent.HUMAN_CONSULTATION in parsedIntents) {
+        AgentQueryTarget.INSTITUTION
+    } else {
+        parsedTarget
+    }
+
+    private fun isPriceConfirmationNegator(clause: String, negator: SignalMatch): Boolean {
+        val tail = clause.substring(negator.index).trim()
+        return when (negator.term) {
+            "不是" -> priceConfirmationPattern.matches(tail)
+            "isn't", "is not" -> englishPriceConfirmationPattern.matches(tail)
+            else -> false
+        }
+    }
+
+    private fun isStandaloneConstraintQuery(query: String): Boolean {
+        val withoutConstraints = constraintSignalGroups.flatten()
+            .map(::normalize)
+            .distinct()
+            .sortedByDescending(String::length)
+            .fold(query) { remaining, term -> remaining.replace(term, " ") }
+        val withoutFillers = constraintOnlyFillerWordsPattern.replace(withoutConstraints, "")
+        return constraintOnlyPunctuationPattern.replace(withoutFillers, "").isBlank()
+    }
+
+    private fun isSocialInterjection(query: String): Boolean = socialInterjectionPattern.matches(query)
+
     private data class SignalMatch(val term: String, val index: Int)
 
     private companion object {
@@ -805,11 +1010,16 @@ class AgentIntentRouter {
             "connect me to a person", "transfer me to a consultant"
         )
         val unresolvedReferenceTerms = listOf("这个", "那个", "那这个", "那它", "它呢", "这家", "那家", "这个呢", "那个呢", "this", "that", "what about it", "how about that")
+        val alternativeEntityTerms = listOf(
+            "其他", "其它", "另外", "别的", "换一家", "换一个", "换个", "换位", "换机构", "换医生", "换项目", "改选",
+            "other", "another", "different", "alternative", "alternatives"
+        )
         val constraintSignalGroups = listOf(
+            listOf("价格", "费用", "多少钱", "价位", "price", "cost"),
             listOf("预算", "budget"),
             listOf("恢复期", "恢复", "downtime", "recovery"),
             listOf("疼痛", "怕痛", "pain"),
-            listOf("多久", "时间")
+            listOf("多久")
         )
         val aestheticConcernTerms = listOf("脸垮", "显老", "松弛", "下垂", "暗沉", "毛孔", "斑", "痘", "皱纹", "细纹", "凹陷", "变美", "改善", "sagging", "aging", "dull", "pores", "acne", "wrinkle", "hollow", "improve my face")
         val institutionProjectTerms = listOf(
@@ -847,10 +1057,91 @@ class AgentIntentRouter {
         )
         val routingTerms = safetyTerms + humanConsultationTerms + detailSummaryTerms + comparisonTerms + planningTerms + catalogActionTerms + catalogTerms +
             institutionProjectTerms + doctorTerms + institutionTerms + projectTerms + unresolvedReferenceTerms +
-            constraintSignalGroups.flatten() + aestheticConcernTerms
+            alternativeEntityTerms + constraintSignalGroups.flatten() + aestheticConcernTerms
         val uncertaintyPhrases = listOf(
             "don't know if", "do not know whether", "not sure if", "not sure whether", "不确定是否", "不知道是否"
         )
         val coordinationConnector = Regex("\\s*(?:和|或|以及|\\b(?:and|or|nor)\\b)\\s*")
+        val negatedCurrentReferencePatterns = listOf(
+            Regex(
+                "(?:不要|不是|不用|不选|不想(?:要)?|别|跳过|排除)\\s*" +
+                    "(?:(?:再\\s*)?(?:给我\\s*)?(?:推荐|展示|显示|看|用|使用|选|选择|考虑|咨询|联系)\\s*)?" +
+                    "(?:再\\s*)?(?:给我\\s*)?" +
+                    "(?:(?:这家|那家)(?:机构|医院|诊所)?|(?:这个|那个|它)(?:医生|医师|机构|医院|诊所|项目|治疗|术式))" +
+                    "(?:了)?(?=\\s*(?:因为|由于|$|[,.;!?，。；！？]))"
+            ),
+            Regex(
+                "(?<![a-z0-9])(?:do not|don't|not|avoid|skip|exclude)(?![a-z0-9])\\s+" +
+                    "(?:(?:recommend|show|see|use|choose|select|consider|want(?:\\s+to)?)\\s+(?:me\\s+)?)?" +
+                    "(?:this|that)(?:\\s+(?:one|doctor|clinic|hospital|institution|procedure|treatment|project))?" +
+                    "(?:\\s+(?:anymore|any\\s+more|any\\s+longer))?" +
+                    "(?=\\s*(?:because\\b|since\\b|$|[,.;!?，。；！？]))"
+            ),
+            Regex(
+                "(?:这个|那个|这家|那家|它)(?:医生|医师|机构|医院|诊所|项目)?\\s*" +
+                    "(?:我\\s*)?(?:不要了|不用了|不选了|不考虑了|算了)"
+            )
+        )
+        val alternativeEntityRequestPatterns = listOf(
+            Regex("(?:其他|其它|另外|别的)\\s*(?:机构|医院|诊所|医生|医师|项目|治疗|术式)"),
+            Regex(
+                "(?:推荐|展示|显示|查找|找|看看|介绍|换)\\s*(?:其他|其它|另外|别的)\\s*" +
+                    "(?:(?:(?:几\\s*)?(?:家|个|位|款|种)?\\s*)?" +
+                    "(?:机构|医院|诊所|医生|医师|项目|治疗|术式)|" +
+                    "(?:几\\s*)?(?:家|个|位|款|种)|的?)" +
+                    "(?=\\s*(?:$|[,.;!?，。；！？]))"
+            ),
+            Regex("(?:other|another|different|alternative)\\s+(?:doctor|doctors|clinic|clinics|hospital|hospitals|institution|institutions|procedure|procedures|treatment|treatments|project|projects)"),
+            Regex(
+                "(?:recommend|show|find|list|introduce|switch to)\\s+(?:me\\s+)?" +
+                    "(?:other|another|different|alternative)(?:\\s+(?:doctor|doctors|clinic|clinics|hospital|hospitals|institution|institutions|procedure|procedures|treatment|treatments|project|projects))?" +
+                "(?=\\s*(?:$|[,.;!?，。；！？]))"
+            )
+        )
+        val entitySwitchRequestPatterns = listOf(
+            Regex("(?:换|改选)\\s*(?:(?:一\\s*)?家\\s*(?:机构|医院|诊所)|(?:机构|医院|诊所)|(?:一\\s*)?(?:个|位)?\\s*(?:医生|医师)|(?:一\\s*)?个?\\s*(?:项目|治疗|术式))"),
+            Regex("(?:换一家|换一个|换个|换位)(?=\\s*(?:$|[,.;!?，。；！？]))")
+        )
+        val priceConfirmationPattern = Regex("不是.+(?:价格|费用|价位|贵|便宜).*(?:吗|嘛|么)")
+        val englishPriceConfirmationPattern = Regex(
+            "(?:isn't|is not)\\s+(?:this|that)\\s+" +
+                "(?:project|treatment|procedure|clinic|hospital|institution|doctor|surgeon)\\s+" +
+                "(?:more\\s+)?(?:expensive|cheap(?:er)?|costly)" +
+                "(?:\\s+than\\s+(?:(?:this|that)" +
+                    "(?:\\s+(?:one|project|treatment|procedure|clinic|hospital|institution|doctor|surgeon))?" +
+                    "|(?:the\\s+)?(?:other|another)(?:\\s+one)?))?" +
+                "(?:\\s+(?:right|correct))?"
+        )
+        val constraintOnlyFillerWordsPattern = Regex(
+            "能不能|可不可以|可以|大概|一般|通常|请问|需要|能|要|会|是|的|呢|吗|嘛|么|呀|啊|" +
+                "\\b(?:what|is|the|about|how|much|long|does|do|it|take|can|could|roughly|approximately|usually)\\b"
+        )
+        val constraintOnlyPunctuationPattern = Regex("[\\s,.;!?，。；！？]+")
+        val socialInterjectionPattern = Regex(
+            "(?:你好|您好|嗨|谢谢|感谢|哈哈+|好的谢谢|好的|收到|明白了|hi|hello|hey|thanks|thank you|ok|okay)[\\s!！。.]*"
+        )
+        val explicitTopicBoundaryPatterns = listOf(
+            Regex("(?:换个|换一个|切换|改变)(?:话题|主题)"),
+            Regex("聊(?:点|些)?别的"),
+            Regex("\\b(?:change|switch)(?:\\s+the)?\\s+(?:topic|subject)\\b"),
+            Regex("\\b(?:another|different)\\s+(?:topic|subject)\\b")
+        )
+        val alternativeInstitutionPattern = Regex(
+            "(?:其他|其它|另外|别的)\\s*(?:几\\s*)?(?:家\\s*)?(?:机构|医院|诊所)|" +
+                "(?:other|another|different|alternative)\\s+(?:clinic|clinics|hospital|hospitals|institution|institutions)"
+        )
+        val alternativeDoctorPattern = Regex(
+            "(?:其他|其它|另外|别的)\\s*(?:几\\s*)?(?:个|位)?\\s*(?:医生|医师)|" +
+                "(?:other|another|different|alternative)\\s+(?:doctor|doctors|surgeon|surgeons)"
+        )
+        val alternativeProjectPattern = Regex(
+            "(?:其他|其它|另外|别的)\\s*(?:几\\s*)?(?:个|种)?\\s*(?:项目|治疗|术式)|" +
+                "(?:other|another|different|alternative)\\s+(?:project|projects|treatment|treatments|procedure|procedures)"
+        )
+        val deicticScopeTargetPatterns = listOf(
+            Regex("(?:这家|那家)\\s*(?:机构|医院|诊所)|(?:this|that)\\s+(?:clinic|hospital|institution)") to AgentQueryTarget.INSTITUTION,
+            Regex("(?:这个|那个)\\s*(?:医生|医师)|(?:this|that)\\s+(?:doctor|surgeon)") to AgentQueryTarget.DOCTOR,
+            Regex("(?:这个|那个)\\s*(?:项目|治疗|术式)|(?:this|that)\\s+(?:project|treatment|procedure)") to AgentQueryTarget.PROJECT
+        )
     }
 }

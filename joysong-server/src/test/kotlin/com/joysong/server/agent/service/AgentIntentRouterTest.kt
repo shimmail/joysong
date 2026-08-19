@@ -107,6 +107,282 @@ class AgentIntentRouterTest {
     }
 
     @Test
+    fun `unrelated general chat does not inherit a detail session target`() {
+        val current = router.assessCurrent("换个话题，讲个笑话", "DOCTOR")
+
+        assertEquals(AgentIntent.GENERAL_CHAT, current.decision.intent)
+        assertEquals(null, current.decision.queryTarget)
+        assertFalse(current.requiresContextCompletion)
+
+        val completed = router.decide("换个话题，讲个笑话", "DOCTOR")
+        assertEquals(AgentIntent.GENERAL_CHAT, completed.intent)
+        assertEquals(null, completed.queryTarget)
+        assertFalse(completed.searchCatalog)
+    }
+
+    @Test
+    fun `negated current references do not inherit a detail session target`() {
+        listOf(
+            "不要这家" to "INSTITUTION",
+            "不是这个医生" to "DOCTOR",
+            "不要推荐这个医生" to "DOCTOR",
+            "别再推荐这个医生" to "DOCTOR",
+            "不要再给我看这家" to "INSTITUTION",
+            "这家不要了" to "INSTITUTION",
+            "我不想选这家" to "INSTITUTION",
+            "这家我不要了" to "INSTITUTION",
+            "不要这家因为太远" to "INSTITUTION",
+            "do not use this clinic" to "INSTITUTION",
+            "do not recommend this doctor" to "DOCTOR",
+            "don't show me this doctor" to "DOCTOR",
+            "I don't want this clinic because it is too expensive" to "INSTITUTION",
+            "I don't want this one" to "DOCTOR"
+        ).forEach { (query, contextType) ->
+            val current = router.assessCurrent(query, contextType)
+
+            assertTrue("NEGATED_CURRENT_REFERENCE" in current.ambiguityReasons, query)
+            assertFalse("UNRESOLVED_CURRENT_REFERENCE" in current.ambiguityReasons, query)
+
+            val completed = router.decide(query, contextType)
+            assertEquals(AgentIntent.GENERAL_CHAT, completed.intent, query)
+            assertEquals(null, completed.queryTarget, query)
+            assertFalse(completed.searchCatalog, query)
+        }
+    }
+
+    @Test
+    fun `generic time chat does not become a detail follow up`() {
+        val current = router.assessCurrent("换个话题，聊聊时间", "PROJECT")
+
+        assertEquals(AgentIntent.GENERAL_CHAT, current.decision.intent)
+        assertFalse("DETAIL_CONTEXT_FOLLOW_UP" in current.ambiguityReasons)
+        assertFalse(current.requiresContextCompletion)
+    }
+
+    @Test
+    fun `same target constraints remain detail follow ups without a catalog action`() {
+        listOf(
+            Triple("医生价格多少", "DOCTOR", AgentQueryTarget.DOCTOR),
+            Triple("机构费用多少", "INSTITUTION", AgentQueryTarget.INSTITUTION),
+            Triple("项目恢复期多久", "PROJECT", AgentQueryTarget.PROJECT)
+        ).forEach { (query, contextType, target) ->
+            val current = router.assessCurrent(query, contextType)
+
+            assertTrue("DETAIL_CONTEXT_FOLLOW_UP" in current.ambiguityReasons, query)
+            val completed = router.decide(query, contextType)
+            assertEquals(AgentIntent.CATALOG_QA, completed.intent, query)
+            assertEquals(target, completed.queryTarget, query)
+        }
+    }
+
+    @Test
+    fun `same target attribute questions remain on the entry detail`() {
+        listOf(
+            Triple("医生资质怎么样", "DOCTOR", AgentQueryTarget.DOCTOR),
+            Triple("机构有哪些优势", "INSTITUTION", AgentQueryTarget.INSTITUTION),
+            Triple("多久能恢复？", "PROJECT", AgentQueryTarget.PROJECT),
+            Triple("恢复期可以吗", "PROJECT", AgentQueryTarget.PROJECT),
+            Triple("How long can recovery take?", "PROJECT", AgentQueryTarget.PROJECT)
+        ).forEach { (query, contextType, target) ->
+            val current = router.assessCurrent(query, contextType)
+
+            assertTrue("DETAIL_CONTEXT_FOLLOW_UP" in current.ambiguityReasons, query)
+            val completed = router.decide(query, contextType)
+            assertEquals(AgentIntent.CATALOG_QA, completed.intent, query)
+            assertEquals(target, completed.queryTarget, query)
+        }
+    }
+
+    @Test
+    fun `alternative entity requests switch catalog focus instead of summarizing the entry detail`() {
+        listOf(
+            Triple("推荐另外几家", "INSTITUTION", AgentQueryTarget.INSTITUTION),
+            Triple("推荐其他的", "DOCTOR", AgentQueryTarget.DOCTOR),
+            Triple("介绍其他机构", "INSTITUTION", AgentQueryTarget.INSTITUTION),
+            Triple("换一家机构", "INSTITUTION", AgentQueryTarget.INSTITUTION),
+            Triple("换个医生", "DOCTOR", AgentQueryTarget.DOCTOR),
+            Triple("换一家", "INSTITUTION", AgentQueryTarget.INSTITUTION),
+            Triple("换个", "DOCTOR", AgentQueryTarget.DOCTOR),
+            Triple("换机构", "INSTITUTION", AgentQueryTarget.INSTITUTION),
+            Triple("换医生", "DOCTOR", AgentQueryTarget.DOCTOR)
+        ).forEach { (query, contextType, expectedTarget) ->
+            val current = router.assessCurrent(query, contextType)
+
+            assertTrue("ALTERNATIVE_ENTITY_REQUEST" in current.ambiguityReasons, query)
+
+            val completed = router.decide(query, contextType)
+            assertEquals(AgentIntent.CATALOG_QA, completed.intent, query)
+            assertEquals(expectedTarget, completed.queryTarget, query)
+        }
+    }
+
+    @Test
+    fun `negated alternative target does not suppress a current target conflict`() {
+        val current = router.assessCurrent("不要其他机构，推荐医生和项目", "GENERAL")
+
+        assertFalse("ALTERNATIVE_ENTITY_REQUEST" in current.ambiguityReasons)
+        assertTrue("CONFLICTING_CURRENT_TARGETS" in current.ambiguityReasons)
+        assertTrue(current.requiresLlmParsing)
+    }
+
+    @Test
+    fun `descriptive alternatives do not release the current detail entity`() {
+        listOf(
+            "这家机构还有其他优势吗" to "INSTITUTION",
+            "这个医生还有其他资质吗" to "DOCTOR",
+            "推荐另外几种注意事项" to "PROJECT",
+            "介绍另外几个优势" to "INSTITUTION",
+            "不要换一家机构" to "INSTITUTION",
+            "不要换个" to "DOCTOR",
+            "换个话题，聊聊价格" to "INSTITUTION",
+            "我还有另一个问题，转真人咨询" to "INSTITUTION",
+            "I have another question; connect me to a person" to "INSTITUTION"
+        ).forEach { (query, contextType) ->
+            val current = router.assessCurrent(query, contextType)
+
+            assertFalse("ALTERNATIVE_ENTITY_REQUEST" in current.ambiguityReasons, query)
+        }
+    }
+
+    @Test
+    fun `price confirmation does not negate the current detail reference`() {
+        listOf(
+            "不是这个价格吗？" to "PROJECT",
+            "不是这个项目更贵吗？" to "PROJECT",
+            "Isn't this treatment more expensive?" to "PROJECT",
+            "Isn't this treatment more expensive than that one?" to "PROJECT",
+            "Isn't this treatment more expensive than the other one?" to "PROJECT",
+            "Isn't this treatment cheaper than that one?" to "PROJECT",
+            "Isn't this project more expensive right?" to "PROJECT",
+            "It is not that expensive, right?" to "PROJECT"
+        ).forEach { (query, contextType) ->
+            val current = router.assessCurrent(query, contextType)
+
+            assertFalse("NEGATED_CURRENT_REFERENCE" in current.ambiguityReasons, query)
+            assertFalse(
+                current.targetEvidence.any {
+                    it.target == AgentQueryTarget.PROJECT && it.polarity == AgentLabelPolarity.NEGATIVE
+                },
+                query
+            )
+            val completed = router.decide(query, contextType)
+            assertEquals(AgentIntent.CATALOG_QA, completed.intent, query)
+            assertEquals(AgentQueryTarget.PROJECT, completed.queryTarget, query)
+        }
+    }
+
+    @Test
+    fun `unrelated recovery wording does not inherit an institution detail`() {
+        val current = router.assessCurrent("心情不好，多久能恢复？", "INSTITUTION")
+
+        assertEquals(AgentIntent.GENERAL_CHAT, current.decision.intent)
+        assertFalse("DETAIL_CONTEXT_FOLLOW_UP" in current.ambiguityReasons)
+        assertFalse(current.requiresContextCompletion)
+    }
+
+    @Test
+    fun `explicit topic boundary does not request the entry detail context`() {
+        val current = router.assessCurrent("换个话题，聊聊价格", "INSTITUTION")
+
+        assertTrue("EXPLICIT_TOPIC_BOUNDARY" in current.ambiguityReasons)
+        assertEquals(AgentIntent.GENERAL_CHAT, current.decision.intent)
+        assertEquals(null, current.decision.queryTarget)
+        assertFalse(current.requiresContextCompletion)
+        assertFalse(current.requiresLlmParsing)
+    }
+
+    @Test
+    fun `explicit topic boundary keeps a new catalog target from the same message`() {
+        listOf(
+            "换个话题，推荐医生" to AgentQueryTarget.DOCTOR,
+            "switch the topic and show clinics" to AgentQueryTarget.INSTITUTION
+        ).forEach { (query, expectedTarget) ->
+            val current = router.assessCurrent(query, "INSTITUTION")
+
+            assertTrue("EXPLICIT_TOPIC_BOUNDARY" in current.ambiguityReasons, query)
+            assertEquals(AgentIntent.CATALOG_QA, current.decision.intent, query)
+            assertEquals(expectedTarget, current.decision.queryTarget, query)
+            assertFalse(current.requiresContextCompletion, query)
+        }
+    }
+
+    @Test
+    fun `explicit topic boundary keeps a new planning intent without inheriting the detail target`() {
+        val current = router.assessCurrent("换个话题，预算5000帮我规划", "INSTITUTION")
+
+        assertTrue("EXPLICIT_TOPIC_BOUNDARY" in current.ambiguityReasons)
+        assertEquals(AgentIntent.PLANNING, current.decision.intent)
+        assertEquals(null, current.decision.queryTarget)
+        assertFalse(current.requiresContextCompletion)
+    }
+
+    @Test
+    fun `explicit topic boundary still parses a conflicting new business request`() {
+        val current = router.assessCurrent("换个话题，比较医生和机构", "INSTITUTION")
+
+        assertEquals(AgentIntent.COMPARISON, current.decision.intent)
+        assertTrue("EXPLICIT_TOPIC_BOUNDARY" in current.ambiguityReasons)
+        assertTrue("CONFLICTING_CURRENT_TARGETS" in current.ambiguityReasons)
+        assertFalse(current.requiresContextCompletion)
+        assertTrue(current.requiresLlmParsing)
+    }
+
+    @Test
+    fun `explicit topic boundary parses uncertain safety but keeps deterministic human handoff`() {
+        val safety = router.assessCurrent("换个话题，我不确定是否怀孕，可以做吗", "INSTITUTION")
+
+        assertTrue("EXPLICIT_TOPIC_BOUNDARY" in safety.ambiguityReasons)
+        assertEquals(AgentIntent.GENERAL_CHAT, safety.decision.intent)
+        assertEquals(null, safety.decision.queryTarget)
+        assertFalse(safety.requiresContextCompletion)
+        assertTrue(safety.requiresLlmParsing)
+
+        val human = router.assessCurrent("换个话题，我不确定是否需要真人咨询", "INSTITUTION")
+
+        assertTrue("EXPLICIT_TOPIC_BOUNDARY" in human.ambiguityReasons)
+        assertEquals(AgentIntent.HUMAN_CONSULTATION, human.decision.intent)
+        assertEquals(AgentQueryTarget.INSTITUTION, human.decision.queryTarget)
+        assertFalse(human.requiresContextCompletion)
+    }
+
+    @Test
+    fun `explicit topic boundary still parses current deictic human and aesthetic requests`() {
+        listOf(
+            "换个话题，Could someone help me with this?",
+            "换个话题，我脸垮了怎么办"
+        ).forEach { query ->
+            val current = router.assessCurrent(query, "INSTITUTION")
+
+            assertTrue("EXPLICIT_TOPIC_BOUNDARY" in current.ambiguityReasons, query)
+            assertFalse(current.requiresContextCompletion, query)
+            assertTrue(current.requiresLlmParsing, query)
+        }
+    }
+
+    @Test
+    fun `short social acknowledgements stay transparent to detail context`() {
+        listOf("好的", "收到", "明白了", "ok", "okay").forEach { query ->
+            val current = router.assessCurrent(query, "INSTITUTION")
+
+            assertTrue("SOCIAL_INTERJECTION" in current.ambiguityReasons, query)
+            assertEquals(AgentIntent.GENERAL_CHAT, current.decision.intent, query)
+        }
+    }
+
+    @Test
+    fun `deictic scope target yields to the requested result target`() {
+        listOf(
+            Triple("这家机构有哪些项目", "INSTITUTION", AgentQueryTarget.PROJECT),
+            Triple("这家机构还有其他项目吗", "INSTITUTION", AgentQueryTarget.PROJECT),
+            Triple("这个医生在哪家机构", "DOCTOR", AgentQueryTarget.INSTITUTION)
+        ).forEach { (query, contextType, expectedTarget) ->
+            val current = router.assessCurrent(query, contextType)
+
+            assertEquals(expectedTarget, current.decision.queryTarget, query)
+        }
+    }
+
+    @Test
     fun `safety takes precedence and avoids recommendations`() {
         val result = router.decide("我在孕期，可以做热玛吉吗", "GENERAL")
         assertEquals(AgentIntent.SAFETY_SCREENING, result.intent)
@@ -162,6 +438,36 @@ class AgentIntentRouterTest {
         assertEquals(AgentIntent.SAFETY_SCREENING, result.decision.intent)
         assertEquals(null, result.decision.queryTarget)
         assertEquals(AgentNextAction.COMPLETE_SAFETY_SCREENING, result.decision.nextAction)
+    }
+
+    @Test
+    fun `safety and human consultation stay above alternative catalog requests`() {
+        val safety = router.decide("我怀孕了，推荐其他机构", "GENERAL")
+        assertEquals(AgentIntent.SAFETY_SCREENING, safety.intent)
+        assertFalse(safety.searchCatalog)
+
+        val human = router.decide("帮我转真人咨询，再推荐其他机构", "GENERAL")
+        assertEquals(AgentIntent.HUMAN_CONSULTATION, human.intent)
+        assertEquals(AgentQueryTarget.INSTITUTION, human.queryTarget)
+        assertEquals(AgentNextAction.SELECT_INSTITUTION, human.nextAction)
+        assertFalse(human.searchCatalog)
+    }
+
+    @Test
+    fun `english current reference rejection accepts common anymore suffixes`() {
+        listOf(
+            "I don't want this clinic anymore" to "INSTITUTION",
+            "I don't want this doctor any more" to "DOCTOR",
+            "I don't want this clinic any longer because I changed my mind" to "INSTITUTION"
+        ).forEach { (query, contextType) ->
+            val current = router.assessCurrent(query, contextType)
+
+            assertTrue("NEGATED_CURRENT_REFERENCE" in current.ambiguityReasons, query)
+            assertFalse("UNRESOLVED_CURRENT_REFERENCE" in current.ambiguityReasons, query)
+            val completed = router.decide(query, contextType)
+            assertEquals(AgentIntent.GENERAL_CHAT, completed.intent, query)
+            assertEquals(null, completed.queryTarget, query)
+        }
     }
 
     @Test
@@ -349,6 +655,79 @@ class AgentIntentRouterTest {
         )
 
         assertEquals(AgentIntent.SAFETY_SCREENING, result.intent)
+        assertEquals(null, result.queryTarget)
+    }
+
+    @Test
+    fun `deterministic context follow up rejects parser intent changes except safety`() {
+        val local = router.supplementWithContext(
+            router.assessCurrent("多少钱？", "GENERAL"),
+            listOf(router.validatedDecision(AgentIntent.CATALOG_QA, AgentQueryTarget.INSTITUTION))
+        )
+
+        assertTrue(local.contextResolvedQueryTarget)
+        listOf(
+            ParsedAgentRoute(AgentIntent.HUMAN_CONSULTATION, AgentQueryTarget.INSTITUTION, emptyList()),
+            ParsedAgentRoute(AgentIntent.DETAIL_SUMMARY, AgentQueryTarget.INSTITUTION, emptyList()),
+            ParsedAgentRoute(
+                AgentIntent.CATALOG_QA,
+                AgentQueryTarget.INSTITUTION,
+                emptyList(),
+                intents = setOf(AgentIntent.DETAIL_SUMMARY)
+            )
+        ).forEach { parsed ->
+            val result = router.mergeParsedRoute(local, parsed)
+            assertEquals(AgentIntent.CATALOG_QA, result.intent, parsed.toString())
+            assertEquals(AgentQueryTarget.INSTITUTION, result.queryTarget, parsed.toString())
+        }
+
+        val safety = router.mergeParsedRoute(
+            local,
+            ParsedAgentRoute(AgentIntent.SAFETY_SCREENING, null, emptyList())
+        )
+        assertEquals(AgentIntent.SAFETY_SCREENING, safety.intent)
+        assertEquals(null, safety.queryTarget)
+    }
+
+    @Test
+    fun `bare deictic context may upgrade to human consultation across detail targets`() {
+        listOf(
+            AgentQueryTarget.DOCTOR,
+            AgentQueryTarget.PROJECT,
+            AgentQueryTarget.INSTITUTION_PROJECT
+        ).forEach { contextTarget ->
+            val local = router.supplementWithContext(
+                router.assessCurrent("Could someone help me with this?", "GENERAL"),
+                listOf(router.validatedDecision(AgentIntent.CATALOG_QA, contextTarget))
+            )
+
+            val result = router.mergeParsedRoute(
+                local,
+                ParsedAgentRoute(AgentIntent.HUMAN_CONSULTATION, null, emptyList())
+            )
+
+            assertTrue(local.contextResolvedQueryTarget, contextTarget.toString())
+            assertEquals(AgentIntent.HUMAN_CONSULTATION, result.intent, contextTarget.toString())
+            assertEquals(AgentQueryTarget.INSTITUTION, result.queryTarget, contextTarget.toString())
+        }
+    }
+
+    @Test
+    fun `parser optional human label cannot override an explicit business intent`() {
+        val local = router.assessCurrent("对比一下", "GENERAL")
+        assertTrue(local.explicitIntent)
+
+        val result = router.mergeParsedRoute(
+            local,
+            ParsedAgentRoute(
+                intent = AgentIntent.COMPARISON,
+                queryTarget = AgentQueryTarget.INSTITUTION,
+                keywords = emptyList(),
+                intents = setOf(AgentIntent.HUMAN_CONSULTATION)
+            )
+        )
+
+        assertEquals(AgentIntent.COMPARISON, result.intent)
         assertEquals(null, result.queryTarget)
     }
 

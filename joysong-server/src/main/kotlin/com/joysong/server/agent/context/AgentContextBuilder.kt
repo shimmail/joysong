@@ -18,6 +18,7 @@ import java.util.UUID
 
 data class AgentSessionSummary(
     val schemaVersion: Int = 1,
+    val focusSemanticsVersion: Int = 0,
     val goals: List<String> = emptyList(),
     val preferences: List<String> = emptyList(),
     val constraints: List<String> = emptyList(),
@@ -30,6 +31,8 @@ data class AgentContext(
     val summary: AgentSessionSummary,
     val messages: List<ChatMessageEntity>
 )
+
+enum class ConversationFocusUpdate { PRESERVE, CLEAR, SET }
 
 interface AgentChatHistoryPort {
     fun load(userId: String, sessionId: String, maxMessages: Int, maxTokens: Int): AgentContext
@@ -88,23 +91,53 @@ class AgentContextBuilder(
         intent: String,
         queryTarget: String?,
         nextAction: String,
-        catalogItems: List<AgentCatalogItemResponse>
+        catalogItems: List<AgentCatalogItemResponse>,
+        conversationFocusUpdate: ConversationFocusUpdate = ConversationFocusUpdate.SET
     ) {
         val current = parseSummary(session.summaryJson)
         val entityRefs = current.entityRefs.toMutableMap()
         catalogItems.filter { it.type.trim().uppercase() in platformEntityTypes && isPlatformEntityId(it.id) }
             .groupBy { it.type.trim().uppercase() }
             .forEach { (type, items) -> entityRefs[type] = (entityRefs[type].orEmpty() + items.map { it.id }).distinct().take(20) }
-        val topic = listOfNotNull(
+        val resolvedTopic = listOfNotNull(
             intent.trim().uppercase().takeIf(validIntents::contains),
             queryTarget?.trim()?.uppercase()?.takeIf(validQueryTargets::contains),
             nextAction.trim().uppercase().takeIf(validNextActions::contains)
         ).filter { it != "NONE" }
             .joinToString(":")
             .takeIf(::isValidTopic)
+        val resolvedFocusTopic = resolvedTopic?.takeIf { it.substringBefore(":") in focusIntents }
+        val sessionDetailFocus = session.contextType.trim().uppercase()
+            .takeIf { session.contextId.isNotBlank() && it in platformEntityTypes }
+            ?.let { "CATALOG_QA:$it:SHOW_CATALOG" }
+        val legacyCanonicalFocus = if (
+            current.focusSemanticsVersion == 0 && conversationFocusUpdate == ConversationFocusUpdate.PRESERVE
+        ) {
+            sessionDetailFocus ?: resolvedFocusTopic
+        } else {
+            null
+        }
+        val adoptsCurrentFocusSemantics = current.focusSemanticsVersion == currentFocusSemanticsVersion ||
+            conversationFocusUpdate != ConversationFocusUpdate.PRESERVE ||
+            legacyCanonicalFocus != null
+        val baseTopics = if (current.focusSemanticsVersion == 0 && adoptsCurrentFocusSemantics) {
+            listOfNotNull(legacyCanonicalFocus)
+        } else {
+            current.unresolvedTopics
+        }
+        val topic = when (conversationFocusUpdate) {
+            ConversationFocusUpdate.PRESERVE -> resolvedTopic?.takeIf {
+                it.substringBefore(":") in setOf("SAFETY_SCREENING", "HUMAN_CONSULTATION")
+            }
+            ConversationFocusUpdate.CLEAR -> "GENERAL_CHAT"
+            ConversationFocusUpdate.SET -> resolvedTopic
+        }
         val updated = current.copy(
+            focusSemanticsVersion = if (adoptsCurrentFocusSemantics) currentFocusSemanticsVersion else 0,
             entityRefs = entityRefs.toSortedMap(),
-            unresolvedTopics = (current.unresolvedTopics + listOfNotNull(topic)).distinct().takeLast(20),
+            unresolvedTopics = topic?.let { latest ->
+                (baseTopics.filterNot { it == latest } + latest).takeLast(20)
+            } ?: baseTopics,
             lastSummarizedSequence = maxOf(current.lastSummarizedSequence, sequenceNo)
         )
         persistSummary(session, updated)
@@ -135,6 +168,8 @@ class AgentContextBuilder(
         if (root.intValue("schemaVersion", summarySchemaVersion) != summarySchemaVersion) return AgentSessionSummary()
         return AgentSessionSummary(
             schemaVersion = summarySchemaVersion,
+            focusSemanticsVersion = root.intValue("focusSemanticsVersion", 0)
+                .takeIf { it == currentFocusSemanticsVersion } ?: 0,
             entityRefs = root.entityRefs(),
             unresolvedTopics = root.stringList("unresolvedTopics").filter(::isValidTopic),
             lastSummarizedSequence = root.longValue("lastSummarizedSequence", 0).coerceAtLeast(0)
@@ -152,6 +187,7 @@ class AgentContextBuilder(
     fun serializeSummary(summary: AgentSessionSummary): String = objectMapper.writeValueAsString(
         linkedMapOf(
             "schemaVersion" to summary.schemaVersion,
+            "focusSemanticsVersion" to summary.focusSemanticsVersion,
             "goals" to summary.goals,
             "preferences" to summary.preferences,
             "constraints" to summary.constraints,
@@ -163,7 +199,7 @@ class AgentContextBuilder(
 
     private fun JsonNode.stringList(name: String): List<String> = get(name)?.takeIf { it.isArray }
         ?.mapNotNull { it.asText(null)?.trim()?.takeIf(String::isNotBlank) }
-        ?.distinct()?.take(20).orEmpty()
+        ?.takeLast(20).orEmpty()
 
     private fun JsonNode.entityRefs(): Map<String, List<String>> = get("entityRefs")?.takeIf { it.isObject }
         ?.fields()?.asSequence()?.mapNotNull { (key, value) ->
@@ -204,7 +240,9 @@ class AgentContextBuilder(
 
     private companion object {
         const val summarySchemaVersion = 1
+        const val currentFocusSemanticsVersion = 1
         val validIntents = setOf("GENERAL_CHAT", "CATALOG_QA", "COMPARISON", "PLANNING", "DETAIL_SUMMARY", "HUMAN_CONSULTATION", "SAFETY_SCREENING")
+        val focusIntents = setOf("CATALOG_QA", "COMPARISON", "PLANNING", "DETAIL_SUMMARY")
         val validQueryTargets = setOf("INSTITUTION", "DOCTOR", "PROJECT", "INSTITUTION_PROJECT")
         val validNextActions = setOf("NONE", "SHOW_CATALOG", "START_PLANNING", "SELECT_INSTITUTION", "COMPLETE_SAFETY_SCREENING")
         val platformEntityTypes = validQueryTargets

@@ -2,6 +2,7 @@ package com.joysong.server.agent.orchestration
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.joysong.server.agent.context.AgentContextBuilder
+import com.joysong.server.agent.context.ConversationFocusUpdate
 import com.joysong.server.agent.dto.AgentCatalogItemResponse
 import com.joysong.server.agent.dto.AgentCatalogReportResponse
 import com.joysong.server.agent.entity.AgentTurnEntity
@@ -49,7 +50,9 @@ data class CompleteTurnCommand(
     val fallbackUsed: Boolean = false,
     val modelName: String = "",
     val promptVersion: String = "",
-    val comparisonRequest: ComparisonRequest? = null
+    val comparisonRequest: ComparisonRequest? = null,
+    val releaseDetailContext: Boolean = false,
+    val conversationFocusUpdate: ConversationFocusUpdate = ConversationFocusUpdate.SET
 )
 
 data class AgentMessageProjection(
@@ -59,7 +62,8 @@ data class AgentMessageProjection(
     val nextAction: String = "NONE",
     val catalogItems: List<AgentCatalogItemResponse> = emptyList(),
     val comparisonRequest: ComparisonRequest? = null,
-    val catalogReport: AgentCatalogReportResponse? = null
+    val catalogReport: AgentCatalogReportResponse? = null,
+    val conversationFocusUpdate: ConversationFocusUpdate? = null
 )
 
 class IdempotencyKeyConflictException : IllegalStateException("IDEMPOTENCY_KEY_CONFLICT")
@@ -85,6 +89,10 @@ class TurnLifecycleService(
         val intent = metadata.path("intent").asText("GENERAL_CHAT").trim()
         val queryTarget = metadata.get("queryTarget")?.takeUnless { it.isNull }?.asText()
         val nextAction = metadata.path("nextAction").asText("NONE")
+        val conversationFocusUpdate = metadata.get("conversationFocusUpdate")
+            ?.takeUnless { it.isNull }
+            ?.asText()
+            ?.let { value -> runCatching { ConversationFocusUpdate.valueOf(value) }.getOrNull() }
         val parsedCatalogItems = metadata.get("catalogItems")
             ?.takeIf { it.isArray }
             ?.mapNotNull { node ->
@@ -126,6 +134,7 @@ class TurnLifecycleService(
                         "intent" to "PLANNING",
                         "queryTarget" to queryTarget,
                         "nextAction" to nextAction,
+                        "conversationFocusUpdate" to conversationFocusUpdate?.name,
                         "catalogItems" to projectedCatalogItems,
                         "catalogReport" to catalogReport
                     )
@@ -141,7 +150,8 @@ class TurnLifecycleService(
             nextAction = nextAction,
             catalogItems = catalogItems,
             comparisonRequest = comparisonRequest,
-            catalogReport = catalogReport
+            catalogReport = catalogReport,
+            conversationFocusUpdate = conversationFocusUpdate
         )
     }
 
@@ -252,6 +262,10 @@ class TurnLifecycleService(
         } else {
             normalizedCommand
         }
+        if (persistedCommand.releaseDetailContext && session.contextType.trim().uppercase() in detailContextTypes) {
+            session.contextType = "GENERAL"
+            session.contextId = ""
+        }
         val metadata = metadata(persistedCommand)
         val assistant = existingAssistant ?: messageRepository.save(
             ChatMessageEntity(
@@ -276,7 +290,8 @@ class TurnLifecycleService(
             persistedCommand.intent,
             persistedCommand.queryTarget,
             persistedCommand.nextAction,
-            persistedCommand.catalogItems
+            persistedCommand.catalogItems,
+            persistedCommand.conversationFocusUpdate
         )
         turnRepository.save(turn)
         return reconstruct(turn, assistant)
@@ -369,6 +384,7 @@ class TurnLifecycleService(
             "intent" to command.intent,
             "queryTarget" to command.queryTarget,
             "nextAction" to command.nextAction,
+            "conversationFocusUpdate" to command.conversationFocusUpdate.name,
             "catalogItems" to command.catalogItems,
             "catalogReport" to command.catalogReport,
             "comparisonRequest" to command.comparisonRequest
@@ -391,4 +407,8 @@ class TurnLifecycleService(
 
     private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
         .digest(value.toByteArray(StandardCharsets.UTF_8)).joinToString("") { "%02x".format(it) }
+
+    private companion object {
+        val detailContextTypes = setOf("PROJECT", "INSTITUTION", "INSTITUTION_PROJECT", "DOCTOR")
+    }
 }

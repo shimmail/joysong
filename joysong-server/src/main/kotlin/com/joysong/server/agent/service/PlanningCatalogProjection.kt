@@ -1,6 +1,7 @@
 package com.joysong.server.agent.service
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.joysong.server.agent.context.ConversationFocusUpdate
 import com.joysong.server.agent.dto.AgentCatalogItemResponse
 import com.joysong.server.agent.dto.AgentCatalogReportResponse
 import com.joysong.server.chat.entity.ChatMessageEntity
@@ -40,11 +41,18 @@ object PlanningCatalogProjection {
         val report = metadata.get("catalogReport")?.takeUnless { it.isNull }?.let { value ->
             runCatching { objectMapper.treeToValue(value, AgentCatalogReportResponse::class.java) }.getOrNull()
         }
+        val conversationFocusUpdate = metadata.get("conversationFocusUpdate")
+            ?.takeUnless { it.isNull }
+            ?.asText()
+            ?.trim()
+            ?.uppercase()
+            ?.let { value -> runCatching { ConversationFocusUpdate.valueOf(value) }.getOrNull() }
         val projectedMetadata = objectMapper.writeValueAsString(
             linkedMapOf(
                 "intent" to "PLANNING",
                 "queryTarget" to metadata.get("queryTarget")?.takeUnless { it.isNull }?.asText(),
                 "nextAction" to metadata.path("nextAction").asText("NONE"),
+                "conversationFocusUpdate" to conversationFocusUpdate?.name,
                 "catalogItems" to projectItems(items),
                 "catalogReport" to projectReport(report)
             )

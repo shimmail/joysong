@@ -7,6 +7,7 @@ import com.joysong.server.chat.dto.CreateSessionRequest
 import com.joysong.server.chat.dto.SendMessageRequest
 import com.joysong.server.agent.context.AgentContextBuilder
 import com.joysong.server.agent.context.AgentSessionSummary
+import com.joysong.server.agent.context.ConversationFocusUpdate
 import com.joysong.server.agent.dto.AgentCatalogReportResponse
 import com.joysong.server.agent.dto.AgentCatalogItemResponse
 import com.joysong.server.agent.orchestration.AgentChatException
@@ -77,12 +78,51 @@ data class GeneratedTurn(
     val catalogReport: AgentCatalogReportResponse?,
     val catalogItems: List<AgentCatalogItemResponse>,
     val comparisonRequest: ComparisonRequest? = null,
-    val answerModelRequired: Boolean = true
+    val answerModelRequired: Boolean = true,
+    val releaseDetailContext: Boolean = false
 )
 
 private data class BoundedRouteContext(
     val decisions: List<AgentIntentDecision>,
-    val ambiguityReasons: List<String>
+    val ambiguityReasons: List<String>,
+    val detailContextSuperseded: Boolean
+)
+
+private data class PersistedFocusEvent(
+    val update: ConversationFocusUpdate,
+    val decision: AgentIntentDecision? = null
+)
+
+private data class CompleteLegacyDetailHistory(
+    val entryActive: Boolean,
+    val sawLegacySocial: Boolean
+)
+
+private data class DetailContextIdentity(
+    val entryType: String,
+    val entryId: String,
+    val institutionId: String? = null,
+    val projectId: String? = null
+) {
+    fun hasRequiredRelation(target: AgentQueryTarget?): Boolean = when {
+        entryType != "INSTITUTION_PROJECT" -> true
+        target == AgentQueryTarget.INSTITUTION -> !institutionId.isNullOrBlank()
+        target == AgentQueryTarget.PROJECT -> !projectId.isNullOrBlank()
+        else -> true
+    }
+}
+
+private data class DetailScopeResolution(
+    val requested: Boolean,
+    val scope: String? = null
+) {
+    val unavailable: Boolean
+        get() = requested && scope.isNullOrBlank()
+}
+
+private data class CatalogExclusionResult(
+    val evidence: AgentPromptEvidence,
+    val verified: Boolean
 )
 
 private data class GenerationLabelSummary(
@@ -239,7 +279,8 @@ sealed interface PreparedChatTurn {
         val planning: Boolean,
         internal val sessionId: String = userMessage.sessionId,
         internal val startedAt: Long = System.nanoTime(),
-        val generated: GeneratedTurn? = null
+        val generated: GeneratedTurn? = null,
+        internal val conversationFocusUpdate: ConversationFocusUpdate = ConversationFocusUpdate.SET
     ) : PreparedChatTurn
 }
 
@@ -364,6 +405,7 @@ class ChatService(
                 capturedProfile = profile
                 LlmCallResult("", false)
             }
+            val focusUpdate = conversationFocusUpdate(session, content, generated)
             val userMessage = messageRepository.findByTurnIdAndRole(begin.turnId, "USER")
                 ?: ChatMessageEntity(sessionId = sessionId, turnId = begin.turnId, role = "USER", content = content)
             if (!generated.answerModelRequired) {
@@ -376,7 +418,8 @@ class ChatService(
                         traceId = begin.traceId,
                         sessionId = sessionId,
                         startedAt = startedAt,
-                        generated = generated
+                        generated = generated,
+                        conversationFocusUpdate = focusUpdate
                     )
                 )
             }
@@ -389,7 +432,8 @@ class ChatService(
                 planning = generated.intentDecision.intent == AgentIntent.PLANNING,
                 sessionId = sessionId,
                 startedAt = startedAt,
-                generated = generated
+                generated = generated,
+                conversationFocusUpdate = focusUpdate
             )
         } catch (error: Exception) {
             val code = if (error is AgentChatException) error.code else "AGENT_INTERNAL_ERROR"
@@ -413,7 +457,8 @@ class ChatService(
             traceId = prepared.traceId,
             sessionId = prepared.sessionId,
             startedAt = prepared.startedAt,
-            generated = generated
+            generated = generated,
+            conversationFocusUpdate = prepared.conversationFocusUpdate
         )
     }
 
@@ -525,7 +570,8 @@ class ChatService(
             traceId = begin.traceId,
             sessionId = sessionId,
             startedAt = totalStartedAt,
-            generated = generated
+            generated = generated,
+            conversationFocusUpdate = conversationFocusUpdate(session, content, generated)
         )
     }
 
@@ -534,7 +580,8 @@ class ChatService(
         traceId: String,
         sessionId: String,
         startedAt: Long,
-        generated: GeneratedTurn
+        generated: GeneratedTurn,
+        conversationFocusUpdate: ConversationFocusUpdate
     ): ChatTurnResult {
         val durationMs = elapsedMs(startedAt)
         val modelName = aiAgentProperties.model.takeIf { generated.answerModelRequired }.orEmpty()
@@ -550,11 +597,52 @@ class ChatService(
                 durationMs = durationMs,
                 fallbackUsed = generated.llmResult.fallbackUsed,
                 modelName = modelName,
-                comparisonRequest = generated.comparisonRequest
+                comparisonRequest = generated.comparisonRequest,
+                releaseDetailContext = generated.releaseDetailContext,
+                conversationFocusUpdate = conversationFocusUpdate
             )
         )
         agentOperationLogger.completed(traceId, turnId, sessionId, durationMs, modelName)
         return completed
+    }
+
+    private fun conversationFocusUpdate(
+        session: ChatSessionEntity,
+        content: String,
+        generated: GeneratedTurn
+    ): ConversationFocusUpdate {
+        val current = agentIntentRouter.assessCurrent(content, session.contextType)
+        val explicitTopicBoundary = "EXPLICIT_TOPIC_BOUNDARY" in current.ambiguityReasons
+        val finalIntent = generated.intentDecision.intent
+        val finalTarget = generated.intentDecision.queryTarget
+        if (explicitTopicBoundary) {
+            return if (
+                finalTarget != null &&
+                finalIntent !in setOf(AgentIntent.SAFETY_SCREENING, AgentIntent.HUMAN_CONSULTATION)
+            ) {
+                ConversationFocusUpdate.SET
+            } else {
+                ConversationFocusUpdate.CLEAR
+            }
+        }
+        if (isDetailContext(session.contextType)) {
+            if (!generated.releaseDetailContext) return ConversationFocusUpdate.PRESERVE
+            return if (
+                finalTarget != null &&
+                finalIntent !in setOf(AgentIntent.SAFETY_SCREENING, AgentIntent.HUMAN_CONSULTATION)
+            ) {
+                ConversationFocusUpdate.SET
+            } else {
+                ConversationFocusUpdate.CLEAR
+            }
+        }
+        if (
+            "SOCIAL_INTERJECTION" in current.ambiguityReasons ||
+            finalIntent in setOf(AgentIntent.SAFETY_SCREENING, AgentIntent.HUMAN_CONSULTATION)
+        ) {
+            return ConversationFocusUpdate.PRESERVE
+        }
+        return if (finalTarget != null) ConversationFocusUpdate.SET else ConversationFocusUpdate.CLEAR
     }
 
     private fun generateTurn(
@@ -598,29 +686,98 @@ class ChatService(
             )
         } else localRouteAssessment
         val parsedRoute = if (aiAgentProperties.intentParserEnabled && routeAssessment.requiresLlmParsing) {
-            parseAmbiguousRoute(content, routeAssessment, boundedContext.decisions, providerCallContext)
+            val parserNeedsContext = currentRouteAssessment.requiresContextCompletion ||
+                routeAssessment.ambiguityReasons.any {
+                    it == "CONFLICTING_CONTEXT" || it.startsWith("CONTEXT_")
+                }
+            parseAmbiguousRoute(
+                content,
+                routeAssessment,
+                if (parserNeedsContext) boundedContext.decisions else emptyList(),
+                providerCallContext
+            )
         } else null
         val intentDecision = agentIntentRouter.mergeParsedRoute(routeAssessment, parsedRoute)
+        val negatedCurrentReference = "NEGATED_CURRENT_REFERENCE" in currentRouteAssessment.ambiguityReasons
+        val alternativeEntityRequest = "ALTERNATIVE_ENTITY_REQUEST" in currentRouteAssessment.ambiguityReasons
+        val explicitTopicBoundary = "EXPLICIT_TOPIC_BOUNDARY" in currentRouteAssessment.ambiguityReasons
+        val detailContextActive = !boundedContext.detailContextSuperseded
+        val detailIdentity by lazy { detailContextIdentity(session) }
         if (intentDecision.intent == AgentIntent.HUMAN_CONSULTATION) {
-            return generateHumanConsultationTurn(session, content, intentDecision)
+            val releaseDetailContext = shouldReleaseDetailContext(
+                contextType = session.contextType,
+                current = currentRouteAssessment,
+                resolved = intentDecision,
+                useDetailContext = false,
+                alreadySuperseded = !detailContextActive
+            )
+            return generateHumanConsultationTurn(
+                userId = session.userId,
+                content = content,
+                decision = intentDecision,
+                useContextInstitution = detailContextActive &&
+                    !negatedCurrentReference &&
+                    !alternativeEntityRequest &&
+                    !explicitTopicBoundary,
+                releaseDetailContext = releaseDetailContext,
+                detailIdentity = detailIdentity
+            )
         }
+        val detailScopeResolution = detailContextSearchScope(
+            session = session,
+            current = currentRouteAssessment,
+            resolved = intentDecision,
+            detailContextActive = detailContextActive
+        )
+        if (detailScopeResolution.unavailable) {
+            return unreliableDetailExclusionTurn(intentDecision, releaseDetailContext = true)
+        }
+        val detailScope = detailScopeResolution.scope
+        val useDetailContext = shouldUseDetailContext(
+            contextType = session.contextType,
+            current = currentRouteAssessment,
+            resolved = intentDecision,
+            detailContextActive = detailContextActive
+        )
+        val releaseDetailContext = shouldReleaseDetailContext(
+            contextType = session.contextType,
+            current = currentRouteAssessment,
+            resolved = intentDecision,
+            useDetailContext = useDetailContext,
+            alreadySuperseded = !detailContextActive,
+            preserveDetailScope = detailScope != null
+        )
         val labelSummary = generationLabelSummary(routeAssessment, parsedRoute, intentDecision)
-        val previousComparison = if (intentDecision.intent == AgentIntent.COMPARISON) {
+        val previousComparison = if (
+            intentDecision.intent == AgentIntent.COMPARISON && !explicitTopicBoundary
+        ) {
             historyMessages.asReversed()
                 .asSequence()
                 .filter { it.role.equals("ASSISTANT", ignoreCase = true) }
                 .map { turnLifecycleService.projectMessage(it).comparisonRequest }
                 .firstOrNull { it != null }
         } else null
-        val previousUserQueries = historyMessages.filter { it.role.equals("USER", true) }
-            .map { it.content }
-            .takeLast(4)
+        val previousUserQueries = if (explicitTopicBoundary) {
+            emptyList()
+        } else {
+            historyMessages.filter { it.role.equals("USER", true) }
+                .map { it.content }
+                .takeLast(4)
+        }
         val contextualQuery = agentCatalogService.contextualSearchQuery(content, previousUserQueries)
         val generationProfile = generationProfile(intentDecision.intent)
-        val catalogSearchQuery = listOf(contextualQuery, parsedRoute?.keywords.orEmpty().joinToString(" "))
+        val catalogSearchQuery = listOf(
+            contextualQuery,
+            detailScope.orEmpty(),
+            parsedRoute?.keywords.orEmpty().joinToString(" ")
+        )
             .filter { it.isNotBlank() }
             .joinToString(" ")
-        val currentContextItems = currentContextCatalogItems(session.contextType, session.contextId)
+        val currentContextItems = if (useDetailContext) {
+            currentContextCatalogItems(session.contextType, session.contextId)
+        } else {
+            emptyList()
+        }
         val comparisonSearchQuery = if (intentDecision.intent == AgentIntent.COMPARISON) {
             (
                 listOf(catalogSearchQuery) +
@@ -631,11 +788,23 @@ class ChatService(
                 .distinct()
                 .joinToString(" ")
         } else catalogSearchQuery
-        val rawEvidence = catalogEvidence(
+        val excludedDetailIdentity = if (
+            negatedCurrentReference || alternativeEntityRequest || !detailContextActive ||
+            (releaseDetailContext && !useDetailContext)
+        ) {
+            detailIdentity
+        } else {
+            null
+        }
+        val exclusion = catalogEvidence(
             content = content,
             searchQuery = comparisonSearchQuery,
             intentDecision = intentDecision
-        )
+        ).withoutCatalogItems(excludedDetailIdentity, intentDecision.queryTarget)
+        if (!exclusion.verified) {
+            return unreliableDetailExclusionTurn(intentDecision, releaseDetailContext = true)
+        }
+        val rawEvidence = exclusion.evidence
         val comparisonRequest = if (intentDecision.intent == AgentIntent.COMPARISON) {
             comparisonRequestBuilder.build(
                 content = content,
@@ -654,7 +823,8 @@ class ChatService(
                 catalogReport = null,
                 catalogItems = emptyList(),
                 comparisonRequest = comparisonRequest,
-                answerModelRequired = false
+                answerModelRequired = false,
+                releaseDetailContext = releaseDetailContext
             )
         }
         val evidence = comparisonRequest?.let {
@@ -666,7 +836,8 @@ class ChatService(
             contextId = session.contextId,
             intentDecision = intentDecision,
             labelSummary = labelSummary,
-            evidence = evidence
+            evidence = evidence,
+            useDetailContext = useDetailContext
         )
         llmMessages.add(mapOf("role" to "system", "content" to promptBuild.prompt))
         if (summary != null && summary != AgentSessionSummary()) {
@@ -695,7 +866,7 @@ class ChatService(
         }
         val visibleItems = if (visibleReport == null) {
             when {
-                isDetailContext(session.contextType) && currentContextItems.isNotEmpty() ->
+                useDetailContext && currentContextItems.isNotEmpty() ->
                     currentContextItems
                 else -> promptBuild.evidence.report?.items.orEmpty().take(4)
             }
@@ -706,34 +877,43 @@ class ChatService(
             llmResult = llmResult,
             catalogReport = visibleReport,
             catalogItems = visibleItems,
-            comparisonRequest = comparisonRequest
+            comparisonRequest = comparisonRequest,
+            releaseDetailContext = releaseDetailContext
         )
     }
 
-    private fun consultationContextInstitutionId(session: ChatSessionEntity): String? =
-        when (session.contextType.trim().uppercase()) {
-            "INSTITUTION" -> session.contextId.trim().takeIf(String::isNotBlank)
-            "INSTITUTION_PROJECT" -> institutionProjectRepository.findById(session.contextId)
-                .orElse(null)
-                ?.institutionId
+    private fun generateHumanConsultationTurn(
+        userId: String,
+        content: String,
+        decision: AgentIntentDecision,
+        useContextInstitution: Boolean,
+        releaseDetailContext: Boolean,
+        detailIdentity: DetailContextIdentity?
+    ): GeneratedTurn {
+        val contextInstitutionId = when (detailIdentity?.entryType) {
+            "INSTITUTION", "INSTITUTION_PROJECT" -> detailIdentity.institutionId
             else -> null
         }
-
-    private fun generateHumanConsultationTurn(
-        session: ChatSessionEntity,
-        content: String,
-        decision: AgentIntentDecision
-    ): GeneratedTurn {
+        val mustVerifyExcludedInstitution = !useContextInstitution && releaseDetailContext &&
+            detailIdentity?.entryType == "INSTITUTION_PROJECT"
+        if (mustVerifyExcludedInstitution && contextInstitutionId.isNullOrBlank()) {
+            return unreliableDetailExclusionTurn(decision, releaseDetailContext = true)
+        }
         val selection = agentCatalogService.selectConsultableInstitutions(
-            userId = session.userId,
+            userId = userId,
             query = content,
-            contextInstitutionId = consultationContextInstitutionId(session)
+            contextInstitutionId = contextInstitutionId.takeIf { useContextInstitution }
         )
+        val excludedInstitutionId = contextInstitutionId.takeIf {
+            !useContextInstitution && releaseDetailContext
+        }
         val items = selection.items.filter {
             it.type.equals("INSTITUTION", ignoreCase = true) &&
                 it.id.isNotBlank() &&
                 !it.institutionId.isNullOrBlank() &&
-                it.canChatWithHuman
+                it.canChatWithHuman &&
+                it.id != excludedInstitutionId &&
+                it.institutionId != excludedInstitutionId
         }.take(4)
         val resolvedDecision = decision.copy(
             queryTarget = AgentQueryTarget.INSTITUTION,
@@ -760,9 +940,29 @@ class ChatService(
             llmResult = LlmCallResult("", fallbackUsed = false),
             catalogReport = null,
             catalogItems = items,
-            answerModelRequired = false
+            answerModelRequired = false,
+            releaseDetailContext = releaseDetailContext
         )
     }
+
+    private fun unreliableDetailExclusionTurn(
+        decision: AgentIntentDecision,
+        releaseDetailContext: Boolean
+    ) = GeneratedTurn(
+        content = AgentText.value(
+            "当前详情信息暂时不可用，无法为你可靠筛选其他选项，请稍后再试。",
+            "The current detail information is temporarily unavailable, so I can't reliably filter alternatives right now. Please try again later."
+        ),
+        intentDecision = decision.copy(
+            searchCatalog = false,
+            nextAction = AgentNextAction.NONE
+        ),
+        llmResult = LlmCallResult(content = "", fallbackUsed = false),
+        catalogReport = null,
+        catalogItems = emptyList(),
+        answerModelRequired = false,
+        releaseDetailContext = releaseDetailContext
+    )
 
     private fun catalogEvidence(
         content: String,
@@ -906,23 +1106,268 @@ class ChatService(
         summary: AgentSessionSummary?,
         contextType: String
     ): BoundedRouteContext {
-        val summaryDecisions = summary?.unresolvedTopics.orEmpty().mapNotNull {
+        val allSummaryDecisions = summary?.unresolvedTopics.orEmpty().mapNotNull {
             summaryContextDecision(it, agentIntentRouter)
         }
-        val historyAssessments = if (summaryDecisions.isEmpty()) {
-            historyMessages.filter { it.role.equals("USER", true) }
-                .takeLast(4)
-                .map { agentIntentRouter.assessCurrent(it.content, "GENERAL") }
-        } else {
-            emptyList()
+        val summaryDecisions = allSummaryDecisions.filterNot {
+            it.intent in setOf(AgentIntent.SAFETY_SCREENING, AgentIntent.HUMAN_CONSULTATION)
         }
-        val sessionDecision = runCatching { AgentQueryTarget.valueOf(contextType.trim().uppercase()) }
-            .getOrNull()
+        val recentUserMessages = historyMessages.filter { it.role.equals("USER", true) }.takeLast(4)
+        val historyAssessments = recentUserMessages.map { agentIntentRouter.assessCurrent(it.content, "GENERAL") }
+        val assistantMessagesByTurnId = historyMessages.asSequence()
+            .filter { it.role.equals("ASSISTANT", ignoreCase = true) }
+            .mapNotNull { message ->
+                val turnId = message.turnId?.takeIf(String::isNotBlank) ?: return@mapNotNull null
+                turnId to message
+            }
+            .toMap()
+        val sessionTarget = runCatching { AgentQueryTarget.valueOf(contextType.trim().uppercase()) }.getOrNull()
+        val sessionDecision = sessionTarget
             ?.let { agentIntentRouter.validatedDecision(AgentIntent.CATALOG_QA, it) }
+        val detailAssessments = if (sessionTarget == null) {
+            historyAssessments
+        } else {
+            recentUserMessages.map { agentIntentRouter.assessCurrent(it.content, contextType) }
+        }
+        val persistedFocusEvents = recentUserMessages.mapIndexed { index, message ->
+            val assistant = message.turnId?.let(assistantMessagesByTurnId::get) ?: return@mapIndexed null
+            persistedFocusEvent(assistant, historyAssessments[index])
+        }
+        val completeLegacyHistory = sessionTarget?.let {
+            completeLegacyDetailHistory(historyMessages, summary, it, assistantMessagesByTurnId)
+        }
+        val rawSummaryFocus = summaryDecisions.lastOrNull()
+        val incompleteLegacyHistory = completeLegacyHistory == null && (
+            (summary?.lastSummarizedSequence ?: 0) > 0 || historyMessages.isNotEmpty()
+            )
+        val legacyDetailMustFailClosed = summary?.focusSemanticsVersion == 0 &&
+            sessionTarget != null && (
+                completeLegacyHistory?.entryActive == false ||
+                    incompleteLegacyHistory ||
+                    retainedHistoryProvesDetailSuperseded(
+                        historyMessages,
+                        sessionTarget,
+                        assistantMessagesByTurnId
+                    )
+                )
+        val ambiguousLegacyOverlay = summary?.focusSemanticsVersion == 0 &&
+            allSummaryDecisions.lastOrNull()?.intent in setOf(
+                AgentIntent.SAFETY_SCREENING,
+                AgentIntent.HUMAN_CONSULTATION
+            ) &&
+            (sessionTarget == null || completeLegacyHistory?.entryActive != true)
+        val legacyTrailingSocial = sessionTarget != null &&
+            rawSummaryFocus?.intent == AgentIntent.GENERAL_CHAT &&
+            rawSummaryFocus.queryTarget == null &&
+            completeLegacyHistory?.entryActive == true &&
+            completeLegacyHistory.sawLegacySocial
+        val summaryFocus = when {
+            legacyDetailMustFailClosed -> null
+            ambiguousLegacyOverlay -> null
+            legacyTrailingSocial -> summaryDecisions.dropLast(1).lastOrNull()
+            else -> rawSummaryFocus
+        }
+        val summarySupersedesDetail = sessionTarget != null && (
+            legacyDetailMustFailClosed ||
+                ambiguousLegacyOverlay ||
+                (summaryFocus != null && summaryFocus.queryTarget != sessionTarget)
+            )
+        var focus = when {
+            summarySupersedesDetail -> summaryFocus
+            sessionDecision != null -> sessionDecision
+            else -> summaryFocus
+        }
+        var focusReasons = emptyList<String>()
+        var detailContextSuperseded = summarySupersedesDetail
+        historyAssessments.forEachIndexed { index, assessment ->
+            val persistedFocus = persistedFocusEvents[index]
+            if (persistedFocus != null) {
+                when (persistedFocus.update) {
+                    ConversationFocusUpdate.PRESERVE -> Unit
+                    ConversationFocusUpdate.CLEAR -> {
+                        focus = null
+                        focusReasons = emptyList()
+                        detailContextSuperseded = detailContextSuperseded || sessionTarget != null
+                    }
+                    ConversationFocusUpdate.SET -> {
+                        focus = persistedFocus.decision
+                        focusReasons = emptyList()
+                        detailContextSuperseded = detailContextSuperseded || sessionTarget != null
+                    }
+                }
+                return@forEachIndexed
+            }
+            if (sessionTarget != null && supersedesEntryDetail(detailAssessments[index], sessionTarget)) {
+                detailContextSuperseded = true
+            }
+            if (assessment.decision.intent in setOf(
+                    AgentIntent.SAFETY_SCREENING,
+                    AgentIntent.HUMAN_CONSULTATION
+                ) || "SOCIAL_INTERJECTION" in assessment.ambiguityReasons
+            ) {
+                return@forEachIndexed
+            }
+            if (isConversationTopicBoundary(assessment)) {
+                focus = null
+                focusReasons = emptyList()
+                return@forEachIndexed
+            }
+            if (assessment.decision.queryTarget != null) {
+                focus = assessment.decision
+                focusReasons = assessment.ambiguityReasons
+            }
+        }
         return BoundedRouteContext(
-            decisions = (summaryDecisions.ifEmpty { historyAssessments.map { it.decision } }) + listOfNotNull(sessionDecision),
-            ambiguityReasons = historyAssessments.flatMap { it.ambiguityReasons }.distinct()
+            decisions = listOfNotNull(focus),
+            ambiguityReasons = focusReasons
+                .filterNot {
+                    it in setOf(
+                        "DETAIL_CONTEXT_FOLLOW_UP",
+                        "NEGATED_CURRENT_REFERENCE",
+                        "ALTERNATIVE_ENTITY_REQUEST"
+                    )
+                }
+                .distinct(),
+            detailContextSuperseded = detailContextSuperseded
         )
+    }
+
+    private fun completeLegacyDetailHistory(
+        historyMessages: List<ChatMessageEntity>,
+        summary: AgentSessionSummary?,
+        sessionTarget: AgentQueryTarget,
+        assistantMessagesByTurnId: Map<String, ChatMessageEntity>
+    ): CompleteLegacyDetailHistory? {
+        val summarizedMessageSequence = summary?.lastSummarizedSequence
+            ?.takeIf { it > 0 }
+            ?.let { sequence -> runCatching { Math.multiplyExact(sequence, 2L) }.getOrNull() }
+            ?: return null
+        val completeHistory = historyMessages
+            .filter { it.sequenceNo <= summarizedMessageSequence }
+            .sortedBy { it.sequenceNo }
+        if (completeHistory.size.toLong() != summarizedMessageSequence) return null
+        if (completeHistory.withIndex().any { (index, message) -> message.sequenceNo != index + 1L }) return null
+
+        var entryActive = true
+        var sawLegacySocial = false
+        completeHistory.filter { it.role.equals("USER", ignoreCase = true) }.forEach { userMessage ->
+            val assistant = userMessage.turnId?.let(assistantMessagesByTurnId::get) ?: return null
+            val generalAssessment = agentIntentRouter.assessCurrent(userMessage.content, "GENERAL")
+            when (persistedFocusEvent(assistant, generalAssessment)?.update) {
+                ConversationFocusUpdate.PRESERVE -> Unit
+                ConversationFocusUpdate.CLEAR,
+                ConversationFocusUpdate.SET -> entryActive = false
+                null -> {
+                    if ("SOCIAL_INTERJECTION" in generalAssessment.ambiguityReasons) {
+                        sawLegacySocial = true
+                    } else {
+                        val detailAssessment = agentIntentRouter.assessCurrent(userMessage.content, sessionTarget.name)
+                        if (
+                            supersedesEntryDetail(detailAssessment, sessionTarget) ||
+                            isConversationTopicBoundary(generalAssessment)
+                        ) {
+                            entryActive = false
+                        }
+                    }
+                }
+            }
+        }
+        return CompleteLegacyDetailHistory(entryActive, sawLegacySocial)
+    }
+
+    private fun retainedHistoryProvesDetailSuperseded(
+        historyMessages: List<ChatMessageEntity>,
+        sessionTarget: AgentQueryTarget,
+        assistantMessagesByTurnId: Map<String, ChatMessageEntity>
+    ): Boolean = historyMessages.asSequence()
+        .filter { it.role.equals("USER", ignoreCase = true) }
+        .sortedBy { it.sequenceNo }
+        .any { userMessage ->
+            val generalAssessment = agentIntentRouter.assessCurrent(userMessage.content, "GENERAL")
+            val persistedFocus = userMessage.turnId
+                ?.let(assistantMessagesByTurnId::get)
+                ?.let { persistedFocusEvent(it, generalAssessment) }
+            when (persistedFocus?.update) {
+                ConversationFocusUpdate.CLEAR,
+                ConversationFocusUpdate.SET -> true
+                ConversationFocusUpdate.PRESERVE -> false
+                null -> {
+                    val detailAssessment = agentIntentRouter.assessCurrent(userMessage.content, sessionTarget.name)
+                    supersedesEntryDetail(detailAssessment, sessionTarget) ||
+                        isConversationTopicBoundary(generalAssessment)
+                }
+            }
+        }
+
+    private fun persistedFocusEvent(
+        message: ChatMessageEntity,
+        pairedUserAssessment: AgentRouteAssessment
+    ): PersistedFocusEvent? {
+        val metadata = runCatching { objectMapper.readTree(message.metadataJson.ifBlank { "{}" }) }.getOrNull()
+            ?: return null
+        val focusNode = metadata.get("conversationFocusUpdate")
+        val update = if (focusNode == null || focusNode.isNull) {
+            val legacyIntent = metadata.path("intent").asText("").trim().uppercase()
+                .let { value -> runCatching { AgentIntent.valueOf(value) }.getOrNull() }
+            if (legacyIntent !in setOf(AgentIntent.SAFETY_SCREENING, AgentIntent.HUMAN_CONSULTATION)) return null
+            if ("EXPLICIT_TOPIC_BOUNDARY" in pairedUserAssessment.ambiguityReasons) {
+                ConversationFocusUpdate.CLEAR
+            } else {
+                ConversationFocusUpdate.PRESERVE
+            }
+        } else {
+            focusNode.asText()
+                .let { value -> runCatching { ConversationFocusUpdate.valueOf(value) }.getOrNull() }
+                ?: return null
+        }
+        if (update != ConversationFocusUpdate.SET) return PersistedFocusEvent(update)
+        val intent = metadata.path("intent").asText("").trim().uppercase()
+            .let { value -> runCatching { AgentIntent.valueOf(value) }.getOrNull() }
+            ?: return null
+        val target = metadata.get("queryTarget")
+            ?.takeUnless { it.isNull }
+            ?.asText()
+            ?.trim()
+            ?.uppercase()
+            ?.let { value -> runCatching { AgentQueryTarget.valueOf(value) }.getOrNull() }
+        return PersistedFocusEvent(update, agentIntentRouter.validatedDecision(intent, target))
+    }
+
+    private fun isConversationTopicBoundary(assessment: AgentRouteAssessment): Boolean =
+        assessment.decision.intent == AgentIntent.GENERAL_CHAT &&
+            assessment.decision.queryTarget == null &&
+            !assessment.requiresContextCompletion &&
+            assessment.ambiguityReasons.none {
+                it in setOf(
+                    "DETAIL_CONTEXT_FOLLOW_UP",
+                    "UNRESOLVED_CURRENT_REFERENCE",
+                    "SOCIAL_INTERJECTION"
+                )
+            }
+
+    private fun supersedesEntryDetail(
+        assessment: AgentRouteAssessment,
+        entryTarget: AgentQueryTarget
+    ): Boolean {
+        if (assessment.ambiguityReasons.any {
+                it in setOf("NEGATED_CURRENT_REFERENCE", "ALTERNATIVE_ENTITY_REQUEST")
+            }) {
+            return true
+        }
+        if (assessment.decision.intent in setOf(AgentIntent.SAFETY_SCREENING, AgentIntent.HUMAN_CONSULTATION)) {
+            return false
+        }
+        if (assessment.ambiguityReasons.any {
+                it in setOf("DETAIL_CONTEXT_FOLLOW_UP", "UNRESOLVED_CURRENT_REFERENCE")
+            }) {
+            return false
+        }
+        if ("SOCIAL_INTERJECTION" in assessment.ambiguityReasons) return false
+        val target = assessment.decision.queryTarget
+        if (assessment.explicitQueryTarget && target != null) {
+            return target != entryTarget || assessment.decision.intent != AgentIntent.DETAIL_SUMMARY
+        }
+        return assessment.decision.intent == AgentIntent.GENERAL_CHAT
     }
 
     private fun parseAmbiguousRoute(
@@ -942,6 +1387,10 @@ class ChatService(
             val context = boundedContext.takeLast(4).joinToString(", ") {
                 "${it.intent}/${it.queryTarget ?: "NONE"}"
             }.ifBlank { "NONE" }
+            val humanOverrideAllowed = agentIntentRouter.allowsHumanContextOverride(local)
+            val ordinaryIntentLocked = local.explicitIntent ||
+                (local.contextResolvedQueryTarget && !humanOverrideAllowed)
+            val ordinaryTargetLocked = local.explicitQueryTarget || local.contextResolvedQueryTarget
             val instruction = """
                 Classify one medical-aesthetic chat request. Return JSON only:
                 {"intent":"GENERAL_CHAT|CATALOG_QA|COMPARISON|PLANNING|DETAIL_SUMMARY|HUMAN_CONSULTATION|SAFETY_SCREENING","intents":["optional additional intent labels"],"queryTarget":"INSTITUTION|DOCTOR|PROJECT|INSTITUTION_PROJECT|null","keywords":["..."]}
@@ -950,8 +1399,10 @@ class ChatService(
                 For HUMAN_CONSULTATION, queryTarget must be INSTITUTION or null.
                 Never return a consultant user ID or invent an institution.
                 Keywords may contain only useful cities, treatments, categories, tags, clinic names or doctor names from the text. Maximum 8 items. Do not invent IDs or facts.
-                Local decision: ${local.decision.intent}/${local.decision.queryTarget ?: "NONE"}. Locked fields: intent=${local.explicitIntent}, queryTarget=${local.explicitQueryTarget}.
-                You may fill only unlocked fields. Do not change locked fields.
+                Local decision: ${local.decision.intent}/${local.decision.queryTarget ?: "NONE"}.
+                Route policy: ordinaryIntentLocked=$ordinaryIntentLocked, ordinaryTargetLocked=$ordinaryTargetLocked, humanOverrideAllowed=$humanOverrideAllowed.
+                A context-inherited target remains locked for ordinary intents. Only when humanOverrideAllowed=true and the current request is HUMAN_CONSULTATION may the inherited target become INSTITUTION or null. SAFETY_SCREENING may always clear the target.
+                You may fill only fields allowed by this route policy.
             """.trimIndent()
             val parserMessages = listOf(
                 mapOf("role" to "system", "content" to instruction),
@@ -1015,10 +1466,11 @@ class ChatService(
             if (keywordsNode.any { !it.isTextual }) throw IntentParserRouteException("INVALID_SCHEMA")
             val keywords = keywordsNode.map { it.asText().trim() }
             if (keywords.any { it.length !in 2..40 }) throw IntentParserRouteException("INVALID_SCHEMA")
-            if (!isCompatibleParsedRoute(local, intent, intents, target)) {
+            val parsedRoute = ParsedAgentRoute(intent, target, keywords, intents)
+            if (!agentIntentRouter.isCompatibleParsedRoute(local, parsedRoute)) {
                 throw IntentParserRouteException("INCOMPATIBLE_ROUTE")
             }
-            ParsedAgentRoute(intent, target, keywords, intents)
+            parsedRoute
         } catch (error: Exception) {
             runCatching {
                 logProviderFailure(
@@ -1048,29 +1500,6 @@ class ChatService(
         else -> "PROVIDER_ERROR"
     }
 
-    private fun isCompatibleParsedRoute(
-        local: AgentRouteAssessment,
-        intent: AgentIntent,
-        intents: Set<AgentIntent>,
-        target: AgentQueryTarget?
-    ): Boolean {
-        val parsedIntents = intents + intent
-        if (
-            AgentIntent.HUMAN_CONSULTATION in parsedIntents &&
-            target != null &&
-            target != AgentQueryTarget.INSTITUTION
-        ) return false
-        if (local.unresolvedSafetyNegation && AgentIntent.SAFETY_SCREENING in parsedIntents) return true
-        if (intent in setOf(AgentIntent.GENERAL_CHAT, AgentIntent.SAFETY_SCREENING) && target != null) return false
-        if (local.explicitIntent && local.decision.intent !in parsedIntents) return false
-        if (local.explicitQueryTarget && target != local.decision.queryTarget) return false
-        if (local.unresolvedSafetyNegation && parsedIntents.none {
-                it in setOf(local.decision.intent, AgentIntent.SAFETY_SCREENING)
-            }
-        ) return false
-        return true
-    }
-
     private class IntentParserRouteException(val category: String) : IllegalArgumentException(category)
 
     /** Reserved SSE path. Streaming remains disabled by fixed runtime policy. */
@@ -1095,7 +1524,8 @@ class ChatService(
         contextId: String,
         intentDecision: AgentIntentDecision,
         labelSummary: GenerationLabelSummary,
-        evidence: AgentPromptEvidence
+        evidence: AgentPromptEvidence,
+        useDetailContext: Boolean
     ): PromptBuildResult {
         val basePrompt = when (persona) {
             "BESTIE" -> "你是娇颜颂的AI闺蜜「小颜」。你性格活泼开朗、善解人意，像一个贴心的好朋友。你关心用户的日常状态，会适时提醒术后护理、鼓励记录变美日记。聊天语气轻松友好，偶尔用可爱的表情。当用户问到专业医美问题时，温柔地建议咨询专业美学咨询师。"
@@ -1120,8 +1550,8 @@ class ChatService(
             11. 不要重复用户称呼、风险提示或“建议咨询医生”。回答当前问题后自然收住，把次要信息留给用户继续追问。
             12. 面向用户时不要使用“命中、命中集、检索结果、字段、记录、数据库返回、召回、实体”等系统或AI术语。自然地说“平台上查到”“平台资料显示”“目前可以看到”“资料中暂未注明”。英文避免使用 hit、retrieval result、database record、field 等内部表达，改用 “I found on the platform”“the profile shows”“the platform does not currently list”。
         """.trimIndent()
-        val contextInfo = buildContextInfo(contextType, contextId)
-        val detailSessionPolicy = if (isDetailContext(contextType)) """
+        val contextInfo = if (useDetailContext) buildContextInfo(contextType, contextId) else ""
+        val detailSessionPolicy = if (useDetailContext) """
             当前处于详情会话。回答时优先围绕当前页面实体，不要跳出到泛泛科普；如果用户追问价格、恢复期、风险、医生或机构，直接基于当前页面给出简短回答。
         """.trimIndent() else ""
         val summaryMode = intentDecision.intent == AgentIntent.DETAIL_SUMMARY
@@ -1528,6 +1958,240 @@ class ChatService(
             logger.warn("Agent context card build failed contextType={}", normalizedType)
             emptyList()
         }
+    }
+
+    private fun detailContextIdentity(session: ChatSessionEntity): DetailContextIdentity? {
+        val entryType = session.contextType.trim().uppercase()
+        val entryId = session.contextId.trim()
+        if (!isDetailContext(entryType) || entryId.isBlank()) return null
+        return when (entryType) {
+            "INSTITUTION" -> DetailContextIdentity(entryType, entryId, institutionId = entryId)
+            "PROJECT" -> DetailContextIdentity(entryType, entryId, projectId = entryId)
+            "DOCTOR" -> DetailContextIdentity(entryType, entryId)
+            "INSTITUTION_PROJECT" -> {
+                val base = DetailContextIdentity(entryType, entryId)
+                runCatching { institutionProjectRepository.findById(entryId).orElse(null) }
+                    .onFailure { error ->
+                        logger.warn(
+                            "Agent detail identity lookup failed contextType=INSTITUTION_PROJECT category={}",
+                            error.javaClass.simpleName
+                        )
+                    }
+                    .getOrNull()
+                    ?.let { offering ->
+                        base.copy(
+                            institutionId = offering.institutionId,
+                            projectId = offering.projectId
+                        )
+                    } ?: base
+            }
+            else -> null
+        }
+    }
+
+    private fun detailContextSearchScope(
+        session: ChatSessionEntity,
+        current: AgentRouteAssessment,
+        resolved: AgentIntentDecision,
+        detailContextActive: Boolean
+    ): DetailScopeResolution {
+        if (!detailContextActive || "UNRESOLVED_CURRENT_REFERENCE" !in current.ambiguityReasons) {
+            return DetailScopeResolution(requested = false)
+        }
+        if (current.ambiguityReasons.any {
+                it in setOf("NEGATED_CURRENT_REFERENCE", "EXPLICIT_TOPIC_BOUNDARY")
+            }) {
+            return DetailScopeResolution(requested = false)
+        }
+        val resolvedTarget = resolved.queryTarget ?: return DetailScopeResolution(requested = false)
+        val positiveTargets = current.targetEvidence.filter {
+            it.polarity == AgentLabelPolarity.POSITIVE
+        }.mapTo(mutableSetOf()) { it.target }
+        val contextId = session.contextId.trim()
+        val contextType = session.contextType.trim().uppercase()
+        val scopeTarget = when (contextType) {
+            "INSTITUTION" -> AgentQueryTarget.INSTITUTION.takeIf {
+                resolvedTarget != it && it in positiveTargets
+            }
+            "DOCTOR" -> AgentQueryTarget.DOCTOR.takeIf {
+                resolvedTarget != it && it in positiveTargets
+            }
+            "PROJECT" -> AgentQueryTarget.PROJECT.takeIf {
+                resolvedTarget != it && it in positiveTargets
+            }
+            "INSTITUTION_PROJECT" -> when {
+                resolvedTarget != AgentQueryTarget.INSTITUTION &&
+                    AgentQueryTarget.INSTITUTION in positiveTargets -> AgentQueryTarget.INSTITUTION
+                resolvedTarget != AgentQueryTarget.PROJECT &&
+                    AgentQueryTarget.PROJECT in positiveTargets -> AgentQueryTarget.PROJECT
+                else -> null
+            }
+            else -> null
+        } ?: return DetailScopeResolution(requested = false)
+        val scope = runCatching {
+            when (contextType) {
+                "INSTITUTION" -> institutionRepository.findById(contextId).orElse(null)?.name
+                "DOCTOR" -> doctorRepository.findById(contextId).orElse(null)?.name
+                "PROJECT" -> projectRepository.findById(contextId).orElse(null)?.name
+                "INSTITUTION_PROJECT" -> institutionProjectRepository.findById(contextId).orElse(null)?.let { offering ->
+                    when (scopeTarget) {
+                        AgentQueryTarget.INSTITUTION ->
+                            institutionRepository.findById(offering.institutionId).orElse(null)?.name
+                        AgentQueryTarget.PROJECT ->
+                            projectRepository.findById(offering.projectId).orElse(null)?.name
+                        else -> null
+                    }
+                }
+                else -> null
+            }
+        }.onFailure { error ->
+            logger.warn(
+                "Agent detail scope lookup failed contextType={} category={}",
+                session.contextType.trim().uppercase(),
+                error.javaClass.simpleName
+            )
+        }.getOrNull()
+        return DetailScopeResolution(
+            requested = true,
+            scope = scope?.trim()?.takeIf(String::isNotBlank)
+        )
+    }
+
+    private fun shouldUseDetailContext(
+        contextType: String,
+        current: AgentRouteAssessment,
+        resolved: AgentIntentDecision,
+        detailContextActive: Boolean
+    ): Boolean {
+        if (!detailContextActive) return false
+        val contextTarget = runCatching { AgentQueryTarget.valueOf(contextType.trim().uppercase()) }.getOrNull()
+            ?: return false
+        if ("EXPLICIT_TOPIC_BOUNDARY" in current.ambiguityReasons) return false
+        if (resolved.intent in setOf(
+                AgentIntent.GENERAL_CHAT,
+                AgentIntent.HUMAN_CONSULTATION,
+                AgentIntent.SAFETY_SCREENING
+            )) {
+            return false
+        }
+        if (current.ambiguityReasons.any {
+                it in setOf(
+                    "AMBIGUOUS_NEGATION",
+                    "CONFLICTING_CURRENT_TARGETS",
+                    "NEGATED_CURRENT_REFERENCE",
+                    "ALTERNATIVE_ENTITY_REQUEST"
+                )
+            }) {
+            return false
+        }
+        if (current.targetEvidence.any {
+                it.target == contextTarget && it.polarity != AgentLabelPolarity.POSITIVE
+            }) {
+            return false
+        }
+        val currentTarget = current.decision.queryTarget
+        if (currentTarget != null && currentTarget != contextTarget) return false
+        if (resolved.queryTarget != null && resolved.queryTarget != contextTarget) return false
+
+        return resolved.intent == AgentIntent.DETAIL_SUMMARY ||
+            current.ambiguityReasons.any {
+                it in setOf("DETAIL_CONTEXT_FOLLOW_UP", "UNRESOLVED_CURRENT_REFERENCE")
+            } ||
+            (!current.explicitQueryTarget && current.decision.intent != AgentIntent.GENERAL_CHAT)
+    }
+
+    private fun shouldReleaseDetailContext(
+        contextType: String,
+        current: AgentRouteAssessment,
+        resolved: AgentIntentDecision,
+        useDetailContext: Boolean,
+        alreadySuperseded: Boolean,
+        preserveDetailScope: Boolean = false
+    ): Boolean {
+        val contextTarget = runCatching { AgentQueryTarget.valueOf(contextType.trim().uppercase()) }.getOrNull()
+            ?: return false
+        if (alreadySuperseded) return true
+        if ("EXPLICIT_TOPIC_BOUNDARY" in current.ambiguityReasons) return true
+        if (preserveDetailScope) return false
+        val negatedCurrentReference = "NEGATED_CURRENT_REFERENCE" in current.ambiguityReasons
+        val alternativeEntityRequest = "ALTERNATIVE_ENTITY_REQUEST" in current.ambiguityReasons
+        if (resolved.intent == AgentIntent.HUMAN_CONSULTATION) {
+            return negatedCurrentReference || alternativeEntityRequest
+        }
+        if (resolved.intent == AgentIntent.SAFETY_SCREENING) {
+            return negatedCurrentReference ||
+                (current.decision.queryTarget != null && current.decision.queryTarget != contextTarget)
+        }
+        if (resolved.intent == AgentIntent.GENERAL_CHAT && "SOCIAL_INTERJECTION" in current.ambiguityReasons) {
+            return false
+        }
+        return !useDetailContext
+    }
+
+    private fun AgentPromptEvidence.withoutCatalogItems(
+        unresolvedIdentity: DetailContextIdentity?,
+        target: AgentQueryTarget?
+    ): CatalogExclusionResult {
+        val report = report ?: return CatalogExclusionResult(this, verified = true)
+        val identity = unresolvedIdentity?.enrichFrom(report.items)
+            ?: return CatalogExclusionResult(this, verified = true)
+        if (!identity.hasRequiredRelation(target)) {
+            return CatalogExclusionResult(AgentPromptEvidence(), verified = false)
+        }
+        val items = report.items.filterNot { item ->
+            val exactEntry = item.type.equals(identity.entryType, ignoreCase = true) &&
+                item.id == identity.entryId
+            exactEntry || when (target) {
+                AgentQueryTarget.INSTITUTION -> identity.institutionId?.let { institutionId ->
+                    item.type.uppercase() in setOf("INSTITUTION", "INSTITUTION_PROJECT") &&
+                        (item.id == institutionId || item.institutionId == institutionId)
+                } == true
+                AgentQueryTarget.PROJECT -> identity.projectId?.let { projectId ->
+                    item.type.uppercase() in setOf("PROJECT", "INSTITUTION_PROJECT") &&
+                        (item.id == projectId || item.projectId == projectId)
+                } == true
+                AgentQueryTarget.DOCTOR, AgentQueryTarget.INSTITUTION_PROJECT, null -> false
+            }
+        }
+        if (items.size == report.items.size) return CatalogExclusionResult(this, verified = true)
+        val context = if (items.isEmpty()) {
+            "Platform database search result: no direct match was found after excluding the current detail item."
+        } else {
+            val records = items.take(5).joinToString("\n") { item ->
+                "[${item.type}] ${item.name}; ${item.subtitle}; " +
+                    "${item.attributes.entries.take(5).joinToString { "${it.key}=${it.value}" }}; " +
+                    item.summary.take(120)
+            }
+            """
+                Platform database search results:
+                $records
+                Instruction: Summarize only the 1-2 most useful findings. Do not reintroduce the excluded current detail item.
+            """.trimIndent()
+        }
+        return CatalogExclusionResult(
+            evidence = copy(
+                context = context,
+                matchedEntityIds = items.groupBy { it.type }.mapValues { (_, grouped) -> grouped.map { it.id } },
+                noMatch = noMatch || items.isEmpty(),
+                report = report.copy(items = items).takeIf { items.isNotEmpty() }
+            ),
+            verified = true
+        )
+    }
+
+    private fun DetailContextIdentity.enrichFrom(
+        items: List<AgentCatalogItemResponse>
+    ): DetailContextIdentity {
+        if (entryType != "INSTITUTION_PROJECT" || (!institutionId.isNullOrBlank() && !projectId.isNullOrBlank())) {
+            return this
+        }
+        val exactOffering = items.firstOrNull {
+            it.type.equals("INSTITUTION_PROJECT", ignoreCase = true) && it.id == entryId
+        } ?: return this
+        return copy(
+            institutionId = institutionId ?: exactOffering.institutionId?.takeIf(String::isNotBlank),
+            projectId = projectId ?: exactOffering.projectId?.takeIf(String::isNotBlank)
+        )
     }
 
     private fun cardDetailSummary(content: String?): String = plainTextContent(content).take(220)

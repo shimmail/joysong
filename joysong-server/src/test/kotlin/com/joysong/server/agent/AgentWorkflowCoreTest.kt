@@ -6,6 +6,7 @@ import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import com.joysong.server.agent.context.AgentContextBuilder
 import com.joysong.server.agent.context.AgentContext
 import com.joysong.server.agent.context.AgentSessionSummary
+import com.joysong.server.agent.context.ConversationFocusUpdate
 import com.joysong.server.agent.diagnostics.AgentOperationLogger
 import com.joysong.server.agent.dto.AgentCatalogItemResponse
 import com.joysong.server.agent.dto.AgentCatalogReportResponse
@@ -49,6 +50,7 @@ import com.joysong.server.discover.repository.DoctorProjectRepository
 import com.joysong.server.discover.service.DiscoverKeywordExtractor
 import com.joysong.server.discover.service.DiscoverSearchService
 import com.joysong.server.institution.entity.InstitutionEntity
+import com.joysong.server.institution.entity.InstitutionProjectEntity
 import com.joysong.server.institution.repository.InstitutionProjectRepository
 import com.joysong.server.institution.repository.InstitutionRepository
 import com.joysong.server.institution.service.InstitutionProjectDetailResolver
@@ -410,6 +412,1374 @@ class AgentWorkflowCoreTest {
     }
 
     @Test
+    fun `unrelated general chat after detail entry drops the context prompt and card`() {
+        val content = "换个话题，聊聊价格"
+        val test = detailEntryChatFixture(content, "旧机构不应进入本轮", "价格闲聊")
+        every {
+            test.catalog.promptEvidence(
+                content,
+                content,
+                content,
+                any(),
+                "AUTO",
+                content
+            )
+        } returns AgentPromptEvidence()
+        test.completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andExpect(content().string(not(containsString(test.institution.name))))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"价格闲聊"}}]}""", MediaType.APPLICATION_JSON))
+
+        test.fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("GENERAL_CHAT", test.completed.captured.intent)
+        assertEquals(null, test.completed.captured.queryTarget)
+        assertEquals("NONE", test.completed.captured.nextAction)
+        assertTrue(test.completed.captured.catalogItems.isEmpty())
+        assertTrue(test.completed.captured.releaseDetailContext)
+        assertEquals(ConversationFocusUpdate.CLEAR, test.completed.captured.conversationFocusUpdate)
+        test.intentServer.verify()
+        test.completionServer.verify()
+    }
+
+    @Test
+    fun `social interjection hides the entry card without releasing the detail context`() {
+        val content = "收到"
+        val test = detailEntryChatFixture(content, "寒暄后仍可继续的机构", "不客气")
+        test.intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andExpect(content().string(not(containsString("CATALOG_QA/INSTITUTION"))))
+            .andRespond(withSuccess(
+                """{"choices":[{"message":{"content":"{\"intent\":\"GENERAL_CHAT\",\"queryTarget\":null,\"keywords\":[]}"}}]}""",
+                MediaType.APPLICATION_JSON
+            ))
+        test.completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andExpect(content().string(not(containsString(test.institution.name))))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"不客气"}}]}""", MediaType.APPLICATION_JSON))
+
+        test.fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("GENERAL_CHAT", test.completed.captured.intent)
+        assertTrue(test.completed.captured.catalogItems.isEmpty())
+        assertFalse(test.completed.captured.releaseDetailContext)
+        assertEquals(ConversationFocusUpdate.PRESERVE, test.completed.captured.conversationFocusUpdate)
+        test.intentServer.verify()
+        test.completionServer.verify()
+    }
+
+    @Test
+    fun `social interjection does not supersede detail context for the next implicit question`() {
+        val content = "多少钱？"
+        val priorTurnId = "social-turn"
+        val priorUser = message(1, "USER", "好的").apply { turnId = priorTurnId }
+        val priorAssistant = message(2, "ASSISTANT", "不客气").apply {
+            turnId = priorTurnId
+            metadataJson = objectMapper.writeValueAsString(
+                linkedMapOf(
+                    "intent" to "GENERAL_CHAT",
+                    "queryTarget" to null,
+                    "nextAction" to "NONE",
+                    "conversationFocusUpdate" to "PRESERVE",
+                    "catalogItems" to emptyList<AgentCatalogItemResponse>(),
+                    "catalogReport" to null
+                )
+            )
+        }
+        val test = detailEntryChatFixture(
+            content,
+            "寒暄后仍应恢复的机构",
+            "价格回答",
+            historyMessages = listOf(priorUser, priorAssistant),
+            summary = AgentSessionSummary(
+                focusSemanticsVersion = 1,
+                unresolvedTopics = listOf("CATALOG_QA:INSTITUTION:SHOW_CATALOG"),
+                lastSummarizedSequence = 1
+            )
+        )
+        every {
+            test.catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.INSTITUTION, any(), any())
+        } returns AgentPromptEvidence()
+        test.completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"价格回答"}}]}""", MediaType.APPLICATION_JSON))
+
+        test.fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("CATALOG_QA", test.completed.captured.intent)
+        assertEquals("INSTITUTION", test.completed.captured.queryTarget)
+        assertEquals(listOf(test.institution.id), test.completed.captured.catalogItems.map { it.id })
+        assertFalse(test.completed.captured.releaseDetailContext)
+        test.completionServer.verify()
+    }
+
+    @Test
+    fun `legacy social metadata does not supersede detail context for the next implicit question`() {
+        val content = "多少钱？"
+        val priorTurnId = "legacy-social-turn"
+        val priorUser = message(1, "USER", "好的").apply { turnId = priorTurnId }
+        val priorAssistant = message(2, "ASSISTANT", "不客气").apply {
+            turnId = priorTurnId
+            metadataJson = "{}"
+        }
+        val test = detailEntryChatFixture(
+            content,
+            "旧版寒暄后仍应恢复的机构",
+            "价格回答",
+            historyMessages = listOf(priorUser, priorAssistant),
+            summary = AgentSessionSummary(
+                unresolvedTopics = listOf(
+                    "CATALOG_QA:INSTITUTION:SHOW_CATALOG",
+                    "GENERAL_CHAT"
+                ),
+                lastSummarizedSequence = 1
+            )
+        )
+        every {
+            test.catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.INSTITUTION, any(), any())
+        } returns AgentPromptEvidence()
+        test.completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"价格回答"}}]}""", MediaType.APPLICATION_JSON))
+
+        test.fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("CATALOG_QA", test.completed.captured.intent)
+        assertEquals("INSTITUTION", test.completed.captured.queryTarget)
+        assertEquals(listOf(test.institution.id), test.completed.captured.catalogItems.map { it.id })
+        assertFalse(test.completed.captured.releaseDetailContext)
+        test.completionServer.verify()
+    }
+
+    @Test
+    fun `legacy social window cannot revive an earlier explicit topic boundary`() {
+        val content = "多少钱？"
+        val history = listOf(
+            "好的" to "不客气",
+            "这家机构怎么样" to "机构回答",
+            "换个话题，讲个笑话" to "笑话回答",
+            "好的" to "不客气",
+            "收到" to "没问题",
+            "明白了" to "好的",
+            "ok" to "You are welcome",
+            "好的" to "不客气",
+            "收到" to "没问题",
+            "明白了" to "好的",
+            "ok" to "You are welcome"
+        ).flatMapIndexed { index, (userContent, assistantContent) ->
+            val turnId = "legacy-boundary-turn-${index + 1}"
+            listOf(
+                message(index * 2L + 1, "USER", userContent).apply { this.turnId = turnId },
+                message(index * 2L + 2, "ASSISTANT", assistantContent).apply {
+                    this.turnId = turnId
+                    metadataJson = "{}"
+                }
+            )
+        }.drop(2)
+        val summary = AgentSessionSummary(
+            unresolvedTopics = listOf(
+                "GENERAL_CHAT",
+                "CATALOG_QA:INSTITUTION:SHOW_CATALOG"
+            ),
+            lastSummarizedSequence = 11
+        )
+        val test = detailEntryChatFixture(
+            content,
+            "真实换题后不能复活的旧机构",
+            "普通回答",
+            historyMessages = history,
+            summary = summary
+        )
+        every {
+            test.catalog.promptEvidence(any(), any(), any(), null, any(), any())
+        } returns AgentPromptEvidence()
+        every {
+            test.catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.INSTITUTION, any(), any())
+        } returns AgentPromptEvidence()
+        test.intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess(
+                """{"choices":[{"message":{"content":"{\"intent\":\"CATALOG_QA\",\"queryTarget\":null,\"keywords\":[]}"}}]}""",
+                MediaType.APPLICATION_JSON
+            ))
+        test.completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"普通回答"}}]}""", MediaType.APPLICATION_JSON))
+
+        test.fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals(null, test.completed.captured.queryTarget)
+        assertTrue(test.completed.captured.catalogItems.isEmpty())
+        assertTrue(test.completed.captured.releaseDetailContext)
+        test.intentServer.verify()
+        test.completionServer.verify()
+    }
+
+    @Test
+    fun `incomplete legacy history cannot revive a replaced same target detail`() {
+        val content = "多少钱？"
+        val history = List(10) { index ->
+            if (index % 2 == 0) "好的" to "不客气" else "收到" to "没问题"
+        }.flatMapIndexed { index, (userContent, assistantContent) ->
+            val turnId = "legacy-truncated-turn-${index + 2}"
+            listOf(
+                message(index * 2L + 3, "USER", userContent).apply { this.turnId = turnId },
+                message(index * 2L + 4, "ASSISTANT", assistantContent).apply {
+                    this.turnId = turnId
+                    metadataJson = "{}"
+                }
+            )
+        }
+        val summary = AgentSessionSummary(
+            unresolvedTopics = listOf("CATALOG_QA:INSTITUTION:SHOW_CATALOG"),
+            lastSummarizedSequence = 11
+        )
+        val test = detailEntryChatFixture(
+            content,
+            "已被同类型替换且不能复活的旧机构",
+            "普通回答",
+            historyMessages = history,
+            summary = summary
+        )
+        every {
+            test.catalog.promptEvidence(any(), any(), any(), null, any(), any())
+        } returns AgentPromptEvidence()
+        every {
+            test.catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.INSTITUTION, any(), any())
+        } returns AgentPromptEvidence()
+        test.intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess(
+                """{"choices":[{"message":{"content":"{\"intent\":\"CATALOG_QA\",\"queryTarget\":null,\"keywords\":[]}"}}]}""",
+                MediaType.APPLICATION_JSON
+            ))
+        test.completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"普通回答"}}]}""", MediaType.APPLICATION_JSON))
+
+        test.fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals(null, test.completed.captured.queryTarget)
+        assertTrue(test.completed.captured.catalogItems.isEmpty())
+        assertTrue(test.completed.captured.releaseDetailContext)
+        test.intentServer.verify()
+        test.completionServer.verify()
+    }
+
+    @Test
+    fun `same target attribute question keeps the entry prompt and card`() {
+        val content = "机构有哪些优势"
+        val test = detailEntryChatFixture(content, "当前优势机构", "优势回答")
+        every {
+            test.catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.INSTITUTION, any(), any())
+        } returns AgentPromptEvidence()
+        test.intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess(
+                """{"choices":[{"message":{"content":"{\"intent\":\"CATALOG_QA\",\"queryTarget\":\"INSTITUTION\",\"keywords\":[]}"}}]}""",
+                MediaType.APPLICATION_JSON
+            ))
+        test.completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andExpect(content().string(containsString(test.institution.name)))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"优势回答"}}]}""", MediaType.APPLICATION_JSON))
+
+        test.fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("CATALOG_QA", test.completed.captured.intent)
+        assertEquals("INSTITUTION", test.completed.captured.queryTarget)
+        assertEquals(listOf(test.institution.id), test.completed.captured.catalogItems.map { it.id })
+        assertFalse(test.completed.captured.releaseDetailContext)
+        test.completionServer.verify()
+    }
+
+    @Test
+    fun `price confirmation keeps the positively referenced entry detail`() {
+        listOf(
+            "Isn't this clinic more expensive?",
+            "Isn't this clinic more expensive than the other one?",
+            "Isn't this clinic cheaper than that one?"
+        ).forEachIndexed { index, content ->
+            val test = detailEntryChatFixture(content, "当前价格机构-$index", "价格确认回答")
+            every {
+                test.catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.INSTITUTION, any(), any())
+            } returns AgentPromptEvidence()
+            test.intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+                .andRespond(withSuccess(
+                    """{"choices":[{"message":{"content":"{\"intent\":\"CATALOG_QA\",\"queryTarget\":\"INSTITUTION\",\"keywords\":[]}"}}]}""",
+                    MediaType.APPLICATION_JSON
+                ))
+            test.completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+                .andExpect(content().string(containsString(test.institution.name)))
+                .andRespond(withSuccess(
+                    """{"choices":[{"message":{"content":"价格确认回答"}}]}""",
+                    MediaType.APPLICATION_JSON
+                ))
+
+            test.fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+            assertEquals("CATALOG_QA", test.completed.captured.intent, content)
+            assertEquals("INSTITUTION", test.completed.captured.queryTarget, content)
+            assertEquals(listOf(test.institution.id), test.completed.captured.catalogItems.map { it.id }, content)
+            assertFalse(test.completed.captured.releaseDetailContext, content)
+            test.intentServer.verify()
+            test.completionServer.verify()
+        }
+    }
+
+    @Test
+    fun `switching catalog target after detail entry shows new target cards only`() {
+        val content = "换个话题，推荐几位医生"
+        val test = detailEntryChatFixture(content, "旧机构不应覆盖医生结果", "医生回答")
+        val doctorItem = AgentCatalogItemResponse(
+            type = "DOCTOR",
+            id = "doctor-2",
+            name = "新话题医生",
+            subtitle = "主任医师",
+            summary = "",
+            attributes = emptyMap()
+        )
+        val evidence = singleItemEvidence("医生", doctorItem)
+        every {
+            test.catalog.promptEvidence(
+                content,
+                content,
+                content,
+                AgentQueryTarget.DOCTOR,
+                "AUTO",
+                content
+            )
+        } returns evidence
+        test.completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andExpect(content().string(not(containsString(test.institution.name))))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"医生回答"}}]}""", MediaType.APPLICATION_JSON))
+
+        test.fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("CATALOG_QA", test.completed.captured.intent)
+        assertEquals("DOCTOR", test.completed.captured.queryTarget)
+        assertEquals(listOf(doctorItem), test.completed.captured.catalogItems)
+        assertTrue(test.completed.captured.releaseDetailContext)
+        assertEquals(ConversationFocusUpdate.SET, test.completed.captured.conversationFocusUpdate)
+        test.intentServer.verify()
+        test.completionServer.verify()
+    }
+
+    @Test
+    fun `explicit topic switch to the same catalog type excludes the entry card`() {
+        val content = "换个话题，推荐机构"
+        val test = detailEntryChatFixture(content, "同类换题不应复活的旧机构", "机构回答")
+        val entry = AgentCatalogItemResponse(
+            type = "INSTITUTION",
+            id = test.institution.id,
+            name = test.institution.name,
+            subtitle = test.institution.city,
+            summary = "",
+            attributes = emptyMap(),
+            institutionId = test.institution.id
+        )
+        val alternative = entry.copy(
+            id = "institution-new",
+            name = "新话题机构",
+            institutionId = "institution-new"
+        )
+        every {
+            test.catalog.promptEvidence(
+                content,
+                content,
+                content,
+                AgentQueryTarget.INSTITUTION,
+                "AUTO",
+                content
+            )
+        } returns AgentPromptEvidence(
+            context = "${entry.name}; ${alternative.name}",
+            report = AgentCatalogReportResponse(
+                mode = "AUTO",
+                title = "机构",
+                summary = "",
+                items = listOf(entry, alternative),
+                comparisonDimensions = emptyList(),
+                warnings = emptyList()
+            )
+        )
+        test.completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andExpect(content().string(not(containsString(test.institution.name))))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"机构回答"}}]}""", MediaType.APPLICATION_JSON))
+
+        test.fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("CATALOG_QA", test.completed.captured.intent)
+        assertEquals("INSTITUTION", test.completed.captured.queryTarget)
+        assertEquals(listOf(alternative), test.completed.captured.catalogItems)
+        assertTrue(test.completed.captured.releaseDetailContext)
+        test.intentServer.verify()
+        test.completionServer.verify()
+    }
+
+    @Test
+    fun `explicit planning topic switch does not reuse the entry prompt or card`() {
+        val content = "换个话题，预算5000帮我规划"
+        val test = detailEntryChatFixture(content, "规划换题不应复活的旧机构", "规划回答")
+        every {
+            test.catalog.promptEvidence(any(), any(), any(), null, "PLANNING", any())
+        } returns AgentPromptEvidence()
+        test.completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andExpect(content().string(not(containsString(test.institution.name))))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"规划回答"}}]}""", MediaType.APPLICATION_JSON))
+
+        test.fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("PLANNING", test.completed.captured.intent)
+        assertEquals(null, test.completed.captured.queryTarget)
+        assertTrue(test.completed.captured.catalogItems.isEmpty())
+        assertTrue(test.completed.captured.releaseDetailContext)
+        test.intentServer.verify()
+        test.completionServer.verify()
+    }
+
+    @Test
+    fun `deictic cross target request keeps the institution as search scope without its card`() {
+        val content = "这家机构还有其他医生吗"
+        val test = detailEntryChatFixture(content, "当前检索范围机构", "医生回答")
+        val doctor = AgentCatalogItemResponse(
+            type = "DOCTOR",
+            id = "doctor-2",
+            name = "本机构其他医生",
+            subtitle = "主任医师",
+            summary = "",
+            attributes = emptyMap(),
+            institutionId = test.institution.id
+        )
+        val scopedQuery = "$content ${test.institution.name}"
+        every {
+            test.catalog.promptEvidence(
+                content,
+                scopedQuery,
+                scopedQuery,
+                AgentQueryTarget.DOCTOR,
+                "AUTO",
+                content
+            )
+        } returns singleItemEvidence("医生", doctor)
+        test.completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"医生回答"}}]}""", MediaType.APPLICATION_JSON))
+
+        test.fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("DOCTOR", test.completed.captured.queryTarget)
+        assertEquals(listOf(doctor), test.completed.captured.catalogItems)
+        assertFalse(test.completed.captured.releaseDetailContext)
+        test.completionServer.verify()
+    }
+
+    @Test
+    fun `deictic institution scope selects projects instead of the scoped institution`() {
+        val content = "这家机构还有其他项目吗"
+        val test = detailEntryChatFixture(content, "当前项目检索范围机构", "项目回答")
+        val project = AgentCatalogItemResponse(
+            type = "PROJECT",
+            id = "project-2",
+            name = "本机构其他项目",
+            subtitle = "皮肤管理",
+            summary = "",
+            attributes = emptyMap()
+        )
+        val scopedQuery = "$content ${test.institution.name}"
+        every {
+            test.catalog.promptEvidence(
+                content,
+                scopedQuery,
+                scopedQuery,
+                AgentQueryTarget.PROJECT,
+                "AUTO",
+                content
+            )
+        } returns singleItemEvidence("项目", project)
+        test.completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andExpect(content().string(not(containsString(test.institution.name))))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"项目回答"}}]}""", MediaType.APPLICATION_JSON))
+
+        test.fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("CATALOG_QA", test.completed.captured.intent)
+        assertEquals("PROJECT", test.completed.captured.queryTarget)
+        assertEquals(listOf(project), test.completed.captured.catalogItems)
+        assertFalse(test.completed.captured.releaseDetailContext)
+        test.intentServer.verify()
+        test.completionServer.verify()
+    }
+
+    @Test
+    fun `same type alternatives drop the entry card across natural phrasings`() {
+        listOf("推荐其他机构", "推荐另外几家", "介绍其他机构", "换一家", "换机构").forEachIndexed { index, content ->
+            val test = detailEntryChatFixture(content, "旧机构不应覆盖同类结果-$index", "机构回答")
+            val alternative = AgentCatalogItemResponse(
+                type = "INSTITUTION",
+                id = "institution-$index",
+                name = "新话题机构-$index",
+                subtitle = "杭州",
+                summary = "",
+                attributes = emptyMap()
+            )
+            val entry = AgentCatalogItemResponse(
+                type = "INSTITUTION",
+                id = test.institution.id,
+                name = test.institution.name,
+                subtitle = test.institution.city,
+                summary = "",
+                attributes = emptyMap()
+            )
+            val evidence = singleItemEvidence("机构", alternative).let {
+                it.copy(
+                    context = "${entry.name}; ${alternative.name}",
+                    report = it.report!!.copy(items = listOf(entry, alternative))
+                )
+            }
+            every {
+                test.catalog.promptEvidence(
+                    content,
+                    content,
+                    content,
+                    AgentQueryTarget.INSTITUTION,
+                    "AUTO",
+                    content
+                )
+            } returns evidence
+            test.completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+                .andExpect(content().string(not(containsString(test.institution.name))))
+                .andRespond(withSuccess("""{"choices":[{"message":{"content":"机构回答"}}]}""", MediaType.APPLICATION_JSON))
+
+            test.fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+            assertEquals("CATALOG_QA", test.completed.captured.intent, content)
+            assertEquals("INSTITUTION", test.completed.captured.queryTarget, content)
+            assertEquals(listOf(alternative), test.completed.captured.catalogItems, content)
+            assertTrue(test.completed.captured.releaseDetailContext, content)
+            test.intentServer.verify()
+            test.completionServer.verify()
+        }
+    }
+
+    @Test
+    fun `recent cross type switch resolves an implicit follow up without the parser`() {
+        val content = "多少钱？"
+        val priorQuery = "推荐几位医生"
+        val test = detailEntryChatFixture(
+            content,
+            "旧机构不应在医生追问中复活",
+            "价格回答",
+            historyMessages = listOf(message(1, "USER", priorQuery))
+        )
+        val doctor = AgentCatalogItemResponse(
+            type = "DOCTOR",
+            id = "doctor-2",
+            name = "新话题医生",
+            subtitle = "主任医师",
+            summary = "",
+            attributes = emptyMap()
+        )
+        val evidence = singleItemEvidence("医生", doctor)
+        every {
+            test.catalog.promptEvidence(
+                content,
+                content,
+                content,
+                AgentQueryTarget.DOCTOR,
+                "AUTO",
+                content
+            )
+        } returns evidence
+        test.completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andExpect(content().string(not(containsString(test.institution.name))))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"价格回答"}}]}""", MediaType.APPLICATION_JSON))
+
+        test.fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("CATALOG_QA", test.completed.captured.intent)
+        assertEquals("DOCTOR", test.completed.captured.queryTarget)
+        assertEquals(listOf(doctor), test.completed.captured.catalogItems)
+        assertTrue(test.completed.captured.releaseDetailContext)
+        test.intentServer.verify()
+        test.completionServer.verify()
+    }
+
+    @Test
+    fun `recent same type switch keeps the entry card released on an implicit follow up`() {
+        val content = "多少钱？"
+        val priorQuery = "推荐其他机构"
+        val test = detailEntryChatFixture(
+            content,
+            "旧机构不应在同类追问中复活",
+            "价格回答",
+            historyMessages = listOf(message(1, "USER", priorQuery))
+        )
+        val alternative = AgentCatalogItemResponse(
+            type = "INSTITUTION",
+            id = "institution-2",
+            name = "新话题机构",
+            subtitle = "杭州",
+            summary = "",
+            attributes = emptyMap()
+        )
+        val entry = AgentCatalogItemResponse(
+            type = "INSTITUTION",
+            id = test.institution.id,
+            name = test.institution.name,
+            subtitle = test.institution.city,
+            summary = "",
+            attributes = emptyMap(),
+            institutionId = test.institution.id
+        )
+        val evidence = singleItemEvidence("机构", alternative).let {
+            it.copy(
+                context = "${entry.name}; ${alternative.name}",
+                report = it.report!!.copy(items = listOf(entry, alternative))
+            )
+        }
+        every {
+            test.catalog.promptEvidence(
+                content,
+                content,
+                content,
+                AgentQueryTarget.INSTITUTION,
+                "AUTO",
+                content
+            )
+        } returns evidence
+        test.completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andExpect(content().string(not(containsString(test.institution.name))))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"价格回答"}}]}""", MediaType.APPLICATION_JSON))
+
+        test.fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("CATALOG_QA", test.completed.captured.intent)
+        assertEquals("INSTITUTION", test.completed.captured.queryTarget)
+        assertEquals(listOf(alternative), test.completed.captured.catalogItems)
+        assertTrue(test.completed.captured.releaseDetailContext)
+        test.intentServer.verify()
+        test.completionServer.verify()
+    }
+
+    @Test
+    fun `recent history overrides legacy summary ordering after detail context release`() {
+        val content = "多少钱？"
+        val history = listOf(message(1, "USER", "推荐医生"))
+        val summaryTopics = listOf(
+            "CATALOG_QA:DOCTOR:SHOW_CATALOG",
+            "CATALOG_QA:INSTITUTION:SHOW_CATALOG"
+        )
+        val summaryJson = objectMapper.writeValueAsString(
+            AgentSessionSummary(unresolvedTopics = summaryTopics)
+        )
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
+        val completed = slot<CompleteTurnCommand>()
+        prepareChatGeneration(fixture, content, session(summary = summaryJson))
+        every { fixture.contextBuilder.load("user-1", "session-1", 20, 4_000) } returns AgentContext(
+            AgentSessionSummary(unresolvedTopics = summaryTopics),
+            history
+        )
+        every { fixture.contextBuilder.serializeSummary(any()) } returns summaryJson
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "answer")
+        )
+        every { catalog.hasInstitutionProjectMatch(content) } returns false
+        every { catalog.contextualSearchQuery(content, listOf("推荐医生")) } returns content
+        every { catalog.promptEvidence(any(), any(), any(), any(), any(), any()) } returns AgentPromptEvidence()
+        intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"not-json"}}]}""", MediaType.APPLICATION_JSON))
+        completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"answer"}}]}""", MediaType.APPLICATION_JSON))
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("CATALOG_QA", completed.captured.intent)
+        assertEquals("DOCTOR", completed.captured.queryTarget)
+        assertTrue(completed.captured.catalogItems.isEmpty())
+        intentServer.verify()
+        completionServer.verify()
+    }
+
+    @Test
+    fun `explicit general topic boundary prevents older catalog focus from reviving`() {
+        val content = "多少钱？"
+        val summaryTopics = listOf("CATALOG_QA:DOCTOR:SHOW_CATALOG")
+        val summaryJson = objectMapper.writeValueAsString(AgentSessionSummary(unresolvedTopics = summaryTopics))
+        val history = listOf(
+            message(1, "USER", "推荐医生"),
+            message(2, "USER", "换个话题，讲个笑话")
+        )
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
+        val completed = slot<CompleteTurnCommand>()
+        prepareChatGeneration(fixture, content, session(summary = summaryJson))
+        every { fixture.contextBuilder.load("user-1", "session-1", 20, 4_000) } returns AgentContext(
+            AgentSessionSummary(unresolvedTopics = summaryTopics),
+            history
+        )
+        every { fixture.contextBuilder.serializeSummary(any()) } returns summaryJson
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "answer")
+        )
+        every { catalog.hasInstitutionProjectMatch(content) } returns false
+        every { catalog.contextualSearchQuery(content, history.map { it.content }) } returns content
+        intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andExpect(content().string(not(containsString("CATALOG_QA/DOCTOR"))))
+            .andRespond(withSuccess(
+                """{"choices":[{"message":{"content":"{\"intent\":\"GENERAL_CHAT\",\"queryTarget\":null,\"keywords\":[]}"}}]}""",
+                MediaType.APPLICATION_JSON
+            ))
+        completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"answer"}}]}""", MediaType.APPLICATION_JSON))
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("GENERAL_CHAT", completed.captured.intent)
+        assertEquals(null, completed.captured.queryTarget)
+        assertTrue(completed.captured.catalogItems.isEmpty())
+        intentServer.verify()
+        completionServer.verify()
+    }
+
+    @Test
+    fun `legacy summary boundary supersedes a stale persisted detail session without history`() {
+        val content = "多少钱？"
+        val institution = InstitutionEntity(
+            id = "stale-institution",
+            name = "摘要边界后不应复活的机构",
+            city = "杭州",
+            description = "旧详情",
+            isVerified = true
+        )
+        val summaryTopics = listOf(
+            "CATALOG_QA:INSTITUTION:SHOW_CATALOG",
+            "GENERAL_CHAT"
+        )
+        val summary = AgentSessionSummary(unresolvedTopics = summaryTopics)
+        val summaryJson = objectMapper.writeValueAsString(summary)
+        val institutionRepository = mockk<InstitutionRepository>()
+        every { institutionRepository.findById(institution.id) } returns java.util.Optional.of(institution)
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(
+            completionTemplate,
+            intentTemplate,
+            catalog,
+            institutionRepository = institutionRepository
+        )
+        val completed = slot<CompleteTurnCommand>()
+        prepareChatGeneration(
+            fixture,
+            content,
+            session(summary = summaryJson, contextType = "INSTITUTION", contextId = institution.id)
+        )
+        every { fixture.contextBuilder.load("user-1", "session-1", 20, 4_000) } returns
+            AgentContext(summary, emptyList())
+        every { fixture.contextBuilder.serializeSummary(summary) } returns summaryJson
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "answer")
+        )
+        every { catalog.hasInstitutionProjectMatch(content) } returns false
+        every { catalog.contextualSearchQuery(content, emptyList()) } returns content
+        every { catalog.promptEvidence(any(), any(), any(), null, any(), any()) } returns AgentPromptEvidence()
+        intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess(
+                """{"choices":[{"message":{"content":"{\"intent\":\"CATALOG_QA\",\"queryTarget\":null,\"keywords\":[]}"}}]}""",
+                MediaType.APPLICATION_JSON
+            ))
+        completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andExpect(content().string(not(containsString(institution.name))))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"answer"}}]}""", MediaType.APPLICATION_JSON))
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals(null, completed.captured.queryTarget)
+        assertTrue(completed.captured.catalogItems.isEmpty())
+        assertTrue(completed.captured.releaseDetailContext)
+        intentServer.verify()
+        completionServer.verify()
+    }
+
+    @Test
+    fun `legacy overlay without provenance cannot revive catalog focus in a general session`() {
+        val content = "多少钱？"
+        val summary = AgentSessionSummary(
+            unresolvedTopics = listOf(
+                "CATALOG_QA:INSTITUTION:SHOW_CATALOG",
+                "SAFETY_SCREENING:COMPLETE_SAFETY_SCREENING"
+            ),
+            lastSummarizedSequence = 3
+        )
+        val summaryJson = objectMapper.writeValueAsString(summary)
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
+        val completed = slot<CompleteTurnCommand>()
+        prepareChatGeneration(fixture, content, session(summary = summaryJson, contextType = "GENERAL"))
+        every { fixture.contextBuilder.load("user-1", "session-1", 20, 4_000) } returns
+            AgentContext(summary, emptyList())
+        every { fixture.contextBuilder.serializeSummary(summary) } returns summaryJson
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "answer")
+        )
+        every { catalog.hasInstitutionProjectMatch(content) } returns false
+        every { catalog.contextualSearchQuery(content, emptyList()) } returns content
+        every { catalog.promptEvidence(any(), any(), any(), null, any(), any()) } returns AgentPromptEvidence()
+        every {
+            catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.INSTITUTION, any(), any())
+        } returns AgentPromptEvidence()
+        intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess(
+                """{"choices":[{"message":{"content":"{\"intent\":\"CATALOG_QA\",\"queryTarget\":null,\"keywords\":[]}"}}]}""",
+                MediaType.APPLICATION_JSON
+            ))
+        completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"answer"}}]}""", MediaType.APPLICATION_JSON))
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals(null, completed.captured.queryTarget)
+        assertTrue(completed.captured.catalogItems.isEmpty())
+        intentServer.verify()
+        completionServer.verify()
+    }
+
+    @Test
+    fun `recent catalog focus cannot be replaced by an incompatible human parser target`() {
+        val content = "多少钱？"
+        val summaryTopics = listOf("CATALOG_QA:INSTITUTION:SHOW_CATALOG")
+        val summaryJson = objectMapper.writeValueAsString(AgentSessionSummary(unresolvedTopics = summaryTopics))
+        val history = listOf(message(1, "USER", "推荐医生"))
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
+        val completed = slot<CompleteTurnCommand>()
+        prepareChatGeneration(fixture, content, session(summary = summaryJson))
+        every { fixture.contextBuilder.load("user-1", "session-1", 20, 4_000) } returns AgentContext(
+            AgentSessionSummary(unresolvedTopics = summaryTopics),
+            history
+        )
+        every { fixture.contextBuilder.serializeSummary(any()) } returns summaryJson
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "answer")
+        )
+        every { catalog.hasInstitutionProjectMatch(content) } returns false
+        every { catalog.contextualSearchQuery(content, listOf("推荐医生")) } returns content
+        every { catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.DOCTOR, any(), any()) } returns
+            AgentPromptEvidence()
+        intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andExpect(content().string(containsString("CATALOG_QA/DOCTOR")))
+            .andExpect(content().string(not(containsString("CATALOG_QA/INSTITUTION"))))
+            .andRespond(withSuccess(
+                """{"choices":[{"message":{"content":"{\"intent\":\"HUMAN_CONSULTATION\",\"queryTarget\":\"INSTITUTION\",\"keywords\":[]}"}}]}""",
+                MediaType.APPLICATION_JSON
+            ))
+        completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"answer"}}]}""", MediaType.APPLICATION_JSON))
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("CATALOG_QA", completed.captured.intent)
+        assertEquals("DOCTOR", completed.captured.queryTarget)
+        intentServer.verify()
+        completionServer.verify()
+    }
+
+    @Test
+    fun `institution project alternative institution excludes the offering institution representation`() {
+        val content = "推荐其他机构"
+        val offering = InstitutionProjectEntity(
+            id = "offering-1",
+            institutionId = "institution-1",
+            projectId = "project-1",
+            price = BigDecimal("1000")
+        )
+        val institutionProjectRepository = mockk<InstitutionProjectRepository>()
+        every { institutionProjectRepository.findById(offering.id) } returns java.util.Optional.of(offering)
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(
+            completionTemplate,
+            intentTemplate,
+            catalog,
+            institutionProjectRepository = institutionProjectRepository
+        )
+        val completed = slot<CompleteTurnCommand>()
+        prepareChatGeneration(
+            fixture,
+            content,
+            session(contextType = "INSTITUTION_PROJECT", contextId = offering.id)
+        )
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "answer")
+        )
+        every { catalog.hasInstitutionProjectMatch(content) } returns false
+        every { catalog.contextualSearchQuery(content, emptyList()) } returns content
+        val oldInstitution = AgentCatalogItemResponse(
+            type = "INSTITUTION",
+            id = offering.institutionId,
+            name = "当前套餐所属机构",
+            subtitle = "杭州",
+            summary = "",
+            attributes = emptyMap(),
+            institutionId = offering.institutionId
+        )
+        val alternative = oldInstitution.copy(
+            id = "institution-2",
+            name = "替代机构",
+            institutionId = "institution-2"
+        )
+        val sameInstitutionOffering = AgentCatalogItemResponse(
+            type = "INSTITUTION_PROJECT",
+            id = "offering-2",
+            name = "当前机构的另一个套餐",
+            subtitle = "杭州",
+            summary = "",
+            attributes = emptyMap(),
+            institutionId = offering.institutionId,
+            projectId = "project-2"
+        )
+        every {
+            catalog.promptEvidence(content, content, content, AgentQueryTarget.INSTITUTION, "AUTO", content)
+        } returns AgentPromptEvidence(
+            context = "两家机构",
+            report = AgentCatalogReportResponse(
+                mode = "AUTO",
+                title = "机构",
+                summary = "",
+                items = listOf(oldInstitution, sameInstitutionOffering, alternative),
+                comparisonDimensions = emptyList(),
+                warnings = emptyList()
+            )
+        )
+        completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"answer"}}]}""", MediaType.APPLICATION_JSON))
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals(listOf(alternative), completed.captured.catalogItems)
+        assertTrue(completed.captured.releaseDetailContext)
+        intentServer.verify()
+        completionServer.verify()
+    }
+
+    @Test
+    fun `institution project identity and scope lookup failures degrade without leaking the entry card`() {
+        val content = "这家机构还有其他医生吗"
+        val entryId = "offering-broken"
+        val institutionProjectRepository = mockk<InstitutionProjectRepository>()
+        every { institutionProjectRepository.findById(entryId) } throws IllegalStateException("lookup unavailable")
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(
+            completionTemplate,
+            intentTemplate,
+            catalog,
+            institutionProjectRepository = institutionProjectRepository
+        )
+        val completed = slot<CompleteTurnCommand>()
+        prepareChatGeneration(fixture, content, session(contextType = "INSTITUTION_PROJECT", contextId = entryId))
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "answer")
+        )
+        every { catalog.hasInstitutionProjectMatch(content) } returns false
+        every { catalog.contextualSearchQuery(content, emptyList()) } returns content
+        val entry = AgentCatalogItemResponse(
+            type = "INSTITUTION_PROJECT",
+            id = entryId,
+            name = "不可重新出现的旧套餐",
+            subtitle = "杭州",
+            summary = "",
+            attributes = emptyMap()
+        )
+        val doctor = AgentCatalogItemResponse(
+            type = "DOCTOR",
+            id = "doctor-2",
+            name = "其他医生",
+            subtitle = "主任医师",
+            summary = "",
+            attributes = emptyMap()
+        )
+        every {
+            catalog.promptEvidence(content, content, content, AgentQueryTarget.DOCTOR, "AUTO", content)
+        } returns singleItemEvidence("医生", doctor).let {
+            it.copy(report = it.report!!.copy(items = listOf(entry, doctor)))
+        }
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertTrue(completed.captured.catalogItems.isEmpty())
+        assertEquals("NONE", completed.captured.nextAction)
+        assertTrue(completed.captured.content.contains("可靠筛选"))
+        assertEquals("", completed.captured.modelName)
+        assertTrue(completed.captured.releaseDetailContext)
+        intentServer.verify()
+        completionServer.verify()
+    }
+
+    @Test
+    fun `institution project lookup failure enriches exclusion identity from exact evidence`() {
+        data class Case(
+            val content: String,
+            val target: AgentQueryTarget,
+            val oldItem: AgentCatalogItemResponse,
+            val siblingOffering: AgentCatalogItemResponse,
+            val alternative: AgentCatalogItemResponse
+        )
+
+        val entryId = "offering-broken"
+        val oldInstitutionId = "institution-old"
+        val oldProjectId = "project-old"
+        val exactOffering = AgentCatalogItemResponse(
+            type = "INSTITUTION_PROJECT",
+            id = entryId,
+            name = "当前套餐",
+            subtitle = "杭州",
+            summary = "",
+            attributes = emptyMap(),
+            institutionId = oldInstitutionId,
+            projectId = oldProjectId
+        )
+        val institutionCase = Case(
+            content = "推荐其他机构",
+            target = AgentQueryTarget.INSTITUTION,
+            oldItem = AgentCatalogItemResponse(
+                type = "INSTITUTION",
+                id = oldInstitutionId,
+                name = "旧所属机构",
+                subtitle = "杭州",
+                summary = "",
+                attributes = emptyMap(),
+                institutionId = oldInstitutionId
+            ),
+            siblingOffering = exactOffering.copy(id = "offering-sibling", name = "旧机构另一套餐", projectId = "project-2"),
+            alternative = AgentCatalogItemResponse(
+                type = "INSTITUTION",
+                id = "institution-new",
+                name = "安全替代机构",
+                subtitle = "上海",
+                summary = "",
+                attributes = emptyMap(),
+                institutionId = "institution-new"
+            )
+        )
+        val projectCase = Case(
+            content = "推荐其他项目",
+            target = AgentQueryTarget.PROJECT,
+            oldItem = AgentCatalogItemResponse(
+                type = "PROJECT",
+                id = oldProjectId,
+                name = "旧所属项目",
+                subtitle = "光电",
+                summary = "",
+                attributes = emptyMap(),
+                projectId = oldProjectId
+            ),
+            siblingOffering = exactOffering.copy(id = "offering-sibling", name = "旧项目另一套餐", institutionId = "institution-2"),
+            alternative = AgentCatalogItemResponse(
+                type = "PROJECT",
+                id = "project-new",
+                name = "安全替代项目",
+                subtitle = "光电",
+                summary = "",
+                attributes = emptyMap(),
+                projectId = "project-new"
+            )
+        )
+
+        listOf(institutionCase, projectCase).forEach { case ->
+            val repository = mockk<InstitutionProjectRepository>()
+            every { repository.findById(entryId) } throws IllegalStateException("lookup unavailable")
+            val completionTemplate = RestTemplate()
+            val intentTemplate = RestTemplate()
+            val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+            val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+            val catalog = mockk<AgentCatalogService>()
+            val fixture = chatFixture(
+                completionTemplate,
+                intentTemplate,
+                catalog,
+                institutionProjectRepository = repository
+            )
+            val completed = slot<CompleteTurnCommand>()
+            prepareChatGeneration(
+                fixture,
+                case.content,
+                session(contextType = "INSTITUTION_PROJECT", contextId = entryId)
+            )
+            every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+                ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "answer")
+            )
+            every { catalog.hasInstitutionProjectMatch(case.content) } returns false
+            every { catalog.contextualSearchQuery(case.content, emptyList()) } returns case.content
+            every {
+                catalog.promptEvidence(
+                    case.content,
+                    case.content,
+                    case.content,
+                    case.target,
+                    "AUTO",
+                    case.content
+                )
+            } returns AgentPromptEvidence(
+                context = "候选",
+                report = AgentCatalogReportResponse(
+                    mode = "AUTO",
+                    title = "候选",
+                    summary = "",
+                    items = listOf(exactOffering, case.oldItem, case.siblingOffering, case.alternative),
+                    comparisonDimensions = emptyList(),
+                    warnings = emptyList()
+                )
+            )
+            completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+                .andRespond(withSuccess("""{"choices":[{"message":{"content":"answer"}}]}""", MediaType.APPLICATION_JSON))
+
+            fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = case.content))
+
+            assertEquals(listOf(case.alternative), completed.captured.catalogItems, case.target.toString())
+            assertTrue(completed.captured.releaseDetailContext, case.target.toString())
+            intentServer.verify()
+            completionServer.verify()
+        }
+    }
+
+    @Test
+    fun `institution project exclusion fails closed when no relation can be verified`() {
+        val content = "推荐其他机构"
+        val entryId = "offering-broken"
+        val repository = mockk<InstitutionProjectRepository>()
+        every { repository.findById(entryId) } throws IllegalStateException("lookup unavailable")
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(
+            completionTemplate,
+            intentTemplate,
+            catalog,
+            institutionProjectRepository = repository
+        )
+        val completed = slot<CompleteTurnCommand>()
+        prepareChatGeneration(fixture, content, session(contextType = "INSTITUTION_PROJECT", contextId = entryId))
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "unavailable")
+        )
+        every { catalog.hasInstitutionProjectMatch(content) } returns false
+        every { catalog.contextualSearchQuery(content, emptyList()) } returns content
+        val possibleOldInstitution = humanInstitutionItem().copy(name = "无法验证是否为旧机构")
+        val alternative = humanInstitutionItem().copy(
+            id = "institution-new",
+            institutionId = "institution-new",
+            name = "看似安全但无法证明的替代机构"
+        )
+        every {
+            catalog.promptEvidence(content, content, content, AgentQueryTarget.INSTITUTION, "AUTO", content)
+        } returns AgentPromptEvidence(
+            context = "无法验证的候选",
+            report = AgentCatalogReportResponse(
+                mode = "AUTO",
+                title = "机构",
+                summary = "",
+                items = listOf(possibleOldInstitution, alternative),
+                comparisonDimensions = emptyList(),
+                warnings = emptyList()
+            )
+        )
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertTrue(completed.captured.catalogItems.isEmpty())
+        assertTrue(completed.captured.content.contains("可靠筛选"))
+        assertEquals("NONE", completed.captured.nextAction)
+        assertEquals("", completed.captured.modelName)
+        assertTrue(completed.captured.releaseDetailContext)
+        intentServer.verify()
+        completionServer.verify()
+    }
+
+    @Test
+    fun `human consultation survives an institution project context lookup failure`() {
+        val content = "转真人咨询"
+        val entryId = "offering-broken"
+        val institutionProjectRepository = mockk<InstitutionProjectRepository>()
+        every { institutionProjectRepository.findById(entryId) } throws IllegalStateException("lookup unavailable")
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(
+            completionTemplate,
+            intentTemplate,
+            catalog,
+            institutionProjectRepository = institutionProjectRepository
+        )
+        val completed = slot<CompleteTurnCommand>()
+        val alternative = humanInstitutionItem()
+        prepareChatGeneration(fixture, content, session(contextType = "INSTITUTION_PROJECT", contextId = entryId))
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "handoff")
+        )
+        every {
+            catalog.selectConsultableInstitutions("user-1", content, null)
+        } returns ConsultableInstitutionSelection(listOf(alternative), false)
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("HUMAN_CONSULTATION", completed.captured.intent)
+        assertEquals(listOf(alternative), completed.captured.catalogItems)
+        verify(exactly = 1) { institutionProjectRepository.findById(entryId) }
+        verify(exactly = 1) { catalog.selectConsultableInstitutions("user-1", content, null) }
+        intentServer.verify()
+        completionServer.verify()
+    }
+
+    @Test
+    fun `negated human handoff fails closed when the offering institution cannot be resolved`() {
+        val content = "不要这个项目，转真人咨询"
+        val entryId = "offering-broken"
+        val repository = mockk<InstitutionProjectRepository>()
+        every { repository.findById(entryId) } throws IllegalStateException("lookup unavailable")
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(
+            completionTemplate,
+            intentTemplate,
+            catalog,
+            institutionProjectRepository = repository
+        )
+        val completed = slot<CompleteTurnCommand>()
+        prepareChatGeneration(fixture, content, session(contextType = "INSTITUTION_PROJECT", contextId = entryId))
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "unavailable")
+        )
+        every {
+            catalog.selectConsultableInstitutions("user-1", content, null)
+        } returns ConsultableInstitutionSelection(
+            listOf(
+                humanInstitutionItem().copy(name = "可能是被拒绝的旧机构"),
+                humanInstitutionItem().copy(
+                    id = "institution-new",
+                    institutionId = "institution-new",
+                    name = "替代机构"
+                )
+            ),
+            false
+        )
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("HUMAN_CONSULTATION", completed.captured.intent)
+        assertTrue(completed.captured.catalogItems.isEmpty())
+        assertTrue(completed.captured.content.contains("可靠筛选"))
+        assertEquals("NONE", completed.captured.nextAction)
+        assertEquals("", completed.captured.modelName)
+        assertTrue(completed.captured.releaseDetailContext)
+        verify(exactly = 0) { catalog.selectConsultableInstitutions(any(), any(), any()) }
+        intentServer.verify()
+        completionServer.verify()
+    }
+
+    @Test
+    fun `negated detail reference does not preselect that institution for human consultation`() {
+        val content = "不想咨询这家机构，因为太贵，转真人咨询"
+        val test = detailEntryChatFixture(content, "不应预选的旧机构", "真人转接")
+        val alternative = AgentCatalogItemResponse(
+            type = "INSTITUTION",
+            id = "institution-2",
+            name = "其他可咨询机构",
+            subtitle = "杭州",
+            summary = "",
+            attributes = emptyMap(),
+            institutionId = "institution-2",
+            canChatWithHuman = true
+        )
+        val rejected = AgentCatalogItemResponse(
+            type = "INSTITUTION",
+            id = test.institution.id,
+            name = test.institution.name,
+            subtitle = "杭州",
+            summary = "",
+            attributes = emptyMap(),
+            institutionId = test.institution.id,
+            canChatWithHuman = true
+        )
+        every {
+            test.catalog.selectConsultableInstitutions("user-1", content, null)
+        } returns ConsultableInstitutionSelection(listOf(rejected, alternative), false)
+
+        test.fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("HUMAN_CONSULTATION", test.completed.captured.intent)
+        assertEquals("INSTITUTION", test.completed.captured.queryTarget)
+        assertEquals("SELECT_INSTITUTION", test.completed.captured.nextAction)
+        assertEquals(listOf(alternative), test.completed.captured.catalogItems)
+        assertTrue(test.completed.captured.releaseDetailContext)
+        verify(exactly = 1) {
+            test.catalog.selectConsultableInstitutions("user-1", content, null)
+        }
+        test.intentServer.verify()
+        test.completionServer.verify()
+    }
+
+    @Test
+    fun `detail summary after detail entry keeps its context prompt and card`() {
+        val content = "请根据平台数据库信息，简要总结当前详情的关键信息、适合关注的方面和必要风险。"
+        val test = detailEntryChatFixture(content, "当前机构应保留", "详情总结")
+        test.completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andExpect(content().string(containsString(test.institution.name)))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"详情总结"}}]}""", MediaType.APPLICATION_JSON))
+
+        test.fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("DETAIL_SUMMARY", test.completed.captured.intent)
+        assertEquals("INSTITUTION", test.completed.captured.queryTarget)
+        assertEquals("SHOW_CATALOG", test.completed.captured.nextAction)
+        assertEquals(test.institution.id, test.completed.captured.catalogItems.single().id)
+        assertFalse(test.completed.captured.releaseDetailContext)
+        test.intentServer.verify()
+        test.completionServer.verify()
+    }
+
+    @Test
+    fun `same target price question keeps the entry context prompt and card`() {
+        val content = "机构费用多少"
+        val test = detailEntryChatFixture(content, "当前费用机构", "价格回答")
+        every {
+            test.catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.INSTITUTION, any(), any())
+        } returns AgentPromptEvidence()
+        test.completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andExpect(content().string(containsString(test.institution.name)))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"价格回答"}}]}""", MediaType.APPLICATION_JSON))
+
+        test.fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("CATALOG_QA", test.completed.captured.intent)
+        assertEquals("INSTITUTION", test.completed.captured.queryTarget)
+        assertEquals(listOf(test.institution.id), test.completed.captured.catalogItems.map { it.id })
+        assertFalse(test.completed.captured.releaseDetailContext)
+        test.intentServer.verify()
+        test.completionServer.verify()
+    }
+
+    @Test
     fun `ambiguous consultation uses the intent model and skips the answer model`() {
         val content = "Could someone help me with this?"
         val completionTemplate = RestTemplate()
@@ -423,14 +1793,19 @@ class AgentWorkflowCoreTest {
             type = "INSTITUTION", id = "institution-1", name = "安心医美", subtitle = "Shanghai", summary = "",
             attributes = emptyMap(), institutionId = "institution-1", canChatWithHuman = true
         )
-        prepareChatGeneration(fixture, content)
+        prepareChatGeneration(
+            fixture,
+            content,
+            session(contextType = "INSTITUTION", contextId = institutionItem.id)
+        )
         every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
             ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "handoff")
         )
         every { catalog.hasInstitutionProjectMatch(content) } returns false
-        every { catalog.selectConsultableInstitutions("user-1", content, null) } returns
+        every { catalog.selectConsultableInstitutions("user-1", content, institutionItem.id) } returns
             ConsultableInstitutionSelection(listOf(institutionItem), false)
         intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andExpect(content().string(containsString("humanOverrideAllowed=true")))
             .andRespond(withSuccess(
                 """{"choices":[{"message":{"content":"{\"intent\":\"HUMAN_CONSULTATION\",\"queryTarget\":null,\"keywords\":[]}"}}]}""",
                 MediaType.APPLICATION_JSON
@@ -442,6 +1817,379 @@ class AgentWorkflowCoreTest {
         assertEquals("", completed.captured.modelName)
         intentServer.verify()
         completionServer.verify()
+    }
+
+    @Test
+    fun `explicit human topic boundary does not preselect or retain the entry institution`() {
+        val content = "换个话题，我不确定是否需要真人咨询"
+        val test = detailEntryChatFixture(content, "换题后不应预选的旧机构", "真人转接")
+        val rejected = AgentCatalogItemResponse(
+            type = "INSTITUTION",
+            id = test.institution.id,
+            name = test.institution.name,
+            subtitle = "杭州",
+            summary = "",
+            attributes = emptyMap(),
+            institutionId = test.institution.id,
+            canChatWithHuman = true
+        )
+        val alternative = rejected.copy(
+            id = "institution-new",
+            name = "新话题可咨询机构",
+            institutionId = "institution-new"
+        )
+        every {
+            test.catalog.selectConsultableInstitutions("user-1", content, null)
+        } returns ConsultableInstitutionSelection(listOf(rejected, alternative), false)
+
+        test.fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("HUMAN_CONSULTATION", test.completed.captured.intent)
+        assertEquals(listOf(alternative), test.completed.captured.catalogItems)
+        assertTrue(test.completed.captured.releaseDetailContext)
+        verify(exactly = 1) {
+            test.catalog.selectConsultableInstitutions("user-1", content, null)
+        }
+        test.intentServer.verify()
+        test.completionServer.verify()
+    }
+
+    @Test
+    fun `explicit safety topic boundary releases the entry detail after the safety answer`() {
+        val content = "换个话题，我怀孕了能做吗"
+        val test = detailEntryChatFixture(content, "安全换题后不应保留的旧机构", "安全回答")
+        test.completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andExpect(content().string(not(containsString(test.institution.name))))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"安全回答"}}]}""", MediaType.APPLICATION_JSON))
+
+        test.fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("SAFETY_SCREENING", test.completed.captured.intent)
+        assertTrue(test.completed.captured.catalogItems.isEmpty())
+        assertTrue(test.completed.captured.releaseDetailContext)
+        test.intentServer.verify()
+        test.completionServer.verify()
+    }
+
+    @Test
+    fun `explicit topic boundary parses an uncertain current safety request`() {
+        val content = "换个话题，我不确定是否怀孕，可以做吗"
+        val test = detailEntryChatFixture(content, "不确定换题不应复活的旧机构", "answer")
+        test.intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess(
+                """{"choices":[{"message":{"content":"{\"intent\":\"SAFETY_SCREENING\",\"queryTarget\":null,\"keywords\":[]}"}}]}""",
+                MediaType.APPLICATION_JSON
+            ))
+        test.completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andExpect(content().string(not(containsString(test.institution.name))))
+            .andRespond(withSuccess(
+                """{"choices":[{"message":{"content":"安全回答"}}]}""",
+                MediaType.APPLICATION_JSON
+            ))
+
+        test.fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("SAFETY_SCREENING", test.completed.captured.intent)
+        assertTrue(test.completed.captured.releaseDetailContext)
+        assertEquals(ConversationFocusUpdate.CLEAR, test.completed.captured.conversationFocusUpdate)
+        assertTrue(test.completed.captured.catalogItems.isEmpty())
+        test.intentServer.verify()
+        test.completionServer.verify()
+    }
+
+    @Test
+    fun `final safety metadata keeps detail focus when the raw request was uncertain`() {
+        val content = "多少钱？"
+        val priorTurnId = "uncertain-safety-turn"
+        val priorUser = message(1, "USER", "我不确定是否怀孕，可以做吗").apply { turnId = priorTurnId }
+        val priorAssistant = message(2, "ASSISTANT", "安全回答").apply {
+            turnId = priorTurnId
+            metadataJson = objectMapper.writeValueAsString(
+                linkedMapOf(
+                    "intent" to "SAFETY_SCREENING",
+                    "queryTarget" to null,
+                    "nextAction" to "NONE",
+                    "conversationFocusUpdate" to "PRESERVE",
+                    "catalogItems" to emptyList<AgentCatalogItemResponse>(),
+                    "catalogReport" to null
+                )
+            )
+        }
+        val test = detailEntryChatFixture(
+            content,
+            "安全覆盖层后仍应恢复的机构",
+            "价格回答",
+            historyMessages = listOf(priorUser, priorAssistant),
+            summary = AgentSessionSummary(
+                focusSemanticsVersion = 1,
+                unresolvedTopics = listOf("CATALOG_QA:INSTITUTION:SHOW_CATALOG"),
+                lastSummarizedSequence = 1
+            )
+        )
+        every {
+            test.catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.INSTITUTION, any(), any())
+        } returns AgentPromptEvidence()
+        test.completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"价格回答"}}]}""", MediaType.APPLICATION_JSON))
+
+        test.fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("INSTITUTION", test.completed.captured.queryTarget)
+        assertEquals(listOf(test.institution.id), test.completed.captured.catalogItems.map { it.id })
+        assertFalse(test.completed.captured.releaseDetailContext)
+        test.completionServer.verify()
+    }
+
+    @Test
+    fun `legacy final safety metadata keeps detail focus when the raw request was uncertain`() {
+        val content = "多少钱？"
+        val priorTurnId = "legacy-uncertain-safety-turn"
+        val priorUser = message(1, "USER", "我不确定是否怀孕，可以做吗").apply { turnId = priorTurnId }
+        val priorAssistant = message(2, "ASSISTANT", "安全回答").apply {
+            turnId = priorTurnId
+            metadataJson = objectMapper.writeValueAsString(
+                linkedMapOf(
+                    "intent" to "SAFETY_SCREENING",
+                    "queryTarget" to null,
+                    "nextAction" to "NONE",
+                    "catalogItems" to emptyList<AgentCatalogItemResponse>(),
+                    "catalogReport" to null
+                )
+            )
+        }
+        val test = detailEntryChatFixture(
+            content,
+            "旧版安全覆盖层后仍应恢复的机构",
+            "价格回答",
+            historyMessages = listOf(priorUser, priorAssistant),
+            summary = AgentSessionSummary(
+                unresolvedTopics = listOf(
+                    "CATALOG_QA:INSTITUTION:SHOW_CATALOG",
+                    "SAFETY_SCREENING"
+                ),
+                lastSummarizedSequence = 1
+            )
+        )
+        every {
+            test.catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.INSTITUTION, any(), any())
+        } returns AgentPromptEvidence()
+        test.completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"价格回答"}}]}""", MediaType.APPLICATION_JSON))
+
+        test.fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("INSTITUTION", test.completed.captured.queryTarget)
+        assertEquals(listOf(test.institution.id), test.completed.captured.catalogItems.map { it.id })
+        assertFalse(test.completed.captured.releaseDetailContext)
+        test.completionServer.verify()
+    }
+
+    @Test
+    fun `legacy final human metadata keeps detail focus when the raw request needed model classification`() {
+        val content = "多少钱？"
+        val priorTurnId = "legacy-human-turn"
+        val priorUser = message(1, "USER", "Can somebody guide me personally?").apply { turnId = priorTurnId }
+        val priorAssistant = message(2, "ASSISTANT", "真人咨询引导").apply {
+            turnId = priorTurnId
+            metadataJson = objectMapper.writeValueAsString(
+                linkedMapOf(
+                    "intent" to "HUMAN_CONSULTATION",
+                    "queryTarget" to "INSTITUTION",
+                    "nextAction" to "SELECT_INSTITUTION",
+                    "catalogItems" to emptyList<AgentCatalogItemResponse>(),
+                    "catalogReport" to null
+                )
+            )
+        }
+        val test = detailEntryChatFixture(
+            content,
+            "旧版真人覆盖层后仍应恢复的机构",
+            "价格回答",
+            historyMessages = listOf(priorUser, priorAssistant),
+            summary = AgentSessionSummary(
+                unresolvedTopics = listOf(
+                    "CATALOG_QA:INSTITUTION:SHOW_CATALOG",
+                    "HUMAN_CONSULTATION:INSTITUTION:SELECT_INSTITUTION"
+                ),
+                lastSummarizedSequence = 1
+            )
+        )
+        every {
+            test.catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.INSTITUTION, any(), any())
+        } returns AgentPromptEvidence()
+        test.completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"价格回答"}}]}""", MediaType.APPLICATION_JSON))
+
+        test.fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("INSTITUTION", test.completed.captured.queryTarget)
+        assertEquals(listOf(test.institution.id), test.completed.captured.catalogItems.map { it.id })
+        assertFalse(test.completed.captured.releaseDetailContext)
+        test.completionServer.verify()
+    }
+
+    @Test
+    fun `legacy overlay window cannot revive an explicit safety topic boundary`() {
+        val content = "多少钱？"
+        data class LegacyOverlay(val user: String, val intent: String, val target: String?, val action: String)
+        val history = listOf(
+            LegacyOverlay("换个话题，我不确定是否怀孕，可以做吗", "SAFETY_SCREENING", null, "COMPLETE_SAFETY_SCREENING"),
+            LegacyOverlay("我不确定是否需要真人咨询", "HUMAN_CONSULTATION", "INSTITUTION", "SELECT_INSTITUTION"),
+            LegacyOverlay("我怀孕了，可以做吗", "SAFETY_SCREENING", null, "COMPLETE_SAFETY_SCREENING"),
+            LegacyOverlay("请帮我转真人咨询", "HUMAN_CONSULTATION", "INSTITUTION", "SELECT_INSTITUTION"),
+            LegacyOverlay("I am pregnant; is this safe?", "SAFETY_SCREENING", null, "COMPLETE_SAFETY_SCREENING")
+        ).flatMapIndexed { index, overlay ->
+            val turnId = "legacy-overlay-turn-${index + 1}"
+            listOf(
+                message(index * 2L + 1, "USER", overlay.user).apply { this.turnId = turnId },
+                message(index * 2L + 2, "ASSISTANT", "overlay answer").apply {
+                    this.turnId = turnId
+                    metadataJson = objectMapper.writeValueAsString(
+                        linkedMapOf(
+                            "intent" to overlay.intent,
+                            "queryTarget" to overlay.target,
+                            "nextAction" to overlay.action,
+                            "catalogItems" to emptyList<AgentCatalogItemResponse>(),
+                            "catalogReport" to null
+                        )
+                    )
+                }
+            )
+        }
+        val summary = AgentSessionSummary(
+            unresolvedTopics = listOf(
+                "CATALOG_QA:INSTITUTION:SHOW_CATALOG",
+                "SAFETY_SCREENING:COMPLETE_SAFETY_SCREENING",
+                "HUMAN_CONSULTATION:INSTITUTION:SELECT_INSTITUTION"
+            ),
+            lastSummarizedSequence = 5
+        )
+        val test = detailEntryChatFixture(
+            content,
+            "旧版安全换题后不能复活的机构",
+            "普通回答",
+            historyMessages = history,
+            summary = summary
+        )
+        every {
+            test.catalog.promptEvidence(any(), any(), any(), null, any(), any())
+        } returns AgentPromptEvidence()
+        every {
+            test.catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.INSTITUTION, any(), any())
+        } returns AgentPromptEvidence()
+        test.intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess(
+                """{"choices":[{"message":{"content":"{\"intent\":\"CATALOG_QA\",\"queryTarget\":null,\"keywords\":[]}"}}]}""",
+                MediaType.APPLICATION_JSON
+            ))
+        test.completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"普通回答"}}]}""", MediaType.APPLICATION_JSON))
+
+        test.fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals(null, test.completed.captured.queryTarget)
+        assertTrue(test.completed.captured.catalogItems.isEmpty())
+        assertTrue(test.completed.captured.releaseDetailContext)
+        test.intentServer.verify()
+        test.completionServer.verify()
+    }
+
+    @Test
+    fun `explicit boundary deictic human request uses the intent model without the old institution`() {
+        val content = "换个话题，Could someone help me with this?"
+        val test = detailEntryChatFixture(content, "模型真人换题不应复活的旧机构", "handoff")
+        val alternative = humanInstitutionItem()
+        every {
+            test.catalog.selectConsultableInstitutions("user-1", content, null)
+        } returns ConsultableInstitutionSelection(listOf(alternative), false)
+        test.intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess(
+                """{"choices":[{"message":{"content":"{\"intent\":\"HUMAN_CONSULTATION\",\"queryTarget\":null,\"keywords\":[]}"}}]}""",
+                MediaType.APPLICATION_JSON
+            ))
+
+        test.fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("HUMAN_CONSULTATION", test.completed.captured.intent)
+        assertEquals(listOf(alternative), test.completed.captured.catalogItems)
+        assertTrue(test.completed.captured.releaseDetailContext)
+        assertEquals(ConversationFocusUpdate.CLEAR, test.completed.captured.conversationFocusUpdate)
+        test.intentServer.verify()
+        test.completionServer.verify()
+    }
+
+    @Test
+    fun `bare deictic human parser upgrade works from non institution detail contexts`() {
+        data class Case(
+            val contextType: String,
+            val contextId: String,
+            val expectedInstitutionId: String?
+        )
+
+        val content = "Could someone help me with this?"
+        listOf(
+            Case("DOCTOR", "doctor-1", null),
+            Case("PROJECT", "project-1", null),
+            Case("INSTITUTION_PROJECT", "offering-1", "institution-1")
+        ).forEach { case ->
+            val completionTemplate = RestTemplate()
+            val intentTemplate = RestTemplate()
+            val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+            val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+            val catalog = mockk<AgentCatalogService>()
+            val institutionProjectRepository = mockk<InstitutionProjectRepository>()
+            if (case.contextType == "INSTITUTION_PROJECT") {
+                every { institutionProjectRepository.findById(case.contextId) } returns java.util.Optional.of(
+                    InstitutionProjectEntity(
+                        id = case.contextId,
+                        institutionId = case.expectedInstitutionId!!,
+                        projectId = "project-1",
+                        price = BigDecimal("1000")
+                    )
+                )
+            }
+            val fixture = chatFixture(
+                completionTemplate,
+                intentTemplate,
+                catalog,
+                institutionProjectRepository = institutionProjectRepository
+            )
+            val completed = slot<CompleteTurnCommand>()
+            val institutionItem = humanInstitutionItem().copy(
+                id = case.expectedInstitutionId ?: "institution-2",
+                institutionId = case.expectedInstitutionId ?: "institution-2"
+            )
+            prepareChatGeneration(
+                fixture,
+                content,
+                session(contextType = case.contextType, contextId = case.contextId)
+            )
+            every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+                ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "handoff")
+            )
+            every { catalog.hasInstitutionProjectMatch(content) } returns false
+            every {
+                catalog.selectConsultableInstitutions("user-1", content, case.expectedInstitutionId)
+            } returns ConsultableInstitutionSelection(listOf(institutionItem), false)
+            intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+                .andExpect(content().string(containsString("humanOverrideAllowed=true")))
+                .andRespond(withSuccess(
+                    """{"choices":[{"message":{"content":"{\"intent\":\"HUMAN_CONSULTATION\",\"queryTarget\":null,\"keywords\":[]}"}}]}""",
+                    MediaType.APPLICATION_JSON
+                ))
+
+            fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+            assertEquals("HUMAN_CONSULTATION", completed.captured.intent, case.contextType)
+            assertEquals("INSTITUTION", completed.captured.queryTarget, case.contextType)
+            assertEquals(listOf(institutionItem), completed.captured.catalogItems, case.contextType)
+            assertEquals("", completed.captured.modelName, case.contextType)
+            verify(exactly = 1) {
+                catalog.selectConsultableInstitutions("user-1", content, case.expectedInstitutionId)
+            }
+            intentServer.verify()
+            completionServer.verify()
+        }
     }
 
     @Test
@@ -1176,38 +2924,7 @@ class AgentWorkflowCoreTest {
 
     @Test
     fun `first turn in project context completes locally without intent parser`() {
-        val completionTemplate = RestTemplate()
-        val intentTemplate = RestTemplate()
-        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
-        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
-        val catalog = mockk<AgentCatalogService>()
-        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
-        val completed = slot<CompleteTurnCommand>()
-        prepareChatGeneration(
-            fixture,
-            "恢复期多久",
-            session(contextType = "PROJECT", contextId = "project-1")
-        )
-        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
-            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "answer")
-        )
-        every { catalog.hasInstitutionProjectMatch("恢复期多久") } returns false
-        every { catalog.contextualSearchQuery("恢复期多久", emptyList()) } returns "恢复期多久"
-        every { catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.PROJECT, any(), any()) } returns AgentPromptEvidence()
-        completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
-            .andRespond(withSuccess("""{"choices":[{"message":{"content":"answer"}}]}""", MediaType.APPLICATION_JSON))
-
-        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = "恢复期多久"))
-
-        assertEquals("CATALOG_QA", completed.captured.intent)
-        assertEquals("PROJECT", completed.captured.queryTarget)
-        intentServer.verify()
-        completionServer.verify()
-    }
-
-    @Test
-    fun `project detail price question uses session context when parser is disabled`() {
-        val content = "多少钱？"
+        val content = "多久能恢复？"
         val completionTemplate = RestTemplate()
         val intentTemplate = RestTemplate()
         val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
@@ -1225,7 +2942,7 @@ class AgentWorkflowCoreTest {
         )
         every { catalog.hasInstitutionProjectMatch(content) } returns false
         every { catalog.contextualSearchQuery(content, emptyList()) } returns content
-        every { catalog.promptEvidence(content, content, content, AgentQueryTarget.PROJECT, "AUTO", content) } returns AgentPromptEvidence()
+        every { catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.PROJECT, any(), any()) } returns AgentPromptEvidence()
         completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
             .andRespond(withSuccess("""{"choices":[{"message":{"content":"answer"}}]}""", MediaType.APPLICATION_JSON))
 
@@ -1233,6 +2950,123 @@ class AgentWorkflowCoreTest {
 
         assertEquals("CATALOG_QA", completed.captured.intent)
         assertEquals("PROJECT", completed.captured.queryTarget)
+        assertFalse(completed.captured.releaseDetailContext)
+        intentServer.verify()
+        completionServer.verify()
+    }
+
+    @Test
+    fun `explicit topic boundary does not restore catalog queries or comparison operands`() {
+        val content = "换个话题，比较医生"
+        val priorUser = message(1, "USER", "比较张医生和李医生")
+        val assistant = message(2, "ASSISTANT", "prior comparison")
+        val previous = ComparisonRequest(
+            operands = listOf(
+                ComparisonOperand(AgentQueryTarget.DOCTOR, "doctor-a", "张医生"),
+                ComparisonOperand(AgentQueryTarget.DOCTOR, "doctor-b", "李医生")
+            ),
+            targetType = AgentQueryTarget.DOCTOR
+        )
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
+        val completed = slot<CompleteTurnCommand>()
+        val contextualHistory = slot<List<String>>()
+        val searchQuery = slot<String>()
+        val oldEvidence = comparisonEvidence(
+            comparisonItem("doctor-a", "张医生", "DOCTOR"),
+            comparisonItem("doctor-b", "李医生", "DOCTOR")
+        )
+        prepareChatGeneration(fixture, content)
+        every { fixture.contextBuilder.load("user-1", "session-1", 20, 4_000) } returns
+            AgentContext(AgentSessionSummary(), listOf(priorUser, assistant))
+        every { fixture.turnService.projectMessage(assistant) } returns AgentMessageProjection(
+            message = assistant,
+            intent = "COMPARISON",
+            queryTarget = "DOCTOR",
+            nextAction = "SHOW_CATALOG",
+            comparisonRequest = previous
+        )
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "clarification")
+        )
+        every { catalog.hasInstitutionProjectMatch(content) } returns false
+        every { catalog.contextualSearchQuery(content, capture(contextualHistory)) } returns content
+        every {
+            catalog.promptEvidence(
+                content,
+                capture(searchQuery),
+                capture(searchQuery),
+                AgentQueryTarget.DOCTOR,
+                "COMPARISON",
+                content
+            )
+        } answers {
+            if (secondArg<String>().contains("张医生")) oldEvidence else comparisonEvidence()
+        }
+        every { catalog.filterComparisonEvidence(any(), any()) } answers {
+            comparisonFilter().filterComparisonEvidence(firstArg(), secondArg())
+        }
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertTrue(contextualHistory.captured.isEmpty())
+        assertEquals(content, searchQuery.captured)
+        assertTrue(completed.captured.comparisonRequest?.operands.orEmpty().isEmpty())
+        assertEquals(setOf(ComparisonMissingField.OPERANDS), completed.captured.comparisonRequest?.missingFields)
+        assertEquals("", completed.captured.modelName)
+        verify(exactly = 0) { fixture.turnService.projectMessage(assistant) }
+        intentServer.verify()
+        completionServer.verify()
+    }
+
+    @Test
+    fun `project detail price ignores an intervening human handoff summary`() {
+        val content = "多少钱？"
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
+        val completed = slot<CompleteTurnCommand>()
+        prepareChatGeneration(
+            fixture,
+            content,
+            session(
+                summary = """{"schemaVersion":1,"focusSemanticsVersion":1,"unresolvedTopics":["HUMAN_CONSULTATION:INSTITUTION:SELECT_INSTITUTION"]}""",
+                contextType = "PROJECT",
+                contextId = "project-1"
+            )
+        )
+        every { fixture.contextBuilder.load("user-1", "session-1", 20, 4_000) } returns AgentContext(
+            AgentSessionSummary(
+                focusSemanticsVersion = 1,
+                unresolvedTopics = listOf("HUMAN_CONSULTATION:INSTITUTION:SELECT_INSTITUTION")
+            ),
+            emptyList()
+        )
+        every { fixture.contextBuilder.serializeSummary(any()) } returns
+            """{"schemaVersion":1,"focusSemanticsVersion":1,"unresolvedTopics":["HUMAN_CONSULTATION:INSTITUTION:SELECT_INSTITUTION"]}"""
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "answer")
+        )
+        every { catalog.hasInstitutionProjectMatch(content) } returns false
+        every { catalog.contextualSearchQuery(content, emptyList()) } returns content
+        every {
+            catalog.promptEvidence(any(), any(), any(), AgentQueryTarget.PROJECT, any(), any())
+        } returns AgentPromptEvidence()
+        completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"answer"}}]}""", MediaType.APPLICATION_JSON))
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("CATALOG_QA", completed.captured.intent)
+        assertEquals("PROJECT", completed.captured.queryTarget)
+        assertFalse(completed.captured.releaseDetailContext)
         intentServer.verify()
         completionServer.verify()
     }
@@ -1569,6 +3403,35 @@ class AgentWorkflowCoreTest {
     }
 
     @Test
+    fun `successful topic switch releases the persisted detail session context`() {
+        val running = turn(status = AgentTurnStatus.RUNNING)
+        val ownedSession = session(contextType = "INSTITUTION", contextId = "institution-1")
+        every { turns.findSessionIdById(running.id) } returns ownedSession.id
+        every { turns.findByIdForUpdate(running.id) } returns running
+        every { sessions.findByIdForUpdate(ownedSession.id) } returns ownedSession
+        every { messages.findByTurnIdAndRole(running.id, "ASSISTANT") } returns null
+        every { messages.save(any()) } answers { firstArg() }
+        every { turns.save(any()) } answers { firstArg() }
+        every { sessions.save(any()) } answers { firstArg() }
+        every { messages.findSucceededTurnMessagesBySessionId(ownedSession.id) } returns emptyList()
+        every { messages.deleteAll(any<Iterable<ChatMessageEntity>>()) } just runs
+
+        lifecycle.completeTurn(
+            CompleteTurnCommand(
+                turnId = running.id,
+                content = "new topic",
+                intent = "CATALOG_QA",
+                queryTarget = "DOCTOR",
+                nextAction = "SHOW_CATALOG",
+                releaseDetailContext = true
+            )
+        )
+
+        assertEquals("GENERAL", ownedSession.contextType)
+        assertEquals("", ownedSession.contextId)
+    }
+
+    @Test
     fun `human consultation completion persists intent target action and institution cards`() {
         val running = turn(status = AgentTurnStatus.RUNNING)
         val assistant = slot<ChatMessageEntity>()
@@ -1590,7 +3453,8 @@ class AgentWorkflowCoreTest {
                 intent = "HUMAN_CONSULTATION",
                 queryTarget = "INSTITUTION",
                 nextAction = "SELECT_INSTITUTION",
-                catalogItems = listOf(institution)
+                catalogItems = listOf(institution),
+                conversationFocusUpdate = ConversationFocusUpdate.PRESERVE
             )
         )
 
@@ -1598,6 +3462,8 @@ class AgentWorkflowCoreTest {
         assertEquals("HUMAN_CONSULTATION", metadata.path("intent").asText())
         assertEquals("INSTITUTION", metadata.path("queryTarget").asText())
         assertEquals("SELECT_INSTITUTION", metadata.path("nextAction").asText())
+        assertEquals("PRESERVE", metadata.path("conversationFocusUpdate").asText())
+        assertEquals(ConversationFocusUpdate.PRESERVE, result.message.let(lifecycle::projectMessage).conversationFocusUpdate)
         assertEquals(institution, result.catalogItems.single())
         assertEquals(institution.id, metadata.path("catalogItems").single().path("institutionId").asText())
         assertTrue(metadata.path("catalogItems").single().path("canChatWithHuman").asBoolean())
@@ -1850,6 +3716,7 @@ class AgentWorkflowCoreTest {
                     "intent" to " PLANNING ",
                     "queryTarget" to "PROJECT",
                     "nextAction" to "START_PLANNING",
+                    "conversationFocusUpdate" to "SET",
                     "catalogItems" to listOf(unsafeItem),
                     "catalogReport" to null
                 )
@@ -1863,6 +3730,7 @@ class AgentWorkflowCoreTest {
         assertEquals("PLANNING", projection.intent)
         assertNotEquals("unsafe planning claim", projection.message.content)
         assertEquals("PLANNING", projectedMetadata.path("intent").asText())
+        assertEquals("SET", projectedMetadata.path("conversationFocusUpdate").asText())
         assertEquals("", projectedMetadata.path("catalogItems").single().path("subtitle").asText())
         assertFalse(projectedMetadata.has("comparisonRequest"))
         assertEquals("", projection.catalogItems.single().subtitle)
@@ -2057,6 +3925,7 @@ class AgentWorkflowCoreTest {
                 "intent":"PLANNING",
                 "queryTarget":"PROJECT",
                 "nextAction":"START_PLANNING",
+                "conversationFocusUpdate":"SET",
                 "catalogItems":[{
                     "type":"PROJECT",
                     "id":"123e4567-e89b-12d3-a456-426614174000",
@@ -2090,6 +3959,7 @@ class AgentWorkflowCoreTest {
             )
             assertEquals("", projectedMetadata.path("catalogItems").single().path("subtitle").asText())
             assertEquals("", projectedMetadata.path("catalogItems").single().path("summary").asText())
+            assertEquals("SET", projectedMetadata.path("conversationFocusUpdate").asText())
             assertEquals("$888", projectedMetadata.path("catalogItems").single().path("attributes").path("reference price").asText())
             assertFalse(projectedMetadata.path("catalogItems").single().path("attributes").has("risk"))
             assertEquals(storedContent, historical.content)
@@ -2160,6 +4030,144 @@ class AgentWorkflowCoreTest {
         every { messages.findSucceededTurnMessagesBySessionId("session-1") } returns emptyList()
 
         assertEquals(listOf("CATALOG_QA:PROJECT:SHOW_CATALOG"), context.load("user-1", "session-1", 20, 100).summary.unresolvedTopics)
+    }
+
+    @Test
+    fun `summary refreshes repeated topic recency so a general boundary stays latest`() {
+        val ownedSession = session(
+            objectMapper.writeValueAsString(
+                AgentSessionSummary(
+                    focusSemanticsVersion = 1,
+                    unresolvedTopics = listOf(
+                        "GENERAL_CHAT",
+                        "CATALOG_QA:DOCTOR:SHOW_CATALOG"
+                    )
+                )
+            )
+        )
+        every { sessions.save(ownedSession) } returns ownedSession
+
+        context.updateSummaryAndPrune(
+            session = ownedSession,
+            sequenceNo = 3,
+            intent = "GENERAL_CHAT",
+            queryTarget = null,
+            nextAction = "NONE",
+            catalogItems = emptyList()
+        )
+
+        val topics = objectMapper.readTree(ownedSession.summaryJson)
+            .path("unresolvedTopics")
+            .map { it.asText() }
+        assertEquals(
+            listOf("CATALOG_QA:DOCTOR:SHOW_CATALOG", "GENERAL_CHAT"),
+            topics
+        )
+    }
+
+    @Test
+    fun `summary focus updates preserve overlays and record explicit clears`() {
+        val ownedSession = session(
+            objectMapper.writeValueAsString(
+                AgentSessionSummary(unresolvedTopics = listOf("CATALOG_QA:INSTITUTION:SHOW_CATALOG"))
+            ),
+            contextType = "INSTITUTION",
+            contextId = "institution-1"
+        )
+        every { sessions.save(ownedSession) } returns ownedSession
+
+        context.updateSummaryAndPrune(
+            session = ownedSession,
+            sequenceNo = 2,
+            intent = "GENERAL_CHAT",
+            queryTarget = null,
+            nextAction = "NONE",
+            catalogItems = emptyList(),
+            conversationFocusUpdate = ConversationFocusUpdate.PRESERVE
+        )
+
+        assertEquals(
+            listOf("CATALOG_QA:INSTITUTION:SHOW_CATALOG"),
+            objectMapper.readTree(ownedSession.summaryJson).path("unresolvedTopics").map { it.asText() }
+        )
+        assertEquals(1, objectMapper.readTree(ownedSession.summaryJson).path("focusSemanticsVersion").asInt())
+
+        context.updateSummaryAndPrune(
+            session = ownedSession,
+            sequenceNo = 3,
+            intent = "SAFETY_SCREENING",
+            queryTarget = null,
+            nextAction = "NONE",
+            catalogItems = emptyList(),
+            conversationFocusUpdate = ConversationFocusUpdate.CLEAR
+        )
+
+        assertEquals(
+            listOf("CATALOG_QA:INSTITUTION:SHOW_CATALOG", "GENERAL_CHAT"),
+            objectMapper.readTree(ownedSession.summaryJson).path("unresolvedTopics").map { it.asText() }
+        )
+    }
+
+    @Test
+    fun `focus semantics upgrade does not certify a legacy social general topic as a boundary`() {
+        val ownedSession = session(
+            objectMapper.writeValueAsString(
+                AgentSessionSummary(
+                    unresolvedTopics = listOf(
+                        "CATALOG_QA:INSTITUTION:SHOW_CATALOG",
+                        "GENERAL_CHAT"
+                    ),
+                    lastSummarizedSequence = 1
+                )
+            ),
+            contextType = "INSTITUTION",
+            contextId = "institution-1"
+        )
+        every { sessions.save(ownedSession) } returns ownedSession
+
+        context.updateSummaryAndPrune(
+            session = ownedSession,
+            sequenceNo = 2,
+            intent = "CATALOG_QA",
+            queryTarget = "INSTITUTION",
+            nextAction = "SHOW_CATALOG",
+            catalogItems = emptyList(),
+            conversationFocusUpdate = ConversationFocusUpdate.PRESERVE
+        )
+
+        val migrated = objectMapper.readTree(ownedSession.summaryJson)
+        assertEquals(1, migrated.path("focusSemanticsVersion").asInt())
+        assertEquals(
+            listOf("CATALOG_QA:INSTITUTION:SHOW_CATALOG"),
+            migrated.path("unresolvedTopics").map { it.asText() }
+        )
+    }
+
+    @Test
+    fun `focus semantics upgrade preserves an active detail scope across target changes`() {
+        val ownedSession = session(
+            objectMapper.writeValueAsString(AgentSessionSummary()),
+            contextType = "INSTITUTION",
+            contextId = "institution-1"
+        )
+        every { sessions.save(ownedSession) } returns ownedSession
+
+        context.updateSummaryAndPrune(
+            session = ownedSession,
+            sequenceNo = 1,
+            intent = "CATALOG_QA",
+            queryTarget = "PROJECT",
+            nextAction = "SHOW_CATALOG",
+            catalogItems = emptyList(),
+            conversationFocusUpdate = ConversationFocusUpdate.PRESERVE
+        )
+
+        val migrated = objectMapper.readTree(ownedSession.summaryJson)
+        assertEquals(1, migrated.path("focusSemanticsVersion").asInt())
+        assertEquals(
+            listOf("CATALOG_QA:INSTITUTION:SHOW_CATALOG"),
+            migrated.path("unresolvedTopics").map { it.asText() }
+        )
     }
 
     @Test
@@ -2399,12 +4407,74 @@ class AgentWorkflowCoreTest {
         val availabilityGuard: AiAgentAvailabilityGuard
     )
 
+    private data class DetailEntryChatFixture(
+        val institution: InstitutionEntity,
+        val completionServer: MockRestServiceServer,
+        val intentServer: MockRestServiceServer,
+        val catalog: AgentCatalogService,
+        val fixture: ChatFixture,
+        val completed: io.mockk.CapturingSlot<CompleteTurnCommand>
+    )
+
+    private fun detailEntryChatFixture(
+        content: String,
+        institutionName: String,
+        answer: String,
+        historyMessages: List<ChatMessageEntity> = emptyList(),
+        summary: AgentSessionSummary = AgentSessionSummary()
+    ): DetailEntryChatFixture {
+        val institution = InstitutionEntity(
+            id = "context-institution",
+            name = institutionName,
+            city = "杭州",
+            description = "机构简介",
+            isVerified = true
+        )
+        val institutionRepository = mockk<InstitutionRepository>()
+        every { institutionRepository.findById(institution.id) } returns java.util.Optional.of(institution)
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(
+            completionTemplate,
+            intentTemplate,
+            catalog,
+            institutionRepository = institutionRepository
+        )
+        val completed = slot<CompleteTurnCommand>()
+        prepareChatGeneration(
+            fixture,
+            content,
+            session(contextType = "INSTITUTION", contextId = institution.id)
+        )
+        every { fixture.contextBuilder.load("user-1", "session-1", 20, 4_000) } returns
+            AgentContext(summary, historyMessages)
+        every { fixture.contextBuilder.serializeSummary(summary) } returns objectMapper.writeValueAsString(summary)
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = answer)
+        )
+        every { catalog.hasInstitutionProjectMatch(content) } returns false
+        every {
+            catalog.contextualSearchQuery(
+                content,
+                historyMessages.filter { it.role.equals("USER", true) }.map { it.content }.takeLast(4)
+            )
+        } returns content
+        return DetailEntryChatFixture(institution, completionServer, intentServer, catalog, fixture, completed)
+    }
+
     private fun chatFixture(
         completionTemplate: RestTemplate,
         intentTemplate: RestTemplate,
         catalog: AgentCatalogService,
         turnService: TurnLifecycleService = mockk(),
-        contextBuilder: AgentContextBuilder = mockk()
+        contextBuilder: AgentContextBuilder = mockk(),
+        projectRepository: ProjectRepository = mockk(),
+        institutionRepository: InstitutionRepository = mockk(),
+        institutionProjectRepository: InstitutionProjectRepository = mockk(),
+        doctorRepository: DoctorRepository = mockk()
     ): ChatFixture {
         val operationLogger = mockk<AgentOperationLogger>()
         val availabilityGuard = mockk<AiAgentAvailabilityGuard>()
@@ -2412,10 +4482,10 @@ class AgentWorkflowCoreTest {
             chat = ChatService(
         sessionRepository = sessions,
         messageRepository = messages,
-        projectRepository = mockk<ProjectRepository>(),
-        institutionRepository = mockk<InstitutionRepository>(),
-        institutionProjectRepository = mockk<InstitutionProjectRepository>(),
-        doctorRepository = mockk<DoctorRepository>(),
+        projectRepository = projectRepository,
+        institutionRepository = institutionRepository,
+        institutionProjectRepository = institutionProjectRepository,
+        doctorRepository = doctorRepository,
         doctorInstitutionService = mockk<DoctorInstitutionService>(),
         institutionProjectDetailResolver = mockk<InstitutionProjectDetailResolver>(),
         agentCatalogService = catalog,
@@ -2490,6 +4560,21 @@ class AgentWorkflowCoreTest {
         attributes = emptyMap(),
         institutionId = "123e4567-e89b-12d3-a456-426614174000",
         canChatWithHuman = true
+    )
+
+    private fun singleItemEvidence(
+        title: String,
+        item: AgentCatalogItemResponse
+    ) = AgentPromptEvidence(
+        context = "平台$title：${item.name}",
+        report = AgentCatalogReportResponse(
+            mode = "AUTO",
+            title = title,
+            summary = "",
+            items = listOf(item),
+            comparisonDimensions = emptyList(),
+            warnings = emptyList()
+        )
     )
 
     private fun unnormalizedComparisonRequest() = ComparisonRequest(
