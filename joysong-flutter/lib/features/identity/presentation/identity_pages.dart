@@ -1984,7 +1984,6 @@ List<_IdentityField> _fieldsFor(IdentityRoleType role) {
   return switch (role) {
     IdentityRoleType.doctor => const [
         ...common,
-        _IdentityField('hospitalName', '执业机构', 'Practicing institution'),
         _IdentityField('department', '科室', 'Department'),
         _IdentityField('title', '职称', 'Professional title'),
         _IdentityField(

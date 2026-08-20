@@ -212,7 +212,7 @@ Flutter 不能依据本地缓存角色自行授权。每次进入专业管理中
 各身份额外必填信息和材料：
 
 - 机构法人：`phone`、`institutionName`、`businessLicenseNo`、`region`、`address`；营业执照、身份证正反面。
-- 医生：`hospitalName`、`department`、`title`、`qualificationNo`、`practiceNo`、`reason`；身份证正反面及手持照、医师资格证、医师执业证。
+- 医生：`department`、`title`、`qualificationNo`、`practiceNo`、`reason`；身份证正反面及手持照、医师资格证、医师执业证。医生身份申请不得提交 `hospitalName`（执业机构）；执业机构只能通过独立的医生执业关系申请与机构审核产生。
 - 医美顾问：`phone`、`experience`、`proofDescription`、`reason`；身份证正反面、医美顾问证明。
 
 同一身份只能存在一个待审核申请。审核通过后才创建职业能力；提交过的文件不能由用户删除。

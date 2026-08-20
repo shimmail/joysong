@@ -251,11 +251,14 @@ final class IdentityApplicationDraft {
     if (role == IdentityRoleType.unknown) {
       throw ArgumentError('不支持申请该身份');
     }
+    if (role == IdentityRoleType.doctor &&
+        applicationData.containsKey('hospitalName')) {
+      throw ArgumentError('医生身份申请不得填写执业机构');
+    }
     final requiredFields = switch (role) {
       IdentityRoleType.doctor => const [
           'realName',
           'idNumber',
-          'hospitalName',
           'department',
           'title',
           'qualificationNo',

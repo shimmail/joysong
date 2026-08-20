@@ -62,6 +62,135 @@ void main() {
     }
   });
 
+  test('doctor identity draft contract excludes practicing institution', () {
+    const draft = IdentityApplicationDraft(
+      role: IdentityRoleType.doctor,
+      applicationData: {
+        'realName': '李医生',
+        'idNumber': 'A1234567',
+        'department': '整形外科',
+        'title': '主任医师',
+        'qualificationNo': 'QUALIFICATION-001',
+        'practiceNo': 'PRACTICE-001',
+        'reason': '申请医生身份',
+      },
+      documents: [
+        IdentityDocumentReference(
+          fileId: 'id-front',
+          type: IdentityDocumentType.idCardFront,
+        ),
+        IdentityDocumentReference(
+          fileId: 'id-back',
+          type: IdentityDocumentType.idCardBack,
+        ),
+        IdentityDocumentReference(
+          fileId: 'id-handheld',
+          type: IdentityDocumentType.idCardHandheld,
+        ),
+        IdentityDocumentReference(
+          fileId: 'doctor-qualification',
+          type: IdentityDocumentType.doctorQualification,
+        ),
+        IdentityDocumentReference(
+          fileId: 'doctor-practice',
+          type: IdentityDocumentType.doctorPracticeCertificate,
+        ),
+      ],
+    );
+
+    expect(draft.validate, returnsNormally);
+    expect(
+      draft.toJson()['applicationData'],
+      isNot(contains('hospitalName')),
+    );
+  });
+
+  test('doctor identity draft rejects caller-provided practicing institution',
+      () {
+    for (final hospitalName in const ['', '悦美医疗美容']) {
+      final draft = IdentityApplicationDraft(
+        role: IdentityRoleType.doctor,
+        applicationData: {
+          'realName': '李医生',
+          'idNumber': 'A1234567',
+          'hospitalName': hospitalName,
+          'department': '整形外科',
+          'title': '主任医师',
+          'qualificationNo': 'QUALIFICATION-001',
+          'practiceNo': 'PRACTICE-001',
+          'reason': '申请医生身份',
+        },
+        documents: const [
+          IdentityDocumentReference(
+            fileId: 'id-front',
+            type: IdentityDocumentType.idCardFront,
+          ),
+          IdentityDocumentReference(
+            fileId: 'id-back',
+            type: IdentityDocumentType.idCardBack,
+          ),
+          IdentityDocumentReference(
+            fileId: 'id-handheld',
+            type: IdentityDocumentType.idCardHandheld,
+          ),
+          IdentityDocumentReference(
+            fileId: 'doctor-qualification',
+            type: IdentityDocumentType.doctorQualification,
+          ),
+          IdentityDocumentReference(
+            fileId: 'doctor-practice',
+            type: IdentityDocumentType.doctorPracticeCertificate,
+          ),
+        ],
+      );
+
+      expect(draft.validate, throwsArgumentError, reason: 'value=$hospitalName');
+    }
+  });
+
+  testWidgets(
+      'doctor identity application omits institution and keeps fields and documents',
+      (tester) async {
+    tester.view.physicalSize = const Size(800, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(_localizedApp(
+      home: IdentityApplicationPage(
+        controller: IdentityController(_FakeIdentityRepository()),
+        role: IdentityRoleType.doctor,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('identity-field-hospitalName')),
+      findsNothing,
+    );
+    expect(find.text('执业机构'), findsNothing);
+    for (final field in const [
+      'realName',
+      'idNumber',
+      'department',
+      'title',
+      'qualificationNo',
+      'practiceNo',
+      'reason',
+    ]) {
+      expect(find.byKey(Key('identity-field-$field')), findsOneWidget);
+    }
+    for (final documentLabel in const [
+      '身份证人像面',
+      '身份证国徽面',
+      '手持身份证照片',
+      '医师资格证',
+      '医师执业证',
+    ]) {
+      expect(find.text(documentLabel), findsOneWidget);
+    }
+  });
+
   testWidgets(
       'identity application history is controlled collapsed localized and survives controller notifications',
       (tester) async {

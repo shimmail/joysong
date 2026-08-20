@@ -134,7 +134,7 @@ class IdentityApplicationService(
                 required("address", "详细地址", 300)
             }
             "DOCTOR" -> {
-                required("hospitalName", "执业机构", 200)
+                require(!data.containsKey("hospitalName")) { "医生身份申请不允许填写执业机构" }
                 required("department", "科室", 100)
                 required("title", "职称", 100)
                 required("qualificationNo", "医师资格证编号", 100)
