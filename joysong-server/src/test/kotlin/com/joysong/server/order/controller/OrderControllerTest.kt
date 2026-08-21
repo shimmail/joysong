@@ -7,6 +7,11 @@ import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.service.OrderService
 import com.joysong.server.order.service.OrderStatusLogService
 import com.joysong.server.payment.service.PaymentService
+import com.joysong.server.payment.service.PaymentSessionResult
+import com.joysong.server.payment.domain.PaymentProvider
+import com.joysong.server.payment.domain.PaymentStatus
+import com.joysong.server.payment.domain.PaymentType
+import com.joysong.server.payment.entity.PaymentEntity
 import com.joysong.server.payment.repository.PaymentRepository
 import com.joysong.server.refund.service.RefundService
 import com.joysong.server.review.service.ReviewService
@@ -26,6 +31,66 @@ import java.math.BigDecimal
 import java.time.LocalDateTime
 
 class OrderControllerTest {
+    @Test
+    fun `service fee endpoint fixes payment contract without request body`() {
+        val authentication = mockk<Authentication>()
+        val orders = mockk<OrderService>()
+        val settlements = mockk<SettlementRepository>()
+        val paymentService = mockk<PaymentService>()
+        val payment = serviceFeePayment()
+        every { authentication.principal } returns "user-1"
+        every {
+            paymentService.createPaymentSession(
+                "order-1",
+                "user-1",
+                PaymentType.TRAVEL_GROUND_SERVICE_FEE,
+                PaymentProvider.ALIPAY_PLUS,
+                "ALIPAY_PLUS_CASHIER",
+                "idem-key-123"
+            )
+        } returns PaymentSessionResult(payment)
+
+        val response = controller(orders, settlements, paymentService = paymentService)
+            .createServiceFeePaymentAttempt("order-1", "idem-key-123", authentication)
+
+        assertEquals(200, response.code)
+        verify(exactly = 1) {
+            paymentService.createPaymentSession(
+                "order-1",
+                "user-1",
+                PaymentType.TRAVEL_GROUND_SERVICE_FEE,
+                PaymentProvider.ALIPAY_PLUS,
+                "ALIPAY_PLUS_CASHIER",
+                "idem-key-123"
+            )
+        }
+    }
+
+    @Test
+    fun `generic payment attempt endpoint rejects travel service orders`() {
+        val authentication = mockk<Authentication>()
+        val orders = mockk<OrderService>()
+        val settlements = mockk<SettlementRepository>()
+        val paymentService = mockk<PaymentService>()
+        every { authentication.principal } returns "user-1"
+        every { orders.getOrderById("order-1", "user-1") } returns serviceOrder("PENDING_SERVICE_FEE")
+
+        val response = controller(orders, settlements, paymentService = paymentService).createPaymentAttempt(
+            "order-1",
+            "idem-key-123",
+            CreatePaymentAttemptRequest(
+                PaymentType.TRAVEL_GROUND_SERVICE_FEE.name,
+                PaymentProvider.ALIPAY_PLUS.name,
+                "ALIPAY_PLUS_CASHIER"
+            ),
+            authentication
+        )
+
+        assertEquals(400, response.code)
+        assertEquals("USE_SERVICE_FEE_PAYMENT_ENDPOINT", response.message)
+        verify(exactly = 0) { paymentService.createPaymentSession(any(), any(), any(), any(), any(), any()) }
+    }
+
     @Test
     fun `create order request JSON omits legacy quantity and coupon fields`() {
         val json = jacksonObjectMapper().readTree(
@@ -192,9 +257,24 @@ class OrderControllerTest {
     private fun controller(
         orders: OrderService,
         settlements: SettlementRepository,
-        payments: PaymentRepository = mockk()
+        payments: PaymentRepository = mockk(),
+        paymentService: PaymentService = mockk()
     ) = OrderController(
-        orders, mockk<PaymentService>(), mockk<RefundService>(), mockk<ReviewService>(), mockk<OrderStatusLogService>(), settlements, payments
+        orders, paymentService, mockk<RefundService>(), mockk<ReviewService>(), mockk<OrderStatusLogService>(), settlements, payments
+    )
+
+    private fun serviceFeePayment() = PaymentEntity(
+        id = "payment-1",
+        orderId = "order-1",
+        userId = "user-1",
+        amount = BigDecimal("400.00"),
+        method = "ONLINE",
+        status = PaymentStatus.CREATED.name,
+        paymentType = "TRAVEL_GROUND_SERVICE_FEE",
+        provider = "ALIPAY_PLUS",
+        paymentMethod = "ALIPAY_PLUS_CASHIER",
+        currency = "USD",
+        amountMinor = 40_000
     )
 
     private fun serviceOrder(

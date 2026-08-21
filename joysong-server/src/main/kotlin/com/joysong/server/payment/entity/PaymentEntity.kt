@@ -17,7 +17,7 @@ data class PaymentEntity(
     @Column(name = "paid_at") val paidAt: LocalDateTime? = null,
     @Column(name = "transaction_id") val transactionId: String = "",
 
-    /** 支付类型：CONSULTATION_FEE-面诊金，BALANCE-尾款 */
+    /** 支付类型；新流程仅使用 TRAVEL_GROUND_SERVICE_FEE。 */
     @Column(name = "payment_type", nullable = false, length = 30) val paymentType: String = "CONSULTATION_FEE",
     @Column(name = "provider", nullable = false, length = 30) val provider: String = "DEMO",
     @Column(name = "payment_method", length = 50) val paymentMethod: String? = null,

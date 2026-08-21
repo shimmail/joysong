@@ -44,7 +44,8 @@ class OrderScheduledTasks(
     }
 
     /**
-     * 超时取消：每5分钟检查 PENDING_PAYMENT 状态超过30分钟未支付的订单，自动取消
+     * 旧医疗支付链路兼容：仅检查 PENDING_PAYMENT。新流程的
+     * PENDING_SERVICE_FEE 订单不会被取消，由支付尝试定时器单独过期尝试。
      */
     @Scheduled(fixedRate = 300000)
     fun cancelExpiredPendingOrders() {

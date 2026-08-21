@@ -9,7 +9,8 @@ enum class PaymentProvider {
     STRIPE,
     PAYPAL,
     WECHAT_PAY,
-    ALIPAY;
+    ALIPAY,
+    ALIPAY_PLUS;
 
     companion object {
         fun parse(value: String): PaymentProvider =
@@ -20,7 +21,8 @@ enum class PaymentProvider {
 
 enum class PaymentType {
     CONSULTATION_FEE,
-    BALANCE
+    BALANCE,
+    TRAVEL_GROUND_SERVICE_FEE
 }
 
 enum class PaymentStatus {

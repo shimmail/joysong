@@ -29,6 +29,10 @@ class PaymentPersistenceService(
     companion object {
         private val log = LoggerFactory.getLogger(PaymentPersistenceService::class.java)
         private const val METHOD_ONLINE = "ONLINE"
+        private const val TRAVEL_SERVICE_PAYMENT_FLOW = "TRAVEL_GROUND_SERVICE_ONLY"
+        private const val TRAVEL_SERVICE_CURRENCY = "USD"
+        private const val TRAVEL_SERVICE_PAYMENT_METHOD = "ALIPAY_PLUS_CASHIER"
+        private const val PAYMENT_ATTEMPT_TIMEOUT_MINUTES = 30L
     }
 
     /** Short transaction: validates the order and persists a local CREATED attempt. */
@@ -52,6 +56,7 @@ class PaymentPersistenceService(
         val order = orderRepository.findByIdForUpdate(orderId)
             ?: throw IllegalArgumentException("订单不存在: $orderId")
         require(order.userId == userId) { "无权操作该订单" }
+        validatePaymentContract(order, paymentType, provider, paymentMethod)
 
         findSuccessfulPayment(orderId, paymentType)?.let { return it }
         paymentRepository.findFirstByOrderIdAndPaymentTypeAndStatusInOrderByCreatedAtAsc(
@@ -76,9 +81,16 @@ class PaymentPersistenceService(
                 ?: Money.toMinor(order.consultationFee, currency)
             PaymentType.BALANCE -> order.remainingAmountMinor
                 ?: Money.toMinor(order.remainingAmount, currency)
+            PaymentType.TRAVEL_GROUND_SERVICE_FEE -> {
+                require(currency == TRAVEL_SERVICE_CURRENCY) { "TRAVEL_SERVICE_CURRENCY_MUST_BE_USD" }
+                requireNotNull(order.travelGroundServiceFeeMinor) { "TRAVEL_GROUND_SERVICE_FEE_MISSING" }
+            }
         }
         require(amountMinor > 0) { "PAYMENT_AMOUNT_NOT_POSITIVE" }
         val now = LocalDateTime.now()
+        val expiresAt = if (paymentType == PaymentType.TRAVEL_GROUND_SERVICE_FEE) {
+            now.plusMinutes(PAYMENT_ATTEMPT_TIMEOUT_MINUTES)
+        } else null
         return paymentRepository.saveAndFlush(
             PaymentEntity(
                 id = UUID.randomUUID().toString(),
@@ -94,6 +106,7 @@ class PaymentPersistenceService(
                 currency = currency,
                 amountMinor = amountMinor,
                 idempotencyKey = idempotencyKey,
+                expiresAt = expiresAt,
                 createdAt = now,
                 updatedAt = now
             )
@@ -151,7 +164,7 @@ class PaymentPersistenceService(
                     payment.authorizedAt ?: now
                 } else payment.authorizedAt,
                 cancelledAt = if (result.status == PaymentStatus.CANCELLED) now else payment.cancelledAt,
-                expiresAt = result.expiresAt ?: payment.expiresAt,
+                expiresAt = earliestExpiry(payment.expiresAt, result.expiresAt),
                 updatedAt = now
             )
         )
@@ -195,6 +208,24 @@ class PaymentPersistenceService(
     ): PaymentEntity {
         val type = PaymentType.valueOf(payment.paymentType)
         validateOrderStage(order, type)
+        if (type == PaymentType.TRAVEL_GROUND_SERVICE_FEE) {
+            val completed = paymentRepository.save(
+                payment.copy(
+                    status = PaymentStatus.SUCCEEDED.name,
+                    paidAt = now,
+                    failureCode = null,
+                    failureMessage = null,
+                    updatedAt = now
+                )
+            )
+            log.info(
+                "订单[{}]旅游地接服务费支付记录成功，provider={}, paymentId={}",
+                order.orderNo,
+                payment.provider,
+                payment.id
+            )
+            return completed
+        }
         val fromStatus = order.status
         val updatedOrder = when (type) {
             PaymentType.CONSULTATION_FEE -> order.copy(
@@ -213,6 +244,7 @@ class PaymentPersistenceService(
                 verifiedAt = null,
                 updatedAt = now
             )
+            PaymentType.TRAVEL_GROUND_SERVICE_FEE -> error("UNREACHABLE_TRAVEL_SERVICE_ACTIVATION")
         }
         orderRepository.save(updatedOrder)
         orderStatusLogService.logTransition(
@@ -242,12 +274,40 @@ class PaymentPersistenceService(
         val target = when (paymentType) {
             PaymentType.CONSULTATION_FEE -> OrderStatusEnum.CONSULTATION_PAID
             PaymentType.BALANCE -> OrderStatusEnum.BALANCE_PAID
+            PaymentType.TRAVEL_GROUND_SERVICE_FEE -> OrderStatusEnum.SERVICE_ACTIVE
         }
         require(current.canTransitionTo(target)) {
-            if (paymentType == PaymentType.BALANCE) "当前状态[${current.value}]不允许支付尾款，需先完成到店核验"
-            else "当前状态[${current.value}]不允许支付面诊金"
+            when (paymentType) {
+                PaymentType.BALANCE -> "当前状态[${current.value}]不允许支付尾款，需先完成到店核验"
+                PaymentType.CONSULTATION_FEE -> "当前状态[${current.value}]不允许支付面诊金"
+                PaymentType.TRAVEL_GROUND_SERVICE_FEE -> "当前状态[${current.value}]不允许支付旅游地接服务费"
+            }
         }
     }
+
+    private fun validatePaymentContract(
+        order: OrderEntity,
+        paymentType: PaymentType,
+        provider: PaymentProvider,
+        paymentMethod: String
+    ) {
+        if (order.paymentFlow == TRAVEL_SERVICE_PAYMENT_FLOW) {
+            require(paymentType == PaymentType.TRAVEL_GROUND_SERVICE_FEE) {
+                "USE_SERVICE_FEE_PAYMENT_ENDPOINT"
+            }
+            require(provider == PaymentProvider.ALIPAY_PLUS) { "PAYMENT_PROVIDER_NOT_ALLOWED" }
+            require(paymentMethod == TRAVEL_SERVICE_PAYMENT_METHOD) { "PAYMENT_METHOD_NOT_ALLOWED" }
+        } else {
+            require(paymentType != PaymentType.TRAVEL_GROUND_SERVICE_FEE) {
+                "TRAVEL_SERVICE_PAYMENT_FLOW_REQUIRED"
+            }
+        }
+    }
+
+    private fun earliestExpiry(
+        localExpiry: LocalDateTime?,
+        providerExpiry: LocalDateTime?
+    ): LocalDateTime? = listOfNotNull(localExpiry, providerExpiry).minOrNull()
 
     private fun findSuccessfulPayment(orderId: String, type: PaymentType): PaymentEntity? =
         paymentRepository.findFirstByOrderIdAndPaymentTypeAndStatusInOrderByCreatedAtDesc(

@@ -41,6 +41,17 @@ interface PaymentRepository : JpaRepository<PaymentEntity, String> {
     ): List<PaymentEntity>
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query(
+        "SELECT p FROM PaymentEntity p " +
+            "WHERE p.status IN :statuses AND p.expiresAt IS NOT NULL AND p.expiresAt <= :now " +
+            "ORDER BY p.id"
+    )
+    fun findExpirableAttempts(
+        @Param("statuses") statuses: Collection<String>,
+        @Param("now") now: LocalDateTime
+    ): List<PaymentEntity>
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT p FROM PaymentEntity p WHERE p.id = :id")
     fun findByIdForUpdate(@Param("id") id: String): PaymentEntity?
 }

@@ -135,12 +135,43 @@ class OrderController(
     ): BaseResponse<*> {
         val userId = authentication.principal as String
         return try {
+            val order = orderService.getOrderById(id, userId)
+                ?: throw IllegalArgumentException("ORDER_NOT_FOUND")
+            require(order.paymentFlow != "TRAVEL_GROUND_SERVICE_ONLY") {
+                "USE_SERVICE_FEE_PAYMENT_ENDPOINT"
+            }
             val payment = paymentService.createPaymentSession(
                 orderId = id,
                 userId = userId,
                 paymentType = PaymentType.valueOf(request.paymentType.trim().uppercase()),
                 provider = PaymentProvider.parse(request.provider),
                 paymentMethod = request.paymentMethod,
+                idempotencyKey = idempotencyKey
+            )
+            BaseResponse.success(PaymentAttemptResponse.from(payment))
+        } catch (e: Exception) {
+            paymentError(e, "创建支付失败")
+        }
+    }
+
+    /**
+     * Fixed travel-service payment contract. Amount, type, provider and method
+     * are intentionally not accepted from the client.
+     */
+    @PostMapping("/{id}/service-fee-payment-attempts")
+    fun createServiceFeePaymentAttempt(
+        @PathVariable id: String,
+        @RequestHeader("Idempotency-Key") idempotencyKey: String,
+        authentication: Authentication
+    ): BaseResponse<*> {
+        val userId = authentication.principal as String
+        return try {
+            val payment = paymentService.createPaymentSession(
+                orderId = id,
+                userId = userId,
+                paymentType = PaymentType.TRAVEL_GROUND_SERVICE_FEE,
+                provider = PaymentProvider.ALIPAY_PLUS,
+                paymentMethod = "ALIPAY_PLUS_CASHIER",
                 idempotencyKey = idempotencyKey
             )
             BaseResponse.success(PaymentAttemptResponse.from(payment))
