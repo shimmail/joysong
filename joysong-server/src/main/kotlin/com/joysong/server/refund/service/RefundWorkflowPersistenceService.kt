@@ -5,6 +5,7 @@ import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.repository.OrderRepository
 import com.joysong.server.order.service.OrderStatusLogService
 import com.joysong.server.payment.domain.Money
+import com.joysong.server.payment.domain.PaymentProvider
 import com.joysong.server.payment.domain.PaymentStatus
 import com.joysong.server.payment.domain.PaymentType
 import com.joysong.server.payment.repository.PaymentRepository
@@ -159,6 +160,15 @@ class RefundWorkflowPersistenceService(
             ?: throw IllegalArgumentException("ORDER_NOT_FOUND")
         val isTravelGroundService = order.paymentFlow == TRAVEL_GROUND_SERVICE_ONLY
         if (isTravelGroundService) {
+            require(order.currency == "USD" && refund.currency == "USD") {
+                "SERVICE_FEE_CURRENCY_NOT_USD"
+            }
+            val expectedAmount = requireNotNull(order.travelGroundServiceFeeMinor) {
+                "SERVICE_FEE_SNAPSHOT_MISSING"
+            }
+            require(refund.requestedAmountMinor == expectedAmount) {
+                "SERVICE_FEE_REFUND_AMOUNT_MISMATCH"
+            }
             require(refund.status in setOf(PENDING, PROCESSING, APPROVED)) {
                 "退款申请已处理，不能重复审核"
             }
@@ -312,7 +322,10 @@ class RefundWorkflowPersistenceService(
         ).filter { it.paymentType == PaymentType.TRAVEL_GROUND_SERVICE_FEE.name }
         require(matches.size == 1) { "SERVICE_FEE_PAYMENT_NOT_UNIQUE" }
         val payment = matches.single()
-        require(payment.currency == order.currency) { "SERVICE_FEE_PAYMENT_CURRENCY_MISMATCH" }
+        require(payment.currency == "USD") { "SERVICE_FEE_PAYMENT_CURRENCY_MISMATCH" }
+        require(payment.provider == PaymentProvider.ALIPAY_PLUS.name) {
+            "SERVICE_FEE_PAYMENT_PROVIDER_NOT_ALIPAY_PLUS"
+        }
         require(payment.amountMinor == expectedAmount) { "SERVICE_FEE_PAYMENT_AMOUNT_MISMATCH" }
         require(payment.refundedAmountMinor == 0L) { "SERVICE_FEE_PAYMENT_ALREADY_REFUNDED" }
     }

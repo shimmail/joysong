@@ -3,6 +3,7 @@ package com.joysong.server.refund.service
 import com.joysong.server.order.dto.OrderStatusEnum
 import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.repository.OrderRepository
+import com.joysong.server.payment.domain.PaymentProvider
 import com.joysong.server.payment.domain.PaymentStatus
 import com.joysong.server.payment.domain.PaymentType
 import com.joysong.server.payment.provider.ProviderRefundResult
@@ -44,6 +45,9 @@ class RefundItemPersistenceService(
             require(order.status == OrderStatusEnum.REFUND_PROCESSING.value) {
                 "INVALID_ORDER_REFUND_STATUS"
             }
+            require(order.currency == "USD" && lockedRefund.currency == "USD") {
+                "SERVICE_FEE_CURRENCY_NOT_USD"
+            }
             val expectedAmount = requireNotNull(order.travelGroundServiceFeeMinor) {
                 "SERVICE_FEE_SNAPSHOT_MISSING"
             }
@@ -58,8 +62,11 @@ class RefundItemPersistenceService(
             ).filter { it.paymentType == PaymentType.TRAVEL_GROUND_SERVICE_FEE.name }
             require(servicePayments.size == 1) { "SERVICE_FEE_PAYMENT_NOT_UNIQUE" }
             val payment = servicePayments.single()
+            require(payment.currency == "USD") { "SERVICE_FEE_PAYMENT_CURRENCY_MISMATCH" }
+            require(payment.provider == PaymentProvider.ALIPAY_PLUS.name) {
+                "SERVICE_FEE_PAYMENT_PROVIDER_NOT_ALIPAY_PLUS"
+            }
             require(payment.amountMinor == expectedAmount) { "SERVICE_FEE_PAYMENT_AMOUNT_MISMATCH" }
-            require(payment.currency == lockedRefund.currency) { "SERVICE_FEE_PAYMENT_CURRENCY_MISMATCH" }
             require(payment.refundedAmountMinor == 0L) { "SERVICE_FEE_PAYMENT_ALREADY_REFUNDED" }
             val now = LocalDateTime.now()
             return refundItemRepository.saveAllAndFlush(
@@ -118,7 +125,10 @@ class RefundItemPersistenceService(
         val item = items.single()
         require(item.refundId == refund.id) { "SERVICE_FEE_REFUND_ITEM_REFUND_MISMATCH" }
         require(item.amountMinor == target) { "SERVICE_FEE_REFUND_ITEM_AMOUNT_MISMATCH" }
-        require(item.currency == refund.currency) { "SERVICE_FEE_REFUND_ITEM_CURRENCY_MISMATCH" }
+        require(item.currency == "USD") { "SERVICE_FEE_REFUND_ITEM_CURRENCY_MISMATCH" }
+        require(item.provider == PaymentProvider.ALIPAY_PLUS.name) {
+            "SERVICE_FEE_REFUND_ITEM_PROVIDER_NOT_ALIPAY_PLUS"
+        }
         require(item.status in setOf(
             PaymentStatus.CREATED.name,
             PaymentStatus.PROCESSING.name,
@@ -132,8 +142,11 @@ class RefundItemPersistenceService(
         require(payment.paymentType == PaymentType.TRAVEL_GROUND_SERVICE_FEE.name) {
             "SERVICE_FEE_REFUND_ITEM_PAYMENT_TYPE_MISMATCH"
         }
+        require(payment.currency == "USD") { "SERVICE_FEE_PAYMENT_CURRENCY_MISMATCH" }
+        require(payment.provider == PaymentProvider.ALIPAY_PLUS.name) {
+            "SERVICE_FEE_PAYMENT_PROVIDER_NOT_ALIPAY_PLUS"
+        }
         require(payment.amountMinor == target) { "SERVICE_FEE_PAYMENT_AMOUNT_MISMATCH" }
-        require(payment.currency == refund.currency) { "SERVICE_FEE_PAYMENT_CURRENCY_MISMATCH" }
         require(item.provider == payment.provider) { "SERVICE_FEE_REFUND_ITEM_PROVIDER_MISMATCH" }
         if (item.status == PaymentStatus.SUCCEEDED.name) {
             require(payment.status == PaymentStatus.REFUNDED.name) {

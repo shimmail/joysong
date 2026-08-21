@@ -118,6 +118,24 @@ class RefundServiceTest {
     }
 
     @Test
+    fun `service fee refund request rejects a non Alipay Plus payment`() {
+        stubApplicationBase()
+        every {
+            paymentRepository.findAllByOrderIdAndStatusInOrderByCreatedAtAsc("order-1", any())
+        } returns listOf(serviceFeePayment(provider = PaymentProvider.STRIPE))
+        every { refundRepository.saveAndFlush(any()) } answers { firstArg() }
+        every { orderRepository.save(any()) } answers { firstArg() }
+        every { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) } returns Unit
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            service().applyRefund("order-1", "user-1", "行程取消", "不再来华")
+        }
+
+        assertEquals("SERVICE_FEE_PAYMENT_PROVIDER_NOT_ALIPAY_PLUS", error.message)
+        verify(exactly = 0) { refundRepository.saveAndFlush(any()) }
+    }
+
+    @Test
     fun `rejected review restores active service without invoking provider`() {
         val execution = mockk<RefundExecutionService>()
         val savedOrder = slot<OrderEntity>()
@@ -184,6 +202,27 @@ class RefundServiceTest {
             orderRepository.save(match { it.status == OrderStatusEnum.REFUND_PROCESSING.value })
             execution.execute(match { it.status == RefundWorkflowPersistenceService.PROCESSING })
         }
+    }
+
+    @Test
+    fun `approval revalidates the locked service refund as USD before provider execution`() {
+        val execution = mockk<RefundExecutionService>()
+        val pending = refund(status = RefundWorkflowPersistenceService.PENDING).copy(currency = "CNY")
+        every { refundRepository.findByIdForUpdate("refund-1") } returns pending
+        every { orderRepository.findByIdForUpdate("order-1") } returns
+            serviceOrder(status = OrderStatusEnum.REFUND_REVIEW.value).copy(currency = "CNY")
+        every { refundRepository.save(any()) } answers { firstArg() }
+        every { orderRepository.save(any()) } answers { firstArg() }
+        every { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) } returns Unit
+        every { execution.execute(any()) } returns RefundExecutionOutcome(0, completed = false)
+        every { refundRepository.findById("refund-1") } returns Optional.of(pending)
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            service(execution = execution).adminUpdateStatus("refund-1", "APPROVED", "admin-1")
+        }
+
+        assertEquals("SERVICE_FEE_CURRENCY_NOT_USD", error.message)
+        verify(exactly = 0) { execution.execute(any()) }
     }
 
     @Test
@@ -341,6 +380,41 @@ class RefundServiceTest {
             assertEquals(IllegalArgumentException::class.java, error?.javaClass)
             assertEquals(expectedMessage, error?.message)
         }
+    }
+
+    @Test
+    fun `internally consistent CNY service refund data is rejected before any provider call`() {
+        val error = executeWithExistingItems(
+            items = listOf(refundItem(currency = "CNY")),
+            payments = listOf(serviceFeePayment(currency = "CNY")),
+            processing = refund(status = RefundWorkflowPersistenceService.PROCESSING).copy(currency = "CNY"),
+            order = serviceOrder(status = OrderStatusEnum.REFUND_PROCESSING.value).copy(currency = "CNY")
+        )
+
+        assertEquals(IllegalArgumentException::class.java, error?.javaClass)
+        assertEquals("SERVICE_FEE_CURRENCY_NOT_USD", error?.message)
+    }
+
+    @Test
+    fun `pre-existing non Alipay Plus service item is rejected before any provider call`() {
+        val error = executeWithExistingItems(
+            items = listOf(refundItem(provider = PaymentProvider.STRIPE)),
+            payments = listOf(serviceFeePayment(provider = PaymentProvider.STRIPE))
+        )
+
+        assertEquals(IllegalArgumentException::class.java, error?.javaClass)
+        assertEquals("SERVICE_FEE_REFUND_ITEM_PROVIDER_NOT_ALIPAY_PLUS", error?.message)
+    }
+
+    @Test
+    fun `new service refund item rejects a non Alipay Plus payment before provider call`() {
+        val error = executeWithExistingItems(
+            items = emptyList(),
+            payments = listOf(serviceFeePayment(provider = PaymentProvider.STRIPE))
+        )
+
+        assertEquals(IllegalArgumentException::class.java, error?.javaClass)
+        assertEquals("SERVICE_FEE_PAYMENT_PROVIDER_NOT_ALIPAY_PLUS", error?.message)
     }
 
     @Test
@@ -576,15 +650,22 @@ class RefundServiceTest {
 
     private fun executeWithExistingItems(
         items: List<RefundItemEntity>,
-        payments: List<PaymentEntity>
+        payments: List<PaymentEntity>,
+        processing: RefundEntity = refund(status = RefundWorkflowPersistenceService.PROCESSING),
+        order: OrderEntity = serviceOrder(status = OrderStatusEnum.REFUND_PROCESSING.value)
     ): Throwable? {
-        val processing = refund(status = RefundWorkflowPersistenceService.PROCESSING)
         val gatewayRegistry = mockk<PaymentGatewayRegistry>()
         val gateway = mockk<PaymentGateway>()
+        var storedItems = items
         every { refundRepository.findByIdForUpdate("refund-1") } returns processing
-        every { orderRepository.findByIdForUpdate("order-1") } returns
-            serviceOrder(status = OrderStatusEnum.REFUND_PROCESSING.value)
-        every { refundItemRepository.findAllByRefundIdOrderByCreatedAtAsc("refund-1") } returns items
+        every { orderRepository.findByIdForUpdate("order-1") } returns order
+        every { refundItemRepository.findAllByRefundIdOrderByCreatedAtAsc("refund-1") } answers { storedItems }
+        every {
+            paymentRepository.findAllByOrderIdAndStatusInOrderByCreatedAtAsc("order-1", any())
+        } returns payments
+        every { refundItemRepository.saveAllAndFlush(any<List<RefundItemEntity>>()) } answers {
+            firstArg<List<RefundItemEntity>>().also { storedItems = it }
+        }
         payments.forEach { payment ->
             every { paymentRepository.findById(payment.id) } returns Optional.of(payment)
             every { paymentRepository.findByIdForUpdate(payment.id) } returns payment
@@ -593,7 +674,7 @@ class RefundServiceTest {
         every { gateway.refund(any()) } returns
             ProviderRefundResult(PaymentStatus.PROCESSING, "provider-refund")
         every { refundItemRepository.findByIdForUpdate(any()) } answers {
-            items.firstOrNull { it.id == firstArg<String>() }
+            storedItems.firstOrNull { it.id == firstArg<String>() }
         }
         every { refundItemRepository.save(any()) } answers { firstArg() }
         val execution = RefundExecutionService(
@@ -657,14 +738,16 @@ class RefundServiceTest {
     private fun serviceFeePayment(
         id: String = "payment-1",
         amountMinor: Long = 40_000L,
-        currency: String = "USD"
-    ) = payment(id, PaymentType.TRAVEL_GROUND_SERVICE_FEE, amountMinor, currency)
+        currency: String = "USD",
+        provider: PaymentProvider = PaymentProvider.ALIPAY_PLUS
+    ) = payment(id, PaymentType.TRAVEL_GROUND_SERVICE_FEE, amountMinor, currency, provider)
 
     private fun payment(
         id: String,
         type: PaymentType,
         amountMinor: Long,
-        currency: String = "USD"
+        currency: String = "USD",
+        provider: PaymentProvider = PaymentProvider.ALIPAY_PLUS
     ) = PaymentEntity(
         id = id,
         orderId = "order-1",
@@ -673,7 +756,7 @@ class RefundServiceTest {
         method = "ALIPAY_PLUS_CASHIER",
         status = PaymentStatus.SUCCEEDED.name,
         paymentType = type.name,
-        provider = PaymentProvider.ALIPAY_PLUS.name,
+        provider = provider.name,
         currency = currency,
         amountMinor = amountMinor,
         providerPaymentId = "provider-$id"
@@ -683,12 +766,13 @@ class RefundServiceTest {
         id: String = "item-1",
         paymentId: String = "payment-1",
         amountMinor: Long = 40_000L,
-        currency: String = "USD"
+        currency: String = "USD",
+        provider: PaymentProvider = PaymentProvider.ALIPAY_PLUS
     ) = RefundItemEntity(
         id = id,
         refundId = "refund-1",
         paymentId = paymentId,
-        provider = PaymentProvider.ALIPAY_PLUS.name,
+        provider = provider.name,
         currency = currency,
         amountMinor = amountMinor
     )
