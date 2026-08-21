@@ -45,18 +45,23 @@ class PaymentPersistenceService(
         paymentMethod: String,
         idempotencyKey: String
     ): PaymentEntity {
-        paymentRepository.findByUserIdAndIdempotencyKey(userId, idempotencyKey)?.let { existing ->
+        val existingByIdempotencyKey = paymentRepository.findByUserIdAndIdempotencyKey(userId, idempotencyKey)
+        existingByIdempotencyKey?.let { existing ->
             require(existing.orderId == orderId &&
                 existing.paymentType == paymentType.name &&
-                existing.provider == provider.name
+                existing.provider == provider.name &&
+                existing.paymentMethod == paymentMethod
             ) { "IDEMPOTENCY_KEY_CONFLICT" }
-            return existing
+            if (existing.status in PaymentStatus.terminalDatabaseValues) return existing
         }
 
         val order = orderRepository.findByIdForUpdate(orderId)
             ?: throw IllegalArgumentException("订单不存在: $orderId")
         require(order.userId == userId) { "无权操作该订单" }
         validatePaymentContract(order, paymentType, provider, paymentMethod)
+        validateOrderStage(order, paymentType)
+
+        existingByIdempotencyKey?.let { return it }
 
         findSuccessfulPayment(orderId, paymentType)?.let { return it }
         paymentRepository.findFirstByOrderIdAndPaymentTypeAndStatusInOrderByCreatedAtAsc(
@@ -73,7 +78,6 @@ class PaymentPersistenceService(
             }
             return active
         }
-        validateOrderStage(order, paymentType)
 
         val currency = Money.normalizeCurrency(order.currency)
         val amountMinor = when (paymentType) {

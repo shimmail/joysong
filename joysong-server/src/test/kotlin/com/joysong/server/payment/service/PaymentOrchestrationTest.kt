@@ -174,7 +174,8 @@ class PaymentOrchestrationTest {
             PaymentStatus.CREATED.name,
             PaymentStatus.REQUIRES_ACTION.name,
             PaymentStatus.PROCESSING.name,
-            PaymentStatus.SUCCEEDED.name
+            PaymentStatus.SUCCEEDED.name,
+            "SUCCESS"
         )
 
         statuses.forEach { status ->
@@ -188,8 +189,8 @@ class PaymentOrchestrationTest {
                     PaymentType.TRAVEL_GROUND_SERVICE_FEE.name,
                     PaymentStatus.successfulDatabaseValues
                 )
-            } returns existing.takeIf { status == PaymentStatus.SUCCEEDED.name }
-            if (status != PaymentStatus.SUCCEEDED.name) {
+            } returns existing.takeIf { status in PaymentStatus.successfulDatabaseValues }
+            if (status !in PaymentStatus.successfulDatabaseValues) {
                 every {
                     repositories.payment.findFirstByOrderIdAndPaymentTypeAndStatusInOrderByCreatedAtAsc(
                         "order-1",
@@ -221,7 +222,12 @@ class PaymentOrchestrationTest {
     fun `failed or expired service fee payment allows retry with a new idempotency key`() {
         listOf(PaymentStatus.FAILED, PaymentStatus.EXPIRED).forEach { previousStatus ->
             val repositories = persistenceRepositories()
-            every { repositories.payment.findByUserIdAndIdempotencyKey("user-1", "retry-key-123") } returns null
+            val previous = travelPayment(previousStatus.name, idempotencyKey = "previous-key-123")
+            val attempts = mutableListOf(previous)
+            every { repositories.payment.findByUserIdAndIdempotencyKey("user-1", any()) } answers {
+                val key = secondArg<String>()
+                attempts.firstOrNull { it.userId == "user-1" && it.idempotencyKey == key }
+            }
             every { repositories.order.findByIdForUpdate("order-1") } returns travelOrder()
             every {
                 repositories.payment.findFirstByOrderIdAndPaymentTypeAndStatusInOrderByCreatedAtDesc(
@@ -229,15 +235,23 @@ class PaymentOrchestrationTest {
                     PaymentType.TRAVEL_GROUND_SERVICE_FEE.name,
                     PaymentStatus.successfulDatabaseValues
                 )
-            } returns null
+            } answers {
+                val statuses = thirdArg<Collection<String>>()
+                attempts.lastOrNull { it.status in statuses }
+            }
             every {
                 repositories.payment.findFirstByOrderIdAndPaymentTypeAndStatusInOrderByCreatedAtAsc(
                     "order-1",
                     PaymentType.TRAVEL_GROUND_SERVICE_FEE.name,
                     any()
                 )
-            } returns null
-            every { repositories.payment.saveAndFlush(any()) } answers { firstArg() }
+            } answers {
+                val statuses = thirdArg<Collection<String>>()
+                attempts.firstOrNull { it.status in statuses }
+            }
+            every { repositories.payment.saveAndFlush(any()) } answers {
+                firstArg<PaymentEntity>().also(attempts::add)
+            }
 
             val result = PaymentPersistenceService(
                 repositories.payment,
@@ -253,7 +267,105 @@ class PaymentOrchestrationTest {
             )
 
             assertEquals(PaymentStatus.CREATED.name, result.status, previousStatus.name)
+            assertEquals(2, attempts.size, previousStatus.name)
+            assertSame(previous, attempts.first(), previousStatus.name)
             verify(exactly = 1) { repositories.payment.saveAndFlush(any()) }
+        }
+    }
+
+    @Test
+    fun `cancelled order rejects same key nonterminal attempt before provider call`() {
+        val repositories = persistenceRepositories()
+        val gateway = mockk<PaymentGateway>()
+        val existing = travelPayment(PaymentStatus.CREATED.name)
+        every { gateway.provider } returns PaymentProvider.ALIPAY_PLUS
+        every {
+            repositories.payment.findByUserIdAndIdempotencyKey("user-1", "client-key-123")
+        } returns existing
+        every { repositories.order.findByIdForUpdate("order-1") } returns travelOrder("CANCELLED")
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            travelService(repositories, gateway).createPaymentSession(
+                "order-1",
+                "user-1",
+                PaymentType.TRAVEL_GROUND_SERVICE_FEE,
+                PaymentProvider.ALIPAY_PLUS,
+                "ALIPAY_PLUS_CASHIER",
+                "client-key-123"
+            )
+        }
+
+        assertEquals("当前状态[CANCELLED]不允许支付旅游地接服务费", error.message)
+        verify(exactly = 1) { repositories.order.findByIdForUpdate("order-1") }
+        verify(exactly = 0) { gateway.createPayment(any()) }
+        verify(exactly = 0) { gateway.queryPayment(any()) }
+    }
+
+    @Test
+    fun `cancelled order rejects active overlap with new key before provider call`() {
+        val repositories = persistenceRepositories()
+        val gateway = mockk<PaymentGateway>()
+        val existing = travelPayment(PaymentStatus.REQUIRES_ACTION.name, idempotencyKey = "previous-key-123")
+        every { gateway.provider } returns PaymentProvider.ALIPAY_PLUS
+        every {
+            repositories.payment.findByUserIdAndIdempotencyKey("user-1", "retry-key-123")
+        } returns null
+        every { repositories.order.findByIdForUpdate("order-1") } returns travelOrder("CANCELLED")
+        every {
+            repositories.payment.findFirstByOrderIdAndPaymentTypeAndStatusInOrderByCreatedAtDesc(
+                "order-1",
+                PaymentType.TRAVEL_GROUND_SERVICE_FEE.name,
+                PaymentStatus.successfulDatabaseValues
+            )
+        } returns null
+        every {
+            repositories.payment.findFirstByOrderIdAndPaymentTypeAndStatusInOrderByCreatedAtAsc(
+                "order-1",
+                PaymentType.TRAVEL_GROUND_SERVICE_FEE.name,
+                any()
+            )
+        } returns existing
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            travelService(repositories, gateway).createPaymentSession(
+                "order-1",
+                "user-1",
+                PaymentType.TRAVEL_GROUND_SERVICE_FEE,
+                PaymentProvider.ALIPAY_PLUS,
+                "ALIPAY_PLUS_CASHIER",
+                "retry-key-123"
+            )
+        }
+
+        assertEquals("当前状态[CANCELLED]不允许支付旅游地接服务费", error.message)
+        verify(exactly = 0) { gateway.createPayment(any()) }
+        verify(exactly = 0) { gateway.queryPayment(any()) }
+    }
+
+    @Test
+    fun `terminal same key returns old result without recontacting provider`() {
+        listOf("SUCCESS", PaymentStatus.FAILED.name, PaymentStatus.EXPIRED.name).forEach { status ->
+            val repositories = persistenceRepositories()
+            val gateway = mockk<PaymentGateway>()
+            val existing = travelPayment(status)
+            every { gateway.provider } returns PaymentProvider.ALIPAY_PLUS
+            every {
+                repositories.payment.findByUserIdAndIdempotencyKey("user-1", "client-key-123")
+            } returns existing
+
+            val result = travelService(repositories, gateway).createPaymentSession(
+                "order-1",
+                "user-1",
+                PaymentType.TRAVEL_GROUND_SERVICE_FEE,
+                PaymentProvider.ALIPAY_PLUS,
+                "ALIPAY_PLUS_CASHIER",
+                "client-key-123"
+            )
+
+            assertSame(existing, result.payment, status)
+            verify(exactly = 0) { repositories.order.findByIdForUpdate(any()) }
+            verify(exactly = 0) { gateway.createPayment(any()) }
+            verify(exactly = 0) { gateway.queryPayment(any()) }
         }
     }
 
@@ -354,7 +466,18 @@ class PaymentOrchestrationTest {
         log = mockk()
     )
 
-    private fun travelOrder() = OrderEntity(
+    private fun travelService(
+        repositories: PersistenceRepositories,
+        gateway: PaymentGateway
+    ) = PaymentService(
+        repositories.payment,
+        repositories.order,
+        repositories.log,
+        PaymentGatewayRegistry(listOf(gateway)),
+        PaymentPersistenceService(repositories.payment, repositories.order, repositories.log)
+    )
+
+    private fun travelOrder(status: String = "PENDING_SERVICE_FEE") = OrderEntity(
         id = "order-1",
         userId = "user-1",
         projectName = "项目",
@@ -363,7 +486,7 @@ class PaymentOrchestrationTest {
         currency = "USD",
         paymentFlow = "TRAVEL_GROUND_SERVICE_ONLY",
         travelGroundServiceFeeMinor = 40_000,
-        status = "PENDING_SERVICE_FEE"
+        status = status
     )
 
     private fun travelPayment(

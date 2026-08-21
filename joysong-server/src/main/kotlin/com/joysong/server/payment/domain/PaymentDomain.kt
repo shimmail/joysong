@@ -39,6 +39,14 @@ enum class PaymentStatus {
     companion object {
         /** Compatibility with records created before provider-aware payments. */
         val successfulDatabaseValues = listOf(SUCCEEDED.name, "SUCCESS")
+
+        val terminalDatabaseValues = successfulDatabaseValues + listOf(
+            FAILED.name,
+            CANCELLED.name,
+            EXPIRED.name,
+            PARTIALLY_REFUNDED.name,
+            REFUNDED.name
+        )
     }
 }
 

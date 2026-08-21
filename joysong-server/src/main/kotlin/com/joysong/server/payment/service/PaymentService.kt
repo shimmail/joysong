@@ -39,13 +39,7 @@ class PaymentService(
     )
 ) {
     companion object {
-        private val terminalStatuses = PaymentStatus.successfulDatabaseValues + listOf(
-            PaymentStatus.FAILED.name,
-            PaymentStatus.CANCELLED.name,
-            PaymentStatus.EXPIRED.name,
-            PaymentStatus.PARTIALLY_REFUNDED.name,
-            PaymentStatus.REFUNDED.name
-        )
+        private val terminalStatuses = PaymentStatus.terminalDatabaseValues
     }
 
     fun createPaymentSession(
