@@ -1,12 +1,12 @@
 package com.joysong.server.admin.service
 
+import com.joysong.server.dm.entity.DmConversationEntity
 import com.joysong.server.dm.entity.DmMessageEntity
 import com.joysong.server.dm.repository.DmConversationRepository
 import com.joysong.server.dm.repository.DmMessageRepository
 import com.joysong.server.notification.service.NotificationService
 import com.joysong.server.user.repository.UserRepository
 import org.springframework.data.domain.PageRequest
-import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDateTime
@@ -54,7 +54,10 @@ class AdminCustomerServiceService(
      */
     fun getAllConversations(keyword: String? = null): List<CsConversationResponse> {
         val conversations = conversationRepository
-            .findAll(Sort.by(Sort.Direction.DESC, "lastMessageAt"))
+            .findByConversationTypeAndParticipantOrderByLastMessageAtDesc(
+                DmConversationEntity.DIRECT,
+                CS_ADMIN
+            )
 
         return conversations.mapNotNull { conv ->
             // 确定"用户方"：非 CS_ADMIN 的参与者
@@ -94,8 +97,7 @@ class AdminCustomerServiceService(
      */
     fun getConversationMessages(conversationId: String, limit: Int = 50): List<CsMessageResponse> {
         require(conversationId.isNotBlank()) { "会话 ID 不能为空" }
-        conversationRepository.findById(conversationId)
-            .orElseThrow { IllegalArgumentException("会话不存在") }
+        requireCustomerServiceConversation(conversationId)
 
         val safeLimit = limit.coerceIn(1, 100)
         val pageable = PageRequest.of(0, safeLimit)
@@ -128,8 +130,7 @@ class AdminCustomerServiceService(
         require(content.isNotBlank()) { "消息内容不能为空" }
         require(content.length <= 5000) { "消息内容不能超过 5000 字符" }
 
-        val conversation = conversationRepository.findById(conversationId)
-            .orElseThrow { IllegalArgumentException("会话不存在") }
+        val conversation = requireCustomerServiceConversation(conversationId)
 
         // 创建消息
         val message = DmMessageEntity(
@@ -183,8 +184,7 @@ class AdminCustomerServiceService(
      */
     @Transactional
     fun markConversationAsRead(conversationId: String) {
-        val conversation = conversationRepository.findById(conversationId)
-            .orElseThrow { IllegalArgumentException("会话不存在") }
+        val conversation = requireCustomerServiceConversation(conversationId)
 
         // 批量将用户发给 CS_ADMIN 的消息（sender_id != CS_ADMIN）标记为已读
         messageRepository.markAsRead(conversationId, CS_ADMIN)
@@ -197,4 +197,11 @@ class AdminCustomerServiceService(
         }
         conversationRepository.save(conversation)
     }
+
+    private fun requireCustomerServiceConversation(conversationId: String): DmConversationEntity =
+        conversationRepository.findByIdAndConversationTypeAndParticipant(
+            conversationId,
+            DmConversationEntity.DIRECT,
+            CS_ADMIN
+        ) ?: throw IllegalArgumentException("会话不存在")
 }

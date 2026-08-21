@@ -36,34 +36,41 @@ class CsService(
         val userAId = minOf(userId, CS_ADMIN)
         val userBId = maxOf(userId, CS_ADMIN)
 
-        val existing = conversationRepository.findByUserAIdAndUserBId(userAId, userBId)
+        val existing = conversationRepository.findByConversationTypeAndUserAIdAndUserBId(
+            DmConversationEntity.DIRECT,
+            userAId,
+            userBId
+        )
         if (existing != null) {
             return existing.toCsResponse(userId)
         }
 
-        val conversation = DmConversationEntity(
-            id = UUID.randomUUID().toString(),
-            userAId = userAId,
-            userBId = userBId,
-            createdAt = LocalDateTime.now(),
-            updatedAt = LocalDateTime.now()
+        val now = LocalDateTime.now()
+        conversationRepository.insertDirectIfAbsent(
+            UUID.randomUUID().toString(),
+            userAId,
+            userBId,
+            now,
+            now
         )
-        val saved = try {
-            conversationRepository.save(conversation)
-        } catch (e: org.springframework.dao.DataIntegrityViolationException) {
-            conversationRepository.findByUserAIdAndUserBId(userAId, userBId)!!
-        }
-        return saved.toCsResponse(userId)
+        val persisted = conversationRepository.findDirectByPairForUpdate(userAId, userBId)
+            ?: throw IllegalStateException("DIRECT_CONVERSATION_CREATE_FAILED")
+        return persisted.toCsResponse(userId)
     }
 
     /**
      * 获取用户的所有客服会话（通常只有一个），按最新消息时间降序排列。
      */
     fun getConversations(userId: String): List<CsConversationResponse> {
-        return conversationRepository
-            .findByUserAIdOrUserBIdOrderByLastMessageAtDesc(userId, userId)
-            .filter { it.userAId == CS_ADMIN || it.userBId == CS_ADMIN }
-            .map { it.toCsResponse(userId) }
+        val userAId = minOf(userId, CS_ADMIN)
+        val userBId = maxOf(userId, CS_ADMIN)
+        return listOfNotNull(
+            conversationRepository.findByConversationTypeAndUserAIdAndUserBId(
+                DmConversationEntity.DIRECT,
+                userAId,
+                userBId
+            )
+        ).map { it.toCsResponse(userId) }
     }
 
     /**
@@ -77,12 +84,7 @@ class CsService(
     ): List<CsMessageResponse> {
         require(conversationId.isNotBlank()) { "会话 ID 不能为空" }
 
-        val conversation = conversationRepository.findById(conversationId)
-            .orElseThrow { IllegalArgumentException("会话不存在") }
-
-        if (conversation.userAId != userId && conversation.userBId != userId) {
-            throw IllegalArgumentException("无权访问该会话")
-        }
+        requireCustomerServiceConversation(conversationId, userId, "无权访问该会话")
 
         val safeLimit = limit.coerceIn(1, 100)
         val pageable = PageRequest.of(0, safeLimit)
@@ -111,12 +113,11 @@ class CsService(
         require(messageType in setOf(MESSAGE_TYPE_TEXT, MESSAGE_TYPE_IMAGE)) { "不支持的消息类型" }
         if (messageType == MESSAGE_TYPE_IMAGE) require(content.startsWith("http")) { "图片地址无效" }
 
-        val conversation = conversationRepository.findById(conversationId)
-            .orElseThrow { IllegalArgumentException("会话不存在") }
-
-        if (conversation.userAId != userId && conversation.userBId != userId) {
-            throw IllegalArgumentException("无权发送消息到该会话")
-        }
+        val conversation = requireCustomerServiceConversation(
+            conversationId,
+            userId,
+            "无权发送消息到该会话"
+        )
 
         // 创建消息
         val message = DmMessageEntity(
@@ -163,12 +164,7 @@ class CsService(
      */
     @Transactional
     fun markAsRead(conversationId: String, userId: String) {
-        val conversation = conversationRepository.findById(conversationId)
-            .orElseThrow { IllegalArgumentException("会话不存在") }
-
-        if (conversation.userAId != userId && conversation.userBId != userId) {
-            throw IllegalArgumentException("无权操作该会话")
-        }
+        val conversation = requireCustomerServiceConversation(conversationId, userId, "无权操作该会话")
 
         // 批量将 CS_ADMIN 发来的未读消息标记为已读
         messageRepository.markAsRead(conversationId, userId)
@@ -184,6 +180,20 @@ class CsService(
     }
 
     // ─── 内部映射 ────────────────────────────────────────────────────────────
+
+    private fun requireCustomerServiceConversation(
+        conversationId: String,
+        userId: String,
+        deniedMessage: String
+    ): DmConversationEntity {
+        val conversation = conversationRepository.findByIdAndConversationTypeAndParticipant(
+            conversationId,
+            DmConversationEntity.DIRECT,
+            CS_ADMIN
+        ) ?: throw IllegalArgumentException("会话不存在")
+        require(conversation.userAId == userId || conversation.userBId == userId) { deniedMessage }
+        return conversation
+    }
 
     private fun DmConversationEntity.toCsResponse(userId: String): CsConversationResponse {
         val unreadCount = if (userId == userAId) userAUnread else userBUnread

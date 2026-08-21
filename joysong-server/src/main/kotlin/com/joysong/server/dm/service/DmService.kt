@@ -19,6 +19,7 @@ import java.util.UUID
 private const val MESSAGE_TYPE_TEXT = "TEXT"
 private const val MESSAGE_TYPE_IMAGE = "IMAGE"
 private const val IMAGE_MESSAGE_SUMMARY = "[图片]"
+private const val CONSULTANT_ROLE = "CONSULTANT"
 
 @Service
 class DmService(
@@ -26,15 +27,24 @@ class DmService(
     private val messageRepository: DmMessageRepository,
     private val notificationService: NotificationService,
     private val userRepository: UserRepository,
-    private val identityAuthorizationService: IdentityAuthorizationService
+    private val identityAuthorizationService: IdentityAuthorizationService,
+    private val orderServiceConversationService: OrderServiceConversationService
 ) {
 
     /**
      * 获取用户的会话列表
      */
     fun getConversations(userId: String): List<DmConversationResponse> {
-        return conversationRepository.findByUserAIdOrUserBIdOrderByLastMessageAtDesc(userId, userId)
-            .filter { it.userAId != "CS_ADMIN" && it.userBId != "CS_ADMIN" }
+        return conversationRepository.findByParticipantOrderByLastMessageAtDesc(userId)
+            .filter { conversation ->
+                when (conversation.conversationType) {
+                    DmConversationEntity.DIRECT ->
+                        conversation.userAId != "CS_ADMIN" && conversation.userBId != "CS_ADMIN"
+                    DmConversationEntity.ORDER_SERVICE ->
+                        orderServiceConversationService.canRead(conversation, userId)
+                    else -> false
+                }
+            }
             .map { it.toResponseFor(userId) }
     }
 
@@ -49,23 +59,33 @@ class DmService(
         val userAId = minOf(userId, targetId)
         val userBId = maxOf(userId, targetId)
 
-        val existing = conversationRepository.findByUserAIdAndUserBId(userAId, userBId)
+        val existing = conversationRepository.findByConversationTypeAndUserAIdAndUserBId(
+            DmConversationEntity.DIRECT,
+            userAId,
+            userBId
+        )
         if (existing != null) {
             return existing.toResponseFor(userId)
         }
 
-        val conversation = DmConversationEntity(
-            id = UUID.randomUUID().toString(),
-            userAId = userAId,
-            userBId = userBId,
-            createdAt = LocalDateTime.now(),
-            updatedAt = LocalDateTime.now()
-        )
-        return try {
-            conversationRepository.save(conversation).toResponseFor(userId)
-        } catch (e: org.springframework.dao.DataIntegrityViolationException) {
-            conversationRepository.findByUserAIdAndUserBId(userAId, userBId)!!.toResponseFor(userId)
+        val senderIsConsultant = identityAuthorizationService.hasActiveRole(userId, CONSULTANT_ROLE)
+        if (senderIsConsultant) {
+            require(identityAuthorizationService.hasActiveProfessionalRole(targetId)) {
+                "DIRECT_OUTREACH_NOT_ALLOWED"
+            }
         }
+
+        val now = LocalDateTime.now()
+        conversationRepository.insertDirectIfAbsent(
+            UUID.randomUUID().toString(),
+            userAId,
+            userBId,
+            now,
+            now
+        )
+        val persisted = conversationRepository.findDirectByPairForUpdate(userAId, userBId)
+            ?: throw IllegalStateException("DIRECT_CONVERSATION_CREATE_FAILED")
+        return persisted.toResponseFor(userId)
     }
 
     /**
@@ -81,9 +101,7 @@ class DmService(
         val conversation = conversationRepository.findById(conversationId).orElse(null)
             ?: throw IllegalArgumentException("会话不存在")
 
-        if (conversation.userAId != userId && conversation.userBId != userId) {
-            throw IllegalArgumentException("无权访问该会话")
-        }
+        requireReadAccess(conversation, userId)
 
         val pageable = PageRequest.of(0, limit)
         val messages = if (before == null) {
@@ -115,16 +133,28 @@ class DmService(
         val conversation = conversationRepository.findByIdForUpdate(conversationId)
             ?: throw IllegalArgumentException("会话不存在")
 
-        if (conversation.userAId != senderId && conversation.userBId != senderId) {
-            throw IllegalArgumentException("无权发送消息到该会话")
+        when (conversation.conversationType) {
+            DmConversationEntity.ORDER_SERVICE ->
+                orderServiceConversationService.requireSendAccess(conversation, senderId)
+            DmConversationEntity.DIRECT -> {
+                requireDirectParticipant(conversation, senderId, "无权发送消息到该会话")
+                val directReceiverId = conversation.otherParticipant(senderId)
+                if (!identityAuthorizationService.hasActiveProfessionalRole(directReceiverId)) {
+                    val receiverHasReplied = messageRepository.existsByConversationIdAndSenderId(
+                        conversationId,
+                        directReceiverId
+                    )
+                    val senderAlreadySent = messageRepository.existsByConversationIdAndSenderId(
+                        conversationId,
+                        senderId
+                    )
+                    require(receiverHasReplied || !senderAlreadySent) { "请等待对方回复后再发送消息" }
+                }
+            }
+            else -> throw IllegalArgumentException("无权发送消息到该会话")
         }
 
         val receiverId = conversation.otherParticipant(senderId)
-        if (!identityAuthorizationService.hasActiveProfessionalRole(receiverId)) {
-            val receiverHasReplied = messageRepository.existsByConversationIdAndSenderId(conversationId, receiverId)
-            val senderAlreadySent = messageRepository.existsByConversationIdAndSenderId(conversationId, senderId)
-            require(receiverHasReplied || !senderAlreadySent) { "请等待对方回复后再发送消息" }
-        }
 
         // 创建消息
         val message = DmMessageEntity(
@@ -174,9 +204,7 @@ class DmService(
         val conversation = conversationRepository.findById(conversationId).orElse(null)
             ?: throw IllegalArgumentException("会话不存在")
 
-        if (conversation.userAId != userId && conversation.userBId != userId) {
-            throw IllegalArgumentException("无权操作该会话")
-        }
+        requireReadAccess(conversation, userId)
 
         // 批量将对方发来的未读消息标记为已读
         messageRepository.markAsRead(conversationId, userId)
@@ -199,6 +227,13 @@ class DmService(
     fun deleteMessage(messageId: String, userId: String) {
         val message = messageRepository.findById(messageId).orElse(null)
             ?: throw IllegalArgumentException("消息不存在")
+        val conversation = conversationRepository.findById(message.conversationId).orElse(null)
+            ?: throw IllegalArgumentException("会话不存在")
+
+        if (conversation.conversationType == DmConversationEntity.ORDER_SERVICE) {
+            orderServiceConversationService.requireReadAccess(conversation, userId)
+            throw IllegalArgumentException("ORDER_SERVICE_MESSAGES_NOT_DELETABLE")
+        }
 
         if (message.senderId != userId) {
             throw IllegalArgumentException("无权删除该消息")
@@ -213,7 +248,28 @@ class DmService(
         else -> throw IllegalArgumentException("无权访问该会话")
     }
 
+    private fun requireReadAccess(conversation: DmConversationEntity, userId: String) {
+        when (conversation.conversationType) {
+            DmConversationEntity.ORDER_SERVICE ->
+                orderServiceConversationService.requireReadAccess(conversation, userId)
+            DmConversationEntity.DIRECT ->
+                requireDirectParticipant(conversation, userId, "无权访问该会话")
+            else -> throw IllegalArgumentException("无权访问该会话")
+        }
+    }
+
+    private fun requireDirectParticipant(
+        conversation: DmConversationEntity,
+        userId: String,
+        message: String
+    ) {
+        require(conversation.userAId == userId || conversation.userBId == userId) { message }
+    }
+
     private fun DmConversationEntity.toResponseFor(currentUserId: String): DmConversationResponse {
+        if (conversationType != DmConversationEntity.DIRECT) {
+            return toResponse()
+        }
         val otherUserId = otherParticipant(currentUserId)
         val otherUserHasSent = messageRepository.existsByConversationIdAndSenderId(id, otherUserId)
         val firstMessageLimitApplies =

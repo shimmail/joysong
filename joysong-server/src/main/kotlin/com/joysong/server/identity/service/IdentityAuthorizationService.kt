@@ -23,7 +23,7 @@ class IdentityAuthorizationService(
         return count > 0
     }
 
-    fun requireActiveRole(userId: String, roleCode: String) {
+    fun hasActiveRole(userId: String, roleCode: String): Boolean {
         val count = jdbcTemplate.queryForObject(
             """
             SELECT COUNT(*)
@@ -34,6 +34,10 @@ class IdentityAuthorizationService(
             userId,
             roleCode
         )
-        require(count > 0) { "用户尚未通过${roleCode}身份审核" }
+        return count > 0
+    }
+
+    fun requireActiveRole(userId: String, roleCode: String) {
+        require(hasActiveRole(userId, roleCode)) { "用户尚未通过${roleCode}身份审核" }
     }
 }

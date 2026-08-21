@@ -11,6 +11,12 @@ data class DmConversationEntity(
     @Column(name = "id")
     var id: String = UUID.randomUUID().toString(),
 
+    @Column(name = "conversation_type", nullable = false, length = 30)
+    var conversationType: String = DIRECT,
+
+    @Column(name = "order_id", length = 36)
+    var orderId: String? = null,
+
     @Column(name = "user_a_id", nullable = false)
     var userAId: String = "",
 
@@ -34,4 +40,9 @@ data class DmConversationEntity(
 
     @Column(name = "updated_at")
     var updatedAt: LocalDateTime = LocalDateTime.now()
-)
+) {
+    companion object {
+        const val DIRECT = "DIRECT"
+        const val ORDER_SERVICE = "ORDER_SERVICE"
+    }
+}

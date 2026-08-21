@@ -5,6 +5,8 @@ import com.joysong.server.dm.entity.DmMessageEntity
 
 data class DmConversationResponse(
     val id: String,
+    val conversationType: String,
+    val orderId: String?,
     val userAId: String,
     val userBId: String,
     val lastMessage: String?,
@@ -44,6 +46,8 @@ fun DmConversationEntity.toResponse(
 ): DmConversationResponse {
     return DmConversationResponse(
         id = id,
+        conversationType = conversationType,
+        orderId = orderId,
         userAId = userAId,
         userBId = userBId,
         lastMessage = lastMessage,
