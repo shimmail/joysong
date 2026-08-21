@@ -5,6 +5,9 @@ import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.repository.OrderRepository
 import com.joysong.server.order.service.OrderStatusLogService
 import com.joysong.server.payment.domain.Money
+import com.joysong.server.payment.domain.PaymentStatus
+import com.joysong.server.payment.domain.PaymentType
+import com.joysong.server.payment.repository.PaymentRepository
 import com.joysong.server.refund.domain.RefundReasonCode
 import com.joysong.server.refund.entity.RefundEntity
 import com.joysong.server.refund.repository.RefundRepository
@@ -26,11 +29,17 @@ data class FinalizedRefund(
     val order: OrderEntity
 )
 
+data class RefundApprovalPreparation(
+    val refund: RefundEntity,
+    val executeProvider: Boolean
+)
+
 @Service
 class RefundWorkflowPersistenceService(
     private val refundRepository: RefundRepository,
     private val orderRepository: OrderRepository,
-    private val orderStatusLogService: OrderStatusLogService
+    private val orderStatusLogService: OrderStatusLogService,
+    private val paymentRepository: PaymentRepository
 ) {
     companion object {
         const val PENDING = "PENDING"
@@ -38,6 +47,8 @@ class RefundWorkflowPersistenceService(
         const val APPROVED = "APPROVED"
         const val REJECTED = "REJECTED"
         const val CANCELLED = "CANCELLED"
+        const val TRAVEL_GROUND_SERVICE_ONLY = "TRAVEL_GROUND_SERVICE_ONLY"
+        const val REVERSAL_NOT_REQUIRED = "NOT_REQUIRED"
     }
 
     @Transactional(rollbackFor = [Exception::class])
@@ -59,23 +70,36 @@ class RefundWorkflowPersistenceService(
         require(order.userId == userId) { "无权操作该订单" }
         val current = OrderStatusEnum.fromValue(order.status)
             ?: throw IllegalStateException("订单状态无效: ${order.status}")
-        require(current in setOf(
-            OrderStatusEnum.CONSULTATION_PAID,
-            OrderStatusEnum.VERIFIED,
-            OrderStatusEnum.BALANCE_PAID,
-            OrderStatusEnum.PENDING_COMPLETION,
-            OrderStatusEnum.COMPLETED,
-            OrderStatusEnum.PENDING_SETTLEMENT
-        )) { "当前状态[${current.value}]不允许申请退款" }
+        val isTravelGroundService = order.paymentFlow == TRAVEL_GROUND_SERVICE_ONLY
+        if (isTravelGroundService) {
+            require(current == OrderStatusEnum.SERVICE_ACTIVE) {
+                "当前状态[${current.value}]不允许申请退款"
+            }
+        } else {
+            require(current in setOf(
+                OrderStatusEnum.CONSULTATION_PAID,
+                OrderStatusEnum.VERIFIED,
+                OrderStatusEnum.BALANCE_PAID,
+                OrderStatusEnum.PENDING_COMPLETION,
+                OrderStatusEnum.COMPLETED,
+                OrderStatusEnum.PENDING_SETTLEMENT
+            )) { "当前状态[${current.value}]不允许申请退款" }
+        }
         require(refundRepository.findAllByOrderIdAndStatusIn(
             orderId,
             listOf(PENDING, PROCESSING, APPROVED)
         ).isEmpty()) { "该订单已有进行中的退款申请，请勿重复提交" }
 
-        val automatic = current == OrderStatusEnum.CONSULTATION_PAID
+        val automatic = !isTravelGroundService && current == OrderStatusEnum.CONSULTATION_PAID
         val now = LocalDateTime.now()
-        val amountMinor = order.paidAmountMinor ?: Money.toMinor(order.paidAmount, order.currency)
+        val amountMinor = if (isTravelGroundService) {
+            validateServiceFeePayment(order)
+            requireNotNull(order.travelGroundServiceFeeMinor) { "SERVICE_FEE_SNAPSHOT_MISSING" }
+        } else {
+            order.paidAmountMinor ?: Money.toMinor(order.paidAmount, order.currency)
+        }
         require(amountMinor > 0) { "REFUND_AMOUNT_NOT_POSITIVE" }
+        val amount = if (isTravelGroundService) Money.fromMinor(amountMinor, order.currency) else order.paidAmount
         val refund = refundRepository.saveAndFlush(
             RefundEntity(
                 id = UUID.randomUUID().toString(),
@@ -83,7 +107,7 @@ class RefundWorkflowPersistenceService(
                 orderId = orderId,
                 userId = userId,
                 currency = order.currency,
-                amount = order.paidAmount,
+                amount = amount,
                 requestedAmountMinor = amountMinor,
                 reason = reason,
                 reasonCode = RefundReasonCode.normalize(reasonCode).name,
@@ -98,14 +122,20 @@ class RefundWorkflowPersistenceService(
                 userPhone = order.userPhone,
                 requestedAt = now,
                 createdAt = now,
-                updatedAt = now
+                updatedAt = now,
+                revenueReversalStatus = if (isTravelGroundService) REVERSAL_NOT_REQUIRED else "PENDING",
+                revenueReversedAt = if (isTravelGroundService) now else null
             )
         )
         val orderAfterRequest = orderRepository.save(
             order.copy(
-                status = if (automatic) order.status else OrderStatusEnum.DISPUTE_MEDIATION.value,
+                status = when {
+                    automatic -> order.status
+                    isTravelGroundService -> OrderStatusEnum.REFUND_REVIEW.value
+                    else -> OrderStatusEnum.DISPUTE_MEDIATION.value
+                },
                 refundStatus = refund.status,
-                refundAmount = order.paidAmount,
+                refundAmount = amount,
                 updatedAt = now
             )
         )
@@ -123,11 +153,29 @@ class RefundWorkflowPersistenceService(
     }
 
     @Transactional(rollbackFor = [Exception::class])
-    fun beginApproval(id: String, adminId: String): RefundEntity? {
+    fun beginApproval(id: String, adminId: String): RefundApprovalPreparation? {
         val refund = refundRepository.findByIdForUpdate(id) ?: return null
-        require(refund.status == PENDING) { "退款申请已处理，不能重复审核" }
+        val order = orderRepository.findByIdForUpdate(refund.orderId)
+            ?: throw IllegalArgumentException("ORDER_NOT_FOUND")
+        val isTravelGroundService = order.paymentFlow == TRAVEL_GROUND_SERVICE_ONLY
+        if (isTravelGroundService) {
+            require(refund.status in setOf(PENDING, PROCESSING, APPROVED)) {
+                "退款申请已处理，不能重复审核"
+            }
+            if (refund.status == APPROVED) {
+                require(order.status == OrderStatusEnum.REFUNDED.value) { "INVALID_ORDER_REFUND_STATUS" }
+                return RefundApprovalPreparation(refund, executeProvider = false)
+            }
+            if (refund.status == PROCESSING) {
+                require(order.status == OrderStatusEnum.REFUND_PROCESSING.value) { "INVALID_ORDER_REFUND_STATUS" }
+                return RefundApprovalPreparation(refund, executeProvider = false)
+            }
+            require(order.status == OrderStatusEnum.REFUND_REVIEW.value) { "INVALID_ORDER_REFUND_STATUS" }
+        } else {
+            require(refund.status == PENDING) { "退款申请已处理，不能重复审核" }
+        }
         val now = LocalDateTime.now()
-        return refundRepository.save(
+        val processing = refundRepository.save(
             refund.copy(
                 status = PROCESSING,
                 reviewedBy = adminId,
@@ -136,6 +184,24 @@ class RefundWorkflowPersistenceService(
                 updatedAt = now
             )
         )
+        if (isTravelGroundService) {
+            val processingOrder = orderRepository.save(
+                order.copy(
+                    status = OrderStatusEnum.REFUND_PROCESSING.value,
+                    refundStatus = PROCESSING,
+                    updatedAt = now
+                )
+            )
+            orderStatusLogService.logTransition(
+                order.id,
+                order.status,
+                processingOrder.status,
+                adminId,
+                "ADMIN",
+                "管理员批准旅游地接服务费退款，提交原渠道处理"
+            )
+        }
+        return RefundApprovalPreparation(processing, executeProvider = true)
     }
 
     @Transactional(rollbackFor = [Exception::class])
@@ -149,14 +215,17 @@ class RefundWorkflowPersistenceService(
         require(outcome.completed) { "REFUND_PROVIDER_PROCESSING" }
         val refund = refundRepository.findByIdForUpdate(refundId)
             ?: throw IllegalArgumentException("REFUND_NOT_FOUND")
-        if (refund.status == APPROVED) {
-            val existingOrder = orderRepository.findById(refund.orderId)
-                .orElseThrow { IllegalArgumentException("ORDER_NOT_FOUND") }
-            return FinalizedRefund(refund, existingOrder)
-        }
-        require(refund.status == PROCESSING) { "INVALID_REFUND_STATUS" }
         val order = orderRepository.findByIdForUpdate(refund.orderId)
             ?: throw IllegalArgumentException("ORDER_NOT_FOUND")
+        if (refund.status == APPROVED) {
+            return FinalizedRefund(refund, order)
+        }
+        require(refund.status == PROCESSING) { "INVALID_REFUND_STATUS" }
+        val isTravelGroundService = order.paymentFlow == TRAVEL_GROUND_SERVICE_ONLY
+        if (isTravelGroundService) {
+            require(order.status == OrderStatusEnum.REFUND_PROCESSING.value) { "INVALID_ORDER_REFUND_STATUS" }
+            require(outcome.refundedAmountMinor == refund.requestedAmountMinor) { "SERVICE_FEE_REFUND_NOT_FULL" }
+        }
         val now = LocalDateTime.now()
         val completedRefund = refundRepository.save(
             refund.copy(
@@ -165,7 +234,10 @@ class RefundWorkflowPersistenceService(
                 refundAmount = Money.fromMinor(outcome.refundedAmountMinor, refund.currency),
                 processedAt = refund.processedAt ?: now,
                 completedAt = now,
-                updatedAt = now
+                updatedAt = now,
+                revenueReversalStatus = if (isTravelGroundService) REVERSAL_NOT_REQUIRED
+                else refund.revenueReversalStatus,
+                revenueReversedAt = if (isTravelGroundService) now else refund.revenueReversedAt
             )
         )
         val completedOrder = orderRepository.save(
@@ -193,6 +265,10 @@ class RefundWorkflowPersistenceService(
         require(refund.status == PENDING) { "退款申请已处理，不能重复审核" }
         val order = orderRepository.findByIdForUpdate(refund.orderId)
             ?: throw IllegalArgumentException("ORDER_NOT_FOUND")
+        val isTravelGroundService = order.paymentFlow == TRAVEL_GROUND_SERVICE_ONLY
+        if (isTravelGroundService) {
+            require(order.status == OrderStatusEnum.REFUND_REVIEW.value) { "INVALID_ORDER_REFUND_STATUS" }
+        }
         val now = LocalDateTime.now()
         val rejected = refundRepository.save(
             refund.copy(
@@ -207,7 +283,7 @@ class RefundWorkflowPersistenceService(
         )
         val restored = orderRepository.save(
             order.copy(
-                status = refund.originalStatus,
+                status = if (isTravelGroundService) OrderStatusEnum.SERVICE_ACTIVE.value else refund.originalStatus,
                 refundStatus = REJECTED,
                 refundAmount = BigDecimal.ZERO,
                 updatedAt = now
@@ -222,6 +298,23 @@ class RefundWorkflowPersistenceService(
             "管理员拒绝退款"
         )
         return FinalizedRefund(rejected, restored)
+    }
+
+    private fun validateServiceFeePayment(order: OrderEntity) {
+        require(order.currency == "USD") { "SERVICE_FEE_ORDER_CURRENCY_INVALID" }
+        val expectedAmount = requireNotNull(order.travelGroundServiceFeeMinor) {
+            "SERVICE_FEE_SNAPSHOT_MISSING"
+        }
+        require(expectedAmount > 0) { "REFUND_AMOUNT_NOT_POSITIVE" }
+        val matches = paymentRepository.findAllByOrderIdAndStatusInOrderByCreatedAtAsc(
+            order.id,
+            PaymentStatus.successfulDatabaseValues
+        ).filter { it.paymentType == PaymentType.TRAVEL_GROUND_SERVICE_FEE.name }
+        require(matches.size == 1) { "SERVICE_FEE_PAYMENT_NOT_UNIQUE" }
+        val payment = matches.single()
+        require(payment.currency == order.currency) { "SERVICE_FEE_PAYMENT_CURRENCY_MISMATCH" }
+        require(payment.amountMinor == expectedAmount) { "SERVICE_FEE_PAYMENT_AMOUNT_MISMATCH" }
+        require(payment.refundedAmountMinor == 0L) { "SERVICE_FEE_PAYMENT_ALREADY_REFUNDED" }
     }
 
     private fun generateRefundNo(): String =

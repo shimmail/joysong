@@ -20,9 +20,8 @@ class RefundService(
     private val orderRepository: OrderRepository,
     private val orderStatusLogService: OrderStatusLogService,
     @Lazy private val couponService: CouponService,
+    private val workflowPersistenceService: RefundWorkflowPersistenceService,
     private val refundExecutionService: RefundExecutionService? = null,
-    private val workflowPersistenceService: RefundWorkflowPersistenceService =
-        RefundWorkflowPersistenceService(refundRepository, orderRepository, orderStatusLogService),
     private val settlementReversalService: SettlementReversalService? = null
 ) {
     companion object {
@@ -73,13 +72,22 @@ class RefundService(
 
     @Transactional(rollbackFor = [Exception::class])
     fun cancelRefund(orderId: String, userId: String): String {
+        val candidate = refundRepository.findFirstByOrderIdOrderByCreatedAtDesc(orderId)
+            ?: throw IllegalArgumentException("未找到退款记录")
+        val refund = refundRepository.findByIdForUpdate(candidate.id)
+            ?: throw IllegalArgumentException("未找到退款记录")
+        require(refund.userId == userId) { "无权操作该订单" }
+        require(refund.status == RefundWorkflowPersistenceService.PENDING) { "当前退款记录不允许取消" }
         val order = orderRepository.findByIdForUpdate(orderId)
             ?: throw IllegalArgumentException("订单不存在: $orderId")
         require(order.userId == userId) { "无权操作该订单" }
         require(order.refundStatus == RefundWorkflowPersistenceService.PENDING) { "当前退款状态不允许取消" }
-        val refund = refundRepository.findFirstByOrderIdOrderByCreatedAtDesc(orderId)
-            ?: throw IllegalArgumentException("未找到退款记录")
-        require(refund.status == RefundWorkflowPersistenceService.PENDING) { "当前退款记录不允许取消" }
+        val isTravelGroundService = order.paymentFlow == RefundWorkflowPersistenceService.TRAVEL_GROUND_SERVICE_ONLY
+        if (isTravelGroundService) {
+            require(order.status == com.joysong.server.order.dto.OrderStatusEnum.REFUND_REVIEW.value) {
+                "INVALID_ORDER_REFUND_STATUS"
+            }
+        }
         val now = LocalDateTime.now()
         refundRepository.save(
             refund.copy(
@@ -92,14 +100,22 @@ class RefundService(
             order.copy(
                 refundStatus = "NONE",
                 refundAmount = BigDecimal.ZERO,
-                status = refund.originalStatus,
+                status = if (isTravelGroundService) {
+                    com.joysong.server.order.dto.OrderStatusEnum.SERVICE_ACTIVE.value
+                } else {
+                    refund.originalStatus
+                },
                 updatedAt = now
             )
         )
         orderStatusLogService.logTransition(
             orderId,
             order.status,
-            refund.originalStatus,
+            if (isTravelGroundService) {
+                com.joysong.server.order.dto.OrderStatusEnum.SERVICE_ACTIVE.value
+            } else {
+                refund.originalStatus
+            },
             userId,
             "USER",
             "取消退款申请"
@@ -162,7 +178,9 @@ class RefundService(
             return workflowPersistenceService.reject(id, adminId, rejectReason)?.refund
         }
 
-        val processing = workflowPersistenceService.beginApproval(id, adminId) ?: return null
+        val approval = workflowPersistenceService.beginApproval(id, adminId) ?: return null
+        val processing = approval.refund
+        if (!approval.executeProvider) return processing
         val executor = refundExecutionService ?: return processing
         val outcome = executor.execute(processing)
         if (!outcome.completed) return refundRepository.findById(id).orElse(processing)
@@ -198,8 +216,10 @@ class RefundService(
     }
 
     private fun afterApproved(finalized: FinalizedRefund) {
-        settlementReversalService?.reverseCompletedRefund(finalized.refund.id)
-        finalized.order.userCouponId?.let { returnCouponSafely(it, finalized.order.id) }
+        if (finalized.order.paymentFlow != RefundWorkflowPersistenceService.TRAVEL_GROUND_SERVICE_ONLY) {
+            settlementReversalService?.reverseCompletedRefund(finalized.refund.id)
+            finalized.order.userCouponId?.let { returnCouponSafely(it, finalized.order.id) }
+        }
         notifyRefundApplied(finalized.order, finalized.refund)
     }
 

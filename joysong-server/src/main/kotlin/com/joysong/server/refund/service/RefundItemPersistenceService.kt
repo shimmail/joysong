@@ -1,11 +1,15 @@
 package com.joysong.server.refund.service
 
+import com.joysong.server.order.dto.OrderStatusEnum
+import com.joysong.server.order.repository.OrderRepository
 import com.joysong.server.payment.domain.PaymentStatus
+import com.joysong.server.payment.domain.PaymentType
 import com.joysong.server.payment.provider.ProviderRefundResult
 import com.joysong.server.payment.repository.PaymentRepository
 import com.joysong.server.refund.entity.RefundEntity
 import com.joysong.server.refund.entity.RefundItemEntity
 import com.joysong.server.refund.repository.RefundItemRepository
+import com.joysong.server.refund.repository.RefundRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDateTime
@@ -14,18 +18,62 @@ import java.util.UUID
 @Service
 class RefundItemPersistenceService(
     private val paymentRepository: PaymentRepository,
-    private val refundItemRepository: RefundItemRepository
+    private val refundItemRepository: RefundItemRepository,
+    private val refundRepository: RefundRepository,
+    private val orderRepository: OrderRepository
 ) {
     /** Short transaction: freezes the allocation before any provider request is sent. */
     @Transactional(rollbackFor = [Exception::class])
     fun prepareItems(refund: RefundEntity): List<RefundItemEntity> {
-        val existing = refundItemRepository.findAllByRefundIdOrderByCreatedAtAsc(refund.id)
+        val lockedRefund = refundRepository.findByIdForUpdate(refund.id)
+            ?: throw IllegalArgumentException("REFUND_NOT_FOUND")
+        val order = orderRepository.findByIdForUpdate(lockedRefund.orderId)
+            ?: throw IllegalArgumentException("ORDER_NOT_FOUND")
+        val existing = refundItemRepository.findAllByRefundIdOrderByCreatedAtAsc(lockedRefund.id)
         if (existing.isNotEmpty()) return existing
 
-        val target = requireNotNull(refund.requestedAmountMinor) { "REFUND_AMOUNT_SNAPSHOT_MISSING" }
+        val target = requireNotNull(lockedRefund.requestedAmountMinor) { "REFUND_AMOUNT_SNAPSHOT_MISSING" }
         require(target > 0) { "REFUND_AMOUNT_NOT_POSITIVE" }
+        if (order.paymentFlow == RefundWorkflowPersistenceService.TRAVEL_GROUND_SERVICE_ONLY) {
+            require(lockedRefund.status == RefundWorkflowPersistenceService.PROCESSING) {
+                "INVALID_REFUND_STATUS"
+            }
+            require(order.status == OrderStatusEnum.REFUND_PROCESSING.value) {
+                "INVALID_ORDER_REFUND_STATUS"
+            }
+            val expectedAmount = requireNotNull(order.travelGroundServiceFeeMinor) {
+                "SERVICE_FEE_SNAPSHOT_MISSING"
+            }
+            require(target == expectedAmount) { "SERVICE_FEE_REFUND_AMOUNT_MISMATCH" }
+            require(lockedRefund.currency == order.currency) { "SERVICE_FEE_REFUND_CURRENCY_MISMATCH" }
+            val servicePayments = paymentRepository.findAllByOrderIdAndStatusInOrderByCreatedAtAsc(
+                lockedRefund.orderId,
+                PaymentStatus.successfulDatabaseValues
+            ).filter { it.paymentType == PaymentType.TRAVEL_GROUND_SERVICE_FEE.name }
+            require(servicePayments.size == 1) { "SERVICE_FEE_PAYMENT_NOT_UNIQUE" }
+            val payment = servicePayments.single()
+            require(payment.amountMinor == expectedAmount) { "SERVICE_FEE_PAYMENT_AMOUNT_MISMATCH" }
+            require(payment.currency == lockedRefund.currency) { "SERVICE_FEE_PAYMENT_CURRENCY_MISMATCH" }
+            require(payment.refundedAmountMinor == 0L) { "SERVICE_FEE_PAYMENT_ALREADY_REFUNDED" }
+            val now = LocalDateTime.now()
+            return refundItemRepository.saveAllAndFlush(
+                listOf(
+                    RefundItemEntity(
+                        id = UUID.randomUUID().toString(),
+                        refundId = lockedRefund.id,
+                        paymentId = payment.id,
+                        provider = payment.provider,
+                        currency = payment.currency,
+                        amountMinor = target,
+                        requestedAt = now,
+                        createdAt = now,
+                        updatedAt = now
+                    )
+                )
+            )
+        }
         val payments = paymentRepository.findAllByOrderIdAndStatusInOrderByCreatedAtAsc(
-            refund.orderId,
+            lockedRefund.orderId,
             PaymentStatus.successfulDatabaseValues + PaymentStatus.PARTIALLY_REFUNDED.name
         )
         var remaining = target
@@ -39,7 +87,7 @@ class RefundItemPersistenceService(
             val itemAmount = minOf(refundable, remaining)
             items += RefundItemEntity(
                 id = UUID.randomUUID().toString(),
-                refundId = refund.id,
+                refundId = lockedRefund.id,
                 paymentId = payment.id,
                 provider = payment.provider,
                 currency = payment.currency,
