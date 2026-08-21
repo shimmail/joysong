@@ -92,6 +92,31 @@ class OrderControllerTest {
     }
 
     @Test
+    fun `generic payment endpoint explicitly rejects medical type for travel service order`() {
+        val authentication = mockk<Authentication>()
+        val orders = mockk<OrderService>()
+        val settlements = mockk<SettlementRepository>()
+        val paymentService = mockk<PaymentService>()
+        every { authentication.principal } returns "user-1"
+        every { orders.getOrderById("order-1", "user-1") } returns serviceOrder("PENDING_SERVICE_FEE")
+
+        val response = controller(orders, settlements, paymentService = paymentService).createPaymentAttempt(
+            "order-1",
+            "idem-key-123",
+            CreatePaymentAttemptRequest(
+                PaymentType.BALANCE.name,
+                PaymentProvider.ALIPAY_PLUS.name,
+                "ALIPAY_PLUS_CASHIER"
+            ),
+            authentication
+        )
+
+        assertEquals(400, response.code)
+        assertEquals("MEDICAL_PAYMENT_NOT_SUPPORTED", response.message)
+        verify(exactly = 0) { paymentService.createPaymentSession(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `create order request JSON omits legacy quantity and coupon fields`() {
         val json = jacksonObjectMapper().readTree(
             jacksonObjectMapper().writeValueAsString(
@@ -228,6 +253,22 @@ class OrderControllerTest {
 
         assertEquals(409, response.code)
         assertEquals("SETTLEMENT_NOT_GENERATED", response.message)
+    }
+
+    @Test
+    fun `travel service order explicitly rejects settlement lookup`() {
+        val authentication = mockk<Authentication>()
+        val orders = mockk<OrderService>()
+        val settlements = mockk<SettlementRepository>()
+        every { authentication.principal } returns "user-1"
+        every { orders.getOrderById("order-1", "user-1") } returns
+            serviceOrder("SERVICE_ACTIVE", LocalDateTime.now())
+
+        val response = controller(orders, settlements).getSettlement("order-1", authentication)
+
+        assertEquals(400, response.code)
+        assertEquals("MEDICAL_PAYMENT_NOT_SUPPORTED", response.message)
+        verify(exactly = 0) { settlements.findByOrderId(any()) }
     }
 
     @Test

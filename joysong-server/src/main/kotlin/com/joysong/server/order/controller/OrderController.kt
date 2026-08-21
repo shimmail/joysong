@@ -87,6 +87,9 @@ class OrderController(
     fun getSettlement(@PathVariable id: String, authentication: Authentication): BaseResponse<*> {
         val order = orderService.getOrderById(id, authentication.principal as String)
             ?: return BaseResponse.error<Any>("Order not found", 404)
+        if (order.paymentFlow == "TRAVEL_GROUND_SERVICE_ONLY") {
+            return BaseResponse.error<Any>("MEDICAL_PAYMENT_NOT_SUPPORTED", 400)
+        }
         val settlement = settlementRepository.findByOrderId(order.id)
             ?: return BaseResponse.error<Any>("SETTLEMENT_NOT_GENERATED", 409)
         return BaseResponse.success(
@@ -137,13 +140,17 @@ class OrderController(
         return try {
             val order = orderService.getOrderById(id, userId)
                 ?: throw IllegalArgumentException("ORDER_NOT_FOUND")
-            require(order.paymentFlow != "TRAVEL_GROUND_SERVICE_ONLY") {
-                "USE_SERVICE_FEE_PAYMENT_ENDPOINT"
+            val paymentType = PaymentType.valueOf(request.paymentType.trim().uppercase())
+            if (order.paymentFlow == "TRAVEL_GROUND_SERVICE_ONLY") {
+                require(paymentType == PaymentType.TRAVEL_GROUND_SERVICE_FEE) {
+                    "MEDICAL_PAYMENT_NOT_SUPPORTED"
+                }
+                throw IllegalArgumentException("USE_SERVICE_FEE_PAYMENT_ENDPOINT")
             }
             val payment = paymentService.createPaymentSession(
                 orderId = id,
                 userId = userId,
-                paymentType = PaymentType.valueOf(request.paymentType.trim().uppercase()),
+                paymentType = paymentType,
                 provider = PaymentProvider.parse(request.provider),
                 paymentMethod = request.paymentMethod,
                 idempotencyKey = idempotencyKey

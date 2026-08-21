@@ -40,6 +40,8 @@ class PaymentService(
 ) {
     companion object {
         private val terminalStatuses = PaymentStatus.terminalDatabaseValues
+        private const val TRAVEL_SERVICE_PAYMENT_FLOW = "TRAVEL_GROUND_SERVICE_ONLY"
+        private const val MEDICAL_PAYMENT_NOT_SUPPORTED = "MEDICAL_PAYMENT_NOT_SUPPORTED"
     }
 
     fun createPaymentSession(
@@ -145,6 +147,11 @@ class PaymentService(
         val order = orderRepository.findById(orderId)
             .orElseThrow { IllegalArgumentException("ORDER_NOT_FOUND") }
         require(order.userId == userId) { "ORDER_ACCESS_DENIED" }
+        if (order.paymentFlow == TRAVEL_SERVICE_PAYMENT_FLOW) {
+            require(paymentType == PaymentType.TRAVEL_GROUND_SERVICE_FEE) {
+                MEDICAL_PAYMENT_NOT_SUPPORTED
+            }
+        }
         val payment = paymentRepository.findFirstByOrderIdAndPaymentTypeOrderByCreatedAtDesc(
             orderId,
             paymentType.name

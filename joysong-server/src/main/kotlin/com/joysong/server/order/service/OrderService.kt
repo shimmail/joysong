@@ -86,6 +86,18 @@ class OrderService(
         private const val REFUND_STATUS_APPROVED = "APPROVED"
 
         private const val TRAVEL_GROUND_SERVICE_PAYMENT_FLOW = "TRAVEL_GROUND_SERVICE_ONLY"
+        private const val MEDICAL_PAYMENT_NOT_SUPPORTED = "MEDICAL_PAYMENT_NOT_SUPPORTED"
+
+        private val LEGACY_MEDICAL_STATUSES = setOf(
+            OrderStatusEnum.PENDING_PAYMENT,
+            OrderStatusEnum.CONSULTATION_PAID,
+            OrderStatusEnum.VERIFIED,
+            OrderStatusEnum.BALANCE_PAID,
+            OrderStatusEnum.PENDING_COMPLETION,
+            OrderStatusEnum.COMPLETED,
+            OrderStatusEnum.PENDING_SETTLEMENT,
+            OrderStatusEnum.SETTLED
+        )
     }
 
     /**
@@ -287,6 +299,7 @@ class OrderService(
         val order = orderRepository.findById(orderId)
             .orElseThrow { IllegalArgumentException("订单不存在: $orderId") }
         require(order.userId == userId) { "无权操作该订单" }
+        requireMedicalPaymentSupported(order)
 
         val currentStatus = OrderStatusEnum.fromValue(order.status)
             ?: throw IllegalStateException("订单状态无效: ${order.status}")
@@ -330,6 +343,7 @@ class OrderService(
 
     private fun confirmVerificationLocked(order: OrderEntity, operatorId: String, verificationCode: String): OrderResponse {
         val orderId = order.id
+        requireMedicalPaymentSupported(order)
         if (order.status == OrderStatusEnum.VERIFIED.value && order.verifiedAt != null) {
             return OrderResponse.forManagement(order)
         }
@@ -385,6 +399,7 @@ class OrderService(
 
     private fun requestCompletionLocked(order: OrderEntity, operatorId: String, verificationCode: String): OrderResponse {
         val orderId = order.id
+        requireMedicalPaymentSupported(order)
         if (order.status == OrderStatusEnum.PENDING_COMPLETION.value && order.completionRequestedAt != null) {
             return OrderResponse.forManagement(order)
         }
@@ -426,14 +441,14 @@ class OrderService(
     fun confirmCompletion(orderId: String, userId: String): OrderResponse {
         val order = orderRepository.findById(orderId)
             .orElseThrow { IllegalArgumentException("订单不存在: $orderId") }
+        require(order.userId == userId) { "无权操作该订单" }
+        requireMedicalPaymentSupported(order)
 
         val currentStatus = OrderStatusEnum.fromValue(order.status)
             ?: throw IllegalStateException("订单状态无效: ${order.status}")
         require(currentStatus.canTransitionTo(OrderStatusEnum.COMPLETED)) {
             "当前状态[${currentStatus.value}]不允许确认完成"
         }
-        require(order.userId == userId) { "无权操作该订单" }
-
         val settlementAt = LocalDateTime.now().plusDays(30)
         val now = LocalDateTime.now()
         val updated = orderRepository.save(
@@ -466,6 +481,8 @@ class OrderService(
      */
     @Transactional(rollbackFor = [Exception::class])
     fun autoCompleteReview(orderId: String) {
+        val order = orderRepository.findById(orderId).orElse(null) ?: return
+        requireMedicalPaymentSupported(order)
         reviewService.submitAutomaticReview(orderId)
     }
 
@@ -822,6 +839,9 @@ class OrderService(
         val targetStatus = OrderStatusEnum.fromValue(status)
             ?: throw IllegalArgumentException("目标状态无效: $status")
         if (order.paymentFlow == TRAVEL_GROUND_SERVICE_PAYMENT_FLOW) {
+            if (targetStatus in LEGACY_MEDICAL_STATUSES) {
+                throw IllegalArgumentException(MEDICAL_PAYMENT_NOT_SUPPORTED)
+            }
             require(
                 currentStatus == OrderStatusEnum.PENDING_SERVICE_FEE &&
                     targetStatus == OrderStatusEnum.CANCELLED
@@ -855,6 +875,7 @@ class OrderService(
     fun adminManualVerify(id: String, operatorId: String): OrderEntity {
         val order = orderRepository.findById(id)
             .orElseThrow { IllegalArgumentException("订单不存在: $id") }
+        requireMedicalPaymentSupported(order)
         val currentStatus = OrderStatusEnum.fromValue(order.status)
             ?: throw IllegalStateException("订单当前状态无效: ${order.status}")
         require(currentStatus == OrderStatusEnum.CONSULTATION_PAID) {
@@ -880,6 +901,12 @@ class OrderService(
         )
         log.info("管理员[{}]手动完成订单[{}]机构核销", operatorId, id)
         return updated
+    }
+
+    private fun requireMedicalPaymentSupported(order: OrderEntity) {
+        require(order.paymentFlow != TRAVEL_GROUND_SERVICE_PAYMENT_FLOW) {
+            MEDICAL_PAYMENT_NOT_SUPPORTED
+        }
     }
 
     /** 管理员删除订单（软删除） */

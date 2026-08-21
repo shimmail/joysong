@@ -33,6 +33,8 @@ class PaymentPersistenceService(
         private const val TRAVEL_SERVICE_CURRENCY = "USD"
         private const val TRAVEL_SERVICE_PAYMENT_METHOD = "ALIPAY_PLUS_CASHIER"
         private const val PAYMENT_ATTEMPT_TIMEOUT_MINUTES = 30L
+        private const val MEDICAL_PAYMENT_NOT_SUPPORTED = "MEDICAL_PAYMENT_NOT_SUPPORTED"
+        private const val DUPLICATE_PAYMENT_SUCCEEDED = "DUPLICATE_PAYMENT_SUCCEEDED"
     }
 
     /** Short transaction: validates the order and persists a local CREATED attempt. */
@@ -136,9 +138,18 @@ class PaymentPersistenceService(
         require(payment.providerPaymentId == null || payment.providerPaymentId == result.providerPaymentId) {
             "PROVIDER_PAYMENT_ID_CONFLICT"
         }
-        result.amountMinor?.let { require(it == payment.amountMinor) { "PAYMENT_AMOUNT_MISMATCH" } }
-        result.currency?.let {
-            require(Money.normalizeCurrency(it) == payment.currency) { "PAYMENT_CURRENCY_MISMATCH" }
+        if (payment.paymentType == PaymentType.TRAVEL_GROUND_SERVICE_FEE.name &&
+            result.status == PaymentStatus.SUCCEEDED
+        ) {
+            val resultAmountMinor = requireNotNull(result.amountMinor) { "PAYMENT_AMOUNT_MISSING" }
+            val resultCurrency = requireNotNull(result.currency) { "PAYMENT_CURRENCY_MISSING" }
+            require(resultAmountMinor == payment.amountMinor) { "PAYMENT_AMOUNT_MISMATCH" }
+            require(Money.normalizeCurrency(resultCurrency) == payment.currency) { "PAYMENT_CURRENCY_MISMATCH" }
+        } else {
+            result.amountMinor?.let { require(it == payment.amountMinor) { "PAYMENT_AMOUNT_MISMATCH" } }
+            result.currency?.let {
+                require(Money.normalizeCurrency(it) == payment.currency) { "PAYMENT_CURRENCY_MISMATCH" }
+            }
         }
 
         if (payment.paidAt != null && payment.status in PaymentStatus.successfulDatabaseValues) {
@@ -211,25 +222,65 @@ class PaymentPersistenceService(
         now: LocalDateTime
     ): PaymentEntity {
         val type = PaymentType.valueOf(payment.paymentType)
-        validateOrderStage(order, type)
         if (type == PaymentType.TRAVEL_GROUND_SERVICE_FEE) {
+            validateTravelServicePaymentSnapshot(payment, order)
+            if (order.serviceActivatedAt != null) {
+                val duplicate = paymentRepository.save(
+                    payment.copy(
+                        status = PaymentStatus.SUCCEEDED.name,
+                        paidAt = payment.paidAt ?: now,
+                        failureCode = DUPLICATE_PAYMENT_SUCCEEDED,
+                        failureMessage = "A different successful payment already activated this order",
+                        updatedAt = now
+                    )
+                )
+                log.error(
+                    "订单[{}]检测到第二笔旅游地接服务费成功扣款，保留渠道事实等待人工处理: paymentId={}, providerPaymentId={}",
+                    order.orderNo,
+                    duplicate.id,
+                    duplicate.providerPaymentId
+                )
+                return duplicate
+            }
+
+            validateOrderStage(order, type)
+            val feeMinor = requireNotNull(order.travelGroundServiceFeeMinor) {
+                "TRAVEL_GROUND_SERVICE_FEE_MISSING"
+            }
+            val updatedOrder = order.copy(
+                status = OrderStatusEnum.SERVICE_ACTIVE.value,
+                serviceActivatedAt = now,
+                paidAmount = Money.fromMinor(feeMinor, TRAVEL_SERVICE_CURRENCY),
+                paidAmountMinor = feeMinor,
+                updatedAt = now
+            )
+            orderRepository.save(updatedOrder)
+            orderStatusLogService.logTransition(
+                orderId = order.id,
+                fromStatus = order.status,
+                toStatus = updatedOrder.status,
+                operatorId = payment.userId,
+                operatorType = "USER",
+                remark = "支付旅游地接服务费，激活地接服务"
+            )
             val completed = paymentRepository.save(
                 payment.copy(
                     status = PaymentStatus.SUCCEEDED.name,
-                    paidAt = now,
+                    paidAt = payment.paidAt ?: now,
                     failureCode = null,
                     failureMessage = null,
                     updatedAt = now
                 )
             )
             log.info(
-                "订单[{}]旅游地接服务费支付记录成功，provider={}, paymentId={}",
+                "订单[{}]旅游地接服务费支付成功并激活服务，provider={}, paymentId={}",
                 order.orderNo,
                 payment.provider,
                 payment.id
             )
             return completed
         }
+        validateOrderStage(order, type)
         val fromStatus = order.status
         val updatedOrder = when (type) {
             PaymentType.CONSULTATION_FEE -> order.copy(
@@ -297,7 +348,7 @@ class PaymentPersistenceService(
     ) {
         if (order.paymentFlow == TRAVEL_SERVICE_PAYMENT_FLOW) {
             require(paymentType == PaymentType.TRAVEL_GROUND_SERVICE_FEE) {
-                "USE_SERVICE_FEE_PAYMENT_ENDPOINT"
+                MEDICAL_PAYMENT_NOT_SUPPORTED
             }
             require(provider == PaymentProvider.ALIPAY_PLUS) { "PAYMENT_PROVIDER_NOT_ALLOWED" }
             require(paymentMethod == TRAVEL_SERVICE_PAYMENT_METHOD) { "PAYMENT_METHOD_NOT_ALLOWED" }
@@ -306,6 +357,19 @@ class PaymentPersistenceService(
                 "TRAVEL_SERVICE_PAYMENT_FLOW_REQUIRED"
             }
         }
+    }
+
+    private fun validateTravelServicePaymentSnapshot(payment: PaymentEntity, order: OrderEntity) {
+        require(order.paymentFlow == TRAVEL_SERVICE_PAYMENT_FLOW) { "TRAVEL_SERVICE_PAYMENT_FLOW_REQUIRED" }
+        val feeMinor = requireNotNull(order.travelGroundServiceFeeMinor) {
+            "TRAVEL_GROUND_SERVICE_FEE_MISSING"
+        }
+        val paymentAmountMinor = requireNotNull(payment.amountMinor) { "PAYMENT_AMOUNT_MISSING" }
+        require(paymentAmountMinor == feeMinor) { "PAYMENT_AMOUNT_MISMATCH" }
+        require(Money.normalizeCurrency(payment.currency) == TRAVEL_SERVICE_CURRENCY) {
+            "TRAVEL_SERVICE_CURRENCY_MUST_BE_USD"
+        }
+        require(Money.normalizeCurrency(order.currency) == payment.currency) { "PAYMENT_CURRENCY_MISMATCH" }
     }
 
     private fun earliestExpiry(

@@ -18,6 +18,8 @@ import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
@@ -166,6 +168,31 @@ class PaymentOrchestrationTest {
         assertEquals("USD", attempt.currency)
         assertEquals(attempt.createdAt.plusMinutes(30), attempt.expiresAt)
         check(!attempt.createdAt.isBefore(before) && !attempt.createdAt.isAfter(after))
+    }
+
+    @Test
+    fun `new flow rejects medical payment types explicitly`() {
+        val repositories = persistenceRepositories()
+        every { repositories.payment.findByUserIdAndIdempotencyKey("user-1", "client-key-123") } returns null
+        every { repositories.order.findByIdForUpdate("order-1") } returns travelOrder()
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            PaymentPersistenceService(
+                repositories.payment,
+                repositories.order,
+                repositories.log
+            ).prepareAttempt(
+                "order-1",
+                "user-1",
+                PaymentType.BALANCE,
+                PaymentProvider.ALIPAY_PLUS,
+                "ALIPAY_PLUS_CASHIER",
+                "client-key-123"
+            )
+        }
+
+        assertEquals("MEDICAL_PAYMENT_NOT_SUPPORTED", error.message)
+        verify(exactly = 0) { repositories.payment.saveAndFlush(any()) }
     }
 
     @Test
@@ -405,31 +432,174 @@ class PaymentOrchestrationTest {
     }
 
     @Test
-    fun `task three records verified service fee success without activating the order`() {
+    fun `verified service fee success atomically activates bound service once`() {
         val repositories = persistenceRepositories()
         val prepared = travelPayment(status = PaymentStatus.PROCESSING.name)
-        every { repositories.payment.findByIdForUpdate(prepared.id) } returns prepared
-        every { repositories.payment.save(any()) } answers { firstArg() }
-        every { repositories.order.findByIdForUpdate(prepared.orderId) } returns travelOrder()
+        var paymentState = prepared
+        var orderState = travelOrder().copy(
+            couponId = 7,
+            userCouponId = 8,
+            discountAmount = BigDecimal("9.99"),
+            discountAmountMinor = 999
+        )
+        every { repositories.payment.findByIdForUpdate(prepared.id) } answers { paymentState }
+        every { repositories.payment.save(any()) } answers {
+            firstArg<PaymentEntity>().also { paymentState = it }
+        }
+        every { repositories.order.findByIdForUpdate(prepared.orderId) } answers { orderState }
+        every { repositories.order.save(any()) } answers {
+            firstArg<OrderEntity>().also { orderState = it }
+        }
+        every { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) } returns Unit
 
-        val updated = PaymentPersistenceService(
+        val providerResult = ProviderPaymentResult(
+            status = PaymentStatus.SUCCEEDED,
+            providerPaymentId = "alipay-1",
+            providerTransactionId = "txn-1",
+            amountMinor = 40_000,
+            currency = "USD"
+        )
+
+        val persistence = PaymentPersistenceService(
             repositories.payment,
             repositories.order,
             repositories.log
-        ).applyProviderResult(
-            prepared.id,
+        )
+        val updated = persistence.applyProviderResult(prepared.id, providerResult)
+        val activatedAt = orderState.serviceActivatedAt
+
+        assertEquals(PaymentStatus.SUCCEEDED.name, updated.status)
+        assertNotNull(updated.paidAt)
+        assertEquals("SERVICE_ACTIVE", orderState.status)
+        assertNotNull(activatedAt)
+        assertEquals(BigDecimal("400.00"), orderState.paidAmount)
+        assertEquals(40_000L, orderState.paidAmountMinor)
+        assertNull(orderState.paymentTime)
+        assertNull(orderState.balancePaidAt)
+        assertNull(orderState.verifiedAt)
+        assertNull(orderState.verifyCode)
+        assertEquals(7, orderState.couponId)
+        assertEquals(8, orderState.userCouponId)
+        assertEquals(BigDecimal("9.99"), orderState.discountAmount)
+        assertEquals(999L, orderState.discountAmountMinor)
+        verify(exactly = 1) { repositories.order.save(any()) }
+        verify(exactly = 1) {
+            repositories.log.logTransition(
+                "order-1",
+                "PENDING_SERVICE_FEE",
+                "SERVICE_ACTIVE",
+                "user-1",
+                "USER",
+                any()
+            )
+        }
+
+        val replayed = persistence.applyProviderResult(prepared.id, providerResult)
+        assertEquals(updated.paidAt, replayed.paidAt)
+        assertEquals(activatedAt, orderState.serviceActivatedAt)
+        verify(exactly = 1) { repositories.order.save(any()) }
+        verify(exactly = 1) { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `successful service fee result requires amount and currency`() {
+        listOf(
             ProviderPaymentResult(
                 status = PaymentStatus.SUCCEEDED,
-                providerPaymentId = "alipay-1",
+                providerPaymentId = "alipay-missing-amount",
+                amountMinor = null,
+                currency = "USD"
+            ) to "PAYMENT_AMOUNT_MISSING",
+            ProviderPaymentResult(
+                status = PaymentStatus.SUCCEEDED,
+                providerPaymentId = "alipay-missing-currency",
+                amountMinor = 40_000,
+                currency = null
+            ) to "PAYMENT_CURRENCY_MISSING",
+            ProviderPaymentResult(
+                status = PaymentStatus.SUCCEEDED,
+                providerPaymentId = "alipay-wrong-amount",
+                amountMinor = 39_999,
+                currency = "USD"
+            ) to "PAYMENT_AMOUNT_MISMATCH",
+            ProviderPaymentResult(
+                status = PaymentStatus.SUCCEEDED,
+                providerPaymentId = "alipay-wrong-currency",
+                amountMinor = 40_000,
+                currency = "CNY"
+            ) to "PAYMENT_CURRENCY_MISMATCH"
+        ).forEach { (result, expectedMessage) ->
+            val repositories = persistenceRepositories()
+            val prepared = travelPayment(status = PaymentStatus.PROCESSING.name)
+            every { repositories.payment.findByIdForUpdate(prepared.id) } returns prepared
+            every { repositories.payment.save(any()) } answers { firstArg() }
+            every { repositories.order.findByIdForUpdate(prepared.orderId) } returns travelOrder()
+
+            val error = assertThrows(IllegalArgumentException::class.java) {
+                PaymentPersistenceService(
+                    repositories.payment,
+                    repositories.order,
+                    repositories.log
+                ).applyProviderResult(prepared.id, result)
+            }
+
+            assertEquals(expectedMessage, error.message)
+        }
+    }
+
+    @Test
+    fun `late second provider success keeps channel truth and flags duplicate without reactivation`() {
+        val repositories = persistenceRepositories()
+        val paymentStates = mutableMapOf(
+            "payment-1" to travelPayment(PaymentStatus.PROCESSING.name, id = "payment-1"),
+            "payment-2" to travelPayment(PaymentStatus.PROCESSING.name, id = "payment-2")
+        )
+        var orderState = travelOrder()
+        every { repositories.payment.findByIdForUpdate(any()) } answers {
+            paymentStates[firstArg<String>()]
+        }
+        every { repositories.payment.save(any()) } answers {
+            firstArg<PaymentEntity>().also { paymentStates[it.id] = it }
+        }
+        every { repositories.order.findByIdForUpdate("order-1") } answers { orderState }
+        every { repositories.order.save(any()) } answers {
+            firstArg<OrderEntity>().also { orderState = it }
+        }
+        every { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) } returns Unit
+        val persistence = PaymentPersistenceService(repositories.payment, repositories.order, repositories.log)
+
+        val first = persistence.applyProviderResult(
+            "payment-1",
+            ProviderPaymentResult(
+                PaymentStatus.SUCCEEDED,
+                "alipay-1",
                 providerTransactionId = "txn-1",
                 amountMinor = 40_000,
                 currency = "USD"
             )
         )
+        val firstActivationTime = orderState.serviceActivatedAt
+        val second = persistence.applyProviderResult(
+            "payment-2",
+            ProviderPaymentResult(
+                PaymentStatus.SUCCEEDED,
+                "alipay-2",
+                providerTransactionId = "txn-2",
+                amountMinor = 40_000,
+                currency = "USD"
+            )
+        )
 
-        assertEquals(PaymentStatus.SUCCEEDED.name, updated.status)
-        verify(exactly = 0) { repositories.order.save(any()) }
-        verify(exactly = 0) { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) }
+        assertEquals(PaymentStatus.SUCCEEDED.name, first.status)
+        assertNotNull(firstActivationTime)
+        assertEquals(PaymentStatus.SUCCEEDED.name, second.status)
+        assertNotNull(second.paidAt)
+        assertEquals("alipay-2", second.providerPaymentId)
+        assertEquals("txn-2", second.providerTransactionId)
+        assertEquals("DUPLICATE_PAYMENT_SUCCEEDED", second.failureCode)
+        assertEquals(firstActivationTime, orderState.serviceActivatedAt)
+        verify(exactly = 1) { repositories.order.save(any()) }
+        verify(exactly = 1) { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) }
     }
 
     private fun service() = PaymentService(
@@ -492,9 +662,10 @@ class PaymentOrchestrationTest {
     private fun travelPayment(
         status: String,
         idempotencyKey: String = "client-key-123",
-        expiresAt: LocalDateTime = LocalDateTime.of(2026, 8, 22, 12, 30)
+        expiresAt: LocalDateTime = LocalDateTime.of(2026, 8, 22, 12, 30),
+        id: String = "payment-1"
     ) = PaymentEntity(
-        id = "payment-1",
+        id = id,
         orderId = "order-1",
         userId = "user-1",
         amount = BigDecimal("400.00"),

@@ -963,7 +963,43 @@ class OrderServiceTest {
     }
 
     @Test
+    fun `旅游地接服务订单显式拒绝全部医疗核验完成和结算入口`() {
+        val order = createTestOrder(
+            "travel-1",
+            "user-1",
+            status = OrderStatusEnum.SERVICE_ACTIVE.value,
+            paymentFlow = "TRAVEL_GROUND_SERVICE_ONLY"
+        ).copy(serviceActivatedAt = LocalDateTime.now())
+        val actor = ManagementActor("admin-1", true, setOf("ADMIN"), null, emptySet(), emptySet(), emptySet())
+        every { orderRepository.findById("travel-1") } returns Optional.of(order)
+        every { orderRepository.findByIdForUpdate("travel-1") } returns order
+
+        val medicalActions = listOf<() -> Unit>(
+            { orderService.requestVerification("travel-1", "user-1") },
+            { orderService.confirmVerification("travel-1", "operator-1", "123456") },
+            { orderService.confirmVerificationForManagement(actor, "travel-1", "123456") },
+            { orderService.requestCompletion("travel-1", "operator-1", "123456") },
+            { orderService.requestCompletionForManagement(actor, "travel-1", "123456") },
+            { orderService.confirmCompletion("travel-1", "user-1") },
+            { orderService.adminManualVerify("travel-1", "admin-1") },
+            { orderService.adminUpdateStatus("travel-1", OrderStatusEnum.COMPLETED.value) },
+            { orderService.autoCompleteReview("travel-1") }
+        )
+
+        medicalActions.forEach { action ->
+            val error = assertThrows<IllegalArgumentException> { action() }
+            assertEquals("MEDICAL_PAYMENT_NOT_SUPPORTED", error.message)
+        }
+        verify(exactly = 0) { orderRepository.save(any()) }
+        verify(exactly = 0) { settlementService.saveSettlement(any(), any()) }
+        verify(exactly = 0) { reviewService.submitAutomaticReview(any()) }
+    }
+
+    @Test
     fun `autoCompleteReview 超时自动好评并触发结算`() {
+        every { orderRepository.findById("o1") } returns Optional.of(
+            createTestOrder("o1", "user-1", OrderStatusEnum.COMPLETED.value)
+        )
         every { reviewService.submitAutomaticReview("o1") } returns mockk()
 
         orderService.autoCompleteReview("o1")
@@ -973,6 +1009,9 @@ class OrderServiceTest {
 
     @Test
     fun `autoCompleteReview 不可转换状态跳过`() {
+        every { orderRepository.findById("o1") } returns Optional.of(
+            createTestOrder("o1", "user-1", OrderStatusEnum.COMPLETED.value)
+        )
         every { reviewService.submitAutomaticReview("o1") } returns null
 
         orderService.autoCompleteReview("o1")
