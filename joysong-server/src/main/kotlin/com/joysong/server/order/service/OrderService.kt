@@ -728,8 +728,8 @@ class OrderService(
      */
     @Transactional(rollbackFor = [Exception::class])
     fun cancelOrder(orderId: String, userId: String) {
-        val order = orderRepository.findById(orderId)
-            .orElseThrow { RuntimeException("订单不存在") }
+        val order = orderRepository.findByIdForUpdate(orderId)
+            ?: throw RuntimeException("订单不存在")
 
         // 鉴权：确保当前用户拥有该订单
         if (order.userId != userId) {
@@ -794,7 +794,7 @@ class OrderService(
      */
     @Transactional(rollbackFor = [Exception::class])
     fun deleteOrder(orderId: String, userId: String): Boolean {
-        val order = orderRepository.findById(orderId).orElse(null) ?: return false
+        val order = orderRepository.findByIdForUpdate(orderId) ?: return false
         require(order.userId == userId) { "无权操作该订单" }
 
         val currentStatus = OrderStatusEnum.fromValue(order.status)
@@ -833,7 +833,7 @@ class OrderService(
      */
     @Transactional(rollbackFor = [Exception::class])
     fun adminUpdateStatus(id: String, status: String): OrderEntity? {
-        val order = orderRepository.findById(id).orElse(null) ?: return null
+        val order = orderRepository.findByIdForUpdate(id) ?: return null
         val currentStatus = OrderStatusEnum.fromValue(order.status)
             ?: throw IllegalStateException("订单当前状态无效: ${order.status}")
         val targetStatus = OrderStatusEnum.fromValue(status)
@@ -909,8 +909,12 @@ class OrderService(
         }
     }
 
-    /** 管理员删除订单（软删除） */
-    fun adminDeleteById(id: String) = orderRepository.deleteById(id)
+    /** 管理员删除订单（软删除）。锁定订单以与支付成功回调顺序化。 */
+    @Transactional(rollbackFor = [Exception::class])
+    fun adminDeleteById(id: String) {
+        orderRepository.findByIdForUpdate(id) ?: return
+        orderRepository.deleteById(id)
+    }
 
     /** 管理员查询指定用户的所有订单（包含软删除） */
     fun adminFindByUserId(userId: String): List<OrderEntity> = orderRepository.findByUserIdIncludeDeleted(userId)

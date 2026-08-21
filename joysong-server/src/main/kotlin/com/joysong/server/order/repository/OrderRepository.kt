@@ -27,6 +27,10 @@ interface OrderRepository : JpaRepository<OrderEntity, String> {
     @Query("SELECT o FROM OrderEntity o WHERE o.id = :id")
     fun findByIdForUpdate(@Param("id") id: String): OrderEntity?
 
+    /** Payment callbacks must still lock a row after @SQLDelete has populated deleted_at. */
+    @Query(value = "SELECT * FROM orders WHERE id = :id FOR UPDATE", nativeQuery = true)
+    fun findByIdIncludeDeletedForUpdate(@Param("id") id: String): OrderEntity?
+
     fun findByUserIdOrderByCreatedAtDesc(userId: String): List<OrderEntity>
     fun findByUserIdAndStatusOrderByCreatedAtDesc(userId: String, status: String): List<OrderEntity>
     fun findByStatusAndCreatedAtBefore(status: String, createdAt: LocalDateTime): List<OrderEntity>

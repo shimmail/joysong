@@ -35,6 +35,7 @@ class PaymentPersistenceService(
         private const val PAYMENT_ATTEMPT_TIMEOUT_MINUTES = 30L
         private const val MEDICAL_PAYMENT_NOT_SUPPORTED = "MEDICAL_PAYMENT_NOT_SUPPORTED"
         private const val DUPLICATE_PAYMENT_SUCCEEDED = "DUPLICATE_PAYMENT_SUCCEEDED"
+        private const val PAYMENT_SUCCEEDED_ORDER_NOT_ACTIVATABLE = "PAYMENT_SUCCEEDED_ORDER_NOT_ACTIVATABLE"
     }
 
     /** Short transaction: validates the order and persists a local CREATED attempt. */
@@ -184,8 +185,12 @@ class PaymentPersistenceService(
             )
         )
         if (result.status == PaymentStatus.SUCCEEDED) {
-            val order = orderRepository.findByIdForUpdate(payment.orderId)
-                ?: throw IllegalArgumentException("ORDER_NOT_FOUND")
+            val order = if (payment.paymentType == PaymentType.TRAVEL_GROUND_SERVICE_FEE.name) {
+                orderRepository.findByIdIncludeDeletedForUpdate(payment.orderId)
+            } else {
+                orderRepository.findByIdForUpdate(payment.orderId)
+                    ?: throw IllegalArgumentException("ORDER_NOT_FOUND")
+            }
             updated = completeSuccessfulPayment(updated, order, now)
         }
         return updated
@@ -218,13 +223,12 @@ class PaymentPersistenceService(
 
     private fun completeSuccessfulPayment(
         payment: PaymentEntity,
-        order: OrderEntity,
+        order: OrderEntity?,
         now: LocalDateTime
     ): PaymentEntity {
         val type = PaymentType.valueOf(payment.paymentType)
         if (type == PaymentType.TRAVEL_GROUND_SERVICE_FEE) {
-            validateTravelServicePaymentSnapshot(payment, order)
-            if (order.serviceActivatedAt != null) {
+            if (order?.serviceActivatedAt != null) {
                 val duplicate = paymentRepository.save(
                     payment.copy(
                         status = PaymentStatus.SUCCEEDED.name,
@@ -243,10 +247,27 @@ class PaymentPersistenceService(
                 return duplicate
             }
 
-            validateOrderStage(order, type)
-            val feeMinor = requireNotNull(order.travelGroundServiceFeeMinor) {
-                "TRAVEL_GROUND_SERVICE_FEE_MISSING"
+            val activationFailure = travelServiceActivationFailure(payment, order)
+            if (activationFailure != null) {
+                val anomaly = paymentRepository.save(
+                    payment.copy(
+                        status = PaymentStatus.SUCCEEDED.name,
+                        paidAt = payment.paidAt ?: now,
+                        failureCode = PAYMENT_SUCCEEDED_ORDER_NOT_ACTIVATABLE,
+                        failureMessage = activationFailure.take(500),
+                        updatedAt = now
+                    )
+                )
+                log.error(
+                    "旅游地接服务费渠道支付成功但订单不可激活，保留渠道事实等待人工退款: orderId={}, paymentId={}, reason={}",
+                    payment.orderId,
+                    payment.id,
+                    activationFailure
+                )
+                return anomaly
             }
+            checkNotNull(order)
+            val feeMinor = checkNotNull(order.travelGroundServiceFeeMinor)
             val updatedOrder = order.copy(
                 status = OrderStatusEnum.SERVICE_ACTIVE.value,
                 serviceActivatedAt = now,
@@ -280,6 +301,7 @@ class PaymentPersistenceService(
             )
             return completed
         }
+        checkNotNull(order) { "ORDER_NOT_FOUND" }
         validateOrderStage(order, type)
         val fromStatus = order.status
         val updatedOrder = when (type) {
@@ -359,17 +381,21 @@ class PaymentPersistenceService(
         }
     }
 
-    private fun validateTravelServicePaymentSnapshot(payment: PaymentEntity, order: OrderEntity) {
-        require(order.paymentFlow == TRAVEL_SERVICE_PAYMENT_FLOW) { "TRAVEL_SERVICE_PAYMENT_FLOW_REQUIRED" }
-        val feeMinor = requireNotNull(order.travelGroundServiceFeeMinor) {
-            "TRAVEL_GROUND_SERVICE_FEE_MISSING"
+    private fun travelServiceActivationFailure(payment: PaymentEntity, order: OrderEntity?): String? {
+        if (order == null) return "ORDER_NOT_FOUND"
+        if (order.deletedAt != null) return "ORDER_SOFT_DELETED"
+        if (order.paymentFlow != TRAVEL_SERVICE_PAYMENT_FLOW) return "TRAVEL_SERVICE_PAYMENT_FLOW_REQUIRED"
+        if (order.status != OrderStatusEnum.PENDING_SERVICE_FEE.value) return "ORDER_STATUS_${order.status}"
+        val feeMinor = order.travelGroundServiceFeeMinor ?: return "TRAVEL_GROUND_SERVICE_FEE_MISSING"
+        val paymentAmountMinor = payment.amountMinor ?: return "PAYMENT_AMOUNT_MISSING"
+        if (paymentAmountMinor != feeMinor) return "PAYMENT_AMOUNT_MISMATCH"
+        if (runCatching { Money.normalizeCurrency(payment.currency) }.getOrNull() != TRAVEL_SERVICE_CURRENCY) {
+            return "TRAVEL_SERVICE_CURRENCY_MUST_BE_USD"
         }
-        val paymentAmountMinor = requireNotNull(payment.amountMinor) { "PAYMENT_AMOUNT_MISSING" }
-        require(paymentAmountMinor == feeMinor) { "PAYMENT_AMOUNT_MISMATCH" }
-        require(Money.normalizeCurrency(payment.currency) == TRAVEL_SERVICE_CURRENCY) {
-            "TRAVEL_SERVICE_CURRENCY_MUST_BE_USD"
+        if (runCatching { Money.normalizeCurrency(order.currency) }.getOrNull() != payment.currency) {
+            return "PAYMENT_CURRENCY_MISMATCH"
         }
-        require(Money.normalizeCurrency(order.currency) == payment.currency) { "PAYMENT_CURRENCY_MISMATCH" }
+        return null
     }
 
     private fun earliestExpiry(

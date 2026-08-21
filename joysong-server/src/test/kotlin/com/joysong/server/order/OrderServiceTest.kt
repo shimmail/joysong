@@ -677,7 +677,7 @@ class OrderServiceTest {
     @Test
     fun `cancelOrder 用户取消待支付订单 - 保留审计并转为已取消`() {
         val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.PENDING_PAYMENT.value)
-        every { orderRepository.findById("o1") } returns Optional.of(order)
+        every { orderRepository.findByIdForUpdate("o1") } returns order
         every { orderRepository.save(any()) } answers { firstArg() }
 
         orderService.cancelOrder("o1", "user-1")
@@ -706,7 +706,7 @@ class OrderServiceTest {
             status = OrderStatusEnum.PENDING_SERVICE_FEE.value,
             paymentFlow = "TRAVEL_GROUND_SERVICE_ONLY"
         )
-        every { orderRepository.findById("o1") } returns Optional.of(order)
+        every { orderRepository.findByIdForUpdate("o1") } returns order
         every { orderRepository.save(any()) } answers { firstArg() }
 
         orderService.cancelOrder("o1", "user-1")
@@ -725,9 +725,34 @@ class OrderServiceTest {
     }
 
     @Test
+    fun `success first makes user cancellation lose the locked race without overwriting activation`() {
+        val activatedAt = LocalDateTime.of(2026, 8, 22, 12, 0)
+        val active = createTestOrder(
+            "travel-active",
+            "user-1",
+            status = OrderStatusEnum.SERVICE_ACTIVE.value,
+            paymentFlow = "TRAVEL_GROUND_SERVICE_ONLY"
+        ).copy(serviceActivatedAt = activatedAt)
+        every { orderRepository.findByIdForUpdate("travel-active") } returns active
+
+        val error = assertThrows<RuntimeException> {
+            orderService.cancelOrder("travel-active", "user-1")
+        }
+
+        assertEquals("当前状态不允许取消", error.message)
+        verify(exactly = 1) { orderRepository.findByIdForUpdate("travel-active") }
+        verify(exactly = 0) { orderRepository.save(any()) }
+        verify(exactly = 0) {
+            orderStatusLogService.logTransition(
+                "travel-active", any(), any(), any(), any(), any()
+            )
+        }
+    }
+
+    @Test
     fun `cancelOrder 非本人订单抛出异常`() {
         val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.PENDING_PAYMENT.value)
-        every { orderRepository.findById("o1") } returns Optional.of(order)
+        every { orderRepository.findByIdForUpdate("o1") } returns order
 
         assertThrows<RuntimeException> {
             orderService.cancelOrder("o1", "user-2")
@@ -737,7 +762,7 @@ class OrderServiceTest {
     @Test
     fun `cancelOrder 非待支付状态不允许取消`() {
         val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.VERIFIED.value)
-        every { orderRepository.findById("o1") } returns Optional.of(order)
+        every { orderRepository.findByIdForUpdate("o1") } returns order
 
         assertThrows<RuntimeException> {
             orderService.cancelOrder("o1", "user-1")
@@ -797,7 +822,7 @@ class OrderServiceTest {
     @Test
     fun `deleteOrder 已取消状态可删除`() {
         val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.CANCELLED.value)
-        every { orderRepository.findById("o1") } returns Optional.of(order)
+        every { orderRepository.findByIdForUpdate("o1") } returns order
         justRun { orderRepository.deleteById("o1") }
 
         val result = orderService.deleteOrder("o1", "user-1")
@@ -807,9 +832,21 @@ class OrderServiceTest {
     }
 
     @Test
+    fun `admin soft delete locks the order before deletion`() {
+        val order = createTestOrder("admin-delete", "user-1", status = OrderStatusEnum.CANCELLED.value)
+        every { orderRepository.findByIdForUpdate("admin-delete") } returns order
+        justRun { orderRepository.deleteById("admin-delete") }
+
+        orderService.adminDeleteById("admin-delete")
+
+        verify(exactly = 1) { orderRepository.findByIdForUpdate("admin-delete") }
+        verify(exactly = 1) { orderRepository.deleteById("admin-delete") }
+    }
+
+    @Test
     fun `deleteOrder 已完成状态可删除`() {
         val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.COMPLETED.value)
-        every { orderRepository.findById("o1") } returns Optional.of(order)
+        every { orderRepository.findByIdForUpdate("o1") } returns order
         justRun { orderRepository.deleteById("o1") }
 
         assertTrue(orderService.deleteOrder("o1", "user-1"))
@@ -818,7 +855,7 @@ class OrderServiceTest {
     @Test
     fun `deleteOrder 待支付状态不可删除`() {
         val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.PENDING_PAYMENT.value)
-        every { orderRepository.findById("o1") } returns Optional.of(order)
+        every { orderRepository.findByIdForUpdate("o1") } returns order
 
         assertThrows<IllegalArgumentException> {
             orderService.deleteOrder("o1", "user-1")
@@ -828,7 +865,7 @@ class OrderServiceTest {
     @Test
     fun `deleteOrder 非本人订单抛出异常`() {
         val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.CANCELLED.value)
-        every { orderRepository.findById("o1") } returns Optional.of(order)
+        every { orderRepository.findByIdForUpdate("o1") } returns order
 
         assertThrows<IllegalArgumentException> {
             orderService.deleteOrder("o1", "user-2")
@@ -837,7 +874,7 @@ class OrderServiceTest {
 
     @Test
     fun `deleteOrder 不存在的订单返回 false`() {
-        every { orderRepository.findById("o1") } returns Optional.empty()
+        every { orderRepository.findByIdForUpdate("o1") } returns null
 
         assertFalse(orderService.deleteOrder("o1", "user-1"))
     }
@@ -847,7 +884,7 @@ class OrderServiceTest {
     @Test
     fun `adminUpdateStatus 合法状态变更`() {
         val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.PENDING_PAYMENT.value)
-        every { orderRepository.findById("o1") } returns Optional.of(order)
+        every { orderRepository.findByIdForUpdate("o1") } returns order
         every { orderRepository.save(any()) } answers { firstArg() }
 
         val result = orderService.adminUpdateStatus("o1", OrderStatusEnum.CONSULTATION_PAID.value)
@@ -860,7 +897,7 @@ class OrderServiceTest {
     @Test
     fun `adminUpdateStatus 非法状态变更抛出异常`() {
         val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.PENDING_PAYMENT.value)
-        every { orderRepository.findById("o1") } returns Optional.of(order)
+        every { orderRepository.findByIdForUpdate("o1") } returns order
 
         assertThrows<IllegalArgumentException> {
             orderService.adminUpdateStatus("o1", OrderStatusEnum.COMPLETED.value)
@@ -879,14 +916,13 @@ class OrderServiceTest {
 
         protectedTransitions.forEachIndexed { index, (from, target) ->
             val orderId = "travel-$index"
-            every { orderRepository.findById(orderId) } returns Optional.of(
+            every { orderRepository.findByIdForUpdate(orderId) } returns
                 createTestOrder(
                     orderId,
                     "user-1",
                     status = from.value,
                     paymentFlow = "TRAVEL_GROUND_SERVICE_ONLY"
                 )
-            )
 
             assertThrows<IllegalArgumentException> {
                 orderService.adminUpdateStatus(orderId, target.value)
@@ -909,7 +945,7 @@ class OrderServiceTest {
             status = OrderStatusEnum.PENDING_SERVICE_FEE.value,
             paymentFlow = "TRAVEL_GROUND_SERVICE_ONLY"
         )
-        every { orderRepository.findById("travel-1") } returns Optional.of(order)
+        every { orderRepository.findByIdForUpdate("travel-1") } returns order
         every { orderRepository.save(any()) } answers { firstArg() }
 
         val updated = orderService.adminUpdateStatus("travel-1", OrderStatusEnum.CANCELLED.value)

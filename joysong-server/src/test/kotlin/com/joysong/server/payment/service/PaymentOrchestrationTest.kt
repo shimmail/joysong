@@ -446,7 +446,7 @@ class PaymentOrchestrationTest {
         every { repositories.payment.save(any()) } answers {
             firstArg<PaymentEntity>().also { paymentState = it }
         }
-        every { repositories.order.findByIdForUpdate(prepared.orderId) } answers { orderState }
+        every { repositories.order.findByIdIncludeDeletedForUpdate(prepared.orderId) } answers { orderState }
         every { repositories.order.save(any()) } answers {
             firstArg<OrderEntity>().also { orderState = it }
         }
@@ -533,7 +533,7 @@ class PaymentOrchestrationTest {
             val prepared = travelPayment(status = PaymentStatus.PROCESSING.name)
             every { repositories.payment.findByIdForUpdate(prepared.id) } returns prepared
             every { repositories.payment.save(any()) } answers { firstArg() }
-            every { repositories.order.findByIdForUpdate(prepared.orderId) } returns travelOrder()
+            every { repositories.order.findByIdIncludeDeletedForUpdate(prepared.orderId) } returns travelOrder()
 
             val error = assertThrows(IllegalArgumentException::class.java) {
                 PaymentPersistenceService(
@@ -561,7 +561,7 @@ class PaymentOrchestrationTest {
         every { repositories.payment.save(any()) } answers {
             firstArg<PaymentEntity>().also { paymentStates[it.id] = it }
         }
-        every { repositories.order.findByIdForUpdate("order-1") } answers { orderState }
+        every { repositories.order.findByIdIncludeDeletedForUpdate("order-1") } answers { orderState }
         every { repositories.order.save(any()) } answers {
             firstArg<OrderEntity>().also { orderState = it }
         }
@@ -600,6 +600,113 @@ class PaymentOrchestrationTest {
         assertEquals(firstActivationTime, orderState.serviceActivatedAt)
         verify(exactly = 1) { repositories.order.save(any()) }
         verify(exactly = 1) { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `cancel first then verified success keeps provider truth for manual refund`() {
+        val repositories = persistenceRepositories()
+        val prepared = travelPayment(PaymentStatus.PROCESSING.name)
+        var paymentState = prepared
+        every { repositories.payment.findByIdForUpdate(prepared.id) } answers { paymentState }
+        every { repositories.payment.save(any()) } answers {
+            firstArg<PaymentEntity>().also { paymentState = it }
+        }
+        every { repositories.order.findByIdIncludeDeletedForUpdate(prepared.orderId) } returns travelOrder("CANCELLED")
+
+        val result = PaymentPersistenceService(
+            repositories.payment,
+            repositories.order,
+            repositories.log
+        ).applyProviderResult(
+            prepared.id,
+            ProviderPaymentResult(
+                PaymentStatus.SUCCEEDED,
+                "alipay-cancelled",
+                providerTransactionId = "txn-cancelled",
+                amountMinor = 40_000,
+                currency = "USD"
+            )
+        )
+
+        assertEquals(PaymentStatus.SUCCEEDED.name, result.status)
+        assertNotNull(result.paidAt)
+        assertEquals("alipay-cancelled", result.providerPaymentId)
+        assertEquals("txn-cancelled", result.providerTransactionId)
+        assertEquals("PAYMENT_SUCCEEDED_ORDER_NOT_ACTIVATABLE", result.failureCode)
+        verify(exactly = 0) { repositories.order.save(any()) }
+        verify(exactly = 0) { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `soft deleted order verified success keeps provider truth for manual refund`() {
+        val repositories = persistenceRepositories()
+        val prepared = travelPayment(PaymentStatus.PROCESSING.name)
+        var paymentState = prepared
+        every { repositories.payment.findByIdForUpdate(prepared.id) } answers { paymentState }
+        every { repositories.payment.save(any()) } answers {
+            firstArg<PaymentEntity>().also { paymentState = it }
+        }
+        every { repositories.order.findByIdIncludeDeletedForUpdate(prepared.orderId) } returns travelOrder().copy(
+            deletedAt = LocalDateTime.of(2026, 8, 22, 13, 0)
+        )
+
+        val result = PaymentPersistenceService(
+            repositories.payment,
+            repositories.order,
+            repositories.log
+        ).applyProviderResult(
+            prepared.id,
+            ProviderPaymentResult(
+                PaymentStatus.SUCCEEDED,
+                "alipay-deleted",
+                providerTransactionId = "txn-deleted",
+                amountMinor = 40_000,
+                currency = "USD"
+            )
+        )
+
+        assertEquals(PaymentStatus.SUCCEEDED.name, result.status)
+        assertNotNull(result.paidAt)
+        assertEquals("alipay-deleted", result.providerPaymentId)
+        assertEquals("txn-deleted", result.providerTransactionId)
+        assertEquals("PAYMENT_SUCCEEDED_ORDER_NOT_ACTIVATABLE", result.failureCode)
+        verify(exactly = 0) { repositories.order.save(any()) }
+        verify(exactly = 0) { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `missing order verified success keeps provider truth for manual refund`() {
+        val repositories = persistenceRepositories()
+        val prepared = travelPayment(PaymentStatus.PROCESSING.name)
+        var paymentState = prepared
+        every { repositories.payment.findByIdForUpdate(prepared.id) } answers { paymentState }
+        every { repositories.payment.save(any()) } answers {
+            firstArg<PaymentEntity>().also { paymentState = it }
+        }
+        every { repositories.order.findByIdIncludeDeletedForUpdate(prepared.orderId) } returns null
+
+        val result = PaymentPersistenceService(
+            repositories.payment,
+            repositories.order,
+            repositories.log
+        ).applyProviderResult(
+            prepared.id,
+            ProviderPaymentResult(
+                PaymentStatus.SUCCEEDED,
+                "alipay-missing-order",
+                providerTransactionId = "txn-missing-order",
+                amountMinor = 40_000,
+                currency = "USD"
+            )
+        )
+
+        assertEquals(PaymentStatus.SUCCEEDED.name, result.status)
+        assertNotNull(result.paidAt)
+        assertEquals("alipay-missing-order", result.providerPaymentId)
+        assertEquals("txn-missing-order", result.providerTransactionId)
+        assertEquals("PAYMENT_SUCCEEDED_ORDER_NOT_ACTIVATABLE", result.failureCode)
+        verify(exactly = 0) { repositories.order.save(any()) }
+        verify(exactly = 0) { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) }
     }
 
     private fun service() = PaymentService(
