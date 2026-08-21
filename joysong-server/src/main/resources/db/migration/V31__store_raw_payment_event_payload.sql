@@ -1,0 +1,2 @@
+ALTER TABLE payment_events
+    MODIFY COLUMN payload LONGTEXT NOT NULL;

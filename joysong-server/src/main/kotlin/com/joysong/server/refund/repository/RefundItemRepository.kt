@@ -19,6 +19,16 @@ interface RefundItemRepository : JpaRepository<RefundItemEntity, String> {
     fun findAllByRefundIdOrderByCreatedAtAsc(refundId: String): List<RefundItemEntity>
     fun findByProviderAndProviderRefundId(provider: String, providerRefundId: String): RefundItemEntity?
 
+    @Query(
+        "SELECT COUNT(i.id) FROM RefundItemEntity i " +
+            "WHERE UPPER(TRIM(i.provider)) = UPPER(TRIM(:provider)) AND (" +
+            "i.status IS NULL OR UPPER(TRIM(i.status)) NOT IN :successfulStatuses)"
+    )
+    fun countUnresolvedLiabilitiesByProvider(
+        @Param("provider") provider: String,
+        @Param("successfulStatuses") successfulStatuses: Collection<String>
+    ): Long
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT i FROM RefundItemEntity i WHERE i.id = :id")
     fun findByIdForUpdate(@Param("id") id: String): RefundItemEntity?

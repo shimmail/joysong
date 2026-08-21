@@ -40,6 +40,22 @@ interface PaymentRepository : JpaRepository<PaymentEntity, String> {
         updatedAt: LocalDateTime
     ): List<PaymentEntity>
 
+    @Query(
+        "SELECT COUNT(p.id) FROM PaymentEntity p " +
+            "WHERE UPPER(TRIM(p.provider)) = UPPER(TRIM(:provider)) AND (" +
+            "p.status IS NULL OR UPPER(TRIM(p.status)) IN :inFlightStatuses OR " +
+            "(UPPER(TRIM(p.status)) IN :refundableStatuses AND (" +
+            "p.amountMinor IS NULL OR p.refundedAmountMinor IS NULL OR " +
+            "p.refundedAmountMinor <> p.amountMinor)) OR " +
+            "UPPER(TRIM(p.status)) NOT IN :knownStatuses)"
+    )
+    fun countActionableLiabilitiesByProvider(
+        @Param("provider") provider: String,
+        @Param("inFlightStatuses") inFlightStatuses: Collection<String>,
+        @Param("refundableStatuses") refundableStatuses: Collection<String>,
+        @Param("knownStatuses") knownStatuses: Collection<String>
+    ): Long
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query(
         "SELECT p FROM PaymentEntity p " +

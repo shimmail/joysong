@@ -70,6 +70,26 @@ class ProductionProfileTest {
     }
 
     @Test
+    fun `Stripe compatibility adapter defaults to legacy disabled`() {
+        assertEquals(
+            "\${STRIPE_LEGACY_ENABLED:false}",
+            applicationProperties.getProperty("payment.stripe.legacy-enabled")
+        )
+    }
+
+    @Test
+    fun `Stripe environment example is explicitly legacy and has no fake redirect defaults`() {
+        val stripe = Files.readAllLines(Path.of(".env.example"))
+            .filter { it.startsWith("STRIPE_") }
+            .associate { it.substringBefore('=') to it.substringAfter('=') }
+
+        assertEquals("false", stripe["STRIPE_LEGACY_ENABLED"])
+        assertEquals("", stripe["STRIPE_SUCCESS_URL"])
+        assertEquals("", stripe["STRIPE_CANCEL_URL"])
+        assertEquals("Joysong legacy medical service", stripe["STRIPE_PRODUCT_NAME"])
+    }
+
+    @Test
     fun `development profile cannot enable fixed agent fallback policy`() {
         val environment = StandardEnvironment().apply {
             propertySources.remove(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME)

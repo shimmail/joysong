@@ -3,7 +3,11 @@ package com.joysong.server.payment.service
 import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.repository.OrderRepository
 import com.joysong.server.order.service.OrderStatusLogService
+import com.joysong.server.payment.domain.PaymentProvider
 import com.joysong.server.payment.domain.PaymentType
+import com.joysong.server.payment.entity.PaymentEntity
+import com.joysong.server.payment.provider.PaymentGatewayRegistry
+import com.joysong.server.payment.provider.PaymentProviderException
 import com.joysong.server.payment.repository.PaymentRepository
 import io.mockk.every
 import io.mockk.mockk
@@ -64,5 +68,31 @@ class PaymentServiceSafetyTest {
         verify(exactly = 0) {
             payments.findFirstByOrderIdAndPaymentTypeOrderByCreatedAtDesc(any(), any())
         }
+    }
+
+    @Test
+    fun `unconfigured alipay plus rejects before local attempt creation`() {
+        val payments = mockk<PaymentRepository>(relaxed = true)
+        val service = PaymentService(
+            paymentRepository = payments,
+            orderRepository = mockk(relaxed = true),
+            orderStatusLogService = mockk(relaxed = true),
+            paymentGatewayRegistry = PaymentGatewayRegistry(emptyList())
+        )
+
+        val error = assertThrows(PaymentProviderException::class.java) {
+            service.createPaymentSession(
+                "order-1",
+                "user-1",
+                PaymentType.TRAVEL_GROUND_SERVICE_FEE,
+                PaymentProvider.ALIPAY_PLUS,
+                "ALIPAY_PLUS_CASHIER",
+                "idem-key-123"
+            )
+        }
+
+        assertEquals("PAYMENT_PROVIDER_UNAVAILABLE", error.errorCode)
+        verify(exactly = 0) { payments.save(any<PaymentEntity>()) }
+        verify(exactly = 0) { payments.saveAndFlush(any<PaymentEntity>()) }
     }
 }

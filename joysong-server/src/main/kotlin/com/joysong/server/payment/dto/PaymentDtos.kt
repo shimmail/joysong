@@ -7,28 +7,13 @@ import java.time.LocalDateTime
 
 data class PaymentNextActionResponse(
     val type: String,
-    val clientSecret: String? = null,
-    val url: String? = null,
-    val params: Map<String, String>? = null,
-    val orderString: String? = null
+    val url: String
 ) {
     companion object {
         fun from(action: PaymentNextAction): PaymentNextActionResponse = when (action) {
-            is PaymentNextAction.StripeClientSecret -> PaymentNextActionResponse(
-                type = action.type,
-                clientSecret = action.clientSecret
-            )
             is PaymentNextAction.Redirect -> PaymentNextActionResponse(
                 type = action.type,
                 url = action.url
-            )
-            is PaymentNextAction.WeChatSdkParams -> PaymentNextActionResponse(
-                type = action.type,
-                params = action.params
-            )
-            is PaymentNextAction.AlipayOrderString -> PaymentNextActionResponse(
-                type = action.type,
-                orderString = action.orderString
             )
         }
     }

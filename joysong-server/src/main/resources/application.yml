@@ -109,15 +109,17 @@ aliyun:
 
 payment:
   stripe:
+    # Legacy-only adapter for historical Stripe query/refund liabilities. New payments never use it.
+    legacy-enabled: ${STRIPE_LEGACY_ENABLED:false}
     secret-key: ${STRIPE_SECRET_KEY:}
     webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
-    # Hosted Checkout returns to these public HTTPS pages. They may be Universal/App Links.
-    success-url: ${STRIPE_SUCCESS_URL:https://example.com/payment/success?session_id={CHECKOUT_SESSION_ID}}
-    cancel-url: ${STRIPE_CANCEL_URL:https://example.com/payment/cancel}
+    # Legacy Hosted Checkout returns to these public HTTPS pages. They may be Universal/App Links.
+    success-url: ${STRIPE_SUCCESS_URL:}
+    cancel-url: ${STRIPE_CANCEL_URL:}
     api-base: ${STRIPE_API_BASE:https://api.stripe.com}
     api-version: ${STRIPE_API_VERSION:}
     webhook-tolerance-seconds: ${STRIPE_WEBHOOK_TOLERANCE_SECONDS:300}
-    product-name: ${STRIPE_PRODUCT_NAME:Joysong medical service}
+    product-name: ${STRIPE_PRODUCT_NAME:Joysong legacy medical service}
   reconciliation:
     enabled: ${PAYMENT_RECONCILIATION_ENABLED:true}
     fixed-delay-ms: ${PAYMENT_RECONCILIATION_DELAY_MS:60000}

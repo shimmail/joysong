@@ -24,20 +24,8 @@ data class ProviderConfirmPaymentRequest(
 sealed interface PaymentNextAction {
     val type: String
 
-    data class StripeClientSecret(val clientSecret: String) : PaymentNextAction {
-        override val type: String = "STRIPE_CLIENT_SECRET"
-    }
-
     data class Redirect(val url: String) : PaymentNextAction {
         override val type: String = "REDIRECT"
-    }
-
-    data class WeChatSdkParams(val params: Map<String, String>) : PaymentNextAction {
-        override val type: String = "WECHAT_SDK_PARAMS"
-    }
-
-    data class AlipayOrderString(val orderString: String) : PaymentNextAction {
-        override val type: String = "ALIPAY_ORDER_STRING"
     }
 }
 

@@ -1,6 +1,5 @@
 package com.joysong.server.payment.service
 
-import com.fasterxml.jackson.databind.ObjectMapper
 import com.joysong.server.payment.domain.PaymentProvider
 import com.joysong.server.payment.domain.PaymentStatus
 import com.joysong.server.payment.entity.PaymentEventEntity
@@ -16,12 +15,9 @@ class PaymentWebhookService(
     private val paymentGatewayRegistry: PaymentGatewayRegistry,
     private val paymentEventRepository: PaymentEventRepository,
     private val paymentRepository: PaymentRepository,
-    private val paymentService: PaymentService,
-    private val objectMapper: ObjectMapper
+    private val paymentService: PaymentService
 ) {
     fun receive(provider: PaymentProvider, payload: String, headers: Map<String, String>): PaymentEventEntity {
-        // Reject malformed data before retaining it in the JSON audit column.
-        objectMapper.readTree(payload)
         val verified = paymentGatewayRegistry.require(provider).verifyWebhook(payload, headers)
         paymentEventRepository.findByProviderAndProviderEventId(provider.name, verified.providerEventId)
             ?.let { return it }

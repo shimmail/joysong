@@ -1,19 +1,23 @@
 package com.joysong.server.payment.provider
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.joysong.server.payment.domain.PaymentProvider
 import com.joysong.server.payment.domain.PaymentStatus
 import com.sun.net.httpserver.HttpServer
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import java.net.InetSocketAddress
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.function.Supplier
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
@@ -109,6 +113,30 @@ class StripePaymentGatewayTest {
 
         assertEquals("STRIPE_SIGNATURE_INVALID", error.errorCode)
         assertTrue(!error.outcomeUnknown)
+    }
+
+    @Test
+    fun `Stripe gateway bean exists only when legacy compatibility is explicitly enabled`() {
+        val contexts = ApplicationContextRunner()
+            .withBean(
+                com.fasterxml.jackson.databind.ObjectMapper::class.java,
+                Supplier { jacksonObjectMapper() }
+            )
+            .withBean(Clock::class.java, Supplier { Clock.fixed(now, ZoneOffset.UTC) })
+            .withUserConfiguration(StripePaymentGateway::class.java)
+            .withPropertyValues(
+                "payment.stripe.secret-key=sk_test_real",
+                "payment.stripe.webhook-secret=whsec_test",
+                "payment.stripe.success-url=https://pay.joysong.example/success",
+                "payment.stripe.cancel-url=https://pay.joysong.example/cancel"
+            )
+
+        contexts.run { context ->
+            assertFalse(context.containsBean("stripePaymentGateway"))
+        }
+        contexts.withPropertyValues("payment.stripe.legacy-enabled=true").run { context ->
+            assertTrue(context.getBean(StripePaymentGateway::class.java).provider == PaymentProvider.STRIPE)
+        }
     }
 
     private fun gateway(apiBase: String = "https://api.stripe.com") = StripePaymentGateway(
