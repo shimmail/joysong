@@ -15,12 +15,15 @@ class StripeLegacyPaymentGuard(
     private val paymentRepository: PaymentRepository,
     private val refundItemRepository: RefundItemRepository,
     @Value("\${payment.stripe.legacy-enabled:false}")
-    private val legacyEnabled: Boolean
+    private val legacyEnabled: String
 ) : SmartInitializingSingleton {
 
     @Transactional(readOnly = true)
     override fun afterSingletonsInstantiated() {
-        if (legacyEnabled) return
+        if (legacyEnabled.equals("true", ignoreCase = true)) return
+        if (!legacyEnabled.equals("false", ignoreCase = true)) {
+            throw IllegalStateException(INVALID_CONFIGURATION_CODE)
+        }
 
         val hasLiabilities = try {
             paymentRepository.countActionableLiabilitiesByProvider(
@@ -44,6 +47,7 @@ class StripeLegacyPaymentGuard(
 
     companion object {
         const val ERROR_CODE = "STRIPE_LEGACY_PAYMENTS_REQUIRE_ADAPTER"
+        const val INVALID_CONFIGURATION_CODE = "STRIPE_LEGACY_ENABLED_INVALID"
 
         private val IN_FLIGHT_PAYMENT_STATUSES = listOf(
             PaymentStatus.CREATED.name,

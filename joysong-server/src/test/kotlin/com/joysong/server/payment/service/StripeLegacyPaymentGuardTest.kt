@@ -81,8 +81,22 @@ class StripeLegacyPaymentGuardTest {
     }
 
     @Test
-    fun `enabled legacy adapter bypasses the retirement guard without querying`() {
-        assertDoesNotThrow { guard(legacyEnabled = true).afterSingletonsInstantiated() }
+    fun `literal true ignoring case enables legacy adapter without querying`() {
+        assertDoesNotThrow { guard(legacyEnabled = "TRUE").afterSingletonsInstantiated() }
+
+        verify(exactly = 0) { payments.countActionableLiabilitiesByProvider(any(), any(), any(), any()) }
+        verify(exactly = 0) { refundItems.countUnresolvedLiabilitiesByProvider(any(), any()) }
+    }
+
+    @Test
+    fun `boolean aliases whitespace and other values fail closed before querying`() {
+        listOf("yes", "on", "1", " true ", "false ", "invalid").forEach { value ->
+            val error = assertThrows(IllegalStateException::class.java) {
+                guard(legacyEnabled = value).afterSingletonsInstantiated()
+            }
+
+            assertEquals("STRIPE_LEGACY_ENABLED_INVALID", error.message)
+        }
 
         verify(exactly = 0) { payments.countActionableLiabilitiesByProvider(any(), any(), any(), any()) }
         verify(exactly = 0) { refundItems.countUnresolvedLiabilitiesByProvider(any(), any()) }
@@ -127,7 +141,7 @@ class StripeLegacyPaymentGuardTest {
             .run { context -> assertNotNull(context.startupFailure) }
     }
 
-    private fun guard(legacyEnabled: Boolean = false) = StripeLegacyPaymentGuard(
+    private fun guard(legacyEnabled: String = "false") = StripeLegacyPaymentGuard(
         paymentRepository = payments,
         refundItemRepository = refundItems,
         legacyEnabled = legacyEnabled
