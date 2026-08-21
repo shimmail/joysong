@@ -17,6 +17,7 @@ enum PaymentFlowStage {
   failed,
   cancelled,
   expired,
+  unavailable,
   partiallyRefunded,
   refunded,
 }
@@ -49,8 +50,8 @@ final class PaymentController extends ChangeNotifier {
   PaymentController({
     required OrdersRepository repository,
     required this.order,
-    required this.paymentType,
-    required List<PaymentProvider> providers,
+    PaymentType? paymentType,
+    List<PaymentProvider>? providers,
     PaymentActionLauncher actionLauncher =
         const UnavailablePaymentActionLauncher(),
     List<Duration> pollingDelays = const [
@@ -60,10 +61,25 @@ final class PaymentController extends ChangeNotifier {
       Duration(seconds: 3),
       Duration(seconds: 5),
     ],
-  })  : assert(providers.isNotEmpty),
+  })  : assert(
+          paymentType == null ||
+              paymentType == PaymentType.travelGroundServiceFee ||
+              (providers != null && providers.isNotEmpty),
+        ),
         _repository = repository,
-        _providers = List.unmodifiable(providers),
-        _selectedProvider = providers.first,
+        paymentType = paymentType ?? PaymentType.travelGroundServiceFee,
+        _isServiceFeeFlow = paymentType == null ||
+            paymentType == PaymentType.travelGroundServiceFee,
+        _providers = List.unmodifiable(
+          paymentType == null ||
+                  paymentType == PaymentType.travelGroundServiceFee
+              ? const [PaymentProvider.alipayPlus]
+              : providers!,
+        ),
+        _selectedProvider = paymentType == null ||
+                paymentType == PaymentType.travelGroundServiceFee
+            ? PaymentProvider.alipayPlus
+            : providers!.first,
         _actionLauncher = actionLauncher,
         _pollingDelays = List.unmodifiable(pollingDelays),
         _createIdempotencyKey = generateApiRequestId();
@@ -71,6 +87,7 @@ final class PaymentController extends ChangeNotifier {
   final OrdersRepository _repository;
   final Order order;
   final PaymentType paymentType;
+  final bool _isServiceFeeFlow;
   final List<PaymentProvider> _providers;
   final PaymentActionLauncher _actionLauncher;
   final List<Duration> _pollingDelays;
@@ -82,10 +99,12 @@ final class PaymentController extends ChangeNotifier {
   String? _errorMessage;
   late String _createIdempotencyKey;
   bool _disposed = false;
+  bool _serverRestoreCompleted = false;
   bool _awaitingExternalReturn = false;
   int _operation = 0;
 
   List<PaymentProvider> get providers => _providers;
+  bool get isServiceFeeFlow => _isServiceFeeFlow;
   PaymentProvider get selectedProvider => _selectedProvider;
   PaymentAttempt? get payment => _payment;
   PaymentFlowStage get stage => _stage;
@@ -99,12 +118,20 @@ final class PaymentController extends ChangeNotifier {
       }.contains(_stage);
   bool get canSubmit =>
       !isBusy &&
+      (!_isServiceFeeFlow ||
+          (_serverRestoreCompleted && _payment == null)) &&
       _stage != PaymentFlowStage.succeeded &&
+      _stage != PaymentFlowStage.unavailable &&
       _stage != PaymentFlowStage.partiallyRefunded &&
       _stage != PaymentFlowStage.refunded;
 
+  bool get canRetryWithNewAttempt =>
+      _payment?.status == PaymentStatus.failed ||
+      _payment?.status == PaymentStatus.expired;
+
   void selectProvider(PaymentProvider provider) {
-    if (isBusy ||
+    if (_isServiceFeeFlow ||
+        isBusy ||
         !_providers.contains(provider) ||
         provider == _selectedProvider) {
       return;
@@ -125,13 +152,19 @@ final class PaymentController extends ChangeNotifier {
     _clearError();
     _notify();
     try {
-      final latest = await _repository.getLatestPayment(
-        order.id,
-        paymentType: paymentType,
-        refresh: true,
-      );
+      final latest = _isServiceFeeFlow
+          ? await _repository.getLatestTravelGroundServicePayment(
+              order.id,
+              refresh: true,
+            )
+          : await _repository.getLatestPayment(
+              order.id,
+              paymentType: paymentType,
+              refresh: true,
+            );
       if (!_isCurrent(operation)) return;
       _payment = latest;
+      _serverRestoreCompleted = true;
       _selectedProvider = latest.provider;
       _applyStatus(latest);
     } on Object catch (error) {
@@ -139,7 +172,10 @@ final class PaymentController extends ChangeNotifier {
       if (_isMissingPayment(error)) {
         // No previous attempt is the expected state for a new payment. The
         // create endpoint remains the source of truth for conflict prevention.
+        _serverRestoreCompleted = true;
         _stage = PaymentFlowStage.ready;
+      } else if (_isProviderUnavailable(error)) {
+        _markProviderUnavailable(error);
       } else {
         // A failed restore query must not enable a second payment attempt.
         _stage = PaymentFlowStage.processing;
@@ -157,19 +193,28 @@ final class PaymentController extends ChangeNotifier {
     _clearError();
     _notify();
     try {
-      final created = await _repository.createPaymentAttempt(
-        order.id,
-        paymentType: paymentType,
-        provider: _selectedProvider,
-        paymentMethod: _paymentMethod(_selectedProvider),
-        idempotencyKey: _createIdempotencyKey,
-      );
+      final created = _isServiceFeeFlow
+          ? await _repository.createTravelGroundServicePaymentAttempt(
+              order.id,
+              idempotencyKey: _createIdempotencyKey,
+            )
+          : await _repository.createPaymentAttempt(
+              order.id,
+              paymentType: paymentType,
+              provider: _selectedProvider,
+              paymentMethod: _paymentMethod(_selectedProvider),
+              idempotencyKey: _createIdempotencyKey,
+            );
       if (!_isCurrent(operation)) return false;
       _payment = created;
       return _continuePayment(operation, created);
     } on Object catch (error) {
       if (_isCurrent(operation)) {
-        if (_outcomeMayBeUnknown(error)) {
+        if (_isProviderUnavailable(error)) {
+          _payment = null;
+          _markProviderUnavailable(error);
+          _notify();
+        } else if (_outcomeMayBeUnknown(error)) {
           _stage = PaymentFlowStage.processing;
           _errorCode = 'PAYMENT_STATUS_UNAVAILABLE';
           _errorMessage = _messageFor(error);
@@ -211,25 +256,39 @@ final class PaymentController extends ChangeNotifier {
     _notify();
     try {
       final refreshed = current == null
-          ? await _repository.getLatestPayment(
-              order.id,
-              paymentType: paymentType,
-              refresh: queryProvider,
-            )
+          ? (_isServiceFeeFlow
+              ? await _repository.getLatestTravelGroundServicePayment(
+                  order.id,
+                  refresh: queryProvider,
+                )
+              : await _repository.getLatestPayment(
+                  order.id,
+                  paymentType: paymentType,
+                  refresh: queryProvider,
+                ))
           : await _repository.getPayment(
               current.id,
               refresh: queryProvider,
             );
       if (!_isCurrent(operation)) return false;
-      _payment = refreshed;
-      _applyStatus(refreshed);
+      final merged = _preserveRedirect(current, refreshed);
+      _payment = merged;
+      _serverRestoreCompleted = true;
+      _applyStatus(merged);
       _notify();
-      return refreshed.status == PaymentStatus.succeeded;
+      return merged.status == PaymentStatus.succeeded;
     } on Object catch (error) {
       if (_isCurrent(operation)) {
-        _stage = PaymentFlowStage.processing;
-        _errorCode = 'PAYMENT_STATUS_UNAVAILABLE';
-        _errorMessage = _messageFor(error);
+        if (current == null && _isMissingPayment(error)) {
+          _serverRestoreCompleted = true;
+          _stage = PaymentFlowStage.ready;
+        } else if (_isProviderUnavailable(error)) {
+          _markProviderUnavailable(error);
+        } else {
+          _stage = PaymentFlowStage.processing;
+          _errorCode = 'PAYMENT_STATUS_UNAVAILABLE';
+          _errorMessage = _messageFor(error);
+        }
         _notify();
       }
       return false;
@@ -237,6 +296,7 @@ final class PaymentController extends ChangeNotifier {
   }
 
   Future<bool> resumeAfterExternalAction() async {
+    if (_isServiceFeeFlow) return refresh();
     final current = _payment;
     if (current == null) return refresh();
     if (!_awaitingExternalReturn ||
@@ -282,13 +342,21 @@ final class PaymentController extends ChangeNotifier {
     int operation,
     PaymentAttempt current,
   ) async {
+    if (_isServiceFeeFlow && !_hasValidServiceFeeContract(current)) {
+      _stage = PaymentFlowStage.unavailable;
+      _errorCode = _serviceFeeContractError(current);
+      _notify();
+      return false;
+    }
     _applyStatus(current);
     _notify();
     if (current.status == PaymentStatus.succeeded) return true;
     if (current.status == PaymentStatus.requiresAction) {
       if (current.nextAction == null) {
         _errorCode = 'PAYMENT_NEXT_ACTION_MISSING';
-        _stage = PaymentFlowStage.failed;
+        _stage = _isServiceFeeFlow
+            ? PaymentFlowStage.unavailable
+            : PaymentFlowStage.failed;
         _notify();
         return false;
       }
@@ -303,7 +371,9 @@ final class PaymentController extends ChangeNotifier {
           return false;
         case PaymentActionOutcome.unavailable:
           _errorCode = actionResult.errorCode ?? 'PAYMENT_ACTION_UNAVAILABLE';
-          _stage = PaymentFlowStage.failed;
+          _stage = _isServiceFeeFlow
+              ? PaymentFlowStage.unavailable
+              : PaymentFlowStage.failed;
           _notify();
           return false;
         case PaymentActionOutcome.completed:
@@ -344,11 +414,12 @@ final class PaymentController extends ChangeNotifier {
           refresh: true,
         );
         if (!_isCurrent(operation)) return false;
-        _payment = refreshed;
-        _applyStatus(refreshed);
+        final merged = _preserveRedirect(_payment, refreshed);
+        _payment = merged;
+        _applyStatus(merged);
         _notify();
-        if (refreshed.status == PaymentStatus.succeeded) return true;
-        if (!_isPending(refreshed.status)) return false;
+        if (merged.status == PaymentStatus.succeeded) return true;
+        if (!_isPending(merged.status)) return false;
       } on Object catch (error) {
         if (!_isCurrent(operation)) return false;
         _errorMessage = _messageFor(error);
@@ -362,8 +433,16 @@ final class PaymentController extends ChangeNotifier {
     return false;
   }
 
-  void retryWithNewAttempt() {
-    if (isBusy) return;
+  bool retryWithNewAttempt() {
+    if (isBusy) return false;
+    final currentStatus = _payment?.status;
+    final canRetry = _isServiceFeeFlow
+        ? currentStatus == PaymentStatus.failed ||
+            currentStatus == PaymentStatus.expired
+        : currentStatus == PaymentStatus.failed ||
+            currentStatus == PaymentStatus.cancelled ||
+            currentStatus == PaymentStatus.expired;
+    if (!canRetry) return false;
     _payment = null;
     _awaitingExternalReturn = false;
     if (!_providers.contains(_selectedProvider)) {
@@ -373,9 +452,24 @@ final class PaymentController extends ChangeNotifier {
     _stage = PaymentFlowStage.ready;
     _clearError();
     _notify();
+    return true;
   }
 
   void _applyStatus(PaymentAttempt value) {
+    if (_isServiceFeeFlow && !_hasValidServiceFeeContract(value)) {
+      _stage = PaymentFlowStage.unavailable;
+      _errorCode = _serviceFeeContractError(value);
+      _errorMessage = value.failureMessage;
+      return;
+    }
+    if (_isServiceFeeFlow &&
+        value.status == PaymentStatus.requiresAction &&
+        !_hasRedirectAction(value)) {
+      _stage = PaymentFlowStage.unavailable;
+      _errorCode = 'PAYMENT_NEXT_ACTION_MISSING';
+      _errorMessage = value.failureMessage;
+      return;
+    }
     _stage = switch (value.status) {
       PaymentStatus.succeeded => PaymentFlowStage.succeeded,
       PaymentStatus.requiresAction => PaymentFlowStage.requiresAction,
@@ -391,6 +485,45 @@ final class PaymentController extends ChangeNotifier {
     };
     _errorCode = value.failureCode;
     _errorMessage = value.failureMessage;
+  }
+
+  PaymentAttempt _preserveRedirect(
+    PaymentAttempt? previous,
+    PaymentAttempt refreshed,
+  ) {
+    if (!_isServiceFeeFlow ||
+        previous == null ||
+        previous.id != refreshed.id ||
+        refreshed.nextAction != null ||
+        !_hasRedirectAction(previous)) {
+      return refreshed;
+    }
+    return refreshed.withNextAction(previous.nextAction!);
+  }
+
+  bool _hasValidServiceFeeContract(PaymentAttempt value) =>
+      value.paymentType == PaymentType.travelGroundServiceFee &&
+      value.provider == PaymentProvider.alipayPlus &&
+      value.currency == 'USD' &&
+      value.amountMinor != null &&
+      value.amountMinor! >= 0;
+
+  String _serviceFeeContractError(PaymentAttempt value) {
+    if (value.currency != 'USD') return 'PAYMENT_CURRENCY_MISMATCH';
+    if (value.amountMinor == null || value.amountMinor! < 0) {
+      return 'PAYMENT_AMOUNT_MISSING';
+    }
+    return 'PAYMENT_RESPONSE_INVALID';
+  }
+
+  bool _hasRedirectAction(PaymentAttempt value) =>
+      value.nextAction?.type == PaymentNextActionType.redirect &&
+      (value.nextAction?.url?.trim().isNotEmpty ?? false);
+
+  void _markProviderUnavailable(Object error) {
+    _stage = PaymentFlowStage.unavailable;
+    _errorCode = 'PAYMENT_PROVIDER_UNAVAILABLE';
+    _errorMessage = _messageFor(error);
   }
 
   void _failWith(Object error) {
@@ -426,6 +559,7 @@ bool _isPending(PaymentStatus status) => const {
     }.contains(status);
 
 String _paymentMethod(PaymentProvider provider) => switch (provider) {
+      PaymentProvider.alipayPlus => 'ALIPAY_PLUS_CASHIER',
       PaymentProvider.stripe => 'CARD',
       PaymentProvider.paypal => 'PAYPAL',
       PaymentProvider.wechatPay => 'WECHAT_PAY',
@@ -447,6 +581,13 @@ bool _outcomeMayBeUnknown(Object error) {
   if (error is FormatException) return true;
   return error is ApiException &&
       (error.httpStatus == null || error.businessCode == 503);
+}
+
+bool _isProviderUnavailable(Object error) {
+  if (error is! ApiException) return false;
+  return error.httpStatus == 503 ||
+      error.businessCode == 503 ||
+      error.message.trim().toUpperCase() == 'PAYMENT_PROVIDER_UNAVAILABLE';
 }
 
 bool _isMissingPayment(Object error) {

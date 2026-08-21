@@ -2,6 +2,10 @@ import 'package:flutter/foundation.dart';
 import 'package:joysong_flutter/features/orders/domain/money.dart';
 
 enum OrderStatus {
+  pendingServiceFee('PENDING_SERVICE_FEE', '待支付旅游地接服务费'),
+  serviceActive('SERVICE_ACTIVE', '旅游地接服务中'),
+  refundReview('REFUND_REVIEW', '退款审核中'),
+  refundProcessing('REFUND_PROCESSING', '退款处理中'),
   pendingPayment('PENDING_PAYMENT', '待支付面诊金'),
   consultationPaid('CONSULTATION_PAID', '待到店核销'),
   verified('VERIFIED', '待支付尾款'),
@@ -29,9 +33,28 @@ enum OrderStatus {
   }
 }
 
+enum OrderPaymentFlow {
+  travelGroundServiceOnly('TRAVEL_GROUND_SERVICE_ONLY'),
+  legacyMedical('LEGACY_MEDICAL'),
+  unknown('UNKNOWN');
+
+  const OrderPaymentFlow(this.wireValue);
+
+  final String wireValue;
+
+  static OrderPaymentFlow fromWire(Object? value) {
+    final raw = value?.toString().trim().toUpperCase() ?? '';
+    return values.firstWhere(
+      (flow) => flow.wireValue == raw,
+      orElse: () => unknown,
+    );
+  }
+}
+
 enum RefundStatus {
   none('NONE', '未申请'),
   pending('PENDING', '退款审核中'),
+  processing('REFUND_PROCESSING', '退款处理中'),
   approved('APPROVED', '退款已批准'),
   rejected('REJECTED', '退款被拒绝'),
   cancelled('CANCELLED', '退款已取消'),
@@ -64,6 +87,7 @@ final class Order {
     required this.projectName,
     required this.institutionName,
     this.consultantName = '',
+    this.consultantAvatar,
     required this.doctorName,
     required this.coverImage,
     required this.amount,
@@ -73,6 +97,16 @@ final class Order {
     required this.remainingAmount,
     required this.refundAmount,
     required this.status,
+    this.paymentFlow = OrderPaymentFlow.legacyMedical,
+    this.currency = 'USD',
+    this.medicalListPriceMinor,
+    this.platformServiceRateBps,
+    this.travelGroundServiceFeeMinor,
+    this.consultantBound = false,
+    this.serviceActivated = false,
+    this.consultantDetailsVisible = false,
+    this.serviceConversationReadable = false,
+    this.serviceMessagingEnabled = false,
     required this.refundStatus,
     required this.quantity,
     required this.remark,
@@ -94,6 +128,7 @@ final class Order {
   final String projectName;
   final String institutionName;
   final String consultantName;
+  final String? consultantAvatar;
   final String doctorName;
   final String coverImage;
   final Money amount;
@@ -103,6 +138,16 @@ final class Order {
   final Money remainingAmount;
   final Money refundAmount;
   final OrderStatus status;
+  final OrderPaymentFlow paymentFlow;
+  final String currency;
+  final int? medicalListPriceMinor;
+  final int? platformServiceRateBps;
+  final int? travelGroundServiceFeeMinor;
+  final bool consultantBound;
+  final bool serviceActivated;
+  final bool consultantDetailsVisible;
+  final bool serviceConversationReadable;
+  final bool serviceMessagingEnabled;
   final RefundStatus refundStatus;
   final int quantity;
   final String remark;
@@ -113,14 +158,24 @@ final class Order {
   final DateTime? paymentTime;
   final DateTime? completedAt;
 
-  bool get canPayConsultation => status == OrderStatus.pendingPayment;
-  bool get canCancel => status == OrderStatus.pendingPayment;
+  bool get isTravelGroundServiceOnly =>
+      paymentFlow == OrderPaymentFlow.travelGroundServiceOnly;
+  bool get canPayTravelGroundServiceFee =>
+      isTravelGroundServiceOnly && status == OrderStatus.pendingServiceFee;
+  bool get canOpenServiceConversation => serviceMessagingEnabled;
+  bool get canPayConsultation =>
+      !isTravelGroundServiceOnly && status == OrderStatus.pendingPayment;
+  bool get canCancel => const {
+        OrderStatus.pendingPayment,
+        OrderStatus.pendingServiceFee,
+      }.contains(status);
   bool get canRequestVerificationCode => status == OrderStatus.consultationPaid;
   bool get canPayBalance => status == OrderStatus.verified;
   bool get showsCompletionCode => status == OrderStatus.balancePaid;
   bool get canConfirmCompletion => status == OrderStatus.pendingCompletion;
   bool get canRequestRefund =>
       refundStatus != RefundStatus.pending &&
+      refundStatus != RefundStatus.processing &&
       refundStatus != RefundStatus.approved &&
       const {
         OrderStatus.consultationPaid,
@@ -128,6 +183,7 @@ final class Order {
         OrderStatus.balancePaid,
         OrderStatus.pendingCompletion,
         OrderStatus.completed,
+        OrderStatus.serviceActive,
       }.contains(status);
   bool get canCancelRefund => refundStatus == RefundStatus.pending;
   bool get canDelete => const {
@@ -151,6 +207,7 @@ final class Order {
       projectName: stringValue(map['projectName'], fallback: '项目'),
       institutionName: stringValue(map['institutionName']),
       consultantName: stringValue(map['consultantName']),
+      consultantAvatar: nullableString(map['consultantAvatar']),
       doctorName: stringValue(map['doctorName']),
       coverImage: stringValue(map['coverImage']),
       amount: Money.parse(map['amount'] ?? map['price'], field: '订单金额'),
@@ -163,6 +220,17 @@ final class Order {
           Money.fromJsonOrZero(map['remainingAmount'], field: '尾款'),
       refundAmount: Money.fromJsonOrZero(map['refundAmount'], field: '退款金额'),
       status: OrderStatus.fromWire(map['status']),
+      paymentFlow: OrderPaymentFlow.fromWire(map['paymentFlow']),
+      currency: stringValue(map['currency'], fallback: 'USD').toUpperCase(),
+      medicalListPriceMinor: nullableInt(map['medicalListPriceMinor']),
+      platformServiceRateBps: nullableInt(map['platformServiceRateBps']),
+      travelGroundServiceFeeMinor:
+          nullableInt(map['travelGroundServiceFeeMinor']),
+      consultantBound: map['consultantBound'] == true,
+      serviceActivated: map['serviceActivated'] == true,
+      consultantDetailsVisible: map['consultantDetailsVisible'] == true,
+      serviceConversationReadable: map['serviceConversationReadable'] == true,
+      serviceMessagingEnabled: map['serviceMessagingEnabled'] == true,
       refundStatus: RefundStatus.fromWire(map['refundStatus']),
       quantity: intValue(map['quantity'], fallback: 1),
       remark: stringValue(map['remark']),
@@ -344,6 +412,13 @@ int requiredInt(Map<String, dynamic> map, String key, String label) {
   final parsed = int.tryParse(value?.toString() ?? '');
   if (parsed == null) throw FormatException('$label缺少有效的 $key');
   return parsed;
+}
+
+int? nullableInt(Object? value) {
+  if (value == null) return null;
+  if (value is int) return value;
+  if (value is num && value == value.toInt()) return value.toInt();
+  return int.tryParse(value.toString());
 }
 
 DateTime? localDateTime(Object? value) {

@@ -17,8 +17,11 @@ final class PaymentStrings {
   String get paymentTitle => pick('确认支付', 'Confirm payment');
   String get selectPaymentMethod => pick('选择支付方式', 'Select a payment method');
   String get paymentMethod => pick('支付方式', 'Payment method');
+  String get paymentValidUntil => pick('支付有效期至', 'Payment valid until');
   String get amountDue => pick('应付金额', 'Amount due');
   String get paymentAmount => pick('支付金额', 'Payment amount');
+  String get travelGroundServiceFee =>
+      pick('旅游地接服务费', 'Travel ground service fee');
   String get consultationFee => pick('面诊金', 'Consultation fee');
   String get balancePayment => pick('支付尾款', 'Balance payment');
   String get continuePayment => pick('继续支付', 'Continue to payment');
@@ -50,6 +53,8 @@ final class PaymentStrings {
   String get paymentExpired => pick('支付已超时', 'Payment expired');
   String get paymentExpiredHint => pick('本次支付请求已失效，请重新发起支付。',
       'This payment request expired. Start a new payment.');
+  String get paymentUnavailable =>
+      pick('支付服务暂不可用', 'Payment temporarily unavailable');
   String get paymentStatusUnknown => pick('支付结果待确认', 'Payment result pending');
   String get paymentStatusUnknownHint => pick(
         '请勿重复支付。我们正在向支付平台确认结果。',
@@ -63,6 +68,7 @@ final class PaymentStrings {
 
   String providerLabel(String provider) =>
       switch (provider.trim().toUpperCase()) {
+        'ALIPAY_PLUS' => 'Alipay+',
         'STRIPE' => pick('银行卡', 'Card'),
         'PAYPAL' => 'PayPal',
         'WECHAT_PAY' => pick('微信支付', 'WeChat Pay'),
@@ -72,6 +78,7 @@ final class PaymentStrings {
 
   String paymentTypeLabel(String paymentType) =>
       switch (paymentType.trim().toUpperCase()) {
+        'TRAVEL_GROUND_SERVICE_FEE' => travelGroundServiceFee,
         'CONSULTATION_FEE' => consultationFee,
         'BALANCE' => balancePayment,
         _ => pick('订单支付', 'Order payment'),
@@ -94,8 +101,8 @@ final class PaymentStrings {
   /// codes and provider diagnostics are never exposed to the customer.
   String errorMessage(String? code) => switch (code?.trim().toUpperCase()) {
         'PAYMENT_PROVIDER_UNAVAILABLE' => pick(
-            '该支付方式暂不可用，请更换支付方式。',
-            'This payment method is currently unavailable. Choose another method.',
+            '支付服务暂不可用，请稍后刷新重试。',
+            'Payment is temporarily unavailable. Refresh and try again later.',
           ),
         'UNSUPPORTED_PAYMENT_PROVIDER' || 'INVALID_PAYMENT_METHOD' => pick(
             '该支付方式不受支持，请更换支付方式。',

@@ -212,22 +212,32 @@ enum _OrderListTab {
   bool matches(Order order) => switch (this) {
         all => true,
         pendingPayment => order.refundStatus != RefundStatus.pending &&
+            order.refundStatus != RefundStatus.processing &&
             order.refundStatus != RefundStatus.rejected &&
             const {
+              OrderStatus.pendingServiceFee,
               OrderStatus.pendingPayment,
               OrderStatus.consultationPaid,
               OrderStatus.verified,
               OrderStatus.balancePaid,
             }.contains(order.status),
-        underReview => order.refundStatus == RefundStatus.pending,
+        underReview => order.refundStatus == RefundStatus.pending ||
+            order.refundStatus == RefundStatus.processing ||
+            const {
+              OrderStatus.refundReview,
+              OrderStatus.refundProcessing,
+            }.contains(order.status),
         rejected => order.refundStatus == RefundStatus.rejected,
         pending => order.refundStatus != RefundStatus.pending &&
+            order.refundStatus != RefundStatus.processing &&
             order.refundStatus != RefundStatus.rejected &&
             const {
+              OrderStatus.serviceActive,
               OrderStatus.consultationPaid,
               OrderStatus.pendingCompletion,
             }.contains(order.status),
         completed => order.refundStatus != RefundStatus.pending &&
+            order.refundStatus != RefundStatus.processing &&
             const {
               OrderStatus.completed,
               OrderStatus.pendingSettlement,
@@ -248,12 +258,16 @@ _OrderListTab _tabForInitialStatus(OrderStatus? status) => switch (status) {
       OrderStatus.settled =>
         _OrderListTab.completed,
       OrderStatus.pendingPayment ||
+      OrderStatus.pendingServiceFee ||
       OrderStatus.verified ||
       OrderStatus.balancePaid =>
         _OrderListTab.pendingPayment,
       OrderStatus.consultationPaid ||
+      OrderStatus.serviceActive ||
       OrderStatus.pendingCompletion =>
         _OrderListTab.pending,
+      OrderStatus.refundReview || OrderStatus.refundProcessing =>
+        _OrderListTab.underReview,
       OrderStatus.cancelled ||
       OrderStatus.refunded ||
       OrderStatus.disputeMediation =>
@@ -288,14 +302,17 @@ class _OrderCard extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      order.institutionName.isEmpty
+                      (order.isTravelGroundServiceOnly &&
+                                  !order.consultantDetailsVisible) ||
+                              order.institutionName.isEmpty
                           ? context.localized('娇颜颂预约', 'Joysong booking')
                           : order.institutionName,
                       style: Theme.of(context).textTheme.titleSmall,
                     ),
                   ),
                   Text(
-                    order.refundStatus == RefundStatus.pending
+                    !order.isTravelGroundServiceOnly &&
+                            order.refundStatus == RefundStatus.pending
                         ? _refundStatusLabel(context, order.refundStatus)
                         : _statusLabel(context, order.status),
                     style: Theme.of(context).textTheme.labelLarge?.copyWith(
@@ -354,7 +371,9 @@ class _OrderCard extends StatelessWidget {
                         Align(
                           alignment: Alignment.centerRight,
                           child: Text(
-                            order.amount.formatted,
+                            order.isTravelGroundServiceOnly
+                                ? _travelServiceFee(order)
+                                : order.amount.formatted,
                             style: Theme.of(context).textTheme.titleMedium,
                           ),
                         ),
@@ -429,6 +448,16 @@ String _formatOrderDateTime(DateTime value) =>
 
 String _statusLabel(BuildContext context, OrderStatus status) =>
     switch (status) {
+      OrderStatus.pendingServiceFee => context.localized(
+          '待支付旅游地接服务费',
+          'Travel ground service fee due',
+        ),
+      OrderStatus.serviceActive =>
+        context.localized('旅游地接服务中', 'Travel ground service active'),
+      OrderStatus.refundReview =>
+        context.localized('退款审核中', 'Refund under review'),
+      OrderStatus.refundProcessing =>
+        context.localized('退款处理中', 'Refund processing'),
       OrderStatus.pendingPayment => context.localized('待付款', 'Pending payment'),
       OrderStatus.consultationPaid => context.localized('已付定金', 'Deposit paid'),
       OrderStatus.verified => context.localized('已核销', 'Verified'),
@@ -453,6 +482,7 @@ Color _orderStatusColor(
 ) {
   final colors = Theme.of(context).colorScheme;
   if (refundStatus == RefundStatus.pending ||
+      refundStatus == RefundStatus.processing ||
       refundStatus == RefundStatus.approved) {
     return refundStatus == RefundStatus.approved
         ? colors.onSurfaceVariant
@@ -462,7 +492,11 @@ Color _orderStatusColor(
     OrderStatus.completed || OrderStatus.settled => Colors.green.shade700,
     OrderStatus.cancelled || OrderStatus.refunded => colors.onSurfaceVariant,
     OrderStatus.disputeMediation => colors.error,
-    OrderStatus.pendingPayment || OrderStatus.verified => colors.primary,
+    OrderStatus.refundReview || OrderStatus.refundProcessing => colors.tertiary,
+    OrderStatus.pendingPayment ||
+    OrderStatus.pendingServiceFee ||
+    OrderStatus.verified =>
+      colors.primary,
     _ => colors.secondary,
   };
 }
@@ -471,9 +505,19 @@ String _refundStatusLabel(BuildContext context, RefundStatus status) =>
     switch (status) {
       RefundStatus.none => context.localized('无退款', 'No refund'),
       RefundStatus.pending => context.localized('退款中', 'Refund pending'),
+      RefundStatus.processing =>
+        context.localized('退款处理中', 'Refund processing'),
       RefundStatus.approved => context.localized('退款成功', 'Refunded'),
       RefundStatus.rejected => context.localized('退款驳回', 'Refund rejected'),
       RefundStatus.cancelled => context.localized('退款已取消', 'Refund cancelled'),
       RefundStatus.unknown =>
         context.localized('退款状态未知', 'Unknown refund status'),
     };
+
+String _travelServiceFee(Order order) {
+  final minor = order.travelGroundServiceFeeMinor;
+  if (order.currency != 'USD' || minor == null || minor < 0) return '--';
+  final digits = minor.toString().padLeft(3, '0');
+  return '\$${digits.substring(0, digits.length - 2)}.'
+      '${digits.substring(digits.length - 2)}';
+}

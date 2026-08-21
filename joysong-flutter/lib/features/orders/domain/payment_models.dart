@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
 
 enum PaymentType {
+  travelGroundServiceFee('TRAVEL_GROUND_SERVICE_FEE'),
   consultationFee('CONSULTATION_FEE'),
   balance('BALANCE'),
   unknown('UNKNOWN');
@@ -19,6 +20,7 @@ enum PaymentType {
 }
 
 enum PaymentProvider {
+  alipayPlus('ALIPAY_PLUS'),
   stripe('STRIPE'),
   paypal('PAYPAL'),
   wechatPay('WECHAT_PAY'),
@@ -76,10 +78,7 @@ enum PaymentStatus {
 }
 
 enum PaymentNextActionType {
-  stripeClientSecret('STRIPE_CLIENT_SECRET'),
   redirect('REDIRECT'),
-  wechatSdkParams('WECHAT_SDK_PARAMS'),
-  alipayOrderString('ALIPAY_ORDER_STRING'),
   unknown('UNKNOWN');
 
   const PaymentNextActionType(this.wireValue);
@@ -98,26 +97,17 @@ enum PaymentNextActionType {
 final class PaymentNextAction {
   const PaymentNextAction({
     required this.type,
-    this.clientSecret,
     this.url,
-    this.params,
-    this.orderString,
   });
 
   final PaymentNextActionType type;
-  final String? clientSecret;
   final String? url;
-  final Map<String, String>? params;
-  final String? orderString;
 
   factory PaymentNextAction.fromJson(Object? json) {
     final map = jsonMap(json, '支付下一步操作');
     return PaymentNextAction(
       type: PaymentNextActionType.fromWire(map['type']),
-      clientSecret: nullableString(map['clientSecret']),
       url: nullableString(map['url']),
-      params: _stringMap(map['params']),
-      orderString: nullableString(map['orderString']),
     );
   }
 }
@@ -134,6 +124,7 @@ final class PaymentAttempt {
     required this.createdAt,
     this.paymentMethod,
     this.amountMinor,
+    this.refundedAmountMinor,
     this.providerPaymentId,
     this.failureCode,
     this.failureMessage,
@@ -149,6 +140,7 @@ final class PaymentAttempt {
   final String? paymentMethod;
   final String currency;
   final int? amountMinor;
+  final int? refundedAmountMinor;
   final PaymentStatus status;
   final String? providerPaymentId;
   final String? failureCode;
@@ -169,7 +161,9 @@ final class PaymentAttempt {
       provider: PaymentProvider.fromWire(map['provider']),
       paymentMethod: nullableString(map['paymentMethod']),
       currency: requiredString(map, 'currency', '支付尝试').toUpperCase(),
-      amountMinor: _nullableInt(map['amountMinor']),
+      amountMinor: _nullableMinor(map['amountMinor'], 'amountMinor'),
+      refundedAmountMinor:
+          _nullableMinor(map['refundedAmountMinor'], 'refundedAmountMinor'),
       status: PaymentStatus.fromWire(map['status']),
       providerPaymentId: nullableString(map['providerPaymentId']),
       failureCode: nullableString(map['failureCode']),
@@ -182,6 +176,25 @@ final class PaymentAttempt {
       updatedAt: localDateTime(map['updatedAt']),
     );
   }
+
+  PaymentAttempt withNextAction(PaymentNextAction value) => PaymentAttempt(
+        id: id,
+        orderId: orderId,
+        paymentType: paymentType,
+        provider: provider,
+        paymentMethod: paymentMethod,
+        currency: currency,
+        amountMinor: amountMinor,
+        refundedAmountMinor: refundedAmountMinor,
+        status: status,
+        providerPaymentId: providerPaymentId,
+        failureCode: failureCode,
+        failureMessage: failureMessage,
+        nextAction: value,
+        expiresAt: expiresAt,
+        createdAt: createdAt,
+        updatedAt: updatedAt,
+      );
 }
 
 T _enumFromWire<T>(
@@ -197,22 +210,11 @@ T _enumFromWire<T>(
   );
 }
 
-int? _nullableInt(Object? value) {
+int? _nullableMinor(Object? value, String field) {
   if (value == null) return null;
   if (value is int) return value;
-  if (value is num) return value.toInt();
-  return int.tryParse(value.toString());
-}
-
-Map<String, String>? _stringMap(Object? value) {
-  if (value == null) return null;
-  if (value is! Map) throw const FormatException('支付渠道参数不是 JSON 对象');
-  final result = <String, String>{};
-  for (final entry in value.entries) {
-    if (entry.key is! String || entry.value is! String) {
-      throw const FormatException('支付渠道参数包含无效字段');
-    }
-    result[entry.key as String] = entry.value as String;
-  }
-  return Map.unmodifiable(result);
+  if (value is num && value == value.toInt()) return value.toInt();
+  final parsed = int.tryParse(value.toString());
+  if (parsed == null) throw FormatException('支付尝试缺少有效的 $field');
+  return parsed;
 }

@@ -1,3 +1,4 @@
+import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/features/orders/domain/money.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
 import 'package:joysong_flutter/features/orders/domain/orders_repository.dart';
@@ -6,7 +7,18 @@ import 'package:joysong_flutter/features/orders/domain/payment_models.dart';
 Order sampleOrder({
   String id = 'order-1',
   OrderStatus status = OrderStatus.pendingPayment,
+  OrderPaymentFlow paymentFlow = OrderPaymentFlow.legacyMedical,
   RefundStatus refundStatus = RefundStatus.none,
+  String institutionId = 'institution-1',
+  String consultantId = 'consultant-1',
+  String institutionName = '娇颜颂医疗美容',
+  String consultantName = '李咨询师',
+  String? consultantAvatar,
+  bool consultantBound = false,
+  bool serviceActivated = false,
+  bool consultantDetailsVisible = false,
+  bool serviceConversationReadable = false,
+  bool serviceMessagingEnabled = false,
   String? verifyCode,
   bool hasReview = false,
 }) =>
@@ -15,12 +27,13 @@ Order sampleOrder({
       orderNo: 'JOY202608060001',
       projectId: 'project-1',
       institutionProjectId: 'ip-1',
-      institutionId: 'institution-1',
-      consultantId: 'consultant-1',
+      institutionId: institutionId,
+      consultantId: consultantId,
       doctorId: 'doctor-1',
       projectName: '光子嫩肤',
-      institutionName: '娇颜颂医疗美容',
-      consultantName: '李咨询师',
+      institutionName: institutionName,
+      consultantName: consultantName,
+      consultantAvatar: consultantAvatar,
       doctorName: '张医生',
       coverImage: '',
       amount: Money.parse('1280.50'),
@@ -30,6 +43,15 @@ Order sampleOrder({
       remainingAmount: Money.parse('1180.50'),
       refundAmount: Money.zero,
       status: status,
+      paymentFlow: paymentFlow,
+      medicalListPriceMinor: 100000,
+      platformServiceRateBps: 4000,
+      travelGroundServiceFeeMinor: 40000,
+      consultantBound: consultantBound,
+      serviceActivated: serviceActivated,
+      consultantDetailsVisible: consultantDetailsVisible,
+      serviceConversationReadable: serviceConversationReadable,
+      serviceMessagingEnabled: serviceMessagingEnabled,
       refundStatus: refundStatus,
       quantity: 1,
       remark: '',
@@ -42,22 +64,27 @@ Order sampleOrder({
 PaymentAttempt samplePaymentAttempt({
   String id = 'payment-1',
   String orderId = 'order-1',
-  PaymentType paymentType = PaymentType.consultationFee,
-  PaymentProvider provider = PaymentProvider.stripe,
+  PaymentType paymentType = PaymentType.travelGroundServiceFee,
+  PaymentProvider provider = PaymentProvider.alipayPlus,
   PaymentStatus status = PaymentStatus.succeeded,
   PaymentNextAction? nextAction,
+  int? amountMinor = 40000,
+  int refundedAmountMinor = 0,
+  DateTime? expiresAt,
 }) =>
     PaymentAttempt(
       id: id,
       orderId: orderId,
       paymentType: paymentType,
       provider: provider,
-      paymentMethod: 'CARD',
-      currency: 'CNY',
-      amountMinor: 10000,
+      paymentMethod: 'ALIPAY_PLUS_CASHIER',
+      currency: 'USD',
+      amountMinor: amountMinor,
+      refundedAmountMinor: refundedAmountMinor,
       status: status,
       providerPaymentId: 'provider-payment-1',
       nextAction: nextAction,
+      expiresAt: expiresAt,
       createdAt: DateTime(2026, 8, 7, 12),
       updatedAt: DateTime(2026, 8, 7, 12, 0, 1),
     );
@@ -65,6 +92,18 @@ PaymentAttempt samplePaymentAttempt({
 Map<String, Object?> sampleOrderJson({
   String id = 'order-1',
   String status = 'PENDING_PAYMENT',
+  String paymentFlow = 'LEGACY_MEDICAL',
+  Object? paidAmount = 0,
+  Object? institutionId = 'institution-1',
+  Object? consultantId = 'consultant-1',
+  Object? institutionName = '娇颜颂医疗美容',
+  Object? consultantName = '李咨询师',
+  Object? consultantAvatar,
+  bool consultantBound = false,
+  bool serviceActivated = false,
+  bool consultantDetailsVisible = false,
+  bool serviceConversationReadable = false,
+  bool serviceMessagingEnabled = false,
   String? verifyCode,
 }) =>
     {
@@ -72,18 +111,29 @@ Map<String, Object?> sampleOrderJson({
       'orderNo': 'JOY202608060001',
       'userId': 'user-1',
       'projectId': 'project-1',
-      'institutionId': 'institution-1',
-      'consultantId': 'consultant-1',
+      'institutionId': institutionId,
+      'consultantId': consultantId,
       'doctorId': 'doctor-1',
       'institutionProjectId': 'ip-1',
       'projectName': '光子嫩肤',
-      'institutionName': '娇颜颂医疗美容',
-      'consultantName': '李咨询师',
+      'institutionName': institutionName,
+      'consultantName': consultantName,
+      'consultantAvatar': consultantAvatar,
       'coverImage': '',
       'amount': '1280.50',
-      'paidAmount': 0,
+      'currency': 'USD',
+      'paidAmount': paidAmount,
       'discountAmount': '20.10',
       'status': status,
+      'paymentFlow': paymentFlow,
+      'medicalListPriceMinor': 100000,
+      'platformServiceRateBps': 4000,
+      'travelGroundServiceFeeMinor': 40000,
+      'consultantBound': consultantBound,
+      'serviceActivated': serviceActivated,
+      'consultantDetailsVisible': consultantDetailsVisible,
+      'serviceConversationReadable': serviceConversationReadable,
+      'serviceMessagingEnabled': serviceMessagingEnabled,
       'quantity': 1,
       'remark': '',
       'consultationFee': 100,
@@ -107,6 +157,7 @@ class FakeOrdersRepository implements OrdersRepository {
   OrderStatus? lastStatus;
   Future<Order>? actionFuture;
   PaymentAttempt? paymentAttempt;
+  Object? latestPaymentError;
   String? lastPaymentIdempotencyKey;
   PaymentType? lastPaymentType;
   PaymentProvider? lastPaymentProvider;
@@ -154,6 +205,18 @@ class FakeOrdersRepository implements OrdersRepository {
   }
 
   @override
+  Future<PaymentAttempt> createTravelGroundServicePaymentAttempt(
+    String orderId, {
+    required String idempotencyKey,
+  }) async {
+    paymentCalls += 1;
+    lastPaymentType = PaymentType.travelGroundServiceFee;
+    lastPaymentProvider = PaymentProvider.alipayPlus;
+    lastPaymentIdempotencyKey = idempotencyKey;
+    return paymentAttempt ?? samplePaymentAttempt(orderId: orderId);
+  }
+
+  @override
   Future<PaymentAttempt> getPayment(
     String paymentId, {
     bool refresh = false,
@@ -184,6 +247,28 @@ class FakeOrdersRepository implements OrdersRepository {
     lastPaymentRefresh = refresh;
     return paymentAttempt ??
         samplePaymentAttempt(orderId: orderId, paymentType: paymentType);
+  }
+
+  @override
+  Future<PaymentAttempt> getLatestTravelGroundServicePayment(
+    String orderId, {
+    bool refresh = false,
+  }) async {
+    paymentCalls += 1;
+    lastPaymentType = PaymentType.travelGroundServiceFee;
+    lastPaymentProvider = PaymentProvider.alipayPlus;
+    lastPaymentRefresh = refresh;
+    final error = latestPaymentError;
+    if (error != null) throw error;
+    final attempt = paymentAttempt;
+    if (attempt == null) {
+      throw const ApiException(
+        message: 'PAYMENT_NOT_FOUND',
+        httpStatus: 200,
+        businessCode: 404,
+      );
+    }
+    return attempt;
   }
 
   @override

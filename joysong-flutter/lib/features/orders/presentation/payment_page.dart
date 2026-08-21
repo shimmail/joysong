@@ -70,14 +70,23 @@ class _PaymentBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final order = controller.order;
-    final fallbackAmount = controller.paymentType == PaymentType.balance
-        ? order.remainingAmount
-        : order.consultationFee;
-    final amount = _paymentAmount(controller.payment, fallbackAmount.formatted);
+    final amount = controller.isServiceFeeFlow
+        ? _paymentAmount(controller.payment, acceptedCurrency: 'USD')
+        : _paymentAmount(
+            controller.payment,
+            fallback: controller.paymentType == PaymentType.balance
+                ? order.remainingAmount.formatted
+                : order.consultationFee.formatted,
+          );
+    final expiresAt = controller.payment?.expiresAt;
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
       children: [
-        _OrderSummary(order: order),
+        _OrderSummary(
+          order: order,
+          showInstitution:
+              !controller.isServiceFeeFlow || order.consultantDetailsVisible,
+        ),
         const SizedBox(height: 12),
         Card(
           child: Padding(
@@ -95,7 +104,11 @@ class _PaymentBody extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  strings.paymentTypeLabel(controller.paymentType.wireValue),
+                  controller.isServiceFeeFlow
+                      ? strings.travelGroundServiceFee
+                      : strings.paymentTypeLabel(
+                          controller.paymentType.wireValue,
+                        ),
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
@@ -103,19 +116,42 @@ class _PaymentBody extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 18),
-        Text(
-          strings.selectPaymentMethod,
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        const SizedBox(height: 8),
-        for (final provider in controller.providers)
-          _ProviderTile(
-            provider: provider,
-            selected: provider == controller.selectedProvider,
-            enabled: !controller.isBusy,
-            label: strings.providerLabel(provider.wireValue),
-            onTap: () => controller.selectProvider(provider),
+        if (controller.isServiceFeeFlow)
+          Card(
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.qr_code_2),
+                  title: const Text('Alipay+'),
+                  subtitle: Text(strings.paymentMethod),
+                ),
+                if (expiresAt != null) ...[
+                  const Divider(height: 1),
+                  ListTile(
+                    key: const Key('payment-expires-at'),
+                    leading: const Icon(Icons.schedule_outlined),
+                    title: Text(strings.paymentValidUntil),
+                    subtitle: Text(_formatPaymentDateTime(expiresAt)),
+                  ),
+                ],
+              ],
+            ),
+          )
+        else ...[
+          Text(
+            strings.selectPaymentMethod,
+            style: Theme.of(context).textTheme.titleMedium,
           ),
+          const SizedBox(height: 8),
+          for (final provider in controller.providers)
+            _ProviderTile(
+              provider: provider,
+              selected: provider == controller.selectedProvider,
+              enabled: !controller.isBusy,
+              label: strings.providerLabel(provider.wireValue),
+              onTap: () => controller.selectProvider(provider),
+            ),
+        ],
         const SizedBox(height: 14),
         _PaymentStatusCard(controller: controller, strings: strings),
         const SizedBox(height: 12),
@@ -235,6 +271,14 @@ class _PaymentStatusCard extends StatelessWidget {
           strings.paymentExpired,
           strings.paymentExpiredHint,
         ),
+      PaymentFlowStage.unavailable => (
+          Icons.cloud_off_outlined,
+          Theme.of(context).colorScheme.error,
+          strings.paymentUnavailable,
+          strings.errorMessage(
+            controller.errorCode ?? controller.errorMessage,
+          ),
+        ),
       PaymentFlowStage.partiallyRefunded => (
           Icons.currency_exchange,
           Theme.of(context).colorScheme.primary,
@@ -299,23 +343,33 @@ class _PaymentBottomBar extends StatelessWidget {
               icon: const Icon(Icons.arrow_back),
               label: Text(strings.backToOrder),
             ),
-          PaymentFlowStage.processing => OutlinedButton.icon(
+          PaymentFlowStage.processing ||
+          PaymentFlowStage.cancelled ||
+          PaymentFlowStage.unavailable =>
+            OutlinedButton.icon(
               key: const Key('payment-refresh'),
               onPressed: () => controller.refresh(),
               icon: const Icon(Icons.refresh),
               label: Text(strings.refreshStatus),
             ),
-          PaymentFlowStage.failed ||
-          PaymentFlowStage.cancelled ||
-          PaymentFlowStage.expired =>
+          PaymentFlowStage.failed || PaymentFlowStage.expired
+              when controller.canRetryWithNewAttempt =>
             FilledButton.icon(
               key: const Key('payment-retry'),
               onPressed: () {
-                controller.retryWithNewAttempt();
-                unawaited(controller.submit());
+                if (controller.retryWithNewAttempt()) {
+                  unawaited(controller.submit());
+                }
               },
               icon: const Icon(Icons.refresh),
               label: Text(strings.retry),
+            ),
+          PaymentFlowStage.failed || PaymentFlowStage.expired =>
+            OutlinedButton.icon(
+              key: const Key('payment-refresh'),
+              onPressed: () => controller.refresh(),
+              icon: const Icon(Icons.refresh),
+              label: Text(strings.refreshStatus),
             ),
           PaymentFlowStage.partiallyRefunded ||
           PaymentFlowStage.refunded =>
@@ -345,7 +399,9 @@ class _PaymentBottomBar extends StatelessWidget {
             ),
           PaymentFlowStage.ready => FilledButton(
               key: const Key('payment-submit'),
-              onPressed: () => controller.submit(),
+              onPressed: controller.canSubmit
+                  ? () => controller.submit()
+                  : null,
               child: Text(strings.payNow),
             ),
         },
@@ -355,9 +411,10 @@ class _PaymentBottomBar extends StatelessWidget {
 }
 
 class _OrderSummary extends StatelessWidget {
-  const _OrderSummary({required this.order});
+  const _OrderSummary({required this.order, required this.showInstitution});
 
   final Order order;
+  final bool showInstitution;
 
   @override
   Widget build(BuildContext context) => Card(
@@ -385,7 +442,7 @@ class _OrderSummary extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
-                    if (order.institutionName.isNotEmpty)
+                    if (showInstitution && order.institutionName.isNotEmpty)
                       Text(
                         order.institutionName,
                         maxLines: 1,
@@ -406,6 +463,7 @@ class _OrderSummary extends StatelessWidget {
 }
 
 IconData _providerIcon(PaymentProvider provider) => switch (provider) {
+      PaymentProvider.alipayPlus => Icons.qr_code_2,
       PaymentProvider.stripe => Icons.credit_card,
       PaymentProvider.paypal => Icons.account_balance_wallet_outlined,
       PaymentProvider.wechatPay => Icons.chat_bubble_outline,
@@ -413,10 +471,18 @@ IconData _providerIcon(PaymentProvider provider) => switch (provider) {
       PaymentProvider.unknown => Icons.payment,
     };
 
-String _paymentAmount(PaymentAttempt? payment, String fallback) {
+String _paymentAmount(
+  PaymentAttempt? payment, {
+  String fallback = '--',
+  String? acceptedCurrency,
+}) {
   final minor = payment?.amountMinor;
   final currency = payment?.currency.trim().toUpperCase();
-  if (minor == null || currency == null || currency.length != 3) {
+  if (minor == null ||
+      minor < 0 ||
+      currency == null ||
+      currency.length != 3 ||
+      (acceptedCurrency != null && currency != acceptedCurrency)) {
     return fallback;
   }
   final fractionDigits = const {
@@ -447,4 +513,10 @@ String _paymentAmount(PaymentAttempt? payment, String fallback) {
       }[currency] ??
       '$currency ';
   return '${negative ? '-' : ''}$symbol$number';
+}
+
+String _formatPaymentDateTime(DateTime value) {
+  String twoDigits(int part) => part.toString().padLeft(2, '0');
+  return '${value.year}-${twoDigits(value.month)}-${twoDigits(value.day)} '
+      '${twoDigits(value.hour)}:${twoDigits(value.minute)}';
 }

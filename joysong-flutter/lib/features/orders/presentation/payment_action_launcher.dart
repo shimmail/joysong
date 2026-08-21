@@ -8,7 +8,9 @@ import 'package:url_launcher/url_launcher.dart';
 /// Redirect payments are supported now. Native SDK actions remain fail-closed
 /// until the matching provider SDK and merchant configuration are installed.
 final class MobilePaymentActionLauncher implements PaymentActionLauncher {
-  const MobilePaymentActionLauncher();
+  const MobilePaymentActionLauncher({required this.allowedRedirectHosts});
+
+  final Set<String> allowedRedirectHosts;
 
   @override
   Future<PaymentActionResult> launch(PaymentAttempt payment) async {
@@ -21,7 +23,11 @@ final class MobilePaymentActionLauncher implements PaymentActionLauncher {
     }
     if (action.type == PaymentNextActionType.redirect) {
       final uri = Uri.tryParse(action.url ?? '');
-      if (uri == null || !isAllowedPaymentRedirect(uri)) {
+      if (uri == null ||
+          !isAllowedPaymentRedirect(
+            uri,
+            allowedRedirectHosts: allowedRedirectHosts,
+          )) {
         return const PaymentActionResult(
           PaymentActionOutcome.unavailable,
           errorCode: 'PAYMENT_REDIRECT_INVALID',
@@ -46,19 +52,17 @@ final class MobilePaymentActionLauncher implements PaymentActionLauncher {
 }
 
 @visibleForTesting
-bool isAllowedPaymentRedirect(Uri uri) {
-  const configured = String.fromEnvironment('PAYMENT_REDIRECT_HOSTS');
+bool isAllowedPaymentRedirect(
+  Uri uri, {
+  required Set<String> allowedRedirectHosts,
+}) {
   final scheme = uri.scheme.toLowerCase();
-  if (uri.host.isEmpty || scheme != 'https') {
+  if (uri.host.isEmpty || scheme != 'https' || uri.userInfo.isNotEmpty) {
     return false;
   }
-  final hosts = <String>{
-    'checkout.stripe.com',
-    ...configured
-      .split(',')
+  final hosts = allowedRedirectHosts
       .map((value) => value.trim().toLowerCase())
-      .where((value) => value.isNotEmpty),
-  };
+      .where((value) => value.isNotEmpty);
   final host = uri.host.toLowerCase();
   return hosts.any((allowed) => host == allowed || host.endsWith('.$allowed'));
 }

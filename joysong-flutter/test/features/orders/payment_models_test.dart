@@ -4,46 +4,53 @@ import 'package:joysong_flutter/features/orders/domain/payment_models.dart';
 import 'payment_test_fixtures.dart';
 
 void main() {
-  test('maps payment attempt and Stripe next action', () {
+  test('maps USD Alipay+ service-fee attempt and redirect action', () {
     final payment = PaymentAttempt.fromJson(
       paymentAttemptJson(
         status: 'REQUIRES_ACTION',
         nextAction: {
-          'type': 'STRIPE_CLIENT_SECRET',
-          'clientSecret': 'pi_secret',
+          'type': 'REDIRECT',
+          'url': 'https://cashier.alipayplus.com/pay/session-1',
         },
       ),
     );
 
-    expect(payment.paymentType, PaymentType.consultationFee);
-    expect(payment.provider, PaymentProvider.stripe);
+    expect(payment.paymentType, PaymentType.travelGroundServiceFee);
+    expect(payment.provider, PaymentProvider.alipayPlus);
     expect(payment.status, PaymentStatus.requiresAction);
     expect(payment.requiresAction, isTrue);
+    expect(payment.nextAction?.type, PaymentNextActionType.redirect);
     expect(
-      payment.nextAction?.type,
-      PaymentNextActionType.stripeClientSecret,
+      payment.nextAction?.url,
+      'https://cashier.alipayplus.com/pay/session-1',
     );
-    expect(payment.nextAction?.clientSecret, 'pi_secret');
-    expect(payment.amountMinor, 10000);
+    expect(payment.currency, 'USD');
+    expect(payment.amountMinor, 40000);
+    expect(payment.refundedAmountMinor, 0);
+    expect(payment.expiresAt, DateTime(2026, 8, 7, 12, 30));
   });
 
-  test('maps every supported next action payload', () {
-    final redirect = PaymentNextAction.fromJson({
-      'type': 'REDIRECT',
-      'url': 'https://pay.example/authorize',
-    });
-    final wechat = PaymentNextAction.fromJson({
+  test('fails closed for non-redirect next actions', () {
+    final unsupported = PaymentNextAction.fromJson({
       'type': 'WECHAT_SDK_PARAMS',
       'params': {'prepayId': 'prepay-1', 'nonceStr': 'nonce-1'},
     });
-    final alipay = PaymentNextAction.fromJson({
-      'type': 'ALIPAY_ORDER_STRING',
-      'orderString': 'signed-order',
-    });
 
-    expect(redirect.url, 'https://pay.example/authorize');
-    expect(wechat.params?['prepayId'], 'prepay-1');
-    expect(alipay.orderString, 'signed-order');
+    expect(unsupported.type, PaymentNextActionType.unknown);
+    expect(unsupported.url, isNull);
+  });
+
+  test('rejects fractional minor-unit amounts', () {
+    expect(
+      () => PaymentAttempt.fromJson(paymentAttemptJson(amountMinor: 40000.5)),
+      throwsFormatException,
+    );
+    expect(
+      () => PaymentAttempt.fromJson(
+        paymentAttemptJson(refundedAmountMinor: 1.5),
+      ),
+      throwsFormatException,
+    );
   });
 
   test('unknown server values degrade safely for forward compatibility', () {

@@ -44,31 +44,24 @@ void main() {
     });
   });
 
-  test('creates payment attempt with protocol body and idempotency key',
+  test('creates service-fee attempt at fixed endpoint without a body',
       () async {
     final client = _FakeApiClient()..responseData = paymentAttemptJson();
     final dataSource = ApiOrdersRemoteDataSource(client);
 
-    final payment = await dataSource.createPaymentAttempt(
+    final payment = await dataSource.createTravelGroundServicePaymentAttempt(
       'order-1',
-      paymentType: PaymentType.consultationFee,
-      provider: PaymentProvider.stripe,
-      paymentMethod: 'CARD',
       idempotencyKey: 'payment-key-1',
     );
 
     expect(payment.id, 'payment-1');
     expect(client.lastMethod, 'POST_IDEMPOTENT');
-    expect(client.lastPath, 'orders/order-1/payment-attempts');
+    expect(client.lastPath, 'orders/order-1/service-fee-payment-attempts');
     expect(client.lastIdempotencyKey, 'payment-key-1');
-    expect(client.lastBody, {
-      'paymentType': 'CONSULTATION_FEE',
-      'provider': 'STRIPE',
-      'paymentMethod': 'CARD',
-    });
+    expect(client.lastBody, isNull);
   });
 
-  test('queries payment and latest payment with refresh parameters', () async {
+  test('queries payment and fixed service-fee latest attempt', () async {
     final client = _FakeApiClient()..responseData = paymentAttemptJson();
     final dataSource = ApiOrdersRemoteDataSource(client);
 
@@ -76,30 +69,12 @@ void main() {
     expect(client.lastPath, 'payments/payment-1');
     expect(client.lastQuery, {'refresh': true});
 
-    await dataSource.getLatestPayment(
-      'order-1',
-      paymentType: PaymentType.balance,
-    );
+    await dataSource.getLatestTravelGroundServicePayment('order-1');
     expect(client.lastPath, 'orders/order-1/payments/latest');
     expect(client.lastQuery, {
-      'paymentType': 'BALANCE',
+      'paymentType': 'TRAVEL_GROUND_SERVICE_FEE',
       'refresh': false,
     });
-  });
-
-  test('confirms payment with idempotency key', () async {
-    final client = _FakeApiClient()..responseData = paymentAttemptJson();
-    final dataSource = ApiOrdersRemoteDataSource(client);
-
-    await dataSource.confirmPayment(
-      'payment-1',
-      idempotencyKey: 'confirm-key-1',
-    );
-
-    expect(client.lastMethod, 'POST_IDEMPOTENT');
-    expect(client.lastPath, 'payments/payment-1/confirm');
-    expect(client.lastIdempotencyKey, 'confirm-key-1');
-    expect(client.lastBody, isNull);
   });
 
   test('gets the consumer settlement using its current response contract',

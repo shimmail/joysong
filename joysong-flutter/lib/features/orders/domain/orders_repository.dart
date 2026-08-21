@@ -6,6 +6,16 @@ abstract interface class OrdersRepository {
 
   Future<Order> getOrder(String id);
 
+  Future<PaymentAttempt> createTravelGroundServicePaymentAttempt(
+    String orderId, {
+    required String idempotencyKey,
+  });
+
+  Future<PaymentAttempt> getLatestTravelGroundServicePayment(
+    String orderId, {
+    bool refresh = false,
+  });
+
   Future<PaymentAttempt> createPaymentAttempt(
     String orderId, {
     required PaymentType paymentType,

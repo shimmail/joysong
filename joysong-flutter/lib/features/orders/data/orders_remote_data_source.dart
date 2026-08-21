@@ -8,6 +8,16 @@ abstract interface class OrdersRemoteDataSource {
 
   Future<Order> getOrder(String id);
 
+  Future<PaymentAttempt> createTravelGroundServicePaymentAttempt(
+    String orderId, {
+    required String idempotencyKey,
+  });
+
+  Future<PaymentAttempt> getLatestTravelGroundServicePayment(
+    String orderId, {
+    bool refresh = false,
+  });
+
   Future<PaymentAttempt> createPaymentAttempt(
     String orderId, {
     required PaymentType paymentType,
@@ -79,6 +89,35 @@ final class ApiOrdersRemoteDataSource implements OrdersRemoteDataSource {
 
   @override
   Future<Order> getOrder(String id) => _orderPostOrGet(id, method: 'GET');
+
+  @override
+  Future<PaymentAttempt> createTravelGroundServicePaymentAttempt(
+    String orderId, {
+    required String idempotencyKey,
+  }) async {
+    final result = await _apiClient.postIdempotent<PaymentAttempt>(
+      'orders/$orderId/service-fee-payment-attempts',
+      idempotencyKey: idempotencyKey,
+      decodeData: PaymentAttempt.fromJson,
+    );
+    return _requiredPayment(result);
+  }
+
+  @override
+  Future<PaymentAttempt> getLatestTravelGroundServicePayment(
+    String orderId, {
+    bool refresh = false,
+  }) async {
+    final result = await _apiClient.get<PaymentAttempt>(
+      'orders/$orderId/payments/latest',
+      query: {
+        'paymentType': PaymentType.travelGroundServiceFee.wireValue,
+        'refresh': refresh,
+      },
+      decodeData: PaymentAttempt.fromJson,
+    );
+    return _requiredPayment(result);
+  }
 
   @override
   Future<PaymentAttempt> createPaymentAttempt(

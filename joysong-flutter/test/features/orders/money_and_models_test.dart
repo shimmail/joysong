@@ -31,6 +31,56 @@ void main() {
     expect(() => Order.fromJson(json), throwsFormatException);
   });
 
+  test('travel-service entitlements come only from explicit server flags', () {
+    final order = Order.fromJson(
+      sampleOrderJson(
+        status: 'PENDING_SERVICE_FEE',
+        paymentFlow: 'TRAVEL_GROUND_SERVICE_ONLY',
+        paidAmount: '1.00',
+        consultantId: 'consultant-must-not-imply-access',
+        consultantName: '不能据此激活',
+        serviceActivated: false,
+        consultantDetailsVisible: false,
+        serviceMessagingEnabled: false,
+      ),
+    );
+
+    expect(order.status, OrderStatus.pendingServiceFee);
+    expect(order.paymentFlow, OrderPaymentFlow.travelGroundServiceOnly);
+    expect(order.travelGroundServiceFeeMinor, 40000);
+    expect(order.serviceActivated, isFalse);
+    expect(order.consultantDetailsVisible, isFalse);
+    expect(order.canOpenServiceConversation, isFalse);
+  });
+
+  test('maps active and refund travel-service states and visible fields', () {
+    final active = Order.fromJson(
+      sampleOrderJson(
+        status: 'SERVICE_ACTIVE',
+        paymentFlow: 'TRAVEL_GROUND_SERVICE_ONLY',
+        consultantAvatar: 'https://cdn.example/consultant.jpg',
+        consultantBound: true,
+        serviceActivated: true,
+        consultantDetailsVisible: true,
+        serviceConversationReadable: true,
+        serviceMessagingEnabled: true,
+      ),
+    );
+
+    expect(active.status, OrderStatus.serviceActive);
+    expect(active.consultantAvatar, 'https://cdn.example/consultant.jpg');
+    expect(active.canOpenServiceConversation, isTrue);
+    expect(OrderStatus.fromWire('REFUND_REVIEW'), OrderStatus.refundReview);
+    expect(
+      OrderStatus.fromWire('REFUND_PROCESSING'),
+      OrderStatus.refundProcessing,
+    );
+    expect(
+      RefundStatus.fromWire('REFUND_PROCESSING'),
+      RefundStatus.processing,
+    );
+  });
+
   test('Settlement maps the consumer-safe minor-unit contract', () {
     final settlement = Settlement.fromJson({
       'settlementId': 42,

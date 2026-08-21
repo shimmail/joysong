@@ -12,6 +12,76 @@ import 'package:joysong_flutter/features/social/presentation/social_controller.d
 import 'order_test_fixtures.dart';
 
 void main() {
+  testWidgets('keeps unpaid travel-service fulfillment details redacted', (
+    tester,
+  ) async {
+    final repository = FakeOrdersRepository()
+      ..orders = [
+        sampleOrder(
+          status: OrderStatus.pendingServiceFee,
+          paymentFlow: OrderPaymentFlow.travelGroundServiceOnly,
+          consultantBound: true,
+        ),
+      ];
+    final controller = OrderDetailController(repository, orderId: 'order-1');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('zh'),
+        supportedLocales: const [Locale('zh')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
+        home: OrderDetailPage(controller: controller),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('支付旅游地接服务费后可查看地接资料并沟通'), findsOneWidget);
+    expect(find.text('旅游地接服务费'), findsAtLeastNWidgets(1));
+    expect(find.text('医疗费到院后直接向医院支付'), findsOneWidget);
+    expect(find.byKey(const Key('pay-service-fee-button')), findsOneWidget);
+    expect(find.byKey(const Key('service-chat-button')), findsNothing);
+    expect(find.text('娇颜颂医疗美容'), findsNothing);
+    expect(find.text('李咨询师'), findsNothing);
+    expect(find.text('面诊费'), findsNothing);
+    expect(find.text('尾款'), findsNothing);
+    expect(find.text('优惠金额'), findsNothing);
+  });
+
+  testWidgets('shows only server-entitled travel-service fulfillment details', (
+    tester,
+  ) async {
+    final repository = FakeOrdersRepository()
+      ..orders = [
+        sampleOrder(
+          status: OrderStatus.serviceActive,
+          paymentFlow: OrderPaymentFlow.travelGroundServiceOnly,
+          consultantBound: true,
+          serviceActivated: true,
+          consultantDetailsVisible: true,
+          serviceConversationReadable: true,
+          serviceMessagingEnabled: true,
+        ),
+      ];
+    final controller = OrderDetailController(repository, orderId: 'order-1');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('zh'),
+        supportedLocales: const [Locale('zh')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
+        home: OrderDetailPage(controller: controller),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('李咨询师'), findsOneWidget);
+    expect(find.text('娇颜颂医疗美容'), findsOneWidget);
+    expect(find.byKey(const Key('service-chat-button')), findsOneWidget);
+    expect(find.byKey(const Key('pay-service-fee-button')), findsNothing);
+    expect(find.byKey(const Key('pay-consultation-button')), findsNothing);
+    expect(find.byKey(const Key('pay-balance-button')), findsNothing);
+  });
+
   testWidgets('shows settlement pending and retries a support-data error',
       (tester) async {
     final repository = FakeOrdersRepository()

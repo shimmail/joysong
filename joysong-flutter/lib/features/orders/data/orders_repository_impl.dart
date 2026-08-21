@@ -26,6 +26,26 @@ final class OrdersRepositoryImpl implements OrdersRepository {
   Future<Order> getOrder(String id) => _remote.getOrder(id);
 
   @override
+  Future<PaymentAttempt> createTravelGroundServicePaymentAttempt(
+    String orderId, {
+    required String idempotencyKey,
+  }) =>
+      _remote.createTravelGroundServicePaymentAttempt(
+        orderId,
+        idempotencyKey: idempotencyKey,
+      );
+
+  @override
+  Future<PaymentAttempt> getLatestTravelGroundServicePayment(
+    String orderId, {
+    bool refresh = false,
+  }) =>
+      _remote.getLatestTravelGroundServicePayment(
+        orderId,
+        refresh: refresh,
+      );
+
+  @override
   Future<PaymentAttempt> createPaymentAttempt(
     String orderId, {
     required PaymentType paymentType,

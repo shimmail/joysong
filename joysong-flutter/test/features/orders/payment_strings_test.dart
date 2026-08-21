@@ -9,8 +9,10 @@ void main() {
 
       expect(chinese.paymentTitle, '确认支付');
       expect(english.paymentTitle, 'Confirm payment');
-      expect(chinese.providerLabel('WECHAT_PAY'), '微信支付');
-      expect(english.providerLabel('WECHAT_PAY'), 'WeChat Pay');
+      expect(chinese.travelGroundServiceFee, '旅游地接服务费');
+      expect(english.travelGroundServiceFee, 'Travel ground service fee');
+      expect(chinese.providerLabel('ALIPAY_PLUS'), 'Alipay+');
+      expect(english.providerLabel('ALIPAY_PLUS'), 'Alipay+');
       expect(chinese.amount('¥100.00'), '支付金额：¥100.00');
       expect(english.amount(r'$100.00'), r'Amount: $100.00');
     });
@@ -30,11 +32,11 @@ void main() {
 
       expect(
         chinese.errorMessage('PAYMENT_PROVIDER_UNAVAILABLE'),
-        '该支付方式暂不可用，请更换支付方式。',
+        '支付服务暂不可用，请稍后刷新重试。',
       );
       expect(
         english.errorMessage('PAYMENT_PROVIDER_UNAVAILABLE'),
-        'This payment method is currently unavailable. Choose another method.',
+        'Payment is temporarily unavailable. Refresh and try again later.',
       );
       expect(
         chinese.errorMessage('RAW_PROVIDER_DIAGNOSTIC'),

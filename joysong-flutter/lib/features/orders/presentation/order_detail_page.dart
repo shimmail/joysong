@@ -262,10 +262,17 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
           _ErrorBanner(message: controller.errorMessage!),
         _StatusHeader(order: order),
         const SizedBox(height: 12),
-        _OrderInformation(order: order),
+        if (order.isTravelGroundServiceOnly)
+          _TravelGroundServiceInformation(order: order)
+        else
+          _OrderInformation(order: order),
         const SizedBox(height: 12),
-        _PaymentInformation(order: order),
-        if (order.verifyCode != null &&
+        if (order.isTravelGroundServiceOnly)
+          _TravelGroundServicePaymentInformation(order: order)
+        else
+          _PaymentInformation(order: order),
+        if (!order.isTravelGroundServiceOnly &&
+            order.verifyCode != null &&
             (order.status == OrderStatus.consultationPaid ||
                 order.status == OrderStatus.balancePaid)) ...[
           const SizedBox(height: 12),
@@ -278,15 +285,18 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
           const SizedBox(height: 12),
           _RefundCard(refund: controller.refund!),
         ],
-        if (controller.settlement != null) ...[
+        if (!order.isTravelGroundServiceOnly &&
+            controller.settlement != null) ...[
           const SizedBox(height: 12),
           _SettlementCard(settlement: controller.settlement!),
         ],
-        if (controller.isSettlementGenerationPending) ...[
+        if (!order.isTravelGroundServiceOnly &&
+            controller.isSettlementGenerationPending) ...[
           const SizedBox(height: 12),
           _SettlementPendingCard(),
         ],
-        if (controller.settlementErrorMessage != null) ...[
+        if (!order.isTravelGroundServiceOnly &&
+            controller.settlementErrorMessage != null) ...[
           const SizedBox(height: 12),
           _SettlementErrorCard(
             message: controller.settlementErrorMessage!,
@@ -304,6 +314,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
         _OrderActions(
           controller: controller,
           order: order,
+          onPayServiceFee: () => _openServiceFeePayment(order),
           onPayConsultation: () => _openPayment(order, balance: false),
           onVerificationCode: () => _run(controller.requestVerificationCode),
           onPayBalance: () => _openPayment(order, balance: true),
@@ -356,7 +367,28 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
       order: order,
       paymentType: balance ? PaymentType.balance : PaymentType.consultationFee,
       providers: const [PaymentProvider.stripe],
-      actionLauncher: const MobilePaymentActionLauncher(),
+      actionLauncher: const MobilePaymentActionLauncher(
+        allowedRedirectHosts: {'checkout.stripe.com'},
+      ),
+    );
+    bool? paid;
+    try {
+      paid = await Navigator.of(context).push<bool>(MaterialPageRoute(
+        builder: (_) => PaymentPage(controller: controller),
+      ));
+    } finally {
+      controller.dispose();
+    }
+    if (paid == true && mounted) await widget.controller.load();
+  }
+
+  Future<void> _openServiceFeePayment(Order order) async {
+    final controller = PaymentController(
+      repository: widget.controller.repository,
+      order: order,
+      actionLauncher: const MobilePaymentActionLauncher(
+        allowedRedirectHosts: {'cashier.alipayplus.com'},
+      ),
     );
     bool? paid;
     try {
@@ -377,7 +409,8 @@ class _StatusHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final statusLabel = order.refundStatus == RefundStatus.pending
+    final statusLabel = !order.isTravelGroundServiceOnly &&
+            order.refundStatus == RefundStatus.pending
         ? _refundStatusText(context, order.refundStatus)
         : _orderStatusText(context, order.status);
     return Card(
@@ -429,6 +462,7 @@ Color _orderStatusColor(
 ) {
   final colors = Theme.of(context).colorScheme;
   if (refundStatus == RefundStatus.pending ||
+      refundStatus == RefundStatus.processing ||
       refundStatus == RefundStatus.approved) {
     return refundStatus == RefundStatus.approved
         ? colors.onSurfaceVariant
@@ -438,7 +472,11 @@ Color _orderStatusColor(
     OrderStatus.completed || OrderStatus.settled => Colors.green.shade700,
     OrderStatus.cancelled || OrderStatus.refunded => colors.onSurfaceVariant,
     OrderStatus.disputeMediation => colors.error,
-    OrderStatus.pendingPayment || OrderStatus.verified => colors.primary,
+    OrderStatus.refundReview || OrderStatus.refundProcessing => colors.tertiary,
+    OrderStatus.pendingPayment ||
+    OrderStatus.pendingServiceFee ||
+    OrderStatus.verified =>
+      colors.primary,
     _ => colors.secondary,
   };
 }
@@ -476,6 +514,103 @@ class _OrderInformation extends StatelessWidget {
               label: _isEnglish(context) ? 'Notes' : '备注',
               value: order.remark,
             ),
+        ],
+      );
+}
+
+class _TravelGroundServiceInformation extends StatelessWidget {
+  const _TravelGroundServiceInformation({required this.order});
+
+  final Order order;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!order.consultantDetailsVisible) {
+      final message = order.status == OrderStatus.pendingServiceFee
+          ? (_isEnglish(context)
+              ? 'Pay the travel ground service fee to view and contact your consultant.'
+              : '支付旅游地接服务费后可查看地接资料并沟通')
+          : (_isEnglish(context)
+              ? 'Travel ground service details are no longer available.'
+              : '地接资料当前不可查看');
+      return _DetailPanel(
+        title: _isEnglish(context) ? 'Travel ground service' : '地接服务',
+        children: [Text(message)],
+      );
+    }
+    return _DetailPanel(
+      title: _isEnglish(context) ? 'Travel ground service' : '地接服务',
+      children: [
+        if (order.consultantAvatar != null) ...[
+          CircleAvatar(
+            key: const Key('service-consultant-avatar'),
+            backgroundImage: NetworkImage(order.consultantAvatar!),
+          ),
+          const SizedBox(height: 8),
+        ],
+        if (order.consultantName.isNotEmpty)
+          _DetailLine(
+            label: _isEnglish(context) ? 'Consultant' : '地接人员',
+            value: order.consultantName,
+          ),
+        if (order.consultantId.isNotEmpty)
+          _DetailLine(
+            label: _isEnglish(context) ? 'Consultant ID' : '地接人员编号',
+            value: order.consultantId,
+          ),
+        if (order.institutionName.isNotEmpty)
+          _DetailLine(
+            label: _isEnglish(context) ? 'Institution' : '服务机构',
+            value: order.institutionName,
+          ),
+        if (order.institutionId.isNotEmpty)
+          _DetailLine(
+            label: _isEnglish(context) ? 'Institution ID' : '机构编号',
+            value: order.institutionId,
+          ),
+        if (order.canOpenServiceConversation)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.tonalIcon(
+              key: const Key('service-chat-button'),
+              onPressed: null,
+              icon: const Icon(Icons.chat_bubble_outline),
+              label: Text(_isEnglish(context) ? 'Service chat' : '地接沟通'),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _TravelGroundServicePaymentInformation extends StatelessWidget {
+  const _TravelGroundServicePaymentInformation({required this.order});
+
+  final Order order;
+
+  @override
+  Widget build(BuildContext context) => _DetailPanel(
+        title: _isEnglish(context) ? 'Payment details' : '费用信息',
+        children: [
+          _DetailLine(
+            label: _isEnglish(context)
+                ? 'Travel ground service fee'
+                : '旅游地接服务费',
+            value: order.currency == 'USD' &&
+                    order.travelGroundServiceFeeMinor != null &&
+                    order.travelGroundServiceFeeMinor! >= 0
+                ? _minorUsd(order.travelGroundServiceFeeMinor!)
+                : '--',
+          ),
+          const SizedBox(height: 6),
+          Text(
+            _isEnglish(context)
+                ? 'Pay medical fees directly to the hospital after arrival.'
+                : '医疗费到院后直接向医院支付',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+          ),
         ],
       );
 }
@@ -692,6 +827,7 @@ class _OrderActions extends StatelessWidget {
   const _OrderActions({
     required this.controller,
     required this.order,
+    required this.onPayServiceFee,
     required this.onPayConsultation,
     required this.onVerificationCode,
     required this.onPayBalance,
@@ -709,6 +845,7 @@ class _OrderActions extends StatelessWidget {
 
   final OrderDetailController controller;
   final Order order;
+  final VoidCallback onPayServiceFee;
   final VoidCallback onPayConsultation;
   final VoidCallback onVerificationCode;
   final VoidCallback onPayBalance;
@@ -726,6 +863,54 @@ class _OrderActions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final busy = controller.isBusy;
+    if (order.isTravelGroundServiceOnly) {
+      return Wrap(
+        spacing: 10,
+        runSpacing: 10,
+        alignment: WrapAlignment.end,
+        children: [
+          if (order.canCancel)
+            TextButton(
+              key: const Key('order-cancel-button'),
+              onPressed: busy ? null : onCancel,
+              child: Text(_isEnglish(context) ? 'Cancel order' : '取消订单'),
+            ),
+          if (order.canPayTravelGroundServiceFee)
+            FilledButton(
+              key: const Key('pay-service-fee-button'),
+              onPressed: busy ? null : onPayServiceFee,
+              child: Text(
+                _isEnglish(context)
+                    ? 'Pay travel ground service fee'
+                    : '支付旅游地接服务费',
+              ),
+            ),
+          if (order.canRequestRefund)
+            TextButton(
+              key: const Key('request-refund-button'),
+              onPressed: busy ? null : onRefund,
+              child: Text(_isEnglish(context) ? 'Request refund' : '申请退款'),
+            ),
+          if (order.canCancelRefund)
+            TextButton(
+              key: const Key('cancel-refund-button'),
+              onPressed: busy ? null : onCancelRefund,
+              child: Text(_isEnglish(context) ? 'Cancel refund' : '撤销退款'),
+            ),
+          if (order.canDelete)
+            TextButton(
+              key: const Key('delete-order-button'),
+              onPressed: busy ? null : onDelete,
+              child: Text(_isEnglish(context) ? 'Delete order' : '删除订单'),
+            ),
+          if (busy)
+            const SizedBox.square(
+              dimension: 22,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+        ],
+      );
+    }
     return Wrap(
       spacing: 10,
       runSpacing: 10,
@@ -895,6 +1080,10 @@ String _detailDateTime(DateTime value) =>
 String _orderStatusText(BuildContext context, OrderStatus status) {
   if (!_isEnglish(context)) return status.label;
   return switch (status) {
+    OrderStatus.pendingServiceFee => 'Travel ground service fee due',
+    OrderStatus.serviceActive => 'Travel ground service active',
+    OrderStatus.refundReview => 'Refund under review',
+    OrderStatus.refundProcessing => 'Refund processing',
     OrderStatus.pendingPayment => 'Consultation fee due',
     OrderStatus.consultationPaid => 'Awaiting visit',
     OrderStatus.verified => 'Balance due',
@@ -915,6 +1104,7 @@ String _refundStatusText(BuildContext context, RefundStatus status) {
   return switch (status) {
     RefundStatus.none => 'Not requested',
     RefundStatus.pending => 'Under review',
+    RefundStatus.processing => 'Refund processing',
     RefundStatus.approved => 'Approved',
     RefundStatus.rejected => 'Rejected',
     RefundStatus.cancelled => 'Cancelled',
