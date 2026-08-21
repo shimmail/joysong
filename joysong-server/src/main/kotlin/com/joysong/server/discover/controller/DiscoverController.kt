@@ -243,10 +243,10 @@ class DiscoverController(
     fun getTravelGroundServiceQuote(
         @RequestParam doctorId: String,
         @RequestParam institutionProjectId: String
-    ): TravelGroundServiceQuote {
+    ): BaseResponse<TravelGroundServiceQuote> {
         val config = configRepository
             .findByDoctorIdAndInstitutionProjectId(doctorId, institutionProjectId)
             ?: throw IllegalArgumentException("MEDICAL_LIST_PRICE_NOT_CONFIGURED")
-        return travelGroundServicePricing.quote(config.medicalListPrice)
+        return BaseResponse.success(travelGroundServicePricing.quote(config.medicalListPrice))
     }
 }

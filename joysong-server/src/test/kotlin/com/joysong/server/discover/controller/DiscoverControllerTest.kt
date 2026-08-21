@@ -51,7 +51,7 @@ class DiscoverControllerTest {
     )
 
     @Test
-    fun `travel ground service quote uses configured medical list price`() {
+    fun `travel ground service quote wraps configured price in API response`() {
         every {
             configRepository.findByDoctorIdAndInstitutionProjectId("doctor-1", "ip-1")
         } returns DoctorInstitutionProjectConfigEntity(
@@ -59,8 +59,10 @@ class DiscoverControllerTest {
             institutionProjectId = "ip-1",
             medicalListPrice = BigDecimal("1000.00")
         )
-        val quote = controller.getTravelGroundServiceQuote("doctor-1", "ip-1")
+        val response = controller.getTravelGroundServiceQuote("doctor-1", "ip-1")
+        val quote = requireNotNull(response.data)
 
+        assertEquals(200, response.code)
         assertEquals("USD", quote.currency)
         assertEquals(100_000, quote.medicalListPriceMinor)
         assertEquals(4_000, quote.platformServiceRateBps)
