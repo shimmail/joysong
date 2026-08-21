@@ -1,6 +1,7 @@
 package com.joysong.server.refund.service
 
 import com.joysong.server.order.dto.OrderStatusEnum
+import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.repository.OrderRepository
 import com.joysong.server.payment.domain.PaymentStatus
 import com.joysong.server.payment.domain.PaymentType
@@ -30,11 +31,13 @@ class RefundItemPersistenceService(
         val order = orderRepository.findByIdForUpdate(lockedRefund.orderId)
             ?: throw IllegalArgumentException("ORDER_NOT_FOUND")
         val existing = refundItemRepository.findAllByRefundIdOrderByCreatedAtAsc(lockedRefund.id)
-        if (existing.isNotEmpty()) return existing
+        val isTravelGroundService = order.paymentFlow ==
+            RefundWorkflowPersistenceService.TRAVEL_GROUND_SERVICE_ONLY
+        if (!isTravelGroundService && existing.isNotEmpty()) return existing
 
         val target = requireNotNull(lockedRefund.requestedAmountMinor) { "REFUND_AMOUNT_SNAPSHOT_MISSING" }
         require(target > 0) { "REFUND_AMOUNT_NOT_POSITIVE" }
-        if (order.paymentFlow == RefundWorkflowPersistenceService.TRAVEL_GROUND_SERVICE_ONLY) {
+        if (isTravelGroundService) {
             require(lockedRefund.status == RefundWorkflowPersistenceService.PROCESSING) {
                 "INVALID_REFUND_STATUS"
             }
@@ -46,6 +49,9 @@ class RefundItemPersistenceService(
             }
             require(target == expectedAmount) { "SERVICE_FEE_REFUND_AMOUNT_MISMATCH" }
             require(lockedRefund.currency == order.currency) { "SERVICE_FEE_REFUND_CURRENCY_MISMATCH" }
+            if (existing.isNotEmpty()) {
+                return validateExistingServiceFeeItem(existing, lockedRefund, order, target)
+            }
             val servicePayments = paymentRepository.findAllByOrderIdAndStatusInOrderByCreatedAtAsc(
                 lockedRefund.orderId,
                 PaymentStatus.successfulDatabaseValues
@@ -100,6 +106,47 @@ class RefundItemPersistenceService(
         }
         require(remaining == 0L) { "REFUNDABLE_PAYMENT_AMOUNT_INSUFFICIENT" }
         return refundItemRepository.saveAllAndFlush(items)
+    }
+
+    private fun validateExistingServiceFeeItem(
+        items: List<RefundItemEntity>,
+        refund: RefundEntity,
+        order: OrderEntity,
+        target: Long
+    ): List<RefundItemEntity> {
+        require(items.size == 1) { "SERVICE_FEE_REFUND_ITEMS_INVALID" }
+        val item = items.single()
+        require(item.refundId == refund.id) { "SERVICE_FEE_REFUND_ITEM_REFUND_MISMATCH" }
+        require(item.amountMinor == target) { "SERVICE_FEE_REFUND_ITEM_AMOUNT_MISMATCH" }
+        require(item.currency == refund.currency) { "SERVICE_FEE_REFUND_ITEM_CURRENCY_MISMATCH" }
+        require(item.status in setOf(
+            PaymentStatus.CREATED.name,
+            PaymentStatus.PROCESSING.name,
+            PaymentStatus.FAILED.name,
+            PaymentStatus.SUCCEEDED.name
+        )) { "SERVICE_FEE_REFUND_ITEM_STATUS_INVALID" }
+
+        val payment = paymentRepository.findByIdForUpdate(item.paymentId)
+            ?: throw IllegalArgumentException("SERVICE_FEE_REFUND_PAYMENT_NOT_FOUND")
+        require(payment.orderId == order.id) { "SERVICE_FEE_REFUND_PAYMENT_ORDER_MISMATCH" }
+        require(payment.paymentType == PaymentType.TRAVEL_GROUND_SERVICE_FEE.name) {
+            "SERVICE_FEE_REFUND_ITEM_PAYMENT_TYPE_MISMATCH"
+        }
+        require(payment.amountMinor == target) { "SERVICE_FEE_PAYMENT_AMOUNT_MISMATCH" }
+        require(payment.currency == refund.currency) { "SERVICE_FEE_PAYMENT_CURRENCY_MISMATCH" }
+        require(item.provider == payment.provider) { "SERVICE_FEE_REFUND_ITEM_PROVIDER_MISMATCH" }
+        if (item.status == PaymentStatus.SUCCEEDED.name) {
+            require(payment.status == PaymentStatus.REFUNDED.name) {
+                "SERVICE_FEE_REFUND_PAYMENT_STATUS_MISMATCH"
+            }
+            require(payment.refundedAmountMinor == target) { "SERVICE_FEE_PAYMENT_REFUND_AMOUNT_MISMATCH" }
+        } else {
+            require(payment.status in PaymentStatus.successfulDatabaseValues) {
+                "SERVICE_FEE_REFUND_PAYMENT_STATUS_MISMATCH"
+            }
+            require(payment.refundedAmountMinor == 0L) { "SERVICE_FEE_PAYMENT_ALREADY_REFUNDED" }
+        }
+        return items
     }
 
     @Transactional(rollbackFor = [Exception::class])

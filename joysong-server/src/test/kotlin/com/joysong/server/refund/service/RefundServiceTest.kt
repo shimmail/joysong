@@ -293,6 +293,7 @@ class RefundServiceTest {
         every {
             paymentRepository.findAllByOrderIdAndStatusInOrderByCreatedAtAsc("order-1", any())
         } returns listOf(serviceFeePayment())
+        every { paymentRepository.findByIdForUpdate("payment-1") } returns serviceFeePayment()
         every { refundItemRepository.saveAllAndFlush(any<List<RefundItemEntity>>()) } answers {
             firstArg<List<RefundItemEntity>>().also { persisted = it }
         }
@@ -302,6 +303,44 @@ class RefundServiceTest {
 
         assertEquals(first, second)
         verify(exactly = 1) { refundItemRepository.saveAllAndFlush(any<List<RefundItemEntity>>()) }
+    }
+
+    @Test
+    fun `pre-existing medical refund item is rejected before any provider call`() {
+        val error = executeWithExistingItems(
+            listOf(refundItem(paymentId = "consultation-payment")),
+            listOf(payment("consultation-payment", PaymentType.CONSULTATION_FEE, 40_000L))
+        )
+
+        assertEquals(IllegalArgumentException::class.java, error?.javaClass)
+        assertEquals("SERVICE_FEE_REFUND_ITEM_PAYMENT_TYPE_MISMATCH", error?.message)
+    }
+
+    @Test
+    fun `multiple pre-existing service refund items are rejected before any provider call`() {
+        val error = executeWithExistingItems(
+            listOf(
+                refundItem(id = "item-1", paymentId = "payment-1"),
+                refundItem(id = "item-2", paymentId = "payment-2")
+            ),
+            listOf(serviceFeePayment(), serviceFeePayment(id = "payment-2"))
+        )
+
+        assertEquals(IllegalArgumentException::class.java, error?.javaClass)
+        assertEquals("SERVICE_FEE_REFUND_ITEMS_INVALID", error?.message)
+    }
+
+    @Test
+    fun `pre-existing service refund item must match the full amount and currency`() {
+        listOf(
+            refundItem(amountMinor = 39_999L) to "SERVICE_FEE_REFUND_ITEM_AMOUNT_MISMATCH",
+            refundItem(currency = "CNY") to "SERVICE_FEE_REFUND_ITEM_CURRENCY_MISMATCH"
+        ).forEach { (item, expectedMessage) ->
+            val error = executeWithExistingItems(listOf(item), listOf(serviceFeePayment()))
+
+            assertEquals(IllegalArgumentException::class.java, error?.javaClass)
+            assertEquals(expectedMessage, error?.message)
+        }
     }
 
     @Test
@@ -445,6 +484,47 @@ class RefundServiceTest {
         verify(exactly = 0) { reversal.reverseCompletedRefund(any()) }
     }
 
+    @Test
+    fun `legacy consultation refund remains automatic and keeps successful payment allocation`() {
+        val legacyOrder = legacyOrder(status = OrderStatusEnum.CONSULTATION_PAID.value).copy(
+            currency = "USD",
+            paidAmount = BigDecimal("100.00"),
+            paidAmountMinor = 10_000L
+        )
+        every { orderRepository.findByIdForUpdate("order-1") } returns legacyOrder
+        every { refundRepository.findAllByOrderIdAndStatusIn("order-1", any()) } returns emptyList()
+        every { refundRepository.saveAndFlush(any()) } answers { firstArg() }
+        every { orderRepository.save(any()) } answers { firstArg() }
+
+        val preparation = workflow().prepareApplication(
+            "order-1",
+            "user-1",
+            "不再到店",
+            "取消预约",
+            "",
+            null
+        )
+        every { refundRepository.findByIdForUpdate(preparation.refund.id) } returns preparation.refund
+        every {
+            refundItemRepository.findAllByRefundIdOrderByCreatedAtAsc(preparation.refund.id)
+        } returns emptyList()
+        every {
+            paymentRepository.findAllByOrderIdAndStatusInOrderByCreatedAtAsc("order-1", any())
+        } returns listOf(
+            payment("consultation-payment", PaymentType.CONSULTATION_FEE, 10_000L),
+            payment("balance-payment", PaymentType.BALANCE, 30_000L)
+        )
+        every { refundItemRepository.saveAllAndFlush(any<List<RefundItemEntity>>()) } answers { firstArg() }
+
+        val items = itemPersistence().prepareItems(preparation.refund)
+
+        assertTrue(preparation.automatic)
+        assertEquals(RefundWorkflowPersistenceService.PROCESSING, preparation.refund.status)
+        assertEquals(1, items.size)
+        assertEquals("consultation-payment", items.single().paymentId)
+        assertEquals(10_000L, items.single().amountMinor)
+    }
+
     private fun service(
         workflow: RefundWorkflowPersistenceService = workflow(),
         execution: RefundExecutionService? = null,
@@ -492,6 +572,41 @@ class RefundServiceTest {
         every { orderRepository.findByIdForUpdate("order-1") } returns
             serviceOrder(status = OrderStatusEnum.REFUND_PROCESSING.value)
         every { refundItemRepository.findAllByRefundIdOrderByCreatedAtAsc("refund-1") } returns emptyList()
+    }
+
+    private fun executeWithExistingItems(
+        items: List<RefundItemEntity>,
+        payments: List<PaymentEntity>
+    ): Throwable? {
+        val processing = refund(status = RefundWorkflowPersistenceService.PROCESSING)
+        val gatewayRegistry = mockk<PaymentGatewayRegistry>()
+        val gateway = mockk<PaymentGateway>()
+        every { refundRepository.findByIdForUpdate("refund-1") } returns processing
+        every { orderRepository.findByIdForUpdate("order-1") } returns
+            serviceOrder(status = OrderStatusEnum.REFUND_PROCESSING.value)
+        every { refundItemRepository.findAllByRefundIdOrderByCreatedAtAsc("refund-1") } returns items
+        payments.forEach { payment ->
+            every { paymentRepository.findById(payment.id) } returns Optional.of(payment)
+            every { paymentRepository.findByIdForUpdate(payment.id) } returns payment
+        }
+        every { gatewayRegistry.require(PaymentProvider.ALIPAY_PLUS) } returns gateway
+        every { gateway.refund(any()) } returns
+            ProviderRefundResult(PaymentStatus.PROCESSING, "provider-refund")
+        every { refundItemRepository.findByIdForUpdate(any()) } answers {
+            items.firstOrNull { it.id == firstArg<String>() }
+        }
+        every { refundItemRepository.save(any()) } answers { firstArg() }
+        val execution = RefundExecutionService(
+            paymentRepository,
+            refundItemRepository,
+            gatewayRegistry,
+            itemPersistence()
+        )
+
+        val error = runCatching { execution.execute(processing) }.exceptionOrNull()
+
+        verify(exactly = 0) { gatewayRegistry.require(any()) }
+        return error
     }
 
     private fun refund(
@@ -564,12 +679,17 @@ class RefundServiceTest {
         providerPaymentId = "provider-$id"
     )
 
-    private fun refundItem() = RefundItemEntity(
-        id = "item-1",
+    private fun refundItem(
+        id: String = "item-1",
+        paymentId: String = "payment-1",
+        amountMinor: Long = 40_000L,
+        currency: String = "USD"
+    ) = RefundItemEntity(
+        id = id,
         refundId = "refund-1",
-        paymentId = "payment-1",
+        paymentId = paymentId,
         provider = PaymentProvider.ALIPAY_PLUS.name,
-        currency = "USD",
-        amountMinor = 40_000L
+        currency = currency,
+        amountMinor = amountMinor
     )
 }
