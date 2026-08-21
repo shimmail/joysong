@@ -32,15 +32,12 @@ BookingConsultant sampleConsultant() => const BookingConsultant(
       name: '李咨询师',
     );
 
-UserCoupon sampleCoupon() => UserCoupon(
-      id: 11,
-      couponId: 22,
-      name: '新人优惠券',
-      type: 'FIXED',
-      discountValue: Money.parse('100'),
-      minimumAmount: Money.parse('500'),
-      status: 'UNUSED',
-      expireAt: DateTime(2026, 12, 31),
+TravelGroundServiceQuote sampleTravelGroundServiceQuote() =>
+    const TravelGroundServiceQuote(
+      currency: 'USD',
+      medicalListPriceMinor: 100000,
+      platformServiceRateBps: 4000,
+      travelGroundServiceFeeMinor: 40000,
     );
 
 class FakeBookingRepository implements BookingRepository {
@@ -48,6 +45,10 @@ class FakeBookingRepository implements BookingRepository {
   CreateOrderCommand? lastCommand;
   Completer<Order>? createCompleter;
   List<BookingConsultant> consultantResults = [sampleConsultant()];
+  String? quoteDoctorId;
+  String? quoteInstitutionProjectId;
+  Completer<TravelGroundServiceQuote>? quoteCompleter;
+  Object? quoteError;
 
   @override
   Future<List<InstitutionProject>> getInstitutionProjects(
@@ -71,25 +72,18 @@ class FakeBookingRepository implements BookingRepository {
       consultantResults;
 
   @override
-  Future<Money> getConsultationFee({
+  Future<TravelGroundServiceQuote> getTravelGroundServiceQuote({
     required String doctorId,
     required String institutionProjectId,
-  }) async =>
-      Money.parse('100');
-
-  @override
-  Future<List<UserCoupon>> getAvailableCoupons() async => [sampleCoupon()];
-
-  @override
-  Future<DiscountQuote> calculateDiscount({
-    required int couponId,
-    required Money originalPrice,
-  }) async =>
-      DiscountQuote(
-        couponId: couponId,
-        originalPrice: originalPrice,
-        discountAmount: Money.parse('100'),
-      );
+  }) {
+    quoteDoctorId = doctorId;
+    quoteInstitutionProjectId = institutionProjectId;
+    final error = quoteError;
+    if (error != null) return Future.error(error);
+    final completer = quoteCompleter;
+    if (completer != null) return completer.future;
+    return Future.value(sampleTravelGroundServiceQuote());
+  }
 
   @override
   Future<Order> createOrder(CreateOrderCommand command) {

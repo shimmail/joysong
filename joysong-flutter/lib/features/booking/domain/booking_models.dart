@@ -108,65 +108,54 @@ final class BookingConsultant {
 }
 
 @immutable
-final class UserCoupon {
-  const UserCoupon({
-    required this.id,
-    required this.couponId,
-    required this.name,
-    required this.type,
-    required this.discountValue,
-    required this.minimumAmount,
-    required this.status,
-    required this.expireAt,
+final class TravelGroundServiceQuote {
+  const TravelGroundServiceQuote({
+    required this.currency,
+    required this.medicalListPriceMinor,
+    required this.platformServiceRateBps,
+    required this.travelGroundServiceFeeMinor,
   });
 
-  final int id;
-  final int couponId;
-  final String name;
-  final String type;
-  final Money discountValue;
-  final Money minimumAmount;
-  final String status;
-  final DateTime expireAt;
+  final String currency;
+  final int medicalListPriceMinor;
+  final int platformServiceRateBps;
+  final int travelGroundServiceFeeMinor;
 
-  bool get isAvailable => status == 'UNUSED';
+  String get medicalListPriceFormatted =>
+      _formatUsdMinor(medicalListPriceMinor);
 
-  factory UserCoupon.fromJson(Object? json) {
-    final map = jsonMap(json, '优惠券');
-    final id = intValue(map['id'], fallback: -1);
-    final couponId = intValue(map['couponId'], fallback: -1);
-    if (id < 0 || couponId < 0) throw const FormatException('优惠券缺少有效 ID');
-    return UserCoupon(
-      id: id,
-      couponId: couponId,
-      name: stringValue(map['couponName'], fallback: '优惠券'),
-      type: stringValue(map['couponType'], fallback: 'UNKNOWN'),
-      discountValue: Money.parse(map['discountValue'], field: '优惠值'),
-      minimumAmount: Money.fromJsonOrZero(map['minAmount'], field: '使用门槛'),
-      status: stringValue(map['status'], fallback: 'UNKNOWN').toUpperCase(),
-      expireAt: requiredLocalDateTime(map['expireAt'], '优惠券有效期'),
+  String get travelGroundServiceFeeFormatted =>
+      _formatUsdMinor(travelGroundServiceFeeMinor);
+
+  factory TravelGroundServiceQuote.fromJson(Object? json) {
+    final map = jsonMap(json, '旅游地接服务费报价');
+    final currency = requiredString(map, 'currency', '旅游地接服务费报价');
+    final medicalListPriceMinor = requiredInt(
+      map,
+      'medicalListPriceMinor',
+      '旅游地接服务费报价',
     );
-  }
-}
-
-@immutable
-final class DiscountQuote {
-  const DiscountQuote({
-    required this.couponId,
-    required this.originalPrice,
-    required this.discountAmount,
-  });
-
-  final int couponId;
-  final Money originalPrice;
-  final Money discountAmount;
-
-  factory DiscountQuote.fromJson(Object? json) {
-    final map = jsonMap(json, '优惠计算');
-    return DiscountQuote(
-      couponId: intValue(map['couponId']),
-      originalPrice: Money.parse(map['originalPrice'], field: '原价'),
-      discountAmount: Money.parse(map['discountAmount'], field: '优惠金额'),
+    final platformServiceRateBps = requiredInt(
+      map,
+      'platformServiceRateBps',
+      '旅游地接服务费报价',
+    );
+    final travelGroundServiceFeeMinor = requiredInt(
+      map,
+      'travelGroundServiceFeeMinor',
+      '旅游地接服务费报价',
+    );
+    if (currency != 'USD') {
+      throw const FormatException('旅游地接服务费报价币种必须为 USD');
+    }
+    if (medicalListPriceMinor < 0 || travelGroundServiceFeeMinor < 0) {
+      throw const FormatException('旅游地接服务费报价金额不能为负数');
+    }
+    return TravelGroundServiceQuote(
+      currency: currency,
+      medicalListPriceMinor: medicalListPriceMinor,
+      platformServiceRateBps: platformServiceRateBps,
+      travelGroundServiceFeeMinor: travelGroundServiceFeeMinor,
     );
   }
 }
@@ -179,18 +168,14 @@ final class CreateOrderCommand {
     required this.consultantId,
     required this.doctorId,
     required this.appointmentTime,
-    this.quantity = 1,
     this.remark = '',
-    this.userCouponId,
   });
 
   final String projectId;
   final String institutionProjectId;
   final String consultantId;
   final String doctorId;
-  final int quantity;
   final String remark;
-  final int? userCouponId;
   final DateTime appointmentTime;
 
   Map<String, Object?> toJson() => {
@@ -198,11 +183,15 @@ final class CreateOrderCommand {
         'institutionProjectId': institutionProjectId,
         'consultantId': consultantId,
         'doctorId': doctorId,
-        'quantity': quantity,
         'remark': remark,
-        'userCouponId': userCouponId,
         'appointmentTime': _localIso8601(appointmentTime),
       };
+}
+
+String _formatUsdMinor(int amountMinor) {
+  final digits = amountMinor.toString().padLeft(3, '0');
+  return '\$${digits.substring(0, digits.length - 2)}.'
+      '${digits.substring(digits.length - 2)}';
 }
 
 String _localIso8601(DateTime value) {

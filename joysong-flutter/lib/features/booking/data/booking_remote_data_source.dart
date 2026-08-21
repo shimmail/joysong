@@ -1,6 +1,5 @@
 import 'package:joysong_flutter/core/network/api_client.dart';
 import 'package:joysong_flutter/features/booking/domain/booking_models.dart';
-import 'package:joysong_flutter/features/orders/domain/money.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
 
 abstract interface class BookingRemoteDataSource {
@@ -15,16 +14,9 @@ abstract interface class BookingRemoteDataSource {
 
   Future<List<BookingConsultant>> getConsultants(String institutionId);
 
-  Future<Money> getConsultationFee({
+  Future<TravelGroundServiceQuote> getTravelGroundServiceQuote({
     required String doctorId,
     required String institutionProjectId,
-  });
-
-  Future<List<UserCoupon>> getAvailableCoupons();
-
-  Future<DiscountQuote> calculateDiscount({
-    required int couponId,
-    required Money originalPrice,
   });
 
   Future<Order> createOrder(CreateOrderCommand command);
@@ -83,45 +75,19 @@ final class ApiBookingRemoteDataSource implements BookingRemoteDataSource {
   }
 
   @override
-  Future<Money> getConsultationFee({
+  Future<TravelGroundServiceQuote> getTravelGroundServiceQuote({
     required String doctorId,
     required String institutionProjectId,
   }) async {
-    final result = await _apiClient.get<Money>(
-      'discover/consultation-fee',
+    final result = await _apiClient.get<TravelGroundServiceQuote>(
+      'discover/travel-ground-service-quote',
       query: {
         'doctorId': doctorId,
         'institutionProjectId': institutionProjectId,
       },
-      decodeData: (json) {
-        final map = jsonMap(json, '面诊金');
-        return Money.fromJsonOrZero(map['consultationFee'], field: '面诊金');
-      },
+      decodeData: TravelGroundServiceQuote.fromJson,
     );
-    return result ?? Money.zero;
-  }
-
-  @override
-  Future<List<UserCoupon>> getAvailableCoupons() async {
-    final result = await _apiClient.get<List<UserCoupon>>(
-      'coupons/available',
-      decodeData: (json) =>
-          _list(json, '优惠券列表').map(UserCoupon.fromJson).toList(),
-    );
-    return result ?? const [];
-  }
-
-  @override
-  Future<DiscountQuote> calculateDiscount({
-    required int couponId,
-    required Money originalPrice,
-  }) async {
-    final result = await _apiClient.get<DiscountQuote>(
-      'coupons/$couponId/discount',
-      query: {'originalPrice': originalPrice.toDecimalString()},
-      decodeData: DiscountQuote.fromJson,
-    );
-    if (result == null) throw const FormatException('优惠计算 data 为空');
+    if (result == null) throw const FormatException('旅游地接服务费报价 data 为空');
     return result;
   }
 

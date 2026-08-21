@@ -226,21 +226,6 @@ class _BookingPageState extends State<BookingPage> {
                     ? null
                     : (doctor) => controller.selectDoctor(doctor),
           ),
-        const SizedBox(height: 10),
-        _SoftPanel(
-          child: Row(
-            children: [
-              Expanded(child: Text(context.localized('面诊费', 'Consultation fee'))),
-              if (controller.isFeeLoading)
-                const SizedBox.square(
-                  dimension: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              else
-                Text(controller.consultationFee.formatted),
-            ],
-          ),
-        ),
         const SizedBox(height: 20),
         _SectionTitle(
           context.localized('预约时间（北京时间 UTC+8）', 'Appointment time (Beijing UTC+8)'),
@@ -259,50 +244,6 @@ class _BookingPageState extends State<BookingPage> {
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: controller.isSubmitting ? null : _pickAppointment,
           ),
-        ),
-        const SizedBox(height: 20),
-        _SectionTitle(context.localized('优惠券', 'Coupon')),
-        const SizedBox(height: 8),
-        DropdownButtonFormField<UserCoupon?>(
-              key: ValueKey(controller.selectedCoupon?.id),
-              initialValue: controller.selectedCoupon,
-              isExpanded: true,
-              borderRadius: BorderRadius.circular(12),
-              menuMaxHeight: 320,
-              dropdownColor: Theme.of(context).colorScheme.surface,
-              decoration: InputDecoration(
-                prefixIcon: const Icon(Icons.local_offer_outlined),
-                hintText: controller.coupons.isEmpty
-                    ? context.localized('暂无可用优惠券', 'No coupons available')
-                    : context.localized('不使用优惠券', 'Do not use a coupon'),
-                suffixIcon: controller.isDiscountLoading
-                    ? const Padding(
-                        padding: EdgeInsets.all(14),
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : null,
-              ),
-              items: [
-                DropdownMenuItem<UserCoupon?>(
-                  value: null,
-                  child: Text(context.localized('不使用优惠券', 'Do not use a coupon')),
-                ),
-                ...controller.coupons.map(
-                  (coupon) => DropdownMenuItem<UserCoupon?>(
-                    value: coupon,
-                    child: Text(
-                      context.isEnglish
-                          ? '${coupon.name} · Minimum ${coupon.minimumAmount.formatted}'
-                          : '${coupon.name} · 满${coupon.minimumAmount.formatted}可用',
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ),
-              ],
-              onChanged:
-                  controller.isSubmitting || controller.isDiscountLoading
-                      ? null
-                      : (coupon) => controller.selectCoupon(coupon),
         ),
         const SizedBox(height: 20),
         _SectionTitle(context.localized('备注', 'Notes')),
@@ -324,8 +265,8 @@ class _BookingPageState extends State<BookingPage> {
         Text(
           key: const Key('booking-price-disclaimer'),
           context.localized(
-            '页面金额仅供展示，最终价格和优惠由服务端在创建订单时计算。',
-            'Amounts shown are estimates. Final prices and discounts are calculated when the order is created.',
+            '医疗费到院后直接向医院支付',
+            'Pay medical fees directly to the hospital after arrival.',
           ),
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -541,13 +482,6 @@ class _ProjectCard extends StatelessWidget {
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
-                  const SizedBox(height: 8),
-                  Text(
-                    project.price.formatted,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
-                  ),
                 ],
               ),
             ),
@@ -565,19 +499,28 @@ class _PriceSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final discount = controller.discountQuote?.discountAmount;
+    final quote = controller.travelGroundServiceQuote;
     return _SoftPanel(
       child: Column(
         children: [
-          _PriceLine(label: context.localized('项目金额', 'Service amount'), value: controller.originalPrice.formatted),
-          if (discount != null && !discount.isZero) ...[
+          if (quote != null) ...[
+            _PriceLine(
+              label: context.localized(
+                '医疗套餐优惠前金额（参考）',
+                'Medical package list price (reference)',
+              ),
+              value: quote.medicalListPriceFormatted,
+            ),
             const SizedBox(height: 8),
-            _PriceLine(label: context.localized('优惠', 'Discount'), value: '-${discount.formatted}'),
           ],
-          const SizedBox(height: 8),
           _PriceLine(
-            label: context.localized('预计应付', 'Estimated total'),
-            value: controller.payablePreview.formatted,
+            label: context.localized(
+              '旅游地接服务费',
+              'Travel ground service fee',
+            ),
+            value: controller.isQuoteLoading
+                ? context.localized('加载中…', 'Loading…')
+                : quote?.travelGroundServiceFeeFormatted ?? '--',
             emphasized: true,
           ),
         ],

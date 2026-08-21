@@ -1,7 +1,6 @@
 import 'package:joysong_flutter/features/booking/data/booking_remote_data_source.dart';
 import 'package:joysong_flutter/features/booking/domain/booking_models.dart';
 import 'package:joysong_flutter/features/booking/domain/booking_repository.dart';
-import 'package:joysong_flutter/features/orders/domain/money.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
 
 final class BookingRepositoryImpl implements BookingRepository {
@@ -31,27 +30,13 @@ final class BookingRepositoryImpl implements BookingRepository {
       _remote.getConsultants(institutionId);
 
   @override
-  Future<Money> getConsultationFee({
+  Future<TravelGroundServiceQuote> getTravelGroundServiceQuote({
     required String doctorId,
     required String institutionProjectId,
   }) =>
-      _remote.getConsultationFee(
+      _remote.getTravelGroundServiceQuote(
         doctorId: doctorId,
         institutionProjectId: institutionProjectId,
-      );
-
-  @override
-  Future<List<UserCoupon>> getAvailableCoupons() =>
-      _remote.getAvailableCoupons();
-
-  @override
-  Future<DiscountQuote> calculateDiscount({
-    required int couponId,
-    required Money originalPrice,
-  }) =>
-      _remote.calculateDiscount(
-        couponId: couponId,
-        originalPrice: originalPrice,
       );
 
   @override

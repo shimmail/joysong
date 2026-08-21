@@ -8,7 +8,7 @@ import 'package:joysong_flutter/features/orders/domain/order_models.dart';
 import 'booking_test_fixtures.dart';
 
 void main() {
-  testWidgets('shows booking inputs and submits selected doctor and time', (
+  testWidgets('shows one travel service fee and submits selected consultant', (
     tester,
   ) async {
     final repository = FakeBookingRepository();
@@ -34,18 +34,26 @@ void main() {
     expect(find.text('光子嫩肤'), findsOneWidget);
     expect(find.text('选择医美顾问'), findsOneWidget);
     expect(find.byKey(const Key('booking-consultant-select')), findsOneWidget);
-    await tester.scrollUntilVisible(
-      find.byKey(const Key('booking-price-disclaimer')),
-      260,
-      scrollable: find.byType(Scrollable).first,
-    );
-    expect(find.byKey(const Key('booking-price-disclaimer')), findsOneWidget);
     await controller.selectConsultant(controller.consultants.single);
     await controller.selectDoctor(controller.doctors.single);
     controller.selectAppointmentTime(
       DateTime.now().add(const Duration(days: 2)),
     );
     await tester.pump();
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('booking-price-disclaimer')),
+      260,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.byKey(const Key('booking-price-disclaimer')), findsOneWidget);
+    expect(find.text('旅游地接服务费'), findsOneWidget);
+    expect(find.text(r'$400.00'), findsOneWidget);
+    expect(find.text('医疗费到院后直接向医院支付'), findsOneWidget);
+    expect(find.text('面诊费'), findsNothing);
+    expect(find.text('面诊金'), findsNothing);
+    expect(find.text('尾款'), findsNothing);
+    expect(find.text('数量'), findsNothing);
+    expect(find.text('优惠券'), findsNothing);
     await tester.ensureVisible(find.byKey(const Key('booking-submit-button')));
     await tester.tap(find.byKey(const Key('booking-submit-button')));
     await tester.pumpAndSettle();

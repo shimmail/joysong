@@ -1,5 +1,4 @@
 import 'package:joysong_flutter/features/booking/domain/booking_models.dart';
-import 'package:joysong_flutter/features/orders/domain/money.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
 
 abstract interface class BookingRepository {
@@ -14,16 +13,9 @@ abstract interface class BookingRepository {
 
   Future<List<BookingConsultant>> getConsultants(String institutionId);
 
-  Future<Money> getConsultationFee({
+  Future<TravelGroundServiceQuote> getTravelGroundServiceQuote({
     required String doctorId,
     required String institutionProjectId,
-  });
-
-  Future<List<UserCoupon>> getAvailableCoupons();
-
-  Future<DiscountQuote> calculateDiscount({
-    required int couponId,
-    required Money originalPrice,
   });
 
   Future<Order> createOrder(CreateOrderCommand command);

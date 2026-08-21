@@ -2,11 +2,71 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/core/network/api_client.dart';
 import 'package:joysong_flutter/features/booking/data/booking_remote_data_source.dart';
 import 'package:joysong_flutter/features/booking/domain/booking_models.dart';
-import 'package:joysong_flutter/features/orders/domain/money.dart';
 
 import '../orders/order_test_fixtures.dart';
 
 void main() {
+  test('create order omits quantity and coupon fields', () {
+    final json = CreateOrderCommand(
+      projectId: 'project-1',
+      institutionProjectId: 'ip-1',
+      consultantId: 'consultant-1',
+      doctorId: 'doctor-1',
+      appointmentTime: DateTime(2026, 8, 22, 10),
+    ).toJson();
+
+    expect(json['consultantId'], 'consultant-1');
+    expect(json.containsKey('quantity'), isFalse);
+    expect(json.containsKey('userCouponId'), isFalse);
+  });
+
+  test('parses and formats USD travel ground service quote', () {
+    final quote = TravelGroundServiceQuote.fromJson({
+      'currency': 'USD',
+      'medicalListPriceMinor': 100000,
+      'platformServiceRateBps': 4000,
+      'travelGroundServiceFeeMinor': 40000,
+    });
+
+    expect(quote.medicalListPriceMinor, 100000);
+    expect(quote.platformServiceRateBps, 4000);
+    expect(quote.travelGroundServiceFeeMinor, 40000);
+    expect(quote.travelGroundServiceFeeFormatted, r'$400.00');
+  });
+
+  test('rejects non-USD travel ground service quote', () {
+    expect(
+      () => TravelGroundServiceQuote.fromJson({
+        'currency': 'EUR',
+        'medicalListPriceMinor': 100000,
+        'platformServiceRateBps': 4000,
+        'travelGroundServiceFeeMinor': 40000,
+      }),
+      throwsFormatException,
+    );
+  });
+
+  test('rejects negative travel ground service quote minor units', () {
+    expect(
+      () => TravelGroundServiceQuote.fromJson({
+        'currency': 'USD',
+        'medicalListPriceMinor': -1,
+        'platformServiceRateBps': 4000,
+        'travelGroundServiceFeeMinor': 40000,
+      }),
+      throwsFormatException,
+    );
+    expect(
+      () => TravelGroundServiceQuote.fromJson({
+        'currency': 'USD',
+        'medicalListPriceMinor': 100000,
+        'platformServiceRateBps': 4000,
+        'travelGroundServiceFeeMinor': -1,
+      }),
+      throwsFormatException,
+    );
+  });
+
   test('loads institution consultants from discover contract', () async {
     final client = _FakeApiClient()
       ..responseData = [
@@ -20,18 +80,24 @@ void main() {
     expect(client.lastPath, 'discover/institutions/institution-1/consultants');
   });
 
-  test('loads doctor fee from discover contract', () async {
+  test('loads travel ground service quote from doctor project contract',
+      () async {
     final client = _FakeApiClient()
-      ..responseData = {'consultationFee': '88.50'};
+      ..responseData = {
+        'currency': 'USD',
+        'medicalListPriceMinor': 100000,
+        'platformServiceRateBps': 4000,
+        'travelGroundServiceFeeMinor': 40000,
+      };
     final dataSource = ApiBookingRemoteDataSource(client);
 
-    final fee = await dataSource.getConsultationFee(
+    final quote = await dataSource.getTravelGroundServiceQuote(
       doctorId: 'doctor-1',
       institutionProjectId: 'ip-1',
     );
 
-    expect(fee, Money.parse('88.5'));
-    expect(client.lastPath, 'discover/consultation-fee');
+    expect(quote.travelGroundServiceFeeFormatted, r'$400.00');
+    expect(client.lastPath, 'discover/travel-ground-service-quote');
     expect(client.lastQuery, {
       'doctorId': 'doctor-1',
       'institutionProjectId': 'ip-1',
@@ -49,7 +115,6 @@ void main() {
         institutionProjectId: 'ip-1',
         consultantId: 'consultant-1',
         doctorId: 'doctor-1',
-        userCouponId: 11,
         appointmentTime: appointment,
       ),
     );
@@ -57,30 +122,12 @@ void main() {
     expect(client.lastPath, 'orders');
     final body = client.lastBody! as Map<String, Object?>;
     expect(body['appointmentTime'], '2026-08-08T14:30:00');
-    expect(body['userCouponId'], 11);
     expect(body['consultantId'], 'consultant-1');
+    expect(body.containsKey('quantity'), isFalse);
+    expect(body.containsKey('userCouponId'), isFalse);
     expect(body.containsKey('price'), isFalse);
     expect(body.containsKey('amount'), isFalse);
     expect(body.containsKey('consultationFee'), isFalse);
-  });
-
-  test('uses coupon definition id for quote and decimal query string',
-      () async {
-    final client = _FakeApiClient()
-      ..responseData = {
-        'couponId': 22,
-        'originalPrice': '1280.50',
-        'discountAmount': '100.00',
-      };
-    final dataSource = ApiBookingRemoteDataSource(client);
-
-    await dataSource.calculateDiscount(
-      couponId: 22,
-      originalPrice: Money.parse('1280.50'),
-    );
-
-    expect(client.lastPath, 'coupons/22/discount');
-    expect(client.lastQuery, {'originalPrice': '1280.5'});
   });
 }
 
