@@ -24,6 +24,8 @@ import com.joysong.server.institution.service.InstitutionProjectDetailResolver
 import com.joysong.server.identity.service.InstitutionConsultantService
 import com.joysong.server.discover.repository.DoctorProjectRepository
 import com.joysong.server.order.repository.DoctorInstitutionProjectConfigRepository
+import com.joysong.server.order.service.TravelGroundServicePricing
+import com.joysong.server.order.service.TravelGroundServiceQuote
 import com.joysong.server.project.repository.ProjectRepository
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
@@ -43,7 +45,8 @@ class DiscoverController(
     private val discoverSearchService: DiscoverSearchService,
     private val configRepository: DoctorInstitutionProjectConfigRepository,
     private val institutionProjectDetailResolver: InstitutionProjectDetailResolver,
-    private val institutionConsultantService: InstitutionConsultantService
+    private val institutionConsultantService: InstitutionConsultantService,
+    private val travelGroundServicePricing: TravelGroundServicePricing
 ) {
     @GetMapping("/filter-options")
     fun getFilterOptions(): BaseResponse<*> {
@@ -236,19 +239,14 @@ class DiscoverController(
         return BaseResponse.success(discoverService.getDoctorsByInstitutionProject(institutionProjectId))
     }
 
-    /**
-     * 查询医生在指定机构项目上的面诊金配置
-     * 无配置时返回 0
-     */
-    @GetMapping("/consultation-fee")
-    fun getConsultationFee(
+    @GetMapping("/travel-ground-service-quote")
+    fun getTravelGroundServiceQuote(
         @RequestParam doctorId: String,
         @RequestParam institutionProjectId: String
-    ): BaseResponse<*> {
-        val fee = configRepository
+    ): TravelGroundServiceQuote {
+        val config = configRepository
             .findByDoctorIdAndInstitutionProjectId(doctorId, institutionProjectId)
-            ?.consultationFee
-            ?: java.math.BigDecimal.ZERO
-        return BaseResponse.success(mapOf("consultationFee" to fee))
+            ?: throw IllegalArgumentException("MEDICAL_LIST_PRICE_NOT_CONFIGURED")
+        return travelGroundServicePricing.quote(config.medicalListPrice)
     }
 }

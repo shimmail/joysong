@@ -62,15 +62,13 @@ class OrderService(
     @Lazy private val reviewService: ReviewService,
     private val institutionConsultantService: InstitutionConsultantService,
     private val doctorInstitutionRelationshipService: DoctorInstitutionRelationshipService,
+    private val travelGroundServicePricing: TravelGroundServicePricing,
     private val refundExecutionService: RefundExecutionService? = null
 ) {
     private val secureRandom = SecureRandom()
 
     companion object {
         private val log = LoggerFactory.getLogger(OrderService::class.java)
-
-        /** 默认面诊金（无医生配置时使用） */
-        private val DEFAULT_CONSULTATION_FEE = BigDecimal.ZERO
 
         /** 核销码长度（6位数字） */
         private const val VERIFY_CODE_LENGTH = 6
@@ -98,7 +96,6 @@ class OrderService(
      */
     @Transactional(rollbackFor = [Exception::class])
     fun createOrder(userId: String, request: CreateOrderRequest): OrderResponse {
-        require(request.quantity in 1..99) { "项目数量必须在 1-99 之间" }
         require(request.remark.length <= 500) { "订单备注不能超过 500 字" }
         require(!request.institutionProjectId.isNullOrBlank()) { "订单必须关联机构项目" }
         require(request.doctorId.isNotBlank()) { "订单必须关联医生" }
@@ -120,7 +117,7 @@ class OrderService(
             .orElseThrow { IllegalArgumentException("机构不存在: ${institutionProject.institutionId}") }
         require(institution.name.isNotBlank()) { "机构名称不能为空" }
 
-        val doctorProject = doctorProjectRepository.findByDoctorIdAndInstitutionProjectId(
+        doctorProjectRepository.findByDoctorIdAndInstitutionProjectId(
             request.doctorId,
             institutionProject.id
         ) ?: throw IllegalArgumentException("所选医生未加入该机构项目")
@@ -135,37 +132,12 @@ class OrderService(
         )
         require(consultant.name.isNotBlank()) { "医美顾问名称不能为空" }
 
-        val unitPrice = doctorProject.price
         val coverImage = effectiveProject.coverImage
-        val configuredConsultationFee = doctorInstitutionProjectConfigRepository
+        val config = doctorInstitutionProjectConfigRepository
             .findByDoctorIdAndInstitutionProjectId(request.doctorId, institutionProject.id)
-            ?.consultationFee
-            ?: DEFAULT_CONSULTATION_FEE
-
-        val originalTotal = unitPrice.multiply(BigDecimal.valueOf(request.quantity.toLong()))
-
-        // 优惠券必须属于当前用户且仍为 UNUSED、未过期；无效券不能静默降级为无券下单。
-        val discountAmount: BigDecimal
-        val couponId: Long?
-        val userCouponId: Long?
-        if (request.userCouponId != null) {
-            val userCoupon = couponService.listUserAvailableCoupons(userId)
-                .firstOrNull { it.id == request.userCouponId }
-                ?: throw IllegalArgumentException("优惠券不存在、不属于当前用户或已失效")
-            couponId = userCoupon.couponId
-            userCouponId = userCoupon.id
-            discountAmount = couponService.calculateDiscount(couponId, originalTotal)
-        } else {
-            couponId = null
-            userCouponId = null
-            discountAmount = BigDecimal.ZERO
-        }
-
-        // 应用优惠后的价格，不低于 0
-        val discountedPrice = (originalTotal - discountAmount).max(BigDecimal.ZERO)
-        val consultationFee = configuredConsultationFee.min(discountedPrice)
-        // 剩余金额 = 优惠后价格 - 面诊金，不低于 0
-        val remainingAmount = (discountedPrice - consultationFee).max(BigDecimal.ZERO)
+            ?: throw IllegalArgumentException("MEDICAL_LIST_PRICE_NOT_CONFIGURED")
+        val quote = travelGroundServicePricing.quote(config.medicalListPrice)
+        val serviceFee = Money.fromMinor(quote.travelGroundServiceFeeMinor, quote.currency)
 
         // 解析预约时间（支持 ISO-8601，兼容旧 Android 的空格分隔格式）；非法值不再静默丢弃。
         val appointmentTime: LocalDateTime? = request.appointmentTime?.takeIf { it.isNotBlank() }?.let {
@@ -190,41 +162,45 @@ class OrderService(
             projectName = effectiveProject.name,
             institutionName = institution.name,
             coverImage = coverImage,
-            currency = com.joysong.server.common.money.CurrencyCode.DEFAULT_CODE,
-            price = discountedPrice,
-            totalAmountMinor = Money.toMinor(discountedPrice, com.joysong.server.common.money.CurrencyCode.DEFAULT_CODE),
+            currency = quote.currency,
+            price = serviceFee,
+            totalAmountMinor = quote.travelGroundServiceFeeMinor,
             paidAmount = BigDecimal.ZERO,
             paidAmountMinor = 0,
-            couponId = couponId,
-            userCouponId = userCouponId,
-            discountAmount = discountAmount,
-            discountAmountMinor = Money.toMinor(discountAmount, com.joysong.server.common.money.CurrencyCode.DEFAULT_CODE),
-            status = OrderStatusEnum.PENDING_PAYMENT.value,
+            couponId = null,
+            userCouponId = null,
+            discountAmount = BigDecimal.ZERO,
+            discountAmountMinor = 0,
+            status = OrderStatusEnum.PENDING_SERVICE_FEE.value,
+            paymentFlow = "TRAVEL_GROUND_SERVICE_ONLY",
+            medicalListPriceMinor = quote.medicalListPriceMinor,
+            platformServiceRateBps = quote.platformServiceRateBps,
+            travelGroundServiceFeeMinor = quote.travelGroundServiceFeeMinor,
             createdAt = now,
             projectId = project.id,
             institutionId = institution.id,
             consultantId = consultant.id,
             consultantName = consultant.name,
+            consultantAvatar = consultant.avatar,
             doctorId = request.doctorId,
             doctorName = doctor.name,
             orderNo = orderNo,
-            consultationFee = consultationFee,
-            consultationFeeMinor = Money.toMinor(consultationFee, com.joysong.server.common.money.CurrencyCode.DEFAULT_CODE),
-            remainingAmount = remainingAmount,
-            remainingAmountMinor = Money.toMinor(remainingAmount, com.joysong.server.common.money.CurrencyCode.DEFAULT_CODE),
+            consultationFee = BigDecimal.ZERO,
+            consultationFeeMinor = 0,
+            remainingAmount = BigDecimal.ZERO,
+            remainingAmountMinor = 0,
             pricingCountry = "CN",
-            quantity = request.quantity,
+            quantity = 1,
             remark = request.remark,
             institutionProjectId = institutionProject.id,
             appointmentTime = appointmentTime
         )
 
         val saved = orderRepository.save(order)
-        userCouponId?.let { couponService.redeemCoupon(it, orderId) }
         orderStatusLogService.logTransition(
             orderId = saved.id,
             fromStatus = "",
-            toStatus = OrderStatusEnum.PENDING_PAYMENT.value,
+            toStatus = OrderStatusEnum.PENDING_SERVICE_FEE.value,
             operatorId = userId,
             operatorType = OPERATOR_TYPE_USER,
             remark = "创建订单"

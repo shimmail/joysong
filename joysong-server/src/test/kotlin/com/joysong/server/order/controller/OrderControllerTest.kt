@@ -1,5 +1,8 @@
 package com.joysong.server.order.controller
 
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.joysong.server.order.dto.CreateOrderRequest
+import com.joysong.server.order.dto.OrderResponse
 import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.service.OrderService
 import com.joysong.server.order.service.OrderStatusLogService
@@ -14,11 +17,90 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.springframework.security.core.Authentication
 import java.math.BigDecimal
+import java.time.LocalDateTime
 
 class OrderControllerTest {
+    @Test
+    fun `create order request JSON omits legacy quantity and coupon fields`() {
+        val json = jacksonObjectMapper().readTree(
+            jacksonObjectMapper().writeValueAsString(
+                CreateOrderRequest("project-1", "ip-1", "doctor-1", "consultant-1")
+            )
+        )
+
+        assertEquals("consultant-1", json["consultantId"].asText())
+        assertFalse(json.has("quantity"))
+        assertFalse(json.has("userCouponId"))
+    }
+
+    @Test
+    fun `pending service fee hides consultant and institution fulfillment details`() {
+        val response = OrderResponse.from(serviceOrder(status = "PENDING_SERVICE_FEE"))
+
+        assertTrue(response.consultantBound)
+        assertFalse(response.serviceActivated)
+        assertFalse(response.consultantDetailsVisible)
+        assertFalse(response.serviceConversationReadable)
+        assertFalse(response.serviceMessagingEnabled)
+        assertNull(response.consultantId)
+        assertNull(response.consultantName)
+        assertNull(response.consultantAvatar)
+        assertNull(response.institutionId)
+        assertNull(response.institutionName)
+    }
+
+    @Test
+    fun `active service exposes public consultant snapshot and enables messaging`() {
+        val response = OrderResponse.from(
+            serviceOrder(status = "SERVICE_ACTIVE", serviceActivatedAt = LocalDateTime.now())
+        )
+
+        assertEquals("consultant-1", response.consultantId)
+        assertEquals("测试咨询师", response.consultantName)
+        assertEquals("consultant.png", response.consultantAvatar)
+        assertEquals("inst-1", response.institutionId)
+        assertEquals("美丽机构", response.institutionName)
+        assertTrue(response.serviceActivated)
+        assertTrue(response.consultantDetailsVisible)
+        assertTrue(response.serviceConversationReadable)
+        assertTrue(response.serviceMessagingEnabled)
+    }
+
+    @Test
+    fun `refund states split detail history and messaging entitlements`() {
+        listOf("REFUND_REVIEW", "REFUND_PROCESSING").forEach { status ->
+            val response = OrderResponse.from(serviceOrder(status, LocalDateTime.now()))
+            assertTrue(response.consultantDetailsVisible, status)
+            assertTrue(response.serviceConversationReadable, status)
+            assertFalse(response.serviceMessagingEnabled, status)
+            assertEquals("consultant-1", response.consultantId, status)
+        }
+
+        val refunded = OrderResponse.from(serviceOrder("REFUNDED", LocalDateTime.now()))
+        assertFalse(refunded.consultantDetailsVisible)
+        assertTrue(refunded.serviceConversationReadable)
+        assertFalse(refunded.serviceMessagingEnabled)
+        assertNull(refunded.consultantId)
+        assertNull(refunded.institutionId)
+    }
+
+    @Test
+    fun `management projection retains internal consultant snapshot before activation`() {
+        val response = OrderResponse.forManagement(serviceOrder(status = "PENDING_SERVICE_FEE"))
+
+        assertEquals("consultant-1", response.consultantId)
+        assertEquals("测试咨询师", response.consultantName)
+        assertEquals("consultant.png", response.consultantAvatar)
+        assertEquals("inst-1", response.institutionId)
+        assertEquals("美丽机构", response.institutionName)
+    }
+
     @Test
     fun `another consumer gets not found before settlement lookup`() {
         val authentication = mockk<Authentication>()
@@ -82,5 +164,24 @@ class OrderControllerTest {
         payments: PaymentRepository = mockk()
     ) = OrderController(
         orders, mockk<PaymentService>(), mockk<RefundService>(), mockk<ReviewService>(), mockk<OrderStatusLogService>(), settlements, payments
+    )
+
+    private fun serviceOrder(status: String, serviceActivatedAt: LocalDateTime? = null) = OrderEntity(
+        id = "order-1",
+        userId = "user-1",
+        projectName = "项目",
+        institutionId = "inst-1",
+        institutionName = "美丽机构",
+        consultantId = "consultant-1",
+        consultantName = "测试咨询师",
+        consultantAvatar = "consultant.png",
+        price = BigDecimal("400.00"),
+        totalAmountMinor = 40_000,
+        paymentFlow = "TRAVEL_GROUND_SERVICE_ONLY",
+        medicalListPriceMinor = 100_000,
+        platformServiceRateBps = 4_000,
+        travelGroundServiceFeeMinor = 40_000,
+        status = status,
+        serviceActivatedAt = serviceActivatedAt
     )
 }

@@ -1,6 +1,7 @@
 package com.joysong.server.order
 
 import com.joysong.server.coupon.service.CouponService
+import com.joysong.server.config.OrderSplitProperties
 import com.joysong.server.discover.repository.DoctorProjectRepository
 import com.joysong.server.discover.entity.DoctorProjectEntity
 import com.joysong.server.doctor.entity.DoctorEntity
@@ -21,7 +22,9 @@ import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.repository.DoctorInstitutionProjectConfigRepository
 import com.joysong.server.order.repository.OrderRepository
 import com.joysong.server.order.service.OrderService
+import com.joysong.server.order.service.OrderSplitRatePolicy
 import com.joysong.server.order.service.OrderStatusLogService
+import com.joysong.server.order.service.TravelGroundServicePricing
 import com.joysong.server.project.entity.ProjectEntity
 import com.joysong.server.project.repository.ProjectRepository
 import com.joysong.server.settlement.entity.SettlementEntity
@@ -60,6 +63,7 @@ class OrderServiceTest {
     private val institutionProjectDetailResolver = InstitutionProjectDetailResolver()
 
     private lateinit var orderService: OrderService
+    private lateinit var config: DoctorInstitutionProjectConfigEntity
 
     private val testProject = ProjectEntity(
         id = "project-1",
@@ -85,6 +89,12 @@ class OrderServiceTest {
     @BeforeEach
     fun setup() {
         MockKAnnotations.init(this)
+        val splitProperties = OrderSplitProperties().apply { platformRate = BigDecimal("40.00") }
+        config = DoctorInstitutionProjectConfigEntity(
+            doctorId = "doctor-1",
+            institutionProjectId = "inst-proj-1",
+            medicalListPrice = BigDecimal("1000.00")
+        )
         orderService = OrderService(
             orderRepository,
             projectRepository,
@@ -101,13 +111,20 @@ class OrderServiceTest {
             institutionProjectDetailResolver,
             reviewService,
             institutionConsultantService = institutionConsultantService,
-            doctorInstitutionRelationshipService = doctorInstitutionRelationshipService
+            doctorInstitutionRelationshipService = doctorInstitutionRelationshipService,
+            travelGroundServicePricing = TravelGroundServicePricing(OrderSplitRatePolicy(splitProperties))
         )
         // 默认 stub：logTransition 不做任何事
         justRun { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) }
         every { institutionConsultantService.requireApprovedConsultant(any(), any()) } returns
-            InstitutionConsultant("consultant-1", "测试咨询师")
-        every { doctorInstitutionProjectConfigRepository.findByDoctorIdAndInstitutionProjectId(any(), any()) } returns null
+            InstitutionConsultant(
+                id = "consultant-1",
+                name = "测试咨询师",
+                avatar = "consultant.png",
+                institutionId = "inst-1",
+                institutionName = "美丽机构"
+            )
+        every { doctorInstitutionProjectConfigRepository.findByDoctorIdAndInstitutionProjectId(any(), any()) } returns config
         every { doctorProjectRepository.findByDoctorIdAndInstitutionProjectId(any(), any()) } returns DoctorProjectEntity(
             doctorId = "doctor-1",
             projectId = "project-1",
@@ -283,7 +300,7 @@ class OrderServiceTest {
     }
 
     @Test
-    fun `创建订单 - 固化医美顾问和医生快照`() {
+    fun `new order snapshots one USD travel ground service fee without quantity or coupon`() {
         val request = CreateOrderRequest(
             projectId = "project-1",
             institutionProjectId = "inst-proj-1",
@@ -295,23 +312,44 @@ class OrderServiceTest {
         every { institutionRepository.findById("inst-1") } returns Optional.of(testInstitution)
         every { doctorProjectRepository.existsByDoctorIdAndInstitutionProjectId("doctor-1", "inst-proj-1") } returns true
         every { doctorRepository.findById("doctor-1") } returns Optional.of(DoctorEntity(id = "doctor-1", name = "测试医生"))
-        every { institutionConsultantService.requireApprovedConsultant("inst-1", "consultant-1") } returns
-            InstitutionConsultant("consultant-1", "测试咨询师")
-        every { doctorInstitutionProjectConfigRepository.findByDoctorIdAndInstitutionProjectId("doctor-1", "inst-proj-1") } returns null
         every { orderRepository.save(any()) } answers { firstArg<OrderEntity>().copy(id = "order-new") }
 
         val result = orderService.createOrder("user-1", request)
+        val saved = slot<OrderEntity>()
+        verify { orderRepository.save(capture(saved)) }
 
-        assertEquals("inst-1", result.institutionId)
-        assertEquals("美丽机构", result.institutionName)
-        assertEquals("consultant-1", result.consultantId)
-        assertEquals("测试咨询师", result.consultantName)
+        assertEquals("TRAVEL_GROUND_SERVICE_ONLY", saved.captured.paymentFlow)
+        assertEquals(OrderStatusEnum.PENDING_SERVICE_FEE.value, saved.captured.status)
+        assertEquals(100_000L, saved.captured.medicalListPriceMinor)
+        assertEquals(4_000, saved.captured.platformServiceRateBps)
+        assertEquals(40_000L, saved.captured.travelGroundServiceFeeMinor)
+        assertEquals(BigDecimal("400.00"), saved.captured.price)
+        assertEquals(40_000L, saved.captured.totalAmountMinor)
+        assertEquals("USD", saved.captured.currency)
+        assertEquals(1, saved.captured.quantity)
+        assertNull(saved.captured.couponId)
+        assertNull(saved.captured.userCouponId)
+        assertEquals(BigDecimal.ZERO, saved.captured.consultationFee)
+        assertEquals(BigDecimal.ZERO, saved.captured.remainingAmount)
+        assertTrue(result.consultantBound)
+        assertNull(result.institutionId)
+        assertNull(result.institutionName)
+        assertNull(result.consultantId)
+        assertNull(result.consultantName)
+        assertNull(result.consultantAvatar)
         assertEquals("doctor-1", result.doctorId)
         assertEquals("测试医生", result.doctorName)
+        assertFalse(result.serviceActivated)
+        assertFalse(result.consultantDetailsVisible)
+        assertFalse(result.serviceConversationReadable)
+        assertFalse(result.serviceMessagingEnabled)
+        verify(exactly = 0) { couponService.listUserAvailableCoupons(any()) }
+        verify(exactly = 0) { couponService.calculateDiscount(any(), any()) }
+        verify(exactly = 0) { couponService.redeemCoupon(any(), any()) }
     }
 
     @Test
-    fun `创建订单 - 使用医生机构项目价格并生成订单快照`() {
+    fun `创建订单 - 使用医疗价配置而非医生机构项目价格`() {
         val request = CreateOrderRequest(
             projectId = "project-1",
             institutionProjectId = "inst-proj-1",
@@ -334,17 +372,17 @@ class OrderServiceTest {
         val result = orderService.createOrder("user-1", request)
 
         assertEquals("project-1", result.projectId)
-        assertEquals("inst-1", result.institutionId)
-        assertEquals("美丽机构", result.institutionName)
-        assertEquals(BigDecimal("3800.00"), result.amount)
+        assertNull(result.institutionId)
+        assertNull(result.institutionName)
+        assertEquals(BigDecimal("400.00"), result.amount)
         assertEquals(BigDecimal.ZERO, result.paidAmount)
         assertEquals(BigDecimal.ZERO, result.consultationFee)
         assertEquals(BigDecimal.ZERO, result.discountAmount)
-        assertEquals(BigDecimal("3800.00"), result.remainingAmount)
-        assertEquals(OrderStatusEnum.PENDING_PAYMENT.value, result.status)
+        assertEquals(BigDecimal.ZERO, result.remainingAmount)
+        assertEquals(OrderStatusEnum.PENDING_SERVICE_FEE.value, result.status)
         assertEquals("inst-cover.jpg", result.coverImage)
 
-        verify { orderStatusLogService.logTransition("order-1", "", OrderStatusEnum.PENDING_PAYMENT.value, "user-1", "USER", any()) }
+        verify { orderStatusLogService.logTransition("order-1", "", OrderStatusEnum.PENDING_SERVICE_FEE.value, "user-1", "USER", any()) }
     }
 
     @Test
@@ -381,7 +419,7 @@ class OrderServiceTest {
     }
 
     @Test
-    fun `创建订单 - 有面诊金时正确计算 remainingAmount`() {
+    fun `创建订单 - 医疗价为零时拒绝而不回退到面诊金`() {
         val request = CreateOrderRequest(
             projectId = "project-1",
             institutionProjectId = "inst-proj-1",
@@ -391,7 +429,8 @@ class OrderServiceTest {
         val config = DoctorInstitutionProjectConfigEntity(
             doctorId = "doctor-1",
             institutionProjectId = "inst-proj-1",
-            consultationFee = BigDecimal("200.00")
+            consultationFee = BigDecimal("200.00"),
+            medicalListPrice = BigDecimal.ZERO
         )
 
         every { projectRepository.findById("project-1") } returns Optional.of(testProject)
@@ -400,13 +439,10 @@ class OrderServiceTest {
         every { doctorProjectRepository.existsByDoctorIdAndInstitutionProjectId("doctor-1", "inst-proj-1") } returns true
         every { doctorRepository.findById("doctor-1") } returns Optional.of(DoctorEntity(id = "doctor-1", name = "测试医生"))
         every { doctorInstitutionProjectConfigRepository.findByDoctorIdAndInstitutionProjectId("doctor-1", "inst-proj-1") } returns config
-        every { orderRepository.save(any()) } answers { firstArg<OrderEntity>().copy(id = "order-3") }
+        val error = assertThrows<IllegalArgumentException> { orderService.createOrder("user-1", request) }
 
-        val result = orderService.createOrder("user-1", request)
-
-        assertEquals(BigDecimal("200.00"), result.consultationFee)
-        // remainingAmount = price - consultationFee = 4500 - 200 = 4300
-        assertEquals(BigDecimal("4300.00"), result.remainingAmount)
+        assertEquals("MEDICAL_LIST_PRICE_NOT_POSITIVE", error.message)
+        verify(exactly = 0) { orderRepository.save(any()) }
     }
 
     @Test

@@ -97,4 +97,24 @@ class OrderStatusEnumTest {
             )
         }
     }
+
+    @Test
+    fun `travel ground service flow has only its approved transitions`() {
+        assertEquals(
+            setOf(OrderStatusEnum.SERVICE_ACTIVE, OrderStatusEnum.CANCELLED),
+            OrderStatusEnum.TRANSITION_MAP.getValue(OrderStatusEnum.PENDING_SERVICE_FEE)
+        )
+        assertEquals(
+            setOf(OrderStatusEnum.REFUND_REVIEW),
+            OrderStatusEnum.TRANSITION_MAP.getValue(OrderStatusEnum.SERVICE_ACTIVE)
+        )
+        assertEquals(
+            setOf(OrderStatusEnum.SERVICE_ACTIVE, OrderStatusEnum.REFUND_PROCESSING),
+            OrderStatusEnum.TRANSITION_MAP.getValue(OrderStatusEnum.REFUND_REVIEW)
+        )
+        assertEquals(
+            setOf(OrderStatusEnum.REFUNDED),
+            OrderStatusEnum.TRANSITION_MAP.getValue(OrderStatusEnum.REFUND_PROCESSING)
+        )
+    }
 }

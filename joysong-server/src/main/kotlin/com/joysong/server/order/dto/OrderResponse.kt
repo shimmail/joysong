@@ -10,13 +10,14 @@ data class OrderResponse(
     val orderNo: String,
     val userId: String,
     val projectId: String,
-    val institutionId: String,
-    val consultantId: String,
+    val institutionId: String?,
+    val consultantId: String?,
     val doctorId: String,
     val institutionProjectId: String = "",
     val projectName: String,
-    val institutionName: String,
-    val consultantName: String,
+    val institutionName: String?,
+    val consultantName: String?,
+    val consultantAvatar: String? = null,
     val coverImage: String,
     val amount: BigDecimal,
     val currency: String = com.joysong.server.common.money.CurrencyCode.DEFAULT_CODE,
@@ -25,6 +26,15 @@ data class OrderResponse(
     val userCouponId: Long? = null,
     val discountAmount: BigDecimal = BigDecimal.ZERO,
     val status: String,
+    val paymentFlow: String = "LEGACY_MEDICAL",
+    val medicalListPriceMinor: Long? = null,
+    val platformServiceRateBps: Int? = null,
+    val travelGroundServiceFeeMinor: Long? = null,
+    val consultantBound: Boolean = false,
+    val serviceActivated: Boolean = false,
+    val consultantDetailsVisible: Boolean = false,
+    val serviceConversationReadable: Boolean = false,
+    val serviceMessagingEnabled: Boolean = false,
     val quantity: Int,
     val remark: String,
     val consultationFee: BigDecimal = BigDecimal.ZERO,
@@ -55,7 +65,7 @@ data class OrderResponse(
     companion object {
         /** 管理侧可查看订单，但不能读取由用户出示的核销码。 */
         fun forManagement(entity: OrderEntity): OrderResponse =
-            fromEntity(entity, entity.status).copy(
+            fromEntity(entity, entity.status, exposeInternalSnapshots = true).copy(
                 verifyCode = null,
                 canVerify = entity.status == OrderStatusEnum.CONSULTATION_PAID.value,
                 canRequestCompletion = entity.status == OrderStatusEnum.BALANCE_PAID.value
@@ -68,21 +78,41 @@ data class OrderResponse(
                 OrderStatusEnum.SETTLED.value -> OrderStatusEnum.COMPLETED.value
                 else -> entity.status
             }
-            return fromEntity(entity, userStatus)
+            return fromEntity(entity, userStatus, exposeInternalSnapshots = false)
         }
 
-        private fun fromEntity(entity: OrderEntity, responseStatus: String): OrderResponse = OrderResponse(
+        private fun fromEntity(
+            entity: OrderEntity,
+            responseStatus: String,
+            exposeInternalSnapshots: Boolean
+        ): OrderResponse {
+            val serviceActivated = entity.serviceActivatedAt != null
+            val consultantDetailsVisible = serviceActivated && entity.status in setOf(
+                OrderStatusEnum.SERVICE_ACTIVE.value,
+                OrderStatusEnum.REFUND_REVIEW.value,
+                OrderStatusEnum.REFUND_PROCESSING.value
+            )
+            val exposeFulfillment = exposeInternalSnapshots || consultantDetailsVisible
+            val conversationReadable = entity.status in setOf(
+                OrderStatusEnum.SERVICE_ACTIVE.value,
+                OrderStatusEnum.REFUND_REVIEW.value,
+                OrderStatusEnum.REFUND_PROCESSING.value,
+                OrderStatusEnum.REFUNDED.value
+            )
+            val messagingEnabled = serviceActivated && entity.status == OrderStatusEnum.SERVICE_ACTIVE.value
+            return OrderResponse(
             id = entity.id,
             orderNo = entity.orderNo ?: "",
             userId = entity.userId,
             projectId = entity.projectId,
-            institutionId = entity.institutionId,
-            consultantId = entity.consultantId,
+            institutionId = entity.institutionId.takeIf { exposeFulfillment },
+            consultantId = entity.consultantId.takeIf { exposeFulfillment },
             doctorId = entity.doctorId,
             institutionProjectId = entity.institutionProjectId,
             projectName = entity.projectName,
-            institutionName = entity.institutionName,
-            consultantName = entity.consultantName,
+            institutionName = entity.institutionName.takeIf { exposeFulfillment },
+            consultantName = entity.consultantName.takeIf { exposeFulfillment },
+            consultantAvatar = entity.consultantAvatar?.takeIf { exposeFulfillment },
             coverImage = entity.coverImage,
             amount = entity.price,
             currency = entity.currency,
@@ -91,6 +121,15 @@ data class OrderResponse(
             userCouponId = entity.userCouponId,
             discountAmount = entity.discountAmount,
             status = responseStatus,
+            paymentFlow = entity.paymentFlow,
+            medicalListPriceMinor = entity.medicalListPriceMinor,
+            platformServiceRateBps = entity.platformServiceRateBps,
+            travelGroundServiceFeeMinor = entity.travelGroundServiceFeeMinor,
+            consultantBound = entity.consultantId.isNotBlank(),
+            serviceActivated = serviceActivated,
+            consultantDetailsVisible = consultantDetailsVisible,
+            serviceConversationReadable = conversationReadable,
+            serviceMessagingEnabled = messagingEnabled,
             quantity = entity.quantity,
             remark = entity.remark,
             consultationFee = entity.consultationFee,
@@ -110,5 +149,6 @@ data class OrderResponse(
             updatedAt = entity.updatedAt,
             completedAt = entity.completedAt
         )
+        }
     }
 }

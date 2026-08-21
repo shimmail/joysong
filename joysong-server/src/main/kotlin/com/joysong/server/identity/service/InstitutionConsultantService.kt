@@ -5,7 +5,10 @@ import org.springframework.stereotype.Service
 
 data class InstitutionConsultant(
     val id: String,
-    val name: String
+    val name: String,
+    val avatar: String = "",
+    val institutionId: String = "",
+    val institutionName: String = ""
 )
 
 @Service
@@ -33,12 +36,20 @@ class InstitutionConsultantService(
     fun listApprovedConsultants(institutionId: String): List<InstitutionConsultant> =
         jdbcTemplate.query(
             """
-            SELECT u.id, u.nickname
+            SELECT u.id, u.nickname, u.avatar, i.id AS institution_id, i.name AS institution_name
             $eligibleConsultantFromWhere
               AND im.institution_id = ?
             ORDER BY u.nickname, u.id
             """.trimIndent(),
-            { rs, _ -> InstitutionConsultant(rs.getString("id"), rs.getString("nickname")) },
+            { rs, _ ->
+                InstitutionConsultant(
+                    id = rs.getString("id"),
+                    name = rs.getString("nickname"),
+                    avatar = rs.getString("avatar") ?: "",
+                    institutionId = rs.getString("institution_id"),
+                    institutionName = rs.getString("institution_name")
+                )
+            },
             institutionId
         )
 

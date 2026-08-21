@@ -10,6 +10,14 @@ package com.joysong.server.order.dto
 enum class OrderStatusEnum(val value: String) {
     /** 等待支付面诊金 */
     PENDING_PAYMENT("PENDING_PAYMENT"),
+    /** 等待支付旅游地接服务费 */
+    PENDING_SERVICE_FEE("PENDING_SERVICE_FEE"),
+    /** 旅游地接服务已激活 */
+    SERVICE_ACTIVE("SERVICE_ACTIVE"),
+    /** 旅游地接服务退款审核中 */
+    REFUND_REVIEW("REFUND_REVIEW"),
+    /** 旅游地接服务退款渠道处理中 */
+    REFUND_PROCESSING("REFUND_PROCESSING"),
     /** 面诊金已付，等待到店 */
     CONSULTATION_PAID("CONSULTATION_PAID"),
     /** 已到店核验 */
@@ -38,6 +46,10 @@ enum class OrderStatusEnum(val value: String) {
          */
         val TRANSITION_MAP: Map<OrderStatusEnum, Set<OrderStatusEnum>> = mapOf(
             PENDING_PAYMENT to setOf(CONSULTATION_PAID, CANCELLED),
+            PENDING_SERVICE_FEE to setOf(SERVICE_ACTIVE, CANCELLED),
+            SERVICE_ACTIVE to setOf(REFUND_REVIEW),
+            REFUND_REVIEW to setOf(SERVICE_ACTIVE, REFUND_PROCESSING),
+            REFUND_PROCESSING to setOf(REFUNDED),
             CONSULTATION_PAID to setOf(VERIFIED, CANCELLED, REFUNDED),
             VERIFIED to setOf(BALANCE_PAID, CANCELLED, DISPUTE_MEDIATION, REFUNDED),
             BALANCE_PAID to setOf(PENDING_COMPLETION, DISPUTE_MEDIATION, REFUNDED),
