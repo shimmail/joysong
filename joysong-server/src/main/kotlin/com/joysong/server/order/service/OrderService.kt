@@ -84,6 +84,8 @@ class OrderService(
 
         /** 退款状态：已批准 */
         private const val REFUND_STATUS_APPROVED = "APPROVED"
+
+        private const val TRAVEL_GROUND_SERVICE_PAYMENT_FLOW = "TRAVEL_GROUND_SERVICE_ONLY"
     }
 
     /**
@@ -172,7 +174,7 @@ class OrderService(
             discountAmount = BigDecimal.ZERO,
             discountAmountMinor = 0,
             status = OrderStatusEnum.PENDING_SERVICE_FEE.value,
-            paymentFlow = "TRAVEL_GROUND_SERVICE_ONLY",
+            paymentFlow = TRAVEL_GROUND_SERVICE_PAYMENT_FLOW,
             medicalListPriceMinor = quote.medicalListPriceMinor,
             platformServiceRateBps = quote.platformServiceRateBps,
             travelGroundServiceFeeMinor = quote.travelGroundServiceFeeMinor,
@@ -701,8 +703,8 @@ class OrderService(
     // ---- 用户操作 ----
 
     /**
-     * 取消待支付订单（物理删除）
-     * 仅允许 PENDING_PAYMENT 状态的订单取消，使用原生 SQL 绕过 @SQLDelete 注解执行真正的 DELETE
+     * 取消待支付订单并保留状态审计。
+     * 仅允许旧流程待支付或旅游地接服务费待支付状态取消。
      *
      * @param orderId 订单ID
      * @param userId  当前用户ID
@@ -717,8 +719,11 @@ class OrderService(
             throw RuntimeException("无权操作此订单")
         }
 
-        // 仅 PENDING_PAYMENT 状态可取消
-        if (order.status != OrderStatusEnum.PENDING_PAYMENT.value) {
+        val cancellableStatuses = setOf(
+            OrderStatusEnum.PENDING_PAYMENT.value,
+            OrderStatusEnum.PENDING_SERVICE_FEE.value
+        )
+        if (order.status !in cancellableStatuses) {
             throw RuntimeException("当前状态不允许取消")
         }
 
@@ -730,7 +735,7 @@ class OrderService(
         )
         orderStatusLogService.logTransition(
             orderId = orderId,
-            fromStatus = OrderStatusEnum.PENDING_PAYMENT.value,
+            fromStatus = order.status,
             toStatus = OrderStatusEnum.CANCELLED.value,
             operatorId = userId,
             operatorType = OPERATOR_TYPE_USER,
@@ -816,6 +821,14 @@ class OrderService(
             ?: throw IllegalStateException("订单当前状态无效: ${order.status}")
         val targetStatus = OrderStatusEnum.fromValue(status)
             ?: throw IllegalArgumentException("目标状态无效: $status")
+        if (order.paymentFlow == TRAVEL_GROUND_SERVICE_PAYMENT_FLOW) {
+            require(
+                currentStatus == OrderStatusEnum.PENDING_SERVICE_FEE &&
+                    targetStatus == OrderStatusEnum.CANCELLED
+            ) {
+                "旅游地接服务订单状态只能由专用支付或退款流程推进"
+            }
+        }
         require(currentStatus.canTransitionTo(targetStatus)) {
             "状态转换不合法：${currentStatus.value} -> ${targetStatus.value}"
         }

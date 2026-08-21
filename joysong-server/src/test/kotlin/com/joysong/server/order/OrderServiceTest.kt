@@ -699,6 +699,32 @@ class OrderServiceTest {
     }
 
     @Test
+    fun `cancelOrder 用户可取消待支付旅游地接服务费订单并记录实际原状态`() {
+        val order = createTestOrder(
+            "o1",
+            "user-1",
+            status = OrderStatusEnum.PENDING_SERVICE_FEE.value,
+            paymentFlow = "TRAVEL_GROUND_SERVICE_ONLY"
+        )
+        every { orderRepository.findById("o1") } returns Optional.of(order)
+        every { orderRepository.save(any()) } answers { firstArg() }
+
+        orderService.cancelOrder("o1", "user-1")
+
+        verify {
+            orderRepository.save(match { it.status == OrderStatusEnum.CANCELLED.value })
+            orderStatusLogService.logTransition(
+                orderId = "o1",
+                fromStatus = OrderStatusEnum.PENDING_SERVICE_FEE.value,
+                toStatus = OrderStatusEnum.CANCELLED.value,
+                operatorId = "user-1",
+                operatorType = "USER",
+                remark = "用户取消待支付订单"
+            )
+        }
+    }
+
+    @Test
     fun `cancelOrder 非本人订单抛出异常`() {
         val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.PENDING_PAYMENT.value)
         every { orderRepository.findById("o1") } returns Optional.of(order)
@@ -842,6 +868,66 @@ class OrderServiceTest {
     }
 
     @Test
+    fun `adminUpdateStatus 通用入口不能伪造旅游地接服务激活或退款推进`() {
+        val protectedTransitions = listOf(
+            OrderStatusEnum.PENDING_SERVICE_FEE to OrderStatusEnum.SERVICE_ACTIVE,
+            OrderStatusEnum.SERVICE_ACTIVE to OrderStatusEnum.REFUND_REVIEW,
+            OrderStatusEnum.REFUND_REVIEW to OrderStatusEnum.REFUND_PROCESSING,
+            OrderStatusEnum.REFUND_PROCESSING to OrderStatusEnum.REFUNDED
+        )
+        every { orderRepository.save(any()) } answers { firstArg() }
+
+        protectedTransitions.forEachIndexed { index, (from, target) ->
+            val orderId = "travel-$index"
+            every { orderRepository.findById(orderId) } returns Optional.of(
+                createTestOrder(
+                    orderId,
+                    "user-1",
+                    status = from.value,
+                    paymentFlow = "TRAVEL_GROUND_SERVICE_ONLY"
+                )
+            )
+
+            assertThrows<IllegalArgumentException> {
+                orderService.adminUpdateStatus(orderId, target.value)
+            }
+        }
+
+        verify(exactly = 0) { orderRepository.save(any()) }
+        verify(exactly = 0) {
+            orderStatusLogService.logTransition(
+                match { it.startsWith("travel-") }, any(), any(), any(), any(), any()
+            )
+        }
+    }
+
+    @Test
+    fun `adminUpdateStatus 通用入口仅允许安全取消待支付旅游地接服务订单`() {
+        val order = createTestOrder(
+            "travel-1",
+            "user-1",
+            status = OrderStatusEnum.PENDING_SERVICE_FEE.value,
+            paymentFlow = "TRAVEL_GROUND_SERVICE_ONLY"
+        )
+        every { orderRepository.findById("travel-1") } returns Optional.of(order)
+        every { orderRepository.save(any()) } answers { firstArg() }
+
+        val updated = orderService.adminUpdateStatus("travel-1", OrderStatusEnum.CANCELLED.value)
+
+        assertEquals(OrderStatusEnum.CANCELLED.value, updated?.status)
+        verify {
+            orderStatusLogService.logTransition(
+                "travel-1",
+                OrderStatusEnum.PENDING_SERVICE_FEE.value,
+                OrderStatusEnum.CANCELLED.value,
+                null,
+                "ADMIN",
+                "管理员修改状态"
+            )
+        }
+    }
+
+    @Test
     fun `adminManualVerify 手动核销会写入核验时间并清除核销码`() {
         val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.CONSULTATION_PAID.value)
             .copy(verifyCode = "123456")
@@ -899,7 +985,8 @@ class OrderServiceTest {
     private fun createTestOrder(
         id: String,
         userId: String,
-        status: String = OrderStatusEnum.PENDING_PAYMENT.value
+        status: String = OrderStatusEnum.PENDING_PAYMENT.value,
+        paymentFlow: String = "LEGACY_MEDICAL"
     ): OrderEntity = OrderEntity(
         id = id,
         userId = userId,
@@ -909,6 +996,7 @@ class OrderServiceTest {
         price = BigDecimal("4500.00"),
         paidAmount = BigDecimal.ZERO,
         status = status,
+        paymentFlow = paymentFlow,
         projectId = "project-1",
         institutionId = "inst-1",
         verifyCode = "123456",

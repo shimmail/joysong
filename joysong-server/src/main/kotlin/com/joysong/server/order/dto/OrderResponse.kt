@@ -86,19 +86,19 @@ data class OrderResponse(
             responseStatus: String,
             exposeInternalSnapshots: Boolean
         ): OrderResponse {
-            val serviceActivated = entity.serviceActivatedAt != null
-            val consultantDetailsVisible = serviceActivated && entity.status in setOf(
-                OrderStatusEnum.SERVICE_ACTIVE.value,
-                OrderStatusEnum.REFUND_REVIEW.value,
-                OrderStatusEnum.REFUND_PROCESSING.value
-            )
-            val exposeFulfillment = exposeInternalSnapshots || consultantDetailsVisible
-            val conversationReadable = entity.status in setOf(
+            val isTravelGroundService = entity.paymentFlow == "TRAVEL_GROUND_SERVICE_ONLY"
+            val activatedStatuses = setOf(
                 OrderStatusEnum.SERVICE_ACTIVE.value,
                 OrderStatusEnum.REFUND_REVIEW.value,
                 OrderStatusEnum.REFUND_PROCESSING.value,
                 OrderStatusEnum.REFUNDED.value
             )
+            val serviceActivated = isTravelGroundService &&
+                entity.serviceActivatedAt != null &&
+                entity.status in activatedStatuses
+            val consultantDetailsVisible = serviceActivated && entity.status != OrderStatusEnum.REFUNDED.value
+            val exposeFulfillment = exposeInternalSnapshots || consultantDetailsVisible
+            val conversationReadable = serviceActivated
             val messagingEnabled = serviceActivated && entity.status == OrderStatusEnum.SERVICE_ACTIVE.value
             return OrderResponse(
             id = entity.id,
@@ -125,7 +125,7 @@ data class OrderResponse(
             medicalListPriceMinor = entity.medicalListPriceMinor,
             platformServiceRateBps = entity.platformServiceRateBps,
             travelGroundServiceFeeMinor = entity.travelGroundServiceFeeMinor,
-            consultantBound = entity.consultantId.isNotBlank(),
+            consultantBound = isTravelGroundService && entity.consultantId.isNotBlank(),
             serviceActivated = serviceActivated,
             consultantDetailsVisible = consultantDetailsVisible,
             serviceConversationReadable = conversationReadable,

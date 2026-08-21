@@ -91,6 +91,37 @@ class OrderControllerTest {
     }
 
     @Test
+    fun `unactivated refunded travel order cannot read conversation`() {
+        val response = OrderResponse.from(serviceOrder(status = "REFUNDED", serviceActivatedAt = null))
+
+        assertFalse(response.serviceActivated)
+        assertFalse(response.consultantDetailsVisible)
+        assertFalse(response.serviceConversationReadable)
+        assertFalse(response.serviceMessagingEnabled)
+        assertNull(response.consultantId)
+        assertNull(response.institutionId)
+    }
+
+    @Test
+    fun `legacy order cannot gain travel service entitlements from anomalous status and timestamp`() {
+        val response = OrderResponse.from(
+            serviceOrder(
+                status = "SERVICE_ACTIVE",
+                serviceActivatedAt = LocalDateTime.now(),
+                paymentFlow = "LEGACY_MEDICAL"
+            )
+        )
+
+        assertFalse(response.consultantBound)
+        assertFalse(response.serviceActivated)
+        assertFalse(response.consultantDetailsVisible)
+        assertFalse(response.serviceConversationReadable)
+        assertFalse(response.serviceMessagingEnabled)
+        assertNull(response.consultantId)
+        assertNull(response.institutionId)
+    }
+
+    @Test
     fun `management projection retains internal consultant snapshot before activation`() {
         val response = OrderResponse.forManagement(serviceOrder(status = "PENDING_SERVICE_FEE"))
 
@@ -166,7 +197,11 @@ class OrderControllerTest {
         orders, mockk<PaymentService>(), mockk<RefundService>(), mockk<ReviewService>(), mockk<OrderStatusLogService>(), settlements, payments
     )
 
-    private fun serviceOrder(status: String, serviceActivatedAt: LocalDateTime? = null) = OrderEntity(
+    private fun serviceOrder(
+        status: String,
+        serviceActivatedAt: LocalDateTime? = null,
+        paymentFlow: String = "TRAVEL_GROUND_SERVICE_ONLY"
+    ) = OrderEntity(
         id = "order-1",
         userId = "user-1",
         projectName = "项目",
@@ -177,7 +212,7 @@ class OrderControllerTest {
         consultantAvatar = "consultant.png",
         price = BigDecimal("400.00"),
         totalAmountMinor = 40_000,
-        paymentFlow = "TRAVEL_GROUND_SERVICE_ONLY",
+        paymentFlow = paymentFlow,
         medicalListPriceMinor = 100_000,
         platformServiceRateBps = 4_000,
         travelGroundServiceFeeMinor = 40_000,
