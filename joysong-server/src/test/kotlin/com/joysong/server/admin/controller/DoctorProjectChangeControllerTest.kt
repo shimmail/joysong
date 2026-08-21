@@ -35,17 +35,33 @@ class DoctorProjectChangeControllerTest {
     }
 
     @Test
-    fun `submit forwards full twelve key profile update arrays`() {
+    fun `submit forwards profile update with medical list price`() {
         val actor = actor()
-        val request = DoctorProjectChangeRequest("ip-1", "PROFILE_UPDATE", "service", BigDecimal("880"), "notes", listOf("tag"), "schedule", "cover", listOf("image"), BigDecimal("30"), BigDecimal("10"), BigDecimal("40"))
+        val request = DoctorProjectChangeRequest("ip-1", "PROFILE_UPDATE", "service", BigDecimal("880"), "notes", listOf("tag"), "schedule", "cover", listOf("image"), BigDecimal("30"), BigDecimal("10"), BigDecimal("40"), BigDecimal("1000.00"))
         every { access.actor(authentication) } returns actor
-        every { service.submit(actor, match { it.requestType == "PROFILE_UPDATE" && it.serviceTags == listOf("tag") && it.images == listOf("image") }) } returns mockk()
+        every { service.submit(actor, match { it.requestType == "PROFILE_UPDATE" && it.serviceTags == listOf("tag") && it.images == listOf("image") && it.medicalListPrice?.compareTo(BigDecimal("1000.00")) == 0 }) } returns mockk()
 
         controller.submit(authentication, mapper.valueToTree(request))
 
-        verify(exactly = 1) { service.submit(actor, match { it.requestType == "PROFILE_UPDATE" && it.serviceTags == listOf("tag") && it.images == listOf("image") }) }
+        verify(exactly = 1) { service.submit(actor, match { it.requestType == "PROFILE_UPDATE" && it.serviceTags == listOf("tag") && it.images == listOf("image") && it.medicalListPrice?.compareTo(BigDecimal("1000.00")) == 0 }) }
         assertEquals(listOf("tag"), request.serviceTags)
         assertEquals(listOf("image"), request.images)
+    }
+
+    @Test
+    fun `profile update rejects doctor supplied platform rate`() {
+        every { access.actor(authentication) } returns actor()
+        val request = mapper.valueToTree<com.fasterxml.jackson.databind.JsonNode>(DoctorProjectChangeRequest(
+            institutionProjectId = "ip-1", requestType = "PROFILE_UPDATE", serviceDescription = "service",
+            priceSuggestion = BigDecimal("880"), notes = "notes", serviceTags = listOf("tag"), scheduleNote = "schedule",
+            coverImage = "cover", images = listOf("image"), consultationFee = BigDecimal("30"),
+            commissionRate = BigDecimal("10"), institutionRate = BigDecimal("40"), medicalListPrice = BigDecimal("1000")
+        )).also { (it as com.fasterxml.jackson.databind.node.ObjectNode).put("platformRate", "99.99") }
+
+        val error = assertThrows(IllegalArgumentException::class.java) { controller.submit(authentication, request) }
+
+        assertEquals("PROFILE_UPDATE 必须且仅能提交 13 个约定字段", error.message)
+        verify(exactly = 0) { service.submit(any(), any()) }
     }
 
     @Test

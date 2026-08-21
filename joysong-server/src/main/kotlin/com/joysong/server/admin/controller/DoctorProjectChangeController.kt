@@ -43,9 +43,9 @@ class DoctorProjectChangeController(
             ?: throw IllegalArgumentException("requestType 必须提交")
         if (type == "PROFILE_UPDATE") {
             val expected = setOf("institutionProjectId", "requestType", "serviceDescription", "priceSuggestion", "notes",
-                "serviceTags", "scheduleNote", "coverImage", "images", "consultationFee", "commissionRate", "institutionRate")
+                "serviceTags", "scheduleNote", "coverImage", "images", "consultationFee", "commissionRate", "institutionRate", "medicalListPrice")
             val actual = body.fieldNames().asSequence().toSet()
-            require(actual == expected) { "PROFILE_UPDATE 必须且仅能提交 12 个约定字段" }
+            require(actual == expected) { "PROFILE_UPDATE 必须且仅能提交 13 个约定字段" }
         }
         return objectMapper.treeToValue(body, DoctorProjectChangeRequest::class.java)
     }

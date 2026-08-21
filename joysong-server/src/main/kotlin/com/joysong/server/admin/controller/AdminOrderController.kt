@@ -242,11 +242,14 @@ class AdminOrderController(
             .findByDoctorIdAndInstitutionProjectId(request.doctorId, request.institutionProjectId)
             ?: doctorInstitutionProjectConfigRepository
                 .findByDoctorIdAndInstitutionProjectIdIncludeDeleted(request.doctorId, request.institutionProjectId)
+        val medicalListPrice = request.medicalListPrice ?: existing?.medicalListPrice
+        require(medicalListPrice != null && medicalListPrice > BigDecimal.ZERO) { "医疗套餐优惠前金额必须大于 0" }
 
         val saved = if (existing != null) {
             existing.consultationFee = request.consultationFee
             existing.commissionRate = request.commissionRate
             existing.institutionRate = request.institutionRate
+            existing.medicalListPrice = medicalListPrice
             existing.deletedAt = null
             existing.updatedAt = LocalDateTime.now()
             doctorInstitutionProjectConfigRepository.save(existing)
@@ -256,7 +259,8 @@ class AdminOrderController(
                 institutionProjectId = request.institutionProjectId,
                 consultationFee = request.consultationFee,
                 commissionRate = request.commissionRate,
-                institutionRate = request.institutionRate
+                institutionRate = request.institutionRate,
+                medicalListPrice = medicalListPrice
             )
             doctorInstitutionProjectConfigRepository.save(newConfig)
         }
@@ -284,5 +288,6 @@ data class UpsertConfigRequest(
     val institutionProjectId: String,
     val consultationFee: BigDecimal = BigDecimal.ZERO,
     val commissionRate: BigDecimal = BigDecimal.ZERO,
-    val institutionRate: BigDecimal = BigDecimal("40.00")
+    val institutionRate: BigDecimal = BigDecimal("40.00"),
+    val medicalListPrice: BigDecimal? = null
 )

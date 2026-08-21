@@ -46,6 +46,10 @@ class DoctorProjectChangeService(
         require(request.serviceDescription.trim().isNotEmpty() && request.serviceDescription.trim().length <= 5000) { "服务说明不能为空且最长 5000" }
         requireNotNull(request.priceSuggestion) { "项目价格不能为空" }.also(::validateMoney)
         requireNotNull(request.consultationFee) { "面诊费不能为空" }.also(::validateMoney)
+        requireNotNull(request.medicalListPrice) { "医疗套餐优惠前金额不能为空" }.also {
+            require(it > BigDecimal.ZERO) { "医疗套餐优惠前金额必须大于 0" }
+            validateMoney(it)
+        }
         require(request.notes.length <= 2000 && request.scheduleNote.length <= 500 && request.coverImage.length <= 500) { "文本字段长度超限" }
         require(request.serviceTags.size <= 20 && request.serviceTags.all { it.isNotBlank() && it.length <= 100 }) { "服务标签不合法" }
         require(request.images.size <= 20 && request.images.all { it.length <= 500 }) { "项目图片不合法" }
@@ -66,7 +70,7 @@ class DoctorProjectChangeService(
                    ip.institution_id, i.name AS institution_name,
                    dp.price AS current_price, dp.service_description,
                    dp.service_tags, dp.schedule_note, dp.cover_image, dp.images,
-                   c.consultation_fee, c.commission_rate, c.institution_rate
+                   c.consultation_fee, c.commission_rate, c.institution_rate, c.medical_list_price
             FROM doctor_projects dp
             JOIN institution_projects ip
               ON ip.id = dp.institution_project_id AND ip.deleted_at IS NULL AND ip.is_active = TRUE
@@ -102,6 +106,7 @@ class DoctorProjectChangeService(
                     consultationFee = rs.getBigDecimal("consultation_fee") ?: BigDecimal.ZERO,
                     commissionRate = commissionRate ?: split.consultantRate,
                     institutionRate = institutionRate ?: split.institutionRate,
+                    medicalListPrice = rs.getBigDecimal("medical_list_price") ?: BigDecimal.ZERO,
                     platformRate = split.platformRate,
                     doctorRate = split.doctorRate
                 )
@@ -118,10 +123,10 @@ class DoctorProjectChangeService(
                    COALESCE(ip.name, p.name) AS project_name, r.request_type,
                    r.service_description, r.price_suggestion, r.notes, r.service_tags, r.schedule_note,
                    r.cover_image, r.images, r.status, r.submitted_by,
-                   r.consultation_fee, r.commission_rate, r.institution_rate, r.force_processed,
+                   r.consultation_fee, r.commission_rate, r.institution_rate, r.medical_list_price, r.force_processed,
                    r.current_price, r.current_service_description, r.current_service_tags,
                    r.current_schedule_note, r.current_cover_image, r.current_images,
-                   r.current_consultation_fee, r.current_commission_rate, r.current_institution_rate,
+                   r.current_consultation_fee, r.current_commission_rate, r.current_institution_rate, r.current_medical_list_price,
                    r.current_platform_rate, r.current_doctor_rate,
                    r.reviewed_by, reviewer.nickname AS reviewer_name, r.review_note,
                    r.submitted_at, r.reviewed_at, r.updated_at
@@ -156,6 +161,7 @@ class DoctorProjectChangeService(
                 consultationFee = rs.getBigDecimal("consultation_fee"),
                 commissionRate = rs.getBigDecimal("commission_rate"),
                 institutionRate = rs.getBigDecimal("institution_rate"),
+                medicalListPrice = rs.getBigDecimal("medical_list_price"),
                 platformRate = rs.getBigDecimal("commission_rate")?.let { splitRatePolicy.currentPlatformRate() },
                 doctorRate = rs.getBigDecimal("commission_rate")?.let { splitRatePolicy.resolve(rs.getBigDecimal("institution_rate"), it).doctorRate },
                 currentPrice = if (requestType == "PROFILE_UPDATE") rs.getBigDecimal("current_price") else null,
@@ -165,6 +171,7 @@ class DoctorProjectChangeService(
                 currentCoverImage = if (requestType == "PROFILE_UPDATE") rs.getString("current_cover_image").orEmpty() else null,
                 currentImages = if (requestType == "PROFILE_UPDATE") decodeList(rs.getString("current_images")) else null,
                 currentConsultationFee = if (requestType == "PROFILE_UPDATE") rs.getBigDecimal("current_consultation_fee") else null,
+                currentMedicalListPrice = if (requestType == "PROFILE_UPDATE") rs.getBigDecimal("current_medical_list_price") else null,
                 currentCommissionRate = currentCommissionRate,
                 currentInstitutionRate = currentInstitutionRate,
                 currentPlatformRate = if (requestType == "PROFILE_UPDATE") rs.getBigDecimal("current_platform_rate") else null,
@@ -208,7 +215,8 @@ class DoctorProjectChangeService(
                 }
                 require(request.serviceTags.isEmpty() && request.images.isEmpty() &&
                     request.scheduleNote.isBlank() && request.coverImage.isBlank() &&
-                    request.consultationFee == null && request.commissionRate == null && request.institutionRate == null) {
+                    request.consultationFee == null && request.commissionRate == null && request.institutionRate == null &&
+                    request.medicalListPrice == null) {
                     "加入机构项目仅允许提交服务内容、价格建议和说明"
                 }
             }
@@ -228,14 +236,14 @@ class DoctorProjectChangeService(
             """
             INSERT INTO doctor_project_change_requests
                 (id, doctor_id, institution_id, institution_project_id, request_type,
-                 service_description, price_suggestion, consultation_fee, commission_rate, institution_rate,
+                 service_description, price_suggestion, consultation_fee, commission_rate, institution_rate, medical_list_price,
                  base_doctor_project_updated_at, base_config_id, base_config_updated_at,
                  current_price, current_service_description, current_service_tags, current_schedule_note,
-                 current_cover_image, current_images, current_consultation_fee, current_commission_rate, current_institution_rate,
+                 current_cover_image, current_images, current_consultation_fee, current_commission_rate, current_institution_rate, current_medical_list_price,
                  current_platform_rate, current_doctor_rate,
                  notes, service_tags, schedule_note, cover_image, images,
                  status, submitted_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
             """.trimIndent(),
             id,
             doctorId,
@@ -244,7 +252,7 @@ class DoctorProjectChangeService(
             requestType,
             request.serviceDescription.trim().take(5000),
             request.priceSuggestion,
-            request.consultationFee, request.commissionRate, request.institutionRate,
+            request.consultationFee, request.commissionRate, request.institutionRate, request.medicalListPrice,
             existing?.updatedAt, config?.id, config?.updatedAt,
             if (requestType == "PROFILE_UPDATE") existing?.price else null,
             if (requestType == "PROFILE_UPDATE") existing?.serviceDescription else null,
@@ -255,6 +263,7 @@ class DoctorProjectChangeService(
             if (requestType == "PROFILE_UPDATE") config?.consultationFee ?: BigDecimal.ZERO else null,
             if (requestType == "PROFILE_UPDATE") config?.commissionRate ?: splitRatePolicy.defaults().consultantRate else null,
             if (requestType == "PROFILE_UPDATE") config?.institutionRate ?: splitRatePolicy.defaults().institutionRate else null,
+            if (requestType == "PROFILE_UPDATE") config?.medicalListPrice ?: BigDecimal.ZERO else null,
             currentSplit?.platformRate, currentSplit?.doctorRate,
             request.notes.trim(),
             encodeList(request.serviceTags),
@@ -345,7 +354,8 @@ class DoctorProjectChangeService(
                 doctorProjectRepository.save(target.toEntity(existing.createdAt, requireNotNull(target.priceSuggestion)))
                 val effective = config ?: DoctorInstitutionProjectConfigEntity(doctorId=target.doctorId, institutionProjectId=target.institutionProjectId)
                 effective.consultationFee=requireNotNull(target.consultationFee); effective.commissionRate=requireNotNull(target.commissionRate)
-                effective.institutionRate=requireNotNull(target.institutionRate); effective.deletedAt=null; effective.updatedAt=LocalDateTime.now()
+                effective.institutionRate=requireNotNull(target.institutionRate); effective.medicalListPrice=requireNotNull(target.medicalListPrice)
+                effective.deletedAt=null; effective.updatedAt=LocalDateTime.now()
                 configRepository.save(effective)
             }
             "LEAVE" -> {
@@ -393,7 +403,7 @@ class DoctorProjectChangeService(
                r.request_type, r.service_description, r.price_suggestion, r.notes,
                r.service_tags, r.schedule_note,
                r.cover_image, r.images, r.status, r.submitted_by
-               ,r.consultation_fee, r.commission_rate, r.institution_rate,
+               ,r.consultation_fee, r.commission_rate, r.institution_rate, r.medical_list_price,
                r.base_doctor_project_updated_at, r.base_config_id, r.base_config_updated_at
         FROM doctor_project_change_requests r
         JOIN institution_projects ip ON ip.id = r.institution_project_id
@@ -416,7 +426,7 @@ class DoctorProjectChangeService(
                 status = rs.getString("status"),
                 submittedBy = rs.getString("submitted_by")
                 ,consultationFee=rs.getBigDecimal("consultation_fee"), commissionRate=rs.getBigDecimal("commission_rate"),
-                institutionRate=rs.getBigDecimal("institution_rate"), baseDoctorProjectUpdatedAt=rs.getTimestamp("base_doctor_project_updated_at")?.toLocalDateTime(),
+                institutionRate=rs.getBigDecimal("institution_rate"), medicalListPrice=rs.getBigDecimal("medical_list_price"), baseDoctorProjectUpdatedAt=rs.getTimestamp("base_doctor_project_updated_at")?.toLocalDateTime(),
                 baseConfigId=rs.getString("base_config_id"), baseConfigUpdatedAt=rs.getTimestamp("base_config_updated_at")?.toLocalDateTime()
             )
         },
@@ -443,7 +453,8 @@ data class DoctorProjectChangeRequest(
     val images: List<String> = emptyList(),
     val consultationFee: BigDecimal? = null,
     val commissionRate: BigDecimal? = null,
-    val institutionRate: BigDecimal? = null
+    val institutionRate: BigDecimal? = null,
+    val medicalListPrice: BigDecimal? = null
 )
 
 data class DoctorProjectProfileUpdateTargetView(
@@ -460,6 +471,7 @@ data class DoctorProjectProfileUpdateTargetView(
     val consultationFee: BigDecimal,
     val commissionRate: BigDecimal,
     val institutionRate: BigDecimal,
+    val medicalListPrice: BigDecimal,
     val platformRate: BigDecimal,
     val doctorRate: BigDecimal
 )
@@ -480,7 +492,7 @@ data class DoctorProjectChangeView(
     val scheduleNote: String,
     val coverImage: String,
     val images: List<String>,
-    val consultationFee: BigDecimal?, val commissionRate: BigDecimal?, val institutionRate: BigDecimal?,
+    val consultationFee: BigDecimal?, val commissionRate: BigDecimal?, val institutionRate: BigDecimal?, val medicalListPrice: BigDecimal?,
     val platformRate: BigDecimal?, val doctorRate: BigDecimal?, val forceProcessed: Boolean,
     val currentPrice: BigDecimal?,
     val currentServiceDescription: String?,
@@ -489,6 +501,7 @@ data class DoctorProjectChangeView(
     val currentCoverImage: String?,
     val currentImages: List<String>?,
     val currentConsultationFee: BigDecimal?,
+    val currentMedicalListPrice: BigDecimal?,
     val currentCommissionRate: BigDecimal?,
     val currentInstitutionRate: BigDecimal?,
     val currentPlatformRate: BigDecimal?,
@@ -520,7 +533,7 @@ private data class ChangeTarget(
     val images: String,
     val status: String,
     val submittedBy: String,
-    val consultationFee: BigDecimal?, val commissionRate: BigDecimal?, val institutionRate: BigDecimal?,
+    val consultationFee: BigDecimal?, val commissionRate: BigDecimal?, val institutionRate: BigDecimal?, val medicalListPrice: BigDecimal?,
     val baseDoctorProjectUpdatedAt: LocalDateTime?, val baseConfigId: String?, val baseConfigUpdatedAt: LocalDateTime?
 )
 

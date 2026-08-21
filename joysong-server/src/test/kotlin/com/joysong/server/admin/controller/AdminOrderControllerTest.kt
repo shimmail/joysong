@@ -41,6 +41,38 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 
 class AdminOrderControllerTest {
     @Test
+    fun `admin config saves positive medical list price and rejects zero`() {
+        val authentication = mockk<Authentication>()
+        val configRepository = mockk<DoctorInstitutionProjectConfigRepository>()
+        val accessService = mockk<ManagementAccessService>()
+        every { accessService.actor(authentication) } returns adminActor()
+        every { accessService.requireSplitConfig(any(), any(), any()) } returns Unit
+        every { configRepository.findByDoctorIdAndInstitutionProjectId("doctor-1", "project-1") } returns null
+        every { configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeleted("doctor-1", "project-1") } returns null
+        every { configRepository.save(any()) } answers { firstArg() }
+        val controller = AdminOrderController(
+            mockk(), mockk(), mockk(), mockk(), mockk(), mockk(), mockk(), configRepository, accessService,
+            OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("40.00") })
+        )
+
+        controller.upsertConfig(authentication, UpsertConfigRequest(
+            doctorId = "doctor-1", institutionProjectId = "project-1", consultationFee = BigDecimal.ZERO,
+            commissionRate = BigDecimal("10.00"), institutionRate = BigDecimal("40.00"),
+            medicalListPrice = BigDecimal("1000.00")
+        ))
+
+        verify(exactly = 1) { configRepository.save(match { it.medicalListPrice == BigDecimal("1000.00") }) }
+        val error = assertThrows<IllegalArgumentException> {
+            controller.upsertConfig(authentication, UpsertConfigRequest(
+                doctorId = "doctor-1", institutionProjectId = "project-1", consultationFee = BigDecimal.ZERO,
+                commissionRate = BigDecimal("10.00"), institutionRate = BigDecimal("40.00"),
+                medicalListPrice = BigDecimal.ZERO
+            ))
+        }
+        assertEquals("医疗套餐优惠前金额必须大于 0", error.message)
+    }
+
+    @Test
     fun `admin config save rejects rates exceeding the shared split policy before persistence`() {
         val authentication = mockk<Authentication>()
         val orderService = mockk<OrderService>()

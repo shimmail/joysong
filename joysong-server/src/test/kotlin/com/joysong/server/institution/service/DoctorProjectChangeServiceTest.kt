@@ -118,10 +118,11 @@ class DoctorProjectChangeServiceTest {
             serviceDescription = "service", priceSuggestion = BigDecimal("880.00"),
             notes = "notes", serviceTags = listOf("tag"), scheduleNote = "schedule",
             coverImage = "cover", images = listOf("image"), consultationFee = BigDecimal("30.00"),
-            commissionRate = BigDecimal("10.00"), institutionRate = BigDecimal("40.00")
+            commissionRate = BigDecimal("10.00"), institutionRate = BigDecimal("40.00"), medicalListPrice = BigDecimal("1000.00")
         )
         assertEquals(listOf("tag"), request.serviceTags)
         assertEquals(BigDecimal("30.00"), request.consultationFee)
+        assertEquals(BigDecimal("1000.00"), request.medicalListPrice)
     }
 
     @Test
@@ -137,6 +138,7 @@ class DoctorProjectChangeServiceTest {
             every { rs.getString("current_cover_image") } returns "before-cover"
             every { rs.getString("current_images") } returns "before-image"
             every { rs.getBigDecimal("current_consultation_fee") } returns BigDecimal("20.00")
+            every { rs.getBigDecimal("current_medical_list_price") } returns BigDecimal("1000.00")
             every { rs.getBigDecimal("current_commission_rate") } returns BigDecimal("5.00")
             every { rs.getBigDecimal("current_institution_rate") } returns BigDecimal("35.00")
             every { rs.getBigDecimal("current_platform_rate") } returns BigDecimal("10.00")
@@ -150,6 +152,7 @@ class DoctorProjectChangeServiceTest {
         assertEquals("before service", view.currentServiceDescription)
         assertEquals(listOf("before-a", "before-b"), view.currentServiceTags)
         assertEquals(BigDecimal("20.00"), view.currentConsultationFee)
+        assertEquals(BigDecimal("1000.00"), view.currentMedicalListPrice)
         assertEquals(BigDecimal("10.00"), view.currentPlatformRate)
         assertEquals(BigDecimal("50.00"), view.currentDoctorRate)
     }
@@ -159,6 +162,38 @@ class DoctorProjectChangeServiceTest {
         assertThrows(AccessDeniedException::class.java) {
             service.review(legalActor(), "request-1", "APPROVED", "force", true)
         }
+    }
+
+    @Test
+    fun `profile update rejects zero medical list price`() {
+        every {
+            jdbcTemplate.query(
+                match<String> { it.contains("FROM institution_projects") },
+                any<RowMapper<Any>>(),
+                "ip-1"
+            )
+        } answers {
+            val mapper = secondArg<RowMapper<Any>>()
+            val rs = mockk<ResultSet> {
+                every { getString("institution_id") } returns "institution-1"
+                every { getString("project_id") } returns "project-1"
+            }
+            listOf(mapper.mapRow(rs, 0))
+        }
+        every { doctorProjectRepository.findByDoctorIdAndInstitutionProjectId("doctor-1", "ip-1") } returns doctorProject()
+        every { configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate("doctor-1", "ip-1") } returns
+            DoctorInstitutionProjectConfigEntity(doctorId = "doctor-1", institutionProjectId = "ip-1", medicalListPrice = BigDecimal("900.00"))
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            service.submit(doctorActor(), DoctorProjectChangeRequest(
+                institutionProjectId = "ip-1", requestType = "PROFILE_UPDATE", serviceDescription = "service",
+                priceSuggestion = BigDecimal("880.00"), notes = "notes", serviceTags = listOf("tag"), scheduleNote = "schedule",
+                coverImage = "cover", images = listOf("image"), consultationFee = BigDecimal("30.00"),
+                commissionRate = BigDecimal("10.00"), institutionRate = BigDecimal("40.00"), medicalListPrice = BigDecimal.ZERO
+            ))
+        }
+
+        assertEquals("医疗套餐优惠前金额必须大于 0", error.message)
     }
 
     @Test
@@ -188,7 +223,7 @@ class DoctorProjectChangeServiceTest {
         val project = slot<DoctorProjectEntity>()
         verify(exactly = 1) { doctorProjectRepository.save(capture(project)) }
         assertEquals(BigDecimal("880.00"), project.captured.price)
-        verify(exactly = 1) { configRepository.save(match { it.doctorId == "doctor-1" && it.consultationFee == BigDecimal("30.00") }) }
+        verify(exactly = 1) { configRepository.save(match { it.doctorId == "doctor-1" && it.consultationFee == BigDecimal("30.00") && it.medicalListPrice == BigDecimal("1000.00") }) }
         verify(exactly = 1) { jdbcTemplate.update(match<String> { it.contains("force_processed = ?") }, *anyVararg()) }
     }
 
@@ -306,6 +341,7 @@ class DoctorProjectChangeServiceTest {
         every { getBigDecimal("consultation_fee") } returns BigDecimal("30.00")
         every { getBigDecimal("commission_rate") } returns BigDecimal("10.00")
         every { getBigDecimal("institution_rate") } returns BigDecimal("40.00")
+        every { getBigDecimal("medical_list_price") } returns BigDecimal("1000.00")
         every { getTimestamp("base_doctor_project_updated_at") } returns Timestamp.valueOf(LocalDateTime.of(2026, 8, 10, 10, 0))
         every { getString("base_config_id") } returns "config-1"
         every { getTimestamp("base_config_updated_at") } returns Timestamp.valueOf(LocalDateTime.of(2026, 8, 10, 10, 0))
