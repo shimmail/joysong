@@ -1,0 +1,107 @@
+@startuml
+title 海外用户旅游地接服务费活动图
+
+|医生|
+start
+:设置医疗套餐优惠前金额（USD）;
+
+|平台|
+:读取原平台分成比例;
+:计算旅游地接服务费\nfeeMinor = roundHalfUp(\nlistPriceMinor × rateBps / 10000);
+
+|海外用户|
+:选择医院套餐、医生和顾问;
+
+|平台|
+:校验顾问属于该医院且状态有效;
+:创建订单并立即绑定顾问;
+:固化套餐金额、平台比例、服务费和币种快照;
+:订单进入 PENDING_SERVICE_FEE;
+:锁定顾问履约资料和订单地接沟通;
+
+note right
+支付前仅显示：
+“已绑定您选择的顾问，
+支付旅游地接服务费后
+可查看地接资料并沟通”
+end note
+
+|海外用户|
+:可在境内或境外直接点击支付;
+
+note right
+不判断 GPS、IP 或所在国家；
+仅提示行程确定后再支付。
+end note
+
+|平台|
+:创建支付尝试\nexpiresAt = now + 30分钟;
+
+if (Alipay+ 当前可用?) then (是)
+  |Alipay+|
+  :打开 HTTPS 托管收银台;
+  :用户使用支付宝完成 USD 支付;
+
+  if (30分钟内渠道确认成功?) then (是)
+    |平台|
+    :验签或主动查单确认;
+    :幂等标记支付成功;
+    :订单进入 SERVICE_ACTIVE;
+    :记录 serviceActivatedAt;
+    :开放绑定地接人员资料;
+    :开放订单专属地接沟通;
+    :通知海外用户和绑定顾问;
+  else (否或超时)
+    |平台|
+    :关闭本次支付尝试;
+    :支付尝试进入 EXPIRED 或 FAILED;
+    :订单仍保持 PENDING_SERVICE_FEE;
+    |海外用户|
+    :稍后可创建新的30分钟支付尝试;
+    stop
+  endif
+else (否)
+  |平台|
+  :返回“支付渠道暂不可用”;
+  :不创建模拟成功支付;
+  :订单保持可支付;
+  stop
+endif
+
+|海外用户|
+:在平台内与地接人员沟通;
+
+|平台|
+:保存沟通记录并提供平台监督;
+
+if (用户申请全额退款?) then (是)
+  :订单进入 REFUND_REVIEW;
+  :暂停地接沟通;
+  :管理员人工审核;
+
+  if (审核批准?) then (是)
+    :通过原支付渠道发起退款;
+    :订单进入 REFUND_PROCESSING;
+    if (渠道确认退款成功?) then (是)
+      :订单进入 REFUNDED;
+      :撤销地接服务权限;
+      :沟通历史转为受控只读;
+      stop
+    else (否)
+      :保持 REFUND_PROCESSING;
+      :主动查单或转人工处理;
+      stop
+    endif
+  else (否)
+    :记录拒绝原因;
+    :恢复 SERVICE_ACTIVE 和地接沟通;
+  endif
+endif
+
+|医院|
+:用户到院后直接向医院支付医疗费;
+
+|平台|
+:不创建医疗费支付、退款、分账或结算记录;
+stop
+@enduml
