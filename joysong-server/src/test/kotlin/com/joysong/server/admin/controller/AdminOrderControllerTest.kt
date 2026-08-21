@@ -3,6 +3,7 @@ package com.joysong.server.admin.controller
 import com.joysong.server.config.OrderSplitProperties
 import com.joysong.server.identity.service.ManagementAccessService
 import com.joysong.server.identity.service.ManagementActor
+import com.joysong.server.order.entity.DoctorInstitutionProjectConfigEntity
 import com.joysong.server.order.repository.DoctorInstitutionProjectConfigRepository
 import com.joysong.server.order.service.OrderService
 import com.joysong.server.order.service.OrderSplitRatePolicy
@@ -40,6 +41,127 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 
 class AdminOrderControllerTest {
+    @Test
+    fun `medical list price only update preserves every stored legacy value`() {
+        val existing = legacyConfig()
+        val (controller, repository, authentication) = configController(existing)
+
+        controller.upsertConfig(
+            authentication,
+            UpsertConfigRequest(
+                doctorId = existing.doctorId,
+                institutionProjectId = existing.institutionProjectId,
+                medicalListPrice = BigDecimal("1200.00")
+            )
+        )
+
+        verify {
+            repository.save(match {
+                it.consultationFee == BigDecimal("12.34") &&
+                    it.commissionRate == BigDecimal("7.89") &&
+                    it.institutionRate == BigDecimal("31.11") &&
+                    it.medicalListPrice == BigDecimal("1200.00")
+            })
+        }
+    }
+
+    @Test
+    fun `explicit null legacy fields preserve every stored legacy value`() {
+        val existing = legacyConfig()
+        val (controller, repository, authentication) = configController(existing)
+        val request = jacksonObjectMapper().readValue(
+            """{
+                "doctorId":"doctor-1",
+                "institutionProjectId":"project-1",
+                "consultationFee":null,
+                "commissionRate":null,
+                "institutionRate":null,
+                "medicalListPrice":1300.00
+            }""".trimIndent(),
+            UpsertConfigRequest::class.java
+        )
+
+        controller.upsertConfig(authentication, request)
+
+        verify {
+            repository.save(match {
+                it.consultationFee == BigDecimal("12.34") &&
+                    it.commissionRate == BigDecimal("7.89") &&
+                    it.institutionRate == BigDecimal("31.11") &&
+                    it.medicalListPrice == BigDecimal("1300.00")
+            })
+        }
+    }
+
+    @Test
+    fun `medical list price only update accepts an unchanged historical split tuple`() {
+        val existing = legacyConfig(
+            commissionRate = BigDecimal("30.00"),
+            institutionRate = BigDecimal("40.00")
+        )
+        val (controller, repository, authentication) = configController(existing)
+
+        controller.upsertConfig(
+            authentication,
+            UpsertConfigRequest(
+                doctorId = existing.doctorId,
+                institutionProjectId = existing.institutionProjectId,
+                medicalListPrice = BigDecimal("1400.00")
+            )
+        )
+
+        verify {
+            repository.save(match {
+                it.commissionRate == BigDecimal("30.00") &&
+                    it.institutionRate == BigDecimal("40.00") &&
+                    it.medicalListPrice == BigDecimal("1400.00")
+            })
+        }
+    }
+
+    @Test
+    fun `new minimal config receives safe legacy defaults`() {
+        val (controller, repository, authentication) = configController(existing = null)
+
+        controller.upsertConfig(
+            authentication,
+            UpsertConfigRequest(
+                doctorId = "doctor-1",
+                institutionProjectId = "project-1",
+                medicalListPrice = BigDecimal("1000.00")
+            )
+        )
+
+        verify {
+            repository.save(match {
+                it.consultationFee == BigDecimal.ZERO &&
+                    it.commissionRate == BigDecimal.ZERO &&
+                    it.institutionRate == BigDecimal("40.00") &&
+                    it.medicalListPrice == BigDecimal("1000.00")
+            })
+        }
+    }
+
+    @Test
+    fun `new config rejects missing or non-positive medical list price`() {
+        val (controller, repository, authentication) = configController(existing = null)
+
+        listOf(null, BigDecimal.ZERO, BigDecimal("-0.01")).forEach { medicalListPrice ->
+            val error = assertThrows<IllegalArgumentException> {
+                controller.upsertConfig(
+                    authentication,
+                    UpsertConfigRequest(
+                        doctorId = "doctor-1",
+                        institutionProjectId = "project-1",
+                        medicalListPrice = medicalListPrice
+                    )
+                )
+            }
+            assertEquals("医疗套餐优惠前金额必须大于 0", error.message)
+        }
+        verify(exactly = 0) { repository.save(any()) }
+    }
+
     @Test
     fun `admin config saves positive medical list price and rejects zero`() {
         val authentication = mockk<Authentication>()
@@ -185,5 +307,40 @@ class AdminOrderControllerTest {
         managedInstitutionIds = emptySet(),
         doctorInstitutionIds = emptySet(),
         manageableDoctorIds = emptySet()
+    )
+
+    private fun configController(
+        existing: DoctorInstitutionProjectConfigEntity?
+    ): Triple<AdminOrderController, DoctorInstitutionProjectConfigRepository, Authentication> {
+        val authentication = mockk<Authentication>()
+        val repository = mockk<DoctorInstitutionProjectConfigRepository>()
+        val accessService = mockk<ManagementAccessService>()
+        every { accessService.actor(authentication) } returns adminActor()
+        every { accessService.requireSplitConfig(any(), any(), any()) } returns Unit
+        every { repository.findByDoctorIdAndInstitutionProjectId("doctor-1", "project-1") } returns existing
+        if (existing == null) {
+            every {
+                repository.findByDoctorIdAndInstitutionProjectIdIncludeDeleted("doctor-1", "project-1")
+            } returns null
+        }
+        every { repository.save(any()) } answers { firstArg() }
+        val controller = AdminOrderController(
+            mockk(), mockk(), mockk(), mockk(), mockk(), mockk(), mockk(), repository, accessService,
+            OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("40.00") })
+        )
+        return Triple(controller, repository, authentication)
+    }
+
+    private fun legacyConfig(
+        commissionRate: BigDecimal = BigDecimal("7.89"),
+        institutionRate: BigDecimal = BigDecimal("31.11")
+    ) = DoctorInstitutionProjectConfigEntity(
+        id = "config-1",
+        doctorId = "doctor-1",
+        institutionProjectId = "project-1",
+        consultationFee = BigDecimal("12.34"),
+        commissionRate = commissionRate,
+        institutionRate = institutionRate,
+        medicalListPrice = BigDecimal("1000.00")
     )
 }

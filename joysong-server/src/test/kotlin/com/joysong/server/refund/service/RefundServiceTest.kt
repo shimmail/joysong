@@ -39,6 +39,22 @@ class RefundServiceTest {
     private val couponService = mockk<CouponService>()
 
     @Test
+    fun `admin refund list exposes the joined order payment flow for new and legacy orders`() {
+        val serviceRefund = refund(status = RefundWorkflowPersistenceService.PENDING)
+        val legacyRefund = serviceRefund.copy(id = "refund-2", orderId = "order-2")
+        every { refundRepository.findAll() } returns listOf(serviceRefund, legacyRefund)
+        every { orderRepository.findAllById(listOf("order-1", "order-2")) } returns listOf(
+            serviceOrder(),
+            legacyOrder(status = OrderStatusEnum.CONSULTATION_PAID.value).copy(id = "order-2")
+        )
+
+        val rows = service().adminListAll()
+
+        assertEquals(RefundWorkflowPersistenceService.TRAVEL_GROUND_SERVICE_ONLY, rows[0]["paymentFlow"])
+        assertEquals("LEGACY_MEDICAL", rows[1]["paymentFlow"])
+    }
+
+    @Test
     fun `service fee refund request is pending full value manual review without provider execution`() {
         val execution = mockk<RefundExecutionService>()
         val orderSlot = slot<OrderEntity>()

@@ -231,24 +231,40 @@ class AdminOrderController(
         }
         require(request.doctorId.isNotBlank()) { "医生ID不能为空" }
         require(request.institutionProjectId.isNotBlank()) { "机构项目ID不能为空" }
-        require(request.consultationFee >= BigDecimal.ZERO) { "面诊金不能为负数" }
-        splitRatePolicy.resolve(
-            institutionRate = request.institutionRate,
-            consultantRate = request.commissionRate
-        )
+        request.consultationFee?.let { require(it >= BigDecimal.ZERO) { "面诊金不能为负数" } }
+        if (request.institutionRate != null && request.commissionRate != null) {
+            splitRatePolicy.resolve(
+                institutionRate = request.institutionRate,
+                consultantRate = request.commissionRate
+            )
+        }
         managementAccessService.requireSplitConfig(actor, request.doctorId, request.institutionProjectId)
 
         val existing = doctorInstitutionProjectConfigRepository
             .findByDoctorIdAndInstitutionProjectId(request.doctorId, request.institutionProjectId)
             ?: doctorInstitutionProjectConfigRepository
                 .findByDoctorIdAndInstitutionProjectIdIncludeDeleted(request.doctorId, request.institutionProjectId)
+        val consultationFee = request.consultationFee ?: existing?.consultationFee ?: BigDecimal.ZERO
+        val commissionRate = request.commissionRate ?: existing?.commissionRate ?: BigDecimal.ZERO
+        val institutionRate = request.institutionRate ?: existing?.institutionRate ?: BigDecimal("40.00")
         val medicalListPrice = request.medicalListPrice ?: existing?.medicalListPrice
         require(medicalListPrice != null && medicalListPrice > BigDecimal.ZERO) { "医疗套餐优惠前金额必须大于 0" }
+        val updatesLegacyValues = request.consultationFee != null ||
+            request.commissionRate != null || request.institutionRate != null
+        if (existing == null || updatesLegacyValues) {
+            require(consultationFee >= BigDecimal.ZERO) { "面诊金不能为负数" }
+            if (request.institutionRate == null || request.commissionRate == null) {
+                splitRatePolicy.resolve(
+                    institutionRate = institutionRate,
+                    consultantRate = commissionRate
+                )
+            }
+        }
 
         val saved = if (existing != null) {
-            existing.consultationFee = request.consultationFee
-            existing.commissionRate = request.commissionRate
-            existing.institutionRate = request.institutionRate
+            request.consultationFee?.let { existing.consultationFee = it }
+            request.commissionRate?.let { existing.commissionRate = it }
+            request.institutionRate?.let { existing.institutionRate = it }
             existing.medicalListPrice = medicalListPrice
             existing.deletedAt = null
             existing.updatedAt = LocalDateTime.now()
@@ -257,9 +273,9 @@ class AdminOrderController(
             val newConfig = DoctorInstitutionProjectConfigEntity(
                 doctorId = request.doctorId,
                 institutionProjectId = request.institutionProjectId,
-                consultationFee = request.consultationFee,
-                commissionRate = request.commissionRate,
-                institutionRate = request.institutionRate,
+                consultationFee = consultationFee,
+                commissionRate = commissionRate,
+                institutionRate = institutionRate,
                 medicalListPrice = medicalListPrice
             )
             doctorInstitutionProjectConfigRepository.save(newConfig)
@@ -286,8 +302,8 @@ class AdminOrderController(
 data class UpsertConfigRequest(
     val doctorId: String,
     val institutionProjectId: String,
-    val consultationFee: BigDecimal = BigDecimal.ZERO,
-    val commissionRate: BigDecimal = BigDecimal.ZERO,
-    val institutionRate: BigDecimal = BigDecimal("40.00"),
+    val consultationFee: BigDecimal? = null,
+    val commissionRate: BigDecimal? = null,
+    val institutionRate: BigDecimal? = null,
     val medicalListPrice: BigDecimal? = null
 )

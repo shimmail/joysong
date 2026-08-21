@@ -157,6 +157,7 @@ class RefundService(
                 "reviewedAt" to refund.reviewedAt,
                 "rejectReason" to refund.rejectReason,
                 "completedAt" to refund.completedAt,
+                "paymentFlow" to order?.paymentFlow,
                 "doctorName" to (order?.doctorName ?: ""),
                 "institutionName" to (order?.institutionName ?: "")
             )
