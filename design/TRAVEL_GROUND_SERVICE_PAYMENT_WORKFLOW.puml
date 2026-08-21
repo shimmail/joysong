@@ -35,9 +35,8 @@ note right
 end note
 
 |平台|
-:创建支付尝试\nexpiresAt = now + 30分钟;
-
 if (Alipay+ 当前可用?) then (是)
+  :创建支付尝试\nexpiresAt = min(now + 30分钟, 渠道有效期);
   |Alipay+|
   :打开 HTTPS 托管收银台;
   :用户使用支付宝完成 USD 支付;
@@ -76,12 +75,13 @@ endif
 
 if (用户申请全额退款?) then (是)
   :订单进入 REFUND_REVIEW;
-  :暂停地接沟通;
+  :暂停发送新消息，沟通历史仍可读;
   :管理员人工审核;
 
   if (审核批准?) then (是)
     :通过原支付渠道发起退款;
     :订单进入 REFUND_PROCESSING;
+    :继续暂停发送，沟通历史仍可读;
     if (渠道确认退款成功?) then (是)
       :订单进入 REFUNDED;
       :撤销地接服务权限;

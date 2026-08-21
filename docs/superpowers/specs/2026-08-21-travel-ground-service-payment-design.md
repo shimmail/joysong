@@ -87,6 +87,7 @@ PENDING_SERVICE_FEE
 - `consultantBound = true`
 - `serviceActivated = false`
 - `consultantDetailsVisible = false`
+- `serviceConversationReadable = false`
 - `serviceMessagingEnabled = false`
 - 不返回 `consultantId`、顾问履约资料或联系方式
 
@@ -94,8 +95,15 @@ PENDING_SERVICE_FEE
 
 - `serviceActivated = true`
 - `consultantDetailsVisible = true`
+- `serviceConversationReadable = true`
 - `serviceMessagingEnabled = true`
-- 仅返回平台允许公开的地接姓名、机构归属、头像和工作联系方式
+- 仅返回平台允许公开的地接姓名、机构归属和头像；沟通在平台订单会话内完成，不返回私人电话或站外联系方式
+
+退款状态使用两个独立权限，不以一个 `SERVICE_ACTIVE` 判断代替：
+
+- `REFUND_REVIEW`、`REFUND_PROCESSING`：保留已激活顾问资料与会话历史读取，暂停发送。
+- 审核拒绝并恢复 `SERVICE_ACTIVE`：恢复发送。
+- `REFUNDED`：撤销顾问履约资料，保留已有订单会话历史受控只读。
 
 权限裁剪必须在服务端完成，不能只依靠 Flutter 隐藏组件。
 
@@ -107,11 +115,12 @@ PENDING_SERVICE_FEE
 - nullable `order_id`
 - `ORDER_SERVICE + order_id` 唯一约束
 
-新增 `POST /api/orders/{orderId}/service-conversation`。接口不接受客户端传入的目标用户 ID，而是从订单快照解析订单用户与绑定顾问。创建、读取、发送和已读操作都必须重新校验：
+新增 `POST /api/orders/{orderId}/service-conversation`。接口不接受客户端传入的目标用户 ID，而是从订单快照解析订单用户与绑定顾问。订单会话的创建、读取、发送和已读操作都必须重新校验参与者与订单关联，并分别应用权限：
 
-- 订单处于 `SERVICE_ACTIVE`
 - 当前用户是订单用户或绑定顾问
 - 会话的 `order_id` 与订单一致
+- 创建新会话与发送消息要求订单处于 `SERVICE_ACTIVE`
+- 读取历史与标记已读允许 `SERVICE_ACTIVE`、`REFUND_REVIEW`、`REFUND_PROCESSING`、`REFUNDED`
 
 支付前的普通平台售前咨询可以保留，但它不是订单履约会话。顾问不能通过普通私信接口主动创建与无有效服务关系用户的会话；订单和管理接口也不得在支付前暴露用户电话等私人资料。订单服务会话消息保留平台审计记录，退款审核期间暂停发送，审核拒绝后恢复，退款成功后转为受控只读。
 
@@ -131,7 +140,7 @@ Flutter 不让用户选择支付类型、渠道或金额。新接口固定业务
 POST /api/orders/{orderId}/service-fee-payment-attempts
 ```
 
-服务端从订单快照取得金额和币种，生成新的幂等键和支付尝试。Alipay+ 未配置或被关闭时返回 `PAYMENT_PROVIDER_UNAVAILABLE`，不得写入成功支付。
+服务端先确认 Alipay+ provider 已配置并启用，再从订单快照取得金额和币种并创建支付尝试。Alipay+ 未配置或被关闭时返回 `PAYMENT_PROVIDER_UNAVAILABLE`，不创建本地尝试，也不得写入成功支付。
 
 ### 30 分钟过期
 
@@ -163,14 +172,14 @@ POST /api/orders/{orderId}/service-fee-payment-attempts
 - 主动查单、退款和对账入口
 - HTTPS 托管收银台跳转能力
 
-移除：
+从新支付链路移除：
 
 - 新订单选择 Stripe 的能力
 - Flutter Stripe host 白名单和 Stripe 文案
-- Stripe 生产配置及必填环境变量
+- Stripe 作为默认/必填生产配置
 - Stripe 专属新支付路径
 
-在删除 Stripe adapter 前，上线检查必须确认不存在仍需查询或退款的 Stripe 支付。旧订单数据清理必须先备份并核对精确目标，由单独运维步骤执行；结构迁移不得自动删除业务数据。
+Stripe adapter 暂仅作为显式开启的旧记录兼容能力保留，不能被新订单选择。默认关闭前必须由启动安全门确认不存在仍需查询或退款的 Stripe 支付；若存在则阻止关闭并要求运维显式启用旧 adapter。只有安全门确认无存量责任后才能在后续版本物理删除 adapter。旧订单数据清理必须先备份并核对精确目标，由单独运维步骤执行；结构迁移不得自动删除业务数据。
 
 Alipay+ 商户及收单参数尚未就绪时，代码保持 provider 关闭并返回明确不可用状态。真实签名、证书、请求地址和通知格式以最终签约的 Cashier Payment 接口为准，不用测试网假结果冒充生产能力。
 
@@ -223,7 +232,7 @@ Alipay+ 商户及收单参数尚未就绪时，代码保持 provider 关闭并�
 - 支付类型允许 `TRAVEL_GROUND_SERVICE_FEE`。
 - 新流程不自动生成 settlement 或 wallet 数据。
 
-迁移测试必须使用按 worktree 隔离的新空数据库，并在迁移前输出解析后的数据库主机和数据库名。旧订单删除不放入结构迁移。
+迁移测试必须使用按 worktree 隔离的新空数据库，并在迁移前输出解析后的数据库主机和数据库名。除空库迁移外，还要先迁移到旧版本、写入代表性旧订单，再升级到最新版本并断言旧行仍保留且标记为 `LEGACY_MEDICAL`。旧订单删除不放入结构迁移。
 
 ## 最低验收场景
 
@@ -238,7 +247,7 @@ Alipay+ 商户及收单参数尚未就绪时，代码保持 provider 关闭并�
 9. 退款申请必须人工审核；拒绝恢复服务，渠道退款成功后撤销服务权限。
 10. Flutter 和管理端不再出现面诊金、尾款、数量或 Stripe 新支付入口。
 11. Alipay+ 未配置时明确显示支付渠道暂不可用，不产生模拟成功记录。
-12. 系统不存在任何来华资料备案入口、接口或数据表。
+12. 本次变更不新增来华资料备案入口、接口或数据表。
 
 ## 推进边界
 
