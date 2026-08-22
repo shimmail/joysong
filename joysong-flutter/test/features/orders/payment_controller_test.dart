@@ -9,7 +9,8 @@ import 'package:joysong_flutter/features/orders/presentation/payment_controller.
 import 'order_test_fixtures.dart';
 
 void main() {
-  test('requires a server restore before creating a service-fee attempt', () async {
+  test('requires a server restore before creating a service-fee attempt',
+      () async {
     final repository = _PaymentRepository();
     final controller = _controller(repository);
 
@@ -23,7 +24,8 @@ void main() {
     controller.dispose();
   });
 
-  test('trusts only a server-confirmed successful service-fee attempt', () async {
+  test('trusts only a server-confirmed successful service-fee attempt',
+      () async {
     final repository = _PaymentRepository();
     final controller = _controller(repository);
     await controller.load();
@@ -96,7 +98,8 @@ void main() {
     controller.dispose();
   });
 
-  test('maps create provider 503 to unavailable without a fake attempt', () async {
+  test('maps create provider 503 to unavailable without a fake attempt',
+      () async {
     final repository = _PaymentRepository(
       createError: const ApiException(
         message: 'Payment is temporarily unavailable',
@@ -114,7 +117,8 @@ void main() {
     controller.dispose();
   });
 
-  test('does not overlap an attempt whose redirect cannot be rehydrated', () async {
+  test('does not overlap an attempt whose redirect cannot be rehydrated',
+      () async {
     final repository = _PaymentRepository(
       latestResult: samplePaymentAttempt(
         status: PaymentStatus.requiresAction,
@@ -157,8 +161,13 @@ void main() {
     controller.dispose();
   });
 
-  test('retry creates a new attempt only after server FAILED or EXPIRED', () async {
-    for (final retryableStatus in [PaymentStatus.failed, PaymentStatus.expired]) {
+  test('retry creates a new attempt after server FAILED, CANCELLED or EXPIRED',
+      () async {
+    for (final retryableStatus in [
+      PaymentStatus.failed,
+      PaymentStatus.cancelled,
+      PaymentStatus.expired,
+    ]) {
       final repository = _PaymentRepository(
         latestResult: samplePaymentAttempt(status: retryableStatus),
       );
@@ -172,9 +181,8 @@ void main() {
     }
   });
 
-  test('cancelled, created and processing attempts cannot be replaced', () async {
+  test('created and processing attempts cannot be replaced', () async {
     for (final status in [
-      PaymentStatus.cancelled,
       PaymentStatus.created,
       PaymentStatus.processing,
     ]) {

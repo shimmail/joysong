@@ -6,6 +6,7 @@ import com.joysong.server.order.service.OrderStatusLogService
 import com.joysong.server.payment.domain.PaymentProvider
 import com.joysong.server.payment.domain.PaymentStatus
 import com.joysong.server.payment.domain.PaymentType
+import com.joysong.server.payment.entity.PaymentCompensationCaseEntity
 import com.joysong.server.payment.entity.PaymentEntity
 import com.joysong.server.payment.provider.PaymentGateway
 import com.joysong.server.payment.provider.PaymentGatewayRegistry
@@ -13,6 +14,7 @@ import com.joysong.server.payment.provider.PaymentProviderException
 import com.joysong.server.payment.provider.ProviderCreatePaymentRequest
 import com.joysong.server.payment.provider.ProviderPaymentResult
 import com.joysong.server.payment.repository.PaymentRepository
+import com.joysong.server.payment.repository.PaymentCompensationCaseRepository
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -618,19 +620,7 @@ class PaymentOrchestrationTest {
                 providerPaymentId = "alipay-missing-currency",
                 amountMinor = 40_000,
                 currency = null
-            ) to "PAYMENT_CURRENCY_MISSING",
-            ProviderPaymentResult(
-                status = PaymentStatus.SUCCEEDED,
-                providerPaymentId = "alipay-wrong-amount",
-                amountMinor = 39_999,
-                currency = "USD"
-            ) to "PAYMENT_AMOUNT_MISMATCH",
-            ProviderPaymentResult(
-                status = PaymentStatus.SUCCEEDED,
-                providerPaymentId = "alipay-wrong-currency",
-                amountMinor = 40_000,
-                currency = "CNY"
-            ) to "PAYMENT_CURRENCY_MISMATCH"
+            ) to "PAYMENT_CURRENCY_MISSING"
         ).forEach { (result, expectedMessage) ->
             val repositories = persistenceRepositories()
             val prepared = travelPayment(status = PaymentStatus.PROCESSING.name)
@@ -648,6 +638,47 @@ class PaymentOrchestrationTest {
 
             assertEquals(expectedMessage, error.message)
         }
+    }
+
+    @Test
+    fun `verified mismatched service fee remains a persisted success awaiting compensation`() {
+        val repositories = persistenceRepositories()
+        val prepared = travelPayment(status = PaymentStatus.PROCESSING.name)
+        var paymentState = prepared
+        val compensation = slot<PaymentCompensationCaseEntity>()
+        every { repositories.payment.findByIdForUpdate(prepared.id) } answers { paymentState }
+        every { repositories.payment.save(any()) } answers {
+            firstArg<PaymentEntity>().also { paymentState = it }
+        }
+        every { repositories.order.findByIdIncludeDeletedForUpdate(prepared.orderId) } returns travelOrder()
+        every { repositories.compensation.findByPaymentId(prepared.id) } returns null
+        every { repositories.compensation.save(capture(compensation)) } answers { compensation.captured }
+
+        val result = PaymentPersistenceService(
+            repositories.payment,
+            repositories.order,
+            repositories.log,
+            repositories.compensation
+        ).applyProviderResult(
+            prepared.id,
+            ProviderPaymentResult(
+                status = PaymentStatus.SUCCEEDED,
+                providerPaymentId = "alipay-wrong-amount",
+                providerTransactionId = "txn-wrong-amount",
+                amountMinor = 39_999,
+                currency = "USD"
+            )
+        )
+
+        assertEquals(PaymentStatus.SUCCEEDED.name, result.status)
+        assertEquals("PAYMENT_SUCCEEDED_AMOUNT_MISMATCH", result.failureCode)
+        assertNotNull(result.paidAt)
+        assertEquals("alipay-wrong-amount", result.providerPaymentId)
+        assertEquals(39_999L, compensation.captured.amountMinor)
+        assertEquals("USD", compensation.captured.currency)
+        assertEquals("payment-compensation-payment-1", compensation.captured.idempotencyKey)
+        assertEquals("PENDING_REVIEW", compensation.captured.status)
+        verify(exactly = 0) { repositories.order.save(any()) }
     }
 
     @Test
@@ -690,6 +721,7 @@ class PaymentOrchestrationTest {
             "payment-2" to travelPayment(PaymentStatus.PROCESSING.name, id = "payment-2")
         )
         var orderState = travelOrder()
+        val compensationCases = mutableMapOf<String, PaymentCompensationCaseEntity>()
         every { repositories.payment.findByIdForUpdate(any()) } answers {
             paymentStates[firstArg<String>()]
         }
@@ -701,7 +733,18 @@ class PaymentOrchestrationTest {
             firstArg<OrderEntity>().also { orderState = it }
         }
         every { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) } returns Unit
-        val persistence = PaymentPersistenceService(repositories.payment, repositories.order, repositories.log)
+        every { repositories.compensation.findByPaymentId(any()) } answers {
+            compensationCases[firstArg<String>()]
+        }
+        every { repositories.compensation.save(any()) } answers {
+            firstArg<PaymentCompensationCaseEntity>().also { compensationCases[it.paymentId] = it }
+        }
+        val persistence = PaymentPersistenceService(
+            repositories.payment,
+            repositories.order,
+            repositories.log,
+            repositories.compensation
+        )
 
         val first = persistence.applyProviderResult(
             "payment-1",
@@ -732,6 +775,9 @@ class PaymentOrchestrationTest {
         assertEquals("alipay-2", second.providerPaymentId)
         assertEquals("txn-2", second.providerTransactionId)
         assertEquals("DUPLICATE_PAYMENT_SUCCEEDED", second.failureCode)
+        assertEquals("payment-2", compensationCases.getValue("payment-2").paymentId)
+        assertEquals(40_000L, compensationCases.getValue("payment-2").amountMinor)
+        assertEquals("PENDING_REVIEW", compensationCases.getValue("payment-2").status)
         assertEquals(firstActivationTime, orderState.serviceActivatedAt)
         verify(exactly = 1) { repositories.order.save(any()) }
         verify(exactly = 1) { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) }
@@ -742,16 +788,20 @@ class PaymentOrchestrationTest {
         val repositories = persistenceRepositories()
         val prepared = travelPayment(PaymentStatus.PROCESSING.name)
         var paymentState = prepared
+        val compensation = slot<PaymentCompensationCaseEntity>()
         every { repositories.payment.findByIdForUpdate(prepared.id) } answers { paymentState }
         every { repositories.payment.save(any()) } answers {
             firstArg<PaymentEntity>().also { paymentState = it }
         }
         every { repositories.order.findByIdIncludeDeletedForUpdate(prepared.orderId) } returns travelOrder("CANCELLED")
+        every { repositories.compensation.findByPaymentId(prepared.id) } returns null
+        every { repositories.compensation.save(capture(compensation)) } answers { compensation.captured }
 
         val result = PaymentPersistenceService(
             repositories.payment,
             repositories.order,
-            repositories.log
+            repositories.log,
+            repositories.compensation
         ).applyProviderResult(
             prepared.id,
             ProviderPaymentResult(
@@ -768,6 +818,8 @@ class PaymentOrchestrationTest {
         assertEquals("alipay-cancelled", result.providerPaymentId)
         assertEquals("txn-cancelled", result.providerTransactionId)
         assertEquals("PAYMENT_SUCCEEDED_ORDER_NOT_ACTIVATABLE", result.failureCode)
+        assertEquals("PAYMENT_SUCCEEDED_ORDER_NOT_ACTIVATABLE", compensation.captured.reasonCode)
+        assertEquals(40_000L, compensation.captured.amountMinor)
         verify(exactly = 0) { repositories.order.save(any()) }
         verify(exactly = 0) { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) }
     }
@@ -777,6 +829,7 @@ class PaymentOrchestrationTest {
         val repositories = persistenceRepositories()
         val prepared = travelPayment(PaymentStatus.PROCESSING.name)
         var paymentState = prepared
+        val compensation = slot<PaymentCompensationCaseEntity>()
         every { repositories.payment.findByIdForUpdate(prepared.id) } answers { paymentState }
         every { repositories.payment.save(any()) } answers {
             firstArg<PaymentEntity>().also { paymentState = it }
@@ -784,11 +837,14 @@ class PaymentOrchestrationTest {
         every { repositories.order.findByIdIncludeDeletedForUpdate(prepared.orderId) } returns travelOrder().copy(
             deletedAt = LocalDateTime.of(2026, 8, 22, 13, 0)
         )
+        every { repositories.compensation.findByPaymentId(prepared.id) } returns null
+        every { repositories.compensation.save(capture(compensation)) } answers { compensation.captured }
 
         val result = PaymentPersistenceService(
             repositories.payment,
             repositories.order,
-            repositories.log
+            repositories.log,
+            repositories.compensation
         ).applyProviderResult(
             prepared.id,
             ProviderPaymentResult(
@@ -805,6 +861,7 @@ class PaymentOrchestrationTest {
         assertEquals("alipay-deleted", result.providerPaymentId)
         assertEquals("txn-deleted", result.providerTransactionId)
         assertEquals("PAYMENT_SUCCEEDED_ORDER_NOT_ACTIVATABLE", result.failureCode)
+        assertEquals("PAYMENT_SUCCEEDED_ORDER_NOT_ACTIVATABLE", compensation.captured.reasonCode)
         verify(exactly = 0) { repositories.order.save(any()) }
         verify(exactly = 0) { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) }
     }
@@ -814,16 +871,20 @@ class PaymentOrchestrationTest {
         val repositories = persistenceRepositories()
         val prepared = travelPayment(PaymentStatus.PROCESSING.name)
         var paymentState = prepared
+        val compensation = slot<PaymentCompensationCaseEntity>()
         every { repositories.payment.findByIdForUpdate(prepared.id) } answers { paymentState }
         every { repositories.payment.save(any()) } answers {
             firstArg<PaymentEntity>().also { paymentState = it }
         }
         every { repositories.order.findByIdIncludeDeletedForUpdate(prepared.orderId) } returns null
+        every { repositories.compensation.findByPaymentId(prepared.id) } returns null
+        every { repositories.compensation.save(capture(compensation)) } answers { compensation.captured }
 
         val result = PaymentPersistenceService(
             repositories.payment,
             repositories.order,
-            repositories.log
+            repositories.log,
+            repositories.compensation
         ).applyProviderResult(
             prepared.id,
             ProviderPaymentResult(
@@ -840,6 +901,7 @@ class PaymentOrchestrationTest {
         assertEquals("alipay-missing-order", result.providerPaymentId)
         assertEquals("txn-missing-order", result.providerTransactionId)
         assertEquals("PAYMENT_SUCCEEDED_ORDER_NOT_ACTIVATABLE", result.failureCode)
+        assertEquals("PAYMENT_SUCCEEDED_ORDER_NOT_ACTIVATABLE", compensation.captured.reasonCode)
         verify(exactly = 0) { repositories.order.save(any()) }
         verify(exactly = 0) { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) }
     }
@@ -869,13 +931,15 @@ class PaymentOrchestrationTest {
     private data class PersistenceRepositories(
         val payment: PaymentRepository,
         val order: OrderRepository,
-        val log: OrderStatusLogService
+        val log: OrderStatusLogService,
+        val compensation: PaymentCompensationCaseRepository
     )
 
     private fun persistenceRepositories() = PersistenceRepositories(
         payment = mockk(),
         order = mockk(),
-        log = mockk()
+        log = mockk(),
+        compensation = mockk(relaxed = true)
     )
 
     private fun travelService(

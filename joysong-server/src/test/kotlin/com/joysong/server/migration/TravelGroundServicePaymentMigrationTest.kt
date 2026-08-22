@@ -81,7 +81,7 @@ class TravelGroundServicePaymentMigrationTest {
     fun `fresh database applies the travel payment schema constraints and index set`() {
         assertEquals(DATABASE, freshMysql.databaseName)
         assertEquals(
-            listOf("26", "27", "28", "29", "30", "31"),
+            listOf("26", "27", "28", "29", "30", "31", "32"),
             jdbcTemplate.queryForList(
                 "SELECT version FROM flyway_schema_history WHERE success = 1 AND version IS NOT NULL ORDER BY installed_rank",
                 String::class.java
@@ -89,6 +89,7 @@ class TravelGroundServicePaymentMigrationTest {
         )
 
         assertColumn("doctor_institution_project_configs", "medical_list_price", "decimal", false)
+        assertDecimalScale("doctor_institution_project_configs", "medical_list_price", 2)
         assertColumn("doctor_project_change_requests", "medical_list_price", "decimal", true)
         assertColumn("doctor_project_change_requests", "current_medical_list_price", "decimal", true)
         assertColumn("orders", "payment_flow", "varchar", false)
@@ -101,13 +102,17 @@ class TravelGroundServicePaymentMigrationTest {
         assertColumn("dm_conversations", "order_id", "varchar", true)
         assertColumn("dm_conversations", "direct_pair_key", "varchar", true)
         assertColumn("payment_events", "payload", "longtext", false)
+        assertColumn("payment_compensation_cases", "payment_id", "varchar", false)
+        assertColumn("payment_compensation_cases", "amount_minor", "bigint", false)
+        assertColumn("payment_compensation_cases", "currency", "char", false)
+        assertColumn("payment_compensation_cases", "status", "varchar", false)
 
         jdbcTemplate.update(
             "INSERT INTO doctor_institution_project_configs (id, doctor_id, institution_project_id) VALUES (?, ?, ?)",
             "legacy-config", "legacy-doctor", "legacy-institution-project"
         )
         assertEquals(
-            BigDecimal("0.0000"),
+            BigDecimal("0.00"),
             jdbcTemplate.queryForObject(
                 "SELECT medical_list_price FROM doctor_institution_project_configs WHERE id = 'legacy-config'",
                 BigDecimal::class.java
@@ -373,7 +378,105 @@ class TravelGroundServicePaymentMigrationTest {
     }
 
     @Test
-    fun `V28 legacy rows upgrade through V31 without business cleanup or text changes`() {
+    fun `V31 anomalies become admin-discoverable compensation cases and price migration preserves remediable values`() {
+        val upgradeJdbc = JdbcTemplate(
+            DriverManagerDataSource(v31UpgradeMysql.jdbcUrl, v31UpgradeMysql.username, v31UpgradeMysql.password)
+        )
+        migrate(v31UpgradeMysql, target = "31")
+        insertMinimalOrder(upgradeJdbc, "v31-service-order")
+        upgradeJdbc.update(
+            """
+            INSERT INTO doctor_institution_project_configs
+                (id, doctor_id, institution_project_id, medical_list_price)
+            VALUES ('v31-fractional-price', 'doctor-v31', 'project-v31', 1000.0050),
+                   ('v31-out-of-range-price', 'doctor-v31', 'project-v31-overflow', 100000000.0000)
+            """.trimIndent()
+        )
+        upgradeJdbc.update(
+            """
+            INSERT INTO payments (
+                id, order_id, user_id, amount, method, status, failure_code, failure_message,
+                provider_payment_id, payment_type, provider, currency, amount_minor, refunded_amount_minor
+            ) VALUES
+                ('v31-duplicate-payment', 'v31-service-order', 'v31-user', 400.0000, 'ONLINE', 'SUCCESS',
+                 'DUPLICATE_PAYMENT_SUCCEEDED', 'late duplicate', 'alipay-v31-duplicate',
+                 'TRAVEL_GROUND_SERVICE_FEE', 'ALIPAY_PLUS', 'usd', 40000, 0),
+                ('v31-unactivatable-payment', 'v31-service-order', 'v31-user', 400.0000, 'ONLINE', 'SUCCEEDED',
+                 'PAYMENT_SUCCEEDED_ORDER_NOT_ACTIVATABLE', 'cancelled before callback', 'alipay-v31-unactivatable',
+                 'TRAVEL_GROUND_SERVICE_FEE', 'ALIPAY_PLUS', 'USD', 40000, 0)
+            """.trimIndent()
+        )
+
+        migrate(v31UpgradeMysql)
+
+        val cases = upgradeJdbc.query(
+            """
+            SELECT payment_id, order_id, user_id, provider, provider_payment_id,
+                   amount_minor, currency, reason_code, status, idempotency_key
+            FROM payment_compensation_cases
+            ORDER BY payment_id
+            """.trimIndent()
+        ) { result, _ ->
+            CompensationCaseSnapshot(
+                paymentId = result.getString("payment_id"),
+                orderId = result.getString("order_id"),
+                userId = result.getString("user_id"),
+                provider = result.getString("provider"),
+                providerPaymentId = result.getString("provider_payment_id"),
+                amountMinor = result.getLong("amount_minor"),
+                currency = result.getString("currency"),
+                reasonCode = result.getString("reason_code"),
+                status = result.getString("status"),
+                idempotencyKey = result.getString("idempotency_key")
+            )
+        }
+        assertEquals(
+            listOf(
+                CompensationCaseSnapshot(
+                    paymentId = "v31-duplicate-payment",
+                    orderId = "v31-service-order",
+                    userId = "v31-user",
+                    provider = "ALIPAY_PLUS",
+                    providerPaymentId = "alipay-v31-duplicate",
+                    amountMinor = 40_000,
+                    currency = "USD",
+                    reasonCode = "DUPLICATE_PAYMENT_SUCCEEDED",
+                    status = "PENDING_REVIEW",
+                    idempotencyKey = "payment-compensation-v31-duplicate-payment"
+                ),
+                CompensationCaseSnapshot(
+                    paymentId = "v31-unactivatable-payment",
+                    orderId = "v31-service-order",
+                    userId = "v31-user",
+                    provider = "ALIPAY_PLUS",
+                    providerPaymentId = "alipay-v31-unactivatable",
+                    amountMinor = 40_000,
+                    currency = "USD",
+                    reasonCode = "PAYMENT_SUCCEEDED_ORDER_NOT_ACTIVATABLE",
+                    status = "PENDING_REVIEW",
+                    idempotencyKey = "payment-compensation-v31-unactivatable-payment"
+                )
+            ),
+            cases
+        )
+        assertEquals(
+            BigDecimal("1000.01"),
+            upgradeJdbc.queryForObject(
+                "SELECT medical_list_price FROM doctor_institution_project_configs WHERE id = 'v31-fractional-price'",
+                BigDecimal::class.java
+            )
+        )
+        assertEquals(
+            BigDecimal("100000000.00"),
+            upgradeJdbc.queryForObject(
+                "SELECT medical_list_price FROM doctor_institution_project_configs WHERE id = 'v31-out-of-range-price'",
+                BigDecimal::class.java
+            )
+        )
+    }
+
+    @Test
+    fun `V28 legacy rows upgrade through V32 without business cleanup or text changes`() {
         val upgradeJdbc = JdbcTemplate(
             DriverManagerDataSource(upgradeMysql.jdbcUrl, upgradeMysql.username, upgradeMysql.password)
         )
@@ -517,6 +620,22 @@ class TravelGroundServicePaymentMigrationTest {
         )
         assertEquals(type, metadata["data_type"])
         assertEquals(if (nullable) "YES" else "NO", metadata["is_nullable"])
+    }
+
+    private fun assertDecimalScale(table: String, column: String, scale: Int) {
+        assertEquals(
+            scale,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT numeric_scale
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?
+                """.trimIndent(),
+                Int::class.java,
+                table,
+                column
+            )
+        )
     }
 
     private fun indexColumns(indexName: String): List<String> = jdbcTemplate.queryForList(
@@ -664,6 +783,19 @@ class TravelGroundServicePaymentMigrationTest {
         val lastMessage: String
     )
 
+    private data class CompensationCaseSnapshot(
+        val paymentId: String,
+        val orderId: String,
+        val userId: String,
+        val provider: String,
+        val providerPaymentId: String,
+        val amountMinor: Long,
+        val currency: String,
+        val reasonCode: String,
+        val status: String,
+        val idempotencyKey: String
+    )
+
     companion object {
         private val DATABASE = WorktreeTestDatabase.databaseName()
 
@@ -677,6 +809,12 @@ class TravelGroundServicePaymentMigrationTest {
         @Container
         @JvmField
         val upgradeMysql = TravelPaymentMySqlContainer("mysql:8.0.39")
+            .withDatabaseName(DATABASE)
+            .withTmpFs(mapOf("/var/lib/mysql" to "rw"))
+
+        @Container
+        @JvmField
+        val v31UpgradeMysql = TravelPaymentMySqlContainer("mysql:8.0.39")
             .withDatabaseName(DATABASE)
             .withTmpFs(mapOf("/var/lib/mysql" to "rw"))
 

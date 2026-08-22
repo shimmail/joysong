@@ -344,7 +344,6 @@ class _PaymentBottomBar extends StatelessWidget {
               label: Text(strings.backToOrder),
             ),
           PaymentFlowStage.processing ||
-          PaymentFlowStage.cancelled ||
           PaymentFlowStage.unavailable =>
             OutlinedButton.icon(
               key: const Key('payment-refresh'),
@@ -352,8 +351,9 @@ class _PaymentBottomBar extends StatelessWidget {
               icon: const Icon(Icons.refresh),
               label: Text(strings.refreshStatus),
             ),
-          PaymentFlowStage.failed || PaymentFlowStage.expired
-              when controller.canRetryWithNewAttempt =>
+          PaymentFlowStage.failed ||
+          PaymentFlowStage.cancelled ||
+          PaymentFlowStage.expired when controller.canRetryWithNewAttempt =>
             FilledButton.icon(
               key: const Key('payment-retry'),
               onPressed: () {
@@ -364,7 +364,9 @@ class _PaymentBottomBar extends StatelessWidget {
               icon: const Icon(Icons.refresh),
               label: Text(strings.retry),
             ),
-          PaymentFlowStage.failed || PaymentFlowStage.expired =>
+          PaymentFlowStage.failed ||
+          PaymentFlowStage.cancelled ||
+          PaymentFlowStage.expired =>
             OutlinedButton.icon(
               key: const Key('payment-refresh'),
               onPressed: () => controller.refresh(),
@@ -399,9 +401,8 @@ class _PaymentBottomBar extends StatelessWidget {
             ),
           PaymentFlowStage.ready => FilledButton(
               key: const Key('payment-submit'),
-              onPressed: controller.canSubmit
-                  ? () => controller.submit()
-                  : null,
+              onPressed:
+                  controller.canSubmit ? () => controller.submit() : null,
               child: Text(strings.payNow),
             ),
         },

@@ -7,6 +7,7 @@ import com.joysong.server.identity.service.DoctorInstitutionRelationshipService
 import com.joysong.server.order.repository.DoctorInstitutionProjectConfigRepository
 import com.joysong.server.order.entity.DoctorInstitutionProjectConfigEntity
 import com.joysong.server.order.service.OrderSplitRatePolicy
+import com.joysong.server.payment.domain.Money
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.security.access.AccessDeniedException
 import org.springframework.stereotype.Service
@@ -56,9 +57,7 @@ class DoctorProjectChangeService(
         splitRatePolicy.resolve(requireNotNull(request.institutionRate) { "机构比例不能为空" }, requireNotNull(request.commissionRate) { "顾问比例不能为空" })
     }
 
-    private fun validateMoney(value: BigDecimal) {
-        require(value >= BigDecimal.ZERO && value <= BigDecimal("99999999.99") && value.stripTrailingZeros().scale() <= 2) { "金额须在范围内且最多两位小数" }
-    }
+    private fun validateMoney(value: BigDecimal) = Money.requireUsdAmount(value)
 
     fun listProfileUpdateTargets(actor: ManagementActor): List<DoctorProjectProfileUpdateTargetView> {
         val doctorId = actor.doctorId
@@ -350,6 +349,7 @@ class DoctorProjectChangeService(
                 val config = configRepository.findForUpdate(target.doctorId, target.institutionProjectId)
                     ?: configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate(target.doctorId, target.institutionProjectId)
                 if (!force && (config?.id != target.baseConfigId || config?.updatedAt != target.baseConfigUpdatedAt)) throw DoctorProjectChangeConflictException("分账配置基线已变化")
+                validateApprovedProfileAmounts(target)
                 splitRatePolicy.resolve(requireNotNull(target.institutionRate), requireNotNull(target.commissionRate))
                 doctorProjectRepository.save(target.toEntity(existing.createdAt, requireNotNull(target.priceSuggestion)))
                 val effective = config ?: DoctorInstitutionProjectConfigEntity(doctorId=target.doctorId, institutionProjectId=target.institutionProjectId)
@@ -370,6 +370,15 @@ class DoctorProjectChangeService(
                 doctorProjectRepository.delete(existing)
             }
         }
+    }
+
+    /** Pending rows can predate the shared USD validation, so approval must not trust submission-time checks. */
+    private fun validateApprovedProfileAmounts(target: ChangeTarget) {
+        requireNotNull(target.priceSuggestion) { "项目价格不能为空" }.also(::validateMoney)
+        requireNotNull(target.consultationFee) { "面诊费不能为空" }.also(::validateMoney)
+        val medicalListPrice = requireNotNull(target.medicalListPrice) { "医疗套餐优惠前金额不能为空" }
+        require(medicalListPrice > BigDecimal.ZERO) { "医疗套餐优惠前金额必须大于 0" }
+        validateMoney(medicalListPrice)
     }
 
 

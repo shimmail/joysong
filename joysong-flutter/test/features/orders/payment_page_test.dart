@@ -83,7 +83,7 @@ void main() {
     expect(find.byKey(const Key('payment-submit')), findsOneWidget);
   });
 
-  testWidgets('does not offer a new attempt for cancelled server status', (
+  testWidgets('offers a new attempt for cancelled server status', (
     tester,
   ) async {
     final repository = FakeOrdersRepository()
@@ -106,9 +106,16 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Payment cancelled'), findsOneWidget);
-    expect(find.byKey(const Key('payment-retry')), findsNothing);
+    expect(find.byKey(const Key('payment-retry')), findsOneWidget);
     expect(find.byKey(const Key('payment-submit')), findsNothing);
-    expect(find.byKey(const Key('payment-refresh')), findsOneWidget);
+    expect(find.byKey(const Key('payment-refresh')), findsNothing);
+
+    repository.paymentAttempt = samplePaymentAttempt();
+    await tester.tap(find.byKey(const Key('payment-retry')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Payment successful'), findsOneWidget);
+    expect(repository.paymentCalls, 2);
   });
 
   testWidgets('shows provider 503 as unavailable with refresh only', (

@@ -37,10 +37,27 @@ if (Alipay+ merchant / gateway 可用?) then (是)
   |平台|
   :仅以验签渠道事件或主动查单确认;
   if (支付 SUCCEEDED?) then (是)
-    :幂等标记支付成功;
-    :订单进入 SERVICE_ACTIVE;
-    :记录 serviceActivatedAt;
-    :开放允许公开的顾问资料和订单服务会话;
+    if (实收金额/币种匹配且订单仍可激活?) then (是)
+      :幂等标记支付成功;
+      :订单进入 SERVICE_ACTIVE;
+      :记录 serviceActivatedAt;
+      :开放允许公开的顾问资料和订单服务会话;
+    else (否：错额/错币种/重复或晚到成功)
+      :保留渠道 SUCCEEDED 事实和实收金额/币种;
+      :按 paymentId 唯一创建补偿工单 PENDING_REVIEW;
+      |管理员|
+      :GET /api/admin/payment-compensations 查看异常扣款;
+      :POST /api/admin/payment-compensations/{id}/retry\n审核并触发原渠道退款;
+      |平台|
+      if (已有 providerRefundId?) then (是)
+        :只查询或续办原退款;
+      else (否)
+        :使用 payment-compensation-{paymentId}\n稳定幂等键退还渠道实收金额;
+      endif
+      :渠道成功后工单进入 SUCCEEDED;
+      :失败或结果未知保留 FAILED / PROCESSING，供后台复核;
+      stop
+    endif
   else (否)
     if (PROCESSING / 结果未知?) then (是)
       :保持原支付尝试;

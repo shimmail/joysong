@@ -807,6 +807,7 @@ class DmThreadPage extends StatelessWidget {
     this.onTranslate,
     this.conversationType = DmConversationType.direct,
     this.sendEnabled = true,
+    this.refreshSendEnabled,
     super.key,
   });
 
@@ -820,6 +821,7 @@ class DmThreadPage extends StatelessWidget {
   final Future<String?> Function(String text)? onTranslate;
   final DmConversationType conversationType;
   final bool sendEnabled;
+  final Future<bool> Function()? refreshSendEnabled;
 
   @override
   Widget build(BuildContext context) => _ThreadScaffold<DmMessage>(
@@ -853,6 +855,7 @@ class DmThreadPage extends StatelessWidget {
         onOtherAvatarTap: onOtherAvatarTap,
         waitingForReply: () => controller.waitingForReply,
         sendEnabled: sendEnabled,
+        refreshSendEnabled: refreshSendEnabled,
         showRemovalActions: conversationType == DmConversationType.direct,
       );
 }
@@ -925,6 +928,7 @@ class _ThreadScaffold<T> extends StatefulWidget {
     this.onOtherAvatarTap,
     this.waitingForReply,
     this.sendEnabled = true,
+    this.refreshSendEnabled,
     this.showRemovalActions = true,
   });
 
@@ -953,6 +957,7 @@ class _ThreadScaffold<T> extends StatefulWidget {
   final VoidCallback? onOtherAvatarTap;
   final bool Function()? waitingForReply;
   final bool sendEnabled;
+  final Future<bool> Function()? refreshSendEnabled;
   final bool showRemovalActions;
 
   @override
@@ -968,6 +973,8 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
   final Set<String> _showingTranslations = <String>{};
   Timer? _refreshTimer;
   bool _isPickingImage = false;
+  bool? _refreshedSendEnabled;
+  int _entitlementRefreshGeneration = 0;
 
   @override
   void initState() {
@@ -977,7 +984,7 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
     unawaited(widget.loadInitial().then((_) => _scrollToLatest()));
     _refreshTimer = Timer.periodic(
       const Duration(seconds: 15),
-      (_) => unawaited(widget.refresh()),
+      (_) => unawaited(_refresh()),
     );
   }
 
@@ -993,7 +1000,25 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) unawaited(widget.refresh());
+    if (state == AppLifecycleState.resumed) unawaited(_refresh());
+  }
+
+  Future<void> _refresh() async {
+    final refreshGeneration = ++_entitlementRefreshGeneration;
+    await widget.refresh();
+    final refreshSendEnabled = widget.refreshSendEnabled;
+    if (refreshSendEnabled == null) return;
+    try {
+      final sendEnabled = await refreshSendEnabled();
+      if (!mounted ||
+          refreshGeneration != _entitlementRefreshGeneration ||
+          sendEnabled == (_refreshedSendEnabled ?? widget.sendEnabled)) {
+        return;
+      }
+      setState(() => _refreshedSendEnabled = sendEnabled);
+    } on Object {
+      // The server still enforces send permission if entitlement refresh fails.
+    }
   }
 
   void _handleControllerUpdate() {
@@ -1187,7 +1212,7 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
                 },
               ),
             ),
-            if (widget.sendEnabled)
+            if (_refreshedSendEnabled ?? widget.sendEnabled)
               _MessageComposer(
                 input: _input,
                 isLoading: widget.isLoading(),

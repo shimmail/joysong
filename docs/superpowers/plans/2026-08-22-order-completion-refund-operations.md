@@ -39,7 +39,7 @@
 
 **Contract:**
 - `POST /api/orders/{id}/confirm-completion` accepts an owned active travel order and returns `COMPLETED` without a settlement.
-- `POST /api/orders/{id}/refunds` accepts travel state `SERVICE_ACTIVE` or `COMPLETED` and records it as `originalStatus`.
+- `POST /api/orders/{id}/refund` accepts travel state `SERVICE_ACTIVE` or `COMPLETED` and records it as `originalStatus`.
 - Cancel/reject restores `originalStatus` and matching messaging entitlement.
 - `GET /api/admin/refunds` includes `reviewedBy`, `reviewedAt`, `rejectReason`, and refund item fields: `id`, `paymentId`, `provider`, `currency`, `amountMinor`, `providerRefundId`, `status`, `failureCode`, `failureMessage`, timestamps.
 - `POST /api/admin/refunds/{id}/retry` is admin-only and only operates on a processing refund with failed items.

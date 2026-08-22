@@ -34,4 +34,12 @@ class TravelGroundServicePricingTest {
             assertThrows<IllegalArgumentException> { pricing.quote(BigDecimal.ZERO) }.message
         )
     }
+
+    @Test
+    fun `rejects fractional cents with the same USD configuration contract`() {
+        assertEquals(
+            "金额须在范围内且最多两位小数",
+            assertThrows<IllegalArgumentException> { pricing.quote(BigDecimal("1000.005")) }.message
+        )
+    }
 }

@@ -44,7 +44,7 @@ class DoctorInstitutionProjectConfigEntity(
     var institutionRate: BigDecimal = BigDecimal("40.00"),
 
     /** 医疗套餐优惠前金额（美元） */
-    @Column(name = "medical_list_price", nullable = false, precision = 10, scale = 2)
+    @Column(name = "medical_list_price", nullable = false, precision = 19, scale = 2)
     var medicalListPrice: BigDecimal = BigDecimal.ZERO,
 
     @Column(name = "created_at", nullable = false, updatable = false)

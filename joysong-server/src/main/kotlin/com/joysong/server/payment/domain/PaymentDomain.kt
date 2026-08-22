@@ -50,7 +50,33 @@ enum class PaymentStatus {
     }
 }
 
+enum class PaymentCompensationStatus {
+    PENDING_REVIEW,
+    PROCESSING,
+    SUCCEEDED,
+    FAILED
+}
+
+/** Provider-confirmed charges that must be refunded outside the order refund lifecycle. */
+object PaymentCompensation {
+    const val DUPLICATE_PAYMENT_SUCCEEDED = "DUPLICATE_PAYMENT_SUCCEEDED"
+    const val PAYMENT_SUCCEEDED_ORDER_NOT_ACTIVATABLE = "PAYMENT_SUCCEEDED_ORDER_NOT_ACTIVATABLE"
+    const val PAYMENT_SUCCEEDED_AMOUNT_MISMATCH = "PAYMENT_SUCCEEDED_AMOUNT_MISMATCH"
+    const val PAYMENT_SUCCEEDED_CURRENCY_MISMATCH = "PAYMENT_SUCCEEDED_CURRENCY_MISMATCH"
+
+    private val reasonCodes = setOf(
+        DUPLICATE_PAYMENT_SUCCEEDED,
+        PAYMENT_SUCCEEDED_ORDER_NOT_ACTIVATABLE,
+        PAYMENT_SUCCEEDED_AMOUNT_MISMATCH,
+        PAYMENT_SUCCEEDED_CURRENCY_MISMATCH
+    )
+
+    fun isRequired(failureCode: String?): Boolean = failureCode in reasonCodes
+}
+
 object Money {
+    private val MAX_USD_AMOUNT = BigDecimal("99999999.99")
+
     fun normalizeCurrency(currency: String): String {
         val normalized = currency.trim().uppercase()
         require(normalized.length == 3) { "INVALID_CURRENCY" }
@@ -74,6 +100,15 @@ object Money {
         } catch (_: ArithmeticException) {
             throw IllegalArgumentException("INVALID_PAYMENT_AMOUNT_PRECISION")
         }
+    }
+
+    /** Shared write-side validation for USD configuration values that will later be snapshotted to minor units. */
+    fun requireUsdAmount(value: BigDecimal) {
+        require(
+            value >= BigDecimal.ZERO &&
+                value <= MAX_USD_AMOUNT &&
+                value.stripTrailingZeros().scale() <= 2
+        ) { "金额须在范围内且最多两位小数" }
     }
 
     fun fromMinor(amountMinor: Long, currency: String): BigDecimal {

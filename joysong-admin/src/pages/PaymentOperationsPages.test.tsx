@@ -429,6 +429,68 @@ describe('RefundsPage manual review operations', () => {
     await waitFor(() => expect(successSpy).toHaveBeenCalledWith('退款审核已提交，请查看渠道处理状态'));
   });
 
+  it('submits approval once and keeps review actions locked when the required refresh fails', async () => {
+    const errorSpy = vi.spyOn(message, 'error');
+    const approval = deferred<any>();
+    const otherRefund = {
+      ...serviceRefund,
+      id: 'refund-service-2',
+      orderId: 'service-order-2',
+      orderNo: 'SO-002',
+    };
+    mockGet
+      .mockImplementationOnce(() => response([serviceRefund, otherRefund]))
+      .mockRejectedValueOnce(new Error('退款列表暂不可用'));
+    mockPut.mockImplementationOnce(() => approval.promise);
+
+    render(<RefundsPage />);
+    const row = await screen.findByRole('row', { name: /SO-001/ });
+    fireEvent.click(within(row).getByRole('button', { name: /批准/ }));
+    const dialog = (await screen.findByText('确认批准退款')).closest('.ant-modal') as HTMLElement;
+    const approveButton = within(dialog).getByRole('button', { name: '确认批准' });
+
+    fireEvent.click(approveButton);
+    fireEvent.click(approveButton);
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+
+    approval.resolve({
+      data: { code: 200, message: 'OK', data: { ...serviceRefund, status: 'REFUND_PROCESSING' } },
+    });
+
+    await waitFor(() => expect(errorSpy).toHaveBeenCalledWith('刷新退款列表失败: 退款列表暂不可用，请刷新页面确认状态'));
+    expect(within(row).getByRole('button', { name: /批准/ })).toBeDisabled();
+    expect(within(row).getByRole('button', { name: /拒绝/ })).toBeDisabled();
+    const otherRow = screen.getByRole('row', { name: /SO-002/ });
+    expect(within(otherRow).getByRole('button', { name: /批准/ })).toBeEnabled();
+    expect(within(otherRow).getByRole('button', { name: /拒绝/ })).toBeEnabled();
+  });
+
+  it('submits rejection once and locks that row when the required refresh fails', async () => {
+    const user = userEvent.setup();
+    const errorSpy = vi.spyOn(message, 'error');
+    const rejection = deferred<any>();
+    mockGet
+      .mockImplementationOnce(() => response([serviceRefund]))
+      .mockRejectedValueOnce(new Error('退款列表暂不可用'));
+    mockPut.mockImplementationOnce(() => rejection.promise);
+
+    render(<RefundsPage />);
+    const row = await screen.findByRole('row', { name: /SO-001/ });
+    fireEvent.click(within(row).getByRole('button', { name: /拒绝/ }));
+    const dialog = (await screen.findByText('拒绝退款申请')).closest('.ant-modal') as HTMLElement;
+    await user.type(within(dialog).getByPlaceholderText('请填写拒绝原因（必填）'), '资料不足');
+    const rejectButton = within(dialog).getByRole('button', { name: '确认拒绝' });
+
+    fireEvent.click(rejectButton);
+    fireEvent.click(rejectButton);
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+
+    rejection.resolve({ data: { code: 200, message: 'OK', data: null } });
+    await waitFor(() => expect(errorSpy).toHaveBeenCalledWith('刷新退款列表失败: 退款列表暂不可用，请刷新页面确认状态'));
+    expect(within(row).getByRole('button', { name: /批准/ })).toBeDisabled();
+    expect(within(row).getByRole('button', { name: /拒绝/ })).toBeDisabled();
+  });
+
   it('shows review metadata and provider failure diagnostics in the refund details', async () => {
     mockGet.mockImplementation((url) => url === '/admin/refunds'
       ? response([{ ...failedProcessingRefund, status: 'PENDING' }])

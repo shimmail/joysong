@@ -1073,6 +1073,7 @@ class _AppShellState extends State<AppShell> {
       return;
     }
     var sendEnabled = true;
+    Future<bool> Function()? refreshSendEnabled;
     if (conversation.conversationType == DmConversationType.orderService) {
       final orderId = conversation.orderId?.trim();
       final ordersRepository = _ordersRepository;
@@ -1088,6 +1089,11 @@ class _AppShellState extends State<AppShell> {
           return;
         }
         sendEnabled = order.serviceMessagingEnabled;
+        refreshSendEnabled = () async {
+          final refreshedOrder = await ordersRepository.getOrder(orderId);
+          return refreshedOrder.serviceConversationReadable &&
+              refreshedOrder.serviceMessagingEnabled;
+        };
       } on Object {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1129,6 +1135,7 @@ class _AppShellState extends State<AppShell> {
           onTranslate: _translateDmMessage,
           conversationType: conversation.conversationType,
           sendEnabled: sendEnabled,
+          refreshSendEnabled: refreshSendEnabled,
           title:
               title?.trim().isNotEmpty == true ? title!.trim() : peers[1].name,
         ),

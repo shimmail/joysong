@@ -6,6 +6,7 @@ import com.joysong.server.order.repository.OrderRepository
 import com.joysong.server.order.service.OrderStatusLogService
 import com.joysong.server.payment.domain.Money
 import com.joysong.server.payment.domain.PaymentProvider
+import com.joysong.server.payment.domain.PaymentCompensation
 import com.joysong.server.payment.domain.PaymentStatus
 import com.joysong.server.payment.domain.PaymentType
 import com.joysong.server.payment.repository.PaymentRepository
@@ -323,7 +324,10 @@ class RefundWorkflowPersistenceService(
         val matches = paymentRepository.findAllByOrderIdAndStatusInOrderByCreatedAtAsc(
             order.id,
             PaymentStatus.successfulDatabaseValues
-        ).filter { it.paymentType == PaymentType.TRAVEL_GROUND_SERVICE_FEE.name }
+        ).filter {
+            it.paymentType == PaymentType.TRAVEL_GROUND_SERVICE_FEE.name &&
+                !PaymentCompensation.isRequired(it.failureCode)
+        }
         require(matches.size == 1) { "SERVICE_FEE_PAYMENT_NOT_UNIQUE" }
         val payment = matches.single()
         require(payment.currency == "USD") { "SERVICE_FEE_PAYMENT_CURRENCY_MISMATCH" }

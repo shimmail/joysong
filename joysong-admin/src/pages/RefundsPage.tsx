@@ -60,6 +60,9 @@ export default function RefundsPage() {
   const [rejectRecord, setRejectRecord] = useState<any | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [rejectLoading, setRejectLoading] = useState(false);
+  const [reviewingRefundId, setReviewingRefundId] = useState<string | null>(null);
+  const [blockedReviewIds, setBlockedReviewIds] = useState<Set<string>>(() => new Set());
+  const reviewingRefundIdRef = useRef<string | null>(null);
 
   // 详情弹窗
   const [detailVisible, setDetailVisible] = useState(false);
@@ -78,10 +81,31 @@ export default function RefundsPage() {
     }
   };
 
+  const finishReviewRefresh = async (refundId: string) => {
+    try {
+      await fetchData();
+      setBlockedReviewIds((current) => {
+        if (!current.has(refundId)) return current;
+        const next = new Set(current);
+        next.delete(refundId);
+        return next;
+      });
+    } catch (err: any) {
+      setBlockedReviewIds((current) => new Set(current).add(refundId));
+      message.error('刷新退款列表失败: ' + (err?.response?.data?.message || err?.message) + '，请刷新页面确认状态');
+    } finally {
+      reviewingRefundIdRef.current = null;
+      setReviewingRefundId(null);
+    }
+  };
+
   useEffect(() => { fetchData(); }, []);
 
   const handleApprove = async () => {
-    if (!approveRecord) return;
+    const refundId = approveRecord?.id;
+    if (!refundId || reviewingRefundIdRef.current || blockedReviewIds.has(refundId)) return;
+    reviewingRefundIdRef.current = refundId;
+    setReviewingRefundId(refundId);
     setApproveLoading(true);
     try {
       await api.put(`/admin/refunds/${approveRecord.id}/status`, { status: 'APPROVED' });
@@ -91,17 +115,20 @@ export default function RefundsPage() {
     } catch (err: any) {
       message.error('操作失败: ' + (err?.response?.data?.message || err?.message));
     } finally {
-      fetchData();
+      await finishReviewRefresh(refundId);
       setApproveLoading(false);
     }
   };
 
   const handleReject = async () => {
-    if (!rejectRecord) return;
+    const refundId = rejectRecord?.id;
+    if (!refundId || reviewingRefundIdRef.current || blockedReviewIds.has(refundId)) return;
     if (!rejectReason.trim()) {
       message.warning('请填写拒绝原因');
       return;
     }
+    reviewingRefundIdRef.current = refundId;
+    setReviewingRefundId(refundId);
     setRejectLoading(true);
     try {
       await api.put(`/admin/refunds/${rejectRecord.id}/status`, {
@@ -115,7 +142,7 @@ export default function RefundsPage() {
     } catch (err: any) {
       message.error('操作失败: ' + (err?.response?.data?.message || err?.message));
     } finally {
-      fetchData();
+      await finishReviewRefresh(refundId);
       setRejectLoading(false);
     }
   };
@@ -208,8 +235,8 @@ export default function RefundsPage() {
           <Button icon={<EyeOutlined />} size="small" onClick={() => openDetail(record)}>详情</Button>
           {record.status === 'PENDING' && (
             <>
-              <Button icon={<CheckOutlined />} size="small" type="primary" onClick={() => openApprove(record)}>批准</Button>
-              <Button icon={<CloseOutlined />} size="small" danger onClick={() => openReject(record)}>拒绝</Button>
+              <Button icon={<CheckOutlined />} size="small" type="primary" disabled={reviewingRefundId !== null || blockedReviewIds.has(record.id)} onClick={() => openApprove(record)}>批准</Button>
+              <Button icon={<CloseOutlined />} size="small" danger disabled={reviewingRefundId !== null || blockedReviewIds.has(record.id)} onClick={() => openReject(record)}>拒绝</Button>
             </>
           )}
           {isRetryableRefund(record) && (
@@ -268,7 +295,7 @@ export default function RefundsPage() {
         onCancel={() => { setApproveVisible(false); setApproveRecord(null); }}
         confirmLoading={approveLoading}
         okText="确认批准"
-        okButtonProps={{ danger: true }}
+        okButtonProps={{ danger: true, disabled: reviewingRefundId !== null || blockedReviewIds.has(approveRecord?.id) }}
       >
         {approveRecord && (
           <div>
@@ -291,7 +318,7 @@ export default function RefundsPage() {
         onCancel={() => { setRejectVisible(false); setRejectRecord(null); setRejectReason(''); }}
         confirmLoading={rejectLoading}
         okText="确认拒绝"
-        okButtonProps={{ danger: true, disabled: !rejectReason.trim() }}
+        okButtonProps={{ danger: true, disabled: !rejectReason.trim() || reviewingRefundId !== null || blockedReviewIds.has(rejectRecord?.id) }}
       >
         {rejectRecord && (
           <div>

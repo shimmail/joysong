@@ -104,6 +104,37 @@ class RefundServiceTest {
     }
 
     @Test
+    fun `normal service fee refund ignores a separately marked duplicate success`() {
+        val order = serviceOrder(status = OrderStatusEnum.SERVICE_ACTIVE.value)
+        every { orderRepository.findByIdForUpdate("order-1") } returns order
+        every { refundRepository.findAllByOrderIdAndStatusIn("order-1", any()) } returns emptyList()
+        every {
+            paymentRepository.findAllByOrderIdAndStatusInOrderByCreatedAtAsc("order-1", any())
+        } returns listOf(
+            serviceFeePayment(),
+            serviceFeePayment(id = "duplicate-payment").copy(
+                providerPaymentId = "duplicate-provider-payment",
+                failureCode = "DUPLICATE_PAYMENT_SUCCEEDED"
+            )
+        )
+        every { refundRepository.saveAndFlush(any()) } answers { firstArg() }
+        every { orderRepository.save(any()) } answers { firstArg() }
+        every { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) } returns Unit
+
+        val preparation = workflow().prepareApplication(
+            "order-1",
+            "user-1",
+            "行程取消",
+            "不再来华",
+            "",
+            null
+        )
+
+        assertEquals(40_000L, preparation.refund.requestedAmountMinor)
+        assertEquals(RefundWorkflowPersistenceService.PENDING, preparation.refund.status)
+    }
+
+    @Test
     fun `service fee refund request rejects a mismatched successful payment`() {
         stubApplicationBase()
         every {

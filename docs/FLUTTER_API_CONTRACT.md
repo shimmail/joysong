@@ -436,6 +436,8 @@ Flutter 只打开 `nextAction.type=REDIRECT` 的受信任 HTTPS URL；当前允�
 
 状态为 `CREATED`、`REQUIRES_ACTION`、`PROCESSING`、`SUCCEEDED`、`FAILED`、`CANCELLED`、`EXPIRED`、`PARTIALLY_REFUNDED`、`REFUNDED`。仅超时的 `CREATED` / `REQUIRES_ACTION` 可由服务端变为 `EXPIRED`；`PROCESSING` 或未知结果不按本地时钟过期。只有明确 `FAILED` / `CANCELLED` / `EXPIRED` 可以重新创建尝试，`SUCCEEDED` 只能由验签渠道事件或主动查单确认。
 
+渠道已确认扣款、但实收金额/币种与快照不符，或订单因重复/晚到成功、取消、删除、缺失而不能激活时，服务端仍保存真实 `SUCCEEDED`，并按 `paymentId` 唯一创建 `payment_compensation_cases`。管理员使用 `GET /api/admin/payment-compensations` 查看异常扣款，使用 `POST /api/admin/payment-compensations/{id}/retry` 审核并触发精确实收金额的原渠道退款：已有 `providerRefundId` 只查原退款；没有 ID 时复用 `payment-compensation-{paymentId}` 幂等键。`PROCESSING` / 未知结果不能伪装成功，普通订单退款会排除这些独立补偿款，不会被第二笔成功扣款阻塞。
+
 Alipay+ 商户注册和收单参数仍在安排，仓库没有真实 gateway。当前创建接口返回 HTTP 503 / `PAYMENT_PROVIDER_UNAVAILABLE` 且零本地尝试；Flutter 显示渠道暂不可用，绝不能模拟成功。
 
 ### 10.4 当前订单会话与退款

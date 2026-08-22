@@ -118,8 +118,7 @@ final class PaymentController extends ChangeNotifier {
       }.contains(_stage);
   bool get canSubmit =>
       !isBusy &&
-      (!_isServiceFeeFlow ||
-          (_serverRestoreCompleted && _payment == null)) &&
+      (!_isServiceFeeFlow || (_serverRestoreCompleted && _payment == null)) &&
       _stage != PaymentFlowStage.succeeded &&
       _stage != PaymentFlowStage.unavailable &&
       _stage != PaymentFlowStage.partiallyRefunded &&
@@ -127,6 +126,7 @@ final class PaymentController extends ChangeNotifier {
 
   bool get canRetryWithNewAttempt =>
       _payment?.status == PaymentStatus.failed ||
+      _payment?.status == PaymentStatus.cancelled ||
       _payment?.status == PaymentStatus.expired;
 
   void selectProvider(PaymentProvider provider) {
@@ -438,6 +438,7 @@ final class PaymentController extends ChangeNotifier {
     final currentStatus = _payment?.status;
     final canRetry = _isServiceFeeFlow
         ? currentStatus == PaymentStatus.failed ||
+            currentStatus == PaymentStatus.cancelled ||
             currentStatus == PaymentStatus.expired
         : currentStatus == PaymentStatus.failed ||
             currentStatus == PaymentStatus.cancelled ||

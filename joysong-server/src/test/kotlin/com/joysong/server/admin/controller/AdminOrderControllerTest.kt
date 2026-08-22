@@ -195,6 +195,27 @@ class AdminOrderControllerTest {
     }
 
     @Test
+    fun `admin config rejects medical list prices with fractional cents before persistence`() {
+        val (controller, repository, authentication) = configController(existing = null)
+
+        listOf(BigDecimal("1000.005"), BigDecimal("1000.0001")).forEach { medicalListPrice ->
+            val error = assertThrows<IllegalArgumentException> {
+                controller.upsertConfig(
+                    authentication,
+                    UpsertConfigRequest(
+                        doctorId = "doctor-1",
+                        institutionProjectId = "project-1",
+                        medicalListPrice = medicalListPrice
+                    )
+                )
+            }
+
+            assertEquals("金额须在范围内且最多两位小数", error.message)
+        }
+        verify(exactly = 0) { repository.save(any()) }
+    }
+
+    @Test
     fun `admin config save rejects rates exceeding the shared split policy before persistence`() {
         val authentication = mockk<Authentication>()
         val orderService = mockk<OrderService>()

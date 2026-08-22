@@ -4,6 +4,7 @@ import com.joysong.server.order.dto.OrderStatusEnum
 import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.repository.OrderRepository
 import com.joysong.server.payment.domain.PaymentProvider
+import com.joysong.server.payment.domain.PaymentCompensation
 import com.joysong.server.payment.domain.PaymentStatus
 import com.joysong.server.payment.domain.PaymentType
 import com.joysong.server.payment.provider.ProviderRefundResult
@@ -97,7 +98,10 @@ class RefundItemPersistenceService(
             val servicePayments = paymentRepository.findAllByOrderIdAndStatusInOrderByCreatedAtAsc(
                 lockedRefund.orderId,
                 PaymentStatus.successfulDatabaseValues
-            ).filter { it.paymentType == PaymentType.TRAVEL_GROUND_SERVICE_FEE.name }
+            ).filter {
+                it.paymentType == PaymentType.TRAVEL_GROUND_SERVICE_FEE.name &&
+                    !PaymentCompensation.isRequired(it.failureCode)
+            }
             require(servicePayments.size == 1) { "SERVICE_FEE_PAYMENT_NOT_UNIQUE" }
             val payment = servicePayments.single()
             require(payment.currency == "USD") { "SERVICE_FEE_PAYMENT_CURRENCY_MISMATCH" }

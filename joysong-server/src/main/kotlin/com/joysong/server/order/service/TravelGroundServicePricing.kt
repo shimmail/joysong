@@ -18,6 +18,7 @@ class TravelGroundServicePricing(
 ) {
     fun quote(medicalListPrice: BigDecimal): TravelGroundServiceQuote {
         require(medicalListPrice > BigDecimal.ZERO) { "MEDICAL_LIST_PRICE_NOT_POSITIVE" }
+        Money.requireUsdAmount(medicalListPrice)
         val currency = "USD"
         val listMinor = Money.toMinor(medicalListPrice, currency)
         val rateBps = splitRatePolicy.currentPlatformRate()

@@ -197,6 +197,39 @@ class DoctorProjectChangeServiceTest {
     }
 
     @Test
+    fun `profile update rejects fractional-cent medical list price before persistence`() {
+        every {
+            jdbcTemplate.query(
+                match<String> { it.contains("FROM institution_projects") },
+                any<RowMapper<Any>>(),
+                "ip-1"
+            )
+        } answers {
+            val mapper = secondArg<RowMapper<Any>>()
+            val rs = mockk<ResultSet> {
+                every { getString("institution_id") } returns "institution-1"
+                every { getString("project_id") } returns "project-1"
+            }
+            listOf(mapper.mapRow(rs, 0))
+        }
+        every { doctorProjectRepository.findByDoctorIdAndInstitutionProjectId("doctor-1", "ip-1") } returns doctorProject()
+        every { configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate("doctor-1", "ip-1") } returns
+            DoctorInstitutionProjectConfigEntity(doctorId = "doctor-1", institutionProjectId = "ip-1", medicalListPrice = BigDecimal("900.00"))
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            service.submit(doctorActor(), DoctorProjectChangeRequest(
+                institutionProjectId = "ip-1", requestType = "PROFILE_UPDATE", serviceDescription = "service",
+                priceSuggestion = BigDecimal("880.00"), notes = "notes", serviceTags = listOf("tag"), scheduleNote = "schedule",
+                coverImage = "cover", images = listOf("image"), consultationFee = BigDecimal("30.00"),
+                commissionRate = BigDecimal("10.00"), institutionRate = BigDecimal("40.00"), medicalListPrice = BigDecimal("1000.005")
+            ))
+        }
+
+        assertEquals("金额须在范围内且最多两位小数", error.message)
+        verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
+    }
+
+    @Test
     fun `profile approval rejects drift before writing either effective row`() {
         stubReviewQueries(requestType = "PROFILE_UPDATE")
         every { doctorProjectRepository.findForUpdate("doctor-1", "ip-1") } returns doctorProject(updatedAt = LocalDateTime.of(2026, 8, 11, 10, 0))
@@ -225,6 +258,52 @@ class DoctorProjectChangeServiceTest {
         assertEquals(BigDecimal("880.00"), project.captured.price)
         verify(exactly = 1) { configRepository.save(match { it.doctorId == "doctor-1" && it.consultationFee == BigDecimal("30.00") && it.medicalListPrice == BigDecimal("1000.00") }) }
         verify(exactly = 1) { jdbcTemplate.update(match<String> { it.contains("force_processed = ?") }, *anyVararg()) }
+    }
+
+    @Test
+    fun `approval rejects historic fractional-cent profile price before saving either effective row`() {
+        stubReviewQueries(
+            requestType = "PROFILE_UPDATE",
+            targetMedicalListPrice = BigDecimal("1000.005")
+        )
+        every { doctorProjectRepository.findForUpdate("doctor-1", "ip-1") } returns doctorProject()
+        every { configRepository.findForUpdate("doctor-1", "ip-1") } returns
+            DoctorInstitutionProjectConfigEntity(id = "config-1", doctorId = "doctor-1", institutionProjectId = "ip-1")
+        every { doctorProjectRepository.save(any()) } answers { firstArg() }
+        every { configRepository.save(any()) } answers { firstArg() }
+        every { jdbcTemplate.update(match<String> { it.contains("UPDATE doctor_project_change_requests") }, *anyVararg()) } returns 1
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            service.review(adminActor(), "request-1", "APPROVED", "migration validation", true)
+        }
+
+        assertEquals("金额须在范围内且最多两位小数", error.message)
+        verify(exactly = 0) { doctorProjectRepository.save(any()) }
+        verify(exactly = 0) { configRepository.save(any()) }
+        verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
+    }
+
+    @Test
+    fun `approval rejects historic out-of-range profile price before saving either effective row`() {
+        stubReviewQueries(
+            requestType = "PROFILE_UPDATE",
+            targetMedicalListPrice = BigDecimal("100000000.00")
+        )
+        every { doctorProjectRepository.findForUpdate("doctor-1", "ip-1") } returns doctorProject()
+        every { configRepository.findForUpdate("doctor-1", "ip-1") } returns
+            DoctorInstitutionProjectConfigEntity(id = "config-1", doctorId = "doctor-1", institutionProjectId = "ip-1")
+        every { doctorProjectRepository.save(any()) } answers { firstArg() }
+        every { configRepository.save(any()) } answers { firstArg() }
+        every { jdbcTemplate.update(match<String> { it.contains("UPDATE doctor_project_change_requests") }, *anyVararg()) } returns 1
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            service.review(adminActor(), "request-1", "APPROVED", "migration validation", true)
+        }
+
+        assertEquals("金额须在范围内且最多两位小数", error.message)
+        verify(exactly = 0) { doctorProjectRepository.save(any()) }
+        verify(exactly = 0) { configRepository.save(any()) }
+        verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
     }
 
     @Test
@@ -307,7 +386,11 @@ class DoctorProjectChangeServiceTest {
         verify(exactly = 0) { doctorProjectRepository.save(any()) }
     }
 
-    private fun stubReviewQueries(status: String = "APPROVED", requestType: String = "JOIN") {
+    private fun stubReviewQueries(
+        status: String = "APPROVED",
+        requestType: String = "JOIN",
+        targetMedicalListPrice: BigDecimal = BigDecimal("1000.00")
+    ) {
         every {
             jdbcTemplate.queryForObject(match<String> { it.contains("doctor_institutions") }, Long::class.java, *anyVararg())
         } returns 1L
@@ -318,12 +401,17 @@ class DoctorProjectChangeServiceTest {
         every { jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) } answers {
             val sql = firstArg<String>()
             val mapper = secondArg<RowMapper<Any>>()
-            val rs = if (sql.contains("FOR UPDATE")) targetResultSet(requestType) else viewResultSet(status)
+            val rs = if (sql.contains("FOR UPDATE")) {
+                targetResultSet(requestType, targetMedicalListPrice)
+            } else viewResultSet(status)
             listOf(mapper.mapRow(rs, 0))
         }
     }
 
-    private fun targetResultSet(requestType: String = "JOIN"): ResultSet = mockk(relaxed = true) {
+    private fun targetResultSet(
+        requestType: String = "JOIN",
+        medicalListPrice: BigDecimal = BigDecimal("1000.00")
+    ): ResultSet = mockk(relaxed = true) {
         every { getString("doctor_id") } returns "doctor-1"
         every { getString("institution_id") } returns "institution-1"
         every { getString("institution_project_id") } returns "ip-1"
@@ -341,7 +429,7 @@ class DoctorProjectChangeServiceTest {
         every { getBigDecimal("consultation_fee") } returns BigDecimal("30.00")
         every { getBigDecimal("commission_rate") } returns BigDecimal("10.00")
         every { getBigDecimal("institution_rate") } returns BigDecimal("40.00")
-        every { getBigDecimal("medical_list_price") } returns BigDecimal("1000.00")
+        every { getBigDecimal("medical_list_price") } returns medicalListPrice
         every { getTimestamp("base_doctor_project_updated_at") } returns Timestamp.valueOf(LocalDateTime.of(2026, 8, 10, 10, 0))
         every { getString("base_config_id") } returns "config-1"
         every { getTimestamp("base_config_updated_at") } returns Timestamp.valueOf(LocalDateTime.of(2026, 8, 10, 10, 0))

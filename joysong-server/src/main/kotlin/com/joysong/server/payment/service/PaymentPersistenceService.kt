@@ -5,11 +5,14 @@ import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.repository.OrderRepository
 import com.joysong.server.order.service.OrderStatusLogService
 import com.joysong.server.payment.domain.Money
+import com.joysong.server.payment.domain.PaymentCompensation
 import com.joysong.server.payment.domain.PaymentProvider
 import com.joysong.server.payment.domain.PaymentStatus
 import com.joysong.server.payment.domain.PaymentType
+import com.joysong.server.payment.entity.PaymentCompensationCaseEntity
 import com.joysong.server.payment.entity.PaymentEntity
 import com.joysong.server.payment.provider.ProviderPaymentResult
+import com.joysong.server.payment.repository.PaymentCompensationCaseRepository
 import com.joysong.server.payment.repository.PaymentRepository
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -22,7 +25,8 @@ import java.util.UUID
 class PaymentPersistenceService(
     private val paymentRepository: PaymentRepository,
     private val orderRepository: OrderRepository,
-    private val orderStatusLogService: OrderStatusLogService
+    private val orderStatusLogService: OrderStatusLogService,
+    private val compensationRepository: PaymentCompensationCaseRepository? = null
 ) {
     private val secureRandom = SecureRandom()
 
@@ -34,8 +38,6 @@ class PaymentPersistenceService(
         private const val TRAVEL_SERVICE_PAYMENT_METHOD = "ALIPAY_PLUS_CASHIER"
         private const val PAYMENT_ATTEMPT_TIMEOUT_MINUTES = 30L
         private const val MEDICAL_PAYMENT_NOT_SUPPORTED = "MEDICAL_PAYMENT_NOT_SUPPORTED"
-        private const val DUPLICATE_PAYMENT_SUCCEEDED = "DUPLICATE_PAYMENT_SUCCEEDED"
-        private const val PAYMENT_SUCCEEDED_ORDER_NOT_ACTIVATABLE = "PAYMENT_SUCCEEDED_ORDER_NOT_ACTIVATABLE"
     }
 
     /** Short transaction: validates the order and persists a local CREATED attempt. */
@@ -145,17 +147,27 @@ class PaymentPersistenceService(
         require(payment.providerPaymentId == null || payment.providerPaymentId == result.providerPaymentId) {
             "PROVIDER_PAYMENT_ID_CONFLICT"
         }
-        if (payment.paymentType == PaymentType.TRAVEL_GROUND_SERVICE_FEE.name &&
+        val travelServiceSuccess = payment.paymentType == PaymentType.TRAVEL_GROUND_SERVICE_FEE.name &&
             result.status == PaymentStatus.SUCCEEDED
-        ) {
+        val reportedTravelCharge = if (travelServiceSuccess) {
             val resultAmountMinor = requireNotNull(result.amountMinor) { "PAYMENT_AMOUNT_MISSING" }
-            val resultCurrency = requireNotNull(result.currency) { "PAYMENT_CURRENCY_MISSING" }
-            require(resultAmountMinor == payment.amountMinor) { "PAYMENT_AMOUNT_MISMATCH" }
-            require(Money.normalizeCurrency(resultCurrency) == payment.currency) { "PAYMENT_CURRENCY_MISMATCH" }
+            require(resultAmountMinor > 0) { "PAYMENT_AMOUNT_NOT_POSITIVE" }
+            val resultCurrency = Money.normalizeCurrency(
+                requireNotNull(result.currency) { "PAYMENT_CURRENCY_MISSING" }
+            )
+            resultAmountMinor to resultCurrency
         } else {
             result.amountMinor?.let { require(it == payment.amountMinor) { "PAYMENT_AMOUNT_MISMATCH" } }
             result.currency?.let {
                 require(Money.normalizeCurrency(it) == payment.currency) { "PAYMENT_CURRENCY_MISMATCH" }
+            }
+            null
+        }
+        val travelChargeAnomaly = reportedTravelCharge?.let { (amountMinor, currency) ->
+            when {
+                amountMinor != payment.amountMinor -> PaymentCompensation.PAYMENT_SUCCEEDED_AMOUNT_MISMATCH
+                currency != payment.currency -> PaymentCompensation.PAYMENT_SUCCEEDED_CURRENCY_MISMATCH
+                else -> null
             }
         }
 
@@ -187,8 +199,12 @@ class PaymentPersistenceService(
                 transactionId = result.providerTransactionId
                     ?: payment.transactionId.takeIf { it.isNotBlank() }
                     ?: result.providerPaymentId,
-                failureCode = result.failureCode,
-                failureMessage = result.failureMessage?.take(500),
+                paidAt = if (result.status == PaymentStatus.SUCCEEDED) payment.paidAt ?: now else payment.paidAt,
+                failureCode = travelChargeAnomaly ?: result.failureCode,
+                failureMessage = if (travelChargeAnomaly != null) {
+                    "Provider-confirmed charge ${reportedTravelCharge?.first} ${reportedTravelCharge?.second} " +
+                        "does not match the service-fee snapshot ${payment.amountMinor} ${payment.currency}"
+                } else result.failureMessage?.take(500),
                 authorizedAt = if (result.status == PaymentStatus.PROCESSING) {
                     payment.authorizedAt ?: now
                 } else payment.authorizedAt,
@@ -198,6 +214,17 @@ class PaymentPersistenceService(
             )
         )
         if (result.status == PaymentStatus.SUCCEEDED) {
+            if (travelChargeAnomaly != null) {
+                val (amountMinor, currency) = checkNotNull(reportedTravelCharge)
+                return persistTravelPaymentAnomaly(
+                    payment = updated,
+                    amountMinor = amountMinor,
+                    currency = currency,
+                    reasonCode = travelChargeAnomaly,
+                    reasonMessage = checkNotNull(updated.failureMessage),
+                    now = now
+                )
+            }
             val order = if (payment.paymentType == PaymentType.TRAVEL_GROUND_SERVICE_FEE.name) {
                 orderRepository.findByIdIncludeDeletedForUpdate(payment.orderId)
             } else {
@@ -244,14 +271,13 @@ class PaymentPersistenceService(
         val type = PaymentType.valueOf(payment.paymentType)
         if (type == PaymentType.TRAVEL_GROUND_SERVICE_FEE) {
             if (order?.serviceActivatedAt != null) {
-                val duplicate = paymentRepository.save(
-                    payment.copy(
-                        status = PaymentStatus.SUCCEEDED.name,
-                        paidAt = payment.paidAt ?: now,
-                        failureCode = DUPLICATE_PAYMENT_SUCCEEDED,
-                        failureMessage = "A different successful payment already activated this order",
-                        updatedAt = now
-                    )
+                val duplicate = persistTravelPaymentAnomaly(
+                    payment = payment,
+                    amountMinor = checkNotNull(payment.amountMinor),
+                    currency = payment.currency,
+                    reasonCode = PaymentCompensation.DUPLICATE_PAYMENT_SUCCEEDED,
+                    reasonMessage = "A different successful payment already activated this order",
+                    now = now
                 )
                 log.error(
                     "订单[{}]检测到第二笔旅游地接服务费成功扣款，保留渠道事实等待人工处理: paymentId={}, providerPaymentId={}",
@@ -264,14 +290,13 @@ class PaymentPersistenceService(
 
             val activationFailure = travelServiceActivationFailure(payment, order)
             if (activationFailure != null) {
-                val anomaly = paymentRepository.save(
-                    payment.copy(
-                        status = PaymentStatus.SUCCEEDED.name,
-                        paidAt = payment.paidAt ?: now,
-                        failureCode = PAYMENT_SUCCEEDED_ORDER_NOT_ACTIVATABLE,
-                        failureMessage = activationFailure.take(500),
-                        updatedAt = now
-                    )
+                val anomaly = persistTravelPaymentAnomaly(
+                    payment = payment,
+                    amountMinor = checkNotNull(payment.amountMinor),
+                    currency = payment.currency,
+                    reasonCode = PaymentCompensation.PAYMENT_SUCCEEDED_ORDER_NOT_ACTIVATABLE,
+                    reasonMessage = activationFailure,
+                    now = now
                 )
                 log.error(
                     "旅游地接服务费渠道支付成功但订单不可激活，保留渠道事实等待人工退款: orderId={}, paymentId={}, reason={}",
@@ -358,6 +383,56 @@ class PaymentPersistenceService(
         )
         log.info("订单[{}]支付成功，阶段={}, provider={}, paymentId={}", order.orderNo, type, payment.provider, payment.id)
         return completed
+    }
+
+    /**
+     * A confirmed charge must never be represented as an ordinary refundable service-fee payment
+     * when it could not activate the order.  The payment row keeps the provider fact; this
+     * companion row is the independently executable original-channel refund work item.
+     */
+    private fun persistTravelPaymentAnomaly(
+        payment: PaymentEntity,
+        amountMinor: Long,
+        currency: String,
+        reasonCode: String,
+        reasonMessage: String,
+        now: LocalDateTime
+    ): PaymentEntity {
+        require(PaymentCompensation.isRequired(reasonCode)) { "INVALID_PAYMENT_COMPENSATION_REASON" }
+        val anomaly = paymentRepository.save(
+            payment.copy(
+                status = PaymentStatus.SUCCEEDED.name,
+                paidAt = payment.paidAt ?: now,
+                failureCode = reasonCode,
+                failureMessage = reasonMessage.take(500),
+                updatedAt = now
+            )
+        )
+        val repository = requireNotNull(compensationRepository) {
+            "PAYMENT_COMPENSATION_WORKFLOW_UNAVAILABLE"
+        }
+        if (repository.findByPaymentId(anomaly.id) == null) {
+            repository.save(
+                PaymentCompensationCaseEntity(
+                    id = UUID.randomUUID().toString(),
+                    paymentId = anomaly.id,
+                    orderId = anomaly.orderId,
+                    userId = anomaly.userId,
+                    provider = anomaly.provider,
+                    providerPaymentId = requireNotNull(anomaly.providerPaymentId) {
+                        "PROVIDER_PAYMENT_ID_MISSING"
+                    },
+                    amountMinor = amountMinor,
+                    currency = Money.normalizeCurrency(currency),
+                    reasonCode = reasonCode,
+                    reasonMessage = reasonMessage.take(500),
+                    idempotencyKey = "payment-compensation-${anomaly.id}",
+                    createdAt = now,
+                    updatedAt = now
+                )
+            )
+        }
+        return anomaly
     }
 
     private fun validateOrderStage(order: OrderEntity, paymentType: PaymentType) {

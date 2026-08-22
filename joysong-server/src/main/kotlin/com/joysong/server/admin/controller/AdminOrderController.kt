@@ -7,6 +7,7 @@ import com.joysong.server.order.repository.DoctorInstitutionProjectConfigReposit
 import com.joysong.server.order.service.OrderService
 import com.joysong.server.order.service.OrderSplitRatePolicy
 import com.joysong.server.order.service.OrderStatusLogService
+import com.joysong.server.payment.domain.Money
 import com.joysong.server.settlement.repository.SettlementRepository
 import com.joysong.server.settlement.repository.SettlementAllocationRepository
 import com.joysong.server.reconciliation.repository.ReconciliationIssueRepository
@@ -249,6 +250,7 @@ class AdminOrderController(
         val institutionRate = request.institutionRate ?: existing?.institutionRate ?: BigDecimal("40.00")
         val medicalListPrice = request.medicalListPrice ?: existing?.medicalListPrice
         require(medicalListPrice != null && medicalListPrice > BigDecimal.ZERO) { "医疗套餐优惠前金额必须大于 0" }
+        Money.requireUsdAmount(medicalListPrice)
         val updatesLegacyValues = request.consultationFee != null ||
             request.commissionRate != null || request.institutionRate != null
         if (existing == null || updatesLegacyValues) {

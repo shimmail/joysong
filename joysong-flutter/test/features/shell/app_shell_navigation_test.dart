@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -166,6 +167,85 @@ void main() {
     expect(find.byType(TextField), findsNothing);
   });
 
+  testWidgets(
+      'open order conversation becomes read-only when the app resumes after order completion',
+      (tester) async {
+    _useLargeTestSurface(tester);
+    final client = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE',
+      freshReadable: true,
+      freshSendEnabled: true,
+    );
+    await _pumpShell(tester, client);
+
+    await tester.tap(find.text('消息'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('dm-conversation-order-1')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(client.orderReads, 1);
+    expect(find.byType(TextField), findsOneWidget);
+
+    client
+      ..freshStatus = 'COMPLETED'
+      ..freshSendEnabled = false;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+
+    expect(client.orderReads, 2);
+    expect(find.byType(TextField), findsNothing);
+  });
+
+  testWidgets(
+      'older entitlement refresh cannot restore sending after a newer read-only result',
+      (tester) async {
+    _useLargeTestSurface(tester);
+    final client = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE',
+      freshReadable: true,
+      freshSendEnabled: true,
+    );
+    await _pumpShell(tester, client);
+
+    await tester.tap(find.text('消息'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('dm-conversation-order-1')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsOneWidget);
+
+    final olderActiveResponse = Completer<Map<String, Object?>>();
+    final newerCompletedResponse = Completer<Map<String, Object?>>();
+    client.queuedOrderReads.addAll([
+      olderActiveResponse.future,
+      newerCompletedResponse.future,
+    ]);
+
+    await tester.pump(const Duration(seconds: 15));
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(client.orderReads, 3);
+
+    newerCompletedResponse.complete(
+      client.orderResponse(status: 'COMPLETED', sendEnabled: false),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsNothing);
+
+    olderActiveResponse.complete(
+      client.orderResponse(status: 'SERVICE_ACTIVE', sendEnabled: true),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsNothing);
+  });
+
   testWidgets('dm notification rejects a server-filtered order conversation',
       (tester) async {
     _useLargeTestSurface(tester);
@@ -288,12 +368,13 @@ final class _OrderServiceApiClient extends ApiClient {
           httpClient: _TestHttpClient(),
         );
 
-  final String freshStatus;
+  String freshStatus;
   final bool freshReadable;
-  final bool freshSendEnabled;
+  bool freshSendEnabled;
   final bool includeNotification;
   final gets = <String>[];
   final posts = <(String, Object?)>[];
+  final queuedOrderReads = <Future<Map<String, Object?>>>[];
 
   int get orderReads => gets.where((path) => path == 'orders/order-1').length;
 
@@ -308,6 +389,20 @@ final class _OrderServiceApiClient extends ApiClient {
         serviceMessagingEnabled: freshSendEnabled,
       );
 
+  Map<String, Object?> orderResponse({
+    required String status,
+    required bool sendEnabled,
+  }) =>
+      sampleOrderJson(
+        status: status,
+        paymentFlow: 'TRAVEL_GROUND_SERVICE_ONLY',
+        consultantBound: true,
+        serviceActivated: true,
+        consultantDetailsVisible: true,
+        serviceConversationReadable: true,
+        serviceMessagingEnabled: sendEnabled,
+      );
+
   @override
   Future<T?> get<T>(
     String path, {
@@ -315,6 +410,9 @@ final class _OrderServiceApiClient extends ApiClient {
     required T Function(Object? json) decodeData,
   }) async {
     gets.add(path);
+    if (path == 'orders/order-1' && queuedOrderReads.isNotEmpty) {
+      return decodeData(await queuedOrderReads.removeAt(0));
+    }
     final Object data = switch (path) {
       'notifications/unread-count' => includeNotification ? 1 : 0,
       'notifications' =>
