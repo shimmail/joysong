@@ -105,11 +105,15 @@ class OrderStatusEnumTest {
             OrderStatusEnum.TRANSITION_MAP.getValue(OrderStatusEnum.PENDING_SERVICE_FEE)
         )
         assertEquals(
-            setOf(OrderStatusEnum.REFUND_REVIEW),
+            setOf(OrderStatusEnum.COMPLETED, OrderStatusEnum.REFUND_REVIEW),
             OrderStatusEnum.TRANSITION_MAP.getValue(OrderStatusEnum.SERVICE_ACTIVE)
         )
         assertEquals(
-            setOf(OrderStatusEnum.SERVICE_ACTIVE, OrderStatusEnum.REFUND_PROCESSING),
+            setOf(
+                OrderStatusEnum.SERVICE_ACTIVE,
+                OrderStatusEnum.COMPLETED,
+                OrderStatusEnum.REFUND_PROCESSING
+            ),
             OrderStatusEnum.TRANSITION_MAP.getValue(OrderStatusEnum.REFUND_REVIEW)
         )
         assertEquals(
