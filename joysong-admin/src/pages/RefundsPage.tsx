@@ -146,9 +146,14 @@ export default function RefundsPage() {
     } catch (err: any) {
       message.error('重试失败: ' + (err?.response?.data?.message || err?.message));
     } finally {
-      await fetchData();
-      retryingRefundIdRef.current = null;
-      setRetryingRefundId(null);
+      try {
+        await fetchData();
+      } catch (err: any) {
+        message.error('刷新退款列表失败: ' + (err?.response?.data?.message || err?.message));
+      } finally {
+        retryingRefundIdRef.current = null;
+        setRetryingRefundId(null);
+      }
     }
   };
 

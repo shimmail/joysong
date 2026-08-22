@@ -558,4 +558,33 @@ describe('RefundsPage manual review operations', () => {
     expect(within(itemRow).getByText('PROVIDER_UNAVAILABLE')).toBeInTheDocument();
     expect(within(itemRow).getByText('渠道仍不可用')).toBeInTheDocument();
   });
+
+  it('releases the retry control and reports a failed refresh after retry submission', async () => {
+    const user = userEvent.setup();
+    const successSpy = vi.spyOn(message, 'success');
+    const errorSpy = vi.spyOn(message, 'error');
+    mockGet
+      .mockImplementationOnce(() => response([failedProcessingRefund]))
+      .mockRejectedValue(new Error('退款列表暂不可用'));
+    mockPost.mockResolvedValue({ data: { code: 200, message: 'OK', data: failedProcessingRefund } });
+
+    render(<RefundsPage />);
+    await user.selectOptions(await screen.findByRole('combobox', { name: '退款状态' }), '__all__');
+    const row = await screen.findByRole('row', { name: /RETRY-001/ });
+    fireEvent.click(within(row).getByRole('button', { name: /详情/ }));
+    const dialog = (await screen.findByText('退款详情')).closest('.ant-modal') as HTMLElement;
+    const retryButton = within(dialog).getByRole('button', { name: '重试失败项' });
+
+    fireEvent.click(retryButton);
+
+    await waitFor(() => expect(successSpy).toHaveBeenCalledWith('失败退款项已重新提交，请查看渠道处理状态'));
+    await waitFor(() => expect(errorSpy).toHaveBeenCalledWith('刷新退款列表失败: 退款列表暂不可用'));
+    const releasedRetryButton = within(dialog).getByRole('button', { name: /重试失败项/ });
+    expect(releasedRetryButton).toBeEnabled();
+    expect(releasedRetryButton).not.toHaveClass('ant-btn-loading');
+
+    fireEvent.click(releasedRetryButton);
+    await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(errorSpy).toHaveBeenCalledTimes(2));
+  });
 });
