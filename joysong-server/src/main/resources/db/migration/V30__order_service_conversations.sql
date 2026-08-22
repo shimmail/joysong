@@ -12,7 +12,6 @@ ALTER TABLE dm_conversations
         ) STORED,
     ADD UNIQUE KEY uk_dm_direct_pair (direct_pair_key),
     ADD UNIQUE KEY uk_dm_order_service_conversation (order_id),
-    ADD KEY idx_dm_conversation_order (order_id),
     ADD CONSTRAINT fk_dm_conversation_order
         FOREIGN KEY (order_id) REFERENCES orders(id),
     ADD CONSTRAINT chk_dm_conversation_scope CHECK (
