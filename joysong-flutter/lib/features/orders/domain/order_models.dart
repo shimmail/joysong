@@ -206,6 +206,54 @@ final class Order {
         OrderStatus.refunded,
       }.contains(status);
 
+  Order copyWith({
+    OrderStatus? status,
+    RefundStatus? refundStatus,
+    bool? serviceMessagingEnabled,
+  }) =>
+      Order(
+        id: id,
+        orderNo: orderNo,
+        projectId: projectId,
+        institutionProjectId: institutionProjectId,
+        institutionId: institutionId,
+        consultantId: consultantId,
+        doctorId: doctorId,
+        projectName: projectName,
+        institutionName: institutionName,
+        consultantName: consultantName,
+        consultantAvatar: consultantAvatar,
+        doctorName: doctorName,
+        coverImage: coverImage,
+        amount: amount,
+        paidAmount: paidAmount,
+        discountAmount: discountAmount,
+        consultationFee: consultationFee,
+        remainingAmount: remainingAmount,
+        refundAmount: refundAmount,
+        status: status ?? this.status,
+        paymentFlow: paymentFlow,
+        currency: currency,
+        medicalListPriceMinor: medicalListPriceMinor,
+        platformServiceRateBps: platformServiceRateBps,
+        travelGroundServiceFeeMinor: travelGroundServiceFeeMinor,
+        consultantBound: consultantBound,
+        serviceActivated: serviceActivated,
+        consultantDetailsVisible: consultantDetailsVisible,
+        serviceConversationReadable: serviceConversationReadable,
+        serviceMessagingEnabled:
+            serviceMessagingEnabled ?? this.serviceMessagingEnabled,
+        refundStatus: refundStatus ?? this.refundStatus,
+        quantity: quantity,
+        remark: remark,
+        verifyCode: verifyCode,
+        hasReview: hasReview,
+        createdAt: createdAt,
+        appointmentTime: appointmentTime,
+        paymentTime: paymentTime,
+        completedAt: completedAt,
+      );
+
   factory Order.fromJson(Object? json) {
     final map = jsonMap(json, '订单');
     return Order(

@@ -399,15 +399,14 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
         allowedRedirectHosts: {'cashier.alipayplus.com'},
       ),
     );
-    bool? paid;
     try {
-      paid = await Navigator.of(context).push<bool>(MaterialPageRoute(
+      await Navigator.of(context).push<bool>(MaterialPageRoute(
         builder: (_) => PaymentPage(controller: controller),
       ));
     } finally {
       controller.dispose();
     }
-    if (paid == true && mounted) await widget.controller.load();
+    if (mounted) await widget.controller.load();
   }
 }
 

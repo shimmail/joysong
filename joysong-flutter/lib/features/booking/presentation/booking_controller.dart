@@ -4,14 +4,32 @@ import 'package:joysong_flutter/features/booking/domain/booking_models.dart';
 import 'package:joysong_flutter/features/booking/domain/booking_repository.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
 
+DateTime beijingWallClockNow([DateTime? instant]) {
+  final beijingInstant =
+      (instant ?? DateTime.now()).toUtc().add(const Duration(hours: 8));
+  return DateTime(
+    beijingInstant.year,
+    beijingInstant.month,
+    beijingInstant.day,
+    beijingInstant.hour,
+    beijingInstant.minute,
+    beijingInstant.second,
+    beijingInstant.millisecond,
+    beijingInstant.microsecond,
+  );
+}
+
 final class BookingController extends ChangeNotifier {
   BookingController({
     required BookingRepository repository,
     required this.institutionId,
     required this.projectId,
-  }) : _repository = repository;
+    DateTime Function()? beijingClock,
+  })  : _repository = repository,
+        _beijingClock = beijingClock ?? beijingWallClockNow;
 
   final BookingRepository _repository;
+  final DateTime Function() _beijingClock;
   final String institutionId;
   final String projectId;
 
@@ -44,6 +62,14 @@ final class BookingController extends ChangeNotifier {
   bool get isQuoteLoading => _isQuoteLoading;
   bool get isSubmitting => _isSubmitting;
   bool get hasLoaded => _hasLoaded;
+  DateTime get currentBeijingWallClock => _beijingClock();
+  bool get canRetryTravelGroundServiceQuote =>
+      !_isLoading &&
+      !_isQuoteLoading &&
+      !_isSubmitting &&
+      _project != null &&
+      _selectedDoctor != null &&
+      _travelGroundServiceQuote == null;
 
   bool get canSubmit =>
       !_isSubmitting &&
@@ -95,12 +121,24 @@ final class BookingController extends ChangeNotifier {
     _selectedDoctor = doctor;
     _travelGroundServiceQuote = null;
     _errorMessage = null;
-    final version = ++_quoteRequestVersion;
     if (doctor == null || _project == null) {
+      ++_quoteRequestVersion;
       _isQuoteLoading = false;
       notifyListeners();
       return;
     }
+    await _loadTravelGroundServiceQuote(doctor);
+  }
+
+  Future<void> retryTravelGroundServiceQuote() async {
+    final doctor = _selectedDoctor;
+    if (!canRetryTravelGroundServiceQuote || doctor == null) return;
+    _errorMessage = null;
+    await _loadTravelGroundServiceQuote(doctor);
+  }
+
+  Future<void> _loadTravelGroundServiceQuote(BookingDoctor doctor) async {
+    final version = ++_quoteRequestVersion;
     _isQuoteLoading = true;
     notifyListeners();
     try {
@@ -155,8 +193,7 @@ final class BookingController extends ChangeNotifier {
       return _fail('旅游地接服务费尚未加载');
     }
     if (time == null) return _fail('请选择预约时间');
-    final beijingNow = DateTime.now().toUtc().add(const Duration(hours: 8));
-    if (!time.isAfter(beijingNow)) {
+    if (!time.isAfter(currentBeijingWallClock)) {
       return _fail('预约时间必须晚于当前北京时间');
     }
     if (_remark.length > 500) return _fail('订单备注不能超过 500 字');

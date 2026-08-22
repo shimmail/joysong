@@ -84,4 +84,47 @@ void main() {
 
     expect(find.text('该机构暂时没有可预约的医美顾问'), findsOneWidget);
   });
+
+  testWidgets('retries a failed quote without changing the selected doctor', (
+    tester,
+  ) async {
+    final repository = FakeBookingRepository()
+      ..quoteError = const FormatException('报价不可用');
+    final controller = BookingController(
+      repository: repository,
+      institutionId: 'institution-1',
+      projectId: 'project-1',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('zh'),
+        supportedLocales: const [Locale('en'), Locale('zh')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
+        home: BookingPage(controller: controller, onOrderCreated: (_) {}),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await controller.selectDoctor(controller.doctors.single);
+    await tester.pump();
+
+    expect(controller.selectedDoctor?.id, 'doctor-1');
+    expect(find.text('报价不可用'), findsOneWidget);
+    final retryButton = find.byKey(const Key('booking-quote-retry'));
+    expect(retryButton, findsOneWidget);
+
+    repository.quoteError = null;
+    await tester.tap(retryButton);
+    await tester.pumpAndSettle();
+
+    expect(controller.selectedDoctor?.id, 'doctor-1');
+    expect(controller.travelGroundServiceQuote, isNotNull);
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('booking-price-disclaimer')),
+      260,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text(r'$400.00'), findsOneWidget);
+    expect(find.byKey(const Key('booking-quote-retry')), findsNothing);
+  });
 }

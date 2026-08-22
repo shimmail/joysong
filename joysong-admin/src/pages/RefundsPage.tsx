@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Table, Button, message, Select, Input, Space, Tag, Modal, Descriptions } from 'antd';
+import { Alert, Table, Button, message, Select, Input, Space, Tag, Modal, Descriptions } from 'antd';
 import { CheckOutlined, CloseOutlined, EyeOutlined } from '@ant-design/icons';
 import api, { getData } from '../api';
 import { formatMoney } from '../utils/money';
@@ -30,6 +30,14 @@ const paymentFlowLabels: Record<string, string> = {
   LEGACY_MEDICAL: '历史医疗支付流程',
 };
 
+const originalStatusLabels: Record<string, string> = {
+  SERVICE_ACTIVE: '服务进行中',
+  COMPLETED: '已完成',
+};
+
+const refundListLoadError = (error: any) =>
+  '退款列表加载失败: ' + (error?.response?.data?.message || error?.message || '未知错误');
+
 const requestedRefundAmount = (record: any) =>
   formatMoney(record.requestedAmountMinor, record.currency, record.amount ?? record.refundAmount);
 
@@ -47,6 +55,7 @@ const isRetryableRefund = (record: any) =>
 export default function RefundsPage() {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('PENDING');
   const [keyword, setKeyword] = useState('');
 
@@ -76,6 +85,10 @@ export default function RefundsPage() {
       const records = getData<any[]>(await api.get('/admin/refunds'));
       setData(records);
       setDetailRecord((current: any | null) => current ? records.find(record => record.id === current.id) ?? current : null);
+      setLoadError(null);
+    } catch (error) {
+      setLoadError(refundListLoadError(error));
+      throw error;
     } finally {
       setLoading(false);
     }
@@ -99,7 +112,11 @@ export default function RefundsPage() {
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  const loadRefunds = () => {
+    void fetchData().catch(() => undefined);
+  };
+
+  useEffect(() => { loadRefunds(); }, []);
 
   const handleApprove = async () => {
     const refundId = approveRecord?.id;
@@ -204,6 +221,10 @@ export default function RefundsPage() {
       render: (value: string) => paymentFlowLabels[value] || value || '-',
     },
     {
+      title: '退款前订单状态', dataIndex: 'originalStatus', width: 130,
+      render: (value: string) => originalStatusLabels[value] || value || '-',
+    },
+    {
       title: '申请退款金额', dataIndex: 'requestedAmountMinor', width: 130,
       render: (_: number, record: any) => (
         <span style={{ color: '#f5222d', fontWeight: 600 }}>{requestedRefundAmount(record)}</span>
@@ -262,6 +283,15 @@ export default function RefundsPage() {
   return (
     <div>
       <h2>退款管理</h2>
+      {loadError && (
+        <Alert
+          type="error"
+          showIcon
+          title={loadError}
+          action={<Button size="small" loading={loading} onClick={loadRefunds}>重新加载</Button>}
+          style={{ marginBottom: 16 }}
+        />
+      )}
       <Space style={{ marginBottom: 16 }}>
         <Select
           aria-label="退款状态"

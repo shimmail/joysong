@@ -56,6 +56,42 @@ void main() {
     expect(repository.actionCalls, 0);
   });
 
+  test('keeps an accepted travel refund pending when detail refresh fails',
+      () async {
+    final completed = sampleOrder(
+      status: OrderStatus.completed,
+      paymentFlow: OrderPaymentFlow.travelGroundServiceOnly,
+      serviceActivated: true,
+      consultantDetailsVisible: true,
+      serviceConversationReadable: true,
+    );
+    final repository = FakeOrdersRepository()..orders = [completed];
+    final controller = OrderDetailController(repository, orderId: 'order-1');
+    await controller.load();
+
+    final refresh = Completer<Order>();
+    repository.delayedOrderDetails = [refresh.future];
+    final request = controller.requestRefund(reason: '行程变化');
+    bool? succeeded;
+    try {
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.refund?.status, RefundStatus.pending);
+      expect(controller.order?.status, OrderStatus.refundReview);
+      expect(controller.order?.refundStatus, RefundStatus.pending);
+      expect(controller.order?.canRequestRefund, isFalse);
+    } finally {
+      refresh.completeError(StateError('offline'));
+      succeeded = await request;
+    }
+
+    expect(succeeded, isTrue);
+    expect(controller.order?.status, OrderStatus.refundReview);
+    expect(controller.order?.refundStatus, RefundStatus.pending);
+    expect(controller.errorMessage, contains('退款申请已提交'));
+    expect(controller.errorMessage, contains('订单状态刷新失败'));
+    expect(controller.errorMessage, isNot(contains('退款申请失败')));
+  });
+
   test('detail treats settlement-not-generated as pending, not an error',
       () async {
     final repository = FakeOrdersRepository()

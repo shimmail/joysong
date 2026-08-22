@@ -342,6 +342,44 @@ describe('PaymentsPage service-fee records', () => {
 });
 
 describe('RefundsPage manual review operations', () => {
+  it('shows an explicit loading error and clears it after a successful retry', async () => {
+    const user = userEvent.setup();
+    mockGet
+      .mockRejectedValueOnce(new Error('退款列表暂不可用'))
+      .mockImplementationOnce((url) => url === '/admin/refunds'
+        ? response([serviceRefund])
+        : response([]));
+
+    render(<RefundsPage />);
+
+    const reloadButton = await screen.findByRole('button', { name: '重新加载' });
+    const loadErrorAlert = reloadButton.closest('[role="alert"]') as HTMLElement;
+    expect(loadErrorAlert).toHaveTextContent('退款列表加载失败: 退款列表暂不可用');
+    expect(screen.queryByRole('row', { name: /SO-001/ })).not.toBeInTheDocument();
+
+    await user.click(reloadButton);
+
+    expect(await screen.findByRole('row', { name: /SO-001/ })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('button', { name: '重新加载' })).not.toBeInTheDocument());
+    expect(screen.queryByText('退款列表加载失败: 退款列表暂不可用')).not.toBeInTheDocument();
+  });
+
+  it('shows both service-active and completed origins for pending refund requests', async () => {
+    mockGet.mockImplementation((url) => url === '/admin/refunds'
+      ? response([
+          { ...serviceRefund, id: 'refund-service-active', orderNo: 'SO-ACTIVE', originalStatus: 'SERVICE_ACTIVE' },
+          { ...serviceRefund, id: 'refund-service-completed', orderNo: 'SO-COMPLETED', originalStatus: 'COMPLETED' },
+        ])
+      : response([]));
+
+    render(<RefundsPage />);
+
+    const activeRow = await screen.findByRole('row', { name: /SO-ACTIVE/ });
+    expect(within(activeRow).getByText('服务进行中')).toBeInTheDocument();
+    const completedRow = screen.getByRole('row', { name: /SO-COMPLETED/ });
+    expect(within(completedRow).getByText('已完成')).toBeInTheDocument();
+  });
+
   it('shows the service flow, real statuses, and requested/refunded minor-unit amounts without COMPLETED', async () => {
     mockGet.mockImplementation((url) => url === '/admin/refunds'
       ? response([serviceRefund])

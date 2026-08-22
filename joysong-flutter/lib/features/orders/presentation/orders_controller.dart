@@ -171,15 +171,37 @@ final class OrderDetailController extends ChangeNotifier {
     _errorMessage = null;
     notifyListeners();
     try {
-      _refund = await _repository.requestRefund(
+      final refund = await _repository.requestRefund(
         orderId,
         reason: reason.trim(),
         description: description.trim(),
         evidenceUrl: evidenceUrl.trim(),
       );
-      final detail = await _repository.getOrder(orderId);
       if (!_isCurrent(generation)) return false;
-      _order = detail;
+      _refund = refund;
+      final current = _order;
+      if (current != null && refund.status == RefundStatus.pending) {
+        _order = current.copyWith(
+          status: current.isTravelGroundServiceOnly
+              ? OrderStatus.refundReview
+              : OrderStatus.disputeMediation,
+          refundStatus: RefundStatus.pending,
+          serviceMessagingEnabled:
+              current.isTravelGroundServiceOnly ? false : null,
+        );
+      }
+      notifyListeners();
+      try {
+        final detail = await _repository.getOrder(orderId);
+        if (!_isCurrent(generation)) return false;
+        _order = detail;
+      } catch (error) {
+        if (!_isCurrent(generation)) return false;
+        final detail = _orderMessageFor(error, '');
+        _errorMessage = detail.isEmpty
+            ? '退款申请已提交，但订单状态刷新失败，请稍后重试'
+            : '退款申请已提交，但订单状态刷新失败：$detail';
+      }
       return true;
     } catch (error) {
       _errorMessage = _orderMessageFor(error, '退款申请失败');

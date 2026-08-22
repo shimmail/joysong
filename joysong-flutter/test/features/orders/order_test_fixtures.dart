@@ -164,6 +164,7 @@ class FakeOrdersRepository implements OrdersRepository {
   RefundDetail? refundDetail;
   PaymentAttempt? paymentAttempt;
   Object? latestPaymentError;
+  Object? getOrderError;
   String? lastPaymentIdempotencyKey;
   PaymentType? lastPaymentType;
   PaymentProvider? lastPaymentProvider;
@@ -192,6 +193,8 @@ class FakeOrdersRepository implements OrdersRepository {
     if (delayedOrderDetails.isNotEmpty) {
       return delayedOrderDetails.removeAt(0);
     }
+    final error = getOrderError;
+    if (error != null) throw error;
     if (orderDetails.isNotEmpty) return orderDetails.removeAt(0);
     return orders.firstWhere((order) => order.id == id);
   }

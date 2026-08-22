@@ -36,7 +36,7 @@ class _BookingPageState extends State<BookingPage> {
   }
 
   Future<void> _pickAppointment() async {
-    final now = _beijingNow();
+    final now = widget.controller.currentBeijingWallClock;
     final currentSelection = widget.controller.appointmentTime;
     final fallbackTime = now.add(const Duration(hours: 1));
     final initial = currentSelection != null && currentSelection.isAfter(now)
@@ -72,7 +72,7 @@ class _BookingPageState extends State<BookingPage> {
     if (time == null || !mounted) return;
     final appointment =
         DateTime(date.year, date.month, date.day, time.hour, time.minute);
-    if (!appointment.isAfter(_beijingNow())) {
+    if (!appointment.isAfter(widget.controller.currentBeijingWallClock)) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(context.localized(
@@ -138,6 +138,18 @@ class _BookingPageState extends State<BookingPage> {
       children: [
         if (controller.errorMessage != null)
           _InlineMessage(message: controller.errorMessage!),
+        if (controller.canRetryTravelGroundServiceQuote)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              key: const Key('booking-quote-retry'),
+              onPressed: controller.retryTravelGroundServiceQuote,
+              icon: const Icon(Icons.refresh),
+              label: Text(
+                context.localized('重新获取服务费', 'Retry service fee quote'),
+              ),
+            ),
+          ),
         _ProjectCard(project: project),
         const SizedBox(height: 20),
         _SectionTitle(
@@ -435,8 +447,6 @@ class _ScrollingTimePickerState extends State<_ScrollingTimePicker> {
     );
   }
 }
-
-DateTime _beijingNow() => DateTime.now().toUtc().add(const Duration(hours: 8));
 
 class _ProjectCard extends StatelessWidget {
   const _ProjectCard({required this.project});
