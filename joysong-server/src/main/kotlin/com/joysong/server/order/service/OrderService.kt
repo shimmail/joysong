@@ -510,15 +510,16 @@ class OrderService(
         reviewService.submitAutomaticReview(orderId)
     }
 
-    /**
-     * 取消超时未支付的订单
-     * 定时任务调用，取消 PENDING_PAYMENT 状态超过30分钟的订单
-     */
+    /** 定时任务调用，取消任一支付流程中超过 30 分钟仍未支付的订单。 */
     @Transactional(rollbackFor = [Exception::class])
     fun cancelExpiredPendingOrder(orderId: String) {
-        val order = orderRepository.findById(orderId).orElse(null) ?: return
+        val order = orderRepository.findByIdForUpdate(orderId) ?: return
         val currentStatus = OrderStatusEnum.fromValue(order.status) ?: return
-        if (currentStatus != OrderStatusEnum.PENDING_PAYMENT) {
+        if (currentStatus !in setOf(
+                OrderStatusEnum.PENDING_PAYMENT,
+                OrderStatusEnum.PENDING_SERVICE_FEE
+            )
+        ) {
             return
         }
         orderRepository.save(

@@ -16,12 +16,14 @@ import io.mockk.mockk
 import io.mockk.slot
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
+import java.time.LocalDateTime
 
 class PaymentWebhookServiceTest {
 
     @Test
     fun `raw form webhook reaches provider verification and storage unchanged`() {
         val rawPayload = "notify_id=n%2B1&trade_status=TRADE_SUCCESS&memo=a+b%26c"
+        val providerPaidAt = LocalDateTime.of(2026, 8, 22, 12, 29)
         var verifiedPayload: String? = null
         val gateway = object : PaymentGateway {
             override val provider = PaymentProvider.ALIPAY_PLUS
@@ -40,7 +42,8 @@ class PaymentWebhookServiceTest {
                     providerPaymentId = "provider-payment-1",
                     paymentStatus = PaymentStatus.SUCCEEDED,
                     amountMinor = 40_000,
-                    currency = "USD"
+                    currency = "USD",
+                    paidAt = providerPaidAt
                 )
             }
         }
@@ -58,7 +61,7 @@ class PaymentWebhookServiceTest {
         every { events.saveAndFlush(capture(stored)) } answers { stored.captured }
         every {
             paymentService.handleProviderPaymentEvent(
-                any(), any(), any(), any(), any(), any(), any(), any(), any()
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), providerPaidAt
             )
         } returns mockk<PaymentEntity>()
         every { events.save(any()) } answers { firstArg() }

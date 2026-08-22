@@ -59,7 +59,9 @@ interface PaymentRepository : JpaRepository<PaymentEntity, String> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query(
         "SELECT p FROM PaymentEntity p " +
-            "WHERE p.status IN :statuses AND p.expiresAt IS NOT NULL AND p.expiresAt <= :now " +
+            "WHERE p.status IN :statuses " +
+            "AND (p.providerPaymentId IS NULL OR TRIM(p.providerPaymentId) = '') " +
+            "AND p.expiresAt IS NOT NULL AND p.expiresAt <= :now " +
             "ORDER BY p.id"
     )
     fun findExpirableAttempts(

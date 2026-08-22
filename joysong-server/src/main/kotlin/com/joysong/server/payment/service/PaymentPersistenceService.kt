@@ -36,7 +36,7 @@ class PaymentPersistenceService(
         private const val TRAVEL_SERVICE_PAYMENT_FLOW = "TRAVEL_GROUND_SERVICE_ONLY"
         private const val TRAVEL_SERVICE_CURRENCY = "USD"
         private const val TRAVEL_SERVICE_PAYMENT_METHOD = "ALIPAY_PLUS_CASHIER"
-        private const val PAYMENT_ATTEMPT_TIMEOUT_MINUTES = 30L
+        private const val TRAVEL_SERVICE_PAYMENT_TIMEOUT_MINUTES = 30L
         private const val MEDICAL_PAYMENT_NOT_SUPPORTED = "MEDICAL_PAYMENT_NOT_SUPPORTED"
     }
 
@@ -65,6 +65,12 @@ class PaymentPersistenceService(
         require(order.userId == userId) { "无权操作该订单" }
         validatePaymentContract(order, paymentType, provider, paymentMethod)
         validateOrderStage(order, paymentType)
+        val now = LocalDateTime.now()
+        val paymentDeadline = if (paymentType == PaymentType.TRAVEL_GROUND_SERVICE_FEE) {
+            order.createdAt.plusMinutes(TRAVEL_SERVICE_PAYMENT_TIMEOUT_MINUTES).also { deadline ->
+                require(now.isBefore(deadline)) { "ORDER_PAYMENT_EXPIRED" }
+            }
+        } else null
 
         existingByIdempotencyKey?.let { return it }
 
@@ -96,10 +102,6 @@ class PaymentPersistenceService(
             }
         }
         require(amountMinor > 0) { "PAYMENT_AMOUNT_NOT_POSITIVE" }
-        val now = LocalDateTime.now()
-        val expiresAt = if (paymentType == PaymentType.TRAVEL_GROUND_SERVICE_FEE) {
-            now.plusMinutes(PAYMENT_ATTEMPT_TIMEOUT_MINUTES)
-        } else null
         return paymentRepository.saveAndFlush(
             PaymentEntity(
                 id = UUID.randomUUID().toString(),
@@ -115,7 +117,7 @@ class PaymentPersistenceService(
                 currency = currency,
                 amountMinor = amountMinor,
                 idempotencyKey = idempotencyKey,
-                expiresAt = expiresAt,
+                expiresAt = paymentDeadline,
                 createdAt = now,
                 updatedAt = now
             )
@@ -182,12 +184,14 @@ class PaymentPersistenceService(
         ) {
             return payment
         }
-        if ((payment.status == PaymentStatus.REQUIRES_ACTION.name && result.status == PaymentStatus.CREATED) ||
+        val recoversMissingProviderPaymentId = payment.providerPaymentId.isNullOrBlank()
+        val staleProviderState =
+            (payment.status == PaymentStatus.REQUIRES_ACTION.name && result.status == PaymentStatus.CREATED) ||
             (payment.status == PaymentStatus.PROCESSING.name && result.status in setOf(
                 PaymentStatus.CREATED,
                 PaymentStatus.REQUIRES_ACTION
             ))
-        ) {
+        if (!recoversMissingProviderPaymentId && staleProviderState) {
             return payment
         }
         val now = LocalDateTime.now()
@@ -199,7 +203,9 @@ class PaymentPersistenceService(
                 transactionId = result.providerTransactionId
                     ?: payment.transactionId.takeIf { it.isNotBlank() }
                     ?: result.providerPaymentId,
-                paidAt = if (result.status == PaymentStatus.SUCCEEDED) payment.paidAt ?: now else payment.paidAt,
+                paidAt = if (result.status == PaymentStatus.SUCCEEDED) {
+                    payment.paidAt ?: result.paidAt
+                } else payment.paidAt,
                 failureCode = travelChargeAnomaly ?: result.failureCode,
                 failureMessage = if (travelChargeAnomaly != null) {
                     "Provider-confirmed charge ${reportedTravelCharge?.first} ${reportedTravelCharge?.second} " +
@@ -270,6 +276,8 @@ class PaymentPersistenceService(
     ): PaymentEntity {
         val type = PaymentType.valueOf(payment.paymentType)
         if (type == PaymentType.TRAVEL_GROUND_SERVICE_FEE) {
+            val activationCheckedAt = LocalDateTime.now()
+            val effectivePaidAt = payment.paidAt ?: activationCheckedAt
             if (order?.serviceActivatedAt != null) {
                 val duplicate = persistTravelPaymentAnomaly(
                     payment = payment,
@@ -277,7 +285,7 @@ class PaymentPersistenceService(
                     currency = payment.currency,
                     reasonCode = PaymentCompensation.DUPLICATE_PAYMENT_SUCCEEDED,
                     reasonMessage = "A different successful payment already activated this order",
-                    now = now
+                    now = activationCheckedAt
                 )
                 log.error(
                     "订单[{}]检测到第二笔旅游地接服务费成功扣款，保留渠道事实等待人工处理: paymentId={}, providerPaymentId={}",
@@ -288,7 +296,7 @@ class PaymentPersistenceService(
                 return duplicate
             }
 
-            val activationFailure = travelServiceActivationFailure(payment, order)
+            val activationFailure = travelServiceActivationFailure(payment, order, effectivePaidAt)
             if (activationFailure != null) {
                 val anomaly = persistTravelPaymentAnomaly(
                     payment = payment,
@@ -296,7 +304,7 @@ class PaymentPersistenceService(
                     currency = payment.currency,
                     reasonCode = PaymentCompensation.PAYMENT_SUCCEEDED_ORDER_NOT_ACTIVATABLE,
                     reasonMessage = activationFailure,
-                    now = now
+                    now = activationCheckedAt
                 )
                 log.error(
                     "旅游地接服务费渠道支付成功但订单不可激活，保留渠道事实等待人工退款: orderId={}, paymentId={}, reason={}",
@@ -310,10 +318,10 @@ class PaymentPersistenceService(
             val feeMinor = checkNotNull(order.travelGroundServiceFeeMinor)
             val updatedOrder = order.copy(
                 status = OrderStatusEnum.SERVICE_ACTIVE.value,
-                serviceActivatedAt = now,
+                serviceActivatedAt = activationCheckedAt,
                 paidAmount = Money.fromMinor(feeMinor, TRAVEL_SERVICE_CURRENCY),
                 paidAmountMinor = feeMinor,
-                updatedAt = now
+                updatedAt = activationCheckedAt
             )
             orderRepository.save(updatedOrder)
             orderStatusLogService.logTransition(
@@ -327,10 +335,10 @@ class PaymentPersistenceService(
             val completed = paymentRepository.save(
                 payment.copy(
                     status = PaymentStatus.SUCCEEDED.name,
-                    paidAt = payment.paidAt ?: now,
+                    paidAt = effectivePaidAt,
                     failureCode = null,
                     failureMessage = null,
-                    updatedAt = now
+                    updatedAt = activationCheckedAt
                 )
             )
             log.info(
@@ -471,11 +479,18 @@ class PaymentPersistenceService(
         }
     }
 
-    private fun travelServiceActivationFailure(payment: PaymentEntity, order: OrderEntity?): String? {
+    private fun travelServiceActivationFailure(
+        payment: PaymentEntity,
+        order: OrderEntity?,
+        effectivePaidAt: LocalDateTime
+    ): String? {
         if (order == null) return "ORDER_NOT_FOUND"
         if (order.deletedAt != null) return "ORDER_SOFT_DELETED"
         if (order.paymentFlow != TRAVEL_SERVICE_PAYMENT_FLOW) return "TRAVEL_SERVICE_PAYMENT_FLOW_REQUIRED"
         if (order.status != OrderStatusEnum.PENDING_SERVICE_FEE.value) return "ORDER_STATUS_${order.status}"
+        if (!effectivePaidAt.isBefore(order.createdAt.plusMinutes(TRAVEL_SERVICE_PAYMENT_TIMEOUT_MINUTES))) {
+            return "ORDER_PAYMENT_EXPIRED"
+        }
         val feeMinor = order.travelGroundServiceFeeMinor ?: return "TRAVEL_GROUND_SERVICE_FEE_MISSING"
         val paymentAmountMinor = payment.amountMinor ?: return "PAYMENT_AMOUNT_MISSING"
         if (paymentAmountMinor != feeMinor) return "PAYMENT_AMOUNT_MISMATCH"

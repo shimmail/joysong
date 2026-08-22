@@ -43,16 +43,16 @@ class OrderScheduledTasks(
         private const val DUE_SETTLEMENT_BATCH_SIZE = 100
     }
 
-    /**
-     * 旧医疗支付链路兼容：仅检查 PENDING_PAYMENT。新流程的
-     * PENDING_SERVICE_FEE 订单不会被取消，由支付尝试定时器单独过期尝试。
-     */
+    /** 超过 30 分钟仍未支付时，关闭旧医疗订单和旅游地接服务费订单。 */
     @Scheduled(fixedRate = 300000)
     fun cancelExpiredPendingOrders() {
         val cutoff = LocalDateTime.now().minusMinutes(PENDING_PAYMENT_TIMEOUT_MINUTES)
-        val expiredOrders = orderRepository.findByStatusAndCreatedAtBefore(
-            OrderStatusEnum.PENDING_PAYMENT.value, cutoff
-        )
+        val expiredOrders = listOf(
+            OrderStatusEnum.PENDING_PAYMENT,
+            OrderStatusEnum.PENDING_SERVICE_FEE
+        ).flatMap { status ->
+            orderRepository.findByStatusAndCreatedAtBefore(status.value, cutoff)
+        }
         expiredOrders.forEach { order ->
             try {
                 orderService.cancelExpiredPendingOrder(order.id)

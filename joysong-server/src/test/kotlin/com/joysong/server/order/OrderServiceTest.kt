@@ -809,7 +809,7 @@ class OrderServiceTest {
     @Test
     fun `cancelExpiredPendingOrder 取消超时未支付订单`() {
         val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.PENDING_PAYMENT.value)
-        every { orderRepository.findById("o1") } returns Optional.of(order)
+        every { orderRepository.findByIdForUpdate("o1") } returns order
         every { orderRepository.save(any()) } answers { firstArg() }
 
         orderService.cancelExpiredPendingOrder("o1")
@@ -820,9 +820,38 @@ class OrderServiceTest {
     }
 
     @Test
+    fun `cancelExpiredPendingOrder closes pending service fee order under row lock`() {
+        val order = createTestOrder(
+            "travel-pending",
+            "user-1",
+            status = OrderStatusEnum.PENDING_SERVICE_FEE.value,
+            paymentFlow = "TRAVEL_GROUND_SERVICE_ONLY"
+        )
+        every { orderRepository.findByIdForUpdate("travel-pending") } returns order
+        every { orderRepository.save(any()) } answers { firstArg() }
+
+        orderService.cancelExpiredPendingOrder("travel-pending")
+
+        val saved = slot<OrderEntity>()
+        verify(exactly = 1) { orderRepository.findByIdForUpdate("travel-pending") }
+        verify(exactly = 1) { orderRepository.save(capture(saved)) }
+        assertEquals(OrderStatusEnum.CANCELLED.value, saved.captured.status)
+        verify(exactly = 1) {
+            orderStatusLogService.logTransition(
+                "travel-pending",
+                OrderStatusEnum.PENDING_SERVICE_FEE.value,
+                OrderStatusEnum.CANCELLED.value,
+                null,
+                "SYSTEM",
+                "支付超时自动取消"
+            )
+        }
+    }
+
+    @Test
     fun `cancelExpiredPendingOrder 非 PENDING_PAYMENT 状态跳过`() {
         val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.VERIFIED.value)
-        every { orderRepository.findById("o1") } returns Optional.of(order)
+        every { orderRepository.findByIdForUpdate("o1") } returns order
 
         orderService.cancelExpiredPendingOrder("o1")
 

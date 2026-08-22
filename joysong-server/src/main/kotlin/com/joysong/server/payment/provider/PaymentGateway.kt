@@ -12,7 +12,9 @@ data class ProviderCreatePaymentRequest(
     val currency: String,
     val paymentMethod: String,
     /** Stable across retries even if the first provider response is lost. */
-    val idempotencyKey: String
+    val idempotencyKey: String,
+    /** Local business deadline; recovery must not create a new provider order after this time. */
+    val expiresAt: LocalDateTime? = null
 )
 
 data class ProviderConfirmPaymentRequest(
@@ -38,7 +40,9 @@ data class ProviderPaymentResult(
     val nextAction: PaymentNextAction? = null,
     val expiresAt: LocalDateTime? = null,
     val failureCode: String? = null,
-    val failureMessage: String? = null
+    val failureMessage: String? = null,
+    /** Provider-authoritative payment time, normalized to the server business timezone. */
+    val paidAt: LocalDateTime? = null
 )
 
 data class ProviderRefundRequest(
@@ -68,6 +72,14 @@ class PaymentProviderException(
 interface PaymentGateway {
     val provider: PaymentProvider
     fun createPayment(request: ProviderCreatePaymentRequest): ProviderPaymentResult
+
+    /**
+     * Resolves an outcome-unknown create by the original stable request reference.
+     * Implementations must not create a new provider order after request.expiresAt.
+     */
+    fun recoverPayment(request: ProviderCreatePaymentRequest): ProviderPaymentResult {
+        throw PaymentProviderException("PAYMENT_RECOVERY_UNAVAILABLE", retryable = true, outcomeUnknown = true)
+    }
 
     fun queryPayment(providerPaymentId: String): ProviderPaymentResult {
         throw PaymentProviderException("PAYMENT_QUERY_UNAVAILABLE", retryable = false, outcomeUnknown = false)
@@ -101,7 +113,9 @@ data class VerifiedProviderEvent(
     val failureCode: String? = null,
     val failureMessage: String? = null,
     /** Local ID copied into provider metadata; used if a webhook races the create response. */
-    val localPaymentId: String? = null
+    val localPaymentId: String? = null,
+    /** Signed provider payment time, normalized to the server business timezone. */
+    val paidAt: LocalDateTime? = null
 )
 
 @Component

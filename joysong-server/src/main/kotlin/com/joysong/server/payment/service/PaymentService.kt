@@ -14,6 +14,7 @@ import com.joysong.server.payment.provider.ProviderCreatePaymentRequest
 import com.joysong.server.payment.provider.ProviderPaymentResult
 import com.joysong.server.payment.repository.PaymentRepository
 import org.springframework.stereotype.Service
+import java.time.LocalDateTime
 
 data class PaymentSessionResult(
     val payment: PaymentEntity,
@@ -36,7 +37,9 @@ class PaymentService(
         paymentRepository,
         orderRepository,
         orderStatusLogService
-    )
+    ),
+    private val paymentAttemptExpiryService: PaymentAttemptExpiryService =
+        PaymentAttemptExpiryService(paymentRepository)
 ) {
     companion object {
         private val terminalStatuses = PaymentStatus.terminalDatabaseValues
@@ -69,19 +72,12 @@ class PaymentService(
         if (prepared.status in terminalStatuses) return PaymentSessionResult(prepared)
 
         return try {
-            val result = if (prepared.providerPaymentId.isNullOrBlank()) {
-                gateway.createPayment(
-                    ProviderCreatePaymentRequest(
-                        paymentId = prepared.id,
-                        orderId = prepared.orderId,
-                        amountMinor = requireNotNull(prepared.amountMinor) { "PAYMENT_AMOUNT_MISSING" },
-                        currency = prepared.currency,
-                        paymentMethod = normalizedMethod,
-                        idempotencyKey = providerCreateIdempotencyKey(prepared.id)
-                    )
-                )
-            } else {
-                gateway.queryPayment(prepared.providerPaymentId)
+            val result = when {
+                !prepared.providerPaymentId.isNullOrBlank() -> gateway.queryPayment(prepared.providerPaymentId)
+                prepared.status == PaymentStatus.PROCESSING.name -> {
+                    gateway.recoverPayment(providerCreateRequest(prepared))
+                }
+                else -> gateway.createPayment(providerCreateRequest(prepared))
             }
             PaymentSessionResult(
                 payment = paymentPersistenceService.applyProviderResult(prepared.id, result),
@@ -194,7 +190,8 @@ class PaymentService(
         currency: String? = null,
         failureCode: String? = null,
         failureMessage: String? = null,
-        localPaymentId: String? = null
+        localPaymentId: String? = null,
+        paidAt: LocalDateTime? = null
     ): PaymentEntity {
         val payment = paymentRepository.findByProviderAndProviderPaymentId(provider.name, providerPaymentId)
             ?: localPaymentId?.let { id -> paymentRepository.findById(id).orElse(null) }
@@ -216,30 +213,31 @@ class PaymentService(
                 amountMinor = amountMinor,
                 currency = currency,
                 failureCode = failureCode,
-                failureMessage = failureMessage
+                failureMessage = failureMessage,
+                paidAt = paidAt
             )
         )
     }
 
     /** Internal entry point for reconciliation jobs; no user authorization is required. */
     fun reconcilePayment(paymentId: String): PaymentEntity {
-        val payment = paymentRepository.findById(paymentId)
+        var payment = paymentRepository.findById(paymentId)
             .orElseThrow { IllegalArgumentException("PAYMENT_NOT_FOUND") }
         if (payment.status in terminalStatuses) return payment
+        val now = LocalDateTime.now()
+        if (payment.providerPaymentId.isNullOrBlank() &&
+            payment.expiresAt?.let { !it.isAfter(now) } == true
+        ) {
+            payment = paymentAttemptExpiryService.expireDueUnsubmittedAttempt(payment.id, now)
+            if (payment.status in terminalStatuses) return payment
+        }
         val gateway = paymentGatewayRegistry.require(PaymentProvider.parse(payment.provider))
-        val result = if (payment.providerPaymentId.isNullOrBlank()) {
-            gateway.createPayment(
-                ProviderCreatePaymentRequest(
-                    paymentId = payment.id,
-                    orderId = payment.orderId,
-                    amountMinor = requireNotNull(payment.amountMinor) { "PAYMENT_AMOUNT_MISSING" },
-                    currency = payment.currency,
-                    paymentMethod = requireNotNull(payment.paymentMethod) { "PAYMENT_METHOD_MISSING" },
-                    idempotencyKey = providerCreateIdempotencyKey(payment.id)
-                )
-            )
-        } else {
-            gateway.queryPayment(payment.providerPaymentId)
+        val result = when {
+            !payment.providerPaymentId.isNullOrBlank() -> {
+                gateway.queryPayment(requireNotNull(payment.providerPaymentId))
+            }
+            payment.status == PaymentStatus.PROCESSING.name -> gateway.recoverPayment(providerCreateRequest(payment))
+            else -> gateway.createPayment(providerCreateRequest(payment))
         }
         return paymentPersistenceService.applyProviderResult(payment.id, result)
     }
@@ -266,5 +264,15 @@ class PaymentService(
     }
 
     private fun providerCreateIdempotencyKey(paymentId: String) = "payment-create-$paymentId"
+
+    private fun providerCreateRequest(payment: PaymentEntity) = ProviderCreatePaymentRequest(
+        paymentId = payment.id,
+        orderId = payment.orderId,
+        amountMinor = requireNotNull(payment.amountMinor) { "PAYMENT_AMOUNT_MISSING" },
+        currency = payment.currency,
+        paymentMethod = requireNotNull(payment.paymentMethod) { "PAYMENT_METHOD_MISSING" },
+        idempotencyKey = providerCreateIdempotencyKey(payment.id),
+        expiresAt = payment.expiresAt
+    )
 
 }

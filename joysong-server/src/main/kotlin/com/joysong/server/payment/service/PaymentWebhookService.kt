@@ -50,7 +50,8 @@ class PaymentWebhookService(
                 currency = verified.currency,
                 failureCode = verified.failureCode,
                 failureMessage = verified.failureMessage,
-                localPaymentId = verified.localPaymentId
+                localPaymentId = verified.localPaymentId,
+                paidAt = verified.paidAt
             )
             paymentEventRepository.save(
                 received.copy(processingStatus = "PROCESSED", processedAt = LocalDateTime.now())

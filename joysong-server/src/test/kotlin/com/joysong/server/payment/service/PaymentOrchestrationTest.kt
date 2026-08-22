@@ -1,5 +1,6 @@
 package com.joysong.server.payment.service
 
+import com.joysong.server.order.dto.OrderStatusEnum
 import com.joysong.server.order.repository.OrderRepository
 import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.service.OrderStatusLogService
@@ -27,6 +28,7 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.LocalDateTime
+import java.util.Optional
 
 class PaymentOrchestrationTest {
     private val paymentRepository = mockk<PaymentRepository>()
@@ -107,6 +109,117 @@ class PaymentOrchestrationTest {
     }
 
     @Test
+    fun `reconciliation expires an unsubmitted due attempt without creating a provider payment`() {
+        val due = payment(status = PaymentStatus.CREATED.name).copy(
+            expiresAt = LocalDateTime.now().minusSeconds(1)
+        )
+        val providerSuccess = due.copy(
+            status = PaymentStatus.SUCCEEDED.name,
+            providerPaymentId = "provider-created-too-late"
+        )
+        every { gateway.provider } returns PaymentProvider.STRIPE
+        every { paymentRepository.findById(due.id) } returns Optional.of(due)
+        every { paymentRepository.findByIdForUpdate(due.id) } returns due
+        every { paymentRepository.save(any()) } answers { firstArg() }
+        every { gateway.createPayment(any()) } returns ProviderPaymentResult(
+            status = PaymentStatus.SUCCEEDED,
+            providerPaymentId = "provider-created-too-late",
+            amountMinor = due.amountMinor,
+            currency = due.currency
+        )
+        every { persistence.applyProviderResult(due.id, any()) } returns providerSuccess
+
+        val result = service().reconcilePayment(due.id)
+
+        assertEquals(PaymentStatus.EXPIRED.name, result.status)
+        verify(exactly = 1) { paymentRepository.findByIdForUpdate(due.id) }
+        verify(exactly = 1) {
+            paymentRepository.save(match { it.id == due.id && it.status == PaymentStatus.EXPIRED.name })
+        }
+        verify(exactly = 0) { gateway.createPayment(any()) }
+        verify(exactly = 0) { persistence.applyProviderResult(any(), any()) }
+    }
+
+    @Test
+    fun `reconciliation does not expire an attempt that gained a provider id under lock`() {
+        val staleRead = payment(status = PaymentStatus.CREATED.name).copy(
+            expiresAt = LocalDateTime.now().minusSeconds(1)
+        )
+        val providerAccepted = staleRead.copy(
+            status = PaymentStatus.REQUIRES_ACTION.name,
+            providerPaymentId = "provider-accepted"
+        )
+        val queried = providerAccepted.copy(status = PaymentStatus.PROCESSING.name)
+        every { gateway.provider } returns PaymentProvider.STRIPE
+        every { paymentRepository.findById(staleRead.id) } returns Optional.of(staleRead)
+        every { paymentRepository.findByIdForUpdate(staleRead.id) } returns providerAccepted
+        every { gateway.queryPayment("provider-accepted") } returns ProviderPaymentResult(
+            status = PaymentStatus.PROCESSING,
+            providerPaymentId = "provider-accepted"
+        )
+        every { persistence.applyProviderResult(staleRead.id, any()) } returns queried
+
+        val result = service().reconcilePayment(staleRead.id)
+
+        assertSame(queried, result)
+        verify(exactly = 0) { paymentRepository.save(any()) }
+        verify(exactly = 0) { gateway.createPayment(any()) }
+        verify(exactly = 1) { gateway.queryPayment("provider-accepted") }
+    }
+
+    @Test
+    fun `expired unknown outcome is recovered by request id without creating a new provider payment`() {
+        val unknown = payment(status = PaymentStatus.PROCESSING.name).copy(
+            expiresAt = LocalDateTime.now().minusSeconds(1)
+        )
+        var paymentState = unknown
+        val recoveryRequest = slot<ProviderCreatePaymentRequest>()
+        every { gateway.provider } returns PaymentProvider.STRIPE
+        every { paymentRepository.findById(unknown.id) } answers { Optional.of(paymentState) }
+        every { paymentRepository.findByIdForUpdate(unknown.id) } answers { paymentState }
+        every { paymentRepository.save(any()) } answers {
+            firstArg<PaymentEntity>().also { paymentState = it }
+        }
+        every { gateway.recoverPayment(capture(recoveryRequest)) } returns ProviderPaymentResult(
+            status = PaymentStatus.REQUIRES_ACTION,
+            providerPaymentId = "provider-recovered",
+            amountMinor = unknown.amountMinor,
+            currency = unknown.currency
+        )
+        every { gateway.queryPayment("provider-recovered") } returns ProviderPaymentResult(
+            status = PaymentStatus.PROCESSING,
+            providerPaymentId = "provider-recovered",
+            amountMinor = unknown.amountMinor,
+            currency = unknown.currency
+        )
+        val realPersistence = PaymentPersistenceService(
+            paymentRepository,
+            orderRepository,
+            orderStatusLogService
+        )
+        val realService = PaymentService(
+            paymentRepository,
+            orderRepository,
+            orderStatusLogService,
+            PaymentGatewayRegistry(listOf(gateway)),
+            realPersistence,
+            PaymentAttemptExpiryService(paymentRepository)
+        )
+
+        val recovered = realService.reconcilePayment(unknown.id)
+        val queried = realService.reconcilePayment(unknown.id)
+
+        assertEquals(PaymentStatus.REQUIRES_ACTION.name, recovered.status)
+        assertEquals("provider-recovered", recovered.providerPaymentId)
+        assertEquals(PaymentStatus.PROCESSING.name, queried.status)
+        assertEquals(unknown.id, recoveryRequest.captured.paymentId)
+        assertEquals(unknown.expiresAt, recoveryRequest.captured.expiresAt)
+        verify(exactly = 1) { gateway.recoverPayment(any()) }
+        verify(exactly = 1) { gateway.queryPayment("provider-recovered") }
+        verify(exactly = 0) { gateway.createPayment(any()) }
+    }
+
+    @Test
     fun `unavailable Alipay Plus is rejected before local attempt persistence`() {
         val service = PaymentService(
             paymentRepository,
@@ -132,11 +245,12 @@ class PaymentOrchestrationTest {
     }
 
     @Test
-    fun `service fee attempt snapshots USD amount and one local thirty minute deadline`() {
+    fun `service fee attempt uses the order thirty minute payment deadline`() {
         val repositories = persistenceRepositories()
         val saved = slot<PaymentEntity>()
+        val orderCreatedAt = LocalDateTime.now().minusMinutes(20)
         every { repositories.payment.findByUserIdAndIdempotencyKey("user-1", "client-key-123") } returns null
-        every { repositories.order.findByIdForUpdate("order-1") } returns travelOrder()
+        every { repositories.order.findByIdForUpdate("order-1") } returns travelOrder(createdAt = orderCreatedAt)
         every {
             repositories.payment.findFirstByOrderIdAndPaymentTypeAndStatusInOrderByCreatedAtDesc(
                 "order-1",
@@ -168,8 +282,34 @@ class PaymentOrchestrationTest {
         assertEquals(40_000L, attempt.amountMinor)
         assertEquals(BigDecimal("400.00"), attempt.amount)
         assertEquals("USD", attempt.currency)
-        assertEquals(attempt.createdAt.plusMinutes(30), attempt.expiresAt)
+        assertEquals(orderCreatedAt.plusMinutes(30), attempt.expiresAt)
         check(!attempt.createdAt.isBefore(before) && !attempt.createdAt.isAfter(after))
+    }
+
+    @Test
+    fun `service fee attempt is rejected after the order payment deadline`() {
+        val repositories = persistenceRepositories()
+        every { repositories.payment.findByUserIdAndIdempotencyKey("user-1", "client-key-123") } returns null
+        every { repositories.order.findByIdForUpdate("order-1") } returns
+            travelOrder(createdAt = LocalDateTime.now().minusMinutes(31))
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            PaymentPersistenceService(
+                repositories.payment,
+                repositories.order,
+                repositories.log
+            ).prepareAttempt(
+                "order-1",
+                "user-1",
+                PaymentType.TRAVEL_GROUND_SERVICE_FEE,
+                PaymentProvider.ALIPAY_PLUS,
+                "ALIPAY_PLUS_CASHIER",
+                "client-key-123"
+            )
+        }
+
+        assertEquals("ORDER_PAYMENT_EXPIRED", error.message)
+        verify(exactly = 0) { repositories.payment.saveAndFlush(any()) }
     }
 
     @Test
@@ -437,7 +577,9 @@ class PaymentOrchestrationTest {
     fun `processing payment ignores stale earlier provider states without persistence`() {
         listOf(PaymentStatus.CREATED, PaymentStatus.REQUIRES_ACTION).forEach { staleStatus ->
             val repositories = persistenceRepositories()
-            val processing = travelPayment(status = PaymentStatus.PROCESSING.name)
+            val processing = travelPayment(status = PaymentStatus.PROCESSING.name).copy(
+                providerPaymentId = "alipay-1"
+            )
             every { repositories.payment.findByIdForUpdate(processing.id) } returns processing
             every { repositories.payment.save(any()) } answers { firstArg() }
 
@@ -463,7 +605,9 @@ class PaymentOrchestrationTest {
     @Test
     fun `requires action payment ignores stale created provider state without persistence`() {
         val repositories = persistenceRepositories()
-        val requiresAction = travelPayment(status = PaymentStatus.REQUIRES_ACTION.name)
+        val requiresAction = travelPayment(status = PaymentStatus.REQUIRES_ACTION.name).copy(
+            providerPaymentId = "alipay-1"
+        )
         every { repositories.payment.findByIdForUpdate(requiresAction.id) } returns requiresAction
         every { repositories.payment.save(any()) } answers { firstArg() }
 
@@ -604,6 +748,88 @@ class PaymentOrchestrationTest {
         assertEquals(activatedAt, orderState.serviceActivatedAt)
         verify(exactly = 1) { repositories.order.save(any()) }
         verify(exactly = 1) { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `service fee success after the order deadline is compensated instead of activating service`() {
+        val repositories = persistenceRepositories()
+        val orderCreatedAt = LocalDateTime.now().minusMinutes(31)
+        val prepared = travelPayment(status = PaymentStatus.PROCESSING.name).copy(
+            createdAt = orderCreatedAt.plusMinutes(20),
+            expiresAt = orderCreatedAt.plusMinutes(30)
+        )
+        val compensation = slot<PaymentCompensationCaseEntity>()
+        every { repositories.payment.findByIdForUpdate(prepared.id) } returns prepared
+        every { repositories.payment.save(any()) } answers { firstArg() }
+        every { repositories.order.findByIdIncludeDeletedForUpdate(prepared.orderId) } returns
+            travelOrder(createdAt = orderCreatedAt)
+        every { repositories.compensation.findByPaymentId(prepared.id) } returns null
+        every { repositories.compensation.save(capture(compensation)) } answers { compensation.captured }
+
+        val result = PaymentPersistenceService(
+            repositories.payment,
+            repositories.order,
+            repositories.log,
+            repositories.compensation
+        ).applyProviderResult(
+            prepared.id,
+            ProviderPaymentResult(
+                status = PaymentStatus.SUCCEEDED,
+                providerPaymentId = "alipay-after-deadline",
+                providerTransactionId = "txn-after-deadline",
+                amountMinor = 40_000,
+                currency = "USD",
+                paidAt = orderCreatedAt.plusMinutes(30)
+            )
+        )
+
+        assertEquals(PaymentStatus.SUCCEEDED.name, result.status)
+        assertEquals("PAYMENT_SUCCEEDED_ORDER_NOT_ACTIVATABLE", result.failureCode)
+        assertEquals("PAYMENT_SUCCEEDED_ORDER_NOT_ACTIVATABLE", compensation.captured.reasonCode)
+        verify(exactly = 0) { repositories.order.save(any()) }
+        verify(exactly = 0) { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `pending service fee order activates when verified paid time was before the deadline`() {
+        val repositories = persistenceRepositories()
+        val orderCreatedAt = LocalDateTime.now().minusMinutes(31)
+        val providerPaidAt = orderCreatedAt.plusMinutes(29)
+        val prepared = travelPayment(status = PaymentStatus.PROCESSING.name).copy(
+            createdAt = orderCreatedAt.plusMinutes(20),
+            expiresAt = orderCreatedAt.plusMinutes(30)
+        )
+        var orderState = travelOrder(createdAt = orderCreatedAt)
+        every { repositories.payment.findByIdForUpdate(prepared.id) } returns prepared
+        every { repositories.payment.save(any()) } answers { firstArg() }
+        every { repositories.order.findByIdIncludeDeletedForUpdate(prepared.orderId) } answers { orderState }
+        every { repositories.order.save(any()) } answers {
+            firstArg<OrderEntity>().also { orderState = it }
+        }
+        every { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) } returns Unit
+
+        val result = PaymentPersistenceService(
+            repositories.payment,
+            repositories.order,
+            repositories.log,
+            repositories.compensation
+        ).applyProviderResult(
+            prepared.id,
+            ProviderPaymentResult(
+                status = PaymentStatus.SUCCEEDED,
+                providerPaymentId = "alipay-before-deadline",
+                providerTransactionId = "txn-before-deadline",
+                amountMinor = 40_000,
+                currency = "USD",
+                paidAt = providerPaidAt
+            )
+        )
+
+        assertEquals(PaymentStatus.SUCCEEDED.name, result.status)
+        assertEquals(providerPaidAt, result.paidAt)
+        assertNull(result.failureCode)
+        assertEquals(OrderStatusEnum.SERVICE_ACTIVE.value, orderState.status)
+        verify(exactly = 0) { repositories.compensation.save(any()) }
     }
 
     @Test
@@ -784,16 +1010,21 @@ class PaymentOrchestrationTest {
     }
 
     @Test
-    fun `cancel first then verified success keeps provider truth for manual refund`() {
+    fun `timeout cancelled order stays cancelled even when verified paid time was before the deadline`() {
         val repositories = persistenceRepositories()
-        val prepared = travelPayment(PaymentStatus.PROCESSING.name)
+        val orderCreatedAt = LocalDateTime.now().minusMinutes(31)
+        val prepared = travelPayment(PaymentStatus.PROCESSING.name).copy(
+            createdAt = orderCreatedAt.plusMinutes(20),
+            expiresAt = orderCreatedAt.plusMinutes(30)
+        )
         var paymentState = prepared
         val compensation = slot<PaymentCompensationCaseEntity>()
         every { repositories.payment.findByIdForUpdate(prepared.id) } answers { paymentState }
         every { repositories.payment.save(any()) } answers {
             firstArg<PaymentEntity>().also { paymentState = it }
         }
-        every { repositories.order.findByIdIncludeDeletedForUpdate(prepared.orderId) } returns travelOrder("CANCELLED")
+        every { repositories.order.findByIdIncludeDeletedForUpdate(prepared.orderId) } returns
+            travelOrder("CANCELLED", createdAt = orderCreatedAt)
         every { repositories.compensation.findByPaymentId(prepared.id) } returns null
         every { repositories.compensation.save(capture(compensation)) } answers { compensation.captured }
 
@@ -809,7 +1040,8 @@ class PaymentOrchestrationTest {
                 "alipay-cancelled",
                 providerTransactionId = "txn-cancelled",
                 amountMinor = 40_000,
-                currency = "USD"
+                currency = "USD",
+                paidAt = orderCreatedAt.plusMinutes(29)
             )
         )
 
@@ -953,7 +1185,10 @@ class PaymentOrchestrationTest {
         PaymentPersistenceService(repositories.payment, repositories.order, repositories.log)
     )
 
-    private fun travelOrder(status: String = "PENDING_SERVICE_FEE") = OrderEntity(
+    private fun travelOrder(
+        status: String = "PENDING_SERVICE_FEE",
+        createdAt: LocalDateTime = LocalDateTime.now()
+    ) = OrderEntity(
         id = "order-1",
         userId = "user-1",
         projectName = "项目",
@@ -962,7 +1197,8 @@ class PaymentOrchestrationTest {
         currency = "USD",
         paymentFlow = "TRAVEL_GROUND_SERVICE_ONLY",
         travelGroundServiceFeeMinor = 40_000,
-        status = status
+        status = status,
+        createdAt = createdAt
     )
 
     private fun travelPayment(

@@ -17,6 +17,7 @@ start
 :创建订单并立即绑定顾问;
 :固化 USD、套餐金额、平台比例和服务费快照;
 :订单进入 PENDING_SERVICE_FEE;
+:确定订单支付截止时间\norderPaymentDeadline = createdAt + 30 分钟;
 :支付前锁定顾问履约资料和订单服务会话;
 
 note right
@@ -31,13 +32,13 @@ end note
 |平台|
 if (Alipay+ merchant / gateway 可用?) then (是)
   :创建旅游地接服务费支付尝试\nCREATED / REQUIRES_ACTION;
-  :expiresAt = min(now + 30 分钟, 渠道有效期);
+  :attempt.expiresAt = min(订单支付截止时间, 渠道有效期);
   |Alipay+|
   :HTTPS 托管收银台完成 USD 支付;
   |平台|
   :仅以验签渠道事件或主动查单确认;
   if (支付 SUCCEEDED?) then (是)
-    if (实收金额/币种匹配且订单仍可激活?) then (是)
+    if (实收金额/币种匹配、渠道付款时间未到截止\n且订单仍可激活?) then (是)
       :幂等标记支付成功;
       :订单进入 SERVICE_ACTIVE;
       :记录 serviceActivatedAt;
@@ -61,13 +62,26 @@ if (Alipay+ merchant / gateway 可用?) then (是)
   else (否)
     if (PROCESSING / 结果未知?) then (是)
       :保持原支付尝试;
-      :主动查单、对账或人工调查;
-      :订单保持 PENDING_SERVICE_FEE，暂不创建新尝试;
-      stop
+      :按 providerPaymentId 或原 paymentRequestId\n主动查单、对账或人工调查;
+      :恢复未知结果不得创建新的渠道支付单;
+      :暂不创建新尝试;
     else (否)
       :超时的 CREATED / REQUIRES_ACTION 进入 EXPIRED;
       :明确 FAILED / CANCELLED 保留渠道终态;
-      :订单保持 PENDING_SERVICE_FEE，用户可创建新尝试;
+    endif
+    if (到达订单支付截止时间?) then (是)
+      :无渠道单号的本地尝试直接 EXPIRED，\n不得再创建渠道支付单;
+      :已有渠道单号的尝试继续查原单，\n不得以本地过期掩盖真实扣款;
+      :PENDING_SERVICE_FEE -> CANCELLED;
+      :支付渠道此后若确认成功，进入补偿退款;
+      stop
+    else (否)
+      :订单保持 PENDING_SERVICE_FEE;
+      if (原尝试已明确终止?) then (是)
+        :用户可在总截止时间前创建新尝试;
+      else (否)
+        :继续查询原尝试，不重复扣款;
+      endif
       stop
     endif
   endif
@@ -79,6 +93,12 @@ endif
 
 note right
 不检查 GPS、IP 或国家；浏览器回跳不能激活服务。
+订单 30 分钟从下单时起计算，不因重试而顺延；
+成功时间优先采用验签通知/查单返回的渠道付款时间；
+渠道未返回付款时间时，按订单锁内确认时间保守判断。
+订单一旦已向用户关闭，不反向恢复；晚到成功走补偿退款，
+即使渠道付款时间早于截止时间也保持已展示的关单结果。
+Alipay+ 收银台可能更早失效，仍可在订单截止前重试。
 Alipay+ 商户参数未就绪时，生产支付和退款联调仍阻塞，
 不得伪造成功。
 end note

@@ -9,8 +9,10 @@ import io.mockk.slot
 import io.mockk.verify
 import jakarta.persistence.LockModeType
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.springframework.data.jpa.repository.Lock
+import org.springframework.data.jpa.repository.Query
 import java.math.BigDecimal
 import java.time.LocalDateTime
 
@@ -23,10 +25,12 @@ class PaymentAttemptExpiryServiceTest {
         val statuses = slot<Collection<String>>()
         val created = payment("created", PaymentStatus.CREATED, now.minusSeconds(1))
         val requiresAction = payment("action", PaymentStatus.REQUIRES_ACTION, now)
+        val providerAccepted = payment("provider-accepted", PaymentStatus.REQUIRES_ACTION, now.minusSeconds(1))
+            .copy(providerPaymentId = "provider-payment-1")
         val processing = payment("processing", PaymentStatus.PROCESSING, now.minusMinutes(1))
         val future = payment("future", PaymentStatus.CREATED, now.plusSeconds(1))
         every { paymentRepository.findExpirableAttempts(capture(statuses), now) } returns
-            listOf(created, requiresAction, processing, future)
+            listOf(created, requiresAction, providerAccepted, processing, future)
         every { paymentRepository.save(any()) } answers { firstArg() }
 
         val count = PaymentAttemptExpiryService(paymentRepository).expireDueAttempts(now)
@@ -42,7 +46,11 @@ class PaymentAttemptExpiryServiceTest {
         verify(exactly = 1) {
             paymentRepository.save(match { it.id == requiresAction.id && it.status == PaymentStatus.EXPIRED.name })
         }
-        verify(exactly = 0) { paymentRepository.save(match { it.id == processing.id || it.id == future.id }) }
+        verify(exactly = 0) {
+            paymentRepository.save(match {
+                it.id == providerAccepted.id || it.id == processing.id || it.id == future.id
+            })
+        }
     }
 
     @Test
@@ -54,6 +62,9 @@ class PaymentAttemptExpiryServiceTest {
         )
 
         assertEquals(LockModeType.PESSIMISTIC_WRITE, method.getAnnotation(Lock::class.java).value)
+        val query = method.getAnnotation(Query::class.java).value
+        assertTrue(query.contains("providerPaymentId IS NULL"))
+        assertTrue(query.contains("TRIM(p.providerPaymentId) = ''"))
     }
 
     private fun payment(id: String, status: PaymentStatus, expiresAt: LocalDateTime) = PaymentEntity(

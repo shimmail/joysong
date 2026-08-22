@@ -88,6 +88,10 @@ class StripePaymentGateway(
         return sessionResult(json)
     }
 
+    /** Legacy Stripe retries remain idempotent through the unchanged request key. */
+    override fun recoverPayment(request: ProviderCreatePaymentRequest): ProviderPaymentResult =
+        createPayment(request)
+
     override fun queryPayment(providerPaymentId: String): ProviderPaymentResult =
         sessionResult(getJson("/v1/checkout/sessions/${safeStripeId(providerPaymentId)}"))
 
