@@ -394,18 +394,22 @@ Agent 调试仅使用受控、脱敏的结构化日志；不存在 traces API，
 ```text
 PENDING_SERVICE_FEE
   -> SERVICE_ACTIVE
-  -> REFUND_REVIEW
-       -> SERVICE_ACTIVE
-       -> REFUND_PROCESSING
-            -> REFUNDED
+       -> COMPLETED                         （用户确认地接服务完成）
+  -> REFUND_REVIEW                          （SERVICE_ACTIVE / COMPLETED 均可申请）
+       -> originalStatus                    （用户取消或管理员拒绝，准确恢复）
+       -> REFUND_PROCESSING                 （管理员批准后）
+            -> REFUNDED                     （渠道确认全额成功）
 ```
 
 订单响应新增并以服务端值为准：`paymentFlow`、`medicalListPriceMinor`、`platformServiceRateBps`、`travelGroundServiceFeeMinor`、`consultantBound`、`serviceActivated`、`consultantDetailsVisible`、`serviceConversationReadable`、`serviceMessagingEnabled`、`consultantAvatar`。
 
 - 支付前 `consultantBound=true` 只表示已绑定；`consultantId`、`institutionId`、`consultantName`、`consultantAvatar` 和履约资料不向用户返回。
-- `SERVICE_ACTIVE` 才显示允许公开的顾问姓名、头像和机构，并允许读取/发送订单会话。
+- `SERVICE_ACTIVE` 显示允许公开的顾问姓名、头像和机构，并允许读取/发送订单会话。
+- 用户可调用 `POST /orders/{id}/confirm-completion` 将旅游订单从 `SERVICE_ACTIVE` 确认到 `COMPLETED`。该动作只写入 `completedAt`；`COMPLETED` 保留顾问公开资料和会话历史读取，但 `serviceMessagingEnabled=false`，且 Flutter 不得请求或展示 settlement。
 - `REFUND_REVIEW`、`REFUND_PROCESSING` 保留资料和历史读取，`serviceMessagingEnabled=false`。
 - `REFUNDED` 隐藏顾问履约资料，保留历史受控只读，禁止发送。
+
+旅游完成不进入医疗核验、尾款、`PENDING_SETTLEMENT`、分账或钱包。医疗费始终由用户到院直接支付医院；新流程不能为医疗费创建平台支付、退款或结算。
 
 客户端不得根据 `paidAmount`、浏览器回跳或本地状态推导这些权限。未知状态降级显示并刷新服务端。
 
@@ -439,13 +443,16 @@ Alipay+ 商户注册和收单参数仍在安排，仓库没有真实 gateway。�
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | POST | `/orders/{id}/service-conversation` | 空 body；取得/创建该订单的 `ORDER_SERVICE` 会话 |
-| POST | `/orders/{id}/refund` | 申请整笔旅游地接服务费退款，进入人工审核 |
+| POST | `/orders/{id}/confirm-completion` | 仅 `SERVICE_ACTIVE` 旅游订单；确认地接服务完成并返回 `COMPLETED` |
+| POST | `/orders/{id}/refund` | `SERVICE_ACTIVE` 或 `COMPLETED` 申请整笔旅游地接服务费退款，进入人工审核 |
 | GET | `/orders/{id}/refund` | 查看退款详情 |
-| POST | `/orders/{id}/cancel-refund` | 仅在待审核阶段取消申请并恢复服务 |
+| POST | `/orders/{id}/cancel-refund` | 仅在待审核阶段取消申请；按退款记录的 `originalStatus` 恢复状态与会话权限 |
 
 服务会话响应必须有 `conversationType=ORDER_SERVICE` 且 `orderId` 与请求一致，否则 fail-closed。售前 `DIRECT` 与订单履约会话分离；新流程会话不提供删除/撤回入口，退款审核、渠道处理和退款成功后均为只读历史。
 
-新流程只允许全额、人工审核、原渠道退款。退款状态只有 `PENDING`、`REFUND_PROCESSING`、`APPROVED`、`REJECTED`、`CANCELLED`，没有 `COMPLETED`。医院医疗费直接向医院支付，不适用平台退款、分账、结算或钱包。
+新流程只允许全额、人工审核、原渠道退款。申请时服务端持久化 `originalStatus`，取消申请或管理员拒绝后只能准确恢复 `SERVICE_ACTIVE` 或 `COMPLETED`：前者恢复发送，后者继续只读。退款状态只有 `PENDING`、`REFUND_PROCESSING`、`APPROVED`、`REJECTED`、`CANCELLED`，没有 `COMPLETED`。拒绝原因使用专属 `rejectReason` 字段展示一次，订单标题仍展示已恢复的实际订单状态。
+
+管理员批准后订单进入 `REFUND_PROCESSING`；只有渠道确认全部退款项成功才到 `REFUNDED`。失败或未知项不得伪装成功：管理端 `GET /admin/refunds` 显示每项 `provider`、`status`、`failureCode`、`failureMessage` 与 `providerRefundId`，并仅当父退款为 `REFUND_PROCESSING` 且存在 `FAILED` 项时可调用 `POST /admin/refunds/{id}/retry`。重试只处理原 `FAILED` 项：已有 `providerRefundId` 查询/续办原退款，没有 ID 才用原幂等键重发，`SUCCEEDED` 项绝不重放；刷新列表失败也必须释放页面重试锁。医院医疗费直接向医院支付，不适用平台退款、分账、结算或钱包。
 
 本期没有姓名、护照、航班、酒店备案。订单服务通知属于后续工作，不得由客户端假定已实现。
 

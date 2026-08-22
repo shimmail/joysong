@@ -1,5 +1,5 @@
 @startuml
-title 海外用户旅游地接服务费活动图
+title 海外用户旅游地接服务费：支付、完成与退款活动图
 
 |医生|
 start
@@ -15,107 +15,123 @@ start
 |平台|
 :校验顾问属于该医院且状态有效;
 :创建订单并立即绑定顾问;
-:固化套餐金额、平台比例、服务费和币种快照;
+:固化 USD、套餐金额、平台比例和服务费快照;
 :订单进入 PENDING_SERVICE_FEE;
-:锁定顾问履约资料和订单地接沟通;
+:支付前锁定顾问履约资料和订单服务会话;
 
 note right
-支付前仅显示：
-“已绑定您选择的顾问，
-支付旅游地接服务费后
-可查看地接资料并沟通”
+不包含数量、优惠券、面诊金或尾款。
+支付前仅显示“已绑定顾问”的权限状态，
+不返回顾问履约资料或私人联系方式。
 end note
 
 |海外用户|
-:可在境内或境外直接点击支付;
-
-note right
-不判断 GPS、IP 或所在国家；
-仅提示行程确定后再支付。
-end note
+:可在境内或境外发起支付;
 
 |平台|
-if (Alipay+ 当前可用?) then (是)
-  :创建支付尝试\n状态为 CREATED / REQUIRES_ACTION;
-  :expiresAt = min(now + 30分钟, 渠道有效期);
+if (Alipay+ merchant / gateway 可用?) then (是)
+  :创建旅游地接服务费支付尝试\nCREATED / REQUIRES_ACTION;
+  :expiresAt = min(now + 30 分钟, 渠道有效期);
   |Alipay+|
-  :打开 HTTPS 托管收银台;
-  :用户使用支付宝完成 USD 支付;
-
+  :HTTPS 托管收银台完成 USD 支付;
   |平台|
-  :仅通过验签渠道事件或主动查单确认结果;
-  if (确认 SUCCEEDED?) then (是)
+  :仅以验签渠道事件或主动查单确认;
+  if (支付 SUCCEEDED?) then (是)
     :幂等标记支付成功;
     :订单进入 SERVICE_ACTIVE;
     :记录 serviceActivatedAt;
-    :开放绑定地接人员资料;
-    :开放订单专属地接沟通;
+    :开放允许公开的顾问资料和订单服务会话;
   else (否)
-    if (PROCESSING 或结果未知?) then (是)
-      :保持当前状态，不按本地时钟关闭;
-      :主动查单、对账或转人工处理;
-      :订单仍保持 PENDING_SERVICE_FEE;
-      stop
+    if (PROCESSING / 结果未知?) then (是)
+      :主动查单、对账或人工处理;
     else (否)
-      if (CREATED / REQUIRES_ACTION 已超时?) then (是)
-        :支付尝试进入 EXPIRED;
-      else (明确 FAILED / CANCELLED)
-        :保留渠道确认的终态;
-      endif
-      :订单仍保持 PENDING_SERVICE_FEE;
-      |海外用户|
-      :可创建新的30分钟支付尝试;
-      stop
+      :超时的 CREATED / REQUIRES_ACTION 进入 EXPIRED;
+      :明确 FAILED / CANCELLED 保留渠道终态;
     endif
+    :订单保持 PENDING_SERVICE_FEE，用户可重试;
+    stop
   endif
 else (否)
-  |平台|
-  :在本地尝试落库前返回 HTTP 503\nPAYMENT_PROVIDER_UNAVAILABLE;
-  :支付尝试零新增，不模拟成功;
-  :订单保持 PENDING_SERVICE_FEE;
+  :本地尝试落库前返回 503\nPAYMENT_PROVIDER_UNAVAILABLE;
+  :订单保持 PENDING_SERVICE_FEE，零本地支付成功记录;
   stop
 endif
 
 note right
-Alipay+ 商户注册和真实网关尚未完成；
-当前创建支付尝试会走“不可用”分支。
-支付/退款订单服务通知属于后续工作。
+不检查 GPS、IP 或国家；浏览器回跳不能激活服务。
+Alipay+ 商户参数未就绪时，生产支付和退款联调仍阻塞，
+不得伪造成功。
 end note
 
 |海外用户|
-:在平台内与地接人员沟通;
+if (确认旅游地接服务完成?) then (是)
+  |平台|
+  :SERVICE_ACTIVE -> COMPLETED;
+  :只记录 completedAt;
+  :顾问公开资料和历史会话保留只读;
+  :禁止发送新消息;
+  note right
+  不进入医疗核验、尾款、PENDING_SETTLEMENT、
+  分账或钱包，也不创建医疗支付/退款/结算。
+  end note
+endif
 
-|平台|
-:保存沟通记录并提供平台监督;
-
-if (用户申请全额退款?) then (是)
+|海外用户|
+if (从 SERVICE_ACTIVE 或 COMPLETED 申请全额退款?) then (是)
+  |平台|
+  :创建全额旅游地接服务费退款申请;
+  :保存 refund.originalStatus;
   :订单进入 REFUND_REVIEW;
-  :暂停发送新消息，沟通历史仍可读;
-  if (待审核时用户取消申请?) then (是)
-    :退款记录进入 CANCELLED;
-    :订单恢复 SERVICE_ACTIVE;
-    :恢复发送地接消息;
-  else (否)
-    :管理员人工审核;
+  :保留资料和历史会话读取，暂停发送;
 
-    if (审核批准?) then (是)
-      :通过原支付渠道发起退款;
-      :订单进入 REFUND_PROCESSING;
-      :继续暂停发送，沟通历史仍可读;
-      if (渠道确认退款成功?) then (是)
-        :订单进入 REFUNDED;
-        :撤销地接服务权限;
-        :隐藏顾问履约资料;
-        :沟通历史转为受控只读;
-        stop
-      else (否)
-        :保持 REFUND_PROCESSING;
-        :主动查单或转人工处理;
-        stop
+  if (用户取消申请?) then (是)
+    :退款记录进入 CANCELLED;
+    :按 originalStatus 恢复订单;
+    if (originalStatus = SERVICE_ACTIVE?) then (是)
+      :恢复消息发送;
+    else (COMPLETED)
+      :保留会话只读;
+    endif
+    stop
+  else (否)
+    |管理员|
+    :记录审核人、理由、证据和决定;
+    if (审核拒绝?) then (是)
+      |平台|
+      :退款记录进入 REJECTED;
+      :按 originalStatus 恢复订单;
+      if (originalStatus = SERVICE_ACTIVE?) then (是)
+        :恢复消息发送;
+      else (COMPLETED)
+        :保留会话只读;
       endif
-    else (否)
-      :记录拒绝原因;
-      :恢复 SERVICE_ACTIVE 和地接沟通;
+      stop
+    else (批准)
+      |平台|
+      :仅为原成功旅游地接服务费支付创建退款项;
+      :订单进入 REFUND_PROCESSING;
+      :提交原渠道退款;
+      if (所有退款项渠道确认成功?) then (是)
+        :订单进入 REFUNDED;
+        :撤销顾问履约资料;
+        :历史会话受控只读，禁止发送;
+        stop
+      else (FAILED / 未知)
+        :父订单保持 REFUND_PROCESSING;
+        :保留历史只读，暂停发送;
+        |管理员|
+        :查看退款项 provider、status、\nfailureCode、failureMessage;
+        :POST /api/admin/refunds/{id}/retry;
+        |平台|
+        :只重试原 FAILED 项;
+        if (已有 providerRefundId?) then (是)
+          :查询或续办原渠道退款;
+        else (否)
+          :用原幂等键重新发起;
+        endif
+        :不触碰已 SUCCEEDED 项;
+        :刷新失败也释放后台重试按钮锁;
+      endif
     endif
   endif
 endif
@@ -124,11 +140,11 @@ endif
 :用户到院后直接向医院支付医疗费;
 
 |平台|
-:不创建医疗费支付、退款、分账或结算记录;
+:不创建医疗费支付、退款、结算、分账或钱包记录;
 
 note right
-姓名、护照、航班、酒店等
-来华资料备案不在本期。
+不建设姓名、护照、航班、酒店等来华备案。
+新流程没有 Stripe 新入口。
 end note
 stop
 @enduml
