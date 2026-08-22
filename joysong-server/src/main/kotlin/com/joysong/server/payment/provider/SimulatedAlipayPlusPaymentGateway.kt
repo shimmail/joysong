@@ -31,9 +31,16 @@ class SimulatedAlipayPlusPaymentGateway(
             paidAt = LocalDateTime.now(clock)
         )
 
+    override fun recoverPayment(request: ProviderCreatePaymentRequest): ProviderPaymentResult =
+        createPayment(request)
+
     override fun refund(request: ProviderRefundRequest): ProviderRefundResult {
-        require(request.providerPaymentId.startsWith("simulated-alipay-plus-payment-")) {
-            "SIMULATED_PAYMENT_ID_REQUIRED"
+        if (!request.providerPaymentId.startsWith("simulated-alipay-plus-payment-")) {
+            throw PaymentProviderException(
+                errorCode = "SIMULATED_PAYMENT_ID_REQUIRED",
+                retryable = false,
+                outcomeUnknown = false
+            )
         }
         return ProviderRefundResult(
             status = PaymentStatus.SUCCEEDED,

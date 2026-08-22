@@ -36,7 +36,7 @@ if (Alipay+ merchant / gateway 可用?) then (是)
   |Alipay+|
   :HTTPS 托管收银台完成 USD 支付;
   |平台|
-  :仅以验签渠道事件或主动查单确认;
+  :真实/生产网关仅以验签渠道事件或主动查单确认;
   if (支付 SUCCEEDED?) then (是)
     if (实收金额/币种匹配、渠道付款时间未到截止\n且订单仍可激活?) then (是)
       :幂等标记支付成功;

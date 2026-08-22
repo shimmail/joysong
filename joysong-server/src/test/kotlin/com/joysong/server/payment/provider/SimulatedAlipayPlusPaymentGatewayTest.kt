@@ -61,7 +61,7 @@ class SimulatedAlipayPlusPaymentGatewayTest {
 
     @Test
     fun `development refund refuses a real provider payment id`() {
-        val error = assertThrows(IllegalArgumentException::class.java) {
+        val error = assertThrows(PaymentProviderException::class.java) {
             gateway().refund(
                 ProviderRefundRequest(
                     refundItemId = "refund-item-1",
@@ -74,6 +74,23 @@ class SimulatedAlipayPlusPaymentGatewayTest {
         }
 
         assertEquals("SIMULATED_PAYMENT_ID_REQUIRED", error.message)
+        assertEquals("SIMULATED_PAYMENT_ID_REQUIRED", error.errorCode)
+        assertFalse(error.retryable)
+        assertFalse(error.outcomeUnknown)
+    }
+
+    @Test
+    fun `recovering a simulated payment returns the same deterministic success`() {
+        val request = ProviderCreatePaymentRequest(
+            paymentId = "payment-1",
+            orderId = "order-1",
+            amountMinor = 12_345,
+            currency = "USD",
+            paymentMethod = "ALIPAY_PLUS_CASHIER",
+            idempotencyKey = "payment-create-payment-1"
+        )
+
+        assertEquals(gateway().createPayment(request), gateway().recoverPayment(request))
     }
 
     @Test

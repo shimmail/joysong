@@ -12,6 +12,7 @@ import com.joysong.server.payment.entity.PaymentEntity
 import com.joysong.server.payment.provider.PaymentGateway
 import com.joysong.server.payment.provider.PaymentGatewayRegistry
 import com.joysong.server.payment.provider.ProviderRefundResult
+import com.joysong.server.payment.provider.SimulatedAlipayPlusPaymentGateway
 import com.joysong.server.payment.repository.PaymentRepository
 import com.joysong.server.refund.entity.RefundEntity
 import com.joysong.server.refund.entity.RefundItemEntity
@@ -612,6 +613,33 @@ class RefundServiceTest {
         assertEquals(completed, execution.execute(processingRefund))
         verify(exactly = 1) { gateway.queryRefund("provider-refund-1") }
         verify(exactly = 0) { gateway.refund(any()) }
+    }
+
+    @Test
+    fun `simulator refusal is persisted as a definitive failed refund item`() {
+        val persistence = mockk<RefundItemPersistenceService>()
+        val execution = RefundExecutionService(
+            paymentRepository,
+            refundItemRepository,
+            PaymentGatewayRegistry(listOf(SimulatedAlipayPlusPaymentGateway())),
+            persistence
+        )
+        val processing = refund(status = RefundWorkflowPersistenceService.PROCESSING)
+        val statusSlot = slot<PaymentStatus>()
+        val codeSlot = slot<String>()
+        every { persistence.prepareItems(processing) } returns listOf(refundItem())
+        every { paymentRepository.findById("payment-1") } returns Optional.of(serviceFeePayment())
+        every {
+            persistence.markProviderError("item-1", capture(statusSlot), capture(codeSlot), any())
+        } returns Unit
+        every { persistence.summarize("refund-1", 40_000L) } returns
+            RefundExecutionOutcome(0L, completed = false)
+
+        execution.execute(processing)
+
+        assertEquals(PaymentStatus.FAILED, statusSlot.captured)
+        assertEquals("SIMULATED_PAYMENT_ID_REQUIRED", codeSlot.captured)
+        verify(exactly = 0) { persistence.applyProviderResult(any(), any()) }
     }
 
     @Test
