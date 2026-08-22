@@ -108,6 +108,9 @@ aliyun:
     template-code: ${SMS_TEMPLATE_CODE:}
 
 payment:
+  alipay-plus:
+    # Development-only simulated gateway. The prod profile overrides this to false.
+    simulated-enabled: ${ALIPAY_PLUS_SIMULATED_ENABLED:false}
   stripe:
     # Legacy-only adapter for historical Stripe query/refund liabilities. New payments never use it.
     legacy-enabled: ${STRIPE_LEGACY_ENABLED:false}

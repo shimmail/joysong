@@ -102,6 +102,9 @@ note right
 Alipay+ 收银台可能更早失效，仍可在订单截止前重试。
 Alipay+ 商户参数未就绪时，生产支付和退款联调仍阻塞，
 不得伪造成功。
+仅 dev profile + 显式开关可装配模拟网关：用户仍点击支付，
+网关立即返回带 simulated-alipay-plus- 标识的成功结果且不跳转；
+模拟退款只接受模拟支付号，prod profile 强制禁用。
 end note
 
 |海外用户|

@@ -46,3 +46,8 @@ aliyun:
 security:
   verification-code:
     log-for-dev: false
+
+payment:
+  alipay-plus:
+    # Never allow simulated money movement in production.
+    simulated-enabled: false

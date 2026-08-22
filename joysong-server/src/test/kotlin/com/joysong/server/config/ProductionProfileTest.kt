@@ -78,6 +78,20 @@ class ProductionProfileTest {
     }
 
     @Test
+    fun `Alipay Plus simulator is disabled by default and in production`() {
+        assertEquals(
+            "\${ALIPAY_PLUS_SIMULATED_ENABLED:false}",
+            applicationProperties.getProperty("payment.alipay-plus.simulated-enabled")
+        )
+        assertEquals(false, properties.getProperty("payment.alipay-plus.simulated-enabled"))
+    }
+
+    @Test
+    fun `development profile enables the Alipay Plus simulator`() {
+        assertEquals(true, developmentProperties.getProperty("payment.alipay-plus.simulated-enabled"))
+    }
+
+    @Test
     fun `Stripe environment example is explicitly legacy and has no fake redirect defaults`() {
         val stripe = Files.readAllLines(Path.of(".env.example"))
             .filter { it.startsWith("STRIPE_") }

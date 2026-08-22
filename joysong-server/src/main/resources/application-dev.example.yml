@@ -21,3 +21,8 @@ aliyun:
 security:
   verification-code:
     log-for-dev: true
+
+payment:
+  alipay-plus:
+    # Lets the full payment/refund journey run locally without a merchant account.
+    simulated-enabled: true
