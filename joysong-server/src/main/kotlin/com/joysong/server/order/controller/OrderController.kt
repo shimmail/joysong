@@ -19,6 +19,7 @@ import com.joysong.server.review.dto.ReviewResponse
 import com.joysong.server.review.service.ReviewService
 import org.springframework.security.core.Authentication
 import org.springframework.http.HttpStatus
+import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import org.springframework.web.server.ResponseStatusException
 
@@ -135,7 +136,7 @@ class OrderController(
         @RequestHeader("Idempotency-Key") idempotencyKey: String,
         @RequestBody request: CreatePaymentAttemptRequest,
         authentication: Authentication
-    ): BaseResponse<*> {
+    ): ResponseEntity<BaseResponse<*>> {
         val userId = authentication.principal as String
         return try {
             val order = orderService.getOrderById(id, userId)
@@ -155,7 +156,7 @@ class OrderController(
                 paymentMethod = request.paymentMethod,
                 idempotencyKey = idempotencyKey
             )
-            BaseResponse.success(PaymentAttemptResponse.from(payment))
+            ResponseEntity.ok(BaseResponse.success(PaymentAttemptResponse.from(payment)))
         } catch (e: Exception) {
             paymentError(e, "创建支付失败")
         }
@@ -170,7 +171,7 @@ class OrderController(
         @PathVariable id: String,
         @RequestHeader("Idempotency-Key") idempotencyKey: String,
         authentication: Authentication
-    ): BaseResponse<*> {
+    ): ResponseEntity<BaseResponse<*>> {
         val userId = authentication.principal as String
         return try {
             val payment = paymentService.createPaymentSession(
@@ -181,7 +182,7 @@ class OrderController(
                 paymentMethod = "ALIPAY_PLUS_CASHIER",
                 idempotencyKey = idempotencyKey
             )
-            BaseResponse.success(PaymentAttemptResponse.from(payment))
+            ResponseEntity.ok(BaseResponse.success(PaymentAttemptResponse.from(payment)))
         } catch (e: Exception) {
             paymentError(e, "创建支付失败")
         }
@@ -194,7 +195,7 @@ class OrderController(
         @RequestParam paymentType: String,
         @RequestParam(defaultValue = "false") refresh: Boolean,
         authentication: Authentication
-    ): BaseResponse<*> {
+    ): ResponseEntity<BaseResponse<*>> {
         val userId = authentication.principal as String
         return try {
             val payment = paymentService.getLatestPayment(
@@ -202,8 +203,9 @@ class OrderController(
                 userId = userId,
                 paymentType = PaymentType.valueOf(paymentType.trim().uppercase()),
                 refresh = refresh
-            ) ?: return BaseResponse.error<Any>("PAYMENT_NOT_FOUND", 404)
-            BaseResponse.success(PaymentAttemptResponse.from(payment))
+            ) ?: return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(BaseResponse.error<Any>("PAYMENT_NOT_FOUND", 404))
+            ResponseEntity.ok(BaseResponse.success(PaymentAttemptResponse.from(payment)))
         } catch (e: Exception) {
             paymentError(e, "查询支付失败")
         }
@@ -335,10 +337,10 @@ class OrderController(
         }
     }
 
-    private fun paymentError(error: Exception, fallback: String): BaseResponse<Any> {
+    private fun paymentError(error: Exception, fallback: String): ResponseEntity<BaseResponse<*>> {
         val message = error.message ?: fallback
         val code = if (error is PaymentProviderException || message == "PAYMENT_PROVIDER_UNAVAILABLE") 503 else 400
-        return BaseResponse.error(message, code)
+        return ResponseEntity.status(code).body(BaseResponse.error<Any>(message, code))
     }
 }
 

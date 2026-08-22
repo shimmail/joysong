@@ -432,6 +432,109 @@ class PaymentOrchestrationTest {
     }
 
     @Test
+    fun `processing payment ignores stale earlier provider states without persistence`() {
+        listOf(PaymentStatus.CREATED, PaymentStatus.REQUIRES_ACTION).forEach { staleStatus ->
+            val repositories = persistenceRepositories()
+            val processing = travelPayment(status = PaymentStatus.PROCESSING.name)
+            every { repositories.payment.findByIdForUpdate(processing.id) } returns processing
+            every { repositories.payment.save(any()) } answers { firstArg() }
+
+            val result = PaymentPersistenceService(
+                repositories.payment,
+                repositories.order,
+                repositories.log
+            ).applyProviderResult(
+                processing.id,
+                ProviderPaymentResult(
+                    status = staleStatus,
+                    providerPaymentId = "alipay-1",
+                    amountMinor = 40_000,
+                    currency = "USD"
+                )
+            )
+
+            assertSame(processing, result, staleStatus.name)
+            verify(exactly = 0) { repositories.payment.save(any()) }
+        }
+    }
+
+    @Test
+    fun `requires action payment ignores stale created provider state without persistence`() {
+        val repositories = persistenceRepositories()
+        val requiresAction = travelPayment(status = PaymentStatus.REQUIRES_ACTION.name)
+        every { repositories.payment.findByIdForUpdate(requiresAction.id) } returns requiresAction
+        every { repositories.payment.save(any()) } answers { firstArg() }
+
+        val result = PaymentPersistenceService(
+            repositories.payment,
+            repositories.order,
+            repositories.log
+        ).applyProviderResult(
+            requiresAction.id,
+            ProviderPaymentResult(
+                status = PaymentStatus.CREATED,
+                providerPaymentId = "alipay-1",
+                amountMinor = 40_000,
+                currency = "USD"
+            )
+        )
+
+        assertSame(requiresAction, result)
+        verify(exactly = 0) { repositories.payment.save(any()) }
+    }
+
+    @Test
+    fun `late provider error cannot overwrite processing payment`() {
+        val repositories = persistenceRepositories()
+        val processing = travelPayment(status = PaymentStatus.PROCESSING.name)
+        every { repositories.payment.findByIdForUpdate(processing.id) } returns processing
+        every { repositories.payment.save(any()) } answers { firstArg() }
+
+        val result = PaymentPersistenceService(
+            repositories.payment,
+            repositories.order,
+            repositories.log
+        ).markProviderError(
+            processing.id,
+            PaymentStatus.FAILED,
+            "PROVIDER_TIMEOUT",
+            "late timeout after provider accepted the payment"
+        )
+
+        assertSame(processing, result)
+        verify(exactly = 0) { repositories.payment.save(any()) }
+    }
+
+    @Test
+    fun `provider error cannot overwrite explicit terminal payment states`() {
+        listOf(
+            PaymentStatus.FAILED to PaymentStatus.PROCESSING,
+            PaymentStatus.CANCELLED to PaymentStatus.FAILED,
+            PaymentStatus.EXPIRED to PaymentStatus.PROCESSING,
+            PaymentStatus.PARTIALLY_REFUNDED to PaymentStatus.FAILED
+        ).forEach { (currentStatus, errorStatus) ->
+            val repositories = persistenceRepositories()
+            val terminal = travelPayment(status = currentStatus.name)
+            every { repositories.payment.findByIdForUpdate(terminal.id) } returns terminal
+            every { repositories.payment.save(any()) } answers { firstArg() }
+
+            val result = PaymentPersistenceService(
+                repositories.payment,
+                repositories.order,
+                repositories.log
+            ).markProviderError(
+                terminal.id,
+                errorStatus,
+                "LATE_PROVIDER_ERROR",
+                "late local error"
+            )
+
+            assertSame(terminal, result, currentStatus.name)
+            verify(exactly = 0) { repositories.payment.save(any()) }
+        }
+    }
+
+    @Test
     fun `verified service fee success atomically activates bound service once`() {
         val repositories = persistenceRepositories()
         val prepared = travelPayment(status = PaymentStatus.PROCESSING.name)
@@ -545,6 +648,38 @@ class PaymentOrchestrationTest {
 
             assertEquals(expectedMessage, error.message)
         }
+    }
+
+    @Test
+    fun `partially refunded payment ignores late provider success without persistence`() {
+        val repositories = persistenceRepositories()
+        val partiallyRefunded = travelPayment(PaymentStatus.PARTIALLY_REFUNDED.name).copy(
+            providerPaymentId = "alipay-1",
+            refundedAmountMinor = 10_000
+        )
+        every { repositories.payment.findByIdForUpdate(partiallyRefunded.id) } returns partiallyRefunded
+        every { repositories.payment.save(any()) } answers { firstArg() }
+        every { repositories.order.findByIdIncludeDeletedForUpdate(partiallyRefunded.orderId) } returns
+            travelOrder("SERVICE_ACTIVE").copy(serviceActivatedAt = LocalDateTime.of(2026, 8, 22, 13, 0))
+
+        val result = PaymentPersistenceService(
+            repositories.payment,
+            repositories.order,
+            repositories.log
+        ).applyProviderResult(
+            partiallyRefunded.id,
+            ProviderPaymentResult(
+                status = PaymentStatus.SUCCEEDED,
+                providerPaymentId = "alipay-1",
+                providerTransactionId = "txn-late",
+                amountMinor = 40_000,
+                currency = "USD"
+            )
+        )
+
+        assertSame(partiallyRefunded, result)
+        verify(exactly = 0) { repositories.payment.save(any()) }
+        verify(exactly = 0) { repositories.order.findByIdIncludeDeletedForUpdate(any()) }
     }
 
     @Test

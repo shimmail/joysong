@@ -97,7 +97,7 @@ data class OrderResponse(
                 entity.serviceActivatedAt != null &&
                 entity.status in activatedStatuses
             val consultantDetailsVisible = serviceActivated && entity.status != OrderStatusEnum.REFUNDED.value
-            val exposeFulfillment = exposeInternalSnapshots || consultantDetailsVisible
+            val exposeFulfillment = !isTravelGroundService || exposeInternalSnapshots || consultantDetailsVisible
             val conversationReadable = serviceActivated
             val messagingEnabled = serviceActivated && entity.status == OrderStatusEnum.SERVICE_ACTIVE.value
             return OrderResponse(

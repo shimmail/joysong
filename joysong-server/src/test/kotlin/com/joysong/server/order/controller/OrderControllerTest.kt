@@ -12,6 +12,7 @@ import com.joysong.server.payment.domain.PaymentProvider
 import com.joysong.server.payment.domain.PaymentStatus
 import com.joysong.server.payment.domain.PaymentType
 import com.joysong.server.payment.entity.PaymentEntity
+import com.joysong.server.payment.provider.PaymentProviderException
 import com.joysong.server.payment.repository.PaymentRepository
 import com.joysong.server.refund.service.RefundService
 import com.joysong.server.review.service.ReviewService
@@ -26,11 +27,73 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.springframework.http.MediaType
+import org.springframework.security.authentication.TestingAuthenticationToken
 import org.springframework.security.core.Authentication
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import java.math.BigDecimal
 import java.time.LocalDateTime
 
 class OrderControllerTest {
+    @Test
+    fun `unavailable service fee provider returns HTTP 503 with matching error body`() {
+        val orders = mockk<OrderService>()
+        val settlements = mockk<SettlementRepository>()
+        val paymentService = mockk<PaymentService>()
+        every {
+            paymentService.createPaymentSession(
+                "order-1",
+                "user-1",
+                PaymentType.TRAVEL_GROUND_SERVICE_FEE,
+                PaymentProvider.ALIPAY_PLUS,
+                "ALIPAY_PLUS_CASHIER",
+                "idem-key-123"
+            )
+        } throws PaymentProviderException(
+            "PAYMENT_PROVIDER_UNAVAILABLE",
+            retryable = false,
+            outcomeUnknown = false
+        )
+        val mvc = MockMvcBuilders
+            .standaloneSetup(controller(orders, settlements, paymentService = paymentService))
+            .build()
+
+        mvc.perform(
+            post("/api/orders/order-1/service-fee-payment-attempts")
+                .header("Idempotency-Key", "idem-key-123")
+                .principal(TestingAuthenticationToken("user-1", null))
+        )
+            .andExpect(status().isServiceUnavailable)
+            .andExpect(jsonPath("$.code").value(503))
+            .andExpect(jsonPath("$.message").value("PAYMENT_PROVIDER_UNAVAILABLE"))
+    }
+
+    @Test
+    fun `invalid generic payment request returns HTTP 400 with matching error body`() {
+        val orders = mockk<OrderService>()
+        val settlements = mockk<SettlementRepository>()
+        every { orders.getOrderById("order-1", "user-1") } returns serviceOrder("PENDING_SERVICE_FEE")
+        val mvc = MockMvcBuilders
+            .standaloneSetup(controller(orders, settlements))
+            .build()
+
+        mvc.perform(
+            post("/api/orders/order-1/payment-attempts")
+                .header("Idempotency-Key", "idem-key-123")
+                .principal(TestingAuthenticationToken("user-1", null))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """{"paymentType":"BALANCE","provider":"ALIPAY_PLUS","paymentMethod":"ALIPAY_PLUS_CASHIER"}"""
+                )
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.code").value(400))
+            .andExpect(jsonPath("$.message").value("MEDICAL_PAYMENT_NOT_SUPPORTED"))
+    }
+
     @Test
     fun `service fee endpoint fixes payment contract without request body`() {
         val authentication = mockk<Authentication>()
@@ -53,7 +116,8 @@ class OrderControllerTest {
         val response = controller(orders, settlements, paymentService = paymentService)
             .createServiceFeePaymentAttempt("order-1", "idem-key-123", authentication)
 
-        assertEquals(200, response.code)
+        assertEquals(200, response.statusCode.value())
+        assertEquals(200, response.body?.code)
         verify(exactly = 1) {
             paymentService.createPaymentSession(
                 "order-1",
@@ -86,8 +150,9 @@ class OrderControllerTest {
             authentication
         )
 
-        assertEquals(400, response.code)
-        assertEquals("USE_SERVICE_FEE_PAYMENT_ENDPOINT", response.message)
+        assertEquals(400, response.statusCode.value())
+        assertEquals(400, response.body?.code)
+        assertEquals("USE_SERVICE_FEE_PAYMENT_ENDPOINT", response.body?.message)
         verify(exactly = 0) { paymentService.createPaymentSession(any(), any(), any(), any(), any(), any()) }
     }
 
@@ -111,8 +176,9 @@ class OrderControllerTest {
             authentication
         )
 
-        assertEquals(400, response.code)
-        assertEquals("MEDICAL_PAYMENT_NOT_SUPPORTED", response.message)
+        assertEquals(400, response.statusCode.value())
+        assertEquals(400, response.body?.code)
+        assertEquals("MEDICAL_PAYMENT_NOT_SUPPORTED", response.body?.message)
         verify(exactly = 0) { paymentService.createPaymentSession(any(), any(), any(), any(), any(), any()) }
     }
 
@@ -193,7 +259,7 @@ class OrderControllerTest {
     }
 
     @Test
-    fun `legacy order cannot gain travel service entitlements from anomalous status and timestamp`() {
+    fun `legacy order retains fulfillment snapshots without gaining travel service entitlements`() {
         val response = OrderResponse.from(
             serviceOrder(
                 status = "SERVICE_ACTIVE",
@@ -207,8 +273,11 @@ class OrderControllerTest {
         assertFalse(response.consultantDetailsVisible)
         assertFalse(response.serviceConversationReadable)
         assertFalse(response.serviceMessagingEnabled)
-        assertNull(response.consultantId)
-        assertNull(response.institutionId)
+        assertEquals("consultant-1", response.consultantId)
+        assertEquals("测试咨询师", response.consultantName)
+        assertEquals("consultant.png", response.consultantAvatar)
+        assertEquals("inst-1", response.institutionId)
+        assertEquals("美丽机构", response.institutionName)
     }
 
     @Test

@@ -125,7 +125,13 @@ class PaymentPersistenceService(
     fun applyProviderResult(paymentId: String, result: ProviderPaymentResult): PaymentEntity {
         val payment = paymentRepository.findByIdForUpdate(paymentId)
             ?: throw IllegalArgumentException("PAYMENT_NOT_FOUND")
-        if (payment.status == PaymentStatus.REFUNDED.name) return payment
+        if (payment.status in setOf(
+                PaymentStatus.PARTIALLY_REFUNDED.name,
+                PaymentStatus.REFUNDED.name
+            )
+        ) {
+            return payment
+        }
         require(result.providerPaymentId.isNotBlank()) { "PROVIDER_PAYMENT_ID_MISSING" }
         require(result.status in setOf(
             PaymentStatus.CREATED,
@@ -164,7 +170,14 @@ class PaymentPersistenceService(
         ) {
             return payment
         }
-
+        if ((payment.status == PaymentStatus.REQUIRES_ACTION.name && result.status == PaymentStatus.CREATED) ||
+            (payment.status == PaymentStatus.PROCESSING.name && result.status in setOf(
+                PaymentStatus.CREATED,
+                PaymentStatus.REQUIRES_ACTION
+            ))
+        ) {
+            return payment
+        }
         val now = LocalDateTime.now()
         var updated = paymentRepository.save(
             payment.copy(
@@ -208,7 +221,9 @@ class PaymentPersistenceService(
         }
         val payment = paymentRepository.findByIdForUpdate(paymentId)
             ?: throw IllegalArgumentException("PAYMENT_NOT_FOUND")
-        if (payment.status in PaymentStatus.successfulDatabaseValues || payment.status == PaymentStatus.REFUNDED.name) {
+        if (payment.status in PaymentStatus.terminalDatabaseValues ||
+            (payment.status == PaymentStatus.PROCESSING.name && status == PaymentStatus.FAILED)
+        ) {
             return payment
         }
         return paymentRepository.save(
