@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Table, Button, message, Select, Input, Space, Tag, Modal, Descriptions } from 'antd';
 import { CheckOutlined, CloseOutlined, EyeOutlined } from '@ant-design/icons';
 import api, { getData } from '../api';
@@ -41,6 +41,20 @@ const paidAmount = (record: any) => formatMoney(
   record.paymentAmount,
 );
 
+export const isRetryableRefund = (record: any) =>
+  record.status === 'REFUND_PROCESSING' && record.items?.some((item: any) => item.status === 'FAILED');
+
+export async function retryFailedRefund(refundId: string, refresh: () => Promise<void>) {
+  try {
+    await api.post(`/admin/refunds/${refundId}/retry`);
+    message.success('失败退款项已重新提交，请查看渠道处理状态');
+  } catch (err: any) {
+    message.error('重试失败: ' + (err?.response?.data?.message || err?.message));
+  } finally {
+    await refresh();
+  }
+}
+
 export default function RefundsPage() {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -61,10 +75,18 @@ export default function RefundsPage() {
   // 详情弹窗
   const [detailVisible, setDetailVisible] = useState(false);
   const [detailRecord, setDetailRecord] = useState<any | null>(null);
+  const [retryingRefundId, setRetryingRefundId] = useState<string | null>(null);
+  const retryingRefundIdRef = useRef<string | null>(null);
 
-  const fetchData = () => {
+  const fetchData = async () => {
     setLoading(true);
-    api.get('/admin/refunds').then(res => setData(getData(res as any))).finally(() => setLoading(false));
+    try {
+      const records = getData<any[]>(await api.get('/admin/refunds'));
+      setData(records);
+      setDetailRecord((current: any | null) => current ? records.find(record => record.id === current.id) ?? current : null);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { fetchData(); }, []);
@@ -125,6 +147,18 @@ export default function RefundsPage() {
     setDetailVisible(true);
   };
 
+  const handleRetry = async (record: any) => {
+    if (!isRetryableRefund(record) || retryingRefundIdRef.current) return;
+    retryingRefundIdRef.current = record.id;
+    setRetryingRefundId(record.id);
+    try {
+      await retryFailedRefund(record.id, fetchData);
+    } finally {
+      retryingRefundIdRef.current = null;
+      setRetryingRefundId(null);
+    }
+  };
+
   const filteredData = data.filter(item => {
     const matchStatus = statusFilter ? item.status === statusFilter : true;
     const matchKeyword = keyword
@@ -179,6 +213,16 @@ export default function RefundsPage() {
               <Button icon={<CheckOutlined />} size="small" type="primary" onClick={() => openApprove(record)}>批准</Button>
               <Button icon={<CloseOutlined />} size="small" danger onClick={() => openReject(record)}>拒绝</Button>
             </>
+          )}
+          {isRetryableRefund(record) && (
+            <Button
+              size="small"
+              loading={retryingRefundId === record.id}
+              disabled={retryingRefundId !== null}
+              onClick={() => handleRetry(record)}
+            >
+              重试失败项
+            </Button>
           )}
         </Space>
       ),
@@ -276,6 +320,7 @@ export default function RefundsPage() {
         width={600}
       >
         {detailRecord && (
+          <>
           <Descriptions column={2} bordered size="small">
             <Descriptions.Item label="退款ID" span={2}>{detailRecord.id}</Descriptions.Item>
             <Descriptions.Item label="订单ID" span={2}>{detailRecord.orderId}</Descriptions.Item>
@@ -284,18 +329,44 @@ export default function RefundsPage() {
             <Descriptions.Item label="项目">{detailRecord.projectName || '-'}</Descriptions.Item>
             <Descriptions.Item label="机构">{detailRecord.institutionName || '-'}</Descriptions.Item>
             <Descriptions.Item label="医生">{detailRecord.doctorName || '-'}</Descriptions.Item>
-            <Descriptions.Item label="用户电话">{detailRecord.userPhone || '-'}</Descriptions.Item>
             <Descriptions.Item label="支付流程">{paymentFlowLabels[detailRecord.paymentFlow] || detailRecord.paymentFlow || '-'}</Descriptions.Item>
             <Descriptions.Item label="申请退款金额"><span style={{ color: '#f5222d', fontWeight: 600 }}>{requestedRefundAmount(detailRecord)}</span></Descriptions.Item>
             <Descriptions.Item label="已退金额">{formatMoney(detailRecord.refundedAmountMinor, detailRecord.currency)}</Descriptions.Item>
             <Descriptions.Item label="原支付金额">{paidAmount(detailRecord)}</Descriptions.Item>
             <Descriptions.Item label="退款类型">{refundTypeLabels[detailRecord.refundType] || detailRecord.refundType || '全额退款'}</Descriptions.Item>
-            <Descriptions.Item label="状态"><Tag color={statusColors[detailRecord.status]}>{statusLabels[detailRecord.status] ?? detailRecord.status}</Tag></Descriptions.Item>
+            <Descriptions.Item label="状态" span={2}><Tag color={statusColors[detailRecord.status]}>{statusLabels[detailRecord.status] ?? detailRecord.status}</Tag></Descriptions.Item>
             <Descriptions.Item label="退款原因" span={2}>{detailRecord.reason}</Descriptions.Item>
             <Descriptions.Item label="详细说明" span={2}>{detailRecord.description || '-'}</Descriptions.Item>
+            {detailRecord.reviewedBy && <Descriptions.Item label="审核人">{detailRecord.reviewedBy}</Descriptions.Item>}
+            {detailRecord.reviewedAt && <Descriptions.Item label="审核时间">{detailRecord.reviewedAt}</Descriptions.Item>}
+            {detailRecord.rejectReason && <Descriptions.Item label="拒绝原因" span={2}>{detailRecord.rejectReason}</Descriptions.Item>}
             <Descriptions.Item label="创建时间">{detailRecord.createdAt}</Descriptions.Item>
             <Descriptions.Item label="处理时间">{detailRecord.processedAt || '-'}</Descriptions.Item>
           </Descriptions>
+          <div style={{ marginTop: 16 }}>
+            <h3>渠道退款项</h3>
+            <Table
+              dataSource={detailRecord.items || []}
+              rowKey="id"
+              size="small"
+              pagination={false}
+              scroll={{ x: 'max-content' }}
+              columns={[
+                { title: '支付记录', dataIndex: 'paymentId', width: 130, render: (value: string) => value || '-' },
+                { title: '渠道', dataIndex: 'provider', width: 110, render: (value: string) => value || '-' },
+                { title: '币种', dataIndex: 'currency', width: 80, render: (value: string) => value || '-' },
+                { title: '退款金额', dataIndex: 'amountMinor', width: 120, render: (value: number, item: any) => formatMoney(value, item.currency) },
+                { title: '状态', dataIndex: 'status', width: 100, render: (value: string) => value || '-' },
+                { title: '渠道退款单号', dataIndex: 'providerRefundId', width: 160, render: (value: string) => value || '-' },
+                { title: '失败码', dataIndex: 'failureCode', width: 130, render: (value: string) => value || '-' },
+                { title: '失败信息', dataIndex: 'failureMessage', width: 180, render: (value: string) => value || '-' },
+                { title: '请求时间', dataIndex: 'requestedAt', width: 170, render: (value: string) => value || '-' },
+                { title: '完成时间', dataIndex: 'completedAt', width: 170, render: (value: string) => value || '-' },
+                { title: '更新时间', dataIndex: 'updatedAt', width: 170, render: (value: string) => value || '-' },
+              ]}
+            />
+          </div>
+          </>
         )}
       </Modal>
     </div>

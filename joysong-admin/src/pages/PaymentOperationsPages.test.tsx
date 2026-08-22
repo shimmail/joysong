@@ -7,7 +7,7 @@ import api from '../api';
 import { formatMoney } from '../utils/money';
 import OrdersPage from './OrdersPage';
 import PaymentsPage from './PaymentsPage';
-import RefundsPage from './RefundsPage';
+import RefundsPage, { isRetryableRefund, retryFailedRefund } from './RefundsPage';
 
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>();
@@ -23,6 +23,7 @@ vi.mock('../api', async (importOriginal) => {
 });
 
 const mockGet = vi.mocked(api.get);
+const mockPost = vi.mocked(api.post);
 const mockPut = vi.mocked(api.put);
 
 const adminContext = {
@@ -131,6 +132,30 @@ const legacyRefund = {
   reason: '历史退款',
   status: 'PENDING',
   createdAt: '2026-08-20T11:00:00',
+};
+
+const failedProcessingRefund = {
+  ...serviceRefund,
+  id: 'refund-processing-failed',
+  orderNo: 'RETRY-001',
+  status: 'REFUND_PROCESSING',
+  reviewedBy: 'admin-reviewer',
+  reviewedAt: '2026-08-22T09:30:00',
+  rejectReason: '渠道暂时不可用',
+  items: [{
+    id: 'refund-item-failed',
+    paymentId: 'payment-service-1',
+    provider: 'ALIPAY_PLUS',
+    currency: 'USD',
+    amountMinor: 12345,
+    providerRefundId: 'provider-refund-001',
+    status: 'FAILED',
+    failureCode: 'GATEWAY_TIMEOUT',
+    failureMessage: '渠道响应超时',
+    requestedAt: '2026-08-22T09:31:00',
+    completedAt: undefined,
+    updatedAt: '2026-08-22T09:32:00',
+  }],
 };
 
 function response(data: unknown) {
@@ -378,5 +403,60 @@ describe('RefundsPage manual review operations', () => {
     await user.click(within(dialog).getByRole('button', { name: '确认批准' }));
 
     await waitFor(() => expect(successSpy).toHaveBeenCalledWith('退款审核已提交，请查看渠道处理状态'));
+  });
+
+  it('shows review metadata and provider failure diagnostics in the refund details', async () => {
+    mockGet.mockImplementation((url) => url === '/admin/refunds'
+      ? response([{ ...failedProcessingRefund, status: 'PENDING' }])
+      : response([]));
+
+    render(<RefundsPage />);
+    const row = await screen.findByRole('row', { name: /RETRY-001/ });
+    await userEvent.setup().click(within(row).getByRole('button', { name: /详情/ }));
+
+    const dialog = (await screen.findByText('退款详情')).closest('.ant-modal') as HTMLElement;
+    expect(within(dialog).getByText('admin-reviewer')).toBeInTheDocument();
+    expect(within(dialog).getByText('2026-08-22T09:30:00')).toBeInTheDocument();
+    expect(within(dialog).getByText('渠道暂时不可用')).toBeInTheDocument();
+    const itemRow = within(dialog).getByRole('row', { name: /payment-service-1/ });
+    expect(within(itemRow).getByText('ALIPAY_PLUS')).toBeInTheDocument();
+    expect(within(itemRow).getByText('USD 123.45')).toBeInTheDocument();
+    expect(within(itemRow).getByText('FAILED')).toBeInTheDocument();
+    expect(within(itemRow).getByText('provider-refund-001')).toBeInTheDocument();
+    expect(within(itemRow).getByText('GATEWAY_TIMEOUT')).toBeInTheDocument();
+    expect(within(itemRow).getByText('渠道响应超时')).toBeInTheDocument();
+    expect(within(itemRow).getByText('2026-08-22T09:31:00')).toBeInTheDocument();
+    expect(within(itemRow).getByText('-')).toBeInTheDocument();
+    expect(within(itemRow).getByText('2026-08-22T09:32:00')).toBeInTheDocument();
+  });
+
+  it('enables the retry button only for processing refunds that contain a failed item', () => {
+    for (const status of ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED']) {
+      expect(isRetryableRefund({ ...failedProcessingRefund, status })).toBe(false);
+    }
+    expect(isRetryableRefund({
+      ...failedProcessingRefund,
+      items: [{ ...failedProcessingRefund.items[0], status: 'PROCESSING' }],
+    })).toBe(false);
+    expect(isRetryableRefund(failedProcessingRefund)).toBe(true);
+  });
+
+  it('posts a retry, refreshes the current records, and reports a retry failure honestly', async () => {
+    const successSpy = vi.spyOn(message, 'success');
+    const errorSpy = vi.spyOn(message, 'error');
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    mockPost.mockResolvedValueOnce({ data: { code: 200, message: 'OK', data: failedProcessingRefund } });
+
+    await retryFailedRefund('refund-processing-failed', refresh);
+
+    expect(mockPost).toHaveBeenCalledWith('/admin/refunds/refund-processing-failed/retry');
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(successSpy).toHaveBeenCalledWith('失败退款项已重新提交，请查看渠道处理状态');
+
+    mockPost.mockRejectedValueOnce(new Error('渠道仍不可用'));
+    await retryFailedRefund('refund-processing-failed', refresh);
+
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(errorSpy).toHaveBeenCalledWith('重试失败: 渠道仍不可用');
   });
 });
