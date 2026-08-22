@@ -8,7 +8,7 @@ export function formatMoney(amountMinor: unknown, currency: unknown, legacyAmoun
       fractionDigits = new Intl.NumberFormat('en-US', {
         style: 'currency',
         currency: currencyCode,
-      }).resolvedOptions().maximumFractionDigits;
+      }).resolvedOptions().maximumFractionDigits ?? 2;
     } catch {
       // Unknown legacy currencies retain the conventional two-decimal display.
     }

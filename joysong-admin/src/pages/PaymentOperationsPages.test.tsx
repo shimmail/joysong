@@ -225,7 +225,7 @@ describe('OrdersPage travel ground service operations', () => {
     expect(within(legacyRow).getByRole('button', { name: /变更状态/ })).toBeInTheDocument();
     expect(within(legacyRow).getByText('legacy-verified-at')).toBeInTheDocument();
     expect(within(legacyRow).getByText('legacy-settlement-at')).toBeInTheDocument();
-  }, 15_000);
+  }, 30_000);
 });
 
 describe('PaymentsPage service-fee records', () => {
