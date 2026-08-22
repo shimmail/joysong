@@ -22,6 +22,7 @@ import io.mockk.slot
 import io.mockk.verify
 import io.mockk.verifyOrder
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -125,6 +126,25 @@ class ReviewServiceTest {
         assertEquals(29, doctorSaved.captured.caseCount)
         assertEquals(2, projectSaved.captured.reviewCount)
         assertEquals(BigDecimal("3.5"), projectSaved.captured.rating)
+    }
+
+    @Test
+    fun `travel completed order review remains completed without settlement`() {
+        val travelOrder = order.copy(paymentFlow = "TRAVEL_GROUND_SERVICE_ONLY")
+        every { orderRepository.findById(travelOrder.id) } returns Optional.of(travelOrder)
+        every { reviewRepository.findByTargetTypeAndTargetId("INSTITUTION", travelOrder.institutionId) } returns emptyList()
+        every { reviewRepository.findByDoctorIdAndTargetType(travelOrder.doctorId, "INSTITUTION") } returns emptyList()
+        every { reviewRepository.findByInstitutionProjectId(travelOrder.institutionProjectId) } returns emptyList()
+        stubAggregateTargets()
+
+        reviewService.submitReview(travelOrder.id, travelOrder.userId, 5, "great", "", "")
+
+        val savedOrder = slot<OrderEntity>()
+        verify { orderRepository.save(capture(savedOrder)) }
+        assertEquals("COMPLETED", savedOrder.captured.status)
+        assertNull(savedOrder.captured.settlementAt)
+        verify(exactly = 0) { settlementService.saveSettlement(any(), any()) }
+        verify(exactly = 0) { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) }
     }
 
     @Test

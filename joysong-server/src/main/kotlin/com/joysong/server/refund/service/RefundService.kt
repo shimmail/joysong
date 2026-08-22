@@ -90,6 +90,10 @@ class RefundService(
             require(order.status == com.joysong.server.order.dto.OrderStatusEnum.REFUND_REVIEW.value) {
                 "INVALID_ORDER_REFUND_STATUS"
             }
+            require(refund.originalStatus in setOf(
+                com.joysong.server.order.dto.OrderStatusEnum.SERVICE_ACTIVE.value,
+                com.joysong.server.order.dto.OrderStatusEnum.COMPLETED.value
+            )) { "INVALID_TRAVEL_REFUND_ORIGINAL_STATUS" }
         }
         val now = LocalDateTime.now()
         refundRepository.save(
@@ -238,7 +242,7 @@ class RefundService(
         require(refund.status == RefundWorkflowPersistenceService.PROCESSING) {
             "INVALID_REFUND_STATUS"
         }
-        val executor = refundExecutionService ?: return refund
+        val executor = refundExecutionService ?: throw IllegalStateException("REFUND_EXECUTOR_UNAVAILABLE")
         val outcome = executor.retryFailed(refund)
         if (!outcome.completed) return refundRepository.findById(id).orElse(refund)
         val finalized = workflowPersistenceService.finalizeSuccess(

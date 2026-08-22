@@ -34,8 +34,10 @@ class RefundItemPersistenceService(
         }
         val order = orderRepository.findByIdForUpdate(refund.orderId)
             ?: throw IllegalArgumentException("ORDER_NOT_FOUND")
-        require(order.status == OrderStatusEnum.REFUND_PROCESSING.value) {
-            "INVALID_ORDER_REFUND_STATUS"
+        if (order.paymentFlow == RefundWorkflowPersistenceService.TRAVEL_GROUND_SERVICE_ONLY) {
+            require(order.status == OrderStatusEnum.REFUND_PROCESSING.value) {
+                "INVALID_ORDER_REFUND_STATUS"
+            }
         }
         val failedItems = refundItemRepository.findAllByRefundIdOrderByCreatedAtAsc(refundId)
             .filter { it.status == PaymentStatus.FAILED.name }

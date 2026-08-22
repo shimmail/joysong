@@ -940,6 +940,18 @@ class OrderServiceTest {
     }
 
     @Test
+    fun `adminUpdateStatus does not allow a legacy completed order into travel refund review`() {
+        val order = createTestOrder("legacy-completed", "user-1", status = OrderStatusEnum.COMPLETED.value)
+        every { orderRepository.findByIdForUpdate("legacy-completed") } returns order
+
+        assertThrows<IllegalArgumentException> {
+            orderService.adminUpdateStatus("legacy-completed", OrderStatusEnum.REFUND_REVIEW.value)
+        }
+
+        verify(exactly = 0) { orderRepository.save(any()) }
+    }
+
+    @Test
     fun `adminUpdateStatus 通用入口不能伪造旅游地接服务激活或退款推进`() {
         val protectedTransitions = listOf(
             OrderStatusEnum.PENDING_SERVICE_FEE to OrderStatusEnum.SERVICE_ACTIVE,

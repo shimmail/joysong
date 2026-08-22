@@ -184,6 +184,20 @@ class OrderServiceConversationServiceTest {
     }
 
     @Test
+    fun `completed service conversation remains readable but rejects new messages`() {
+        val completed = order(status = OrderStatusEnum.COMPLETED.value)
+        every { orderRepository.findById("order-1") } returns Optional.of(completed)
+        every { orderRepository.findByIdForUpdate("order-1") } returns completed
+
+        service.requireReadAccess(conversation(), "user-1")
+        val error = assertThrows<IllegalArgumentException> {
+            service.requireSendAccess(conversation(), "user-1")
+        }
+
+        assertEquals("ORDER_SERVICE_NOT_ACTIVE", error.message)
+    }
+
+    @Test
     fun `order lock makes a creation flush failure propagate without a second lookup`() {
         val failure = org.springframework.dao.DataIntegrityViolationException("constraint")
         every { orderRepository.findByIdForUpdate("order-1") } returns order()

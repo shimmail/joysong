@@ -24,16 +24,22 @@ class RefundExecutionService(
     private val persistenceService: RefundItemPersistenceService
 ) {
     fun retryFailed(refund: RefundEntity): RefundExecutionOutcome {
-        persistenceService.requeueFailedItems(refund.id)
-        return execute(refund)
+        val retryItemIds = persistenceService.requeueFailedItems(refund.id).mapTo(mutableSetOf()) { it.id }
+        return execute(refund, retryItemIds)
     }
 
-    fun execute(refund: RefundEntity): RefundExecutionOutcome {
+    fun execute(refund: RefundEntity): RefundExecutionOutcome = execute(refund, null)
+
+    private fun execute(
+        refund: RefundEntity,
+        retryItemIds: Set<String>?
+    ): RefundExecutionOutcome {
         val target = requireNotNull(refund.requestedAmountMinor) { "REFUND_AMOUNT_SNAPSHOT_MISSING" }
         val items = persistenceService.prepareItems(refund)
 
         for (item in items.filter {
-            it.status == PaymentStatus.CREATED.name || it.status == PaymentStatus.PROCESSING.name
+            (retryItemIds == null || it.id in retryItemIds) &&
+                (it.status == PaymentStatus.CREATED.name || it.status == PaymentStatus.PROCESSING.name)
         }) {
             val payment = paymentRepository.findById(item.paymentId)
                 .orElseThrow { IllegalArgumentException("PAYMENT_NOT_FOUND") }

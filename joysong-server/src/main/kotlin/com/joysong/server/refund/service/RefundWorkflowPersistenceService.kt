@@ -278,6 +278,10 @@ class RefundWorkflowPersistenceService(
         val isTravelGroundService = order.paymentFlow == TRAVEL_GROUND_SERVICE_ONLY
         if (isTravelGroundService) {
             require(order.status == OrderStatusEnum.REFUND_REVIEW.value) { "INVALID_ORDER_REFUND_STATUS" }
+            require(refund.originalStatus in setOf(
+                OrderStatusEnum.SERVICE_ACTIVE.value,
+                OrderStatusEnum.COMPLETED.value
+            )) { "INVALID_TRAVEL_REFUND_ORIGINAL_STATUS" }
         }
         val now = LocalDateTime.now()
         val rejected = refundRepository.save(

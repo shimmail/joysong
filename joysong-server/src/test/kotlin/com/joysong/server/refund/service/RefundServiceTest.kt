@@ -212,6 +212,58 @@ class RefundServiceTest {
     }
 
     @Test
+    fun `travel cancellation rejects an invalid original status before saving`() {
+        val pending = refund(status = RefundWorkflowPersistenceService.PENDING)
+            .copy(originalStatus = OrderStatusEnum.VERIFIED.value)
+        every { refundRepository.findFirstByOrderIdOrderByCreatedAtDesc("order-1") } returns pending
+        every { refundRepository.findByIdForUpdate("refund-1") } returns pending
+        every { orderRepository.findByIdForUpdate("order-1") } returns
+            serviceOrder(status = OrderStatusEnum.REFUND_REVIEW.value, refundStatus = RefundWorkflowPersistenceService.PENDING)
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            service().cancelRefund("order-1", "user-1")
+        }
+
+        assertEquals("INVALID_TRAVEL_REFUND_ORIGINAL_STATUS", error.message)
+        verify(exactly = 0) { refundRepository.save(any()) }
+        verify(exactly = 0) { orderRepository.save(any()) }
+    }
+
+    @Test
+    fun `travel cancellation rejects a blank original status before saving`() {
+        val pending = refund(status = RefundWorkflowPersistenceService.PENDING).copy(originalStatus = "")
+        every { refundRepository.findFirstByOrderIdOrderByCreatedAtDesc("order-1") } returns pending
+        every { refundRepository.findByIdForUpdate("refund-1") } returns pending
+        every { orderRepository.findByIdForUpdate("order-1") } returns
+            serviceOrder(status = OrderStatusEnum.REFUND_REVIEW.value, refundStatus = RefundWorkflowPersistenceService.PENDING)
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            service().cancelRefund("order-1", "user-1")
+        }
+
+        assertEquals("INVALID_TRAVEL_REFUND_ORIGINAL_STATUS", error.message)
+        verify(exactly = 0) { refundRepository.save(any()) }
+        verify(exactly = 0) { orderRepository.save(any()) }
+    }
+
+    @Test
+    fun `travel rejection rejects an invalid original status before saving`() {
+        val pending = refund(status = RefundWorkflowPersistenceService.PENDING)
+            .copy(originalStatus = OrderStatusEnum.PENDING_SETTLEMENT.value)
+        every { refundRepository.findByIdForUpdate("refund-1") } returns pending
+        every { orderRepository.findByIdForUpdate("order-1") } returns
+            serviceOrder(status = OrderStatusEnum.REFUND_REVIEW.value)
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            service().adminUpdateStatus("refund-1", "REJECTED", "admin-1", "资料不全")
+        }
+
+        assertEquals("INVALID_TRAVEL_REFUND_ORIGINAL_STATUS", error.message)
+        verify(exactly = 0) { refundRepository.save(any()) }
+        verify(exactly = 0) { orderRepository.save(any()) }
+    }
+
+    @Test
     fun `approval persists processing order before invoking provider`() {
         val execution = mockk<RefundExecutionService>()
         val pending = refund(status = RefundWorkflowPersistenceService.PENDING)
@@ -532,6 +584,117 @@ class RefundServiceTest {
     }
 
     @Test
+    fun `manual retry executes only the items that were failed when retry started`() {
+        val persistence = mockk<RefundItemPersistenceService>()
+        val gatewayRegistry = mockk<PaymentGatewayRegistry>()
+        val gateway = mockk<PaymentGateway>()
+        val execution = RefundExecutionService(paymentRepository, refundItemRepository, gatewayRegistry, persistence)
+        val processing = refund(status = RefundWorkflowPersistenceService.PROCESSING)
+        val failedWithProvider = refundItem(id = "failed-query").copy(
+            status = PaymentStatus.PROCESSING.name,
+            providerRefundId = "provider-failed"
+        )
+        val failedWithoutProvider = refundItem(id = "failed-resend", paymentId = "retry-payment").copy(
+            status = PaymentStatus.CREATED.name
+        )
+        val unrelatedProcessing = refundItem(id = "already-processing", paymentId = "other-payment").copy(
+            status = PaymentStatus.PROCESSING.name,
+            providerRefundId = "provider-other"
+        )
+        val succeeded = refundItem(id = "succeeded", paymentId = "done-payment").copy(
+            status = PaymentStatus.SUCCEEDED.name,
+            providerRefundId = "provider-done"
+        )
+        val queried = ProviderRefundResult(PaymentStatus.PROCESSING, "provider-failed")
+        val resent = ProviderRefundResult(PaymentStatus.PROCESSING, "provider-retried")
+        every { persistence.requeueFailedItems("refund-1") } returns listOf(failedWithProvider, failedWithoutProvider)
+        every { persistence.prepareItems(processing) } returns listOf(
+            failedWithProvider,
+            failedWithoutProvider,
+            unrelatedProcessing,
+            succeeded
+        )
+        every { paymentRepository.findById("payment-1") } returns Optional.of(serviceFeePayment())
+        every { paymentRepository.findById("retry-payment") } returns Optional.of(serviceFeePayment(id = "retry-payment"))
+        every { gatewayRegistry.require(PaymentProvider.ALIPAY_PLUS) } returns gateway
+        every { gateway.queryRefund("provider-failed") } returns queried
+        every { gateway.refund(any()) } returns resent
+        every { persistence.applyProviderResult("failed-query", queried) } returns failedWithProvider
+        every { persistence.applyProviderResult("failed-resend", resent) } returns failedWithoutProvider
+        every { persistence.summarize("refund-1", 40_000L) } returns RefundExecutionOutcome(0, completed = false)
+
+        execution.retryFailed(processing)
+
+        verify(exactly = 1) { gateway.queryRefund("provider-failed") }
+        verify(exactly = 1) {
+            gateway.refund(match {
+                it.refundItemId == "failed-resend" &&
+                    it.idempotencyKey == "refund-refund-1-retry-payment"
+            })
+        }
+        verify(exactly = 0) { gateway.queryRefund("provider-other") }
+        verify(exactly = 0) { paymentRepository.findById("other-payment") }
+        verify(exactly = 0) { paymentRepository.findById("done-payment") }
+    }
+
+    @Test
+    fun `manual retry requeues only failed items and preserves successful and processing items`() {
+        val processing = refund(status = RefundWorkflowPersistenceService.PROCESSING)
+        val failedWithProvider = refundItem(id = "failed-query").copy(
+            status = PaymentStatus.FAILED.name,
+            providerRefundId = "provider-failed",
+            failureCode = "DECLINED"
+        )
+        val failedWithoutProvider = refundItem(id = "failed-resend", paymentId = "retry-payment").copy(
+            status = PaymentStatus.FAILED.name,
+            failureMessage = "network"
+        )
+        val existingProcessing = refundItem(id = "already-processing", paymentId = "other-payment").copy(
+            status = PaymentStatus.PROCESSING.name,
+            providerRefundId = "provider-other"
+        )
+        val succeeded = refundItem(id = "succeeded", paymentId = "done-payment").copy(
+            status = PaymentStatus.SUCCEEDED.name,
+            providerRefundId = "provider-done"
+        )
+        val items = listOf(failedWithProvider, failedWithoutProvider, existingProcessing, succeeded)
+        every { refundRepository.findByIdForUpdate("refund-1") } returns processing
+        every { orderRepository.findByIdForUpdate("order-1") } returns
+            serviceOrder(status = OrderStatusEnum.REFUND_PROCESSING.value)
+        every { refundItemRepository.findAllByRefundIdOrderByCreatedAtAsc("refund-1") } returns items
+        every { refundItemRepository.findByIdForUpdate(any()) } answers {
+            items.firstOrNull { it.id == firstArg<String>() }
+        }
+        every { refundItemRepository.save(any()) } answers { firstArg() }
+
+        val requeued = itemPersistence().requeueFailedItems("refund-1")
+
+        assertEquals(listOf("failed-query", "failed-resend"), requeued.map { it.id })
+        assertEquals(PaymentStatus.PROCESSING.name, requeued[0].status)
+        assertEquals(PaymentStatus.CREATED.name, requeued[1].status)
+        verify(exactly = 0) { refundItemRepository.findByIdForUpdate("already-processing") }
+        verify(exactly = 0) { refundItemRepository.findByIdForUpdate("succeeded") }
+        verify(exactly = 2) { refundItemRepository.save(any()) }
+    }
+
+    @Test
+    fun `legacy manual retry does not require the travel refund processing order status`() {
+        val processing = refund(status = RefundWorkflowPersistenceService.PROCESSING)
+            .copy(revenueReversalStatus = "PENDING")
+        val failed = refundItem().copy(status = PaymentStatus.FAILED.name)
+        every { refundRepository.findByIdForUpdate("refund-1") } returns processing
+        every { orderRepository.findByIdForUpdate("order-1") } returns
+            legacyOrder(status = OrderStatusEnum.DISPUTE_MEDIATION.value)
+        every { refundItemRepository.findAllByRefundIdOrderByCreatedAtAsc("refund-1") } returns listOf(failed)
+        every { refundItemRepository.findByIdForUpdate("item-1") } returns failed
+        every { refundItemRepository.save(any()) } answers { firstArg() }
+
+        val requeued = itemPersistence().requeueFailedItems("refund-1")
+
+        assertEquals(PaymentStatus.CREATED.name, requeued.single().status)
+    }
+
+    @Test
     fun `adminUpdateStatus rejects unsupported target state before loading data`() {
         assertThrows(IllegalArgumentException::class.java) {
             service().adminUpdateStatus("refund-1", "CANCELLED", "admin-1")
@@ -605,6 +768,18 @@ class RefundServiceTest {
         assertEquals(RefundWorkflowPersistenceService.PROCESSING, result.status)
         verify(exactly = 1) { execution.retryFailed(processing) }
         verify(exactly = 0) { execution.execute(any()) }
+    }
+
+    @Test
+    fun `manual retry fails explicitly when the refund executor is unavailable`() {
+        val processing = refund(status = RefundWorkflowPersistenceService.PROCESSING)
+        every { refundRepository.findById("refund-1") } returns Optional.of(processing)
+
+        val error = assertThrows(IllegalStateException::class.java) {
+            service().retryFailedProcessingRefund("refund-1", "admin-1")
+        }
+
+        assertEquals("REFUND_EXECUTOR_UNAVAILABLE", error.message)
     }
 
     @Test

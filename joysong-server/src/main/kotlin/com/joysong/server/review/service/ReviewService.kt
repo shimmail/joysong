@@ -33,6 +33,7 @@ class ReviewService(
         private val log = LoggerFactory.getLogger(ReviewService::class.java)
         private const val OPERATOR_TYPE_USER = "USER"
         private const val OPERATOR_TYPE_SYSTEM = "SYSTEM"
+        private const val TRAVEL_GROUND_SERVICE_PAYMENT_FLOW = "TRAVEL_GROUND_SERVICE_ONLY"
         private const val MAX_REVIEW_IMAGES = 6
         private const val MAX_REVIEW_IMAGES_LENGTH = 2000
     }
@@ -85,12 +86,18 @@ class ReviewService(
         // 重算机构/医生/机构项目评分统计
         recalculateStats(order.institutionId, order.doctorId, order.institutionProjectId)
 
-        // 只有 COMPLETED 可以进入待结算；已待结算/已结算订单不得状态倒退。
+        // 医疗订单的 COMPLETED 评价后进入待结算；旅游地接完成态评价不进入医疗结算链路。
         val previousStatus = order.status
-        val settlementAt = order.settlementAt ?: LocalDateTime.now().plusDays(30)
+        val shouldEnterSettlement = previousStatus == OrderStatusEnum.COMPLETED.value &&
+            order.paymentFlow != TRAVEL_GROUND_SERVICE_PAYMENT_FLOW
+        val settlementAt = if (shouldEnterSettlement) {
+            order.settlementAt ?: LocalDateTime.now().plusDays(30)
+        } else {
+            order.settlementAt
+        }
         orderRepository.save(
             order.copy(
-                status = if (previousStatus == OrderStatusEnum.COMPLETED.value) {
+                status = if (shouldEnterSettlement) {
                     OrderStatusEnum.PENDING_SETTLEMENT.value
                 } else {
                     previousStatus
@@ -101,7 +108,7 @@ class ReviewService(
             )
         )
 
-        if (previousStatus == OrderStatusEnum.COMPLETED.value) {
+        if (shouldEnterSettlement) {
             orderStatusLogService.logTransition(
                 orderId = orderId,
                 fromStatus = previousStatus,
