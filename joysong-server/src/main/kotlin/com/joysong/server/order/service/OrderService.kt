@@ -439,9 +439,33 @@ class OrderService(
      */
     @Transactional(rollbackFor = [Exception::class])
     fun confirmCompletion(orderId: String, userId: String): OrderResponse {
-        val order = orderRepository.findById(orderId)
-            .orElseThrow { IllegalArgumentException("订单不存在: $orderId") }
+        val order = orderRepository.findByIdForUpdate(orderId)
+            ?: throw IllegalArgumentException("订单不存在: $orderId")
         require(order.userId == userId) { "无权操作该订单" }
+        if (order.paymentFlow == TRAVEL_GROUND_SERVICE_PAYMENT_FLOW) {
+            if (order.status == OrderStatusEnum.COMPLETED.value) return OrderResponse.from(order)
+            require(order.status == OrderStatusEnum.SERVICE_ACTIVE.value) {
+                "当前状态[${order.status}]不允许确认完成"
+            }
+            val now = LocalDateTime.now()
+            val completed = orderRepository.save(
+                order.copy(
+                    status = OrderStatusEnum.COMPLETED.value,
+                    completedAt = now,
+                    updatedAt = now
+                )
+            )
+            orderStatusLogService.logTransition(
+                orderId = orderId,
+                fromStatus = OrderStatusEnum.SERVICE_ACTIVE.value,
+                toStatus = OrderStatusEnum.COMPLETED.value,
+                operatorId = userId,
+                operatorType = OPERATOR_TYPE_USER,
+                remark = "用户确认旅游地接服务完成"
+            )
+            log.info("订单[{}]确认旅游地接服务完成", orderId)
+            return OrderResponse.from(completed)
+        }
         requireMedicalPaymentSupported(order)
 
         val currentStatus = OrderStatusEnum.fromValue(order.status)

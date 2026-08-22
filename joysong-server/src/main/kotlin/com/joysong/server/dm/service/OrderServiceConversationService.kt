@@ -120,6 +120,7 @@ class OrderServiceConversationService(
         private const val ACCESS_DENIED = "ORDER_SERVICE_ACCESS_DENIED"
         private val READABLE_STATUSES = setOf(
             OrderStatusEnum.SERVICE_ACTIVE.value,
+            OrderStatusEnum.COMPLETED.value,
             OrderStatusEnum.REFUND_REVIEW.value,
             OrderStatusEnum.REFUND_PROCESSING.value,
             OrderStatusEnum.REFUNDED.value

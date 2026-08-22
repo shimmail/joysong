@@ -5,6 +5,8 @@ import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.repository.OrderRepository
 import com.joysong.server.order.service.OrderStatusLogService
 import com.joysong.server.refund.entity.RefundEntity
+import com.joysong.server.refund.entity.RefundItemEntity
+import com.joysong.server.refund.repository.RefundItemRepository
 import com.joysong.server.refund.repository.RefundRepository
 import com.joysong.server.settlement.service.SettlementReversalService
 import org.slf4j.LoggerFactory
@@ -22,7 +24,8 @@ class RefundService(
     @Lazy private val couponService: CouponService,
     private val workflowPersistenceService: RefundWorkflowPersistenceService,
     private val refundExecutionService: RefundExecutionService? = null,
-    private val settlementReversalService: SettlementReversalService? = null
+    private val settlementReversalService: SettlementReversalService? = null,
+    private val refundItemRepository: RefundItemRepository? = null
 ) {
     companion object {
         private val log = LoggerFactory.getLogger(RefundService::class.java)
@@ -100,22 +103,14 @@ class RefundService(
             order.copy(
                 refundStatus = "NONE",
                 refundAmount = BigDecimal.ZERO,
-                status = if (isTravelGroundService) {
-                    com.joysong.server.order.dto.OrderStatusEnum.SERVICE_ACTIVE.value
-                } else {
-                    refund.originalStatus
-                },
+                status = refund.originalStatus,
                 updatedAt = now
             )
         )
         orderStatusLogService.logTransition(
             orderId,
             order.status,
-            if (isTravelGroundService) {
-                com.joysong.server.order.dto.OrderStatusEnum.SERVICE_ACTIVE.value
-            } else {
-                refund.originalStatus
-            },
+            refund.originalStatus,
             userId,
             "USER",
             "取消退款申请"
@@ -128,6 +123,9 @@ class RefundService(
         val orders = orderRepository.findAllById(refunds.map { it.orderId }).associateBy { it.id }
         return refunds.map { refund ->
             val order = orders[refund.orderId]
+            val items = refundItemRepository
+                ?.findAllByRefundIdOrderByCreatedAtAsc(refund.id)
+                .orEmpty()
             mapOf(
                 "id" to refund.id,
                 "orderId" to refund.orderId,
@@ -157,12 +155,29 @@ class RefundService(
                 "reviewedAt" to refund.reviewedAt,
                 "rejectReason" to refund.rejectReason,
                 "completedAt" to refund.completedAt,
+                "items" to items.map(::adminRefundItem),
                 "paymentFlow" to order?.paymentFlow,
                 "doctorName" to (order?.doctorName ?: ""),
                 "institutionName" to (order?.institutionName ?: "")
             )
         }
     }
+
+    private fun adminRefundItem(item: RefundItemEntity): Map<String, Any?> = mapOf(
+        "id" to item.id,
+        "paymentId" to item.paymentId,
+        "provider" to item.provider,
+        "currency" to item.currency,
+        "amountMinor" to item.amountMinor,
+        "providerRefundId" to item.providerRefundId,
+        "status" to item.status,
+        "failureCode" to item.failureCode,
+        "failureMessage" to item.failureMessage,
+        "requestedAt" to item.requestedAt,
+        "completedAt" to item.completedAt,
+        "createdAt" to item.createdAt,
+        "updatedAt" to item.updatedAt
+    )
 
     fun adminUpdateStatus(
         id: String,
@@ -211,6 +226,27 @@ class RefundService(
             "SYSTEM",
             "SYSTEM",
             "退款补偿任务确认渠道退款完成"
+        )
+        afterApproved(finalized)
+        return finalized.refund
+    }
+
+    /** Admin-only retry entry point: only failed items are made executable again. */
+    fun retryFailedProcessingRefund(id: String, adminId: String): RefundEntity {
+        val refund = refundRepository.findById(id)
+            .orElseThrow { IllegalArgumentException("REFUND_NOT_FOUND") }
+        require(refund.status == RefundWorkflowPersistenceService.PROCESSING) {
+            "INVALID_REFUND_STATUS"
+        }
+        val executor = refundExecutionService ?: return refund
+        val outcome = executor.retryFailed(refund)
+        if (!outcome.completed) return refundRepository.findById(id).orElse(refund)
+        val finalized = workflowPersistenceService.finalizeSuccess(
+            id,
+            outcome,
+            adminId,
+            "ADMIN",
+            "管理员重试失败退款项，渠道退款完成"
         )
         afterApproved(finalized)
         return finalized.refund

@@ -95,7 +95,7 @@ class OrderServiceConversationServiceTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["REFUND_REVIEW", "REFUND_PROCESSING", "REFUNDED"])
+    @ValueSource(strings = ["COMPLETED", "REFUND_REVIEW", "REFUND_PROCESSING", "REFUNDED"])
     fun `refund state returns existing activated conversation without creating another`(status: String) {
         val existing = conversation()
         every { orderRepository.findByIdForUpdate("order-1") } returns order(status = status)
@@ -132,7 +132,7 @@ class OrderServiceConversationServiceTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["SERVICE_ACTIVE", "REFUND_REVIEW", "REFUND_PROCESSING", "REFUNDED"])
+    @ValueSource(strings = ["SERVICE_ACTIVE", "COMPLETED", "REFUND_REVIEW", "REFUND_PROCESSING", "REFUNDED"])
     fun `activated participants may read service history in every readable state`(status: String) {
         every { orderRepository.findById("order-1") } returns Optional.of(order(status = status))
 

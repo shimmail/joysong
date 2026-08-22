@@ -89,6 +89,7 @@ data class OrderResponse(
             val isTravelGroundService = entity.paymentFlow == "TRAVEL_GROUND_SERVICE_ONLY"
             val activatedStatuses = setOf(
                 OrderStatusEnum.SERVICE_ACTIVE.value,
+                OrderStatusEnum.COMPLETED.value,
                 OrderStatusEnum.REFUND_REVIEW.value,
                 OrderStatusEnum.REFUND_PROCESSING.value,
                 OrderStatusEnum.REFUNDED.value

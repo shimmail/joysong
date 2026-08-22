@@ -23,6 +23,11 @@ class RefundExecutionService(
     private val paymentGatewayRegistry: PaymentGatewayRegistry,
     private val persistenceService: RefundItemPersistenceService
 ) {
+    fun retryFailed(refund: RefundEntity): RefundExecutionOutcome {
+        persistenceService.requeueFailedItems(refund.id)
+        return execute(refund)
+    }
+
     fun execute(refund: RefundEntity): RefundExecutionOutcome {
         val target = requireNotNull(refund.requestedAmountMinor) { "REFUND_AMOUNT_SNAPSHOT_MISSING" }
         val items = persistenceService.prepareItems(refund)

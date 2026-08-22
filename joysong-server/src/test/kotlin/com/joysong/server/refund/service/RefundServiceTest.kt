@@ -42,16 +42,28 @@ class RefundServiceTest {
     fun `admin refund list exposes the joined order payment flow for new and legacy orders`() {
         val serviceRefund = refund(status = RefundWorkflowPersistenceService.PENDING)
         val legacyRefund = serviceRefund.copy(id = "refund-2", orderId = "order-2")
+        val failedItem = refundItem().copy(
+            providerRefundId = "provider-refund-1",
+            status = PaymentStatus.FAILED.name,
+            failureCode = "DECLINED",
+            failureMessage = "provider declined"
+        )
         every { refundRepository.findAll() } returns listOf(serviceRefund, legacyRefund)
         every { orderRepository.findAllById(listOf("order-1", "order-2")) } returns listOf(
             serviceOrder(),
             legacyOrder(status = OrderStatusEnum.CONSULTATION_PAID.value).copy(id = "order-2")
         )
+        every { refundItemRepository.findAllByRefundIdOrderByCreatedAtAsc("refund-1") } returns listOf(failedItem)
+        every { refundItemRepository.findAllByRefundIdOrderByCreatedAtAsc("refund-2") } returns emptyList()
 
         val rows = service().adminListAll()
 
         assertEquals(RefundWorkflowPersistenceService.TRAVEL_GROUND_SERVICE_ONLY, rows[0]["paymentFlow"])
         assertEquals("LEGACY_MEDICAL", rows[1]["paymentFlow"])
+        val item = (rows[0]["items"] as List<Map<String, Any?>>).single()
+        assertEquals("DECLINED", item["failureCode"])
+        assertEquals("provider declined", item["failureMessage"])
+        assertEquals("provider-refund-1", item["providerRefundId"])
     }
 
     @Test
@@ -74,18 +86,21 @@ class RefundServiceTest {
     }
 
     @Test
-    fun `service fee refund request requires active service`() {
+    fun `service fee refund request accepts completed service and preserves original status`() {
         every { orderRepository.findByIdForUpdate("order-1") } returns
-            serviceOrder(status = OrderStatusEnum.REFUND_REVIEW.value)
+            serviceOrder(status = OrderStatusEnum.COMPLETED.value)
+        every { refundRepository.findAllByOrderIdAndStatusIn("order-1", any()) } returns emptyList()
+        every {
+            paymentRepository.findAllByOrderIdAndStatusInOrderByCreatedAtAsc("order-1", any())
+        } returns listOf(serviceFeePayment())
+        every { refundRepository.saveAndFlush(any()) } answers { firstArg() }
+        every { orderRepository.save(any()) } answers { firstArg() }
+        every { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) } returns Unit
 
-        val error = assertThrows(IllegalArgumentException::class.java) {
-            service().applyRefund("order-1", "user-1", "行程取消", "不再来华")
-        }
+        val refund = service().applyRefund("order-1", "user-1", "行程取消", "不再来华")
 
-        assertTrue(error.message!!.contains("不允许申请退款"))
-        verify(exactly = 0) {
-            paymentRepository.findAllByOrderIdAndStatusInOrderByCreatedAtAsc(any(), any())
-        }
+        assertEquals(OrderStatusEnum.COMPLETED.value, refund.originalStatus)
+        verify { orderRepository.save(match { it.status == OrderStatusEnum.REFUND_REVIEW.value }) }
     }
 
     @Test
@@ -152,10 +167,11 @@ class RefundServiceTest {
     }
 
     @Test
-    fun `rejected review restores active service without invoking provider`() {
+    fun `rejected review restores completed service without invoking provider`() {
         val execution = mockk<RefundExecutionService>()
         val savedOrder = slot<OrderEntity>()
         val pending = refund(status = RefundWorkflowPersistenceService.PENDING)
+            .copy(originalStatus = OrderStatusEnum.COMPLETED.value)
         every { refundRepository.findByIdForUpdate("refund-1") } returns pending
         every { orderRepository.findByIdForUpdate("order-1") } returns
             serviceOrder(status = OrderStatusEnum.REFUND_REVIEW.value)
@@ -167,13 +183,14 @@ class RefundServiceTest {
             .adminUpdateStatus("refund-1", "REJECTED", "admin-1", "服务已安排")!!
 
         assertEquals(RefundWorkflowPersistenceService.REJECTED, result.status)
-        assertEquals(OrderStatusEnum.SERVICE_ACTIVE.value, savedOrder.captured.status)
+        assertEquals(OrderStatusEnum.COMPLETED.value, savedOrder.captured.status)
         verify(exactly = 0) { execution.execute(any()) }
     }
 
     @Test
-    fun `user cancellation locks refund before order and restores active service`() {
+    fun `user cancellation locks refund before order and restores completed service`() {
         val pending = refund(status = RefundWorkflowPersistenceService.PENDING)
+            .copy(originalStatus = OrderStatusEnum.COMPLETED.value)
         val savedOrder = slot<OrderEntity>()
         every { refundRepository.findFirstByOrderIdOrderByCreatedAtDesc("order-1") } returns pending
         every { refundRepository.findByIdForUpdate("refund-1") } returns pending
@@ -186,7 +203,7 @@ class RefundServiceTest {
         val message = service().cancelRefund("order-1", "user-1")
 
         assertEquals("退款已取消", message)
-        assertEquals(OrderStatusEnum.SERVICE_ACTIVE.value, savedOrder.captured.status)
+        assertEquals(OrderStatusEnum.COMPLETED.value, savedOrder.captured.status)
         verifyOrder {
             refundRepository.findFirstByOrderIdOrderByCreatedAtDesc("order-1")
             refundRepository.findByIdForUpdate("refund-1")
@@ -575,6 +592,22 @@ class RefundServiceTest {
     }
 
     @Test
+    fun `manual retry only invokes the failed-item executor for a processing refund`() {
+        val execution = mockk<RefundExecutionService>()
+        val processing = refund(status = RefundWorkflowPersistenceService.PROCESSING)
+        every { refundRepository.findById("refund-1") } returns Optional.of(processing)
+        every { execution.retryFailed(processing) } returns RefundExecutionOutcome(0, completed = false)
+        every { refundRepository.findById("refund-1") } returns Optional.of(processing)
+
+        val result = service(execution = execution)
+            .retryFailedProcessingRefund("refund-1", "admin-1")
+
+        assertEquals(RefundWorkflowPersistenceService.PROCESSING, result.status)
+        verify(exactly = 1) { execution.retryFailed(processing) }
+        verify(exactly = 0) { execution.execute(any()) }
+    }
+
+    @Test
     fun `legacy consultation refund remains automatic and keeps successful payment allocation`() {
         val legacyOrder = legacyOrder(status = OrderStatusEnum.CONSULTATION_PAID.value).copy(
             currency = "USD",
@@ -626,7 +659,8 @@ class RefundServiceTest {
         couponService = couponService,
         workflowPersistenceService = workflow,
         refundExecutionService = execution,
-        settlementReversalService = reversal
+        settlementReversalService = reversal,
+        refundItemRepository = refundItemRepository
     )
 
     private fun workflow() = RefundWorkflowPersistenceService(

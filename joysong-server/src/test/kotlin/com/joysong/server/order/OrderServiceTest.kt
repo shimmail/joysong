@@ -649,6 +649,7 @@ class OrderServiceTest {
     fun `confirmCompletion 用户确认完成并触发结算`() {
         val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.PENDING_COMPLETION.value)
         every { orderRepository.findById("o1") } returns Optional.of(order)
+        every { orderRepository.findByIdForUpdate("o1") } returns order
         every { orderRepository.save(any()) } answers { firstArg() }
         every { settlementService.saveSettlement("o1", any()) } returns mockk()
 
@@ -663,9 +664,43 @@ class OrderServiceTest {
     }
 
     @Test
+    fun `travel active confirmation completes without settlement and is idempotent`() {
+        var current = createTestOrder(
+            "travel-completion",
+            "user-1",
+            status = OrderStatusEnum.SERVICE_ACTIVE.value,
+            paymentFlow = "TRAVEL_GROUND_SERVICE_ONLY"
+        ).copy(serviceActivatedAt = LocalDateTime.now())
+        every { orderRepository.findById("travel-completion") } returns Optional.of(current)
+        every { orderRepository.findByIdForUpdate("travel-completion") } answers { current }
+        every { orderRepository.save(any()) } answers {
+            firstArg<OrderEntity>().also { current = it }
+        }
+
+        val first = orderService.confirmCompletion("travel-completion", "user-1")
+        val second = orderService.confirmCompletion("travel-completion", "user-1")
+
+        assertEquals(OrderStatusEnum.COMPLETED.value, first.status)
+        assertEquals(OrderStatusEnum.COMPLETED.value, second.status)
+        assertNotNull(first.completedAt)
+        verify(exactly = 1) {
+            orderStatusLogService.logTransition(
+                "travel-completion",
+                OrderStatusEnum.SERVICE_ACTIVE.value,
+                OrderStatusEnum.COMPLETED.value,
+                "user-1",
+                "USER",
+                "用户确认旅游地接服务完成"
+            )
+        }
+        verify(exactly = 0) { settlementService.saveSettlement(any(), any()) }
+    }
+
+    @Test
     fun `confirmCompletion 非本人操作抛出异常`() {
         val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.PENDING_COMPLETION.value)
         every { orderRepository.findById("o1") } returns Optional.of(order)
+        every { orderRepository.findByIdForUpdate("o1") } returns order
 
         assertThrows<IllegalArgumentException> {
             orderService.confirmCompletion("o1", "user-2")
@@ -1016,7 +1051,6 @@ class OrderServiceTest {
             { orderService.confirmVerificationForManagement(actor, "travel-1", "123456") },
             { orderService.requestCompletion("travel-1", "operator-1", "123456") },
             { orderService.requestCompletionForManagement(actor, "travel-1", "123456") },
-            { orderService.confirmCompletion("travel-1", "user-1") },
             { orderService.adminManualVerify("travel-1", "admin-1") },
             { orderService.adminUpdateStatus("travel-1", OrderStatusEnum.COMPLETED.value) },
             { orderService.autoCompleteReview("travel-1") }

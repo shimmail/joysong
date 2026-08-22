@@ -73,7 +73,7 @@ class RefundWorkflowPersistenceService(
             ?: throw IllegalStateException("订单状态无效: ${order.status}")
         val isTravelGroundService = order.paymentFlow == TRAVEL_GROUND_SERVICE_ONLY
         if (isTravelGroundService) {
-            require(current == OrderStatusEnum.SERVICE_ACTIVE) {
+            require(current in setOf(OrderStatusEnum.SERVICE_ACTIVE, OrderStatusEnum.COMPLETED)) {
                 "当前状态[${current.value}]不允许申请退款"
             }
         } else {
@@ -293,7 +293,7 @@ class RefundWorkflowPersistenceService(
         )
         val restored = orderRepository.save(
             order.copy(
-                status = if (isTravelGroundService) OrderStatusEnum.SERVICE_ACTIVE.value else refund.originalStatus,
+                status = refund.originalStatus,
                 refundStatus = REJECTED,
                 refundAmount = BigDecimal.ZERO,
                 updatedAt = now

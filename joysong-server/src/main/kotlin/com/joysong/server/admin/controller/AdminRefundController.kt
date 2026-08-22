@@ -27,4 +27,13 @@ class AdminRefundController(
             ?: return BaseResponse.error<Any>("退款记录不存在")
         return BaseResponse.success(result)
     }
+
+    @PostMapping("/refunds/{id}/retry")
+    fun retryRefund(
+        @PathVariable id: String,
+        authentication: Authentication
+    ): BaseResponse<*> {
+        val adminId = authentication.principal as String
+        return BaseResponse.success(refundService.retryFailedProcessingRefund(id, adminId))
+    }
 }

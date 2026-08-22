@@ -24,6 +24,42 @@ class RefundItemPersistenceService(
     private val refundRepository: RefundRepository,
     private val orderRepository: OrderRepository
 ) {
+    /** Requeues only provider-failed items; successful items remain immutable. */
+    @Transactional(rollbackFor = [Exception::class])
+    fun requeueFailedItems(refundId: String): List<RefundItemEntity> {
+        val refund = refundRepository.findByIdForUpdate(refundId)
+            ?: throw IllegalArgumentException("REFUND_NOT_FOUND")
+        require(refund.status == RefundWorkflowPersistenceService.PROCESSING) {
+            "INVALID_REFUND_STATUS"
+        }
+        val order = orderRepository.findByIdForUpdate(refund.orderId)
+            ?: throw IllegalArgumentException("ORDER_NOT_FOUND")
+        require(order.status == OrderStatusEnum.REFUND_PROCESSING.value) {
+            "INVALID_ORDER_REFUND_STATUS"
+        }
+        val failedItems = refundItemRepository.findAllByRefundIdOrderByCreatedAtAsc(refundId)
+            .filter { it.status == PaymentStatus.FAILED.name }
+        require(failedItems.isNotEmpty()) { "NO_FAILED_REFUND_ITEMS" }
+        val now = LocalDateTime.now()
+        return failedItems.map { failed ->
+            val locked = refundItemRepository.findByIdForUpdate(failed.id)
+                ?: throw IllegalArgumentException("REFUND_ITEM_NOT_FOUND")
+            require(locked.status == PaymentStatus.FAILED.name) { "REFUND_ITEM_STATUS_CHANGED" }
+            refundItemRepository.save(
+                locked.copy(
+                    status = if (locked.providerRefundId.isNullOrBlank()) {
+                        PaymentStatus.CREATED.name
+                    } else {
+                        PaymentStatus.PROCESSING.name
+                    },
+                    failureCode = null,
+                    failureMessage = null,
+                    updatedAt = now
+                )
+            )
+        }
+    }
+
     /** Short transaction: freezes the allocation before any provider request is sent. */
     @Transactional(rollbackFor = [Exception::class])
     fun prepareItems(refund: RefundEntity): List<RefundItemEntity> {
