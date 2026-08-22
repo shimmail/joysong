@@ -36,36 +36,51 @@ end note
 
 |平台|
 if (Alipay+ 当前可用?) then (是)
-  :创建支付尝试\nexpiresAt = min(now + 30分钟, 渠道有效期);
+  :创建支付尝试\n状态为 CREATED / REQUIRES_ACTION;
+  :expiresAt = min(now + 30分钟, 渠道有效期);
   |Alipay+|
   :打开 HTTPS 托管收银台;
   :用户使用支付宝完成 USD 支付;
 
-  if (30分钟内渠道确认成功?) then (是)
-    |平台|
-    :验签或主动查单确认;
+  |平台|
+  :仅通过验签渠道事件或主动查单确认结果;
+  if (确认 SUCCEEDED?) then (是)
     :幂等标记支付成功;
     :订单进入 SERVICE_ACTIVE;
     :记录 serviceActivatedAt;
     :开放绑定地接人员资料;
     :开放订单专属地接沟通;
-    :通知海外用户和绑定顾问;
-  else (否或超时)
-    |平台|
-    :关闭本次支付尝试;
-    :支付尝试进入 EXPIRED 或 FAILED;
-    :订单仍保持 PENDING_SERVICE_FEE;
-    |海外用户|
-    :稍后可创建新的30分钟支付尝试;
-    stop
+  else (否)
+    if (PROCESSING 或结果未知?) then (是)
+      :保持当前状态，不按本地时钟关闭;
+      :主动查单、对账或转人工处理;
+      :订单仍保持 PENDING_SERVICE_FEE;
+      stop
+    else (否)
+      if (CREATED / REQUIRES_ACTION 已超时?) then (是)
+        :支付尝试进入 EXPIRED;
+      else (明确 FAILED / CANCELLED)
+        :保留渠道确认的终态;
+      endif
+      :订单仍保持 PENDING_SERVICE_FEE;
+      |海外用户|
+      :可创建新的30分钟支付尝试;
+      stop
+    endif
   endif
 else (否)
   |平台|
-  :返回“支付渠道暂不可用”;
-  :不创建模拟成功支付;
-  :订单保持可支付;
+  :在本地尝试落库前返回 HTTP 503\nPAYMENT_PROVIDER_UNAVAILABLE;
+  :支付尝试零新增，不模拟成功;
+  :订单保持 PENDING_SERVICE_FEE;
   stop
 endif
+
+note right
+Alipay+ 商户注册和真实网关尚未完成；
+当前创建支付尝试会走“不可用”分支。
+支付/退款订单服务通知属于后续工作。
+end note
 
 |海外用户|
 :在平台内与地接人员沟通;
@@ -76,25 +91,32 @@ endif
 if (用户申请全额退款?) then (是)
   :订单进入 REFUND_REVIEW;
   :暂停发送新消息，沟通历史仍可读;
-  :管理员人工审核;
-
-  if (审核批准?) then (是)
-    :通过原支付渠道发起退款;
-    :订单进入 REFUND_PROCESSING;
-    :继续暂停发送，沟通历史仍可读;
-    if (渠道确认退款成功?) then (是)
-      :订单进入 REFUNDED;
-      :撤销地接服务权限;
-      :沟通历史转为受控只读;
-      stop
-    else (否)
-      :保持 REFUND_PROCESSING;
-      :主动查单或转人工处理;
-      stop
-    endif
+  if (待审核时用户取消申请?) then (是)
+    :退款记录进入 CANCELLED;
+    :订单恢复 SERVICE_ACTIVE;
+    :恢复发送地接消息;
   else (否)
-    :记录拒绝原因;
-    :恢复 SERVICE_ACTIVE 和地接沟通;
+    :管理员人工审核;
+
+    if (审核批准?) then (是)
+      :通过原支付渠道发起退款;
+      :订单进入 REFUND_PROCESSING;
+      :继续暂停发送，沟通历史仍可读;
+      if (渠道确认退款成功?) then (是)
+        :订单进入 REFUNDED;
+        :撤销地接服务权限;
+        :隐藏顾问履约资料;
+        :沟通历史转为受控只读;
+        stop
+      else (否)
+        :保持 REFUND_PROCESSING;
+        :主动查单或转人工处理;
+        stop
+      endif
+    else (否)
+      :记录拒绝原因;
+      :恢复 SERVICE_ACTIVE 和地接沟通;
+    endif
   endif
 endif
 
@@ -103,5 +125,10 @@ endif
 
 |平台|
 :不创建医疗费支付、退款、分账或结算记录;
+
+note right
+姓名、护照、航班、酒店等
+来华资料备案不在本期。
+end note
 stop
 @enduml

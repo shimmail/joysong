@@ -1,6 +1,6 @@
 # 娇颜颂 Flutter API 接入契约
 
-> 状态：服务端当前实现基线（2026-08-15）
+> 状态：服务端当前实现基线（2026-08-22）
 > 适用：Flutter Android/iOS 用户端，以及医生、顾问、机构法人的专业管理入口
 > API 根路径：`{baseUrl}/api`
 
@@ -358,18 +358,106 @@ Flutter Agent 的 SSE 配置固定为关闭，运行时仅使用 9.1 中的同�
 
 Agent 调试仅使用受控、脱敏的结构化日志；不存在 traces API，Flutter 不得调用 `/agent/traces`。Agent 输出是辅助决策，不是医疗诊断。Flutter 必须展示风险、限制、替代方案和需要确认项，不能只展示推荐项目名称。大模型密钥未配置时，接口可能使用规则或降级结果；客户端不要根据 `provider` 文案推断医疗可靠性。
 
-## 10. 订单、支付占位与核销流程
+## 10. 订单与旅游地接服务费流程
 
-### 10.1 用户接口
+本节以 `paymentFlow = TRAVEL_GROUND_SERVICE_ONLY` 为当前新订单合同。10.5 之后保留的面诊金、尾款、核销、结算和钱包仅用于 `LEGACY_MEDICAL` 历史兼容；Flutter 不得把旧动作暴露给新流程订单。
+
+### 10.1 当前报价与下单
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/orders` | 创建订单 |
+| GET | `/discover/travel-ground-service-quote?doctorId=&institutionProjectId=` | 返回 USD 医疗套餐优惠前金额、平台比例和旅游地接服务费分币报价 |
+| POST | `/orders` | 创建当前用户订单并立即绑定其选择的顾问 |
+| GET | `/orders?status=&offset=&limit=` | 当前用户订单 |
+| GET | `/orders/{id}` | 订单详情；服务端按状态裁剪顾问信息 |
+| POST | `/orders/{id}/cancel` | 取消尚未支付订单；支付尝试过期不会调用它 |
+
+报价固定返回 `currency`、`medicalListPriceMinor`、`platformServiceRateBps`、`travelGroundServiceFeeMinor`。服务费按 `medicalListPriceMinor * platformServiceRateBps / 10000` HALF_UP 舍入，不乘数量、不应用优惠券。
+
+新订单请求：
+
+```json
+{
+  "projectId": "base-project-id",
+  "institutionProjectId": "institution-project-id",
+  "doctorId": "doctor-user-id",
+  "consultantId": "consultant-user-id",
+  "remark": "",
+  "appointmentTime": "2026-09-01T10:00:00"
+}
+```
+
+`consultantId` 必填。服务端重新校验顾问属于所选机构且有效，并在创建时固化顾问、USD 金额和平台比例快照；不存在支付后指派或自动指派。Flutter 不发送 `quantity`、`couponId`、`consultationFee`、`remainingAmount` 或任何客户端金额。
+
+### 10.2 当前订单状态和显式权限
+
+```text
+PENDING_SERVICE_FEE
+  -> SERVICE_ACTIVE
+  -> REFUND_REVIEW
+       -> SERVICE_ACTIVE
+       -> REFUND_PROCESSING
+            -> REFUNDED
+```
+
+订单响应新增并以服务端值为准：`paymentFlow`、`medicalListPriceMinor`、`platformServiceRateBps`、`travelGroundServiceFeeMinor`、`consultantBound`、`serviceActivated`、`consultantDetailsVisible`、`serviceConversationReadable`、`serviceMessagingEnabled`、`consultantAvatar`。
+
+- 支付前 `consultantBound=true` 只表示已绑定；`consultantId`、`institutionId`、`consultantName`、`consultantAvatar` 和履约资料不向用户返回。
+- `SERVICE_ACTIVE` 才显示允许公开的顾问姓名、头像和机构，并允许读取/发送订单会话。
+- `REFUND_REVIEW`、`REFUND_PROCESSING` 保留资料和历史读取，`serviceMessagingEnabled=false`。
+- `REFUNDED` 隐藏顾问履约资料，保留历史受控只读，禁止发送。
+
+客户端不得根据 `paidAmount`、浏览器回跳或本地状态推导这些权限。未知状态降级显示并刷新服务端。
+
+### 10.3 当前固定支付合同
+
+```http
+POST /orders/{orderId}/service-fee-payment-attempts
+Idempotency-Key: <同一次用户动作稳定复用的 8..100 字符值>
+```
+
+请求无 body；服务端固定 `TRAVEL_GROUND_SERVICE_FEE`、`ALIPAY_PLUS`、`ALIPAY_PLUS_CASHIER`、`USD` 和订单快照金额。响应 `PaymentAttemptResponse` 字段为：`id`、`orderId`、`paymentType`、`provider`、`paymentMethod`、`currency`、`amountMinor`、`status`、`providerPaymentId`、`failureCode`、`failureMessage`、`nextAction`、`expiresAt`、`createdAt`、`updatedAt`。
+
+查询：
+
+```http
+GET /orders/{orderId}/payments/latest
+    ?paymentType=TRAVEL_GROUND_SERVICE_FEE
+    &refresh=true
+
+GET /payments/{paymentId}?refresh=true
+```
+
+Flutter 只打开 `nextAction.type=REDIRECT` 的受信任 HTTPS URL；当前允许 `cashier.alipayplus.com` 及其子域，不检查 GPS、IP 或国家。回到前台只查单，不调用客户端确认接口。
+
+状态为 `CREATED`、`REQUIRES_ACTION`、`PROCESSING`、`SUCCEEDED`、`FAILED`、`CANCELLED`、`EXPIRED`、`PARTIALLY_REFUNDED`、`REFUNDED`。仅超时的 `CREATED` / `REQUIRES_ACTION` 可由服务端变为 `EXPIRED`；`PROCESSING` 或未知结果不按本地时钟过期。只有明确 `FAILED` / `CANCELLED` / `EXPIRED` 可以重新创建尝试，`SUCCEEDED` 只能由验签渠道事件或主动查单确认。
+
+Alipay+ 商户注册和收单参数仍在安排，仓库没有真实 gateway。当前创建接口返回 HTTP 503 / `PAYMENT_PROVIDER_UNAVAILABLE` 且零本地尝试；Flutter 显示渠道暂不可用，绝不能模拟成功。
+
+### 10.4 当前订单会话与退款
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/orders/{id}/service-conversation` | 空 body；取得/创建该订单的 `ORDER_SERVICE` 会话 |
+| POST | `/orders/{id}/refund` | 申请整笔旅游地接服务费退款，进入人工审核 |
+| GET | `/orders/{id}/refund` | 查看退款详情 |
+| POST | `/orders/{id}/cancel-refund` | 仅在待审核阶段取消申请并恢复服务 |
+
+服务会话响应必须有 `conversationType=ORDER_SERVICE` 且 `orderId` 与请求一致，否则 fail-closed。售前 `DIRECT` 与订单履约会话分离；新流程会话不提供删除/撤回入口，退款审核、渠道处理和退款成功后均为只读历史。
+
+新流程只允许全额、人工审核、原渠道退款。退款状态只有 `PENDING`、`REFUND_PROCESSING`、`APPROVED`、`REJECTED`、`CANCELLED`，没有 `COMPLETED`。医院医疗费直接向医院支付，不适用平台退款、分账、结算或钱包。
+
+本期没有姓名、护照、航班、酒店备案。订单服务通知属于后续工作，不得由客户端假定已实现。
+
+### 10.5 既有历史订单兼容接口（仅 `LEGACY_MEDICAL`）
+
+`POST /orders` 只执行 10.1 的当前新流程，服务端固定创建 `TRAVEL_GROUND_SERVICE_ONLY`；请求没有 `paymentFlow` 选择项，也不存在创建 `LEGACY_MEDICAL` 订单的接口。历史订单只能来自既有数据或保留迁移，Flutter 仅对这些已存在的行使用下列仍有效接口：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
 | GET | `/orders?status=&offset=&limit=` | 当前用户订单 |
 | GET | `/orders/{id}` | 订单详情 |
-| POST | `/orders/{id}/pay-consultation` | 支付面诊金（当前占位） |
 | POST | `/orders/{id}/verification-code` | 生成首次到店 6 位核销码 |
-| POST | `/orders/{id}/pay-balance` | 支付尾款（当前占位） |
 | POST | `/orders/{id}/confirm-completion` | 用户确认完成 |
 | POST | `/orders/{id}/refund` | 申请退款 |
 | GET | `/orders/{id}/refund` | 退款详情 |
@@ -380,23 +468,9 @@ Agent 调试仅使用受控、脱敏的结构化日志；不存在 traces API，
 | POST | `/orders/{id}/cancel` | 取消待支付订单 |
 | DELETE | `/orders/{id}` | 删除已结束订单 |
 
-创建订单请求：
+### 10.6 历史状态与双方动作（仅 `LEGACY_MEDICAL`）
 
-```json
-{
-  "projectId": "base-project-id",
-  "institutionProjectId": "institution-project-id",
-  "doctorId": "doctor-user-id",
-  "quantity": 1,
-  "remark": "",
-  "userCouponId": 123,
-  "appointmentTime": "2026-08-06T10:00:00"
-}
-```
-
-选择医生时必须使用 `/discover/institution-projects/{institutionProjectId}/doctors` 返回的医生；服务端会再次校验医生与机构项目绑定。价格由服务端计算，客户端金额只用于展示。
-
-### 10.2 状态与双方动作
+下图只描述既有历史行可能保留的状态，不表示当前还能通过平台创建历史订单或发起面诊金/尾款支付：
 
 ```text
 PENDING_PAYMENT
@@ -413,21 +487,21 @@ PENDING_PAYMENT
 
 核销职责必须分离：
 
-1. 用户在 `CONSULTATION_PAID` 状态调用 `/verification-code`，向现场人员展示核销码。
+1. 已处于 `CONSULTATION_PAID` 的历史订单可由用户调用 `/verification-code`，向现场人员展示核销码。
 2. 订单所属医生调用 `POST /management/orders/{id}/verify`，请求体 `{ "verificationCode": "123456" }`，推进到 `VERIFIED`。
-3. 用户支付尾款后进入 `BALANCE_PAID` 并获得第二次核销码。
+3. 已处于 `BALANCE_PAID` 的历史订单可生成第二次核销码；当前接口不能再把其他状态推进为 `BALANCE_PAID`。
 4. 订单所属医生调用 `POST /management/orders/{id}/request-completion`，推进到 `PENDING_COMPLETION`。
 5. 用户调用 `/confirm-completion` 最终确认。
 
 旧 `POST /orders/{id}/verify` 仅为旧 Android 兼容，当前语义也只是生成核销码。Flutter 禁止使用该旧路径。用户端绝不能调用专业端核销接口，也不能自行确认自己的核销码。
 
-### 10.3 支付边界
+### 10.7 历史支付关闭边界（仅 `LEGACY_MEDICAL`）
 
-支付方式、第三方下单、验签、异步回调、幂等通知和退款通道尚未落地。现有 `pay-consultation`、`pay-balance` 与兼容 `/pay` 仅用于内部流程占位；`/pay` 的 `method` 当前不会真正选择渠道。
+`POST /orders/{id}/pay-consultation`、`POST /orders/{id}/pay-balance` 和兼容 `POST /orders/{id}/pay` 均已移除，固定返回真实 HTTP 410 / `LEGACY_PAYMENT_ENDPOINT_REMOVED`。Flutter 不得调用、自动降级或把 410 当成可重试错误，也不能用这些路径为历史订单发起新收款。
 
-Flutter 可以完成页面和接口抽象，但生产发布前必须等待支付服务契约确定，并至少补齐：支付预下单、渠道参数、支付查询、服务端回调验签、回调幂等、退款查询。客户端不能把“接口返回成功”等同于渠道到账。
+provider-aware `POST /orders/{id}/payment-attempts` 不是订单创建接口，只为已存在的 `LEGACY_MEDICAL` 历史支付责任保留。涉及 Stripe 时，adapter 默认由 `STRIPE_LEGACY_ENABLED=false` 关闭；只有安全门核对出既有查询/退款责任且受控批准后才可启用。该接口不能创建 `LEGACY_MEDICAL` 订单，不得用于当前新订单，也不得作为重新开放面诊金/尾款收款的入口。
 
-### 10.4 收入台账与结算查询
+### 10.8 历史收入台账与结算查询（新流程不生成）
 
 结算记录和钱包是平台内部收入台账：金额一律使用最小货币单位整数 `minor` 与 ISO-4217 三位 `currency`，同一金额对象不得混用元/浮点数与 `minor`。`PENDING`、`AVAILABLE`、`PARTIALLY_REVERSED`、`REVERSED` 是分账状态；钱包分别维护 `pending`、`available`、`frozen` 三个余额桶。`PENDING` 表示待释放的内部余额，`AVAILABLE` 表示已释放到内部可用余额，部分或完全冲正分别为 `PARTIALLY_REVERSED`、`REVERSED`。
 
@@ -720,8 +794,8 @@ resultingInstitutionProjectId, submittedAt, updatedAt
 
 - 医生文章必须使用专业端 `/management/doctor-articles`，不得调用管理员文章接口。四个路由分别是列表、创建、完整更新和逻辑删除；没有文章详情 GET。每次请求均重新校验当前 `ACTIVE DOCTOR`，普通医生只能读写 `doctorId == self` 的文章。管理员端接口保持其既有契约，专业端新增路由不替代、不修改管理员系统行为。
 - `DoctorArticleDraft` 请求必须且只能序列化 `title`、`summary`、`coverImage`、`publishDate`、`content` 五个非 null 字段；`publishDate` 为 `yyyy-MM-dd`。响应 `DoctorArticle` 精确包含 `id`、`title`、`authorName`、`summary`、`coverImage`、`publishDate`、`content`、`readCount`、`doctorId`、`createdAt`、`updatedAt`。后六类身份、计数和时间字段均只读。创建为 HTTP 201；其余成功为 200；参数错误 400、越权 403、不存在 404、并发/状态冲突 409。列表支持 `keyword`、`offset`、`limit`，编辑页需要详情时从本人列表按 id 定位。
-- `DoctorOrder` 复用管理订单 JSON 字段：`id`、`orderNo`、`userId`、`projectId`、`institutionId`、`consultantId`、`doctorId`、`institutionProjectId`、`projectName`、`institutionName`、`consultantName`、`coverImage`、`amount`、`price`、`currency`、`paidAmount`、`couponId`、`userCouponId`、`discountAmount`、`status`、`quantity`、`remark`、`consultationFee`、`remainingAmount`、`transactionMethod`、`userPhone`、`appointmentTime`、`paymentTime`、`verifyCode`、`qrCode`、`evidenceUrl`、`hasReview`、`refundStatus`、`refundAmount`、`doctorName`、`createdAt`、`updatedAt`、`completedAt`、`canVerify`、`canRequestCompletion`。`price` 是 `amount` 的兼容别名；金额按十进制定点解析。管理响应的 `verifyCode` 恒为 `null`，UI 不能展示或缓存核销码。
-- 订单列表接受 `status`、`offset`、`limit`，详情与列表返回同一 VO。普通医生只能访问 `doctorId == self`；法人和顾问没有订单权限。`canVerify` 仅在 `CONSULTATION_PAID` 为 true，`canRequestCompletion` 仅在 `BALANCE_PAID` 为 true，Flutter 只能按服务端标志显示动作，不得单凭本地状态推断。
+- `DoctorOrder` 复用管理订单 JSON 字段：`id`、`orderNo`、`userId`、`projectId`、`institutionId`、`consultantId`、`doctorId`、`institutionProjectId`、`projectName`、`institutionName`、`consultantName`、`consultantAvatar`、`coverImage`、`amount`、`price`、`currency`、`paidAmount`、`couponId`、`userCouponId`、`discountAmount`、`status`、`paymentFlow`、`medicalListPriceMinor`、`platformServiceRateBps`、`travelGroundServiceFeeMinor`、`consultantBound`、`serviceActivated`、`consultantDetailsVisible`、`serviceConversationReadable`、`serviceMessagingEnabled`、`quantity`、`remark`、`consultationFee`、`remainingAmount`、`transactionMethod`、`userPhone`、`appointmentTime`、`paymentTime`、`verifyCode`、`qrCode`、`evidenceUrl`、`hasReview`、`refundStatus`、`refundAmount`、`doctorName`、`createdAt`、`updatedAt`、`completedAt`、`canVerify`、`canRequestCompletion`。`price` 是 `amount` 的兼容别名；金额按十进制定点解析，两个金额 `*Minor` 字段按显式币种的最小单位整数解析，`platformServiceRateBps` 按基点解析。管理响应的 `verifyCode` 恒为 `null`，UI 不能展示或缓存核销码。
+- 订单列表接受 `status`、`offset`、`limit`，详情与列表返回同一 VO。普通医生只能访问 `doctorId == self`；法人和顾问没有订单权限。`canVerify` 仅在历史 `CONSULTATION_PAID` 为 true，`canRequestCompletion` 仅在历史 `BALANCE_PAID` 为 true；`TRAVEL_GROUND_SERVICE_ONLY` 行的两个标志均为 false，不得展示核销、完成、尾款或结算动作。Flutter 只能按服务端标志显示旧流程动作，不得单凭本地状态推断。
 - 两个订单动作请求体都必须且只能是 `{ "verificationCode": "123456" }`，核销码须为 6 位数字。服务端加锁后再次校验对象、状态和核销码：不存在 404、对象越界/身份失效 403、核销码格式或不匹配 400、状态不允许 409。`CONSULTATION_PAID -> VERIFIED` 与 `BALANCE_PAID -> PENDING_COMPLETION` 成功后清除核销码并各写一次状态日志；已处于对应目标状态且时间戳存在的直接重放返回当前对象，不重复写日志，后续其他状态仍为 409。
 
 - 医生仅通过 `/management/doctor-profile` 读取和完整更新自己的单个医生档案；请求不发送 `id` 或 `userId`。PUT 必须带齐 `name`、`title`、`bio`、`avatar`、`contactPhone`、`specialties`、`credentials`、`credentialImages`、`certificationTags` 九个非 null String 字段。`name` 不得为空白，其余八项可用 `""` 清空；缺失或 `null` 为 400。
@@ -734,12 +808,12 @@ resultingInstitutionProjectId, submittedAt, updatedAt
 - 法人可审核本机构的成员关系和机构项目申请；不能编辑医生档案，也不能绕过项目申请/审核流程直接创建、修改或删除机构项目。旧专业端 `/admin/institutions/{id}` PUT 已移除；`POST/PUT/DELETE /api/admin/institutions...` 等机构写操作及平台全量 CRUD 始终仅限 `ADMIN`。上表列出的机构范围 GET 旧读路径仅在后续切换完成前向已认证专业用户兼容，并由服务端按 `visibleInstitutionIds` 做对象级只读过滤；`GET /admin/projects` 则只提供全局项目目录。所有兼容 GET 均不授予任何写权限。
 - 医生和顾问机构关系统一遵循 11.1 的独立申请账本契约；两种身份都可提交 `JOIN`/`LEAVE` 并撤回本人 `PENDING`，法人从 `/reviewable` 审核本机构申请。旧顾问接口只承担滚动兼容，已处理申请不会被重提覆盖。
 - Flutter 专业项目选择统一使用 `GET /management/projects`，不得继续调用 `/admin/projects`。该目录只检查用户是否拥有至少一个活跃 `DOCTOR`、`CONSULTANT` 或 `INSTITUTION_LEGAL_REPRESENTATIVE` 身份；同时具有 `ADMIN` 身份不会改变该授权结果。它返回全局只读数组，按 `name`、`id` 排序。每项完整固定包含 13 个字段：`id`、`name`、`category`、`description`、`tags`、`categoryTags`、`coverImage`、`referencePrice`、`currency`、`slogan`、`detailContent`、`images`、`salesCount`；不接受查询参数，也不授予任何项目写能力。
-- `POST /admin/institution-project-requests` 的 `PROFILE_UPDATE` 是医生修改本人医生级项目资料、价格、面诊费和分账的唯一生效前申请入口。Flutter 请求 VO 必须精确包含 12 个键：`institutionProjectId`、固定值 `requestType: PROFILE_UPDATE`、`serviceDescription`、`priceSuggestion`、`notes`、`serviceTags`、`scheduleNote`、`coverImage`、`images`、`consultationFee`、`commissionRate`、`institutionRate`；其中 `serviceTags`、`images` 是 JSON 字符串数组，不能发送 `doctorId`、`platformRate`、`doctorRate` 或基线字段。
-- `GET /admin/institution-project-requests/profile-update-targets` 是表单唯一的当前值来源，只返回已认证医生本人仍有效的医生—机构项目。响应是数组，每项 `DoctorProjectProfileUpdateTargetView` 精确包含：`institutionProjectId`、`projectName`、`institutionId`、`institutionName`、`currentPrice`、`serviceDescription`、`serviceTags`、`scheduleNote`、`coverImage`、`images`、`consultationFee`、`commissionRate`、`institutionRate`、`platformRate`、`doctorRate`。15 个字段全部非 null；无有效配置时返回面诊费 0、顾问率 0、策略默认机构率以及当前平台率和推导医生率。Flutter 不得用机构项目价或本地默认比例伪造基线。
-- `serviceDescription` 非空且最长 5000；`notes`/`scheduleNote`/`coverImage` 最长分别为 2000/500/500；两个数组各最多 20 项，标签每项非空且最长 100，图片每项最长 500。`priceSuggestion`、`consultationFee` 为 `0..99999999.99` 的最多两位小数；`commissionRate`（兼容字段名，语义为顾问率）和 `institutionRate`（机构率）均为 `0..100` 的最多两位小数。
-- `platformRate` 是服务端配置、不可编辑；`doctorRate = 100 - platformRate - institutionRate - commissionRate` 由服务端推导且不得小于 0。Flutter 只读展示响应中的 `platformRate` 与 `doctorRate`，文案必须明确区分顾问率、机构率、平台率和医生净比例。
+- `POST /admin/institution-project-requests` 的 `PROFILE_UPDATE` 是医生修改本人医生级项目资料和医疗套餐优惠前金额的生效前申请入口。Flutter 请求 VO 必须精确包含 13 个键：`institutionProjectId`、固定值 `requestType: PROFILE_UPDATE`、`serviceDescription`、`priceSuggestion`、`notes`、`serviceTags`、`scheduleNote`、`coverImage`、`images`、`consultationFee`、`commissionRate`、`institutionRate`、`medicalListPrice`；其中 `serviceTags`、`images` 是 JSON 字符串数组，不能发送 `doctorId`、`platformRate`、`doctorRate` 或任何 `current*` 基线字段。三个旧金额/比例字段仍须显式携带当前基线以保持后端滚动兼容，但当前新支付 UI 不提供编辑入口。
+- `GET /admin/institution-project-requests/profile-update-targets` 是表单唯一的当前值来源，只返回已认证医生本人仍有效的医生—机构项目。响应是数组，每项 `DoctorProjectProfileUpdateTargetView` 精确包含：`institutionProjectId`、`projectName`、`institutionId`、`institutionName`、`currentPrice`、`serviceDescription`、`serviceTags`、`scheduleNote`、`coverImage`、`images`、`consultationFee`、`commissionRate`、`institutionRate`、`medicalListPrice`、`platformRate`、`doctorRate`。16 个字段全部非 null；无有效配置时返回面诊费 0、医疗套餐优惠前金额 0、顾问率 0、策略默认机构率以及当前平台率和推导医生率。Flutter 不得用机构项目价、本地默认金额或默认比例伪造基线；`medicalListPrice=0` 的旧基线必须由医生填写大于 0 的值后才能提交。
+- `serviceDescription` 非空且最长 5000；`notes`/`scheduleNote`/`coverImage` 最长分别为 2000/500/500；两个数组各最多 20 项，标签每项非空且最长 100，图片每项最长 500。`priceSuggestion`、`consultationFee` 为 `0..99999999.99` 的最多两位小数；`medicalListPrice` 必须大于 0 且最多两位小数。`commissionRate`（兼容字段名，语义为顾问率）和 `institutionRate`（机构率）均为 `0..100` 的最多两位小数。
+- `platformRate` 是平台配置、不可编辑；`doctorRate = 100 - platformRate - institutionRate - commissionRate` 由服务端推导且不得小于 0。Flutter 只读展示这两个字段，并明确区分顾问率、机构率、平台率和医生净比例。当前新支付只使用 `platformRate` 与 `medicalListPrice` 计算旅游地接服务费；`doctorRate` 仅为历史分账兼容派生值，不能进入新订单金额或结算计算。
 - 提交成功只创建 `PENDING` 申请。机构法人通过 `POST /admin/institution-project-requests/{id}/review` 且显式发送 `force: false` 批准后，服务端才按 `(doctorId, institutionProjectId)` 在同一事务中更新本人 `doctor_projects` 与本人分账配置；基线变化返回 409，绝不波及同项目其他医生。平台管理员可显式发送 `force: true` 强制处理，但必须填写 `reviewNote`，响应以 `forceProcessed`、`reviewedBy`、`reviewedAt` 留痕。
-- `DoctorProjectChangeView`/Flutter 响应 VO 字段固定为：`id`、`doctorId`、`doctorName`、`institutionId`、`institutionName`、`institutionProjectId`、`projectName`、`requestType`、`serviceDescription`、`priceSuggestion`、`notes`、`serviceTags`、`scheduleNote`、`coverImage`、`images`、`consultationFee`、`commissionRate`、`institutionRate`、`platformRate`、`doctorRate`、`currentPrice`、`currentServiceDescription`、`currentServiceTags`、`currentScheduleNote`、`currentCoverImage`、`currentImages`、`currentConsultationFee`、`currentCommissionRate`、`currentInstitutionRate`、`currentPlatformRate`、`currentDoctorRate`、`forceProcessed`、`status`、`submittedBy`、`reviewedBy`、`reviewerName`、`reviewNote`、`submittedAt`、`reviewedAt`、`updatedAt`。V17/V18 先增加可空提案、基线与 11 个 `current*` 列，V18 回填升级前的 `PROFILE_UPDATE`，V19 最后启用范围和判别约束。新申请的 `current*` 是提交事务固化的 before 快照；升级前历史申请无法还原提交时原值，因此 V18 按 `(doctorId, institutionProjectId)` 捕获**迁移执行时**的当前医生项目与未软删 config，明确属于近似快照。缺 config 使用面诊费 0、顾问率 0、机构率 40、平台率 10 和推导医生率；缺医生项目使用价格 0 与空资料。审核页使用已固化字段，不能在审批时重新读取当前表冒充原值。非 `PROFILE_UPDATE` 的这些字段仍为 null。
+- `DoctorProjectChangeView`/Flutter 响应 VO 字段固定为：`id`、`doctorId`、`doctorName`、`institutionId`、`institutionName`、`institutionProjectId`、`projectName`、`requestType`、`serviceDescription`、`priceSuggestion`、`notes`、`serviceTags`、`scheduleNote`、`coverImage`、`images`、`consultationFee`、`commissionRate`、`institutionRate`、`medicalListPrice`、`platformRate`、`doctorRate`、`forceProcessed`、`currentPrice`、`currentServiceDescription`、`currentServiceTags`、`currentScheduleNote`、`currentCoverImage`、`currentImages`、`currentConsultationFee`、`currentMedicalListPrice`、`currentCommissionRate`、`currentInstitutionRate`、`currentPlatformRate`、`currentDoctorRate`、`status`、`submittedBy`、`reviewedBy`、`reviewerName`、`reviewNote`、`submittedAt`、`reviewedAt`、`updatedAt`。V17/V18 先增加可空提案、基线与 11 个原有 `current*` 列，V18 回填升级前的 `PROFILE_UPDATE`，V19 最后启用范围和判别约束；V29 追加 `medicalListPrice` 与 `currentMedicalListPrice`，不删除或重写历史申请。新申请的 `current*` 是提交事务固化的 before 快照；升级前历史申请无法还原提交时原值，因此 V18 按 `(doctorId, institutionProjectId)` 捕获**迁移执行时**的当前医生项目与未软删 config，明确属于近似快照。缺 config 使用面诊费 0、医疗套餐优惠前金额 0、顾问率 0、机构率 40、平台率 10 和推导医生率；缺医生项目使用价格 0 与空资料。审核页使用已固化字段，不能在审批时重新读取当前表冒充原值，并同时展示 `medicalListPrice` / `currentMedicalListPrice` 及只读 `platformRate` / `currentPlatformRate`。非 `PROFILE_UPDATE` 的这些字段仍为 null。
 - 该接口族使用真实 HTTP 状态：400 参数错误、403 身份/对象/强制处理越权、409 重复 `PENDING`/基线变化/已处理或并发冲突、500 服务端异常。写请求不得自动重试；409 应刷新申请与当前项目配置后提示用户重新提交。
 - 医生不能直接修改机构项目价格、销量、评分、评价数或上下架状态。
 - 医生和机构法人都不能修改自己的评分、评价数和认证状态；服务端会保留原值。
@@ -764,7 +838,10 @@ resultingInstitutionProjectId, submittedAt, updatedAt
 
 | 能力 | 状态 | Flutter 处理 |
 |---|---|---|
-| 微信/支付宝等真实支付与回调 | 未落地 | 保留支付抽象，不宣称真实到账 |
+| Alipay+ 旅游地接服务费真实网关 | 商户注册及收单参数仍在安排，仓库无真实 gateway | 创建返回 503 / `PAYMENT_PROVIDER_UNAVAILABLE`；零本地尝试，不模拟成功 |
+| 历史 Stripe adapter | 默认关闭、只承担旧查询/退款责任 | 新订单不展示；启动安全门 fail-closed |
+| 订单服务通知 | 后续工作 | 不假定支付或退款时已有推送 |
+| 姓名/护照/航班/酒店备案 | 本期不建设 | 不新增入口、模型、缓存或埋点 |
 | 邮箱验证码、邮箱绑定 | 未开放 | 隐藏提交入口 |
 | AI 流式输出 | Flutter 固定关闭 | 仅使用同步 REST，不做 SSE 回退或重放 |
 | 短信发送 | 依赖短信供应商配置 | 开发环境可能只记录验证码 |
@@ -780,6 +857,10 @@ resultingInstitutionProjectId, submittedAt, updatedAt
 - [ ] refresh token 轮换后原子保存；403 不清登录态。
 - [ ] refresh token 使用安全存储；日志、崩溃上报和调试面板不输出令牌、身份证号或认证文件。
 - [ ] 写操作默认不自动重试；下单、支付、核销、身份申请和分账操作有防重复提交。
+- [ ] 新订单必须选择顾问；不发送数量、优惠券、面诊金、尾款或客户端金额。
+- [ ] 新支付只调用固定服务费接口，使用稳定幂等键；503 不可用时不创建本地成功状态。
+- [ ] 只按服务端 `expiresAt` 展示倒计时；`PROCESSING` 不本地过期，回前台只查单。
+- [ ] 顾问资料、会话读取和发送分别使用三个显式权限；`REFUNDED` 隐藏资料并保持历史只读。
 - [ ] multipart 公共图片和私有身份材料使用两个独立客户端方法。
 - [ ] offset/limit 与 before 游标封装成两种分页器，按 ID 去重；Agent 聊天仅保留最新 20 条且不翻页。
 - [ ] Agent 仅使用同步 REST，SSE 固定关闭，失败时不自动重放 POST。

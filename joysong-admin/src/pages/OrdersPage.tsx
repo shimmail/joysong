@@ -3,8 +3,13 @@ import { Table, Button, Popconfirm, message, Select, Input, Space, Tag, Modal, F
 import { DeleteOutlined, SwapOutlined, HistoryOutlined, RollbackOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import api, { getApiErrorMessage, getData, getManagementContext } from '../api';
+import { formatMoney } from '../utils/money';
 
 const ORDER_STATUSES = [
+  { value: 'PENDING_SERVICE_FEE', label: '待支付旅游地接服务费', color: 'orange' },
+  { value: 'SERVICE_ACTIVE', label: '旅游地接服务已激活', color: 'green' },
+  { value: 'REFUND_REVIEW', label: '旅游地接服务退款审核中', color: 'gold' },
+  { value: 'REFUND_PROCESSING', label: '旅游地接服务退款渠道处理中', color: 'blue' },
   { value: 'PENDING_PAYMENT', label: '待支付面诊金', color: 'orange' },
   { value: 'CONSULTATION_PAID', label: '面诊金已付', color: 'blue' },
   { value: 'VERIFIED', label: '已核验', color: 'cyan' },
@@ -34,6 +39,10 @@ const STATUS_TRANSITIONS: Record<string, string[]> = {
 
 const statusMap = Object.fromEntries(ORDER_STATUSES.map(s => [s.value, s]));
 const statusOptions = ORDER_STATUSES.map(s => ({ label: s.label, value: s.value }));
+const SERVICE_FEE_REFUND_AMOUNT_STATUSES = new Set(['PENDING', 'REFUND_PROCESSING', 'APPROVED']);
+
+const isTravelGroundServiceOrder = (record: any) =>
+  record?.paymentFlow === 'TRAVEL_GROUND_SERVICE_ONLY';
 
 export default function OrdersPage() {
   const managementContext = getManagementContext();
@@ -91,6 +100,7 @@ export default function OrdersPage() {
 
   // 打开状态变更弹窗
   const openTransition = (record: any) => {
+    if (isTravelGroundServiceOrder(record)) return;
     setTransitionOrder(record);
     setTransitionTarget(undefined);
     setTransitionVisible(true);
@@ -98,7 +108,7 @@ export default function OrdersPage() {
 
   // 执行状态变更
   const handleTransition = async () => {
-    if (!transitionOrder || !transitionTarget) return;
+    if (!transitionOrder || !transitionTarget || isTravelGroundServiceOrder(transitionOrder)) return;
     setTransitioning(true);
     try {
       await api.put(`/admin/orders/${transitionOrder.id}/status`, { status: transitionTarget });
@@ -173,7 +183,7 @@ export default function OrdersPage() {
 
   // 状态变更弹窗中可选项
   const availableTransitions = transitionOrder
-    ? (STATUS_TRANSITIONS[transitionOrder.status] || [])
+    ? (isTravelGroundServiceOrder(transitionOrder) ? [] : (STATUS_TRANSITIONS[transitionOrder.status] || []))
     : [];
   const transitionOptions = availableTransitions.map(s => {
     const info = statusMap[s];
@@ -204,42 +214,69 @@ export default function OrdersPage() {
     { title: 'ID', dataIndex: 'id', width: 60 },
     { title: '项目', dataIndex: 'projectName', width: 180 },
     { title: '机构', dataIndex: 'institutionName', width: 150 },
-    { title: '价格', dataIndex: 'price', width: 80 },
+    {
+      title: '收费项目', key: 'chargeType', width: 150,
+      render: (_: unknown, record: any) => isTravelGroundServiceOrder(record)
+        ? '旅游地接服务费'
+        : '历史医疗订单',
+    },
+    {
+      title: '订单金额', dataIndex: 'price', width: 120,
+      render: (value: number, record: any) => isTravelGroundServiceOrder(record)
+        ? formatMoney(record.travelGroundServiceFeeMinor, record.currency)
+        : value,
+    },
     {
       title: '面诊金', dataIndex: 'consultationFee', width: 80,
-      render: (v: number) => v != null ? `$${v}` : '-',
+      render: (v: number, record: any) => !isTravelGroundServiceOrder(record) && v != null ? `$${v}` : '-',
     },
     {
       title: '尾款', dataIndex: 'remainingAmount', width: 80,
-      render: (v: number) => v != null ? `$${v}` : '-',
+      render: (v: number, record: any) => !isTravelGroundServiceOrder(record) && v != null ? `$${v}` : '-',
     },
     {
       title: '优惠金额', dataIndex: 'discountAmount', width: 90,
-      render: (v: number) => v != null ? `$${v}` : '-',
+      render: (v: number, record: any) => !isTravelGroundServiceOrder(record) && v != null ? `$${v}` : '-',
     },
     {
       title: '状态', dataIndex: 'status', width: 130,
-      render: (s: string) => {
+      render: (s: string, record: any) => {
         const info = statusMap[s];
-        return info ? <Tag color={info.color}>{info.label}</Tag> : s;
+        const label = isTravelGroundServiceOrder(record) && s === 'REFUNDED'
+          ? '旅游地接服务已退款'
+          : info?.label;
+        return info ? <Tag color={info.color}>{label}</Tag> : s;
       },
     },
     {
       title: '退款金额', dataIndex: 'refundAmount', width: 90,
-      render: (v: number) => {
+      render: (v: number, record: any) => {
+        if (isTravelGroundServiceOrder(record)) {
+          if (!SERVICE_FEE_REFUND_AMOUNT_STATUSES.has(record.refundStatus)) return '-';
+          const amount = formatMoney(record.travelGroundServiceFeeMinor, record.currency);
+          return amount === '-' ? '-' : <Tag color="volcano">{amount}</Tag>;
+        }
         if (v && v > 0) return <Tag color="volcano">${v}</Tag>;
         return '-';
       },
     },
-    { title: '核验时间', dataIndex: 'verifiedAt', width: 160, render: (v: string) => v || '-' },
-    { title: '结算到期', dataIndex: 'settlementAt', width: 160, render: (v: string) => v || '-' },
+    {
+      title: '核验时间', dataIndex: 'verifiedAt', width: 160,
+      render: (v: string, record: any) => isTravelGroundServiceOrder(record) ? '-' : (v || '-'),
+    },
+    {
+      title: '结算到期', dataIndex: 'settlementAt', width: 160,
+      render: (v: string, record: any) => isTravelGroundServiceOrder(record) ? '-' : (v || '-'),
+    },
     { title: '创建时间', dataIndex: 'createdAt', width: 160 },
     { title: '预约时间', dataIndex: 'appointmentTime', width: 160 },
     {
       title: '操作', key: 'actions', width: 300, fixed: 'right' as const,
-      render: (_: any, record: any) => (
+      render: (_: any, record: any) => {
+        const isTravelGroundService = isTravelGroundServiceOrder(record);
+        return (
         <Space size="small">
-          {isAdmin && record.status === 'CONSULTATION_PAID' && (
+          {isAdmin && !isTravelGroundService && record.status === 'CONSULTATION_PAID' && (
             <Popconfirm
               title="手动完成机构核销？"
               description="仅用于测试，将跳过用户核销码并把订单变更为已核验。"
@@ -256,7 +293,7 @@ export default function OrdersPage() {
               </Button>
             </Popconfirm>
           )}
-          {isAdmin && <Button
+          {isAdmin && !isTravelGroundService && <Button
             icon={<SwapOutlined />}
             size="small"
             onClick={() => openTransition(record)}
@@ -280,12 +317,12 @@ export default function OrdersPage() {
               查看退款
             </Button>
           )}
-          {!isAdmin && record.status === 'CONSULTATION_PAID' && (
+          {!isAdmin && !isTravelGroundService && record.status === 'CONSULTATION_PAID' && (
             <Button type="primary" size="small" icon={<SafetyCertificateOutlined />} onClick={() => openVerification(record, 'verify')}>
               首次到店核销
             </Button>
           )}
-          {!isAdmin && record.status === 'BALANCE_PAID' && (
+          {!isAdmin && !isTravelGroundService && record.status === 'BALANCE_PAID' && (
             <Button type="primary" size="small" icon={<SafetyCertificateOutlined />} onClick={() => openVerification(record, 'request-completion')}>
               申请项目完成
             </Button>
@@ -294,7 +331,8 @@ export default function OrdersPage() {
             <Button icon={<DeleteOutlined />} size="small" danger title="删除" />
           </Popconfirm>}
         </Space>
-      ),
+        );
+      },
     },
   ];
 

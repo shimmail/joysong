@@ -2,25 +2,44 @@ import { useEffect, useState } from 'react';
 import { Table, Button, message, Select, Input, Space, Tag, Modal, Descriptions } from 'antd';
 import { CheckOutlined, CloseOutlined, EyeOutlined } from '@ant-design/icons';
 import api, { getData } from '../api';
+import { formatMoney } from '../utils/money';
 
 const statusLabels: Record<string, string> = {
-  PENDING: '待处理',
-  APPROVED: '已批准',
+  PENDING: '待人工审核',
+  REFUND_PROCESSING: '渠道处理中',
+  APPROVED: '退款成功',
   REJECTED: '已拒绝',
-  COMPLETED: '已完成',
+  CANCELLED: '已取消',
 };
 
 const statusColors: Record<string, string> = {
   PENDING: 'orange',
+  REFUND_PROCESSING: 'blue',
   APPROVED: 'green',
   REJECTED: 'red',
-  COMPLETED: 'blue',
+  CANCELLED: 'default',
 };
 
 const refundTypeLabels: Record<string, string> = {
   FULL: '全额退款',
   PARTIAL: '部分退款',
 };
+
+const paymentFlowLabels: Record<string, string> = {
+  TRAVEL_GROUND_SERVICE_ONLY: '旅游地接服务费流程',
+  LEGACY_MEDICAL: '历史医疗支付流程',
+};
+
+const requestedRefundAmount = (record: any) =>
+  formatMoney(record.requestedAmountMinor, record.currency, record.amount ?? record.refundAmount);
+
+const paidAmount = (record: any) => formatMoney(
+  record.paymentAmountMinor ?? (
+    record.paymentFlow === 'TRAVEL_GROUND_SERVICE_ONLY' ? record.requestedAmountMinor : undefined
+  ),
+  record.currency,
+  record.paymentAmount,
+);
 
 export default function RefundsPage() {
   const [data, setData] = useState<any[]>([]);
@@ -55,13 +74,13 @@ export default function RefundsPage() {
     setApproveLoading(true);
     try {
       await api.put(`/admin/refunds/${approveRecord.id}/status`, { status: 'APPROVED' });
-      message.success('退款已批准');
+      message.success('退款审核已提交，请查看渠道处理状态');
       setApproveVisible(false);
       setApproveRecord(null);
-      fetchData();
     } catch (err: any) {
       message.error('操作失败: ' + (err?.response?.data?.message || err?.message));
     } finally {
+      fetchData();
       setApproveLoading(false);
     }
   };
@@ -82,10 +101,10 @@ export default function RefundsPage() {
       setRejectVisible(false);
       setRejectRecord(null);
       setRejectReason('');
-      fetchData();
     } catch (err: any) {
       message.error('操作失败: ' + (err?.response?.data?.message || err?.message));
     } finally {
+      fetchData();
       setRejectLoading(false);
     }
   };
@@ -122,12 +141,22 @@ export default function RefundsPage() {
     { title: '机构', dataIndex: 'institutionName', width: 130, ellipsis: true, render: (v: string) => v || '-' },
     { title: '医生', dataIndex: 'doctorName', width: 100, render: (v: string) => v || '-' },
     {
-      title: '退款金额', dataIndex: 'amount', width: 100,
-      render: (v: number) => <span style={{ color: '#f5222d', fontWeight: 600 }}>${v}</span>,
+      title: '支付流程', dataIndex: 'paymentFlow', width: 160,
+      render: (value: string) => paymentFlowLabels[value] || value || '-',
     },
     {
-      title: '订单金额', dataIndex: 'paymentAmount', width: 100,
-      render: (v: number) => v ? `$${v}` : '-',
+      title: '申请退款金额', dataIndex: 'requestedAmountMinor', width: 130,
+      render: (_: number, record: any) => (
+        <span style={{ color: '#f5222d', fontWeight: 600 }}>{requestedRefundAmount(record)}</span>
+      ),
+    },
+    {
+      title: '已退金额', dataIndex: 'refundedAmountMinor', width: 120,
+      render: (value: number, record: any) => formatMoney(value, record.currency),
+    },
+    {
+      title: '原支付金额', dataIndex: 'paymentAmount', width: 120,
+      render: (_: number, record: any) => paidAmount(record),
     },
     {
       title: '退款类型', dataIndex: 'refundType', width: 90,
@@ -166,6 +195,8 @@ export default function RefundsPage() {
       <h2>退款管理</h2>
       <Space style={{ marginBottom: 16 }}>
         <Select
+          aria-label="退款状态"
+          virtual={false}
           value={statusFilter}
           options={statusOptions}
           style={{ width: 140 }}
@@ -203,7 +234,7 @@ export default function RefundsPage() {
             <Descriptions column={1} bordered size="small">
               <Descriptions.Item label="订单编号">{approveRecord.orderNo || '-'}</Descriptions.Item>
               <Descriptions.Item label="项目">{approveRecord.projectName || '-'}</Descriptions.Item>
-              <Descriptions.Item label="退款金额"><span style={{ color: '#f5222d', fontWeight: 600 }}>${approveRecord.amount}</span></Descriptions.Item>
+              <Descriptions.Item label="退款金额"><span style={{ color: '#f5222d', fontWeight: 600 }}>{requestedRefundAmount(approveRecord)}</span></Descriptions.Item>
               <Descriptions.Item label="退款原因">{approveRecord.reason}</Descriptions.Item>
             </Descriptions>
           </div>
@@ -222,7 +253,7 @@ export default function RefundsPage() {
       >
         {rejectRecord && (
           <div>
-            <p>拒绝退款：<b>{rejectRecord.orderNo || rejectRecord.orderId}</b>，退款金额 <span style={{ color: '#f5222d' }}>${rejectRecord.amount}</span></p>
+            <p>拒绝退款：<b>{rejectRecord.orderNo || rejectRecord.orderId}</b>，退款金额 <span style={{ color: '#f5222d' }}>{requestedRefundAmount(rejectRecord)}</span></p>
             <p style={{ marginBottom: 8 }}><b>拒绝原因 <span style={{ color: '#f5222d' }}>*</span></b></p>
             <Input.TextArea
               rows={3}
@@ -254,8 +285,10 @@ export default function RefundsPage() {
             <Descriptions.Item label="机构">{detailRecord.institutionName || '-'}</Descriptions.Item>
             <Descriptions.Item label="医生">{detailRecord.doctorName || '-'}</Descriptions.Item>
             <Descriptions.Item label="用户电话">{detailRecord.userPhone || '-'}</Descriptions.Item>
-            <Descriptions.Item label="退款金额"><span style={{ color: '#f5222d', fontWeight: 600 }}>${detailRecord.amount}</span></Descriptions.Item>
-            <Descriptions.Item label="订单金额">{detailRecord.paymentAmount ? `$${detailRecord.paymentAmount}` : '-'}</Descriptions.Item>
+            <Descriptions.Item label="支付流程">{paymentFlowLabels[detailRecord.paymentFlow] || detailRecord.paymentFlow || '-'}</Descriptions.Item>
+            <Descriptions.Item label="申请退款金额"><span style={{ color: '#f5222d', fontWeight: 600 }}>{requestedRefundAmount(detailRecord)}</span></Descriptions.Item>
+            <Descriptions.Item label="已退金额">{formatMoney(detailRecord.refundedAmountMinor, detailRecord.currency)}</Descriptions.Item>
+            <Descriptions.Item label="原支付金额">{paidAmount(detailRecord)}</Descriptions.Item>
             <Descriptions.Item label="退款类型">{refundTypeLabels[detailRecord.refundType] || detailRecord.refundType || '全额退款'}</Descriptions.Item>
             <Descriptions.Item label="状态"><Tag color={statusColors[detailRecord.status]}>{statusLabels[detailRecord.status] ?? detailRecord.status}</Tag></Descriptions.Item>
             <Descriptions.Item label="退款原因" span={2}>{detailRecord.reason}</Descriptions.Item>
