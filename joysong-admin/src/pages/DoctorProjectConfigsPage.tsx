@@ -1,13 +1,11 @@
 import { useEffect, useState } from 'react';
 import {
   Table, Button, Popconfirm, message, Space, Modal, Form,
-  InputNumber, Select, Tag,
+  InputNumber, Select,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import api, { getData } from '../api';
-import { SplitRateFields } from '../components/SplitRateFields';
 import { useOrderSplitPolicy } from '../hooks/useOrderSplitPolicy';
-import { calculateDoctorRate } from '../utils/splitRates';
 
 export default function DoctorProjectConfigsPage() {
   const policyState = useOrderSplitPolicy();
@@ -73,7 +71,6 @@ export default function DoctorProjectConfigsPage() {
     setFilteredProjects([]);
     setAllInstitutionProjects([]);
     form.resetFields();
-    form.setFieldsValue({ institutionRate: 40 });
     setFormVisible(true);
   };
 
@@ -143,9 +140,7 @@ export default function DoctorProjectConfigsPage() {
           institutionId: institutionId,
           doctorId: record.doctorId,
           institutionProjectId: record.institutionProjectId,
-          consultationFee: record.consultationFee != null ? Number(record.consultationFee) : undefined,
-          commissionRate: record.commissionRate != null ? Number(record.commissionRate) : undefined,
-          institutionRate: record.institutionRate != null ? Number(record.institutionRate) : undefined,
+          medicalListPrice: record.medicalListPrice != null ? Number(record.medicalListPrice) : undefined,
         });
       }, 100);
     } catch (err: any) {
@@ -159,10 +154,13 @@ export default function DoctorProjectConfigsPage() {
   const handleFormOk = async () => {
     try {
       const values = await form.validateFields();
-      const { institutionId, ...submitValues } = values;
       setSubmitting(true);
       // 后端 POST 接口为 upsert（按 doctorId + institutionProjectId 判重），新增和编辑统一使用 POST
-      await api.post('/admin/doctor-institution-project-configs', submitValues);
+      await api.post('/admin/doctor-institution-project-configs', {
+        doctorId: values.doctorId,
+        institutionProjectId: values.institutionProjectId,
+        medicalListPrice: values.medicalListPrice,
+      });
       message.success(editingRecord ? '更新成功' : '创建成功');
       setFormVisible(false);
       fetchData();
@@ -178,16 +176,6 @@ export default function DoctorProjectConfigsPage() {
     await api.delete(`/admin/doctor-institution-project-configs/${id}`);
     message.success('删除成功');
     fetchData();
-  };
-
-  const renderDoctorRate = (record: { institutionRate?: number; commissionRate?: number }) => {
-    const doctorRate = calculateDoctorRate(
-      policyState.policy?.platformRate,
-      record.institutionRate,
-      record.commissionRate,
-    );
-    if (doctorRate == null) return '-';
-    return doctorRate < 0 ? <Tag color="red">配置无效</Tag> : `${doctorRate}%`;
   };
 
   const columns = [
@@ -207,20 +195,12 @@ export default function DoctorProjectConfigsPage() {
       render: (_: any, record: any) => record.institutionProjectId ? getProjectName(record.institutionProjectId) : '-',
     },
     {
-      title: '面诊金', dataIndex: 'consultationFee', width: 100,
-      render: (v: number) => v != null ? `$${v}` : '-',
+      title: '医疗套餐优惠前金额（USD）', dataIndex: 'medicalListPrice', width: 210,
+      render: (value: number) => value != null ? `USD ${value}` : '-',
     },
     {
-      title: '医美顾问分账比例', dataIndex: 'commissionRate', width: 140,
-      render: (v: number) => v != null ? `${v}%` : '-',
-    },
-    {
-      title: '机构分成比例', dataIndex: 'institutionRate', width: 120,
-      render: (v: number) => v != null ? `${v}%` : '-',
-    },
-    {
-      title: '医生分账比例', width: 120,
-      render: (_: unknown, record: any) => renderDoctorRate(record),
+      title: '平台服务比例', width: 130,
+      render: () => policyState.policy ? `${policyState.policy.platformRate}%` : '-',
     },
     {
       title: '操作', key: 'actions', width: 160, fixed: 'right' as const,
@@ -239,7 +219,7 @@ export default function DoctorProjectConfigsPage() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
         <Space>
-          <h2 style={{ margin: 0 }}>项目分账配置</h2>
+          <h2 style={{ margin: 0 }}>医生项目价格配置</h2>
           <Button type="link" icon={<InfoCircleOutlined />} onClick={() => setDisclaimerVisible(true)}>
             了解更多
           </Button>
@@ -322,23 +302,48 @@ export default function DoctorProjectConfigsPage() {
               }))}
             />
           </Form.Item>
-          <Form.Item name="consultationFee" label="面诊金" rules={[{ required: true, message: '请输入面诊金' }]}>
-            <InputNumber min={0} precision={2} style={{ width: '100%' }} placeholder="请输入面诊金金额" prefix="$" />
+          <Form.Item
+            name="medicalListPrice"
+            label="医疗套餐优惠前金额（USD）"
+            rules={[
+              { required: true, message: '请输入医疗套餐优惠前金额' },
+              {
+                validator: (_, value) => typeof value === 'number' && value > 0
+                  ? Promise.resolve()
+                  : Promise.reject(new Error('医疗套餐优惠前金额必须大于 0')),
+              },
+            ]}
+          >
+            <InputNumber precision={2} style={{ width: '100%' }} placeholder="请输入医疗套餐优惠前金额" prefix="$" />
           </Form.Item>
-          <SplitRateFields form={form} {...policyState} />
+          <Form.Item
+            label="平台服务比例"
+            htmlFor="admin-platform-service-rate"
+            validateStatus={policyState.error ? 'error' : undefined}
+            help={policyState.error}
+          >
+            <InputNumber
+              id="admin-platform-service-rate"
+              value={policyState.policy?.platformRate}
+              precision={2}
+              style={{ width: '100%' }}
+              disabled
+              suffix="%"
+            />
+          </Form.Item>
         </Form>
       </Modal>
 
       {/* 免责声明弹窗 */}
       <Modal
-        title="平台分账说明与免责声明"
+        title="旅游地接服务费计费说明"
         open={disclaimerVisible}
         onCancel={() => setDisclaimerVisible(false)}
         footer={[<Button key="ok" type="primary" onClick={() => setDisclaimerVisible(false)}>我知道了</Button>]}
         width={600}
       >
-        <p>合作医疗机构全责承担项目所含医疗全部耗材成本、项目所含手术执行场地及服务费等一切除项目发布者即医生本人的人力成本外的一切支出。</p>
-        <p>该比例及医生与其合作医疗机构之间的其他权责，包括项目执行后出现医疗事故导致的患者后续诊疗和赔偿的全部支出和费用安排等，由医生及其合作医疗机构私下自行协商并确定，与平台无关。</p>
+        <p>医生设置医疗套餐优惠前金额；平台服务比例由平台统一维护，仅作只读展示。</p>
+        <p>平台收取的旅游地接服务费按医疗套餐优惠前金额与平台服务比例计算，币种为 USD。</p>
       </Modal>
     </div>
   );

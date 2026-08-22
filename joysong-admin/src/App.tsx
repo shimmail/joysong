@@ -89,7 +89,7 @@ function CapabilityRoute({ capability, children }: {
   capability: keyof Pick<ManagementContext,
     'canManageDoctors' | 'canManageInstitutions' | 'canManageInstitutionProjects' |
     'canManageArticles' | 'canManageSplitConfigs' | 'canManageOrders' |
-    'canReviewInstitutionProjectRequests'>;
+    'canSubmitInstitutionProjectRequests' | 'canReviewInstitutionProjectRequests'>;
   children: React.ReactNode;
 }) {
   const context = getManagementContext();
@@ -128,7 +128,7 @@ function App() {
           <Route path="reviews" element={<AdminOnlyRoute><ReviewsPage /></AdminOnlyRoute>} />
           <Route path="payments" element={<AdminOnlyRoute><PaymentsPage /></AdminOnlyRoute>} />
           <Route path="institution-projects" element={<AdminOnlyRoute><InstitutionProjectsPage /></AdminOnlyRoute>} />
-          <Route path="project-collaboration" element={<AdminOnlyRoute><ProjectCollaborationPage /></AdminOnlyRoute>} />
+          <Route path="project-collaboration" element={<CapabilityRoute capability="canSubmitInstitutionProjectRequests"><ProjectCollaborationPage /></CapabilityRoute>} />
           <Route path="refunds" element={<AdminOnlyRoute><RefundsPage /></AdminOnlyRoute>} />
           <Route path="reports" element={<AdminOnlyRoute><ReportsPage /></AdminOnlyRoute>} />
           <Route path="coupons" element={<AdminOnlyRoute><CouponsPage /></AdminOnlyRoute>} />

@@ -4,7 +4,9 @@ import { CheckOutlined, CloseOutlined, EditOutlined } from '@ant-design/icons';
 import api, { getApiErrorMessage, getData, getManagementContext } from '../api';
 import { identityStatusColor, identityStatusLabel } from '../identity';
 
-type ProjectRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CHANGES_REQUESTED';
+type ProfessionalProjectRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CHANGES_REQUESTED';
+type DoctorProjectChangeStatus = ProfessionalProjectRequestStatus | 'WITHDRAWN';
+type ProjectRequestStatus = DoctorProjectChangeStatus;
 type ProjectCurrency = 'CNY' | 'USD';
 
 export interface InstitutionProjectSplit {
@@ -41,7 +43,7 @@ export interface ProfessionalProjectRequestResponse {
   isActive: boolean | null;
   institutionSplit: InstitutionProjectSplit | null;
   notes: string | null;
-  status: ProjectRequestStatus;
+  status: ProfessionalProjectRequestStatus;
   reviewNote: string | null;
   reviewedBy: string | null;
   reviewedAt: string | null;
@@ -91,10 +93,10 @@ type ProfessionalProjectRequest = CompleteProfessionalProjectRequestResponse & {
   requestSource: 'PROFESSIONAL';
 };
 
-interface JoinProjectRequest {
+interface DoctorProjectChangeRequest {
   id: string;
-  requestSource: 'JOIN';
-  requestType: 'JOIN';
+  requestSource: 'DOCTOR_PROJECT_CHANGE';
+  requestType: 'JOIN' | 'PROFILE_UPDATE' | 'LEAVE';
   doctorId: string;
   doctorName: string;
   institutionId: string;
@@ -102,14 +104,37 @@ interface JoinProjectRequest {
   institutionProjectId: string;
   projectName: string;
   serviceDescription: string;
+  serviceTags?: string[];
+  scheduleNote?: string | null;
+  coverImage?: string | null;
+  images?: string[];
   priceSuggestion?: number | null;
   notes?: string | null;
-  status: ProjectRequestStatus;
+  consultationFee?: number | null;
+  commissionRate?: number | null;
+  institutionRate?: number | null;
+  medicalListPrice?: number | null;
+  platformRate?: number | null;
+  doctorRate?: number | null;
+  currentPrice?: number | null;
+  currentServiceDescription?: string | null;
+  currentServiceTags?: string[] | null;
+  currentScheduleNote?: string | null;
+  currentCoverImage?: string | null;
+  currentImages?: string[] | null;
+  currentConsultationFee?: number | null;
+  currentCommissionRate?: number | null;
+  currentInstitutionRate?: number | null;
+  currentMedicalListPrice?: number | null;
+  currentPlatformRate?: number | null;
+  currentDoctorRate?: number | null;
+  forceProcessed?: boolean;
+  status: DoctorProjectChangeStatus;
   reviewNote?: string | null;
   submittedAt?: string | null;
 }
 
-type ProjectRequest = ProfessionalProjectRequest | JoinProjectRequest;
+type ProjectRequest = ProfessionalProjectRequest | DoctorProjectChangeRequest;
 type ReviewDecision = 'REJECTED' | 'CHANGES_REQUESTED';
 
 const textOrDash = (value?: string | null) => value || '-';
@@ -154,7 +179,7 @@ const isFiniteNumber = (value: unknown): value is number => typeof value === 'nu
 const isProjectCurrency = (value: unknown): value is ProjectCurrency => value === 'CNY' || value === 'USD';
 const isMoney = (value: unknown): value is number => toHundredths(value, 0, 99_999_999.99) !== null;
 const isNullableMoney = (value: unknown): value is number | null => value === null || isMoney(value);
-const isProjectRequestStatus = (value: unknown): value is ProjectRequestStatus => typeof value === 'string'
+const isProjectRequestStatus = (value: unknown): value is ProfessionalProjectRequestStatus => typeof value === 'string'
   && ['PENDING', 'APPROVED', 'REJECTED', 'CHANGES_REQUESTED'].includes(value);
 const isIsoLocalDateTime = (value: unknown): value is string => {
   if (typeof value !== 'string') return false;
@@ -285,7 +310,7 @@ const hasNegativeDoctorRate = (request: ProjectRequest) => request.requestSource
   && request.requestType === 'INSTITUTION'
   && request.institutionSplit.doctorRate < 0;
 const reviewAriaLabel = (action: string, request: ProjectRequest) => {
-  const name = request.requestSource === 'JOIN'
+  const name = request.requestSource === 'DOCTOR_PROJECT_CHANGE'
     ? request.projectName
     : request.name?.trim() || '项目名称留空，使用继承值';
   return `${action} ${name}，申请ID ${request.id}`;
@@ -324,15 +349,15 @@ export default function ProjectRequestsPage() {
       const professional = professionalItems
         .filter(isCompleteProfessionalProjectRequest)
         .map(item => ({ ...item, requestSource: 'PROFESSIONAL' as const }));
-      const joins = (getData<Omit<JoinProjectRequest, 'requestSource'>[]>(joinResponse as any) || [])
-        .filter(item => item.requestType === 'JOIN')
-        .map(item => ({ ...item, requestSource: 'JOIN' as const }));
+      const projectChanges = (getData<Omit<DoctorProjectChangeRequest, 'requestSource'>[]>(joinResponse as any) || [])
+        .filter(item => ['JOIN', 'PROFILE_UPDATE', 'LEAVE'].includes(item.requestType))
+        .map(item => ({ ...item, requestSource: 'DOCTOR_PROJECT_CHANGE' as const }));
       setMalformedProfessionalCount(
         Array.isArray(professionalPayload)
           ? professionalItems.length - professional.length
           : 1,
       );
-      const refreshedRequests = [...professional, ...joins];
+      const refreshedRequests = [...professional, ...projectChanges];
       requestsRef.current = refreshedRequests;
       setRequests(refreshedRequests);
       setReviewTarget(currentTarget => {
@@ -390,12 +415,12 @@ export default function ProjectRequestsPage() {
         && request.institutionId != null
         && managementContext.managedInstitutionIds.includes(request.institutionId);
     }
-    return managementContext?.canReviewInstitutionRequests === true
+    return managementContext?.canReviewInstitutionProjectRequests === true
       && managementContext.managedInstitutionIds.includes(request.institutionId);
   };
 
   const reviewPath = (request: ProjectRequest) => {
-    if (request.requestSource === 'JOIN') {
+    if (request.requestSource === 'DOCTOR_PROJECT_CHANGE') {
       return `/admin/institution-project-requests/${request.id}/review`;
     }
     return request.requestType === 'PLATFORM'
@@ -406,14 +431,13 @@ export default function ProjectRequestsPage() {
   const approve = async (request: ProjectRequest) => {
     if (hasNegativeDoctorRate(request) || !beginReview(request)) return;
     try {
-      await api.post(reviewPath(request), {
-        decision: 'APPROVED',
-        reviewNote: '',
-      });
+      await api.post(reviewPath(request), request.requestSource === 'DOCTOR_PROJECT_CHANGE'
+        ? { decision: 'APPROVED', reviewNote: '', force: false }
+        : { decision: 'APPROVED', reviewNote: '' });
       message.success(request.requestType === 'PLATFORM'
         ? '申请已通过，平台项目已创建'
-        : request.requestType === 'JOIN'
-          ? '申请已通过，医生已加入机构项目'
+        : request.requestSource === 'DOCTOR_PROJECT_CHANGE'
+          ? '机构项目变更申请已通过'
           : '申请已通过，机构项目已创建');
       await refresh();
     } catch (error) {
@@ -440,10 +464,9 @@ export default function ProjectRequestsPage() {
       const values = await reviewForm.validateFields();
       started = beginReview(target);
       if (!started) return;
-      await api.post(reviewPath(target), {
-        decision,
-        reviewNote: values.reviewNote,
-      });
+      await api.post(reviewPath(target), target.requestSource === 'DOCTOR_PROJECT_CHANGE'
+        ? { decision, reviewNote: values.reviewNote, force: false }
+        : { decision, reviewNote: values.reviewNote });
       message.success(decision === 'REJECTED' ? '申请已驳回' : '已要求医生修改申请');
       setReviewTarget(null);
       await refresh();
@@ -476,7 +499,7 @@ export default function ProjectRequestsPage() {
         disabled={submitting || staleReviewData || hasNegativeDoctorRate(item)}
         onClick={() => void approve(item)}
       >通过</Button>
-      {item.requestSource === 'JOIN' && <Button
+      {item.requestSource === 'DOCTOR_PROJECT_CHANGE' && <Button
         aria-label={reviewAriaLabel('要求修改', item)}
         size="small"
         icon={<EditOutlined />}
@@ -499,7 +522,9 @@ export default function ProjectRequestsPage() {
       title: '类型', dataIndex: 'requestType', width: 140,
       render: (value: ProjectRequest['requestType']) => value === 'PLATFORM'
         ? '新增平台项目'
-        : value === 'JOIN' ? '加入机构项目' : '新增机构项目',
+        : value === 'INSTITUTION' ? '新增机构项目'
+          : value === 'JOIN' ? '加入机构项目'
+            : value === 'PROFILE_UPDATE' ? '资料变更' : '退出机构项目',
     },
     { title: '医生', dataIndex: 'doctorName', width: 130 },
     { title: '机构', dataIndex: 'institutionName', width: 160, render: (value?: string) => value || '-' },
@@ -535,12 +560,21 @@ export default function ProjectRequestsPage() {
   ];
 
   const expandedItems = (item: ProjectRequest) => {
-    if (item.requestSource === 'JOIN') {
-      return [
+    if (item.requestSource === 'DOCTOR_PROJECT_CHANGE') {
+      const items = [
         { key: 'description', label: '服务内容', children: textOrDash(item.serviceDescription) },
         { key: 'price', label: '建议价格', children: item.priceSuggestion == null ? '-' : `¥${item.priceSuggestion}` },
         { key: 'notes', label: '补充说明', children: textOrDash(item.notes) },
       ];
+      if (item.requestType === 'PROFILE_UPDATE') {
+        items.push(
+          { key: 'medicalListPrice', label: '医疗套餐优惠前金额（提议）', children: moneyOrDash('USD', item.medicalListPrice) },
+          { key: 'currentMedicalListPrice', label: '医疗套餐优惠前金额（当前）', children: moneyOrDash('USD', item.currentMedicalListPrice) },
+          { key: 'platformRate', label: '平台服务比例（提议，只读）', children: item.platformRate == null ? '-' : `${item.platformRate}%` },
+          { key: 'currentPlatformRate', label: '平台服务比例（当前，只读）', children: item.currentPlatformRate == null ? '-' : `${item.currentPlatformRate}%` },
+        );
+      }
+      return items;
     }
 
     const common = [
@@ -607,6 +641,7 @@ export default function ProjectRequestsPage() {
           { label: '已通过', value: 'APPROVED' },
           { label: '已驳回', value: 'REJECTED' },
           { label: '待修改', value: 'CHANGES_REQUESTED' },
+          { label: '已撤回', value: 'WITHDRAWN' },
         ]}
       />
     </div>

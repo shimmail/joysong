@@ -130,7 +130,7 @@ export default function AdminLayout() {
     if (key === '/doctors') return managementContext?.canManageDoctors;
     if (key === '/institution-projects') return false;
     if (key === '/project-requests') return managementContext?.canReviewInstitutionProjectRequests;
-    if (key === '/project-collaboration') return false;
+    if (key === '/project-collaboration') return managementContext?.canSubmitInstitutionProjectRequests;
     if (key === '/orders') return managementContext?.canManageOrders;
     if (key === '/institutions') return (managementContext?.visibleInstitutionIds.length || 0) > 0;
     if (key === '/articles') return managementContext?.canManageArticles;

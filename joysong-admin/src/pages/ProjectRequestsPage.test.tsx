@@ -97,6 +97,26 @@ const joinRequest = {
   status: 'PENDING', reviewNote: '', submittedAt: '2026-08-15T09:00:00',
 };
 
+const profileUpdateRequest = {
+  id: 'profile-request', requestType: 'PROFILE_UPDATE', doctorId: 'doctor-2', doctorName: '王医生',
+  institutionId: 'institution-1', institutionName: '示例机构', institutionProjectId: 'ip-1',
+  projectName: '已有机构项目', serviceDescription: '更新后的服务介绍', priceSuggestion: 1600,
+  notes: '调整医疗套餐标价', serviceTags: ['精细'], scheduleNote: '每周三', coverImage: '', images: [],
+  consultationFee: 100, commissionRate: 10, institutionRate: 35,
+  medicalListPrice: 1200, platformRate: 40, doctorRate: 15,
+  currentPrice: 1500, currentServiceDescription: '原服务介绍', currentServiceTags: ['自然'],
+  currentScheduleNote: '每周二', currentCoverImage: '', currentImages: [],
+  currentConsultationFee: 100, currentCommissionRate: 10, currentInstitutionRate: 35,
+  currentMedicalListPrice: 1000, currentPlatformRate: 38, currentDoctorRate: 17,
+  forceProcessed: false, status: 'PENDING', reviewNote: '', submittedAt: '2026-08-15T10:00:00',
+};
+
+const leaveRequest = {
+  ...joinRequest,
+  id: 'leave-request', requestType: 'LEAVE', projectName: '退出项目', serviceDescription: '',
+  priceSuggestion: null, notes: '停止合作',
+};
+
 const maximumValidTags = [
   't'.repeat(100),
   ...Array.from({ length: 18 }, () => 't'.repeat(20)),
@@ -989,7 +1009,30 @@ describe('ProjectRequestsPage', () => {
     await user.click(screen.getByRole('button', { name: /确\s*认/ }));
     await waitFor(() => expect(api.post).toHaveBeenCalledWith(
       '/admin/institution-project-requests/join-request/review',
-      { decision: 'CHANGES_REQUESTED', reviewNote: '请补充排班' },
+      { decision: 'CHANGES_REQUESTED', reviewNote: '请补充排班', force: false },
+    ));
+  });
+
+  it('includes profile updates and leave requests, compares pricing snapshots, and reviews with force false', async () => {
+    const user = userEvent.setup();
+    setContext(adminContext);
+    mockLists('/admin/project-requests', [], [profileUpdateRequest, leaveRequest]);
+
+    render(<ProjectRequestsPage />);
+
+    expect(await screen.findByText('资料变更')).toBeInTheDocument();
+    expect(screen.getByText('退出机构项目')).toBeInTheDocument();
+    const detail = expandRow('已有机构项目');
+    expectDescriptionValue(detail, '医疗套餐优惠前金额（提议）', 'USD 1200');
+    expectDescriptionValue(detail, '医疗套餐优惠前金额（当前）', 'USD 1000');
+    expectDescriptionValue(detail, '平台服务比例（提议，只读）', '40%');
+    expectDescriptionValue(detail, '平台服务比例（当前，只读）', '38%');
+
+    await user.click(screen.getByRole('button', { name: '通过 已有机构项目，申请ID profile-request' }));
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(
+      '/admin/institution-project-requests/profile-request/review',
+      { decision: 'APPROVED', reviewNote: '', force: false },
     ));
   });
 });

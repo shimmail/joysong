@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Alert, Button, Form, Input, message, Modal, Space, Table, Tabs, Tag, Typography,
+  Alert, Button, Form, Input, InputNumber, message, Modal, Space, Table, Tabs, Tag, Typography,
 } from 'antd';
 import { CheckOutlined, EditOutlined, LoginOutlined, LogoutOutlined, StopOutlined } from '@ant-design/icons';
 import api, { getApiErrorMessage, getData, getManagementContext } from '../api';
@@ -36,15 +36,34 @@ interface ProjectRequest {
   projectName: string;
   requestType: 'JOIN' | 'PROFILE_UPDATE' | 'LEAVE';
   serviceDescription: string;
-  serviceTags: string;
+  serviceTags: string[];
   scheduleNote: string;
   coverImage: string;
-  images: string;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN';
+  images: string[];
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CHANGES_REQUESTED' | 'WITHDRAWN';
   submittedBy: string;
   reviewerName?: string;
   reviewNote?: string;
   submittedAt: string;
+}
+
+interface ProfileUpdateTarget {
+  institutionProjectId: string;
+  projectName: string;
+  institutionId: string;
+  institutionName: string;
+  currentPrice: number;
+  serviceDescription: string;
+  serviceTags: string[];
+  scheduleNote: string;
+  coverImage: string;
+  images: string[];
+  consultationFee: number;
+  commissionRate: number;
+  institutionRate: number;
+  medicalListPrice: number;
+  platformRate: number;
+  doctorRate: number;
 }
 
 const requestTypeText: Record<ProjectRequest['requestType'], string> = {
@@ -54,19 +73,21 @@ const requestTypeText: Record<ProjectRequest['requestType'], string> = {
 };
 
 const statusColor: Record<ProjectRequest['status'], string> = {
-  PENDING: 'orange', APPROVED: 'green', REJECTED: 'red', WITHDRAWN: 'default',
+  PENDING: 'orange', APPROVED: 'green', REJECTED: 'red', CHANGES_REQUESTED: 'orange', WITHDRAWN: 'default',
 };
 
 export default function ProjectCollaborationPage() {
   const context = getManagementContext();
   const doctorId = context?.doctorId;
-  const canReview = context?.platformRole === 'ADMIN' || (context?.managedInstitutionIds.length || 0) > 0;
+  const canReview = context?.platformRole === 'ADMIN' || context?.canReviewInstitutionProjectRequests === true;
   const [projects, setProjects] = useState<InstitutionProject[]>([]);
   const [requests, setRequests] = useState<ProjectRequest[]>([]);
+  const [profileTargets, setProfileTargets] = useState<ProfileUpdateTarget[]>([]);
   const [institutionNames, setInstitutionNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [requestOpen, setRequestOpen] = useState(false);
   const [requestProject, setRequestProject] = useState<InstitutionProject | null>(null);
+  const [profileTarget, setProfileTarget] = useState<ProfileUpdateTarget | null>(null);
   const [requestType, setRequestType] = useState<'JOIN' | 'PROFILE_UPDATE'>('JOIN');
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewing, setReviewing] = useState<ProjectRequest | null>(null);
@@ -78,13 +99,15 @@ export default function ProjectCollaborationPage() {
   const refresh = async () => {
     setLoading(true);
     try {
-      const [projectRes, requestRes, institutionRes] = await Promise.all([
+      const [projectRes, requestRes, institutionRes, profileTargetRes] = await Promise.all([
         api.get('/admin/institution-projects'),
         api.get('/admin/institution-project-requests'),
         api.get('/admin/institutions'),
+        doctorId ? api.get('/admin/institution-project-requests/profile-update-targets') : Promise.resolve(null),
       ]);
       setProjects(getData<InstitutionProject[]>(projectRes as any) || []);
       setRequests(getData<ProjectRequest[]>(requestRes as any) || []);
+      setProfileTargets(profileTargetRes ? getData<ProfileUpdateTarget[]>(profileTargetRes as any) || [] : []);
       const institutions = getData<any[]>(institutionRes as any) || [];
       setInstitutionNames(Object.fromEntries(institutions.map(item => [item.id, item.name])));
     } catch (error) {
@@ -103,14 +126,29 @@ export default function ProjectCollaborationPage() {
 
   const openRequest = (project: InstitutionProject, type: 'JOIN' | 'PROFILE_UPDATE') => {
     const profile = project.doctors?.find(item => item.id === doctorId);
+    const target = type === 'PROFILE_UPDATE'
+      ? profileTargets.find(item => item.institutionProjectId === project.id)
+      : null;
+    if (type === 'PROFILE_UPDATE' && !target) {
+      message.error('无法读取该项目的资料修改基线，请刷新后重试');
+      return;
+    }
     setRequestProject(project);
     setRequestType(type);
-    requestForm.setFieldsValue({
-      serviceDescription: profile?.serviceDescription || '',
-      serviceTags: profile?.serviceTags || '',
-      scheduleNote: profile?.scheduleNote || '',
-      coverImage: profile?.coverImage || '',
-      images: profile?.images || '',
+    setProfileTarget(target || null);
+    requestForm.resetFields();
+    requestForm.setFieldsValue(type === 'PROFILE_UPDATE' ? {
+      serviceDescription: target?.serviceDescription ?? '',
+      serviceTags: target?.serviceTags.join(', ') ?? '',
+      scheduleNote: target?.scheduleNote ?? '',
+      coverImage: target?.coverImage ?? '',
+      images: target?.images.join(',') ?? '',
+      notes: '',
+      medicalListPrice: target?.medicalListPrice,
+    } : {
+      serviceDescription: profile?.serviceDescription ?? '',
+      priceSuggestion: undefined,
+      notes: '',
     });
     setRequestOpen(true);
   };
@@ -120,11 +158,32 @@ export default function ProjectCollaborationPage() {
     try {
       const values = await requestForm.validateFields();
       setSubmitting(true);
-      await api.post('/admin/institution-project-requests', {
-        institutionProjectId: requestProject.id,
-        requestType,
-        ...values,
-      });
+      if (requestType === 'PROFILE_UPDATE') {
+        if (!profileTarget) throw new Error('资料修改基线不存在');
+        await api.post('/admin/institution-project-requests', {
+          institutionProjectId: profileTarget.institutionProjectId,
+          requestType: 'PROFILE_UPDATE',
+          serviceDescription: values.serviceDescription || '',
+          priceSuggestion: profileTarget.currentPrice,
+          notes: values.notes || '',
+          serviceTags: toStringList(values.serviceTags),
+          scheduleNote: values.scheduleNote || '',
+          coverImage: values.coverImage || '',
+          images: toStringList(values.images),
+          consultationFee: profileTarget.consultationFee,
+          commissionRate: profileTarget.commissionRate,
+          institutionRate: profileTarget.institutionRate,
+          medicalListPrice: values.medicalListPrice,
+        });
+      } else {
+        await api.post('/admin/institution-project-requests', {
+          institutionProjectId: requestProject.id,
+          requestType: 'JOIN',
+          serviceDescription: values.serviceDescription || '',
+          priceSuggestion: values.priceSuggestion,
+          notes: values.notes || '',
+        });
+      }
       message.success('已提交机构审核，审核通过后生效');
       setRequestOpen(false);
       await refresh();
@@ -178,6 +237,7 @@ export default function ProjectCollaborationPage() {
       await api.post(`/admin/institution-project-requests/${reviewing.id}/review`, {
         decision: reviewDecision,
         reviewNote: values.reviewNote || '',
+        force: false,
       });
       message.success(reviewDecision === 'APPROVED' ? '申请已通过并生效' : '申请已驳回');
       setReviewOpen(false);
@@ -227,7 +287,10 @@ export default function ProjectCollaborationPage() {
     {
       title: '操作', width: 190,
       render: (_: unknown, record: ProjectRequest) => record.status === 'PENDING' ? <Space>
-        {(context?.platformRole === 'ADMIN' || context?.managedInstitutionIds.includes(record.institutionId)) && <>
+        {(context?.platformRole === 'ADMIN' || (
+          context?.canReviewInstitutionProjectRequests === true &&
+          context.managedInstitutionIds.includes(record.institutionId)
+        )) && <>
           <Button size="small" type="primary" icon={<CheckOutlined />} onClick={() => openReview(record, 'APPROVED')}>通过</Button>
           <Button size="small" danger icon={<StopOutlined />} onClick={() => openReview(record, 'REJECTED')}>驳回</Button>
         </>}
@@ -268,10 +331,57 @@ export default function ProjectCollaborationPage() {
       <Alert style={{ marginBottom: 16 }} type="warning" showIcon message="以下内容仅代表医生在该项目中的个人服务资料，不会修改机构价格、销量、评分或上下架状态。" />
       <Form form={requestForm} layout="vertical">
         <Form.Item name="serviceDescription" label="个人服务介绍" rules={[{ max: 5000 }]}><Input.TextArea rows={4} /></Form.Item>
-        <Form.Item name="serviceTags" label="个人擅长标签" rules={[{ max: 500 }]}><Input placeholder="多个标签使用英文逗号分隔" /></Form.Item>
-        <Form.Item name="scheduleNote" label="出诊与排班说明" rules={[{ max: 500 }]}><Input.TextArea rows={3} /></Form.Item>
-        <Form.Item name="coverImage" label="个人项目封面"><ImageUpload folder="doctor-project-profiles" recommendedSize="1200 × 800 px（3:2）" /></Form.Item>
-        <Form.Item name="images" label="个人案例图集"><MultiImageUpload folder="doctor-project-profiles" /></Form.Item>
+        {requestType === 'JOIN' ? <>
+          <Form.Item
+            name="priceSuggestion"
+            label="项目价格建议"
+            rules={[
+              { required: true, message: '请输入价格建议' },
+              {
+                validator: (_, value) => typeof value === 'number' && value >= 0
+                  ? Promise.resolve()
+                  : Promise.reject(new Error('价格建议不能为负数')),
+              },
+            ]}
+          >
+            <InputNumber precision={2} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="notes" label="补充说明" rules={[{ max: 2000 }]}>
+            <Input.TextArea rows={2} />
+          </Form.Item>
+        </> : <>
+          <Form.Item name="serviceTags" label="个人擅长标签" rules={[{ max: 500 }]}><Input placeholder="多个标签使用英文逗号分隔" /></Form.Item>
+          <Form.Item name="scheduleNote" label="出诊与排班说明" rules={[{ max: 500 }]}><Input.TextArea rows={3} /></Form.Item>
+          <Form.Item name="coverImage" label="个人项目封面"><ImageUpload folder="doctor-project-profiles" recommendedSize="1200 × 800 px（3:2）" /></Form.Item>
+          <Form.Item name="images" label="个人案例图集"><MultiImageUpload folder="doctor-project-profiles" /></Form.Item>
+          <Form.Item
+            name="medicalListPrice"
+            label="医疗套餐优惠前金额（USD）"
+            rules={[
+              { required: true, message: '请输入医疗套餐优惠前金额' },
+              {
+                validator: (_, value) => typeof value === 'number' && value > 0
+                  ? Promise.resolve()
+                  : Promise.reject(new Error('医疗套餐优惠前金额必须大于 0')),
+              },
+            ]}
+          >
+            <InputNumber precision={2} prefix="$" style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item label="平台服务比例" htmlFor="profile-platform-rate">
+            <InputNumber
+              id="profile-platform-rate"
+              value={profileTarget?.platformRate}
+              precision={2}
+              suffix="%"
+              disabled
+              style={{ width: '100%' }}
+            />
+          </Form.Item>
+          <Form.Item name="notes" label="补充说明" rules={[{ max: 2000 }]}>
+            <Input.TextArea rows={2} />
+          </Form.Item>
+        </>}
       </Form>
     </Modal>
 
@@ -296,4 +406,10 @@ export default function ProjectCollaborationPage() {
       </Form>
     </Modal>
   </div>;
+}
+
+function toStringList(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(String).map(item => item.trim()).filter(Boolean);
+  if (typeof value !== 'string') return [];
+  return value.split(',').map(item => item.trim()).filter(Boolean);
 }

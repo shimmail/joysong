@@ -116,6 +116,7 @@ export function getDefaultManagementPath() {
   const context = getManagementContext();
   if (!context || context.platformRole === 'ADMIN') return '/';
   if (context.canReviewInstitutionProjectRequests) return '/project-requests';
+  if (context.canSubmitInstitutionProjectRequests) return '/project-collaboration';
   if (context.canManageDoctors) return '/doctors';
   if (context.canManageInstitutions || context.visibleInstitutionIds.length > 0) return '/institutions';
   if (context.canManageArticles) return '/articles';

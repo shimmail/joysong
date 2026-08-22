@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import api from '../api';
@@ -43,7 +43,10 @@ beforeEach(() => {
   mockPost.mockResolvedValue({ data: { code: 200, message: 'OK', data: null } });
   mockGet.mockImplementation((url) => {
     const data = url === '/admin/doctor-institution-project-configs'
-      ? [{ id: 'config-1', doctorId: doctor.id, institutionProjectId: project.id, consultationFee: 100, institutionRate: 35, commissionRate: 10 }]
+      ? [{
+        id: 'config-1', doctorId: doctor.id, institutionProjectId: project.id,
+        medicalListPrice: 1000, consultationFee: 100, institutionRate: 35, commissionRate: 10,
+      }]
       : url === '/admin/institutions' ? [institution]
         : url === '/admin/doctors' ? [doctor]
           : url.startsWith('/admin/institution-projects') ? [project]
@@ -54,116 +57,56 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-async function selectOption(label: string, option: string) {
-  const combobox = screen.getByRole('combobox', { name: label });
-  fireEvent.mouseDown(combobox);
-  await screen.findByRole('option', { name: option });
-  const optionLabels = screen.getAllByText(option);
-  fireEvent.click(optionLabels[optionLabels.length - 1]);
-}
-
-async function openAndCompleteForm() {
-  const user = userEvent.setup();
-  render(<DoctorProjectConfigsPage />);
-  await screen.findByText('医生 A');
-  await user.click(screen.getByRole('button', { name: /新增配置/ }));
-  const dialog = screen.getByRole('dialog', { name: '新增配置' });
-  expect(within(dialog).queryByText('医生/项目发布者佣金比例')).not.toBeInTheDocument();
-  expect(within(dialog).getByText('平台分账比例')).toBeInTheDocument();
-  expect(within(dialog).getByText('医美顾问分账比例')).toBeInTheDocument();
-  expect(within(dialog).getByText('医生分账比例')).toBeInTheDocument();
-  await selectOption('机构', '机构 A');
-  await selectOption('医生', '医生 A');
-  await selectOption('机构项目', '项目 A');
-  const feeInput = screen.getByRole('spinbutton', { name: '面诊金' });
-  const institutionInput = screen.getByRole('spinbutton', { name: '合作医疗机构分成比例' });
-  const consultantInput = screen.getByRole('spinbutton', { name: '医美顾问分账比例' });
-  await user.type(feeInput, '100');
-  await user.clear(institutionInput);
-  await user.type(institutionInput, '35');
-  await user.type(consultantInput, '10');
-  await waitFor(() => expect(screen.getByRole('spinbutton', { name: '医生分账比例' })).toHaveValue('15'));
-  return user;
-}
-
-describe('DoctorProjectConfigsPage split rates', () => {
-  it('submits only compatible editable rate fields', async () => {
-    const user = await openAndCompleteForm();
-    await user.click(screen.getByRole('button', { name: '创建配置' }));
-
-    await waitFor(() => expect(mockPost).toHaveBeenCalledWith(
-      '/admin/doctor-institution-project-configs',
-      expect.objectContaining({ institutionRate: 35, commissionRate: 10 }),
-    ));
-    const payload = mockPost.mock.calls[0][1] as Record<string, unknown>;
-    expect(payload).not.toHaveProperty('doctorRate');
-    expect(payload).not.toHaveProperty('platformRate');
-  });
-
-  it('does not post when the rate total is invalid', async () => {
-    const user = await openAndCompleteForm();
-    const institutionInput = screen.getByRole('spinbutton', { name: '合作医疗机构分成比例' });
-    const consultantInput = screen.getByRole('spinbutton', { name: '医美顾问分账比例' });
-    await user.clear(institutionInput);
-    await user.type(institutionInput, '40');
-    await user.clear(consultantInput);
-    await user.type(consultantInput, '20.01');
-    await user.click(screen.getByRole('button', { name: '创建配置' }));
-
-    expect(await screen.findAllByText('平台、合作医疗机构和医美顾问分账比例合计不能超过 100%')).not.toHaveLength(0);
-    expect(mockPost).not.toHaveBeenCalled();
-  });
-
-  it('disables confirmation when the policy failed to load', async () => {
-    policyState.current = { policy: undefined, loading: false, error: '分账策略加载失败' };
-    const user = userEvent.setup();
-    render(<DoctorProjectConfigsPage />);
-    await user.click(screen.getByRole('button', { name: /新增配置/ }));
-
-    const dialog = screen.getByRole('dialog', { name: '新增配置' });
-    expect(within(dialog).getByRole('alert')).toHaveTextContent('分账策略加载失败');
-    expect(within(dialog).getByRole('button', { name: '创建配置' })).toBeDisabled();
-    expect(mockPost).not.toHaveBeenCalled();
-  });
-
-  it('disables confirmation while the policy is loading', async () => {
-    policyState.current = { policy: undefined, loading: true, error: undefined };
-    const user = userEvent.setup();
-    render(<DoctorProjectConfigsPage />);
-    await user.click(screen.getByRole('button', { name: /新增配置/ }));
-
-    const dialog = screen.getByRole('dialog', { name: '新增配置' });
-    expect(within(dialog).getByRole('button', { name: '创建配置' })).toBeDisabled();
-    expect(mockPost).not.toHaveBeenCalled();
-  });
-
-  it('renders an unavailable doctor rate and disables confirmation when policy is silently absent', async () => {
-    policyState.current = { policy: undefined, loading: false, error: undefined };
+describe('DoctorProjectConfigsPage medical list price', () => {
+  it('edits the USD list price, shows the platform rate read only, and submits exactly three fields', async () => {
     const user = userEvent.setup();
     render(<DoctorProjectConfigsPage />);
 
     const table = await screen.findByRole('table');
-    const configRow = within(table).getByRole('row', { name: /医生 A.*项目 A/ });
-    expect(within(configRow).getByText('-')).toBeInTheDocument();
+    const row = within(table).getByRole('row', { name: /医生 A.*项目 A/ });
+    expect(within(row).getByText('USD 1000')).toBeInTheDocument();
+    await user.click(within(row).getByRole('button', { name: /编辑/ }));
 
-    await user.click(screen.getByRole('button', { name: /新增配置/ }));
-    const dialog = screen.getByRole('dialog', { name: '新增配置' });
-    expect(within(dialog).getByRole('button', { name: '创建配置' })).toBeDisabled();
-    expect(mockPost).not.toHaveBeenCalled();
+    const dialog = await screen.findByRole('dialog', { name: '编辑配置' });
+    const listPrice = within(dialog).getByRole('spinbutton', { name: '医疗套餐优惠前金额（USD）' });
+    await waitFor(() => expect(listPrice).toHaveValue('1000.00'));
+    expect(within(dialog).getByRole('spinbutton', { name: '平台服务比例' })).toBeDisabled();
+    expect(within(dialog).queryByText('面诊金')).not.toBeInTheDocument();
+    expect(within(dialog).queryByText('尾款')).not.toBeInTheDocument();
+    expect(within(dialog).queryByText('医美顾问分账比例')).not.toBeInTheDocument();
+    expect(within(dialog).queryByText('医生分账比例')).not.toBeInTheDocument();
+
+    await user.clear(listPrice);
+    await user.type(listPrice, '1200');
+    await user.click(within(dialog).getByRole('button', { name: '保存修改' }));
+
+    await waitFor(() => expect(mockPost).toHaveBeenCalledWith(
+      '/admin/doctor-institution-project-configs',
+      {
+        doctorId: 'doctor-1',
+        institutionProjectId: 'project-1',
+        medicalListPrice: 1200,
+      },
+    ));
+    expect(Object.keys(mockPost.mock.calls[0][1] as object).sort()).toEqual([
+      'doctorId', 'institutionProjectId', 'medicalListPrice',
+    ]);
   });
 
-  it('marks an old config with a negative derived doctor share invalid', async () => {
-    mockGet.mockImplementation((url) => {
-      const data = url === '/admin/doctor-institution-project-configs'
-        ? [{ id: 'config-1', doctorId: doctor.id, institutionProjectId: project.id, consultationFee: 100, institutionRate: 40, commissionRate: 20.01 }]
-        : url === '/admin/institutions' ? [institution]
-          : url === '/admin/doctors' ? [doctor]
-            : url.startsWith('/admin/institution-projects') ? [project]
-              : [];
-      return Promise.resolve({ data: { code: 200, message: 'OK', data } });
-    });
+  it('requires a positive medical list price', async () => {
+    const user = userEvent.setup();
     render(<DoctorProjectConfigsPage />);
 
-    expect(await screen.findByText('配置无效')).toBeInTheDocument();
+    const table = await screen.findByRole('table');
+    await user.click(within(table).getByRole('button', { name: /编辑/ }));
+    const dialog = await screen.findByRole('dialog', { name: '编辑配置' });
+    const listPrice = within(dialog).getByRole('spinbutton', { name: '医疗套餐优惠前金额（USD）' });
+    await waitFor(() => expect(listPrice).toHaveValue('1000.00'));
+    await user.clear(listPrice);
+    await user.type(listPrice, '0');
+    await user.click(within(dialog).getByRole('button', { name: '保存修改' }));
+
+    expect(await within(dialog).findByText('医疗套餐优惠前金额必须大于 0')).toBeInTheDocument();
+    expect(mockPost).not.toHaveBeenCalled();
   });
 });
