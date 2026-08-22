@@ -418,11 +418,7 @@ class _StatusHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final statusLabel = (order.refundStatus == RefundStatus.rejected ||
-            (!order.isTravelGroundServiceOnly &&
-                order.refundStatus == RefundStatus.pending))
-        ? _refundStatusText(context, order.refundStatus)
-        : _orderStatusText(context, order.status);
+    final statusLabel = _orderStatusText(context, order.status);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(18),
@@ -736,33 +732,47 @@ class _RefundCard extends StatelessWidget {
   final RefundDetail refund;
 
   @override
-  Widget build(BuildContext context) => _DetailPanel(
-        title: _isEnglish(context) ? 'Refund details' : '退款信息',
-        children: [
+  Widget build(BuildContext context) {
+    final description = _refundDescription(refund);
+    return _DetailPanel(
+      title: _isEnglish(context) ? 'Refund details' : '退款信息',
+      children: [
+        _DetailLine(
+          label: _isEnglish(context) ? 'Status' : '状态',
+          value: _refundStatusText(context, refund.status),
+        ),
+        _DetailLine(
+          label: _isEnglish(context) ? 'Amount' : '金额',
+          value: refund.amount.formatted,
+        ),
+        _DetailLine(
+          label: _isEnglish(context) ? 'Reason' : '原因',
+          value: refund.reason,
+        ),
+        if (description.isNotEmpty)
           _DetailLine(
-            label: _isEnglish(context) ? 'Status' : '状态',
-            value: _refundStatusText(context, refund.status),
+            label: _isEnglish(context) ? 'Details' : '说明',
+            value: description,
           ),
+        if (refund.rejectReason?.isNotEmpty == true)
           _DetailLine(
-            label: _isEnglish(context) ? 'Amount' : '金额',
-            value: refund.amount.formatted,
+            label: _isEnglish(context) ? 'Rejection reason' : '驳回原因',
+            value: refund.rejectReason!,
           ),
-          _DetailLine(
-            label: _isEnglish(context) ? 'Reason' : '原因',
-            value: refund.reason,
-          ),
-          if (refund.description.isNotEmpty)
-            _DetailLine(
-              label: _isEnglish(context) ? 'Details' : '说明',
-              value: refund.description,
-            ),
-          if (refund.rejectReason?.isNotEmpty == true)
-            _DetailLine(
-              label: _isEnglish(context) ? 'Rejection reason' : '驳回原因',
-              value: refund.rejectReason!,
-            ),
-        ],
-      );
+      ],
+    );
+  }
+}
+
+String _refundDescription(RefundDetail refund) {
+  final rejectReason = refund.rejectReason?.trim();
+  if (rejectReason == null || rejectReason.isEmpty) return refund.description;
+  final suffix = '[拒绝原因] $rejectReason';
+  final suffixIndex = refund.description.lastIndexOf(suffix);
+  return suffixIndex >= 0 &&
+          suffixIndex + suffix.length == refund.description.trimRight().length
+      ? refund.description.substring(0, suffixIndex).trimRight()
+      : refund.description;
 }
 
 class _SettlementCard extends StatelessWidget {

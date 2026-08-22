@@ -129,4 +129,39 @@ void main() {
 
     expect(repository.settlementCalls, 0);
   });
+
+  test('a stale detail load cannot replace confirmed travel completion',
+      () async {
+    final active = sampleOrder(
+      status: OrderStatus.serviceActive,
+      paymentFlow: OrderPaymentFlow.travelGroundServiceOnly,
+    );
+    final completed = sampleOrder(
+      status: OrderStatus.completed,
+      paymentFlow: OrderPaymentFlow.travelGroundServiceOnly,
+      consultantDetailsVisible: true,
+      serviceConversationReadable: true,
+      serviceMessagingEnabled: false,
+    );
+    final staleResponse = Completer<Order>();
+    final repository = FakeOrdersRepository()
+      ..orders = [active]
+      ..completionOrder = completed;
+    final controller = OrderDetailController(repository, orderId: 'order-1');
+    await controller.load();
+
+    repository.delayedOrderDetails = [
+      staleResponse.future,
+      Future.value(completed),
+    ];
+    final staleLoad = controller.load();
+    await controller.confirmCompletion();
+    expect(controller.order?.status, OrderStatus.completed);
+
+    staleResponse.complete(active);
+    await staleLoad;
+
+    expect(controller.order?.status, OrderStatus.completed);
+    expect(repository.settlementCalls, 0);
+  });
 }

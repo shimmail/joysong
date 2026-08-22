@@ -150,6 +150,7 @@ Map<String, Object?> sampleOrderJson({
 class FakeOrdersRepository implements OrdersRepository {
   List<Order> orders = [sampleOrder()];
   List<Order> orderDetails = const [];
+  List<Future<Order>> delayedOrderDetails = [];
   int getOrdersCalls = 0;
   int getOrderCalls = 0;
   int actionCalls = 0;
@@ -188,6 +189,9 @@ class FakeOrdersRepository implements OrdersRepository {
   @override
   Future<Order> getOrder(String id) async {
     getOrderCalls += 1;
+    if (delayedOrderDetails.isNotEmpty) {
+      return delayedOrderDetails.removeAt(0);
+    }
     if (orderDetails.isNotEmpty) return orderDetails.removeAt(0);
     return orders.firstWhere((order) => order.id == id);
   }

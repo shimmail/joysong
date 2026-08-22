@@ -95,12 +95,18 @@ void main() {
       paymentFlow: OrderPaymentFlow.travelGroundServiceOnly,
       refundStatus: RefundStatus.pending,
     );
+    final processingRefundTravel = sampleOrder(
+      status: OrderStatus.completed,
+      paymentFlow: OrderPaymentFlow.travelGroundServiceOnly,
+      refundStatus: RefundStatus.processing,
+    );
     final pendingLegacy = sampleOrder(status: OrderStatus.pendingCompletion);
     final activeLegacy = sampleOrder(status: OrderStatus.serviceActive);
 
     expect(activeTravel.canConfirmCompletion, isTrue);
     expect(completedTravel.canRequestRefund, isTrue);
     expect(refundingTravel.canRequestRefund, isFalse);
+    expect(processingRefundTravel.canRequestRefund, isFalse);
     expect(pendingLegacy.canConfirmCompletion, isTrue);
     expect(activeLegacy.canConfirmCompletion, isFalse);
     expect(activeLegacy.canRequestRefund, isFalse);

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -96,7 +98,7 @@ void main() {
     tester,
   ) async {
     final repository = FakeOrdersRepository()
-      ..orders = [
+      ..orderDetails = [
         sampleOrder(
           status: OrderStatus.serviceActive,
           paymentFlow: OrderPaymentFlow.travelGroundServiceOnly,
@@ -104,7 +106,21 @@ void main() {
           serviceConversationReadable: true,
           serviceMessagingEnabled: true,
         ),
+        sampleOrder(
+          status: OrderStatus.completed,
+          paymentFlow: OrderPaymentFlow.travelGroundServiceOnly,
+          consultantDetailsVisible: true,
+          serviceConversationReadable: true,
+          serviceMessagingEnabled: false,
+        ),
       ];
+    repository.completionOrder = sampleOrder(
+      status: OrderStatus.completed,
+      paymentFlow: OrderPaymentFlow.travelGroundServiceOnly,
+      consultantDetailsVisible: true,
+      serviceConversationReadable: true,
+      serviceMessagingEnabled: false,
+    );
     final controller = OrderDetailController(repository, orderId: 'order-1');
 
     await tester.pumpWidget(
@@ -123,8 +139,15 @@ void main() {
     await tester.tap(completionButton);
     await tester.pumpAndSettle();
     expect(find.text('请确认旅游地接服务已完成？'), findsOneWidget);
+    await tester.tap(find.text('确认'));
+    await tester.pumpAndSettle();
+    expect(repository.actionCalls, 1);
+    expect(find.text('已完成'), findsOneWidget);
+    expect(find.byKey(const Key('confirm-completion-button')), findsNothing);
     expect(find.textContaining('结算'), findsNothing);
     expect(find.textContaining('尾款'), findsNothing);
+    expect(find.text('李咨询师'), findsOneWidget);
+    expect(find.text('查看沟通记录'), findsOneWidget);
   });
 
   testWidgets('shows rejected travel refund result after restoring completion',
@@ -147,7 +170,7 @@ void main() {
         'orderId': 'order-1',
         'amount': '400.00',
         'reason': '行程变更',
-        'description': '',
+        'description': '用户希望退款[拒绝原因] 服务已经完成，需补充材料',
         'status': 'REJECTED',
         'rejectReason': '服务已经完成，需补充材料',
         'createdAt': '2026-08-22T10:00:00',
@@ -164,9 +187,80 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('退款被拒绝'), findsAtLeastNWidgets(1));
+    expect(find.text('已完成'), findsOneWidget);
+    expect(find.text('退款被拒绝'), findsOneWidget);
+    expect(find.text('用户希望退款'), findsOneWidget);
     expect(find.text('服务已经完成，需补充材料'), findsOneWidget);
+    expect(find.textContaining('[拒绝原因]'), findsNothing);
     expect(find.text('查看沟通记录'), findsOneWidget);
+  });
+
+  testWidgets('disables travel completion while the detail refresh is loading',
+      (tester) async {
+    final active = sampleOrder(
+      status: OrderStatus.serviceActive,
+      paymentFlow: OrderPaymentFlow.travelGroundServiceOnly,
+      consultantDetailsVisible: true,
+      serviceConversationReadable: true,
+      serviceMessagingEnabled: true,
+    );
+    final repository = FakeOrdersRepository()..orders = [active];
+    final controller = OrderDetailController(repository, orderId: 'order-1');
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('zh'),
+        supportedLocales: const [Locale('zh')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
+        home: OrderDetailPage(controller: controller),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final refresh = Completer<Order>();
+    repository.delayedOrderDetails = [refresh.future];
+    final load = controller.load();
+    await tester.pump();
+
+    final completionButton = find.byKey(const Key('confirm-completion-button'));
+    await tester.scrollUntilVisible(completionButton, 300);
+    final button = tester.widget<FilledButton>(completionButton);
+    expect(button.onPressed, isNull);
+    expect(repository.actionCalls, 0);
+
+    refresh.complete(active);
+    await load;
+  });
+
+  testWidgets('submits a full travel refund request from a completed order',
+      (tester) async {
+    final repository = FakeOrdersRepository()
+      ..orders = [
+        sampleOrder(
+          status: OrderStatus.completed,
+          paymentFlow: OrderPaymentFlow.travelGroundServiceOnly,
+          consultantDetailsVisible: true,
+          serviceConversationReadable: true,
+          serviceMessagingEnabled: false,
+        ),
+      ];
+    final controller = OrderDetailController(repository, orderId: 'order-1');
+    await tester
+        .pumpWidget(MaterialApp(home: OrderDetailPage(controller: controller)));
+    await tester.pumpAndSettle();
+
+    final refundButton = find.byKey(const Key('request-refund-button'));
+    await tester.scrollUntilVisible(refundButton, 300);
+    expect(find.text('Request full travel ground service fee refund'),
+        findsOneWidget);
+    await tester.tap(refundButton);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('refund-reason-0')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('refund-submit-button')));
+    await tester.pumpAndSettle();
+
+    expect(repository.lastRefundReason, 'Changed my mind');
+    expect(repository.actionCalls, 1);
   });
 
   for (final status in const [

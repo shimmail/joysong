@@ -102,6 +102,7 @@ final class OrderDetailController extends ChangeNotifier {
   bool _isLoading = false;
   OrderAction? _activeAction;
   bool _isRemoved = false;
+  int _detailGeneration = 0;
 
   Order? get order => _order;
   RefundDetail? get refund => _refund;
@@ -112,21 +113,25 @@ final class OrderDetailController extends ChangeNotifier {
   bool get isSettlementGenerationPending => _isSettlementGenerationPending;
   bool get isLoading => _isLoading;
   OrderAction? get activeAction => _activeAction;
-  bool get isBusy => _activeAction != null;
+  bool get isBusy => _isLoading || _activeAction != null;
   bool get isRemoved => _isRemoved;
 
   Future<void> load() async {
-    if (_isLoading || isBusy) return;
+    if (_isLoading || _activeAction != null) return;
+    final generation = ++_detailGeneration;
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
     try {
       final detail = await _repository.getOrder(orderId);
+      if (!_isCurrent(generation)) return;
       _order = detail;
       _isRemoved = false;
-      await _loadSupportingData(detail);
+      await _loadSupportingData(detail, generation);
     } catch (error) {
-      _errorMessage = _orderMessageFor(error, '订单详情加载失败');
+      if (_isCurrent(generation)) {
+        _errorMessage = _orderMessageFor(error, '订单详情加载失败');
+      }
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -160,7 +165,8 @@ final class OrderDetailController extends ChangeNotifier {
       notifyListeners();
       return false;
     }
-    if (isBusy) return false;
+    if (_activeAction != null) return false;
+    final generation = ++_detailGeneration;
     _activeAction = OrderAction.refund;
     _errorMessage = null;
     notifyListeners();
@@ -171,7 +177,9 @@ final class OrderDetailController extends ChangeNotifier {
         description: description.trim(),
         evidenceUrl: evidenceUrl.trim(),
       );
-      _order = await _repository.getOrder(orderId);
+      final detail = await _repository.getOrder(orderId);
+      if (!_isCurrent(generation)) return false;
+      _order = detail;
       return true;
     } catch (error) {
       _errorMessage = _orderMessageFor(error, '退款申请失败');
@@ -198,15 +206,19 @@ final class OrderDetailController extends ChangeNotifier {
       );
 
   Future<void> retrySettlement() async {
-    if (_order == null || !_supportsSettlement(_order!)) return;
-    await _loadSettlement();
+    if (isBusy || _order == null || !_supportsSettlement(_order!)) return;
+    final generation = ++_detailGeneration;
+    await _loadSettlement(generation);
     notifyListeners();
   }
 
   Future<bool> _runOrderAction(
-      OrderAction action, Future<Order> Function() operation,
-      {bool refreshDetail = false}) async {
-    if (isBusy) return false;
+    OrderAction action,
+    Future<Order> Function() operation, {
+    bool refreshDetail = false,
+  }) async {
+    if (_activeAction != null) return false;
+    final generation = ++_detailGeneration;
     _activeAction = action;
     _errorMessage = null;
     notifyListeners();
@@ -214,8 +226,9 @@ final class OrderDetailController extends ChangeNotifier {
       _order = await operation();
       if (refreshDetail) {
         final detail = await _repository.getOrder(orderId);
+        if (!_isCurrent(generation)) return false;
         _order = detail;
-        await _loadSupportingData(detail);
+        await _loadSupportingData(detail, generation);
       }
       return true;
     } catch (error) {
@@ -232,7 +245,8 @@ final class OrderDetailController extends ChangeNotifier {
     Future<void> Function() operation, {
     bool removesOrder = false,
   }) async {
-    if (isBusy) return false;
+    if (_activeAction != null) return false;
+    ++_detailGeneration;
     _activeAction = action;
     _errorMessage = null;
     notifyListeners();
@@ -250,34 +264,46 @@ final class OrderDetailController extends ChangeNotifier {
   }
 
   Future<void> _reloadOrderOnly() async {
+    final generation = ++_detailGeneration;
     try {
-      _order = await _repository.getOrder(orderId);
+      final detail = await _repository.getOrder(orderId);
+      if (!_isCurrent(generation)) return;
+      _order = detail;
       _refund = null;
     } catch (error) {
-      _errorMessage = _orderMessageFor(error, '订单刷新失败');
+      if (_isCurrent(generation)) {
+        _errorMessage = _orderMessageFor(error, '订单刷新失败');
+      }
     }
     notifyListeners();
   }
 
-  Future<void> _loadSupportingData(Order detail) async {
+  Future<void> _loadSupportingData(Order detail, int generation) async {
+    List<OrderStatusLog> statusLogs;
     try {
-      _statusLogs = await _repository.getStatusLogs(orderId);
+      statusLogs = await _repository.getStatusLogs(orderId);
     } catch (_) {
-      _statusLogs = const [];
+      statusLogs = const [];
     }
+    if (!_isCurrent(generation)) return;
+    _statusLogs = statusLogs;
     if (detail.refundStatus != RefundStatus.none &&
         detail.refundStatus != RefundStatus.unknown) {
       try {
-        _refund = await _repository.getRefund(orderId);
+        final refund = await _repository.getRefund(orderId);
+        if (!_isCurrent(generation)) return;
+        _refund = refund;
       } catch (_) {
+        if (!_isCurrent(generation)) return;
         _refund = null;
       }
     } else {
       _refund = null;
     }
     if (_supportsSettlement(detail)) {
-      await _loadSettlement();
+      await _loadSettlement(generation);
     } else {
+      if (!_isCurrent(generation)) return;
       _settlement = null;
       _settlementErrorMessage = null;
       _isSettlementGenerationPending = false;
@@ -292,13 +318,17 @@ final class OrderDetailController extends ChangeNotifier {
         OrderStatus.settled,
       }.contains(order.status);
 
-  Future<void> _loadSettlement() async {
+  Future<void> _loadSettlement(int generation) async {
+    if (!_isCurrent(generation)) return;
     _settlement = null;
     _settlementErrorMessage = null;
     _isSettlementGenerationPending = false;
     try {
-      _settlement = await _repository.getSettlement(orderId);
+      final settlement = await _repository.getSettlement(orderId);
+      if (!_isCurrent(generation)) return;
+      _settlement = settlement;
     } catch (error) {
+      if (!_isCurrent(generation)) return;
       if (_isSettlementNotGenerated(error)) {
         _isSettlementGenerationPending = true;
       } else {
@@ -311,6 +341,8 @@ final class OrderDetailController extends ChangeNotifier {
       error is ApiException &&
       error.httpStatus == 409 &&
       error.message == 'SETTLEMENT_NOT_GENERATED';
+
+  bool _isCurrent(int generation) => generation == _detailGeneration;
 }
 
 String _orderMessageFor(Object error, String fallback) {
