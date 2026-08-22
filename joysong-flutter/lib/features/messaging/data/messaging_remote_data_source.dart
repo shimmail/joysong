@@ -9,6 +9,7 @@ abstract interface class MessagingRemoteDataSource {
   Future<void> markAllNotificationsRead();
   Future<List<DmConversation>> getDmConversations();
   Future<DmConversation> createDmConversation(String targetId);
+  Future<DmConversation> createOrderServiceConversation(String orderId);
   Future<List<DmMessage>> getDmMessages(
     String conversationId, {
     required int limit,
@@ -97,6 +98,25 @@ final class ApiMessagingRemoteDataSource implements MessagingRemoteDataSource {
           decodeData: DmConversation.fromJson,
         ),
       );
+
+  @override
+  Future<DmConversation> createOrderServiceConversation(String orderId) async {
+    final expectedOrderId = orderId.trim();
+    if (expectedOrderId.isEmpty) {
+      throw ArgumentError.value(orderId, 'orderId', '订单 ID 不能为空');
+    }
+    final conversation = _required(
+      await _apiClient.post<DmConversation>(
+        'orders/$expectedOrderId/service-conversation',
+        decodeData: DmConversation.fromJson,
+      ),
+    );
+    if (conversation.conversationType != DmConversationType.orderService ||
+        conversation.orderId != expectedOrderId) {
+      throw const FormatException('订单会话响应与请求不匹配');
+    }
+    return conversation;
+  }
 
   @override
   Future<List<DmMessage>> getDmMessages(

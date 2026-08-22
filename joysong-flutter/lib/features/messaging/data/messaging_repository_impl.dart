@@ -25,6 +25,9 @@ final class MessagingRepositoryImpl implements MessagingRepository {
   Future<DmConversation> createDmConversation(String targetId) =>
       _remote.createDmConversation(targetId);
   @override
+  Future<DmConversation> createOrderServiceConversation(String orderId) =>
+      _remote.createOrderServiceConversation(orderId);
+  @override
   Future<List<DmMessage>> getDmMessages(
     String conversationId, {
     int limit = 30,

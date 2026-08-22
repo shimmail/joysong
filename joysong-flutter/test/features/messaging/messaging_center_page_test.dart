@@ -8,40 +8,29 @@ import 'package:joysong_flutter/features/messaging/presentation/messaging_contro
 import 'package:joysong_flutter/features/messaging/presentation/messaging_pages.dart';
 
 void main() {
-  testWidgets('empty English hub creates and opens customer service',
+  testWidgets('empty English hub shows the current no-messages baseline',
       (tester) async {
     final repository = _PageMessagingRepository();
     final controller = MessagingHubController(repository);
-    CustomerServiceConversation? opened;
 
     await tester.pumpWidget(
       MaterialApp(
         locale: const Locale('en', 'US'),
         supportedLocales: const [Locale('zh', 'CN'), Locale('en', 'US')],
-        home: MessagingCenterPage(
-          controller: controller,
-          onOpenCustomerService: (conversation) => opened = conversation,
-        ),
+        home: MessagingCenterPage(controller: controller),
       ),
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Customer service'), findsWidgets);
-    expect(find.text('Need help? Tap to start a chat.'), findsOneWidget);
-
-    await tester.tap(find.byKey(const Key('customer-service-start')));
-    await tester.pumpAndSettle();
-
-    expect(repository.createCalls, 1);
-    expect(opened?.id, _conversation.id);
-    expect(find.byKey(const ValueKey('customer-service-cs-1')), findsOneWidget);
+    expect(find.text('No messages'), findsOneWidget);
+    expect(find.byKey(const Key('customer-service-start')), findsNothing);
+    expect(repository.createCalls, 0);
   });
 
-  testWidgets('hub shows loading and localized creation failure',
+  testWidgets('delayed loading suppresses the empty state until completion',
       (tester) async {
     final repository = _PageMessagingRepository()
-      ..conversationLoad = Completer<List<CustomerServiceConversation>>()
-      ..failCreate = true;
+      ..conversationLoad = Completer<List<CustomerServiceConversation>>();
     final controller = MessagingHubController(repository);
 
     await tester.pumpWidget(
@@ -52,25 +41,63 @@ void main() {
       ),
     );
     await tester.pump();
-    expect(find.byKey(const Key('customer-service-loading')), findsOneWidget);
+    expect(find.text('No messages'), findsNothing);
+    expect(find.byKey(const Key('customer-service-start')), findsNothing);
 
     repository.conversationLoad!.complete(const []);
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('customer-service-start')));
+
+    expect(find.text('No messages'), findsOneWidget);
+    expect(find.byKey(const Key('customer-service-start')), findsNothing);
+    expect(repository.createCalls, 0);
+  });
+
+  testWidgets('order-service rows never expose local hide or delete',
+      (tester) async {
+    final repository = _PageMessagingRepository()
+      ..dmConversations = const [_orderConversation, _directConversation];
+    final controller = MessagingHubController(
+      repository,
+      currentUserId: 'user-1',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('en'),
+        home: MessagingCenterPage(
+          controller: controller,
+          currentUserId: 'user-1',
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
 
-    expect(find.text('Something went wrong. Try again later.'), findsOneWidget);
-    expect(repository.createCalls, 1);
+    await tester.longPress(
+      find.byKey(const ValueKey('dm-conversation-order-1')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(ListTile, 'Pin chat'), findsOneWidget);
+    expect(find.widgetWithText(ListTile, 'Mark as unread'), findsOneWidget);
+    expect(find.widgetWithText(ListTile, 'Delete'), findsNothing);
+
+    Navigator.of(tester.element(find.widgetWithText(ListTile, 'Pin chat')))
+        .pop();
+    await tester.pumpAndSettle();
+    await tester.longPress(
+      find.byKey(const ValueKey('dm-conversation-direct-1')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(ListTile, 'Delete'), findsOneWidget);
   });
 }
 
 class _PageMessagingRepository extends Fake implements MessagingRepository {
   Completer<List<CustomerServiceConversation>>? conversationLoad;
-  bool failCreate = false;
   int createCalls = 0;
+  List<DmConversation> dmConversations = const [];
 
   @override
-  Future<List<DmConversation>> getDmConversations() async => const [];
+  Future<List<DmConversation>> getDmConversations() async => dmConversations;
 
   @override
   Future<List<CustomerServiceConversation>> getCustomerServiceConversations() =>
@@ -81,7 +108,6 @@ class _PageMessagingRepository extends Fake implements MessagingRepository {
   Future<CustomerServiceConversation>
       createCustomerServiceConversation() async {
     createCalls++;
-    if (failCreate) throw StateError('offline');
     return _conversation;
   }
 }
@@ -95,4 +121,30 @@ const _conversation = CustomerServiceConversation(
   unreadCount: 0,
   createdAt: '2026-08-06T10:00:00',
   updatedAt: '2026-08-06T10:00:00',
+);
+
+const _orderConversation = DmConversation(
+  id: 'conversation-order-1',
+  conversationType: DmConversationType.orderService,
+  orderId: 'order-1',
+  userAId: 'consultant-1',
+  userBId: 'user-1',
+  lastMessage: 'Order service',
+  lastMessageAt: '2026-08-21T10:00:00',
+  userAUnread: 0,
+  userBUnread: 1,
+  createdAt: '2026-08-21T09:00:00',
+  updatedAt: '2026-08-21T10:00:00',
+);
+
+const _directConversation = DmConversation(
+  id: 'conversation-direct-1',
+  userAId: 'friend-1',
+  userBId: 'user-1',
+  lastMessage: 'Direct message',
+  lastMessageAt: '2026-08-21T09:30:00',
+  userAUnread: 0,
+  userBUnread: 0,
+  createdAt: '2026-08-21T08:00:00',
+  updatedAt: '2026-08-21T09:30:00',
 );

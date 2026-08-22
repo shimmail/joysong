@@ -2,10 +2,14 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/core/config/app_environment.dart';
 import 'package:joysong_flutter/core/network/api_client.dart';
+import 'package:joysong_flutter/features/messaging/presentation/messaging_pages.dart';
 import 'package:joysong_flutter/features/shell/presentation/app_shell.dart';
+
+import '../orders/order_test_fixtures.dart';
 
 void main() {
   testWidgets('system back pops nested content before leaving the app shell',
@@ -101,6 +105,116 @@ void main() {
     );
     expect(dmPost.$2, {'targetId': 'consultant-2'});
   });
+
+  testWidgets('order detail uses only the order-scoped conversation endpoint',
+      (tester) async {
+    _useLargeTestSurface(tester);
+    final client = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE',
+      freshReadable: true,
+      freshSendEnabled: true,
+    );
+    await _pumpShell(tester, client);
+
+    await tester.tap(find.text('我的'));
+    await tester.pumpAndSettle();
+    final ordersEntry = find.text('我的订单');
+    await tester.ensureVisible(ordersEntry);
+    await tester.tap(ordersEntry);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('order-1')));
+    await tester.pumpAndSettle();
+
+    final chatButton = find.byKey(const Key('service-chat-button'));
+    await tester.ensureVisible(chatButton);
+    await tester.tap(chatButton);
+    await tester.pumpAndSettle();
+
+    expect(
+      client.posts,
+      contains(('orders/order-1/service-conversation', null)),
+    );
+    expect(
+      client.posts.where((request) => request.$1 == 'dm/conversations'),
+      isEmpty,
+    );
+    expect(client.orderReads, 2);
+    expect(find.byType(DmThreadPage), findsOneWidget);
+    expect(find.byType(TextField), findsOneWidget);
+  });
+
+  testWidgets('message center refreshes order entitlement before read-only chat',
+      (tester) async {
+    _useLargeTestSurface(tester);
+    final client = _OrderServiceApiClient(
+      freshStatus: 'REFUND_PROCESSING',
+      freshReadable: true,
+      freshSendEnabled: false,
+    );
+    await _pumpShell(tester, client);
+
+    await tester.tap(find.text('消息'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('dm-conversation-order-1')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(client.orderReads, 1);
+    expect(client.posts, isEmpty);
+    expect(find.byType(DmThreadPage), findsOneWidget);
+    expect(find.byType(TextField), findsNothing);
+  });
+
+  testWidgets('dm notification rejects a server-filtered order conversation',
+      (tester) async {
+    _useLargeTestSurface(tester);
+    final client = _OrderServiceApiClient(
+      freshStatus: 'PENDING_SERVICE_FEE',
+      freshReadable: false,
+      freshSendEnabled: false,
+      includeNotification: true,
+    );
+    await _pumpShell(tester, client);
+
+    await tester.tap(find.text('消息'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('message-center-system')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('订单沟通更新'));
+    await tester.pumpAndSettle();
+
+    expect(client.orderReads, 0);
+    expect(find.byType(DmThreadPage), findsNothing);
+    expect(find.text('当前会话不可查看'), findsOneWidget);
+  });
+}
+
+void _useLargeTestSurface(WidgetTester tester) {
+  tester.view.physicalSize = const Size(800, 1200);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+}
+
+Future<void> _pumpShell(
+  WidgetTester tester,
+  ApiClient client,
+) async {
+  FlutterSecureStorage.setMockInitialValues(const {});
+  await tester.pumpWidget(
+    MaterialApp(
+      locale: const Locale('zh'),
+      supportedLocales: const [Locale('zh')],
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
+      home: AppShell(
+        agentConfig: const AgentConfig(),
+        apiClient: client,
+        currentUserId: 'user-1',
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
 }
 
 final class _AgentHandoffApiClient extends ApiClient {
@@ -163,6 +277,88 @@ final class _AgentHandoffApiClient extends ApiClient {
 
 final class _TestHttpClient extends Fake implements HttpClient {}
 
+final class _OrderServiceApiClient extends ApiClient {
+  _OrderServiceApiClient({
+    required this.freshStatus,
+    required this.freshReadable,
+    required this.freshSendEnabled,
+    this.includeNotification = false,
+  }) : super(
+          apiRoot: Uri.parse('http://localhost/api/'),
+          httpClient: _TestHttpClient(),
+        );
+
+  final String freshStatus;
+  final bool freshReadable;
+  final bool freshSendEnabled;
+  final bool includeNotification;
+  final gets = <String>[];
+  final posts = <(String, Object?)>[];
+
+  int get orderReads => gets.where((path) => path == 'orders/order-1').length;
+
+  Map<String, Object?> get _freshOrder => sampleOrderJson(
+        status: freshStatus,
+        paymentFlow: 'TRAVEL_GROUND_SERVICE_ONLY',
+        consultantBound: true,
+        serviceActivated: freshStatus != 'PENDING_SERVICE_FEE',
+        consultantDetailsVisible:
+            freshStatus != 'PENDING_SERVICE_FEE' && freshStatus != 'REFUNDED',
+        serviceConversationReadable: freshReadable,
+        serviceMessagingEnabled: freshSendEnabled,
+      );
+
+  @override
+  Future<T?> get<T>(
+    String path, {
+    Map<String, Object?> query = const {},
+    required T Function(Object? json) decodeData,
+  }) async {
+    gets.add(path);
+    final Object data = switch (path) {
+      'notifications/unread-count' => includeNotification ? 1 : 0,
+      'notifications' =>
+        includeNotification ? const [_dmNotificationJson] : const <Object?>[],
+      'dm/conversations' => freshReadable
+          ? const [_orderServiceConversationJson]
+          : const <Object?>[],
+      'cs/conversations' => const <Object?>[],
+      'orders' => [_freshOrder],
+      'orders/order-1' => _freshOrder,
+      'orders/order-1/status-logs' => const <Object?>[],
+      'dm/conversations/conversation-order-1/messages' => const <Object?>[],
+      '/discover/filter-options' => const <String, Object?>{
+          'categories': <String>[],
+          'tags': <String>[],
+          'cities': <String>[],
+        },
+      _ => const <Object?>[],
+    };
+    return decodeData(data);
+  }
+
+  @override
+  Future<T?> post<T>(
+    String path, {
+    Object? body,
+    required T Function(Object? json) decodeData,
+  }) async {
+    posts.add((path, body));
+    if (path == 'orders/order-1/service-conversation') {
+      return decodeData(_orderServiceConversationJson);
+    }
+    return decodeData(const <String, Object?>{});
+  }
+
+  @override
+  Future<T?> put<T>(
+    String path, {
+    Object? body,
+    required T Function(Object? json) decodeData,
+  }) async =>
+      decodeData(null);
+}
+
 const _agentSessionJson = <String, Object?>{
   'id': 'session-human',
   'persona': 'CONSULTANT',
@@ -209,4 +405,32 @@ const _dmConversationJson = <String, Object?>{
   'updatedAt': '2026-08-17T09:02:00Z',
   'firstMessageLimitApplies': false,
   'waitingForReply': false,
+};
+
+const _orderServiceConversationJson = <String, Object?>{
+  'id': 'conversation-order-1',
+  'conversationType': 'ORDER_SERVICE',
+  'orderId': 'order-1',
+  'userAId': 'consultant-1',
+  'userBId': 'user-1',
+  'lastMessage': '订单服务记录',
+  'lastMessageAt': '2026-08-21T10:05:00',
+  'userAUnread': 0,
+  'userBUnread': 1,
+  'createdAt': '2026-08-21T10:00:00',
+  'updatedAt': '2026-08-21T10:05:00',
+  'firstMessageLimitApplies': false,
+  'waitingForReply': false,
+};
+
+const _dmNotificationJson = <String, Object?>{
+  'id': 'notification-order-1',
+  'userId': 'user-1',
+  'type': 'DM_NEW',
+  'title': '订单沟通更新',
+  'content': '您有一条订单服务消息',
+  'targetType': 'dm_conversation',
+  'targetId': 'conversation-order-1',
+  'isRead': false,
+  'createdAt': '2026-08-21T10:06:00',
 };

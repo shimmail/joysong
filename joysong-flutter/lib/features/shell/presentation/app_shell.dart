@@ -777,6 +777,7 @@ class _AppShellState extends State<AppShell> {
         builder: (_) => OrderDetailPage(
           controller: controller,
           socialController: _socialController,
+          onOpenServiceConversation: _openOrderServiceConversation,
         ),
       ),
     );
@@ -899,6 +900,28 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
+  Future<void> _openOrderServiceConversation(String orderId) async {
+    final repository = _messagingRepository;
+    final id = orderId.trim();
+    if (repository == null || id.isEmpty) return;
+    try {
+      final conversation =
+          await repository.createOrderServiceConversation(id);
+      if (!mounted) return;
+      await _openDmThread(conversation);
+    } on Object {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(context.localized(
+            '暂时无法打开订单沟通，请稍后重试',
+            'Unable to open this order conversation. Please try again.',
+          )),
+        ),
+      );
+    }
+  }
+
   Future<void> _openDiaryEditor(
     SocialController controller, {
     Diary? diary,
@@ -1007,7 +1030,11 @@ class _AppShellState extends State<AppShell> {
       final conversations = await repository.getDmConversations();
       final conversation =
           conversations.where((item) => item.id == conversationId).firstOrNull;
-      if (!mounted || conversation == null) return;
+      if (!mounted) return;
+      if (conversation == null) {
+        _showConversationUnavailable();
+        return;
+      }
       final peer = _messagingController?.peerFor(conversation);
       await _openDmThread(conversation, title: peer?.name);
     } on Object {
@@ -1045,6 +1072,35 @@ class _AppShellState extends State<AppShell> {
     if (repository == null) {
       return;
     }
+    var sendEnabled = true;
+    if (conversation.conversationType == DmConversationType.orderService) {
+      final orderId = conversation.orderId?.trim();
+      final ordersRepository = _ordersRepository;
+      if (orderId == null || orderId.isEmpty || ordersRepository == null) {
+        _showOrderConversationUnavailable();
+        return;
+      }
+      try {
+        final order = await ordersRepository.getOrder(orderId);
+        if (!mounted) return;
+        if (!order.serviceConversationReadable) {
+          _showOrderConversationUnavailable();
+          return;
+        }
+        sendEnabled = order.serviceMessagingEnabled;
+      } on Object {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(context.localized(
+              '暂时无法打开订单沟通，请稍后重试',
+              'Unable to open this order conversation. Please try again.',
+            )),
+          ),
+        );
+        return;
+      }
+    }
     final otherUserId = conversation.otherUserId(widget.currentUserId);
     final currentUserFallback = context.localized('我', 'Me');
     final peers = await Future.wait<MessagingPeer>([
@@ -1071,6 +1127,8 @@ class _AppShellState extends State<AppShell> {
               otherUserId.isEmpty ? null : () => _openPublicUser(otherUserId),
           onPickImage: _pickAndUploadDmImage,
           onTranslate: _translateDmMessage,
+          conversationType: conversation.conversationType,
+          sendEnabled: sendEnabled,
           title:
               title?.trim().isNotEmpty == true ? title!.trim() : peers[1].name,
         ),
@@ -1078,6 +1136,30 @@ class _AppShellState extends State<AppShell> {
     );
     controller.dispose();
     await _messagingController?.refresh();
+  }
+
+  void _showOrderConversationUnavailable() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(context.localized(
+          '当前订单沟通记录不可查看',
+          'This order conversation is not available.',
+        )),
+      ),
+    );
+  }
+
+  void _showConversationUnavailable() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(context.localized(
+          '当前会话不可查看',
+          'This conversation is not available.',
+        )),
+      ),
+    );
   }
 
   Future<MessagingPeer> _loadCurrentMessagingPeer(String fallbackName) async {

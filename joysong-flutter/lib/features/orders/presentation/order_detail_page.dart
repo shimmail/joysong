@@ -18,6 +18,7 @@ class OrderDetailPage extends StatefulWidget {
     this.pickImage,
     this.uploadImage,
     this.onOrderRemoved,
+    this.onOpenServiceConversation,
     super.key,
   });
 
@@ -27,6 +28,7 @@ class OrderDetailPage extends StatefulWidget {
   final Future<AppPickedFile?> Function()? pickImage;
   final Future<String?> Function(PublicMediaPurpose purpose)? uploadImage;
   final VoidCallback? onOrderRemoved;
+  final ValueChanged<String>? onOpenServiceConversation;
 
   @override
   State<OrderDetailPage> createState() => _OrderDetailPageState();
@@ -263,7 +265,10 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
         _StatusHeader(order: order),
         const SizedBox(height: 12),
         if (order.isTravelGroundServiceOnly)
-          _TravelGroundServiceInformation(order: order)
+          _TravelGroundServiceInformation(
+            order: order,
+            onOpenServiceConversation: widget.onOpenServiceConversation,
+          )
         else
           _OrderInformation(order: order),
         const SizedBox(height: 12),
@@ -519,9 +524,13 @@ class _OrderInformation extends StatelessWidget {
 }
 
 class _TravelGroundServiceInformation extends StatelessWidget {
-  const _TravelGroundServiceInformation({required this.order});
+  const _TravelGroundServiceInformation({
+    required this.order,
+    this.onOpenServiceConversation,
+  });
 
   final Order order;
+  final ValueChanged<String>? onOpenServiceConversation;
 
   @override
   Widget build(BuildContext context) {
@@ -535,7 +544,11 @@ class _TravelGroundServiceInformation extends StatelessWidget {
               : '地接资料当前不可查看');
       return _DetailPanel(
         title: _isEnglish(context) ? 'Travel ground service' : '地接服务',
-        children: [Text(message)],
+        children: [
+          Text(message),
+          if (order.serviceConversationReadable)
+            _serviceConversationAction(context),
+        ],
       );
     }
     return _DetailPanel(
@@ -568,19 +581,29 @@ class _TravelGroundServiceInformation extends StatelessWidget {
             label: _isEnglish(context) ? 'Institution ID' : '机构编号',
             value: order.institutionId,
           ),
-        if (order.canOpenServiceConversation)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: FilledButton.tonalIcon(
-              key: const Key('service-chat-button'),
-              onPressed: null,
-              icon: const Icon(Icons.chat_bubble_outline),
-              label: Text(_isEnglish(context) ? 'Service chat' : '地接沟通'),
-            ),
-          ),
+        if (order.serviceConversationReadable)
+          _serviceConversationAction(context),
       ],
     );
   }
+
+  Widget _serviceConversationAction(BuildContext context) => Align(
+        alignment: Alignment.centerLeft,
+        child: FilledButton.tonalIcon(
+          key: const Key('service-chat-button'),
+          onPressed: onOpenServiceConversation == null
+              ? null
+              : () => onOpenServiceConversation!(order.id),
+          icon: const Icon(Icons.chat_bubble_outline),
+          label: Text(
+            order.serviceMessagingEnabled
+                ? (_isEnglish(context) ? 'Service chat' : '地接沟通')
+                : (_isEnglish(context)
+                    ? 'View service history'
+                    : '查看沟通记录'),
+          ),
+        ),
+      );
 }
 
 class _TravelGroundServicePaymentInformation extends StatelessWidget {

@@ -49,6 +49,8 @@ class AppNotification {
   }
 }
 
+enum DmConversationType { direct, orderService }
+
 class DmConversation {
   const DmConversation({
     required this.id,
@@ -60,6 +62,8 @@ class DmConversation {
     required this.userBUnread,
     required this.createdAt,
     required this.updatedAt,
+    this.conversationType = DmConversationType.direct,
+    this.orderId,
     this.firstMessageLimitApplies = false,
     this.waitingForReply = false,
   });
@@ -73,6 +77,8 @@ class DmConversation {
   final int userBUnread;
   final String createdAt;
   final String updatedAt;
+  final DmConversationType conversationType;
+  final String? orderId;
   final bool firstMessageLimitApplies;
   final bool waitingForReply;
 
@@ -84,6 +90,12 @@ class DmConversation {
 
   factory DmConversation.fromJson(Object? json) {
     final map = _map(json, '私信会话');
+    final conversationType = _dmConversationType(map['conversationType']);
+    final orderId = _nullableTrimmedText(map['orderId']);
+    if (conversationType == DmConversationType.orderService &&
+        orderId == null) {
+      throw const FormatException('ORDER_SERVICE 会话缺少 orderId');
+    }
     return DmConversation(
       id: _required(map, 'id'),
       userAId: _text(map['userAId']),
@@ -94,6 +106,8 @@ class DmConversation {
       userBUnread: _integer(map['userBUnread']),
       createdAt: _text(map['createdAt']),
       updatedAt: _text(map['updatedAt']),
+      conversationType: conversationType,
+      orderId: orderId,
       firstMessageLimitApplies: _boolean(map['firstMessageLimitApplies']),
       waitingForReply: _boolean(map['waitingForReply']),
     );
@@ -234,6 +248,18 @@ String? _nullableText(Object? value) {
   final text = value?.toString();
   return text == null || text.isEmpty ? null : text;
 }
+
+String? _nullableTrimmedText(Object? value) {
+  final text = value?.toString().trim();
+  return text == null || text.isEmpty ? null : text;
+}
+
+DmConversationType _dmConversationType(Object? value) =>
+    switch (value?.toString().trim().toUpperCase() ?? '') {
+      '' || 'DIRECT' => DmConversationType.direct,
+      'ORDER_SERVICE' => DmConversationType.orderService,
+      final value => throw FormatException('不支持的会话类型: $value'),
+    };
 
 int _integer(Object? value) => switch (value) {
       final int number => number,

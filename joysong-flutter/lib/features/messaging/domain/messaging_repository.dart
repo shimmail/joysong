@@ -13,6 +13,8 @@ abstract interface class MessagingRepository {
 
   Future<DmConversation> createDmConversation(String targetId);
 
+  Future<DmConversation> createOrderServiceConversation(String orderId);
+
   Future<List<DmMessage>> getDmMessages(
     String conversationId, {
     int limit = 30,

@@ -369,7 +369,11 @@ class _MessagingCenterPageState extends State<MessagingCenterPage> {
                     isPinned: widget.controller.isPinned(item.id),
                     onMarkUnread: () => widget.controller.markUnread(item.id),
                     onTogglePin: () => widget.controller.togglePin(item.id),
-                    onDelete: () => widget.controller.hideConversation(item.id),
+                    onDelete:
+                        item.conversationType == DmConversationType.orderService
+                            ? null
+                            : () =>
+                                widget.controller.hideConversation(item.id),
                     onOpen: () {
                       widget.controller.clearUnread(item.id);
                       widget.onOpenDm?.call(item);
@@ -557,7 +561,7 @@ class _ConversationActionCard extends StatefulWidget {
   final bool isPinned;
   final VoidCallback onMarkUnread;
   final VoidCallback onTogglePin;
-  final VoidCallback onDelete;
+  final VoidCallback? onDelete;
   final VoidCallback onOpen;
 
   @override
@@ -567,7 +571,8 @@ class _ConversationActionCard extends StatefulWidget {
 
 class _ConversationActionCardState extends State<_ConversationActionCard> {
   static const _actionWidth = 80.0;
-  static const _actionsWidth = _actionWidth * 3;
+  double get _actionsWidth =>
+      _actionWidth * (widget.onDelete == null ? 2 : 3);
   double _offset = 0;
 
   void _close() {
@@ -586,6 +591,8 @@ class _ConversationActionCardState extends State<_ConversationActionCard> {
   }
 
   Future<void> _requestDelete() async {
+    final onDelete = widget.onDelete;
+    if (onDelete == null) return;
     _close();
     final strings = _strings(context);
     final confirmed = await showDialog<bool>(
@@ -605,7 +612,7 @@ class _ConversationActionCardState extends State<_ConversationActionCard> {
         ],
       ),
     );
-    if (confirmed == true) widget.onDelete();
+    if (confirmed == true) onDelete();
   }
 
   Future<void> _showActions() async {
@@ -635,17 +642,18 @@ class _ConversationActionCardState extends State<_ConversationActionCard> {
               title: Text(strings.markUnread),
               onTap: () => Navigator.pop(context, 'unread'),
             ),
-            ListTile(
-              leading: const Icon(
-                Icons.delete_outline,
-                color: Color(0xfff44336),
+            if (widget.onDelete != null)
+              ListTile(
+                leading: const Icon(
+                  Icons.delete_outline,
+                  color: Color(0xfff44336),
+                ),
+                title: Text(
+                  strings.delete,
+                  style: const TextStyle(color: Color(0xfff44336)),
+                ),
+                onTap: () => Navigator.pop(context, 'delete'),
               ),
-              title: Text(
-                strings.delete,
-                style: const TextStyle(color: Color(0xfff44336)),
-              ),
-              onTap: () => Navigator.pop(context, 'delete'),
-            ),
           ],
         ),
       ),
@@ -697,13 +705,14 @@ class _ConversationActionCardState extends State<_ConversationActionCard> {
                               : _strings(context).pinChat,
                           onTap: _togglePin,
                         ),
-                        _ConversationActionButton(
-                          width: _actionWidth,
-                          color: const Color(0xfff44336),
-                          icon: Icons.delete_outline,
-                          label: _strings(context).delete,
-                          onTap: () => unawaited(_requestDelete()),
-                        ),
+                        if (widget.onDelete != null)
+                          _ConversationActionButton(
+                            width: _actionWidth,
+                            color: const Color(0xfff44336),
+                            icon: Icons.delete_outline,
+                            label: _strings(context).delete,
+                            onTap: () => unawaited(_requestDelete()),
+                          ),
                       ],
                     ),
                   ),
@@ -796,6 +805,8 @@ class DmThreadPage extends StatelessWidget {
     this.onOtherAvatarTap,
     this.onPickImage,
     this.onTranslate,
+    this.conversationType = DmConversationType.direct,
+    this.sendEnabled = true,
     super.key,
   });
 
@@ -807,6 +818,8 @@ class DmThreadPage extends StatelessWidget {
   final VoidCallback? onOtherAvatarTap;
   final Future<String?> Function()? onPickImage;
   final Future<String?> Function(String text)? onTranslate;
+  final DmConversationType conversationType;
+  final bool sendEnabled;
 
   @override
   Widget build(BuildContext context) => _ThreadScaffold<DmMessage>(
@@ -831,12 +844,16 @@ class DmThreadPage extends StatelessWidget {
         createdAtOf: (item) => item.createdAt,
         typeOf: (item) => item.messageType,
         idOf: (item) => item.id,
-        delete: controller.deleteMessage,
+        delete: conversationType == DmConversationType.direct
+            ? controller.deleteMessage
+            : null,
         isMine: (item) => item.senderId == currentUserId,
         myPeer: myPeer,
         otherPeer: otherPeer,
         onOtherAvatarTap: onOtherAvatarTap,
         waitingForReply: () => controller.waitingForReply,
+        sendEnabled: sendEnabled,
+        showRemovalActions: conversationType == DmConversationType.direct,
       );
 }
 
@@ -907,6 +924,8 @@ class _ThreadScaffold<T> extends StatefulWidget {
     this.otherPeer,
     this.onOtherAvatarTap,
     this.waitingForReply,
+    this.sendEnabled = true,
+    this.showRemovalActions = true,
   });
 
   final String title;
@@ -933,6 +952,8 @@ class _ThreadScaffold<T> extends StatefulWidget {
   final MessagingPeer? otherPeer;
   final VoidCallback? onOtherAvatarTap;
   final bool Function()? waitingForReply;
+  final bool sendEnabled;
+  final bool showRemovalActions;
 
   @override
   State<_ThreadScaffold<T>> createState() => _ThreadScaffoldState<T>();
@@ -1166,18 +1187,19 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
                 },
               ),
             ),
-            _MessageComposer(
-              input: _input,
-              isLoading: widget.isLoading(),
-              isSending: widget.isSending(),
-              isPickingImage: _isPickingImage,
-              waitingForReply: widget.waitingForReply?.call() ?? false,
-              canPickImage:
-                  widget.pickImage != null && widget.sendImage != null,
-              onPickImage: _pickAndSendImage,
-              onSend: _sendText,
-              strings: strings,
-            ),
+            if (widget.sendEnabled)
+              _MessageComposer(
+                input: _input,
+                isLoading: widget.isLoading(),
+                isSending: widget.isSending(),
+                isPickingImage: _isPickingImage,
+                waitingForReply: widget.waitingForReply?.call() ?? false,
+                canPickImage:
+                    widget.pickImage != null && widget.sendImage != null,
+                onPickImage: _pickAndSendImage,
+                onSend: _sendText,
+                strings: strings,
+              ),
           ],
         ),
       ),
@@ -1233,12 +1255,13 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
                 ),
                 onTap: () => Navigator.pop(context, 'translate'),
               ),
-            ListTile(
-              enabled: false,
-              leading: const Icon(Icons.undo_outlined),
-              title: Text(strings.unsend),
-            ),
-            if (mine && widget.delete != null)
+            if (widget.showRemovalActions)
+              ListTile(
+                enabled: false,
+                leading: const Icon(Icons.undo_outlined),
+                title: Text(strings.unsend),
+              ),
+            if (widget.showRemovalActions && mine && widget.delete != null)
               ListTile(
                 leading: const Icon(Icons.delete_outline),
                 title: Text(strings.delete),

@@ -50,6 +50,7 @@ void main() {
   testWidgets('shows only server-entitled travel-service fulfillment details', (
     tester,
   ) async {
+    String? openedOrderId;
     final repository = FakeOrdersRepository()
       ..orders = [
         sampleOrder(
@@ -69,7 +70,10 @@ void main() {
         locale: const Locale('zh'),
         supportedLocales: const [Locale('zh')],
         localizationsDelegates: GlobalMaterialLocalizations.delegates,
-        home: OrderDetailPage(controller: controller),
+        home: OrderDetailPage(
+          controller: controller,
+          onOpenServiceConversation: (orderId) => openedOrderId = orderId,
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -80,7 +84,56 @@ void main() {
     expect(find.byKey(const Key('pay-service-fee-button')), findsNothing);
     expect(find.byKey(const Key('pay-consultation-button')), findsNothing);
     expect(find.byKey(const Key('pay-balance-button')), findsNothing);
+
+    final chatButton = find.byKey(const Key('service-chat-button'));
+    await tester.ensureVisible(chatButton);
+    await tester.tap(chatButton);
+    expect(openedOrderId, 'order-1');
   });
+
+  for (final status in const [
+    OrderStatus.refundReview,
+    OrderStatus.refundProcessing,
+    OrderStatus.refunded,
+  ])
+    testWidgets('$status keeps order history readable but read-only', (
+      tester,
+    ) async {
+      String? openedOrderId;
+      final repository = FakeOrdersRepository()
+        ..orders = [
+          sampleOrder(
+            status: status,
+            paymentFlow: OrderPaymentFlow.travelGroundServiceOnly,
+            consultantBound: true,
+            serviceActivated: true,
+            consultantDetailsVisible: status != OrderStatus.refunded,
+            serviceConversationReadable: true,
+            serviceMessagingEnabled: false,
+          ),
+        ];
+      final controller = OrderDetailController(repository, orderId: 'order-1');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          locale: const Locale('zh'),
+          supportedLocales: const [Locale('zh')],
+          localizationsDelegates: GlobalMaterialLocalizations.delegates,
+          home: OrderDetailPage(
+            controller: controller,
+            onOpenServiceConversation: (orderId) => openedOrderId = orderId,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final historyButton = find.byKey(const Key('service-chat-button'));
+      expect(historyButton, findsOneWidget);
+      expect(find.text('查看沟通记录'), findsOneWidget);
+      await tester.ensureVisible(historyButton);
+      await tester.tap(historyButton);
+      expect(openedOrderId, 'order-1');
+    });
 
   testWidgets('shows settlement pending and retries a support-data error',
       (tester) async {
