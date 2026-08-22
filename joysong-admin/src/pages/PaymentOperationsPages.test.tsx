@@ -7,7 +7,25 @@ import api from '../api';
 import { formatMoney } from '../utils/money';
 import OrdersPage from './OrdersPage';
 import PaymentsPage from './PaymentsPage';
-import RefundsPage, { isRetryableRefund, retryFailedRefund } from './RefundsPage';
+import RefundsPage from './RefundsPage';
+
+vi.mock('antd', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('antd')>();
+  return {
+    ...actual,
+    Select: ({ value, options = [], onChange, virtual: _virtual, ...props }: any) => (
+      <select
+        {...props}
+        value={value || '__all__'}
+        onChange={(event) => onChange(event.target.value === '__all__' ? '' : event.target.value)}
+      >
+        {options.map((option: { label: string; value: string }) => (
+          <option key={option.value} value={option.value || '__all__'}>{option.label}</option>
+        ))}
+      </select>
+    ),
+  };
+});
 
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>();
@@ -160,6 +178,12 @@ const failedProcessingRefund = {
 
 function response(data: unknown) {
   return Promise.resolve({ data: { code: 200, message: 'OK', data } });
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
 }
 
 function renderOrders() {
@@ -430,33 +454,108 @@ describe('RefundsPage manual review operations', () => {
     expect(within(itemRow).getByText('2026-08-22T09:32:00')).toBeInTheDocument();
   });
 
-  it('enables the retry button only for processing refunds that contain a failed item', () => {
-    for (const status of ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED']) {
-      expect(isRetryableRefund({ ...failedProcessingRefund, status })).toBe(false);
+  it('shows the retry button only on processing refunds with a failed item', async () => {
+    const user = userEvent.setup();
+    const records = [
+      ...['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED', 'refund_processing'].map((status) => ({
+        ...failedProcessingRefund,
+        id: `retry-${status.toLowerCase()}`,
+        orderNo: `RETRY-${status}`,
+        status,
+      })),
+      {
+        ...failedProcessingRefund,
+        id: 'retry-processing-without-failure',
+        orderNo: 'RETRY-PROCESSING-WITHOUT-FAILURE',
+        items: [{ ...failedProcessingRefund.items[0], status: 'PROCESSING' }],
+      },
+      failedProcessingRefund,
+    ];
+    mockGet.mockImplementation((url) => url === '/admin/refunds' ? response(records) : response([]));
+
+    render(<RefundsPage />);
+    await user.selectOptions(await screen.findByRole('combobox', { name: '退款状态' }), '__all__');
+    await screen.findByText('RETRY-APPROVED');
+
+    for (const orderNo of records.filter(record => record.id !== failedProcessingRefund.id).map(record => record.orderNo)) {
+      const row = screen.getByText(orderNo).closest('tr') as HTMLTableRowElement;
+      expect(within(row).queryByRole('button', { name: '重试失败项' })).not.toBeInTheDocument();
     }
-    expect(isRetryableRefund({
-      ...failedProcessingRefund,
-      items: [{ ...failedProcessingRefund.items[0], status: 'PROCESSING' }],
-    })).toBe(false);
-    expect(isRetryableRefund(failedProcessingRefund)).toBe(true);
+    const retryableRow = screen.getByText('RETRY-001').closest('tr') as HTMLTableRowElement;
+    expect(within(retryableRow).getByRole('button', { name: '重试失败项' })).toBeEnabled();
   });
 
-  it('posts a retry, refreshes the current records, and reports a retry failure honestly', async () => {
+  it('submits only one pending detail retry and refreshes its diagnostics after success', async () => {
+    const user = userEvent.setup();
     const successSpy = vi.spyOn(message, 'success');
+    const retry = deferred<any>();
+    const refreshedRefund = {
+      ...failedProcessingRefund,
+      items: [{
+        ...failedProcessingRefund.items[0],
+        status: 'PROCESSING',
+        failureCode: 'RETRY_QUEUED',
+        failureMessage: '已重新提交渠道',
+        updatedAt: '2026-08-22T10:00:00',
+      }],
+    };
+    mockGet
+      .mockImplementationOnce(() => response([failedProcessingRefund]))
+      .mockImplementationOnce(() => response([refreshedRefund]));
+    mockPost.mockImplementationOnce(() => retry.promise);
+
+    render(<RefundsPage />);
+    await user.selectOptions(await screen.findByRole('combobox', { name: '退款状态' }), '__all__');
+    const row = await screen.findByRole('row', { name: /RETRY-001/ });
+    fireEvent.click(within(row).getByRole('button', { name: /详情/ }));
+    const dialog = (await screen.findByText('退款详情')).closest('.ant-modal') as HTMLElement;
+    const retryButton = within(dialog).getByRole('button', { name: '重试失败项' });
+
+    fireEvent.click(retryButton);
+    fireEvent.click(retryButton);
+
+    await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(1));
+    expect(within(dialog).getByRole('button', { name: /重试失败项/ })).toBeDisabled();
+
+    retry.resolve({ data: { code: 200, message: 'OK', data: refreshedRefund } });
+
+    await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(successSpy).toHaveBeenCalledWith('失败退款项已重新提交，请查看渠道处理状态'));
+    const itemRow = within(dialog).getByRole('row', { name: /payment-service-1/ });
+    expect(within(itemRow).getByText('PROCESSING')).toBeInTheDocument();
+    expect(within(itemRow).getByText('RETRY_QUEUED')).toBeInTheDocument();
+    expect(within(itemRow).getByText('已重新提交渠道')).toBeInTheDocument();
+  });
+
+  it('refreshes open retry details and reports the retry error after a failed request', async () => {
+    const user = userEvent.setup();
     const errorSpy = vi.spyOn(message, 'error');
-    const refresh = vi.fn().mockResolvedValue(undefined);
-    mockPost.mockResolvedValueOnce({ data: { code: 200, message: 'OK', data: failedProcessingRefund } });
-
-    await retryFailedRefund('refund-processing-failed', refresh);
-
-    expect(mockPost).toHaveBeenCalledWith('/admin/refunds/refund-processing-failed/retry');
-    expect(refresh).toHaveBeenCalledTimes(1);
-    expect(successSpy).toHaveBeenCalledWith('失败退款项已重新提交，请查看渠道处理状态');
-
+    const refreshedRefund = {
+      ...failedProcessingRefund,
+      items: [{
+        ...failedProcessingRefund.items[0],
+        failureCode: 'PROVIDER_UNAVAILABLE',
+        failureMessage: '渠道仍不可用',
+        updatedAt: '2026-08-22T10:05:00',
+      }],
+    };
+    mockGet
+      .mockImplementationOnce(() => response([failedProcessingRefund]))
+      .mockImplementationOnce(() => response([refreshedRefund]));
     mockPost.mockRejectedValueOnce(new Error('渠道仍不可用'));
-    await retryFailedRefund('refund-processing-failed', refresh);
 
-    expect(refresh).toHaveBeenCalledTimes(2);
+    render(<RefundsPage />);
+    await user.selectOptions(await screen.findByRole('combobox', { name: '退款状态' }), '__all__');
+    const row = await screen.findByRole('row', { name: /RETRY-001/ });
+    fireEvent.click(within(row).getByRole('button', { name: /详情/ }));
+    const dialog = (await screen.findByText('退款详情')).closest('.ant-modal') as HTMLElement;
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '重试失败项' }));
+
+    await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(2));
     expect(errorSpy).toHaveBeenCalledWith('重试失败: 渠道仍不可用');
+    const itemRow = within(dialog).getByRole('row', { name: /payment-service-1/ });
+    expect(within(itemRow).getByText('PROVIDER_UNAVAILABLE')).toBeInTheDocument();
+    expect(within(itemRow).getByText('渠道仍不可用')).toBeInTheDocument();
   });
 });

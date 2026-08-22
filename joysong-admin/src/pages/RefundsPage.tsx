@@ -41,19 +41,8 @@ const paidAmount = (record: any) => formatMoney(
   record.paymentAmount,
 );
 
-export const isRetryableRefund = (record: any) =>
-  record.status === 'REFUND_PROCESSING' && record.items?.some((item: any) => item.status === 'FAILED');
-
-export async function retryFailedRefund(refundId: string, refresh: () => Promise<void>) {
-  try {
-    await api.post(`/admin/refunds/${refundId}/retry`);
-    message.success('失败退款项已重新提交，请查看渠道处理状态');
-  } catch (err: any) {
-    message.error('重试失败: ' + (err?.response?.data?.message || err?.message));
-  } finally {
-    await refresh();
-  }
-}
+const isRetryableRefund = (record: any) =>
+  record?.status === 'REFUND_PROCESSING' && record.items?.some((item: any) => item.status === 'FAILED');
 
 export default function RefundsPage() {
   const [data, setData] = useState<any[]>([]);
@@ -152,8 +141,12 @@ export default function RefundsPage() {
     retryingRefundIdRef.current = record.id;
     setRetryingRefundId(record.id);
     try {
-      await retryFailedRefund(record.id, fetchData);
+      await api.post(`/admin/refunds/${record.id}/retry`);
+      message.success('失败退款项已重新提交，请查看渠道处理状态');
+    } catch (err: any) {
+      message.error('重试失败: ' + (err?.response?.data?.message || err?.message));
     } finally {
+      await fetchData();
       retryingRefundIdRef.current = null;
       setRetryingRefundId(null);
     }
@@ -316,7 +309,20 @@ export default function RefundsPage() {
         title="退款详情"
         open={detailVisible}
         onCancel={() => { setDetailVisible(false); setDetailRecord(null); }}
-        footer={<Button onClick={() => setDetailVisible(false)}>关闭</Button>}
+        footer={(
+          <Space>
+            {isRetryableRefund(detailRecord) && (
+              <Button
+                loading={retryingRefundId === detailRecord.id}
+                disabled={retryingRefundId !== null}
+                onClick={() => handleRetry(detailRecord)}
+              >
+                重试失败项
+              </Button>
+            )}
+            <Button onClick={() => setDetailVisible(false)}>关闭</Button>
+          </Space>
+        )}
         width={600}
       >
         {detailRecord && (
