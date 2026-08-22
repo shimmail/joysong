@@ -88,4 +88,45 @@ void main() {
     expect(controller.settlementErrorMessage, isNull);
     expect(controller.settlement, isNotNull);
   });
+
+  test('travel completion refreshes the completed detail without settlement',
+      () async {
+    final active = sampleOrder(
+      status: OrderStatus.serviceActive,
+      paymentFlow: OrderPaymentFlow.travelGroundServiceOnly,
+    );
+    final completed = sampleOrder(
+      status: OrderStatus.completed,
+      paymentFlow: OrderPaymentFlow.travelGroundServiceOnly,
+      consultantDetailsVisible: true,
+      serviceConversationReadable: true,
+      serviceMessagingEnabled: false,
+    );
+    final repository = FakeOrdersRepository()
+      ..orderDetails = [active, completed]
+      ..completionOrder = completed;
+    final controller = OrderDetailController(repository, orderId: 'order-1');
+
+    await controller.load();
+    expect(await controller.confirmCompletion(), isTrue);
+
+    expect(controller.order?.status, OrderStatus.completed);
+    expect(repository.getOrderCalls, 2);
+    expect(repository.settlementCalls, 0);
+  });
+
+  test('completed travel details never request settlement data', () async {
+    final repository = FakeOrdersRepository()
+      ..orders = [
+        sampleOrder(
+          status: OrderStatus.completed,
+          paymentFlow: OrderPaymentFlow.travelGroundServiceOnly,
+        ),
+      ];
+    final controller = OrderDetailController(repository, orderId: 'order-1');
+
+    await controller.load();
+
+    expect(repository.settlementCalls, 0);
+  });
 }

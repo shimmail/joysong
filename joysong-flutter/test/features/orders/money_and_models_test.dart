@@ -81,6 +81,46 @@ void main() {
     );
   });
 
+  test('completion and refund eligibility remain payment-flow aware', () {
+    final activeTravel = sampleOrder(
+      status: OrderStatus.serviceActive,
+      paymentFlow: OrderPaymentFlow.travelGroundServiceOnly,
+    );
+    final completedTravel = sampleOrder(
+      status: OrderStatus.completed,
+      paymentFlow: OrderPaymentFlow.travelGroundServiceOnly,
+    );
+    final refundingTravel = sampleOrder(
+      status: OrderStatus.completed,
+      paymentFlow: OrderPaymentFlow.travelGroundServiceOnly,
+      refundStatus: RefundStatus.pending,
+    );
+    final pendingLegacy = sampleOrder(status: OrderStatus.pendingCompletion);
+    final activeLegacy = sampleOrder(status: OrderStatus.serviceActive);
+
+    expect(activeTravel.canConfirmCompletion, isTrue);
+    expect(completedTravel.canRequestRefund, isTrue);
+    expect(refundingTravel.canRequestRefund, isFalse);
+    expect(pendingLegacy.canConfirmCompletion, isTrue);
+    expect(activeLegacy.canConfirmCompletion, isFalse);
+    expect(activeLegacy.canRequestRefund, isFalse);
+  });
+
+  test('RefundDetail exposes the server rejection reason', () {
+    final detail = RefundDetail.fromJson({
+      'id': 'refund-1',
+      'orderId': 'order-1',
+      'amount': '400.00',
+      'reason': '行程变更',
+      'description': '',
+      'status': 'REJECTED',
+      'rejectReason': '服务已经完成，需补充材料',
+      'createdAt': '2026-08-22T10:00:00',
+    });
+
+    expect(detail.rejectReason, '服务已经完成，需补充材料');
+  });
+
   test('Settlement maps the consumer-safe minor-unit contract', () {
     final settlement = Settlement.fromJson({
       'settlementId': 42,

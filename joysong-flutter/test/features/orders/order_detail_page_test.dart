@@ -91,6 +91,84 @@ void main() {
     expect(openedOrderId, 'order-1');
   });
 
+  testWidgets('confirms active travel service without medical settlement copy',
+      (
+    tester,
+  ) async {
+    final repository = FakeOrdersRepository()
+      ..orders = [
+        sampleOrder(
+          status: OrderStatus.serviceActive,
+          paymentFlow: OrderPaymentFlow.travelGroundServiceOnly,
+          consultantDetailsVisible: true,
+          serviceConversationReadable: true,
+          serviceMessagingEnabled: true,
+        ),
+      ];
+    final controller = OrderDetailController(repository, orderId: 'order-1');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('zh'),
+        supportedLocales: const [Locale('zh')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
+        home: OrderDetailPage(controller: controller),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final completionButton = find.byKey(const Key('confirm-completion-button'));
+    await tester.scrollUntilVisible(completionButton, 300);
+    expect(find.text('确认旅游地接服务已完成'), findsOneWidget);
+    await tester.tap(completionButton);
+    await tester.pumpAndSettle();
+    expect(find.text('请确认旅游地接服务已完成？'), findsOneWidget);
+    expect(find.textContaining('结算'), findsNothing);
+    expect(find.textContaining('尾款'), findsNothing);
+  });
+
+  testWidgets('shows rejected travel refund result after restoring completion',
+      (
+    tester,
+  ) async {
+    final repository = FakeOrdersRepository()
+      ..orders = [
+        sampleOrder(
+          status: OrderStatus.completed,
+          paymentFlow: OrderPaymentFlow.travelGroundServiceOnly,
+          consultantDetailsVisible: true,
+          serviceConversationReadable: true,
+          serviceMessagingEnabled: false,
+          refundStatus: RefundStatus.rejected,
+        ),
+      ]
+      ..refundDetail = RefundDetail.fromJson({
+        'id': 'refund-1',
+        'orderId': 'order-1',
+        'amount': '400.00',
+        'reason': '行程变更',
+        'description': '',
+        'status': 'REJECTED',
+        'rejectReason': '服务已经完成，需补充材料',
+        'createdAt': '2026-08-22T10:00:00',
+      });
+    final controller = OrderDetailController(repository, orderId: 'order-1');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('zh'),
+        supportedLocales: const [Locale('zh')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
+        home: OrderDetailPage(controller: controller),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('退款被拒绝'), findsAtLeastNWidgets(1));
+    expect(find.text('服务已经完成，需补充材料'), findsOneWidget);
+    expect(find.text('查看沟通记录'), findsOneWidget);
+  });
+
   for (final status in const [
     OrderStatus.refundReview,
     OrderStatus.refundProcessing,

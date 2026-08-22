@@ -141,6 +141,7 @@ final class OrderDetailController extends ChangeNotifier {
   Future<bool> confirmCompletion() => _runOrderAction(
         OrderAction.confirmCompletion,
         () => _repository.confirmCompletion(orderId),
+        refreshDetail: true,
       );
 
   Future<bool> cancel() => _runVoidAction(
@@ -203,15 +204,19 @@ final class OrderDetailController extends ChangeNotifier {
   }
 
   Future<bool> _runOrderAction(
-    OrderAction action,
-    Future<Order> Function() operation,
-  ) async {
+      OrderAction action, Future<Order> Function() operation,
+      {bool refreshDetail = false}) async {
     if (isBusy) return false;
     _activeAction = action;
     _errorMessage = null;
     notifyListeners();
     try {
       _order = await operation();
+      if (refreshDetail) {
+        final detail = await _repository.getOrder(orderId);
+        _order = detail;
+        await _loadSupportingData(detail);
+      }
       return true;
     } catch (error) {
       _errorMessage = _orderMessageFor(error, '订单操作失败');
@@ -279,7 +284,9 @@ final class OrderDetailController extends ChangeNotifier {
     }
   }
 
-  bool _supportsSettlement(Order order) => const {
+  bool _supportsSettlement(Order order) =>
+      !order.isTravelGroundServiceOnly &&
+      const {
         OrderStatus.completed,
         OrderStatus.pendingSettlement,
         OrderStatus.settled,

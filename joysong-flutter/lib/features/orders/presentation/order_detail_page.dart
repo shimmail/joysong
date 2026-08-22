@@ -325,9 +325,13 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
           onPayBalance: () => _openPayment(order, balance: true),
           onConfirmCompletion: () => _run(
             controller.confirmCompletion,
-            confirmation: _isEnglish(context)
-                ? 'Confirm that the service is complete. The order will then enter completion and settlement.'
-                : '请确认项目服务已经全部完成。确认后将进入完成与结算流程。',
+            confirmation: order.isTravelGroundServiceOnly
+                ? (_isEnglish(context)
+                    ? 'Confirm that the travel ground service is complete?'
+                    : '请确认旅游地接服务已完成？')
+                : (_isEnglish(context)
+                    ? 'Confirm that the service is complete. The order will then enter completion and settlement.'
+                    : '请确认项目服务已经全部完成。确认后将进入完成与结算流程。'),
           ),
           onCancel: () => _run(
             controller.cancel,
@@ -414,8 +418,9 @@ class _StatusHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final statusLabel = !order.isTravelGroundServiceOnly &&
-            order.refundStatus == RefundStatus.pending
+    final statusLabel = (order.refundStatus == RefundStatus.rejected ||
+            (!order.isTravelGroundServiceOnly &&
+                order.refundStatus == RefundStatus.pending))
         ? _refundStatusText(context, order.refundStatus)
         : _orderStatusText(context, order.status);
     return Card(
@@ -598,9 +603,7 @@ class _TravelGroundServiceInformation extends StatelessWidget {
           label: Text(
             order.serviceMessagingEnabled
                 ? (_isEnglish(context) ? 'Service chat' : '地接沟通')
-                : (_isEnglish(context)
-                    ? 'View service history'
-                    : '查看沟通记录'),
+                : (_isEnglish(context) ? 'View service history' : '查看沟通记录'),
           ),
         ),
       );
@@ -616,9 +619,8 @@ class _TravelGroundServicePaymentInformation extends StatelessWidget {
         title: _isEnglish(context) ? 'Payment details' : '费用信息',
         children: [
           _DetailLine(
-            label: _isEnglish(context)
-                ? 'Travel ground service fee'
-                : '旅游地接服务费',
+            label:
+                _isEnglish(context) ? 'Travel ground service fee' : '旅游地接服务费',
             value: order.currency == 'USD' &&
                     order.travelGroundServiceFeeMinor != null &&
                     order.travelGroundServiceFeeMinor! >= 0
@@ -753,6 +755,11 @@ class _RefundCard extends StatelessWidget {
             _DetailLine(
               label: _isEnglish(context) ? 'Details' : '说明',
               value: refund.description,
+            ),
+          if (refund.rejectReason?.isNotEmpty == true)
+            _DetailLine(
+              label: _isEnglish(context) ? 'Rejection reason' : '驳回原因',
+              value: refund.rejectReason!,
             ),
         ],
       );
@@ -908,11 +915,25 @@ class _OrderActions extends StatelessWidget {
                     : '支付旅游地接服务费',
               ),
             ),
+          if (order.canConfirmCompletion)
+            FilledButton(
+              key: const Key('confirm-completion-button'),
+              onPressed: busy ? null : onConfirmCompletion,
+              child: Text(
+                _isEnglish(context)
+                    ? 'Confirm travel ground service completion'
+                    : '确认旅游地接服务已完成',
+              ),
+            ),
           if (order.canRequestRefund)
             TextButton(
               key: const Key('request-refund-button'),
               onPressed: busy ? null : onRefund,
-              child: Text(_isEnglish(context) ? 'Request refund' : '申请退款'),
+              child: Text(
+                _isEnglish(context)
+                    ? 'Request full travel ground service fee refund'
+                    : '申请全额旅游地接服务费退款',
+              ),
             ),
           if (order.canCancelRefund)
             TextButton(

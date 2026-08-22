@@ -149,13 +149,18 @@ Map<String, Object?> sampleOrderJson({
 
 class FakeOrdersRepository implements OrdersRepository {
   List<Order> orders = [sampleOrder()];
+  List<Order> orderDetails = const [];
   int getOrdersCalls = 0;
+  int getOrderCalls = 0;
   int actionCalls = 0;
   int paymentCalls = 0;
+  int settlementCalls = 0;
   int? lastOffset;
   int? lastLimit;
   OrderStatus? lastStatus;
   Future<Order>? actionFuture;
+  Order? completionOrder;
+  RefundDetail? refundDetail;
   PaymentAttempt? paymentAttempt;
   Object? latestPaymentError;
   String? lastPaymentIdempotencyKey;
@@ -181,8 +186,11 @@ class FakeOrdersRepository implements OrdersRepository {
   }
 
   @override
-  Future<Order> getOrder(String id) async =>
-      orders.firstWhere((order) => order.id == id);
+  Future<Order> getOrder(String id) async {
+    getOrderCalls += 1;
+    if (orderDetails.isNotEmpty) return orderDetails.removeAt(0);
+    return orders.firstWhere((order) => order.id == id);
+  }
 
   @override
   Future<PaymentAttempt> createPaymentAttempt(
@@ -286,7 +294,7 @@ class FakeOrdersRepository implements OrdersRepository {
   @override
   Future<Order> confirmCompletion(String id) async {
     actionCalls += 1;
-    return sampleOrder(status: OrderStatus.completed);
+    return completionOrder ?? sampleOrder(status: OrderStatus.completed);
   }
 
   @override
@@ -317,7 +325,9 @@ class FakeOrdersRepository implements OrdersRepository {
   }
 
   @override
-  Future<RefundDetail> getRefund(String id) async => RefundDetail(
+  Future<RefundDetail> getRefund(String id) async =>
+      refundDetail ??
+      RefundDetail(
         id: 'refund-1',
         orderId: id,
         amount: Money.parse('100'),
@@ -342,6 +352,7 @@ class FakeOrdersRepository implements OrdersRepository {
 
   @override
   Future<Settlement> getSettlement(String id) async {
+    settlementCalls += 1;
     final error = settlementError;
     if (error != null) throw error;
     return Settlement(

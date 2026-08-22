@@ -162,7 +162,7 @@ final class Order {
       paymentFlow == OrderPaymentFlow.travelGroundServiceOnly;
   bool get canPayTravelGroundServiceFee =>
       isTravelGroundServiceOnly && status == OrderStatus.pendingServiceFee;
-  bool get canOpenServiceConversation => serviceMessagingEnabled;
+  bool get canOpenServiceConversation => serviceConversationReadable;
   bool get canPayConsultation =>
       !isTravelGroundServiceOnly && status == OrderStatus.pendingPayment;
   bool get canCancel => const {
@@ -172,19 +172,31 @@ final class Order {
   bool get canRequestVerificationCode => status == OrderStatus.consultationPaid;
   bool get canPayBalance => status == OrderStatus.verified;
   bool get showsCompletionCode => status == OrderStatus.balancePaid;
-  bool get canConfirmCompletion => status == OrderStatus.pendingCompletion;
-  bool get canRequestRefund =>
-      refundStatus != RefundStatus.pending &&
-      refundStatus != RefundStatus.processing &&
-      refundStatus != RefundStatus.approved &&
-      const {
-        OrderStatus.consultationPaid,
-        OrderStatus.verified,
-        OrderStatus.balancePaid,
-        OrderStatus.pendingCompletion,
-        OrderStatus.completed,
+  bool get canConfirmCompletion => isTravelGroundServiceOnly
+      ? status == OrderStatus.serviceActive
+      : status == OrderStatus.pendingCompletion;
+  bool get canRequestRefund {
+    final hasActiveRefund = const {
+      RefundStatus.pending,
+      RefundStatus.processing,
+      RefundStatus.approved,
+    }.contains(refundStatus);
+    if (hasActiveRefund) return false;
+    if (isTravelGroundServiceOnly) {
+      return const {
         OrderStatus.serviceActive,
+        OrderStatus.completed,
       }.contains(status);
+    }
+    return const {
+      OrderStatus.consultationPaid,
+      OrderStatus.verified,
+      OrderStatus.balancePaid,
+      OrderStatus.pendingCompletion,
+      OrderStatus.completed,
+    }.contains(status);
+  }
+
   bool get canCancelRefund => refundStatus == RefundStatus.pending;
   bool get canDelete => const {
         OrderStatus.cancelled,
@@ -255,6 +267,7 @@ final class RefundDetail {
     required this.status,
     required this.createdAt,
     this.processedAt,
+    this.rejectReason,
   });
 
   final String id;
@@ -265,6 +278,7 @@ final class RefundDetail {
   final RefundStatus status;
   final DateTime createdAt;
   final DateTime? processedAt;
+  final String? rejectReason;
 
   factory RefundDetail.fromJson(Object? json) {
     final map = jsonMap(json, '退款详情');
@@ -277,6 +291,7 @@ final class RefundDetail {
       status: RefundStatus.fromWire(map['status']),
       createdAt: requiredLocalDateTime(map['createdAt'], '退款申请时间'),
       processedAt: localDateTime(map['processedAt']),
+      rejectReason: nullableString(map['rejectReason']),
     );
   }
 }
