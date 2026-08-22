@@ -43,13 +43,16 @@ if (Alipay+ merchant / gateway 可用?) then (是)
     :开放允许公开的顾问资料和订单服务会话;
   else (否)
     if (PROCESSING / 结果未知?) then (是)
-      :主动查单、对账或人工处理;
+      :保持原支付尝试;
+      :主动查单、对账或人工调查;
+      :订单保持 PENDING_SERVICE_FEE，暂不创建新尝试;
+      stop
     else (否)
       :超时的 CREATED / REQUIRES_ACTION 进入 EXPIRED;
       :明确 FAILED / CANCELLED 保留渠道终态;
+      :订单保持 PENDING_SERVICE_FEE，用户可创建新尝试;
+      stop
     endif
-    :订单保持 PENDING_SERVICE_FEE，用户可重试;
-    stop
   endif
 else (否)
   :本地尝试落库前返回 503\nPAYMENT_PROVIDER_UNAVAILABLE;
@@ -111,27 +114,33 @@ if (从 SERVICE_ACTIVE 或 COMPLETED 申请全额退款?) then (是)
       :仅为原成功旅游地接服务费支付创建退款项;
       :订单进入 REFUND_PROCESSING;
       :提交原渠道退款;
-      if (所有退款项渠道确认成功?) then (是)
-        :订单进入 REFUNDED;
-        :撤销顾问履约资料;
-        :历史会话受控只读，禁止发送;
-        stop
-      else (FAILED / 未知)
-        :父订单保持 REFUND_PROCESSING;
-        :保留历史只读，暂停发送;
-        |管理员|
-        :查看退款项 provider、status、\nfailureCode、failureMessage;
-        :POST /api/admin/refunds/{id}/retry;
-        |平台|
-        :只重试原 FAILED 项;
-        if (已有 providerRefundId?) then (是)
-          :查询或续办原渠道退款;
-        else (否)
-          :用原幂等键重新发起;
+      while (所有退款项渠道确认成功?) is (否)
+        if (存在至少一个明确 FAILED 项?) then (是)
+          :父订单保持 REFUND_PROCESSING;
+          :保留历史只读，暂停发送;
+          |管理员|
+          :查看退款项 provider、status、\nfailureCode、failureMessage;
+          :POST /api/admin/refunds/{id}/retry;
+          |平台|
+          :只重试原 FAILED 项;
+          if (已有 providerRefundId?) then (是)
+            :查询或续办原渠道退款;
+          else (否)
+            :用原幂等键重新发起;
+          endif
+          :不触碰已 SUCCEEDED 项;
+          :刷新失败也释放后台重试按钮锁;
+          :重新汇总所有退款项结果;
+        else (仅 PROCESSING / 未知)
+          :父订单保持 REFUND_PROCESSING;
+          :只主动查单、对账或人工调查;
+          :等待渠道结果后重新汇总所有退款项;
         endif
-        :不触碰已 SUCCEEDED 项;
-        :刷新失败也释放后台重试按钮锁;
-      endif
+      endwhile (是)
+      :订单进入 REFUNDED;
+      :撤销顾问履约资料;
+      :历史会话受控只读，禁止发送;
+      stop
     endif
   endif
 endif
