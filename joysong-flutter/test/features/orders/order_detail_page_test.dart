@@ -95,7 +95,7 @@ void main() {
     OrderStatus.refundReview,
     OrderStatus.refundProcessing,
     OrderStatus.refunded,
-  ])
+  ]) {
     testWidgets('$status keeps order history readable but read-only', (
       tester,
     ) async {
@@ -134,6 +134,7 @@ void main() {
       await tester.tap(historyButton);
       expect(openedOrderId, 'order-1');
     });
+  }
 
   testWidgets('shows settlement pending and retries a support-data error',
       (tester) async {

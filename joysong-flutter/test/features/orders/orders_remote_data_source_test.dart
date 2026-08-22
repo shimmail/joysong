@@ -2,7 +2,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/core/network/api_client.dart';
 import 'package:joysong_flutter/features/orders/data/orders_remote_data_source.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
-import 'package:joysong_flutter/features/orders/domain/payment_models.dart';
 
 import 'order_test_fixtures.dart';
 import 'payment_test_fixtures.dart';
