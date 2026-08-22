@@ -195,6 +195,31 @@ void main() {
     expect(find.text('查看沟通记录'), findsOneWidget);
   });
 
+  testWidgets('keeps pending refund status in the legacy order header',
+      (tester) async {
+    final repository = FakeOrdersRepository()
+      ..orders = [
+        sampleOrder(
+          status: OrderStatus.disputeMediation,
+          refundStatus: RefundStatus.pending,
+        ),
+      ];
+    final controller = OrderDetailController(repository, orderId: 'order-1');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('zh'),
+        supportedLocales: const [Locale('zh')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
+        home: OrderDetailPage(controller: controller),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('退款审核中'), findsAtLeastNWidgets(2));
+    expect(find.text('纠纷调解中'), findsNothing);
+  });
+
   testWidgets('disables travel completion while the detail refresh is loading',
       (tester) async {
     final active = sampleOrder(

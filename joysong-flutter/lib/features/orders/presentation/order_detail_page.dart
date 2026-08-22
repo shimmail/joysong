@@ -418,7 +418,10 @@ class _StatusHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final statusLabel = _orderStatusText(context, order.status);
+    final statusLabel = !order.isTravelGroundServiceOnly &&
+            order.refundStatus == RefundStatus.pending
+        ? _refundStatusText(context, order.refundStatus)
+        : _orderStatusText(context, order.status);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(18),
