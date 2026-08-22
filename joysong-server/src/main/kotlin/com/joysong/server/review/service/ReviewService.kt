@@ -51,8 +51,8 @@ class ReviewService(
         require(content.isNotBlank()) { "评价内容不能为空" }
         validateImages(images)
 
-        val order = orderRepository.findById(orderId)
-            .orElseThrow { IllegalArgumentException("订单不存在") }
+        val order = orderRepository.findByIdForUpdate(orderId)
+            ?: throw IllegalArgumentException("订单不存在")
 
         if (order.userId != userId) {
             throw IllegalArgumentException("无权操作该订单")

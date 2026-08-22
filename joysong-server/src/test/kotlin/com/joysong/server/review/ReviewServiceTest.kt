@@ -99,7 +99,7 @@ class ReviewServiceTest {
 
     @Test
     fun `submit review recalculates institution doctor and institution project stats`() {
-        every { orderRepository.findById(order.id) } returns Optional.of(order)
+        every { orderRepository.findByIdForUpdate(order.id) } returns order
         every {
             reviewRepository.findByTargetTypeAndTargetId("INSTITUTION", order.institutionId)
         } returns listOf(review("review-1", 5), review("review-2", 4))
@@ -131,7 +131,7 @@ class ReviewServiceTest {
     @Test
     fun `travel completed order review remains completed without settlement`() {
         val travelOrder = order.copy(paymentFlow = "TRAVEL_GROUND_SERVICE_ONLY")
-        every { orderRepository.findById(travelOrder.id) } returns Optional.of(travelOrder)
+        every { orderRepository.findByIdForUpdate(travelOrder.id) } returns travelOrder
         every { reviewRepository.findByTargetTypeAndTargetId("INSTITUTION", travelOrder.institutionId) } returns emptyList()
         every { reviewRepository.findByDoctorIdAndTargetType(travelOrder.doctorId, "INSTITUTION") } returns emptyList()
         every { reviewRepository.findByInstitutionProjectId(travelOrder.institutionProjectId) } returns emptyList()
@@ -145,6 +145,25 @@ class ReviewServiceTest {
         assertNull(savedOrder.captured.settlementAt)
         verify(exactly = 0) { settlementService.saveSettlement(any(), any()) }
         verify(exactly = 0) { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `travel review uses the locked current status instead of a completed snapshot`() {
+        val refundReviewOrder = order.copy(
+            paymentFlow = "TRAVEL_GROUND_SERVICE_ONLY",
+            status = "REFUND_REVIEW",
+            refundStatus = "PENDING"
+        )
+        every { orderRepository.findByIdForUpdate(refundReviewOrder.id) } returns refundReviewOrder
+
+        val error = org.junit.jupiter.api.assertThrows<IllegalArgumentException> {
+            reviewService.submitReview(refundReviewOrder.id, refundReviewOrder.userId, 5, "great", "", "")
+        }
+
+        assertEquals("订单状态不允许评价，当前状态: REFUND_REVIEW", error.message)
+        verify(exactly = 0) { orderRepository.findById(refundReviewOrder.id) }
+        verify(exactly = 0) { reviewRepository.save(any()) }
+        verify(exactly = 0) { orderRepository.save(any()) }
     }
 
     @Test
