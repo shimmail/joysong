@@ -18,6 +18,8 @@ final class PaymentStrings {
   String get selectPaymentMethod => pick('选择支付方式', 'Select a payment method');
   String get paymentMethod => pick('支付方式', 'Payment method');
   String get paymentValidUntil => pick('支付有效期至', 'Payment valid until');
+  String paymentExpiresIn(String remaining) =>
+      pick('支付剩余时间 $remaining', 'Payment expires in $remaining');
   String get amountDue => pick('应付金额', 'Amount due');
   String get paymentAmount => pick('支付金额', 'Payment amount');
   String get travelGroundServiceFee =>

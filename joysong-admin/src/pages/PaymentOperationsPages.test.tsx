@@ -248,13 +248,15 @@ describe('OrdersPage travel ground service operations', () => {
 
     renderOrders();
 
-    expect(await screen.findByText('待支付旅游地接服务费')).toBeInTheDocument();
-    expect(screen.getAllByText('旅游地接服务已激活')).toHaveLength(2);
-    expect(screen.getByText('旅游地接服务退款审核中')).toBeInTheDocument();
-    expect(screen.getByText('旅游地接服务退款渠道处理中')).toBeInTheDocument();
-    expect(screen.getByText('旅游地接服务已退款')).toBeInTheDocument();
-
+    const pendingRow = await screen.findByRole('row', { name: /service-order-pending/ });
+    const reviewRow = screen.getByRole('row', { name: /service-order-review/ });
     const serviceRow = screen.getByRole('row', { name: /service-order-processing/ });
+    const refundedRow = screen.getByRole('row', { name: /service-order-refunded/ });
+    expect(within(pendingRow).getByText('待支付旅游地接服务费')).toBeInTheDocument();
+    expect(within(reviewRow).getByText('旅游地接服务退款审核中')).toBeInTheDocument();
+    expect(within(serviceRow).getByText('旅游地接服务退款渠道处理中')).toBeInTheDocument();
+    expect(within(refundedRow).getByText('旅游地接服务已退款')).toBeInTheDocument();
+
     expect(within(serviceRow).getByText('旅游地接服务费')).toBeInTheDocument();
     expect(within(serviceRow).getAllByText('USD 123.45')).toHaveLength(2);
     expect(within(serviceRow).queryByRole('button', { name: /变更状态/ })).not.toBeInTheDocument();
@@ -265,8 +267,10 @@ describe('OrdersPage travel ground service operations', () => {
     expect(within(serviceRow).queryByText('service-settlement-at')).not.toBeInTheDocument();
 
     const rejectedRow = screen.getByRole('row', { name: /service-order-rejected/ });
+    expect(within(rejectedRow).getByText('旅游地接服务已激活')).toBeInTheDocument();
     expect(within(rejectedRow).getAllByText('USD 222.22')).toHaveLength(1);
     const activeRow = screen.getByRole('row', { name: /service-order-active/ });
+    expect(within(activeRow).getByText('旅游地接服务已激活')).toBeInTheDocument();
     expect(within(activeRow).getAllByText('USD 123.45')).toHaveLength(1);
 
     const legacyRow = screen.getByRole('row', { name: /legacy-order/ });

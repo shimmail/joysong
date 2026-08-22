@@ -198,13 +198,18 @@ final class Order {
   }
 
   bool get canCancelRefund => refundStatus == RefundStatus.pending;
-  bool get canDelete => const {
-        OrderStatus.cancelled,
-        OrderStatus.completed,
-        OrderStatus.pendingSettlement,
-        OrderStatus.settled,
-        OrderStatus.refunded,
-      }.contains(status);
+  bool get canDelete {
+    if (isTravelGroundServiceOnly && status == OrderStatus.completed) {
+      return false;
+    }
+    return const {
+      OrderStatus.cancelled,
+      OrderStatus.completed,
+      OrderStatus.pendingSettlement,
+      OrderStatus.settled,
+      OrderStatus.refunded,
+    }.contains(status);
+  }
 
   Order copyWith({
     OrderStatus? status,

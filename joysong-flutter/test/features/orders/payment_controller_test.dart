@@ -161,6 +161,66 @@ void main() {
     controller.dispose();
   });
 
+  test('refreshes server state instead of opening an expired payment action',
+      () async {
+    const action = PaymentNextAction(
+      type: PaymentNextActionType.redirect,
+      url: 'https://cashier.alipayplus.com/pay/session-1',
+    );
+    final repository = _PaymentRepository(
+      latestResult: samplePaymentAttempt(
+        status: PaymentStatus.requiresAction,
+        nextAction: action,
+        expiresAt: DateTime.now().subtract(const Duration(seconds: 1)),
+      ),
+      queryResult: samplePaymentAttempt(status: PaymentStatus.expired),
+    );
+    final controller = PaymentController(
+      repository: repository,
+      order: sampleOrder(),
+      actionLauncher: const _ThrowingActionLauncher(),
+      pollingDelays: const [],
+    );
+
+    await controller.load();
+
+    expect(await controller.continueCurrent(), isFalse);
+    expect(controller.stage, PaymentFlowStage.expired);
+    expect(repository.queryCalls, 1);
+    controller.dispose();
+  });
+
+  test('does not open an expired action returned while creating payment',
+      () async {
+    final now = DateTime(2026, 8, 7, 12);
+    const action = PaymentNextAction(
+      type: PaymentNextActionType.redirect,
+      url: 'https://cashier.alipayplus.com/pay/session-1',
+    );
+    final repository = _PaymentRepository(
+      createResult: samplePaymentAttempt(
+        status: PaymentStatus.requiresAction,
+        nextAction: action,
+        expiresAt: now.subtract(const Duration(seconds: 1)),
+      ),
+      queryResult: samplePaymentAttempt(status: PaymentStatus.expired),
+    );
+    final controller = PaymentController(
+      repository: repository,
+      order: sampleOrder(),
+      actionLauncher: const _ThrowingActionLauncher(),
+      pollingDelays: const [],
+      now: () => now,
+    );
+    await controller.load();
+
+    expect(await controller.submit(), isFalse);
+    expect(controller.stage, PaymentFlowStage.expired);
+    expect(repository.createCalls, 1);
+    expect(repository.queryCalls, 1);
+    controller.dispose();
+  });
+
   test('retry creates a new attempt after server FAILED, CANCELLED or EXPIRED',
       () async {
     for (final retryableStatus in [
@@ -321,4 +381,12 @@ final class _PaymentRepository implements OrdersRepository {
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+final class _ThrowingActionLauncher implements PaymentActionLauncher {
+  const _ThrowingActionLauncher();
+
+  @override
+  Future<PaymentActionResult> launch(PaymentAttempt payment) =>
+      Future<PaymentActionResult>.error(StateError('stale action was opened'));
 }

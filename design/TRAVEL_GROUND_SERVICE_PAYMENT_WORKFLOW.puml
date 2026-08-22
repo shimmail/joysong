@@ -73,6 +73,7 @@ if (Alipay+ merchant / gateway 可用?) then (是)
       :无渠道单号的本地尝试直接 EXPIRED，\n不得再创建渠道支付单;
       :已有渠道单号的尝试继续查原单，\n不得以本地过期掩盖真实扣款;
       :PENDING_SERVICE_FEE -> CANCELLED;
+      :客户端倒计时归零后只刷新服务端状态，\n不再打开已过期收银台动作;
       :支付渠道此后若确认成功，进入补偿退款;
       stop
     else (否)
@@ -110,6 +111,7 @@ if (确认旅游地接服务完成?) then (是)
   :只记录 completedAt;
   :顾问公开资料和历史会话保留只读;
   :禁止发送新消息;
+  :保留全额退款入口，退款完成前不可删除订单;
   note right
   不进入医疗核验、尾款、PENDING_SETTLEMENT、
   分账或钱包，也不创建医疗支付/退款/结算。

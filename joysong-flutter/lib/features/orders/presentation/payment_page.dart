@@ -7,35 +7,78 @@ import 'package:joysong_flutter/features/orders/presentation/payment_controller.
 import 'package:joysong_flutter/features/orders/presentation/payment_strings.dart';
 
 class PaymentPage extends StatefulWidget {
-  const PaymentPage({required this.controller, super.key});
+  const PaymentPage({
+    required this.controller,
+    this.now = DateTime.now,
+    super.key,
+  });
 
   final PaymentController controller;
+  final DateTime Function() now;
 
   @override
   State<PaymentPage> createState() => _PaymentPageState();
 }
 
 class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
+  Timer? _expiryTimer;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    widget.controller.addListener(_onControllerChanged);
+    _expiryTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      _onExpiryTick();
+    });
     unawaited(widget.controller.load());
   }
 
   @override
+  void didUpdateWidget(covariant PaymentPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller == widget.controller) return;
+    oldWidget.controller.removeListener(_onControllerChanged);
+    widget.controller.addListener(_onControllerChanged);
+    unawaited(widget.controller.load());
+  }
+
+  void _onControllerChanged() {
+    if (!mounted) return;
+    _refreshExpiredAction();
+  }
+
+  void _onExpiryTick() {
+    if (!mounted) return;
+    setState(() {});
+    _refreshExpiredAction();
+  }
+
+  void _refreshExpiredAction() {
+    if (widget.controller.isCurrentPaymentExpired) {
+      unawaited(widget.controller.refreshExpiredAction());
+    }
+  }
+
+  @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed &&
-        const {
-          PaymentFlowStage.processing,
-          PaymentFlowStage.requiresAction,
-        }.contains(widget.controller.stage)) {
+    if (state != AppLifecycleState.resumed) return;
+    if (widget.controller.isCurrentPaymentExpired) {
+      unawaited(widget.controller.refreshExpiredAction());
+      return;
+    }
+    if (const {
+      PaymentFlowStage.processing,
+      PaymentFlowStage.requiresAction,
+    }.contains(widget.controller.stage)) {
       unawaited(widget.controller.resumeAfterExternalAction());
     }
   }
 
   @override
   void dispose() {
+    _expiryTimer?.cancel();
+    widget.controller.removeListener(_onControllerChanged);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -50,7 +93,11 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
           final controller = widget.controller;
           return Scaffold(
             appBar: AppBar(title: Text(strings.paymentTitle)),
-            body: _PaymentBody(controller: controller, strings: strings),
+            body: _PaymentBody(
+              controller: controller,
+              strings: strings,
+              now: widget.now,
+            ),
             bottomNavigationBar: _PaymentBottomBar(
               controller: controller,
               strings: strings,
@@ -62,10 +109,15 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
 }
 
 class _PaymentBody extends StatelessWidget {
-  const _PaymentBody({required this.controller, required this.strings});
+  const _PaymentBody({
+    required this.controller,
+    required this.strings,
+    required this.now,
+  });
 
   final PaymentController controller;
   final PaymentStrings strings;
+  final DateTime Function() now;
 
   @override
   Widget build(BuildContext context) {
@@ -131,7 +183,18 @@ class _PaymentBody extends StatelessWidget {
                     key: const Key('payment-expires-at'),
                     leading: const Icon(Icons.schedule_outlined),
                     title: Text(strings.paymentValidUntil),
-                    subtitle: Text(_formatPaymentDateTime(expiresAt)),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(_formatPaymentDateTime(expiresAt)),
+                        Text(
+                          strings.paymentExpiresIn(
+                            _formatPaymentRemaining(expiresAt, now: now),
+                          ),
+                          key: const Key('payment-expires-in'),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ],
@@ -381,9 +444,15 @@ class _PaymentBottomBar extends StatelessWidget {
             ),
           PaymentFlowStage.requiresAction => FilledButton.icon(
               key: const Key('payment-continue'),
-              onPressed: () => controller.continueCurrent(),
+              onPressed: controller.isCurrentPaymentExpired
+                  ? () => controller.refresh()
+                  : () => controller.continueCurrent(),
               icon: const Icon(Icons.open_in_new),
-              label: Text(strings.continuePayment),
+              label: Text(
+                controller.isCurrentPaymentExpired
+                    ? strings.refreshStatus
+                    : strings.continuePayment,
+              ),
             ),
           PaymentFlowStage.loading || PaymentFlowStage.creating => FilledButton(
               onPressed: null,
@@ -520,4 +589,14 @@ String _formatPaymentDateTime(DateTime value) {
   String twoDigits(int part) => part.toString().padLeft(2, '0');
   return '${value.year}-${twoDigits(value.month)}-${twoDigits(value.day)} '
       '${twoDigits(value.hour)}:${twoDigits(value.minute)}';
+}
+
+String _formatPaymentRemaining(DateTime expiresAt, {DateTime Function()? now}) {
+  final milliseconds = expiresAt.difference(now?.call() ?? DateTime.now()).inMilliseconds;
+  final totalSeconds = milliseconds <= 0 ? 0 : (milliseconds + 999) ~/ 1000;
+  final hours = totalSeconds ~/ 3600;
+  final minutes = (totalSeconds % 3600) ~/ 60;
+  final seconds = totalSeconds % 60;
+  String twoDigits(int value) => value.toString().padLeft(2, '0');
+  return '${twoDigits(hours)}:${twoDigits(minutes)}:${twoDigits(seconds)}';
 }

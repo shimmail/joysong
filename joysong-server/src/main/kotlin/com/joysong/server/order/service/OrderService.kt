@@ -824,6 +824,12 @@ class OrderService(
 
         val currentStatus = OrderStatusEnum.fromValue(order.status)
             ?: throw IllegalStateException("订单状态无效: ${order.status}")
+        require(
+            order.paymentFlow != TRAVEL_GROUND_SERVICE_PAYMENT_FLOW ||
+                currentStatus != OrderStatusEnum.COMPLETED
+        ) {
+            "旅游地接服务已完成订单仍可申请退款，暂不可删除"
+        }
         val deletableStatuses = setOf(
             OrderStatusEnum.CANCELLED,
             OrderStatusEnum.COMPLETED,

@@ -61,6 +61,7 @@ final class PaymentController extends ChangeNotifier {
       Duration(seconds: 3),
       Duration(seconds: 5),
     ],
+    DateTime Function() now = DateTime.now,
   })  : assert(
           paymentType == null ||
               paymentType == PaymentType.travelGroundServiceFee ||
@@ -82,6 +83,7 @@ final class PaymentController extends ChangeNotifier {
             : providers!.first,
         _actionLauncher = actionLauncher,
         _pollingDelays = List.unmodifiable(pollingDelays),
+        _now = now,
         _createIdempotencyKey = generateApiRequestId();
 
   final OrdersRepository _repository;
@@ -91,6 +93,7 @@ final class PaymentController extends ChangeNotifier {
   final List<PaymentProvider> _providers;
   final PaymentActionLauncher _actionLauncher;
   final List<Duration> _pollingDelays;
+  final DateTime Function() _now;
 
   PaymentProvider _selectedProvider;
   PaymentAttempt? _payment;
@@ -101,6 +104,8 @@ final class PaymentController extends ChangeNotifier {
   bool _disposed = false;
   bool _serverRestoreCompleted = false;
   bool _awaitingExternalReturn = false;
+  String? _expiryRefreshKey;
+  Future<bool>? _refreshInFlight;
   int _operation = 0;
 
   List<PaymentProvider> get providers => _providers;
@@ -128,6 +133,12 @@ final class PaymentController extends ChangeNotifier {
       _payment?.status == PaymentStatus.failed ||
       _payment?.status == PaymentStatus.cancelled ||
       _payment?.status == PaymentStatus.expired;
+
+  bool get isCurrentPaymentExpired {
+    final current = _payment;
+    return current?.status == PaymentStatus.requiresAction &&
+        _hasExpired(current!);
+  }
 
   void selectProvider(PaymentProvider provider) {
     if (_isServiceFeeFlow ||
@@ -247,9 +258,57 @@ final class PaymentController extends ChangeNotifier {
     }
   }
 
-  Future<bool> refresh({bool queryProvider = true}) async {
+  Future<bool> refreshExpiredAction() async {
     final current = _payment;
-    if (stage == PaymentFlowStage.succeeded) return false;
+    if (current == null ||
+        current.status != PaymentStatus.requiresAction ||
+        !_hasExpired(current)) {
+      return false;
+    }
+    final expiry = current.expiresAt;
+    if (expiry == null) return false;
+    final key = '${current.id}:${expiry.toUtc().microsecondsSinceEpoch}';
+    if (_expiryRefreshKey == key) {
+      return _refreshInFlight ?? Future<bool>.value(false);
+    }
+    _expiryRefreshKey = key;
+    return refresh();
+  }
+
+  Future<bool> refresh({bool queryProvider = true}) {
+    final inFlight = _refreshInFlight;
+    if (inFlight != null) return inFlight;
+    if (stage == PaymentFlowStage.succeeded) return Future<bool>.value(false);
+
+    final completer = Completer<bool>();
+    final refreshFuture = completer.future;
+    _refreshInFlight = refreshFuture;
+    unawaited(_completeRefresh(
+      completer,
+      refreshFuture,
+      queryProvider: queryProvider,
+    ));
+    return refreshFuture;
+  }
+
+  Future<void> _completeRefresh(
+    Completer<bool> completer,
+    Future<bool> refreshFuture, {
+    required bool queryProvider,
+  }) async {
+    try {
+      completer.complete(await _refresh(queryProvider: queryProvider));
+    } on Object catch (error, stackTrace) {
+      completer.completeError(error, stackTrace);
+    } finally {
+      if (identical(_refreshInFlight, refreshFuture)) {
+        _refreshInFlight = null;
+      }
+    }
+  }
+
+  Future<bool> _refresh({required bool queryProvider}) async {
+    final current = _payment;
     final operation = ++_operation;
     _stage = PaymentFlowStage.processing;
     _clearError();
@@ -296,6 +355,7 @@ final class PaymentController extends ChangeNotifier {
   }
 
   Future<bool> resumeAfterExternalAction() async {
+    if (isCurrentPaymentExpired) return refreshExpiredAction();
     if (_isServiceFeeFlow) return refresh();
     final current = _payment;
     if (current == null) return refresh();
@@ -347,6 +407,10 @@ final class PaymentController extends ChangeNotifier {
       _errorCode = _serviceFeeContractError(current);
       _notify();
       return false;
+    }
+    if (current.status == PaymentStatus.requiresAction &&
+        _hasExpired(current)) {
+      return refreshExpiredAction();
     }
     _applyStatus(current);
     _notify();
@@ -446,6 +510,7 @@ final class PaymentController extends ChangeNotifier {
     if (!canRetry) return false;
     _payment = null;
     _awaitingExternalReturn = false;
+    _expiryRefreshKey = null;
     if (!_providers.contains(_selectedProvider)) {
       _selectedProvider = _providers.first;
     }
@@ -520,6 +585,11 @@ final class PaymentController extends ChangeNotifier {
   bool _hasRedirectAction(PaymentAttempt value) =>
       value.nextAction?.type == PaymentNextActionType.redirect &&
       (value.nextAction?.url?.trim().isNotEmpty ?? false);
+
+  bool _hasExpired(PaymentAttempt value) {
+    final expiresAt = value.expiresAt;
+    return expiresAt != null && !expiresAt.isAfter(_now());
+  }
 
   void _markProviderUnavailable(Object error) {
     _stage = PaymentFlowStage.unavailable;

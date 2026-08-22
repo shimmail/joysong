@@ -917,6 +917,25 @@ class OrderServiceTest {
     }
 
     @Test
+    fun `deleteOrder 旅游地接已完成订单不可删除`() {
+        val order = createTestOrder(
+            "travel-completed",
+            "user-1",
+            status = OrderStatusEnum.COMPLETED.value,
+            paymentFlow = "TRAVEL_GROUND_SERVICE_ONLY"
+        )
+        every { orderRepository.findByIdForUpdate("travel-completed") } returns order
+        justRun { orderRepository.deleteById("travel-completed") }
+
+        val error = assertThrows<IllegalArgumentException> {
+            orderService.deleteOrder("travel-completed", "user-1")
+        }
+
+        assertEquals("旅游地接服务已完成订单仍可申请退款，暂不可删除", error.message)
+        verify(exactly = 0) { orderRepository.deleteById(any()) }
+    }
+
+    @Test
     fun `deleteOrder 待支付状态不可删除`() {
         val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.PENDING_PAYMENT.value)
         every { orderRepository.findByIdForUpdate("o1") } returns order

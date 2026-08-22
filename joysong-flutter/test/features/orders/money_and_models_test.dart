@@ -112,6 +112,23 @@ void main() {
     expect(activeLegacy.canRequestRefund, isFalse);
   });
 
+  test('completed travel-service orders stay undeletable while refundable', () {
+    final completedTravel = sampleOrder(
+      status: OrderStatus.completed,
+      paymentFlow: OrderPaymentFlow.travelGroundServiceOnly,
+    );
+    final refundedTravel = sampleOrder(
+      status: OrderStatus.refunded,
+      paymentFlow: OrderPaymentFlow.travelGroundServiceOnly,
+    );
+    final completedLegacy = sampleOrder(status: OrderStatus.completed);
+
+    expect(completedTravel.canRequestRefund, isTrue);
+    expect(completedTravel.canDelete, isFalse);
+    expect(refundedTravel.canDelete, isTrue);
+    expect(completedLegacy.canDelete, isTrue);
+  });
+
   test('RefundDetail exposes the server rejection reason', () {
     final detail = RefundDetail.fromJson({
       'id': 'refund-1',
