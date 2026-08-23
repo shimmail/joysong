@@ -60,7 +60,7 @@ void main() {
       });
       expect(role.status, entry.value);
     }
-  });
+  },);
 
   test('doctor identity draft contract excludes practicing institution', () {
     const draft = IdentityApplicationDraft(
@@ -101,7 +101,7 @@ void main() {
     expect(draft.validate, returnsNormally);
     expect(
       draft.toJson()['applicationData'],
-      isNot(contains('hospitalName')),
+      isNot(contains('hospitalName'))
     );
   });
 
@@ -144,9 +144,9 @@ void main() {
         ],
       );
 
-      expect(draft.validate, throwsArgumentError, reason: 'value=$hospitalName');
+      expect(draft.validate, throwsArgumentError, reason: 'value=$hospitalName',);
     }
-  });
+  },);
 
   testWidgets(
       'doctor identity application omits institution and keeps fields and documents',
@@ -161,7 +161,7 @@ void main() {
         controller: IdentityController(_FakeIdentityRepository()),
         role: IdentityRoleType.doctor,
       ),
-    ));
+    ),);
     await tester.pumpAndSettle();
 
     expect(
@@ -189,7 +189,7 @@ void main() {
     ]) {
       expect(find.text(documentLabel), findsOneWidget);
     }
-  });
+  },);
 
   testWidgets(
       'identity application history is controlled collapsed localized and survives controller notifications',
@@ -226,7 +226,7 @@ void main() {
     );
 
     await tester
-        .pumpWidget(_localizedApp(home: page, locale: const Locale('en')));
+        .pumpWidget(_localizedApp(home: page, locale: const Locale('en')),);
     await tester.pumpAndSettle();
 
     expect(find.text('Approved application note'), findsNothing);
@@ -254,14 +254,14 @@ void main() {
           (widget) =>
               widget is ListenableBuilder &&
               widget.listenable is IdentityController,
-        ))
+        ),)
         .listenable as IdentityController;
     await controller.upload(IdentityFileDraft(
       bytes: Uint8List.fromList(const [0x89, 0x50, 0x4e, 0x47]),
       fileName: 'notification.png',
       contentType: 'image/png',
       purpose: IdentityDocumentType.idCardFront,
-    ));
+    ),);
     await tester.pump();
     expect(find.text('Approved application note'), findsOneWidget);
     expect(
@@ -299,14 +299,14 @@ void main() {
         repository: _FakeIdentityRepository(),
       ),
       locale: const Locale('en'),
-    ));
+    ),);
     await tester.pumpAndSettle();
     expect(find.text('No identity applications yet'), findsOneWidget);
     expect(
       find.byKey(const Key('identity-application-history-toggle')),
       findsNothing,
     );
-  });
+  },);
 
   test('management capabilities fail closed when booleans are missing', () {
     final context = ManagementContext.fromJson({
@@ -399,11 +399,11 @@ void main() {
       'updatedAt': '2026-08-11T10:00:00',
     });
 
-    expect(doctorRequest.requestType, InstitutionMembershipRequestType.doctor);
+    expect(doctorRequest.requestType, InstitutionMembershipRequestType.doctor,);
     expect(doctorRequest.action, InstitutionMembershipAction.join);
     expect(doctorRequest.status, InstitutionMembershipRequestStatus.pending);
     expect(
-        doctorRequest.relationshipStatus, InstitutionRelationshipStatus.none);
+        doctorRequest.relationshipStatus, InstitutionRelationshipStatus.none,);
     expect(doctorRequest.applicantName, 'Dr. Lin');
     expect(doctorRequest.institutionName, 'Joysong Clinic');
     expect(doctorRequest.submittedAt, DateTime.parse('2026-08-10T09:00:00Z'));
@@ -423,7 +423,7 @@ void main() {
       consultantRequest.reviewedAt,
       DateTime.parse('2026-08-11T10:00:00'),
     );
-  });
+  },);
 
   test('membership protocol parses every status and rejects malformed values',
       () {
@@ -491,7 +491,7 @@ void main() {
       }),
       throwsFormatException,
     );
-  });
+  },);
 
   test('normalized membership text fields require JSON strings', () {
     for (final field in const [
@@ -608,7 +608,7 @@ void main() {
       'consultantInstitutionIds': ['institution-1'],
     });
     expect(context.consultantInstitutionIds, ['institution-1']);
-  });
+  },);
 
   test('management context is fetched again on every entry', () async {
     final repository = _FakeIdentityRepository();
@@ -646,6 +646,7 @@ void main() {
       institutionProjectId: ' institution-project-1 ',
       serviceDescription: ' 擅长面部年轻化 ',
       priceSuggestion: 699,
+      platformRate: 40,
       notes: ' 周末可约 ',
     );
 
@@ -661,7 +662,44 @@ void main() {
       () => const InstitutionProjectJoinRequestDraft(
         institutionProjectId: 'institution-project-1',
         serviceDescription: '服务说明',
+        priceSuggestion: 0.01,
+        platformRate: 40,
+      ).validate(),
+      throwsArgumentError,
+    );
+    expect(
+      () => const InstitutionProjectJoinRequestDraft(
+        institutionProjectId: 'institution-project-1',
+        serviceDescription: '服务说明',
+        priceSuggestion: 1.001,
+        platformRate: 40,
+      ).validate(),
+      throwsArgumentError,
+    );
+    expect(
+      () => const InstitutionProjectJoinRequestDraft(
+        institutionProjectId: 'institution-project-1',
+        serviceDescription: '服务说明',
+        priceSuggestion: 0.02,
+        platformRate: 40,
+      ).validate(),
+      returnsNormally,
+    );
+    expect(
+      () => const InstitutionProjectJoinRequestDraft(
+        institutionProjectId: 'institution-project-1',
+        serviceDescription: '服务说明',
+        priceSuggestion: 0.01,
+        platformRate: 50,
+      ).validate(),
+      returnsNormally,
+    );
+    expect(
+      () => const InstitutionProjectJoinRequestDraft(
+        institutionProjectId: 'institution-project-1',
+        serviceDescription: '服务说明',
         priceSuggestion: -1,
+        platformRate: 40,
       ).validate(),
       throwsArgumentError,
     );
@@ -709,7 +747,7 @@ void main() {
     expect(saved, isTrue);
     expect(repository.savedUpdates.single.toJson()['city'], '宁波');
     expect(controller.selectedProfile?.description, '服务端保存结果');
-  });
+  },);
 
   testWidgets('institution profile edit uses public info and album image copy',
       (tester) async {
@@ -757,7 +795,7 @@ void main() {
       find.text('https://cdn.example.com/institutions/license.png'),
       findsOneWidget,
     );
-  });
+  },);
 
   testWidgets(
       'creation review has two decisions while the legacy JOIN review retains request changes',
@@ -792,7 +830,7 @@ void main() {
         requestType: 'DOCTOR',
         reviewMode: true,
       ),
-    ));
+    ),);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('approve-membership-1')), findsOneWidget);
     expect(find.byKey(const Key('reject-membership-1')), findsOneWidget);
@@ -805,7 +843,7 @@ void main() {
           child: const Text('open creation review'),
         ),
       ),
-    ));
+    ),);
     await tester.tap(find.text('open creation review'));
     await tester.pumpAndSettle();
 
@@ -826,14 +864,14 @@ void main() {
           child: const Text('open JOIN review'),
         ),
       ),
-    ));
+    ),);
     await tester.tap(find.text('open JOIN review'));
     await tester.pumpAndSettle();
     await tester.tap(find.byType(DropdownButtonFormField<String>));
     await tester.pumpAndSettle();
     expect(find.text('要求修改'), findsOneWidget,
-        reason: 'the unrelated legacy JOIN workflow keeps three decisions');
-  });
+        reason: 'the unrelated legacy JOIN workflow keeps three decisions',);
+  },);
 
   testWidgets(
       'legal representative sees only institution profile and review queues',
@@ -918,10 +956,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('Skin Renewal'), findsWidgets);
     expect(find.text('机构项目申请加载失败，请重试'), findsNothing);
-  });
+  },);
 
   testWidgets('doctor sees self profile and request capabilities',
-      (tester) async {
+      (tester,) async {
     final repository = _FakeIdentityRepository()
       ..managementContext = const ManagementContext(
         userId: 'doctor-1',
@@ -943,7 +981,7 @@ void main() {
         repository: repository,
         discoverRepository: const _FakeDiscoverRepository(),
       ),
-    ));
+    ),);
     await tester.pumpAndSettle();
 
     expect(find.text('医生档案'), findsOneWidget);
@@ -959,8 +997,12 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('申请新增平台项目'), findsOneWidget);
-    expect(find.text('申请新增机构项目'), findsOneWidget);
-    expect(find.text('申请加入机构项目'), findsOneWidget);
+    expect(find.text('新增机构项目'), findsOneWidget);
+    expect(find.text('加入机构项目'), findsOneWidget);
+    expect(find.text('编辑机构项目'), findsOneWidget);
+    expect(find.text('申请新增机构项目'), findsNothing);
+    expect(find.text('申请加入机构项目'), findsNothing);
+    expect(find.text('修改本人项目资料'), findsNothing);
     expect(find.text('机构项目'), findsNothing);
 
     await tester.ensureVisible(relationshipAction);
@@ -994,15 +1036,15 @@ void main() {
         repository: repository,
         discoverRepository: const _FakeDiscoverRepository(),
       ),
-    ));
+    ),);
     await tester.pumpAndSettle();
 
     expect(find.text('医生档案'), findsNothing);
     expect(find.text('Doctor profile'), findsNothing);
-  });
+  },);
 
   testWidgets('administrator receives both creation review entry points',
-      (tester) async {
+      (tester,) async {
     Future<String?> picker() async => 'https://cdn.example.com/review.jpg';
     final repository = _FakeIdentityRepository()
       ..managementContext = const ManagementContext(
@@ -1020,7 +1062,7 @@ void main() {
         discoverRepository: const _FakeDiscoverRepository(),
         doctorImagePicker: picker,
       ),
-    ));
+    ),);
     await tester.pumpAndSettle();
 
     final adminGroup = find.byKey(const Key('management-group-platform-admin'));
@@ -1072,7 +1114,7 @@ void main() {
         repository: repository,
         discoverRepository: const _FakeDiscoverRepository(),
       ),
-    ));
+    ),);
     await tester.pumpAndSettle();
 
     final consultantGroup = find.byKey(
@@ -1089,21 +1131,21 @@ void main() {
     expect(
       find.descendant(
         of: consultantGroup,
-        matching: find.text('机构关系'),
+        matching: find.text('机构关系')
       ),
       findsOneWidget,
     );
     expect(
       find.descendant(
         of: consultantGroup,
-        matching: find.text('申请加入机构'),
+        matching: find.text('申请加入机构')
       ),
       findsNothing,
     );
     expect(
       find.descendant(
         of: consultantGroup,
-        matching: find.text('机构归属'),
+        matching: find.text('机构归属')
       ),
       findsNothing,
     );
@@ -1122,7 +1164,7 @@ void main() {
           .scope,
       InstitutionRelationshipScope.consultant,
     );
-  });
+  },);
 
   testWidgets(
       'legal representative routes its stable relationship action with legal scope',
@@ -1142,7 +1184,7 @@ void main() {
         repository: repository,
         discoverRepository: const _FakeDiscoverRepository(),
       ),
-    ));
+    ),);
     await tester.pumpAndSettle();
 
     final legalGroup = find.byKey(
@@ -1168,7 +1210,7 @@ void main() {
           .scope,
       InstitutionRelationshipScope.legalRepresentative,
     );
-  });
+  },);
 
   testWidgets(
       'doctor and legal catalog entries keep their explicit read-only scopes',
@@ -1190,7 +1232,7 @@ void main() {
         repository: repository,
         discoverRepository: catalogRepository,
       ),
-    ));
+    ),);
     await tester.pumpAndSettle();
 
     for (final testCase in const [
@@ -1218,14 +1260,14 @@ void main() {
         findsNothing,
       );
 
-      Navigator.of(tester.element(find.byType(ProfessionalCatalogPage))).pop();
+      Navigator.of(tester.element(find.byType(ProfessionalCatalogPage)),).pop();
       await tester.pumpAndSettle();
     }
-  });
+  },);
 }
 
 Widget _localizedApp(
-        {required Widget home, Locale locale = const Locale('zh')}) =>
+        {required Widget home, Locale locale = const Locale('zh'),}) =>
     MaterialApp(
       locale: locale,
       supportedLocales: const [Locale('zh'), Locale('en')],
@@ -1365,7 +1407,7 @@ final class _FakeIdentityRepository implements IdentityRepository {
         const ManagedInstitutionSummary(
           id: 'inst-1',
           name: '悦美医疗美容',
-          city: '杭州',
+          city: '杭州'
         ),
       ];
 
@@ -1375,7 +1417,7 @@ final class _FakeIdentityRepository implements IdentityRepository {
             ManagedInstitutionSummary(
               id: 'inst-1',
               name: '悦美医疗美容',
-              city: '杭州',
+              city: '杭州'
             ),
           ];
 
@@ -1439,7 +1481,7 @@ final class _FakeIdentityRepository implements IdentityRepository {
 
   @override
   Future<void> submitSplitConfigProposal(
-      SplitConfigProposalDraft draft) async {}
+      SplitConfigProposalDraft draft,) async {}
 
   @override
   Future<DoctorSelfProfile> loadDoctorSelfProfile() {

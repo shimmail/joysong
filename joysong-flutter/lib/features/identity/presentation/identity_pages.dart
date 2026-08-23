@@ -781,8 +781,8 @@ class _ManagementCapabilities extends StatelessWidget {
           (
             icon: Icons.add_task_outlined,
             label: buildContext.localized(
-              '申请新增机构项目',
-              'Request institution project',
+              '新增机构项目',
+              'Add institution project',
             ),
             enabled: isDoctor && context.canSubmitInstitutionProjectRequests,
             action: _ManagementAction.institutionProjectRequest,
@@ -790,7 +790,7 @@ class _ManagementCapabilities extends StatelessWidget {
           (
             icon: Icons.group_add_outlined,
             label: buildContext.localized(
-              '申请加入机构项目',
+              '加入机构项目',
               'Join institution project',
             ),
             enabled: isDoctor && context.canSubmitInstitutionProjectRequests,
@@ -799,8 +799,8 @@ class _ManagementCapabilities extends StatelessWidget {
           (
             icon: Icons.edit_note_outlined,
             label: buildContext.localized(
-              '修改本人项目资料',
-              'Update my project profile',
+              '编辑机构项目',
+              'Edit institution project',
             ),
             enabled: isDoctor && context.canSubmitInstitutionProjectRequests,
             action: _ManagementAction.doctorProjectProfileUpdate,

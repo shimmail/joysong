@@ -7,20 +7,65 @@ import 'package:joysong_flutter/features/identity/presentation/identity_pages.da
 import 'package:joysong_flutter/features/identity/presentation/professional_request_pages.dart';
 
 void main() {
-  testWidgets(
-      'doctor form prefills server target and submits full profile update',
-      (tester) async {
+  testWidgets('doctor form exposes one USD price and derives the travel fee',
+      (tester,) async {
     _largeView(tester);
     final repository = _FakeRepository();
     await tester.pumpWidget(MaterialApp(
         home: DoctorProjectProfileUpdatePage(
       repository: repository,
       pickAndUploadImage: () async => 'uploaded.jpg',
-    )));
+    ),),);
     await tester.pumpAndSettle();
 
-    expect(find.text('12000'), findsOneWidget);
-    expect(find.textContaining('Platform rate (read only)'), findsOneWidget);
+    final priceField = tester.widget<TextField>(
+      find.byKey(const Key('profile-update-price')),
+    );
+
+    expect(priceField.decoration?.labelText, 'Doctor project price (USD)');
+    expect(
+      tester.widgetList<TextField>(find.byType(TextField)).where(
+            (field) =>
+                field.decoration?.labelText?.toLowerCase().contains('price') ==
+                true,
+          ),
+      hasLength(1),
+    );
+    expect(find.text('Consultation fee'), findsNothing);
+    expect(find.text('Consultant rate (%)'), findsNothing);
+    expect(find.text('Institution rate (%)'), findsNothing);
+    expect(find.textContaining('Platform rate'), findsNothing);
+    expect(find.textContaining('Doctor net rate'), findsNothing);
+
+    await tester.enterText(
+      find.byKey(const Key('profile-update-price')),
+      '799.99',
+    );
+    await tester.pump();
+    expect(
+      find.byKey(const Key('profile-update-travel-ground-service-fee')), findsOneWidget,);
+    expect(find.textContaining('USD 320.00'), findsOneWidget);
+  });
+
+  testWidgets('doctor submission reuses hidden legacy values from the target', (
+    tester,
+  ) async {
+    _largeView(tester);
+    final repository = _FakeRepository();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DoctorProjectProfileUpdatePage(
+          repository: repository,
+          pickAndUploadImage: () async => 'uploaded.jpg',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('profile-update-price')),
+      '799.99',
+    );
     await tester.tap(find.byKey(const Key('profile-update-upload')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('submit-profile-update')));
@@ -28,21 +73,72 @@ void main() {
 
     expect(repository.submitted?.institutionProjectId, 'ip-1');
     expect(repository.submitted?.images, ['one.jpg', 'uploaded.jpg']);
-    expect(find.textContaining('PENDING'), findsOneWidget);
+    expect(repository.submitted?.consultationFee, _target.consultationFee);
+    expect(repository.submitted?.commissionRate, _target.commissionRate);
+    expect(repository.submitted?.institutionRate, _target.institutionRate);
+    expect(
+      repository.submitted?.toJson(),
+      containsPair('priceSuggestion', 799.99),
+    );
+    expect(
+      repository.submitted?.toJson(),
+      containsPair('medicalListPrice', 799.99),
+    );
+    expect(find.text('PENDING'), findsOneWidget);
   });
 
-  testWidgets('legal representative sees proposed rates but no force action',
-      (tester) async {
+  testWidgets('doctor price rejects sub-cent fee and excess precision',
+      (tester,) async {
     _largeView(tester);
+    final repository = _FakeRepository();
     await tester.pumpWidget(MaterialApp(
+        home: DoctorProjectProfileUpdatePage(repository: repository)),
+    );
+    await tester.pumpAndSettle();
+
+    for (final invalidPrice in ['0.01', '1.001']) {
+      await tester.enterText(
+        find.byKey(const Key('profile-update-price')),
+        invalidPrice,
+      );
+      await tester.tap(find.byKey(const Key('submit-profile-update')));
+      await tester.pumpAndSettle();
+      expect(repository.submissionCount, 0);
+    }
+
+    await tester.enterText(
+      find.byKey(const Key('profile-update-price')),
+      '0.02',
+    );
+    await tester.tap(find.byKey(const Key('submit-profile-update')));
+    await tester.pumpAndSettle();
+    expect(repository.submissionCount, 1);
+    expect(repository.submitted?.priceSuggestion, 0.02);
+  });
+
+  testWidgets('review shows only current and proposed price and travel fee', (
+    tester,
+  ) async {
+    _largeView(tester);
+    await tester.pumpWidget(
+      MaterialApp(
         home: DoctorProjectProfileReviewPage(
       repository: _FakeRepository(),
       context: _legalContext,
-    )));
+    ),),);
     await tester.pumpAndSettle();
 
-    expect(find.text('Consultant rate: 5%'), findsOneWidget);
-    expect(find.text('Consultant rate: 10%'), findsOneWidget);
+    expect(find.text('Current values at submission'), findsOneWidget);
+    expect(find.text('Proposed values'), findsOneWidget);
+    expect(find.textContaining('USD 12000.00'), findsOneWidget);
+    expect(find.textContaining('USD 4800.00'), findsOneWidget);
+    expect(find.textContaining('USD 12800.00'), findsOneWidget);
+    expect(find.textContaining('USD 5120.00'), findsOneWidget);
+    expect(find.textContaining('Consultation fee'), findsNothing);
+    expect(find.textContaining('Consultant rate'), findsNothing);
+    expect(find.textContaining('Institution rate'), findsNothing);
+    expect(find.textContaining('Platform rate'), findsNothing);
+    expect(find.textContaining('Doctor net rate'), findsNothing);
     expect(find.text('Force approve'), findsNothing);
     expect(find.text('Approve'), findsOneWidget);
   });
@@ -55,7 +151,7 @@ void main() {
         home: DoctorProjectProfileReviewPage(
       repository: repository,
       context: _adminContext,
-    )));
+    ),),);
     await tester.pumpAndSettle();
 
     expect(find.text('Approve'), findsOneWidget);
@@ -66,7 +162,7 @@ void main() {
     await tester.tap(find.text('Request changes'));
     await tester.pumpAndSettle();
     await tester.enterText(
-        find.byKey(const Key('profile-review-note')), 'Please revise');
+        find.byKey(const Key('profile-review-note')), 'Please revise',);
     await tester.tap(find.text('Confirm'));
     await tester.pumpAndSettle();
 
@@ -77,26 +173,26 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Confirm force approval'), findsOneWidget);
     await tester.enterText(
-        find.byKey(const Key('profile-review-note')), 'Manual handling');
+        find.byKey(const Key('profile-review-note')), 'Manual handling',);
     await tester.tap(find.text('Confirm'));
     await tester.pumpAndSettle();
 
     expect(repository.reviewForce, isTrue);
     expect(repository.reviewDecision, 'APPROVED');
     expect(repository.reviewNote, 'Manual handling');
-  });
+  },);
 
   testWidgets(
       'platform admin enters profile reviews without ordinary professional entries',
       (tester) async {
     _largeView(tester);
-    final repository = _FakeRepository(managementContext: _adminReviewContext);
+    final repository = _FakeRepository(managementContext: _adminReviewContext,);
     await tester.pumpWidget(MaterialApp(
       home: ManagementCenterPage(
         repository: repository,
         discoverRepository: _UnusedDiscoverRepository(),
       ),
-    ));
+    ),);
     await tester.pumpAndSettle();
 
     expect(find.text('Doctor project profile reviews'), findsOneWidget);
@@ -106,7 +202,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(DoctorProjectProfileReviewPage), findsOneWidget);
     expect(find.text('Force approve'), findsOneWidget);
-  });
+  },);
 }
 
 void _largeView(WidgetTester tester) {
@@ -161,17 +257,20 @@ final class _FakeRepository implements IdentityRepository {
 
   @override
   Future<DoctorProjectChangeRequest> submitDoctorProjectProfileUpdate(
-      DoctorProjectProfileUpdateDraft draft) async {
+      DoctorProjectProfileUpdateDraft draft,) async {
     submitted = draft;
+    submissionCount++;
     return _request;
   }
+
+  int submissionCount = 0;
 
   @override
   Future<void> reviewDoctorProjectChangeRequest(
       {required String id,
       required String decision,
       required String reviewNote,
-      required bool force}) async {
+      required bool force,}) async {
     reviewDecision = decision;
     reviewForce = force;
     this.reviewNote = reviewNote;
@@ -200,8 +299,8 @@ const _target = DoctorProjectProfileUpdateTarget(
   consultationFee: 200,
   commissionRate: 10,
   institutionRate: 40,
-  platformRate: 10,
-  doctorRate: 40,
+  platformRate: 40,
+  doctorRate: 10,
 );
 const _request = DoctorProjectChangeRequest(
   id: 'request-1',
@@ -222,8 +321,8 @@ const _request = DoctorProjectChangeRequest(
   consultationFee: 300,
   commissionRate: 10,
   institutionRate: 40,
-  platformRate: 10,
-  doctorRate: 40,
+  platformRate: 40,
+  doctorRate: 10,
   forceProcessed: false,
   currentPrice: 12000,
   currentServiceDescription: '当前服务说明',
@@ -234,8 +333,8 @@ const _request = DoctorProjectChangeRequest(
   currentConsultationFee: 200,
   currentCommissionRate: 5,
   currentInstitutionRate: 40,
-  currentPlatformRate: 10,
-  currentDoctorRate: 45,
+  currentPlatformRate: 40,
+  currentDoctorRate: 15,
   status: 'PENDING',
   reviewNote: '',
 );

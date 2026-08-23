@@ -1937,12 +1937,14 @@ final class InstitutionProjectJoinRequestDraft {
     required this.institutionProjectId,
     required this.serviceDescription,
     required this.priceSuggestion,
+    required this.platformRate,
     this.notes = '',
   });
 
   final String institutionProjectId;
   final String serviceDescription;
   final num priceSuggestion;
+  final num platformRate;
   final String notes;
 
   void validate() {
@@ -1952,8 +1954,12 @@ final class InstitutionProjectJoinRequestDraft {
     if (serviceDescription.trim().isEmpty) {
       throw ArgumentError('请填写服务说明');
     }
-    if (!priceSuggestion.isFinite || priceSuggestion < 0) {
-      throw ArgumentError('价格建议必须明确填写且不能小于 0');
+    if (calculateTravelGroundServiceFeeMinor(
+          doctorProjectPrice: priceSuggestion,
+          platformRate: platformRate,
+        ) ==
+        null) {
+      throw ArgumentError('医生项目价格必须能按当前比例计算出至少 USD 0.01 的旅游地接服务费');
     }
   }
 
@@ -2017,10 +2023,8 @@ final class DoctorProjectProfileUpdateDraft {
             (value) => value.trim().isEmpty || value.trim().length > 100)) {
       throw ArgumentError('服务标签不合法');
     }
-    for (final amount in [priceSuggestion, consultationFee]) {
-      if (!_validDecimal(amount, 99999999.99)) {
-        throw ArgumentError('金额必须为非负且最多保留两位小数');
-      }
+    if (!_validDecimal(consultationFee, 99999999.99)) {
+      throw ArgumentError('金额必须为非负且最多保留两位小数');
     }
     for (final rate in [commissionRate, institutionRate, platformRate]) {
       if (!_validDecimal(rate, 100)) {
@@ -2030,6 +2034,13 @@ final class DoctorProjectProfileUpdateDraft {
     if (commissionRate + institutionRate + platformRate > 100) {
       throw ArgumentError('平台、机构和顾问比例合计不能超过 100%');
     }
+    if (calculateTravelGroundServiceFeeMinor(
+          doctorProjectPrice: priceSuggestion,
+          platformRate: platformRate,
+        ) ==
+        null) {
+      throw ArgumentError('医生项目价格必须能按当前比例计算出至少 USD 0.01 的旅游地接服务费');
+    }
   }
 
   Map<String, Object?> toJson() {
@@ -2038,6 +2049,7 @@ final class DoctorProjectProfileUpdateDraft {
       'requestType': 'PROFILE_UPDATE',
       'institutionProjectId': institutionProjectId.trim(),
       'priceSuggestion': priceSuggestion,
+      'medicalListPrice': priceSuggestion,
       'serviceDescription': serviceDescription.trim(),
       'serviceTags': serviceTags.map((value) => value.trim()).toList(),
       'scheduleNote': scheduleNote.trim(),
@@ -2236,6 +2248,26 @@ BigInt? _decimalHundredths(num value) {
   return unscaled;
 }
 
+int? calculateTravelGroundServiceFeeMinor({
+  required num doctorProjectPrice,
+  required num platformRate,
+}) {
+  final priceMinor = _decimalHundredths(doctorProjectPrice);
+  final rateHundredths = _decimalHundredths(platformRate);
+  if (priceMinor == null ||
+      priceMinor <= BigInt.zero ||
+      priceMinor > BigInt.from(9999999999) ||
+      rateHundredths == null ||
+      rateHundredths < BigInt.zero ||
+      rateHundredths > BigInt.from(10000)) {
+    return null;
+  }
+
+  final feeMinor =
+      (priceMinor * rateHundredths + BigInt.from(5000)) ~/ BigInt.from(10000);
+  return feeMinor >= BigInt.one ? feeMinor.toInt() : null;
+}
+
 final class PlatformProjectRequestDraft {
   const PlatformProjectRequestDraft({
     required this.name,
@@ -2415,7 +2447,7 @@ final class InstitutionProjectRequestDraft {
     num? price,
     num? priceSuggestion,
     this.originalPrice,
-    this.currency = 'CNY',
+    this.currency = 'USD',
     this.coverImage,
     this.images,
     this.salesCount = 0,
@@ -2463,8 +2495,14 @@ final class InstitutionProjectRequestDraft {
     _validateText('项目详情', detailContent, 20000);
     _validateText('封面图片', coverImage, 500);
     _validateText('申请备注', notes, 2000);
+    if (calculateTravelGroundServiceFeeMinor(
+          doctorProjectPrice: price,
+          platformRate: platformRate,
+        ) ==
+        null) {
+      throw ArgumentError('医生项目价格必须能按当前比例计算出至少 USD 0.01 的旅游地接服务费');
+    }
     for (final amount in [
-      price,
       consultationFee,
       if (originalPrice != null) originalPrice!
     ]) {
@@ -2476,6 +2514,9 @@ final class InstitutionProjectRequestDraft {
       throw ArgumentError('销量必须在 0 到 2147483647 之间');
     }
     _validateCurrency(currency);
+    if (currency.trim().toUpperCase() != 'USD') {
+      throw ArgumentError('医生项目价格必须使用 USD');
+    }
     if (tags != null) _validateItems('项目标签', tags!, 20, 100, 500);
     if (images != null) _validateItems('项目图片', images!, 20, 500, 2000);
     for (final rate in [commissionRate, institutionRate, platformRate]) {

@@ -821,12 +821,8 @@ class _InstitutionProjectRequestsPageState
   final _slogan = TextEditingController();
   final _detailContent = TextEditingController();
   final _price = TextEditingController();
-  final _originalPrice = TextEditingController();
   final _cover = TextEditingController();
   final _salesCount = TextEditingController();
-  final _consultationFee = TextEditingController();
-  final _consultantRate = TextEditingController();
-  final _institutionRate = TextEditingController();
   final _notes = TextEditingController();
   List<InstitutionOption> _institutions = const [];
   List<ManagementProjectOption> _projects = const [];
@@ -834,7 +830,6 @@ class _InstitutionProjectRequestsPageState
   List<String> _images = const [];
   String? _institutionId;
   String? _projectId;
-  String _currency = 'CNY';
   bool _isActive = true;
   num? _platformRate;
   String? _error;
@@ -867,12 +862,8 @@ class _InstitutionProjectRequestsPageState
       _slogan,
       _detailContent,
       _price,
-      _originalPrice,
       _cover,
       _salesCount,
-      _consultationFee,
-      _consultantRate,
-      _institutionRate,
       _notes,
     ]) {
       controller.dispose();
@@ -881,6 +872,9 @@ class _InstitutionProjectRequestsPageState
   }
 
   Future<bool> _load() async {
+    if (!widget.reviewMode && mounted) {
+      setState(() => _platformRate = null);
+    }
     try {
       final includeFormData = !widget.reviewMode;
       final values = !includeFormData
@@ -974,7 +968,7 @@ class _InstitutionProjectRequestsPageState
         appBar: AppBar(
           title: Text(widget.reviewMode
               ? context.localized('机构项目申请审核', 'Institution Project Reviews')
-              : context.localized('申请新增机构项目', 'Request Institution Project')),
+              : context.localized('新增机构项目', 'Add institution project')),
         ),
         body: _loading
             ? const Center(child: CircularProgressIndicator())
@@ -1072,35 +1066,22 @@ class _InstitutionProjectRequestsPageState
                     ),
                     _requestField(
                       _price,
-                      context.localized('价格', 'Price'),
+                      context.localized(
+                        '医生项目价格（USD）',
+                        'Doctor project price (USD)',
+                      ),
                       fieldKey: const Key('institution-price'),
                       keyboardType:
                           const TextInputType.numberWithOptions(decimal: true),
-                      hintText: _selectedProject == null
-                          ? null
-                          : '${_selectedProject!.referencePrice}',
+                      onChanged: (_) => setState(() {}),
                     ),
-                    _requestField(
-                      _originalPrice,
-                      context.localized('原价（可选）', 'Original price (optional)'),
-                      fieldKey: const Key('institution-original-price'),
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                    ),
-                    DropdownButtonFormField<String>(
-                      key: ValueKey('institution-currency-$_currency'),
-                      initialValue: _currency,
-                      decoration: InputDecoration(
-                        labelText: context.localized('币种', 'Currency'),
+                    _travelGroundServiceFeePreview(
+                      context,
+                      key: const Key(
+                        'institution-travel-ground-service-fee',
                       ),
-                      items: const [
-                        DropdownMenuItem(value: 'CNY', child: Text('CNY')),
-                        DropdownMenuItem(value: 'USD', child: Text('USD')),
-                      ],
-                      onChanged: _saving
-                          ? null
-                          : (value) =>
-                              setState(() => _currency = value ?? 'CNY'),
+                      doctorProjectPrice: num.tryParse(_price.text.trim()),
+                      platformRate: _platformRate,
                     ),
                     const SizedBox(height: 12),
                     _imageUploadField(
@@ -1164,38 +1145,6 @@ class _InstitutionProjectRequestsPageState
                           : (value) => setState(() => _isActive = value),
                     ),
                     _requestField(
-                      _consultationFee,
-                      context.localized('面诊费', 'Consultation fee'),
-                      fieldKey: const Key('institution-consultation-fee'),
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                    ),
-                    _requestField(
-                      _consultantRate,
-                      context.localized('医美顾问比例（%）', 'Consultant rate (%)'),
-                      fieldKey: const Key('institution-consultant-rate'),
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                    _requestField(
-                      _institutionRate,
-                      context.localized('机构比例（%）', 'Institution rate (%)'),
-                      fieldKey: const Key('institution-rate'),
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                    Text(
-                      '${context.localized('平台比例（只读）', 'Platform rate (read only)')}：${_formatNumber(_platformRate)}%',
-                      key: const Key('institution-platform-rate'),
-                    ),
-                    Text(
-                      '${context.localized('医生比例（自动推导）', 'Doctor rate (derived)')}：${_formatRateHundredths(_derivedDoctorRateHundredths)}%',
-                      key: const Key('institution-doctor-rate'),
-                    ),
-                    const SizedBox(height: 12),
-                    _requestField(
                       _notes,
                       context.localized('说明', 'Notes'),
                       fieldKey: const Key('institution-notes'),
@@ -1230,25 +1179,18 @@ class _InstitutionProjectRequestsPageState
     final institutionId = _institutionId;
     final projectId = _projectId;
     final price = num.tryParse(_price.text.trim());
-    final originalPrice = _originalPrice.text.trim().isEmpty
-        ? null
-        : num.tryParse(_originalPrice.text.trim());
-    final consultationFee = num.tryParse(_consultationFee.text.trim());
-    final consultantRate = num.tryParse(_consultantRate.text.trim());
-    final institutionRate = num.tryParse(_institutionRate.text.trim());
     final salesCount = _salesCount.text.trim().isEmpty
         ? _selectedProject?.salesCount
         : int.tryParse(_salesCount.text.trim());
     if (institutionId == null ||
         projectId == null ||
         price == null ||
-        consultationFee == null ||
-        consultantRate == null ||
-        institutionRate == null ||
         salesCount == null ||
-        _platformRate == null ||
-        (_originalPrice.text.trim().isNotEmpty && originalPrice == null)) {
-      setState(() => _error = '请选择机构和平台项目，并填写有效金额、销量与分账比例');
+        _platformRate == null) {
+      setState(() => _error = context.localized(
+            '请选择机构和平台项目，并填写有效的医生项目价格与销量',
+            'Select an institution and platform project, then enter a valid doctor project price and sales count.',
+          ));
       return;
     }
     final draft = InstitutionProjectRequestDraft(
@@ -1261,15 +1203,15 @@ class _InstitutionProjectRequestsPageState
       slogan: _optionalText(_slogan.text),
       detailContent: _optionalText(_detailContent.text),
       price: price,
-      originalPrice: originalPrice,
-      currency: _currency,
+      originalPrice: null,
+      currency: 'USD',
       coverImage: _optionalText(_cover.text),
       images: _images.isEmpty ? null : _images,
       salesCount: salesCount,
       isActive: _isActive,
-      consultationFee: consultationFee,
-      commissionRate: consultantRate,
-      institutionRate: institutionRate,
+      consultationFee: 0,
+      commissionRate: 0,
+      institutionRate: 0,
       platformRate: _platformRate!,
       notes: _notes.text,
     );
@@ -1306,12 +1248,12 @@ class _InstitutionProjectRequestsPageState
         if (!mounted) return;
         setState(() => _error = refreshed
             ? context.localized(
-                '提交冲突，申请、项目目录与分账配置已刷新；草稿已保留，请核对后重新提交',
-                'Submission conflict. Requests, the project catalog, and split configuration were refreshed; the draft was retained. Review them before submitting again.',
+                '提交冲突，申请、项目目录与价格配置已刷新；草稿已保留，请核对后重新提交',
+                'Submission conflict. Requests, the project catalog, and pricing configuration were refreshed; the draft was retained. Review them before submitting again.',
               )
             : context.localized(
-                '提交冲突，申请、项目目录或分账配置刷新失败；草稿已保留，请手动刷新后再提交',
-                'Submission conflict. Requests, the project catalog, or split configuration could not be refreshed; the draft was retained. Refresh manually before submitting again.',
+                '提交冲突，申请、项目目录或价格配置刷新失败；草稿已保留，请手动刷新后再提交',
+                'Submission conflict. Requests, the project catalog, or pricing configuration could not be refreshed; the draft was retained. Refresh manually before submitting again.',
               ));
       } else {
         setState(() => _error = '机构项目申请提交失败，请稍后重试');
@@ -1337,8 +1279,8 @@ class _InstitutionProjectRequestsPageState
       if (!mounted || review == null) return;
       if (review.decision == 'APPROVED' && !request.isCurrentlyApprovable) {
         setState(() => _error = context.localized(
-              '当前医生净比例为负，无法批准；可驳回申请并说明原因',
-              'The current doctor net rate is negative and cannot be approved. Reject the request with a reason instead.',
+              '当前价格配置不满足审批条件；可驳回申请并说明原因',
+              'The current pricing configuration cannot be approved. Reject the request with a reason instead.',
             ));
         return;
       }
@@ -1373,22 +1315,10 @@ class _InstitutionProjectRequestsPageState
   }
 
   void _selectProject(String projectId) {
-    final project = _projects.firstWhere((item) => item.id == projectId);
     setState(() {
       _projectId = projectId;
-      _currency = project.currency;
       _error = null;
     });
-  }
-
-  int? get _derivedDoctorRateHundredths {
-    final platform = _rateHundredths('${_platformRate ?? ''}');
-    final institution = _rateHundredths(_institutionRate.text);
-    final consultant = _rateHundredths(_consultantRate.text);
-    if (platform == null || institution == null || consultant == null) {
-      return null;
-    }
-    return 10000 - platform - institution - consultant;
   }
 
   Future<bool> _refreshRequests() async {
@@ -1442,12 +1372,8 @@ class _InstitutionProjectRequestsPageState
       _slogan,
       _detailContent,
       _price,
-      _originalPrice,
       _cover,
       _salesCount,
-      _consultationFee,
-      _consultantRate,
-      _institutionRate,
       _notes,
     ]) {
       controller.clear();
@@ -1455,7 +1381,6 @@ class _InstitutionProjectRequestsPageState
     setState(() {
       _institutionId = null;
       _projectId = null;
-      _currency = 'CNY';
       _images = const [];
       _isActive = true;
     });
@@ -1502,9 +1427,6 @@ class _DoctorProjectProfileUpdatePageState
   final _schedule = TextEditingController();
   final _cover = TextEditingController();
   final _images = TextEditingController();
-  final _consultationFee = TextEditingController();
-  final _consultantRate = TextEditingController();
-  final _institutionRate = TextEditingController();
   final _notes = TextEditingController();
   List<DoctorProjectProfileUpdateTarget> _targets = const [];
   List<DoctorProjectChangeRequest> _requests = const [];
@@ -1527,9 +1449,6 @@ class _DoctorProjectProfileUpdatePageState
       _schedule,
       _cover,
       _images,
-      _consultationFee,
-      _consultantRate,
-      _institutionRate,
       _notes,
     ]) {
       controller.dispose();
@@ -1540,6 +1459,8 @@ class _DoctorProjectProfileUpdatePageState
   Future<void> _load() async {
     setState(() {
       _loading = true;
+      _targets = const [];
+      _selected = null;
       _error = null;
     });
     try {
@@ -1587,17 +1508,14 @@ class _DoctorProjectProfileUpdatePageState
     _schedule.text = target.scheduleNote;
     _cover.text = target.coverImage;
     _images.text = target.images.join('\n');
-    _consultationFee.text = '${target.consultationFee}';
-    _consultantRate.text = '${target.commissionRate}';
-    _institutionRate.text = '${target.institutionRate}';
     _notes.clear();
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(
-            title: Text(context.localized(
-                '医生项目资料变更', 'Doctor project profile update'))),
+            title: Text(
+                context.localized('编辑机构项目', 'Edit institution project'))),
         body: _loading
             ? const Center(child: CircularProgressIndicator())
             : ListView(padding: const EdgeInsets.all(16), children: [
@@ -1633,10 +1551,20 @@ class _DoctorProjectProfileUpdatePageState
                   ),
                   const SizedBox(height: 12),
                   _requestField(
-                      _price, context.localized('医生级价格', 'Doctor price'),
+                      _price,
+                      context.localized(
+                          '医生项目价格（USD）', 'Doctor project price (USD)'),
                       fieldKey: const Key('profile-update-price'),
                       keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true)),
+                          const TextInputType.numberWithOptions(decimal: true),
+                      onChanged: (_) => setState(() {})),
+                  _travelGroundServiceFeePreview(
+                    context,
+                    key: const Key(
+                        'profile-update-travel-ground-service-fee'),
+                    doctorProjectPrice: num.tryParse(_price.text.trim()),
+                    platformRate: _selected?.platformRate,
+                  ),
                   _requestField(_description,
                       context.localized('项目展示说明', 'Display description'),
                       maxLines: 4),
@@ -1660,24 +1588,6 @@ class _DoctorProjectProfileUpdatePageState
                         icon: const Icon(Icons.upload_outlined),
                         label: Text(context.localized(
                             '上传项目图片', 'Upload project image'))),
-                  _requestField(_consultationFee,
-                      context.localized('面诊费', 'Consultation fee'),
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true)),
-                  _requestField(_consultantRate,
-                      context.localized('医美顾问比例（%）', 'Consultant rate (%)'),
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true)),
-                  _requestField(_institutionRate,
-                      context.localized('机构比例（%）', 'Institution rate (%)'),
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true)),
-                  if (_selected != null) ...[
-                    Text(
-                        '${context.localized('平台比例（只读）', 'Platform rate (read only)')}: ${_selected!.platformRate}%'),
-                    Text(
-                        '${context.localized('医生净比例（自动推导）', 'Doctor net rate (derived)')}: ${_derivedDoctorRate()}%'),
-                  ],
                   _requestField(
                       _notes, context.localized('申请说明', 'Request note'),
                       maxLines: 3),
@@ -1715,12 +1625,6 @@ class _DoctorProjectProfileUpdatePageState
                   ),
               ]),
       );
-
-  num _derivedDoctorRate() =>
-      100 -
-      (_selected?.platformRate ?? 0) -
-      (num.tryParse(_institutionRate.text) ?? 0) -
-      (num.tryParse(_consultantRate.text) ?? 0);
 
   bool _canWithdraw(DoctorProjectChangeRequest request) {
     final status = request.status.trim().toUpperCase();
@@ -1783,25 +1687,23 @@ class _DoctorProjectProfileUpdatePageState
           context.localized('请选择机构项目', 'Select an institution project.'));
       return;
     }
-    final values = [_price, _consultationFee, _consultantRate, _institutionRate]
-        .map((controller) => num.tryParse(controller.text.trim()))
-        .toList();
-    if (values.any((value) => value == null)) {
+    final price = num.tryParse(_price.text.trim());
+    if (price == null) {
       setState(() => _error =
-          context.localized('请填写有效金额和比例', 'Enter valid amounts and rates.'));
+          context.localized('请填写有效的医生项目价格', 'Enter a valid doctor project price.'));
       return;
     }
     final draft = DoctorProjectProfileUpdateDraft(
       institutionProjectId: target.institutionProjectId,
-      priceSuggestion: values[0]!,
+      priceSuggestion: price,
       serviceDescription: _description.text,
       serviceTags: _csv(_tags.text),
       scheduleNote: _schedule.text,
       coverImage: _cover.text,
       images: _lines(_images.text),
-      consultationFee: values[1]!,
-      commissionRate: values[2]!,
-      institutionRate: values[3]!,
+      consultationFee: target.consultationFee,
+      commissionRate: target.commissionRate,
+      institutionRate: target.institutionRate,
       platformRate: target.platformRate,
       notes: _notes.text,
     );
@@ -1949,45 +1851,29 @@ class _DoctorProjectProfileReviewPageState
                                   style:
                                       Theme.of(context).textTheme.titleSmall),
                               Text(
-                                  '${context.localized('医生级价格', 'Doctor price')}: ${request.currentPrice ?? '-'}'),
+                                  '${context.localized('医生项目价格（USD）', 'Doctor project price (USD)')}: ${_formatUsd(request.currentPrice)}'),
+                              Text(
+                                  '${context.localized('旅游地接服务费', 'Travel ground service fee')}: ${_travelGroundServiceFeeValue(request.currentPrice, request.currentPlatformRate)}'),
                               Text(
                                   '${context.localized('项目展示说明', 'Display description')}: ${request.currentServiceDescription ?? '-'}'),
                               Text(
                                   '${context.localized('标签', 'Tags')}: ${request.currentServiceTags?.join(', ') ?? '-'}'),
                               Text(
                                   '${context.localized('排期', 'Schedule')}: ${request.currentScheduleNote ?? '-'}'),
-                              Text(
-                                  '${context.localized('面诊费', 'Consultation fee')}: ${request.currentConsultationFee ?? '-'}'),
-                              Text(
-                                  '${context.localized('医美顾问比例', 'Consultant rate')}: ${request.currentCommissionRate ?? '-'}%'),
-                              Text(
-                                  '${context.localized('机构比例', 'Institution rate')}: ${request.currentInstitutionRate ?? '-'}%'),
-                              Text(
-                                  '${context.localized('平台比例', 'Platform rate')}: ${request.currentPlatformRate ?? '-'}%'),
-                              Text(
-                                  '${context.localized('医生净比例', 'Doctor net rate')}: ${request.currentDoctorRate ?? '-'}%'),
                               const Divider(),
                               Text(context.localized('申请值', 'Proposed values'),
                                   style:
                                       Theme.of(context).textTheme.titleSmall),
                               Text(
-                                  '${context.localized('医生级价格', 'Doctor price')}: ${request.priceSuggestion ?? '-'}'),
+                                  '${context.localized('医生项目价格（USD）', 'Doctor project price (USD)')}: ${_formatUsd(request.priceSuggestion)}'),
+                              Text(
+                                  '${context.localized('旅游地接服务费', 'Travel ground service fee')}: ${_travelGroundServiceFeeValue(request.priceSuggestion, request.platformRate)}'),
                               Text(
                                   '${context.localized('项目展示说明', 'Display description')}: ${request.serviceDescription}'),
                               Text(
                                   '${context.localized('标签', 'Tags')}: ${request.serviceTags.join(', ')}'),
                               Text(
                                   '${context.localized('排期', 'Schedule')}: ${request.scheduleNote}'),
-                              Text(
-                                  '${context.localized('面诊费', 'Consultation fee')}: ${request.consultationFee ?? '-'}'),
-                              Text(
-                                  '${context.localized('医美顾问比例', 'Consultant rate')}: ${request.commissionRate ?? '-'}%'),
-                              Text(
-                                  '${context.localized('机构比例', 'Institution rate')}: ${request.institutionRate ?? '-'}%'),
-                              Text(
-                                  '${context.localized('平台比例（只读）', 'Platform rate (read only)')}: ${request.platformRate ?? '-'}%'),
-                              Text(
-                                  '${context.localized('医生净比例（推导）', 'Doctor net rate (derived)')}: ${request.doctorRate ?? '-'}%'),
                               if (request.forceProcessed)
                                 Text(context.localized('已由管理员强制处理',
                                     'Force-processed by an administrator')),
@@ -2106,6 +1992,7 @@ class _InstitutionProjectJoinRequestsPageState
   List<ManagedInstitutionProject> _projects = const [];
   List<InstitutionProjectJoinRequest> _requests = const [];
   String? _institutionProjectId;
+  num? _platformRate;
   String? _error;
   var _loading = true;
   var _saving = false;
@@ -2125,12 +2012,21 @@ class _InstitutionProjectJoinRequestsPageState
   }
 
   Future<void> _load() async {
+    if (!widget.reviewMode && mounted) {
+      setState(() => _platformRate = null);
+    }
     try {
-      final requests =
-          await widget.repository.listInstitutionProjectJoinRequests();
+      final values = await Future.wait<Object>([
+        widget.repository.listInstitutionProjectJoinRequests(),
+        if (!widget.reviewMode)
+          widget.repository.listManagedInstitutionProjects(),
+        if (!widget.reviewMode)
+          widget.repository.loadInstitutionProjectApplicationFormConfig(),
+      ]);
+      final requests = values[0] as List<InstitutionProjectJoinRequest>;
       final projects = widget.reviewMode
           ? const <ManagedInstitutionProject>[]
-          : await widget.repository.listManagedInstitutionProjects();
+          : values[1] as List<ManagedInstitutionProject>;
       if (!mounted) return;
       final institutionIds = (widget.reviewMode
               ? widget.context.managedInstitutionIds
@@ -2147,6 +2043,10 @@ class _InstitutionProjectJoinRequestsPageState
         _projects = projects
             .where((project) => institutionIds.contains(project.institutionId))
             .toList(growable: false);
+        _platformRate = widget.reviewMode
+            ? null
+            : (values[2] as InstitutionProjectApplicationFormConfig)
+                .platformRate;
         _loading = false;
         _error = null;
       });
@@ -2154,7 +2054,10 @@ class _InstitutionProjectJoinRequestsPageState
       if (mounted) {
         setState(() {
           _loading = false;
-          _error = '机构项目加入申请加载失败，请重试';
+          _error = context.localized(
+            '机构项目加入申请加载失败，请重试',
+            'Failed to load institution project join requests. Please retry.',
+          );
         });
       }
     }
@@ -2170,7 +2073,7 @@ class _InstitutionProjectJoinRequestsPageState
       appBar: AppBar(
         title: Text(widget.reviewMode
             ? context.localized('机构项目加入审核', 'Project Join Reviews')
-            : context.localized('申请加入机构项目', 'Join Institution Project')),
+            : context.localized('加入机构项目', 'Join institution project')),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -2179,6 +2082,8 @@ class _InstitutionProjectJoinRequestsPageState
               children: [
                 if (!widget.reviewMode) ...[
                   DropdownButtonFormField<String>(
+                    key: ValueKey(
+                        'join-institution-project-$_institutionProjectId'),
                     initialValue: _institutionProjectId,
                     isExpanded: true,
                     decoration: InputDecoration(
@@ -2209,16 +2114,26 @@ class _InstitutionProjectJoinRequestsPageState
                   _requestField(
                     _serviceDescription,
                     context.localized('服务说明', 'Service description'),
+                    fieldKey: const Key('join-service-description'),
                     maxLines: 4,
                   ),
                   _requestField(
                     _priceSuggestion,
                     context.localized(
-                      '价格建议（必填，不能小于 0）',
-                      'Price suggestion (required, non-negative)',
+                      '医生项目价格（USD）',
+                      'Doctor project price (USD)',
                     ),
+                    fieldKey: const Key('join-project-price'),
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                  _travelGroundServiceFeePreview(
+                    context,
+                    key: const Key('join-travel-ground-service-fee'),
+                    doctorProjectPrice:
+                        num.tryParse(_priceSuggestion.text.trim()),
+                    platformRate: _platformRate,
                   ),
                   _requestField(
                     _notes,
@@ -2226,6 +2141,7 @@ class _InstitutionProjectJoinRequestsPageState
                     maxLines: 3,
                   ),
                   FilledButton.icon(
+                    key: const Key('join-submit'),
                     onPressed: _saving ? null : _submit,
                     icon: const Icon(Icons.send_outlined),
                     label: Text(context.localized('提交申请', 'Submit')),
@@ -2255,7 +2171,7 @@ class _InstitutionProjectJoinRequestsPageState
                       request.institutionName,
                       if (widget.reviewMode) request.doctorName,
                       request.serviceDescription,
-                      '价格建议：${request.priceSuggestion}',
+                      '${context.localized('医生项目价格（USD）', 'Doctor project price (USD)')}：${_formatUsd(request.priceSuggestion)}',
                       if (request.notes.isNotEmpty) request.notes,
                       _statusLabel(request.status),
                       if (request.reviewNote.isNotEmpty)
@@ -2277,13 +2193,25 @@ class _InstitutionProjectJoinRequestsPageState
   Future<void> _submit() async {
     final price = num.tryParse(_priceSuggestion.text.trim());
     if (price == null) {
-      setState(() => _error = '请明确填写非负价格建议');
+      setState(() => _error = context.localized(
+            '请填写有效的医生项目价格',
+            'Enter a valid doctor project price.',
+          ));
+      return;
+    }
+    final platformRate = _platformRate;
+    if (platformRate == null) {
+      setState(() => _error = context.localized(
+            '旅游地接服务费暂不可计算，请刷新后重试',
+            'The travel ground service fee cannot be calculated yet. Refresh and retry.',
+          ));
       return;
     }
     final draft = InstitutionProjectJoinRequestDraft(
       institutionProjectId: _institutionProjectId ?? '',
       serviceDescription: _serviceDescription.text,
       priceSuggestion: price,
+      platformRate: platformRate,
       notes: _notes.text,
     );
     try {
@@ -2296,7 +2224,10 @@ class _InstitutionProjectJoinRequestsPageState
       (item) => item.id == draft.institutionProjectId.trim(),
     );
     if (project.hasDoctor(widget.context.doctorId)) {
-      setState(() => _error = '您已加入该机构项目，不能重复申请');
+      setState(() => _error = context.localized(
+            '您已加入该机构项目，不能重复申请',
+            'You have already joined this institution project.',
+          ));
       return;
     }
     setState(() {
@@ -2311,7 +2242,12 @@ class _InstitutionProjectJoinRequestsPageState
       _notes.clear();
       await _load();
     } catch (_) {
-      if (mounted) setState(() => _error = '机构项目加入申请提交失败，请稍后重试');
+      if (mounted) {
+        setState(() => _error = context.localized(
+              '机构项目加入申请提交失败，请稍后重试',
+              'Failed to submit the institution project join request. Please retry later.',
+            ));
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -2372,8 +2308,8 @@ Future<({String decision, String note})?>
           warning: allowApproval
               ? null
               : context.localized(
-                  '当前医生净比例为负，无法批准；可驳回申请并说明原因',
-                  'The current doctor net rate is negative and cannot be approved. Reject the request with a reason instead.',
+                  '当前价格配置不满足审批条件；可驳回申请并说明原因',
+                  'The current pricing configuration cannot be approved. Reject the request with a reason instead.',
                 ),
           decisions: [
             if (allowApproval)
@@ -2626,8 +2562,6 @@ Widget _inheritancePreview(
           '${context.localized('标签', 'Tags')}: ${project.tags}',
           '${context.localized('分类标签', 'Category tags')}: ${project.categoryTags}',
           '${context.localized('封面', 'Cover')}: ${project.coverImage}',
-          '${context.localized('参考价格', 'Reference price')}: ${project.referencePrice}',
-          '${context.localized('币种', 'Currency')}: ${project.currency}',
           '${context.localized('标语', 'Slogan')}: ${project.slogan}',
           '${context.localized('详情', 'Detail')}: ${project.detailContent ?? ''}',
           '${context.localized('图片', 'Images')}: ${project.images.join(', ')}',
@@ -2644,6 +2578,7 @@ Widget _professionalRequestSnapshot(
   required VoidCallback onReview,
 }) {
   final split = request.institutionSplit;
+  final isInstitutionRequest = request.requestType == 'INSTITUTION';
   final hasCompleteSnapshot = request.hasCompleteReviewSnapshot;
   final rows = <String>[
     '${context.localized('申请编号', 'Request ID')}：${request.id}',
@@ -2660,16 +2595,23 @@ Widget _professionalRequestSnapshot(
     '${context.localized('项目标签', 'Tags')}：${_snapshotItems(context, request.tags)}',
     '${context.localized('项目标语', 'Slogan')}：${_snapshotText(context, request.slogan)}',
     '${context.localized('项目详情', 'Detail')}：${_snapshotText(context, request.detailContent)}',
-    '${context.localized('币种', 'Currency')}：${request.currency}',
+    if (!isInstitutionRequest)
+      '${context.localized('币种', 'Currency')}：${request.currency}',
     '${context.localized('封面图', 'Cover')}：${_snapshotText(context, request.coverImage)}',
     '${context.localized('项目图片', 'Images')}：${_snapshotItems(context, request.images)}',
     '${context.localized('销量', 'Sales count')}：${request.salesCount}',
-    '${context.localized('参考价格', 'Reference price')}：${request.referencePrice ?? '-'}',
+    if (!isInstitutionRequest)
+      '${context.localized('参考价格', 'Reference price')}：${request.referencePrice ?? '-'}',
     '${context.localized('分类标签', 'Category tags')}：${_snapshotItems(context, request.categoryTags)}',
-    '${context.localized('价格', 'Price')}：${request.price ?? '-'}',
-    '${context.localized('原价', 'Original price')}：${request.originalPrice ?? '-'}',
+    if (isInstitutionRequest) ...[
+      '${context.localized('医生项目价格（USD）', 'Doctor project price (USD)')}：${_formatUsd(request.price)}',
+      '${context.localized('旅游地接服务费', 'Travel ground service fee')}：${_travelGroundServiceFeeValue(request.price, split?.platformRate)}',
+    ] else ...[
+      '${context.localized('价格', 'Price')}：${request.price ?? '-'}',
+      '${context.localized('原价', 'Original price')}：${request.originalPrice ?? '-'}',
+    ],
     '${context.localized('上架', 'Active')}：${request.isActive ?? '-'}',
-    if (split != null) ...[
+    if (!isInstitutionRequest && split != null) ...[
       '${context.localized('面诊费', 'Consultation fee')}：${_formatNumber(split.consultationFee)}',
       '${context.localized('顾问比例', 'Consultant rate')}：${_formatNumber(split.commissionRate)}%',
       '${context.localized('机构比例', 'Institution rate')}：${_formatNumber(split.institutionRate)}%',
@@ -2745,6 +2687,42 @@ String _formatNumber(num? value) {
       : value.toString();
 }
 
+Widget _travelGroundServiceFeePreview(
+  BuildContext context, {
+  required Key key,
+  required num? doctorProjectPrice,
+  required num? platformRate,
+}) {
+  final rate = platformRate == null ? null : _formatNumber(platformRate);
+  final label = rate == null
+      ? context.localized('旅游地接服务费', 'Travel ground service fee')
+      : context.localized(
+          '旅游地接服务费（$rate%）',
+          'Travel ground service fee ($rate%)',
+        );
+  return Text(
+    '$label：${_travelGroundServiceFeeValue(doctorProjectPrice, platformRate)}',
+    key: key,
+  );
+}
+
+String _travelGroundServiceFeeValue(num? price, num? platformRate) {
+  if (price == null || platformRate == null) return '-';
+  final minor = calculateTravelGroundServiceFeeMinor(
+    doctorProjectPrice: price,
+    platformRate: platformRate,
+  );
+  return minor == null ? '-' : _formatUsdMinor(minor);
+}
+
+String _formatUsd(num? value) {
+  if (value == null || !value.isFinite) return '-';
+  return 'USD ${value.toStringAsFixed(2)}';
+}
+
+String _formatUsdMinor(int minor) =>
+    'USD ${(minor / 100).toStringAsFixed(2)}';
+
 String _snapshotText(BuildContext context, String? value) {
   if (value == null) return context.localized('未提供', 'Not provided');
   if (value.isEmpty) return context.localized('空字符串', 'Empty string');
@@ -2755,27 +2733,6 @@ String _snapshotItems(BuildContext context, List<String>? values) {
   if (values == null) return context.localized('未提供', 'Not provided');
   if (values.isEmpty) return context.localized('空列表', 'Empty list');
   return values.join(', ');
-}
-
-int? _rateHundredths(String value) {
-  final parsed = num.tryParse(value.trim());
-  if (parsed == null || !parsed.isFinite || parsed < 0 || parsed > 100) {
-    return null;
-  }
-  final hundredths = (parsed * 100).round();
-  if (parsed != hundredths / 100) return null;
-  return hundredths;
-}
-
-String _formatRateHundredths(int? value) {
-  if (value == null) return '-';
-  final remainder = value.abs() % 100;
-  final precision = remainder == 0
-      ? 0
-      : remainder % 10 == 0
-          ? 1
-          : 2;
-  return (value / 100).toStringAsFixed(precision);
 }
 
 List<String> _parseCsv(String value) => value

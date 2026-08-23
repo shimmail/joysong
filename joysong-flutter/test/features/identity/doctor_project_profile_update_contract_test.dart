@@ -4,10 +4,11 @@ import 'package:joysong_flutter/features/identity/data/identity_repository_impl.
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 
 void main() {
-  test('PROFILE_UPDATE draft emits the exact twelve-key request', () {
+  test(
+    'PROFILE_UPDATE duplicates the doctor project price for compatibility', () {
     const draft = DoctorProjectProfileUpdateDraft(
       institutionProjectId: ' ip-1 ',
-      priceSuggestion: 12800,
+      priceSuggestion: 799.99,
       serviceDescription: ' 服务说明 ',
       serviceTags: [' 自然 ', '精细化'],
       scheduleNote: ' 周二、四 ',
@@ -23,7 +24,8 @@ void main() {
     expect(draft.toJson(), {
       'requestType': 'PROFILE_UPDATE',
       'institutionProjectId': 'ip-1',
-      'priceSuggestion': 12800,
+      'priceSuggestion': 799.99,
+        'medicalListPrice': 799.99,
       'serviceDescription': '服务说明',
       'serviceTags': ['自然', '精细化'],
       'scheduleNote': '周二、四',
@@ -50,6 +52,29 @@ void main() {
     );
 
     expect(invalidDraft.toJson, throwsArgumentError);
+  },);
+
+  test('PROFILE_UPDATE requires a USD price that produces a payable fee', () {
+    DoctorProjectProfileUpdateDraft draft(num price) =>
+        DoctorProjectProfileUpdateDraft(
+          institutionProjectId: 'ip-1',
+          priceSuggestion: price,
+          serviceDescription: '服务说明',
+          serviceTags: const [],
+          scheduleNote: '',
+          coverImage: '',
+          images: const [],
+          consultationFee: 300,
+          commissionRate: 10,
+          institutionRate: 40,
+          platformRate: 40,
+          notes: '',
+        );
+
+    expect(draft(0.01).toJson, throwsArgumentError);
+    expect(draft(1.001).toJson, throwsArgumentError);
+    expect(draft(0.02).toJson()['priceSuggestion'], 0.02);
+    expect(draft(0.02).toJson()['medicalListPrice'], 0.02);
   });
 
   test('request view decodes arrays, rates, and force audit fields', () {
@@ -90,17 +115,16 @@ void main() {
     ];
 
     expect(requests.map((request) => request.requestType),
-        ['JOIN', 'LEAVE', 'PROFILE_UPDATE']);
+        ['JOIN', 'LEAVE', 'PROFILE_UPDATE',]);
     expect(requests.take(2).every((request) => request.platformRate == null),
-        isTrue);
+        isTrue,);
     expect(requests.last.currentPlatformRate, 10);
     expect(requests.last.currentDoctorRate, 45);
-    expect(
-      () => DoctorProjectChangeRequest.fromJson({
+    expect( DoctorProjectChangeRequest.fromJson({
         ..._requestJson,
         'platformRate': null,
-      }),
-      throwsFormatException,
+      }).platformRate,
+      0,
     );
   });
 
@@ -140,23 +164,23 @@ void main() {
         {'decision': 'APPROVED', 'reviewNote': '管理员强制处置', 'force': true},
       ),
     ]);
-  });
+  },);
 
   test('repository loads the server-owned current profile update target',
       () async {
     final client = _RecordingApiClient();
-    final targets = await ApiIdentityRepository(client)
+    final targets = await ApiIdentityRepository(client,)
         .listDoctorProjectProfileUpdateTargets();
 
     expect(targets.single.currentPrice, 12000);
     expect(targets.single.platformRate, 10);
     expect(client.requests.single.path,
-        '/admin/institution-project-requests/profile-update-targets');
-  });
+        '/admin/institution-project-requests/profile-update-targets',);
+  },);
 
   test('doctor withdraws pending project requests', () async {
     final client = _RecordingApiClient();
-    await ApiIdentityRepository(client)
+    await ApiIdentityRepository(client,)
         .withdrawDoctorProjectChangeRequest(' request-1 ');
 
     expect(
@@ -165,7 +189,7 @@ void main() {
           'POST',
           '/admin/institution-project-requests/request-1/withdraw',
           null,
-        ));
+        ),);
   });
 }
 
@@ -237,14 +261,14 @@ final class _RecordingApiClient extends ApiClient {
   @override
   Future<T?> get<T>(String path,
       {Map<String, Object?> query = const {},
-      required T Function(Object? json) decodeData}) async {
+      required T Function(Object? json) decodeData,}) async {
     requests.add(_Request('GET', path, null));
     return decodeData([_targetJson]);
   }
 
   @override
   Future<T?> post<T>(String path,
-      {Object? body, required T Function(Object? json) decodeData}) async {
+      {Object? body, required T Function(Object? json) decodeData,}) async {
     requests.add(_Request('POST', path, body));
     return decodeData(path.endsWith('/review') ? null : _requestJson);
   }
@@ -271,11 +295,11 @@ bool _deepEquals(Object? left, Object? right) {
     return left.length == right.length &&
         left.entries.every((entry) =>
             right.containsKey(entry.key) &&
-            _deepEquals(entry.value, right[entry.key]));
+            _deepEquals(entry.value, right[entry.key]),);
   }
   if (left is List && right is List) {
     return left.length == right.length &&
-        Iterable.generate(left.length)
+        Iterable.generate(left.length,)
             .every((index) => _deepEquals(left[index], right[index]));
   }
   return left == right;

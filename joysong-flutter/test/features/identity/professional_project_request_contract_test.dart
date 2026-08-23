@@ -68,7 +68,7 @@ void main() {
     expect(blank.toJson(), hasLength(13));
     expect(blank.toJson()['detailContent'], isNull);
     expect(filled.toJson()['detailContent'], 'Plain detail');
-  });
+  },);
 
   test(
       'institution draft emits 18 body keys and keeps institution id path-only',
@@ -84,15 +84,15 @@ void main() {
       detailContent: ' Clinic details ',
       price: 799.5,
       originalPrice: 999.99,
-      currency: ' cny ',
+      currency: ' usd ',
       coverImage: ' clinic-cover.jpg ',
       images: [' clinic-1.jpg ', 'clinic-2.jpg'],
       salesCount: 5,
       isActive: false,
-      consultationFee: 80.25,
-      commissionRate: 12.5,
-      institutionRate: 42.25,
-      platformRate: 10,
+      consultationFee: 0,
+      commissionRate: 0,
+      institutionRate: 0,
+      platformRate: 40,
       notes: ' Clinic note ',
     );
 
@@ -106,20 +106,46 @@ void main() {
       'detailContent': 'Clinic details',
       'price': 799.5,
       'originalPrice': 999.99,
-      'currency': 'CNY',
+      'currency': 'USD',
       'coverImage': 'clinic-cover.jpg',
       'images': ['clinic-1.jpg', 'clinic-2.jpg'],
       'salesCount': 5,
       'isActive': false,
-      'consultationFee': 80.25,
-      'commissionRate': 12.5,
-      'institutionRate': 42.25,
+      'consultationFee': 0,
+      'commissionRate': 0,
+      'institutionRate': 0,
       'notes': 'Clinic note',
     });
     expect(draft.toJson(), hasLength(18));
     expect(draft.toJson(), isNot(contains('institutionId')));
     expect(draft.toJson().keys.toSet().intersection(prohibitedKeys), isEmpty);
-    expect(draft.doctorRate, 35.25);
+    expect(draft.doctorRate, 60);
+    },
+  );
+
+  test('institution project uses one payable USD doctor price', () {
+    InstitutionProjectRequestDraft draft({
+      required num price,
+      String currency = 'USD',
+    }) =>
+        InstitutionProjectRequestDraft(
+          institutionId: 'institution-1',
+          projectId: 'project-1',
+          price: price,
+          currency: currency,
+          platformRate: 40,
+        );
+
+    expect(draft(price: 0.01).toJson, throwsArgumentError);
+    expect(draft(price: 1.001).toJson, throwsArgumentError);
+    expect(draft(price: 0.02, currency: 'CNY').toJson, throwsArgumentError);
+
+    final body = draft(price: 0.02).toJson();
+    expect(body['price'], 0.02);
+    expect(body['currency'], 'USD');
+    expect(body['consultationFee'], 0);
+    expect(body['commissionRate'], 0);
+    expect(body['institutionRate'], 0);
   });
 
   test('institution draft keeps all nullable inheritance overrides explicit',
@@ -133,9 +159,9 @@ void main() {
       tags: null,
       slogan: null,
       detailContent: null,
-      price: 0,
+      price: 0.02,
       originalPrice: null,
-      currency: ' cny ',
+      currency: ' usd ',
       coverImage: null,
       images: null,
       salesCount: 0,
@@ -143,7 +169,7 @@ void main() {
       consultationFee: 0,
       commissionRate: 0,
       institutionRate: 0,
-      platformRate: 0,
+      platformRate: 40,
       notes: '   ',
     );
 
@@ -155,9 +181,9 @@ void main() {
       'tags': null,
       'slogan': null,
       'detailContent': null,
-      'price': 0,
+      'price': 0.02,
       'originalPrice': null,
-      'currency': 'CNY',
+      'currency': 'USD',
       'coverImage': null,
       'images': null,
       'salesCount': 0,
@@ -169,7 +195,7 @@ void main() {
     });
     expect(draft.toJson(), hasLength(18));
     expect(draft.toJson(), isNot(contains('institutionId')));
-  });
+  },);
 
   test('draft validation mirrors backend amount count currency and rate limits',
       () {
@@ -231,10 +257,11 @@ void main() {
         institutionId: 'institution-1',
         projectId: 'project-1',
         price: 100000000,
+          currency: 'USD',
         consultationFee: 0,
         commissionRate: 0,
         institutionRate: 0,
-        platformRate: 0,
+        platformRate: 40,
       ).validate(),
       throwsArgumentError,
     );
@@ -242,11 +269,12 @@ void main() {
       () => const InstitutionProjectRequestDraft(
         institutionId: 'institution-1',
         projectId: 'project-1',
-        price: 0,
+        price: 0.02,
+          currency: 'USD',
         consultationFee: 0,
         commissionRate: 45.001,
-        institutionRate: 45,
-        platformRate: 10,
+        institutionRate: 0,
+        platformRate: 40,
       ).validate(),
       throwsArgumentError,
     );
@@ -254,11 +282,12 @@ void main() {
       () => const InstitutionProjectRequestDraft(
         institutionId: 'institution-1',
         projectId: 'project-1',
-        price: 0,
+        price: 0.02,
+          currency: 'USD',
         consultationFee: 0,
         commissionRate: 45.01,
-        institutionRate: 45,
-        platformRate: 10,
+        institutionRate: 15,
+        platformRate: 40,
       ).validate(),
       throwsArgumentError,
     );
@@ -267,11 +296,12 @@ void main() {
         institutionId: 'institution-1',
         projectId: 'project-1',
         description: List.filled(5001, 'x').join(),
-        price: 0,
+        price: 0.02,
+          currency: 'USD',
         consultationFee: 0,
-        commissionRate: 45,
-        institutionRate: 45,
-        platformRate: 10,
+        commissionRate: 0,
+        institutionRate: 0,
+        platformRate: 40,
       ).validate(),
       throwsArgumentError,
     );
@@ -282,14 +312,15 @@ void main() {
         projectId: 'project-1',
         price: 99999999.99,
         originalPrice: 0,
+          currency: 'USD',
         consultationFee: 99999999.99,
-        commissionRate: 45,
-        institutionRate: 45,
-        platformRate: 10,
+        commissionRate: 0,
+        institutionRate: 0,
+        platformRate: 40,
       ).validate(),
       returnsNormally,
     );
-  });
+  },);
 
   test('draft target lists include commas in backend length boundaries', () {
     final tagBoundary = <String>[
@@ -359,11 +390,12 @@ void main() {
         projectId: 'project-1',
         tags: tagBoundary,
         images: imageBoundary,
-        price: 0,
+        price: 0.02,
+        currency: 'USD',
         consultationFee: 0,
         commissionRate: 0,
         institutionRate: 0,
-        platformRate: 0,
+        platformRate: 40,
       ).validate(),
       returnsNormally,
     );
@@ -372,21 +404,23 @@ void main() {
         institutionId: 'institution-1',
         projectId: 'project-1',
         tags: tagOverBoundary,
-        price: 0,
+        price: 0.02,
+        currency: 'USD',
         consultationFee: 0,
         commissionRate: 0,
         institutionRate: 0,
-        platformRate: 0,
+        platformRate: 40,
       ),
       InstitutionProjectRequestDraft(
         institutionId: 'institution-1',
         projectId: 'project-1',
         images: imageOverBoundary,
-        price: 0,
+        price: 0.02,
+        currency: 'USD',
         consultationFee: 0,
         commissionRate: 0,
         institutionRate: 0,
-        platformRate: 0,
+        platformRate: 40,
       ),
     ]) {
       expect(draft.validate, throwsArgumentError);
@@ -418,10 +452,11 @@ void main() {
         institutionId: 'institution-1',
         projectId: 'project-1',
         price: 0.1 + 0.2,
+          currency: 'USD',
         consultationFee: 0,
         commissionRate: 0,
         institutionRate: 0,
-        platformRate: 0,
+        platformRate: 40,
       ).validate(),
       throwsArgumentError,
     );
@@ -429,26 +464,28 @@ void main() {
       () => InstitutionProjectRequestDraft(
         institutionId: 'institution-1',
         projectId: 'project-1',
-        price: 0,
+        price: 0.02,
+          currency: 'USD',
         consultationFee: 0,
         commissionRate: 0.1 + 0.2,
         institutionRate: 0,
-        platformRate: 0,
+        platformRate: 40,
       ).validate(),
       throwsArgumentError,
     );
-  });
+  },);
 
   test('draft validation sums exact hundredths without binary float drift', () {
     expect(
       () => const InstitutionProjectRequestDraft(
         institutionId: 'institution-1',
         projectId: 'project-1',
-        price: 0,
+        price: 0.02,
+        currency: 'USD',
         consultationFee: 0,
         commissionRate: 35.95,
-        institutionRate: 64.04,
-        platformRate: 0.01,
+        institutionRate: 24.05,
+        platformRate: 40,
       ).validate(),
       returnsNormally,
     );
@@ -477,12 +514,13 @@ void main() {
       () => const InstitutionProjectRequestDraft(
         institutionId: 'institution-1',
         projectId: 'project-1',
-        price: 0,
+        price: 0.02,
+        currency: 'USD',
         salesCount: 2147483647,
         consultationFee: 0,
         commissionRate: 0,
         institutionRate: 0,
-        platformRate: 0,
+        platformRate: 40,
       ).validate(),
       returnsNormally,
     );
@@ -490,12 +528,13 @@ void main() {
       () => const InstitutionProjectRequestDraft(
         institutionId: 'institution-1',
         projectId: 'project-1',
-        price: 0,
+        price: 0.02,
+        currency: 'USD',
         salesCount: 2147483648,
         consultationFee: 0,
         commissionRate: 0,
         institutionRate: 0,
-        platformRate: 0,
+        platformRate: 40,
       ).validate(),
       throwsArgumentError,
     );
@@ -551,7 +590,7 @@ void main() {
     expect(legacy.isCreationReviewable, isFalse);
 
     final platform =
-        ProfessionalProjectRequest.fromJson(_platformRequestSnapshot());
+        ProfessionalProjectRequest.fromJson(_platformRequestSnapshot(),);
     expect(platform.slogan, '');
     expect(platform.coverImage, '');
     expect(platform.institutionId, isNull);
@@ -611,7 +650,7 @@ void main() {
         throwsFormatException,
       );
     }
-  });
+  },);
 
   test('review snapshots enforce the V28 request-type-exclusive shape', () {
     for (final contradiction in <String, Object?>{
@@ -724,7 +763,7 @@ void main() {
 
     final parsed = ProfessionalProjectRequest.fromJson(_requestSnapshot);
     expect((parsed as dynamic).hasCompleteReviewSnapshot, isTrue);
-  });
+  },);
 
   test(
       'project response decoder rejects numeric coercion, unnormalized text, malformed lists, limits, and invalid ISO times',
@@ -759,7 +798,7 @@ void main() {
       (
         snapshot: {
           ..._platformRequestSnapshot(),
-          'detailContent': '   ',
+          'detailContent': '   '
         },
         reason: 'blank optional text',
       ),
@@ -892,7 +931,7 @@ void main() {
         reason: entry.reason,
       );
     }
-  });
+  },);
 
   test(
       'project response decoder accepts exact text list money and rate boundaries',
@@ -934,7 +973,7 @@ void main() {
     });
     expect(platform.hasCompleteReviewSnapshot, isTrue);
     expect(platform.tags, tagBoundary,
-        reason: 'strict response decoding must not rewrite valid list items');
+        reason: 'strict response decoding must not rewrite valid list items',);
 
     final institution = ProfessionalProjectRequest.fromJson({
       ..._requestSnapshot,
@@ -971,7 +1010,7 @@ void main() {
     });
     expect(legacy.status, 'CHANGES_REQUESTED');
     expect(legacy.hasCompleteReviewSnapshot, isTrue);
-  });
+  },);
 
   test('parses form config and all 13 management inheritance values', () {
     final config = InstitutionProjectApplicationFormConfig.fromJson({
@@ -1019,7 +1058,7 @@ void main() {
       _ProjectRequestListApiClient.missing(),
       _ProjectRequestListApiClient(data: const [
         <String, Object?>{'id': 'incomplete-request'},
-      ]),
+      ],),
     ]) {
       final repository = ApiIdentityRepository(client);
       await expectLater(
@@ -1032,7 +1071,7 @@ void main() {
       _ProjectRequestListApiClient(data: const <Object?>[]),
     ).listProfessionalProjectRequests();
     expect(empty, isEmpty);
-  });
+  },);
 
   test('repository records distinct submission config and review routes',
       () async {
@@ -1095,7 +1134,7 @@ void main() {
         body: {'decision': 'REJECTED', 'reviewNote': 'Needs evidence'},
       ),
     ]);
-  });
+  },);
 }
 
 const _requestSnapshot = <String, Object?>{
@@ -1239,7 +1278,7 @@ bool _deepEquals(Object? left, Object? right) {
   }
   if (left is List && right is List) {
     return left.length == right.length &&
-        Iterable.generate(left.length)
+        Iterable.generate(left.length,)
             .every((index) => _deepEquals(left[index], right[index]));
   }
   return left == right;
