@@ -7,6 +7,7 @@ import com.joysong.server.identity.service.DoctorInstitutionRelationshipService
 import com.joysong.server.order.repository.DoctorInstitutionProjectConfigRepository
 import com.joysong.server.order.entity.DoctorInstitutionProjectConfigEntity
 import com.joysong.server.order.service.OrderSplitRatePolicy
+import com.joysong.server.order.service.TravelGroundServicePricing
 import com.joysong.server.payment.domain.Money
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.security.access.AccessDeniedException
@@ -29,6 +30,7 @@ class DoctorProjectChangeService(
     private val configRepository: DoctorInstitutionProjectConfigRepository,
     private val relationshipService: DoctorInstitutionRelationshipService,
     private val splitRatePolicy: OrderSplitRatePolicy,
+    private val travelGroundServicePricing: TravelGroundServicePricing,
     private val objectMapper: ObjectMapper
 ) {
     private fun decodeList(raw: String?): List<String> {
@@ -45,12 +47,11 @@ class DoctorProjectChangeService(
 
     private fun validateProfile(request: DoctorProjectChangeRequest) {
         require(request.serviceDescription.trim().isNotEmpty() && request.serviceDescription.trim().length <= 5000) { "服务说明不能为空且最长 5000" }
-        requireNotNull(request.priceSuggestion) { "项目价格不能为空" }.also(::validateMoney)
+        val price = requireNotNull(request.priceSuggestion) { "医生项目价格不能为空" }
+        val compatibilityPrice = requireNotNull(request.medicalListPrice) { "医生项目价格不能为空" }
+        require(price.compareTo(compatibilityPrice) == 0) { "医生项目价格与兼容价格必须一致" }
+        travelGroundServicePricing.quote(price)
         requireNotNull(request.consultationFee) { "面诊费不能为空" }.also(::validateMoney)
-        requireNotNull(request.medicalListPrice) { "医疗套餐优惠前金额不能为空" }.also {
-            require(it > BigDecimal.ZERO) { "医疗套餐优惠前金额必须大于 0" }
-            validateMoney(it)
-        }
         require(request.notes.length <= 2000 && request.scheduleNote.length <= 500 && request.coverImage.length <= 500) { "文本字段长度超限" }
         require(request.serviceTags.size <= 20 && request.serviceTags.all { it.isNotBlank() && it.length <= 100 }) { "服务标签不合法" }
         require(request.images.size <= 20 && request.images.all { it.length <= 500 }) { "项目图片不合法" }
@@ -354,7 +355,7 @@ class DoctorProjectChangeService(
                 doctorProjectRepository.save(target.toEntity(existing.createdAt, requireNotNull(target.priceSuggestion)))
                 val effective = config ?: DoctorInstitutionProjectConfigEntity(doctorId=target.doctorId, institutionProjectId=target.institutionProjectId)
                 effective.consultationFee=requireNotNull(target.consultationFee); effective.commissionRate=requireNotNull(target.commissionRate)
-                effective.institutionRate=requireNotNull(target.institutionRate); effective.medicalListPrice=requireNotNull(target.medicalListPrice)
+                effective.institutionRate=requireNotNull(target.institutionRate); effective.medicalListPrice=requireNotNull(target.priceSuggestion)
                 effective.deletedAt=null; effective.updatedAt=LocalDateTime.now()
                 configRepository.save(effective)
             }
@@ -374,11 +375,11 @@ class DoctorProjectChangeService(
 
     /** Pending rows can predate the shared USD validation, so approval must not trust submission-time checks. */
     private fun validateApprovedProfileAmounts(target: ChangeTarget) {
-        requireNotNull(target.priceSuggestion) { "项目价格不能为空" }.also(::validateMoney)
+        val price = requireNotNull(target.priceSuggestion) { "医生项目价格不能为空" }
+        val compatibilityPrice = requireNotNull(target.medicalListPrice) { "医生项目价格不能为空" }
+        require(price.compareTo(compatibilityPrice) == 0) { "医生项目价格与兼容价格必须一致" }
+        travelGroundServicePricing.quote(price)
         requireNotNull(target.consultationFee) { "面诊费不能为空" }.also(::validateMoney)
-        val medicalListPrice = requireNotNull(target.medicalListPrice) { "医疗套餐优惠前金额不能为空" }
-        require(medicalListPrice > BigDecimal.ZERO) { "医疗套餐优惠前金额必须大于 0" }
-        validateMoney(medicalListPrice)
     }
 
 

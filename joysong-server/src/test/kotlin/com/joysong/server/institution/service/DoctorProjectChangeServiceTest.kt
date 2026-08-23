@@ -21,6 +21,7 @@ import java.sql.ResultSet
 import java.sql.Timestamp
 import java.time.LocalDateTime
 import com.joysong.server.order.service.OrderSplitRatePolicy
+import com.joysong.server.order.service.TravelGroundServicePricing
 import com.joysong.server.config.OrderSplitProperties
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 
@@ -30,7 +31,52 @@ class DoctorProjectChangeServiceTest {
     private val configRepository = mockk<DoctorInstitutionProjectConfigRepository>()
     private val relationshipService = mockk<DoctorInstitutionRelationshipService>(relaxed = true)
     private val splitRatePolicy = OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("10.00"); institutionRate = BigDecimal("40.00") })
-    private val service = DoctorProjectChangeService(jdbcTemplate, doctorProjectRepository, configRepository, relationshipService, splitRatePolicy, jacksonObjectMapper())
+    private val travelGroundServicePricing = TravelGroundServicePricing(
+        OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("40.00") })
+    )
+    private val service = DoctorProjectChangeService(
+        jdbcTemplate, doctorProjectRepository, configRepository, relationshipService, splitRatePolicy,
+        travelGroundServicePricing, jacksonObjectMapper()
+    )
+
+    @Test
+    fun `profile update rejects different project and compatibility prices`() {
+        stubProfileSubmission()
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            service.submit(doctorActor(), profileRequest(
+                priceSuggestion = BigDecimal("3999.00"),
+                medicalListPrice = BigDecimal("4299.00")
+            ))
+        }
+
+        assertEquals("医生项目价格与兼容价格必须一致", error.message)
+    }
+
+    @Test
+    fun `profile approval writes one price to source and compatibility mirror`() {
+        stubReviewQueries(
+            requestType = "PROFILE_UPDATE",
+            targetPriceSuggestion = BigDecimal("4299.00"),
+            targetMedicalListPrice = BigDecimal("4299.00")
+        )
+        every { doctorProjectRepository.findForUpdate("doctor-1", "ip-1") } returns doctorProject()
+        every { configRepository.findForUpdate("doctor-1", "ip-1") } returns
+            DoctorInstitutionProjectConfigEntity(
+                id = "config-1",
+                doctorId = "doctor-1",
+                institutionProjectId = "ip-1",
+                updatedAt = LocalDateTime.of(2026, 8, 10, 10, 0)
+            )
+        every { doctorProjectRepository.save(any()) } answers { firstArg() }
+        every { configRepository.save(any()) } answers { firstArg() }
+        every { jdbcTemplate.update(match<String> { it.contains("UPDATE doctor_project_change_requests") }, *anyVararg()) } returns 1
+
+        service.review(legalActor(), "request-1", "APPROVED", "", false)
+
+        verify { doctorProjectRepository.save(match { it.price == BigDecimal("4299.00") }) }
+        verify { configRepository.save(match { it.medicalListPrice == BigDecimal("4299.00") }) }
+    }
 
     @Test
     fun `profile update targets expose only current doctor approved active bindings`() {
@@ -165,7 +211,7 @@ class DoctorProjectChangeServiceTest {
     }
 
     @Test
-    fun `profile update rejects zero medical list price`() {
+    fun `profile update rejects zero effective project price`() {
         every {
             jdbcTemplate.query(
                 match<String> { it.contains("FROM institution_projects") },
@@ -187,13 +233,13 @@ class DoctorProjectChangeServiceTest {
         val error = assertThrows(IllegalArgumentException::class.java) {
             service.submit(doctorActor(), DoctorProjectChangeRequest(
                 institutionProjectId = "ip-1", requestType = "PROFILE_UPDATE", serviceDescription = "service",
-                priceSuggestion = BigDecimal("880.00"), notes = "notes", serviceTags = listOf("tag"), scheduleNote = "schedule",
+                priceSuggestion = BigDecimal.ZERO, notes = "notes", serviceTags = listOf("tag"), scheduleNote = "schedule",
                 coverImage = "cover", images = listOf("image"), consultationFee = BigDecimal("30.00"),
                 commissionRate = BigDecimal("10.00"), institutionRate = BigDecimal("40.00"), medicalListPrice = BigDecimal.ZERO
             ))
         }
 
-        assertEquals("医疗套餐优惠前金额必须大于 0", error.message)
+        assertEquals("MEDICAL_LIST_PRICE_NOT_POSITIVE", error.message)
     }
 
     @Test
@@ -219,7 +265,7 @@ class DoctorProjectChangeServiceTest {
         val error = assertThrows(IllegalArgumentException::class.java) {
             service.submit(doctorActor(), DoctorProjectChangeRequest(
                 institutionProjectId = "ip-1", requestType = "PROFILE_UPDATE", serviceDescription = "service",
-                priceSuggestion = BigDecimal("880.00"), notes = "notes", serviceTags = listOf("tag"), scheduleNote = "schedule",
+                priceSuggestion = BigDecimal("1000.005"), notes = "notes", serviceTags = listOf("tag"), scheduleNote = "schedule",
                 coverImage = "cover", images = listOf("image"), consultationFee = BigDecimal("30.00"),
                 commissionRate = BigDecimal("10.00"), institutionRate = BigDecimal("40.00"), medicalListPrice = BigDecimal("1000.005")
             ))
@@ -244,7 +290,7 @@ class DoctorProjectChangeServiceTest {
 
     @Test
     fun `admin force applies exact doctor profile and records force audit`() {
-        stubReviewQueries(requestType = "PROFILE_UPDATE")
+        stubReviewQueries(requestType = "PROFILE_UPDATE", targetMedicalListPrice = BigDecimal("880.00"))
         every { doctorProjectRepository.findForUpdate("doctor-1", "ip-1") } returns doctorProject()
         every { configRepository.findForUpdate("doctor-1", "ip-1") } returns DoctorInstitutionProjectConfigEntity(id="config-1", doctorId="doctor-1", institutionProjectId="ip-1")
         every { doctorProjectRepository.save(any()) } answers { firstArg() }
@@ -256,7 +302,7 @@ class DoctorProjectChangeServiceTest {
         val project = slot<DoctorProjectEntity>()
         verify(exactly = 1) { doctorProjectRepository.save(capture(project)) }
         assertEquals(BigDecimal("880.00"), project.captured.price)
-        verify(exactly = 1) { configRepository.save(match { it.doctorId == "doctor-1" && it.consultationFee == BigDecimal("30.00") && it.medicalListPrice == BigDecimal("1000.00") }) }
+        verify(exactly = 1) { configRepository.save(match { it.doctorId == "doctor-1" && it.consultationFee == BigDecimal("30.00") && it.medicalListPrice == BigDecimal("880.00") }) }
         verify(exactly = 1) { jdbcTemplate.update(match<String> { it.contains("force_processed = ?") }, *anyVararg()) }
     }
 
@@ -264,6 +310,7 @@ class DoctorProjectChangeServiceTest {
     fun `approval rejects historic fractional-cent profile price before saving either effective row`() {
         stubReviewQueries(
             requestType = "PROFILE_UPDATE",
+            targetPriceSuggestion = BigDecimal("1000.005"),
             targetMedicalListPrice = BigDecimal("1000.005")
         )
         every { doctorProjectRepository.findForUpdate("doctor-1", "ip-1") } returns doctorProject()
@@ -287,6 +334,7 @@ class DoctorProjectChangeServiceTest {
     fun `approval rejects historic out-of-range profile price before saving either effective row`() {
         stubReviewQueries(
             requestType = "PROFILE_UPDATE",
+            targetPriceSuggestion = BigDecimal("100000000.00"),
             targetMedicalListPrice = BigDecimal("100000000.00")
         )
         every { doctorProjectRepository.findForUpdate("doctor-1", "ip-1") } returns doctorProject()
@@ -386,9 +434,53 @@ class DoctorProjectChangeServiceTest {
         verify(exactly = 0) { doctorProjectRepository.save(any()) }
     }
 
+    private fun stubProfileSubmission() {
+        every {
+            jdbcTemplate.query(
+                match<String> { it.contains("FROM institution_projects") },
+                any<RowMapper<Any>>(),
+                "ip-1"
+            )
+        } answers {
+            val mapper = secondArg<RowMapper<Any>>()
+            val rs = mockk<ResultSet> {
+                every { getString("institution_id") } returns "institution-1"
+                every { getString("project_id") } returns "project-1"
+            }
+            listOf(mapper.mapRow(rs, 0))
+        }
+        every { doctorProjectRepository.findByDoctorIdAndInstitutionProjectId("doctor-1", "ip-1") } returns doctorProject()
+        every { configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate("doctor-1", "ip-1") } returns
+            DoctorInstitutionProjectConfigEntity(
+                doctorId = "doctor-1",
+                institutionProjectId = "ip-1",
+                medicalListPrice = BigDecimal("900.00")
+            )
+    }
+
+    private fun profileRequest(
+        priceSuggestion: BigDecimal,
+        medicalListPrice: BigDecimal
+    ) = DoctorProjectChangeRequest(
+        institutionProjectId = "ip-1",
+        requestType = "PROFILE_UPDATE",
+        serviceDescription = "service",
+        priceSuggestion = priceSuggestion,
+        notes = "notes",
+        serviceTags = listOf("tag"),
+        scheduleNote = "schedule",
+        coverImage = "cover",
+        images = listOf("image"),
+        consultationFee = BigDecimal("30.00"),
+        commissionRate = BigDecimal("10.00"),
+        institutionRate = BigDecimal("40.00"),
+        medicalListPrice = medicalListPrice
+    )
+
     private fun stubReviewQueries(
         status: String = "APPROVED",
         requestType: String = "JOIN",
+        targetPriceSuggestion: BigDecimal = BigDecimal("880.00"),
         targetMedicalListPrice: BigDecimal = BigDecimal("1000.00")
     ) {
         every {
@@ -402,7 +494,7 @@ class DoctorProjectChangeServiceTest {
             val sql = firstArg<String>()
             val mapper = secondArg<RowMapper<Any>>()
             val rs = if (sql.contains("FOR UPDATE")) {
-                targetResultSet(requestType, targetMedicalListPrice)
+                targetResultSet(requestType, targetPriceSuggestion, targetMedicalListPrice)
             } else viewResultSet(status)
             listOf(mapper.mapRow(rs, 0))
         }
@@ -410,6 +502,7 @@ class DoctorProjectChangeServiceTest {
 
     private fun targetResultSet(
         requestType: String = "JOIN",
+        priceSuggestion: BigDecimal = BigDecimal("880.00"),
         medicalListPrice: BigDecimal = BigDecimal("1000.00")
     ): ResultSet = mockk(relaxed = true) {
         every { getString("doctor_id") } returns "doctor-1"
@@ -422,7 +515,7 @@ class DoctorProjectChangeServiceTest {
         every { getString("schedule_note") } returns "schedule"
         every { getString("cover_image") } returns ""
         every { getString("images") } returns ""
-        every { getBigDecimal("price_suggestion") } returns BigDecimal("880.00")
+        every { getBigDecimal("price_suggestion") } returns priceSuggestion
         every { getString("notes") } returns "doctor notes"
         every { getString("status") } returns "PENDING"
         every { getString("submitted_by") } returns "doctor-1"

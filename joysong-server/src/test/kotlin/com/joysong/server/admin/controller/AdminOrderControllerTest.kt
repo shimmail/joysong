@@ -1,6 +1,8 @@
 package com.joysong.server.admin.controller
 
 import com.joysong.server.config.OrderSplitProperties
+import com.joysong.server.discover.entity.DoctorProjectEntity
+import com.joysong.server.discover.repository.DoctorProjectRepository
 import com.joysong.server.identity.service.ManagementAccessService
 import com.joysong.server.identity.service.ManagementActor
 import com.joysong.server.order.entity.DoctorInstitutionProjectConfigEntity
@@ -8,6 +10,7 @@ import com.joysong.server.order.repository.DoctorInstitutionProjectConfigReposit
 import com.joysong.server.order.service.OrderService
 import com.joysong.server.order.service.OrderSplitRatePolicy
 import com.joysong.server.order.service.OrderStatusLogService
+import com.joysong.server.order.service.TravelGroundServicePricing
 import com.joysong.server.settlement.repository.SettlementRepository
 import com.joysong.server.settlement.repository.SettlementAllocationRepository
 import com.joysong.server.wallet.repository.WalletLedgerEntryRepository
@@ -41,6 +44,44 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 
 class AdminOrderControllerTest {
+    @Test
+    fun `legacy config price update also updates the doctor project source`() {
+        val existing = legacyConfig(institutionProjectId = "ip-1")
+        val fixture = configController(
+            existing = existing,
+            doctorProject = DoctorProjectEntity("doctor-1", "project-1", "ip-1", BigDecimal("1000.00"))
+        )
+
+        fixture.controller.upsertConfig(fixture.authentication, UpsertConfigRequest(
+            doctorId = "doctor-1",
+            institutionProjectId = "ip-1",
+            medicalListPrice = BigDecimal("1200.00")
+        ))
+
+        verify { fixture.doctorProjects.save(match { it.price == BigDecimal("1200.00") }) }
+        verify { fixture.repository.save(match { it.medicalListPrice == BigDecimal("1200.00") }) }
+    }
+
+    @Test
+    fun `legacy config price update rejects an unbound doctor project`() {
+        val fixture = configController(
+            existing = null,
+            doctorProject = null,
+            institutionProjectId = "ip-1"
+        )
+
+        assertThrows<IllegalArgumentException> {
+            fixture.controller.upsertConfig(fixture.authentication, UpsertConfigRequest(
+                doctorId = "doctor-1",
+                institutionProjectId = "ip-1",
+                medicalListPrice = BigDecimal("1200.00")
+            ))
+        }
+
+        verify(exactly = 0) { fixture.doctorProjects.save(any()) }
+        verify(exactly = 0) { fixture.repository.save(any()) }
+    }
+
     @Test
     fun `medical list price only update preserves every stored legacy value`() {
         val existing = legacyConfig()
@@ -172,9 +213,14 @@ class AdminOrderControllerTest {
         every { configRepository.findByDoctorIdAndInstitutionProjectId("doctor-1", "project-1") } returns null
         every { configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeleted("doctor-1", "project-1") } returns null
         every { configRepository.save(any()) } answers { firstArg() }
+        val doctorProjects = mockk<DoctorProjectRepository>()
+        val doctorProject = DoctorProjectEntity("doctor-1", "project-1", "project-1", BigDecimal("1000.00"))
+        every { doctorProjects.findByDoctorIdAndInstitutionProjectId("doctor-1", "project-1") } returns doctorProject
+        every { doctorProjects.save(any()) } answers { firstArg() }
+        val policy = OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("40.00") })
         val controller = AdminOrderController(
-            mockk(), mockk(), mockk(), mockk(), mockk(), mockk(), mockk(), configRepository, accessService,
-            OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("40.00") })
+            mockk(), mockk(), mockk(), mockk(), mockk(), mockk(), mockk(), configRepository, doctorProjects,
+            accessService, policy, TravelGroundServicePricing(policy)
         )
 
         controller.upsertConfig(authentication, UpsertConfigRequest(
@@ -240,8 +286,10 @@ class AdminOrderControllerTest {
             walletRepository,
             reconciliationIssueRepository,
             configRepository,
+            mockk(),
             accessService,
-            policy
+            policy,
+            TravelGroundServicePricing(policy)
         )
 
         val request = UpsertConfigRequest(
@@ -272,8 +320,9 @@ class AdminOrderControllerTest {
         val allocationPageable = slot<Pageable>()
         val controller = AdminOrderController(
             orderService, logs, settlements, allocations, ledgers, wallets, issues,
-            mockk<DoctorInstitutionProjectConfigRepository>(), mockk<ManagementAccessService>(),
-            OrderSplitRatePolicy(OrderSplitProperties())
+            mockk<DoctorInstitutionProjectConfigRepository>(), mockk<DoctorProjectRepository>(),
+            mockk<ManagementAccessService>(), OrderSplitRatePolicy(OrderSplitProperties()),
+            TravelGroundServicePricing(OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("40.00") }))
         )
         val settlement = SettlementEntity(
             id = 7, orderId = "order-1", currency = "USD", totalAmount = BigDecimal("8.00"), totalAmountMinor = 800
@@ -331,34 +380,50 @@ class AdminOrderControllerTest {
     )
 
     private fun configController(
-        existing: DoctorInstitutionProjectConfigEntity?
-    ): Triple<AdminOrderController, DoctorInstitutionProjectConfigRepository, Authentication> {
+        existing: DoctorInstitutionProjectConfigEntity?,
+        doctorProject: DoctorProjectEntity? = DoctorProjectEntity(
+            "doctor-1", "project-1", existing?.institutionProjectId ?: "project-1", BigDecimal("1000.00")
+        ),
+        institutionProjectId: String = existing?.institutionProjectId ?: doctorProject?.institutionProjectId ?: "project-1"
+    ): ConfigFixture {
         val authentication = mockk<Authentication>()
         val repository = mockk<DoctorInstitutionProjectConfigRepository>()
+        val doctorProjects = mockk<DoctorProjectRepository>()
         val accessService = mockk<ManagementAccessService>()
         every { accessService.actor(authentication) } returns adminActor()
         every { accessService.requireSplitConfig(any(), any(), any()) } returns Unit
-        every { repository.findByDoctorIdAndInstitutionProjectId("doctor-1", "project-1") } returns existing
+        every { repository.findByDoctorIdAndInstitutionProjectId("doctor-1", institutionProjectId) } returns existing
         if (existing == null) {
             every {
-                repository.findByDoctorIdAndInstitutionProjectIdIncludeDeleted("doctor-1", "project-1")
+                repository.findByDoctorIdAndInstitutionProjectIdIncludeDeleted("doctor-1", institutionProjectId)
             } returns null
         }
         every { repository.save(any()) } answers { firstArg() }
+        every { doctorProjects.findByDoctorIdAndInstitutionProjectId("doctor-1", institutionProjectId) } returns doctorProject
+        every { doctorProjects.save(any()) } answers { firstArg() }
+        val policy = OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("40.00") })
         val controller = AdminOrderController(
-            mockk(), mockk(), mockk(), mockk(), mockk(), mockk(), mockk(), repository, accessService,
-            OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("40.00") })
+            mockk(), mockk(), mockk(), mockk(), mockk(), mockk(), mockk(), repository, doctorProjects,
+            accessService, policy, TravelGroundServicePricing(policy)
         )
-        return Triple(controller, repository, authentication)
+        return ConfigFixture(controller, repository, authentication, doctorProjects)
     }
+
+    private data class ConfigFixture(
+        val controller: AdminOrderController,
+        val repository: DoctorInstitutionProjectConfigRepository,
+        val authentication: Authentication,
+        val doctorProjects: DoctorProjectRepository
+    )
 
     private fun legacyConfig(
         commissionRate: BigDecimal = BigDecimal("7.89"),
-        institutionRate: BigDecimal = BigDecimal("31.11")
+        institutionRate: BigDecimal = BigDecimal("31.11"),
+        institutionProjectId: String = "project-1"
     ) = DoctorInstitutionProjectConfigEntity(
         id = "config-1",
         doctorId = "doctor-1",
-        institutionProjectId = "project-1",
+        institutionProjectId = institutionProjectId,
         consultationFee = BigDecimal("12.34"),
         commissionRate = commissionRate,
         institutionRate = institutionRate,

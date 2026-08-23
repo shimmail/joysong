@@ -1,13 +1,14 @@
 package com.joysong.server.admin.controller
 
 import com.joysong.server.common.BaseResponse
+import com.joysong.server.discover.repository.DoctorProjectRepository
 import com.joysong.server.order.dto.OrderStatusEnum
 import com.joysong.server.order.entity.DoctorInstitutionProjectConfigEntity
 import com.joysong.server.order.repository.DoctorInstitutionProjectConfigRepository
 import com.joysong.server.order.service.OrderService
 import com.joysong.server.order.service.OrderSplitRatePolicy
 import com.joysong.server.order.service.OrderStatusLogService
-import com.joysong.server.payment.domain.Money
+import com.joysong.server.order.service.TravelGroundServicePricing
 import com.joysong.server.settlement.repository.SettlementRepository
 import com.joysong.server.settlement.repository.SettlementAllocationRepository
 import com.joysong.server.reconciliation.repository.ReconciliationIssueRepository
@@ -22,6 +23,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import org.springframework.web.bind.annotation.*
+import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
 import java.time.LocalDateTime
 
@@ -43,8 +45,10 @@ class AdminOrderController(
     private val walletRepository: WalletRepository,
     private val reconciliationIssueRepository: ReconciliationIssueRepository,
     private val doctorInstitutionProjectConfigRepository: DoctorInstitutionProjectConfigRepository,
+    private val doctorProjectRepository: DoctorProjectRepository,
     private val managementAccessService: ManagementAccessService,
-    private val splitRatePolicy: OrderSplitRatePolicy
+    private val splitRatePolicy: OrderSplitRatePolicy,
+    private val travelGroundServicePricing: TravelGroundServicePricing
 ) {
 
     companion object {
@@ -225,6 +229,7 @@ class AdminOrderController(
 
     /** 创建或更新医生-机构项目配置（面诊金 + 医美顾问分账比例 + 机构分成比例） */
     @PostMapping("/doctor-institution-project-configs")
+    @Transactional
     fun upsertConfig(authentication: Authentication, @RequestBody request: UpsertConfigRequest): BaseResponse<*> {
         val actor = managementAccessService.actor(authentication)
         if (!actor.isAdmin) {
@@ -241,6 +246,11 @@ class AdminOrderController(
         }
         managementAccessService.requireSplitConfig(actor, request.doctorId, request.institutionProjectId)
 
+        val doctorProject = requireNotNull(doctorProjectRepository.findByDoctorIdAndInstitutionProjectId(
+            request.doctorId,
+            request.institutionProjectId
+        )) { "医生项目关系不存在" }
+
         val existing = doctorInstitutionProjectConfigRepository
             .findByDoctorIdAndInstitutionProjectId(request.doctorId, request.institutionProjectId)
             ?: doctorInstitutionProjectConfigRepository
@@ -248,9 +258,9 @@ class AdminOrderController(
         val consultationFee = request.consultationFee ?: existing?.consultationFee ?: BigDecimal.ZERO
         val commissionRate = request.commissionRate ?: existing?.commissionRate ?: BigDecimal.ZERO
         val institutionRate = request.institutionRate ?: existing?.institutionRate ?: BigDecimal("40.00")
-        val medicalListPrice = request.medicalListPrice ?: existing?.medicalListPrice
+        val medicalListPrice = request.medicalListPrice ?: existing?.let { doctorProject.price }
         require(medicalListPrice != null && medicalListPrice > BigDecimal.ZERO) { "医疗套餐优惠前金额必须大于 0" }
-        Money.requireUsdAmount(medicalListPrice)
+        travelGroundServicePricing.quote(medicalListPrice)
         val updatesLegacyValues = request.consultationFee != null ||
             request.commissionRate != null || request.institutionRate != null
         if (existing == null || updatesLegacyValues) {
@@ -263,6 +273,7 @@ class AdminOrderController(
             }
         }
 
+        doctorProjectRepository.save(doctorProject.copy(price = medicalListPrice, updatedAt = LocalDateTime.now()))
         val saved = if (existing != null) {
             request.consultationFee?.let { existing.consultationFee = it }
             request.commissionRate?.let { existing.commissionRate = it }
