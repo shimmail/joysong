@@ -312,7 +312,7 @@ export default function InstitutionProjectsPage() {
                       },
                     ]}
                   >
-                    <InputNumber min={0} precision={2} style={{ width: 200 }} />
+                    <InputNumber min={0} max={99_999_999.99} precision={2} style={{ width: 200 }} />
                   </Form.Item>
                   <Form.Item label="平台服务费">
                     <Form.Item noStyle shouldUpdate>

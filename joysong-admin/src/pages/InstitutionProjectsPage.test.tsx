@@ -4,6 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { MemoryRouter } from 'react-router-dom';
 import api, { setAdminToken, type ManagementContext } from '../api';
 import InstitutionProjectsPage from './InstitutionProjectsPage';
+import { calculatePercentageFeeMinor } from '../utils/money';
 
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>();
@@ -88,7 +89,19 @@ describe('InstitutionProjectsPage doctor prices', () => {
     await waitFor(() => expect(api.put).not.toHaveBeenCalled());
   });
 
-  it('blocks duplicate doctors and shows no fee when the policy is unavailable', async () => {
+  it('blocks duplicate doctors with the duplicate-specific error', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByTitle('编辑'));
+    const selects = screen.getAllByRole('combobox', { name: '医生' });
+    await user.click(selects[1]);
+    await user.click((await screen.findAllByText('医生 A（主任）'))[1]);
+    await user.click(screen.getByRole('button', { name: /保\s*存/ }));
+    expect(await screen.findByText('同一医生只能配置一次')).toBeInTheDocument();
+    expect(api.put).not.toHaveBeenCalled();
+  }, 10_000);
+
+  it('shows no fee and blocks saving when the policy is unavailable', async () => {
     vi.mocked(api.get).mockImplementation(async (url) => {
       if (url === '/admin/order-split-policy') throw new Error('policy unavailable');
       const data = url === '/admin/institution-projects' ? [record]
@@ -100,10 +113,12 @@ describe('InstitutionProjectsPage doctor prices', () => {
     renderPage();
     await user.click(await screen.findByTitle('编辑'));
     expect((await screen.findAllByText('-')).length).toBeGreaterThan(0);
-    const selects = screen.getAllByRole('combobox', { name: '医生' });
-    await user.click(selects[1]);
-    await user.click((await screen.findAllByText('医生 A（主任）'))[1]);
     await user.click(screen.getByRole('button', { name: /保\s*存/ }));
-    await waitFor(() => expect(api.put).not.toHaveBeenCalled());
+    expect((await screen.findAllByText('分账策略不可用，暂不能保存')).length).toBeGreaterThan(0);
+    expect(api.put).not.toHaveBeenCalled();
   }, 10_000);
+
+  it('rejects fees whose intermediate minor-unit multiplication is unsafe', () => {
+    expect(calculatePercentageFeeMinor(1_000_000_000, 1000)).toBeNull();
+  });
 });

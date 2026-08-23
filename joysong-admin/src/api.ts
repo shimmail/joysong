@@ -120,7 +120,7 @@ export function getDefaultManagementPath() {
   if (context.canManageDoctors) return '/doctors';
   if (context.canManageInstitutions || context.visibleInstitutionIds.length > 0) return '/institutions';
   if (context.canManageArticles) return '/articles';
-  if (context.canManageSplitConfigs) return '/doctor-project-configs';
+  if (context.canManageSplitConfigs) return '/split-proposals';
   if (context.canManageOrders) return '/orders';
   return '/login';
 }

@@ -63,7 +63,7 @@ describe('direct project creation regressions', () => {
     })));
   });
 
-  it('keeps institution rating, review-count, multi-doctor controls and the direct create route', async () => {
+  it('keeps institution rating, review-count, priced doctor bindings and the direct create route', async () => {
     const user = userEvent.setup();
     setAdminToken('header.payload.signature', adminContext);
     vi.mocked(api.get).mockImplementation(async (url) => ({ data: {
@@ -73,11 +73,13 @@ describe('direct project creation regressions', () => {
         ? [{ id: 'institution-1', name: '机构甲' }]
         : url === '/admin/projects'
           ? [{ id: 'project-1', name: '基础项目', rating: 4.6, reviewCount: 18 }]
-          : url === '/admin/doctors'
+            : url === '/admin/doctors'
             ? [
               { id: 'doctor-1', name: '张医生', title: '主任', institutionId: 'institution-1' },
               { id: 'doctor-2', name: '李医生', title: '副主任', institutionId: 'institution-1' },
             ]
+            : url === '/admin/order-split-policy'
+              ? { platformRate: 40 }
             : [],
     } }));
     vi.mocked(api.post).mockResolvedValue({ data: { code: 200, message: 'OK', data: null } });
@@ -87,7 +89,7 @@ describe('direct project creation regressions', () => {
 
     expect(screen.getByLabelText(/评分/)).toBeInTheDocument();
     expect(screen.getByLabelText(/评价数/)).toBeInTheDocument();
-    expect(screen.getByLabelText('关联医生（可多选）')).toBeInTheDocument();
+    expect(screen.getByText('医生项目价格')).toBeInTheDocument();
 
     await user.click(screen.getByLabelText('所属机构'));
     await user.click(await screen.findByText('机构甲'));
@@ -95,9 +97,16 @@ describe('direct project creation regressions', () => {
     await user.click(await screen.findByText('基础项目'));
     await user.type(screen.getByLabelText(/评分/), '4.9');
     await user.type(screen.getByLabelText(/评价数/), '31');
-    await user.click(screen.getByLabelText('关联医生（可多选）'));
+    await user.click(screen.getByRole('button', { name: '添加医生' }));
+    await user.click(screen.getByRole('button', { name: '添加医生' }));
+    const doctorSelects = screen.getAllByRole('combobox', { name: '医生' });
+    await user.click(doctorSelects[0]);
     await user.click(await screen.findByText('张医生（主任）'));
-    await user.click(await screen.findByText('李医生（副主任）'));
+    await user.click(doctorSelects[1]);
+    await user.click((await screen.findAllByText('李医生（副主任）'))[1]);
+    const doctorPrices = screen.getAllByRole('spinbutton', { name: '医生项目价格（USD）' });
+    await user.type(doctorPrices[0], '3999');
+    await user.type(doctorPrices[1], '4299');
     await user.click(screen.getByRole('button', { name: /保\s*存/ }));
 
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/admin/institution-projects', expect.objectContaining({
@@ -105,11 +114,11 @@ describe('direct project creation regressions', () => {
       projectId: 'project-1',
       rating: 4.9,
       reviewCount: 31,
-      doctorIds: ['doctor-1', 'doctor-2'],
       doctorBindings: [
-        { doctorId: 'doctor-1', institutionProjectId: '' },
-        { doctorId: 'doctor-2', institutionProjectId: '' },
+        { doctorId: 'doctor-1', price: 3999 },
+        { doctorId: 'doctor-2', price: 4299 },
       ],
     })));
+    expect(vi.mocked(api.post).mock.calls[0][1]).not.toHaveProperty('doctorIds');
   });
 });

@@ -25,6 +25,9 @@ export function calculatePercentageFeeMinor(price: unknown, ratePercent: unknown
   if (typeof ratePercent !== 'number' || !Number.isFinite(ratePercent) || ratePercent <= 0) return null;
   const priceMinor = Math.round((price + Number.EPSILON) * 100);
   const rateBps = Math.round((ratePercent + Number.EPSILON) * 100);
-  const feeMinor = Math.round((priceMinor * rateBps) / 10_000);
+  if (!Number.isSafeInteger(priceMinor) || !Number.isSafeInteger(rateBps)) return null;
+  const feeNumerator = priceMinor * rateBps;
+  if (!Number.isSafeInteger(feeNumerator)) return null;
+  const feeMinor = Math.round(feeNumerator / 10_000);
   return Number.isSafeInteger(feeMinor) && feeMinor > 0 ? feeMinor : null;
 }

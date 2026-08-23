@@ -90,6 +90,17 @@ describe('professional role default routes', () => {
     expect(getDefaultManagementPath()).toBe('/project-collaboration');
   });
 
+  it('routes split-config-only users to the retained split proposal page', () => {
+    setAdminToken('header.payload.signature', {
+      ...doctorContext,
+      canManageDoctors: false,
+      canSubmitInstitutionProjectRequests: false,
+      canManageSplitConfigs: true,
+    });
+
+    expect(getDefaultManagementPath()).toBe('/split-proposals');
+  });
+
   it('allows a capable doctor to open project collaboration and see its menu entry', async () => {
     setAdminToken(managementToken(doctorContext), doctorContext);
     window.history.pushState({}, '', '/project-collaboration');
