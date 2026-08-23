@@ -144,7 +144,7 @@ export default function ProjectCollaborationPage() {
       coverImage: target?.coverImage ?? '',
       images: target?.images.join(',') ?? '',
       notes: '',
-      medicalListPrice: target?.medicalListPrice,
+      doctorProjectPrice: target?.currentPrice,
     } : {
       serviceDescription: profile?.serviceDescription ?? '',
       priceSuggestion: undefined,
@@ -164,7 +164,7 @@ export default function ProjectCollaborationPage() {
           institutionProjectId: profileTarget.institutionProjectId,
           requestType: 'PROFILE_UPDATE',
           serviceDescription: values.serviceDescription || '',
-          priceSuggestion: profileTarget.currentPrice,
+          priceSuggestion: values.doctorProjectPrice,
           notes: values.notes || '',
           serviceTags: toStringList(values.serviceTags),
           scheduleNote: values.scheduleNote || '',
@@ -173,7 +173,7 @@ export default function ProjectCollaborationPage() {
           consultationFee: profileTarget.consultationFee,
           commissionRate: profileTarget.commissionRate,
           institutionRate: profileTarget.institutionRate,
-          medicalListPrice: values.medicalListPrice,
+          medicalListPrice: values.doctorProjectPrice,
         });
       } else {
         await api.post('/admin/institution-project-requests', {
@@ -355,14 +355,14 @@ export default function ProjectCollaborationPage() {
           <Form.Item name="coverImage" label="个人项目封面"><ImageUpload folder="doctor-project-profiles" recommendedSize="1200 × 800 px（3:2）" /></Form.Item>
           <Form.Item name="images" label="个人案例图集"><MultiImageUpload folder="doctor-project-profiles" /></Form.Item>
           <Form.Item
-            name="medicalListPrice"
-            label="医疗套餐优惠前金额（USD）"
+            name="doctorProjectPrice"
+            label="医生项目价格（USD）"
             rules={[
-              { required: true, message: '请输入医疗套餐优惠前金额' },
+              { required: true, message: '请输入医生项目价格' },
               {
                 validator: (_, value) => typeof value === 'number' && value > 0
                   ? Promise.resolve()
-                  : Promise.reject(new Error('医疗套餐优惠前金额必须大于 0')),
+                  : Promise.reject(new Error('医生项目价格必须大于 0')),
               },
             ]}
           >

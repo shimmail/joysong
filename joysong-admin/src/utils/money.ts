@@ -19,3 +19,12 @@ export function formatMoney(amountMinor: unknown, currency: unknown, legacyAmoun
     ? `${currencyCode} ${legacyAmount.toFixed(2)}`
     : '-';
 }
+
+export function calculatePercentageFeeMinor(price: unknown, ratePercent: unknown): number | null {
+  if (typeof price !== 'number' || !Number.isFinite(price) || price <= 0) return null;
+  if (typeof ratePercent !== 'number' || !Number.isFinite(ratePercent) || ratePercent <= 0) return null;
+  const priceMinor = Math.round((price + Number.EPSILON) * 100);
+  const rateBps = Math.round((ratePercent + Number.EPSILON) * 100);
+  const feeMinor = Math.round((priceMinor * rateBps) / 10_000);
+  return Number.isSafeInteger(feeMinor) && feeMinor > 0 ? feeMinor : null;
+}

@@ -63,7 +63,6 @@ const ProjectCollaborationPage = lazy(() => import('./pages/ProjectCollaboration
 const ReportsPage = lazy(() => import('./pages/ReportsPage'));
 const CouponsPage = lazy(() => import('./pages/CouponsPage'));
 const SettlementsPage = lazy(() => import('./pages/SettlementsPage'));
-const DoctorProjectConfigsPage = lazy(() => import('./pages/DoctorProjectConfigsPage'));
 const SplitConfigProposalsPage = lazy(() => import('./pages/SplitConfigProposalsPage'));
 const CustomerServicePage = lazy(() => import('./pages/CustomerServicePage'));
 const IdentityManagementPage = lazy(() => import('./pages/IdentityManagementPage'));
@@ -133,7 +132,7 @@ function App() {
           <Route path="reports" element={<AdminOnlyRoute><ReportsPage /></AdminOnlyRoute>} />
           <Route path="coupons" element={<AdminOnlyRoute><CouponsPage /></AdminOnlyRoute>} />
           <Route path="settlements" element={<AdminOnlyRoute><SettlementsPage /></AdminOnlyRoute>} />
-          <Route path="doctor-project-configs" element={<AdminOnlyRoute><DoctorProjectConfigsPage /></AdminOnlyRoute>} />
+          <Route path="doctor-project-configs" element={<Navigate to="/institution-projects" replace />} />
           <Route path="split-proposals" element={<CapabilityRoute capability="canManageSplitConfigs"><SplitConfigProposalsPage /></CapabilityRoute>} />
           <Route path="cs" element={<AdminOnlyRoute><CustomerServicePage /></AdminOnlyRoute>} />
           <Route path="identity" element={<AdminOnlyRoute><IdentityManagementPage /></AdminOnlyRoute>} />

@@ -9,6 +9,8 @@ import ImageUpload from '../components/ImageUpload';
 import MultiImageUpload from '../components/MultiImageUpload';
 import RichTextEditor from '../components/RichTextEditor';
 import { useSearchParams } from 'react-router-dom';
+import { useOrderSplitPolicy } from '../hooks/useOrderSplitPolicy';
+import { calculatePercentageFeeMinor, formatMoney } from '../utils/money';
 
 interface Institution { id: string; name: string }
 interface Project {
@@ -24,6 +26,7 @@ interface Doctor {
   institutionId: string;
   /** 医生全部出诊机构；机构项目配置必须以此为准。 */
   institutions?: { id: string; name: string }[];
+  price?: number;
 }
 interface InstitutionProjectRecord {
   id: string; institutionId: string; projectId: string; projectName: string; baseProjectName: string;
@@ -52,6 +55,7 @@ export default function InstitutionProjectsPage() {
   const [filterInstitutionId, setFilterInstitutionId] = useState<string | undefined>(searchParams.get('institutionId') || undefined);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [selectedInstitutionId, setSelectedInstitutionId] = useState<string | undefined>();
+  const policyState = useOrderSplitPolicy();
   const selectedProjectId = Form.useWatch('projectId', form);
   const selectedProject = projects.find(p => p.id === selectedProjectId);
 
@@ -87,7 +91,7 @@ export default function InstitutionProjectsPage() {
     setEditingId(null);
     setSelectedInstitutionId(undefined);
     form.resetFields();
-    form.setFieldsValue({ price: 0, originalPrice: null, salesCount: 0, isActive: true });
+    form.setFieldsValue({ price: 0, originalPrice: null, salesCount: 0, isActive: true, doctorBindings: [] });
     setModalOpen(true);
   };
 
@@ -97,7 +101,7 @@ export default function InstitutionProjectsPage() {
     form.setFieldsValue({
       ...record,
       originalPrice: record.originalPrice ?? null,
-      doctorIds: record.doctors?.map((d: any) => d.id) || [],
+      doctorBindings: record.doctors?.map((doctor) => ({ doctorId: doctor.id, price: doctor.price })) || [],
     });
     setModalOpen(true);
   };
@@ -127,14 +131,15 @@ export default function InstitutionProjectsPage() {
   const handleSave = async () => {
     try {
       const values = await form.validateFields();
-      const { doctorIds = [], ...rest } = values;
-      const institutionProjectId = editingId || '';
-      const doctorBindings = doctorIds.map((doctorId: string) => ({ doctorId, institutionProjectId }));
+      if (!policyState.policy) {
+        message.error('分账策略不可用，暂不能保存');
+        return;
+      }
+      const { doctorBindings = [], ...rest } = values;
       const payload = {
         ...rest,
         // InputNumber 清空后可能返回 undefined；显式提交 null 才能清除已有原价。
         originalPrice: rest.originalPrice ?? null,
-        doctorIds,
         doctorBindings,
       };
       if (editingId) {
@@ -167,7 +172,13 @@ export default function InstitutionProjectsPage() {
     { title: '原价', dataIndex: 'originalPrice', width: 90, render: (v: number | null | undefined) => v ?? '—' },
     { title: '销量', dataIndex: 'salesCount', width: 70 },
     { title: '上架', dataIndex: 'isActive', width: 70, render: (v: boolean) => v ? '是' : '否' },
-    { title: '关联医生', dataIndex: 'doctors', width: 200, render: (doctors: any[]) => doctors?.length ? doctors.map(d => <Tag key={d.id}>{d.name}</Tag>) : '-' },
+    {
+      title: '关联医生', dataIndex: 'doctors', width: 280,
+      render: (recordDoctors: Doctor[]) => recordDoctors?.length ? recordDoctors.map((doctor) => {
+        const feeMinor = calculatePercentageFeeMinor(doctor.price, policyState.policy?.platformRate);
+        return <Tag key={doctor.id}>{doctor.name} · USD {doctor.price?.toFixed(2) ?? '-'} · 平台费 {feeMinor == null ? '-' : formatMoney(feeMinor, 'USD')}</Tag>;
+      }) : '-',
+    },
     {
       title: '操作', key: 'actions', width: 100,
       render: (_: unknown, record: InstitutionProjectRecord) => (
@@ -223,7 +234,7 @@ export default function InstitutionProjectsPage() {
       <Modal title={editingId ? '编辑机构项目' : '新增机构项目'} open={modalOpen} onOk={handleSave} onCancel={() => setModalOpen(false)} width={900} okText="保存" cancelText="取消">
         <Form form={form} layout="vertical" style={{ marginTop: 16, maxHeight: '65vh', overflowY: 'auto', paddingRight: 8 }}>
           <Form.Item name="institutionId" label="所属机构" rules={[{ required: true }]}>
-            <Select disabled={!!editingId} options={institutionOptions} showSearch placeholder="请选择机构" onChange={(v) => { setSelectedInstitutionId(v); form.setFieldsValue({ doctorIds: [] }); }} />
+            <Select disabled={!!editingId} options={institutionOptions} showSearch placeholder="请选择机构" onChange={(v) => { setSelectedInstitutionId(v); form.setFieldsValue({ doctorBindings: [] }); }} />
           </Form.Item>
           <Form.Item name="projectId" label="关联项目" rules={[{ required: true }]}>
             <Select disabled={!!editingId} options={projectOptions} showSearch placeholder="请选择项目" />
@@ -269,9 +280,55 @@ export default function InstitutionProjectsPage() {
           <Form.Item name="images" label="图集"><MultiImageUpload folder="projects" /></Form.Item>
           {isAdmin && <Form.Item name="salesCount" label="销量"><InputNumber style={{ width: '100%' }} min={0} /></Form.Item>}
           <Form.Item name="isActive" label="是否上架" valuePropName="checked"><Switch /></Form.Item>
-          <Form.Item name="doctorIds" label="关联医生（可多选）">
-            <Select mode="multiple" options={filteredDoctorOptions} showSearch allowClear placeholder="请选择可执行该机构项目的医生" />
-          </Form.Item>
+          <Divider titlePlacement="start">医生项目价格</Divider>
+          <Form.List
+            name="doctorBindings"
+            rules={[
+              {
+                validator: async (_, bindings: Array<{ doctorId?: string }> = []) => {
+                  const doctorIds = bindings.map(binding => binding?.doctorId).filter(Boolean);
+                  if (new Set(doctorIds).size !== doctorIds.length) throw new Error('同一医生只能配置一次');
+                },
+              },
+            ]}
+          >
+            {(fields, { add, remove }, { errors }) => <>
+              {fields.map((field) => {
+                const { key, ...fieldProps } = field;
+                return <Space key={key} align="start" style={{ display: 'flex' }}>
+                  <Form.Item {...fieldProps} name={[field.name, 'doctorId']} label="医生" rules={[{ required: true, message: '请选择医生' }]}>
+                    <Select style={{ width: 260 }} options={filteredDoctorOptions} showSearch placeholder="请选择可执行该机构项目的医生" />
+                  </Form.Item>
+                  <Form.Item
+                    {...fieldProps}
+                    name={[field.name, 'price']}
+                    label="医生项目价格（USD）"
+                    rules={[
+                      { required: true, message: '请输入医生项目价格' },
+                      {
+                        validator: (_, value) => calculatePercentageFeeMinor(value, policyState.policy?.platformRate) != null
+                          ? Promise.resolve()
+                          : Promise.reject(new Error(policyState.policy ? '医生项目价格必须大于 0，且平台费至少为 USD 0.01' : '分账策略不可用，暂不能保存')),
+                      },
+                    ]}
+                  >
+                    <InputNumber min={0} precision={2} style={{ width: 200 }} />
+                  </Form.Item>
+                  <Form.Item label="平台服务费">
+                    <Form.Item noStyle shouldUpdate>
+                      {() => {
+                        const feeMinor = calculatePercentageFeeMinor(form.getFieldValue(['doctorBindings', field.name, 'price']), policyState.policy?.platformRate);
+                        return <Typography.Text>{feeMinor == null ? '-' : formatMoney(feeMinor, 'USD')}</Typography.Text>;
+                      }}
+                    </Form.Item>
+                  </Form.Item>
+                  <Button danger onClick={() => remove(field.name)}>删除</Button>
+                </Space>;
+              })}
+              <Form.ErrorList errors={errors} />
+              <Button onClick={() => add()} type="dashed">添加医生</Button>
+            </>}
+          </Form.List>
         </Form>
       </Modal>
     </div>

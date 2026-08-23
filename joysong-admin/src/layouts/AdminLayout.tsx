@@ -98,7 +98,6 @@ const menuGroups: MenuGroup[] = [
       { key: '/payments', icon: <DollarOutlined />, label: '支付记录' },
       { key: '/refunds', icon: <RollbackOutlined />, label: '退款管理' },
       { key: '/settlements', icon: <WalletOutlined />, label: '结算管理' },
-      { key: '/doctor-project-configs', icon: <SettingOutlined />, label: '项目分账配置' },
       { key: '/split-proposals', icon: <SettingOutlined />, label: '分账协商与确认' },
     ],
   },

@@ -98,7 +98,7 @@ function mockPageData(requests: unknown[] = [], projects = [project]) {
 }
 
 describe('ProjectCollaborationPage profile update', () => {
-  it('loads the server target and submits the exact 13-key request with arrays and no platform override', async () => {
+  it('loads the server target and submits one doctor project price through both compatibility fields', async () => {
     const user = userEvent.setup();
     setAdminToken('header.payload.signature', doctorContext);
     mockPageData();
@@ -107,16 +107,16 @@ describe('ProjectCollaborationPage profile update', () => {
     await user.click(await screen.findByRole('button', { name: /修改我的资料/ }));
 
     const dialog = await screen.findByRole('dialog', { name: '申请修改个人项目资料' });
-    const listPrice = within(dialog).getByRole('spinbutton', { name: '医疗套餐优惠前金额（USD）' });
-    expect(listPrice).toHaveValue('1000.00');
+    const doctorPrice = within(dialog).getByRole('spinbutton', { name: '医生项目价格（USD）' });
+    expect(doctorPrice).toHaveValue('900.00');
     expect(within(dialog).getByRole('spinbutton', { name: '平台服务比例' })).toBeDisabled();
     expect(api.get).toHaveBeenCalledWith('/admin/institution-project-requests/profile-update-targets');
 
     const tags = within(dialog).getByRole('textbox', { name: '个人擅长标签' });
     await user.clear(tags);
     await user.type(tags, '轮廓, 年轻化');
-    await user.clear(listPrice);
-    await user.type(listPrice, '1200');
+    await user.clear(doctorPrice);
+    await user.type(doctorPrice, '4299');
     await user.click(within(dialog).getByRole('button', { name: '提交机构审核' }));
 
     await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
@@ -126,7 +126,7 @@ describe('ProjectCollaborationPage profile update', () => {
       institutionProjectId: 'ip-1',
       requestType: 'PROFILE_UPDATE',
       serviceDescription: '原服务介绍',
-      priceSuggestion: 900,
+      priceSuggestion: 4299,
       notes: '',
       serviceTags: ['轮廓', '年轻化'],
       scheduleNote: '每周二',
@@ -135,7 +135,7 @@ describe('ProjectCollaborationPage profile update', () => {
       consultationFee: 100,
       commissionRate: 10,
       institutionRate: 35,
-      medicalListPrice: 1200,
+      medicalListPrice: 4299,
     });
     expect(Object.keys(payload).sort()).toEqual([
       'commissionRate', 'consultationFee', 'coverImage', 'images', 'institutionProjectId',
