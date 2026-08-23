@@ -366,13 +366,13 @@ Agent 调试仅使用受控、脱敏的结构化日志；不存在 traces API，
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/discover/travel-ground-service-quote?doctorId=&institutionProjectId=` | 返回 USD 医疗套餐优惠前金额、平台比例和旅游地接服务费分币报价 |
+| GET | `/discover/travel-ground-service-quote?doctorId=&institutionProjectId=` | 返回由所选医生机构项目价格派生的 USD、平台比例和旅游地接服务费分币报价 |
 | POST | `/orders` | 创建当前用户订单并立即绑定其选择的顾问 |
 | GET | `/orders?status=&offset=&limit=` | 当前用户订单 |
 | GET | `/orders/{id}` | 订单详情；服务端按状态裁剪顾问信息 |
 | POST | `/orders/{id}/cancel` | 取消尚未支付订单；支付尝试过期不会调用它 |
 
-报价固定返回 `currency`、`medicalListPriceMinor`、`platformServiceRateBps`、`travelGroundServiceFeeMinor`。服务费按 `medicalListPriceMinor * platformServiceRateBps / 10000` HALF_UP 舍入，不乘数量、不应用优惠券。
+`doctor_projects.price` / 所选 `DoctorProjectEntity.price` 是当前报价和新订单唯一的运行时价格依据。报价固定返回 `currency`、`medicalListPriceMinor`、`platformServiceRateBps`、`travelGroundServiceFeeMinor`；其中 `medicalListPriceMinor` 是兼容字段名及新订单价格快照，不是另一套需要维护的医疗套餐价格。当前 40.00% 策略下，服务费按 `doctorPriceMinor * 4000 / 10000` HALF_UP 舍入，不乘数量、不应用优惠券。
 
 新订单请求：
 
@@ -387,7 +387,7 @@ Agent 调试仅使用受控、脱敏的结构化日志；不存在 traces API，
 }
 ```
 
-`consultantId` 必填。服务端重新校验顾问属于所选机构且有效，并在创建时固化顾问、USD 金额和平台比例快照；不存在支付后指派或自动指派。Flutter 不发送 `quantity`、`couponId`、`consultationFee`、`remainingAmount` 或任何客户端金额。
+`consultantId` 必填。服务端重新校验顾问属于所选机构且有效，并在创建时按所选 `DoctorProjectEntity.price` 固化顾问、USD 价格兼容快照和平台比例快照；不存在支付后指派或自动指派。Flutter 不发送 `quantity`、`couponId`、`consultationFee`、`remainingAmount` 或任何客户端金额。
 
 ### 10.2 当前订单状态和显式权限
 
@@ -401,7 +401,7 @@ PENDING_SERVICE_FEE
             -> REFUNDED                     （渠道确认全额成功）
 ```
 
-订单响应新增并以服务端值为准：`paymentFlow`、`medicalListPriceMinor`、`platformServiceRateBps`、`travelGroundServiceFeeMinor`、`consultantBound`、`serviceActivated`、`consultantDetailsVisible`、`serviceConversationReadable`、`serviceMessagingEnabled`、`consultantAvatar`。
+订单响应新增并以服务端值为准：`paymentFlow`、`medicalListPriceMinor`（兼容名称的订单价格快照）、`platformServiceRateBps`、`travelGroundServiceFeeMinor`、`consultantBound`、`serviceActivated`、`consultantDetailsVisible`、`serviceConversationReadable`、`serviceMessagingEnabled`、`consultantAvatar`。
 
 - 支付前 `consultantBound=true` 只表示已绑定；`consultantId`、`institutionId`、`consultantName`、`consultantAvatar` 和履约资料不向用户返回。
 - `SERVICE_ACTIVE` 显示允许公开的顾问姓名、头像和机构，并允许读取/发送订单会话。
@@ -817,12 +817,12 @@ resultingInstitutionProjectId, submittedAt, updatedAt
 - 法人可审核本机构的成员关系和机构项目申请；不能编辑医生档案，也不能绕过项目申请/审核流程直接创建、修改或删除机构项目。旧专业端 `/admin/institutions/{id}` PUT 已移除；`POST/PUT/DELETE /api/admin/institutions...` 等机构写操作及平台全量 CRUD 始终仅限 `ADMIN`。上表列出的机构范围 GET 旧读路径仅在后续切换完成前向已认证专业用户兼容，并由服务端按 `visibleInstitutionIds` 做对象级只读过滤；`GET /admin/projects` 则只提供全局项目目录。所有兼容 GET 均不授予任何写权限。
 - 医生和顾问机构关系统一遵循 11.1 的独立申请账本契约；两种身份都可提交 `JOIN`/`LEAVE` 并撤回本人 `PENDING`，法人从 `/reviewable` 审核本机构申请。旧顾问接口只承担滚动兼容，已处理申请不会被重提覆盖。
 - Flutter 专业项目选择统一使用 `GET /management/projects`，不得继续调用 `/admin/projects`。该目录只检查用户是否拥有至少一个活跃 `DOCTOR`、`CONSULTANT` 或 `INSTITUTION_LEGAL_REPRESENTATIVE` 身份；同时具有 `ADMIN` 身份不会改变该授权结果。它返回全局只读数组，按 `name`、`id` 排序。每项完整固定包含 13 个字段：`id`、`name`、`category`、`description`、`tags`、`categoryTags`、`coverImage`、`referencePrice`、`currency`、`slogan`、`detailContent`、`images`、`salesCount`；不接受查询参数，也不授予任何项目写能力。
-- `POST /admin/institution-project-requests` 的 `PROFILE_UPDATE` 是医生修改本人医生级项目资料和医疗套餐优惠前金额的生效前申请入口。Flutter 请求 VO 必须精确包含 13 个键：`institutionProjectId`、固定值 `requestType: PROFILE_UPDATE`、`serviceDescription`、`priceSuggestion`、`notes`、`serviceTags`、`scheduleNote`、`coverImage`、`images`、`consultationFee`、`commissionRate`、`institutionRate`、`medicalListPrice`；其中 `serviceTags`、`images` 是 JSON 字符串数组，不能发送 `doctorId`、`platformRate`、`doctorRate` 或任何 `current*` 基线字段。三个旧金额/比例字段仍须显式携带当前基线以保持后端滚动兼容，但当前新支付 UI 不提供编辑入口。
-- `GET /admin/institution-project-requests/profile-update-targets` 是表单唯一的当前值来源，只返回已认证医生本人仍有效的医生—机构项目。响应是数组，每项 `DoctorProjectProfileUpdateTargetView` 精确包含：`institutionProjectId`、`projectName`、`institutionId`、`institutionName`、`currentPrice`、`serviceDescription`、`serviceTags`、`scheduleNote`、`coverImage`、`images`、`consultationFee`、`commissionRate`、`institutionRate`、`medicalListPrice`、`platformRate`、`doctorRate`。16 个字段全部非 null；无有效配置时返回面诊费 0、医疗套餐优惠前金额 0、顾问率 0、策略默认机构率以及当前平台率和推导医生率。Flutter 不得用机构项目价、本地默认金额或默认比例伪造基线；`medicalListPrice=0` 的旧基线必须由医生填写大于 0 的值后才能提交。
-- `serviceDescription` 非空且最长 5000；`notes`/`scheduleNote`/`coverImage` 最长分别为 2000/500/500；两个数组各最多 20 项，标签每项非空且最长 100，图片每项最长 500。`priceSuggestion`、`consultationFee` 为 `0..99999999.99` 的最多两位小数；`medicalListPrice` 必须大于 0 且最多两位小数。`commissionRate`（兼容字段名，语义为顾问率）和 `institutionRate`（机构率）均为 `0..100` 的最多两位小数。
-- `platformRate` 是平台配置、不可编辑；`doctorRate = 100 - platformRate - institutionRate - commissionRate` 由服务端推导且不得小于 0。Flutter 只读展示这两个字段，并明确区分顾问率、机构率、平台率和医生净比例。当前新支付只使用 `platformRate` 与 `medicalListPrice` 计算旅游地接服务费；`doctorRate` 仅为历史分账兼容派生值，不能进入新订单金额或结算计算。
+- `POST /admin/institution-project-requests` 的 `PROFILE_UPDATE` 是医生修改本人医生级项目资料与价格的生效前申请入口。Flutter 请求 VO 必须精确包含 13 个键：`institutionProjectId`、固定值 `requestType: PROFILE_UPDATE`、`serviceDescription`、`priceSuggestion`、`notes`、`serviceTags`、`scheduleNote`、`coverImage`、`images`、`consultationFee`、`commissionRate`、`institutionRate`、`medicalListPrice`；其中 `serviceTags`、`images` 是 JSON 字符串数组，不能发送 `doctorId`、`platformRate`、`doctorRate` 或任何 `current*` 基线字段。`priceSuggestion` 是拟生效的 `DoctorProjectEntity.price`；`medicalListPrice` 仅为滚动兼容字段，必须与 `priceSuggestion` 相同，客户端不能把它作为独立价格维护或编辑。
+- `GET /admin/institution-project-requests/profile-update-targets` 是表单唯一的当前值来源，只返回已认证医生本人仍有效的医生—机构项目。响应是数组，每项 `DoctorProjectProfileUpdateTargetView` 精确包含：`institutionProjectId`、`projectName`、`institutionId`、`institutionName`、`currentPrice`、`serviceDescription`、`serviceTags`、`scheduleNote`、`coverImage`、`images`、`consultationFee`、`commissionRate`、`institutionRate`、`medicalListPrice`、`platformRate`、`doctorRate`。16 个字段全部非 null；`currentPrice` 是当前 `DoctorProjectEntity.price`，`medicalListPrice` 是其兼容镜像。无有效配置时返回面诊费 0、项目价格 0、顾问率 0、策略默认机构率以及当前平台率和推导医生率。Flutter 不得用机构项目价、本地默认金额或默认比例伪造基线。
+- `serviceDescription` 非空且最长 5000；`notes`/`scheduleNote`/`coverImage` 最长分别为 2000/500/500；两个数组各最多 20 项，标签每项非空且最长 100，图片每项最长 500。`priceSuggestion`、`consultationFee` 为 `0..99999999.99` 的最多两位小数；兼容字段 `medicalListPrice` 必须与 `priceSuggestion` 相同。`commissionRate`（兼容字段名，语义为顾问率）和 `institutionRate`（机构率）均为 `0..100` 的最多两位小数。
+- `platformRate` 是平台配置、不可编辑；`doctorRate = 100 - platformRate - institutionRate - commissionRate` 由服务端推导且不得小于 0。Flutter 只读展示这两个字段，并明确区分顾问率、机构率、平台率和医生净比例。当前新支付以所选 `DoctorProjectEntity.price` 和 `platformRate` 计算旅游地接服务费；`doctorRate` 仅为历史分账兼容派生值，不能进入新订单金额或结算计算。
 - 提交成功只创建 `PENDING` 申请。机构法人通过 `POST /admin/institution-project-requests/{id}/review` 且显式发送 `force: false` 批准后，服务端才按 `(doctorId, institutionProjectId)` 在同一事务中更新本人 `doctor_projects` 与本人分账配置；基线变化返回 409，绝不波及同项目其他医生。平台管理员可显式发送 `force: true` 强制处理，但必须填写 `reviewNote`，响应以 `forceProcessed`、`reviewedBy`、`reviewedAt` 留痕。
-- `DoctorProjectChangeView`/Flutter 响应 VO 字段固定为：`id`、`doctorId`、`doctorName`、`institutionId`、`institutionName`、`institutionProjectId`、`projectName`、`requestType`、`serviceDescription`、`priceSuggestion`、`notes`、`serviceTags`、`scheduleNote`、`coverImage`、`images`、`consultationFee`、`commissionRate`、`institutionRate`、`medicalListPrice`、`platformRate`、`doctorRate`、`forceProcessed`、`currentPrice`、`currentServiceDescription`、`currentServiceTags`、`currentScheduleNote`、`currentCoverImage`、`currentImages`、`currentConsultationFee`、`currentMedicalListPrice`、`currentCommissionRate`、`currentInstitutionRate`、`currentPlatformRate`、`currentDoctorRate`、`status`、`submittedBy`、`reviewedBy`、`reviewerName`、`reviewNote`、`submittedAt`、`reviewedAt`、`updatedAt`。V17/V18 先增加可空提案、基线与 11 个原有 `current*` 列，V18 回填升级前的 `PROFILE_UPDATE`，V19 最后启用范围和判别约束；V29 追加 `medicalListPrice` 与 `currentMedicalListPrice`，不删除或重写历史申请。新申请的 `current*` 是提交事务固化的 before 快照；升级前历史申请无法还原提交时原值，因此 V18 按 `(doctorId, institutionProjectId)` 捕获**迁移执行时**的当前医生项目与未软删 config，明确属于近似快照。缺 config 使用面诊费 0、医疗套餐优惠前金额 0、顾问率 0、机构率 40、平台率 10 和推导医生率；缺医生项目使用价格 0 与空资料。审核页使用已固化字段，不能在审批时重新读取当前表冒充原值，并同时展示 `medicalListPrice` / `currentMedicalListPrice` 及只读 `platformRate` / `currentPlatformRate`。非 `PROFILE_UPDATE` 的这些字段仍为 null。
+- `DoctorProjectChangeView`/Flutter 响应 VO 字段固定为：`id`、`doctorId`、`doctorName`、`institutionId`、`institutionName`、`institutionProjectId`、`projectName`、`requestType`、`serviceDescription`、`priceSuggestion`、`notes`、`serviceTags`、`scheduleNote`、`coverImage`、`images`、`consultationFee`、`commissionRate`、`institutionRate`、`medicalListPrice`、`platformRate`、`doctorRate`、`forceProcessed`、`currentPrice`、`currentServiceDescription`、`currentServiceTags`、`currentScheduleNote`、`currentCoverImage`、`currentImages`、`currentConsultationFee`、`currentMedicalListPrice`、`currentCommissionRate`、`currentInstitutionRate`、`currentPlatformRate`、`currentDoctorRate`、`status`、`submittedBy`、`reviewedBy`、`reviewerName`、`reviewNote`、`submittedAt`、`reviewedAt`、`updatedAt`。`medicalListPrice` / `currentMedicalListPrice` 是兼容字段名，分别镜像申请价格 / 当前 `DoctorProjectEntity.price`，不得作为另一套运行时价格。新申请的 `current*` 是提交事务固化的 before 快照；审核页使用已固化字段，不能在审批时重新读取当前表冒充原值。非 `PROFILE_UPDATE` 的这些字段仍为 null。
 - 该接口族使用真实 HTTP 状态：400 参数错误、403 身份/对象/强制处理越权、409 重复 `PENDING`/基线变化/已处理或并发冲突、500 服务端异常。写请求不得自动重试；409 应刷新申请与当前项目配置后提示用户重新提交。
 - 医生不能直接修改机构项目价格、销量、评分、评价数或上下架状态。
 - 医生和机构法人都不能修改自己的评分、评价数和认证状态；服务端会保留原值。

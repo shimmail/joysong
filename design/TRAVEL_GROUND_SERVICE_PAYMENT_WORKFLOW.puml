@@ -1,18 +1,13 @@
 @startuml
 title 海外用户旅游地接服务费：支付、完成与退款活动图
 
-|医生|
-start
-:设置医疗套餐优惠前金额（USD）;
-
-|平台|
-:读取原平台分成比例;
-:计算旅游地接服务费\nfeeMinor = roundHalfUp(\nlistPriceMinor × rateBps / 10000);
-
 |海外用户|
+start
 :选择医院套餐、医生和顾问;
 
 |平台|
+:读取所选医生的机构项目价格\ndoctor_projects.price（USD）;
+:计算旅游地接服务费\nfeeMinor = roundHalfUp(\ndoctorPriceMinor × 4000 / 10000);
 :校验顾问属于该医院且状态有效;
 :创建订单并立即绑定顾问;
 :固化 USD、套餐金额、平台比例和服务费快照;
@@ -21,7 +16,7 @@ start
 :支付前锁定顾问履约资料和订单服务会话;
 
 note right
-不包含数量、优惠券、面诊金或尾款。
+不包含数量、优惠券或其他医疗收费。
 支付前仅显示“已绑定顾问”的权限状态，
 不返回顾问履约资料或私人联系方式。
 end note
@@ -116,7 +111,7 @@ if (确认旅游地接服务完成?) then (是)
   :禁止发送新消息;
   :保留全额退款入口，退款完成前不可删除订单;
   note right
-  不进入医疗核验、尾款、PENDING_SETTLEMENT、
+  不进入医疗核验、后续医疗收费、PENDING_SETTLEMENT、
   分账或钱包，也不创建医疗支付/退款/结算。
   end note
 endif
