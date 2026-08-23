@@ -200,16 +200,18 @@ class IdentityDataInitializer(
             """
             INSERT INTO doctor_project_change_requests
                 (id, doctor_id, institution_id, institution_project_id, request_type,
-                 service_description, price_suggestion, consultation_fee, commission_rate, institution_rate,
-                 current_price, current_service_description, current_service_tags, current_schedule_note,
+                 service_description, price_suggestion, medical_list_price, consultation_fee, commission_rate, institution_rate,
+                 current_price, current_medical_list_price, current_service_description, current_service_tags, current_schedule_note,
                  current_cover_image, current_images, current_consultation_fee, current_commission_rate,
                  current_institution_rate, current_platform_rate, current_doctor_rate,
                  notes, service_tags, schedule_note, cover_image, images, status, submitted_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
             ON DUPLICATE KEY UPDATE
                 service_description = VALUES(service_description), price_suggestion = VALUES(price_suggestion),
+                medical_list_price = VALUES(medical_list_price),
                 consultation_fee = VALUES(consultation_fee), commission_rate = VALUES(commission_rate),
                 institution_rate = VALUES(institution_rate), current_price = VALUES(current_price),
+                current_medical_list_price = VALUES(current_medical_list_price),
                 current_service_description = VALUES(current_service_description), current_service_tags = VALUES(current_service_tags),
                 current_schedule_note = VALUES(current_schedule_note), current_cover_image = VALUES(current_cover_image),
                 current_images = VALUES(current_images), current_consultation_fee = VALUES(current_consultation_fee),
@@ -224,10 +226,12 @@ class IdentityDataInitializer(
             SeedIds.IP_ID_4,
             "PROFILE_UPDATE",
             "专注眼部年轻化方案，申请更新个人项目介绍。",
-            BigDecimal("5299.00"),
+            BigDecimal("4999.00"),
+            BigDecimal("4999.00"),
             BigDecimal("80.00"),
             BigDecimal("10.00"),
             BigDecimal("40.00"),
+            BigDecimal("4999.00"),
             BigDecimal("4999.00"),
             "双眼皮成形的现有个人服务介绍。",
             jsonArray("双眼皮", "眼部整形"),
@@ -249,12 +253,24 @@ class IdentityDataInitializer(
         jdbcTemplate.update(
             """
             INSERT IGNORE INTO doctor_institution_project_configs
-                (id, doctor_id, institution_project_id, consultation_fee, commission_rate, institution_rate)
-            VALUES (?, ?, ?, 25.00, 10.00, 40.00)
+                (id, doctor_id, institution_project_id, medical_list_price, consultation_fee, commission_rate, institution_rate)
+            VALUES (?, ?, ?, ?, 25.00, 10.00, 40.00)
             """.trimIndent(),
             SeedIds.SPLIT_CONFIG_ID,
             SeedIds.DOC_ID_1,
-            SeedIds.IP_ID_1
+            SeedIds.IP_ID_1,
+            BigDecimal("3999.00")
+        )
+        jdbcTemplate.update(
+            """
+            INSERT IGNORE INTO doctor_institution_project_configs
+                (id, doctor_id, institution_project_id, medical_list_price, consultation_fee, commission_rate, institution_rate)
+            VALUES (?, ?, ?, ?, 0.00, 0.00, 0.00)
+            """.trimIndent(),
+            SeedIds.SPLIT_CONFIG_ID_2,
+            SeedIds.DOC_ID_2,
+            SeedIds.IP_ID_1,
+            BigDecimal("4299.00")
         )
         jdbcTemplate.update(
             """
@@ -291,7 +307,7 @@ class IdentityDataInitializer(
             jsonArray("热玛吉", "紧致抗衰"),
             "重塑紧致轮廓",
             "采用分层能量设计，帮助改善松弛与细纹。",
-            "CNY",
+            "USD",
             "https://via.placeholder.com/800x500?text=ThermageCover",
             jsonArray("https://via.placeholder.com/800x500?text=Thermage1", "https://via.placeholder.com/800x500?text=Thermage2"),
             36,
@@ -319,7 +335,7 @@ class IdentityDataInitializer(
             jsonArray("玻尿酸", "术后修护"),
             "定制联合美肤方案",
             "由张医生完成面诊、注射与恢复期随访。",
-            "CNY",
+            "USD",
             "https://via.placeholder.com/800x500?text=BeijingFillerCover",
             jsonArray("https://via.placeholder.com/800x500?text=BeijingFiller1", "https://via.placeholder.com/800x500?text=BeijingFiller2"),
             12,

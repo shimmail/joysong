@@ -53,7 +53,7 @@ class IdentityDataInitializerTest {
                 "[\"热玛吉\",\"紧致抗衰\"]",
                 "重塑紧致轮廓",
                 "采用分层能量设计，帮助改善松弛与细纹。",
-                "CNY",
+                "USD",
                 "https://via.placeholder.com/800x500?text=ThermageCover",
                 "[\"https://via.placeholder.com/800x500?text=Thermage1\",\"https://via.placeholder.com/800x500?text=Thermage2\"]",
                 36,
@@ -76,7 +76,7 @@ class IdentityDataInitializerTest {
                 "[\"玻尿酸\",\"术后修护\"]",
                 "定制联合美肤方案",
                 "由张医生完成面诊、注射与恢复期随访。",
-                "CNY",
+                "USD",
                 "https://via.placeholder.com/800x500?text=BeijingFillerCover",
                 "[\"https://via.placeholder.com/800x500?text=BeijingFiller1\",\"https://via.placeholder.com/800x500?text=BeijingFiller2\"]",
                 12,
@@ -101,10 +101,12 @@ class IdentityDataInitializerTest {
                 SeedIds.IP_ID_4,
                 "PROFILE_UPDATE",
                 "专注眼部年轻化方案，申请更新个人项目介绍。",
-                BigDecimal("5299.00"),
+                BigDecimal("4999.00"),
+                BigDecimal("4999.00"),
                 BigDecimal("80.00"),
                 BigDecimal("10.00"),
                 BigDecimal("40.00"),
+                BigDecimal("4999.00"),
                 BigDecimal("4999.00"),
                 "双眼皮成形的现有个人服务介绍。",
                 "[\"双眼皮\",\"眼部整形\"]",
@@ -126,7 +128,16 @@ class IdentityDataInitializerTest {
             profileUpdate.args
         )
 
-        assertTrue(writes.any { it.args.firstOrNull() == SeedIds.SPLIT_CONFIG_ID })
+        val priceConfigs = writes.filter { it.sql.contains("doctor_institution_project_configs") }
+        assertEquals(2, priceConfigs.size)
+        assertTrue(priceConfigs.all { it.sql.contains("medical_list_price") })
+        assertEquals(
+            mapOf(
+                SeedIds.DOC_ID_1 to BigDecimal("3999.00"),
+                SeedIds.DOC_ID_2 to BigDecimal("4299.00")
+            ),
+            priceConfigs.associate { it.args[1] as String to it.args[3] as BigDecimal }
+        )
         assertTrue(writes.any { it.args.firstOrNull() == SeedIds.SPLIT_PROPOSAL_ID })
     }
 

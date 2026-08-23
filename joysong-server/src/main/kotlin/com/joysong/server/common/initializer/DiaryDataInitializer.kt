@@ -45,7 +45,7 @@ class DiaryDataInitializer(
                 projectId = SeedIds.PROJ_ID_1,
                 institutionId = SeedIds.INST_ID_1,
                 institutionProjectId = SeedIds.IP_ID_1,
-                orderId = SeedIds.ORDER_ID_1
+                orderId = SeedIds.ORDER_ID_3
             ),
             DiaryEntity(
                 id = UUID.randomUUID().toString(),
@@ -67,7 +67,7 @@ class DiaryDataInitializer(
                 projectId = SeedIds.PROJ_ID_4,
                 institutionId = SeedIds.INST_ID_2,
                 institutionProjectId = SeedIds.IP_ID_5,
-                orderId = SeedIds.ORDER_ID_2
+                orderId = ""
             ),
             DiaryEntity(
                 id = UUID.randomUUID().toString(),
@@ -111,7 +111,7 @@ class DiaryDataInitializer(
                 projectId = SeedIds.PROJ_ID_5,
                 institutionId = SeedIds.INST_ID_4,
                 institutionProjectId = SeedIds.IP_ID_6,
-                orderId = SeedIds.ORDER_ID_3
+                orderId = ""
             ),
             DiaryEntity(
                 id = UUID.randomUUID().toString(),

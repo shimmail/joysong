@@ -25,212 +25,153 @@ class OrderDataInitializer(
 
     @Transactional
     override fun run(args: Array<String>) {
-        // OrderEntity uses a soft-delete filter, so repository.count() ignores
-        // deleted rows. The demo rows use stable IDs; treating a table that only
-        // contains soft-deleted rows as empty would try to insert those IDs again
-        // and fail with a duplicate-primary-key error.
+        // The repository soft-delete filter must not make stable IDs look absent.
         val persistedOrderCount = jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM orders",
             Long::class.java
         ) ?: 0L
         if (persistedOrderCount > 0L) return
 
-        // ============================================================
-        // 订单（6 条，覆盖订单生命周期主要状态）
-        // ============================================================
+        val pendingCreatedAt = LocalDateTime.of(2026, 7, 9, 10, 30)
+        val activeCreatedAt = LocalDateTime.of(2026, 7, 10, 11, 0)
+        val activePaidAt = LocalDateTime.of(2026, 7, 10, 11, 1)
+        val completedCreatedAt = LocalDateTime.of(2026, 7, 6, 16, 0)
+        val completedPaidAt = LocalDateTime.of(2026, 7, 6, 16, 1)
+        val completedAt = LocalDateTime.of(2026, 7, 8, 12, 0)
+
         orderRepository.saveAll(listOf(
-            // 小美 - 玻尿酸填充（CONSULTATION_PAID：面诊金已付，待到店）
+            // 399900 * 4000 / 10000 = 159960
             OrderEntity(
                 id = SeedIds.ORDER_ID_1,
                 userId = SeedIds.USER_ID_1,
                 projectName = "玻尿酸填充",
                 institutionName = "上海娇颜颂医美中心",
-                price = BigDecimal("2999.00"),
-                paidAmount = BigDecimal("25.00"),
-                status = OrderStatusEnum.CONSULTATION_PAID.value,
-                createdAt = LocalDateTime.of(2026, 7, 9, 10, 30),
+                currency = "USD",
+                price = BigDecimal("1599.60"),
+                totalAmountMinor = 159_960,
+                paidAmount = BigDecimal.ZERO,
+                paidAmountMinor = 0,
+                status = OrderStatusEnum.PENDING_SERVICE_FEE.value,
+                paymentFlow = "TRAVEL_GROUND_SERVICE_ONLY",
+                medicalListPriceMinor = 399_900,
+                platformServiceRateBps = 4_000,
+                travelGroundServiceFeeMinor = 159_960,
+                createdAt = pendingCreatedAt,
                 appointmentTime = LocalDateTime.of(2026, 7, 12, 14, 0),
                 projectId = SeedIds.PROJ_ID_1,
                 institutionId = SeedIds.INST_ID_1,
-                consultantId = SeedIds.CONSULTANT_ID,
-                consultantName = "安娜咨询师",
                 doctorId = SeedIds.DOC_ID_1,
                 doctorName = "王医生",
                 institutionProjectId = SeedIds.IP_ID_1,
-                orderNo = "JOY20260709103000001",
-                remark = "希望填充苹果肌和鼻唇沟",
-                consultationFee = BigDecimal("25.00"),
-                remainingAmount = BigDecimal("2974.00"),
-                paymentTime = LocalDateTime.of(2026, 7, 9, 10, 31)
+                orderNo = "JOY20260709103000001"
             ),
-            // 小红 - 皮秒祛斑（PENDING_SETTLEMENT：已评价，待结算）
+            // 429900 * 4000 / 10000 = 171960
             OrderEntity(
                 id = SeedIds.ORDER_ID_2,
                 userId = SeedIds.USER_ID_2,
-                projectName = "皮秒祛斑",
-                institutionName = "北京美丽时光医疗美容",
-                price = BigDecimal("1999.00"),
-                paidAmount = BigDecimal("1999.00"),
-                status = OrderStatusEnum.PENDING_SETTLEMENT.value,
-                createdAt = LocalDateTime.of(2026, 7, 6, 16, 0),
-                appointmentTime = LocalDateTime.of(2026, 7, 7, 10, 0),
-                hasReview = true,
-                projectId = SeedIds.PROJ_ID_4,
-                institutionId = SeedIds.INST_ID_2,
-                consultantId = SeedIds.CONSULTANT_ID,
-                consultantName = "安娜咨询师",
-                doctorId = SeedIds.DOC_ID_3,
-                doctorName = "张医生",
-                institutionProjectId = SeedIds.IP_ID_5,
-                orderNo = "JOY20260706160000002",
-                consultationFee = BigDecimal("20.00"),
-                remainingAmount = BigDecimal("1979.00"),
-                paymentTime = LocalDateTime.of(2026, 7, 6, 16, 1),
-                verifiedAt = LocalDateTime.of(2026, 7, 7, 10, 10),
-                verifyCode = "VRF20260707001",
-                balancePaidAt = LocalDateTime.of(2026, 7, 7, 10, 30),
-                completionRequestedAt = LocalDateTime.of(2026, 7, 7, 11, 0),
-                completedAt = LocalDateTime.of(2026, 7, 7, 11, 30),
-                settlementAt = LocalDateTime.of(2026, 8, 6, 11, 30)
-            ),
-            // 小丽 - 热玛吉抗衰（PENDING_PAYMENT：待支付面诊金）
-            OrderEntity(
-                id = SeedIds.ORDER_ID_3,
-                userId = SeedIds.USER_ID_3,
-                projectName = "热玛吉抗衰",
-                institutionName = "广州悦颜整形医院",
-                price = BigDecimal("7999.00"),
-                paidAmount = BigDecimal.ZERO,
-                status = OrderStatusEnum.PENDING_PAYMENT.value,
-                createdAt = LocalDateTime.of(2026, 7, 18, 14, 30),
-                appointmentTime = LocalDateTime.of(2026, 7, 22, 15, 0),
-                projectId = SeedIds.PROJ_ID_5,
-                institutionId = SeedIds.INST_ID_4,
-                consultantId = SeedIds.CONSULTANT_ID,
-                consultantName = "安娜咨询师",
-                doctorId = SeedIds.DOC_ID_4,
-                doctorName = "陈医生",
-                institutionProjectId = SeedIds.IP_ID_6,
-                orderNo = "JOY20260718143000003",
-                remark = "希望改善面部松弛问题",
-                consultationFee = BigDecimal("50.00"),
-                remainingAmount = BigDecimal("7949.00")
-            ),
-            // 小美 - 水光针（VERIFIED：已到店核验，待付尾款）
-            OrderEntity(
-                id = SeedIds.ORDER_ID_4,
-                userId = SeedIds.USER_ID_1,
-                projectName = "水光针",
+                projectName = "玻尿酸填充",
                 institutionName = "上海娇颜颂医美中心",
-                price = BigDecimal("1280.00"),
-                paidAmount = BigDecimal("15.00"),
-                status = OrderStatusEnum.VERIFIED.value,
-                createdAt = LocalDateTime.of(2026, 7, 20, 9, 0),
-                appointmentTime = LocalDateTime.of(2026, 7, 24, 10, 0),
-                projectId = SeedIds.PROJ_ID_2,
+                currency = "USD",
+                price = BigDecimal("1719.60"),
+                totalAmountMinor = 171_960,
+                paidAmount = BigDecimal("1719.60"),
+                paidAmountMinor = 171_960,
+                status = OrderStatusEnum.SERVICE_ACTIVE.value,
+                paymentFlow = "TRAVEL_GROUND_SERVICE_ONLY",
+                medicalListPriceMinor = 429_900,
+                platformServiceRateBps = 4_000,
+                travelGroundServiceFeeMinor = 171_960,
+                createdAt = activeCreatedAt,
+                appointmentTime = LocalDateTime.of(2026, 7, 15, 10, 0),
+                projectId = SeedIds.PROJ_ID_1,
                 institutionId = SeedIds.INST_ID_1,
-                consultantId = SeedIds.CONSULTANT_ID,
-                consultantName = "安娜咨询师",
                 doctorId = SeedIds.DOC_ID_2,
                 doctorName = "李医生",
-                institutionProjectId = SeedIds.IP_ID_3,
-                orderNo = "JOY20260720090000004",
-                consultationFee = BigDecimal("15.00"),
-                remainingAmount = BigDecimal("1265.00"),
-                paymentTime = LocalDateTime.of(2026, 7, 20, 9, 1),
-                verifiedAt = LocalDateTime.of(2026, 7, 24, 10, 15),
-                verifyCode = "VRF20260724001"
+                institutionProjectId = SeedIds.IP_ID_1,
+                orderNo = "JOY20260710110000002",
+                paymentTime = activePaidAt,
+                serviceActivatedAt = activePaidAt
             ),
-            // 小红 - 双眼皮成形（BALANCE_PAID：全款已付，等待执行）
+            // 399900 * 4000 / 10000 = 159960
             OrderEntity(
-                id = SeedIds.ORDER_ID_5,
-                userId = SeedIds.USER_ID_2,
-                projectName = "双眼皮成形",
+                id = SeedIds.ORDER_ID_3,
+                userId = SeedIds.USER_ID_1,
+                projectName = "玻尿酸填充",
                 institutionName = "上海娇颜颂医美中心",
-                price = BigDecimal("3800.00"),
-                paidAmount = BigDecimal("3800.00"),
-                status = OrderStatusEnum.BALANCE_PAID.value,
-                createdAt = LocalDateTime.of(2026, 7, 22, 11, 0),
-                appointmentTime = LocalDateTime.of(2026, 7, 26, 9, 0),
-                projectId = SeedIds.PROJ_ID_3,
+                currency = "USD",
+                price = BigDecimal("1599.60"),
+                totalAmountMinor = 159_960,
+                paidAmount = BigDecimal("1599.60"),
+                paidAmountMinor = 159_960,
+                status = OrderStatusEnum.COMPLETED.value,
+                paymentFlow = "TRAVEL_GROUND_SERVICE_ONLY",
+                medicalListPriceMinor = 399_900,
+                platformServiceRateBps = 4_000,
+                travelGroundServiceFeeMinor = 159_960,
+                createdAt = completedCreatedAt,
+                appointmentTime = LocalDateTime.of(2026, 7, 7, 10, 0),
+                hasReview = true,
+                projectId = SeedIds.PROJ_ID_1,
                 institutionId = SeedIds.INST_ID_1,
-                consultantId = SeedIds.CONSULTANT_ID,
-                consultantName = "安娜咨询师",
                 doctorId = SeedIds.DOC_ID_1,
                 doctorName = "王医生",
-                institutionProjectId = SeedIds.IP_ID_4,
-                orderNo = "JOY20260722110000005",
-                consultationFee = BigDecimal("30.00"),
-                remainingAmount = BigDecimal("3770.00"),
-                paymentTime = LocalDateTime.of(2026, 7, 22, 11, 1),
-                verifiedAt = LocalDateTime.of(2026, 7, 26, 9, 10),
-                verifyCode = "VRF20260726001",
-                balancePaidAt = LocalDateTime.of(2026, 7, 26, 9, 30)
-            ),
-            // 小丽 - 鼻综合整形（PENDING_SETTLEMENT：待结算，30 天倒计时）
-            OrderEntity(
-                id = SeedIds.ORDER_ID_6,
-                userId = SeedIds.USER_ID_3,
-                projectName = "鼻综合整形",
-                institutionName = "深圳美莱医疗美容医院",
-                price = BigDecimal("12800.00"),
-                paidAmount = BigDecimal("12800.00"),
-                status = OrderStatusEnum.PENDING_SETTLEMENT.value,
-                createdAt = LocalDateTime.of(2026, 7, 10, 13, 0),
-                appointmentTime = LocalDateTime.of(2026, 7, 14, 9, 0),
-                hasReview = true,
-                projectId = SeedIds.PROJ_ID_6,
-                institutionId = SeedIds.INST_ID_3,
-                consultantId = SeedIds.CONSULTANT_ID,
-                consultantName = "安娜咨询师",
-                doctorId = SeedIds.DOC_ID_5,
-                doctorName = "刘医生",
-                institutionProjectId = SeedIds.IP_ID_8,
-                orderNo = "JOY20260710130000006",
-                consultationFee = BigDecimal("100.00"),
-                remainingAmount = BigDecimal("12700.00"),
-                paymentTime = LocalDateTime.of(2026, 7, 10, 13, 1),
-                verifiedAt = LocalDateTime.of(2026, 7, 14, 9, 15),
-                verifyCode = "VRF20260714001",
-                balancePaidAt = LocalDateTime.of(2026, 7, 14, 9, 45),
-                completionRequestedAt = LocalDateTime.of(2026, 7, 14, 14, 0),
-                settlementAt = LocalDateTime.of(2026, 8, 13, 14, 0)
+                institutionProjectId = SeedIds.IP_ID_1,
+                orderNo = "JOY20260706160000003",
+                paymentTime = completedPaidAt,
+                serviceActivatedAt = completedPaidAt,
+                completedAt = completedAt
             )
         ))
 
-        // Flush JPA 缓存到数据库，确保 JdbcTemplate 能引用到已保存的数据
         entityManager.flush()
 
-        // ============================================================
-        // 收藏（3 条）
-        // ============================================================
         jdbcTemplate.batchUpdate(
             "INSERT IGNORE INTO favorites (id, user_id, target_type, target_id, target_name, target_image, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
             listOf(
                 arrayOf(UUID.randomUUID().toString(), SeedIds.USER_ID_1, "PROJECT", SeedIds.PROJ_ID_1, "玻尿酸填充", ""),
                 arrayOf(UUID.randomUUID().toString(), SeedIds.USER_ID_1, "DOCTOR", SeedIds.DOC_ID_1, "王医生", ""),
-                arrayOf(UUID.randomUUID().toString(), SeedIds.USER_ID_2, "INSTITUTION", SeedIds.INST_ID_2, "北京美丽时光医疗美容", "")
+                arrayOf(UUID.randomUUID().toString(), SeedIds.USER_ID_2, "INSTITUTION", SeedIds.INST_ID_1, "上海娇颜颂医美中心", "")
             )
         )
 
-        // ============================================================
-        // 评价（2 条，一订单一条 canonical 主评价；其他维度从订单关系聚合）
-        // ============================================================
         jdbcTemplate.batchUpdate(
             "INSERT IGNORE INTO reviews (id, order_id, user_id, doctor_id, rating, content, tags, images, target_type, target_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
             listOf(
-                // 小红 - 北京美丽时光机构评价（INSTITUTION）
-                arrayOf(UUID.randomUUID().toString(), SeedIds.ORDER_ID_2, SeedIds.USER_ID_2, SeedIds.DOC_ID_3, 5,
-                    "北京美丽时光的就诊体验非常棒！预约流程很方便，到店后几乎不用等待。护士很温柔，术后还送了修复面膜，很贴心。已经推荐给闺蜜了！",
-                    "环境好,服务贴心,推荐,专业", "https://via.placeholder.com/300x300?text=PicoClinic1,https://via.placeholder.com/300x300?text=PicoClinic2", "INSTITUTION", SeedIds.INST_ID_2),
-                // 小丽 - 深圳美莱机构评价（INSTITUTION）
-                arrayOf(UUID.randomUUID().toString(), SeedIds.ORDER_ID_6, SeedIds.USER_ID_3, SeedIds.DOC_ID_5, 5,
-                    "鼻综合项目恢复顺利，医生讲解清楚，机构术后回访也很及时，整体体验满意。",
-                    "专业,术后服务好,推荐", "https://via.placeholder.com/300x300?text=RhinoplastyClinic1", "INSTITUTION", SeedIds.INST_ID_3)
+                arrayOf(
+                    UUID.randomUUID().toString(), SeedIds.ORDER_ID_3, SeedIds.USER_ID_1, SeedIds.DOC_ID_1, 5,
+                    "旅行地接服务安排顺畅，王医生讲解专业，机构回访及时。",
+                    "专业,服务贴心,推荐", "", "INSTITUTION", SeedIds.INST_ID_1
+                )
             )
         )
 
-        // 初始化器在 Flyway 之后运行；写入评价后再次校准演示库聚合字段，保证全新库也一致。
+        refreshReviewAggregates()
+
+        jdbcTemplate.batchUpdate(
+            """
+            INSERT IGNORE INTO payments
+                (id, order_id, user_id, amount, method, status, paid_at, transaction_id,
+                 payment_type, provider, payment_method, currency, amount_minor,
+                 provider_payment_id, provider_transaction_id, idempotency_key, authorized_at, created_at)
+            VALUES (?, ?, ?, ?, ?, 'SUCCEEDED', ?, ?, 'TRAVEL_GROUND_SERVICE_FEE',
+                    'ALIPAY_PLUS', 'ALIPAY_PLUS', 'USD', ?, ?, ?, ?, ?, ?)
+            """.trimIndent(),
+            listOf(
+                arrayOf(
+                    "96000001-0000-4000-8000-000000000002", SeedIds.ORDER_ID_2, SeedIds.USER_ID_2,
+                    BigDecimal("1719.60"), "ALIPAY_PLUS", activePaidAt, "TX20260710110100002", 171_960L,
+                    "DEMO-PAYMENT-2", "DEMO-TRANSACTION-2", "demo-travel-order-2", activePaidAt, activePaidAt
+                ),
+                arrayOf(
+                    "96000001-0000-4000-8000-000000000003", SeedIds.ORDER_ID_3, SeedIds.USER_ID_1,
+                    BigDecimal("1599.60"), "ALIPAY_PLUS", completedPaidAt, "TX20260706160100003", 159_960L,
+                    "DEMO-PAYMENT-3", "DEMO-TRANSACTION-3", "demo-travel-order-3", completedPaidAt, completedPaidAt
+                )
+            )
+        )
+    }
+
+    private fun refreshReviewAggregates() {
         jdbcTemplate.update(
             """
             UPDATE institutions i
@@ -271,35 +212,6 @@ class OrderDataInitializer(
             SET ip.review_count = COALESCE(stats.review_count, 0), ip.rating = COALESCE(stats.rating, 0.0)
             WHERE ip.deleted_at IS NULL
             """.trimIndent()
-        )
-
-        // ============================================================
-        // 支付记录（5 条，覆盖面诊金和尾款两种支付类型）
-        // ============================================================
-        jdbcTemplate.batchUpdate(
-            "INSERT IGNORE INTO payments (id, order_id, user_id, amount, method, status, paid_at, transaction_id, payment_type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
-            listOf(
-                // 小美 - 玻尿酸填充（CONSULTATION_PAID：面诊金已付）
-                arrayOf(UUID.randomUUID().toString(), SeedIds.ORDER_ID_1, SeedIds.USER_ID_1,
-                    BigDecimal("25.00"), "WECHAT", "SUCCESS",
-                    LocalDateTime.of(2026, 7, 9, 10, 31), "TX20260709103100001", "CONSULTATION_FEE"),
-                // 小红 - 皮秒祛斑（COMPLETED：尾款已付）
-                arrayOf(UUID.randomUUID().toString(), SeedIds.ORDER_ID_2, SeedIds.USER_ID_2,
-                    BigDecimal("1979.00"), "ALIPAY", "SUCCESS",
-                    LocalDateTime.of(2026, 7, 7, 10, 30), "TX20260707103000002", "BALANCE"),
-                // 小美 - 水光针（VERIFIED：面诊金已付）
-                arrayOf(UUID.randomUUID().toString(), SeedIds.ORDER_ID_4, SeedIds.USER_ID_1,
-                    BigDecimal("15.00"), "WECHAT", "SUCCESS",
-                    LocalDateTime.of(2026, 7, 20, 9, 1), "TX20260720090100004", "CONSULTATION_FEE"),
-                // 小红 - 双眼皮成形（BALANCE_PAID：尾款已付）
-                arrayOf(UUID.randomUUID().toString(), SeedIds.ORDER_ID_5, SeedIds.USER_ID_2,
-                    BigDecimal("3770.00"), "WECHAT", "SUCCESS",
-                    LocalDateTime.of(2026, 7, 26, 9, 30), "TX20260726093000005", "BALANCE"),
-                // 小丽 - 鼻综合整形（PENDING_SETTLEMENT：尾款已付，等待结算）
-                arrayOf(UUID.randomUUID().toString(), SeedIds.ORDER_ID_6, SeedIds.USER_ID_3,
-                    BigDecimal("12700.00"), "ALIPAY", "SUCCESS",
-                    LocalDateTime.of(2026, 7, 14, 9, 45), "TX20260714094500006", "BALANCE")
-            )
         )
     }
 }

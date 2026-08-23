@@ -34,6 +34,7 @@ class IdentityDataInitializerPersistenceTest {
         assertNull(platform.projectId)
         assertEquals("热玛吉焕肤疗程", platform.name)
         assertEquals("抗衰紧致", platform.category)
+        assertEquals("USD", platform.currency)
         assertJsonArray(listOf("热玛吉", "紧致抗衰"), platform.tags)
         assertEquals(BigDecimal("9800.00"), platform.referencePrice)
         assertJsonArray(listOf("抗衰紧致", "光电美容"), platform.categoryTags)
@@ -51,6 +52,7 @@ class IdentityDataInitializerPersistenceTest {
         assertEquals(SeedIds.INST_ID_2, institution.institutionId)
         assertEquals(SeedIds.PROJ_ID_1, institution.projectId)
         assertEquals("皮秒焕肤玻尿酸联合方案", institution.name)
+        assertEquals("USD", institution.currency)
         assertJsonArray(listOf("玻尿酸", "术后修护"), institution.tags)
         assertNull(institution.referencePrice)
         assertNull(institution.categoryTags)
@@ -60,6 +62,24 @@ class IdentityDataInitializerPersistenceTest {
         assertEquals(BigDecimal("50.00"), institution.consultationFee)
         assertEquals(BigDecimal("10.00"), institution.commissionRate)
         assertEquals(BigDecimal("40.00"), institution.institutionRate)
+
+        val configPrices = jdbc.query(
+            """
+            SELECT doctor_id, medical_list_price
+            FROM doctor_institution_project_configs
+            WHERE institution_project_id = ?
+            ORDER BY medical_list_price
+            """.trimIndent(),
+            { rs, _ -> rs.getString("doctor_id") to rs.getBigDecimal("medical_list_price") },
+            SeedIds.IP_ID_1
+        ).toMap()
+        assertEquals(
+            mapOf(
+                SeedIds.DOC_ID_1 to BigDecimal("3999.00"),
+                SeedIds.DOC_ID_2 to BigDecimal("4299.00")
+            ),
+            configPrices
+        )
 
         val forbiddenColumns = jdbc.queryForList(
             """
@@ -139,7 +159,7 @@ class IdentityDataInitializerPersistenceTest {
 
     private fun projectRequest(jdbc: JdbcTemplate, id: String): ProjectRequestSnapshot = jdbc.queryForObject(
         """
-        SELECT id, request_type, status, doctor_id, institution_id, project_id, name, category, tags,
+        SELECT id, request_type, status, doctor_id, institution_id, project_id, name, category, currency, tags,
                reference_price, category_tags, price, original_price, is_active,
                consultation_fee, commission_rate, institution_rate, notes
         FROM professional_project_requests
@@ -155,6 +175,7 @@ class IdentityDataInitializerPersistenceTest {
                 projectId = rs.getString("project_id"),
                 name = rs.getString("name"),
                 category = rs.getString("category"),
+                currency = rs.getString("currency"),
                 tags = rs.getString("tags"),
                 referencePrice = rs.getBigDecimal("reference_price"),
                 categoryTags = rs.getString("category_tags"),
@@ -183,6 +204,7 @@ class IdentityDataInitializerPersistenceTest {
         val projectId: String?,
         val name: String?,
         val category: String?,
+        val currency: String,
         val tags: String,
         val referencePrice: BigDecimal?,
         val categoryTags: String?,
