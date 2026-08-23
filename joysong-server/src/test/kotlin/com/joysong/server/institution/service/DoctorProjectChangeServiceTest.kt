@@ -307,6 +307,30 @@ class DoctorProjectChangeServiceTest {
     }
 
     @Test
+    fun `approval rejects historic mismatched project and compatibility prices before effective writes`() {
+        stubReviewQueries(
+            requestType = "PROFILE_UPDATE",
+            targetPriceSuggestion = BigDecimal("3999.00"),
+            targetMedicalListPrice = BigDecimal("4299.00")
+        )
+        every { doctorProjectRepository.findForUpdate("doctor-1", "ip-1") } returns doctorProject()
+        every { configRepository.findForUpdate("doctor-1", "ip-1") } returns
+            DoctorInstitutionProjectConfigEntity(id = "config-1", doctorId = "doctor-1", institutionProjectId = "ip-1")
+        every { doctorProjectRepository.save(any()) } answers { firstArg() }
+        every { configRepository.save(any()) } answers { firstArg() }
+        every { jdbcTemplate.update(match<String> { it.contains("UPDATE doctor_project_change_requests") }, *anyVararg()) } returns 1
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            service.review(adminActor(), "request-1", "APPROVED", "historic validation", true)
+        }
+
+        assertEquals("医生项目价格与兼容价格必须一致", error.message)
+        verify(exactly = 0) { doctorProjectRepository.save(any()) }
+        verify(exactly = 0) { configRepository.save(any()) }
+        verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
+    }
+
+    @Test
     fun `approval rejects historic fractional-cent profile price before saving either effective row`() {
         stubReviewQueries(
             requestType = "PROFILE_UPDATE",

@@ -29,6 +29,7 @@ import com.joysong.server.wallet.dto.WalletLedgerDto
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import io.mockk.verifyOrder
 import io.mockk.slot
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -80,6 +81,46 @@ class AdminOrderControllerTest {
 
         verify(exactly = 0) { fixture.doctorProjects.save(any()) }
         verify(exactly = 0) { fixture.repository.save(any()) }
+    }
+
+    @Test
+    fun `legacy config price update locks doctor then config and preserves locked snapshots`() {
+        val staleDoctor = DoctorProjectEntity(
+            doctorId = "doctor-1",
+            projectId = "project-1",
+            institutionProjectId = "ip-1",
+            price = BigDecimal("1000.00"),
+            serviceDescription = "stale profile"
+        )
+        val staleConfig = legacyConfig(institutionProjectId = "ip-1").apply {
+            consultationFee = BigDecimal("10.00")
+        }
+        val fixture = configController(existing = staleConfig, doctorProject = staleDoctor)
+        val lockedDoctor = staleDoctor.copy(serviceDescription = "approved profile")
+        val lockedConfig = legacyConfig(institutionProjectId = "ip-1").apply {
+            consultationFee = BigDecimal("88.00")
+        }
+        every { fixture.doctorProjects.findForUpdate("doctor-1", "ip-1") } returns lockedDoctor
+        every { fixture.repository.findForUpdate("doctor-1", "ip-1") } returns lockedConfig
+
+        fixture.controller.upsertConfig(fixture.authentication, UpsertConfigRequest(
+            doctorId = "doctor-1",
+            institutionProjectId = "ip-1",
+            medicalListPrice = BigDecimal("1200.00")
+        ))
+
+        verifyOrder {
+            fixture.doctorProjects.findForUpdate("doctor-1", "ip-1")
+            fixture.repository.findForUpdate("doctor-1", "ip-1")
+        }
+        verify {
+            fixture.doctorProjects.save(match {
+                it.price == BigDecimal("1200.00") && it.serviceDescription == "approved profile"
+            })
+            fixture.repository.save(match {
+                it.medicalListPrice == BigDecimal("1200.00") && it.consultationFee == BigDecimal("88.00")
+            })
+        }
     }
 
     @Test
@@ -212,10 +253,13 @@ class AdminOrderControllerTest {
         every { accessService.requireSplitConfig(any(), any(), any()) } returns Unit
         every { configRepository.findByDoctorIdAndInstitutionProjectId("doctor-1", "project-1") } returns null
         every { configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeleted("doctor-1", "project-1") } returns null
+        every { configRepository.findForUpdate("doctor-1", "project-1") } returns null
+        every { configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate("doctor-1", "project-1") } returns null
         every { configRepository.save(any()) } answers { firstArg() }
         val doctorProjects = mockk<DoctorProjectRepository>()
         val doctorProject = DoctorProjectEntity("doctor-1", "project-1", "project-1", BigDecimal("1000.00"))
         every { doctorProjects.findByDoctorIdAndInstitutionProjectId("doctor-1", "project-1") } returns doctorProject
+        every { doctorProjects.findForUpdate("doctor-1", "project-1") } returns doctorProject
         every { doctorProjects.save(any()) } answers { firstArg() }
         val policy = OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("40.00") })
         val controller = AdminOrderController(
@@ -393,13 +437,18 @@ class AdminOrderControllerTest {
         every { accessService.actor(authentication) } returns adminActor()
         every { accessService.requireSplitConfig(any(), any(), any()) } returns Unit
         every { repository.findByDoctorIdAndInstitutionProjectId("doctor-1", institutionProjectId) } returns existing
+        every { repository.findForUpdate("doctor-1", institutionProjectId) } returns existing
         if (existing == null) {
             every {
                 repository.findByDoctorIdAndInstitutionProjectIdIncludeDeleted("doctor-1", institutionProjectId)
             } returns null
+            every {
+                repository.findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate("doctor-1", institutionProjectId)
+            } returns null
         }
         every { repository.save(any()) } answers { firstArg() }
         every { doctorProjects.findByDoctorIdAndInstitutionProjectId("doctor-1", institutionProjectId) } returns doctorProject
+        every { doctorProjects.findForUpdate("doctor-1", institutionProjectId) } returns doctorProject
         every { doctorProjects.save(any()) } answers { firstArg() }
         val policy = OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("40.00") })
         val controller = AdminOrderController(

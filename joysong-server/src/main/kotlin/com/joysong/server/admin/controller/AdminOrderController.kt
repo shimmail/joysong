@@ -246,15 +246,15 @@ class AdminOrderController(
         }
         managementAccessService.requireSplitConfig(actor, request.doctorId, request.institutionProjectId)
 
-        val doctorProject = requireNotNull(doctorProjectRepository.findByDoctorIdAndInstitutionProjectId(
+        val doctorProject = requireNotNull(doctorProjectRepository.findForUpdate(
             request.doctorId,
             request.institutionProjectId
         )) { "医生项目关系不存在" }
 
         val existing = doctorInstitutionProjectConfigRepository
-            .findByDoctorIdAndInstitutionProjectId(request.doctorId, request.institutionProjectId)
+            .findForUpdate(request.doctorId, request.institutionProjectId)
             ?: doctorInstitutionProjectConfigRepository
-                .findByDoctorIdAndInstitutionProjectIdIncludeDeleted(request.doctorId, request.institutionProjectId)
+                .findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate(request.doctorId, request.institutionProjectId)
         val consultationFee = request.consultationFee ?: existing?.consultationFee ?: BigDecimal.ZERO
         val commissionRate = request.commissionRate ?: existing?.commissionRate ?: BigDecimal.ZERO
         val institutionRate = request.institutionRate ?: existing?.institutionRate ?: BigDecimal("40.00")
