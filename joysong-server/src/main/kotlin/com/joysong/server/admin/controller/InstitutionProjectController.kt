@@ -11,8 +11,10 @@ import com.joysong.server.institution.entity.InstitutionProjectEntity
 import com.joysong.server.institution.repository.InstitutionProjectRepository
 import com.joysong.server.institution.repository.InstitutionRepository
 import com.joysong.server.institution.service.InstitutionProjectDetailResolver
+import com.joysong.server.order.entity.DoctorInstitutionProjectConfigEntity
 import com.joysong.server.order.repository.DoctorInstitutionProjectConfigRepository
 import com.joysong.server.order.repository.OrderRepository
+import com.joysong.server.order.service.TravelGroundServicePricing
 import com.joysong.server.identity.service.ManagementAccessService
 import org.springframework.security.core.Authentication
 import com.joysong.server.project.repository.ProjectRepository
@@ -38,7 +40,8 @@ class InstitutionProjectController(
     private val detailResolver: InstitutionProjectDetailResolver,
     private val doctorInstitutionService: DoctorInstitutionService,
     private val managementAccessService: ManagementAccessService,
-    private val jdbcTemplate: JdbcTemplate
+    private val jdbcTemplate: JdbcTemplate,
+    private val travelGroundServicePricing: TravelGroundServicePricing
 ) {
     @GetMapping
     fun list(
@@ -74,7 +77,7 @@ class InstitutionProjectController(
         if (!institutionRepository.existsById(request.institutionId)) return BaseResponse.error("机构不存在")
         val project = projectRepository.findById(request.projectId).orElse(null)
             ?: return BaseResponse.error("关联项目不存在")
-        val doctorBindings = request.doctorBindings
+        val doctorBindings = normalizeDoctorBindings(request.doctorBindings)
         validateDoctorBindings(request.institutionId, doctorBindings)?.let { return BaseResponse.error(it, 409) }
         if (institutionProjectRepository.findByInstitutionIdAndProjectId(request.institutionId, request.projectId) != null) {
             return BaseResponse.error("该机构已关联此项目")
@@ -122,7 +125,8 @@ class InstitutionProjectController(
         validateRequest(request, validateAssociationIds = false)?.let { return BaseResponse.error(it) }
         val project = projectRepository.findById(existing.projectId).orElse(null)
             ?: return BaseResponse.error("关联项目不存在")
-        validateDoctorBindings(existing.institutionId, request.doctorBindings)?.let { return BaseResponse.error(it, 409) }
+        val doctorBindings = normalizeDoctorBindings(request.doctorBindings)
+        validateDoctorBindings(existing.institutionId, doctorBindings)?.let { return BaseResponse.error(it, 409) }
         val updated = existing.copy(
             name = detailResolver.normalize(request.name),
             category = detailResolver.normalize(request.category),
@@ -142,7 +146,7 @@ class InstitutionProjectController(
             updatedAt = LocalDateTime.now()
         )
         val saved = institutionProjectRepository.save(updated)
-        syncDoctorBindings(saved.id, saved.projectId, request.doctorBindings)
+        syncDoctorBindings(saved.id, saved.projectId, doctorBindings)
         return BaseResponse.success(toDto(saved, project))
     }
 
@@ -183,22 +187,21 @@ class InstitutionProjectController(
      * 批量保存医生与机构项目的关联关系
      */
     private fun saveDoctorBindings(institutionProjectId: String, projectId: String, doctorBindings: List<DoctorProjectBinding>) {
-        val entities = doctorBindings
-            .filter { it.doctorId.isNotBlank() }
-            .map { binding ->
-                DoctorProjectEntity(
-                    doctorId = binding.doctorId,
-                    projectId = projectId,
-                    institutionProjectId = institutionProjectId,
-                    price = requireNotNull(binding.price) { "医生项目价格不能为空" }
-                )
-            }
-        doctorProjectRepository.saveAll(entities)
+        val savedBindings = doctorBindings.map { binding ->
+            DoctorProjectEntity(
+                doctorId = binding.doctorId,
+                projectId = projectId,
+                institutionProjectId = institutionProjectId,
+                price = validatedPrice(binding)
+            )
+        }
+        doctorProjectRepository.saveAll(savedBindings)
+        savedBindings.forEach(::syncCompatibilityPrice)
     }
 
     /** 调整执行医生名单时保留未移除医生已经审核通过的个人项目资料。 */
     private fun syncDoctorBindings(institutionProjectId: String, projectId: String, doctorBindings: List<DoctorProjectBinding>) {
-        val requestedDoctorIds = doctorBindings.map { it.doctorId.trim() }.filter(String::isNotEmpty).toSet()
+        val requestedDoctorIds = doctorBindings.map { it.doctorId }.toSet()
         val existing = doctorProjectRepository.findByInstitutionProjectId(institutionProjectId)
         val removed = existing.filter { it.doctorId !in requestedDoctorIds }
         removed.forEach { binding ->
@@ -211,26 +214,30 @@ class InstitutionProjectController(
             )
         }
         doctorProjectRepository.deleteAll(removed)
-        val existingDoctorIds = existing.map { it.doctorId }.toSet()
-        doctorProjectRepository.saveAll(
-            requestedDoctorIds.filter { it !in existingDoctorIds }.map { doctorId ->
-                DoctorProjectEntity(
-                    doctorId = doctorId,
+        val existingByDoctor = existing.associateBy { it.doctorId }
+        val savedBindings = doctorBindings.map { binding ->
+            val price = validatedPrice(binding)
+            existingByDoctor[binding.doctorId]?.copy(price = price, updatedAt = LocalDateTime.now())
+                ?: DoctorProjectEntity(
+                    doctorId = binding.doctorId,
                     projectId = projectId,
                     institutionProjectId = institutionProjectId,
-                    price = requireNotNull(doctorBindings.first { it.doctorId.trim() == doctorId }.price) {
-                        "医生项目价格不能为空"
-                    }
+                    price = price
                 )
-            }
-        )
+        }
+        doctorProjectRepository.saveAll(savedBindings)
+        savedBindings.forEach(::syncCompatibilityPrice)
     }
 
     private fun validateDoctorBindings(institutionId: String, bindings: List<DoctorProjectBinding>): String? {
-        val doctorIds = bindings.map { it.doctorId.trim() }.filter { it.isNotBlank() }
+        val doctorIds = bindings.map { it.doctorId }
         if (doctorIds.size != doctorIds.distinct().size) return "同一医生不能重复绑定到机构项目"
-        if (bindings.any { it.doctorId.isNotBlank() && (it.price == null || it.price < BigDecimal.ZERO) }) {
-            return "医生项目价格不能为空且不能小于 0"
+        bindings.forEach { binding ->
+            try {
+                validatedPrice(binding)
+            } catch (error: IllegalArgumentException) {
+                return error.message ?: "医生项目价格无效"
+            }
         }
         val doctors = doctorRepository.findAllById(doctorIds).associateBy { it.id }
         if (doctors.size != doctorIds.size) return "存在无效的医生"
@@ -240,6 +247,31 @@ class InstitutionProjectController(
             }
         }
         return unbound?.let { "医生未绑定当前机构，不能配置该机构项目" }
+    }
+
+    private fun normalizeDoctorBindings(bindings: List<DoctorProjectBinding>): List<DoctorProjectBinding> = bindings
+        .filter { it.doctorId.isNotBlank() }
+        .map { it.copy(doctorId = it.doctorId.trim()) }
+
+    private fun validatedPrice(binding: DoctorProjectBinding): BigDecimal {
+        val price = requireNotNull(binding.price) { "医生项目价格不能为空" }
+        require(price > BigDecimal.ZERO) { "医生项目价格必须大于 0" }
+        travelGroundServicePricing.quote(price)
+        return price
+    }
+
+    private fun syncCompatibilityPrice(doctorProject: DoctorProjectEntity) {
+        val config = configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeleted(
+            doctorProject.doctorId,
+            doctorProject.institutionProjectId
+        ) ?: DoctorInstitutionProjectConfigEntity(
+            doctorId = doctorProject.doctorId,
+            institutionProjectId = doctorProject.institutionProjectId
+        )
+        config.medicalListPrice = doctorProject.price
+        config.deletedAt = null
+        config.updatedAt = LocalDateTime.now()
+        configRepository.save(config)
     }
 
     private fun validateRequest(request: InstitutionProjectRequest, validateAssociationIds: Boolean = true): String? {
