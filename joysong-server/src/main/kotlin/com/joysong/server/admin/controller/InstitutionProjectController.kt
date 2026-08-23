@@ -202,13 +202,31 @@ class InstitutionProjectController(
     /** 调整执行医生名单时保留未移除医生已经审核通过的个人项目资料。 */
     private fun syncDoctorBindings(institutionProjectId: String, projectId: String, doctorBindings: List<DoctorProjectBinding>) {
         val requestedDoctorIds = doctorBindings.map { it.doctorId }.toSet()
-        val existing = doctorProjectRepository.findByInstitutionProjectId(institutionProjectId)
+        val affectedDoctorIds = (
+            doctorProjectRepository.findDoctorIdsByInstitutionProjectId(institutionProjectId) + requestedDoctorIds
+        ).distinct().sorted()
+        // Lock every doctor row before taking retained-field snapshots, then lock configs in the same ID order.
+        val existing = affectedDoctorIds.mapNotNull { doctorId ->
+            doctorProjectRepository.findForUpdate(doctorId, institutionProjectId)
+        }
+        val lockedConfigs = affectedDoctorIds.associateWith { doctorId ->
+            configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate(
+                doctorId,
+                institutionProjectId
+            )
+        }
         val removed = existing.filter { it.doctorId !in requestedDoctorIds }
         removed.forEach { binding ->
-            configRepository.findByDoctorIdAndInstitutionProjectId(binding.doctorId, institutionProjectId)
+            lockedConfigs[binding.doctorId]
+                ?.takeIf { it.deletedAt == null }
                 ?.let(configRepository::delete)
             jdbcTemplate.update(
                 "UPDATE split_config_proposals SET status = 'WITHDRAWN', decided_at = NOW(), decision_note = '机构已移除执行医生' WHERE doctor_id = ? AND institution_project_id = ? AND status = 'PENDING'",
+                binding.doctorId,
+                institutionProjectId
+            )
+            jdbcTemplate.update(
+                "UPDATE doctor_project_change_requests SET status = 'WITHDRAWN', reviewed_at = NOW(), review_note = '机构已移除执行医生' WHERE doctor_id = ? AND institution_project_id = ? AND request_type IN ('PROFILE_UPDATE', 'LEAVE') AND status = 'PENDING'",
                 binding.doctorId,
                 institutionProjectId
             )
@@ -226,7 +244,9 @@ class InstitutionProjectController(
                 )
         }
         doctorProjectRepository.saveAll(savedBindings)
-        savedBindings.forEach(::syncCompatibilityPrice)
+        savedBindings.forEach { binding ->
+            saveCompatibilityPrice(binding, lockedConfigs[binding.doctorId])
+        }
     }
 
     private fun validateDoctorBindings(institutionId: String, bindings: List<DoctorProjectBinding>): String? {
@@ -264,7 +284,15 @@ class InstitutionProjectController(
         val config = configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeleted(
             doctorProject.doctorId,
             doctorProject.institutionProjectId
-        ) ?: DoctorInstitutionProjectConfigEntity(
+        )
+        saveCompatibilityPrice(doctorProject, config)
+    }
+
+    private fun saveCompatibilityPrice(
+        doctorProject: DoctorProjectEntity,
+        existingConfig: DoctorInstitutionProjectConfigEntity?
+    ) {
+        val config = existingConfig ?: DoctorInstitutionProjectConfigEntity(
             doctorId = doctorProject.doctorId,
             institutionProjectId = doctorProject.institutionProjectId
         )

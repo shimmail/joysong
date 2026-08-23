@@ -380,21 +380,7 @@ class DoctorProjectChangeServiceTest {
 
     @Test
     fun `join submission rejects legacy profile fields outside minimal contract`() {
-        every {
-            jdbcTemplate.query(
-                match<String> { it.contains("FROM institution_projects") },
-                any<RowMapper<Any>>(),
-                "ip-1"
-            )
-        } answers {
-            val mapper = secondArg<RowMapper<Any>>()
-            val rs = mockk<ResultSet> {
-                every { getString("institution_id") } returns "institution-1"
-                every { getString("project_id") } returns "project-1"
-            }
-            listOf(mapper.mapRow(rs, 0))
-        }
-        every { doctorProjectRepository.findByDoctorIdAndInstitutionProjectId("doctor-1", "ip-1") } returns null
+        stubJoinSubmission()
 
         val error = assertThrows(IllegalArgumentException::class.java) {
             service.submit(
@@ -411,6 +397,41 @@ class DoctorProjectChangeServiceTest {
         }
 
         assertEquals("加入机构项目仅允许提交服务内容、价格建议和说明", error.message)
+    }
+
+    @Test
+    fun `join submission rejects zero price through shared travel pricing`() {
+        stubJoinSubmission()
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            service.submit(
+                doctorActor(),
+                DoctorProjectChangeRequest(
+                    institutionProjectId = "ip-1",
+                    requestType = "JOIN",
+                    serviceDescription = "service",
+                    priceSuggestion = BigDecimal.ZERO,
+                    notes = "notes"
+                )
+            )
+        }
+
+        assertEquals("MEDICAL_LIST_PRICE_NOT_POSITIVE", error.message)
+        verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
+    }
+
+    @Test
+    fun `join approval rejects historic zero price before creating binding`() {
+        stubReviewQueries(targetPriceSuggestion = BigDecimal.ZERO)
+        every { doctorProjectRepository.findForUpdate("doctor-1", "ip-1") } returns null
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            service.review(legalActor(), "request-1", "APPROVED", "", false)
+        }
+
+        assertEquals("MEDICAL_LIST_PRICE_NOT_POSITIVE", error.message)
+        verify(exactly = 0) { doctorProjectRepository.save(any()) }
+        verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
     }
 
     @Test
@@ -480,6 +501,24 @@ class DoctorProjectChangeServiceTest {
                 institutionProjectId = "ip-1",
                 medicalListPrice = BigDecimal("900.00")
             )
+    }
+
+    private fun stubJoinSubmission() {
+        every {
+            jdbcTemplate.query(
+                match<String> { it.contains("FROM institution_projects") },
+                any<RowMapper<Any>>(),
+                "ip-1"
+            )
+        } answers {
+            val mapper = secondArg<RowMapper<Any>>()
+            val rs = mockk<ResultSet> {
+                every { getString("institution_id") } returns "institution-1"
+                every { getString("project_id") } returns "project-1"
+            }
+            listOf(mapper.mapRow(rs, 0))
+        }
+        every { doctorProjectRepository.findByDoctorIdAndInstitutionProjectId("doctor-1", "ip-1") } returns null
     }
 
     private fun profileRequest(

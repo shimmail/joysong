@@ -163,7 +163,7 @@ describe('ProjectCollaborationPage profile update', () => {
     ));
   });
 
-  it('shows only JOIN-compatible fields and rejects a negative price suggestion', async () => {
+  it('shows only JOIN-compatible fields and enforces positive USD price bounds', async () => {
     const user = userEvent.setup();
     setAdminToken('header.payload.signature', doctorContext);
     mockPageData([], [joinProject]);
@@ -173,7 +173,10 @@ describe('ProjectCollaborationPage profile update', () => {
 
     const dialog = await screen.findByRole('dialog', { name: '申请加入机构项目' });
     expect(within(dialog).getByRole('textbox', { name: '个人服务介绍' })).toBeInTheDocument();
-    const priceSuggestion = within(dialog).getByRole('spinbutton', { name: '项目价格建议' });
+    const priceSuggestion = within(dialog).getByRole('spinbutton', { name: '项目价格建议（USD）' });
+    expect(priceSuggestion).toHaveAttribute('aria-valuemin', '0.02');
+    expect(priceSuggestion).toHaveAttribute('aria-valuemax', '99999999.99');
+    expect(priceSuggestion).toHaveAttribute('step', '0.01');
     expect(within(dialog).getByRole('textbox', { name: '补充说明' })).toBeInTheDocument();
     expect(within(dialog).queryByText('个人擅长标签')).not.toBeInTheDocument();
     expect(within(dialog).queryByText('出诊与排班说明')).not.toBeInTheDocument();
@@ -182,10 +185,9 @@ describe('ProjectCollaborationPage profile update', () => {
     expect(within(dialog).queryByText('医疗套餐优惠前金额（USD）')).not.toBeInTheDocument();
     expect(within(dialog).queryByText('平台服务比例')).not.toBeInTheDocument();
 
-    await user.type(priceSuggestion, '-1');
-    await user.click(within(dialog).getByRole('button', { name: '提交机构审核' }));
-
-    expect(await within(dialog).findByText('价格建议不能为负数')).toBeInTheDocument();
+    await user.type(priceSuggestion, '0');
+    await user.click(within(dialog).getByRole('textbox', { name: '补充说明' }));
+    expect(priceSuggestion).toHaveValue('0.02');
     expect(api.post).not.toHaveBeenCalled();
   }, 10_000);
 
@@ -199,7 +201,7 @@ describe('ProjectCollaborationPage profile update', () => {
 
     const dialog = await screen.findByRole('dialog', { name: '申请加入机构项目' });
     await user.type(within(dialog).getByRole('textbox', { name: '个人服务介绍' }), '擅长精细操作');
-    await user.type(within(dialog).getByRole('spinbutton', { name: '项目价格建议' }), '1500');
+    await user.type(within(dialog).getByRole('spinbutton', { name: '项目价格建议（USD）' }), '1500');
     await user.type(within(dialog).getByRole('textbox', { name: '补充说明' }), '希望加入该项目');
     await user.click(within(dialog).getByRole('button', { name: '提交机构审核' }));
 

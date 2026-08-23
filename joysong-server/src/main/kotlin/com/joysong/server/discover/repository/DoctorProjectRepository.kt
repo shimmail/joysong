@@ -12,6 +12,10 @@ interface DoctorProjectRepository : JpaRepository<DoctorProjectEntity, DoctorPro
     fun findByDoctorId(doctorId: String): List<DoctorProjectEntity>
     fun findByProjectId(projectId: String): List<DoctorProjectEntity>
     fun findByInstitutionProjectId(institutionProjectId: String): List<DoctorProjectEntity>
+    @Query("select d.doctorId from DoctorProjectEntity d where d.institutionProjectId=:institutionProjectId order by d.doctorId")
+    fun findDoctorIdsByInstitutionProjectId(
+        @Param("institutionProjectId") institutionProjectId: String
+    ): List<String>
     @Query(
         value = """
             SELECT dp.* FROM doctor_projects dp

@@ -176,7 +176,7 @@ export default function InstitutionProjectsPage() {
       title: '关联医生', dataIndex: 'doctors', width: 280,
       render: (recordDoctors: Doctor[]) => recordDoctors?.length ? recordDoctors.map((doctor) => {
         const feeMinor = calculatePercentageFeeMinor(doctor.price, policyState.policy?.platformRate);
-        return <Tag key={doctor.id}>{doctor.name} · USD {doctor.price?.toFixed(2) ?? '-'} · 平台费 {feeMinor == null ? '-' : formatMoney(feeMinor, 'USD')}</Tag>;
+        return <Tag key={doctor.id}>{doctor.name} · USD {doctor.price?.toFixed(2) ?? '-'} · 旅游地接服务费 {feeMinor == null ? '-' : formatMoney(feeMinor, 'USD')}</Tag>;
       }) : '-',
     },
     {
@@ -308,13 +308,13 @@ export default function InstitutionProjectsPage() {
                       {
                         validator: (_, value) => calculatePercentageFeeMinor(value, policyState.policy?.platformRate) != null
                           ? Promise.resolve()
-                          : Promise.reject(new Error(policyState.policy ? '医生项目价格必须大于 0，且平台费至少为 USD 0.01' : '分账策略不可用，暂不能保存')),
+                          : Promise.reject(new Error(policyState.policy ? '医生项目价格必须大于 0，且旅游地接服务费至少为 USD 0.01' : '分账策略不可用，暂不能保存')),
                       },
                     ]}
                   >
                     <InputNumber min={0} max={99_999_999.99} precision={2} style={{ width: 200 }} />
                   </Form.Item>
-                  <Form.Item label="平台服务费">
+                  <Form.Item label="旅游地接服务费">
                     <Form.Item noStyle shouldUpdate>
                       {() => {
                         const feeMinor = calculatePercentageFeeMinor(form.getFieldValue(['doctorBindings', field.name, 'price']), policyState.policy?.platformRate);

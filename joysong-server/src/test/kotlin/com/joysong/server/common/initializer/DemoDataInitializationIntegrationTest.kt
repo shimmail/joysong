@@ -76,7 +76,8 @@ class DemoDataInitializationIntegrationTest {
 
         val orders = jdbcTemplate.query(
             """
-            SELECT id, user_id, doctor_id, project_id, institution_id, institution_project_id,
+            SELECT id, user_id, doctor_id, consultant_id, consultant_name,
+                   project_id, institution_id, institution_project_id,
                    currency, price, total_amount_minor, paid_amount, paid_amount_minor, status,
                    payment_flow, medical_list_price_minor, platform_service_rate_bps,
                    travel_ground_service_fee_minor, created_at, payment_time,
@@ -87,6 +88,7 @@ class DemoDataInitializationIntegrationTest {
             { rs, _ ->
                 OrderSnapshot(
                     rs.getString("id"), rs.getString("user_id"), rs.getString("doctor_id"),
+                    rs.getString("consultant_id"), rs.getString("consultant_name"),
                     rs.getString("project_id"), rs.getString("institution_id"),
                     rs.getString("institution_project_id"), rs.getString("currency"),
                     rs.getBigDecimal("price").setScale(2), rs.getLong("total_amount_minor"),
@@ -104,6 +106,7 @@ class DemoDataInitializationIntegrationTest {
             listOf(
                 OrderSnapshot(
                     SeedIds.ORDER_ID_1, SeedIds.USER_ID_1, SeedIds.DOC_ID_1,
+                    SeedIds.CONSULTANT_ID, "安娜咨询师",
                     SeedIds.PROJ_ID_1, SeedIds.INST_ID_1, SeedIds.IP_ID_1, "USD",
                     BigDecimal("1599.60"), 159_960, BigDecimal.ZERO.setScale(2), 0,
                     "PENDING_SERVICE_FEE", "TRAVEL_GROUND_SERVICE_ONLY", 399_900, 4_000, 159_960,
@@ -111,6 +114,7 @@ class DemoDataInitializationIntegrationTest {
                 ),
                 OrderSnapshot(
                     SeedIds.ORDER_ID_2, SeedIds.USER_ID_2, SeedIds.DOC_ID_2,
+                    SeedIds.CONSULTANT_ID, "安娜咨询师",
                     SeedIds.PROJ_ID_1, SeedIds.INST_ID_1, SeedIds.IP_ID_1, "USD",
                     BigDecimal("1719.60"), 171_960, BigDecimal("1719.60"), 171_960,
                     "SERVICE_ACTIVE", "TRAVEL_GROUND_SERVICE_ONLY", 429_900, 4_000, 171_960,
@@ -119,6 +123,7 @@ class DemoDataInitializationIntegrationTest {
                 ),
                 OrderSnapshot(
                     SeedIds.ORDER_ID_3, SeedIds.USER_ID_1, SeedIds.DOC_ID_1,
+                    SeedIds.CONSULTANT_ID, "安娜咨询师",
                     SeedIds.PROJ_ID_1, SeedIds.INST_ID_1, SeedIds.IP_ID_1, "USD",
                     BigDecimal("1599.60"), 159_960, BigDecimal("1599.60"), 159_960,
                     "COMPLETED", "TRAVEL_GROUND_SERVICE_ONLY", 399_900, 4_000, 159_960,
@@ -127,6 +132,23 @@ class DemoDataInitializationIntegrationTest {
                 )
             ),
             orders
+        )
+        assertEquals(
+            1L,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM users u
+                JOIN institution_memberships m ON m.user_id = u.id
+                WHERE u.id = ? AND u.nickname = ?
+                  AND m.institution_id = ? AND m.member_role = 'CONSULTANT'
+                  AND m.status = 'APPROVED' AND m.revoked_at IS NULL
+                """.trimIndent(),
+                Long::class.java,
+                SeedIds.CONSULTANT_ID,
+                "安娜咨询师",
+                SeedIds.INST_ID_1
+            )
         )
 
         val payments = jdbcTemplate.query(
@@ -232,6 +254,8 @@ class DemoDataInitializationIntegrationTest {
         val id: String,
         val userId: String,
         val doctorId: String,
+        val consultantId: String,
+        val consultantName: String,
         val projectId: String,
         val institutionId: String,
         val institutionProjectId: String,

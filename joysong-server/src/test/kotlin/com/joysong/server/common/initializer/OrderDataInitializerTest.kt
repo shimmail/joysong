@@ -43,6 +43,7 @@ class OrderDataInitializerTest {
             listOf(
                 OrderSeedSnapshot(
                     SeedIds.ORDER_ID_1, SeedIds.USER_ID_1, SeedIds.DOC_ID_1,
+                    SeedIds.CONSULTANT_ID, "安娜咨询师",
                     BigDecimal("1599.60"), 159_960, BigDecimal.ZERO, 0,
                     "PENDING_SERVICE_FEE", 399_900, 159_960,
                     LocalDateTime.of(2026, 7, 9, 10, 30),
@@ -50,6 +51,7 @@ class OrderDataInitializerTest {
                 ),
                 OrderSeedSnapshot(
                     SeedIds.ORDER_ID_2, SeedIds.USER_ID_2, SeedIds.DOC_ID_2,
+                    SeedIds.CONSULTANT_ID, "安娜咨询师",
                     BigDecimal("1719.60"), 171_960, BigDecimal("1719.60"), 171_960,
                     "SERVICE_ACTIVE", 429_900, 171_960,
                     LocalDateTime.of(2026, 7, 10, 11, 0),
@@ -59,6 +61,7 @@ class OrderDataInitializerTest {
                 ),
                 OrderSeedSnapshot(
                     SeedIds.ORDER_ID_3, SeedIds.USER_ID_1, SeedIds.DOC_ID_1,
+                    SeedIds.CONSULTANT_ID, "安娜咨询师",
                     BigDecimal("1599.60"), 159_960, BigDecimal("1599.60"), 159_960,
                     "COMPLETED", 399_900, 159_960,
                     LocalDateTime.of(2026, 7, 6, 16, 0),
@@ -77,7 +80,7 @@ class OrderDataInitializerTest {
                 assertEquals(SeedIds.INST_ID_1, order.institutionId)
                 assertEquals(SeedIds.IP_ID_1, order.institutionProjectId)
                 OrderSeedSnapshot(
-                    order.id, order.userId, order.doctorId,
+                    order.id, order.userId, order.doctorId, order.consultantId, order.consultantName,
                     order.price, order.totalAmountMinor, order.paidAmount, order.paidAmountMinor,
                     order.status, order.medicalListPriceMinor, order.travelGroundServiceFeeMinor,
                     order.createdAt, order.paymentTime, order.serviceActivatedAt, order.completedAt, order.hasReview
@@ -121,6 +124,8 @@ class OrderDataInitializerTest {
         val id: String,
         val userId: String,
         val doctorId: String,
+        val consultantId: String,
+        val consultantName: String,
         val price: BigDecimal,
         val totalAmountMinor: Long?,
         val paidAmount: BigDecimal,

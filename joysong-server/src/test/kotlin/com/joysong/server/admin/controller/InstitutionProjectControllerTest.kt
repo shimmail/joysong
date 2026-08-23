@@ -15,6 +15,7 @@ import com.joysong.server.institution.repository.InstitutionProjectRepository
 import com.joysong.server.institution.repository.InstitutionRepository
 import com.joysong.server.institution.service.InstitutionProjectDetailResolver
 import com.joysong.server.order.repository.DoctorInstitutionProjectConfigRepository
+import com.joysong.server.order.entity.DoctorInstitutionProjectConfigEntity
 import com.joysong.server.order.service.OrderSplitRatePolicy
 import com.joysong.server.order.service.TravelGroundServicePricing
 import com.joysong.server.order.repository.OrderRepository
@@ -23,12 +24,14 @@ import com.joysong.server.project.repository.ProjectRepository
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import io.mockk.verifyOrder
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Test
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.security.core.Authentication
 import java.math.BigDecimal
+import java.time.LocalDateTime
 import java.util.Optional
 
 class InstitutionProjectControllerTest {
@@ -74,6 +77,8 @@ class InstitutionProjectControllerTest {
             images = "keep-images"
         )
         every { fixture.doctorProjects.findByInstitutionProjectId("ip-1") } returns listOf(existing)
+        every { fixture.doctorProjects.findDoctorIdsByInstitutionProjectId("ip-1") } returns listOf("doctor-a")
+        every { fixture.doctorProjects.findForUpdate("doctor-a", "ip-1") } returns existing
 
         fixture.controller.update(
             fixture.authentication,
@@ -92,6 +97,108 @@ class InstitutionProjectControllerTest {
                     rows.single().coverImage == "keep-cover" &&
                     rows.single().images == "keep-images"
             })
+        }
+    }
+
+    @Test
+    fun `update uses locked doctor snapshot so concurrently approved profile fields survive`() {
+        val fixture = Fixture()
+        val stale = doctorProject(
+            doctorId = "doctor-a",
+            description = "stale-description",
+            tags = "stale-tags",
+            images = "stale-images"
+        )
+        val approved = doctorProject(
+            doctorId = "doctor-a",
+            description = "approved-description",
+            tags = "approved-tags",
+            images = "approved-images"
+        )
+        every { fixture.doctorProjects.findByInstitutionProjectId("ip-1") } returns stale
+        every { fixture.doctorProjects.findDoctorIdsByInstitutionProjectId("ip-1") } returns listOf("doctor-a")
+        every { fixture.doctorProjects.findForUpdate("doctor-a", "ip-1") } returns approved.single()
+
+        fixture.controller.update(
+            fixture.authentication,
+            "ip-1",
+            institutionProjectRequest(
+                doctorBindings = listOf(DoctorProjectBinding("doctor-a", price = BigDecimal("3999.00")))
+            )
+        )
+
+        verify {
+            fixture.doctorProjects.saveAll(match<Iterable<DoctorProjectEntity>> { rows ->
+                rows.single().serviceDescription == "approved-description" &&
+                    rows.single().serviceTags == "approved-tags" &&
+                    rows.single().images == "approved-images"
+            })
+        }
+        verifyOrder {
+            fixture.doctorProjects.findForUpdate("doctor-a", "ip-1")
+            fixture.configs.findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate("doctor-a", "ip-1")
+        }
+    }
+
+    @Test
+    fun `update restores soft-deleted compatibility row without clearing legacy fields`() {
+        val fixture = Fixture()
+        val legacyConfig = DoctorInstitutionProjectConfigEntity(
+            id = "config-a",
+            doctorId = "doctor-a",
+            institutionProjectId = "ip-1",
+            consultationFee = BigDecimal("88.00"),
+            commissionRate = BigDecimal("12.00"),
+            institutionRate = BigDecimal("35.00"),
+            medicalListPrice = BigDecimal("3000.00"),
+            deletedAt = LocalDateTime.of(2026, 8, 20, 9, 0)
+        )
+        every { fixture.doctorProjects.findByInstitutionProjectId("ip-1") } returns emptyList()
+        every {
+            fixture.configs.findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate("doctor-a", "ip-1")
+        } returns legacyConfig
+
+        fixture.controller.update(
+            fixture.authentication,
+            "ip-1",
+            institutionProjectRequest(
+                doctorBindings = listOf(DoctorProjectBinding("doctor-a", price = BigDecimal("3999.00")))
+            )
+        )
+
+        verify {
+            fixture.configs.save(match {
+                it.id == "config-a" && it.medicalListPrice == BigDecimal("3999.00") &&
+                    it.consultationFee == BigDecimal("88.00") && it.commissionRate == BigDecimal("12.00") &&
+                    it.institutionRate == BigDecimal("35.00") && it.deletedAt == null
+            })
+        }
+    }
+
+    @Test
+    fun `removing doctor withdraws pending profile update and leave requests`() {
+        val fixture = Fixture()
+        every { fixture.doctorProjects.findByInstitutionProjectId("ip-1") } returns doctorProject("doctor-a")
+        every { fixture.doctorProjects.findDoctorIdsByInstitutionProjectId("ip-1") } returns listOf("doctor-a")
+        every { fixture.doctorProjects.findForUpdate("doctor-a", "ip-1") } returns doctorProject("doctor-a").single()
+
+        fixture.controller.update(
+            fixture.authentication,
+            "ip-1",
+            institutionProjectRequest(doctorBindings = emptyList())
+        )
+
+        verify {
+            fixture.jdbc.update(
+                match<String> {
+                    it.contains("UPDATE doctor_project_change_requests") &&
+                        it.contains("status = 'WITHDRAWN'") &&
+                        it.contains("request_type IN ('PROFILE_UPDATE', 'LEAVE')") &&
+                        it.contains("status = 'PENDING'")
+                },
+                "doctor-a",
+                "ip-1"
+            )
         }
     }
 
@@ -158,7 +265,7 @@ class InstitutionProjectControllerTest {
         private val orders = mockk<OrderRepository>(relaxed = true)
         private val doctorInstitutions = mockk<DoctorInstitutionService>()
         private val access = mockk<ManagementAccessService>()
-        private val jdbc = mockk<JdbcTemplate>(relaxed = true)
+        val jdbc = mockk<JdbcTemplate>(relaxed = true)
         private val travelGroundServicePricing = TravelGroundServicePricing(
             OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("40.00") })
         )
@@ -195,8 +302,11 @@ class InstitutionProjectControllerTest {
                 listOf(DoctorInstitutionEntity("di-1", firstArg(), doctorInstitutionId))
             }
             every { configs.findByDoctorIdAndInstitutionProjectIdIncludeDeleted(any(), any()) } returns null
+            every { configs.findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate(any(), any()) } returns null
             every { configs.save(any<com.joysong.server.order.entity.DoctorInstitutionProjectConfigEntity>()) } answers { firstArg() }
             every { doctorProjects.findByInstitutionProjectId("ip-1") } returns emptyList()
+            every { doctorProjects.findDoctorIdsByInstitutionProjectId("ip-1") } returns emptyList()
+            every { doctorProjects.findForUpdate(any(), any()) } returns null
         }
     }
 
@@ -205,5 +315,22 @@ class InstitutionProjectControllerTest {
         projectId = "project-1",
         price = BigDecimal("3500.00"),
         doctorBindings = doctorBindings
+    )
+
+    private fun doctorProject(
+        doctorId: String,
+        description: String = "description",
+        tags: String = "tags",
+        images: String = "images"
+    ) = listOf(
+        DoctorProjectEntity(
+            doctorId = doctorId,
+            projectId = "project-1",
+            institutionProjectId = "ip-1",
+            price = BigDecimal("3000.00"),
+            serviceDescription = description,
+            serviceTags = tags,
+            images = images
+        )
     )
 }

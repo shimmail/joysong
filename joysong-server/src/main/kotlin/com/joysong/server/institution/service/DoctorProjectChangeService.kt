@@ -210,9 +210,9 @@ class DoctorProjectChangeService(
         when (requestType) {
             "JOIN" -> {
                 require(existing == null) { "医生已加入该机构项目" }
-                require(request.priceSuggestion != null && request.priceSuggestion >= BigDecimal.ZERO) {
-                    "申请加入机构项目时必须填写非负价格建议"
-                }
+                travelGroundServicePricing.quote(
+                    requireNotNull(request.priceSuggestion) { "申请加入机构项目时必须填写价格建议" }
+                )
                 require(request.serviceTags.isEmpty() && request.images.isEmpty() &&
                     request.scheduleNote.isBlank() && request.coverImage.isBlank() &&
                     request.consultationFee == null && request.commissionRate == null && request.institutionRate == null &&
@@ -338,7 +338,9 @@ class DoctorProjectChangeService(
         when (target.requestType) {
             "JOIN" -> {
                 require(existing == null) { "医生已加入该机构项目，申请无法重复通过" }
-                require(target.priceSuggestion != null) { "加入申请缺少价格建议" }
+                travelGroundServicePricing.quote(
+                    requireNotNull(target.priceSuggestion) { "加入申请缺少价格建议" }
+                )
                 doctorProjectRepository.save(target.toEntity(includeProfileFields = false))
             }
             "PROFILE_UPDATE" -> {

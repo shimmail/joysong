@@ -6,6 +6,7 @@ import { CheckOutlined, EditOutlined, LoginOutlined, LogoutOutlined, StopOutline
 import api, { getApiErrorMessage, getData, getManagementContext } from '../api';
 import ImageUpload from '../components/ImageUpload';
 import MultiImageUpload from '../components/MultiImageUpload';
+import { calculatePercentageFeeMinor } from '../utils/money';
 
 interface ProjectDoctor {
   id: string;
@@ -334,17 +335,19 @@ export default function ProjectCollaborationPage() {
         {requestType === 'JOIN' ? <>
           <Form.Item
             name="priceSuggestion"
-            label="项目价格建议"
+            label="项目价格建议（USD）"
             rules={[
               { required: true, message: '请输入价格建议' },
               {
-                validator: (_, value) => typeof value === 'number' && value >= 0
+                validator: (_, value) => typeof value === 'number' &&
+                  value <= 99_999_999.99 && Number(value.toFixed(2)) === value &&
+                  calculatePercentageFeeMinor(value, 40) != null
                   ? Promise.resolve()
-                  : Promise.reject(new Error('价格建议不能为负数')),
+                  : Promise.reject(new Error('价格建议必须为 USD 0.02 至 99,999,999.99，且最多两位小数')),
               },
             ]}
           >
-            <InputNumber precision={2} style={{ width: '100%' }} />
+            <InputNumber min={0.02} max={99_999_999.99} precision={2} step={0.01} prefix="$" style={{ width: '100%' }} />
           </Form.Item>
           <Form.Item name="notes" label="补充说明" rules={[{ max: 2000 }]}>
             <Input.TextArea rows={2} />

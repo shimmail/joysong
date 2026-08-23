@@ -59,11 +59,13 @@ describe('InstitutionProjectsPage doctor prices', () => {
   it('loads persisted doctor prices, previews the policy fee, and saves doctor bindings without doctorIds', async () => {
     const user = userEvent.setup();
     renderPage();
+    expect(await screen.findByText(/医生 A.*旅游地接服务费 USD 1599\.60/)).toBeInTheDocument();
     await user.click(await screen.findByTitle('编辑'));
     expect(await screen.findByDisplayValue('3999.00')).toBeInTheDocument();
     expect(screen.getByDisplayValue('4299.00')).toBeInTheDocument();
     expect(screen.getByText('USD 1599.60')).toBeInTheDocument();
     expect(screen.getByText('USD 1719.60')).toBeInTheDocument();
+    expect(screen.getAllByText('旅游地接服务费')).toHaveLength(2);
 
     const priceInputs = screen.getAllByRole('spinbutton', { name: '医生项目价格（USD）' });
     await user.clear(priceInputs[0]);
