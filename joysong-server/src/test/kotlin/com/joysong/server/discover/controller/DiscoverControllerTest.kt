@@ -4,6 +4,7 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.joysong.server.article.repository.ArticleRepository
 import com.joysong.server.config.OrderSplitProperties
 import com.joysong.server.diary.repository.DiaryRepository
+import com.joysong.server.discover.entity.DoctorProjectEntity
 import com.joysong.server.discover.repository.DoctorProjectRepository
 import com.joysong.server.discover.service.DiscoverDetailService
 import com.joysong.server.discover.service.DiscoverSearchService
@@ -14,8 +15,6 @@ import com.joysong.server.identity.service.InstitutionConsultantService
 import com.joysong.server.institution.repository.InstitutionProjectRepository
 import com.joysong.server.institution.repository.InstitutionRepository
 import com.joysong.server.institution.service.InstitutionProjectDetailResolver
-import com.joysong.server.order.entity.DoctorInstitutionProjectConfigEntity
-import com.joysong.server.order.repository.DoctorInstitutionProjectConfigRepository
 import com.joysong.server.order.service.OrderSplitRatePolicy
 import com.joysong.server.order.service.TravelGroundServicePricing
 import com.joysong.server.project.repository.ProjectRepository
@@ -28,7 +27,7 @@ import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 
 class DiscoverControllerTest {
-    private val configRepository = mockk<DoctorInstitutionProjectConfigRepository>()
+    private val doctorProjectRepository = mockk<DoctorProjectRepository>()
     private val pricing = TravelGroundServicePricing(
         OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("40.00") })
     )
@@ -41,47 +40,39 @@ class DiscoverControllerTest {
         mockk<ArticleRepository>(),
         mockk<DiscoverDetailService>(),
         mockk<InstitutionProjectRepository>(),
-        mockk<DoctorProjectRepository>(),
+        doctorProjectRepository,
         mockk<DiscoverService>(),
         mockk<DiscoverSearchService>(),
-        configRepository,
         InstitutionProjectDetailResolver(),
         consultants,
         pricing
     )
 
     @Test
-    fun `travel ground service quote wraps configured price in API response`() {
-        every {
-            configRepository.findByDoctorIdAndInstitutionProjectId("doctor-1", "ip-1")
-        } returns DoctorInstitutionProjectConfigEntity(
-            doctorId = "doctor-1",
-            institutionProjectId = "ip-1",
-            medicalListPrice = BigDecimal("1000.00")
-        )
-        val response = controller.getTravelGroundServiceQuote("doctor-1", "ip-1")
-        val quote = requireNotNull(response.data)
+    fun `quote uses each selected doctor price without a medical config`() {
+        every { doctorProjectRepository.findByDoctorIdAndInstitutionProjectId("doctor-a", "ip-1") } returns
+            DoctorProjectEntity("doctor-a", "project-1", "ip-1", BigDecimal("3999.00"))
+        every { doctorProjectRepository.findByDoctorIdAndInstitutionProjectId("doctor-b", "ip-1") } returns
+            DoctorProjectEntity("doctor-b", "project-1", "ip-1", BigDecimal("4299.00"))
 
-        assertEquals(200, response.code)
-        assertEquals("USD", quote.currency)
-        assertEquals(100_000, quote.medicalListPriceMinor)
-        assertEquals(4_000, quote.platformServiceRateBps)
-        assertEquals(40_000, quote.travelGroundServiceFeeMinor)
+        assertEquals(159_960L, controller.getTravelGroundServiceQuote("doctor-a", "ip-1").data!!.travelGroundServiceFeeMinor)
+        assertEquals(171_960L, controller.getTravelGroundServiceQuote("doctor-b", "ip-1").data!!.travelGroundServiceFeeMinor)
     }
 
     @Test
-    fun `travel ground service quote rejects missing or zero doctor configuration`() {
-        every { configRepository.findByDoctorIdAndInstitutionProjectId("missing", "ip-1") } returns null
+    fun `travel ground service quote rejects missing or zero doctor project price`() {
+        every { doctorProjectRepository.findByDoctorIdAndInstitutionProjectId("missing", "ip-1") } returns null
         every {
-            configRepository.findByDoctorIdAndInstitutionProjectId("zero", "ip-1")
-        } returns DoctorInstitutionProjectConfigEntity(
+            doctorProjectRepository.findByDoctorIdAndInstitutionProjectId("zero", "ip-1")
+        } returns DoctorProjectEntity(
             doctorId = "zero",
+            projectId = "project-1",
             institutionProjectId = "ip-1",
-            medicalListPrice = BigDecimal.ZERO
+            price = BigDecimal.ZERO
         )
 
         assertEquals(
-            "MEDICAL_LIST_PRICE_NOT_CONFIGURED",
+            "DOCTOR_PROJECT_NOT_CONFIGURED",
             assertThrows(IllegalArgumentException::class.java) {
                 controller.getTravelGroundServiceQuote("missing", "ip-1")
             }.message

@@ -18,7 +18,6 @@ import com.joysong.server.order.dto.CreateOrderRequest
 import com.joysong.server.order.dto.OrderResponse
 import com.joysong.server.order.dto.OrderStatusEnum
 import com.joysong.server.order.entity.OrderEntity
-import com.joysong.server.order.repository.DoctorInstitutionProjectConfigRepository
 import com.joysong.server.order.repository.OrderRepository
 import com.joysong.server.project.repository.ProjectRepository
 import com.joysong.server.settlement.service.SettlementService
@@ -50,7 +49,6 @@ class OrderService(
     private val projectRepository: ProjectRepository,
     private val institutionProjectRepository: InstitutionProjectRepository,
     private val institutionRepository: InstitutionRepository,
-    private val doctorInstitutionProjectConfigRepository: DoctorInstitutionProjectConfigRepository,
     private val doctorProjectRepository: DoctorProjectRepository,
     private val doctorRepository: DoctorRepository,
     private val orderStatusLogService: OrderStatusLogService,
@@ -102,7 +100,7 @@ class OrderService(
 
     /**
      * 创建订单
-     * 根据项目和机构项目信息创建订单，从医生-机构配置读取面诊金，无配置时使用默认值
+     * 根据项目和机构项目信息创建订单，并基于所选医生项目价格计算旅游地接服务费。
      *
      * @param userId  当前用户ID
      * @param request 创建订单请求参数
@@ -131,7 +129,7 @@ class OrderService(
             .orElseThrow { IllegalArgumentException("机构不存在: ${institutionProject.institutionId}") }
         require(institution.name.isNotBlank()) { "机构名称不能为空" }
 
-        doctorProjectRepository.findByDoctorIdAndInstitutionProjectId(
+        val doctorProject = doctorProjectRepository.findByDoctorIdAndInstitutionProjectId(
             request.doctorId,
             institutionProject.id
         ) ?: throw IllegalArgumentException("所选医生未加入该机构项目")
@@ -147,10 +145,7 @@ class OrderService(
         require(consultant.name.isNotBlank()) { "医美顾问名称不能为空" }
 
         val coverImage = effectiveProject.coverImage
-        val config = doctorInstitutionProjectConfigRepository
-            .findByDoctorIdAndInstitutionProjectId(request.doctorId, institutionProject.id)
-            ?: throw IllegalArgumentException("MEDICAL_LIST_PRICE_NOT_CONFIGURED")
-        val quote = travelGroundServicePricing.quote(config.medicalListPrice)
+        val quote = travelGroundServicePricing.quote(doctorProject.price)
         val serviceFee = Money.fromMinor(quote.travelGroundServiceFeeMinor, quote.currency)
 
         // 解析预约时间（支持 ISO-8601，兼容旧 Android 的空格分隔格式）；非法值不再静默丢弃。

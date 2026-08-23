@@ -23,7 +23,6 @@ import com.joysong.server.institution.repository.InstitutionRepository
 import com.joysong.server.institution.service.InstitutionProjectDetailResolver
 import com.joysong.server.identity.service.InstitutionConsultantService
 import com.joysong.server.discover.repository.DoctorProjectRepository
-import com.joysong.server.order.repository.DoctorInstitutionProjectConfigRepository
 import com.joysong.server.order.service.TravelGroundServicePricing
 import com.joysong.server.order.service.TravelGroundServiceQuote
 import com.joysong.server.project.repository.ProjectRepository
@@ -43,7 +42,6 @@ class DiscoverController(
     private val doctorProjectRepository: DoctorProjectRepository,
     private val discoverService: DiscoverService,
     private val discoverSearchService: DiscoverSearchService,
-    private val configRepository: DoctorInstitutionProjectConfigRepository,
     private val institutionProjectDetailResolver: InstitutionProjectDetailResolver,
     private val institutionConsultantService: InstitutionConsultantService,
     private val travelGroundServicePricing: TravelGroundServicePricing
@@ -244,9 +242,9 @@ class DiscoverController(
         @RequestParam doctorId: String,
         @RequestParam institutionProjectId: String
     ): BaseResponse<TravelGroundServiceQuote> {
-        val config = configRepository
+        val doctorProject = doctorProjectRepository
             .findByDoctorIdAndInstitutionProjectId(doctorId, institutionProjectId)
-            ?: throw IllegalArgumentException("MEDICAL_LIST_PRICE_NOT_CONFIGURED")
-        return BaseResponse.success(travelGroundServicePricing.quote(config.medicalListPrice))
+            ?: throw IllegalArgumentException("DOCTOR_PROJECT_NOT_CONFIGURED")
+        return BaseResponse.success(travelGroundServicePricing.quote(doctorProject.price))
     }
 }
