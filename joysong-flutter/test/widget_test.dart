@@ -97,8 +97,7 @@ void main() {
   testWidgets(
       'restored authenticated English consent activates injected translation',
       (tester) async {
-    final translationRepository = RecordingTranslationRepository()
-      ..holdResponses = true;
+    final translationRepository = RecordingTranslationRepository();
     await tester.pumpWidget(
       JoysongApp(
         environment: AppEnvironment.resolve(platform: AppPlatform.android),
@@ -111,14 +110,23 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    translationRepository
+      ..holdResponses = true
+      ..calls.clear();
     _insertTranslationProbe(tester);
     await tester.pump();
 
     expect(find.text(_rootTranslationRequest.sourceText), findsOneWidget);
-    expect(translationRepository.calls, hasLength(1));
-    expect(translationRepository.calls.single.targetLanguage, 'en-US');
+    final rootCalls = translationRepository.calls
+        .where((call) => call.text == _rootTranslationRequest.sourceText)
+        .toList(growable: false);
+    expect(rootCalls, hasLength(1));
+    expect(rootCalls.single.targetLanguage, 'en-US');
 
-    translationRepository.completeNext('Root translation');
+    translationRepository.completeText(
+      _rootTranslationRequest.sourceText,
+      'Root translation',
+    );
     await _pumpTranslation(tester);
     expect(find.text('Root translation'), findsOneWidget);
   });
@@ -201,8 +209,7 @@ void main() {
     });
     final authRepository = _AuthenticatedRepository()
       ..logoutCompleter = logoutCompleter;
-    final translationRepository = RecordingTranslationRepository()
-      ..holdResponses = true;
+    final translationRepository = RecordingTranslationRepository();
     await tester.pumpWidget(
       JoysongApp(
         environment: AppEnvironment.resolve(platform: AppPlatform.android),
@@ -215,16 +222,32 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    translationRepository
+      ..holdResponses = true
+      ..calls.clear();
     _insertTranslationProbe(tester);
     await tester.pump();
-    expect(translationRepository.calls, hasLength(1));
-    translationRepository.completeNext('Visible root translation');
+    expect(
+      translationRepository.calls.where(
+        (call) => call.text == _rootTranslationRequest.sourceText,
+      ),
+      hasLength(1),
+    );
+    translationRepository.completeText(
+      _rootTranslationRequest.sourceText,
+      'Visible root translation',
+    );
     await _pumpTranslation(tester);
     expect(find.text('Visible root translation'), findsOneWidget);
 
     _insertTranslationProbe(tester, request: _pendingRootTranslationRequest);
     await tester.pump();
-    expect(translationRepository.calls, hasLength(2));
+    expect(
+      translationRepository.calls.where(
+        (call) => call.text == _pendingRootTranslationRequest.sourceText,
+      ),
+      hasLength(1),
+    );
 
     await tester.tap(
       find.descendant(
@@ -261,9 +284,17 @@ void main() {
 
     _insertTranslationProbe(tester, request: _inactiveRootTranslationRequest);
     await tester.pump();
-    expect(translationRepository.calls, hasLength(2));
+    expect(
+      translationRepository.calls.where(
+        (call) => call.text == _inactiveRootTranslationRequest.sourceText,
+      ),
+      isEmpty,
+    );
 
-    translationRepository.completeNext('Translation after logout started');
+    translationRepository.completeText(
+      _pendingRootTranslationRequest.sourceText,
+      'Translation after logout started',
+    );
     await _pumpTranslation(tester);
     expect(
         find.text(_pendingRootTranslationRequest.sourceText), findsOneWidget);

@@ -69,6 +69,16 @@ final class RecordingTranslationRepository implements TranslationRepository {
     completePending(0, translatedText);
   }
 
+  void completeText(String sourceText, String translatedText) {
+    final index = _pending.indexWhere(
+      (pending) => pending.call.text == sourceText,
+    );
+    if (index < 0) {
+      throw StateError('No pending translation for: $sourceText');
+    }
+    completePending(index, translatedText);
+  }
+
   void completePending(int index, String translatedText) {
     final pending = _pending.removeAt(index);
     pending.completer.complete(
