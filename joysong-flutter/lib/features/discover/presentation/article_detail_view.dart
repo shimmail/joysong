@@ -116,7 +116,7 @@ class ArticleDetailView extends StatelessWidget {
                 contentId: contentId,
                 field: contentField,
                 sourceText: content,
-                validator: contentIsHtml ? preservesRichContentStructure : null,
+                validator: preservesRichContentStructure,
               ),
               builder: (_, visibleContent) => _ArticleContent(
                 content: visibleContent,

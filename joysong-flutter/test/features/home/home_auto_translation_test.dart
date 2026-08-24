@@ -109,6 +109,48 @@ void main() {
   });
 
   testWidgets(
+    'deserialized author-only Home articles and diaries keep names source-only',
+    (tester) async {
+      await _useTallSurface(tester);
+      final repository = _LiteralTranslationRepository(
+        translations: const {},
+        holdResponses: true,
+      );
+      final controller = _activeController(repository, maxConcurrent: 10);
+      addTearDown(controller.dispose);
+      final article = HomeContent.fromJson(
+        const {
+          'id': 'author-only-article',
+          'title': '术后护理文章',
+          'authorName': '赵教授',
+        },
+        kind: HomeSectionKind.expertArticle,
+      );
+      final diary = HomeContent.fromJson(
+        const {
+          'id': 'author-only-diary',
+          'title': '恢复日记',
+          'authorName': '小美',
+        },
+        kind: HomeSectionKind.userDiary,
+      );
+
+      await tester.pumpWidget(
+        _homeHost(
+          controller: controller,
+          feed: HomeFeed(expertArticles: [article], userDiaries: [diary]),
+        ),
+      );
+      await tester.pump();
+
+      expect(repository.sourceTexts, isNot(contains('赵教授')));
+      expect(repository.sourceTexts, isNot(contains('小美')));
+      expect(find.text('赵教授'), findsOneWidget);
+      expect(find.text('小美'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
     'one Home provider failure preserves its source while siblings translate',
     (tester) async {
       final repository = _LiteralTranslationRepository(

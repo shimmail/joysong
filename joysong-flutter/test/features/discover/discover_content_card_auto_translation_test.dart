@@ -212,6 +212,132 @@ void main() {
       expect(find.byType(SnackBar), findsNothing);
     },
   );
+
+  testWidgets(
+    'DiaryPreviewCard factory rejects auto translation without a backend id',
+    (tester) async {
+      final repository = _LiteralTranslationRepository(
+        translations: const {'空标识日记': 'Diary without an id'},
+        failedSources: const {'空标识日记'},
+      );
+      final controller = _controller(repository, active: true);
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(
+        _host(
+          controller: controller,
+          child: DiaryPreviewCard.fromData(
+            data: const {
+              'id': '  ',
+              'title': '空标识日记',
+            },
+            enableAutoTranslation: true,
+            onTap: _noop,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('空标识日记'), findsOneWidget);
+      expect(repository.calls, isEmpty);
+      expect(
+        tester
+            .widget<DiaryPreviewCard>(find.byType(DiaryPreviewCard))
+            .autoTranslationContentId,
+        isEmpty,
+      );
+    },
+  );
+
+  testWidgets(
+    'DiaryPreviewRail translates only a unique non-empty backend id',
+    (tester) async {
+      final repository = _LiteralTranslationRepository(
+        translations: const {
+          '唯一日记': 'Unique diary',
+          '空标识日记': 'Blank-id diary',
+          '重复日记甲': 'Duplicate diary one',
+          '重复日记乙': 'Duplicate diary two',
+        },
+      );
+      final controller = _controller(repository, active: true);
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(
+        _host(
+          controller: controller,
+          child: const DiaryPreviewRail(
+            enableAutoTranslation: true,
+            diaries: [
+              {'id': 'unique-diary', 'title': '唯一日记'},
+              {'id': ' ', 'title': '空标识日记'},
+              {'id': 'duplicate-diary', 'title': '重复日记甲'},
+              {'diaryId': 'duplicate-diary', 'title': '重复日记乙'},
+            ],
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Unique diary'), findsOneWidget);
+      for (final retained in const ['空标识日记', '重复日记甲', '重复日记乙']) {
+        expect(find.text(retained), findsOneWidget, reason: retained);
+      }
+      expect(repository.sourceTexts, const ['唯一日记']);
+    },
+  );
+
+  testWidgets(
+    'DiaryPreviewRail reorder preserves a failed unique diary owner without retry',
+    (tester) async {
+      final repository = _LiteralTranslationRepository(
+        translations: const {'重排失败日记': 'Failed diary after reorder'},
+        holdResponses: true,
+      );
+      final controller = _controller(repository, active: true);
+      addTearDown(controller.dispose);
+      final failedDiary = <String, Object?>{
+        'id': 'failed-diary',
+        'title': '重排失败日记',
+      };
+      final englishDiary = <String, Object?>{
+        'id': 'english-diary',
+        'title': 'English diary',
+      };
+      var diaries = [failedDiary, englishDiary];
+      late StateSetter updateRail;
+
+      await tester.pumpWidget(
+        _host(
+          controller: controller,
+          child: StatefulBuilder(
+            builder: (context, setState) {
+              updateRail = setState;
+              return DiaryPreviewRail(
+                diaries: diaries,
+                enableAutoTranslation: true,
+              );
+            },
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(repository.sourceTexts, const ['重排失败日记']);
+
+      repository.failSource('重排失败日记');
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('重排失败日记'), findsOneWidget);
+
+      updateRail(() => diaries = [englishDiary, failedDiary]);
+      await tester.pump();
+      await tester.pump();
+
+      expect(repository.sourceTexts, const ['重排失败日记']);
+      expect(repository.pendingCount, 0);
+      expect(find.text('重排失败日记'), findsOneWidget);
+    },
+  );
 }
 
 typedef _RequestRecord = (String, String, String, String);

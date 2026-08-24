@@ -541,8 +541,8 @@ class DiaryPreviewCard extends StatelessWidget {
     final id = _text(source, const ['id', 'diaryId']);
     return DiaryPreviewCard(
       key: key,
-      enableAutoTranslation: enableAutoTranslation,
-      autoTranslationContentId: 'diary:$id',
+      enableAutoTranslation: enableAutoTranslation && id.isNotEmpty,
+      autoTranslationContentId: id.isEmpty ? '' : 'diary:$id',
       title: _text(source, const ['title']),
       content: _text(source, const ['content', 'description', 'summary']),
       authorName: _text(
@@ -655,11 +655,10 @@ class DiaryPreviewCard extends StatelessWidget {
                     ),
                     if (projectName.isNotEmpty)
                       enableAutoTranslation && containsChineseText(projectName)
-                          ? AutoTranslationBuilder(
-                              request: _diaryRequest(
-                                field: 'projectName',
-                                source: projectName,
-                              ),
+                          ? _StableDiaryTranslation(
+                              contentId: autoTranslationContentId,
+                              field: 'projectName',
+                              source: projectName,
                               builder: (_, visibleText) => _Tag(visibleText),
                             )
                           : _Tag(projectName),
@@ -671,22 +670,20 @@ class DiaryPreviewCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
                 enableAutoTranslation
-                    ? AutoTranslationBuilder(
-                        request: _diaryRequest(
-                          field: 'title',
-                          source: title,
-                        ),
+                    ? _StableDiaryTranslation(
+                        contentId: autoTranslationContentId,
+                        field: 'title',
+                        source: title,
                         builder: (_, visibleText) => _Title(visibleText),
                       )
                     : _Title(title),
                 if (content.isNotEmpty) ...[
                   const SizedBox(height: 5),
                   enableAutoTranslation
-                      ? AutoTranslationBuilder(
-                          request: _diaryRequest(
-                            field: 'content',
-                            source: content,
-                          ),
+                      ? _StableDiaryTranslation(
+                          contentId: autoTranslationContentId,
+                          field: 'content',
+                          source: content,
                           builder: (_, visibleText) =>
                               _Muted(visibleText, maxLines: 2),
                         )
@@ -723,18 +720,51 @@ class DiaryPreviewCard extends StatelessWidget {
       ),
     );
   }
+}
 
-  AutoTranslationRequest _diaryRequest({
-    required String field,
-    required String source,
-  }) {
-    return AutoTranslationRequest(
-      contentType: 'diary',
-      contentId: autoTranslationContentId,
-      field: field,
-      sourceText: source,
-    );
+class _StableDiaryTranslation extends StatefulWidget {
+  const _StableDiaryTranslation({
+    required this.contentId,
+    required this.field,
+    required this.source,
+    required this.builder,
+  });
+
+  final String contentId;
+  final String field;
+  final String source;
+  final Widget Function(BuildContext context, String visibleText) builder;
+
+  @override
+  State<_StableDiaryTranslation> createState() =>
+      _StableDiaryTranslationState();
+}
+
+class _StableDiaryTranslationState extends State<_StableDiaryTranslation> {
+  late AutoTranslationRequest _request = _createRequest();
+
+  @override
+  void didUpdateWidget(_StableDiaryTranslation oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.contentId != oldWidget.contentId ||
+        widget.field != oldWidget.field ||
+        widget.source != oldWidget.source) {
+      _request = _createRequest();
+    }
   }
+
+  AutoTranslationRequest _createRequest() => AutoTranslationRequest(
+        contentType: 'diary',
+        contentId: widget.contentId,
+        field: widget.field,
+        sourceText: widget.source,
+      );
+
+  @override
+  Widget build(BuildContext context) => AutoTranslationBuilder(
+        request: _request,
+        builder: widget.builder,
+      );
 }
 
 class DiaryPreviewRail extends StatelessWidget {
@@ -758,6 +788,7 @@ class DiaryPreviewRail extends StatelessWidget {
     final count = maxItems == null || diaries.length <= maxItems!
         ? diaries.length
         : maxItems!;
+    final duplicateIds = _duplicateDiaryPreviewIds(diaries);
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
@@ -766,10 +797,15 @@ class DiaryPreviewRail extends StatelessWidget {
           for (var index = 0; index < count; index++) ...[
             if (index > 0) const SizedBox(width: 10),
             SizedBox(
+              key: _diaryPreviewKey(diaries[index], duplicateIds),
               width: cardWidth,
               child: DiaryPreviewCard.fromData(
                 data: diaries[index],
-                enableAutoTranslation: enableAutoTranslation,
+                enableAutoTranslation: enableAutoTranslation &&
+                    _hasUniqueDiaryPreviewId(
+                      diaries[index],
+                      duplicateIds,
+                    ),
                 onTap: () {
                   final id = _text(diaries[index], const ['id', 'diaryId']);
                   if (id.isNotEmpty) onDiaryTap?.call(id);
@@ -781,6 +817,40 @@ class DiaryPreviewRail extends StatelessWidget {
       ),
     );
   }
+}
+
+Set<String> _duplicateDiaryPreviewIds(
+  List<Map<String, Object?>> diaries,
+) {
+  final seen = <String>{};
+  final duplicates = <String>{};
+  for (final diary in diaries) {
+    final id = _diaryPreviewId(diary);
+    if (id.isNotEmpty && !seen.add(id)) duplicates.add(id);
+  }
+  return duplicates;
+}
+
+bool _hasUniqueDiaryPreviewId(
+  Map<String, Object?> diary,
+  Set<String> duplicateIds,
+) {
+  final id = _diaryPreviewId(diary);
+  return id.isNotEmpty && !duplicateIds.contains(id);
+}
+
+Key _diaryPreviewKey(
+  Map<String, Object?> diary,
+  Set<String> duplicateIds,
+) {
+  final id = _diaryPreviewId(diary);
+  if (id.isEmpty || duplicateIds.contains(id)) return ObjectKey(diary);
+  return ValueKey<String>('diary-preview:$id');
+}
+
+String _diaryPreviewId(Map<String, Object?> diary) {
+  final nested = _map(diary['diary']);
+  return _text(<String, Object?>{...nested, ...diary}, const ['id', 'diaryId']);
 }
 
 class _ArticleCard extends StatelessWidget {

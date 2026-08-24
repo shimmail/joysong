@@ -61,7 +61,7 @@ ContentTranslation _decodeTranslation(Object? json) {
 
 String _requiredString(Map<Object?, Object?> json, String field) {
   final value = json[field];
-  if (value is! String || value.isEmpty) {
+  if (value is! String || value.trim().isEmpty) {
     throw FormatException('翻译响应缺少有效的 $field');
   }
   return value;

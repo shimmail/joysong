@@ -73,6 +73,13 @@ void main() {
       'provider': 'qwen',
       'cached': false,
     },
+    'translatedText is blank': const {
+      'translatedText': ' \n\t ',
+      'detectedLanguage': 'zh',
+      'targetLanguage': 'en-US',
+      'provider': 'qwen',
+      'cached': false,
+    },
     'detectedLanguage has the wrong type': const {
       'translatedText': 'Recovery is progressing well',
       'detectedLanguage': 1,

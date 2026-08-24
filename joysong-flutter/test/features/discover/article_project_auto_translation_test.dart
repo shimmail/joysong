@@ -127,6 +127,39 @@ void main() {
   });
 
   testWidgets(
+      'article plain summary falls back when translation adds Markdown',
+      (tester) async {
+    final repository = RecordingTranslationRepository()..holdResponses = true;
+    final controller = _activeController(repository);
+    addTearDown(controller.dispose);
+    const article = DiscoverItem(
+      id: 'article-plain-summary',
+      type: DiscoverContentType.article,
+      title: 'Care article',
+      subtitle: '可见文章摘要',
+      raw: {'summary': '可见文章摘要'},
+    );
+
+    await tester.pumpWidget(
+      _host(
+        controller: controller,
+        child: const ArticleDetailView(item: article),
+      ),
+    );
+    await tester.pump();
+    repository.completeText(
+      '可见文章摘要',
+      '**Visible article summary**',
+    );
+    await _pumpTranslation(tester);
+
+    expect(
+      tester.widget<RichContentView>(find.byType(RichContentView)).content,
+      '可见文章摘要',
+    );
+  });
+
+  testWidgets(
       'deserialized author-only article renders fallback without translating it',
       (tester) async {
     final repository = RecordingTranslationRepository();
@@ -231,6 +264,55 @@ void main() {
       isEmpty,
     );
     _expectNeverRequested(repository, const ['隐藏项目分类']);
+  });
+
+  testWidgets(
+      'project Markdown detail falls back when translation changes a URL',
+      (tester) async {
+    await _useTallSurface(tester);
+    final repository = RecordingTranslationRepository()..holdResponses = true;
+    final controller = _activeController(repository);
+    addTearDown(controller.dispose);
+    const source = '[护理指南](https://care.test/guide)\n'
+        '![护理图](https://cdn.test/care.jpg)';
+    const project = DiscoverItem(
+      id: 'project-markdown',
+      type: DiscoverContentType.project,
+      title: 'Care project',
+      subtitle: 'Care description',
+      raw: {
+        'project': {
+          'id': 'project-markdown',
+          'name': 'Care project',
+          'description': 'Care description',
+          'detailContent': source,
+        },
+      },
+    );
+
+    await tester.pumpWidget(
+      _host(
+        controller: controller,
+        child: const CatalogProjectDetailView(
+          item: project,
+          enableAutoTranslation: true,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('View more information'));
+    await tester.pump();
+    repository.completeText(
+      source,
+      '[Care guide](https://evil.test/guide)\n'
+      '![Care image](https://cdn.test/care.jpg)',
+    );
+    await _pumpTranslation(tester);
+
+    expect(
+      tester.widget<RichContentView>(find.byType(RichContentView)).content,
+      source,
+    );
   });
 
   testWidgets(
@@ -378,6 +460,130 @@ void main() {
         tester.widget<RichContentView>(find.byType(RichContentView)).content,
         '<p>Project detail <strong>description</strong></p>',
       );
+    },
+  );
+
+  testWidgets(
+    'consumer project all-diaries route shows source then translates unique diary fields',
+    (tester) async {
+      await _useTallSurface(tester);
+      final repository = RecordingTranslationRepository()..holdResponses = true;
+      final controller = _activeController(repository);
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(
+        _host(
+          controller: controller,
+          child: DiscoverDetailPage(
+            repository: const _DetailRepository(_projectWithSixDiaries),
+            type: DiscoverContentType.project,
+            id: _projectWithSixDiaries.id,
+            initialItem: _projectWithSixDiaries,
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(repository.calls, isEmpty);
+      expect(find.text('全部日记标题'), findsNothing);
+
+      await tester.tap(find.text('All (6)'));
+      await tester.pumpAndSettle();
+
+      for (final source in const ['全部日记标题', '全部日记正文', '全部日记项目']) {
+        expect(find.text(source), findsOneWidget, reason: source);
+      }
+      expect(
+        _requestRecords(tester).where(
+          (request) => request.$2 == 'diary:all-diary-6',
+        ),
+        const {
+          ('diary', 'diary:all-diary-6', 'title', '全部日记标题'),
+          ('diary', 'diary:all-diary-6', 'content', '全部日记正文'),
+          ('diary', 'diary:all-diary-6', 'projectName', '全部日记项目'),
+        },
+      );
+      expect(
+        repository.calls.map((call) => call.text).toSet(),
+        const {'全部日记标题', '全部日记正文', '全部日记项目'},
+      );
+
+      await _completeAll(tester, repository, const {
+        '全部日记标题': 'All diary title',
+        '全部日记正文': 'All diary content',
+        '全部日记项目': 'All diary project',
+      });
+
+      expect(find.text('All diary title'), findsOneWidget);
+      expect(find.text('All diary content'), findsOneWidget);
+      expect(find.text('All diary project'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'all-diaries list filters unsafe ids and preserves failed owner across reorder',
+    (tester) async {
+      await _useTallSurface(tester);
+      final repository = RecordingTranslationRepository()..holdResponses = true;
+      final controller = AutoTranslationController(
+        repository: repository,
+        maxConcurrent: 30,
+      );
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(
+        _host(
+          controller: controller,
+          child: DiscoverDetailPage(
+            repository: const _DetailRepository(_projectWithUnsafeDiaryIds),
+            type: DiscoverContentType.project,
+            id: _projectWithUnsafeDiaryIds.id,
+            initialItem: _projectWithUnsafeDiaryIds,
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(repository.calls, isEmpty);
+
+      controller.synchronize(
+        enabled: true,
+        authenticated: true,
+        targetLanguage: 'en-US',
+      );
+      await tester.tap(find.text('All (4)'));
+      await tester.pumpAndSettle();
+
+      for (final source in const ['唯一全部日记', '空ID全部日记', '重复全部日记甲', '重复全部日记乙']) {
+        expect(find.text(source), findsOneWidget, reason: source);
+      }
+      expect(
+        repository.calls.map((call) => call.text).toList(growable: false),
+        const ['唯一全部日记'],
+      );
+
+      repository.failNext();
+      await _pumpTranslation(tester);
+      final beforeReorder = tester.getTopLeft(find.text('唯一全部日记')).dy;
+      final allPageFinder = find.byWidgetPredicate(
+        (widget) => widget.runtimeType.toString() == '_AllRelatedContentPage',
+      );
+      final dynamic allPage = tester.widget(allPageFinder);
+      final List<dynamic> diaries = allPage.groups['diaries'] as List<dynamic>;
+      final moved = diaries.removeAt(0);
+      diaries.insert(1, moved);
+      tester.element(allPageFinder).markNeedsBuild();
+      await tester.pump();
+      await tester.pump();
+
+      expect(
+        tester.getTopLeft(find.text('唯一全部日记')).dy,
+        greaterThan(beforeReorder),
+      );
+      expect(
+        repository.calls.map((call) => call.text).toList(growable: false),
+        const ['唯一全部日记'],
+      );
+      expect(repository.pendingCount, 0);
     },
   );
 
@@ -611,5 +817,77 @@ const _consumerProject = DiscoverItem(
       },
     ],
     'doctorName': '王医生',
+  },
+);
+
+const _projectWithSixDiaries = DiscoverItem(
+  id: 'project-all-diaries',
+  type: DiscoverContentType.project,
+  title: 'All diaries project',
+  subtitle: 'English-only project description',
+  raw: {
+    'project': {
+      'id': 'project-all-diaries',
+      'name': 'All diaries project',
+      'description': 'English-only project description',
+    },
+    'diaries': [
+      {
+        'id': 'all-diary-1',
+        'title': 'Diary one',
+        'content': 'English content one',
+        'projectName': 'English project',
+      },
+      {
+        'id': 'all-diary-2',
+        'title': 'Diary two',
+        'content': 'English content two',
+        'projectName': 'English project',
+      },
+      {
+        'id': 'all-diary-3',
+        'title': 'Diary three',
+        'content': 'English content three',
+        'projectName': 'English project',
+      },
+      {
+        'id': 'all-diary-4',
+        'title': 'Diary four',
+        'content': 'English content four',
+        'projectName': 'English project',
+      },
+      {
+        'id': 'all-diary-5',
+        'title': 'Diary five',
+        'content': 'English content five',
+        'projectName': 'English project',
+      },
+      {
+        'id': 'all-diary-6',
+        'title': '全部日记标题',
+        'content': '全部日记正文',
+        'projectName': '全部日记项目',
+      },
+    ],
+  },
+);
+
+const _projectWithUnsafeDiaryIds = DiscoverItem(
+  id: 'project-unsafe-diary-ids',
+  type: DiscoverContentType.project,
+  title: 'Diary identity project',
+  subtitle: 'English-only project description',
+  raw: {
+    'project': {
+      'id': 'project-unsafe-diary-ids',
+      'name': 'Diary identity project',
+      'description': 'English-only project description',
+    },
+    'diaries': [
+      {'id': 'unique-all-diary', 'title': '唯一全部日记'},
+      {'id': ' ', 'title': '空ID全部日记'},
+      {'id': 'duplicate-all-diary', 'title': '重复全部日记甲'},
+      {'diaryId': 'duplicate-all-diary', 'title': '重复全部日记乙'},
+    ],
   },
 );

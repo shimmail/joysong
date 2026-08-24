@@ -1605,39 +1605,105 @@ class _AllRelatedContentPage extends StatelessWidget {
           body: TabBarView(
             children: [
               for (final group in groups.entries)
-                ListView.separated(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: group.value.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (_, index) {
-                    final entry = group.value[index];
-                    if (group.key == 'diaries') {
-                      return DiaryPreviewCard.fromData(
-                        data: entry,
-                        onTap: () => onOpen?.call(group.key, entry),
-                      );
-                    }
-                    if (group.key == 'reviews') {
-                      return _AllReviewCard(
-                        entry: entry,
-                        socialController: socialController,
-                      );
-                    }
-                    final item = _relatedDiscoverItem(group.key, entry);
-                    if (item != null) {
-                      return DiscoverContentCard(
-                        key: ValueKey('all-${group.key}-${item.id}'),
-                        item: item,
-                        onTap: () => onOpen?.call(group.key, entry),
-                      );
-                    }
-                    return const SizedBox.shrink();
-                  },
-                ),
+                if (group.key == 'diaries')
+                  _AllDiaryList(
+                    diaries: group.value,
+                    onOpen: onOpen == null
+                        ? null
+                        : (entry) => onOpen!(group.key, entry),
+                  )
+                else
+                  ListView.separated(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: group.value.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (_, index) {
+                      final entry = group.value[index];
+                      if (group.key == 'reviews') {
+                        return _AllReviewCard(
+                          entry: entry,
+                          socialController: socialController,
+                        );
+                      }
+                      final item = _relatedDiscoverItem(group.key, entry);
+                      if (item != null) {
+                        return DiscoverContentCard(
+                          key: ValueKey('all-${group.key}-${item.id}'),
+                          item: item,
+                          onTap: () => onOpen?.call(group.key, entry),
+                        );
+                      }
+                      return const SizedBox.shrink();
+                    },
+                  ),
             ],
           ),
         ),
       );
+}
+
+class _AllDiaryList extends StatelessWidget {
+  const _AllDiaryList({required this.diaries, this.onOpen});
+
+  final List<Map<String, Object?>> diaries;
+  final ValueChanged<Map<String, Object?>>? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final duplicateIds = _duplicateAllDiaryIds(diaries);
+    final rows = [
+      for (final diary in diaries)
+        (
+          diary: diary,
+          id: _allDiaryId(diary),
+          key: _allDiaryKey(diary, duplicateIds),
+        ),
+    ];
+    final rowIndexes = <Key, int>{
+      for (var index = 0; index < rows.length; index++) rows[index].key: index,
+    };
+    return ListView.separated(
+      padding: const EdgeInsets.all(16),
+      itemCount: rows.length,
+      findItemIndexCallback: (key) => rowIndexes[key],
+      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      itemBuilder: (_, index) {
+        final row = rows[index];
+        return DiaryPreviewCard.fromData(
+          key: row.key,
+          data: row.diary,
+          enableAutoTranslation:
+              row.id.isNotEmpty && !duplicateIds.contains(row.id),
+          onTap: () => onOpen?.call(row.diary),
+        );
+      },
+    );
+  }
+}
+
+Set<String> _duplicateAllDiaryIds(List<Map<String, Object?>> diaries) {
+  final seen = <String>{};
+  final duplicates = <String>{};
+  for (final diary in diaries) {
+    final id = _allDiaryId(diary);
+    if (id.isNotEmpty && !seen.add(id)) duplicates.add(id);
+  }
+  return duplicates;
+}
+
+String _allDiaryId(Map<String, Object?> diary) {
+  final nested = _relatedMap(diary['diary']);
+  final source = <String, Object?>{...nested, ...diary};
+  return _rawText(source['id'], fallback: _rawText(source['diaryId']));
+}
+
+Key _allDiaryKey(
+  Map<String, Object?> diary,
+  Set<String> duplicateIds,
+) {
+  final id = _allDiaryId(diary);
+  if (id.isEmpty || duplicateIds.contains(id)) return ObjectKey(diary);
+  return ValueKey<String>('all-diary:$id');
 }
 
 class _AllReviewCard extends StatelessWidget {

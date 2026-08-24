@@ -41,15 +41,108 @@ const _unsafeSchemes = <String>{
   'vbscript',
 };
 
-/// Returns whether [translated] preserves the safe lexical structure of
-/// [source]. This validates markup only; it does not parse or render HTML.
+/// Returns whether [translated] preserves the safe renderer-visible structure
+/// of [source]. HTML is validated directly while plain text and the Markdown
+/// subset supported by RichContentView are normalized before comparison.
 bool preservesRichContentStructure(String source, String translated) {
-  final sourceMarkup = _parseMarkup(source);
-  final translatedMarkup = _parseMarkup(translated);
-  return sourceMarkup != null &&
-      translatedMarkup != null &&
-      _sameValues(sourceMarkup.tags, translatedMarkup.tags) &&
-      _sameValues(sourceMarkup.urls, translatedMarkup.urls);
+  final sourceContent = _parseRenderedContent(source);
+  final translatedContent = _parseRenderedContent(translated);
+  return sourceContent != null &&
+      translatedContent != null &&
+      sourceContent.kind == translatedContent.kind &&
+      _sameValues(sourceContent.markup.tags, translatedContent.markup.tags) &&
+      _sameValues(sourceContent.markup.urls, translatedContent.markup.urls);
+}
+
+_ParsedRenderedContent? _parseRenderedContent(String content) {
+  final source = content.trim();
+  if (_looksLikeHtml(source)) {
+    final markup = _parseMarkup(source);
+    return markup == null
+        ? null
+        : _ParsedRenderedContent(_RichContentKind.html, markup);
+  }
+
+  final markdown = _markdownToMarkup(source);
+  if (markdown == null) return null;
+  final markup = _parseMarkup(markdown.markup);
+  if (markup == null) return null;
+  return _ParsedRenderedContent(
+    markdown.hasMarkup ? _RichContentKind.markdown : _RichContentKind.plain,
+    markup,
+  );
+}
+
+bool _looksLikeHtml(String value) =>
+    RegExp(r'<\/?[a-z][^>]*>', caseSensitive: false).hasMatch(value);
+
+_NormalizedMarkdown? _markdownToMarkup(String value) {
+  var hasMarkup = false;
+  var ambiguous = false;
+  final source = value
+      .replaceAllMapped(
+        RegExp(r'!\[([^\]]*)\]\(([^)]+)\)'),
+        (match) {
+          hasMarkup = true;
+          if (match.group(2)!.contains('(')) ambiguous = true;
+          return '<img src="${match.group(2)}" alt="${match.group(1)}">';
+        },
+      )
+      .replaceAllMapped(
+        RegExp(r'\[([^\]]+)\]\(([^)]+)\)'),
+        (match) {
+          hasMarkup = true;
+          if (match.group(2)!.contains('(')) ambiguous = true;
+          return '<a href="${match.group(2)}">${match.group(1)}</a>';
+        },
+      )
+      .replaceAllMapped(
+        RegExp(r'\*\*(.+?)\*\*'),
+        (match) {
+          hasMarkup = true;
+          return '<strong>${match.group(1)}</strong>';
+        },
+      )
+      .replaceAllMapped(
+        RegExp(r'__(.+?)__'),
+        (match) {
+          hasMarkup = true;
+          return '<strong>${match.group(1)}</strong>';
+        },
+      )
+      .replaceAllMapped(
+        RegExp(r'(?<!\*)\*([^*\n]+)\*(?!\*)'),
+        (match) {
+          hasMarkup = true;
+          return '<em>${match.group(1)}</em>';
+        },
+      );
+  final lines = source.split(RegExp(r'\r?\n'));
+  final markup = lines.map((line) {
+    final trimmed = line.trimRight();
+    if (trimmed.startsWith('### ')) {
+      hasMarkup = true;
+      return '<h3>${trimmed.substring(4)}</h3>';
+    }
+    if (trimmed.startsWith('## ')) {
+      hasMarkup = true;
+      return '<h2>${trimmed.substring(3)}</h2>';
+    }
+    if (trimmed.startsWith('# ')) {
+      hasMarkup = true;
+      return '<h1>${trimmed.substring(2)}</h1>';
+    }
+    if (trimmed.startsWith('> ')) {
+      hasMarkup = true;
+      return '<blockquote>${trimmed.substring(2)}</blockquote>';
+    }
+    if (RegExp(r'^[-*+] ').hasMatch(trimmed)) {
+      hasMarkup = true;
+      return '<li>${trimmed.substring(2)}</li>';
+    }
+    return '$trimmed<br>';
+  }).join();
+  return ambiguous ? null : _NormalizedMarkdown(markup, hasMarkup: hasMarkup);
 }
 
 _ParsedMarkup? _parseMarkup(String markup) {
@@ -361,4 +454,20 @@ final class _ParsedMarkup {
 
   final List<String> tags;
   final List<String> urls;
+}
+
+enum _RichContentKind { plain, markdown, html }
+
+final class _ParsedRenderedContent {
+  const _ParsedRenderedContent(this.kind, this.markup);
+
+  final _RichContentKind kind;
+  final _ParsedMarkup markup;
+}
+
+final class _NormalizedMarkdown {
+  const _NormalizedMarkdown(this.markup, {required this.hasMarkup});
+
+  final String markup;
+  final bool hasMarkup;
 }

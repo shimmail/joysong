@@ -369,8 +369,7 @@ class CatalogProjectDetailView extends StatelessWidget {
                   field: 'content',
                   source: content,
                   contentType: contentIsHtml ? 'project_html' : 'project',
-                  validator:
-                      contentIsHtml ? preservesRichContentStructure : null,
+                  validator: preservesRichContentStructure,
                 ),
                 builder: (_, visibleContent) => RichContentView(
                   content: visibleContent,

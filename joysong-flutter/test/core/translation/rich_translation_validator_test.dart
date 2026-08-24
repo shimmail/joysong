@@ -2,6 +2,78 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/core/translation/rich_translation_validator.dart';
 
 void main() {
+  group('preservesRichContentStructure matches Markdown rendering', () {
+    const source = '## 护理指南\n'
+        '[复诊流程](https://care.test/follow-up)\n'
+        '![护理示意图](https://cdn.test/care.jpg)\n'
+        '**注意事项**';
+    const translated = '## Care guide\n'
+        '[Follow-up process](https://care.test/follow-up)\n'
+        '![Care diagram](https://cdn.test/care.jpg)\n'
+        '**Important notes**';
+
+    test('accepts equivalent Markdown structure and URL identities', () {
+      expect(preservesRichContentStructure(source, translated), isTrue);
+    });
+
+    test('rejects a changed Markdown link URL', () {
+      expect(
+        preservesRichContentStructure(
+          source,
+          translated.replaceFirst('care.test', 'evil.test'),
+        ),
+        isFalse,
+      );
+    });
+
+    test('rejects a changed Markdown image URL', () {
+      expect(
+        preservesRichContentStructure(
+          source,
+          translated.replaceFirst('care.jpg', 'tracking.gif'),
+        ),
+        isFalse,
+      );
+    });
+
+    test('rejects removed or additional renderer-visible Markdown', () {
+      expect(
+        preservesRichContentStructure(
+          '**护理重点**',
+          'Care essentials',
+        ),
+        isFalse,
+      );
+      expect(
+        preservesRichContentStructure(
+          '护理重点',
+          '**Care essentials**',
+        ),
+        isFalse,
+      );
+    });
+
+    test('rejects Markdown introduced into plain content', () {
+      expect(
+        preservesRichContentStructure(
+          '护理指南',
+          '[Care guide](https://care.test/guide)',
+        ),
+        isFalse,
+      );
+    });
+
+    test('rejects an ambiguous Markdown URL the renderer would truncate', () {
+      const ambiguous =
+          '[护理指南](https://care.test/guide_(follow-up))';
+
+      expect(
+        preservesRichContentStructure(ambiguous, ambiguous),
+        isFalse,
+      );
+    });
+  });
+
   group('preservesRichContentStructure accepts safe equivalent markup', () {
     test('preserves nested paragraph list link emphasis image and break tags',
         () {
