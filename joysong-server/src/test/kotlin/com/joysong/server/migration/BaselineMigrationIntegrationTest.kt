@@ -31,7 +31,7 @@ class BaselineMigrationIntegrationTest {
     private lateinit var jdbcTemplate: JdbcTemplate
 
     @Test
-    fun `fresh database applies B26 baseline followed by V31`() {
+    fun `fresh database applies B26 baseline followed by V33`() {
         val history = jdbcTemplate.query(
             """
             SELECT version, type, script
@@ -48,7 +48,9 @@ class BaselineMigrationIntegrationTest {
                 Triple("28", "SQL", "V28__expand_professional_project_requests.sql"),
                 Triple("29", "SQL", "V29__travel_ground_service_order_flow.sql"),
                 Triple("30", "SQL", "V30__order_service_conversations.sql"),
-                Triple("31", "SQL", "V31__store_raw_payment_event_payload.sql")
+                Triple("31", "SQL", "V31__store_raw_payment_event_payload.sql"),
+                Triple("32", "SQL", "V32__payment_compensation_and_usd_price_precision.sql"),
+                Triple("33", "SQL", "V33__doctor_institution_project_full_edit.sql")
             ),
             history
         )

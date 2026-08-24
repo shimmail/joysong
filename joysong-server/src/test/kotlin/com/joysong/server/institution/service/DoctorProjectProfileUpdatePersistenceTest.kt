@@ -1,6 +1,7 @@
 package com.joysong.server.institution.service
 
 import com.joysong.server.config.OrderSplitProperties
+import com.joysong.server.support.WorktreeTestDatabase
 import com.joysong.server.discover.repository.DoctorProjectRepository
 import com.joysong.server.identity.service.DoctorInstitutionRelationshipService
 import com.joysong.server.identity.service.ManagementActor
@@ -121,11 +122,9 @@ class DoctorProjectProfileUpdatePersistenceTest {
     private fun text(sql: String): String = jdbc.queryForObject(sql, String::class.java)!!
 
     companion object {
-        private const val DB_NAME = "myapp_worktree_doctor_profile_update_request"
-
         @Container @ServiceConnection @JvmField
         val mysql = DoctorProjectProfileUpdateMySqlContainer("mysql:8.0.39")
-            .withDatabaseName(DB_NAME)
+            .withDatabaseName(WorktreeTestDatabase.databaseName())
             .withTmpFs(mapOf("/var/lib/mysql" to "rw"))
     }
 }
@@ -137,9 +136,7 @@ class ProfileUpdatePersistenceTestConfig {
 
 class DoctorProjectProfileUpdateMySqlContainer(imageName: String) : MySQLContainer<DoctorProjectProfileUpdateMySqlContainer>(imageName) {
     override fun start() {
-        require(databaseName == "myapp_worktree_doctor_profile_update_request")
         super.start()
-        println("DOCTOR_PROFILE_UPDATE_TEST_DB_HOST=$host:${getMappedPort(3306)}")
-        println("DOCTOR_PROFILE_UPDATE_TEST_DB_NAME=$databaseName")
+        WorktreeTestDatabase.validateAndPrint(this)
     }
 }

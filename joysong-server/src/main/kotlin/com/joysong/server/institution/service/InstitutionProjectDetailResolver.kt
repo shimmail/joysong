@@ -18,8 +18,8 @@ class InstitutionProjectDetailResolver {
         tags = ip.tags.inherit(project.tags),
         slogan = ip.slogan.inherit(project.slogan),
         detailContent = ip.detailContent.inheritNullable(project.detailContent),
-        coverImage = ip.coverImage.ifBlank { project.coverImage },
-        images = ip.images.ifBlank { project.images },
+        coverImage = ip.coverImage?.takeIf { it.isNotBlank() } ?: project.coverImage,
+        images = ip.images?.takeIf { it.isNotBlank() } ?: project.images,
         salesCount = ip.salesCount
     )
 

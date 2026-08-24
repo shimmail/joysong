@@ -97,8 +97,8 @@ class InstitutionProjectController(
             price = request.price,
             originalPrice = request.originalPrice,
             currency = request.currency.name,
-            coverImage = request.coverImage ?: "",
-            images = request.images ?: "",
+            coverImage = request.coverImage?.trim()?.takeIf(String::isNotEmpty),
+            images = request.images?.trim()?.takeIf(String::isNotEmpty),
             salesCount = if (actor.isAdmin) request.salesCount ?: 0 else 0,
             isActive = request.isActive ?: true
         )
@@ -139,8 +139,8 @@ class InstitutionProjectController(
             price = request.price,
             originalPrice = request.originalPrice,
             currency = request.currency.name,
-            coverImage = request.coverImage?.trim().orEmpty(),
-            images = request.images?.trim().orEmpty(),
+            coverImage = request.coverImage?.trim()?.takeIf(String::isNotEmpty),
+            images = request.images?.trim()?.takeIf(String::isNotEmpty),
             salesCount = if (actor.isAdmin) request.salesCount ?: 0 else existing.salesCount,
             isActive = request.isActive ?: true,
             updatedAt = LocalDateTime.now()
@@ -358,8 +358,8 @@ class InstitutionProjectController(
             price = entity.price,
             originalPrice = entity.originalPrice,
             currency = entity.currency,
-            coverImage = entity.coverImage,
-            images = entity.images,
+            coverImage = entity.coverImage.orEmpty(),
+            images = entity.images.orEmpty(),
             effectiveCoverImage = effective.coverImage,
             effectiveImages = effective.images,
             salesCount = entity.salesCount,

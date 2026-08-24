@@ -1,5 +1,6 @@
 package com.joysong.server.institution.service
 
+import com.joysong.server.support.WorktreeTestDatabase
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -18,7 +19,7 @@ class DoctorProjectProfileUpdateMigrationTest {
     @Test
     fun `legacy schema recorded through V19 is repaired by V20`() {
         DoctorProfileMigrationMySqlContainer("mysql:8.0.39")
-            .withDatabaseName("myapp_worktree_doctor_orders_articles_legacy")
+            .withDatabaseName(WorktreeTestDatabase.databaseName())
             .withTmpFs(mapOf("/var/lib/mysql" to "rw"))
             .use { legacyMysql ->
                 legacyMysql.start()
@@ -101,19 +102,15 @@ class DoctorProjectProfileUpdateMigrationTest {
     private fun decimal(jdbc: JdbcTemplate, sql: String): BigDecimal = jdbc.queryForObject(sql, BigDecimal::class.java)!!
 
     companion object {
-        private const val DB_NAME = "myapp_worktree_doctor_orders_articles"
-
         @Container @JvmField
         val mysql = DoctorProfileMigrationMySqlContainer("mysql:8.0.39")
-            .withDatabaseName(DB_NAME).withTmpFs(mapOf("/var/lib/mysql" to "rw"))
+            .withDatabaseName(WorktreeTestDatabase.databaseName()).withTmpFs(mapOf("/var/lib/mysql" to "rw"))
     }
 }
 
 class DoctorProfileMigrationMySqlContainer(imageName: String) : MySQLContainer<DoctorProfileMigrationMySqlContainer>(imageName) {
     override fun start() {
-        require(databaseName.startsWith("myapp_worktree_"))
         super.start()
-        println("DOCTOR_PROFILE_MIGRATION_DB_HOST=$host:${getMappedPort(3306)}")
-        println("DOCTOR_PROFILE_MIGRATION_DB_NAME=$databaseName")
+        WorktreeTestDatabase.validateAndPrint(this)
     }
 }

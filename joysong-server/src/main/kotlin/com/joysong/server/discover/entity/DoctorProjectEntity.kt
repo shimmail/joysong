@@ -17,6 +17,7 @@ data class DoctorProjectEntity(
     @Column(name = "schedule_note") val scheduleNote: String = "",
     @Column(name = "cover_image") val coverImage: String = "",
     val images: String = "",
+    @Column(name = "is_active", nullable = false) val isActive: Boolean = true,
     @Column(name = "created_at") val createdAt: LocalDateTime = LocalDateTime.now(),
     @Column(name = "updated_at") val updatedAt: LocalDateTime? = null
 )

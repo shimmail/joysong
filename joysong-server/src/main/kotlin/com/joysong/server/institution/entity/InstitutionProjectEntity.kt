@@ -9,7 +9,11 @@ import com.joysong.server.common.money.CurrencyCode
 
 @Entity
 @Table(name = "institution_projects")
-@SQLDelete(sql = "UPDATE institution_projects SET deleted_at = NOW() WHERE id = ?")
+@SQLDelete(
+    sql = "UPDATE institution_projects " +
+        "SET deleted_at = NOW(), version = version + 1 " +
+        "WHERE id = ? AND version = ?"
+)
 @Where(clause = "deleted_at IS NULL")
 data class InstitutionProjectEntity(
     @Id
@@ -56,16 +60,20 @@ data class InstitutionProjectEntity(
     val currency: String = CurrencyCode.DEFAULT_CODE,
 
     @Column(name = "cover_image")
-    val coverImage: String = "",
+    val coverImage: String? = null,
 
     @Column(name = "images")
-    val images: String = "",
+    val images: String? = null,
 
     @Column(name = "sales_count")
     val salesCount: Int = 0,
 
     @Column(name = "is_active")
     val isActive: Boolean = true,
+
+    @Version
+    @Column(name = "version", nullable = false)
+    val version: Long = 0,
 
     @Column(name = "created_at")
     val createdAt: LocalDateTime = LocalDateTime.now(),
