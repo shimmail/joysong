@@ -4,7 +4,6 @@ import com.joysong.server.order.dto.OrderStatusEnum
 import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.repository.OrderRepository
 import com.joysong.server.order.service.OrderStatusLogService
-import com.joysong.server.notification.service.BusinessNotificationService
 import com.joysong.server.payment.domain.Money
 import com.joysong.server.payment.domain.PaymentCompensation
 import com.joysong.server.payment.domain.PaymentProvider
@@ -30,7 +29,7 @@ class PaymentPersistenceService(
     private val orderRepository: OrderRepository,
     private val orderStatusLogService: OrderStatusLogService,
     private val compensationRepository: PaymentCompensationCaseRepository? = null,
-    private val businessNotificationService: BusinessNotificationService
+    private val businessNotificationDispatcher: PaymentBusinessNotificationDispatcher
 ) {
     private val secureRandom = SecureRandom()
 
@@ -352,7 +351,7 @@ class PaymentPersistenceService(
                 payment.id
             )
             notifyAfterCommitSafely("ORDER_SERVICE_ACTIVATED", updatedOrder.id) {
-                businessNotificationService.orderServiceActivated(
+                businessNotificationDispatcher.orderServiceActivated(
                     updatedOrder.id,
                     updatedOrder.userId,
                     updatedOrder.consultantId,

@@ -26,7 +26,18 @@ import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.springframework.aop.framework.ProxyFactory
+import org.springframework.aop.support.AopUtils
+import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.datasource.DataSourceTransactionManager
+import org.springframework.jdbc.datasource.DriverManagerDataSource
+import org.springframework.transaction.TransactionManager
 import org.junit.jupiter.api.Test
+import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource
+import org.springframework.transaction.annotation.Propagation
+import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.interceptor.TransactionInterceptor
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.AbstractPlatformTransactionManager
 import org.springframework.transaction.support.DefaultTransactionStatus
@@ -842,6 +853,118 @@ class PaymentOrchestrationTest {
     }
 
     @Test
+    fun `after commit activation notification uses a new database transaction`() {
+        val dataSource = DriverManagerDataSource("jdbc:h2:mem:payment_dispatcher;DB_CLOSE_DELAY=-1", "sa", "")
+        val jdbc = JdbcTemplate(dataSource)
+        jdbc.execute("CREATE TABLE business_events (id INT PRIMARY KEY)")
+        jdbc.execute("CREATE TABLE notification_events (id INT PRIMARY KEY)")
+        val repositories = persistenceRepositories()
+        val prepared = travelPayment(status = PaymentStatus.PROCESSING.name)
+        var orderState = travelOrder()
+        var paymentState = prepared
+        every { repositories.payment.findByIdForUpdate(prepared.id) } answers { paymentState }
+        every { repositories.payment.save(any()) } answers {
+            firstArg<PaymentEntity>().also { paymentState = it }
+        }
+        every { repositories.order.findByIdIncludeDeletedForUpdate(prepared.orderId) } answers { orderState }
+        every { repositories.order.save(any()) } answers {
+            firstArg<OrderEntity>().also { orderState = it }
+        }
+        every { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) } returns Unit
+        every { businessNotificationService.orderServiceActivated(any(), any(), any(), any()) } answers {
+            jdbc.update("INSERT INTO notification_events (id) VALUES (1)")
+            Unit
+        }
+        val transactionManager = CountingDataSourceTransactionManager(dataSource)
+        val dispatcher = proxiedDispatcher(transactionManager)
+        assertTrue(AopUtils.isAopProxy(dispatcher))
+        val transactional = PaymentBusinessNotificationDispatcher::class.java
+            .getMethod("orderServiceActivated", String::class.java, String::class.java, String::class.java, String::class.java)
+            .getAnnotation(Transactional::class.java)
+        assertNotNull(transactional)
+        assertEquals(Propagation.REQUIRES_NEW, transactional.propagation)
+        val persistence = PaymentPersistenceService(
+            repositories.payment,
+            repositories.order,
+            repositories.log,
+            businessNotificationDispatcher = dispatcher
+        )
+
+        TransactionTemplate(transactionManager).executeWithoutResult {
+            jdbc.update("INSERT INTO business_events (id) VALUES (1)")
+            persistence.applyProviderResult(
+                prepared.id,
+                ProviderPaymentResult(
+                    status = PaymentStatus.SUCCEEDED,
+                    providerPaymentId = "alipay-requires-new",
+                    amountMinor = 40_000,
+                    currency = "USD"
+                )
+            )
+            persistence.applyProviderResult(
+                prepared.id,
+                ProviderPaymentResult(
+                    status = PaymentStatus.SUCCEEDED,
+                    providerPaymentId = "alipay-requires-new",
+                    amountMinor = 40_000,
+                    currency = "USD"
+                )
+            )
+        }
+
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM business_events", Int::class.java))
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM notification_events", Int::class.java))
+        assertEquals(2, transactionManager.begins)
+    }
+
+    @Test
+    fun `failed independent activation notification leaves outer business commit intact`() {
+        val dataSource = DriverManagerDataSource("jdbc:h2:mem:payment_dispatcher_failure;DB_CLOSE_DELAY=-1", "sa", "")
+        val jdbc = JdbcTemplate(dataSource)
+        jdbc.execute("CREATE TABLE business_events (id INT PRIMARY KEY)")
+        jdbc.execute("CREATE TABLE notification_events (id INT PRIMARY KEY)")
+        val repositories = persistenceRepositories()
+        val prepared = travelPayment(status = PaymentStatus.PROCESSING.name)
+        var orderState = travelOrder()
+        every { repositories.payment.findByIdForUpdate(prepared.id) } returns prepared
+        every { repositories.payment.save(any()) } answers { firstArg() }
+        every { repositories.order.findByIdIncludeDeletedForUpdate(prepared.orderId) } answers { orderState }
+        every { repositories.order.save(any()) } answers {
+            firstArg<OrderEntity>().also { orderState = it }
+        }
+        every { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) } returns Unit
+        every { businessNotificationService.orderServiceActivated(any(), any(), any(), any()) } answers {
+            jdbc.update("INSERT INTO notification_events (id) VALUES (1)")
+            throw IllegalStateException("notification persistence unavailable")
+        }
+        val transactionManager = CountingDataSourceTransactionManager(dataSource)
+        val persistence = PaymentPersistenceService(
+            repositories.payment,
+            repositories.order,
+            repositories.log,
+            businessNotificationDispatcher = proxiedDispatcher(transactionManager)
+        )
+
+        TransactionTemplate(transactionManager).executeWithoutResult {
+            jdbc.update("INSERT INTO business_events (id) VALUES (1)")
+            persistence.applyProviderResult(
+                prepared.id,
+                ProviderPaymentResult(
+                    status = PaymentStatus.SUCCEEDED,
+                    providerPaymentId = "alipay-requires-new-failure",
+                    amountMinor = 40_000,
+                    currency = "USD"
+                )
+            )
+        }
+
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM business_events", Int::class.java))
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM notification_events", Int::class.java))
+        assertEquals(2, transactionManager.begins)
+        verify(exactly = 1) { businessNotificationService.orderServiceActivated(any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `service fee success after the order deadline is compensated instead of activating service`() {
         val repositories = persistenceRepositories()
         val orderCreatedAt = LocalDateTime.now().minusMinutes(31)
@@ -1269,14 +1392,29 @@ class PaymentOrchestrationTest {
         paymentRepository: PaymentRepository,
         orderRepository: OrderRepository,
         orderStatusLogService: OrderStatusLogService,
-        compensationRepository: PaymentCompensationCaseRepository? = null
+        compensationRepository: PaymentCompensationCaseRepository? = null,
+        businessNotificationDispatcher: PaymentBusinessNotificationDispatcher =
+            PaymentBusinessNotificationDispatcher(businessNotificationService)
     ): PaymentPersistenceService = com.joysong.server.payment.service.PaymentPersistenceService(
         paymentRepository,
         orderRepository,
         orderStatusLogService,
         compensationRepository,
-        businessNotificationService
+        businessNotificationDispatcher
     )
+
+    private fun proxiedDispatcher(
+        transactionManager: DataSourceTransactionManager
+    ): PaymentBusinessNotificationDispatcher {
+        val transactionAdvice = TransactionInterceptor(
+            transactionManager as TransactionManager,
+            AnnotationTransactionAttributeSource()
+        )
+        return (ProxyFactory(PaymentBusinessNotificationDispatcher(businessNotificationService)).apply {
+            isProxyTargetClass = true
+            addAdvice(transactionAdvice)
+        }.proxy as PaymentBusinessNotificationDispatcher)
+    }
 
     private fun travelService(
         repositories: PersistenceRepositories,
@@ -1340,5 +1478,15 @@ class PaymentOrchestrationTest {
         }
 
         override fun doRollback(status: DefaultTransactionStatus) = Unit
+    }
+
+    private class CountingDataSourceTransactionManager(dataSource: javax.sql.DataSource) :
+        DataSourceTransactionManager(dataSource) {
+        var begins = 0
+
+        override fun doBegin(transaction: Any, definition: TransactionDefinition) {
+            begins += 1
+            super.doBegin(transaction, definition)
+        }
     }
 }
