@@ -7,6 +7,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/core/config/app_environment.dart';
 import 'package:joysong_flutter/core/network/api_client.dart';
+import 'package:joysong_flutter/features/messaging/domain/notification_target.dart';
 import 'package:joysong_flutter/features/messaging/presentation/messaging_pages.dart';
 import 'package:joysong_flutter/features/orders/presentation/order_detail_page.dart';
 import 'package:joysong_flutter/features/shell/presentation/app_shell.dart';
@@ -14,6 +15,63 @@ import 'package:joysong_flutter/features/shell/presentation/app_shell.dart';
 import '../orders/order_test_fixtures.dart';
 
 void main() {
+  test('business notification targets remain system messages and map to scoped destinations', () {
+    expect(isActivityNotificationType('ORDER_REFUND_APPROVED'), isFalse);
+    expect(isActivityNotificationType('PROFESSIONAL_APPLICATION_REJECTED'), isFalse);
+    expect(isActivityNotificationType('IDENTITY_APPLICATION_APPROVED'), isFalse);
+    expect(isActivityNotificationType('promotion'), isTrue);
+
+    expect(
+      NotificationTarget.parse('order', 'order-1').kind,
+      NotificationTargetKind.orderDetail,
+    );
+    expect(
+      NotificationTarget.parse('order_refund', 'order-1').kind,
+      NotificationTargetKind.orderDetail,
+    );
+    expect(
+      NotificationTarget.parse('order_service_conversation', 'order-1').kind,
+      NotificationTargetKind.orderServiceConversation,
+    );
+    expect(
+      NotificationTarget.parse('identity_management', 'identity-1').kind,
+      NotificationTargetKind.identityManagement,
+    );
+    expect(
+      NotificationTarget.parse('identity_application', 'identity-1').kind,
+      NotificationTargetKind.identityApplication,
+    );
+    expect(
+      NotificationTarget.parse('professional_doctor_review', 'request-1').kind,
+      NotificationTargetKind.professionalDoctorReview,
+    );
+    expect(
+      NotificationTarget.parse('professional_consultant_review', 'request-1').kind,
+      NotificationTargetKind.professionalConsultantReview,
+    );
+    expect(
+      NotificationTarget.parse('professional_doctor_application', 'request-1').kind,
+      NotificationTargetKind.professionalDoctorApplication,
+    );
+    expect(
+      NotificationTarget.parse('professional_doctor_relationships', 'request-1').kind,
+      NotificationTargetKind.professionalDoctorRelationships,
+    );
+    expect(
+      NotificationTarget.parse('professional_consultant_application', 'request-1').kind,
+      NotificationTargetKind.professionalConsultantApplication,
+    );
+    expect(
+      NotificationTarget.parse('professional_consultant_relationships', 'request-1').kind,
+      NotificationTargetKind.professionalConsultantRelationships,
+    );
+    expect(
+      NotificationTarget.parse('identity_application', '').id,
+      isEmpty,
+      reason: 'A stale target retains its destination so the shell can fall back safely.',
+    );
+  });
+
   testWidgets('system back pops nested content before leaving the app shell',
       (tester) async {
     await tester.pumpWidget(

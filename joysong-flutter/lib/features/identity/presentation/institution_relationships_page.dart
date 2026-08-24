@@ -12,12 +12,14 @@ class InstitutionRelationshipsPage extends StatefulWidget {
     required this.repository,
     required this.scope,
     this.initialRequestId,
+    this.initialReviewType,
     super.key,
   });
 
   final IdentityRepository repository;
   final InstitutionRelationshipScope scope;
   final String? initialRequestId;
+  final InstitutionMembershipRequestType? initialReviewType;
 
   @override
   State<InstitutionRelationshipsPage> createState() =>
@@ -89,7 +91,10 @@ class _InstitutionRelationshipsPageState
         if (generation != _loadGeneration || !mounted) return;
         final managed = managementContext.managedInstitutionIds.toSet();
         final requests = reviewable
-            .where((request) => managed.contains(request.institutionId))
+            .where((request) =>
+                managed.contains(request.institutionId) &&
+                (widget.initialReviewType == null ||
+                    request.requestType == widget.initialReviewType))
             .toList(growable: false);
         setState(() {
           _managementContext = managementContext;

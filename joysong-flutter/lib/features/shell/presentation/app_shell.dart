@@ -30,6 +30,7 @@ import 'package:joysong_flutter/features/home/domain/home_models.dart';
 import 'package:joysong_flutter/features/home/domain/home_repository.dart';
 import 'package:joysong_flutter/features/home/presentation/home_page.dart';
 import 'package:joysong_flutter/features/identity/data/identity_repository_impl.dart';
+import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
 import 'package:joysong_flutter/features/identity/presentation/identity_pages.dart';
 import 'package:joysong_flutter/features/identity/presentation/institution_relationships_page.dart';
@@ -38,6 +39,7 @@ import 'package:joysong_flutter/features/messaging/data/messaging_repository_imp
 import 'package:joysong_flutter/features/messaging/data/secure_messaging_preferences_store.dart';
 import 'package:joysong_flutter/features/messaging/domain/messaging_models.dart';
 import 'package:joysong_flutter/features/messaging/domain/messaging_repository.dart';
+import 'package:joysong_flutter/features/messaging/domain/notification_target.dart';
 import 'package:joysong_flutter/features/messaging/presentation/messaging_controllers.dart';
 import 'package:joysong_flutter/features/messaging/presentation/messaging_pages.dart';
 import 'package:joysong_flutter/features/orders/data/orders_remote_data_source.dart';
@@ -960,14 +962,7 @@ class _AppShellState extends State<AppShell> {
               ? (english ? 'Activity messages' : '活动消息')
               : (english ? 'System messages' : '系统消息'),
           filter: (notification) {
-            final type = notification.type.trim().toLowerCase();
-            final isActivity = const {
-              'activity',
-              'promotion',
-              'marketing',
-              'campaign',
-              'offer',
-            }.contains(type);
+            final isActivity = isActivityNotificationType(notification.type);
             return activity ? isActivity : !isActivity;
           },
           onOpenNotification: _openNotificationTarget,
@@ -977,54 +972,68 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _openNotificationTarget(AppNotification notification) {
-    final targetId = notification.targetId.trim();
-    if (targetId.isEmpty) return;
-    final type = notification.targetType.trim().toLowerCase();
-    if (type == 'dm_conversation') {
-      unawaited(_openDmConversation(targetId));
-      return;
+    final target = NotificationTarget.parse(
+      notification.targetType,
+      notification.targetId,
+    );
+    switch (target.kind) {
+      case NotificationTargetKind.directMessage:
+        if (target.id.isNotEmpty) unawaited(_openDmConversation(target.id));
+        return;
+      case NotificationTargetKind.user:
+        if (target.id.isNotEmpty) _openPublicUser(target.id);
+        return;
+      case NotificationTargetKind.orderDetail:
+        if (target.id.isEmpty) {
+          unawaited(_openOrders());
+        } else {
+          unawaited(_openOrderDetailById(target.id));
+        }
+        return;
+      case NotificationTargetKind.orderServiceConversation:
+        if (target.id.isNotEmpty) {
+          unawaited(_openOrderServiceConversation(target.id));
+        }
+        return;
+      case NotificationTargetKind.identityManagement:
+        _openIdentityCenter();
+        return;
+      case NotificationTargetKind.identityApplication:
+        _openIdentityCenter(initialApplicationId: target.id);
+        return;
+      case NotificationTargetKind.professionalDoctorReview:
+        _openInstitutionRelationships(
+          InstitutionRelationshipScope.legalRepresentative,
+          initialRequestId: target.id,
+          initialReviewType: InstitutionMembershipRequestType.doctor,
+        );
+        return;
+      case NotificationTargetKind.professionalConsultantReview:
+        _openInstitutionRelationships(
+          InstitutionRelationshipScope.legalRepresentative,
+          initialRequestId: target.id,
+          initialReviewType: InstitutionMembershipRequestType.consultant,
+        );
+        return;
+      case NotificationTargetKind.professionalDoctorApplication:
+      case NotificationTargetKind.professionalDoctorRelationships:
+        _openInstitutionRelationships(
+          InstitutionRelationshipScope.doctor,
+          initialRequestId: target.id,
+        );
+        return;
+      case NotificationTargetKind.professionalConsultantApplication:
+      case NotificationTargetKind.professionalConsultantRelationships:
+        _openInstitutionRelationships(
+          InstitutionRelationshipScope.consultant,
+          initialRequestId: target.id,
+        );
+        return;
+      case NotificationTargetKind.discover:
+      case NotificationTargetKind.unknown:
+        break;
     }
-    if (type == 'user') {
-      _openPublicUser(targetId);
-      return;
-    }
-    if (type == 'order' || type == 'order_refund') {
-      unawaited(_openOrderDetailById(targetId));
-      return;
-    }
-    if (type == 'order_service_conversation') {
-      unawaited(_openOrderServiceConversation(targetId));
-      return;
-    }
-    if (type == 'identity_management') {
-      _openIdentityCenter();
-      return;
-    }
-    if (type == 'identity_application') {
-      _openIdentityCenter(initialApplicationId: targetId);
-      return;
-    }
-    final relationshipScope = switch (type) {
-      'professional_doctor_review' =>
-        InstitutionRelationshipScope.legalRepresentative,
-      'professional_consultant_review' =>
-        InstitutionRelationshipScope.legalRepresentative,
-      'professional_doctor_application' ||
-      'professional_doctor_relationships' =>
-        InstitutionRelationshipScope.doctor,
-      'professional_consultant_application' ||
-      'professional_consultant_relationships' =>
-        InstitutionRelationshipScope.consultant,
-      _ => null,
-    };
-    if (relationshipScope != null) {
-      _openInstitutionRelationships(
-        relationshipScope,
-        initialRequestId: targetId,
-      );
-      return;
-    }
-    final discoverType = switch (type) {
+    final discoverType = switch (notification.targetType.trim().toLowerCase()) {
       'project' => DiscoverContentType.project,
       'institution' => DiscoverContentType.institution,
       'doctor' => DiscoverContentType.doctor,
@@ -1033,12 +1042,12 @@ class _AppShellState extends State<AppShell> {
       _ => null,
     };
     final repository = _discoverRepository;
-    if (discoverType == null || repository == null) return;
+    if (target.id.isEmpty || discoverType == null || repository == null) return;
     _contentNavigator.push<void>(MaterialPageRoute(
       builder: (_) => DiscoverDetailPage(
         repository: repository,
         type: discoverType,
-        id: targetId,
+        id: target.id,
         onBookProject: _bookingRepository == null ? null : _openBooking,
         socialController: _socialController,
         onOpenUser: _openPublicUser,
@@ -1084,6 +1093,7 @@ class _AppShellState extends State<AppShell> {
   void _openInstitutionRelationships(
     InstitutionRelationshipScope scope, {
     String? initialRequestId,
+    InstitutionMembershipRequestType? initialReviewType,
   }) {
     final repository = _identityRepository;
     if (repository == null) return;
@@ -1093,6 +1103,7 @@ class _AppShellState extends State<AppShell> {
           repository: repository,
           scope: scope,
           initialRequestId: initialRequestId,
+          initialReviewType: initialReviewType,
         ),
       ),
     );
