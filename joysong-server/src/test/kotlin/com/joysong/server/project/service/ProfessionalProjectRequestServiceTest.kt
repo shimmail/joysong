@@ -4,10 +4,13 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.joysong.server.common.money.CurrencyCode
+import com.joysong.server.common.GlobalExceptionHandler
 import com.joysong.server.config.OrderSplitProperties
 import com.joysong.server.identity.service.InstitutionRelationshipReviewAuthorityOperations
 import com.joysong.server.identity.service.ManagementActor
 import com.joysong.server.order.service.OrderSplitRatePolicy
+import com.joysong.server.institution.service.ProjectChangeContractException
+import com.joysong.server.institution.service.ProjectChangeErrorCode
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -19,6 +22,7 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.cache.CacheManager
 import org.springframework.security.access.AccessDeniedException
+import org.springframework.http.HttpStatus
 import java.math.BigDecimal
 import java.sql.ResultSet
 import java.sql.Timestamp
@@ -191,9 +195,53 @@ class ProfessionalProjectRequestServiceTest {
         assertEquals(null, normalized.coverImage)
         assertEquals(null, normalized.images)
         assertEquals(3, normalized.salesCount)
-        assertThrows<IllegalArgumentException> {
+        val error = assertThrows<ProjectChangeContractException> {
             InstitutionProjectPayloadPolicy().normalize(InstitutionProjectPayload(salesCount = -1))
         }
+        assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, error.status)
+        assertEquals(ProjectChangeErrorCode.PROJECT_PAYLOAD_INVALID, error.errorCode)
+        val response = GlobalExceptionHandler().handleProjectChangeContract(error)
+        assertEquals(
+            "PROJECT_PAYLOAD_INVALID",
+            objectMapper.readTree(objectMapper.writeValueAsString(response.body)).path("errorCode").asText()
+        )
+    }
+
+    @Test
+    fun `shared payload policy rejects blank members in nonempty tag and image lists`() {
+        val invalidPayloads = listOf(
+            InstitutionProjectPayload(tags = listOf("valid", " ")),
+            InstitutionProjectPayload(images = listOf(" ", "valid.png"))
+        )
+
+        invalidPayloads.forEach { payload ->
+            val error = assertThrows<ProjectChangeContractException> {
+                InstitutionProjectPayloadPolicy().normalize(payload)
+            }
+            assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, error.status)
+            assertEquals(ProjectChangeErrorCode.PROJECT_PAYLOAD_INVALID, error.errorCode)
+        }
+    }
+
+    @Test
+    fun `institution submission rejects blank list members as a coded payload error before writes`() {
+        every { jdbcTemplate.queryForObject(match<String> { it.contains("FROM projects") }, Long::class.java, *anyVararg()) } returns 1L
+        every { jdbcTemplate.queryForObject(match<String> { it.contains("FROM institution_projects") }, Long::class.java, *anyVararg()) } returns 0L
+        every { jdbcTemplate.queryForObject(match<String> { it.contains("professional_project_requests") }, Long::class.java, *anyVararg()) } returns 0L
+        every { jdbcTemplate.update(match<String> { it.contains("INSERT INTO professional_project_requests") }, *anyVararg()) } returns 1
+        val invalidRequests = listOf(
+            DoctorInstitutionProjectRequest(projectId = "project-1", tags = listOf("valid", " ")),
+            DoctorInstitutionProjectRequest(projectId = "project-1", images = listOf(" ", "valid.png"))
+        )
+
+        invalidRequests.forEach { request ->
+            val error = assertThrows<ProjectChangeContractException> {
+                service.submitInstitution(doctorActor(), "institution-1", request)
+            }
+            assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, error.status)
+            assertEquals(ProjectChangeErrorCode.PROJECT_PAYLOAD_INVALID, error.errorCode)
+        }
+        verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
     }
 
     @Test
@@ -286,9 +334,10 @@ class ProfessionalProjectRequestServiceTest {
             assertThrows<IllegalArgumentException> { service.submitPlatform(doctorActor(), request) }
         }
         institutionRequests.forEach { request ->
-            assertThrows<IllegalArgumentException> {
+            val error = assertThrows<ProjectChangeContractException> {
                 service.submitInstitution(doctorActor(), "institution-1", request)
             }
+            assertEquals(ProjectChangeErrorCode.PROJECT_PAYLOAD_INVALID, error.errorCode)
         }
         verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
     }
@@ -299,19 +348,27 @@ class ProfessionalProjectRequestServiceTest {
         every { jdbcTemplate.queryForObject(match<String> { it.contains("FROM institution_projects") }, Long::class.java, *anyVararg()) } returns 0L
         every { jdbcTemplate.queryForObject(match<String> { it.contains("professional_project_requests") }, Long::class.java, *anyVararg()) } returns 0L
         every { jdbcTemplate.update(match<String> { it.contains("INSERT INTO professional_project_requests") }, *anyVararg()) } returns 1
-        val invalidRequests = listOf(
+        val invalidLegacyRequests = listOf(
             DoctorInstitutionProjectRequest(projectId = "project-1", description = "Service", price = BigDecimal("1.001")),
             DoctorInstitutionProjectRequest(projectId = "project-1", description = "Service", originalPrice = BigDecimal("-0.01")),
             DoctorInstitutionProjectRequest(projectId = "project-1", description = "Service", consultationFee = BigDecimal("100000000.00")),
-            DoctorInstitutionProjectRequest(projectId = "project-1", description = "Service", salesCount = -1),
             DoctorInstitutionProjectRequest(projectId = "project-1", description = "Service", commissionRate = BigDecimal("60.00"), institutionRate = BigDecimal("50.00"))
         )
 
-        invalidRequests.forEach { request ->
+        invalidLegacyRequests.forEach { request ->
             assertThrows<IllegalArgumentException> {
                 service.submitInstitution(doctorActor(), "institution-1", request)
             }
         }
+        val payloadError = assertThrows<ProjectChangeContractException> {
+            service.submitInstitution(
+                doctorActor(),
+                "institution-1",
+                DoctorInstitutionProjectRequest(projectId = "project-1", description = "Service", salesCount = -1)
+            )
+        }
+        assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, payloadError.status)
+        assertEquals(ProjectChangeErrorCode.PROJECT_PAYLOAD_INVALID, payloadError.errorCode)
         verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
     }
 

@@ -22,8 +22,9 @@ enum class ProjectChangeErrorCode {
 class ProjectChangeContractException(
     val status: HttpStatus,
     val errorCode: ProjectChangeErrorCode,
-    message: String
-) : RuntimeException(message)
+    message: String,
+    cause: Throwable? = null
+) : RuntimeException(message, cause)
 
 @JsonPropertyOrder("schemaVersion", "association", "rawOverrides", "effective", "source")
 data class InstitutionProjectSnapshotV2(

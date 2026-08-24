@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.text.Normalizer
 import java.time.format.DateTimeFormatter
+import org.springframework.http.HttpStatus
 
 class DoctorProjectSnapshotCodec(private val objectMapper: ObjectMapper) {
     private val snapshotReader = objectMapper.copy()
@@ -54,19 +55,28 @@ class DoctorProjectSnapshotCodec(private val objectMapper: ObjectMapper) {
         return sha256(objectMapper.writeValueAsBytes(canonical))
     }
 
-    fun encode(snapshot: InstitutionProjectSnapshotV2): String {
+    fun encode(snapshot: InstitutionProjectSnapshotV2): String = snapshotOperation {
         validateSnapshot(objectMapper.valueToTree(snapshot))
-        return objectMapper.writeValueAsString(snapshot)
+        objectMapper.writeValueAsString(snapshot)
     }
 
-    fun decode(raw: String): InstitutionProjectSnapshotV2 = try {
+    fun decode(raw: String): InstitutionProjectSnapshotV2 = snapshotOperation {
         val tree = objectMapper.readTree(raw) ?: throw IllegalArgumentException("snapshot is null")
         validateSnapshot(tree)
         snapshotReader.readValue(raw)
-    } catch (e: IllegalArgumentException) {
+    }
+
+    private fun <T> snapshotOperation(action: () -> T): T = try {
+        action()
+    } catch (e: ProjectChangeContractException) {
         throw e
     } catch (e: Exception) {
-        throw IllegalArgumentException("REQUEST_SNAPSHOT_INVALID", e)
+        throw ProjectChangeContractException(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            ProjectChangeErrorCode.REQUEST_SNAPSHOT_INVALID,
+            "项目快照无效",
+            e
+        )
     }
 
     private fun validateSnapshot(root: JsonNode) {

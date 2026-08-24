@@ -6,6 +6,7 @@ import com.joysong.server.common.GlobalExceptionHandler
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -127,7 +128,29 @@ class DoctorProjectSnapshotCodecTest {
             valid.replace("\"tags\":[\"local\"]", "\"tags\":[]"),
             valid.replace("\"name\":\"Effective name\"", "\"name\":\"   \"")
         )
-        cases.forEach { raw -> assertThrows<IllegalArgumentException> { codec.decode(raw) } }
+        cases.forEach { raw ->
+            val error = assertThrows<ProjectChangeContractException> { codec.decode(raw) }
+            assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, error.status)
+            assertEquals(ProjectChangeErrorCode.REQUEST_SNAPSHOT_INVALID, error.errorCode)
+        }
+    }
+
+    @Test
+    fun `snapshot validation failures retain their cause and serialize a coded envelope`() {
+        val decodeError = assertThrows<ProjectChangeContractException> { codec.decode("not-json") }
+        assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, decodeError.status)
+        assertEquals(ProjectChangeErrorCode.REQUEST_SNAPSHOT_INVALID, decodeError.errorCode)
+        assertNotNull(decodeError.cause)
+
+        val encodeError = assertThrows<ProjectChangeContractException> {
+            codec.encode(validSnapshot().copy(schemaVersion = 3))
+        }
+        assertEquals(ProjectChangeErrorCode.REQUEST_SNAPSHOT_INVALID, encodeError.errorCode)
+
+        val response = GlobalExceptionHandler().handleProjectChangeContract(decodeError)
+        val json = mapper.readTree(mapper.writeValueAsString(response.body))
+        assertEquals(422, response.statusCode.value())
+        assertEquals("REQUEST_SNAPSHOT_INVALID", json.path("errorCode").asText())
     }
 
     @Test

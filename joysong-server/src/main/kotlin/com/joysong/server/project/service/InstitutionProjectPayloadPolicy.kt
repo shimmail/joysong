@@ -1,5 +1,8 @@
 package com.joysong.server.project.service
 
+import com.joysong.server.institution.service.ProjectChangeContractException
+import com.joysong.server.institution.service.ProjectChangeErrorCode
+import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
 import java.text.Normalizer
 
@@ -17,7 +20,20 @@ data class InstitutionProjectPayload(
 
 @Component
 class InstitutionProjectPayloadPolicy {
-    fun normalize(payload: InstitutionProjectPayload): InstitutionProjectPayload {
+    fun normalize(payload: InstitutionProjectPayload): InstitutionProjectPayload = try {
+        normalizeValidated(payload)
+    } catch (e: ProjectChangeContractException) {
+        throw e
+    } catch (e: IllegalArgumentException) {
+        throw ProjectChangeContractException(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            ProjectChangeErrorCode.PROJECT_PAYLOAD_INVALID,
+            e.message ?: "机构项目内容无效",
+            e
+        )
+    }
+
+    private fun normalizeValidated(payload: InstitutionProjectPayload): InstitutionProjectPayload {
         require(payload.salesCount >= 0) { "销量不能为负数" }
         return InstitutionProjectPayload(
             name = optionalText("项目名称", payload.name, 200),
@@ -47,10 +63,10 @@ class InstitutionProjectPayloadPolicy {
     ): List<String>? {
         if (values.isNullOrEmpty()) return null
         require(values.size <= maxItems) { "${label}最多包含 $maxItems 项" }
-        val normalized = values.mapNotNull { value ->
-            value.trim().takeIf(String::isNotEmpty)?.let { Normalizer.normalize(it, Normalizer.Form.NFC) }
+        require(values.none(String::isBlank)) { "${label}不能包含空白项" }
+        val normalized = values.map { value ->
+            Normalizer.normalize(value.trim(), Normalizer.Form.NFC)
         }
-        if (normalized.isEmpty()) return null
         normalized.forEach { require(it.length <= maxItemLength) { "${label}每项不能超过 $maxItemLength 个字符" } }
         require(normalized.joinToString(",").length <= maxTargetLength) {
             "${label}不能超过 $maxTargetLength 个字符"
