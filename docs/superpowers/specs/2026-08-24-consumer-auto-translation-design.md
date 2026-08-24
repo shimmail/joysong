@@ -49,6 +49,8 @@ Create a reusable `core/translation` module with these boundaries:
 
 The social repository continues to expose manual translation behavior during this phase, but its HTTP implementation delegates to the shared translation repository instead of duplicating endpoint logic.
 
+All callers use the backend's existing content-type whitelist: `diary`, `comment`, `article`, `article_html`, `project`, `project_html`, `institution`, `doctor`, `message`, and `general`. Banners use `general`, reviews use `comment`, and direct messages use `message`.
+
 ### Activation conditions
 
 An automatic request is eligible only when all of these conditions hold:
@@ -106,7 +108,7 @@ Automatically translate eligible titles, summaries, descriptions, categories, ad
 - Articles: title, category, summary, plain-text body, and supported rich-text body.
 - Projects: name, slogan, description, detailed content, category, tags, institution name, and address.
 - Institutions: name, address, description, public qualification description, and consumer-facing project cards.
-- Doctors: professional title, specialties, biography, public credential description, related project text, diary text, and review text. Doctor names and certificate identifiers remain unchanged.
+- Doctors: consumer-visible institution/affiliation name, professional title, specialties, biography, public credential description, related project text, diary text, and review text. Doctor names and certificate identifiers remain unchanged.
 - Diaries, comments, replies, and direct messages: automatically invoke the existing translation capability when enabled while retaining all manual translation controls.
 - Reviews: review body, related project name, and tags. Reviewer names remain unchanged.
 
@@ -122,6 +124,10 @@ No automatic translation integration is added to:
 
 Consumer-facing institution and doctor discovery/detail pages are included; only their Chinese operator workflows are excluded.
 
+Some catalog detail widgets are shared by consumer discovery and Chinese professional operations. Shared project, institution, review, and related-content widgets must expose an explicit consumer auto-translation flag whose default is `false`. Only the consumer `DiscoverDetailPage` entry passes `true`; professional catalog and management callers retain the default and never register automatic translation requests.
+
+The same default-false rule applies to reusable diary preview cards/rails and review preview/cards. Home, Discover, Social, and consumer detail parents opt in explicitly; an active global scope alone never enables a reusable child reached from an operator page.
+
 ## Rendering and Data Flow
 
 1. A consumer page loads its normal database-backed DTOs.
@@ -136,7 +142,7 @@ Page controllers must not wait for translation before entering their ready state
 
 ## Rich Text
 
-Article and project HTML use the existing `article_html` and `project_html` content types. A translated HTML result is accepted only if it passes structural validation sufficient for the current renderer. If required tags or parse structure are invalid, the result is discarded and the source HTML remains visible.
+Article and project HTML use the existing `article_html` and `project_html` content types. A translated HTML result is accepted only if it preserves the source tag sequence and existing link/image URL identities and contains no scripts, event-handler attributes, or unsafe URL schemes. If required tags, URLs, or parse structure are invalid, the result is discarded and the source HTML remains visible.
 
 Rich-text translation tests cover preserved paragraph, list, link, and emphasis structures. Automatic translation must not inject executable markup or broaden the renderer's existing HTML capabilities.
 
@@ -147,7 +153,8 @@ Rich-text translation tests cover preserved paragraph, list, link, and emphasis 
 - A failed item does not cancel unrelated queued items.
 - Disposed widgets do not receive UI updates.
 - Results from an old language, disabled generation, or changed source value are ignored.
-- Existing manual translation errors retain their current explicit feedback.
+- Automatic results remain separate from existing manual translation caches and callbacks. A cached automatic result may be toggled back from source without another request, but an automatic failure must still leave the original manual action callable.
+- Existing manual translation requests and errors retain their current behavior and explicit feedback even while automatic mode is active.
 
 ## Testing Strategy
 
@@ -177,7 +184,7 @@ Follow test-driven development and run the smallest relevant tests first.
 - Representative article, project, institution, doctor, diary, and review detail fields translate.
 - One failed field does not prevent other fields or page rendering.
 - Person names and excluded data types do not translate.
-- Identity, professional-management, institution-project-management, doctor-service-management, and consultant-management screens make zero automatic calls.
+- Excluded operator entries that render a modified shared component make zero automatic calls under an active global scope with Chinese fixtures. Excluded identity, institution-project-management, doctor-service-management, consultant-management, and admin modules that do not consume the new builders are verified by an unchanged-file audit.
 - Rich-text structural failure preserves source content.
 
 After focused tests pass, run `flutter analyze`, then at most one full Flutter test run if it remains within the repository's ten-minute limit.
