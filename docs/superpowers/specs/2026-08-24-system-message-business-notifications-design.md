@@ -33,9 +33,9 @@ Stable notification types:
 
 Because the current notification schema has no metadata JSON, navigation scope is encoded by stable target types:
 
-- `order`: `targetId` is the order ID and opens order details.
+- `order`: `targetId` is the order ID and opens order details, including `ORDER_REFUNDED` after a refund completes.
 - `order_service_conversation`: `targetId` is the order ID and opens the order service conversation; only consultant notifications use it.
-- `order_refund`: `targetId` is the order ID and opens order details with refund information.
+- `order_refund`: `targetId` is the order ID and opens order details with refund information for refund submission, approval, and rejection.
 - `professional_doctor_review`: request ID, opens the legal representative's doctor review view.
 - `professional_consultant_review`: request ID, opens the legal representative's consultant review view.
 - `professional_doctor_application`: request ID, opens the doctor's own relationship history.
@@ -68,4 +68,3 @@ Order and refund targets open order details directly. Identity rejection and pro
 ## Testing
 
 Backend focused tests cover exact recipients, de-duplication, review-note text, transition-only emission, replay safety, and target contracts. Flutter focused tests cover system-category filtering, single-item read behavior, direct order navigation, identity focus, professional scope navigation, review-note rendering, and stale-target fallback. Run focused tests first, then at most one broader suite per project.
-

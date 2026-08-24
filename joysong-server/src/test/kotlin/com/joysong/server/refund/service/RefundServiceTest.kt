@@ -1,6 +1,7 @@
 package com.joysong.server.refund.service
 
 import com.joysong.server.coupon.service.CouponService
+import com.joysong.server.notification.service.BusinessNotificationService
 import com.joysong.server.order.dto.OrderStatusEnum
 import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.repository.OrderRepository
@@ -29,9 +30,17 @@ import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.springframework.aop.framework.ProxyFactory
+import org.springframework.aop.support.AopUtils
+import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.datasource.DataSourceTransactionManager
+import org.springframework.jdbc.datasource.DriverManagerDataSource
+import org.springframework.transaction.TransactionManager
 import org.springframework.transaction.TransactionDefinition
+import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.interceptor.TransactionInterceptor
 import org.springframework.transaction.support.AbstractPlatformTransactionManager
 import org.springframework.transaction.support.DefaultTransactionStatus
 import org.springframework.transaction.support.TransactionTemplate
@@ -545,6 +554,103 @@ class RefundServiceTest {
     }
 
     @Test
+    fun `repeated compensation retry emits the completed notification only for the processing transition`() {
+        val execution = mockk<RefundExecutionService>()
+        val processing = refund(status = RefundWorkflowPersistenceService.PROCESSING)
+        var current = processing
+        every { refundRepository.findById("refund-1") } answers { Optional.of(current) }
+        every { refundRepository.findByIdForUpdate("refund-1") } returns processing
+        every { orderRepository.findByIdForUpdate("order-1") } returns
+            serviceOrder(status = OrderStatusEnum.REFUND_PROCESSING.value).copy(
+                consultantId = "consultant-1",
+                doctorId = "doctor-1"
+            )
+        every { refundRepository.save(any()) } answers {
+            firstArg<RefundEntity>().also { current = it }
+        }
+        every { orderRepository.save(any()) } answers { firstArg() }
+        every { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) } returns Unit
+        every { execution.execute(processing) } returns RefundExecutionOutcome(40_000L, completed = true)
+
+        val first = service(execution = execution).retryProcessingRefund("refund-1")
+        val replay = service(execution = execution).retryProcessingRefund("refund-1")
+
+        assertEquals(RefundWorkflowPersistenceService.APPROVED, first.status)
+        assertEquals(RefundWorkflowPersistenceService.APPROVED, replay.status)
+        verify(exactly = 1) { execution.execute(processing) }
+        verify(exactly = 1) {
+            refundNotificationDispatcher.orderRefunded(
+                "order-1", "user-1", "consultant-1", "doctor-1"
+            )
+        }
+    }
+
+    @Test
+    fun `duplicate refund application is rejected without a requested notification`() {
+        every { orderRepository.findByIdForUpdate("order-1") } returns serviceOrder()
+        every { refundRepository.findAllByOrderIdAndStatusIn("order-1", any()) } returns listOf(
+            refund(status = RefundWorkflowPersistenceService.PENDING)
+        )
+
+        assertThrows(IllegalArgumentException::class.java) {
+            service().applyRefund("order-1", "user-1", "重复申请", "重复提交")
+        }
+
+        verify(exactly = 0) { refundNotificationDispatcher.orderRefundRequested(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `refund notification dispatcher commits independently after the refund business transaction`() {
+        val dataSource = DriverManagerDataSource("jdbc:h2:mem:refund_dispatcher;DB_CLOSE_DELAY=-1", "sa", "")
+        val jdbc = JdbcTemplate(dataSource)
+        jdbc.execute("CREATE TABLE business_events (id INT PRIMARY KEY)")
+        jdbc.execute("CREATE TABLE notification_events (id INT PRIMARY KEY)")
+        val businessNotificationService = mockk<BusinessNotificationService>()
+        every { businessNotificationService.orderRefundRequested(any(), any(), any(), any()) } answers {
+            jdbc.update("INSERT INTO notification_events (id) VALUES (1)")
+            Unit
+        }
+        val transactionManager = CountingDataSourceTransactionManager(dataSource)
+        val workflow = workflow(proxiedRefundDispatcher(businessNotificationService, transactionManager))
+        stubServiceApplication()
+
+        TransactionTemplate(transactionManager).executeWithoutResult {
+            jdbc.update("INSERT INTO business_events (id) VALUES (1)")
+            workflow.prepareApplication("order-1", "user-1", "行程取消", "不再来华", "", null)
+            assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM notification_events", Int::class.java))
+        }
+
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM business_events", Int::class.java))
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM notification_events", Int::class.java))
+        assertEquals(2, transactionManager.begins)
+    }
+
+    @Test
+    fun `failed refund notification rolls back only its independent transaction after the refund commits`() {
+        val dataSource = DriverManagerDataSource("jdbc:h2:mem:refund_dispatcher_failure;DB_CLOSE_DELAY=-1", "sa", "")
+        val jdbc = JdbcTemplate(dataSource)
+        jdbc.execute("CREATE TABLE business_events (id INT PRIMARY KEY)")
+        jdbc.execute("CREATE TABLE notification_events (id INT PRIMARY KEY)")
+        val businessNotificationService = mockk<BusinessNotificationService>()
+        every { businessNotificationService.orderRefundRequested(any(), any(), any(), any()) } answers {
+            jdbc.update("INSERT INTO notification_events (id) VALUES (1)")
+            throw IllegalStateException("notification persistence unavailable")
+        }
+        val transactionManager = CountingDataSourceTransactionManager(dataSource)
+        val workflow = workflow(proxiedRefundDispatcher(businessNotificationService, transactionManager))
+        stubServiceApplication()
+
+        TransactionTemplate(transactionManager).executeWithoutResult {
+            jdbc.update("INSERT INTO business_events (id) VALUES (1)")
+            workflow.prepareApplication("order-1", "user-1", "行程取消", "不再来华", "", null)
+        }
+
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM business_events", Int::class.java))
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM notification_events", Int::class.java))
+        assertEquals(2, transactionManager.begins)
+    }
+
+    @Test
     fun `legacy repeated approval remains rejected`() {
         val approved = refund(
             status = RefundWorkflowPersistenceService.APPROVED,
@@ -1041,13 +1147,31 @@ class RefundServiceTest {
         refundItemRepository = refundItemRepository
     )
 
-    private fun workflow() = RefundWorkflowPersistenceService(
+    private fun workflow(
+        dispatcher: RefundBusinessNotificationDispatcher = refundNotificationDispatcher
+    ) = RefundWorkflowPersistenceService(
         refundRepository,
         orderRepository,
         orderStatusLogService,
         paymentRepository,
-        refundNotificationDispatcher
+        dispatcher
     )
+
+    private fun proxiedRefundDispatcher(
+        businessNotificationService: BusinessNotificationService,
+        transactionManager: DataSourceTransactionManager
+    ): RefundBusinessNotificationDispatcher {
+        val transactionAdvice = TransactionInterceptor(
+            transactionManager as TransactionManager,
+            AnnotationTransactionAttributeSource()
+        )
+        return (ProxyFactory(RefundBusinessNotificationDispatcher(businessNotificationService)).apply {
+            isProxyTargetClass = true
+            addAdvice(transactionAdvice)
+        }.proxy as RefundBusinessNotificationDispatcher).also { dispatcher ->
+            assertTrue(AopUtils.isAopProxy(dispatcher))
+        }
+    }
 
     private fun itemPersistence() = RefundItemPersistenceService(
         paymentRepository,
@@ -1222,5 +1346,15 @@ class RefundServiceTest {
         }
 
         override fun doRollback(status: DefaultTransactionStatus) = Unit
+    }
+
+    private class CountingDataSourceTransactionManager(dataSource: javax.sql.DataSource) :
+        DataSourceTransactionManager(dataSource) {
+        var begins = 0
+
+        override fun doBegin(transaction: Any, definition: TransactionDefinition) {
+            begins += 1
+            super.doBegin(transaction, definition)
+        }
     }
 }
