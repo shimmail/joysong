@@ -37,6 +37,7 @@ import com.joysong.server.agent.service.AgentLabelPolarity
 import com.joysong.server.agent.service.AgentNextAction
 import com.joysong.server.agent.service.AgentQueryTarget
 import com.joysong.server.agent.service.ComparisonRequest
+import com.joysong.server.agent.service.ComparisonOperand
 import com.joysong.server.agent.service.ComparisonMissingField
 import com.joysong.server.agent.service.ComparisonRequestBuilder
 import com.joysong.server.agent.service.AgentPromptEvidence
@@ -62,6 +63,7 @@ private val latinWordRegex = Regex("[A-Za-z]+(?:['’-][A-Za-z]+)?")
 private val englishLeadRegex = Regex(
     "(?i)^\\s*(?:what|why|how|which|where|when|who|is|are|can|could|should|would|do|does|please|compare|tell|explain)\\b"
 )
+private const val MAX_FUZZY_COMPARISON_CANDIDATES = 4
 
 private data class PromptBuildResult(
     val prompt: String,
@@ -841,7 +843,7 @@ class ChatService(
             return unreliableDetailExclusionTurn(intentDecision, releaseDetailContext = true)
         }
         val rawEvidence = exclusion.evidence
-        val comparisonRequest = if (intentDecision.intent == AgentIntent.COMPARISON) {
+        val initialComparisonRequest = if (intentDecision.intent == AgentIntent.COMPARISON) {
             comparisonRequestBuilder.build(
                 content = content,
                 operandContent = comparisonSearchQuery.takeIf { comparisonTargetClarification } ?: content,
@@ -852,13 +854,36 @@ class ChatService(
                 detectedCities = rawEvidence.detectedCities
             )
         } else null
+        val comparisonCandidates = comparisonCandidateItems(rawEvidence, intentDecision.queryTarget)
+        val comparisonRequest = initialComparisonRequest?.let { request ->
+            if (
+                request.missingFields == setOf(ComparisonMissingField.OPERANDS) &&
+                request.operands.isEmpty() &&
+                comparisonCandidates.size in 2..MAX_FUZZY_COMPARISON_CANDIDATES &&
+                (rawEvidence.report?.totalMatched ?: comparisonCandidates.size) <= MAX_FUZZY_COMPARISON_CANDIDATES
+            ) {
+                comparisonRequestBuilder.normalize(request.copy(
+                    operands = comparisonCandidates.map { candidate ->
+                        ComparisonOperand(
+                            entityType = requireNotNull(intentDecision.queryTarget),
+                            entityId = candidate.id,
+                            displayName = candidate.name
+                        )
+                    }
+                ))
+            } else request
+        }
         if (comparisonRequest != null && !comparisonRequest.isComplete) {
             return GeneratedTurn(
-                content = comparisonClarification(comparisonRequest.missingFields),
+                content = comparisonClarification(
+                    request = comparisonRequest,
+                    candidates = comparisonCandidates,
+                    totalMatched = rawEvidence.report?.totalMatched ?: comparisonCandidates.size
+                ),
                 intentDecision = intentDecision,
                 llmResult = LlmCallResult(content = "", fallbackUsed = false),
-                catalogReport = null,
-                catalogItems = emptyList(),
+                catalogReport = rawEvidence.report,
+                catalogItems = comparisonCandidates.take(MAX_FUZZY_COMPARISON_CANDIDATES),
                 comparisonRequest = comparisonRequest,
                 answerModelRequired = false,
                 releaseDetailContext = releaseDetailContext
@@ -1020,11 +1045,39 @@ class ChatService(
         )
     }
 
-    private fun comparisonClarification(missingFields: Set<ComparisonMissingField>): String = buildList {
-        if (ComparisonMissingField.OPERANDS in missingFields) {
-            add(AgentText.value("请选择至少两个对比对象", "Select at least two items to compare"))
+    private fun comparisonCandidateItems(
+        evidence: AgentPromptEvidence,
+        target: AgentQueryTarget?
+    ): List<AgentCatalogItemResponse> {
+        if (target == null) return emptyList()
+        return evidence.report?.items.orEmpty()
+            .filter { it.type.equals(target.name, ignoreCase = true) }
+            .distinctBy { "${it.type.uppercase()}:${it.id}" }
+    }
+
+    private fun comparisonClarification(
+        request: ComparisonRequest,
+        candidates: List<AgentCatalogItemResponse>,
+        totalMatched: Int
+    ): String = buildList {
+        if (ComparisonMissingField.OPERANDS in request.missingFields) {
+            val names = candidates.take(MAX_FUZZY_COMPARISON_CANDIDATES).joinToString(AgentText.value("、", ", ")) { it.name }
+            when {
+                totalMatched > MAX_FUZZY_COMPARISON_CANDIDATES -> add(AgentText.value(
+                    "关键词搜索找到较多结果（共 $totalMatched 条），例如：$names。请补充机构、城市、价格范围、部位或更具体的项目名称来缩小范围",
+                    "The keyword search found many results ($totalMatched), including: $names. Narrow the scope by clinic, city, price range, treatment area, or a more specific treatment name"
+                ))
+                candidates.size == 1 -> add(AgentText.value(
+                    "关键词搜索找到：$names。请再提供一个要比较的对象",
+                    "The keyword search found: $names. Provide one more item to compare"
+                ))
+                else -> add(AgentText.value(
+                    "暂未搜索到足够的对比对象，请补充名称或更具体的关键词",
+                    "The keyword search did not find enough items to compare. Provide a name or a more specific keyword"
+                ))
+            }
         }
-        if (ComparisonMissingField.TARGET_TYPE in missingFields) {
+        if (ComparisonMissingField.TARGET_TYPE in request.missingFields) {
             add(AgentText.value(
                 "请明确要比较机构、医生、项目还是机构项目",
                 "Specify whether to compare clinics, doctors, treatments, or clinic treatments"

@@ -2646,7 +2646,7 @@ class AgentWorkflowCoreTest {
     }
 
     @Test
-    fun `incomplete comparison skips answer model and persists deterministic clarification`() {
+    fun `single fuzzy comparison result is preserved and asks for another operand`() {
         val content = "Compare clinics"
         val completionTemplate = RestTemplate()
         val intentTemplate = RestTemplate()
@@ -2668,13 +2668,85 @@ class AgentWorkflowCoreTest {
 
         fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
 
-        assertEquals("Select at least two items to compare", completed.captured.content)
+        assertTrue(completed.captured.content.contains("keyword search found", ignoreCase = true))
+        assertTrue(completed.captured.content.contains("Ranked Clinic"))
+        assertTrue(completed.captured.content.contains("one more", ignoreCase = true))
         assertEquals(setOf(ComparisonMissingField.OPERANDS), completed.captured.comparisonRequest?.missingFields)
         assertEquals("", completed.captured.modelName)
-        assertEquals(null, completed.captured.catalogReport)
-        assertTrue(completed.captured.catalogItems.isEmpty())
+        assertEquals(rawEvidence.report, completed.captured.catalogReport)
+        assertEquals(listOf("ranked"), completed.captured.catalogItems.map { it.id })
         verify(exactly = 0) { catalog.filterComparisonEvidence(any(), any()) }
         intentServer.verify()
+        completionServer.verify()
+    }
+
+    @Test
+    fun `fuzzy comparison with a small result set compares discovered candidates`() {
+        val content = "Compare treatments"
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
+        val completed = slot<CompleteTurnCommand>()
+        val filteredRequest = slot<ComparisonRequest>()
+        val first = comparisonItem("thermage", "Thermage", type = "PROJECT")
+        val second = comparisonItem("ultherapy", "Ultherapy", type = "PROJECT")
+        val rawEvidence = comparisonEvidence(first, second)
+        prepareChatGeneration(fixture, content)
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "answer")
+        )
+        every { catalog.hasInstitutionProjectMatch(content) } returns false
+        every { catalog.contextualSearchQuery(content, emptyList()) } returns content
+        every {
+            catalog.promptEvidence(content, content, content, AgentQueryTarget.PROJECT, "COMPARISON", content)
+        } returns rawEvidence
+        every { catalog.filterComparisonEvidence(rawEvidence, capture(filteredRequest)) } returns rawEvidence
+        completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"answer"}}]}""", MediaType.APPLICATION_JSON))
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals(listOf("thermage", "ultherapy"), filteredRequest.captured.operands.map { it.entityId })
+        assertTrue(completed.captured.comparisonRequest?.isComplete == true)
+        verify(exactly = 1) { catalog.filterComparisonEvidence(rawEvidence, any()) }
+        completionServer.verify()
+    }
+
+    @Test
+    fun `fuzzy comparison with too many results keeps examples and asks to narrow scope`() {
+        val content = "对比一下皮肤相关的项目"
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
+        val completed = slot<CompleteTurnCommand>()
+        val candidates = (1..4).map { comparisonItem("skin-$it", "皮肤项目$it", type = "PROJECT") }
+        val rawEvidence = comparisonEvidence(*candidates.toTypedArray(), totalMatched = 9)
+        prepareChatGeneration(fixture, content)
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "clarification")
+        )
+        every { catalog.hasInstitutionProjectMatch(content) } returns false
+        every { catalog.contextualSearchQuery(content, emptyList()) } returns content
+        every {
+            catalog.promptEvidence(content, content, content, AgentQueryTarget.PROJECT, "COMPARISON", content)
+        } returns rawEvidence
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertTrue(completed.captured.content.contains("9"))
+        assertTrue(completed.captured.content.contains("缩小范围"))
+        assertTrue(completed.captured.content.contains("机构"))
+        assertTrue(completed.captured.content.contains("城市"))
+        assertTrue(completed.captured.content.contains("价格"))
+        assertEquals(4, completed.captured.catalogItems.size)
+        assertEquals(setOf(ComparisonMissingField.OPERANDS), completed.captured.comparisonRequest?.missingFields)
+        verify(exactly = 0) { catalog.filterComparisonEvidence(any(), any()) }
         completionServer.verify()
     }
 
@@ -4721,7 +4793,10 @@ class AgentWorkflowCoreTest {
         warnings = emptyList()
     )
 
-    private fun comparisonEvidence(vararg items: AgentCatalogItemResponse) = AgentPromptEvidence(
+    private fun comparisonEvidence(
+        vararg items: AgentCatalogItemResponse,
+        totalMatched: Int = items.size
+    ) = AgentPromptEvidence(
         context = items.joinToString("; ") { it.name },
         report = AgentCatalogReportResponse(
             mode = "COMPARISON",
@@ -4729,7 +4804,8 @@ class AgentWorkflowCoreTest {
             summary = "Comparison evidence",
             items = items.toList(),
             comparisonDimensions = listOf("Rating", "Reviews"),
-            warnings = emptyList()
+            warnings = emptyList(),
+            totalMatched = totalMatched
         )
     )
 

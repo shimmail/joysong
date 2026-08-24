@@ -207,7 +207,19 @@ class _AgentChatPageState extends State<AgentChatPage> {
                             if (!message.isUser)
                               if (message.comparisonRequest case final request?
                                   when !request.isComplete)
-                                AgentComparisonStatusCard(request: request)
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    AgentComparisonStatusCard(request: request),
+                                    if (_supportedCatalogItems(message).isNotEmpty)
+                                      AgentCatalogLinkList(
+                                        items: _supportedCatalogItems(message),
+                                        onOpen: widget.onOpenCatalogItem,
+                                        onHumanChat: widget.onHumanConsult,
+                                        canOpen: _canOpenCatalogItem,
+                                      ),
+                                  ],
+                                )
                               else if (message.comparisonRequest
                                   case final request?
                                   when request.isComplete &&

@@ -200,10 +200,11 @@ class AgentCatalogService(
             institutionRepository.findAllById(discoveredOfferings.map { it.second.institutionId })
         } else emptyList()
         val institutionCandidates = if (offeringInstitutions.isNotEmpty()) offeringInstitutions else unifiedSearch.institutions
-        val institutions = institutionCandidates
+        val allMatchingInstitutions = institutionCandidates
             .distinctBy { it.id }
             .sortedByDescending { it.rating }
             .prioritizeBy { exactNamePriority(priorityQuery, listOf(it.name)) }
+        val institutions = allMatchingInstitutions
             .take(4)
         val relatedDoctorIds = if (reportTarget == ReportTarget.DOCTOR && discoveredProjects.isNotEmpty()) {
             val discoveredProjectIds = discoveredProjects.map { it.id }.toSet()
@@ -225,7 +226,7 @@ class AgentCatalogService(
             doctor.id to doctorInstitutionService.findByDoctorId(doctor.id)
                 .filter { it.status == "APPROVED" && it.deletedAt == null }
         }
-        val doctors = doctorCandidates
+        val allMatchingDoctors = doctorCandidates
             .filter { doctor ->
                 mentionedCities.isEmpty() || mentionedCities.any { city ->
                     approvedDoctorInstitutions[doctor.id].orEmpty().any { relation ->
@@ -235,12 +236,14 @@ class AgentCatalogService(
             }
             .sortedByDescending { it.rating }
             .prioritizeBy { exactNamePriority(priorityQuery, listOf(it.name)) }
+        val doctors = allMatchingDoctors
             .take(4)
         val searchedProjectEntities = projectRepository.findAllById(unifiedSearch.projects.map { it.id })
             .associateBy { it.id }
-        val projects = unifiedSearch.projects
+        val allMatchingProjects = unifiedSearch.projects
             .mapNotNull { searchedProjectEntities[it.id] }
             .prioritizeBy { exactNamePriority(priorityQuery, listOf(it.name)) }
+        val projects = allMatchingProjects
             .take(4)
 
         val institutionIds = institutions.map { it.id }.toSet()
@@ -396,6 +399,13 @@ class AgentCatalogService(
             }
             .sortedBy { if (mode == "COMPARISON" && it.type == "INSTITUTION_PROJECT") 0 else 1 }
             .take(12)
+        val totalMatched = when (reportTarget) {
+            ReportTarget.INSTITUTION -> allMatchingInstitutions.size
+            ReportTarget.DOCTOR -> allMatchingDoctors.size
+            ReportTarget.PROJECT -> allMatchingProjects.size
+            ReportTarget.INSTITUTION_PROJECT -> directlyMatchedInstitutionProjects.size.coerceAtLeast(institutionProjects.size)
+            null -> items.size
+        }
         val summary = if (items.isEmpty()) {
             AgentText.value("数据库中没有找到与该问题明确匹配的记录，请提供机构、医生或项目名称。", "No clearly matching database records were found. Provide a clinic, doctor, or treatment name.")
         } else if (mode == "COMPARISON") {
@@ -409,7 +419,8 @@ class AgentCatalogService(
             summary = summary,
             items = items,
             comparisonDimensions = comparisonRows(reportTarget, allComparisonGroups),
-            warnings = listOf(AgentText.value("平台数据仅用于信息比较，不代表医疗适用性或效果保证。", "Platform data supports information comparison only and does not establish medical suitability or guarantee results."))
+            warnings = listOf(AgentText.value("平台数据仅用于信息比较，不代表医疗适用性或效果保证。", "Platform data supports information comparison only and does not establish medical suitability or guarantee results.")),
+            totalMatched = totalMatched
         )
     }
 

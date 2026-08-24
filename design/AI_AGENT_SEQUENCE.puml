@@ -150,11 +150,23 @@ alt final intent == COMPARISON
     end note
     Compare --> Chat: normalized request（同类型、2～4 operands、target、dimensions/constraints）
 
+    opt 仅缺少 operands
+        Chat -> Chat: 按 target 提取关键词搜索候选并读取 totalMatched
+        alt 2～4 条且没有更多结果
+            Chat -> Compare: 将本轮真实搜索候选规范化为 operands
+            Compare --> Chat: complete request
+        else 超过 4 条
+            Chat -> Chat: 保留前 4 条示例，提示按机构/城市/价格/部位/名称收敛
+        else 0～1 条
+            Chat -> Chat: 保留已有候选，提示补充名称或另一个对象
+        end
+    end
+
     alt request incomplete
         Chat -> Chat: 按当前消息语言生成确定性 clarification
         note right of Chat
         回答模型调用 = 0
-        不展示无关候选卡片或 report
+        仅展示本轮同 target 的关键词候选卡片和 report
         end note
         Chat -> Lifecycle: completeTurn（确定性 clarification + normalized request）
         Lifecycle -> DB: 持久化 assistant message metadata
@@ -198,7 +210,7 @@ loop 每条 assistant message 独立渲染
     alt intent == HUMAN_CONSULTATION
         App --> User: 固定本地化文案 + 机构卡片 / 空态
     else request 不完整
-        App --> User: 仅展示 comparison status
+        App --> User: 展示 comparison status + 同 target 的关键词候选
     else request 完整且 report 存在
         App --> User: 仅展示 comparison report
     else request 为空且存在普通 catalogItems

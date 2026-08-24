@@ -104,5 +104,6 @@ data class AgentCatalogReportResponse(
     val summary: String,
     val items: List<AgentCatalogItemResponse>,
     val comparisonDimensions: List<String>,
-    val warnings: List<String>
+    val warnings: List<String>,
+    val totalMatched: Int = items.size
 )
