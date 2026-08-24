@@ -574,15 +574,18 @@ Future<void> _completeAll(
     while (completed < repository.calls.length) {
       final call = repository.calls[completed];
       final translated = translations[call.text];
-      if (translated == null) fail('Missing translation for ${call.text}');
-      repository.completeNext(translated!);
+      if (translated == null) {
+        fail('Missing translation for ${call.text}');
+      }
+      repository.completeNext(translated);
       completed += 1;
       await tester.pump();
       await tester.pump();
     }
     safety += 1;
-    if (safety > translations.length * 3 + 3)
+    if (safety > translations.length * 3 + 3) {
       fail('translations did not drain');
+    }
     await tester.pump();
   }
 }
