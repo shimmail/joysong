@@ -67,6 +67,21 @@ void main() {
     expect(value.aiTranslationEnabled, isFalse);
   });
 
+  test('malformed AI translation preference values stay disabled', () {
+    for (final value in <Object?>[
+      null,
+      'true',
+      0,
+      <String, Object?>{},
+    ]) {
+      final preferences = SettingsPreferences.fromJson({
+        'aiTranslationEnabled': value,
+      });
+
+      expect(preferences.aiTranslationEnabled, isFalse);
+    }
+  });
+
   test('AI translation preference survives a secure-store round trip',
       () async {
     final storage = _MemorySecureStore();
