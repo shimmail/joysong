@@ -432,17 +432,19 @@ class DoctorProjectChangeServiceTest {
 
         val initial = service.listV2(legalActor()).single() as VersionedDoctorProjectChangeViewV2
         liveState = liveState.copy(
-            institutionProjectVersion = 8,
+            institutionProjectVersion = 8
+        )
+        val sharedOnly = service.listV2(legalActor()).single() as VersionedDoctorProjectChangeViewV2
+        liveState = liveState.copy(
             doctorPrice = BigDecimal("125.00"),
             doctorActive = false,
             doctorUpdatedAt = Timestamp.valueOf(LocalDateTime.of(2026, 8, 11, 10, 0))
         )
-        val refreshed = service.listV2(legalActor()).single() as VersionedDoctorProjectChangeViewV2
+        val doctorPrivateOnly = service.listV2(legalActor()).single() as VersionedDoctorProjectChangeViewV2
         liveState = liveState.copy(
-            institutionProjectVersion = 9,
             configUpdatedAt = Timestamp.valueOf(LocalDateTime.of(2026, 8, 12, 10, 0))
         )
-        val refreshedAgain = service.listV2(legalActor()).single() as VersionedDoctorProjectChangeViewV2
+        val configOnly = service.listV2(legalActor()).single() as VersionedDoctorProjectChangeViewV2
 
         assertEquals(submitView.id, initial.id)
         assertEquals(submitView.baseRevision, initial.baseRevision)
@@ -460,29 +462,29 @@ class DoctorProjectChangeServiceTest {
         assertEquals(submitView.sharedChanged, initial.sharedChanged)
         assertEquals("notes", initial.notes)
         assertEquals("doctor-1", initial.submittedBy)
-        assertEquals(initial.currentProject, refreshed.currentProject)
-        assertEquals(initial.proposedProject, refreshed.proposedProject)
-        assertEquals(initial.currentDoctorPrice, refreshed.currentDoctorPrice)
-        assertEquals(initial.currentDoctorActive, refreshed.currentDoctorActive)
-        assertEquals(initial.proposedDoctorPrice, refreshed.proposedDoctorPrice)
-        assertEquals(initial.proposedDoctorActive, refreshed.proposedDoctorActive)
-        assertEquals(refreshed.currentProject, refreshedAgain.currentProject)
-        assertEquals(refreshed.proposedProject, refreshedAgain.proposedProject)
-        assertEquals(refreshed.currentDoctorPrice, refreshedAgain.currentDoctorPrice)
-        assertEquals(refreshed.currentDoctorActive, refreshedAgain.currentDoctorActive)
-        assertEquals(refreshed.proposedDoctorPrice, refreshedAgain.proposedDoctorPrice)
-        assertEquals(refreshed.proposedDoctorActive, refreshedAgain.proposedDoctorActive)
+        listOf(sharedOnly, doctorPrivateOnly, configOnly).forEach { row ->
+            assertEquals(initial.currentProject, row.currentProject)
+            assertEquals(initial.proposedProject, row.proposedProject)
+            assertEquals(initial.currentDoctorPrice, row.currentDoctorPrice)
+            assertEquals(initial.currentDoctorActive, row.currentDoctorActive)
+            assertEquals(initial.proposedDoctorPrice, row.proposedDoctorPrice)
+            assertEquals(initial.proposedDoctorActive, row.proposedDoctorActive)
+        }
+        assertEquals(7L, initial.latestProject?.source?.institutionProjectVersion)
         assertEquals(BigDecimal("100.00"), initial.latestDoctorPrice)
         assertEquals(true, initial.latestDoctorActive)
-        assertEquals(8L, refreshed.latestProject?.source?.institutionProjectVersion)
-        assertEquals(BigDecimal("125.00"), refreshed.latestDoctorPrice)
-        assertEquals(false, refreshed.latestDoctorActive)
-        assertEquals(9L, refreshedAgain.latestProject?.source?.institutionProjectVersion)
-        assertEquals(BigDecimal("125.00"), refreshedAgain.latestDoctorPrice)
-        assertEquals(false, refreshedAgain.latestDoctorActive)
-        assertEquals(false, initial.latestRevision == refreshed.latestRevision)
-        assertEquals(false, refreshed.latestRevision == refreshedAgain.latestRevision)
-        assertEquals(false, initial.latestRevision == refreshedAgain.latestRevision)
+        assertEquals(8L, sharedOnly.latestProject?.source?.institutionProjectVersion)
+        assertEquals(BigDecimal("100.00"), sharedOnly.latestDoctorPrice)
+        assertEquals(true, sharedOnly.latestDoctorActive)
+        assertEquals(8L, doctorPrivateOnly.latestProject?.source?.institutionProjectVersion)
+        assertEquals(BigDecimal("125.00"), doctorPrivateOnly.latestDoctorPrice)
+        assertEquals(false, doctorPrivateOnly.latestDoctorActive)
+        assertEquals(8L, configOnly.latestProject?.source?.institutionProjectVersion)
+        assertEquals(BigDecimal("125.00"), configOnly.latestDoctorPrice)
+        assertEquals(false, configOnly.latestDoctorActive)
+        assertEquals(false, initial.latestRevision == sharedOnly.latestRevision)
+        assertEquals(false, sharedOnly.latestRevision == doctorPrivateOnly.latestRevision)
+        assertEquals(false, doctorPrivateOnly.latestRevision == configOnly.latestRevision)
     }
 
     @Test
