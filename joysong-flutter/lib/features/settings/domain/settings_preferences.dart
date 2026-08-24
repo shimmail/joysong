@@ -100,18 +100,22 @@ final class SettingsPreferences {
   const SettingsPreferences({
     this.appearanceMode = AppAppearanceMode.system,
     this.notifications = const NotificationPreferences(),
+    this.aiTranslationEnabled = false,
   });
 
   final AppAppearanceMode appearanceMode;
   final NotificationPreferences notifications;
+  final bool aiTranslationEnabled;
 
   SettingsPreferences copyWith({
     AppAppearanceMode? appearanceMode,
     NotificationPreferences? notifications,
+    bool? aiTranslationEnabled,
   }) {
     return SettingsPreferences(
       appearanceMode: appearanceMode ?? this.appearanceMode,
       notifications: notifications ?? this.notifications,
+      aiTranslationEnabled: aiTranslationEnabled ?? this.aiTranslationEnabled,
     );
   }
 
@@ -119,10 +123,12 @@ final class SettingsPreferences {
         'version': 1,
         'appearanceMode': appearanceMode.name,
         'notifications': notifications.toJson(),
+        'aiTranslationEnabled': aiTranslationEnabled,
       };
 
   factory SettingsPreferences.fromJson(Map<String, Object?> json) {
     final rawNotifications = json['notifications'];
+    final rawAiTranslationEnabled = json['aiTranslationEnabled'];
     return SettingsPreferences(
       appearanceMode: AppAppearanceMode.fromStorage(
         json['appearanceMode'] as String?,
@@ -132,6 +138,9 @@ final class SettingsPreferences {
               rawNotifications.cast<String, Object?>(),
             )
           : const NotificationPreferences(),
+      aiTranslationEnabled: rawAiTranslationEnabled is bool
+          ? rawAiTranslationEnabled
+          : false,
     );
   }
 
@@ -139,9 +148,11 @@ final class SettingsPreferences {
   bool operator ==(Object other) {
     return other is SettingsPreferences &&
         appearanceMode == other.appearanceMode &&
-        notifications == other.notifications;
+        notifications == other.notifications &&
+        aiTranslationEnabled == other.aiTranslationEnabled;
   }
 
   @override
-  int get hashCode => Object.hash(appearanceMode, notifications);
+  int get hashCode =>
+      Object.hash(appearanceMode, notifications, aiTranslationEnabled);
 }

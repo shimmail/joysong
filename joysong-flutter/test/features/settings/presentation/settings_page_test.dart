@@ -28,7 +28,7 @@ void main() {
 
     expect(find.text('设置'), findsOneWidget);
     expect(find.text('账号与安全'), findsOneWidget);
-    expect(find.text('消息通知'), findsOneWidget);
+    expect(find.text('应用偏好'), findsOneWidget);
     expect(find.text('清理缓存'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('account-security-entry')));
@@ -51,6 +51,8 @@ void main() {
       onAppearanceModeChanged: (mode) => selectedMode = mode,
     );
 
+    await _tapAfterScroll(tester, const Key('app-preferences-entry'));
+
     await tester.tap(find.text('深色'));
     await tester.pumpAndSettle();
 
@@ -70,7 +72,7 @@ void main() {
     await tester.tap(find.text('恢复默认主题色'));
     await tester.pumpAndSettle();
 
-    expect(fixture.themeController.selectedPreset, ThemePreset.softRose);
+    expect(fixture.themeController.selectedPreset, ThemePreset.neutralGray);
     expect(fixture.themeStore.color, isNull);
   });
 
@@ -78,6 +80,8 @@ void main() {
       (tester) async {
     final fixture = _Fixture();
     await _pumpPage(tester, fixture);
+
+    await _tapAfterScroll(tester, const Key('app-preferences-entry'));
 
     await _tapAfterScroll(tester, const Key('notifications-product-switch'));
     expect(fixture.settingsStore.value.notifications.productNews, isTrue);
@@ -105,14 +109,19 @@ void main() {
     expect(fixture.localeStore.code, 'en');
     expect(find.text('Settings'), findsOneWidget);
     expect(find.text('Account & security'), findsOneWidget);
-    expect(find.text('Appearance'), findsOneWidget);
-    expect(find.text('Theme color'), findsOneWidget);
-    expect(find.text('Notifications'), findsOneWidget);
     expect(find.text('Clear cache'), findsOneWidget);
     expect(find.text('Privacy Policy'), findsOneWidget);
     expect(find.text('Terms of Service'), findsOneWidget);
     expect(find.text('About Joysong'), findsOneWidget);
     expect(find.text('设置'), findsNothing);
+
+    await _tapAfterScroll(tester, const Key('app-preferences-entry'));
+    expect(find.text('Appearance'), findsOneWidget);
+    expect(find.text('Theme color'), findsOneWidget);
+    expect(find.text('Notifications'), findsOneWidget);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
 
     await _tapAfterScroll(tester, const Key('language-entry'));
     expect(find.text('Choose language'), findsOneWidget);
@@ -124,6 +133,31 @@ void main() {
     expect(find.text('设置'), findsOneWidget);
     expect(find.text('账号与安全'), findsOneWidget);
     expect(find.text('Settings'), findsNothing);
+  });
+
+  testWidgets('AI translation switch appears only in English and persists',
+      (tester) async {
+    final fixture = _Fixture();
+    await _pumpPage(tester, fixture);
+    expect(find.byKey(const Key('ai-translation-switch')), findsNothing);
+
+    await _tapAfterScroll(tester, const Key('language-entry'));
+    await tester.tap(find.byKey(const Key('language-english-option')));
+    await tester.pumpAndSettle();
+    await _scrollTo(tester, const Key('ai-translation-switch'));
+    expect(find.text('AI automatic translation'), findsOneWidget);
+    expect(find.textContaining('sent to an AI translation service'),
+        findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('ai-translation-switch')));
+    await tester.pumpAndSettle();
+    expect(fixture.settingsStore.value.aiTranslationEnabled, isTrue);
+
+    await _tapAfterScroll(tester, const Key('language-entry'));
+    await tester.tap(find.byKey(const Key('language-chinese-option')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('ai-translation-switch')), findsNothing);
+    expect(fixture.settingsStore.value.aiTranslationEnabled, isTrue);
   });
 
   testWidgets('cache clear requires confirmation and reports actual success',

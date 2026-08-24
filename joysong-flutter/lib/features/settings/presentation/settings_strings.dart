@@ -63,6 +63,15 @@ final class SettingsStrings {
       pick('语言设置暂不可用', 'Language settings are currently unavailable.');
   String get languageSaveFailed =>
       pick('语言保存失败，请稍后重试', 'Could not save the language. Try again later.');
+  String get aiTranslation => pick('AI 自动翻译', 'AI automatic translation');
+  String get aiTranslationSubtitle => pick(
+        '英文模式下，符合条件的页面文本将发送至 AI 翻译服务',
+        'Eligible page text is sent to an AI translation service in English mode.',
+      );
+  String get aiTranslationSaveFailed => pick(
+        'AI 翻译设置保存失败，请稍后重试',
+        'Could not save AI translation setting. Try again later.',
+      );
   String get chinese => '中文';
   String get english => 'English';
   String get clearCache => pick('清理缓存', 'Clear cache');
