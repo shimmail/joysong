@@ -28,6 +28,7 @@ void main() {
       for (final source in _homeTranslations.keys) {
         expect(find.text(source), findsOneWidget, reason: source);
       }
+      expect(tester.takeException(), isNull);
 
       final requests = tester
           .widgetList<AutoTranslationBuilder>(
@@ -35,6 +36,16 @@ void main() {
           )
           .map((builder) => builder.request)
           .toList(growable: false);
+      final visibleHiddenTexts = {
+        for (final hidden in _hiddenHomeTexts)
+          if (find.text(hidden).evaluate().isNotEmpty) hidden,
+      };
+      final requestedHiddenTexts = requests
+          .map((request) => request.sourceText)
+          .where(_hiddenHomeTexts.contains)
+          .toSet();
+      expect(visibleHiddenTexts, isEmpty);
+      expect(requestedHiddenTexts, isEmpty);
       expect(requests, hasLength(_expectedHomeRequests.length));
       expect(
         requests
@@ -57,6 +68,7 @@ void main() {
       }
       expect(find.text('王医生'), findsOneWidget);
       expect(repository.sourceTexts, isNot(contains('王医生')));
+      expect(repository.sourceTexts, isNot(contains('李医生')));
       expect(repository.sourceTexts, isNot(contains('赵教授')));
       expect(repository.sourceTexts, isNot(contains('小美')));
       expect(repository.sourceTexts, isNot(contains('2026-08-20')));
@@ -67,6 +79,10 @@ void main() {
         repository.sourceTexts,
         isNot(contains('https://images.example/diary.jpg')),
       );
+      for (final hidden in _hiddenHomeTexts) {
+        expect(repository.sourceTexts, isNot(contains(hidden)), reason: hidden);
+      }
+      expect(tester.takeException(), isNull);
     },
   );
 
@@ -314,8 +330,8 @@ void main() {
   });
 }
 
-const _completeFeed = HomeFeed(
-  banners: [
+final _completeFeed = HomeFeed(
+  banners: const [
     HomeContent(
       id: 'banner-1',
       title: '焕肤新选择',
@@ -324,17 +340,21 @@ const _completeFeed = HomeFeed(
     ),
   ],
   recommendedInstitutionProjects: [
-    HomeContent(
-      id: 'recommended-1',
-      title: '光电嫩肤',
-      subtitle: '改善肤色与肤质',
-      category: '皮肤管理',
-      priceText: r'$1280',
+    HomeContent.fromJson(
+      const {
+        'institutionProjectId': 'recommended-1',
+        'institutionName': '安心医美中心',
+        'price': 1280,
+        'project': {
+          'name': '光电嫩肤',
+          'description': '推荐项目隐藏描述',
+          'category': '皮肤管理',
+        },
+      },
       kind: HomeSectionKind.recommendedInstitutionProject,
-      raw: {'institutionName': '安心医美中心'},
     ),
   ],
-  hotProjects: [
+  hotProjects: const [
     HomeContent(
       id: 'hot-1',
       title: '热玛吉',
@@ -344,12 +364,12 @@ const _completeFeed = HomeFeed(
       kind: HomeSectionKind.hotProject,
     ),
   ],
-  expertArticles: [
+  expertArticles: const [
     HomeContent(
       id: 'article-1',
       title: '术后护理指南',
       subtitle: '专家讲解恢复注意事项',
-      category: '护理科普',
+      category: '文章隐藏分类',
       kind: HomeSectionKind.expertArticle,
       raw: {
         'authorName': '赵教授',
@@ -358,7 +378,7 @@ const _completeFeed = HomeFeed(
       },
     ),
   ],
-  userDiaries: [
+  userDiaries: const [
     HomeContent(
       id: 'diary-1',
       title: '我的恢复日记',
@@ -375,7 +395,7 @@ const _completeFeed = HomeFeed(
       },
     ),
   ],
-  institutions: [
+  institutions: const [
     HomeContent(
       id: 'institution-1',
       title: '华美医疗美容医院',
@@ -383,13 +403,13 @@ const _completeFeed = HomeFeed(
       kind: HomeSectionKind.institution,
       raw: {
         'address': '上海市静安区',
-        'description': '专注皮肤健康管理',
+        'description': '机构隐藏描述',
         'rating': 4.9,
         'reviewCount': 37,
       },
     ),
   ],
-  doctors: [
+  doctors: const [
     HomeContent(
       id: 'doctor-1',
       title: '王医生',
@@ -397,9 +417,20 @@ const _completeFeed = HomeFeed(
       kind: HomeSectionKind.doctor,
       raw: {
         'professionalTitle': '主任医师',
-        'specialties': ['激光治疗', '皮肤护理'],
-        'institutionName': '仁爱医院',
+        'specialties': ['激光治疗'],
+        'institutionName': '标题医生隐藏机构',
         'rating': 4.9,
+      },
+    ),
+    HomeContent(
+      id: 'doctor-2',
+      title: '李医生',
+      subtitle: '仁爱医院',
+      kind: HomeSectionKind.doctor,
+      raw: {
+        'name': '李医生',
+        'specialties': ['鼻部整形'],
+        'institutionName': '仁爱医院',
       },
     ),
   ],
@@ -410,22 +441,27 @@ const _homeTranslations = {
   '科学了解恢复过程': 'Understand recovery scientifically',
   '安心医美中心': 'Trusted Aesthetic Center',
   '光电嫩肤': 'Laser rejuvenation',
-  '改善肤色与肤质': 'Improve tone and texture',
   '皮肤管理': 'Skin care',
   '热玛吉': 'Thermage',
   '紧致抗衰': 'Firming and anti-aging',
   '术后护理指南': 'Post-treatment care guide',
   '专家讲解恢复注意事项': 'Expert recovery guidance',
-  '护理科普': 'Care education',
   '我的恢复日记': 'My recovery diary',
   '恢复过程很顺利': 'Recovery went smoothly',
   '点阵激光': 'Fractional laser',
   '华美医疗美容医院': 'Huamei Aesthetic Hospital',
   '上海市静安区': 'Jing an District, Shanghai',
-  '专注皮肤健康管理': 'Focused on skin health',
   '主任医师': 'Chief physician',
-  '激光治疗 · 皮肤护理': 'Laser treatment · Skin care',
+  '激光治疗': 'Laser treatment',
+  '鼻部整形': 'Rhinoplasty',
   '仁爱医院': 'Renai Hospital',
+};
+
+const _hiddenHomeTexts = {
+  '推荐项目隐藏描述',
+  '文章隐藏分类',
+  '机构隐藏描述',
+  '标题医生隐藏机构',
 };
 
 const _expectedHomeRequests = {
@@ -446,12 +482,6 @@ const _expectedHomeRequests = {
   (
     'project',
     'recommendedInstitutionProject:recommended-1',
-    'slogan',
-    '改善肤色与肤质',
-  ),
-  (
-    'project',
-    'recommendedInstitutionProject:recommended-1',
     'category',
     '皮肤管理',
   ),
@@ -459,21 +489,15 @@ const _expectedHomeRequests = {
   ('project', 'hotProject:hot-1', 'category', '紧致抗衰'),
   ('article', 'expertArticle:article-1', 'title', '术后护理指南'),
   ('article', 'expertArticle:article-1', 'summary', '专家讲解恢复注意事项'),
-  ('article', 'expertArticle:article-1', 'category', '护理科普'),
   ('diary', 'userDiary:diary-1', 'title', '我的恢复日记'),
   ('diary', 'userDiary:diary-1', 'content', '恢复过程很顺利'),
   ('diary', 'userDiary:diary-1', 'projectName', '点阵激光'),
   ('institution', 'institution:institution-1', 'name', '华美医疗美容医院'),
   ('institution', 'institution:institution-1', 'address', '上海市静安区'),
-  (
-    'institution',
-    'institution:institution-1',
-    'description',
-    '专注皮肤健康管理',
-  ),
   ('doctor', 'doctor:doctor-1', 'professionalTitle', '主任医师'),
-  ('doctor', 'doctor:doctor-1', 'specialties', '激光治疗 · 皮肤护理'),
-  ('doctor', 'doctor:doctor-1', 'institutionName', '仁爱医院'),
+  ('doctor', 'doctor:doctor-1', 'specialties', '激光治疗'),
+  ('doctor', 'doctor:doctor-2', 'institutionName', '仁爱医院'),
+  ('doctor', 'doctor:doctor-2', 'specialties', '鼻部整形'),
 };
 
 const _diaryTranslations = {
