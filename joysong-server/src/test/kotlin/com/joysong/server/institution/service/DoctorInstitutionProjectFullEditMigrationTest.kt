@@ -51,6 +51,7 @@ class DoctorInstitutionProjectFullEditMigrationTest {
         assertNull(jdbc.queryForObject("SELECT approval_audit_snapshot FROM doctor_project_change_requests WHERE id = 'pending-v2'", String::class.java))
 
         assertV2ConstraintViolation { insertPendingV2(jdbc, "missing-current-snapshot", currentProjectSnapshot = null) }
+        assertV2ConstraintViolation { insertPendingV2(jdbc, "missing-proposed-snapshot", proposedProjectSnapshot = null) }
         assertV2ConstraintViolation { insertPendingV2(jdbc, "missing-policy-revision", pricingPolicyRevision = null) }
         assertV2ConstraintViolation { insertPendingV2(jdbc, "missing-proposed-price", medicalListPrice = null) }
         assertV2ConstraintViolation { insertPendingV2(jdbc, "missing-current-price", currentPrice = null) }
@@ -99,6 +100,7 @@ class DoctorInstitutionProjectFullEditMigrationTest {
         currentPrice: BigDecimal? = BigDecimal("99.00"),
         pricingPolicyRevision: String? = "policy-v1",
         currentProjectSnapshot: String? = "{\"name\":\"before\"}",
+        proposedProjectSnapshot: String? = "{\"name\":\"after\"}",
     ) {
         jdbc.update(
             """
@@ -111,7 +113,7 @@ class DoctorInstitutionProjectFullEditMigrationTest {
                 proposed_doctor_is_active
             ) VALUES (?, 'legacy-doctor', 'legacy-institution', 'legacy-ip', 'PROFILE_UPDATE',
                 'v2 profile', 'PENDING', 'legacy-doctor', 2, ?, ?, ?, 0, ?, ?, TRUE, ?,
-                '{\"name\":\"after\"}', TRUE, FALSE)
+                ?, TRUE, FALSE)
             """.trimIndent(),
             id,
             priceSuggestion,
@@ -120,6 +122,7 @@ class DoctorInstitutionProjectFullEditMigrationTest {
             "a".repeat(64),
             pricingPolicyRevision,
             currentProjectSnapshot,
+            proposedProjectSnapshot,
         )
     }
 
