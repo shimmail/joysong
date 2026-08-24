@@ -301,6 +301,170 @@ void main() {
     );
   });
 
+  testWidgets(
+      'doctor project rows keep independent state when project IDs repeat',
+      (tester) async {
+    await _useTallSurface(tester);
+    final repository = RecordingTranslationRepository();
+    final controller = _activeController(repository);
+    addTearDown(controller.dispose);
+    const doctor = DiscoverItem(
+      id: 'doctor-repeated-project',
+      type: DiscoverContentType.doctor,
+      title: 'Doctor',
+      raw: {
+        'doctor': {'id': 'doctor-repeated-project', 'name': 'Doctor'},
+        'institutionProjects': [
+          {
+            'institutionProjectId': 'offering-a',
+            'institutionId': 'institution-a',
+            'projectId': 'shared-project',
+            'projectName': '第一机构项目',
+          },
+          {
+            'institutionProjectId': 'offering-b',
+            'institutionId': 'institution-b',
+            'projectId': 'shared-project',
+            'projectName': '第二机构项目',
+          },
+        ],
+      },
+    );
+
+    await tester.pumpWidget(
+      _host(
+        controller,
+        const DoctorDetailView(
+          item: doctor,
+          enableAutoTranslation: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('en-US:第一机构项目'), findsOneWidget);
+    expect(find.text('en-US:第二机构项目'), findsOneWidget);
+    expect(
+      _requestRecords(tester),
+      containsAll(const {
+        (
+          'project',
+          'project:shared-project',
+          'projectName',
+          '第一机构项目',
+        ),
+        (
+          'project',
+          'project:shared-project',
+          'projectName',
+          '第二机构项目',
+        ),
+      }),
+    );
+  });
+
+  testWidgets('institution project failures do not retry after filtering',
+      (tester) async {
+    await _useTallSurface(tester);
+    final repository = RecordingTranslationRepository()..holdResponses = true;
+    final controller = _activeController(repository);
+    addTearDown(controller.dispose);
+    const institution = DiscoverItem(
+      id: 'institution-project-retry',
+      type: DiscoverContentType.institution,
+      title: 'Institution',
+      raw: {
+        'institution': {
+          'id': 'institution-project-retry',
+          'name': 'Institution',
+        },
+        'projects': [
+          {
+            'id': 'institution-project',
+            'projectName': '机构项目名',
+            'description': '机构项目说明',
+            'tags': ['机构筛选'],
+          },
+        ],
+      },
+    );
+
+    await tester.pumpWidget(
+      _host(
+        controller,
+        const CatalogInstitutionDetailView(
+          item: institution,
+          enableAutoTranslation: true,
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(
+      repository.calls.map((call) => call.text),
+      containsAll(const ['机构筛选', '机构项目名', '机构项目说明']),
+    );
+    final callsBeforeFilter = repository.calls.length;
+    await _failAllPending(tester, repository);
+
+    await tester.tap(find.widgetWithText(ChoiceChip, '机构筛选'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('机构项目名'), findsOneWidget);
+    expect(repository.calls, hasLength(callsBeforeFilter));
+  });
+
+  testWidgets('doctor project failures do not retry after filtering',
+      (tester) async {
+    await _useTallSurface(tester);
+    final repository = RecordingTranslationRepository()..holdResponses = true;
+    final controller = _activeController(repository);
+    addTearDown(controller.dispose);
+    const doctor = DiscoverItem(
+      id: 'doctor-project-retry',
+      type: DiscoverContentType.doctor,
+      title: 'Doctor',
+      raw: {
+        'doctor': {'id': 'doctor-project-retry', 'name': 'Doctor'},
+        'institutionProjects': [
+          {
+            'institutionProjectId': 'doctor-offering',
+            'institutionId': 'doctor-institution',
+            'projectId': 'doctor-project',
+            'projectName': '医生项目名',
+            'institutionName': '医生项目机构',
+            'tags': ['医生筛选'],
+          },
+        ],
+      },
+    );
+
+    await tester.pumpWidget(
+      _host(
+        controller,
+        const DoctorDetailView(
+          item: doctor,
+          enableAutoTranslation: true,
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(
+      repository.calls.map((call) => call.text),
+      containsAll(const ['医生筛选', '医生项目名', '医生项目机构']),
+    );
+    final callsBeforeFilter = repository.calls.length;
+    await _failAllPending(tester, repository);
+
+    await tester.tap(find.widgetWithText(ChoiceChip, '医生筛选'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('医生项目名'), findsOneWidget);
+    expect(repository.calls, hasLength(callsBeforeFilter));
+  });
+
   testWidgets('nested projects without real IDs stay source only',
       (tester) async {
     await _useTallSurface(tester);
@@ -438,6 +602,17 @@ Future<void> _useTallSurface(WidgetTester tester) async {
   tester.view.physicalSize = const Size(1200, 5200);
   addTearDown(tester.view.resetDevicePixelRatio);
   addTearDown(tester.view.resetPhysicalSize);
+}
+
+Future<void> _failAllPending(
+  WidgetTester tester,
+  RecordingTranslationRepository repository,
+) async {
+  while (repository.pendingCount > 0) {
+    repository.failNext();
+    await tester.pump();
+    await tester.pump();
+  }
 }
 
 final class _DetailRepository implements DiscoverRepository {

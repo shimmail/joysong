@@ -86,6 +86,7 @@ class _CatalogReviewPreviewState extends State<CatalogReviewPreview> {
   Widget build(BuildContext context) {
     final filtered = filterCatalogReviews(widget.reviews, _filter);
     final visible = filtered.take(widget.previewCount).toList(growable: false);
+    final duplicateReviewIds = _duplicateReviewIds(widget.reviews);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -133,6 +134,7 @@ class _CatalogReviewPreviewState extends State<CatalogReviewPreview> {
                 visible[index],
                 widget.ownerType,
                 widget.ownerId,
+                duplicateReviewIds,
               ),
               review: visible[index],
               socialController: widget.socialController,
@@ -405,16 +407,33 @@ double _rating(Map<String, Object?> review) {
   return value is num ? value.toDouble() : double.tryParse('$value') ?? 0;
 }
 
-String _reviewId(Map<String, Object?> review) =>
-    _text(review['id'] ?? review['reviewId']);
+String _reviewId(Map<String, Object?> review) {
+  final id = _text(review['id']);
+  return id.isNotEmpty ? id : _text(review['reviewId']);
+}
+
+Set<String> _duplicateReviewIds(List<Map<String, Object?>> reviews) {
+  final seen = <String>{};
+  final duplicates = <String>{};
+  for (final review in reviews) {
+    final reviewId = _reviewId(review);
+    if (reviewId.isNotEmpty && !seen.add(reviewId)) {
+      duplicates.add(reviewId);
+    }
+  }
+  return duplicates;
+}
 
 Key _reviewKey(
   Map<String, Object?> review,
   String ownerType,
   String ownerId,
+  Set<String> duplicateReviewIds,
 ) {
   final reviewId = _reviewId(review);
-  if (reviewId.isEmpty) return ObjectKey(review);
+  if (reviewId.isEmpty || duplicateReviewIds.contains(reviewId)) {
+    return ObjectKey(review);
+  }
   return ValueKey<String>(
     'catalog-review:${ownerType.trim()}:${ownerId.trim()}:$reviewId',
   );

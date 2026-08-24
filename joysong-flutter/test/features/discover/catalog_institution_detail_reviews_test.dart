@@ -356,6 +356,288 @@ void main() {
     );
   });
 
+  testWidgets('duplicate review IDs keep independent preview state',
+      (tester) async {
+    final repository = RecordingTranslationRepository();
+    final controller = _activeController(repository);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      AutoTranslationScope(
+        controller: controller,
+        enabled: true,
+        targetLanguage: 'en-US',
+        child: const MaterialApp(
+          locale: Locale('en'),
+          home: Scaffold(
+            body: CatalogReviewPreview(
+              enableAutoTranslation: true,
+              ownerType: 'doctor',
+              ownerId: 'doctor-duplicate-preview',
+              reviews: [
+                {
+                  'id': 'duplicate-review',
+                  'content': '预览第一条评价',
+                  'rating': 5,
+                },
+                {
+                  'id': 'duplicate-review',
+                  'content': '预览第二条评价',
+                  'rating': 1,
+                },
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(CatalogReviewCard), findsNWidgets(2));
+    expect(find.text('en-US:预览第一条评价'), findsOneWidget);
+    expect(find.text('en-US:预览第二条评价'), findsOneWidget);
+  });
+
+  testWidgets('duplicate review IDs keep independent full-route state',
+      (tester) async {
+    await _useTallSurface(tester);
+    final repository = RecordingTranslationRepository();
+    final controller = _activeController(repository);
+    addTearDown(controller.dispose);
+    final reviews = <Map<String, Object?>>[
+      {
+        'id': 'duplicate-review',
+        'content': '全量第一条评价',
+        'rating': 5,
+      },
+      {
+        'id': 'unique-before-navigation',
+        'content': '全量第二条评价',
+        'rating': 1,
+      },
+    ];
+    final item = DiscoverItem(
+      id: 'institution-duplicate-full',
+      type: DiscoverContentType.institution,
+      title: 'Institution',
+      raw: {
+        'institution': {
+          'id': 'institution-duplicate-full',
+          'name': 'Institution',
+        },
+        'reviews': reviews,
+      },
+    );
+
+    await tester.pumpWidget(
+      AutoTranslationScope(
+        controller: controller,
+        enabled: true,
+        targetLanguage: 'en-US',
+        child: MaterialApp(
+          locale: const Locale('en'),
+          home: DiscoverDetailPage(
+            repository: _DetailRepository(item),
+            type: item.type,
+            id: item.id,
+            initialItem: item,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    reviews[1]['id'] = 'duplicate-review';
+
+    await tester.tap(find.text('All (2)'));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('All reviews'), findsOneWidget);
+    expect(find.byType(CatalogReviewCard), findsNWidgets(2));
+    expect(
+      tester
+          .widgetList<CatalogReviewCard>(find.byType(CatalogReviewCard))
+          .map((card) => card.key)
+          .toSet(),
+      hasLength(2),
+    );
+    expect(find.text('en-US:全量第一条评价'), findsOneWidget);
+    expect(find.text('en-US:全量第二条评价'), findsOneWidget);
+  });
+
+  testWidgets('blank review id falls back to reviewId in preview',
+      (tester) async {
+    final repository = RecordingTranslationRepository();
+    final controller = _activeController(repository);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      AutoTranslationScope(
+        controller: controller,
+        enabled: true,
+        targetLanguage: 'en-US',
+        child: const MaterialApp(
+          locale: Locale('en'),
+          home: Scaffold(
+            body: CatalogReviewPreview(
+              enableAutoTranslation: true,
+              ownerType: 'institution',
+              ownerId: 'institution-blank-preview',
+              reviews: [
+                {
+                  'id': '',
+                  'reviewId': 'review-1',
+                  'content': '预览空标识评价',
+                  'rating': 5,
+                },
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('en-US:预览空标识评价'), findsOneWidget);
+    expect(
+      _requestRecords(tester),
+      contains(const (
+        'comment',
+        'institution:institution-blank-preview:review:review-1',
+        'content',
+        '预览空标识评价',
+      )),
+    );
+  });
+
+  testWidgets('blank review id falls back to reviewId in direct card',
+      (tester) async {
+    final repository = RecordingTranslationRepository();
+    final controller = _activeController(repository);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      AutoTranslationScope(
+        controller: controller,
+        enabled: true,
+        targetLanguage: 'en-US',
+        child: const MaterialApp(
+          locale: Locale('en'),
+          home: Scaffold(
+            body: CatalogReviewCard(
+              enableAutoTranslation: true,
+              ownerType: 'doctor',
+              ownerId: 'doctor-blank-card',
+              review: {
+                'id': '',
+                'reviewId': 'review-1',
+                'content': '直接卡片空标识评价',
+                'rating': 5,
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('en-US:直接卡片空标识评价'), findsOneWidget);
+    expect(
+      _requestRecords(tester),
+      contains(const (
+        'comment',
+        'doctor:doctor-blank-card:review:review-1',
+        'content',
+        '直接卡片空标识评价',
+      )),
+    );
+  });
+
+  testWidgets('full review filtering does not retry a failed moved review',
+      (tester) async {
+    await _useTallSurface(tester);
+    final repository = RecordingTranslationRepository()..holdResponses = true;
+    final controller = _activeController(repository);
+    addTearDown(controller.dispose);
+    const item = DiscoverItem(
+      id: 'institution-full-filter',
+      type: DiscoverContentType.institution,
+      title: 'Institution',
+      raw: {
+        'institution': {
+          'id': 'institution-full-filter',
+          'name': 'Institution',
+        },
+        'reviews': [
+          {
+            'id': 'positive-full-filter',
+            'content': '全量好评内容',
+            'rating': 5,
+          },
+          {
+            'id': 'negative-full-filter',
+            'content': '全量差评内容',
+            'rating': 1,
+          },
+        ],
+      },
+    );
+
+    await tester.pumpWidget(
+      AutoTranslationScope(
+        controller: controller,
+        enabled: true,
+        targetLanguage: 'en-US',
+        child: MaterialApp(
+          locale: const Locale('en'),
+          home: DiscoverDetailPage(
+            repository: const _DetailRepository(item),
+            type: item.type,
+            id: item.id,
+            initialItem: item,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(repository.calls.map((call) => call.text), [
+      '全量好评内容',
+      '全量差评内容',
+    ]);
+    repository.completeNext('Preview positive');
+    await _pumpTranslation(tester);
+    repository.completeNext('Preview negative');
+    await _pumpTranslation(tester);
+    controller.synchronize(
+      enabled: false,
+      authenticated: true,
+      targetLanguage: 'en-US',
+    );
+    controller.synchronize(
+      enabled: true,
+      authenticated: true,
+      targetLanguage: 'en-US',
+    );
+
+    await tester.tap(find.text('All (2)'));
+    await tester.pumpAndSettle();
+    expect(repository.calls, hasLength(4));
+    expect(repository.calls[2].text, '全量好评内容');
+    expect(repository.calls[3].text, '全量差评内容');
+    repository.completeNext('Full positive');
+    await _pumpTranslation(tester);
+    repository.failNext();
+    await _pumpTranslation(tester);
+    final callsBeforeFilter = repository.calls.length;
+
+    await tester.tap(find.text('Negative'));
+    await _pumpTranslation(tester);
+
+    expect(find.text('全量差评内容'), findsOneWidget);
+    expect(repository.calls, hasLength(callsBeforeFilter));
+  });
+
   testWidgets('review filtering preserves the matching review request state',
       (tester) async {
     final repository = RecordingTranslationRepository()..holdResponses = true;

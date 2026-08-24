@@ -578,17 +578,24 @@ class _FilterChip extends StatelessWidget {
     this.label, {
     required this.selected,
     required this.onTap,
-    this.translationRequest,
+    this.translationEnabled = false,
+    this.projectId = '',
+    this.field = '',
   });
   final String label;
   final bool selected;
   final VoidCallback onTap;
-  final AutoTranslationRequest? translationRequest;
+  final bool translationEnabled;
+  final String projectId;
+  final String field;
   @override
   Widget build(BuildContext context) => ChoiceChip(
-        label: translationRequest == null
-            ? Text(label)
-            : AutoTranslatedText(request: translationRequest!),
+        label: _InstitutionProjectText(
+          enabled: translationEnabled,
+          projectId: projectId,
+          field: field,
+          source: label,
+        ),
         selected: selected,
         onSelected: (_) => onTap(),
         visualDensity: VisualDensity.compact,
@@ -640,23 +647,15 @@ class _FilterableProjectListState extends State<_FilterableProjectList> {
                 selected: _selectedTag.isEmpty,
                 onTap: () => setState(() => _selectedTag = ''),
               ),
-              for (final tag in tags) ...[
+              for (final tagSource in tagSources) ...[
                 const SizedBox(width: 8),
                 _FilterChip(
-                  tag,
-                  selected: _selectedTag == tag,
-                  onTap: () => setState(() => _selectedTag = tag),
-                  translationRequest: widget.enableAutoTranslation
-                      ? _projectRequest(
-                          projectId: tagSources
-                              .firstWhere((source) => source.value == tag)
-                              .projectId,
-                          field: tagSources
-                              .firstWhere((source) => source.value == tag)
-                              .field,
-                          source: tag,
-                        )
-                      : null,
+                  tagSource.value,
+                  selected: _selectedTag == tagSource.value,
+                  onTap: () => setState(() => _selectedTag = tagSource.value),
+                  translationEnabled: widget.enableAutoTranslation,
+                  projectId: tagSource.projectId,
+                  field: tagSource.field,
                 ),
               ],
             ]),
@@ -743,13 +742,9 @@ class _ProjectRow extends StatelessWidget {
                         .take(3)
                         .map((tag) => _ProjectTag(
                               tag.value,
-                              request: enableAutoTranslation
-                                  ? _projectRequest(
-                                      projectId: projectId,
-                                      field: tag.field,
-                                      source: tag.value,
-                                    )
-                                  : null,
+                              enabled: enableAutoTranslation,
+                              projectId: projectId,
+                              field: tag.field,
                             ))
                         .toList(growable: false),
                   ),
@@ -786,9 +781,16 @@ class _ProjectRow extends StatelessWidget {
 }
 
 class _ProjectTag extends StatelessWidget {
-  const _ProjectTag(this.label, {this.request});
+  const _ProjectTag(
+    this.label, {
+    required this.enabled,
+    required this.projectId,
+    required this.field,
+  });
   final String label;
-  final AutoTranslationRequest? request;
+  final bool enabled;
+  final String projectId;
+  final String field;
 
   @override
   Widget build(BuildContext context) => DecoratedBox(
@@ -798,26 +800,21 @@ class _ProjectTag extends StatelessWidget {
         ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-          child: request == null
-              ? Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: Theme.of(context).colorScheme.onPrimaryContainer,
-                  ),
-                )
-              : AutoTranslatedText(
-                  request: request!,
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: Theme.of(context).colorScheme.onPrimaryContainer,
-                  ),
-                ),
+          child: _InstitutionProjectText(
+            enabled: enabled,
+            projectId: projectId,
+            field: field,
+            source: label,
+            style: TextStyle(
+              fontSize: 10,
+              color: Theme.of(context).colorScheme.onPrimaryContainer,
+            ),
+          ),
         ),
       );
 }
 
-class _InstitutionProjectText extends StatelessWidget {
+class _InstitutionProjectText extends StatefulWidget {
   const _InstitutionProjectText({
     required this.enabled,
     required this.projectId,
@@ -837,27 +834,51 @@ class _InstitutionProjectText extends StatelessWidget {
   final TextStyle? style;
 
   @override
+  State<_InstitutionProjectText> createState() =>
+      _InstitutionProjectTextState();
+}
+
+class _InstitutionProjectTextState extends State<_InstitutionProjectText> {
+  AutoTranslationRequest? _request;
+
+  @override
+  void initState() {
+    super.initState();
+    _updateRequest();
+  }
+
+  @override
+  void didUpdateWidget(_InstitutionProjectText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _updateRequest();
+  }
+
+  void _updateRequest() {
+    _request = _updatedProjectRequest(
+      _request,
+      enabled: widget.enabled,
+      projectId: widget.projectId,
+      field: widget.field,
+      source: widget.source,
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final request = enabled
-        ? _projectRequest(
-            projectId: projectId,
-            field: field,
-            source: source,
-          )
-        : null;
+    final request = _request;
     if (request == null) {
       return Text(
-        source,
-        maxLines: maxLines,
-        overflow: overflow,
-        style: style,
+        widget.source,
+        maxLines: widget.maxLines,
+        overflow: widget.overflow,
+        style: widget.style,
       );
     }
     return AutoTranslatedText(
       request: request,
-      maxLines: maxLines,
-      overflow: overflow,
-      style: style,
+      maxLines: widget.maxLines,
+      overflow: widget.overflow,
+      style: widget.style,
     );
   }
 }
@@ -1068,6 +1089,30 @@ AutoTranslationRequest? _projectRequest({
     contentId: 'project:$projectId',
     field: field,
     sourceText: source,
+  );
+}
+
+AutoTranslationRequest? _updatedProjectRequest(
+  AutoTranslationRequest? previous, {
+  required bool enabled,
+  required String projectId,
+  required String field,
+  required String source,
+}) {
+  if (!enabled || projectId.isEmpty || field.isEmpty || source.isEmpty) {
+    return null;
+  }
+  final contentId = 'project:$projectId';
+  if (previous != null &&
+      previous.contentId == contentId &&
+      previous.field == field &&
+      previous.sourceText == source) {
+    return previous;
+  }
+  return _projectRequest(
+    projectId: projectId,
+    field: field,
+    source: source,
   );
 }
 

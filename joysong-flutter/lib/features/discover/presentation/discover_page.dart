@@ -1486,6 +1486,23 @@ class _AllReviewsPageState extends State<_AllReviewsPage> {
   @override
   Widget build(BuildContext context) {
     final filtered = filterCatalogReviews(widget.reviews, _filter);
+    final duplicateReviewIds = _duplicateAllReviewIds(widget.reviews);
+    final rows = [
+      for (final review in filtered)
+        (
+          review: review,
+          reviewId: _allReviewId(review),
+          key: _allReviewKey(
+            review,
+            widget.ownerType,
+            widget.ownerId,
+            duplicateReviewIds,
+          ),
+        ),
+    ];
+    final rowIndexes = <Key, int>{
+      for (var index = 0; index < rows.length; index++) rows[index].key: index,
+    };
     return Scaffold(
       appBar: AppBar(title: Text(context.localized('全部评价', 'All reviews'))),
       body: Column(
@@ -1499,7 +1516,7 @@ class _AllReviewsPageState extends State<_AllReviewsPage> {
             ),
           ),
           Expanded(
-            child: filtered.isEmpty
+            child: rows.isEmpty
                 ? Center(
                     child: Text(context.localized(
                       '暂无符合条件的评价',
@@ -1508,22 +1525,15 @@ class _AllReviewsPageState extends State<_AllReviewsPage> {
                   )
                 : ListView.separated(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                    itemCount: filtered.length,
+                    itemCount: rows.length,
+                    findItemIndexCallback: (key) => rowIndexes[key],
                     separatorBuilder: (_, __) => const SizedBox(height: 10),
                     itemBuilder: (_, index) {
-                      final review = filtered[index];
-                      final reviewId = _rawText(
-                        review['id'],
-                        fallback: _rawText(review['reviewId']),
-                      );
+                      final row = rows[index];
                       return CatalogReviewCard(
-                        key: reviewId.isEmpty
-                            ? ObjectKey(review)
-                            : ValueKey<String>(
-                                'all-review:${widget.ownerType}:${widget.ownerId}:$reviewId',
-                              ),
-                        review: review,
-                        reviewId: reviewId,
+                        key: row.key,
+                        review: row.review,
+                        reviewId: row.reviewId,
                         socialController: widget.socialController,
                         enableAutoTranslation: widget.enableAutoTranslation,
                         ownerType: widget.ownerType,
@@ -1536,6 +1546,36 @@ class _AllReviewsPageState extends State<_AllReviewsPage> {
       ),
     );
   }
+}
+
+String _allReviewId(Map<String, Object?> review) => _rawText(
+      review['id'],
+      fallback: _rawText(review['reviewId']),
+    );
+
+Set<String> _duplicateAllReviewIds(List<Map<String, Object?>> reviews) {
+  final seen = <String>{};
+  final duplicates = <String>{};
+  for (final review in reviews) {
+    final reviewId = _allReviewId(review);
+    if (reviewId.isNotEmpty && !seen.add(reviewId)) {
+      duplicates.add(reviewId);
+    }
+  }
+  return duplicates;
+}
+
+Key _allReviewKey(
+  Map<String, Object?> review,
+  String ownerType,
+  String ownerId,
+  Set<String> duplicateReviewIds,
+) {
+  final reviewId = _allReviewId(review);
+  if (reviewId.isEmpty || duplicateReviewIds.contains(reviewId)) {
+    return ObjectKey(review);
+  }
+  return ValueKey<String>('all-review:$ownerType:$ownerId:$reviewId');
 }
 
 class _AllRelatedContentPage extends StatelessWidget {

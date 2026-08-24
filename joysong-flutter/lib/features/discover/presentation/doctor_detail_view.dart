@@ -651,15 +651,9 @@ class _ProjectCard extends StatelessWidget {
                           .take(3)
                           .map((tag) => _ProjectTag(
                                 label: tag.value,
-                                request: enableAutoTranslation &&
-                                        projectId.isNotEmpty
-                                    ? AutoTranslationRequest(
-                                        contentType: 'project',
-                                        contentId: 'project:$projectId',
-                                        field: tag.field,
-                                        sourceText: tag.value,
-                                      )
-                                    : null,
+                                enabled: enableAutoTranslation,
+                                projectId: projectId,
+                                field: tag.field,
                               ))
                           .toList(growable: false),
                     ),
@@ -736,18 +730,16 @@ class _FilterableProjectsState extends State<_FilterableProjects> {
                   selected: _selectedTag.isEmpty,
                   onSelected: () => setState(() => _selectedTag = ''),
                 ),
-                for (final tag in tags) ...[
+                for (final tagSource in tagSources) ...[
                   const SizedBox(width: 8),
                   _FilterChip(
-                    label: tag,
-                    selected: _selectedTag == tag,
-                    onSelected: () => setState(() => _selectedTag = tag),
-                    request: widget.enableAutoTranslation
-                        ? _projectTagRequest(
-                            tagSources
-                                .firstWhere((source) => source.value == tag),
-                          )
-                        : null,
+                    label: tagSource.value,
+                    selected: _selectedTag == tagSource.value,
+                    onSelected: () =>
+                        setState(() => _selectedTag = tagSource.value),
+                    enabled: widget.enableAutoTranslation,
+                    projectId: tagSource.projectId,
+                    field: tagSource.field,
                   ),
                 ],
               ],
@@ -774,19 +766,27 @@ class _FilterChip extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onSelected,
-    this.request,
+    this.enabled = false,
+    this.projectId = '',
+    this.field = '',
   });
 
   final String label;
   final bool selected;
   final VoidCallback onSelected;
-  final AutoTranslationRequest? request;
+  final bool enabled;
+  final String projectId;
+  final String field;
 
   @override
   Widget build(BuildContext context) => ChoiceChip(
-        label: request == null
-            ? Text(label)
-            : AutoTranslatedText(request: request!),
+        label: _DoctorTranslatedText(
+          enabled: enabled && projectId.isNotEmpty,
+          contentType: 'project',
+          contentId: 'project:$projectId',
+          field: field,
+          source: label,
+        ),
         selected: selected,
         onSelected: (_) => onSelected(),
         visualDensity: VisualDensity.compact,
@@ -794,9 +794,16 @@ class _FilterChip extends StatelessWidget {
 }
 
 class _ProjectTag extends StatelessWidget {
-  const _ProjectTag({required this.label, this.request});
+  const _ProjectTag({
+    required this.label,
+    required this.enabled,
+    required this.projectId,
+    required this.field,
+  });
   final String label;
-  final AutoTranslationRequest? request;
+  final bool enabled;
+  final String projectId;
+  final String field;
 
   @override
   Widget build(BuildContext context) => DecoratedBox(
@@ -806,21 +813,17 @@ class _ProjectTag extends StatelessWidget {
         ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-          child: request == null
-              ? Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: Theme.of(context).colorScheme.onPrimaryContainer,
-                  ),
-                )
-              : AutoTranslatedText(
-                  request: request!,
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: Theme.of(context).colorScheme.onPrimaryContainer,
-                  ),
-                ),
+          child: _DoctorTranslatedText(
+            enabled: enabled && projectId.isNotEmpty,
+            contentType: 'project',
+            contentId: 'project:$projectId',
+            field: field,
+            source: label,
+            style: TextStyle(
+              fontSize: 10,
+              color: Theme.of(context).colorScheme.onPrimaryContainer,
+            ),
+          ),
         ),
       );
 }
@@ -1085,7 +1088,7 @@ class _Tag extends StatelessWidget {
       );
 }
 
-class _DoctorTranslatedText extends StatelessWidget {
+class _DoctorTranslatedText extends StatefulWidget {
   const _DoctorTranslatedText({
     required this.enabled,
     required this.contentId,
@@ -1109,23 +1112,62 @@ class _DoctorTranslatedText extends StatelessWidget {
   final TextOverflow? overflow;
 
   @override
+  State<_DoctorTranslatedText> createState() => _DoctorTranslatedTextState();
+}
+
+class _DoctorTranslatedTextState extends State<_DoctorTranslatedText> {
+  AutoTranslationRequest? _request;
+
+  @override
+  void initState() {
+    super.initState();
+    _updateRequest();
+  }
+
+  @override
+  void didUpdateWidget(_DoctorTranslatedText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _updateRequest();
+  }
+
+  void _updateRequest() {
+    if (!widget.enabled ||
+        widget.contentId.isEmpty ||
+        widget.field.isEmpty ||
+        widget.source.isEmpty) {
+      _request = null;
+      return;
+    }
+    final previous = _request;
+    if (previous != null &&
+        previous.contentType == widget.contentType &&
+        previous.contentId == widget.contentId &&
+        previous.field == widget.field &&
+        previous.sourceText == widget.source) {
+      return;
+    }
+    _request = AutoTranslationRequest(
+      contentType: widget.contentType,
+      contentId: widget.contentId,
+      field: widget.field,
+      sourceText: widget.source,
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     Widget text(String visible) => Text(
-          [prefix, visible].where((value) => value.isNotEmpty).join('  '),
-          style: style,
-          maxLines: maxLines,
-          overflow: overflow,
+          [widget.prefix, visible]
+              .where((value) => value.isNotEmpty)
+              .join('  '),
+          style: widget.style,
+          maxLines: widget.maxLines,
+          overflow: widget.overflow,
         );
-    if (!enabled || contentId.isEmpty || field.isEmpty || source.isEmpty) {
-      return text(source);
-    }
+    final request = _request;
+    if (request == null) return text(widget.source);
     return AutoTranslationBuilder(
-      request: AutoTranslationRequest(
-        contentType: contentType,
-        contentId: contentId,
-        field: field,
-        sourceText: source,
-      ),
+      request: request,
       builder: (_, visible) => text(visible),
     );
   }
@@ -1192,10 +1234,19 @@ String _projectId(Map<String, Object?> project) {
 }
 
 Key _doctorProjectKey(Map<String, Object?> project) {
-  final id = _projectId(project);
-  return id.isEmpty
-      ? ObjectKey(project)
-      : ValueKey<String>('doctor-project:$id');
+  final institutionProjectId = _text(
+    project,
+    const ['institutionProjectId'],
+  );
+  if (institutionProjectId.isNotEmpty) {
+    return ValueKey<String>('doctor-project-offering:$institutionProjectId');
+  }
+  final institutionId = _text(project, const ['institutionId']);
+  final projectId = _projectId(project);
+  if (institutionId.isNotEmpty && projectId.isNotEmpty) {
+    return ValueKey<String>('doctor-project:$institutionId:$projectId');
+  }
+  return ObjectKey(project);
 }
 
 List<_ProjectTagSource> _projectTagSources(
@@ -1265,20 +1316,6 @@ AutoTranslationRequest _doctorRequest({
       field: field,
       sourceText: source,
     );
-
-AutoTranslationRequest? _projectTagRequest(_ProjectTagSource source) {
-  if (source.projectId.isEmpty ||
-      source.field.isEmpty ||
-      source.value.isEmpty) {
-    return null;
-  }
-  return AutoTranslationRequest(
-    contentType: 'project',
-    contentId: 'project:${source.projectId}',
-    field: source.field,
-    sourceText: source.value,
-  );
-}
 
 double _number(Object? value) =>
     value is num ? value.toDouble() : double.tryParse('$value') ?? 0;
