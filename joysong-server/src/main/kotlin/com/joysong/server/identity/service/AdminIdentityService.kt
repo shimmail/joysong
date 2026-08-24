@@ -2,6 +2,7 @@ package com.joysong.server.identity.service
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.joysong.server.notification.service.BusinessNotificationService
 import com.joysong.server.wallet.repository.WalletRepository
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
@@ -29,7 +30,8 @@ class AdminIdentityService(
     private val objectMapper: ObjectMapper,
     private val doctorInstitutionRelationshipService: DoctorInstitutionRelationshipOperations,
     private val walletRepository: WalletRepository,
-    private val consultantInstitutionRelationships: ConsultantInstitutionRelationshipOperations
+    private val consultantInstitutionRelationships: ConsultantInstitutionRelationshipOperations,
+    private val businessNotifications: BusinessNotificationService? = null
 ) {
     private val namedJdbcTemplate = NamedParameterJdbcTemplate(jdbcTemplate)
 
@@ -142,6 +144,9 @@ class AdminIdentityService(
                 provisionInstitutionForLegalRepresentative(target, reviewerId)
             }
             provisionWallet(target.userId, target.roleCode)
+            businessNotifications?.identityApplicationApproved(target.userId, applicationId)
+        } else {
+            businessNotifications?.identityApplicationRejected(target.userId, applicationId, reviewNote.trim())
         }
     }
 

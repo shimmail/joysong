@@ -1,6 +1,7 @@
 package com.joysong.server.identity.service
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.joysong.server.notification.service.BusinessNotificationService
 import com.joysong.server.wallet.repository.WalletRepository
 import io.mockk.every
 import io.mockk.mockk
@@ -29,6 +30,56 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
 class AdminIdentityServiceTest {
+
+    @Test
+    fun `identity approval and rejection notify only the applicant with their target contracts`() {
+        val approvedNotifications = mockk<BusinessNotificationService>(relaxed = true)
+        identityReviewService(approvedNotifications).reviewApplication("application-1", "admin-1", "APPROVED", "")
+
+        verify(exactly = 1) {
+            approvedNotifications.identityApplicationApproved("applicant-1", "application-1")
+        }
+        verify(exactly = 0) { approvedNotifications.identityApplicationRejected(any(), any(), any()) }
+
+        val rejectedNotifications = mockk<BusinessNotificationService>(relaxed = true)
+        identityReviewService(rejectedNotifications).reviewApplication(
+            "application-2",
+            "admin-1",
+            "REJECTED",
+            " 材料不完整 "
+        )
+
+        verify(exactly = 1) {
+            rejectedNotifications.identityApplicationRejected("applicant-1", "application-2", "材料不完整")
+        }
+        verify(exactly = 0) { rejectedNotifications.identityApplicationApproved(any(), any()) }
+    }
+
+    @Test
+    fun `failed identity transition emits no notification`() {
+        val notifications = mockk<BusinessNotificationService>(relaxed = true)
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        every {
+            jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg())
+        } answers {
+            listOf(secondArg<RowMapper<Any>>().mapRow(identityReviewResultSet(), 0))
+        }
+        every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 0
+        val service = AdminIdentityService(
+            jdbcTemplate,
+            ObjectMapper(),
+            mockk(relaxed = true),
+            mockk(relaxed = true),
+            mockk(relaxed = true),
+            notifications
+        )
+
+        assertThrows(IllegalStateException::class.java) {
+            service.reviewApplication("application-1", "admin-1", "REJECTED", "材料不完整")
+        }
+
+        verify(exactly = 0) { notifications.identityApplicationRejected(any(), any(), any()) }
+    }
 
     @Test
     fun `admin doctor practice revoke uses shared relationship cleanup`() {
@@ -636,6 +687,33 @@ class AdminIdentityServiceTest {
             consultantRelationships = consultantRelationships
         )
     }
+
+    private fun identityReviewService(notifications: BusinessNotificationService): AdminIdentityService {
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        every {
+            jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg())
+        } answers {
+            listOf(secondArg<RowMapper<Any>>().mapRow(identityReviewResultSet(), 0))
+        }
+        every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 1
+        return AdminIdentityService(
+            jdbcTemplate,
+            ObjectMapper(),
+            mockk(relaxed = true),
+            mockk(relaxed = true),
+            mockk(relaxed = true),
+            notifications
+        )
+    }
+
+    private fun identityReviewResultSet() = resultSet(
+        strings = mapOf(
+            "user_id" to "applicant-1",
+            "role_code" to "CONSULTANT",
+            "status" to "PENDING",
+            "application_data" to "{}"
+        )
+    )
 
     private fun bindingView() = ConsultantBindingAdminView(
         userId = "user-1",
