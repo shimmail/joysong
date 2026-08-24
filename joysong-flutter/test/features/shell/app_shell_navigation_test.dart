@@ -9,6 +9,9 @@ import 'package:joysong_flutter/core/config/app_environment.dart';
 import 'package:joysong_flutter/core/network/api_client.dart';
 import 'package:joysong_flutter/features/messaging/domain/notification_target.dart';
 import 'package:joysong_flutter/features/messaging/presentation/messaging_pages.dart';
+import 'package:joysong_flutter/features/identity/presentation/identity_pages.dart';
+import 'package:joysong_flutter/features/identity/presentation/institution_relationships_page.dart';
+import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/orders/presentation/order_detail_page.dart';
 import 'package:joysong_flutter/features/shell/presentation/app_shell.dart';
 
@@ -368,6 +371,95 @@ void main() {
     expect(client.orderReads, 1);
     expect(find.byType(OrderDetailPage), findsOneWidget);
   });
+
+  testWidgets('refund and service notifications open the business destination or safe fallback',
+      (tester) async {
+    final client = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE', freshReadable: true, freshSendEnabled: true,
+      notifications: const [_refundNotificationJson],
+    );
+    await _pumpShell(tester, client);
+    await _openSystemNotification(tester, '退款已批准');
+    expect(find.byType(OrderDetailPage), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    final serviceClient = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE', freshReadable: true, freshSendEnabled: true,
+      notifications: const [_serviceNotificationJson],
+    );
+    await _pumpShell(tester, serviceClient);
+    await _openSystemNotification(tester, '订单服务会话');
+    expect(find.byType(DmThreadPage), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    final emptyTargetClient = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE', freshReadable: true, freshSendEnabled: true,
+      notifications: const [_emptyServiceNotificationJson],
+    );
+    await _pumpShell(tester, emptyTargetClient);
+    await _openSystemNotification(tester, '服务会话不可用');
+    expect(find.text('我的订单'), findsOneWidget);
+  });
+
+  testWidgets('identity notification targets open the identity center and focus an application',
+      (tester) async {
+    final client = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE', freshReadable: true, freshSendEnabled: true,
+      notifications: const [_identityApplicationNotificationJson],
+      identityOverview: _identityOverviewJson,
+    );
+    await _pumpShell(tester, client);
+    await _openSystemNotification(tester, '身份审核结果');
+    expect(find.byType(IdentityCenterPage), findsOneWidget);
+    expect(find.byKey(const ValueKey('identity-application-identity-1')), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    final managementClient = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE', freshReadable: true, freshSendEnabled: true,
+      notifications: const [_identityManagementNotificationJson],
+    );
+    await _pumpShell(tester, managementClient);
+    await _openSystemNotification(tester, '身份管理');
+    expect(find.byType(IdentityCenterPage), findsOneWidget);
+  });
+
+  testWidgets('professional notification targets open the correct relationship scope',
+      (tester) async {
+    final client = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE', freshReadable: true, freshSendEnabled: true,
+      notifications: const [_doctorReviewNotificationJson],
+    );
+    await _pumpShell(tester, client);
+    await _openSystemNotification(tester, '医生关系待审核');
+    var page = tester.widget<InstitutionRelationshipsPage>(
+      find.byType(InstitutionRelationshipsPage),
+    );
+    expect(page.scope, InstitutionRelationshipScope.legalRepresentative);
+    expect(page.initialReviewType, InstitutionMembershipRequestType.doctor);
+    expect(page.initialRequestId, 'request-1');
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    final ownClient = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE', freshReadable: true, freshSendEnabled: true,
+      notifications: const [_consultantRelationshipNotificationJson],
+    );
+    await _pumpShell(tester, ownClient);
+    await _openSystemNotification(tester, '顾问关系更新');
+    page = tester.widget<InstitutionRelationshipsPage>(
+      find.byType(InstitutionRelationshipsPage),
+    );
+    expect(page.scope, InstitutionRelationshipScope.consultant);
+    expect(page.initialRequestId, 'request-2');
+  });
+}
+
+Future<void> _openSystemNotification(WidgetTester tester, String title) async {
+  await tester.tap(find.text('消息'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(const Key('message-center-system')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(title));
+  await tester.pumpAndSettle();
 }
 
 void _useLargeTestSurface(WidgetTester tester) {
@@ -464,6 +556,7 @@ final class _OrderServiceApiClient extends ApiClient {
     required this.freshSendEnabled,
     this.includeNotification = false,
     this.notifications = const [],
+    this.identityOverview = const {'roles': <Object?>[], 'applications': <Object?>[]},
   }) : super(
           apiRoot: Uri.parse('http://localhost/api/'),
           httpClient: _TestHttpClient(),
@@ -474,6 +567,7 @@ final class _OrderServiceApiClient extends ApiClient {
   bool freshSendEnabled;
   final bool includeNotification;
   final List<Map<String, Object?>> notifications;
+  final Object identityOverview;
   final gets = <String>[];
   final posts = <(String, Object?)>[];
   final puts = <String>[];
@@ -523,6 +617,10 @@ final class _OrderServiceApiClient extends ApiClient {
         notifications.isNotEmpty
             ? notifications
             : (includeNotification ? const [_dmNotificationJson] : const <Object?>[]),
+      '/identity/overview' => identityOverview,
+      '/management/context' => _managementContextJson,
+      '/management/institution-membership-requests/owned' ||
+      '/management/institution-membership-requests/reviewable' => const <Object?>[],
       'dm/conversations' => freshReadable
           ? const [_orderServiceConversationJson]
           : const <Object?>[],
@@ -651,4 +749,51 @@ const _orderNotificationJson = <String, Object?>{
   'targetId': 'order-1',
   'isRead': false,
   'createdAt': '2026-08-25T10:00:00',
+};
+
+const _refundNotificationJson = <String, Object?>{
+  'id': 'notification-refund', 'userId': 'user-1', 'type': 'ORDER_REFUND_APPROVED',
+  'title': '退款已批准', 'content': '', 'targetType': 'order_refund', 'targetId': 'order-1',
+  'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+};
+const _emptyServiceNotificationJson = <String, Object?>{
+  'id': 'notification-empty-service', 'userId': 'user-1', 'type': 'ORDER_SERVICE_ACTIVATED',
+  'title': '服务会话不可用', 'content': '', 'targetType': 'order_service_conversation', 'targetId': '',
+  'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+};
+const _serviceNotificationJson = <String, Object?>{
+  'id': 'notification-service', 'userId': 'user-1', 'type': 'ORDER_SERVICE_ACTIVATED',
+  'title': '订单服务会话', 'content': '', 'targetType': 'order_service_conversation', 'targetId': 'order-1',
+  'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+};
+const _identityApplicationNotificationJson = <String, Object?>{
+  'id': 'notification-identity', 'userId': 'user-1', 'type': 'IDENTITY_APPLICATION_REJECTED',
+  'title': '身份审核结果', 'content': '', 'targetType': 'identity_application', 'targetId': 'identity-1',
+  'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+};
+const _identityManagementNotificationJson = <String, Object?>{
+  'id': 'notification-identity-management', 'userId': 'user-1', 'type': 'IDENTITY_APPLICATION_APPROVED',
+  'title': '身份管理', 'content': '', 'targetType': 'identity_management', 'targetId': 'identity-2',
+  'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+};
+const _doctorReviewNotificationJson = <String, Object?>{
+  'id': 'notification-doctor-review', 'userId': 'user-1', 'type': 'PROFESSIONAL_APPLICATION_SUBMITTED',
+  'title': '医生关系待审核', 'content': '', 'targetType': 'professional_doctor_review', 'targetId': 'request-1',
+  'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+};
+const _consultantRelationshipNotificationJson = <String, Object?>{
+  'id': 'notification-consultant-own', 'userId': 'user-1', 'type': 'PROFESSIONAL_APPLICATION_APPROVED',
+  'title': '顾问关系更新', 'content': '', 'targetType': 'professional_consultant_relationships', 'targetId': 'request-2',
+  'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+};
+const _identityOverviewJson = <String, Object?>{
+  'roles': <Object?>[],
+  'applications': <Object?>[
+    {'id': 'identity-1', 'roleCode': 'DOCTOR', 'status': 'REJECTED', 'reviewNote': '补充材料'},
+  ],
+};
+const _managementContextJson = <String, Object?>{
+  'userId': 'user-1', 'platformRole': 'USER', 'activeRoles': <String>[],
+  'managedInstitutionIds': <String>[], 'visibleInstitutionIds': <String>[],
+  'doctorInstitutionIds': <String>[], 'consultantInstitutionIds': <String>[],
 };

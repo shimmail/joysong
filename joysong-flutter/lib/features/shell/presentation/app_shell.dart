@@ -993,6 +993,8 @@ class _AppShellState extends State<AppShell> {
       case NotificationTargetKind.orderServiceConversation:
         if (target.id.isNotEmpty) {
           unawaited(_openOrderServiceConversation(target.id));
+        } else {
+          unawaited(_openOrders());
         }
         return;
       case NotificationTargetKind.identityManagement:
