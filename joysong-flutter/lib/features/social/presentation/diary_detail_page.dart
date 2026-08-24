@@ -2,8 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:joysong_flutter/core/translation/translation.dart';
 import 'package:joysong_flutter/features/social/data/comment_collapse_store.dart';
-import 'package:joysong_flutter/features/social/domain/social_models.dart';
+import 'package:joysong_flutter/features/social/domain/social_models.dart'
+    hide ContentTranslation;
 import 'package:joysong_flutter/features/social/presentation/diary_media_grid.dart';
 import 'package:joysong_flutter/features/social/presentation/diary_share.dart';
 import 'package:joysong_flutter/features/social/presentation/favorite_action_button.dart';
@@ -40,6 +42,7 @@ final class _DiaryDetailPageState extends State<DiaryDetailPage> {
   final _scrollController = ScrollController();
   final _expandedComments = <String>{};
   final _collapsedComments = <String>{};
+  final _translationSourceOverrides = <String>{};
   late final CommentCollapseStore _collapseStore;
   Comment? _replyTarget;
   int _replyTrigger = 0;
@@ -251,9 +254,7 @@ final class _DiaryDetailPageState extends State<DiaryDetailPage> {
                     scale: status.active ? 1.15 : 1,
                     duration: const Duration(milliseconds: 180),
                     child: Icon(
-                      status.active
-                          ? Icons.favorite
-                          : Icons.favorite_border,
+                      status.active ? Icons.favorite : Icons.favorite_border,
                       size: 24,
                       color: status.active ? likedColor : inactiveColor,
                     ),
@@ -281,9 +282,7 @@ final class _DiaryDetailPageState extends State<DiaryDetailPage> {
           targetName: widget.diary.title,
           targetImage: widget.diary.coverImage.isNotEmpty
               ? widget.diary.coverImage
-              : (widget.diary.images.isEmpty
-                  ? ''
-                  : widget.diary.images.first),
+              : (widget.diary.images.isEmpty ? '' : widget.diary.images.first),
           compact: true,
           showCount: true,
           activeColor: savedColor,
@@ -351,19 +350,12 @@ final class _DiaryDetailPageState extends State<DiaryDetailPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _CommentBody(
+        _translatedCommentBody(
           comment: comment,
-          english: _english,
           collapsed: collapsed,
           isAuthor: comment.userId == widget.diary.userId,
-          displayContent: _displayContent(comment),
-          translating: widget.controller.isBusy(
-            'translation:comment:${comment.id}',
-          ),
-          translationActive: widget.controller.isShowingTranslation(comment.id),
           likeStatus: visibleLike,
           onReply: () => _startReply(comment),
-          onTranslate: () => _translateComment(comment),
           onLike: () => _toggleCommentLike(comment, like),
           onDislike: () => _toggleCommentDislike(comment, like),
           onLongPress: () => _showCommentMenu(comment, like),
@@ -419,42 +411,113 @@ final class _DiaryDetailPageState extends State<DiaryDetailPage> {
     final collapsed = _collapsedComments.contains(reply.id);
     final visibleLike =
         collapsed ? EngagementStatus(active: false, count: like.count) : like;
-    return _CommentBody(
+    return _translatedCommentBody(
       comment: reply,
-      english: _english,
       collapsed: collapsed,
       isAuthor: reply.userId == widget.diary.userId,
-      displayContent: _displayContent(reply),
-      translating: widget.controller.isBusy(
-        'translation:comment:${reply.id}',
-      ),
-      translationActive: widget.controller.isShowingTranslation(reply.id),
       likeStatus: visibleLike,
       compact: true,
       onReply: () => _startReply(reply),
-      onTranslate: () => _translateComment(reply),
       onLike: () => _toggleCommentLike(reply, like),
       onDislike: () => _toggleCommentDislike(reply, like),
       onLongPress: () => _showCommentMenu(reply, like),
     );
   }
 
-  String _displayContent(Comment comment) {
-    if (!widget.controller.isShowingTranslation(comment.id)) {
-      return comment.content;
+  Widget _translatedCommentBody({
+    required Comment comment,
+    required bool collapsed,
+    required bool isAuthor,
+    required EngagementStatus likeStatus,
+    required VoidCallback onReply,
+    required VoidCallback onLike,
+    required VoidCallback onDislike,
+    required VoidCallback onLongPress,
+    bool compact = false,
+  }) {
+    Widget buildBody(String automaticText) {
+      final displayContent = _displayContent(comment, automaticText);
+      return _CommentBody(
+        comment: comment,
+        english: _english,
+        collapsed: collapsed,
+        isAuthor: isAuthor,
+        displayContent: displayContent,
+        translating: widget.controller.isBusy(
+          'translation:comment:${comment.id}',
+        ),
+        translationActive: displayContent != comment.content,
+        likeStatus: likeStatus,
+        compact: compact,
+        onReply: onReply,
+        onTranslate: () => _translateComment(comment, automaticText),
+        onLike: onLike,
+        onDislike: onDislike,
+        onLongPress: onLongPress,
+      );
     }
-    return widget.controller.translationFor(comment.id)?.translatedText ??
-        comment.content;
+
+    if (collapsed || comment.id.trim().isEmpty) {
+      return buildBody(comment.content);
+    }
+    return _StableAutoTranslationBuilder(
+      key: ValueKey('automatic-comment:${comment.id}'),
+      contentType: 'comment',
+      contentId: 'comment:${comment.id}',
+      field: 'content',
+      sourceText: comment.content,
+      builder: (_, automaticText) => buildBody(automaticText),
+    );
   }
 
-  Future<void> _translateComment(Comment comment) async {
-    if (widget.controller.translationFor(comment.id) != null) {
-      widget.controller.toggleTranslationVisibility(comment.id);
+  String _displayContent(Comment comment, String automaticText) {
+    final source = comment.content;
+    if (_translationSourceOverrides.contains('comment:${comment.id}')) {
+      return source;
+    }
+    final manual = widget.controller.translationFor(comment.id)?.translatedText;
+    if (widget.controller.isShowingTranslation(comment.id) &&
+        _usableTranslation(manual, source)) {
+      return manual!.trim();
+    }
+    if (_usableTranslation(automaticText, source)) {
+      return automaticText.trim();
+    }
+    return source;
+  }
+
+  Future<void> _translateComment(
+    Comment comment,
+    String automaticText,
+  ) async {
+    final source = comment.content;
+    final overrideKey = 'comment:${comment.id}';
+    if (_displayContent(comment, automaticText) != source) {
+      setState(() => _translationSourceOverrides.add(overrideKey));
+      return;
+    }
+    final manual = widget.controller.translationFor(comment.id)?.translatedText;
+    final hasManual = _usableTranslation(manual, source);
+    final hasAutomatic = _usableTranslation(automaticText, source);
+    if (_translationSourceOverrides.remove(overrideKey)) {
+      if (hasManual && !widget.controller.isShowingTranslation(comment.id)) {
+        widget.controller.toggleTranslationVisibility(comment.id);
+      } else {
+        setState(() {});
+      }
+      if (hasManual || hasAutomatic) return;
+    } else if (hasManual) {
+      if (!widget.controller.isShowingTranslation(comment.id)) {
+        widget.controller.toggleTranslationVisibility(comment.id);
+      }
+      return;
+    } else if (hasAutomatic) {
+      setState(() {});
       return;
     }
     final result = await widget.controller.translateComment(
       commentId: comment.id,
-      text: comment.content,
+      text: source,
       targetLanguage: _english ? 'en-US' : 'zh-CN',
     );
     if (!result.succeeded && mounted) {
@@ -948,6 +1011,7 @@ final class _DiaryHeader extends StatelessWidget {
         const SizedBox(height: 18),
         _TranslatedDiarySection(
           controller: controller,
+          autoContentId: 'diary:${diary.id}',
           titleContentId: 'translation:diary-title:${diary.id}',
           title: diary.title,
           contentContentId: 'translation:diary-content:${diary.id}',
@@ -970,9 +1034,10 @@ final class _DiaryHeader extends StatelessWidget {
   }
 }
 
-final class _TranslatedDiarySection extends StatelessWidget {
+final class _TranslatedDiarySection extends StatefulWidget {
   const _TranslatedDiarySection({
     required this.controller,
+    required this.autoContentId,
     required this.titleContentId,
     required this.title,
     required this.contentContentId,
@@ -982,6 +1047,7 @@ final class _TranslatedDiarySection extends StatelessWidget {
   });
 
   final SocialController controller;
+  final String autoContentId;
   final String titleContentId;
   final String title;
   final String contentContentId;
@@ -990,66 +1056,118 @@ final class _TranslatedDiarySection extends StatelessWidget {
   final TextStyle? titleStyle;
 
   @override
+  State<_TranslatedDiarySection> createState() =>
+      _TranslatedDiarySectionState();
+}
+
+final class _TranslatedDiarySectionState
+    extends State<_TranslatedDiarySection> {
+  final _sourceOverrides = <String>{};
+  AutoTranslationRequest? _titleRequest;
+  AutoTranslationRequest? _contentRequest;
+  String _automaticTitle = '';
+  String _automaticContent = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _automaticTitle = widget.title;
+    _automaticContent = widget.content;
+    _synchronizeRequests();
+  }
+
+  @override
+  void didUpdateWidget(_TranslatedDiarySection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.title != widget.title) {
+      _automaticTitle = widget.title;
+      _sourceOverrides.remove('title');
+    }
+    if (oldWidget.content != widget.content) {
+      _automaticContent = widget.content;
+      _sourceOverrides.remove('content');
+    }
+    _synchronizeRequests();
+  }
+
+  void _synchronizeRequests() {
+    _titleRequest = _stableRequest(
+      previous: _titleRequest,
+      contentType: 'diary',
+      contentId: widget.autoContentId,
+      field: 'title',
+      sourceText: widget.title,
+    );
+    _contentRequest = _stableRequest(
+      previous: _contentRequest,
+      contentType: 'diary',
+      contentId: widget.autoContentId,
+      field: 'content',
+      sourceText: widget.content,
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final titleTranslation = controller.translationFor(titleContentId);
-    final contentTranslation = controller.translationFor(contentContentId);
-    final showingTitle = controller.isShowingTranslation(titleContentId);
-    final showingContent = controller.isShowingTranslation(contentContentId);
-    final busy = controller.isBusy('translation:diary:$titleContentId') ||
-        controller.isBusy('translation:diary:$contentContentId');
-    final hasTranslation = titleTranslation != null || contentTranslation != null;
-    final showing = showingTitle || showingContent;
+    Widget buildContent(String automaticTitle) {
+      _automaticTitle = automaticTitle;
+      final contentRequest = _contentRequest;
+      if (contentRequest == null) {
+        return _buildSection(widget.content);
+      }
+      return AutoTranslationBuilder(
+        request: contentRequest,
+        builder: (_, automaticContent) {
+          _automaticContent = automaticContent;
+          return _buildSection(automaticContent);
+        },
+      );
+    }
+
+    final titleRequest = _titleRequest;
+    if (titleRequest == null) {
+      return buildContent(widget.title);
+    }
+    return AutoTranslationBuilder(
+      request: titleRequest,
+      builder: (_, automaticTitle) => buildContent(automaticTitle),
+    );
+  }
+
+  Widget _buildSection(String automaticContent) {
+    final title = _visibleText(
+      source: widget.title,
+      automatic: _automaticTitle,
+      manualContentId: widget.titleContentId,
+      overrideKey: 'title',
+    );
+    final content = _visibleText(
+      source: widget.content,
+      automatic: automaticContent,
+      manualContentId: widget.contentContentId,
+      overrideKey: 'content',
+    );
+    final busy = widget.controller
+            .isBusy('translation:diary:${widget.titleContentId}') ||
+        widget.controller
+            .isBusy('translation:diary:${widget.contentContentId}');
+    final showing = title != widget.title || content != widget.content;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SelectableText(
-          showingTitle && titleTranslation != null
-              ? titleTranslation.translatedText
-              : title,
-          style: titleStyle,
+          title,
+          style: widget.titleStyle,
         ),
         const SizedBox(height: 10),
-        SelectableText(
-          showingContent && contentTranslation != null
-              ? contentTranslation.translatedText
-              : content,
-        ),
-        if (title.trim().isNotEmpty || content.trim().isNotEmpty)
+        SelectableText(content),
+        if (widget.title.trim().isNotEmpty || widget.content.trim().isNotEmpty)
           Align(
             alignment: Alignment.centerLeft,
             child: IconButton(
-              key: Key('$titleContentId-button'),
-              tooltip: hasTranslation && showing ? '显示原文' : '翻译',
-              onPressed: busy
-                  ? null
-                  : () async {
-                      if (hasTranslation) {
-                        controller.toggleTranslationVisibility(titleContentId);
-                        controller.toggleTranslationVisibility(contentContentId);
-                        return;
-                      }
-                      final requests = <Future<SocialActionResult<ContentTranslation>>>[
-                        if (title.trim().isNotEmpty)
-                          controller.translateContent(
-                            contentId: titleContentId,
-                            text: title,
-                            targetLanguage: targetLanguage,
-                            contentType: 'diary',
-                          ),
-                        if (content.trim().isNotEmpty)
-                          controller.translateContent(
-                            contentId: contentContentId,
-                            text: content,
-                            targetLanguage: targetLanguage,
-                            contentType: 'diary',
-                          ),
-                      ];
-                      final results = await Future.wait(requests);
-                      if (!context.mounted || results.every((r) => r.succeeded)) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(results.firstWhere((r) => !r.succeeded).message ?? '翻译失败，请稍后重试')),
-                      );
-                    },
+              key: Key('${widget.titleContentId}-button'),
+              tooltip: showing ? '显示原文' : '翻译',
+              onPressed: busy ? null : _handleTranslationAction,
               icon: busy
                   ? const SizedBox(
                       width: 16,
@@ -1062,6 +1180,190 @@ final class _TranslatedDiarySection extends StatelessWidget {
       ],
     );
   }
+
+  String _visibleText({
+    required String source,
+    required String automatic,
+    required String manualContentId,
+    required String overrideKey,
+  }) {
+    if (_sourceOverrides.contains(overrideKey)) return source;
+    final manual =
+        widget.controller.translationFor(manualContentId)?.translatedText;
+    if (widget.controller.isShowingTranslation(manualContentId) &&
+        _usableTranslation(manual, source)) {
+      return manual!.trim();
+    }
+    return _usableTranslation(automatic, source) ? automatic.trim() : source;
+  }
+
+  Future<void> _handleTranslationAction() async {
+    final titleVisible = _visibleText(
+      source: widget.title,
+      automatic: _automaticTitle,
+      manualContentId: widget.titleContentId,
+      overrideKey: 'title',
+    );
+    final contentVisible = _visibleText(
+      source: widget.content,
+      automatic: _automaticContent,
+      manualContentId: widget.contentContentId,
+      overrideKey: 'content',
+    );
+    if (titleVisible != widget.title || contentVisible != widget.content) {
+      setState(() {
+        if (widget.title.trim().isNotEmpty) _sourceOverrides.add('title');
+        if (widget.content.trim().isNotEmpty) _sourceOverrides.add('content');
+      });
+      return;
+    }
+
+    final requests = <Future<SocialActionResult<ContentTranslation>>>[];
+    _restoreOrRequest(
+      source: widget.title,
+      automatic: _automaticTitle,
+      manualContentId: widget.titleContentId,
+      overrideKey: 'title',
+      requests: requests,
+    );
+    _restoreOrRequest(
+      source: widget.content,
+      automatic: _automaticContent,
+      manualContentId: widget.contentContentId,
+      overrideKey: 'content',
+      requests: requests,
+    );
+    if (mounted) setState(() {});
+    if (requests.isEmpty) return;
+    final results = await Future.wait(requests);
+    if (!mounted || results.every((result) => result.succeeded)) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          results.firstWhere((result) => !result.succeeded).message ??
+              '翻译失败，请稍后重试',
+        ),
+      ),
+    );
+  }
+
+  void _restoreOrRequest({
+    required String source,
+    required String automatic,
+    required String manualContentId,
+    required String overrideKey,
+    required List<Future<SocialActionResult<ContentTranslation>>> requests,
+  }) {
+    _sourceOverrides.remove(overrideKey);
+    if (source.trim().isEmpty) return;
+    final manual =
+        widget.controller.translationFor(manualContentId)?.translatedText;
+    if (_usableTranslation(manual, source)) {
+      if (!widget.controller.isShowingTranslation(manualContentId)) {
+        widget.controller.toggleTranslationVisibility(manualContentId);
+      }
+      return;
+    }
+    if (_usableTranslation(automatic, source)) return;
+    requests.add(
+      widget.controller.translateContent(
+        contentId: manualContentId,
+        text: source,
+        targetLanguage: widget.targetLanguage,
+        contentType: 'diary',
+      ),
+    );
+  }
+}
+
+final class _StableAutoTranslationBuilder extends StatefulWidget {
+  const _StableAutoTranslationBuilder({
+    required this.contentType,
+    required this.contentId,
+    required this.field,
+    required this.sourceText,
+    required this.builder,
+    super.key,
+  });
+
+  final String contentType;
+  final String contentId;
+  final String field;
+  final String sourceText;
+  final Widget Function(BuildContext context, String automaticText) builder;
+
+  @override
+  State<_StableAutoTranslationBuilder> createState() =>
+      _StableAutoTranslationBuilderState();
+}
+
+final class _StableAutoTranslationBuilderState
+    extends State<_StableAutoTranslationBuilder> {
+  AutoTranslationRequest? _request;
+
+  @override
+  void initState() {
+    super.initState();
+    _synchronizeRequest();
+  }
+
+  @override
+  void didUpdateWidget(_StableAutoTranslationBuilder oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _synchronizeRequest();
+  }
+
+  void _synchronizeRequest() {
+    _request = _stableRequest(
+      previous: _request,
+      contentType: widget.contentType,
+      contentId: widget.contentId,
+      field: widget.field,
+      sourceText: widget.sourceText,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final request = _request;
+    if (request == null) return widget.builder(context, widget.sourceText);
+    return AutoTranslationBuilder(
+      request: request,
+      builder: widget.builder,
+    );
+  }
+}
+
+AutoTranslationRequest? _stableRequest({
+  required AutoTranslationRequest? previous,
+  required String contentType,
+  required String contentId,
+  required String field,
+  required String sourceText,
+}) {
+  if (contentId.trim().isEmpty ||
+      contentId.trim().endsWith(':') ||
+      sourceText.trim().isEmpty) {
+    return null;
+  }
+  if (previous != null &&
+      previous.contentType == contentType &&
+      previous.contentId == contentId &&
+      previous.field == field &&
+      previous.sourceText == sourceText) {
+    return previous;
+  }
+  return AutoTranslationRequest(
+    contentType: contentType,
+    contentId: contentId,
+    field: field,
+    sourceText: sourceText,
+  );
+}
+
+bool _usableTranslation(String? candidate, String source) {
+  final value = candidate?.trim() ?? '';
+  return value.isNotEmpty && value != source;
 }
 
 final class _DiaryAssociations extends StatelessWidget {

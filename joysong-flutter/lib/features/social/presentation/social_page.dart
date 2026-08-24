@@ -1065,7 +1065,7 @@ class _DiaryImageTile extends StatelessWidget {
   }
 }
 
-final class _DiaryCard extends StatelessWidget {
+final class _DiaryCard extends StatefulWidget {
   const _DiaryCard({
     required this.diary,
     required this.repository,
@@ -1081,8 +1081,37 @@ final class _DiaryCard extends StatelessWidget {
   final VoidCallback onDelete;
 
   @override
+  State<_DiaryCard> createState() => _DiaryCardState();
+}
+
+final class _DiaryCardState extends State<_DiaryCard> {
+  DiaryPreviewCard? _cachedCard;
+  Locale? _locale;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final locale = Localizations.localeOf(context);
+    if (_locale != locale) {
+      _locale = locale;
+      _cachedCard = null;
+    }
+  }
+
+  @override
+  void didUpdateWidget(_DiaryCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_sameDiaryCard(oldWidget.diary, widget.diary) ||
+        oldWidget.repository != widget.repository ||
+        (oldWidget.onEdit == null) != (widget.onEdit == null)) {
+      _cachedCard = null;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return DiaryPreviewCard(
+    final diary = widget.diary;
+    return _cachedCard ??= DiaryPreviewCard(
       key: Key('open-diary-${diary.id}'),
       title: diary.title,
       content: diary.content,
@@ -1098,9 +1127,11 @@ final class _DiaryCard extends StatelessWidget {
       likeCount: diary.likeCount,
       favoriteCount: diary.favoriteCount,
       commentCount: diary.commentCount,
+      enableAutoTranslation: true,
+      autoTranslationContentId: 'diary:${diary.id}',
       isLiked: diary.isLiked,
       isFavorited: false,
-      onTap: onOpen,
+      onTap: () => widget.onOpen(),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1109,11 +1140,11 @@ final class _DiaryCard extends StatelessWidget {
             tooltip: context.localized('更多操作', 'More actions'),
             onSelected: (value) {
               if (value == 'share') {
-                shareDiary(context, diary, repository: repository);
+                shareDiary(context, diary, repository: widget.repository);
               } else if (value == 'edit') {
-                onEdit?.call();
+                widget.onEdit?.call();
               } else if (value == 'delete') {
-                onDelete();
+                widget.onDelete();
               }
             },
             itemBuilder: (_) => [
@@ -1127,7 +1158,7 @@ final class _DiaryCard extends StatelessWidget {
                   ],
                 ),
               ),
-              if (onEdit != null)
+              if (widget.onEdit != null)
                 PopupMenuItem(
                   value: 'edit',
                   child: Text(context.localized('编辑', 'Edit')),
@@ -1142,6 +1173,32 @@ final class _DiaryCard extends StatelessWidget {
       ),
     );
   }
+}
+
+bool _sameDiaryCard(Diary first, Diary second) =>
+    first.id == second.id &&
+    first.title == second.title &&
+    first.content == second.content &&
+    first.authorName == second.authorName &&
+    first.authorAvatar == second.authorAvatar &&
+    first.publishDate == second.publishDate &&
+    first.createdAt == second.createdAt &&
+    first.projectName == second.projectName &&
+    _sameStrings(first.images, second.images) &&
+    _sameStrings(first.beforeImages, second.beforeImages) &&
+    _sameStrings(first.afterImages, second.afterImages) &&
+    first.likeCount == second.likeCount &&
+    first.favoriteCount == second.favoriteCount &&
+    first.commentCount == second.commentCount &&
+    first.isLiked == second.isLiked &&
+    first.status == second.status;
+
+bool _sameStrings(List<String> first, List<String> second) {
+  if (first.length != second.length) return false;
+  for (var index = 0; index < first.length; index += 1) {
+    if (first[index] != second[index]) return false;
+  }
+  return true;
 }
 
 final class _StatusChip extends StatelessWidget {
