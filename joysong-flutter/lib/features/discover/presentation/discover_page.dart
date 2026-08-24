@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/network/optimized_network_image.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/core/translation/translation.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/discover/presentation/discover_controller.dart';
@@ -1084,6 +1085,7 @@ class _DiscoverDetailPageState extends State<DiscoverDetailPage> {
                   : switch (item!.type) {
                       DiscoverContentType.project => CatalogProjectDetailView(
                           item: item,
+                          enableAutoTranslation: true,
                           socialController: widget.socialController,
                           onBook: widget.onBookProject,
                           onInstitutionTap: (id) =>
@@ -1359,6 +1361,21 @@ class _GenericDetailView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final titleField = _matchingVisibleField(
+      item.raw,
+      item.title,
+      const ['title', 'name', 'projectName'],
+    );
+    final metaField = _matchingVisibleField(
+      item.raw,
+      item.meta,
+      const ['city', 'category', 'institutionName', 'department'],
+    );
+    final subtitleField = _matchingVisibleField(
+      item.raw,
+      item.subtitle,
+      const ['description', 'summary', 'content', 'specialties', 'address'],
+    );
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
@@ -1373,23 +1390,70 @@ class _GenericDetailView extends StatelessWidget {
             ),
           ),
         const SizedBox(height: 20),
-        Text(item.title, style: Theme.of(context).textTheme.headlineSmall),
+        titleField == null
+            ? Text(item.title, style: Theme.of(context).textTheme.headlineSmall)
+            : AutoTranslatedText(
+                request: _genericDetailRequest(item, titleField, item.title),
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
         if (item.meta.isNotEmpty) ...[
           const SizedBox(height: 8),
-          Text(
-            item.meta,
-            style: TextStyle(color: Theme.of(context).colorScheme.primary),
-          ),
+          metaField == null
+              ? Text(
+                  item.meta,
+                  style:
+                      TextStyle(color: Theme.of(context).colorScheme.primary),
+                )
+              : AutoTranslatedText(
+                  request: _genericDetailRequest(item, metaField, item.meta),
+                  style:
+                      TextStyle(color: Theme.of(context).colorScheme.primary),
+                ),
         ],
         const SizedBox(height: 16),
-        Text(
-          item.subtitle.isEmpty
-              ? context.localized('暂无更多介绍', 'No additional information')
-              : item.subtitle,
-        ),
+        if (subtitleField != null)
+          AutoTranslatedText(
+            request: _genericDetailRequest(
+              item,
+              subtitleField,
+              item.subtitle,
+            ),
+          )
+        else
+          Text(
+            item.subtitle.isEmpty
+                ? context.localized('暂无更多介绍', 'No additional information')
+                : item.subtitle,
+          ),
       ],
     );
   }
+}
+
+String? _matchingVisibleField(
+  Map<String, Object?> data,
+  String visible,
+  List<String> fields,
+) {
+  if (visible.isEmpty) return null;
+  for (final field in fields) {
+    if (data[field]?.toString().trim() == visible) return field;
+  }
+  return null;
+}
+
+AutoTranslationRequest _genericDetailRequest(
+  DiscoverItem item,
+  String field,
+  String source,
+) {
+  return AutoTranslationRequest(
+    contentType:
+        item.type == DiscoverContentType.all ? 'general' : item.type.name,
+    contentId: '${item.type.name}:${item.id}',
+    field: field,
+    sourceText: source,
+  );
 }
 
 class _AllReviewsPage extends StatefulWidget {
@@ -1546,15 +1610,14 @@ class _AllReviewCard extends StatelessWidget {
               children: [
                 CircleAvatar(
                   radius: 20,
-                  foregroundImage:
-                      avatar.isEmpty
-                          ? null
-                          : optimizedNetworkImageProvider(
-                              context,
-                              avatar,
-                              width: 40,
-                              height: 40,
-                            ),
+                  foregroundImage: avatar.isEmpty
+                      ? null
+                      : optimizedNetworkImageProvider(
+                          context,
+                          avatar,
+                          width: 40,
+                          height: 40,
+                        ),
                   child: Text(userName.characters.first),
                 ),
                 const SizedBox(width: 10),

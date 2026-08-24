@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/network/optimized_network_image.dart';
+import 'package:joysong_flutter/core/translation/rich_translation_validator.dart';
+import 'package:joysong_flutter/core/translation/translation.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/presentation/catalog_detail_shared.dart';
 import 'package:joysong_flutter/features/discover/presentation/rich_content_view.dart';
@@ -16,8 +18,12 @@ class ArticleDetailView extends StatelessWidget {
     final avatar = _text(raw, const ['authorAvatar', 'avatar']);
     final date = _text(raw, const ['publishDate', 'publishedAt', 'createdAt']);
     final category = _text(raw, const ['category', 'categoryName']);
-    final content = _text(raw, const ['content', 'body', 'contentHtml'],
-        fallback: item.subtitle);
+    final body = _text(raw, const ['content', 'body', 'contentHtml']);
+    final summary = _text(raw, const ['summary'], fallback: item.subtitle);
+    final content = body.isEmpty ? summary : body;
+    final contentField = body.isEmpty ? 'summary' : 'content';
+    final contentIsHtml = _looksLikeHtml(content);
+    final contentId = 'article:${item.id}';
     final images = _images(raw);
     final galleryImages = <String>{
       if (item.imageUrl.isNotEmpty) item.imageUrl,
@@ -50,7 +56,15 @@ class ArticleDetailView extends StatelessWidget {
               ),
             ),
           const SizedBox(height: 20),
-          Text(item.title, style: Theme.of(context).textTheme.headlineSmall),
+          AutoTranslatedText(
+            request: AutoTranslationRequest(
+              contentType: 'article',
+              contentId: contentId,
+              field: 'title',
+              sourceText: item.title,
+            ),
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
           const SizedBox(height: 14),
           Row(children: [
             CircleAvatar(
@@ -77,21 +91,39 @@ class ArticleDetailView extends StatelessWidget {
             const SizedBox(height: 10),
             Align(
               alignment: Alignment.centerLeft,
-              child: Chip(label: Text(category)),
+              child: Chip(
+                label: AutoTranslatedText(
+                  request: AutoTranslationRequest(
+                    contentType: 'article',
+                    contentId: contentId,
+                    field: 'category',
+                    sourceText: category,
+                  ),
+                ),
+              ),
             ),
           ],
           const Divider(height: 28),
-          RichContentView(
-            content: content,
-            textStyle:
-                Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.75),
-            onImageTap: (image) => Navigator.of(context).push<void>(
-              MaterialPageRoute(
-                builder: (_) => FullscreenImagePager(
-                  images: galleryImages,
-                  contentDescription:
-                      context.localized('文章图片', 'Article image'),
-                  initialPage: galleryImages.indexOf(image),
+          AutoTranslationBuilder(
+            request: AutoTranslationRequest(
+              contentType: contentIsHtml ? 'article_html' : 'article',
+              contentId: contentId,
+              field: contentField,
+              sourceText: content,
+              validator: contentIsHtml ? preservesRichContentStructure : null,
+            ),
+            builder: (_, visibleContent) => RichContentView(
+              content: visibleContent,
+              textStyle:
+                  Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.75),
+              onImageTap: (image) => Navigator.of(context).push<void>(
+                MaterialPageRoute(
+                  builder: (_) => FullscreenImagePager(
+                    images: galleryImages,
+                    contentDescription:
+                        context.localized('文章图片', 'Article image'),
+                    initialPage: galleryImages.indexOf(image),
+                  ),
                 ),
               ),
             ),
@@ -154,3 +186,6 @@ List<String> _images(Map<String, Object?> map) {
       .where((item) => item.isNotEmpty)
       .toList(growable: false);
 }
+
+bool _looksLikeHtml(String value) =>
+    RegExp(r'<\/?[a-z][^>]*>', caseSensitive: false).hasMatch(value);
