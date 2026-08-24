@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/core/translation/translation.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
+import 'package:joysong_flutter/features/discover/presentation/catalog_institution_detail_view.dart';
 import 'package:joysong_flutter/features/discover/presentation/professional_catalog_page.dart';
 
 import '../../core/translation/translation_test_fixtures.dart';
@@ -103,6 +104,71 @@ void main() {
     expect(find.text('专业端评价内容'), findsOneWidget);
     expect(translationRepository.calls, isEmpty);
   });
+
+  testWidgets(
+      'professional institution shared content makes zero requests under active scope',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 3000);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final translationRepository = RecordingTranslationRepository();
+    final translationController = AutoTranslationController(
+      repository: translationRepository,
+    )..synchronize(
+        enabled: true,
+        authenticated: true,
+        targetLanguage: 'en-US',
+      );
+    addTearDown(translationController.dispose);
+    final repository = _CatalogRepository(
+      selectedInstitution: _chineseProfessionalInstitution,
+    );
+
+    Widget scoped(Widget child, {Key? appKey}) => AutoTranslationScope(
+          controller: translationController,
+          enabled: true,
+          targetLanguage: 'en-US',
+          child: MaterialApp(
+            key: appKey,
+            locale: const Locale('en'),
+            home: child,
+          ),
+        );
+
+    await tester.pumpWidget(scoped(ProfessionalCatalogPage(
+      repository: repository,
+      scope: ProfessionalCatalogScope.doctor,
+    )));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('专业端中文机构'));
+    for (var frame = 0; frame < 4; frame += 1) {
+      await tester.pump(Duration.zero, EnginePhase.build);
+    }
+
+    expect(repository.calls, contains('institution/professional-institution'));
+    expect(
+      repository.calls,
+      contains('institution/professional-institution/doctors'),
+    );
+    expect(translationRepository.calls, isEmpty);
+
+    await tester.pumpWidget(scoped(
+      const Scaffold(
+        body: CatalogInstitutionDetailView(
+          item: _chineseProfessionalInstitution,
+        ),
+      ),
+      appKey: const ValueKey('bounded-professional-institution'),
+    ));
+    await tester.pump();
+    expect(find.text('专业端中文机构'), findsWidgets);
+    expect(find.text('专业端公开资质'), findsOneWidget);
+    expect(find.text('专业端机构项目'), findsOneWidget);
+    expect(find.text('专业端机构日记'), findsOneWidget);
+    expect(find.text('专业端机构评价'), findsOneWidget);
+    expect(translationRepository.calls, isEmpty);
+  });
 }
 
 ListTile _unmountedListTile(WidgetTester tester, String title) {
@@ -122,9 +188,10 @@ ListTile _unmountedListTile(WidgetTester tester, String title) {
 }
 
 final class _CatalogRepository implements ProfessionalCatalogRepository {
-  _CatalogRepository({this.selectedProject});
+  _CatalogRepository({this.selectedProject, this.selectedInstitution});
 
   final DiscoverItem? selectedProject;
+  final DiscoverItem? selectedInstitution;
   final calls = <String>[];
   DiscoverItem item(String id, DiscoverContentType type, String title) =>
       DiscoverItem(id: id, type: type, title: title);
@@ -132,7 +199,8 @@ final class _CatalogRepository implements ProfessionalCatalogRepository {
   Future<List<DiscoverItem>> loadVisibleInstitutions() async {
     calls.add('institutions');
     return [
-      item('i-1', DiscoverContentType.institution, 'Visible institution')
+      selectedInstitution ??
+          item('i-1', DiscoverContentType.institution, 'Visible institution')
     ];
   }
 
@@ -196,6 +264,52 @@ const _chineseProfessionalProject = DiscoverItem(
         'userName': '专业端评价用户',
         'content': '专业端评价内容',
         'rating': 5,
+      },
+    ],
+  },
+);
+
+const _chineseProfessionalInstitution = DiscoverItem(
+  id: 'professional-institution',
+  type: DiscoverContentType.institution,
+  title: '专业端中文机构',
+  raw: {
+    'institution': {
+      'id': 'professional-institution',
+      'name': '专业端中文机构',
+      'city': '上海市',
+      'address': '专业端机构地址',
+      'credentials': '专业端公开资质',
+    },
+    'projects': [
+      {
+        'id': 'professional-institution-project',
+        'projectName': '专业端机构项目',
+        'description': '专业端机构项目说明',
+        'tags': ['专业端项目标签'],
+      },
+    ],
+    'diaries': [
+      {
+        'id': 'professional-institution-diary',
+        'title': '专业端机构日记',
+        'content': '专业端机构日记内容',
+      },
+    ],
+    'reviews': [
+      {
+        'id': 'professional-institution-review',
+        'content': '专业端机构评价',
+        'projectName': '专业端评价项目',
+        'tags': ['专业端评价标签'],
+        'rating': 5,
+      },
+    ],
+    'doctors': [
+      {
+        'id': 'professional-doctor',
+        'name': '专业端医生姓名',
+        'title': '专业端医生职称',
       },
     ],
   },

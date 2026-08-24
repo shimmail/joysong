@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/network/optimized_network_image.dart';
+import 'package:joysong_flutter/core/translation/translation.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/presentation/catalog_detail_shared.dart';
 import 'package:joysong_flutter/features/discover/presentation/catalog_review_section.dart';
@@ -24,6 +25,7 @@ class DoctorDetailView extends StatelessWidget {
     this.onViewAllDiaries,
     this.onViewAllReviews,
     this.socialController,
+    this.enableAutoTranslation = false,
     super.key,
   });
 
@@ -37,6 +39,7 @@ class DoctorDetailView extends StatelessWidget {
   final VoidCallback? onViewAllDiaries;
   final VoidCallback? onViewAllReviews;
   final SocialController? socialController;
+  final bool enableAutoTranslation;
 
   @override
   Widget build(BuildContext context) {
@@ -44,13 +47,13 @@ class DoctorDetailView extends StatelessWidget {
     final data = doctor.isEmpty ? item.raw : doctor;
     final avatar = _text(data, const ['avatar', 'imageUrl'], item.imageUrl);
     final name = _text(data, const ['name'], item.title);
-    final title = _text(data, const ['title']);
+    final titleSource = _firstTextSource(data, const ['title']);
+    final title = titleSource?.value ?? '';
     final primaryInstitution = _map(item.raw['institution']);
-    final institutionName = _text(
-      data,
-      const ['institutionName'],
-      _text(primaryInstitution, const ['name']),
-    );
+    final institutionSource =
+        _firstTextSource(data, const ['institutionName']) ??
+            _firstTextSource(primaryInstitution, const ['name']);
+    final institutionName = institutionSource?.value ?? '';
     final institutionId = _text(
       data,
       const ['institutionId'],
@@ -58,15 +61,26 @@ class DoctorDetailView extends StatelessWidget {
     );
     final rating = _number(data['rating']);
     final verified = _boolean(data['isVerified']);
-    final specialties = _texts(data['specialties']);
-    final certificationTags = _texts(data['certificationTags']);
+    final certificationTagSet = <String>{};
+    final certificationTags = _texts(
+      data['certificationTags'],
+    ).where(certificationTagSet.add).toList(growable: false);
+    final visibleTagSet = <String>{...certificationTagSet};
+    final specialties = _texts(
+      data['specialties'],
+    ).where(visibleTagSet.add).toList(growable: false);
     final credentialImages = _texts(data['credentialImages']);
-    final bio = _text(data, const ['bio', 'description'], item.subtitle);
-    final credentials = _text(data, const ['credentials']);
+    final bioSource = _firstTextSource(data, const ['bio', 'description']);
+    final bio = bioSource?.value ?? item.subtitle;
+    final credentialsSource = _firstTextSource(data, const ['credentials']);
+    final credentials = credentialsSource?.value ?? '';
+    final profileSource = credentialsSource ?? bioSource;
+    final profile = credentials.isNotEmpty ? credentials : bio;
     final projects = _maps(item.raw['institutionProjects']);
     final institutions = _maps(item.raw['institutions']);
     final diaries = _maps(item.raw['diaries']);
     final reviews = _maps(item.raw['reviews']);
+    final translationContentId = 'doctor:${item.id}';
 
     final reviewCount = _integer(data['reviewCount']);
     final consultationCount = _integer(data['consultationCount']);
@@ -93,16 +107,18 @@ class DoctorDetailView extends StatelessWidget {
                   avatar: avatar,
                   name: name,
                   title: title,
+                  titleField: titleSource?.field ?? 'title',
                   institutionName: institutionName,
+                  institutionField: institutionSource?.field ?? '',
                   verified: verified,
                   rating: rating,
                   reviewCount: reviewCount,
                   caseCount: caseCount,
                   consultationCount: consultationCount,
-                  certificationTags: {
-                    ...certificationTags,
-                    ...specialties,
-                  }.toList(growable: false),
+                  certificationTags: certificationTags,
+                  specialties: specialties,
+                  contentId: translationContentId,
+                  enableAutoTranslation: enableAutoTranslation,
                   onInstitutionTap:
                       institutionId.isEmpty || onInstitutionTap == null
                           ? null
@@ -143,20 +159,29 @@ class DoctorDetailView extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 8),
-                        Text(
-                          credentials.isNotEmpty
-                              ? credentials
-                              : bio.isNotEmpty
-                                  ? bio
-                                  : context.localized(
-                                      '资质信息正在完善中',
-                                      'Credentials are being updated',
-                                    ),
-                          style: const TextStyle(
-                            height: 1.55,
-                            color: Color(0xff666666),
+                        if (profile.isEmpty)
+                          Text(
+                            context.localized(
+                              '资质信息正在完善中',
+                              'Credentials are being updated',
+                            ),
+                            style: const TextStyle(
+                              height: 1.55,
+                              color: Color(0xff666666),
+                            ),
+                          )
+                        else
+                          _DoctorTranslatedText(
+                            enabled:
+                                enableAutoTranslation && profileSource != null,
+                            contentId: translationContentId,
+                            field: profileSource?.field ?? '',
+                            source: profile,
+                            style: const TextStyle(
+                              height: 1.55,
+                              color: Color(0xff666666),
+                            ),
                           ),
-                        ),
                         if (credentialImages.isNotEmpty) ...[
                           const SizedBox(height: 14),
                           SizedBox(
@@ -205,6 +230,7 @@ class DoctorDetailView extends StatelessWidget {
                             projects: projects,
                             onProjectTap: (project) =>
                                 _projectTap(project, onProjectTap),
+                            enableAutoTranslation: enableAutoTranslation,
                           ),
                       ],
                     ),
@@ -237,6 +263,7 @@ class DoctorDetailView extends StatelessWidget {
                             diaries: diaries,
                             onDiaryTap: onDiaryTap,
                             maxItems: 5,
+                            enableAutoTranslation: enableAutoTranslation,
                           ),
                       ],
                     ),
@@ -259,6 +286,9 @@ class DoctorDetailView extends StatelessWidget {
                       socialController: socialController,
                       onViewAll: onViewAllReviews,
                       showHeader: false,
+                      enableAutoTranslation: enableAutoTranslation,
+                      ownerType: 'doctor',
+                      ownerId: item.id,
                     ),
                   ),
                 ),
@@ -282,6 +312,8 @@ class DoctorDetailView extends StatelessWidget {
                             index++) ...[
                           _InstitutionTile(
                             data: institutions[index],
+                            enableAutoTranslation: enableAutoTranslation,
+                            contentId: translationContentId,
                             onTap: onInstitutionTap == null
                                 ? null
                                 : () {
@@ -332,26 +364,36 @@ class _DoctorHeader extends StatelessWidget {
     required this.avatar,
     required this.name,
     required this.title,
+    required this.titleField,
     required this.institutionName,
+    required this.institutionField,
     required this.verified,
     required this.rating,
     required this.reviewCount,
     required this.caseCount,
     required this.consultationCount,
     required this.certificationTags,
+    required this.specialties,
+    required this.contentId,
+    required this.enableAutoTranslation,
     this.onInstitutionTap,
   });
 
   final String avatar;
   final String name;
   final String title;
+  final String titleField;
   final String institutionName;
+  final String institutionField;
   final bool verified;
   final double rating;
   final int reviewCount;
   final int caseCount;
   final int consultationCount;
   final List<String> certificationTags;
+  final List<String> specialties;
+  final String contentId;
+  final bool enableAutoTranslation;
   final VoidCallback? onInstitutionTap;
 
   @override
@@ -387,11 +429,18 @@ class _DoctorHeader extends StatelessWidget {
             ]),
             const SizedBox(height: 7),
           ],
-          Text(
-            [name, title].where((value) => value.isNotEmpty).join('  '),
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+          _DoctorTranslatedText(
+            enabled: enableAutoTranslation,
+            contentId: contentId,
+            field: titleField,
+            source: title,
+            prefix: name,
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+            ),
           ),
-          if (certificationTags.isNotEmpty) ...[
+          if (certificationTags.isNotEmpty || specialties.isNotEmpty) ...[
             const SizedBox(height: 8),
             Text(
               context.localized('展示标签', 'Display tags'),
@@ -407,6 +456,19 @@ class _DoctorHeader extends StatelessWidget {
                   _Tag(label: tag),
                   const SizedBox(width: 6),
                 ],
+                for (var index = 0; index < specialties.length; index++) ...[
+                  _Tag(
+                    label: specialties[index],
+                    request: enableAutoTranslation
+                        ? _doctorRequest(
+                            contentId: contentId,
+                            field: 'specialties',
+                            source: specialties[index],
+                          )
+                        : null,
+                  ),
+                  const SizedBox(width: 6),
+                ],
               ]),
             ),
           ],
@@ -419,8 +481,11 @@ class _DoctorHeader extends StatelessWidget {
                     size: 15, color: Color(0xff777777)),
                 const SizedBox(width: 5),
                 Expanded(
-                  child: Text(
-                    institutionName,
+                  child: _DoctorTranslatedText(
+                    enabled: enableAutoTranslation,
+                    contentId: contentId,
+                    field: institutionField,
+                    source: institutionName,
                     style: const TextStyle(
                       color: Color(0xff666666),
                       decoration: TextDecoration.underline,
@@ -515,15 +580,27 @@ class _EmptySection extends StatelessWidget {
 }
 
 class _ProjectCard extends StatelessWidget {
-  const _ProjectCard({required this.data, this.onTap});
+  const _ProjectCard({
+    required this.data,
+    required this.enableAutoTranslation,
+    this.onTap,
+    super.key,
+  });
   final Map<String, Object?> data;
   final VoidCallback? onTap;
+  final bool enableAutoTranslation;
 
   @override
   Widget build(BuildContext context) {
     final price = _number(data['price']);
     final originalPrice = _number(data['originalPrice']);
-    final tags = _projectTags(data);
+    final tagSources = _projectTagSources(data);
+    final tags =
+        tagSources.map((source) => source.value).toList(growable: false);
+    final projectId = _projectId(data);
+    final name = _firstTextSource(data, const ['projectName', 'name']);
+    final subtitle =
+        _firstTextSource(data, const ['institutionName', 'category']);
     return Material(
       color: const Color(0xfff7f7f7),
       borderRadius: BorderRadius.circular(12),
@@ -544,23 +621,46 @@ class _ProjectCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(_text(data, const ['projectName', 'name']),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w700)),
+                  _DoctorTranslatedText(
+                    enabled: enableAutoTranslation && projectId.isNotEmpty,
+                    contentType: 'project',
+                    contentId: 'project:$projectId',
+                    field: name?.field ?? '',
+                    source: name?.value ?? '',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
                   const SizedBox(height: 5),
-                  Text(_text(data, const ['institutionName', 'category']),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall),
+                  _DoctorTranslatedText(
+                    enabled: enableAutoTranslation && projectId.isNotEmpty,
+                    contentType: 'project',
+                    contentId: 'project:$projectId',
+                    field: subtitle?.field ?? '',
+                    source: subtitle?.value ?? '',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                   if (tags.isNotEmpty) ...[
                     const SizedBox(height: 6),
                     Wrap(
                       spacing: 5,
                       runSpacing: 4,
-                      children: tags
+                      children: tagSources
                           .take(3)
-                          .map((tag) => _ProjectTag(label: tag))
+                          .map((tag) => _ProjectTag(
+                                label: tag.value,
+                                request: enableAutoTranslation &&
+                                        projectId.isNotEmpty
+                                    ? AutoTranslationRequest(
+                                        contentType: 'project',
+                                        contentId: 'project:$projectId',
+                                        field: tag.field,
+                                        sourceText: tag.value,
+                                      )
+                                    : null,
+                              ))
                           .toList(growable: false),
                     ),
                   ],
@@ -597,10 +697,12 @@ class _FilterableProjects extends StatefulWidget {
   const _FilterableProjects({
     required this.projects,
     required this.onProjectTap,
+    required this.enableAutoTranslation,
   });
 
   final List<Map<String, Object?>> projects;
   final VoidCallback? Function(Map<String, Object?> project) onProjectTap;
+  final bool enableAutoTranslation;
 
   @override
   State<_FilterableProjects> createState() => _FilterableProjectsState();
@@ -611,7 +713,9 @@ class _FilterableProjectsState extends State<_FilterableProjects> {
 
   @override
   Widget build(BuildContext context) {
-    final tags = _allProjectTags(widget.projects);
+    final tagSources = _allProjectTagSources(widget.projects);
+    final tags =
+        tagSources.map((source) => source.value).toList(growable: false);
     final filtered = _selectedTag.isEmpty
         ? widget.projects
         : widget.projects
@@ -638,6 +742,12 @@ class _FilterableProjectsState extends State<_FilterableProjects> {
                     label: tag,
                     selected: _selectedTag == tag,
                     onSelected: () => setState(() => _selectedTag = tag),
+                    request: widget.enableAutoTranslation
+                        ? _projectTagRequest(
+                            tagSources
+                                .firstWhere((source) => source.value == tag),
+                          )
+                        : null,
                   ),
                 ],
               ],
@@ -647,8 +757,10 @@ class _FilterableProjectsState extends State<_FilterableProjects> {
         ],
         for (var index = 0; index < visible.length; index++) ...[
           _ProjectCard(
+            key: _doctorProjectKey(visible[index]),
             data: visible[index],
             onTap: widget.onProjectTap(visible[index]),
+            enableAutoTranslation: widget.enableAutoTranslation,
           ),
           if (index < visible.length - 1) const SizedBox(height: 14),
         ],
@@ -662,15 +774,19 @@ class _FilterChip extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onSelected,
+    this.request,
   });
 
   final String label;
   final bool selected;
   final VoidCallback onSelected;
+  final AutoTranslationRequest? request;
 
   @override
   Widget build(BuildContext context) => ChoiceChip(
-        label: Text(label),
+        label: request == null
+            ? Text(label)
+            : AutoTranslatedText(request: request!),
         selected: selected,
         onSelected: (_) => onSelected(),
         visualDensity: VisualDensity.compact,
@@ -678,8 +794,9 @@ class _FilterChip extends StatelessWidget {
 }
 
 class _ProjectTag extends StatelessWidget {
-  const _ProjectTag({required this.label});
+  const _ProjectTag({required this.label, this.request});
   final String label;
+  final AutoTranslationRequest? request;
 
   @override
   Widget build(BuildContext context) => DecoratedBox(
@@ -689,13 +806,21 @@ class _ProjectTag extends StatelessWidget {
         ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 10,
-              color: Theme.of(context).colorScheme.onPrimaryContainer,
-            ),
-          ),
+          child: request == null
+              ? Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: Theme.of(context).colorScheme.onPrimaryContainer,
+                  ),
+                )
+              : AutoTranslatedText(
+                  request: request!,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: Theme.of(context).colorScheme.onPrimaryContainer,
+                  ),
+                ),
         ),
       );
 }
@@ -752,9 +877,16 @@ class _DoctorBottomBar extends StatelessWidget {
 }
 
 class _InstitutionTile extends StatelessWidget {
-  const _InstitutionTile({required this.data, this.onTap});
+  const _InstitutionTile({
+    required this.data,
+    required this.enableAutoTranslation,
+    required this.contentId,
+    this.onTap,
+  });
   final Map<String, Object?> data;
   final VoidCallback? onTap;
+  final bool enableAutoTranslation;
+  final String contentId;
 
   @override
   Widget build(BuildContext context) {
@@ -762,6 +894,7 @@ class _InstitutionTile extends StatelessWidget {
       _text(data, const ['city']),
       _text(data, const ['address']),
     ].where((value) => value.isNotEmpty).join(' ');
+    final name = _firstTextSource(data, const ['name']);
     return Material(
       color: const Color(0xfff7f7f7),
       borderRadius: BorderRadius.circular(12),
@@ -769,15 +902,28 @@ class _InstitutionTile extends StatelessWidget {
         onTap: onTap,
         title: Row(children: [
           Flexible(
-              child: Text(_text(data, const ['name']),
-                  style: const TextStyle(fontWeight: FontWeight.w700))),
+            child: _DoctorTranslatedText(
+              enabled: enableAutoTranslation,
+              contentId: contentId,
+              field: name?.field ?? '',
+              source: name?.value ?? '',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
           if (_boolean(data['isVerified'])) ...[
             const SizedBox(width: 5),
             Icon(Icons.verified_outlined,
                 size: 17, color: Theme.of(context).colorScheme.primary),
           ],
         ]),
-        subtitle: address.isEmpty ? null : Text(address),
+        subtitle: address.isEmpty
+            ? null
+            : _DoctorTranslatedText(
+                enabled: enableAutoTranslation,
+                contentId: contentId,
+                field: 'address',
+                source: address,
+              ),
         trailing:
             onTap == null ? null : const Icon(Icons.chevron_right_rounded),
       ),
@@ -919,8 +1065,9 @@ class _NetworkImage extends StatelessWidget {
 }
 
 class _Tag extends StatelessWidget {
-  const _Tag({required this.label});
+  const _Tag({required this.label, this.request});
   final String label;
+  final AutoTranslationRequest? request;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -929,8 +1076,59 @@ class _Tag extends StatelessWidget {
           color: const Color(0xfff0f0f0),
           borderRadius: BorderRadius.circular(6),
         ),
-        child: Text(label, style: Theme.of(context).textTheme.bodySmall),
+        child: request == null
+            ? Text(label, style: Theme.of(context).textTheme.bodySmall)
+            : AutoTranslatedText(
+                request: request!,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
       );
+}
+
+class _DoctorTranslatedText extends StatelessWidget {
+  const _DoctorTranslatedText({
+    required this.enabled,
+    required this.contentId,
+    required this.field,
+    required this.source,
+    this.contentType = 'doctor',
+    this.prefix = '',
+    this.style,
+    this.maxLines,
+    this.overflow,
+  });
+
+  final bool enabled;
+  final String contentType;
+  final String contentId;
+  final String field;
+  final String source;
+  final String prefix;
+  final TextStyle? style;
+  final int? maxLines;
+  final TextOverflow? overflow;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget text(String visible) => Text(
+          [prefix, visible].where((value) => value.isNotEmpty).join('  '),
+          style: style,
+          maxLines: maxLines,
+          overflow: overflow,
+        );
+    if (!enabled || contentId.isEmpty || field.isEmpty || source.isEmpty) {
+      return text(source);
+    }
+    return AutoTranslationBuilder(
+      request: AutoTranslationRequest(
+        contentType: contentType,
+        contentId: contentId,
+        field: field,
+        sourceText: source,
+      ),
+      builder: (_, visible) => text(visible),
+    );
+  }
 }
 
 Map<String, Object?> _map(Object? value) {
@@ -966,42 +1164,120 @@ List<String> _texts(Object? value) {
 }
 
 List<String> _projectTags(Map<String, Object?> project) {
-  final tags = <String>{};
-  final nested = _map(project['project']);
-  if (nested.isNotEmpty) tags.addAll(_projectTags(nested));
-  for (final key in const [
-    'tags',
-    'projectTags',
-    'tagNames',
-    'categories',
-    'category',
-  ]) {
-    final value = project[key];
-    if (value is List) {
-      for (final item in value) {
-        if (item is Map) {
-          final tag = _text(
-            item.map((key, value) => MapEntry(key.toString(), value)),
-            const ['name', 'label', 'tagName', 'categoryName'],
-          );
-          if (tag.isNotEmpty) tags.add(tag);
-        } else {
-          tags.addAll(_texts(item));
-        }
-      }
-    } else {
-      tags.addAll(_texts(value));
-    }
-  }
-  return tags.where((tag) => tag.isNotEmpty).toList(growable: false);
+  return _projectTagSources(project)
+      .map((source) => source.value)
+      .toList(growable: false);
 }
 
-List<String> _allProjectTags(List<Map<String, Object?>> projects) {
-  final tags = <String>{};
-  for (final project in projects) {
-    tags.addAll(_projectTags(project));
+typedef _TextSource = ({String field, String value});
+typedef _ProjectTagSource = ({String projectId, String field, String value});
+
+_TextSource? _firstTextSource(
+  Map<String, Object?> data,
+  List<String> keys,
+) {
+  for (final key in keys) {
+    final value = data[key]?.toString().trim() ?? '';
+    if (value.isNotEmpty && value.toLowerCase() != 'null') {
+      return (field: key, value: value);
+    }
   }
-  return tags.toList(growable: false);
+  return null;
+}
+
+String _projectId(Map<String, Object?> project) {
+  final direct = _text(project, const ['projectId', 'id']);
+  if (direct.isNotEmpty) return direct;
+  return _text(_map(project['project']), const ['projectId', 'id']);
+}
+
+Key _doctorProjectKey(Map<String, Object?> project) {
+  final id = _projectId(project);
+  return id.isEmpty
+      ? ObjectKey(project)
+      : ValueKey<String>('doctor-project:$id');
+}
+
+List<_ProjectTagSource> _projectTagSources(
+  Map<String, Object?> project,
+) {
+  final projectId = _projectId(project);
+  final result = <_ProjectTagSource>[];
+  final seen = <String>{};
+  void collect(Map<String, Object?> source) {
+    for (final key in const [
+      'tags',
+      'projectTags',
+      'tagNames',
+      'categories',
+      'category',
+    ]) {
+      final value = source[key];
+      final values = <String>[];
+      if (value is List) {
+        for (final item in value) {
+          if (item is Map) {
+            final tag = _text(
+              _map(item),
+              const ['name', 'label', 'tagName', 'categoryName'],
+            );
+            if (tag.isNotEmpty) values.add(tag);
+          } else {
+            values.addAll(_texts(item));
+          }
+        }
+      } else {
+        values.addAll(_texts(value));
+      }
+      for (final tag in values) {
+        if (tag.isNotEmpty && seen.add(tag)) {
+          result.add((projectId: projectId, field: key, value: tag));
+        }
+      }
+    }
+  }
+
+  final nested = _map(project['project']);
+  if (nested.isNotEmpty) collect(nested);
+  collect(project);
+  return result;
+}
+
+List<_ProjectTagSource> _allProjectTagSources(
+  List<Map<String, Object?>> projects,
+) {
+  final seen = <String>{};
+  return [
+    for (final project in projects)
+      for (final source in _projectTagSources(project))
+        if (seen.add(source.value)) source,
+  ];
+}
+
+AutoTranslationRequest _doctorRequest({
+  required String contentId,
+  required String field,
+  required String source,
+}) =>
+    AutoTranslationRequest(
+      contentType: 'doctor',
+      contentId: contentId,
+      field: field,
+      sourceText: source,
+    );
+
+AutoTranslationRequest? _projectTagRequest(_ProjectTagSource source) {
+  if (source.projectId.isEmpty ||
+      source.field.isEmpty ||
+      source.value.isEmpty) {
+    return null;
+  }
+  return AutoTranslationRequest(
+    contentType: 'project',
+    contentId: 'project:${source.projectId}',
+    field: source.field,
+    sourceText: source.value,
+  );
 }
 
 double _number(Object? value) =>

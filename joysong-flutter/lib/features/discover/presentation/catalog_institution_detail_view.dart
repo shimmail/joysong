@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/network/optimized_network_image.dart';
+import 'package:joysong_flutter/core/translation/translation.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/presentation/catalog_detail_shared.dart';
 import 'package:joysong_flutter/features/discover/presentation/catalog_review_section.dart';
@@ -23,6 +24,7 @@ class CatalogInstitutionDetailView extends StatelessWidget {
     this.onConsultInstitution,
     this.onAiChat,
     this.socialController,
+    this.enableAutoTranslation = false,
     super.key,
   });
 
@@ -37,12 +39,15 @@ class CatalogInstitutionDetailView extends StatelessWidget {
   final ValueChanged<String>? onConsultInstitution;
   final VoidCallback? onAiChat;
   final SocialController? socialController;
+  final bool enableAutoTranslation;
 
   @override
   Widget build(BuildContext context) {
     final nested = _map(item.raw['institution']);
     final data = {...nested, ...item.raw};
     final institutionId = _text(data, const ['id', 'institutionId']);
+    final translationOwnerId = institutionId.isEmpty ? item.id : institutionId;
+    final translationContentId = 'institution:$translationOwnerId';
     final projects = _maps(item.raw['projects']);
     final diaries = _maps(item.raw['diaries']);
     final reviews = _maps(item.raw['reviews']);
@@ -52,7 +57,8 @@ class CatalogInstitutionDetailView extends StatelessWidget {
       ..._split(data['coverImage']),
       if (item.imageUrl.isNotEmpty) item.imageUrl,
     }.toList(growable: false);
-    final name = _text(data, const ['name'], fallback: item.title);
+    final nameSource = _firstTextSource(data, const ['name', 'title']);
+    final name = nameSource?.value ?? item.title;
     final address = [
       _text(data, const ['city']),
       _text(data, const ['address']),
@@ -79,13 +85,16 @@ class CatalogInstitutionDetailView extends StatelessWidget {
       Expanded(
         child: CustomScrollView(slivers: [
           SliverToBoxAdapter(
-            child: CatalogHero(
+            child: _InstitutionHero(
               images: images,
-              title: name,
+              name: name,
+              nameField: nameSource?.field ?? '',
               eyebrow: _bool(data['isVerified'])
                   ? context.localized('安颜认证', 'Verified institution')
                   : '',
-              subtitle: address,
+              address: address,
+              contentId: translationContentId,
+              enableAutoTranslation: enableAutoTranslation,
             ),
           ),
           SliverToBoxAdapter(
@@ -95,6 +104,8 @@ class CatalogInstitutionDetailView extends StatelessWidget {
               caseCount: caseCount,
               address: address,
               phone: phone,
+              contentId: translationContentId,
+              enableAutoTranslation: enableAutoTranslation,
             ),
           ),
           SliverToBoxAdapter(child: _FeatureCards(context)),
@@ -107,7 +118,11 @@ class CatalogInstitutionDetailView extends StatelessWidget {
               key: keys[0],
               title: context.localized('资质保险箱', 'Credentials vault'),
               trailing: Text(context.localized('查资质', 'Verify')),
-              child: _Credentials(data),
+              child: _Credentials(
+                data,
+                contentId: translationContentId,
+                enableAutoTranslation: enableAutoTranslation,
+              ),
             ),
           ),
           SliverToBoxAdapter(
@@ -127,6 +142,7 @@ class CatalogInstitutionDetailView extends StatelessWidget {
                       institutionId: institutionId,
                       onTap: onProjectTap,
                       socialController: socialController,
+                      enableAutoTranslation: enableAutoTranslation,
                     ),
             ),
           ),
@@ -146,6 +162,7 @@ class CatalogInstitutionDetailView extends StatelessWidget {
                       diaries: diaries,
                       onDiaryTap: onDiaryTap,
                       maxItems: 5,
+                      enableAutoTranslation: enableAutoTranslation,
                     ),
             ),
           ),
@@ -164,6 +181,9 @@ class CatalogInstitutionDetailView extends StatelessWidget {
                 socialController: socialController,
                 onViewAll: onViewAllReviews,
                 showHeader: false,
+                enableAutoTranslation: enableAutoTranslation,
+                ownerType: 'institution',
+                ownerId: translationOwnerId,
               ),
             ),
           ),
@@ -206,6 +226,89 @@ class CatalogInstitutionDetailView extends StatelessWidget {
   }
 }
 
+class _InstitutionHero extends StatefulWidget {
+  const _InstitutionHero({
+    required this.images,
+    required this.name,
+    required this.nameField,
+    required this.eyebrow,
+    required this.address,
+    required this.contentId,
+    required this.enableAutoTranslation,
+  });
+
+  final List<String> images;
+  final String name;
+  final String nameField;
+  final String eyebrow;
+  final String address;
+  final String contentId;
+  final bool enableAutoTranslation;
+
+  @override
+  State<_InstitutionHero> createState() => _InstitutionHeroState();
+}
+
+class _InstitutionHeroState extends State<_InstitutionHero> {
+  AutoTranslationRequest? _nameRequest;
+  AutoTranslationRequest? _addressRequest;
+
+  @override
+  void initState() {
+    super.initState();
+    _updateRequests();
+  }
+
+  @override
+  void didUpdateWidget(_InstitutionHero oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _updateRequests();
+  }
+
+  void _updateRequests() {
+    _nameRequest = _updatedInstitutionRequest(
+      _nameRequest,
+      enabled: widget.enableAutoTranslation,
+      contentId: widget.contentId,
+      field: widget.nameField,
+      source: widget.name,
+    );
+    _addressRequest = _updatedInstitutionRequest(
+      _addressRequest,
+      enabled: widget.enableAutoTranslation,
+      contentId: widget.contentId,
+      field: 'address',
+      source: widget.address,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Widget hero(String name, String address) => CatalogHero(
+          images: widget.images,
+          title: name,
+          eyebrow: widget.eyebrow,
+          subtitle: address,
+        );
+
+    final nameRequest = _nameRequest;
+    final addressRequest = _addressRequest;
+    Widget withAddress(String name) {
+      if (addressRequest == null) return hero(name, widget.address);
+      return AutoTranslationBuilder(
+        request: addressRequest,
+        builder: (_, address) => hero(name, address),
+      );
+    }
+
+    if (nameRequest == null) return withAddress(widget.name);
+    return AutoTranslationBuilder(
+      request: nameRequest,
+      builder: (_, name) => withAddress(name),
+    );
+  }
+}
+
 class _InstitutionFacts extends StatelessWidget {
   const _InstitutionFacts({
     required this.rating,
@@ -213,12 +316,16 @@ class _InstitutionFacts extends StatelessWidget {
     required this.caseCount,
     required this.address,
     required this.phone,
+    required this.contentId,
+    required this.enableAutoTranslation,
   });
   final double rating;
   final int reviewCount;
   final int caseCount;
   final String address;
   final String phone;
+  final String contentId;
+  final bool enableAutoTranslation;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -251,6 +358,13 @@ class _InstitutionFacts extends StatelessWidget {
               icon: Icons.location_on_outlined,
               label: context.localized('机构位置', 'Location'),
               value: address,
+              request: enableAutoTranslation
+                  ? _institutionRequest(
+                      contentId: contentId,
+                      field: 'address',
+                      source: address,
+                    )
+                  : null,
             ),
           if (phone.isNotEmpty)
             _CopyableFact(
@@ -286,10 +400,14 @@ class _FactStat extends StatelessWidget {
 
 class _CopyableFact extends StatelessWidget {
   const _CopyableFact(
-      {required this.icon, required this.label, required this.value});
+      {required this.icon,
+      required this.label,
+      required this.value,
+      this.request});
   final IconData icon;
   final String label;
   final String value;
+  final AutoTranslationRequest? request;
   @override
   Widget build(BuildContext context) => InkWell(
         onTap: () async {
@@ -306,8 +424,18 @@ class _CopyableFact extends StatelessWidget {
             const SizedBox(width: 8),
             Text('$label：', style: const TextStyle(color: Color(0xff777777))),
             Expanded(
-                child:
-                    Text(value, maxLines: 2, overflow: TextOverflow.ellipsis)),
+              child: request == null
+                  ? Text(
+                      value,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    )
+                  : AutoTranslatedText(
+                      request: request!,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+            ),
             Icon(
               Icons.copy_rounded,
               size: 17,
@@ -387,20 +515,48 @@ class _Feature extends StatelessWidget {
 }
 
 class _Credentials extends StatelessWidget {
-  const _Credentials(this.data);
+  const _Credentials(
+    this.data, {
+    required this.contentId,
+    required this.enableAutoTranslation,
+  });
   final Map<String, Object?> data;
+  final String contentId;
+  final bool enableAutoTranslation;
   @override
   Widget build(BuildContext context) {
-    final text = _text(data, const ['credentials', 'description']);
+    final source = _firstTextSource(data, const ['credentials', 'description']);
+    final text = source?.value ?? '';
     final images = _split(data['credentialImages']);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(
-          text.isEmpty
-              ? context.localized('资质信息正在完善中', 'Credentials are being updated')
-              : text,
+      if (text.isEmpty)
+        Text(
+          context.localized(
+            '资质信息正在完善中',
+            'Credentials are being updated',
+          ),
           maxLines: 6,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(height: 1.5, color: Color(0xff666666))),
+          style: const TextStyle(height: 1.5, color: Color(0xff666666)),
+        )
+      else if (enableAutoTranslation)
+        AutoTranslatedText(
+          request: _institutionRequest(
+            contentId: contentId,
+            field: source!.field,
+            source: text,
+          ),
+          maxLines: 6,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(height: 1.5, color: Color(0xff666666)),
+        )
+      else
+        Text(
+          text,
+          maxLines: 6,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(height: 1.5, color: Color(0xff666666)),
+        ),
       if (images.isNotEmpty) ...[
         const SizedBox(height: 12),
         SizedBox(
@@ -422,13 +578,17 @@ class _FilterChip extends StatelessWidget {
     this.label, {
     required this.selected,
     required this.onTap,
+    this.translationRequest,
   });
   final String label;
   final bool selected;
   final VoidCallback onTap;
+  final AutoTranslationRequest? translationRequest;
   @override
   Widget build(BuildContext context) => ChoiceChip(
-        label: Text(label),
+        label: translationRequest == null
+            ? Text(label)
+            : AutoTranslatedText(request: translationRequest!),
         selected: selected,
         onSelected: (_) => onTap(),
         visualDensity: VisualDensity.compact,
@@ -441,12 +601,14 @@ class _FilterableProjectList extends StatefulWidget {
     required this.institutionId,
     required this.onTap,
     required this.socialController,
+    required this.enableAutoTranslation,
   });
 
   final List<Map<String, Object?>> projects;
   final String institutionId;
   final void Function(String institutionId, String projectId)? onTap;
   final SocialController? socialController;
+  final bool enableAutoTranslation;
 
   @override
   State<_FilterableProjectList> createState() => _FilterableProjectListState();
@@ -457,7 +619,9 @@ class _FilterableProjectListState extends State<_FilterableProjectList> {
 
   @override
   Widget build(BuildContext context) {
-    final tags = _allProjectTags(widget.projects);
+    final tagSources = _allProjectTagSources(widget.projects);
+    final tags =
+        tagSources.map((source) => source.value).toList(growable: false);
     final projects = _selectedTag.isEmpty
         ? widget.projects
         : widget.projects
@@ -482,6 +646,17 @@ class _FilterableProjectListState extends State<_FilterableProjectList> {
                   tag,
                   selected: _selectedTag == tag,
                   onTap: () => setState(() => _selectedTag = tag),
+                  translationRequest: widget.enableAutoTranslation
+                      ? _projectRequest(
+                          projectId: tagSources
+                              .firstWhere((source) => source.value == tag)
+                              .projectId,
+                          field: tagSources
+                              .firstWhere((source) => source.value == tag)
+                              .field,
+                          source: tag,
+                        )
+                      : null,
                 ),
               ],
             ]),
@@ -494,6 +669,8 @@ class _FilterableProjectListState extends State<_FilterableProjectList> {
             widget.institutionId,
             widget.onTap,
             widget.socialController,
+            widget.enableAutoTranslation,
+            key: _projectRowKey(project),
           ),
       ],
     );
@@ -506,17 +683,25 @@ class _ProjectRow extends StatelessWidget {
     this.institutionId,
     this.onTap,
     this.socialController,
-  );
+    this.enableAutoTranslation, {
+    super.key,
+  });
   final Map<String, Object?> data;
   final String institutionId;
   final void Function(String institutionId, String projectId)? onTap;
   final SocialController? socialController;
+  final bool enableAutoTranslation;
   @override
   Widget build(BuildContext context) {
     final id = _text(data, const ['projectId', 'id']);
     final price = _number(data['price']);
     final original = _number(data['originalPrice']);
-    final tags = _projectTags(data);
+    final tagSources = _projectTagSources(data);
+    final tags =
+        tagSources.map((source) => source.value).toList(growable: false);
+    final projectId = _projectId(data);
+    final name = _firstTextSource(data, const ['projectName', 'name']);
+    final description = _firstTextSource(data, const ['description']);
     return InkWell(
       onTap:
           id.isEmpty || onTap == null ? null : () => onTap!(institutionId, id),
@@ -530,23 +715,42 @@ class _ProjectRow extends StatelessWidget {
               child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                Text(_text(data, const ['projectName', 'name']),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w800)),
+                _InstitutionProjectText(
+                  enabled: enableAutoTranslation,
+                  projectId: projectId,
+                  field: name?.field ?? '',
+                  source: name?.value ?? '',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
                 const SizedBox(height: 5),
-                Text(_text(data, const ['description']),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Color(0xff888888))),
+                _InstitutionProjectText(
+                  enabled: enableAutoTranslation,
+                  projectId: projectId,
+                  field: description?.field ?? '',
+                  source: description?.value ?? '',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Color(0xff888888)),
+                ),
                 if (tags.isNotEmpty) ...[
                   const SizedBox(height: 6),
                   Wrap(
                     spacing: 5,
                     runSpacing: 4,
-                    children: tags
+                    children: tagSources
                         .take(3)
-                        .map((tag) => _ProjectTag(tag))
+                        .map((tag) => _ProjectTag(
+                              tag.value,
+                              request: enableAutoTranslation
+                                  ? _projectRequest(
+                                      projectId: projectId,
+                                      field: tag.field,
+                                      source: tag.value,
+                                    )
+                                  : null,
+                            ))
                         .toList(growable: false),
                   ),
                 ],
@@ -582,8 +786,9 @@ class _ProjectRow extends StatelessWidget {
 }
 
 class _ProjectTag extends StatelessWidget {
-  const _ProjectTag(this.label);
+  const _ProjectTag(this.label, {this.request});
   final String label;
+  final AutoTranslationRequest? request;
 
   @override
   Widget build(BuildContext context) => DecoratedBox(
@@ -593,15 +798,68 @@ class _ProjectTag extends StatelessWidget {
         ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 10,
-              color: Theme.of(context).colorScheme.onPrimaryContainer,
-            ),
-          ),
+          child: request == null
+              ? Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: Theme.of(context).colorScheme.onPrimaryContainer,
+                  ),
+                )
+              : AutoTranslatedText(
+                  request: request!,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: Theme.of(context).colorScheme.onPrimaryContainer,
+                  ),
+                ),
         ),
       );
+}
+
+class _InstitutionProjectText extends StatelessWidget {
+  const _InstitutionProjectText({
+    required this.enabled,
+    required this.projectId,
+    required this.field,
+    required this.source,
+    this.maxLines,
+    this.overflow,
+    this.style,
+  });
+
+  final bool enabled;
+  final String projectId;
+  final String field;
+  final String source;
+  final int? maxLines;
+  final TextOverflow? overflow;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    final request = enabled
+        ? _projectRequest(
+            projectId: projectId,
+            field: field,
+            source: source,
+          )
+        : null;
+    if (request == null) {
+      return Text(
+        source,
+        maxLines: maxLines,
+        overflow: overflow,
+        style: style,
+      );
+    }
+    return AutoTranslatedText(
+      request: request,
+      maxLines: maxLines,
+      overflow: overflow,
+      style: style,
+    );
+  }
 }
 
 class _DoctorRow extends StatelessWidget {
@@ -709,42 +967,143 @@ List<String> _split(Object? value) {
 }
 
 List<String> _projectTags(Map<String, Object?> project) {
-  final tags = <String>{};
-  final nested = _map(project['project']);
-  if (nested.isNotEmpty) tags.addAll(_projectTags(nested));
-  for (final key in const [
-    'tags',
-    'projectTags',
-    'tagNames',
-    'categories',
-    'category',
-  ]) {
-    final value = project[key];
-    if (value is List) {
-      for (final item in value) {
-        if (item is Map) {
-          final tag = _text(
-            _map(item),
-            const ['name', 'label', 'tagName', 'categoryName'],
-          );
-          if (tag.isNotEmpty) tags.add(tag);
-        } else {
-          tags.addAll(_split(item));
-        }
-      }
-    } else {
-      tags.addAll(_split(value));
-    }
-  }
-  return tags.where((tag) => tag.isNotEmpty).toList(growable: false);
+  return _projectTagSources(project)
+      .map((source) => source.value)
+      .toList(growable: false);
 }
 
-List<String> _allProjectTags(List<Map<String, Object?>> projects) {
-  final tags = <String>{};
-  for (final project in projects) {
-    tags.addAll(_projectTags(project));
+typedef _TextSource = ({String field, String value});
+typedef _ProjectTagSource = ({String projectId, String field, String value});
+
+_TextSource? _firstTextSource(
+  Map<String, Object?> data,
+  List<String> keys,
+) {
+  for (final key in keys) {
+    final value = data[key]?.toString().trim() ?? '';
+    if (value.isNotEmpty && value.toLowerCase() != 'null') {
+      return (field: key, value: value);
+    }
   }
-  return tags.toList(growable: false);
+  return null;
+}
+
+String _projectId(Map<String, Object?> project) {
+  final direct = _text(project, const ['projectId', 'id']);
+  if (direct.isNotEmpty) return direct;
+  return _text(_map(project['project']), const ['projectId', 'id']);
+}
+
+Key _projectRowKey(Map<String, Object?> project) {
+  final id = _projectId(project);
+  return id.isEmpty
+      ? ObjectKey(project)
+      : ValueKey<String>('institution-project:$id');
+}
+
+List<_ProjectTagSource> _projectTagSources(
+  Map<String, Object?> project,
+) {
+  final projectId = _projectId(project);
+  final tags = <_ProjectTagSource>[];
+  final seen = <String>{};
+  void collect(Map<String, Object?> source) {
+    for (final key in const [
+      'tags',
+      'projectTags',
+      'tagNames',
+      'categories',
+      'category',
+    ]) {
+      final value = source[key];
+      final values = <String>[];
+      if (value is List) {
+        for (final item in value) {
+          if (item is Map) {
+            final tag = _text(
+              _map(item),
+              const ['name', 'label', 'tagName', 'categoryName'],
+            );
+            if (tag.isNotEmpty) values.add(tag);
+          } else {
+            values.addAll(_split(item));
+          }
+        }
+      } else {
+        values.addAll(_split(value));
+      }
+      for (final tag in values) {
+        if (tag.isNotEmpty && seen.add(tag)) {
+          tags.add((projectId: projectId, field: key, value: tag));
+        }
+      }
+    }
+  }
+
+  final nested = _map(project['project']);
+  if (nested.isNotEmpty) collect(nested);
+  collect(project);
+  return tags;
+}
+
+List<_ProjectTagSource> _allProjectTagSources(
+  List<Map<String, Object?>> projects,
+) {
+  final seen = <String>{};
+  return [
+    for (final project in projects)
+      for (final source in _projectTagSources(project))
+        if (seen.add(source.value)) source,
+  ];
+}
+
+AutoTranslationRequest? _projectRequest({
+  required String projectId,
+  required String field,
+  required String source,
+}) {
+  if (projectId.isEmpty || field.isEmpty || source.isEmpty) return null;
+  return AutoTranslationRequest(
+    contentType: 'project',
+    contentId: 'project:$projectId',
+    field: field,
+    sourceText: source,
+  );
+}
+
+AutoTranslationRequest _institutionRequest({
+  required String contentId,
+  required String field,
+  required String source,
+}) =>
+    AutoTranslationRequest(
+      contentType: 'institution',
+      contentId: contentId,
+      field: field,
+      sourceText: source,
+    );
+
+AutoTranslationRequest? _updatedInstitutionRequest(
+  AutoTranslationRequest? previous, {
+  required bool enabled,
+  required String contentId,
+  required String field,
+  required String source,
+}) {
+  if (!enabled || contentId.isEmpty || field.isEmpty || source.isEmpty) {
+    return null;
+  }
+  if (previous != null &&
+      previous.contentId == contentId &&
+      previous.field == field &&
+      previous.sourceText == source) {
+    return previous;
+  }
+  return _institutionRequest(
+    contentId: contentId,
+    field: field,
+    source: source,
+  );
 }
 
 double _number(Object? value) =>

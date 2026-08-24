@@ -1124,6 +1124,7 @@ class _DiscoverDetailPageState extends State<DiscoverDetailPage> {
                         ),
                       DiscoverContentType.doctor => DoctorDetailView(
                           item: item,
+                          enableAutoTranslation: true,
                           onInstitutionTap: (id) =>
                               _openRelated(DiscoverContentType.institution, id),
                           onProjectTap: (institutionId, projectId) =>
@@ -1163,6 +1164,7 @@ class _DiscoverDetailPageState extends State<DiscoverDetailPage> {
                       DiscoverContentType.institution =>
                         CatalogInstitutionDetailView(
                           item: item,
+                          enableAutoTranslation: true,
                           socialController: widget.socialController,
                           onConsultInstitution: widget.onConsultInstitution,
                           onProjectTap: (institutionId, projectId) =>
@@ -1277,6 +1279,9 @@ class _DiscoverDetailPageState extends State<DiscoverDetailPage> {
           ? _AllReviewsPage(
               reviews: entries,
               socialController: widget.socialController,
+              enableAutoTranslation: true,
+              ownerType: item.type.name,
+              ownerId: item.id,
             )
           : _AllRelatedContentPage(
               groups: {key: entries},
@@ -1457,10 +1462,19 @@ AutoTranslationRequest _genericDetailRequest(
 }
 
 class _AllReviewsPage extends StatefulWidget {
-  const _AllReviewsPage({required this.reviews, this.socialController});
+  const _AllReviewsPage({
+    required this.reviews,
+    required this.enableAutoTranslation,
+    required this.ownerType,
+    required this.ownerId,
+    this.socialController,
+  });
 
   final List<Map<String, Object?>> reviews;
   final SocialController? socialController;
+  final bool enableAutoTranslation;
+  final String ownerType;
+  final String ownerId;
 
   @override
   State<_AllReviewsPage> createState() => _AllReviewsPageState();
@@ -1496,10 +1510,26 @@ class _AllReviewsPageState extends State<_AllReviewsPage> {
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                     itemCount: filtered.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 10),
-                    itemBuilder: (_, index) => CatalogReviewCard(
-                      review: filtered[index],
-                      socialController: widget.socialController,
-                    ),
+                    itemBuilder: (_, index) {
+                      final review = filtered[index];
+                      final reviewId = _rawText(
+                        review['id'],
+                        fallback: _rawText(review['reviewId']),
+                      );
+                      return CatalogReviewCard(
+                        key: reviewId.isEmpty
+                            ? ObjectKey(review)
+                            : ValueKey<String>(
+                                'all-review:${widget.ownerType}:${widget.ownerId}:$reviewId',
+                              ),
+                        review: review,
+                        reviewId: reviewId,
+                        socialController: widget.socialController,
+                        enableAutoTranslation: widget.enableAutoTranslation,
+                        ownerType: widget.ownerType,
+                        ownerId: widget.ownerId,
+                      );
+                    },
                   ),
           ),
         ],
