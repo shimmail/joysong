@@ -148,23 +148,60 @@ void main() {
     expect(find.text('Description du projet'), findsOneWidget);
   });
 
-  testWidgets('disabling restores the exact source and rejects late results',
+  testWidgets('disabling immediately restores exact source from translation',
       (tester) async {
     final repository = RecordingTranslationRepository()..holdResponses = true;
     final controller = _activeController(repository);
     addTearDown(controller.dispose);
 
     await tester.pumpWidget(_translationHost(controller: controller));
+    repository.completeNext('Visible translation');
+    await _pumpTranslation(tester);
+    expect(find.text('Visible translation'), findsOneWidget);
+
     await tester.pumpWidget(
       _translationHost(controller: controller, enabled: false),
     );
 
     expect(find.text(_initialRequest.sourceText), findsOneWidget);
+    expect(find.text('Visible translation'), findsNothing);
     expect(repository.calls, hasLength(1));
-    repository.completeNext('Late translation');
+  });
+
+  testWidgets(
+      'disable and reactivation reject completion for the previous request',
+      (tester) async {
+    final repository = RecordingTranslationRepository()..holdResponses = true;
+    final controller = _activeController(repository);
+    addTearDown(controller.dispose);
+    const replacementRequest = AutoTranslationRequest(
+      contentType: 'project',
+      contentId: 'project-2',
+      field: 'description',
+      sourceText: '第二个项目说明',
+    );
+
+    await tester.pumpWidget(_translationHost(controller: controller));
+    await tester.pumpWidget(
+      _translationHost(controller: controller, enabled: false),
+    );
+    await tester.pumpWidget(
+      _translationHost(
+        controller: controller,
+        request: replacementRequest,
+      ),
+    );
+
+    expect(find.text(replacementRequest.sourceText), findsOneWidget);
+    expect(repository.calls, hasLength(2));
+    repository.completePending(0, 'Late previous translation');
     await _pumpTranslation(tester);
-    expect(find.text(_initialRequest.sourceText), findsOneWidget);
-    expect(find.text('Late translation'), findsNothing);
+    expect(find.text(replacementRequest.sourceText), findsOneWidget);
+    expect(find.text('Late previous translation'), findsNothing);
+
+    repository.completeNext('Current translation');
+    await _pumpTranslation(tester);
+    expect(find.text('Current translation'), findsOneWidget);
   });
 
   testWidgets('late completion after widget disposal produces no Flutter error',

@@ -296,6 +296,8 @@ final class AuthController extends ChangeNotifier {
       return;
     }
     _isBusy = true;
+    _currentUser = null;
+    _status = AuthStatus.unauthenticated;
     _clearError(notify: false);
     notifyListeners();
     try {

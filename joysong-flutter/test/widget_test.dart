@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/app/app.dart';
@@ -193,7 +195,12 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final authRepository = _AuthenticatedRepository();
+    final logoutCompleter = Completer<void>();
+    addTearDown(() {
+      if (!logoutCompleter.isCompleted) logoutCompleter.complete();
+    });
+    final authRepository = _AuthenticatedRepository()
+      ..logoutCompleter = logoutCompleter;
     final translationRepository = RecordingTranslationRepository()
       ..holdResponses = true;
     await tester.pumpWidget(
@@ -211,6 +218,13 @@ void main() {
     _insertTranslationProbe(tester);
     await tester.pump();
     expect(translationRepository.calls, hasLength(1));
+    translationRepository.completeNext('Visible root translation');
+    await _pumpTranslation(tester);
+    expect(find.text('Visible root translation'), findsOneWidget);
+
+    _insertTranslationProbe(tester, request: _pendingRootTranslationRequest);
+    await tester.pump();
+    expect(translationRepository.calls, hasLength(2));
 
     await tester.tap(
       find.descendant(
@@ -231,20 +245,40 @@ void main() {
     await tester.tap(logoutButton);
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Confirm'));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump();
 
     expect(authRepository.logoutCalls, 1);
+    expect(logoutCompleter.isCompleted, isFalse);
+    expect(
+      tester
+          .widget<AutoTranslationScope>(find.byType(AutoTranslationScope))
+          .enabled,
+      isFalse,
+    );
     expect(find.text(_rootTranslationRequest.sourceText), findsOneWidget);
-    translationRepository.completeNext('Translation after logout');
+    expect(find.text('Visible root translation'), findsNothing);
+
+    _insertTranslationProbe(tester, request: _inactiveRootTranslationRequest);
+    await tester.pump();
+    expect(translationRepository.calls, hasLength(2));
+
+    translationRepository.completeNext('Translation after logout started');
     await _pumpTranslation(tester);
-    expect(find.text(_rootTranslationRequest.sourceText), findsOneWidget);
-    expect(find.text('Translation after logout'), findsNothing);
+    expect(
+        find.text(_pendingRootTranslationRequest.sourceText), findsOneWidget);
+    expect(find.text('Translation after logout started'), findsNothing);
     expect(tester.takeException(), isNull);
+
+    logoutCompleter.complete();
+    await tester.pumpAndSettle();
+    expect(authRepository.logoutCalls, 1);
   });
 }
 
 class _AuthenticatedRepository extends Fake implements AuthRepository {
   int logoutCalls = 0;
+  Completer<void>? logoutCompleter;
 
   @override
   Future<AuthTokens?> readTokens() async => const AuthTokens(
@@ -273,8 +307,9 @@ class _AuthenticatedRepository extends Fake implements AuthRepository {
       );
 
   @override
-  Future<void> logout() async {
+  Future<void> logout() {
     logoutCalls += 1;
+    return logoutCompleter?.future ?? Future<void>.value();
   }
 }
 
@@ -318,16 +353,33 @@ const _rootTranslationRequest = AutoTranslationRequest(
   sourceText: '自动翻译根测试',
 );
 
-void _insertTranslationProbe(WidgetTester tester) {
+const _pendingRootTranslationRequest = AutoTranslationRequest(
+  contentType: 'project',
+  contentId: 'root-pending-probe',
+  field: 'description',
+  sourceText: '等待中的根翻译',
+);
+
+const _inactiveRootTranslationRequest = AutoTranslationRequest(
+  contentType: 'project',
+  contentId: 'root-inactive-probe',
+  field: 'description',
+  sourceText: '退出后的根翻译',
+);
+
+void _insertTranslationProbe(
+  WidgetTester tester, {
+  AutoTranslationRequest request = _rootTranslationRequest,
+}) {
   final overlay = tester.state<OverlayState>(find.byType(Overlay).first);
   overlay.insert(
     OverlayEntry(
-      builder: (context) => const Positioned(
+      builder: (context) => Positioned(
         left: 0,
         top: 0,
         child: IgnorePointer(
           child: Material(
-            child: AutoTranslatedText(request: _rootTranslationRequest),
+            child: AutoTranslatedText(request: request),
           ),
         ),
       ),
