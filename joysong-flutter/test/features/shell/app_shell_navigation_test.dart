@@ -64,7 +64,7 @@ void main() {
   });
 
   testWidgets(
-      'agent institution handoff opens the selected consultant direct message',
+      'agent institution handoff translates direct messages with the supported type',
       (tester) async {
     final client = _AgentHandoffApiClient();
     await tester.pumpWidget(
@@ -105,6 +105,31 @@ void main() {
       (request) => request.$1 == 'dm/conversations',
     );
     expect(dmPost.$2, {'targetId': 'consultant-2'});
+
+    expect(find.byType(DmThreadPage), findsOneWidget);
+    expect(find.text('恢复得很好'), findsOneWidget);
+    await tester.longPress(find.text('恢复得很好'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('翻译'));
+    await tester.pumpAndSettle();
+
+    final translationPosts = client.posts
+        .where((request) => request.$1 == 'translations')
+        .toList(growable: false);
+    expect(translationPosts, hasLength(1));
+    expect(translationPosts.single.$2, {
+      'text': '恢复得很好',
+      'targetLanguage': 'en',
+      'contentType': 'message',
+    });
+    expect(
+      translationPosts.any(
+        (request) =>
+            (request.$2 as Map<String, Object?>)['contentType'] ==
+            'direct_message',
+      ),
+      isFalse,
+    );
   });
 
   testWidgets('order detail uses only the order-scoped conversation endpoint',
@@ -330,6 +355,9 @@ final class _AgentHandoffApiClient extends ApiClient {
       'discover/institutions/institution-1/consultants' => const <Object?>[
           <String, Object?>{'id': 'consultant-2', 'name': '林顾问'},
         ],
+      'dm/conversations/dm-human/messages' => const <Object?>[
+          _dmMessageJson,
+        ],
       _ => const <Object?>[],
     };
     return decodeData(data);
@@ -343,6 +371,15 @@ final class _AgentHandoffApiClient extends ApiClient {
   }) async {
     posts.add((path, body));
     if (path == 'dm/conversations') return decodeData(_dmConversationJson);
+    if (path == 'translations') {
+      return decodeData(const <String, Object?>{
+        'translatedText': 'Recovery is progressing well',
+        'detectedLanguage': 'zh',
+        'targetLanguage': 'en',
+        'provider': 'qwen',
+        'cached': false,
+      });
+    }
     return decodeData(const <String, Object?>{});
   }
 
@@ -503,6 +540,16 @@ const _dmConversationJson = <String, Object?>{
   'updatedAt': '2026-08-17T09:02:00Z',
   'firstMessageLimitApplies': false,
   'waitingForReply': false,
+};
+
+const _dmMessageJson = <String, Object?>{
+  'id': 'message-human-1',
+  'conversationId': 'dm-human',
+  'senderId': 'consultant-2',
+  'content': '恢复得很好',
+  'messageType': 'TEXT',
+  'isRead': true,
+  'createdAt': '2026-08-17T09:03:00Z',
 };
 
 const _orderServiceConversationJson = <String, Object?>{

@@ -1,5 +1,8 @@
 import 'dart:typed_data';
 
+import 'package:joysong_flutter/core/translation/content_translation.dart'
+    as core_translation;
+
 enum DiaryStatus {
   draft('draft'),
   published('published');
@@ -277,21 +280,7 @@ final class Comment {
   final bool isLiked;
 }
 
-final class ContentTranslation {
-  const ContentTranslation({
-    required this.translatedText,
-    required this.detectedLanguage,
-    required this.targetLanguage,
-    required this.provider,
-    required this.cached,
-  });
-
-  final String translatedText;
-  final String detectedLanguage;
-  final String targetLanguage;
-  final String provider;
-  final bool cached;
-}
+typedef ContentTranslation = core_translation.ContentTranslation;
 
 final class CommentDraft {
   const CommentDraft({

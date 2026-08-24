@@ -1,6 +1,7 @@
 import 'package:joysong_flutter/core/network/api_client.dart';
 import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/core/network/public_media_url.dart';
+import 'package:joysong_flutter/core/translation/api_translation_repository.dart';
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
 
 abstract interface class SocialRemoteDataSource {
@@ -62,9 +63,11 @@ abstract interface class SocialTranslationRemoteDataSource {
 final class ApiSocialRemoteDataSource
     implements SocialRemoteDataSource, SocialTranslationRemoteDataSource {
   ApiSocialRemoteDataSource(this._apiClient)
-      : _mediaResolver = ApiPublicMediaUrlResolver(_apiClient.apiRoot);
+      : _translationRepository = ApiTranslationRepository(_apiClient),
+        _mediaResolver = ApiPublicMediaUrlResolver(_apiClient.apiRoot);
 
   final ApiClient _apiClient;
+  final ApiTranslationRepository _translationRepository;
   final PublicMediaUrlResolver _mediaResolver;
 
   @override
@@ -179,18 +182,12 @@ final class ApiSocialRemoteDataSource
     required String text,
     required String targetLanguage,
     required String contentType,
-  }) async {
-    final value = await _apiClient.post<ContentTranslation>(
-      'translations',
-      body: {
-        'text': text.trim(),
-        'targetLanguage': targetLanguage.trim(),
-        'contentType': contentType.trim(),
-      },
-      decodeData: _translation,
-    );
-    return _requireData(value, '翻译响应');
-  }
+  }) =>
+      _translationRepository.translateText(
+        text: text,
+        targetLanguage: targetLanguage,
+        contentType: contentType,
+      );
 
   @override
   Future<EngagementStatus> getLikeStatus(
@@ -506,17 +503,6 @@ EngagementStatus _engagement(Object? json, {required String activeKey}) {
   return EngagementStatus(
     active: _boolean(map[activeKey], activeKey),
     count: _integer(map['count']),
-  );
-}
-
-ContentTranslation _translation(Object? json) {
-  final map = _map(json, '翻译');
-  return ContentTranslation(
-    translatedText: _requiredString(map['translatedText'], 'translatedText'),
-    detectedLanguage: _string(map['detectedLanguage'], fallback: 'und'),
-    targetLanguage: _requiredString(map['targetLanguage'], 'targetLanguage'),
-    provider: _string(map['provider'], fallback: 'AI'),
-    cached: _optionalBoolean(map['cached']),
   );
 }
 
