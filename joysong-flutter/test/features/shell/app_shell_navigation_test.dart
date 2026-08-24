@@ -13,6 +13,7 @@ import 'package:joysong_flutter/features/identity/presentation/identity_pages.da
 import 'package:joysong_flutter/features/identity/presentation/institution_relationships_page.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/orders/presentation/order_detail_page.dart';
+import 'package:joysong_flutter/features/orders/presentation/orders_page.dart';
 import 'package:joysong_flutter/features/shell/presentation/app_shell.dart';
 
 import '../orders/order_test_fixtures.dart';
@@ -401,6 +402,53 @@ void main() {
     expect(find.text('我的订单'), findsOneWidget);
   });
 
+  testWidgets('stale non-empty order and refund notifications fall back to the orders list',
+      (tester) async {
+    final orderClient = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE',
+      freshReadable: true,
+      freshSendEnabled: true,
+      notifications: const [_staleOrderNotificationJson],
+      failedOrderIds: const {'stale-order'},
+    );
+    await _pumpShell(tester, orderClient);
+    await _openSystemNotification(tester, '已失效订单');
+
+    expect(find.byType(OrdersPage), findsOneWidget);
+    expect(find.byType(OrderDetailPage), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    final refundClient = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE',
+      freshReadable: true,
+      freshSendEnabled: true,
+      notifications: const [_staleRefundNotificationJson],
+      failedOrderIds: const {'stale-refund-order'},
+    );
+    await _pumpShell(tester, refundClient);
+    await _openSystemNotification(tester, '已失效退款');
+
+    expect(find.byType(OrdersPage), findsOneWidget);
+    expect(find.byType(OrderDetailPage), findsNothing);
+  });
+
+  testWidgets('stale service notification shows feedback and falls back to the orders list',
+      (tester) async {
+    final client = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE',
+      freshReadable: true,
+      freshSendEnabled: true,
+      notifications: const [_staleServiceNotificationJson],
+      failedServiceOrderIds: const {'stale-service-order'},
+    );
+    await _pumpShell(tester, client);
+    await _openSystemNotification(tester, '已失效服务会话');
+
+    expect(find.text('暂时无法打开订单沟通，请稍后重试'), findsOneWidget);
+    expect(find.byType(OrdersPage), findsOneWidget);
+    expect(find.byType(DmThreadPage), findsNothing);
+  });
+
   testWidgets('identity notification targets open the identity center and focus an application',
       (tester) async {
     final client = _OrderServiceApiClient(
@@ -557,6 +605,8 @@ final class _OrderServiceApiClient extends ApiClient {
     this.includeNotification = false,
     this.notifications = const [],
     this.identityOverview = const {'roles': <Object?>[], 'applications': <Object?>[]},
+    this.failedOrderIds = const {},
+    this.failedServiceOrderIds = const {},
   }) : super(
           apiRoot: Uri.parse('http://localhost/api/'),
           httpClient: _TestHttpClient(),
@@ -568,6 +618,8 @@ final class _OrderServiceApiClient extends ApiClient {
   final bool includeNotification;
   final List<Map<String, Object?>> notifications;
   final Object identityOverview;
+  final Set<String> failedOrderIds;
+  final Set<String> failedServiceOrderIds;
   final gets = <String>[];
   final posts = <(String, Object?)>[];
   final puts = <String>[];
@@ -607,6 +659,9 @@ final class _OrderServiceApiClient extends ApiClient {
     required T Function(Object? json) decodeData,
   }) async {
     gets.add(path);
+    if (failedOrderIds.any((id) => path == 'orders/$id')) {
+      throw StateError('order unavailable');
+    }
     if (path == 'orders/order-1' && queuedOrderReads.isNotEmpty) {
       return decodeData(await queuedOrderReads.removeAt(0));
     }
@@ -646,6 +701,11 @@ final class _OrderServiceApiClient extends ApiClient {
     required T Function(Object? json) decodeData,
   }) async {
     posts.add((path, body));
+    if (failedServiceOrderIds.any(
+      (id) => path == 'orders/$id/service-conversation',
+    )) {
+      throw StateError('order service conversation unavailable');
+    }
     if (path == 'orders/order-1/service-conversation') {
       return decodeData(_orderServiceConversationJson);
     }
@@ -765,6 +825,21 @@ const _serviceNotificationJson = <String, Object?>{
   'id': 'notification-service', 'userId': 'user-1', 'type': 'ORDER_SERVICE_ACTIVATED',
   'title': '订单服务会话', 'content': '', 'targetType': 'order_service_conversation', 'targetId': 'order-1',
   'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+};
+const _staleOrderNotificationJson = <String, Object?>{
+  'id': 'notification-stale-order', 'userId': 'user-1', 'type': 'ORDER_CANCELLED',
+  'title': '已失效订单', 'content': '', 'targetType': 'order', 'targetId': 'stale-order',
+  'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+};
+const _staleRefundNotificationJson = <String, Object?>{
+  'id': 'notification-stale-refund', 'userId': 'user-1', 'type': 'ORDER_REFUND_APPROVED',
+  'title': '已失效退款', 'content': '', 'targetType': 'order_refund', 'targetId': 'stale-refund-order',
+  'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+};
+const _staleServiceNotificationJson = <String, Object?>{
+  'id': 'notification-stale-service', 'userId': 'user-1', 'type': 'ORDER_SERVICE_ACTIVATED',
+  'title': '已失效服务会话', 'content': '', 'targetType': 'order_service_conversation',
+  'targetId': 'stale-service-order', 'isRead': false, 'createdAt': '2026-08-25T10:00:00',
 };
 const _identityApplicationNotificationJson = <String, Object?>{
   'id': 'notification-identity', 'userId': 'user-1', 'type': 'IDENTITY_APPLICATION_REJECTED',

@@ -904,7 +904,10 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
-  Future<void> _openOrderServiceConversation(String orderId) async {
+  Future<void> _openOrderServiceConversation(
+    String orderId, {
+    bool fallbackToOrdersOnFailure = false,
+  }) async {
     final repository = _messagingRepository;
     final id = orderId.trim();
     if (repository == null || id.isEmpty) return;
@@ -923,6 +926,9 @@ class _AppShellState extends State<AppShell> {
           )),
         ),
       );
+      if (fallbackToOrdersOnFailure) {
+        await _openOrders();
+      }
     }
   }
 
@@ -992,7 +998,10 @@ class _AppShellState extends State<AppShell> {
         return;
       case NotificationTargetKind.orderServiceConversation:
         if (target.id.isNotEmpty) {
-          unawaited(_openOrderServiceConversation(target.id));
+          unawaited(_openOrderServiceConversation(
+            target.id,
+            fallbackToOrdersOnFailure: true,
+          ));
         } else {
           unawaited(_openOrders());
         }
@@ -1066,6 +1075,16 @@ class _AppShellState extends State<AppShell> {
     final id = orderId.trim();
     if (repository == null || id.isEmpty) return;
     final controller = OrderDetailController(repository, orderId: id);
+    await controller.load();
+    if (!mounted) {
+      controller.dispose();
+      return;
+    }
+    if (controller.order == null) {
+      controller.dispose();
+      await _openOrders();
+      return;
+    }
     await _contentNavigator.push<void>(
       MaterialPageRoute(
         builder: (_) => OrderDetailPage(

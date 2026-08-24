@@ -28,6 +28,8 @@ import org.springframework.security.access.AccessDeniedException
 import org.springframework.stereotype.Service
 import org.springframework.data.domain.PageRequest
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionSynchronization
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.math.BigDecimal
 import java.security.SecureRandom
 import java.time.LocalDateTime
@@ -63,6 +65,7 @@ class OrderService(
     private val doctorInstitutionRelationshipService: DoctorInstitutionRelationshipService,
     private val travelGroundServicePricing: TravelGroundServicePricing,
     private val businessNotificationService: BusinessNotificationService,
+    private val orderBusinessNotificationDispatcher: OrderBusinessNotificationDispatcher,
     private val refundExecutionService: RefundExecutionService? = null
 ) {
     private val secureRandom = SecureRandom()
@@ -563,7 +566,7 @@ class OrderService(
      */
     @Transactional(rollbackFor = [Exception::class])
     fun cancelBalanceTimeoutOrder(orderId: String) {
-        val order = orderRepository.findById(orderId).orElse(null) ?: return
+        val order = orderRepository.findByIdForUpdate(orderId) ?: return
         val currentStatus = OrderStatusEnum.fromValue(order.status) ?: return
         if (currentStatus != OrderStatusEnum.VERIFIED) {
             return
@@ -672,8 +675,8 @@ class OrderService(
         }
 
         log.info("订单[{}]尾款支付超时自动取消", orderId)
-        notifySafely("ORDER_CANCELLED", order.id) {
-            businessNotificationService.orderCancelled(order.id, order.userId, order.consultantId)
+        notifyAfterCommitSafely("ORDER_CANCELLED", order.id) {
+            orderBusinessNotificationDispatcher.orderCancelled(order.id, order.userId, order.consultantId)
         }
     }
 
@@ -684,7 +687,7 @@ class OrderService(
      */
     @Transactional(rollbackFor = [Exception::class])
     fun cancelExpiredConsultationPaidOrder(orderId: String) {
-        val order = orderRepository.findById(orderId).orElse(null) ?: return
+        val order = orderRepository.findByIdForUpdate(orderId) ?: return
         val currentStatus = OrderStatusEnum.fromValue(order.status) ?: return
         if (currentStatus != OrderStatusEnum.CONSULTATION_PAID) {
             return
@@ -756,6 +759,14 @@ class OrderService(
         }
 
         log.info("订单[{}]超时未到店自动退款，退款金额: {}", orderId, refundAmount)
+        notifyAfterCommitSafely("ORDER_REFUNDED", order.id) {
+            orderBusinessNotificationDispatcher.orderRefunded(
+                order.id,
+                order.userId,
+                order.consultantId,
+                order.doctorId
+            )
+        }
     }
 
     // ---- 用户操作 ----
@@ -981,6 +992,20 @@ class OrderService(
         runCatching(notification).onFailure { error ->
             log.error("订单通知发送失败: type={}, orderId={}", eventType, orderId, error)
         }
+    }
+
+    private fun notifyAfterCommitSafely(eventType: String, orderId: String, notification: () -> Unit) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive() ||
+            !TransactionSynchronizationManager.isActualTransactionActive()
+        ) {
+            notifySafely(eventType, orderId, notification)
+            return
+        }
+        TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
+            override fun afterCommit() {
+                notifySafely(eventType, orderId, notification)
+            }
+        })
     }
 
     /**
