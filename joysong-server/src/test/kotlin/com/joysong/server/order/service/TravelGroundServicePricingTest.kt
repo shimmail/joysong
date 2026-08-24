@@ -42,4 +42,13 @@ class TravelGroundServicePricingTest {
             assertThrows<IllegalArgumentException> { pricing.quote(BigDecimal("1000.005")) }.message
         )
     }
+
+    @Test
+    fun `policy quote freezes one normalized platform rate revision and rounded fee`() {
+        val quote = pricing.quoteWithPolicy(BigDecimal("1000.00"))
+
+        assertEquals(BigDecimal("40.00"), quote.platformRate)
+        assertEquals("travel-ground-service-rate:0.400000", quote.pricingPolicyRevision)
+        assertEquals(BigDecimal("400.00"), quote.serviceFee)
+    }
 }

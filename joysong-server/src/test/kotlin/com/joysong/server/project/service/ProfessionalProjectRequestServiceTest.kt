@@ -37,7 +37,8 @@ class ProfessionalProjectRequestServiceTest {
         objectMapper,
         splitRatePolicy,
         reviewAuthority,
-        cacheManager
+        cacheManager,
+        InstitutionProjectPayloadPolicy()
     )
 
     init {
@@ -172,6 +173,26 @@ class ProfessionalProjectRequestServiceTest {
                 null, null, BigDecimal("0.00"), null, true,
                 BigDecimal("0.00"), BigDecimal("0.00"), BigDecimal("0.00"), null
             )
+        }
+    }
+
+    @Test
+    fun `shared payload policy normalizes inheritance markers but keeps explicit nonnegative sales count`() {
+        val normalized = InstitutionProjectPayloadPolicy().normalize(
+            InstitutionProjectPayload(
+                name = "  Local  ", category = " ", description = null, tags = emptyList(), slogan = " ",
+                detailContent = " ", coverImage = " ", images = emptyList(), salesCount = 3
+            )
+        )
+
+        assertEquals("Local", normalized.name)
+        assertEquals(null, normalized.category)
+        assertEquals(null, normalized.tags)
+        assertEquals(null, normalized.coverImage)
+        assertEquals(null, normalized.images)
+        assertEquals(3, normalized.salesCount)
+        assertThrows<IllegalArgumentException> {
+            InstitutionProjectPayloadPolicy().normalize(InstitutionProjectPayload(salesCount = -1))
         }
     }
 

@@ -44,7 +44,8 @@ class ProfessionalProjectRequestService(
     private val objectMapper: ObjectMapper,
     private val splitRatePolicy: OrderSplitRatePolicy,
     private val reviewAuthority: InstitutionRelationshipReviewAuthorityOperations,
-    private val cacheManager: CacheManager
+    private val cacheManager: CacheManager,
+    private val institutionProjectPayloadPolicy: InstitutionProjectPayloadPolicy = InstitutionProjectPayloadPolicy()
 ) {
     @Transactional
     fun submitPlatform(
@@ -124,31 +125,23 @@ class ProfessionalProjectRequestService(
             throw ProfessionalProjectRequestNotFoundException("机构不存在")
         }
         val projectId = required(request.projectId, "平台项目不能为空")
-        val name = normalizeOptionalText("项目名称", request.name, MAX_NAME_LENGTH)
-        val category = normalizeOptionalText("项目分类", request.category, MAX_CATEGORY_LENGTH)
-        val description = normalizeOptionalText("服务内容", request.description, MAX_DESCRIPTION_LENGTH)
-        val tags = request.tags
-            ?.takeIf(List<String>::isNotEmpty)
-            ?.let {
-                normalizeTargetList(
-                    "项目标签", it, MAX_TAG_ITEMS, MAX_TAG_ITEM_LENGTH, MAX_TARGET_TAGS_LENGTH
-                )
-            }
-        val slogan = normalizeOptionalText("项目标语", request.slogan, MAX_SLOGAN_LENGTH).orEmpty()
-        val detailContent = normalizeOptionalText("项目详情", request.detailContent, MAX_DETAIL_CONTENT_LENGTH)
-        val coverImage = normalizeOptionalText("封面图片", request.coverImage, MAX_COVER_IMAGE_LENGTH).orEmpty()
-        val images = request.images
-            ?.takeIf(List<String>::isNotEmpty)
-            ?.let {
-                normalizeTargetList(
-                    "项目图片", it, MAX_IMAGE_ITEMS, MAX_IMAGE_ITEM_LENGTH, MAX_TARGET_IMAGES_LENGTH
-                )
-            }
+        val payload = institutionProjectPayloadPolicy.normalize(
+            InstitutionProjectPayload(
+                name = request.name,
+                category = request.category,
+                description = request.description,
+                tags = request.tags,
+                slogan = request.slogan,
+                detailContent = request.detailContent,
+                coverImage = request.coverImage,
+                images = request.images,
+                salesCount = request.salesCount
+            )
+        )
         val notes = normalizeOptionalText("申请备注", request.notes, MAX_NOTES_LENGTH)
         requireMoney("项目价格", request.price)
         optionalMoney("原价", request.originalPrice)
         requireMoney("咨询费", request.consultationFee)
-        requireCount("销量", request.salesCount)
         splitRatePolicy.resolve(request.institutionRate, request.commissionRate)
 
         if (count("SELECT COUNT(*) FROM projects WHERE id = ? AND deleted_at IS NULL", projectId) != 1L) {
@@ -180,16 +173,16 @@ class ProfessionalProjectRequestService(
                 doctorId = doctorId,
                 institutionId = targetInstitutionId,
                 projectId = projectId,
-                name = name,
-                category = category,
-                description = description,
-                tags = tags?.let(::encodeList),
-                slogan = slogan,
-                detailContent = detailContent,
+                name = payload.name,
+                category = payload.category,
+                description = payload.description,
+                tags = payload.tags?.let(::encodeList),
+                slogan = payload.slogan.orEmpty(),
+                detailContent = payload.detailContent,
                 currency = request.currency.name,
-                coverImage = coverImage,
-                images = images?.let(::encodeList),
-                salesCount = request.salesCount,
+                coverImage = payload.coverImage.orEmpty(),
+                images = payload.images?.let(::encodeList),
+                salesCount = payload.salesCount,
                 price = request.price,
                 originalPrice = request.originalPrice,
                 isActive = request.isActive,

@@ -102,4 +102,21 @@ class InstitutionProjectDetailResolverTest {
         assertEquals("platform-cover", resolved.coverImage)
         assertEquals("platform-images", resolved.images)
     }
+
+    @Test
+    fun `details expose normalized raw overrides separately from effective inherited media`() {
+        val details = resolver.resolveDetails(
+            InstitutionProjectEntity(
+                id = "institution-project-1", institutionId = "institution-1", projectId = project.id,
+                price = BigDecimal("100.00"), coverImage = " ", images = null, tags = " local "
+            ),
+            project
+        )
+
+        assertNull(details.rawOverrides.coverImage)
+        assertNull(details.rawOverrides.images)
+        assertEquals(listOf("local"), details.rawOverrides.tags)
+        assertEquals("public-cover", details.effective.coverImage)
+        assertEquals(listOf("public-1", "public-2"), details.effective.images)
+    }
 }
