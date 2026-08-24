@@ -72,6 +72,10 @@ class SecurityConfig(
                         "/api/admin/institution-project-requests/*/review",
                         "/api/admin/institution-project-requests/*/withdraw"
                     ).authenticated()
+                    .requestMatchers(
+                        "/api/v2/admin/institution-project-requests",
+                        "/api/v2/admin/institution-project-requests/**"
+                    ).authenticated()
                     .requestMatchers(HttpMethod.DELETE,
                         "/api/admin/articles/*"
                     ).authenticated()

@@ -144,3 +144,7 @@ order:
   split:
     platform-rate: 40.00    # 平台服务费比例
     institution-rate: 40.00  # 机构默认分成比例
+
+app:
+  project-change:
+    v1-profile-update-enabled: ${PROJECT_CHANGE_V1_PROFILE_UPDATE_ENABLED:true}

@@ -227,6 +227,7 @@ class GlobalExceptionHandler {
 
     private fun String.usesRealHttpErrorStatus(): Boolean =
         startsWith("/api/admin/") ||
+            startsWith("/api/v2/admin/institution-project-requests") ||
             this == "/api/management/doctor-profile" ||
             startsWith("/api/management/institutions")
             || startsWith("/api/management/consultant-memberships")
