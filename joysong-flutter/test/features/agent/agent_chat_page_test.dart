@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/features/agent/domain/agent_models.dart';
@@ -14,6 +15,21 @@ import 'package:joysong_flutter/features/discover/domain/discover_repository.dar
 import 'package:joysong_flutter/features/shell/presentation/app_shell.dart';
 
 void main() {
+  testWidgets('long pressing a message bubble opens copy menu', (tester) async {
+    await _pumpPage(tester, _CatalogRepository(_turn()));
+    await _sendAndSettle(tester);
+
+    await tester.longPress(find.text('参考结果'));
+    await tester.pumpAndSettle();
+    expect(find.text('复制'), findsOneWidget);
+
+    await tester.tap(find.text('复制'));
+    await tester.pump();
+
+    expect((await Clipboard.getData(Clipboard.kTextPlain))?.text, '参考结果');
+    expect(find.text('消息已复制'), findsOneWidget);
+  });
+
   testWidgets('assistant bubble updates while the response is streaming',
       (tester) async {
     final stream = StreamController<AgentStreamEvent>();

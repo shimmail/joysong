@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:joysong_flutter/features/agent/domain/agent_models.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_chat_controller.dart';
@@ -542,28 +543,83 @@ class _ChatBubble extends StatelessWidget {
   const _ChatBubble({required this.message});
   final ChatMessage message;
 
+  Future<void> _showMessageMenu(
+    BuildContext context,
+    LongPressStartDetails details,
+  ) async {
+    if (message.content.isEmpty) return;
+    final overlay = Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final action = await showMenu<_ChatBubbleAction>(
+      context: context,
+      position: RelativeRect.fromRect(
+        Rect.fromPoints(details.globalPosition, details.globalPosition),
+        Offset.zero & overlay.size,
+      ),
+      items: [
+        PopupMenuItem(
+          value: _ChatBubbleAction.copy,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.copy_outlined, size: 20),
+              const SizedBox(width: 10),
+              Text(
+                Localizations.localeOf(context).languageCode == 'en'
+                    ? 'Copy'
+                    : '复制',
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+    if (action != _ChatBubbleAction.copy || !context.mounted) return;
+    await Clipboard.setData(ClipboardData(text: message.content));
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            Localizations.localeOf(context).languageCode == 'en'
+                ? 'Message copied'
+                : '消息已复制',
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+  }
+
   @override
   Widget build(BuildContext context) => Align(
         alignment:
             message.isUser ? Alignment.centerRight : Alignment.centerLeft,
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 320),
-          margin: const EdgeInsets.symmetric(vertical: 5),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            color: message.isUser
-                ? Theme.of(context).colorScheme.primaryContainer
-                : Theme.of(context).colorScheme.surfaceContainerLow,
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Text(
-            message.content.isEmpty && message.isTemporary
-                ? '正在思考…'
-                : message.content,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onLongPressStart: message.content.isEmpty
+              ? null
+              : (details) => _showMessageMenu(context, details),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 320),
+            margin: const EdgeInsets.symmetric(vertical: 5),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: message.isUser
+                  ? Theme.of(context).colorScheme.primaryContainer
+                  : Theme.of(context).colorScheme.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Text(
+              message.content.isEmpty && message.isTemporary
+                  ? '正在思考…'
+                  : message.content,
+            ),
           ),
         ),
       );
 }
+
+enum _ChatBubbleAction { copy }
 
 class _StatusBanner extends StatelessWidget {
   const _StatusBanner({required this.message});
