@@ -252,14 +252,13 @@ void main() {
       );
     });
 
-    test('rejects ambiguous raw ampersands but accepts ordinary safe queries',
-        () {
+    test('accepts safe raw ampersands in ordinary query parameters', () {
       expect(
         preservesRichContentStructure(
           '<a href="https://care.test/a?x=1&y=2">护理</a>',
           '<a href="https://care.test/a?x=1&y=2">Care</a>',
         ),
-        isFalse,
+        isTrue,
       );
       expect(
         preservesRichContentStructure(
@@ -275,6 +274,75 @@ void main() {
       const ambiguous = '<a href="https://care.test/&copy/path">Care guide</a>';
 
       expect(preservesRichContentStructure(ambiguous, ambiguous), isFalse);
+    });
+  });
+
+  group('preservesRichContentStructure matches renderer entity semantics', () {
+    test('rejects named colon in source against literal HTTPS output', () {
+      expect(
+        preservesRichContentStructure(
+          '<img src="https&colon;//cdn.test/a.jpg">',
+          '<img src="https://cdn.test/a.jpg">',
+        ),
+        isFalse,
+      );
+    });
+
+    test('rejects named colon in output against literal HTTPS source', () {
+      expect(
+        preservesRichContentStructure(
+          '<img src="https://cdn.test/a.jpg">',
+          '<img src="https&colon;//cdn.test/a.jpg">',
+        ),
+        isFalse,
+      );
+    });
+
+    test('rejects named entity casing the renderer does not decode', () {
+      expect(
+        preservesRichContentStructure(
+          '<img src="https://cdn.test/a.jpg?x=1&amp;y=2">',
+          '<img src="https://cdn.test/a.jpg?x=1&AMP;y=2">',
+        ),
+        isFalse,
+      );
+      expect(
+        preservesRichContentStructure(
+          '<img src="https://cdn.test/a.jpg?x=1&AMP;y=2">',
+          '<img src="https://cdn.test/a.jpg?x=1&AMP;y=2">',
+        ),
+        isFalse,
+      );
+    });
+
+    test('rejects apos entity versus literal quote truncation', () {
+      expect(
+        preservesRichContentStructure(
+          '<img src="https://cdn.test/a&apos;b.jpg">',
+          '<img src="https://cdn.test/a\'b.jpg">',
+        ),
+        isFalse,
+      );
+    });
+
+    test('rejects quot entity versus literal quote truncation', () {
+      expect(
+        preservesRichContentStructure(
+          "<img src='https://cdn.test/a&quot;b.jpg'>",
+          "<img src='https://cdn.test/a\"b.jpg'>",
+        ),
+        isFalse,
+      );
+    });
+
+    test('canonicalizes renderer-supported amp entity to a safe raw query', () {
+      expect(
+        preservesRichContentStructure(
+          '<img src="https://cdn.test/a.jpg?x=1&amp;y=2">',
+          '<img src="https://cdn.test/a.jpg?x=1&y=2">',
+        ),
+        isTrue,
+      );
     });
   });
 

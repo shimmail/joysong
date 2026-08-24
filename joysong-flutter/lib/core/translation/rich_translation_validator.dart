@@ -185,7 +185,10 @@ bool _parseTag(
     final value = _decodeAttributeEntities(
       token.substring(valueStart, cursor),
     );
-    if (value == null || _containsControl(value) || _containsAngle(value)) {
+    if (value == null ||
+        _containsControl(value) ||
+        _containsAngle(value) ||
+        _containsQuote(value)) {
       return false;
     }
     attributes[attribute] = value;
@@ -235,64 +238,73 @@ String? _canonicalUrl(String value, {required bool image}) {
 }
 
 String? _decodeAttributeEntities(String value) {
-  // Raw ampersands are deliberately outside this grammar. Callers must encode
-  // query separators as &amp; (or a semicolon-terminated numeric reference),
-  // which also removes semicolonless named/numeric parsing ambiguity.
+  if (_hasAmbiguousCharacterReference(value)) return null;
+
+  // Keep this order aligned with RichContentView._decodeEntities. In
+  // particular, named references are case-sensitive and amp may expose a
+  // numeric reference that the renderer decodes in its later numeric pass.
   var result = value;
-  for (var pass = 0; pass < 4; pass += 1) {
-    final output = StringBuffer();
-    var changed = false;
-    var cursor = 0;
-    while (cursor < result.length) {
-      if (result.codeUnitAt(cursor) != 0x26) {
-        output.writeCharCode(result.codeUnitAt(cursor));
-        cursor += 1;
-        continue;
-      }
-      final match = _entityPattern.matchAsPrefix(result, cursor);
-      if (match == null) {
-        if (pass == 0) return null;
-        output.write('&');
-        cursor += 1;
-        continue;
-      }
-      final decoded = _decodeEntity(match.group(1)!);
-      if (decoded == null) return null;
-      output.write(decoded);
-      cursor = match.end;
-      changed = true;
-    }
-    result = output.toString();
-    if (!changed) break;
-  }
-  return result;
-}
-
-final _entityPattern = RegExp(
-  r'&(#x[0-9a-f]+|#[0-9]+|amp|lt|gt|quot|apos|colon|tab|newline);',
-  caseSensitive: false,
-);
-
-String? _decodeEntity(String entity) {
-  final normalized = entity.toLowerCase();
-  if (normalized.startsWith('#x')) {
-    return _entityCodePoint(normalized.substring(2), radix: 16);
-  }
-  if (normalized.startsWith('#')) {
-    return _entityCodePoint(normalized.substring(1), radix: 10);
-  }
-  return switch (normalized) {
-    'amp' => '&',
-    'lt' => '<',
-    'gt' => '>',
-    'quot' => '"',
-    'apos' => "'",
-    'colon' => ':',
-    'tab' => '\t',
-    'newline' => '\n',
-    _ => null,
+  const named = {
+    '&nbsp;': ' ',
+    '&amp;': '&',
+    '&lt;': '<',
+    '&gt;': '>',
+    '&quot;': '"',
+    '&#39;': "'",
+    '&apos;': "'",
   };
+  for (final entry in named.entries) {
+    result = result.replaceAll(entry.key, entry.value);
+  }
+
+  var valid = true;
+  result = result.replaceAllMapped(RegExp(r'&#(\d+);'), (match) {
+    final decoded = _entityCodePoint(match.group(1)!, radix: 10);
+    if (decoded == null) valid = false;
+    return decoded ?? '';
+  });
+  result = result.replaceAllMapped(
+    RegExp(r'&#x([0-9a-f]+);', caseSensitive: false),
+    (match) {
+      final decoded = _entityCodePoint(match.group(1)!, radix: 16);
+      if (decoded == null) valid = false;
+      return decoded ?? '';
+    },
+  );
+  return valid ? result : null;
 }
+
+bool _hasAmbiguousCharacterReference(String value) {
+  var cursor = 0;
+  while (cursor < value.length) {
+    final ampersand = value.indexOf('&', cursor);
+    if (ampersand < 0) return false;
+    final supported = _supportedEntityPattern.matchAsPrefix(value, ampersand);
+    if (supported != null) {
+      cursor = supported.end;
+      continue;
+    }
+    if (ampersand + 1 < value.length &&
+        value.codeUnitAt(ampersand + 1) == 0x23) {
+      return true;
+    }
+    if (_unsupportedNamedEntityPattern.matchAsPrefix(value, ampersand) !=
+            null ||
+        _semicolonlessNamedEntityPattern.matchAsPrefix(value, ampersand) !=
+            null) {
+      return true;
+    }
+    cursor = ampersand + 1;
+  }
+  return false;
+}
+
+final _supportedEntityPattern = RegExp(
+  r'&(?:nbsp|amp|lt|gt|quot|apos|#39|#[0-9]+|#[xX][0-9a-fA-F]+);',
+);
+final _unsupportedNamedEntityPattern = RegExp(r'&[A-Za-z][A-Za-z0-9]*;');
+final _semicolonlessNamedEntityPattern =
+    RegExp(r'&[A-Za-z][A-Za-z0-9]*(?=[^A-Za-z0-9=]|$)');
 
 String? _entityCodePoint(String digits, {required int radix}) {
   final codePoint = int.tryParse(digits, radix: radix);
@@ -318,6 +330,8 @@ bool _containsControl(String value) => value.codeUnits
     .any((code) => code <= 0x1f || (code >= 0x7f && code <= 0x9f));
 
 bool _containsAngle(String value) => value.contains('<') || value.contains('>');
+
+bool _containsQuote(String value) => value.contains('"') || value.contains("'");
 
 bool _isAsciiLetter(int code) =>
     (code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a);
