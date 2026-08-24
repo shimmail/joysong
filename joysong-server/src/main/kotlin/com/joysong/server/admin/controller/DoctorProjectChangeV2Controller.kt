@@ -61,7 +61,9 @@ class DoctorProjectChangeV2Controller(
             "PROFILE_UPDATE" -> {
                 requireExactFields(body, profileFields)
                 validateProfileFieldTypes(body)
-                service.submitV2(actor, convert(body, DoctorProjectChangeV2Request::class.java))
+                adaptSemanticPayloadError {
+                    service.submitV2(actor, convert(body, DoctorProjectChangeV2Request::class.java))
+                }
             }
             else -> throw invalidPayload("requestType 不受支持")
         }
@@ -117,7 +119,9 @@ class DoctorProjectChangeV2Controller(
         BaseResponse.success(service.withdrawV2(managementAccessService.actor(authentication), id))
 
     private fun submitLegacy(actor: ManagementActor, body: JsonNode) = try {
-        service.submit(actor, convert(body, DoctorProjectChangeRequest::class.java))
+        adaptSemanticPayloadError {
+            service.submit(actor, convert(body, DoctorProjectChangeRequest::class.java))
+        }
     } catch (e: DoctorProjectChangeConflictException) {
         throw ProjectChangeContractException(
             HttpStatus.CONFLICT,
@@ -125,6 +129,12 @@ class DoctorProjectChangeV2Controller(
             e.message ?: "该项目已有待处理申请",
             e
         )
+    }
+
+    private inline fun <T> adaptSemanticPayloadError(delegate: () -> T): T = try {
+        delegate()
+    } catch (e: IllegalArgumentException) {
+        throw invalidPayload("请求字段值不正确", e)
     }
 
     private fun validateProfileFieldTypes(body: JsonNode) {

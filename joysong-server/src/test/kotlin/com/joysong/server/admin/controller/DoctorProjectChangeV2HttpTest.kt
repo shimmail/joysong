@@ -6,6 +6,11 @@ import com.fasterxml.jackson.databind.node.ObjectNode
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.joysong.server.common.GlobalExceptionHandler
+import com.joysong.server.config.JwtAuthenticationFilter
+import com.joysong.server.config.JwtTokenProvider
+import com.joysong.server.config.ProjectChangeCompatibilityConfiguration
+import com.joysong.server.config.ProjectChangeCompatibilityProperties
+import com.joysong.server.config.SecurityConfig
 import com.joysong.server.identity.service.ManagementAccessService
 import com.joysong.server.identity.service.ManagementActor
 import com.joysong.server.institution.service.DoctorProjectChangeNotFoundException
@@ -19,17 +24,28 @@ import com.joysong.server.institution.service.ProjectChangeContractException
 import com.joysong.server.institution.service.ProjectChangeDecision
 import com.joysong.server.institution.service.ProjectChangeErrorCode
 import com.joysong.server.institution.service.VersionedDoctorProjectChangeViewV2
+import com.joysong.server.user.repository.UserRepository
+import io.mockk.clearMocks
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.hamcrest.Matchers.nullValue
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
+import org.springframework.boot.test.context.TestConfiguration
+import org.springframework.boot.test.context.runner.ApplicationContextRunner
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Import
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
 import org.springframework.security.access.AccessDeniedException
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
+import org.springframework.security.test.context.support.WithMockUser
+import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.ResultActions
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
@@ -322,6 +338,61 @@ class DoctorProjectChangeV2HttpTest {
     }
 
     @Test
+    fun `v2 profile semantic IllegalArgumentException is HTTP 422 payload invalid`() {
+        val fixture = fixture()
+        every {
+            fixture.service.submitV2(
+                fixture.actor,
+                match { request ->
+                    request.institutionProjectId.isBlank() || request.baseRevision.length != revision.length ||
+                        request.price.signum() <= 0 || request.notes.isBlank()
+                }
+            )
+        } throws IllegalArgumentException("项目资料语义不合法")
+        val invalidBodies = listOf(
+            profileBody().put("institutionProjectId", ""),
+            profileBody().put("baseRevision", "invalid-revision"),
+            profileBody().put("price", -1),
+            profileBody().put("notes", " ")
+        )
+
+        invalidBodies.forEach { body ->
+            fixture.mvc.perform(post(basePath).json(body.toString()))
+                .andAssertSemanticPayloadInvalid()
+        }
+
+        verify(exactly = invalidBodies.size) { fixture.service.submitV2(fixture.actor, any()) }
+    }
+
+    @Test
+    fun `v2 legacy semantic IllegalArgumentException is HTTP 422 payload invalid`() {
+        val fixture = fixture()
+        every {
+            fixture.service.submit(
+                fixture.actor,
+                match { request ->
+                    val invalidPrice = request.priceSuggestion?.signum()?.let { it <= 0 } ?: false
+                    request.institutionProjectId.isBlank() || invalidPrice ||
+                        (request.requestType == "JOIN" && request.notes.isBlank())
+                }
+            )
+        } throws IllegalArgumentException("旧版项目申请语义不合法")
+        val invalidBodies = listOf(
+            joinBody().put("institutionProjectId", ""),
+            joinBody().put("priceSuggestion", -1),
+            joinBody().put("notes", " "),
+            leaveBody().put("institutionProjectId", "")
+        )
+
+        invalidBodies.forEach { body ->
+            fixture.mvc.perform(post(basePath).json(body.toString()))
+                .andAssertSemanticPayloadInvalid()
+        }
+
+        verify(exactly = invalidBodies.size) { fixture.service.submit(fixture.actor, any()) }
+    }
+
+    @Test
     fun `damaged or unknown snapshot review is HTTP 422 with stable error code`() {
         listOf("request-v2-invalid", "request-v2-unknown-schema").forEach { id ->
             val fixture = fixture()
@@ -420,6 +491,16 @@ class DoctorProjectChangeV2HttpTest {
         .andExpect(jsonPath("$.errorCode").value("PROJECT_PAYLOAD_INVALID"))
         .andExpect(jsonPath("$.data").value(nullValue()))
 
+    private fun ResultActions.andAssertSemanticPayloadInvalid(): ResultActions = also {
+        val response = andReturn().response
+        val envelope = mapper.readTree(response.contentAsString)
+        assertEquals(
+            422 to "PROJECT_PAYLOAD_INVALID",
+            response.status to envelope.get("errorCode")?.textValue()
+        )
+        assertEquals(true, envelope.path("data").isNull)
+    }
+
     private fun MockHttpServletRequestBuilder.authenticated(): MockHttpServletRequestBuilder =
         principal(UsernamePasswordAuthenticationToken("doctor-1", "", emptyList()))
 
@@ -510,5 +591,115 @@ class DoctorProjectChangeV2HttpTest {
 
         fun contractError(status: HttpStatus, code: ProjectChangeErrorCode) =
             ProjectChangeContractException(status, code, code.name)
+    }
+}
+
+@WebMvcTest
+@ContextConfiguration(
+    classes = [
+        DoctorProjectChangeV2SecurityTestConfig::class,
+        SecurityConfig::class,
+        GlobalExceptionHandler::class
+    ]
+)
+class DoctorProjectChangeV2SecurityTest {
+    @Autowired
+    private lateinit var mockMvc: MockMvc
+
+    @Autowired
+    private lateinit var accessService: ManagementAccessService
+
+    @Autowired
+    private lateinit var projectChangeService: DoctorProjectChangeService
+
+    private val actor = ManagementActor(
+        userId = "doctor-1",
+        isAdmin = false,
+        activeRoles = setOf("DOCTOR"),
+        doctorId = "doctor-1",
+        managedInstitutionIds = emptySet(),
+        doctorInstitutionIds = setOf("inst-1"),
+        manageableDoctorIds = emptySet(),
+        consultantInstitutionIds = emptySet()
+    )
+
+    @BeforeEach
+    fun resetMocks() {
+        clearMocks(accessService, projectChangeService)
+    }
+
+    @Test
+    fun `unauthenticated v2 base route returns HTTP 401`() {
+        mockMvc.perform(get(basePath))
+            .andExpect(status().isUnauthorized)
+            .andExpect(jsonPath("$.code").value(401))
+            .andExpect(jsonPath("$.errorCode").doesNotExist())
+    }
+
+    @Test
+    fun `unauthenticated v2 child route returns HTTP 401`() {
+        mockMvc.perform(post("$basePath/request-v2/withdraw"))
+            .andExpect(status().isUnauthorized)
+            .andExpect(jsonPath("$.code").value(401))
+            .andExpect(jsonPath("$.errorCode").doesNotExist())
+    }
+
+    @Test
+    @WithMockUser(username = "doctor-1", roles = ["USER"])
+    fun `authenticated non admin user reaches the v2 controller`() {
+        every { accessService.actor(any()) } returns actor
+        every { projectChangeService.listV2(actor) } returns emptyList()
+
+        mockMvc.perform(get(basePath))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.code").value(200))
+            .andExpect(jsonPath("$.data").isArray)
+    }
+
+    private companion object {
+        const val basePath = "/api/v2/admin/institution-project-requests"
+    }
+}
+
+@TestConfiguration
+@Import(DoctorProjectChangeV2Controller::class, JwtAuthenticationFilter::class)
+class DoctorProjectChangeV2SecurityTestConfig {
+    @Bean
+    fun managementAccessService(): ManagementAccessService = mockk()
+
+    @Bean
+    fun doctorProjectChangeService(): DoctorProjectChangeService = mockk()
+
+    @Bean
+    fun jwtTokenProvider(): JwtTokenProvider = mockk(relaxed = true)
+
+    @Bean
+    fun userRepository(): UserRepository = mockk(relaxed = true)
+}
+
+class ProjectChangeCompatibilityPropertiesContextTest {
+    private val contextRunner = ApplicationContextRunner()
+        .withUserConfiguration(ProjectChangeCompatibilityConfiguration::class.java)
+
+    @Test
+    fun `compatibility properties are registered with v1 profile updates enabled by default`() {
+        contextRunner.run { context ->
+            assertEquals(
+                true,
+                context.getBean(ProjectChangeCompatibilityProperties::class.java).v1ProfileUpdateEnabled
+            )
+        }
+    }
+
+    @Test
+    fun `compatibility properties bind the v1 profile update override`() {
+        contextRunner
+            .withPropertyValues("app.project-change.v1-profile-update-enabled=false")
+            .run { context ->
+                assertEquals(
+                    false,
+                    context.getBean(ProjectChangeCompatibilityProperties::class.java).v1ProfileUpdateEnabled
+                )
+            }
     }
 }
