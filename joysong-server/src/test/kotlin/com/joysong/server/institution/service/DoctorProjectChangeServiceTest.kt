@@ -388,20 +388,30 @@ class DoctorProjectChangeServiceTest {
     @Test
     fun `v2 list keeps immutable snapshots while refreshing latest state and force token after each drift`() {
         val baseRevision = stubV2SubmitState()
-        var persistedCurrentSnapshot: String? = null
-        var persistedProposedSnapshot: String? = null
+        var persistedLedger: CapturedV2Ledger? = null
         every { jdbcTemplate.update(match<String> { it.contains("payload_version") }, *anyVararg()) } answers {
             val values = invocation.args[1] as Array<*>
-            persistedCurrentSnapshot = values[9] as String
-            persistedProposedSnapshot = values[10] as String
+            persistedLedger = captureV2Ledger(values)
             1
         }
-        service.submitV2(
+        val submitView = service.submitV2(
             doctorActor(),
-            v2Request(baseRevision = baseRevision, name = "Proposed Project", price = BigDecimal("110.00"))
-        )
+            v2Request(
+                baseRevision = baseRevision,
+                name = "Proposed Project",
+                price = BigDecimal("110.00"),
+                doctorActive = false
+            )
+        ) as VersionedDoctorProjectChangeViewV2
 
-        var liveVersion = 7L
+        var liveState = V2LiveState(
+            institutionProjectVersion = 7,
+            doctorPrice = BigDecimal("100.00"),
+            doctorActive = true,
+            doctorUpdatedAt = Timestamp.valueOf(LocalDateTime.of(2026, 8, 10, 10, 0)),
+            configId = "config-1",
+            configUpdatedAt = Timestamp.valueOf(LocalDateTime.of(2026, 8, 10, 10, 0))
+        )
         every {
             jdbcTemplate.query(match<String> { it.contains("payload_version = 1") }, any<RowMapper<Any>>())
         } returns emptyList()
@@ -412,33 +422,67 @@ class DoctorProjectChangeServiceTest {
             listOf(
                 mapper.mapRow(
                     v2ListResultSet(
-                        currentSnapshot = requireNotNull(persistedCurrentSnapshot),
-                        proposedSnapshot = requireNotNull(persistedProposedSnapshot),
-                        latestVersion = liveVersion
+                        ledger = requireNotNull(persistedLedger),
+                        liveState = liveState
                     ),
                     0
                 )
             )
         }
 
-        val submitted = service.listV2(legalActor()).single() as VersionedDoctorProjectChangeViewV2
-        liveVersion = 8
+        val initial = service.listV2(legalActor()).single() as VersionedDoctorProjectChangeViewV2
+        liveState = liveState.copy(
+            institutionProjectVersion = 8,
+            doctorPrice = BigDecimal("125.00"),
+            doctorActive = false,
+            doctorUpdatedAt = Timestamp.valueOf(LocalDateTime.of(2026, 8, 11, 10, 0))
+        )
         val refreshed = service.listV2(legalActor()).single() as VersionedDoctorProjectChangeViewV2
-        liveVersion = 9
-        val driftedAgain = service.listV2(legalActor()).single() as VersionedDoctorProjectChangeViewV2
+        liveState = liveState.copy(
+            institutionProjectVersion = 9,
+            configUpdatedAt = Timestamp.valueOf(LocalDateTime.of(2026, 8, 12, 10, 0))
+        )
+        val refreshedAgain = service.listV2(legalActor()).single() as VersionedDoctorProjectChangeViewV2
 
-        assertEquals(7L, submitted.currentProject?.source?.institutionProjectVersion)
-        assertEquals("Local Project", submitted.currentProject?.effective?.name)
-        assertEquals("Proposed Project", submitted.proposedProject?.effective?.name)
-        assertEquals(7L, refreshed.currentProject?.source?.institutionProjectVersion)
-        assertEquals(submitted.currentProject, refreshed.currentProject)
-        assertEquals(submitted.proposedProject, refreshed.proposedProject)
-        assertEquals(refreshed.currentProject, driftedAgain.currentProject)
-        assertEquals(refreshed.proposedProject, driftedAgain.proposedProject)
+        assertEquals(submitView.id, initial.id)
+        assertEquals(submitView.baseRevision, initial.baseRevision)
+        assertEquals("doctor-1", initial.doctorId)
+        assertEquals("institution-1", initial.institutionId)
+        assertEquals("ip-1", initial.institutionProjectId)
+        assertEquals(submitView.currentProject, initial.currentProject)
+        assertEquals(submitView.proposedProject, initial.proposedProject)
+        assertEquals(submitView.currentDoctorPrice, initial.currentDoctorPrice)
+        assertEquals(submitView.currentDoctorActive, initial.currentDoctorActive)
+        assertEquals(submitView.proposedDoctorPrice, initial.proposedDoctorPrice)
+        assertEquals(submitView.proposedDoctorActive, initial.proposedDoctorActive)
+        assertEquals(submitView.platformRate, initial.platformRate)
+        assertEquals(submitView.travelGroundServiceFee, initial.travelGroundServiceFee)
+        assertEquals(submitView.sharedChanged, initial.sharedChanged)
+        assertEquals("notes", initial.notes)
+        assertEquals("doctor-1", initial.submittedBy)
+        assertEquals(initial.currentProject, refreshed.currentProject)
+        assertEquals(initial.proposedProject, refreshed.proposedProject)
+        assertEquals(initial.currentDoctorPrice, refreshed.currentDoctorPrice)
+        assertEquals(initial.currentDoctorActive, refreshed.currentDoctorActive)
+        assertEquals(initial.proposedDoctorPrice, refreshed.proposedDoctorPrice)
+        assertEquals(initial.proposedDoctorActive, refreshed.proposedDoctorActive)
+        assertEquals(refreshed.currentProject, refreshedAgain.currentProject)
+        assertEquals(refreshed.proposedProject, refreshedAgain.proposedProject)
+        assertEquals(refreshed.currentDoctorPrice, refreshedAgain.currentDoctorPrice)
+        assertEquals(refreshed.currentDoctorActive, refreshedAgain.currentDoctorActive)
+        assertEquals(refreshed.proposedDoctorPrice, refreshedAgain.proposedDoctorPrice)
+        assertEquals(refreshed.proposedDoctorActive, refreshedAgain.proposedDoctorActive)
+        assertEquals(BigDecimal("100.00"), initial.latestDoctorPrice)
+        assertEquals(true, initial.latestDoctorActive)
         assertEquals(8L, refreshed.latestProject?.source?.institutionProjectVersion)
-        assertEquals(9L, driftedAgain.latestProject?.source?.institutionProjectVersion)
-        assertEquals(false, submitted.latestRevision == refreshed.latestRevision)
-        assertEquals(false, refreshed.latestRevision == driftedAgain.latestRevision)
+        assertEquals(BigDecimal("125.00"), refreshed.latestDoctorPrice)
+        assertEquals(false, refreshed.latestDoctorActive)
+        assertEquals(9L, refreshedAgain.latestProject?.source?.institutionProjectVersion)
+        assertEquals(BigDecimal("125.00"), refreshedAgain.latestDoctorPrice)
+        assertEquals(false, refreshedAgain.latestDoctorActive)
+        assertEquals(false, initial.latestRevision == refreshed.latestRevision)
+        assertEquals(false, refreshed.latestRevision == refreshedAgain.latestRevision)
+        assertEquals(false, initial.latestRevision == refreshedAgain.latestRevision)
     }
 
     @Test
@@ -1107,53 +1151,102 @@ class DoctorProjectChangeServiceTest {
             Timestamp.valueOf(LocalDateTime.of(2026, 8, 10, 10, 0))
     }
 
+    private fun captureV2Ledger(values: Array<*>): CapturedV2Ledger {
+        val currentSnapshot = values[9] as String
+        return CapturedV2Ledger(
+            id = values[0] as String,
+            doctorId = values[1] as String,
+            institutionId = values[2] as String,
+            institutionProjectId = values[3] as String,
+            platformProjectId = DoctorProjectSnapshotCodec(objectMapper).decode(currentSnapshot).association.platformProjectId,
+            baseInstitutionProjectVersion = values[4] as Long,
+            basePlatformInheritanceHash = values[5] as String,
+            pricingPolicyRevision = values[6] as String,
+            travelGroundServiceFee = values[7] as BigDecimal,
+            sharedChanged = values[8] as Boolean,
+            currentProjectSnapshot = currentSnapshot,
+            proposedProjectSnapshot = values[10] as String,
+            baseDoctorProjectUpdatedAt = values[11] as Timestamp,
+            baseConfigId = values[12] as String?,
+            baseConfigUpdatedAt = values[13] as Timestamp?,
+            currentDoctorPrice = values[14] as BigDecimal,
+            proposedDoctorPrice = values[15] as BigDecimal,
+            platformRate = values[16] as BigDecimal,
+            currentDoctorActive = values[17] as Boolean,
+            proposedDoctorActive = values[18] as Boolean,
+            notes = values[19] as String,
+            submittedBy = values[20] as String,
+            submittedAt = Timestamp.valueOf(LocalDateTime.of(2026, 8, 24, 1, 2, 3))
+        )
+    }
+
     private fun v2ListResultSet(
         id: String = "request-v2",
         currentSnapshot: String = DoctorProjectSnapshotCodec(objectMapper).encode(validV2Snapshot()),
         proposedSnapshot: String = DoctorProjectSnapshotCodec(objectMapper).encode(validV2Snapshot()),
         latestVersion: Long = 7,
         currentPlatformRate: BigDecimal? = BigDecimal("40.00"),
-        travelGroundServiceFee: BigDecimal? = BigDecimal("44.00")
+        travelGroundServiceFee: BigDecimal? = BigDecimal("44.00"),
+        ledger: CapturedV2Ledger? = null,
+        liveState: V2LiveState? = null
     ): ResultSet = mockk(relaxed = true) {
         val now = Timestamp.valueOf(LocalDateTime.of(2026, 8, 24, 1, 2, 3))
-        every { getString("id") } returns id
+        val live = liveState ?: V2LiveState(
+            institutionProjectVersion = latestVersion,
+            doctorPrice = BigDecimal("100.00"),
+            doctorActive = true,
+            doctorUpdatedAt = Timestamp.valueOf(LocalDateTime.of(2026, 8, 10, 10, 0)),
+            configId = "config-1",
+            configUpdatedAt = Timestamp.valueOf(LocalDateTime.of(2026, 8, 10, 10, 0))
+        )
+        every { getString("id") } returns (ledger?.id ?: id)
         every { getInt("payload_version") } returns 2
-        every { getString("doctor_id") } returns "doctor-1"
+        every { getString("doctor_id") } returns (ledger?.doctorId ?: "doctor-1")
         every { getString("doctor_name") } returns "Doctor"
-        every { getString("institution_id") } returns "institution-1"
+        every { getString("institution_id") } returns (ledger?.institutionId ?: "institution-1")
         every { getString("institution_name") } returns "Institution"
-        every { getString("institution_project_id") } returns "ip-1"
+        every { getString("institution_project_id") } returns (ledger?.institutionProjectId ?: "ip-1")
         every { getString("institution_project_name") } returns "Local Project"
-        every { getString("platform_project_id") } returns "project-1"
+        every { getString("platform_project_id") } returns (ledger?.platformProjectId ?: "project-1")
         every { getString("platform_project_name") } returns "Platform Project"
         every { getString("request_type") } returns "PROFILE_UPDATE"
-        every { getLong("base_institution_project_version") } returns 7
-        every { getString("base_platform_inheritance_hash") } returns validV2Snapshot().source.platformInheritanceHash
-        every { getString("pricing_policy_revision") } returns "travel-ground-service-rate:0.400000"
-        every { getString("current_project_snapshot") } returns currentSnapshot
-        every { getString("proposed_project_snapshot") } returns proposedSnapshot
-        every { getBoolean("shared_changed") } returns true
-        every { getBigDecimal("current_price") } returns BigDecimal("100.00")
-        every { getBigDecimal("medical_list_price") } returns BigDecimal("110.00")
-        every { getBoolean("current_doctor_is_active") } returns true
-        every { getBoolean("proposed_doctor_is_active") } returns true
-        every { getBigDecimal("current_platform_rate") } returns currentPlatformRate
-        every { getBigDecimal("proposed_travel_ground_service_fee") } returns travelGroundServiceFee
+        every { getLong("base_institution_project_version") } returns (ledger?.baseInstitutionProjectVersion ?: 7L)
+        every { getString("base_platform_inheritance_hash") } returns (
+            ledger?.basePlatformInheritanceHash ?: validV2Snapshot().source.platformInheritanceHash
+        )
+        every { getString("pricing_policy_revision") } returns (
+            ledger?.pricingPolicyRevision ?: "travel-ground-service-rate:0.400000"
+        )
+        every { getString("current_project_snapshot") } returns (ledger?.currentProjectSnapshot ?: currentSnapshot)
+        every { getString("proposed_project_snapshot") } returns (ledger?.proposedProjectSnapshot ?: proposedSnapshot)
+        every { getBoolean("shared_changed") } returns (ledger?.sharedChanged ?: true)
+        every { getBigDecimal("current_price") } returns (ledger?.currentDoctorPrice ?: BigDecimal("100.00"))
+        every { getBigDecimal("medical_list_price") } returns (ledger?.proposedDoctorPrice ?: BigDecimal("110.00"))
+        every { getBoolean("current_doctor_is_active") } returns (ledger?.currentDoctorActive ?: true)
+        every { getBoolean("proposed_doctor_is_active") } returns (ledger?.proposedDoctorActive ?: true)
+        every { getBigDecimal("current_platform_rate") } returns (ledger?.platformRate ?: currentPlatformRate)
+        every { getBigDecimal("proposed_travel_ground_service_fee") } returns (
+            ledger?.travelGroundServiceFee ?: travelGroundServiceFee
+        )
         every { getString("status") } returns "PENDING"
-        every { getString("notes") } returns "notes"
+        every { getString("notes") } returns (ledger?.notes ?: "notes")
         every { getBoolean("force_processed") } returns false
-        every { getString("submitted_by") } returns "doctor-1"
-        every { getTimestamp("submitted_at") } returns now
+        every { getString("submitted_by") } returns (ledger?.submittedBy ?: "doctor-1")
+        every { getTimestamp("submitted_at") } returns (ledger?.submittedAt ?: now)
         every { getString("reviewed_by") } returns null
         every { getString("reviewer_name") } returns null
         every { getString("review_note") } returns null
         every { getTimestamp("reviewed_at") } returns null
         every { getTimestamp("updated_at") } returns now
-        every { getTimestamp("base_doctor_project_updated_at") } returns
+        every { getTimestamp("base_doctor_project_updated_at") } returns (
+            ledger?.baseDoctorProjectUpdatedAt ?: Timestamp.valueOf(LocalDateTime.of(2026, 8, 10, 10, 0))
+        )
+        every { getString("base_config_id") } returns if (ledger != null) ledger.baseConfigId else "config-1"
+        every { getTimestamp("base_config_updated_at") } returns if (ledger != null) {
+            ledger.baseConfigUpdatedAt
+        } else {
             Timestamp.valueOf(LocalDateTime.of(2026, 8, 10, 10, 0))
-        every { getString("base_config_id") } returns "config-1"
-        every { getTimestamp("base_config_updated_at") } returns
-            Timestamp.valueOf(LocalDateTime.of(2026, 8, 10, 10, 0))
+        }
         every { getString("latest_ip_name") } returns "Local Project"
         every { getString("latest_ip_category") } returns null
         every { getString("latest_ip_description") } returns null
@@ -1163,7 +1256,7 @@ class DoctorProjectChangeServiceTest {
         every { getString("latest_ip_cover_image") } returns null
         every { getString("latest_ip_images") } returns null
         every { getInt("latest_ip_sales_count") } returns 8
-        every { getLong("latest_ip_version") } returns latestVersion
+        every { getLong("latest_ip_version") } returns live.institutionProjectVersion
         every { getString("latest_platform_category") } returns "Platform Category"
         every { getString("latest_platform_description") } returns "Platform Description"
         every { getString("latest_platform_tags") } returns "platform-tag"
@@ -1171,13 +1264,11 @@ class DoctorProjectChangeServiceTest {
         every { getString("latest_platform_detail_content") } returns "Platform Detail"
         every { getString("latest_platform_cover_image") } returns "platform-cover"
         every { getString("latest_platform_images") } returns "platform-image"
-        every { getBigDecimal("latest_doctor_price") } returns BigDecimal("100.00")
-        every { getBoolean("latest_doctor_active") } returns true
-        every { getTimestamp("latest_doctor_project_updated_at") } returns
-            Timestamp.valueOf(LocalDateTime.of(2026, 8, 10, 10, 0))
-        every { getString("latest_config_id") } returns "config-1"
-        every { getTimestamp("latest_config_updated_at") } returns
-            Timestamp.valueOf(LocalDateTime.of(2026, 8, 10, 10, 0))
+        every { getBigDecimal("latest_doctor_price") } returns live.doctorPrice
+        every { getBoolean("latest_doctor_active") } returns live.doctorActive
+        every { getTimestamp("latest_doctor_project_updated_at") } returns live.doctorUpdatedAt
+        every { getString("latest_config_id") } returns live.configId
+        every { getTimestamp("latest_config_updated_at") } returns live.configUpdatedAt
     }
 
     private fun validV2Snapshot(version: Long = 7): InstitutionProjectSnapshotV2 {
@@ -1372,5 +1463,40 @@ class DoctorProjectChangeServiceTest {
         managedInstitutionIds = emptySet(),
         doctorInstitutionIds = setOf("institution-1"),
         manageableDoctorIds = setOf(doctorId)
+    )
+
+    private data class CapturedV2Ledger(
+        val id: String,
+        val doctorId: String,
+        val institutionId: String,
+        val institutionProjectId: String,
+        val platformProjectId: String,
+        val baseInstitutionProjectVersion: Long,
+        val basePlatformInheritanceHash: String,
+        val pricingPolicyRevision: String,
+        val travelGroundServiceFee: BigDecimal,
+        val sharedChanged: Boolean,
+        val currentProjectSnapshot: String,
+        val proposedProjectSnapshot: String,
+        val baseDoctorProjectUpdatedAt: Timestamp,
+        val baseConfigId: String?,
+        val baseConfigUpdatedAt: Timestamp?,
+        val currentDoctorPrice: BigDecimal,
+        val proposedDoctorPrice: BigDecimal,
+        val platformRate: BigDecimal,
+        val currentDoctorActive: Boolean,
+        val proposedDoctorActive: Boolean,
+        val notes: String,
+        val submittedBy: String,
+        val submittedAt: Timestamp
+    )
+
+    private data class V2LiveState(
+        val institutionProjectVersion: Long,
+        val doctorPrice: BigDecimal,
+        val doctorActive: Boolean,
+        val doctorUpdatedAt: Timestamp,
+        val configId: String?,
+        val configUpdatedAt: Timestamp?
     )
 }
