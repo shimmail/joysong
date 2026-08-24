@@ -109,7 +109,7 @@ void main() {
   });
 
   testWidgets(
-    'deserialized author-only Home articles and diaries keep names source-only',
+    'deserialized author-only Home content keeps names source-only',
     (tester) async {
       await _useTallSurface(tester);
       final repository = _LiteralTranslationRepository(
@@ -118,6 +118,14 @@ void main() {
       );
       final controller = _activeController(repository, maxConcurrent: 10);
       addTearDown(controller.dispose);
+      final banner = HomeContent.fromJson(
+        const {
+          'id': 'author-only-banner',
+          'title': '安心变美',
+          'authorName': '李医生',
+        },
+        kind: HomeSectionKind.banner,
+      );
       final article = HomeContent.fromJson(
         const {
           'id': 'author-only-article',
@@ -138,13 +146,19 @@ void main() {
       await tester.pumpWidget(
         _homeHost(
           controller: controller,
-          feed: HomeFeed(expertArticles: [article], userDiaries: [diary]),
+          feed: HomeFeed(
+            banners: [banner],
+            expertArticles: [article],
+            userDiaries: [diary],
+          ),
         ),
       );
       await tester.pump();
 
+      expect(repository.sourceTexts, isNot(contains('李医生')));
       expect(repository.sourceTexts, isNot(contains('赵教授')));
       expect(repository.sourceTexts, isNot(contains('小美')));
+      expect(find.text('李医生'), findsOneWidget);
       expect(find.text('赵教授'), findsOneWidget);
       expect(find.text('小美'), findsOneWidget);
     },

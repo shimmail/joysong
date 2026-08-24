@@ -455,6 +455,9 @@ class _RecommendationBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
+    final authorName = item.text(const ['authorName']);
+    final subtitleIsAuthorName =
+        authorName.isNotEmpty && item.subtitle == authorName;
     return Material(
       color: colors.primaryContainer,
       borderRadius: BorderRadius.circular(16),
@@ -505,18 +508,28 @@ class _RecommendationBanner extends StatelessWidget {
                         ),
                         if (item.subtitle.isNotEmpty) ...[
                           const SizedBox(height: 5),
-                          AutoTranslatedText(
-                            request: _homeRequest(
-                              item,
-                              'subtitle',
+                          if (subtitleIsAuthorName)
+                            Text(
                               item.subtitle,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: colors.onSurfaceVariant,
+                              ),
+                            )
+                          else
+                            AutoTranslatedText(
+                              request: _homeRequest(
+                                item,
+                                'subtitle',
+                                item.subtitle,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: colors.onSurfaceVariant,
+                              ),
                             ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: colors.onSurfaceVariant,
-                            ),
-                          ),
                         ],
                       ],
                     ),
