@@ -130,6 +130,13 @@ final class _DiaryDetailPageState extends State<DiaryDetailPage> {
   Widget _buildContent() {
     final theme = Theme.of(context);
     final comments = widget.controller.commentsFor(widget.diary.id);
+    final commentIdCounts = <String, int>{};
+    for (final comment in comments) {
+      final id = comment.id.trim();
+      if (id.isNotEmpty) {
+        commentIdCounts[id] = (commentIdCounts[id] ?? 0) + 1;
+      }
+    }
     final loading = widget.controller.isBusy(
       'comments:load:${widget.diary.id}',
     );
@@ -178,7 +185,14 @@ final class _DiaryDetailPageState extends State<DiaryDetailPage> {
           )
         else
           for (final comment in comments) ...[
-            _buildComment(comment),
+            KeyedSubtree(
+              key: _commentRowKey(comment, commentIdCounts),
+              child: _buildComment(
+                comment,
+                enableAutoTranslation:
+                    _commentRowKey(comment, commentIdCounts) != null,
+              ),
+            ),
             const Divider(height: 24),
           ],
         if (loading && comments.isNotEmpty)
@@ -329,7 +343,10 @@ final class _DiaryDetailPageState extends State<DiaryDetailPage> {
     unawaited(_focusComposer(_replyTrigger));
   }
 
-  Widget _buildComment(Comment comment) {
+  Widget _buildComment(
+    Comment comment, {
+    required bool enableAutoTranslation,
+  }) {
     final initial = EngagementStatus(
       active: comment.isLiked,
       count: comment.likeCount,
@@ -352,6 +369,7 @@ final class _DiaryDetailPageState extends State<DiaryDetailPage> {
       children: [
         _translatedCommentBody(
           comment: comment,
+          enableAutoTranslation: enableAutoTranslation,
           collapsed: collapsed,
           isAuthor: comment.userId == widget.diary.userId,
           likeStatus: visibleLike,
@@ -426,6 +444,7 @@ final class _DiaryDetailPageState extends State<DiaryDetailPage> {
 
   Widget _translatedCommentBody({
     required Comment comment,
+    bool enableAutoTranslation = true,
     required bool collapsed,
     required bool isAuthor,
     required EngagementStatus likeStatus,
@@ -457,7 +476,7 @@ final class _DiaryDetailPageState extends State<DiaryDetailPage> {
       );
     }
 
-    if (collapsed || comment.id.trim().isEmpty) {
+    if (!enableAutoTranslation || collapsed || comment.id.trim().isEmpty) {
       return buildBody(comment.content);
     }
     return _StableAutoTranslationBuilder(
@@ -468,6 +487,12 @@ final class _DiaryDetailPageState extends State<DiaryDetailPage> {
       sourceText: comment.content,
       builder: (_, automaticText) => buildBody(automaticText),
     );
+  }
+
+  Key? _commentRowKey(Comment comment, Map<String, int> idCounts) {
+    final id = comment.id.trim();
+    if (id.isEmpty || idCounts[id] != 1) return null;
+    return ValueKey<String>('comment-row:$id');
   }
 
   String _displayContent(Comment comment, String automaticText) {

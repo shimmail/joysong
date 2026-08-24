@@ -77,26 +77,43 @@ final class _SocialPageState extends State<SocialPage> {
               onCreate: widget.onCreateDiary,
             );
           }
+          final diaries = controller.diaries;
+          final diaryIdCounts = <String, int>{};
+          for (final diary in diaries) {
+            final id = diary.id.trim();
+            if (id.isNotEmpty) {
+              diaryIdCounts[id] = (diaryIdCounts[id] ?? 0) + 1;
+            }
+          }
+          final diaryRowIndices = <Key, int>{};
+          for (var index = 0; index < diaries.length; index += 1) {
+            final key = _diaryRowKey(diaries[index], diaryIdCounts);
+            if (key != null) diaryRowIndices[key] = index;
+          }
           return RefreshIndicator(
             onRefresh: () async {
               await controller.loadMyDiaries(refresh: true);
             },
             child: ListView.separated(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-              itemCount: controller.diaries.length + 1,
+              itemCount: diaries.length + 1,
+              findItemIndexCallback: (key) => diaryRowIndices[key],
               separatorBuilder: (_, __) => const SizedBox(height: 12),
               itemBuilder: (context, index) {
-                if (index == controller.diaries.length) {
+                if (index == diaries.length) {
                   return _LoadMore(
                     isLoading: controller.isLoadingDiaries,
                     hasMore: controller.hasMoreDiaries,
                     onLoad: controller.loadMyDiaries,
                   );
                 }
-                final diary = controller.diaries[index];
+                final diary = diaries[index];
+                final rowKey = _diaryRowKey(diary, diaryIdCounts);
                 return _DiaryCard(
+                  key: rowKey,
                   diary: diary,
                   repository: controller.repository,
+                  enableAutoTranslation: rowKey != null,
                   onOpen: () => Navigator.of(context).push<void>(
                     MaterialPageRoute(
                       builder: (_) => DiaryDetailPage(
@@ -1069,13 +1086,16 @@ final class _DiaryCard extends StatefulWidget {
   const _DiaryCard({
     required this.diary,
     required this.repository,
+    required this.enableAutoTranslation,
     required this.onOpen,
     required this.onDelete,
     this.onEdit,
+    super.key,
   });
 
   final Diary diary;
   final SocialRepository repository;
+  final bool enableAutoTranslation;
   final VoidCallback onOpen;
   final VoidCallback? onEdit;
   final VoidCallback onDelete;
@@ -1103,6 +1123,7 @@ final class _DiaryCardState extends State<_DiaryCard> {
     super.didUpdateWidget(oldWidget);
     if (!_sameDiaryCard(oldWidget.diary, widget.diary) ||
         oldWidget.repository != widget.repository ||
+        oldWidget.enableAutoTranslation != widget.enableAutoTranslation ||
         (oldWidget.onEdit == null) != (widget.onEdit == null)) {
       _cachedCard = null;
     }
@@ -1127,7 +1148,7 @@ final class _DiaryCardState extends State<_DiaryCard> {
       likeCount: diary.likeCount,
       favoriteCount: diary.favoriteCount,
       commentCount: diary.commentCount,
-      enableAutoTranslation: true,
+      enableAutoTranslation: widget.enableAutoTranslation,
       autoTranslationContentId: 'diary:${diary.id}',
       isLiked: diary.isLiked,
       isFavorited: false,
@@ -1173,6 +1194,12 @@ final class _DiaryCardState extends State<_DiaryCard> {
       ),
     );
   }
+}
+
+Key? _diaryRowKey(Diary diary, Map<String, int> idCounts) {
+  final id = diary.id.trim();
+  if (id.isEmpty || idCounts[id] != 1) return null;
+  return ValueKey<String>('social-diary-row:$id');
 }
 
 bool _sameDiaryCard(Diary first, Diary second) =>

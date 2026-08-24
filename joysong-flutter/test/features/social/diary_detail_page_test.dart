@@ -328,6 +328,58 @@ void main() {
   );
 
   testWidgets(
+    'failed top-level comment does not retry when a new top-level comment is prepended',
+    (tester) async {
+      final repository = _DetailRepository();
+      final controller = SocialController(repository);
+      final translations = _AutoRepository(
+        translations: const {
+          '真实日记': 'Real diary',
+          '日记正文': 'Diary body',
+          '来自数据库的回复': 'Database reply',
+        },
+        failedSources: const {'来自数据库的评论'},
+      );
+      final autoController = _activeAutoController(translations);
+      addTearDown(controller.dispose);
+      addTearDown(autoController.dispose);
+
+      await tester.pumpWidget(
+        _autoHost(
+          controller: autoController,
+          child: DiaryDetailPage(
+            controller: controller,
+            diary: repository.diaries.single,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        translations.sources.where((source) => source == '来自数据库的评论'),
+        hasLength(1),
+      );
+
+      await tester.enterText(
+        find.byKey(const Key('comment-input')),
+        'New top-level comment',
+      );
+      await tester.tap(find.byKey(const Key('comment-send')));
+      await tester.pumpAndSettle();
+
+      expect(repository.publishedDraft?.parentId, isNull);
+      expect(
+        find.textContaining('New top-level comment', findRichText: true),
+        findsOneWidget,
+      );
+      expect(
+        translations.sources.where((source) => source == '来自数据库的评论'),
+        hasLength(1),
+      );
+    },
+  );
+
+  testWidgets(
     'partial automatic diary failure manually fills only the missing field',
     (tester) async {
       final repository = _DetailRepository(

@@ -901,6 +901,8 @@ class CustomerServiceThreadPage extends StatelessWidget {
       );
 }
 
+enum _MessageAction { copy, showTranslation, showOriginal, delete }
+
 class _ThreadScaffold<T> extends StatefulWidget {
   const _ThreadScaffold({
     required this.title,
@@ -1065,6 +1067,7 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
                 controller: _scrollController,
                 padding: const EdgeInsets.all(16),
                 itemCount: widget.items().length + (widget.hasMore() ? 1 : 0),
+                findChildIndexCallback: _findMessageChildIndex,
                 itemBuilder: (context, index) {
                   if (widget.hasMore() && index == 0) {
                     return TextButton(
@@ -1078,7 +1081,9 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
                   final messageType = widget.typeOf(item).toUpperCase();
                   final messageId = widget.idOf(item);
                   final sourceText = widget.contentOf(item);
+                  final rowKey = _messageRowKey(item);
                   return Padding(
+                    key: rowKey,
                     padding: const EdgeInsets.symmetric(vertical: 6),
                     child: Column(
                       children: [
@@ -1165,7 +1170,7 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
                                               widget.enableAutoTranslation &&
                                                   !mine &&
                                                   messageType == 'TEXT' &&
-                                                  messageId.trim().isNotEmpty,
+                                                  rowKey != null,
                                           style: TextStyle(
                                             color: mine
                                                 ? Theme.of(context)
@@ -1277,6 +1282,26 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
     return sourceText;
   }
 
+  Key? _messageRowKey(T item) {
+    final id = widget.idOf(item).trim();
+    if (id.isEmpty) return null;
+    var matches = 0;
+    for (final candidate in widget.items()) {
+      if (widget.idOf(candidate).trim() == id) matches += 1;
+      if (matches > 1) return null;
+    }
+    return ValueKey<String>('message-row:$id');
+  }
+
+  int? _findMessageChildIndex(Key key) {
+    final items = widget.items();
+    final offset = widget.hasMore() ? 1 : 0;
+    for (var index = 0; index < items.length; index += 1) {
+      if (_messageRowKey(items[index]) == key) return index + offset;
+    }
+    return null;
+  }
+
   Future<void> _sendText() async {
     if (widget.waitingForReply?.call() ?? false) return;
     final text = _input.text;
@@ -1299,7 +1324,7 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
     final sourceText = widget.contentOf(item);
     final showingTranslation =
         _visibleMessageText(messageId, sourceText) != sourceText;
-    final action = await showModalBottomSheet<String>(
+    final action = await showModalBottomSheet<_MessageAction>(
       context: context,
       showDragHandle: true,
       builder: (context) => SafeArea(
@@ -1309,7 +1334,7 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
             ListTile(
               leading: const Icon(Icons.copy_outlined),
               title: Text(strings.copy),
-              onTap: () => Navigator.pop(context, 'copy'),
+              onTap: () => Navigator.pop(context, _MessageAction.copy),
             ),
             ListTile(
               enabled: false,
@@ -1323,7 +1348,12 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
                 title: Text(
                   showingTranslation ? strings.showOriginal : strings.translate,
                 ),
-                onTap: () => Navigator.pop(context, 'translate'),
+                onTap: () => Navigator.pop(
+                  context,
+                  showingTranslation
+                      ? _MessageAction.showOriginal
+                      : _MessageAction.showTranslation,
+                ),
               ),
             if (widget.showRemovalActions)
               ListTile(
@@ -1337,22 +1367,24 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
                 title: Text(strings.delete),
                 textColor: Theme.of(context).colorScheme.error,
                 iconColor: Theme.of(context).colorScheme.error,
-                onTap: () => Navigator.pop(context, 'delete'),
+                onTap: () => Navigator.pop(context, _MessageAction.delete),
               ),
           ],
         ),
       ),
     );
     if (!mounted) return;
-    if (action == 'copy') {
+    if (action == _MessageAction.copy) {
       await Clipboard.setData(ClipboardData(text: widget.contentOf(item)));
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(strings.copied)));
       }
-    } else if (action == 'translate') {
-      await _translateMessage(item);
-    } else if (action == 'delete') {
+    } else if (action == _MessageAction.showTranslation) {
+      await _showMessageTranslation(item);
+    } else if (action == _MessageAction.showOriginal) {
+      _showMessageOriginal(item);
+    } else if (action == _MessageAction.delete) {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
@@ -1388,28 +1420,24 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
     }
   }
 
-  Future<void> _translateMessage(T item) async {
+  void _showMessageOriginal(T item) {
+    final messageId = widget.idOf(item);
+    setState(() => _translationSourceOverrides.add(messageId));
+  }
+
+  Future<void> _showMessageTranslation(T item) async {
     final translate = widget.translate;
     final messageId = widget.idOf(item);
     final sourceText = widget.contentOf(item);
-    if (_visibleMessageText(messageId, sourceText) != sourceText) {
-      setState(() => _translationSourceOverrides.add(messageId));
-      return;
-    }
     final manual = _translations[messageId];
     final automatic = _automaticTranslations[messageId];
     final hasManual = _usableMessageTranslation(manual, sourceText);
     final hasAutomatic = _usableMessageTranslation(automatic, sourceText);
-    if (_translationSourceOverrides.remove(messageId)) {
+    if (hasManual || hasAutomatic) {
       setState(() {
+        _translationSourceOverrides.remove(messageId);
         if (hasManual) _showingTranslations.add(messageId);
       });
-      if (hasManual || hasAutomatic) return;
-    } else if (hasManual) {
-      setState(() => _showingTranslations.add(messageId));
-      return;
-    } else if (hasAutomatic) {
-      setState(() {});
       return;
     }
     if (translate == null || !_translating.add(messageId)) return;

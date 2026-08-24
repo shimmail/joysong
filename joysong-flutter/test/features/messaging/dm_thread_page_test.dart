@@ -173,6 +173,168 @@ void main() {
     },
   );
 
+  testWidgets(
+    'failed incoming message does not retry when Load earlier prepends a page',
+    (tester) async {
+      await _useTallSurface(tester);
+      final repository = _ThreadRepository(
+        dmLoader: (before) async => before == null
+            ? const [_failedPagedMessage]
+            : const [_olderPagedMessage],
+      );
+      final controller = DmThreadController(
+        repository: repository,
+        conversationId: 'conversation-direct-1',
+        currentUserId: 'user-1',
+        pageSize: 1,
+      );
+      final translations = _AutoRepository(
+        translations: const {},
+        failedSources: const {'分页前失败消息'},
+      );
+      final autoController = _activeAutoController(translations);
+      addTearDown(controller.dispose);
+      addTearDown(autoController.dispose);
+
+      await tester.pumpWidget(
+        _autoHost(
+          controller: autoController,
+          child: DmThreadPage(
+            controller: controller,
+            currentUserId: 'user-1',
+            myPeer: _me,
+            otherPeer: _consultant,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        translations.sources.where((source) => source == '分页前失败消息'),
+        hasLength(1),
+      );
+      await tester.tap(find.text('Load earlier messages'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Earlier Latin message'), findsOneWidget);
+      expect(find.text('分页前失败消息'), findsOneWidget);
+      expect(
+        translations.sources.where((source) => source == '分页前失败消息'),
+        hasLength(1),
+      );
+    },
+  );
+
+  testWidgets(
+    'Translate menu intent survives automatic completion while the sheet is held',
+    (tester) async {
+      final repository = _ThreadRepository(dmMessages: const [_heldMessage]);
+      final controller = DmThreadController(
+        repository: repository,
+        conversationId: 'conversation-direct-1',
+        currentUserId: 'user-1',
+      );
+      final translations = _AutoRepository(
+        translations: const {'菜单等待自动完成': 'Automatic result while held'},
+        holdResponses: true,
+      );
+      final autoController = _activeAutoController(translations);
+      final manualCalls = <String>[];
+      addTearDown(controller.dispose);
+      addTearDown(autoController.dispose);
+
+      await tester.pumpWidget(
+        _autoHost(
+          controller: autoController,
+          child: DmThreadPage(
+            controller: controller,
+            currentUserId: 'user-1',
+            myPeer: _me,
+            otherPeer: _consultant,
+            onTranslate: (text) async {
+              manualCalls.add(text);
+              return 'manual:$text';
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.longPress(find.text('菜单等待自动完成'));
+      await tester.pumpAndSettle();
+      expect(find.text('Translate'), findsOneWidget);
+
+      translations.completeSource('菜单等待自动完成');
+      await tester.pump();
+      await tester.pump();
+      await tester.tap(find.text('Translate'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Automatic result while held'), findsOneWidget);
+      expect(find.text('菜单等待自动完成'), findsNothing);
+      expect(manualCalls, isEmpty);
+      expect(translations.sources, const ['菜单等待自动完成']);
+    },
+  );
+
+  testWidgets(
+    'Show original menu intent survives scope deactivation and reactivation',
+    (tester) async {
+      final repository = _ThreadRepository(dmMessages: const [_heldMessage]);
+      final controller = DmThreadController(
+        repository: repository,
+        conversationId: 'conversation-direct-1',
+        currentUserId: 'user-1',
+      );
+      final translations = _AutoRepository(
+        translations: const {'菜单等待自动完成': 'Automatic result while held'},
+      );
+      final autoController = _activeAutoController(translations);
+      final enabled = ValueNotifier<bool>(true);
+      final manualCalls = <String>[];
+      addTearDown(controller.dispose);
+      addTearDown(autoController.dispose);
+      addTearDown(enabled.dispose);
+
+      await tester.pumpWidget(
+        _toggleAutoHost(
+          controller: autoController,
+          enabled: enabled,
+          child: DmThreadPage(
+            controller: controller,
+            currentUserId: 'user-1',
+            myPeer: _me,
+            otherPeer: _consultant,
+            onTranslate: (text) async {
+              manualCalls.add(text);
+              return 'manual:$text';
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Automatic result while held'), findsOneWidget);
+
+      await tester.longPress(find.text('Automatic result while held'));
+      await tester.pumpAndSettle();
+      expect(find.text('Show original'), findsOneWidget);
+
+      enabled.value = false;
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('菜单等待自动完成'), findsOneWidget);
+      await tester.tap(find.text('Show original'));
+      await tester.pumpAndSettle();
+
+      enabled.value = true;
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('菜单等待自动完成'), findsOneWidget);
+      expect(find.text('Automatic result while held'), findsNothing);
+      expect(manualCalls, isEmpty);
+    },
+  );
+
   testWidgets('read-only order-service DmThreadPage also auto translates',
       (tester) async {
     final repository = _ThreadRepository(
@@ -451,18 +613,23 @@ final class _ThreadRepository extends Fake implements MessagingRepository {
   _ThreadRepository({
     this.dmMessages = const [_message],
     this.customerMessages = const [],
+    this.dmLoader,
   });
 
   final List<DmMessage> dmMessages;
   final List<CustomerServiceMessage> customerMessages;
+  final Future<List<DmMessage>> Function(String? before)? dmLoader;
 
   @override
   Future<List<DmMessage>> getDmMessages(
     String conversationId, {
     int limit = 30,
     String? before,
-  }) async =>
-      dmMessages;
+  }) async {
+    final loader = dmLoader;
+    if (loader != null) return loader(before);
+    return dmMessages;
+  }
 
   @override
   Future<void> markDmConversationRead(String conversationId) async {}
@@ -572,6 +739,25 @@ Widget _autoHost({
       ),
     );
 
+Widget _toggleAutoHost({
+  required AutoTranslationController controller,
+  required ValueNotifier<bool> enabled,
+  required Widget child,
+}) =>
+    MaterialApp(
+      locale: const Locale('en'),
+      home: ValueListenableBuilder<bool>(
+        valueListenable: enabled,
+        child: child,
+        builder: (context, scopeEnabled, child) => AutoTranslationScope(
+          controller: controller,
+          enabled: scopeEnabled,
+          targetLanguage: 'en-US',
+          child: child!,
+        ),
+      ),
+    );
+
 Future<void> _useTallSurface(WidgetTester tester) async {
   tester.view.devicePixelRatio = 1;
   tester.view.physicalSize = const Size(1200, 1800);
@@ -668,6 +854,36 @@ const _lateMessage = DmMessage(
   conversationId: 'conversation-direct-1',
   senderId: 'consultant-1',
   content: '自动稍后完成',
+  messageType: 'TEXT',
+  isRead: true,
+  createdAt: '2026-08-21T10:05:00',
+);
+
+const _failedPagedMessage = DmMessage(
+  id: 'failed-paged-message',
+  conversationId: 'conversation-direct-1',
+  senderId: 'consultant-1',
+  content: '分页前失败消息',
+  messageType: 'TEXT',
+  isRead: true,
+  createdAt: '2026-08-21T10:05:00',
+);
+
+const _olderPagedMessage = DmMessage(
+  id: 'older-paged-message',
+  conversationId: 'conversation-direct-1',
+  senderId: 'user-1',
+  content: 'Earlier Latin message',
+  messageType: 'TEXT',
+  isRead: true,
+  createdAt: '2026-08-21T09:05:00',
+);
+
+const _heldMessage = DmMessage(
+  id: 'held-message',
+  conversationId: 'conversation-direct-1',
+  senderId: 'consultant-1',
+  content: '菜单等待自动完成',
   messageType: 'TEXT',
   isRead: true,
   createdAt: '2026-08-21T10:05:00',
