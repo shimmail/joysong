@@ -31,7 +31,7 @@ class AdminIdentityService(
     private val doctorInstitutionRelationshipService: DoctorInstitutionRelationshipOperations,
     private val walletRepository: WalletRepository,
     private val consultantInstitutionRelationships: ConsultantInstitutionRelationshipOperations,
-    private val businessNotifications: BusinessNotificationService? = null
+    private val businessNotifications: BusinessNotificationService
 ) {
     private val namedJdbcTemplate = NamedParameterJdbcTemplate(jdbcTemplate)
 
@@ -144,9 +144,9 @@ class AdminIdentityService(
                 provisionInstitutionForLegalRepresentative(target, reviewerId)
             }
             provisionWallet(target.userId, target.roleCode)
-            businessNotifications?.identityApplicationApproved(target.userId, applicationId)
+            businessNotifications.identityApplicationApproved(target.userId, applicationId)
         } else {
-            businessNotifications?.identityApplicationRejected(target.userId, applicationId, reviewNote.trim())
+            businessNotifications.identityApplicationRejected(target.userId, applicationId, reviewNote.trim())
         }
     }
 

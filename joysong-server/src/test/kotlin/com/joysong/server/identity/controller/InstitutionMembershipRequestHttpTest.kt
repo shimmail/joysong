@@ -23,6 +23,7 @@ import com.joysong.server.identity.service.InstitutionRelationshipReviewAuthorit
 import com.joysong.server.identity.service.ManagementAccessService
 import com.joysong.server.identity.service.ManagementActor
 import com.joysong.server.identity.service.MembershipRequestType
+import com.joysong.server.notification.service.BusinessNotificationService
 import com.joysong.server.user.repository.UserRepository
 import io.mockk.clearMocks
 import io.mockk.every
@@ -362,7 +363,8 @@ class InstitutionMembershipDoctorConflictHttpConfig {
     ) = DoctorInstitutionChangeRequestService(
         store,
         relationships,
-        mockk<InstitutionRelationshipReviewAuthorityOperations>(relaxed = true)
+        mockk<InstitutionRelationshipReviewAuthorityOperations>(relaxed = true),
+        mockk<BusinessNotificationService>(relaxed = true)
     )
     @Bean fun consultantRequests(): ConsultantInstitutionChangeRequestService = mockk()
     @Bean

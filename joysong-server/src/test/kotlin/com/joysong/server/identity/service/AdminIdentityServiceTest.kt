@@ -8,6 +8,7 @@ import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -28,8 +29,24 @@ import java.time.LocalDateTime
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.reflect.full.primaryConstructor
 
 class AdminIdentityServiceTest {
+
+    @Test
+    fun `business notification dependency is required and non nullable for identity workflows`() {
+        listOf(
+            AdminIdentityService::class,
+            DoctorInstitutionChangeRequestService::class,
+            ConsultantInstitutionChangeRequestService::class
+        ).forEach { serviceType ->
+            val notificationParameter = requireNotNull(serviceType.primaryConstructor).parameters.last()
+
+            assertEquals(BusinessNotificationService::class, notificationParameter.type.classifier)
+            assertFalse(notificationParameter.type.isMarkedNullable)
+            assertFalse(notificationParameter.isOptional)
+        }
+    }
 
     @Test
     fun `identity approval and rejection notify only the applicant with their target contracts`() {
@@ -98,6 +115,7 @@ class AdminIdentityServiceTest {
             ObjectMapper(),
             relationshipService,
             mockk(relaxed = true),
+            mockk(relaxed = true),
             mockk(relaxed = true)
         )
 
@@ -120,6 +138,7 @@ class AdminIdentityServiceTest {
             jdbcTemplate,
             ObjectMapper(),
             relationshipService,
+            mockk(relaxed = true),
             mockk(relaxed = true),
             mockk(relaxed = true)
         )
@@ -149,6 +168,7 @@ class AdminIdentityServiceTest {
             jdbcTemplate,
             ObjectMapper(),
             relationshipService,
+            mockk(relaxed = true),
             mockk(relaxed = true),
             mockk(relaxed = true)
         )
@@ -194,6 +214,7 @@ class AdminIdentityServiceTest {
             ObjectMapper(),
             relationshipService,
             mockk(relaxed = true),
+            mockk(relaxed = true),
             mockk(relaxed = true)
         )
 
@@ -227,6 +248,7 @@ class AdminIdentityServiceTest {
             ObjectMapper(),
             relationshipService,
             mockk(relaxed = true),
+            mockk(relaxed = true),
             mockk(relaxed = true)
         )
 
@@ -248,6 +270,7 @@ class AdminIdentityServiceTest {
             ObjectMapper(),
             relationshipService,
             mockk(relaxed = true),
+            mockk(relaxed = true),
             mockk(relaxed = true)
         )
 
@@ -267,6 +290,7 @@ class AdminIdentityServiceTest {
         val service = AdminIdentityService(
             jdbcTemplate,
             ObjectMapper(),
+            mockk(relaxed = true),
             mockk(relaxed = true),
             mockk(relaxed = true),
             mockk(relaxed = true)
@@ -347,6 +371,7 @@ class AdminIdentityServiceTest {
             ObjectMapper(),
             mockk(relaxed = true),
             mockk(relaxed = true),
+            mockk(relaxed = true),
             mockk(relaxed = true)
         )
 
@@ -387,7 +412,8 @@ class AdminIdentityServiceTest {
             ObjectMapper(),
             mockk(relaxed = true),
             mockk(relaxed = true),
-            consultantRelationships
+            consultantRelationships,
+            mockk(relaxed = true)
         )
 
         assertThrows(ConsultantInstitutionRequestConflictException::class.java) {
@@ -416,7 +442,8 @@ class AdminIdentityServiceTest {
             ObjectMapper(),
             mockk(relaxed = true),
             mockk(relaxed = true),
-            consultantRelationships
+            consultantRelationships,
+            mockk(relaxed = true)
         )
 
         assertThrows(ConsultantInstitutionRequestConflictException::class.java) {
@@ -673,7 +700,8 @@ class AdminIdentityServiceTest {
                 ObjectMapper(),
                 mockk<DoctorInstitutionRelationshipService>(relaxed = true),
                 walletRepository,
-                consultantRelationships
+                consultantRelationships,
+                mockk(relaxed = true)
             ),
             jdbcTemplate = jdbcTemplate,
             upserts = upserts,

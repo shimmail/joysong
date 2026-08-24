@@ -357,6 +357,20 @@ class ConsultantInstitutionChangeRequestServiceTest {
         }
     }
 
+    @Test
+    fun `failed consultant review transition emits no professional notification`() {
+        store.locked = request()
+        store.changeStatusResult = false
+
+        assertThrows(ConsultantInstitutionRequestConflictException::class.java) {
+            service.review(admin(), "request-1", MembershipRequestDecision.REJECTED, "not eligible")
+        }
+
+        io.mockk.verify(exactly = 0) {
+            businessNotifications.professionalApplicationRejected(any(), any(), any(), any())
+        }
+    }
+
     private fun actor(
         userId: String = "consultant-1",
         isAdmin: Boolean = false,

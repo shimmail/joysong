@@ -45,7 +45,7 @@ class ConsultantInstitutionChangeRequestService(
     private val store: ConsultantInstitutionChangeRequestStore,
     private val relationships: ConsultantInstitutionRelationshipOperations,
     private val reviewAuthority: InstitutionRelationshipReviewAuthorityOperations,
-    private val businessNotifications: BusinessNotificationService? = null
+    private val businessNotifications: BusinessNotificationService
 ) {
     @Transactional
     fun submit(
@@ -76,7 +76,7 @@ class ConsultantInstitutionChangeRequestService(
             if (error.isPendingRequestConflict()) pendingConflict()
             throw error
         }.also { request ->
-            businessNotifications?.professionalApplicationSubmitted(
+            businessNotifications.professionalApplicationSubmitted(
                 request.institutionId,
                 ProfessionalApplicantRole.CONSULTANT,
                 request.id
@@ -121,7 +121,7 @@ class ConsultantInstitutionChangeRequestService(
             status = ConsultantInstitutionRequestStatus.WITHDRAWN,
             updatedAt = LocalDateTime.now()
         ).also {
-            businessNotifications?.professionalApplicationWithdrawn(
+            businessNotifications.professionalApplicationWithdrawn(
                 request.institutionId,
                 ProfessionalApplicantRole.CONSULTANT,
                 request.id
@@ -178,12 +178,12 @@ class ConsultantInstitutionChangeRequestService(
             updatedAt = now
         ).also {
             when (decision) {
-                MembershipRequestDecision.APPROVED -> businessNotifications?.professionalApplicationApproved(
+                MembershipRequestDecision.APPROVED -> businessNotifications.professionalApplicationApproved(
                     request.consultantId,
                     ProfessionalApplicantRole.CONSULTANT,
                     request.id
                 )
-                MembershipRequestDecision.REJECTED -> businessNotifications?.professionalApplicationRejected(
+                MembershipRequestDecision.REJECTED -> businessNotifications.professionalApplicationRejected(
                     request.consultantId,
                     ProfessionalApplicantRole.CONSULTANT,
                     request.id,

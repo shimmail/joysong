@@ -85,7 +85,7 @@ class DoctorInstitutionChangeRequestService(
     private val store: DoctorInstitutionChangeRequestStore,
     private val relationshipService: DoctorInstitutionRelationshipOperations,
     private val reviewAuthority: InstitutionRelationshipReviewAuthorityOperations,
-    private val businessNotifications: BusinessNotificationService? = null
+    private val businessNotifications: BusinessNotificationService
 ) {
     @Transactional
     fun submit(
@@ -118,7 +118,7 @@ class DoctorInstitutionChangeRequestService(
             if (error.isPendingRequestConflict()) duplicatePending()
             throw error
         }.also { request ->
-            businessNotifications?.professionalApplicationSubmitted(
+            businessNotifications.professionalApplicationSubmitted(
                 request.institutionId,
                 ProfessionalApplicantRole.DOCTOR,
                 request.id
@@ -156,7 +156,7 @@ class DoctorInstitutionChangeRequestService(
             status = DoctorInstitutionRequestStatus.WITHDRAWN,
             updatedAt = LocalDateTime.now()
         ).also {
-            businessNotifications?.professionalApplicationWithdrawn(
+            businessNotifications.professionalApplicationWithdrawn(
                 request.institutionId,
                 ProfessionalApplicantRole.DOCTOR,
                 request.id
@@ -215,12 +215,12 @@ class DoctorInstitutionChangeRequestService(
             updatedAt = LocalDateTime.now()
         ).also {
             when (decision) {
-                MembershipRequestDecision.APPROVED -> businessNotifications?.professionalApplicationApproved(
+                MembershipRequestDecision.APPROVED -> businessNotifications.professionalApplicationApproved(
                     request.doctorId,
                     ProfessionalApplicantRole.DOCTOR,
                     request.id
                 )
-                MembershipRequestDecision.REJECTED -> businessNotifications?.professionalApplicationRejected(
+                MembershipRequestDecision.REJECTED -> businessNotifications.professionalApplicationRejected(
                     request.doctorId,
                     ProfessionalApplicantRole.DOCTOR,
                     request.id,

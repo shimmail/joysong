@@ -471,6 +471,26 @@ class DoctorInstitutionChangeRequestServiceTest {
     }
 
     @Test
+    fun `failed doctor review transition emits no professional notification`() {
+        every { store.find("request-1") } returns request()
+        every { store.lock("request-1") } returns request()
+        every { store.changeStatus("request-1", DoctorInstitutionRequestStatus.REJECTED, "legal-1", "暂不通过") } returns false
+
+        assertThrows<DoctorInstitutionRequestConflictException> {
+            service.review(
+                legalActor(setOf("institution-1")),
+                "request-1",
+                MembershipRequestDecision.REJECTED,
+                "暂不通过"
+            )
+        }
+
+        verify(exactly = 0) {
+            businessNotifications.professionalApplicationRejected(any(), any(), any(), any())
+        }
+    }
+
+    @Test
     fun `withdraw peeks then pair locks before relocking the request`() {
         val pending = request()
         every { store.find("request-1") } returns pending
