@@ -140,6 +140,80 @@ void main() {
       );
       expect(repository.calls, hasLength(2));
     });
+
+    test('a stateful validator is evaluated once for its repository candidate',
+        () async {
+      final repository = RecordingTranslationRepository();
+      final controller = _activeController(repository);
+      addTearDown(controller.dispose);
+      var evaluations = 0;
+      final request = AutoTranslationRequest(
+        contentType: 'article',
+        contentId: 'stateful-validator',
+        field: 'body',
+        sourceText: '中文stateful-validator',
+        validator: (_, __) => ++evaluations == 1,
+      );
+
+      expect(
+        await controller.translateOrSource(request),
+        'en-US:${request.sourceText}',
+      );
+      expect(evaluations, 1);
+      expect(repository.calls, hasLength(1));
+
+      final cachedCaller = AutoTranslationRequest(
+        contentType: request.contentType,
+        contentId: request.contentId,
+        field: request.field,
+        sourceText: request.sourceText,
+      );
+      expect(
+        await controller.translateOrSource(cachedCaller),
+        'en-US:${request.sourceText}',
+      );
+      expect(repository.calls, hasLength(1));
+    });
+
+    test('a validator-rejected candidate is evaluated once and never cached',
+        () async {
+      final repository = RecordingTranslationRepository();
+      final controller = _activeController(repository);
+      addTearDown(controller.dispose);
+      var evaluations = 0;
+      final request = AutoTranslationRequest(
+        contentType: 'article',
+        contentId: 'rejected-validator',
+        field: 'body',
+        sourceText: '中文rejected-validator',
+        validator: (_, __) {
+          evaluations += 1;
+          return false;
+        },
+      );
+
+      expect(await controller.translateOrSource(request), request.sourceText);
+      expect(await controller.translateOrSource(request), request.sourceText);
+      expect(evaluations, 2);
+      expect(repository.calls, hasLength(2));
+    });
+
+    test('a true synchronous repository throw returns source and retries',
+        () async {
+      final repository = SynchronousThrowTranslationRepository();
+      final controller = AutoTranslationController(repository: repository)
+        ..synchronize(
+          enabled: true,
+          authenticated: true,
+          targetLanguage: 'en-US',
+        );
+      addTearDown(controller.dispose);
+      final request = _request('sync-throw');
+
+      expect(await controller.translateOrSource(request), request.sourceText);
+      expect(await controller.translateOrSource(request), request.sourceText);
+      expect(repository.calls, 2);
+    });
   });
 
   group('identity, single-flight, and cache', () {
@@ -289,6 +363,119 @@ void main() {
       repository.completeNext('four');
       expect(
           await Future.wait(futures), ['zero', 'one', 'two', 'three', 'four']);
+    });
+
+    test('an asynchronous failure releases its slot and pumps FIFO work',
+        () async {
+      final repository = RecordingTranslationRepository()..holdResponses = true;
+      final controller = AutoTranslationController(
+        repository: repository,
+        maxConcurrent: 1,
+      )..synchronize(
+          enabled: true,
+          authenticated: true,
+          targetLanguage: 'en-US',
+        );
+      addTearDown(controller.dispose);
+      final requests = <AutoTranslationRequest>[
+        _request('async-failure-0'),
+        _request('async-failure-1'),
+        _request('async-failure-2'),
+      ];
+      final futures = requests.map(controller.translateOrSource).toList();
+      await pumpEventQueue();
+      expect(repository.calls.map((call) => call.text), ['中文async-failure-0']);
+
+      repository.failNext();
+      await pumpEventQueue();
+      expect(repository.calls.map((call) => call.text), [
+        '中文async-failure-0',
+        '中文async-failure-1',
+      ]);
+      repository.completeNext('second');
+      await pumpEventQueue();
+      expect(repository.calls.map((call) => call.text), [
+        '中文async-failure-0',
+        '中文async-failure-1',
+        '中文async-failure-2',
+      ]);
+      repository.completeNext('third');
+
+      expect(
+        await Future.wait(futures),
+        [requests.first.sourceText, 'second', 'third'],
+      );
+      expect(repository.maximumActiveCalls, 1);
+    });
+
+    test('validator rollover cannot publish or cache the old candidate',
+        () async {
+      final repository = RecordingTranslationRepository()..holdResponses = true;
+      final controller = AutoTranslationController(
+        repository: repository,
+        maxConcurrent: 2,
+      )..synchronize(
+          enabled: true,
+          authenticated: true,
+          targetLanguage: 'en-US',
+        );
+      addTearDown(controller.dispose);
+      var evaluations = 0;
+      final oldRequest = AutoTranslationRequest(
+        contentType: 'article',
+        contentId: 'validator-rollover',
+        field: 'title',
+        sourceText: '中文validator-rollover',
+        validator: (_, __) {
+          evaluations += 1;
+          controller
+            ..synchronize(
+              enabled: true,
+              authenticated: true,
+              targetLanguage: 'fr-FR',
+            )
+            ..synchronize(
+              enabled: true,
+              authenticated: true,
+              targetLanguage: 'en-US',
+            );
+          return true;
+        },
+      );
+      final currentRequest = AutoTranslationRequest(
+        contentType: oldRequest.contentType,
+        contentId: oldRequest.contentId,
+        field: oldRequest.field,
+        sourceText: oldRequest.sourceText,
+      );
+
+      final oldFuture = controller.translateOrSource(oldRequest);
+      await pumpEventQueue();
+      repository.completeNext('old candidate');
+      expect(await oldFuture, oldRequest.sourceText);
+      await pumpEventQueue();
+      expect(evaluations, 1);
+
+      final currentFuture = controller.translateOrSource(currentRequest);
+      await pumpEventQueue();
+      expect(repository.calls, hasLength(2));
+      repository.completeNext('current candidate');
+      expect(await currentFuture, 'current candidate');
+      expect(
+        await controller.translateOrSource(currentRequest),
+        'current candidate',
+      );
+      expect(repository.calls, hasLength(2));
+    });
+
+    test('same-key rollover preserves new ownership when old completes first',
+        () async {
+      await _expectSameKeyRollover(newCompletesFirst: false);
+    });
+
+    test('same-key rollover preserves new ownership when new completes first',
+        () async {
+      await _expectSameKeyRollover(newCompletesFirst: true);
     });
 
     test('disablement invalidates running and queued old work', () async {
@@ -444,5 +631,52 @@ Future<void> _expectQueuedInvalidation(
   repository.completeNext('ignored-1');
   repository.completeNext('ignored-2');
   await pumpEventQueue();
+  controller.dispose();
+}
+
+Future<void> _expectSameKeyRollover({required bool newCompletesFirst}) async {
+  final repository = RecordingTranslationRepository()..holdResponses = true;
+  final controller = AutoTranslationController(
+    repository: repository,
+    maxConcurrent: 2,
+  )..synchronize(
+      enabled: true,
+      authenticated: true,
+      targetLanguage: 'en-US',
+    );
+  final request = _request('same-key-rollover');
+
+  final oldFuture = controller.translateOrSource(request);
+  await pumpEventQueue();
+  controller
+    ..synchronize(
+      enabled: true,
+      authenticated: true,
+      targetLanguage: 'fr-FR',
+    )
+    ..synchronize(
+      enabled: true,
+      authenticated: true,
+      targetLanguage: 'en-US',
+    );
+  final newFuture = controller.translateOrSource(request);
+  await pumpEventQueue();
+  expect(repository.calls, hasLength(2));
+
+  if (newCompletesFirst) {
+    repository.completePending(1, 'new candidate');
+    expect(await newFuture, 'new candidate');
+    repository.completePending(0, 'old candidate');
+  } else {
+    repository.completePending(0, 'old candidate');
+    await pumpEventQueue();
+    repository.completePending(0, 'new candidate');
+    expect(await newFuture, 'new candidate');
+  }
+  expect(await oldFuture, request.sourceText);
+  await pumpEventQueue();
+  expect(await controller.translateOrSource(request), 'new candidate');
+  expect(repository.calls, hasLength(2));
+  expect(repository.maximumActiveCalls, lessThanOrEqualTo(2));
   controller.dispose();
 }

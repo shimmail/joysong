@@ -79,28 +79,41 @@ final class AutoTranslationController {
       field: request.field,
       sourceText: request.sourceText,
     );
+    final generation = _generation;
+    final targetLanguage = _targetLanguage;
     final cached = _cache.remove(key);
-    if (cached != null && _isValid(request, cached)) {
-      _cache[key] = cached;
-      return Future<String>.value(cached);
+    if (cached != null) {
+      final accepted = _isValid(request, cached);
+      if (!_isEligible(request, generation, targetLanguage)) {
+        return Future<String>.value(request.sourceText);
+      }
+      if (accepted) {
+        _cache[key] = cached;
+        return Future<String>.value(cached);
+      }
     }
 
     final existing = _inFlight[key];
-    if (existing != null && existing.generation == _generation) {
-      existing.validators.add(request.validator);
-      return _resultFor(request, existing.result.future);
+    final caller = _TranslationCaller(
+      request: request,
+      generation: generation,
+      targetLanguage: targetLanguage,
+    );
+    if (existing != null && existing.generation == generation) {
+      existing.callers.add(caller);
+      return caller.result.future;
     }
 
     final job = _TranslationJob(
       key: key,
       request: request,
-      targetLanguage: _targetLanguage,
-      generation: _generation,
-    )..validators.add(request.validator);
+      targetLanguage: targetLanguage,
+      generation: generation,
+    )..callers.add(caller);
     _inFlight[key] = job;
     _queue.add(job);
     _pump();
-    return _resultFor(request, job.result.future);
+    return caller.result.future;
   }
 
   void dispose() {
@@ -109,14 +122,6 @@ final class AutoTranslationController {
     }
     _disposed = true;
     _invalidate();
-  }
-
-  Future<String> _resultFor(
-    AutoTranslationRequest request,
-    Future<String> result,
-  ) async {
-    final translated = await result;
-    return _isValid(request, translated) ? translated : request.sourceText;
   }
 
   bool _isValid(AutoTranslationRequest request, String translated) {
@@ -166,33 +171,37 @@ final class AutoTranslationController {
         contentType: job.request.contentType,
       );
       final translated = response.translatedText;
-      final current = _isEligible(
-        job.request,
-        job.generation,
-        job.targetLanguage,
-      );
-      final validForAll = job.validators.every((validator) {
-        if (validator == null) {
-          return true;
-        }
-        try {
-          return validator(job.request.sourceText, translated);
-        } on Object {
-          return false;
-        }
-      });
-      if (!current) {
+      if (!_ownsCurrentJob(job)) {
         _finishWithSource(job);
         return;
       }
-      if (validForAll) {
+
+      for (final caller in job.callers) {
+        caller.accepted = _isValid(caller.request, translated);
+        if (!_ownsCurrentCaller(job, caller)) {
+          return;
+        }
+      }
+
+      if (job.callers.every((caller) => caller.accepted!)) {
+        if (!_ownsCurrentJob(job)) {
+          return;
+        }
         _cache[job.key] = translated;
         while (_cache.length > _maxCacheEntries) {
           _cache.remove(_cache.keys.first);
         }
       }
-      if (!job.result.isCompleted) {
-        job.result.complete(translated);
+
+      for (final caller in job.callers) {
+        if (!_ownsCurrentCaller(job, caller)) {
+          return;
+        }
+        if (!caller.result.isCompleted) {
+          caller.result.complete(
+            caller.accepted! ? translated : caller.request.sourceText,
+          );
+        }
       }
     } on Object {
       _finishWithSource(job);
@@ -219,12 +228,25 @@ final class AutoTranslationController {
   }
 
   void _finishWithSource(_TranslationJob job) {
-    if (!job.result.isCompleted) {
-      job.result.complete(job.request.sourceText);
+    for (final caller in job.callers) {
+      if (!caller.result.isCompleted) {
+        caller.result.complete(caller.request.sourceText);
+      }
     }
     if (identical(_inFlight[job.key], job)) {
       _inFlight.remove(job.key);
     }
+  }
+
+  bool _ownsCurrentJob(_TranslationJob job) {
+    return identical(_inFlight[job.key], job) &&
+        _isEligible(job.request, job.generation, job.targetLanguage);
+  }
+
+  bool _ownsCurrentCaller(_TranslationJob job, _TranslationCaller caller) {
+    return caller.generation == job.generation &&
+        caller.targetLanguage == job.targetLanguage &&
+        _ownsCurrentJob(job);
   }
 }
 
@@ -240,8 +262,21 @@ final class _TranslationJob {
   final AutoTranslationRequest request;
   final String targetLanguage;
   final int generation;
+  final List<_TranslationCaller> callers = <_TranslationCaller>[];
+}
+
+final class _TranslationCaller {
+  _TranslationCaller({
+    required this.request,
+    required this.generation,
+    required this.targetLanguage,
+  });
+
+  final AutoTranslationRequest request;
+  final int generation;
+  final String targetLanguage;
   final Completer<String> result = Completer<String>();
-  final List<TranslationValidator?> validators = <TranslationValidator?>[];
+  bool? accepted;
 }
 
 final class _TranslationKey {

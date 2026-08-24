@@ -17,8 +17,7 @@ final class TranslationCall {
 
 final class RecordingTranslationRepository implements TranslationRepository {
   final List<TranslationCall> calls = <TranslationCall>[];
-  final Queue<Completer<ContentTranslation>> _pending =
-      Queue<Completer<ContentTranslation>>();
+  final List<_PendingTranslation> _pending = <_PendingTranslation>[];
   final Queue<String> translations = Queue<String>();
 
   bool holdResponses = false;
@@ -34,11 +33,12 @@ final class RecordingTranslationRepository implements TranslationRepository {
     required String targetLanguage,
     required String contentType,
   }) async {
-    calls.add(TranslationCall(
+    final call = TranslationCall(
       text: text,
       targetLanguage: targetLanguage,
       contentType: contentType,
-    ));
+    );
+    calls.add(call);
     activeCalls += 1;
     if (activeCalls > maximumActiveCalls) {
       maximumActiveCalls = activeCalls;
@@ -51,7 +51,7 @@ final class RecordingTranslationRepository implements TranslationRepository {
       }
       if (holdResponses) {
         final completer = Completer<ContentTranslation>();
-        _pending.add(completer);
+        _pending.add(_PendingTranslation(call, completer));
         return await completer.future;
       }
       return _translation(
@@ -66,14 +66,18 @@ final class RecordingTranslationRepository implements TranslationRepository {
   }
 
   void completeNext(String translatedText) {
-    final call = calls[calls.length - _pending.length];
-    _pending.removeFirst().complete(
-          _translation(translatedText, call.targetLanguage),
-        );
+    completePending(0, translatedText);
+  }
+
+  void completePending(int index, String translatedText) {
+    final pending = _pending.removeAt(index);
+    pending.completer.complete(
+      _translation(translatedText, pending.call.targetLanguage),
+    );
   }
 
   void failNext([Object error = const FormatException('invalid response')]) {
-    _pending.removeFirst().completeError(error);
+    _pending.removeAt(0).completer.completeError(error);
   }
 
   ContentTranslation _translation(String text, String targetLanguage) {
@@ -85,4 +89,26 @@ final class RecordingTranslationRepository implements TranslationRepository {
       cached: false,
     );
   }
+}
+
+final class SynchronousThrowTranslationRepository
+    implements TranslationRepository {
+  int calls = 0;
+
+  @override
+  Future<ContentTranslation> translateText({
+    required String text,
+    required String targetLanguage,
+    required String contentType,
+  }) {
+    calls += 1;
+    throw StateError('synchronous translation failure');
+  }
+}
+
+final class _PendingTranslation {
+  const _PendingTranslation(this.call, this.completer);
+
+  final TranslationCall call;
+  final Completer<ContentTranslation> completer;
 }
