@@ -45,6 +45,7 @@ import com.joysong.server.agent.service.ParsedAgentRoute
 import com.joysong.server.config.AiAgentProperties
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Qualifier
+import org.springframework.context.i18n.LocaleContextHolder
 import org.springframework.http.*
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -53,7 +54,14 @@ import org.springframework.web.client.ResourceAccessException
 import org.springframework.web.client.RestClientResponseException
 import java.net.URI
 import java.time.LocalDateTime
+import java.util.Locale
 import java.util.UUID
+
+private val hanScriptRegex = Regex("\\p{IsHan}")
+private val latinWordRegex = Regex("[A-Za-z]+(?:['’-][A-Za-z]+)?")
+private val englishLeadRegex = Regex(
+    "(?i)^\\s*(?:what|why|how|which|where|when|who|is|are|can|could|should|would|do|does|please|compare|tell|explain)\\b"
+)
 
 private data class PromptBuildResult(
     val prompt: String,
@@ -393,17 +401,19 @@ class ChatService(
                 ?: throw AgentChatException("SESSION_NOT_FOUND", begin.traceId)
             var capturedMessages: List<Map<String, String>> = emptyList()
             var capturedProfile: GenerationProfile? = null
-            val generated = generateTurn(
-                session,
-                content,
-                context.messages,
-                context.summary,
-                true,
-                ProviderCallContext(begin.traceId, begin.turnId)
-            ) { messages, profile, _ ->
-                capturedMessages = messages
-                capturedProfile = profile
-                LlmCallResult("", false)
+            val generated = withCurrentTurnLanguage(content) {
+                generateTurn(
+                    session,
+                    content,
+                    context.messages,
+                    context.summary,
+                    true,
+                    ProviderCallContext(begin.traceId, begin.turnId)
+                ) { messages, profile, _ ->
+                    capturedMessages = messages
+                    capturedProfile = profile
+                    LlmCallResult("", false)
+                }
             }
             val focusUpdate = conversationFocusUpdate(session, content, generated)
             val userMessage = messageRepository.findByTurnIdAndRole(begin.turnId, "USER")
@@ -444,23 +454,24 @@ class ChatService(
         }
     }
 
-    fun completeStreamingMessage(prepared: PreparedChatTurn.Started, providerContent: String): ChatTurnResult {
-        val generated = requireNotNull(prepared.generated).copy(
-            content = enforcePlanningBoundary(
-                prepared.generated.intentDecision.intent,
-                naturalizeUserFacingLanguage(providerContent)
-            ),
-            llmResult = LlmCallResult(providerContent, false)
-        )
-        return completeGeneratedTurn(
-            turnId = prepared.turnId,
-            traceId = prepared.traceId,
-            sessionId = prepared.sessionId,
-            startedAt = prepared.startedAt,
-            generated = generated,
-            conversationFocusUpdate = prepared.conversationFocusUpdate
-        )
-    }
+    fun completeStreamingMessage(prepared: PreparedChatTurn.Started, providerContent: String): ChatTurnResult =
+        withCurrentTurnLanguage(prepared.userMessage.content) {
+            val generated = requireNotNull(prepared.generated).copy(
+                content = enforcePlanningBoundary(
+                    prepared.generated.intentDecision.intent,
+                    naturalizeUserFacingLanguage(providerContent)
+                ),
+                llmResult = LlmCallResult(providerContent, false)
+            )
+            completeGeneratedTurn(
+                turnId = prepared.turnId,
+                traceId = prepared.traceId,
+                sessionId = prepared.sessionId,
+                startedAt = prepared.startedAt,
+                generated = generated,
+                conversationFocusUpdate = prepared.conversationFocusUpdate
+            )
+        }
 
     fun failStreamingMessage(prepared: PreparedChatTurn.Started, error: Throwable): String {
         val code = if (isProviderTimeout(error)) "AI_PROVIDER_TIMEOUT" else "AI_PROVIDER_UNAVAILABLE"
@@ -556,15 +567,17 @@ class ChatService(
         val context = agentContextBuilder.load(userId, sessionId, 20, 4_000)
         val session = sessionRepository.findByIdAndUserIdAndDeletedAtIsNull(sessionId, userId)
             ?: throw AgentChatException("SESSION_NOT_FOUND", begin.traceId)
-        val generated = generateTurn(
-            session = session,
-            content = content,
-            historyMessages = context.messages,
-            summary = context.summary,
-            appendCurrentUser = true,
-            providerCallContext = ProviderCallContext(begin.traceId, begin.turnId),
-            llmCaller = llmCaller
-        )
+        val generated = withCurrentTurnLanguage(content) {
+            generateTurn(
+                session = session,
+                content = content,
+                historyMessages = context.messages,
+                summary = context.summary,
+                appendCurrentUser = true,
+                providerCallContext = ProviderCallContext(begin.traceId, begin.turnId),
+                llmCaller = llmCaller
+            )
+        }
         return completeGeneratedTurn(
             turnId = begin.turnId,
             traceId = begin.traceId,
@@ -855,6 +868,7 @@ class ChatService(
         if (promptBuild.groundingPrompt.isNotBlank()) {
             llmMessages.add(mapOf("role" to "system", "content" to promptBuild.groundingPrompt))
         }
+        llmMessages.add(mapOf("role" to "system", "content" to currentTurnLanguagePolicy(content)))
 
         val llmResult = llmCaller(llmMessages, generationProfile, providerCallContext)
         val aiContent = enforcePlanningBoundary(
@@ -984,12 +998,15 @@ class ChatService(
 
     private fun comparisonClarification(missingFields: Set<ComparisonMissingField>): String = buildList {
         if (ComparisonMissingField.OPERANDS in missingFields) {
-            add("请选择至少两个对比对象 / Select at least two items to compare")
+            add(AgentText.value("请选择至少两个对比对象", "Select at least two items to compare"))
         }
         if (ComparisonMissingField.TARGET_TYPE in missingFields) {
-            add("请明确要比较机构、医生、项目还是机构项目 / Specify whether to compare clinics, doctors, treatments, or clinic treatments")
+            add(AgentText.value(
+                "请明确要比较机构、医生、项目还是机构项目",
+                "Specify whether to compare clinics, doctors, treatments, or clinic treatments"
+            ))
         }
-    }.joinToString("；")
+    }.joinToString(AgentText.value("；", "; "))
 
     /**
      * 删除消息（验证会话归属后删除）
@@ -1674,6 +1691,38 @@ class ChatService(
         .replace("平台数据库", "平台资料")
         .replace("数据库", "平台资料")
         .replace("字段", "资料")
+
+    private inline fun <T> withCurrentTurnLanguage(content: String, block: () -> T): T {
+        val previousLocale = LocaleContextHolder.getLocale()
+        LocaleContextHolder.setLocale(currentTurnLocale(content, previousLocale))
+        return try {
+            block()
+        } finally {
+            LocaleContextHolder.setLocale(previousLocale)
+        }
+    }
+
+    private fun currentTurnLocale(content: String, fallback: Locale): Locale {
+        val hasHan = hanScriptRegex.containsMatchIn(content)
+        val latinWordCount = latinWordRegex.findAll(content).count()
+        return when {
+            !hasHan && latinWordCount > 0 -> Locale.ENGLISH
+            hasHan && latinWordCount == 0 -> Locale.SIMPLIFIED_CHINESE
+            hasHan && englishLeadRegex.containsMatchIn(content) -> Locale.ENGLISH
+            hasHan && latinWordCount >= 3 -> Locale.ENGLISH
+            hasHan -> Locale.SIMPLIFIED_CHINESE
+            fallback.language.equals("zh", ignoreCase = true) -> Locale.SIMPLIFIED_CHINESE
+            else -> Locale.ENGLISH
+        }
+    }
+
+    private fun currentTurnLanguagePolicy(content: String): String =
+        if (currentTurnLocale(content, LocaleContextHolder.getLocale()).language == "zh") {
+            "本轮语言要求：当前用户消息使用中文。只用中文回答，不要附加英文翻译，即使历史消息使用英文。"
+        } else {
+            "Turn language requirement: The current user message is in English. Answer in English only. " +
+                "Do not add a Chinese translation, even if earlier messages are in Chinese."
+        }
 
     private fun planningGroundingPrompt(evidence: AgentPromptEvidence): String {
         val items = PlanningCatalogProjection.projectItems(evidence.report?.items.orEmpty()).take(4).map { item ->

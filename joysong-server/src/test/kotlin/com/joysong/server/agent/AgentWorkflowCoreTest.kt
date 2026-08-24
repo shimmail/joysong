@@ -122,6 +122,74 @@ class AgentWorkflowCoreTest {
     }
 
     @Test
+    fun `current Chinese message overrides English conversation history for generation language`() {
+        val content = "Ultherapy多少钱"
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(RestTemplate(), RestTemplate(), catalog)
+        prepareChatGeneration(fixture, content)
+        every { fixture.contextBuilder.load("user-1", "session-1", 20, 4_000) } returns AgentContext(
+            AgentSessionSummary(),
+            listOf(
+                message(1, "USER", "Please introduce yourself."),
+                message(2, "ASSISTANT", "I am your medical aesthetics assistant.")
+            )
+        )
+        every { messages.findByTurnIdAndRole("turn-1", "USER") } returns null
+        every { catalog.hasInstitutionProjectMatch(content) } returns false
+        every { catalog.contextualSearchQuery(content, listOf("Please introduce yourself.")) } returns content
+        every { catalog.promptEvidence(any(), any(), any(), any(), any(), any()) } returns AgentPromptEvidence()
+
+        val prepared = fixture.chat.prepareStreamingMessage(
+            "session-1",
+            "user-1",
+            SendMessageRequest(content = content)
+        ) as PreparedChatTurn.Started
+
+        assertEquals(
+            mapOf(
+                "role" to "system",
+                "content" to "本轮语言要求：当前用户消息使用中文。只用中文回答，不要附加英文翻译，即使历史消息使用英文。"
+            ),
+            prepared.messages.last()
+        )
+        assertTrue(prepared.messages.indexOf(mapOf("role" to "user", "content" to content)) < prepared.messages.lastIndex)
+    }
+
+    @Test
+    fun `current English message overrides Chinese conversation history for generation language`() {
+        val content = "What is 超声炮?"
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(RestTemplate(), RestTemplate(), catalog)
+        prepareChatGeneration(fixture, content)
+        every { fixture.contextBuilder.load("user-1", "session-1", 20, 4_000) } returns AgentContext(
+            AgentSessionSummary(),
+            listOf(
+                message(1, "USER", "请介绍一下你自己"),
+                message(2, "ASSISTANT", "我是你的医美咨询助手。")
+            )
+        )
+        every { messages.findByTurnIdAndRole("turn-1", "USER") } returns null
+        every { catalog.hasInstitutionProjectMatch(content) } returns false
+        every { catalog.contextualSearchQuery(content, listOf("请介绍一下你自己")) } returns content
+        every { catalog.promptEvidence(any(), any(), any(), any(), any(), any()) } returns AgentPromptEvidence()
+
+        val prepared = fixture.chat.prepareStreamingMessage(
+            "session-1",
+            "user-1",
+            SendMessageRequest(content = content)
+        ) as PreparedChatTurn.Started
+
+        assertEquals(
+            mapOf(
+                "role" to "system",
+                "content" to "Turn language requirement: The current user message is in English. Answer in English only. Do not add a Chinese translation, even if earlier messages are in Chinese."
+            ),
+            prepared.messages.last()
+        )
+        assertTrue(prepared.messages.indexOf(mapOf("role" to "user", "content" to content)) < prepared.messages.lastIndex)
+    }
+
+    @Test
     fun `stream events serialize with stable public field names`() {
         val mapper = jacksonObjectMapper()
         val failed = mapper.readTree(
@@ -238,7 +306,7 @@ class AgentWorkflowCoreTest {
         every { catalog.selectConsultableInstitutions("user-1", chineseContent, null) } returns selection
 
         val previousLocale = LocaleContextHolder.getLocale()
-        LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE)
+        LocaleContextHolder.setLocale(Locale.ENGLISH)
         try {
             fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = chineseContent))
 
@@ -273,7 +341,7 @@ class AgentWorkflowCoreTest {
         every { messages.findByTurnIdAndRole("turn-1", "USER") } returns null
         every { streamingCatalog.selectConsultableInstitutions("user-1", englishContent, null) } returns selection
 
-        LocaleContextHolder.setLocale(Locale.ENGLISH)
+        LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE)
         try {
             val prepared = streamingFixture.chat.prepareStreamingMessage(
                 "session-1",
@@ -2600,7 +2668,7 @@ class AgentWorkflowCoreTest {
 
         fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
 
-        assertEquals("请选择至少两个对比对象 / Select at least two items to compare", completed.captured.content)
+        assertEquals("Select at least two items to compare", completed.captured.content)
         assertEquals(setOf(ComparisonMissingField.OPERANDS), completed.captured.comparisonRequest?.missingFields)
         assertEquals("", completed.captured.modelName)
         assertEquals(null, completed.captured.catalogReport)
