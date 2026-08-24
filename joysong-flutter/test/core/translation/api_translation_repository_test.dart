@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/core/network/api_client.dart';
 import 'package:joysong_flutter/core/translation/translation.dart';
@@ -115,6 +118,63 @@ void main() {
       );
     });
   }
+
+  test('unwraps malformed translation data from the real ApiClient', () async {
+    final server = await _serveEnvelope({
+      'code': 200,
+      'message': 'ok',
+      'data': {
+        'detectedLanguage': 'zh',
+        'targetLanguage': 'en-US',
+        'provider': 'qwen',
+        'cached': false,
+      },
+    });
+    addTearDown(() => server.close(force: true));
+    final client = ApiClient(apiRoot: _apiRoot(server));
+    addTearDown(client.close);
+
+    await expectLater(
+      ApiTranslationRepository(client).translateText(
+        text: '恢复得很好',
+        targetLanguage: 'en-US',
+        contentType: 'diary',
+      ),
+      throwsA(
+        isA<FormatException>().having(
+          (error) => error.message,
+          'message',
+          '翻译响应缺少有效的 translatedText',
+        ),
+      ),
+    );
+  });
+
+  test('throws FormatException when the real API envelope omits data',
+      () async {
+    final server = await _serveEnvelope({
+      'code': 200,
+      'message': 'ok',
+    });
+    addTearDown(() => server.close(force: true));
+    final client = ApiClient(apiRoot: _apiRoot(server));
+    addTearDown(client.close);
+
+    await expectLater(
+      ApiTranslationRepository(client).translateText(
+        text: '恢复得很好',
+        targetLanguage: 'en-US',
+        contentType: 'diary',
+      ),
+      throwsA(
+        isA<FormatException>().having(
+          (error) => error.message,
+          'message',
+          '翻译响应 data 为空',
+        ),
+      ),
+    );
+  });
 }
 
 final class _RecordingApiClient extends ApiClient {
@@ -136,3 +196,23 @@ final class _RecordingApiClient extends ApiClient {
     return decodeData(response);
   }
 }
+
+Future<HttpServer> _serveEnvelope(Map<String, Object?> envelope) async {
+  final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+  server.listen((request) async {
+    try {
+      await request.drain<void>();
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode(envelope));
+      await request.response.close();
+    } on Object catch (error, stackTrace) {
+      request.response.statusCode = 500;
+      request.response.write('$error\n$stackTrace');
+      await request.response.close();
+    }
+  });
+  return server;
+}
+
+Uri _apiRoot(HttpServer server) =>
+    Uri.parse('http://${server.address.host}:${server.port}/api/');
