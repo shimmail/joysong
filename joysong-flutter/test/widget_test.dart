@@ -3,11 +3,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/app/app.dart';
 import 'package:joysong_flutter/core/config/app_environment.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/core/translation/translation.dart';
 import 'package:joysong_flutter/features/auth/domain/auth_models.dart';
 import 'package:joysong_flutter/features/auth/domain/auth_repository.dart';
 import 'package:joysong_flutter/features/profile/presentation/profile_page.dart';
 import 'package:joysong_flutter/features/settings/domain/settings_preferences.dart';
 import 'package:joysong_flutter/features/settings/domain/settings_services.dart';
+
+import 'core/translation/translation_test_fixtures.dart';
 
 void main() {
   testWidgets('app shell switches between primary destinations',
@@ -88,9 +91,161 @@ void main() {
     expect(find.text('Discover'), findsOneWidget);
     expect(find.text('Profile'), findsOneWidget);
   });
+
+  testWidgets(
+      'restored authenticated English consent activates injected translation',
+      (tester) async {
+    final translationRepository = RecordingTranslationRepository()
+      ..holdResponses = true;
+    await tester.pumpWidget(
+      JoysongApp(
+        environment: AppEnvironment.resolve(platform: AppPlatform.android),
+        authRepository: _AuthenticatedRepository(),
+        localePreferenceStore: _LocaleStore('en'),
+        settingsPreferenceStore: _SettingsStore(
+          const SettingsPreferences(aiTranslationEnabled: true),
+        ),
+        translationRepository: translationRepository,
+      ),
+    );
+    await tester.pumpAndSettle();
+    _insertTranslationProbe(tester);
+    await tester.pump();
+
+    expect(find.text(_rootTranslationRequest.sourceText), findsOneWidget);
+    expect(translationRepository.calls, hasLength(1));
+    expect(translationRepository.calls.single.targetLanguage, 'en-US');
+
+    translationRepository.completeNext('Root translation');
+    await _pumpTranslation(tester);
+    expect(find.text('Root translation'), findsOneWidget);
+  });
+
+  testWidgets('unauthenticated restoration keeps root translation inactive',
+      (tester) async {
+    final translationRepository = RecordingTranslationRepository();
+    await tester.pumpWidget(
+      JoysongApp(
+        environment: AppEnvironment.resolve(platform: AppPlatform.android),
+        authRepository: _UnauthenticatedRepository(),
+        localePreferenceStore: _LocaleStore('en'),
+        settingsPreferenceStore: _SettingsStore(
+          const SettingsPreferences(aiTranslationEnabled: true),
+        ),
+        translationRepository: translationRepository,
+      ),
+    );
+    await tester.pumpAndSettle();
+    _insertTranslationProbe(tester);
+    await tester.pump();
+
+    expect(find.text(_rootTranslationRequest.sourceText), findsOneWidget);
+    expect(translationRepository.calls, isEmpty);
+  });
+
+  testWidgets('Chinese restoration keeps root translation inactive',
+      (tester) async {
+    final translationRepository = RecordingTranslationRepository();
+    await tester.pumpWidget(
+      JoysongApp(
+        environment: AppEnvironment.resolve(platform: AppPlatform.android),
+        authRepository: _AuthenticatedRepository(),
+        localePreferenceStore: _LocaleStore('zh'),
+        settingsPreferenceStore: _SettingsStore(
+          const SettingsPreferences(aiTranslationEnabled: true),
+        ),
+        translationRepository: translationRepository,
+      ),
+    );
+    await tester.pumpAndSettle();
+    _insertTranslationProbe(tester);
+    await tester.pump();
+
+    expect(find.text(_rootTranslationRequest.sourceText), findsOneWidget);
+    expect(translationRepository.calls, isEmpty);
+  });
+
+  testWidgets('disabled persisted consent keeps root translation inactive',
+      (tester) async {
+    final translationRepository = RecordingTranslationRepository();
+    await tester.pumpWidget(
+      JoysongApp(
+        environment: AppEnvironment.resolve(platform: AppPlatform.android),
+        authRepository: _AuthenticatedRepository(),
+        localePreferenceStore: _LocaleStore('en'),
+        settingsPreferenceStore: _SettingsStore(
+          const SettingsPreferences(aiTranslationEnabled: false),
+        ),
+        translationRepository: translationRepository,
+      ),
+    );
+    await tester.pumpAndSettle();
+    _insertTranslationProbe(tester);
+    await tester.pump();
+
+    expect(find.text(_rootTranslationRequest.sourceText), findsOneWidget);
+    expect(translationRepository.calls, isEmpty);
+  });
+
+  testWidgets('logout restores source and invalidates a late translation',
+      (tester) async {
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final authRepository = _AuthenticatedRepository();
+    final translationRepository = RecordingTranslationRepository()
+      ..holdResponses = true;
+    await tester.pumpWidget(
+      JoysongApp(
+        environment: AppEnvironment.resolve(platform: AppPlatform.android),
+        authRepository: authRepository,
+        localePreferenceStore: _LocaleStore('en'),
+        settingsPreferenceStore: _SettingsStore(
+          const SettingsPreferences(aiTranslationEnabled: true),
+        ),
+        translationRepository: translationRepository,
+      ),
+    );
+    await tester.pumpAndSettle();
+    _insertTranslationProbe(tester);
+    await tester.pump();
+    expect(translationRepository.calls, hasLength(1));
+
+    await tester.tap(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('Profile'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.drag(
+      find.descendant(
+        of: find.byType(ProfilePage),
+        matching: find.byType(ListView),
+      ),
+      const Offset(0, -1000),
+    );
+    await tester.pumpAndSettle();
+    final logoutButton = find.byKey(const Key('logout-button'));
+    await tester.tap(logoutButton);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Confirm'));
+    await tester.pumpAndSettle();
+
+    expect(authRepository.logoutCalls, 1);
+    expect(find.text(_rootTranslationRequest.sourceText), findsOneWidget);
+    translationRepository.completeNext('Translation after logout');
+    await _pumpTranslation(tester);
+    expect(find.text(_rootTranslationRequest.sourceText), findsOneWidget);
+    expect(find.text('Translation after logout'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 }
 
 class _AuthenticatedRepository extends Fake implements AuthRepository {
+  int logoutCalls = 0;
+
   @override
   Future<AuthTokens?> readTokens() async => const AuthTokens(
         accessToken: 'access-token',
@@ -116,6 +271,16 @@ class _AuthenticatedRepository extends Fake implements AuthRepository {
           hasPassword: true,
         ),
       );
+
+  @override
+  Future<void> logout() async {
+    logoutCalls += 1;
+  }
+}
+
+class _UnauthenticatedRepository extends Fake implements AuthRepository {
+  @override
+  Future<AuthTokens?> readTokens() async => null;
 }
 
 final class _SettingsStore implements SettingsPreferenceStore {
@@ -144,4 +309,33 @@ final class _LocaleStore implements LocalePreferenceStore {
   Future<void> writeLanguageCode(String value) async {
     this.value = value;
   }
+}
+
+const _rootTranslationRequest = AutoTranslationRequest(
+  contentType: 'project',
+  contentId: 'root-probe',
+  field: 'description',
+  sourceText: '自动翻译根测试',
+);
+
+void _insertTranslationProbe(WidgetTester tester) {
+  final overlay = tester.state<OverlayState>(find.byType(Overlay).first);
+  overlay.insert(
+    OverlayEntry(
+      builder: (context) => const Positioned(
+        left: 0,
+        top: 0,
+        child: IgnorePointer(
+          child: Material(
+            child: AutoTranslatedText(request: _rootTranslationRequest),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+Future<void> _pumpTranslation(WidgetTester tester) async {
+  await tester.pump();
+  await tester.pump();
 }
