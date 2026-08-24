@@ -39,6 +39,38 @@ class ComparisonRequestBuilderTest {
     }
 
     @Test
+    fun `matches broader institution project subjects against names with institution prefixes`() {
+        val result = builder.build(
+            content = "机构项目",
+            operandContent = "对比热玛吉和玻尿酸 机构项目",
+            targetType = AgentQueryTarget.INSTITUTION_PROJECT,
+            candidates = listOf(
+                item("INSTITUTION_PROJECT", "thermage", "悦美机构 · 热玛吉紧肤"),
+                item("INSTITUTION_PROJECT", "filler", "安心诊所 · 玻尿酸填充")
+            )
+        )
+
+        assertEquals(AgentQueryTarget.INSTITUTION_PROJECT, result.targetType)
+        assertEquals(listOf("thermage", "filler"), result.operands.map { it.entityId })
+        assertTrue(result.isComplete)
+    }
+
+    @Test
+    fun `does not broadly promote institution projects without requested subjects`() {
+        val result = builder.build(
+            content = "对比机构项目",
+            targetType = AgentQueryTarget.INSTITUTION_PROJECT,
+            candidates = listOf(
+                item("INSTITUTION_PROJECT", "thermage", "悦美机构 · 热玛吉紧肤"),
+                item("INSTITUTION_PROJECT", "filler", "安心诊所 · 玻尿酸填充")
+            )
+        )
+
+        assertTrue(result.operands.isEmpty())
+        assertEquals(setOf(ComparisonMissingField.OPERANDS), result.missingFields)
+    }
+
+    @Test
     fun `applies target defaults without making dimensions a missing field`() {
         val result = builder.build(
             content = "Compare Dr Alpha and Dr Beta",

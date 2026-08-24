@@ -672,7 +672,29 @@ class ChatService(
         val boundedContext by lazy {
             boundedRouteContext(historyMessages, summary, session.contextType)
         }
-        val localRouteAssessment = if (currentRouteAssessment.requiresContextCompletion) {
+        val targetClarificationCandidate = currentRouteAssessment.decision.queryTarget != null &&
+            isComparisonTargetClarification(content, currentRouteAssessment.decision.queryTarget)
+        val pendingComparison = if (targetClarificationCandidate) {
+            historyMessages.asReversed()
+                .asSequence()
+                .filter { it.role.equals("ASSISTANT", ignoreCase = true) }
+                .mapNotNull { turnLifecycleService.projectMessage(it).comparisonRequest }
+                .firstOrNull { !it.isComplete }
+        } else null
+        val comparisonTargetClarification = pendingComparison != null &&
+            ComparisonMissingField.TARGET_TYPE in pendingComparison.missingFields &&
+            targetClarificationCandidate
+        val localRouteAssessment = if (comparisonTargetClarification) {
+            currentRouteAssessment.copy(
+                decision = agentIntentRouter.validatedDecision(
+                    AgentIntent.COMPARISON,
+                    currentRouteAssessment.decision.queryTarget
+                ),
+                confidence = 1.0,
+                requiresLlmParsing = false,
+                requiresContextCompletion = false
+            )
+        } else if (currentRouteAssessment.requiresContextCompletion) {
             agentIntentRouter.supplementWithContext(
                 currentRouteAssessment,
                 boundedContext.decisions,
@@ -794,6 +816,7 @@ class ChatService(
         val comparisonSearchQuery = if (intentDecision.intent == AgentIntent.COMPARISON) {
             (
                 listOf(catalogSearchQuery) +
+                    previousUserQueries.takeIf { comparisonTargetClarification }.orEmpty() +
                     currentContextItems.map { it.name } +
                     previousComparison?.operands.orEmpty().map { it.displayName }
                 )
@@ -821,6 +844,7 @@ class ChatService(
         val comparisonRequest = if (intentDecision.intent == AgentIntent.COMPARISON) {
             comparisonRequestBuilder.build(
                 content = content,
+                operandContent = comparisonSearchQuery.takeIf { comparisonTargetClarification } ?: content,
                 targetType = intentDecision.queryTarget,
                 candidates = rawEvidence.report?.items.orEmpty(),
                 contextCandidates = currentContextItems,
@@ -1007,6 +1031,21 @@ class ChatService(
             ))
         }
     }.joinToString(AgentText.value("；", "; "))
+
+    private fun isComparisonTargetClarification(content: String, target: AgentQueryTarget?): Boolean {
+        val normalized = content.trim().lowercase().trim('，', ',', '。', '.', '！', '!', '？', '?')
+        val accepted = when (target) {
+            AgentQueryTarget.INSTITUTION -> setOf("机构", "医院", "诊所", "clinic", "institution", "hospital")
+            AgentQueryTarget.DOCTOR -> setOf("医生", "医师", "doctor", "surgeon", "physician")
+            AgentQueryTarget.PROJECT -> setOf("项目", "治疗", "术式", "project", "treatment", "procedure")
+            AgentQueryTarget.INSTITUTION_PROJECT -> setOf(
+                "机构项目", "机构套餐", "项目套餐", "套餐", "报价",
+                "institution project", "clinic treatment", "clinic package", "offering", "package"
+            )
+            null -> emptySet()
+        }
+        return normalized in accepted
+    }
 
     /**
      * 删除消息（验证会话归属后删除）

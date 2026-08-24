@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service
 class ComparisonRequestBuilder {
     fun build(
         content: String,
+        operandContent: String = content,
         targetType: AgentQueryTarget?,
         candidates: List<AgentCatalogItemResponse>,
         contextCandidates: List<AgentCatalogItemResponse> = emptyList(),
@@ -14,7 +15,7 @@ class ComparisonRequestBuilder {
         detectedCities: List<String> = emptyList()
     ): ComparisonRequest {
         val inherited = previous?.let(::normalize)
-        val currentOperands = (candidates.filter { it.isNamedIn(content) } + contextCandidates)
+        val currentOperands = (candidates.filter { it.isNamedIn(operandContent, targetType) } + contextCandidates)
             .mapNotNull(::toOperand)
             .distinctBy { "${it.entityType.name}:${it.entityId}" }
         val resolvedTarget = targetType ?: currentOperands.map { it.entityType }.distinct().singleOrNull() ?: inherited?.targetType
@@ -90,9 +91,27 @@ class ComparisonRequestBuilder {
         )
     }
 
-    private fun AgentCatalogItemResponse.isNamedIn(content: String): Boolean =
-        name.isNotBlank() && content.contains(name, ignoreCase = true) ||
+    private fun AgentCatalogItemResponse.isNamedIn(content: String, targetType: AgentQueryTarget?): Boolean {
+        if (name.isNotBlank() && content.contains(name, ignoreCase = true) ||
             id.isNotBlank() && content.contains(id, ignoreCase = true)
+        ) return true
+        if (targetType != AgentQueryTarget.INSTITUTION_PROJECT || !type.equals("INSTITUTION_PROJECT", true)) {
+            return false
+        }
+        val projectAlias = name.substringAfter('·', missingDelimiterValue = "").trim()
+        if (projectAlias.isBlank()) return false
+        return comparisonSubjects(content).any { subject ->
+            projectAlias.contains(subject, ignoreCase = true) || subject.contains(projectAlias, ignoreCase = true)
+        }
+    }
+
+    private fun comparisonSubjects(content: String): List<String> = content
+        .replace(comparisonActionPattern, " ")
+        .replace(comparisonTargetPattern, " ")
+        .split(comparisonSubjectSeparator)
+        .map { it.trim().trim('，', ',', '。', '.', '：', ':', '；', ';', '！', '!', '？', '?') }
+        .filter { subject -> subject.count { !it.isWhitespace() } >= MIN_COMPARISON_SUBJECT_LENGTH }
+        .distinct()
 
     private fun toOperand(item: AgentCatalogItemResponse): ComparisonOperand? {
         val entityType = runCatching { AgentQueryTarget.valueOf(item.type.uppercase()) }.getOrNull() ?: return null
@@ -140,6 +159,7 @@ class ComparisonRequestBuilder {
         const val MAX_DISPLAY_NAME_LENGTH = 120
         const val MAX_CONSTRAINT_KEY_LENGTH = 40
         const val MAX_CONSTRAINT_VALUE_LENGTH = 120
+        const val MIN_COMPARISON_SUBJECT_LENGTH = 2
 
         val allowedDimensions = setOf("PRICE", "CREDENTIALS", "RATING")
         val allowedConstraints = setOf("city", "budgetMin", "budgetMax", "downtimeDays")
@@ -178,5 +198,14 @@ class ComparisonRequestBuilder {
             "糖尿病", "高血压", "高血糖", "心脏病", "diabetes", "hypertension", "high blood pressure",
             "pregnant", "pregnancy", "breastfeeding", "allergy", "keloid", "medication", "infection"
         )
+        val comparisonActionPattern = Regex(
+            "(?:对比|比较|区别|compare|comparison|versus|\\bvs\\b)",
+            RegexOption.IGNORE_CASE
+        )
+        val comparisonTargetPattern = Regex(
+            "(?:机构项目|机构套餐|项目套餐|clinic\\s+(?:treatment|package|offering)|institution\\s+project)",
+            RegexOption.IGNORE_CASE
+        )
+        val comparisonSubjectSeparator = Regex("\\s*(?:和|与|及|、|/|\\b(?:and|or)\\b)\\s*", RegexOption.IGNORE_CASE)
     }
 }

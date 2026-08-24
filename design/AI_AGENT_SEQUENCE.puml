@@ -45,6 +45,12 @@ Context --> Chat: contextualQuery
 Chat -> Router: assess(query, contextType)
 Router --> Chat: LocalAssessment
 
+opt 当前消息仅回答比较对象类型，且历史存在缺少 target 的未完成 comparison
+    Chat -> Lifecycle: 投影最近未完成 comparison request
+    Lifecycle --> Chat: pending request（missing TARGET_TYPE）
+    Chat -> Chat: 保持 intent=COMPARISON，以当前消息补充 target
+end
+
 note over Router,Parser
 |= 返回内容 |= 可选值 |
 | intent | GENERAL_CHAT · CATALOG_QA · COMPARISON · PLANNING |
@@ -68,7 +74,7 @@ note over Router,Chat
 安全路由保持最高优先级；当前明确否定高于历史和模型结果。
 HUMAN_CONSULTATION 固定 target=INSTITUTION，模型不能提供咨询师或私聊用户 ID。
 规划路由及其边界保持不变。
-仅 final intent == COMPARISON 才恢复和构建对比请求，
+除“仅补充 target 的确定性澄清回复”外，仅 final intent == COMPARISON 才恢复和构建对比请求，
 不会让历史对比状态覆盖 SAFETY_SCREENING / PLANNING。
 end note
 
@@ -137,6 +143,11 @@ alt final intent == COMPARISON
     Catalog --> Chat: raw catalog evidence
 
     Chat -> Compare: build + normalize（当前命名对象、上下文、历史有效请求）
+    note over Chat,Compare
+    target-only 澄清会把上一轮用户比较文本用于 operand 匹配；
+    INSTITUTION_PROJECT 可用“机构名 · 项目名”的项目名后缀做受限别名匹配；
+    候选仍必须来自本轮 Catalog 检索，不从模型或全库任意补齐。
+    end note
     Compare --> Chat: normalized request（同类型、2～4 operands、target、dimensions/constraints）
 
     alt request incomplete

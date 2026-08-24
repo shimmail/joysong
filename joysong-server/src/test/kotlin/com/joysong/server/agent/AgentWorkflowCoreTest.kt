@@ -2679,6 +2679,60 @@ class AgentWorkflowCoreTest {
     }
 
     @Test
+    fun `target only follow up completes broader institution project comparison`() {
+        val content = "机构项目"
+        val priorUser = message(1, "USER", "对比热玛吉和玻尿酸")
+        val assistant = message(2, "ASSISTANT", "请明确比较类型")
+        val previous = ComparisonRequestBuilder().normalize(ComparisonRequest())
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(completionTemplate, intentTemplate, catalog)
+        val completed = slot<CompleteTurnCommand>()
+        val thermage = comparisonItem("thermage", "悦美机构 · 热玛吉紧肤", type = "INSTITUTION_PROJECT")
+        val filler = comparisonItem("filler", "安心诊所 · 玻尿酸填充", type = "INSTITUTION_PROJECT")
+        val rawEvidence = comparisonEvidence(thermage, filler)
+        prepareChatGeneration(fixture, content)
+        every { fixture.contextBuilder.load("user-1", "session-1", 20, 4_000) } returns
+            AgentContext(AgentSessionSummary(), listOf(priorUser, assistant))
+        every { fixture.turnService.projectMessage(assistant) } returns AgentMessageProjection(
+            message = assistant,
+            intent = "COMPARISON",
+            queryTarget = null,
+            nextAction = "SHOW_CATALOG",
+            comparisonRequest = previous
+        )
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "answer")
+        )
+        every { catalog.contextualSearchQuery(content, listOf(priorUser.content)) } returns content
+        every {
+            catalog.promptEvidence(
+                content,
+                "$content ${priorUser.content}",
+                "$content ${priorUser.content}",
+                AgentQueryTarget.INSTITUTION_PROJECT,
+                "COMPARISON",
+                content
+            )
+        } returns rawEvidence
+        every { catalog.filterComparisonEvidence(rawEvidence, any()) } returns rawEvidence
+        completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"answer"}}]}""", MediaType.APPLICATION_JSON))
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals("COMPARISON", completed.captured.intent)
+        assertEquals(AgentQueryTarget.INSTITUTION_PROJECT.name, completed.captured.queryTarget)
+        assertEquals(listOf("thermage", "filler"), completed.captured.comparisonRequest?.operands?.map { it.entityId })
+        assertTrue(completed.captured.comparisonRequest?.isComplete == true)
+        intentServer.verify()
+        completionServer.verify()
+    }
+
+    @Test
     fun `later comparison restores the latest incomplete request from loaded assistant metadata`() {
         val content = "Compare Beta Clinic with clinics"
         val assistant = message(2, "ASSISTANT", "choose another").apply { turnId = "previous-turn" }
