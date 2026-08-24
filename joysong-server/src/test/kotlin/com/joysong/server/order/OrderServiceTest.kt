@@ -911,6 +911,20 @@ class OrderServiceTest {
         verify(exactly = 0) { orderRepository.save(any()) }
     }
 
+    @Test
+    fun `cancelExpiredConsultationPaidOrder refunds without a cancellation notification`() {
+        val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.CONSULTATION_PAID.value)
+            .copy(paidAmount = BigDecimal("100.00"), paidAmountMinor = 10_000)
+        every { orderRepository.findById("o1") } returns Optional.of(order)
+        every { orderRepository.save(any()) } answers { firstArg() }
+        every { refundRepository.save(any()) } answers { firstArg() }
+
+        orderService.cancelExpiredConsultationPaidOrder("o1")
+
+        verify(exactly = 1) { orderRepository.save(match { it.status == OrderStatusEnum.REFUNDED.value }) }
+        verify(exactly = 0) { businessNotificationService.orderCancelled(any(), any(), any()) }
+    }
+
     // ---- 删除订单 ----
 
     @Test

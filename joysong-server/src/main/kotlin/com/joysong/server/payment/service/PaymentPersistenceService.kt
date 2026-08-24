@@ -18,6 +18,8 @@ import com.joysong.server.payment.repository.PaymentRepository
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionSynchronization
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.security.SecureRandom
 import java.time.LocalDateTime
 import java.util.UUID
@@ -349,7 +351,7 @@ class PaymentPersistenceService(
                 payment.provider,
                 payment.id
             )
-            notifySafely("ORDER_SERVICE_ACTIVATED", updatedOrder.id) {
+            notifyAfterCommitSafely("ORDER_SERVICE_ACTIVATED", updatedOrder.id) {
                 businessNotificationService.orderServiceActivated(
                     updatedOrder.id,
                     updatedOrder.userId,
@@ -522,6 +524,20 @@ class PaymentPersistenceService(
         runCatching(notification).onFailure { error ->
             log.error("支付订单通知发送失败: type={}, orderId={}", eventType, orderId, error)
         }
+    }
+
+    private fun notifyAfterCommitSafely(eventType: String, orderId: String, notification: () -> Unit) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive() ||
+            !TransactionSynchronizationManager.isActualTransactionActive()
+        ) {
+            notifySafely(eventType, orderId, notification)
+            return
+        }
+        TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
+            override fun afterCommit() {
+                notifySafely(eventType, orderId, notification)
+            }
+        })
     }
 
     private fun findSuccessfulPayment(orderId: String, type: PaymentType): PaymentEntity? =

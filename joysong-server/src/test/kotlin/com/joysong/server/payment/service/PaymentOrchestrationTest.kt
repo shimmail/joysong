@@ -27,6 +27,10 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
+import org.springframework.transaction.TransactionDefinition
+import org.springframework.transaction.support.AbstractPlatformTransactionManager
+import org.springframework.transaction.support.DefaultTransactionStatus
+import org.springframework.transaction.support.TransactionTemplate
 import java.math.BigDecimal
 import java.time.LocalDateTime
 import java.util.Optional
@@ -762,6 +766,82 @@ class PaymentOrchestrationTest {
     }
 
     @Test
+    fun `service activation notification runs only after the business transaction commits`() {
+        val repositories = persistenceRepositories()
+        val prepared = travelPayment(status = PaymentStatus.PROCESSING.name)
+        var paymentState = prepared
+        var orderState = travelOrder()
+        every { repositories.payment.findByIdForUpdate(prepared.id) } answers { paymentState }
+        every { repositories.payment.save(any()) } answers {
+            firstArg<PaymentEntity>().also { paymentState = it }
+        }
+        every { repositories.order.findByIdIncludeDeletedForUpdate(prepared.orderId) } answers { orderState }
+        every { repositories.order.save(any()) } answers {
+            firstArg<OrderEntity>().also { orderState = it }
+        }
+        every { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) } returns Unit
+        val transactionManager = RecordingTransactionManager()
+        val persistence = PaymentPersistenceService(repositories.payment, repositories.order, repositories.log)
+        val providerResult = ProviderPaymentResult(
+            status = PaymentStatus.SUCCEEDED,
+            providerPaymentId = "alipay-after-commit",
+            amountMinor = 40_000,
+            currency = "USD"
+        )
+
+        TransactionTemplate(transactionManager).executeWithoutResult {
+            persistence.applyProviderResult(prepared.id, providerResult)
+            persistence.applyProviderResult(prepared.id, providerResult)
+
+            assertEquals(OrderStatusEnum.SERVICE_ACTIVE.value, orderState.status)
+            verify(exactly = 0) { businessNotificationService.orderServiceActivated(any(), any(), any(), any()) }
+        }
+
+        assertEquals(1, transactionManager.commits)
+        verify(exactly = 1) {
+            businessNotificationService.orderServiceActivated(
+                "order-1", "user-1", "consultant-1", "doctor-1"
+            )
+        }
+    }
+
+    @Test
+    fun `failed after commit notification does not roll back service activation`() {
+        val repositories = persistenceRepositories()
+        val prepared = travelPayment(status = PaymentStatus.PROCESSING.name)
+        var orderState = travelOrder()
+        every { repositories.payment.findByIdForUpdate(prepared.id) } returns prepared
+        every { repositories.payment.save(any()) } answers { firstArg() }
+        every { repositories.order.findByIdIncludeDeletedForUpdate(prepared.orderId) } answers { orderState }
+        every { repositories.order.save(any()) } answers {
+            firstArg<OrderEntity>().also { orderState = it }
+        }
+        every { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) } returns Unit
+        every {
+            businessNotificationService.orderServiceActivated(any(), any(), any(), any())
+        } throws IllegalStateException("notification persistence unavailable")
+        val transactionManager = RecordingTransactionManager()
+        val persistence = PaymentPersistenceService(repositories.payment, repositories.order, repositories.log)
+
+        val result = TransactionTemplate(transactionManager).execute {
+            persistence.applyProviderResult(
+                prepared.id,
+                ProviderPaymentResult(
+                    status = PaymentStatus.SUCCEEDED,
+                    providerPaymentId = "alipay-notification-failure",
+                    amountMinor = 40_000,
+                    currency = "USD"
+                )
+            )
+        }
+
+        assertEquals(PaymentStatus.SUCCEEDED.name, result?.status)
+        assertEquals(OrderStatusEnum.SERVICE_ACTIVE.value, orderState.status)
+        assertEquals(1, transactionManager.commits)
+        verify(exactly = 1) { businessNotificationService.orderServiceActivated(any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `service fee success after the order deadline is compensated instead of activating service`() {
         val repositories = persistenceRepositories()
         val orderCreatedAt = LocalDateTime.now().minusMinutes(31)
@@ -1247,4 +1327,18 @@ class PaymentOrchestrationTest {
         idempotencyKey = idempotencyKey,
         expiresAt = expiresAt
     )
+
+    private class RecordingTransactionManager : AbstractPlatformTransactionManager() {
+        var commits = 0
+
+        override fun doGetTransaction(): Any = Any()
+
+        override fun doBegin(transaction: Any, definition: TransactionDefinition) = Unit
+
+        override fun doCommit(status: DefaultTransactionStatus) {
+            commits += 1
+        }
+
+        override fun doRollback(status: DefaultTransactionStatus) = Unit
+    }
 }
