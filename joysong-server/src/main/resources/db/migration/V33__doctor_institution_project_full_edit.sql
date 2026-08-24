@@ -61,14 +61,26 @@ ALTER TABLE doctor_project_change_requests
             AND medical_list_price IS NOT NULL
             AND medical_list_price >= 0
             AND current_price IS NOT NULL
+            AND current_price >= 0
             AND base_institution_project_version IS NOT NULL
+            AND base_institution_project_version >= 0
             AND base_platform_inheritance_hash IS NOT NULL
             AND CHAR_LENGTH(base_platform_inheritance_hash) = 64
+            AND base_platform_inheritance_hash REGEXP '^[0-9a-f]{64}$'
             AND pricing_policy_revision IS NOT NULL
+            AND CHAR_LENGTH(pricing_policy_revision) > 0
+            AND base_doctor_project_updated_at IS NOT NULL
+            AND ((base_config_id IS NULL AND base_config_updated_at IS NULL)
+                OR (base_config_id IS NOT NULL AND base_config_updated_at IS NOT NULL))
             AND shared_changed IS NOT NULL
             AND current_project_snapshot IS NOT NULL
             AND proposed_project_snapshot IS NOT NULL
             AND current_doctor_is_active IS NOT NULL
             AND proposed_doctor_is_active IS NOT NULL
+            AND current_platform_rate IS NOT NULL
+            AND current_platform_rate >= 0
+            AND current_platform_rate <= 100
+            AND proposed_travel_ground_service_fee IS NOT NULL
+            AND proposed_travel_ground_service_fee >= 0
         )
     );

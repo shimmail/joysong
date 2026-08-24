@@ -14,6 +14,8 @@ import org.testcontainers.containers.MySQLContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
 import java.math.BigDecimal
+import java.sql.Timestamp
+import java.time.LocalDateTime
 
 @Tag("mysql-integration")
 @Testcontainers
@@ -46,7 +48,7 @@ class DoctorInstitutionProjectFullEditMigrationTest {
         assertEquals(3, jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'doctor_projects' AND index_name = 'idx_doctor_projects_public_lookup'", Int::class.java))
 
         jdbc.update("UPDATE doctor_project_change_requests SET status = 'APPROVED' WHERE id = 'legacy-request'")
-        insertPendingV2(jdbc, "pending-v2")
+        insertPendingV2(jdbc, "pending-v2", status = "PENDING")
         assertEquals(2, jdbc.queryForObject("SELECT payload_version FROM doctor_project_change_requests WHERE id = 'pending-v2'", Int::class.java))
         assertNull(jdbc.queryForObject("SELECT approval_audit_snapshot FROM doctor_project_change_requests WHERE id = 'pending-v2'", String::class.java))
 
@@ -56,6 +58,14 @@ class DoctorInstitutionProjectFullEditMigrationTest {
         assertV2ConstraintViolation { insertPendingV2(jdbc, "missing-proposed-price", medicalListPrice = null) }
         assertV2ConstraintViolation { insertPendingV2(jdbc, "missing-current-price", currentPrice = null) }
         assertV2ConstraintViolation { insertPendingV2(jdbc, "obsolete-price-suggestion", priceSuggestion = BigDecimal("102.00")) }
+        assertV2ConstraintViolation { insertPendingV2(jdbc, "missing-base-doctor-time", baseDoctorProjectUpdatedAt = null) }
+        assertV2ConstraintViolation { insertPendingV2(jdbc, "missing-platform-rate", currentPlatformRate = null) }
+        assertV2ConstraintViolation { insertPendingV2(jdbc, "missing-service-fee", proposedTravelGroundServiceFee = null) }
+        assertV2ConstraintViolation { insertPendingV2(jdbc, "negative-current-price", currentPrice = BigDecimal("-0.01")) }
+        assertV2ConstraintViolation { insertPendingV2(jdbc, "negative-service-fee", proposedTravelGroundServiceFee = BigDecimal("-0.01")) }
+        assertV2ConstraintViolation { insertPendingV2(jdbc, "platform-rate-over-100", currentPlatformRate = BigDecimal("100.01")) }
+        assertV2ConstraintViolation { insertPendingV2(jdbc, "config-id-without-time", baseConfigUpdatedAt = null) }
+        assertV2ConstraintViolation { insertPendingV2(jdbc, "config-time-without-id", baseConfigId = null) }
     }
 
     private fun migrate(target: String? = null) {
@@ -101,6 +111,12 @@ class DoctorInstitutionProjectFullEditMigrationTest {
         pricingPolicyRevision: String? = "policy-v1",
         currentProjectSnapshot: String? = "{\"name\":\"before\"}",
         proposedProjectSnapshot: String? = "{\"name\":\"after\"}",
+        status: String = "CHANGES_REQUESTED",
+        baseDoctorProjectUpdatedAt: Timestamp? = Timestamp.valueOf(LocalDateTime.of(2026, 8, 24, 10, 0)),
+        baseConfigId: String? = "config-1",
+        baseConfigUpdatedAt: Timestamp? = Timestamp.valueOf(LocalDateTime.of(2026, 8, 24, 10, 0)),
+        currentPlatformRate: BigDecimal? = BigDecimal("40.00"),
+        proposedTravelGroundServiceFee: BigDecimal? = BigDecimal("40.80"),
     ) {
         jdbc.update(
             """
@@ -110,12 +126,15 @@ class DoctorInstitutionProjectFullEditMigrationTest {
                 medical_list_price, current_price, base_institution_project_version,
                 base_platform_inheritance_hash, pricing_policy_revision, shared_changed,
                 current_project_snapshot, proposed_project_snapshot, current_doctor_is_active,
-                proposed_doctor_is_active
+                proposed_doctor_is_active, base_doctor_project_updated_at,
+                base_config_id, base_config_updated_at, current_platform_rate,
+                proposed_travel_ground_service_fee
             ) VALUES (?, 'legacy-doctor', 'legacy-institution', 'legacy-ip', 'PROFILE_UPDATE',
-                'v2 profile', 'PENDING', 'legacy-doctor', 2, ?, ?, ?, 0, ?, ?, TRUE, ?,
-                ?, TRUE, FALSE)
+                'v2 profile', ?, 'legacy-doctor', 2, ?, ?, ?, 0, ?, ?, TRUE, ?,
+                ?, TRUE, FALSE, ?, ?, ?, ?, ?)
             """.trimIndent(),
             id,
+            status,
             priceSuggestion,
             medicalListPrice,
             currentPrice,
@@ -123,6 +142,11 @@ class DoctorInstitutionProjectFullEditMigrationTest {
             pricingPolicyRevision,
             currentProjectSnapshot,
             proposedProjectSnapshot,
+            baseDoctorProjectUpdatedAt,
+            baseConfigId,
+            baseConfigUpdatedAt,
+            currentPlatformRate,
+            proposedTravelGroundServiceFee,
         )
     }
 

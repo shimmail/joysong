@@ -25,7 +25,7 @@ import java.sql.ResultSet
 import java.sql.Timestamp
 import java.time.LocalDateTime
 import java.time.Instant
-import java.time.ZoneOffset
+import java.util.TimeZone
 import com.joysong.server.order.service.OrderSplitRatePolicy
 import com.joysong.server.order.service.TravelGroundServicePricing
 import com.joysong.server.config.OrderSplitProperties
@@ -128,6 +128,24 @@ class DoctorProjectChangeServiceTest {
     }
 
     @Test
+    fun `target revision remains valid when submit rereads unchanged database timestamps in Asia Shanghai`() {
+        val originalTimeZone = TimeZone.getDefault()
+        TimeZone.setDefault(TimeZone.getTimeZone("Asia/Shanghai"))
+        try {
+            stubV2TargetQuery(doctorActive = true)
+            val baseRevision = service.listProfileUpdateTargetsV2(doctorActor()).single().baseRevision
+            stubV2SubmitState()
+            every { jdbcTemplate.update(match<String> { it.contains("payload_version") }, *anyVararg()) } returns 1
+
+            val result = service.submitV2(doctorActor(), v2Request(baseRevision = baseRevision))
+
+            assertEquals(baseRevision, (result as VersionedDoctorProjectChangeViewV2).baseRevision)
+        } finally {
+            TimeZone.setDefault(originalTimeZone)
+        }
+    }
+
+    @Test
     fun `submit v2 empty values clear overrides back to inheritance`() {
         val baseRevision = stubV2SubmitState(currentName = "Local Project", currentTags = "local-tag")
         every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 1
@@ -181,6 +199,26 @@ class DoctorProjectChangeServiceTest {
             v2Request(baseRevision = sharedBase, salesCount = 9)
         ) as VersionedDoctorProjectChangeViewV2
         assertEquals(true, sharedResult.sharedChanged)
+    }
+
+    @Test
+    fun `two doctors can submit from the same shared project version independently`() {
+        every { jdbcTemplate.update(match<String> { it.contains("payload_version") }, *anyVararg()) } returns 1
+        val doctorOneBase = stubV2SubmitState(doctorId = "doctor-1", revisionVersion = 7)
+        val doctorOne = service.submitV2(
+            doctorActor("doctor-1"),
+            v2Request(baseRevision = doctorOneBase, price = BigDecimal("110.00"))
+        ) as VersionedDoctorProjectChangeViewV2
+        val doctorTwoBase = stubV2SubmitState(doctorId = "doctor-2", revisionVersion = 7)
+        val doctorTwo = service.submitV2(
+            doctorActor("doctor-2"),
+            v2Request(baseRevision = doctorTwoBase, price = BigDecimal("120.00"))
+        ) as VersionedDoctorProjectChangeViewV2
+
+        assertEquals("doctor-1", doctorOne.doctorId)
+        assertEquals("doctor-2", doctorTwo.doctorId)
+        assertEquals(7L, doctorOne.currentProject?.source?.institutionProjectVersion)
+        assertEquals(7L, doctorTwo.currentProject?.source?.institutionProjectVersion)
     }
 
     @Test
@@ -316,7 +354,53 @@ class DoctorProjectChangeServiceTest {
     }
 
     @Test
+    fun `v2 list keeps damaged outer ledger visible and preserves valid siblings`() {
+        every {
+            jdbcTemplate.query(match<String> { it.contains("payload_version = 1") }, any<RowMapper<Any>>())
+        } returns emptyList()
+        every {
+            jdbcTemplate.query(match<String> { it.contains("payload_version = 2") }, any<RowMapper<Any>>())
+        } answers {
+            val mapper = secondArg<RowMapper<Any>>()
+            listOf(
+                mapper.mapRow(v2ListResultSet(id = "request-v2-valid"), 0),
+                mapper.mapRow(
+                    v2ListResultSet(
+                        id = "request-v2-damaged-ledger",
+                        currentPlatformRate = null,
+                        travelGroundServiceFee = null
+                    ),
+                    1
+                )
+            )
+        }
+
+        val rows = service.listV2(legalActor())
+
+        assertEquals(2, rows.size)
+        assertEquals("VALID", (rows.single { it.id == "request-v2-valid" } as VersionedDoctorProjectChangeViewV2).snapshotState)
+        val damaged = rows.single { it.id == "request-v2-damaged-ledger" } as VersionedDoctorProjectChangeViewV2
+        assertEquals("INVALID", damaged.snapshotState)
+        assertEquals(ProjectChangeErrorCode.REQUEST_SNAPSHOT_INVALID.name, damaged.snapshotError)
+        assertEquals(false, damaged.reviewable)
+    }
+
+    @Test
     fun `v2 list keeps immutable snapshots while refreshing latest state and force token after each drift`() {
+        val baseRevision = stubV2SubmitState()
+        var persistedCurrentSnapshot: String? = null
+        var persistedProposedSnapshot: String? = null
+        every { jdbcTemplate.update(match<String> { it.contains("payload_version") }, *anyVararg()) } answers {
+            val values = invocation.args[1] as Array<*>
+            persistedCurrentSnapshot = values[9] as String
+            persistedProposedSnapshot = values[10] as String
+            1
+        }
+        service.submitV2(
+            doctorActor(),
+            v2Request(baseRevision = baseRevision, name = "Proposed Project", price = BigDecimal("110.00"))
+        )
+
         var liveVersion = 7L
         every {
             jdbcTemplate.query(match<String> { it.contains("payload_version = 1") }, any<RowMapper<Any>>())
@@ -325,7 +409,16 @@ class DoctorProjectChangeServiceTest {
             jdbcTemplate.query(match<String> { it.contains("payload_version = 2") }, any<RowMapper<Any>>())
         } answers {
             val mapper = secondArg<RowMapper<Any>>()
-            listOf(mapper.mapRow(v2ListResultSet(latestVersion = liveVersion), 0))
+            listOf(
+                mapper.mapRow(
+                    v2ListResultSet(
+                        currentSnapshot = requireNotNull(persistedCurrentSnapshot),
+                        proposedSnapshot = requireNotNull(persistedProposedSnapshot),
+                        latestVersion = liveVersion
+                    ),
+                    0
+                )
+            )
         }
 
         val submitted = service.listV2(legalActor()).single() as VersionedDoctorProjectChangeViewV2
@@ -335,7 +428,13 @@ class DoctorProjectChangeServiceTest {
         val driftedAgain = service.listV2(legalActor()).single() as VersionedDoctorProjectChangeViewV2
 
         assertEquals(7L, submitted.currentProject?.source?.institutionProjectVersion)
+        assertEquals("Local Project", submitted.currentProject?.effective?.name)
+        assertEquals("Proposed Project", submitted.proposedProject?.effective?.name)
         assertEquals(7L, refreshed.currentProject?.source?.institutionProjectVersion)
+        assertEquals(submitted.currentProject, refreshed.currentProject)
+        assertEquals(submitted.proposedProject, refreshed.proposedProject)
+        assertEquals(refreshed.currentProject, driftedAgain.currentProject)
+        assertEquals(refreshed.proposedProject, driftedAgain.proposedProject)
         assertEquals(8L, refreshed.latestProject?.source?.institutionProjectVersion)
         assertEquals(9L, driftedAgain.latestProject?.source?.institutionProjectVersion)
         assertEquals(false, submitted.latestRevision == refreshed.latestRevision)
@@ -796,23 +895,25 @@ class DoctorProjectChangeServiceTest {
     }
 
     private fun stubV2SubmitState(
+        doctorId: String = "doctor-1",
         currentName: String? = "Local Project",
         currentTags: String? = null,
         platformCategory: String = "Platform Category",
-        doctorProject: DoctorProjectEntity? = doctorProject(),
+        doctorProject: DoctorProjectEntity? = doctorProject(doctorId = doctorId),
         pendingCount: Long = 0,
         revisionVersion: Long = 7,
         lockedVersion: Long = revisionVersion,
         lockedConfigUpdatedAt: LocalDateTime = LocalDateTime.of(2026, 8, 10, 10, 0),
         revisionPlatformCategory: String = platformCategory
     ): String {
+        val configId = if (doctorId == "doctor-1") "config-1" else "config-$doctorId"
         every {
             jdbcTemplate.query(
                 match<String> {
                     it.contains("SELECT institution_id, project_id") && !it.contains("FOR UPDATE")
                 },
                 any<RowMapper<Any>>(),
-                "doctor-1",
+                doctorId,
                 "ip-1"
             )
         } answers {
@@ -821,7 +922,7 @@ class DoctorProjectChangeServiceTest {
                 every { getString("institution_id") } returns "institution-1"
                 every { getString("project_id") } returns "project-1"
                 every { getString("institution_name") } returns "Institution"
-                every { getString("doctor_name") } returns "Doctor"
+                every { getString("doctor_name") } returns if (doctorId == "doctor-1") "Doctor" else "Doctor $doctorId"
             }
             listOf(mapper.mapRow(rs, 0))
         }
@@ -850,21 +951,53 @@ class DoctorProjectChangeServiceTest {
             val mapper = secondArg<RowMapper<Any>>()
             listOf(mapper.mapRow(platformResultSet(category = platformCategory), 0))
         }
-        every { doctorProjectRepository.findForUpdate("doctor-1", "ip-1") } returns doctorProject
+        every { doctorProjectRepository.findForUpdate(doctorId, "ip-1") } returns doctorProject
         every {
-            configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate("doctor-1", "ip-1")
+            jdbcTemplate.query(
+                match<String> { it.contains("FROM doctor_projects") && it.contains("FOR UPDATE") },
+                any<RowMapper<Any>>(),
+                doctorId,
+                "ip-1"
+            )
+        } answers {
+            if (doctorProject == null) emptyList() else {
+                val mapper = secondArg<RowMapper<Any>>()
+                val rs = mockk<ResultSet>(relaxed = true) {
+                    every { getTimestamp("updated_at") } returns Timestamp.valueOf(doctorProject.updatedAt)
+                }
+                listOf(mapper.mapRow(rs, 0))
+            }
+        }
+        every {
+            configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate(doctorId, "ip-1")
         } returns DoctorInstitutionProjectConfigEntity(
-            id = "config-1",
-            doctorId = "doctor-1",
+            id = configId,
+            doctorId = doctorId,
             institutionProjectId = "ip-1",
             medicalListPrice = BigDecimal("100.00"),
             updatedAt = lockedConfigUpdatedAt
         )
         every {
+            jdbcTemplate.query(
+                match<String> { it.contains("FROM doctor_institution_project_configs") && it.contains("FOR UPDATE") },
+                any<RowMapper<Any>>(),
+                doctorId,
+                "ip-1"
+            )
+        } answers {
+            val mapper = secondArg<RowMapper<Any>>()
+            val rs = mockk<ResultSet>(relaxed = true) {
+                every { getString("id") } returns configId
+                every { getTimestamp("updated_at") } returns Timestamp.valueOf(lockedConfigUpdatedAt)
+                every { getTimestamp("deleted_at") } returns null
+            }
+            listOf(mapper.mapRow(rs, 0))
+        }
+        every {
             jdbcTemplate.queryForObject(
                 match<String> { it.contains("status = 'PENDING'") },
                 Long::class.java,
-                "doctor-1",
+                doctorId,
                 "ip-1"
             )
         } returns pendingCount
@@ -889,9 +1022,9 @@ class DoctorProjectChangeServiceTest {
                 platformProjectId = "project-1",
                 institutionProjectVersion = revisionVersion,
                 platformInheritanceHash = platformHash,
-                doctorProjectUpdatedAt = LocalDateTime.of(2026, 8, 10, 10, 0).toInstant(ZoneOffset.UTC),
-                configId = "config-1",
-                configUpdatedAt = LocalDateTime.of(2026, 8, 10, 10, 0).toInstant(ZoneOffset.UTC),
+                doctorProjectUpdatedAt = Timestamp.valueOf(LocalDateTime.of(2026, 8, 10, 10, 0)).toInstant(),
+                configId = configId,
+                configUpdatedAt = Timestamp.valueOf(LocalDateTime.of(2026, 8, 10, 10, 0)).toInstant(),
                 pricingPolicyRevision = "travel-ground-service-rate:0.400000"
             )
         )
@@ -977,7 +1110,10 @@ class DoctorProjectChangeServiceTest {
     private fun v2ListResultSet(
         id: String = "request-v2",
         currentSnapshot: String = DoctorProjectSnapshotCodec(objectMapper).encode(validV2Snapshot()),
-        latestVersion: Long = 7
+        proposedSnapshot: String = DoctorProjectSnapshotCodec(objectMapper).encode(validV2Snapshot()),
+        latestVersion: Long = 7,
+        currentPlatformRate: BigDecimal? = BigDecimal("40.00"),
+        travelGroundServiceFee: BigDecimal? = BigDecimal("44.00")
     ): ResultSet = mockk(relaxed = true) {
         val now = Timestamp.valueOf(LocalDateTime.of(2026, 8, 24, 1, 2, 3))
         every { getString("id") } returns id
@@ -995,14 +1131,14 @@ class DoctorProjectChangeServiceTest {
         every { getString("base_platform_inheritance_hash") } returns validV2Snapshot().source.platformInheritanceHash
         every { getString("pricing_policy_revision") } returns "travel-ground-service-rate:0.400000"
         every { getString("current_project_snapshot") } returns currentSnapshot
-        every { getString("proposed_project_snapshot") } returns DoctorProjectSnapshotCodec(objectMapper).encode(validV2Snapshot())
+        every { getString("proposed_project_snapshot") } returns proposedSnapshot
         every { getBoolean("shared_changed") } returns true
         every { getBigDecimal("current_price") } returns BigDecimal("100.00")
         every { getBigDecimal("medical_list_price") } returns BigDecimal("110.00")
         every { getBoolean("current_doctor_is_active") } returns true
         every { getBoolean("proposed_doctor_is_active") } returns true
-        every { getBigDecimal("current_platform_rate") } returns BigDecimal("40.00")
-        every { getBigDecimal("proposed_travel_ground_service_fee") } returns BigDecimal("44.00")
+        every { getBigDecimal("current_platform_rate") } returns currentPlatformRate
+        every { getBigDecimal("proposed_travel_ground_service_fee") } returns travelGroundServiceFee
         every { getString("status") } returns "PENDING"
         every { getString("notes") } returns "notes"
         every { getBoolean("force_processed") } returns false
@@ -1221,17 +1357,20 @@ class DoctorProjectChangeServiceTest {
 
     private fun adminActor() = legalActor().copy(userId="admin-1", isAdmin=true, managedInstitutionIds=emptySet())
 
-    private fun doctorProject(updatedAt: LocalDateTime = LocalDateTime.of(2026, 8, 10, 10, 0)) = DoctorProjectEntity(
-        doctorId="doctor-1", projectId="project-1", institutionProjectId="ip-1", price=BigDecimal("100.00"), updatedAt=updatedAt
+    private fun doctorProject(
+        doctorId: String = "doctor-1",
+        updatedAt: LocalDateTime = LocalDateTime.of(2026, 8, 10, 10, 0)
+    ) = DoctorProjectEntity(
+        doctorId=doctorId, projectId="project-1", institutionProjectId="ip-1", price=BigDecimal("100.00"), updatedAt=updatedAt
     )
 
-    private fun doctorActor() = ManagementActor(
-        userId = "doctor-1",
+    private fun doctorActor(doctorId: String = "doctor-1") = ManagementActor(
+        userId = doctorId,
         isAdmin = false,
         activeRoles = setOf("DOCTOR"),
-        doctorId = "doctor-1",
+        doctorId = doctorId,
         managedInstitutionIds = emptySet(),
         doctorInstitutionIds = setOf("institution-1"),
-        manageableDoctorIds = setOf("doctor-1")
+        manageableDoctorIds = setOf(doctorId)
     )
 }

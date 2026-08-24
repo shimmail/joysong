@@ -20,8 +20,8 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDateTime
 import java.time.Instant
-import java.time.ZoneOffset
 import java.math.BigDecimal
+import java.sql.Timestamp
 import java.util.UUID
 import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -162,11 +162,9 @@ class DoctorProjectChangeService(
         if (doctorProject.projectId != targetIds.projectId) {
             throw AccessDeniedException("医生项目绑定与机构项目不一致")
         }
-        val lockedConfig = configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate(
-            doctorId,
-            institutionProjectId
-        )
-        val activeConfig = lockedConfig?.takeIf { it.deletedAt == null }
+        val doctorProjectUpdatedAt = lockedDoctorProjectUpdatedAt(doctorId, institutionProjectId)
+            ?: throw AccessDeniedException("医生尚未加入该机构项目")
+        val activeConfig = lockedActiveConfigRevision(doctorId, institutionProjectId)
         val quote = travelGroundServicePricing.quoteWithPolicy(request.price)
         val state = V2ProjectState(
             institutionProject = institutionProject,
@@ -176,9 +174,9 @@ class DoctorProjectChangeService(
             doctorName = targetIds.doctorName,
             doctorPrice = doctorProject.price,
             doctorActive = doctorProject.isActive,
-            doctorProjectUpdatedAt = doctorProject.updatedAt.toRequiredInstant("医生项目更新时间缺失"),
+            doctorProjectUpdatedAt = doctorProjectUpdatedAt,
             configId = activeConfig?.id,
-            configUpdatedAt = activeConfig?.updatedAt?.toInstant(ZoneOffset.UTC)
+            configUpdatedAt = activeConfig?.updatedAt
         )
         val lockedRevision = try {
             state.revision(quote.pricingPolicyRevision)
@@ -261,9 +259,9 @@ class DoctorProjectChangeService(
                 sharedChanged,
                 snapshotCodec.encode(currentSnapshot),
                 snapshotCodec.encode(proposedSnapshot),
-                doctorProject.updatedAt,
+                Timestamp.from(doctorProjectUpdatedAt),
                 activeConfig?.id,
-                activeConfig?.updatedAt,
+                activeConfig?.updatedAt?.let(Timestamp::from),
                 doctorProject.price,
                 request.price,
                 quote.platformRate,
@@ -504,32 +502,64 @@ class DoctorProjectChangeService(
             ORDER BY CASE r.status WHEN 'PENDING' THEN 0 ELSE 1 END, r.submitted_at DESC
             """.trimIndent()
         ) { rs, _ ->
-            val currentResult = runCatching { snapshotCodec.decode(rs.getString("current_project_snapshot")) }
-            val proposedResult = runCatching { snapshotCodec.decode(rs.getString("proposed_project_snapshot")) }
+            val ledgerResult = runCatching {
+                val currentProject = snapshotCodec.decode(requireNotNull(rs.getString("current_project_snapshot")))
+                val proposedProject = snapshotCodec.decode(requireNotNull(rs.getString("proposed_project_snapshot")))
+                val baseDoctorProjectUpdatedAt = requireNotNull(rs.getTimestamp("base_doctor_project_updated_at"))
+                    .toInstant()
+                val baseConfigId = rs.getString("base_config_id")
+                val baseConfigUpdatedAt = rs.getTimestamp("base_config_updated_at")?.toInstant()
+                require((baseConfigId == null) == (baseConfigUpdatedAt == null))
+                val baseVersion = rs.getLong("base_institution_project_version").also { require(!rs.wasNull() && it >= 0) }
+                val platformHash = requireNotNull(rs.getString("base_platform_inheritance_hash")).also {
+                    require(it.matches(Regex("[0-9a-f]{64}")))
+                }
+                val pricingPolicyRevision = requireNotNull(rs.getString("pricing_policy_revision")).also {
+                    require(it.isNotBlank())
+                }
+                val currentDoctorPrice = requireNotNull(rs.getBigDecimal("current_price")).also { require(it.signum() >= 0) }
+                val proposedDoctorPrice = requireNotNull(rs.getBigDecimal("medical_list_price")).also { require(it.signum() >= 0) }
+                val platformRate = requireNotNull(rs.getBigDecimal("current_platform_rate")).also {
+                    require(it >= BigDecimal.ZERO && it <= BigDecimal("100"))
+                }
+                val travelGroundServiceFee = requireNotNull(rs.getBigDecimal("proposed_travel_ground_service_fee")).also {
+                    require(it.signum() >= 0)
+                }
+                V2LedgerShape(
+                    baseRevision = snapshotCodec.baseRevision(
+                        DoctorProjectRevisionSource(
+                            institutionProjectId = rs.getString("institution_project_id"),
+                            institutionId = rs.getString("institution_id"),
+                            platformProjectId = rs.getString("platform_project_id"),
+                            institutionProjectVersion = baseVersion,
+                            platformInheritanceHash = platformHash,
+                            doctorProjectUpdatedAt = baseDoctorProjectUpdatedAt,
+                            configId = baseConfigId,
+                            configUpdatedAt = baseConfigUpdatedAt,
+                            pricingPolicyRevision = pricingPolicyRevision
+                        )
+                    ),
+                    currentProject = currentProject,
+                    proposedProject = proposedProject,
+                    sharedChanged = requiredBoolean(rs, "shared_changed"),
+                    currentDoctorPrice = currentDoctorPrice,
+                    proposedDoctorPrice = proposedDoctorPrice,
+                    currentDoctorActive = requiredBoolean(rs, "current_doctor_is_active"),
+                    proposedDoctorActive = requiredBoolean(rs, "proposed_doctor_is_active"),
+                    platformRate = platformRate,
+                    pricingPolicyRevision = pricingPolicyRevision,
+                    travelGroundServiceFee = travelGroundServiceFee
+                )
+            }
+            val ledger = ledgerResult.getOrNull()
             val latestState = runCatching { v2StateFromLatestRow(rs) }.getOrNull()
             val latestSnapshot = runCatching { latestState?.snapshot() }.getOrNull()
             val latestRevision = runCatching {
                 val live = requireNotNull(latestState)
-                val currentPolicy = travelGroundServicePricing.quoteWithPolicy(rs.getBigDecimal("medical_list_price"))
+                val currentPolicy = travelGroundServicePricing.quoteWithPolicy(requireNotNull(ledger).proposedDoctorPrice)
                 live.revision(currentPolicy.pricingPolicyRevision)
             }.getOrNull()
-            val baseResult = runCatching {
-                snapshotCodec.baseRevision(
-                    DoctorProjectRevisionSource(
-                        institutionProjectId = rs.getString("institution_project_id"),
-                        institutionId = rs.getString("institution_id"),
-                        platformProjectId = rs.getString("platform_project_id"),
-                        institutionProjectVersion = rs.getLong("base_institution_project_version"),
-                        platformInheritanceHash = rs.getString("base_platform_inheritance_hash"),
-                        doctorProjectUpdatedAt = rs.getTimestamp("base_doctor_project_updated_at").toInstant(),
-                        configId = rs.getString("base_config_id"),
-                        configUpdatedAt = rs.getTimestamp("base_config_updated_at")?.toInstant(),
-                        pricingPolicyRevision = rs.getString("pricing_policy_revision")
-                    )
-                )
-            }
-            val baseRevision = baseResult.getOrElse { "0".repeat(64) }
-            val snapshotsValid = currentResult.isSuccess && proposedResult.isSuccess && baseResult.isSuccess
+            val snapshotsValid = ledgerResult.isSuccess
             val status = rs.getString("status")
             VersionedDoctorProjectChangeViewV2(
                 id = rs.getString("id"),
@@ -542,21 +572,21 @@ class DoctorProjectChangeService(
                 institutionProjectName = rs.getString("institution_project_name"),
                 platformProjectId = rs.getString("platform_project_id"),
                 platformProjectName = rs.getString("platform_project_name"),
-                baseRevision = baseRevision,
-                currentProject = currentResult.getOrNull(),
-                proposedProject = proposedResult.getOrNull(),
+                baseRevision = ledger?.baseRevision ?: "0".repeat(64),
+                currentProject = ledger?.currentProject,
+                proposedProject = ledger?.proposedProject,
                 latestProject = latestSnapshot,
                 latestRevision = latestRevision,
-                sharedChanged = rs.getBoolean("shared_changed"),
-                currentDoctorPrice = rs.getBigDecimal("current_price"),
-                proposedDoctorPrice = rs.getBigDecimal("medical_list_price"),
+                sharedChanged = ledger?.sharedChanged ?: false,
+                currentDoctorPrice = ledger?.currentDoctorPrice ?: BigDecimal.ZERO,
+                proposedDoctorPrice = ledger?.proposedDoctorPrice ?: BigDecimal.ZERO,
                 latestDoctorPrice = rs.getBigDecimal("latest_doctor_price"),
-                currentDoctorActive = rs.getBoolean("current_doctor_is_active"),
-                proposedDoctorActive = rs.getBoolean("proposed_doctor_is_active"),
+                currentDoctorActive = ledger?.currentDoctorActive ?: false,
+                proposedDoctorActive = ledger?.proposedDoctorActive ?: false,
                 latestDoctorActive = nullableBoolean(rs, "latest_doctor_active"),
-                platformRate = rs.getBigDecimal("current_platform_rate"),
-                pricingPolicyRevision = rs.getString("pricing_policy_revision"),
-                travelGroundServiceFee = rs.getBigDecimal("proposed_travel_ground_service_fee"),
+                platformRate = ledger?.platformRate ?: BigDecimal.ZERO,
+                pricingPolicyRevision = ledger?.pricingPolicyRevision.orEmpty(),
+                travelGroundServiceFee = ledger?.travelGroundServiceFee ?: BigDecimal.ZERO,
                 requestStatus = status,
                 notes = rs.getString("notes").orEmpty(),
                 forceProcessed = rs.getBoolean("force_processed"),
@@ -878,6 +908,41 @@ class DoctorProjectChangeService(
         projectId
     ).firstOrNull()
 
+    private fun lockedDoctorProjectUpdatedAt(doctorId: String, institutionProjectId: String): Instant? =
+        jdbcTemplate.query(
+            """
+            SELECT updated_at
+            FROM doctor_projects
+            WHERE doctor_id = ? AND institution_project_id = ?
+            FOR UPDATE
+            """.trimIndent(),
+            { rs, _ -> rs.getTimestamp("updated_at").toInstant() },
+            doctorId,
+            institutionProjectId
+        ).firstOrNull()
+
+    private fun lockedActiveConfigRevision(
+        doctorId: String,
+        institutionProjectId: String
+    ): LockedConfigRevision? = jdbcTemplate.query(
+        """
+        SELECT id, updated_at, deleted_at
+        FROM doctor_institution_project_configs
+        WHERE doctor_id = ? AND institution_project_id = ?
+        FOR UPDATE
+        """.trimIndent(),
+        { rs, _ ->
+            if (rs.getTimestamp("deleted_at") == null) {
+                LockedConfigRevision(
+                    id = rs.getString("id"),
+                    updatedAt = rs.getTimestamp("updated_at").toInstant()
+                )
+            } else null
+        },
+        doctorId,
+        institutionProjectId
+    ).firstOrNull()
+
     private fun v2StateFromTargetRow(rs: java.sql.ResultSet): V2ProjectState = V2ProjectState(
         institutionProject = InstitutionProjectEntity(
             id = rs.getString("institution_project_id"),
@@ -1017,8 +1082,11 @@ class DoctorProjectChangeService(
         return if (rs.wasNull()) null else value
     }
 
-    private fun LocalDateTime?.toRequiredInstant(message: String): Instant =
-        this?.toInstant(ZoneOffset.UTC) ?: throw IllegalStateException(message)
+    private fun requiredBoolean(rs: java.sql.ResultSet, column: String): Boolean {
+        val value = rs.getBoolean(column)
+        require(!rs.wasNull()) { "$column 不能为空" }
+        return value
+    }
 
     private fun contractConflict(code: ProjectChangeErrorCode, message: String) =
         ProjectChangeContractException(HttpStatus.CONFLICT, code, message)
@@ -1151,6 +1219,25 @@ private data class V2TargetIdentity(
     val projectId: String,
     val institutionName: String,
     val doctorName: String
+)
+
+private data class LockedConfigRevision(
+    val id: String,
+    val updatedAt: Instant
+)
+
+private data class V2LedgerShape(
+    val baseRevision: String,
+    val currentProject: InstitutionProjectSnapshotV2,
+    val proposedProject: InstitutionProjectSnapshotV2,
+    val sharedChanged: Boolean,
+    val currentDoctorPrice: BigDecimal,
+    val proposedDoctorPrice: BigDecimal,
+    val currentDoctorActive: Boolean,
+    val proposedDoctorActive: Boolean,
+    val platformRate: BigDecimal,
+    val pricingPolicyRevision: String,
+    val travelGroundServiceFee: BigDecimal
 )
 
 private data class V2ProjectState(
