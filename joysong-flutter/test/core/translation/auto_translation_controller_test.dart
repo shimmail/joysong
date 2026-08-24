@@ -261,6 +261,113 @@ void main() {
       expect(repository.calls, hasLength(2));
     });
 
+    test('a validator can reentrantly add an accepted caller to its flight',
+        () async {
+      final repository = RecordingTranslationRepository()..holdResponses = true;
+      final controller = _activeController(repository);
+      addTearDown(controller.dispose);
+      var firstEvaluations = 0;
+      var secondEvaluations = 0;
+      late Future<String> secondFuture;
+      late final AutoTranslationRequest secondRequest;
+      secondRequest = AutoTranslationRequest(
+        contentType: 'article',
+        contentId: 'reentrant-accepted',
+        field: 'body',
+        sourceText: '中文reentrant-accepted',
+        validator: (_, __) {
+          secondEvaluations += 1;
+          return true;
+        },
+      );
+      final firstRequest = AutoTranslationRequest(
+        contentType: secondRequest.contentType,
+        contentId: secondRequest.contentId,
+        field: secondRequest.field,
+        sourceText: secondRequest.sourceText,
+        validator: (_, __) {
+          firstEvaluations += 1;
+          secondFuture = controller.translateOrSource(secondRequest);
+          return true;
+        },
+      );
+
+      final firstFuture = controller.translateOrSource(firstRequest);
+      await pumpEventQueue();
+      repository.completeNext('shared candidate');
+
+      expect(await firstFuture, 'shared candidate');
+      expect(await secondFuture, 'shared candidate');
+      expect(firstEvaluations, 1);
+      expect(secondEvaluations, 1);
+      expect(repository.calls, hasLength(1));
+
+      final cachedRequest = AutoTranslationRequest(
+        contentType: firstRequest.contentType,
+        contentId: firstRequest.contentId,
+        field: firstRequest.field,
+        sourceText: firstRequest.sourceText,
+      );
+      expect(await controller.translateOrSource(cachedRequest),
+          'shared candidate');
+      expect(repository.calls, hasLength(1));
+    });
+
+    test('a reentrantly added rejection prevents shared cache admission',
+        () async {
+      final repository = RecordingTranslationRepository()..holdResponses = true;
+      final controller = _activeController(repository);
+      addTearDown(controller.dispose);
+      var firstEvaluations = 0;
+      var secondEvaluations = 0;
+      late Future<String> secondFuture;
+      late final AutoTranslationRequest secondRequest;
+      secondRequest = AutoTranslationRequest(
+        contentType: 'article',
+        contentId: 'reentrant-rejected',
+        field: 'body',
+        sourceText: '中文reentrant-rejected',
+        validator: (_, __) {
+          secondEvaluations += 1;
+          return false;
+        },
+      );
+      final firstRequest = AutoTranslationRequest(
+        contentType: secondRequest.contentType,
+        contentId: secondRequest.contentId,
+        field: secondRequest.field,
+        sourceText: secondRequest.sourceText,
+        validator: (_, __) {
+          firstEvaluations += 1;
+          secondFuture = controller.translateOrSource(secondRequest);
+          return true;
+        },
+      );
+
+      final firstFuture = controller.translateOrSource(firstRequest);
+      await pumpEventQueue();
+      repository.completeNext('shared candidate');
+
+      expect(await firstFuture, 'shared candidate');
+      expect(await secondFuture, secondRequest.sourceText);
+      expect(firstEvaluations, 1);
+      expect(secondEvaluations, 1);
+      expect(repository.calls, hasLength(1));
+
+      repository.holdResponses = false;
+      final retry = AutoTranslationRequest(
+        contentType: firstRequest.contentType,
+        contentId: firstRequest.contentId,
+        field: firstRequest.field,
+        sourceText: firstRequest.sourceText,
+      );
+      expect(
+        await controller.translateOrSource(retry),
+        'en-US:${retry.sourceText}',
+      );
+      expect(repository.calls, hasLength(2));
+    });
+
     test('cached text is revalidated for each caller and rejection retries',
         () async {
       final repository = RecordingTranslationRepository()

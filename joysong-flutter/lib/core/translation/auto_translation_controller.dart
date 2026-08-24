@@ -176,11 +176,14 @@ final class AutoTranslationController {
         return;
       }
 
-      for (final caller in job.callers) {
+      var callerIndex = 0;
+      while (callerIndex < job.callers.length) {
+        final caller = job.callers[callerIndex];
         caller.accepted = _isValid(caller.request, translated);
         if (!_ownsCurrentCaller(job, caller)) {
           return;
         }
+        callerIndex += 1;
       }
 
       if (job.callers.every((caller) => caller.accepted!)) {
