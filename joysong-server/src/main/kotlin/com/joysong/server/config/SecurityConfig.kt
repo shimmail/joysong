@@ -2,6 +2,7 @@ package com.joysong.server.config
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.joysong.server.common.BaseResponse
+import jakarta.servlet.DispatcherType
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.http.MediaType
@@ -77,6 +78,7 @@ class SecurityConfig(
                     ).authenticated()
                     .requestMatchers("/api/admin/**").hasRole("ADMIN")
                     .requestMatchers("/api/cs/**").authenticated()
+                    .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
                     .anyRequest().authenticated()
             }
             .exceptionHandling { exceptions ->
