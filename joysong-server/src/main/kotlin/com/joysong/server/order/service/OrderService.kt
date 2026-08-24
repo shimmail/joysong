@@ -35,6 +35,7 @@ import java.time.format.DateTimeFormatter
 import java.util.UUID
 import com.joysong.server.payment.domain.Money
 import com.joysong.server.refund.service.RefundExecutionService
+import com.joysong.server.notification.service.BusinessNotificationService
 
 /**
  * 订单核心业务服务
@@ -61,6 +62,7 @@ class OrderService(
     private val institutionConsultantService: InstitutionConsultantService,
     private val doctorInstitutionRelationshipService: DoctorInstitutionRelationshipService,
     private val travelGroundServicePricing: TravelGroundServicePricing,
+    private val businessNotificationService: BusinessNotificationService,
     private val refundExecutionService: RefundExecutionService? = null
 ) {
     private val secureRandom = SecureRandom()
@@ -215,6 +217,9 @@ class OrderService(
             remark = "创建订单"
         )
         log.info("用户[{}]创建订单[{}]成功, 订单号: {}", userId, saved.id, orderNo)
+        notifySafely("ORDER_CREATED", saved.id) {
+            businessNotificationService.orderCreated(saved.id, saved.userId, saved.consultantId)
+        }
         return OrderResponse.from(saved)
     }
 
@@ -459,6 +464,11 @@ class OrderService(
                 remark = "用户确认旅游地接服务完成"
             )
             log.info("订单[{}]确认旅游地接服务完成", orderId)
+            notifySafely("ORDER_COMPLETED", completed.id) {
+                businessNotificationService.orderCompleted(
+                    completed.id, completed.consultantId, completed.doctorId, completed.institutionId
+                )
+            }
             return OrderResponse.from(completed)
         }
         requireMedicalPaymentSupported(order)
@@ -489,6 +499,11 @@ class OrderService(
         log.info("订单[{}]用户确认完成, 结算到期时间: {}", orderId, settlementAt)
 
         settlementService.saveSettlement(orderId, settlementAt)
+        notifySafely("ORDER_COMPLETED", updated.id) {
+            businessNotificationService.orderCompleted(
+                updated.id, updated.consultantId, updated.doctorId, updated.institutionId
+            )
+        }
         return OrderResponse.from(updated)
     }
 
@@ -532,6 +547,9 @@ class OrderService(
             remark = "支付超时自动取消"
         )
         log.info("订单[{}]支付超时自动取消", orderId)
+        notifySafely("ORDER_CANCELLED", order.id) {
+            businessNotificationService.orderCancelled(order.id, order.userId, order.consultantId)
+        }
     }
 
     /**
@@ -654,6 +672,9 @@ class OrderService(
         }
 
         log.info("订单[{}]尾款支付超时自动取消", orderId)
+        notifySafely("ORDER_CANCELLED", order.id) {
+            businessNotificationService.orderCancelled(order.id, order.userId, order.consultantId)
+        }
     }
 
     /**
@@ -780,6 +801,9 @@ class OrderService(
         )
 
         log.info("用户[{}]取消订单[{}]", userId, orderId)
+        notifySafely("ORDER_CANCELLED", order.id) {
+            businessNotificationService.orderCancelled(order.id, order.userId, order.consultantId)
+        }
     }
 
     /**
@@ -890,6 +914,11 @@ class OrderService(
             remark = "管理员修改状态"
         )
         log.info("管理员将订单[{}]状态从[{}]更新为[{}]", id, currentStatus.value, targetStatus.value)
+        if (targetStatus == OrderStatusEnum.CANCELLED) {
+            notifySafely("ORDER_CANCELLED", updated.id) {
+                businessNotificationService.orderCancelled(updated.id, updated.userId, updated.consultantId)
+            }
+        }
         return updated
     }
 
@@ -947,6 +976,12 @@ class OrderService(
 
     /** 订单总数 */
     fun count(): Long = orderRepository.count()
+
+    private fun notifySafely(eventType: String, orderId: String, notification: () -> Unit) {
+        runCatching(notification).onFailure { error ->
+            log.error("订单通知发送失败: type={}, orderId={}", eventType, orderId, error)
+        }
+    }
 
     /**
      * 生成订单编号

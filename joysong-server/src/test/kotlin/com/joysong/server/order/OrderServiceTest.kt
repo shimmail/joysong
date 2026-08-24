@@ -23,6 +23,7 @@ import com.joysong.server.order.service.OrderService
 import com.joysong.server.order.service.OrderSplitRatePolicy
 import com.joysong.server.order.service.OrderStatusLogService
 import com.joysong.server.order.service.TravelGroundServicePricing
+import com.joysong.server.notification.service.BusinessNotificationService
 import com.joysong.server.project.entity.ProjectEntity
 import com.joysong.server.project.repository.ProjectRepository
 import com.joysong.server.settlement.entity.SettlementEntity
@@ -57,6 +58,7 @@ class OrderServiceTest {
     @MockK private lateinit var reviewService: ReviewService
     @MockK private lateinit var institutionConsultantService: InstitutionConsultantService
     @MockK private lateinit var doctorInstitutionRelationshipService: DoctorInstitutionRelationshipService
+    @MockK(relaxed = true) private lateinit var businessNotificationService: BusinessNotificationService
     private val institutionProjectDetailResolver = InstitutionProjectDetailResolver()
 
     private lateinit var orderService: OrderService
@@ -102,7 +104,8 @@ class OrderServiceTest {
             reviewService,
             institutionConsultantService = institutionConsultantService,
             doctorInstitutionRelationshipService = doctorInstitutionRelationshipService,
-            travelGroundServicePricing = TravelGroundServicePricing(OrderSplitRatePolicy(splitProperties))
+            travelGroundServicePricing = TravelGroundServicePricing(OrderSplitRatePolicy(splitProperties)),
+            businessNotificationService = businessNotificationService
         )
         // 默认 stub：logTransition 不做任何事
         justRun { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) }
@@ -335,6 +338,9 @@ class OrderServiceTest {
         verify(exactly = 0) { couponService.listUserAvailableCoupons(any()) }
         verify(exactly = 0) { couponService.calculateDiscount(any(), any()) }
         verify(exactly = 0) { couponService.redeemCoupon(any(), any()) }
+        verify(exactly = 1) {
+            businessNotificationService.orderCreated("order-new", "user-1", "consultant-1")
+        }
     }
 
     @Test
@@ -668,6 +674,9 @@ class OrderServiceTest {
         verify { orderRepository.save(capture(saved)) }
         assertNotNull(saved.captured.settlementAt)
         verify { settlementService.saveSettlement("o1", saved.captured.settlementAt) }
+        verify(exactly = 1) {
+            businessNotificationService.orderCompleted("o1", "consultant-1", "doctor-1", "inst-1")
+        }
     }
 
     @Test
@@ -701,6 +710,11 @@ class OrderServiceTest {
             )
         }
         verify(exactly = 0) { settlementService.saveSettlement(any(), any()) }
+        verify(exactly = 1) {
+            businessNotificationService.orderCompleted(
+                "travel-completion", "consultant-1", "doctor-1", "inst-1"
+            )
+        }
     }
 
     @Test
@@ -738,6 +752,9 @@ class OrderServiceTest {
             )
         }
         verify(exactly = 0) { entityManager.createNativeQuery(any<String>()) }
+        verify(exactly = 1) {
+            businessNotificationService.orderCancelled("o1", "user-1", "consultant-1")
+        }
     }
 
     @Test
@@ -853,6 +870,9 @@ class OrderServiceTest {
                 "支付超时自动取消"
             )
         }
+        verify(exactly = 1) {
+            businessNotificationService.orderCancelled("travel-pending", "user-1", "consultant-1")
+        }
     }
 
     @Test
@@ -876,6 +896,9 @@ class OrderServiceTest {
         val saved = slot<OrderEntity>()
         verify { orderRepository.save(capture(saved)) }
         assertEquals(OrderStatusEnum.CANCELLED.value, saved.captured.status)
+        verify(exactly = 1) {
+            businessNotificationService.orderCancelled("o1", "user-1", "consultant-1")
+        }
     }
 
     @Test
@@ -1063,6 +1086,9 @@ class OrderServiceTest {
                 "管理员修改状态"
             )
         }
+        verify(exactly = 1) {
+            businessNotificationService.orderCancelled("travel-1", "user-1", "consultant-1")
+        }
     }
 
     @Test
@@ -1175,6 +1201,8 @@ class OrderServiceTest {
         paymentFlow = paymentFlow,
         projectId = "project-1",
         institutionId = "inst-1",
+        consultantId = "consultant-1",
+        doctorId = "doctor-1",
         verifyCode = "123456",
         orderNo = "JOY202607311200001234"
     )

@@ -4,6 +4,7 @@ import com.joysong.server.order.dto.OrderStatusEnum
 import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.repository.OrderRepository
 import com.joysong.server.order.service.OrderStatusLogService
+import com.joysong.server.notification.service.BusinessNotificationService
 import com.joysong.server.payment.domain.Money
 import com.joysong.server.payment.domain.PaymentCompensation
 import com.joysong.server.payment.domain.PaymentProvider
@@ -26,7 +27,8 @@ class PaymentPersistenceService(
     private val paymentRepository: PaymentRepository,
     private val orderRepository: OrderRepository,
     private val orderStatusLogService: OrderStatusLogService,
-    private val compensationRepository: PaymentCompensationCaseRepository? = null
+    private val compensationRepository: PaymentCompensationCaseRepository? = null,
+    private val businessNotificationService: BusinessNotificationService
 ) {
     private val secureRandom = SecureRandom()
 
@@ -347,6 +349,14 @@ class PaymentPersistenceService(
                 payment.provider,
                 payment.id
             )
+            notifySafely("ORDER_SERVICE_ACTIVATED", updatedOrder.id) {
+                businessNotificationService.orderServiceActivated(
+                    updatedOrder.id,
+                    updatedOrder.userId,
+                    updatedOrder.consultantId,
+                    updatedOrder.doctorId
+                )
+            }
             return completed
         }
         checkNotNull(order) { "ORDER_NOT_FOUND" }
@@ -507,6 +517,12 @@ class PaymentPersistenceService(
         localExpiry: LocalDateTime?,
         providerExpiry: LocalDateTime?
     ): LocalDateTime? = listOfNotNull(localExpiry, providerExpiry).minOrNull()
+
+    private fun notifySafely(eventType: String, orderId: String, notification: () -> Unit) {
+        runCatching(notification).onFailure { error ->
+            log.error("支付订单通知发送失败: type={}, orderId={}", eventType, orderId, error)
+        }
+    }
 
     private fun findSuccessfulPayment(orderId: String, type: PaymentType): PaymentEntity? =
         paymentRepository.findFirstByOrderIdAndPaymentTypeAndStatusInOrderByCreatedAtDesc(

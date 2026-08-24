@@ -4,6 +4,7 @@ import com.joysong.server.order.dto.OrderStatusEnum
 import com.joysong.server.order.repository.OrderRepository
 import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.service.OrderStatusLogService
+import com.joysong.server.notification.service.BusinessNotificationService
 import com.joysong.server.payment.domain.PaymentProvider
 import com.joysong.server.payment.domain.PaymentStatus
 import com.joysong.server.payment.domain.PaymentType
@@ -34,6 +35,7 @@ class PaymentOrchestrationTest {
     private val paymentRepository = mockk<PaymentRepository>()
     private val orderRepository = mockk<OrderRepository>()
     private val orderStatusLogService = mockk<OrderStatusLogService>()
+    private val businessNotificationService = mockk<BusinessNotificationService>(relaxed = true)
     private val persistence = mockk<PaymentPersistenceService>()
     private val gateway = mockk<PaymentGateway>()
 
@@ -700,6 +702,9 @@ class PaymentOrchestrationTest {
             firstArg<OrderEntity>().also { orderState = it }
         }
         every { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) } returns Unit
+        every {
+            businessNotificationService.orderServiceActivated(any(), any(), any(), any())
+        } throws IllegalStateException("notification persistence unavailable")
 
         val providerResult = ProviderPaymentResult(
             status = PaymentStatus.SUCCEEDED,
@@ -742,12 +747,18 @@ class PaymentOrchestrationTest {
                 any()
             )
         }
+        verify(exactly = 1) {
+            businessNotificationService.orderServiceActivated(
+                "order-1", "user-1", "consultant-1", "doctor-1"
+            )
+        }
 
         val replayed = persistence.applyProviderResult(prepared.id, providerResult)
         assertEquals(updated.paidAt, replayed.paidAt)
         assertEquals(activatedAt, orderState.serviceActivatedAt)
         verify(exactly = 1) { repositories.order.save(any()) }
         verify(exactly = 1) { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 1) { businessNotificationService.orderServiceActivated(any(), any(), any(), any()) }
     }
 
     @Test
@@ -1174,6 +1185,19 @@ class PaymentOrchestrationTest {
         compensation = mockk(relaxed = true)
     )
 
+    private fun PaymentPersistenceService(
+        paymentRepository: PaymentRepository,
+        orderRepository: OrderRepository,
+        orderStatusLogService: OrderStatusLogService,
+        compensationRepository: PaymentCompensationCaseRepository? = null
+    ): PaymentPersistenceService = com.joysong.server.payment.service.PaymentPersistenceService(
+        paymentRepository,
+        orderRepository,
+        orderStatusLogService,
+        compensationRepository,
+        businessNotificationService
+    )
+
     private fun travelService(
         repositories: PersistenceRepositories,
         gateway: PaymentGateway
@@ -1198,7 +1222,9 @@ class PaymentOrchestrationTest {
         paymentFlow = "TRAVEL_GROUND_SERVICE_ONLY",
         travelGroundServiceFeeMinor = 40_000,
         status = status,
-        createdAt = createdAt
+        createdAt = createdAt,
+        consultantId = "consultant-1",
+        doctorId = "doctor-1"
     )
 
     private fun travelPayment(
