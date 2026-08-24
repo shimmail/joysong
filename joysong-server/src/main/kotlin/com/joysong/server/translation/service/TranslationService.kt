@@ -1,6 +1,6 @@
 package com.joysong.server.translation.service
 
-import com.joysong.server.config.AiAgentProperties
+import com.joysong.server.translation.config.TranslationProperties
 import com.joysong.server.translation.dto.TranslateTextRequest
 import com.joysong.server.translation.dto.TranslationResponse
 import org.slf4j.LoggerFactory
@@ -21,7 +21,7 @@ import java.util.Locale
 @Service
 class TranslationService(
     @Qualifier("translationRestTemplate") private val restTemplate: RestTemplate,
-    private val aiAgentProperties: AiAgentProperties
+    private val translationProperties: TranslationProperties
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
     private val responseCache = object : LinkedHashMap<String, TranslationResponse>(128, 0.75f, true) {
@@ -58,13 +58,14 @@ class TranslationService(
     }
 
     private fun requestQwenTranslation(text: String, targetLanguage: String): TranslationResponse {
-        check(aiAgentProperties.apiKey.isNotBlank()) { "Qwen 翻译服务尚未配置" }
+        val qwen = translationProperties.qwen
+        check(qwen.apiKey.isNotBlank()) { "Qwen 翻译服务尚未配置" }
         val headers = HttpHeaders().apply {
-            setBearerAuth(aiAgentProperties.apiKey)
+            setBearerAuth(qwen.apiKey)
             contentType = MediaType.APPLICATION_JSON
         }
         val body = mapOf(
-            "model" to TRANSLATION_MODEL,
+            "model" to qwen.model,
             "messages" to listOf(
                 mapOf(
                     "role" to "system",
@@ -77,7 +78,7 @@ class TranslationService(
             "max_tokens" to qwenTranslationMaxTokens(text),
             "stream" to false
         )
-        val url = "${aiAgentProperties.baseUrl.trimEnd('/')}/chat/completions"
+        val url = "${qwen.baseUrl.trimEnd('/')}/chat/completions"
         val response = restTemplate.exchange(url, HttpMethod.POST, HttpEntity(body, headers), Map::class.java)
         val choice = (response.body?.get("choices") as? List<*>)?.firstOrNull() as? Map<*, *>
         val message = choice?.get("message") as? Map<*, *>
@@ -87,7 +88,7 @@ class TranslationService(
             translatedText = translatedText,
             detectedLanguage = "und",
             targetLanguage = targetLanguage,
-            provider = "qwen"
+            provider = translationProperties.provider
         )
     }
 
@@ -144,7 +145,6 @@ class TranslationService(
     private companion object {
         const val MAX_TEXT_LENGTH = 12000
         const val MAX_CACHE_ENTRIES = 1000
-        const val TRANSLATION_MODEL = "qwen3.7-flash"
         const val MIN_QWEN_TRANSLATION_TOKENS = 128
         const val MAX_QWEN_TRANSLATION_TOKENS = 4096
         val USER_CONTENT_TYPES = setOf("diary", "comment", "message")

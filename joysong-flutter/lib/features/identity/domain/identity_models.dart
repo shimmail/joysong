@@ -2274,7 +2274,6 @@ final class PlatformProjectRequestDraft {
     required this.category,
     required this.description,
     this.referencePrice = 0,
-    this.currency = 'CNY',
     this.slogan = '',
     this.salesCount = 0,
     this.coverImage = '',
@@ -2289,7 +2288,6 @@ final class PlatformProjectRequestDraft {
   final String category;
   final String description;
   final num referencePrice;
-  final String currency;
   final String slogan;
   final int salesCount;
   final String coverImage;
@@ -2313,7 +2311,6 @@ final class PlatformProjectRequestDraft {
     if (salesCount < 0 || salesCount > 2147483647) {
       throw ArgumentError('销量必须在 0 到 2147483647 之间');
     }
-    _validateCurrency(currency);
     _validateItems('项目图片', images, 20, 500, 2000);
     _validateItems('项目标签', tags, 20, 100, 500);
     _validateItems('分类标签', categoryTags, 20, 100, 500);
@@ -2327,7 +2324,7 @@ final class PlatformProjectRequestDraft {
       'category': category.trim(),
       'description': description.trim(),
       'referencePrice': referencePrice,
-      'currency': currency.trim().toUpperCase(),
+      'currency': 'USD',
       'slogan': slogan.trim(),
       'salesCount': salesCount,
       'coverImage': coverImage.trim(),

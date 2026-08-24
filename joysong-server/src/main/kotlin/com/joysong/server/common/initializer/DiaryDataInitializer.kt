@@ -45,7 +45,7 @@ class DiaryDataInitializer(
                 projectId = SeedIds.PROJ_ID_1,
                 institutionId = SeedIds.INST_ID_1,
                 institutionProjectId = SeedIds.IP_ID_1,
-                orderId = SeedIds.ORDER_ID_3
+                orderId = ""
             ),
             DiaryEntity(
                 id = UUID.randomUUID().toString(),

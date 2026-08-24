@@ -1641,6 +1641,12 @@ final class _FakeIdentityRepository implements IdentityRepository {
       throw UnimplementedError();
 
   @override
+  Future<DoctorProjectChangeRequest> submitDoctorProjectLeave({
+    required String institutionProjectId,
+  }) =>
+      throw UnimplementedError();
+
+  @override
   Future<List<DoctorProjectProfileUpdateTarget>>
       listDoctorProjectProfileUpdateTargets() async => const [];
 

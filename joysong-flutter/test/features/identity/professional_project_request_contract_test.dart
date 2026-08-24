@@ -14,13 +14,12 @@ void main() {
     'doctorRate',
   };
 
-  test('platform draft emits the exact 13-key creation snapshot', () {
+  test('platform draft emits the exact 13-key USD creation snapshot', () {
     const draft = PlatformProjectRequestDraft(
       name: ' Hydrating Facial ',
       category: ' Skin ',
       description: ' Deep hydration ',
       referencePrice: 899.25,
-      currency: ' usd ',
       slogan: ' Glow naturally ',
       salesCount: 12,
       coverImage: ' cover.jpg ',
@@ -213,15 +212,6 @@ void main() {
         category: 'Skin',
         description: 'Description',
         referencePrice: 0.001,
-      ).validate(),
-      throwsArgumentError,
-    );
-    expect(
-      () => const PlatformProjectRequestDraft(
-        name: 'Name',
-        category: 'Skin',
-        description: 'Description',
-        currency: 'EUR',
       ).validate(),
       throwsArgumentError,
     );

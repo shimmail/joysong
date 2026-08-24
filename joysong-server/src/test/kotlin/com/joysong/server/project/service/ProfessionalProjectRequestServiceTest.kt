@@ -62,7 +62,7 @@ class ProfessionalProjectRequestServiceTest {
                 category = " Skin ",
                 description = " Description ",
                 referencePrice = BigDecimal("199.90"),
-                currency = CurrencyCode.CNY,
+                currency = CurrencyCode.USD,
                 slogan = "  Clear skin  ",
                 salesCount = 12,
                 coverImage = " cover.png ",
@@ -86,7 +86,7 @@ class ProfessionalProjectRequestServiceTest {
                 },
                 any(), "PLATFORM", "doctor-1", null, null,
                 "Laser", "Skin", "Description", "[\"bright\",\"laser\"]", "Clear skin", "Details",
-                "CNY", "cover.png", "[\"one.png\",\"two.png\"]", 12,
+                "USD", "cover.png", "[\"one.png\",\"two.png\"]", 12,
                 BigDecimal("199.90"), "[\"face\"]",
                 null, null, null, null, null, null,
                 "Notes"
@@ -180,6 +180,7 @@ class ProfessionalProjectRequestServiceTest {
         every { jdbcTemplate.queryForObject(match<String> { it.contains("professional_project_requests") }, Long::class.java, *anyVararg()) } returns 0L
         every { jdbcTemplate.update(match<String> { it.contains("INSERT INTO professional_project_requests") }, *anyVararg()) } returns 1
         val invalidPlatformRequests = listOf(
+            DoctorPlatformProjectRequest(name = "P", category = "C", description = "D", currency = CurrencyCode.CNY),
             DoctorPlatformProjectRequest(name = "P", category = "C", description = "D", referencePrice = BigDecimal("-0.01")),
             DoctorPlatformProjectRequest(name = "P", category = "C", description = "D", referencePrice = BigDecimal("100000000.00")),
             DoctorPlatformProjectRequest(name = "P", category = "C", description = "D", referencePrice = BigDecimal("1.001")),
@@ -545,6 +546,22 @@ class ProfessionalProjectRequestServiceTest {
                 BigDecimal("199.00"), "USD", "Slogan", "Service details",
                 BigDecimal.ZERO, 0, 1
             )
+        }
+    }
+
+    @Test
+    fun `platform approval rejects a legacy non USD snapshot before creating a project`() {
+        every { jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) } answers {
+            val mapper = secondArg<RowMapper<Any>>()
+            listOf(mapper.mapRow(targetResultSet("PLATFORM", null, currency = "CNY"), 0))
+        }
+
+        assertThrows<IllegalArgumentException> {
+            service.reviewPlatform(adminActor(), "request-1", ProjectRequestReview("APPROVED"))
+        }
+
+        verify(exactly = 0) {
+            jdbcTemplate.update(match<String> { it.contains("INSERT INTO projects") }, *anyVararg())
         }
     }
 
@@ -952,7 +969,8 @@ class ProfessionalProjectRequestServiceTest {
         driftedSplit: Boolean = false,
         tagsJson: String = "[\"tag\"]",
         categoryTagsJson: String = "[\"category-tag\"]",
-        imagesJson: String = "[\"one.png\"]"
+        imagesJson: String = "[\"one.png\"]",
+        currency: String = "USD"
     ): ResultSet = mockk<ResultSet>(relaxed = true).also { rs ->
         every { rs.getString("id") } returns "request-1"
         every { rs.getString("request_type") } returns type
@@ -965,7 +983,7 @@ class ProfessionalProjectRequestServiceTest {
         every { rs.getString("tags") } returns tagsJson
         every { rs.getString("slogan") } returns "Slogan"
         every { rs.getString("detail_content") } returns "Service details"
-        every { rs.getString("currency") } returns "USD"
+        every { rs.getString("currency") } returns currency
         every { rs.getString("cover_image") } returns "cover.png"
         every { rs.getString("images") } returns imagesJson
         every { rs.getInt("sales_count") } returns 1

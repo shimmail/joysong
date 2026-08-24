@@ -433,7 +433,6 @@ class _PlatformProjectRequestPageState
   final _tags = TextEditingController();
   final _categoryTags = TextEditingController();
   final _notes = TextEditingController();
-  String _currency = 'CNY';
   String _coverImage = '';
   List<String> _images = const [];
   List<ProfessionalProjectRequest> _requests = const [];
@@ -512,39 +511,16 @@ class _PlatformProjectRequestPageState
                 context.localized('项目名称', 'Project name'),
                 fieldKey: const Key('platform-name'),
               ),
-              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Expanded(
-                  child: _requestField(
-                    _referencePrice,
-                    context.localized('参考价格', 'Reference price'),
-                    fieldKey: const Key('platform-reference-price'),
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                  ),
+              _requestField(
+                _referencePrice,
+                context.localized(
+                  '参考价格（USD）',
+                  'Reference price (USD)',
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: KeyedSubtree(
-                    key: const Key('platform-currency'),
-                    child: DropdownButtonFormField<String>(
-                      key: ValueKey('platform-currency-$_currency'),
-                      initialValue: _currency,
-                      decoration: InputDecoration(
-                        labelText: context.localized('币种', 'Currency'),
-                      ),
-                      items: const [
-                        DropdownMenuItem(value: 'CNY', child: Text('CNY')),
-                        DropdownMenuItem(value: 'USD', child: Text('USD')),
-                      ],
-                      onChanged: _saving
-                          ? null
-                          : (value) =>
-                              setState(() => _currency = value ?? 'CNY'),
-                    ),
-                  ),
-                ),
-              ]),
-              const SizedBox(height: 12),
+                fieldKey: const Key('platform-reference-price'),
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+              ),
               _requestField(
                 _slogan,
                 context.localized('项目标语', 'Slogan'),
@@ -660,7 +636,6 @@ class _PlatformProjectRequestPageState
       category: _category.text,
       description: _description.text,
       referencePrice: referencePrice,
-      currency: _currency,
       slogan: _slogan.text,
       salesCount: salesCount,
       coverImage: _coverImage,
@@ -747,7 +722,6 @@ class _PlatformProjectRequestPageState
       controller.clear();
     }
     setState(() {
-      _currency = 'CNY';
       _coverImage = '';
       _images = const [];
     });
@@ -956,13 +930,6 @@ class _InstitutionProjectRequestsPageState
         _currentContext.managedInstitutionIds.contains(request.institutionId);
   }
 
-  ManagementProjectOption? get _selectedProject {
-    for (final project in _projects) {
-      if (project.id == _projectId) return project;
-    }
-    return null;
-  }
-
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(
@@ -1006,7 +973,7 @@ class _InstitutionProjectRequestsPageState
                                 child: Text(item.name),
                               ))
                           .toList(),
-                      onChanged: _saving
+                      onChanged: _saving || _uploading
                           ? null
                           : (value) {
                               if (value != null) _selectProject(value);
@@ -1021,48 +988,40 @@ class _InstitutionProjectRequestsPageState
                       key: const Key('institution-applicant-notice'),
                     ),
                     const SizedBox(height: 12),
-                    if (_selectedProject != null)
-                      _inheritancePreview(context, _selectedProject!),
                     _requestField(
                       _name,
-                      context.localized('项目名称（可选覆盖）', 'Name override'),
+                      context.localized('项目名称', 'Project name'),
                       fieldKey: const Key('institution-name'),
-                      hintText: _selectedProject?.name,
                     ),
                     _requestField(
                       _category,
-                      context.localized('项目分类（可选覆盖）', 'Category override'),
+                      context.localized('项目分类', 'Category'),
                       fieldKey: const Key('institution-category'),
-                      hintText: _selectedProject?.category,
                     ),
                     _requestField(
                       _description,
-                      context.localized('项目说明（可选覆盖）', 'Description override'),
+                      context.localized('项目说明', 'Description'),
                       fieldKey: const Key('institution-description'),
                       maxLines: 4,
-                      hintText: _selectedProject?.description,
                     ),
                     _requestField(
                       _tags,
-                      context.localized('项目标签（可选覆盖）', 'Tags override'),
+                      context.localized('项目标签', 'Tags'),
                       fieldKey: const Key('institution-tags'),
-                      hintText: _selectedProject?.tags,
                     ),
                     _requestField(
                       _slogan,
-                      context.localized('项目标语（可选覆盖）', 'Slogan override'),
+                      context.localized('项目标语', 'Slogan'),
                       fieldKey: const Key('institution-slogan'),
-                      hintText: _selectedProject?.slogan,
                     ),
                     _requestField(
                       _detailContent,
                       context.localized(
-                        '项目详情（可选纯文本覆盖）',
-                        'Detail override (plain text)',
+                        '项目详情（纯文本）',
+                        'Detail (plain text)',
                       ),
                       fieldKey: const Key('institution-detail-content'),
                       maxLines: 6,
-                      hintText: _selectedProject?.detailContent,
                     ),
                     _requestField(
                       _price,
@@ -1086,14 +1045,10 @@ class _InstitutionProjectRequestsPageState
                     const SizedBox(height: 12),
                     _imageUploadField(
                       context,
-                      title: context.localized('封面图（可选覆盖）', 'Cover override'),
+                      title: context.localized('封面图', 'Cover image'),
                       values: _cover.text.trim().isEmpty
                           ? const []
                           : [_cover.text.trim()],
-                      inheritedValues: _selectedProject == null ||
-                              _selectedProject!.coverImage.isEmpty
-                          ? const []
-                          : [_selectedProject!.coverImage],
                       addKey: const Key('institution-cover-upload'),
                       addLabel: context.localized('上传封面图', 'Upload cover'),
                       removeLabel:
@@ -1106,10 +1061,8 @@ class _InstitutionProjectRequestsPageState
                     ),
                     _imageUploadField(
                       context,
-                      title:
-                          context.localized('项目图片（可选覆盖）', 'Gallery override'),
+                      title: context.localized('项目图片', 'Gallery images'),
                       values: _images,
-                      inheritedValues: _selectedProject?.images ?? const [],
                       addKey: const Key('institution-gallery-upload'),
                       addLabel:
                           context.localized('添加项目图片', 'Add gallery image'),
@@ -1130,9 +1083,6 @@ class _InstitutionProjectRequestsPageState
                       context.localized('销量', 'Sales count'),
                       fieldKey: const Key('institution-sales-count'),
                       keyboardType: TextInputType.number,
-                      hintText: _selectedProject == null
-                          ? null
-                          : '${_selectedProject!.salesCount}',
                     ),
                     SwitchListTile(
                       key: const Key('institution-is-active'),
@@ -1162,14 +1112,15 @@ class _InstitutionProjectRequestsPageState
                     Text(_error!,
                         style: TextStyle(
                             color: Theme.of(context).colorScheme.error)),
-                  for (final request in _requests)
-                    _professionalRequestSnapshot(
-                      context,
-                      request,
-                      canReview: _canReview(request),
-                      reviewEnabled: !_reviewing,
-                      onReview: () => _review(request),
-                    ),
+                  if (widget.reviewMode)
+                    for (final request in _requests)
+                      _professionalRequestSnapshot(
+                        context,
+                        request,
+                        canReview: _canReview(request),
+                        reviewEnabled: !_reviewing,
+                        onReview: () => _review(request),
+                      ),
                 ],
               ),
       );
@@ -1179,9 +1130,7 @@ class _InstitutionProjectRequestsPageState
     final institutionId = _institutionId;
     final projectId = _projectId;
     final price = num.tryParse(_price.text.trim());
-    final salesCount = _salesCount.text.trim().isEmpty
-        ? _selectedProject?.salesCount
-        : int.tryParse(_salesCount.text.trim());
+    final salesCount = int.tryParse(_salesCount.text.trim());
     if (institutionId == null ||
         projectId == null ||
         price == null ||
@@ -1315,8 +1264,18 @@ class _InstitutionProjectRequestsPageState
   }
 
   void _selectProject(String projectId) {
+    final project = _projects.firstWhere((item) => item.id == projectId);
     setState(() {
       _projectId = projectId;
+      _name.text = project.name;
+      _category.text = project.category;
+      _description.text = project.description;
+      _tags.text = project.tags;
+      _slogan.text = project.slogan;
+      _detailContent.text = project.detailContent ?? '';
+      _cover.text = project.coverImage;
+      _images = List<String>.of(project.images, growable: false);
+      _salesCount.text = '${project.salesCount}';
       _error = null;
     });
   }
@@ -1421,17 +1380,10 @@ class DoctorProjectProfileUpdatePage extends StatefulWidget {
 
 class _DoctorProjectProfileUpdatePageState
     extends State<DoctorProjectProfileUpdatePage> {
-  final _price = TextEditingController();
-  final _description = TextEditingController();
-  final _tags = TextEditingController();
-  final _schedule = TextEditingController();
-  final _cover = TextEditingController();
-  final _images = TextEditingController();
-  final _notes = TextEditingController();
   List<DoctorProjectProfileUpdateTarget> _targets = const [];
   List<DoctorProjectChangeRequest> _requests = const [];
-  DoctorProjectProfileUpdateTarget? _selected;
-  bool _loading = true, _saving = false, _uploading = false;
+  DoctorSelfProfile? _doctorProfile;
+  bool _loading = true, _saving = false;
   String? _error;
 
   @override
@@ -1440,32 +1392,16 @@ class _DoctorProjectProfileUpdatePageState
     _load();
   }
 
-  @override
-  void dispose() {
-    for (final controller in [
-      _price,
-      _description,
-      _tags,
-      _schedule,
-      _cover,
-      _images,
-      _notes,
-    ]) {
-      controller.dispose();
-    }
-    super.dispose();
-  }
-
   Future<void> _load() async {
     setState(() {
       _loading = true;
       _targets = const [];
-      _selected = null;
+      _doctorProfile = null;
       _error = null;
     });
     try {
       Object? targetFailure;
-      final values = await Future.wait<Object>([
+      final values = await Future.wait<Object?>([
         widget.repository.listDoctorProjectProfileUpdateTargets().catchError(
           (Object error) {
             targetFailure = error;
@@ -1473,19 +1409,20 @@ class _DoctorProjectProfileUpdatePageState
           },
         ),
         widget.repository.listDoctorProjectChangeRequests(),
+        _loadDoctorProfileSafely(),
       ]);
       final targets = values[0] as List<DoctorProjectProfileUpdateTarget>;
       if (!mounted) return;
       setState(() {
         _targets = targets;
         _requests = values[1] as List<DoctorProjectChangeRequest>;
+        _doctorProfile = values[2] as DoctorSelfProfile?;
         _loading = false;
         if (targetFailure != null) {
           _error = context.localized('可修改项目加载失败，请重试',
               'Failed to load editable projects. Please retry.');
         }
       });
-      if (targets.length == 1) _select(targets.single);
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -1497,210 +1434,430 @@ class _DoctorProjectProfileUpdatePageState
     }
   }
 
-  void _select(DoctorProjectProfileUpdateTarget target) {
-    setState(() {
-      _selected = target;
-      _error = null;
-    });
-    _price.text = '${target.currentPrice}';
-    _description.text = target.serviceDescription;
-    _tags.text = target.serviceTags.join(', ');
-    _schedule.text = target.scheduleNote;
-    _cover.text = target.coverImage;
-    _images.text = target.images.join('\n');
-    _notes.clear();
+  Future<DoctorSelfProfile?> _loadDoctorProfileSafely() async {
+    try {
+      return await Future.sync(() => widget.repository.loadDoctorSelfProfile());
+    } catch (_) {
+      return null;
+    }
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(
-            title: Text(
-                context.localized('编辑机构项目', 'Edit institution project'))),
-        body: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : ListView(padding: const EdgeInsets.all(16), children: [
+  Widget build(BuildContext context) {
+    final groupedTargets = <String, List<DoctorProjectProfileUpdateTarget>>{};
+    for (final target in _targets) {
+      groupedTargets.putIfAbsent(target.institutionId, () => []).add(target);
+    }
+    final institutionNames = <String, String>{
+      for (final institution in _doctorProfile?.institutions ?? const [])
+        institution.id: institution.name,
+    };
+    for (final target in _targets) {
+      institutionNames[target.institutionId] = target.institutionName;
+    }
+    final institutionIds = <String>[
+      ...institutionNames.keys,
+      ...groupedTargets.keys.where((id) => !institutionNames.containsKey(id)),
+    ];
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(context.localized('编辑机构项目', 'Edit institution project')),
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
                 if (_error != null) ...[
                   Text(_error!,
                       style: TextStyle(
                           color: Theme.of(context).colorScheme.error)),
                   TextButton(
-                      onPressed: _saving ? null : _load,
-                      child: Text(context.localized('重试', 'Retry'))),
+                    onPressed: _saving ? null : _load,
+                    child: Text(context.localized('重试', 'Retry')),
+                  ),
                 ],
                 if (_targets.isEmpty && _error == null)
-                  Text(context.localized('暂无可修改的医生项目',
-                      'No doctor project is available to update.')),
-                if (_targets.isNotEmpty) ...[
-                  DropdownButtonFormField<DoctorProjectProfileUpdateTarget>(
-                    key: const Key('profile-update-target'),
-                    initialValue: _selected,
-                    decoration: InputDecoration(
-                        labelText: context.localized(
-                            '本人机构项目', 'My institution project')),
-                    items: _targets
-                        .map((target) => DropdownMenuItem(
-                            value: target,
-                            child: Text(
-                                '${target.institutionName} · ${target.projectName}')))
-                        .toList(),
-                    onChanged: _saving
-                        ? null
-                        : (target) {
-                            if (target != null) _select(target);
-                          },
-                  ),
-                  const SizedBox(height: 12),
-                  _requestField(
-                      _price,
-                      context.localized(
-                          '医生项目价格（USD）', 'Doctor project price (USD)'),
-                      fieldKey: const Key('profile-update-price'),
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      onChanged: (_) => setState(() {})),
-                  _travelGroundServiceFeePreview(
+                  Text(context.localized('暂无已加入的机构项目',
+                      'No joined institution projects are available.')),
+                for (final institutionId in institutionIds)
+                  _institutionProjectGroup(
                     context,
-                    key: const Key(
-                        'profile-update-travel-ground-service-fee'),
-                    doctorProjectPrice: num.tryParse(_price.text.trim()),
-                    platformRate: _selected?.platformRate,
+                    institutionId,
+                    institutionNames[institutionId] ?? institutionId,
+                    groupedTargets[institutionId] ?? const [],
                   ),
-                  _requestField(_description,
-                      context.localized('项目展示说明', 'Display description'),
-                      maxLines: 4),
-                  _requestField(
-                      _tags,
-                      context.localized(
-                          '服务标签（逗号分隔）', 'Service tags (comma separated)')),
-                  _requestField(
-                      _schedule, context.localized('排期说明', 'Schedule note')),
-                  _requestField(
-                      _cover, context.localized('封面图片', 'Cover image')),
-                  _requestField(
-                      _images,
-                      context.localized(
-                          '项目图片（每行一个）', 'Project images (one per line)'),
-                      maxLines: 3),
-                  if (widget.pickAndUploadImage != null)
-                    OutlinedButton.icon(
-                        key: const Key('profile-update-upload'),
-                        onPressed: _saving || _uploading ? null : _uploadImage,
-                        icon: const Icon(Icons.upload_outlined),
-                        label: Text(context.localized(
-                            '上传项目图片', 'Upload project image'))),
-                  _requestField(
-                      _notes, context.localized('申请说明', 'Request note'),
-                      maxLines: 3),
-                  FilledButton.icon(
-                      key: const Key('submit-profile-update'),
-                      onPressed: _saving ? null : _submit,
-                      icon: _saving
-                          ? const SizedBox.square(
-                              dimension: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2))
-                          : const Icon(Icons.send_outlined),
-                      label: Text(context.localized(
-                          _saving ? '提交中…' : '提交整体变更申请',
-                          _saving
-                              ? 'Submitting…'
-                              : 'Submit profile update request'))),
-                  const SizedBox(height: 16),
-                ],
-                const SizedBox(height: 16),
-                Text(context.localized('我的项目申请', 'My project requests'),
-                    style: Theme.of(context).textTheme.titleMedium),
-                for (final request in _requests)
-                  ListTile(
-                    title: Text(
-                        '${request.institutionName} · ${request.projectName}'),
-                    subtitle: Text(request.status),
-                    trailing: _canWithdraw(request)
-                        ? TextButton(
-                            key: Key('withdraw-${request.id}'),
-                            onPressed:
-                                _saving ? null : () => _withdraw(request),
-                            child: Text(context.localized('撤回', 'Withdraw')),
-                          )
-                        : null,
-                  ),
-              ]),
-      );
-
-  bool _canWithdraw(DoctorProjectChangeRequest request) {
-    final status = request.status.trim().toUpperCase();
-    final type = request.requestType.trim().toUpperCase();
-    return status == 'PENDING' && (type == 'JOIN' || type == 'PROFILE_UPDATE');
+              ],
+            ),
+    );
   }
 
-  Future<void> _withdraw(DoctorProjectChangeRequest request) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(context.localized('撤回申请', 'Withdraw request')),
-        content: Text(context.localized(
-            '确认撤回这条待处理申请？', 'Withdraw this pending request?')),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: Text(context.localized('取消', 'Cancel'))),
-          FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: Text(context.localized('撤回', 'Withdraw'))),
+  Widget _institutionProjectGroup(
+    BuildContext context,
+    String institutionId,
+    String institutionName,
+    List<DoctorProjectProfileUpdateTarget> targets,
+  ) {
+    return ExpansionTile(
+      key: Key('doctor-project-institution-$institutionId'),
+      initiallyExpanded: true,
+      title: Text(institutionName),
+      subtitle: Text(context.localized(
+        '${targets.length} 个已加入项目',
+        '${targets.length} joined project${targets.length == 1 ? '' : 's'}',
+      )),
+      children: targets.isEmpty
+          ? [
+              ListTile(
+                title: Text(context.localized(
+                    '暂无已加入项目', 'No joined projects')),
+              ),
+            ]
+          : [for (final target in targets) _projectRow(context, target)],
+    );
+  }
+
+  Widget _projectRow(
+    BuildContext context,
+    DoctorProjectProfileUpdateTarget target,
+  ) {
+    final pending = _hasPending(target);
+    return ListTile(
+      title: Text(target.projectName),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${context.localized('当前价格', 'Current price')}: USD ${target.currentPrice}',
+          ),
+          if (pending) const Text('PENDING'),
+        ],
+      ),
+      trailing: PopupMenuButton<String>(
+        key: Key('doctor-project-menu-${target.institutionProjectId}'),
+        enabled: !_saving,
+        onSelected: (value) {
+          if (value == 'edit') _edit(target);
+          if (value == 'leave') _leave(target);
+        },
+        itemBuilder: (context) => [
+          PopupMenuItem<String>(
+            key: Key('doctor-project-edit-${target.institutionProjectId}'),
+            value: 'edit',
+            enabled: !pending && !_saving,
+            child: Text(context.localized('编辑', 'Edit')),
+          ),
+          PopupMenuItem<String>(
+            key: Key('doctor-project-leave-${target.institutionProjectId}'),
+            value: 'leave',
+            enabled: !pending && !_saving,
+            child: Text(context.localized('离开项目', 'Leave project')),
+          ),
         ],
       ),
     );
-    if (confirmed != true) return;
-    setState(() => _saving = true);
-    try {
-      await widget.repository.withdrawDoctorProjectChangeRequest(request.id);
-      await _load();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(context.localized('申请已撤回', 'Request withdrawn.'))));
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() => _error =
-            context.localized('撤回失败，请重试', 'Withdrawal failed. Please retry.'));
-      }
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
   }
 
-  Future<void> _uploadImage() async {
-    setState(() => _uploading = true);
+  bool _hasPending(DoctorProjectProfileUpdateTarget target) {
+    final doctorId = _doctorProfile?.id.trim();
+    return _requests.any(
+      (request) =>
+          request.institutionProjectId == target.institutionProjectId &&
+          request.status.trim().toUpperCase() == 'PENDING' &&
+          (doctorId == null || doctorId.isEmpty || request.doctorId == doctorId),
+    );
+  }
+
+  Future<void> _edit(DoctorProjectProfileUpdateTarget target) async {
+    if (_saving || _hasPending(target)) return;
+    final request = await Navigator.of(context).push<DoctorProjectChangeRequest>(
+      MaterialPageRoute(
+        builder: (_) => _DoctorProjectProfileUpdateFormPage(
+          repository: widget.repository,
+          target: target,
+          pickAndUploadImage: widget.pickAndUploadImage,
+        ),
+      ),
+    );
+    if (request == null || !mounted) return;
+    setState(() {
+      _rememberPending(request);
+      _error = null;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(context.localized(
+        '整体变更申请已提交，当前状态：${request.status}',
+        'Profile update request submitted. Status: ${request.status}',
+      )),
+    ));
+  }
+
+  Future<void> _leave(DoctorProjectProfileUpdateTarget target) async {
+    if (_saving || _hasPending(target)) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(context.localized('确认离开项目', 'Confirm leave')),
+        content: Text(context.localized(
+          '离开申请需要机构审核，确认提交吗？',
+          'Leaving requires institution approval. Submit the request?',
+        )),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(context.localized('取消', 'Cancel')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(context.localized('确认', 'Confirm')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true ||
+        !mounted ||
+        _saving ||
+        _hasPending(target)) {
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    late final DoctorProjectChangeRequest request;
     try {
-      final image = await widget.pickAndUploadImage?.call();
-      if (!mounted || image == null || image.trim().isEmpty) return;
-      final existing = _lines(_images.text);
-      _images.text = [...existing, image.trim()].join('\n');
+      request = await widget.repository.submitDoctorProjectLeave(
+        institutionProjectId: target.institutionProjectId,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = context.localized(
+            '离开申请提交失败，请重试', 'Failed to submit leave request. Please retry.');
+      });
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _saving = false;
+      _rememberPending(request);
+    });
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(context.localized(
+          '离开申请已提交，等待机构审核', 'Leave request submitted for review')),
+    ));
+  }
+
+  void _rememberPending(DoctorProjectChangeRequest request) {
+    _requests = [
+      ..._requests.where((existing) => existing.id != request.id),
+      request,
+    ];
+  }
+}
+
+class _DoctorProjectProfileUpdateFormPage extends StatefulWidget {
+  const _DoctorProjectProfileUpdateFormPage({
+    required this.repository,
+    required this.target,
+    required this.pickAndUploadImage,
+  });
+
+  final IdentityRepository repository;
+  final DoctorProjectProfileUpdateTarget target;
+  final Future<String?> Function()? pickAndUploadImage;
+
+  @override
+  State<_DoctorProjectProfileUpdateFormPage> createState() =>
+      _DoctorProjectProfileUpdateFormPageState();
+}
+
+class _DoctorProjectProfileUpdateFormPageState
+    extends State<_DoctorProjectProfileUpdateFormPage> {
+  late final TextEditingController _price;
+  late final TextEditingController _description;
+  late final TextEditingController _tags;
+  late final TextEditingController _schedule;
+  late final TextEditingController _notes;
+  late String _cover;
+  late List<String> _images;
+  bool _saving = false, _uploading = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    final target = widget.target;
+    _price = TextEditingController(text: '${target.currentPrice}');
+    _description = TextEditingController(text: target.serviceDescription);
+    _tags = TextEditingController(text: target.serviceTags.join(', '));
+    _schedule = TextEditingController(text: target.scheduleNote);
+    _notes = TextEditingController();
+    _cover = target.coverImage;
+    _images = List<String>.of(target.images);
+  }
+
+  @override
+  void dispose() {
+    for (final controller in [
+      _price,
+      _description,
+      _tags,
+      _schedule,
+      _notes,
+    ]) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  bool get _busy => _saving || _uploading;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(
+          title: Text(context.localized('编辑项目资料', 'Edit project profile')),
+        ),
+        body: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Text(
+              '${widget.target.institutionName} · ${widget.target.projectName}',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 16),
+            _requestField(
+              _price,
+              context.localized(
+                  '医生项目价格（USD）', 'Doctor project price (USD)'),
+              fieldKey: const Key('profile-update-price'),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              onChanged: (_) => setState(() {}),
+            ),
+            _travelGroundServiceFeePreview(
+              context,
+              key: const Key('profile-update-travel-ground-service-fee'),
+              doctorProjectPrice: num.tryParse(_price.text.trim()),
+              platformRate: widget.target.platformRate,
+            ),
+            const SizedBox(height: 12),
+            _requestField(
+              _description,
+              context.localized('项目展示说明', 'Display description'),
+              maxLines: 4,
+            ),
+            _requestField(
+              _tags,
+              context.localized(
+                  '服务标签（逗号分隔）', 'Service tags (comma separated)'),
+            ),
+            _requestField(
+              _schedule,
+              context.localized('排期说明', 'Schedule note'),
+            ),
+            _imageUploadField(
+              context,
+              title: context.localized('封面图片', 'Cover image'),
+              values: _cover.trim().isEmpty ? const [] : [_cover],
+              addKey: const Key('profile-update-cover-upload'),
+              removeKeyPrefix: 'profile-update-cover-remove',
+              addLabel: context.localized('上传/更换封面', 'Upload/replace cover'),
+              removeLabel: context.localized('移除封面图片', 'Remove cover image'),
+              enabled: !_busy && widget.pickAndUploadImage != null,
+              removeEnabled: !_busy,
+              onAdd: () => _uploadImage(cover: true),
+              onRemove: (_) => setState(() => _cover = ''),
+            ),
+            _imageUploadField(
+              context,
+              title: context.localized('项目图片', 'Gallery images'),
+              values: _images,
+              addKey: const Key('profile-update-gallery-upload'),
+              removeKeyPrefix: 'profile-update-gallery-remove',
+              addLabel: context.localized('添加项目图片', 'Add gallery image'),
+              removeLabel: context.localized('移除项目图片', 'Remove gallery image'),
+              enabled: !_busy && widget.pickAndUploadImage != null,
+              removeEnabled: !_busy,
+              onAdd: () => _uploadImage(cover: false),
+              onRemove: (value) => setState(() {
+                final images = List<String>.of(_images)..remove(value);
+                _images = images;
+              }),
+            ),
+            _requestField(
+              _notes,
+              context.localized('申请说明', 'Request note'),
+              maxLines: 3,
+            ),
+            if (_error != null) ...[
+              Text(
+                _error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+              const SizedBox(height: 12),
+            ],
+            FilledButton.icon(
+              key: const Key('submit-profile-update'),
+              onPressed: _busy ? null : _submit,
+              icon: _saving
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.send_outlined),
+              label: Text(context.localized(
+                _saving ? '提交中…' : '提交整体变更申请',
+                _saving ? 'Submitting…' : 'Submit profile update request',
+              )),
+            ),
+          ],
+        ),
+      );
+
+  Future<void> _uploadImage({required bool cover}) async {
+    if (widget.pickAndUploadImage == null) return;
+    setState(() {
+      _uploading = true;
+      _error = null;
+    });
+    try {
+      final image = (await widget.pickAndUploadImage?.call())?.trim();
+      if (!mounted || image == null || image.isEmpty) return;
+      setState(() {
+        if (cover) {
+          _cover = image;
+        } else {
+          _images = [..._images, image];
+        }
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() => _error = context.localized(
+            '图片上传失败，请重试', 'Image upload failed. Please retry.'));
+      }
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
   }
 
   Future<void> _submit() async {
-    final target = _selected;
-    if (target == null) {
-      setState(() => _error =
-          context.localized('请选择机构项目', 'Select an institution project.'));
-      return;
-    }
     final price = num.tryParse(_price.text.trim());
     if (price == null) {
-      setState(() => _error =
-          context.localized('请填写有效的医生项目价格', 'Enter a valid doctor project price.'));
+      setState(() => _error = context.localized(
+          '请填写有效的医生项目价格', 'Enter a valid doctor project price.'));
       return;
     }
+    final target = widget.target;
     final draft = DoctorProjectProfileUpdateDraft(
       institutionProjectId: target.institutionProjectId,
       priceSuggestion: price,
       serviceDescription: _description.text,
       serviceTags: _csv(_tags.text),
       scheduleNote: _schedule.text,
-      coverImage: _cover.text,
-      images: _lines(_images.text),
+      coverImage: _cover,
+      images: List<String>.of(_images, growable: false),
       consultationFee: target.consultationFee,
       commissionRate: target.commissionRate,
       institutionRate: target.institutionRate,
@@ -1720,10 +1877,7 @@ class _DoctorProjectProfileUpdatePageState
     try {
       final request =
           await widget.repository.submitDoctorProjectProfileUpdate(draft);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(context.localized('整体变更申请已提交，当前状态：${request.status}',
-              'Profile update request submitted. Status: ${request.status}'))));
+      if (mounted) Navigator.of(context).pop(request);
     } on ApiException catch (error) {
       if (!mounted) return;
       setState(() => _error = error.httpStatus == 409
@@ -1743,11 +1897,6 @@ class _DoctorProjectProfileUpdatePageState
 
 List<String> _csv(String value) => value
     .split(',')
-    .map((item) => item.trim())
-    .where((item) => item.isNotEmpty)
-    .toList(growable: false);
-List<String> _lines(String value) => value
-    .split(RegExp(r'[\r\n]+'))
     .map((item) => item.trim())
     .where((item) => item.isNotEmpty)
     .toList(growable: false);
@@ -2479,12 +2628,13 @@ Widget _imageUploadField(
   required String title,
   required List<String> values,
   required Key addKey,
+  String? removeKeyPrefix,
   required String addLabel,
   required String removeLabel,
   required bool enabled,
+  bool? removeEnabled,
   required Future<void> Function() onAdd,
   required ValueChanged<String> onRemove,
-  List<String> inheritedValues = const [],
 }) =>
     Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -2494,10 +2644,6 @@ Widget _imageUploadField(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(title, style: Theme.of(context).textTheme.titleSmall),
-            if (values.isEmpty && inheritedValues.isNotEmpty)
-              Text(
-                '${context.localized('继承值', 'Inherited')}: ${inheritedValues.join(', ')}',
-              ),
             for (final entry in values.indexed)
               ListTile(
                 contentPadding: EdgeInsets.zero,
@@ -2512,14 +2658,18 @@ Widget _imageUploadField(
                   ),
                   button: true,
                   child: IconButton(
-                    key: ValueKey('${addKey.toString()}-remove-${entry.$1}'),
+                    key: ValueKey(removeKeyPrefix == null
+                        ? '${addKey.toString()}-remove-${entry.$1}'
+                        : '$removeKeyPrefix-${entry.$1}'),
                     tooltip: _indexedImageRemoveLabel(
                       context,
                       removeLabel,
                       entry.$1,
                       entry.$2,
                     ),
-                    onPressed: enabled ? () => onRemove(entry.$2) : null,
+                    onPressed: (removeEnabled ?? enabled)
+                        ? () => onRemove(entry.$2)
+                        : null,
                     icon: const Icon(Icons.delete_outline),
                   ),
                 ),
@@ -2544,30 +2694,6 @@ String _indexedImageRemoveLabel(
     context.localized(
       '$removeLabel ${index + 1}：$identity',
       '$removeLabel ${index + 1}: $identity',
-    );
-
-Widget _inheritancePreview(
-  BuildContext context,
-  ManagementProjectOption project,
-) =>
-    Card(
-      key: const Key('institution-inheritance-preview'),
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Text([
-          '${context.localized('继承项目', 'Inherited project')}: ${project.name}',
-          '${context.localized('分类', 'Category')}: ${project.category}',
-          '${context.localized('说明', 'Description')}: ${project.description}',
-          '${context.localized('标签', 'Tags')}: ${project.tags}',
-          '${context.localized('分类标签', 'Category tags')}: ${project.categoryTags}',
-          '${context.localized('封面', 'Cover')}: ${project.coverImage}',
-          '${context.localized('标语', 'Slogan')}: ${project.slogan}',
-          '${context.localized('详情', 'Detail')}: ${project.detailContent ?? ''}',
-          '${context.localized('图片', 'Images')}: ${project.images.join(', ')}',
-          '${context.localized('销量', 'Sales')}: ${project.salesCount}',
-        ].join('\n')),
-      ),
     );
 
 Widget _professionalRequestSnapshot(

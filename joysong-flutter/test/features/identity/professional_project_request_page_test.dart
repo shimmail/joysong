@@ -44,7 +44,6 @@ void main() {
     const orderedKeys = [
       'platform-name',
       'platform-reference-price',
-      'platform-currency',
       'platform-slogan',
       'platform-sales-count',
       'platform-cover-upload',
@@ -74,6 +73,16 @@ void main() {
     expect(find.textContaining('评分'), findsNothing);
     expect(find.textContaining('评价数'), findsNothing);
     expect(find.textContaining('选择医生'), findsNothing);
+    expect(find.byKey(const Key('platform-currency')), findsNothing);
+    expect(
+      tester
+          .widget<TextField>(
+            find.byKey(const Key('platform-reference-price')),
+          )
+          .decoration
+          ?.labelText,
+      '参考价格（USD）',
+    );
     expect(find.byType(EditableText).evaluate().length, 10);
 
     await tester.tap(find.byKey(const Key('platform-cover-upload')));
@@ -122,7 +131,7 @@ void main() {
   },);
 
   testWidgets(
-    'institution application loads config, exposes inheritance hints, applicant-only binding, and one USD price',
+    'institution application loads inherited project details into editable fields and keeps one USD price',
       (tester) async {
     _useLargeSurface(tester);
     final repository = _ProjectRequestRepository();
@@ -143,23 +152,8 @@ void main() {
     expect(find.textContaining('多医生'), findsNothing);
 
     await _choose(tester, const Key('institution-project'), 'Hydrating Facial',);
-    for (final inherited in const [
-      'Hydrating Facial',
-      'Skin',
-      'Inherited description',
-      'hydration,gentle',
-      'facial,skin',
-      'https://cdn.example.com/inherited-cover.jpg',
-      'Glow naturally',
-      'Inherited plain detail',
-      'https://cdn.example.com/inherited-one.jpg',
-      'https://cdn.example.com/inherited-two.jpg',
-      '18',
-    ]) {
-      expect(find.textContaining(inherited), findsWidgets,
-          reason: 'missing inherited value $inherited',);
-    }
-    const inheritedHints = {
+    expect(find.byKey(const Key('institution-inheritance-preview')), findsNothing);
+    const inheritedValues = {
       'institution-name': 'Hydrating Facial',
       'institution-category': 'Skin',
       'institution-description': 'Inherited description',
@@ -168,13 +162,48 @@ void main() {
       'institution-detail-content': 'Inherited plain detail',
       'institution-sales-count': '18',
     };
-    for (final entry in inheritedHints.entries) {
+    for (final entry in inheritedValues.entries) {
       final field = tester.widget<TextField>(find.byKey(Key(entry.key)));
-      expect(field.controller!.text, isEmpty,
-          reason: '${entry.key} must remain override-only',);
-      expect(field.decoration?.hintText, entry.value,
-          reason: '${entry.key} must expose its inherited hint',);
+      expect(field.controller!.text, entry.value,
+          reason: '${entry.key} must contain an editable inherited value',);
+      expect(field.readOnly, isFalse);
+      expect(field.decoration?.hintText, isNull);
     }
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('institution-name')))
+          .decoration
+          ?.labelText,
+      '项目名称',
+    );
+    expect(find.text('https://cdn.example.com/inherited-cover.jpg'), findsOneWidget);
+    expect(find.text('https://cdn.example.com/inherited-one.jpg'), findsOneWidget);
+    expect(find.text('https://cdn.example.com/inherited-two.jpg'), findsOneWidget);
+    expect(find.textContaining('继承值'), findsNothing);
+    expect(find.textContaining('可选覆盖'), findsNothing);
+    expect(
+      find.byTooltip(
+        '移除封面图 1：https://cdn.example.com/inherited-cover.jpg',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byTooltip(
+        '移除项目图片 1：https://cdn.example.com/inherited-one.jpg',
+      ),
+      findsOneWidget,
+    );
+    await tester.enterText(
+      find.byKey(const Key('institution-name')),
+      'Doctor Hydrating Facial',
+    );
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('institution-name')))
+          .controller
+          ?.text,
+      'Doctor Hydrating Facial',
+    );
     final priceField =
         tester.widget<TextField>(find.byKey(const Key('institution-price')));
     expect(priceField.decoration?.labelText, '医生项目价格（USD）');
@@ -193,7 +222,6 @@ void main() {
       _dropdown('institution-id'),
       _dropdown('institution-project'),
       find.byKey(const Key('institution-applicant-notice')),
-      find.byKey(const Key('institution-inheritance-preview')),
       find.byKey(const Key('institution-name')),
       find.byKey(const Key('institution-category')),
       find.byKey(const Key('institution-description')),
@@ -224,12 +252,103 @@ void main() {
 
       await tester.tap(find.byKey(const Key('institution-cover-upload')));
     await tester.pump();
+      expect(
+        find.text('https://cdn.example.com/inherited-cover.jpg'),
+        findsNothing,
+      );
       await tester.tap(find.byKey(const Key('institution-gallery-upload')));
       await tester.pump();
     expect(find.text('https://cdn.example.com/institution-cover.jpg'), findsOneWidget,);
       expect(
         find.text('https://cdn.example.com/institution-gallery.jpg'),
         findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'switching the platform project replaces inherited editable values but keeps doctor-only inputs',
+    (tester) async {
+      _useLargeSurface(tester);
+      final repository = _ProjectRequestRepository();
+      repository.managementProjects = [
+        ...repository.managementProjects,
+        const ManagementProjectOption(
+          id: 'project-2',
+          name: 'Laser Toning',
+          category: 'Laser',
+          description: 'Second inherited description',
+          tags: 'laser,toning',
+          categoryTags: 'laser,skin',
+          coverImage: 'https://cdn.example.com/second-cover.jpg',
+          referencePrice: 699,
+          currency: 'USD',
+          slogan: 'Clear and bright',
+          detailContent: 'Second inherited detail',
+          images: ['https://cdn.example.com/second-gallery.jpg'],
+          salesCount: 9,
+        ),
+      ];
+
+      await tester.pumpWidget(
+        _app(
+          InstitutionProjectRequestsPage(
+            repository: repository,
+            context: _doctorContext,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await _choose(
+        tester,
+        const Key('institution-project'),
+        'Hydrating Facial',
+      );
+      await tester.enterText(
+        find.byKey(const Key('institution-name')),
+        'Temporary doctor edit',
+      );
+      await tester.enterText(
+        find.byKey(const Key('institution-price')),
+        '799.99',
+      );
+      await tester.ensureVisible(_dropdown('institution-project'));
+      await tester.pump();
+
+      await _choose(
+        tester,
+        const Key('institution-project'),
+        'Laser Toning',
+      );
+
+      expect(_dropdownValue(tester, 'institution-project'), 'project-2');
+      expect(_text(tester, 'institution-name'), 'Laser Toning');
+      expect(_text(tester, 'institution-category'), 'Laser');
+      expect(
+        _text(tester, 'institution-description'),
+        'Second inherited description',
+      );
+      expect(_text(tester, 'institution-tags'), 'laser,toning');
+      expect(_text(tester, 'institution-slogan'), 'Clear and bright');
+      expect(
+        _text(tester, 'institution-detail-content'),
+        'Second inherited detail',
+      );
+      expect(_text(tester, 'institution-sales-count'), '9');
+      expect(_text(tester, 'institution-price'), '799.99');
+      expect(find.text('https://cdn.example.com/second-cover.jpg'), findsOneWidget);
+      expect(find.text('https://cdn.example.com/second-gallery.jpg'), findsOneWidget);
+      expect(
+        find.text('https://cdn.example.com/inherited-cover.jpg'),
+        findsNothing,
+      );
+      expect(
+        find.text('https://cdn.example.com/inherited-one.jpg'),
+        findsNothing,
+      );
+      expect(
+        find.text('https://cdn.example.com/inherited-two.jpg'),
+        findsNothing,
       );
     },
   );
@@ -268,7 +387,7 @@ void main() {
         findsOneWidget);
   });
 
-  testWidgets('institution application submits hidden compatibility defaults',
+  testWidgets('institution application submits editable inherited project details and hidden compatibility defaults',
       (tester,) async {
     _useLargeSurface(tester);
     final repository = _ProjectRequestRepository()..formPlatformRate = 40;
@@ -289,6 +408,18 @@ void main() {
 
     expect(repository.institutionSubmissions, hasLength(1));
     final body = repository.institutionSubmissions.single.toJson();
+    expect(body['name'], 'Hydrating Facial');
+    expect(body['category'], 'Skin');
+    expect(body['description'], 'Inherited description');
+    expect(body['tags'], ['hydration', 'gentle']);
+    expect(body['slogan'], 'Glow naturally');
+    expect(body['detailContent'], 'Inherited plain detail');
+    expect(body['coverImage'], 'https://cdn.example.com/inherited-cover.jpg');
+    expect(body['images'], [
+      'https://cdn.example.com/inherited-one.jpg',
+      'https://cdn.example.com/inherited-two.jpg',
+    ]);
+    expect(body['salesCount'], 18);
     expect(body['price'], 799.99);
     expect(body['currency'], 'USD');
     expect(body['originalPrice'], isNull);
@@ -455,6 +586,7 @@ void main() {
     repository.platformSubmitError = true;
     await _submit(tester, const Key('platform-submit'));
     expect(repository.platformSubmissions, hasLength(1));
+    expect(repository.platformSubmissions.single.toJson()['currency'], 'USD');
     expect(_text(tester, 'platform-notes'), 'Retained notes');
     expect(find.text('https://cdn.example.com/retained-cover.jpg'),
         findsOneWidget,);
@@ -741,15 +873,17 @@ void main() {
           .widget<TextField>(find.byKey(const Key('institution-name')))
           .decoration
           ?.hintText,
-      'Refreshed Hydrating Facial',
+      isNull,
     );
-    expect(find.text('医生项目价格（USD）：USD 799.50'), findsOneWidget);
-    expect(find.text('旅游地接服务费：USD 99.94'), findsOneWidget);
+    expect(find.text('https://cdn.example.com/refreshed-cover.jpg'), findsNothing);
+    expect(find.text('https://cdn.example.com/refreshed-gallery.jpg'), findsNothing);
     expect(
       find.textContaining('USD 100.00'), findsOneWidget);
-      expect(
-        find.byKey(const Key('professional-request-institution-conflict-latest'),),
-      findsOneWidget,
+    expect(
+      find.byKey(
+        const Key('professional-request-institution-conflict-latest'),
+      ),
+      findsNothing,
     );
     expect(
       find.text('提交冲突，申请、项目目录与价格配置已刷新；草稿已保留，请核对后重新提交'),
@@ -1469,7 +1603,7 @@ void main() {
   },);
 
   testWidgets(
-      'immutable history is role scoped and creation reviews dispatch to the exact authority endpoint',
+      'institution creation hides history while immutable reviews remain role scoped',
       (tester) async {
     _useLargeSurface(tester);
     final repository = _ProjectRequestRepository()
@@ -1523,7 +1657,7 @@ void main() {
     ),),);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('professional-request-institution-target')),
-        findsOneWidget,);
+        findsNothing,);
     expect(find.byKey(const Key('professional-request-institution-other')),
         findsNothing,);
     expect(find.byKey(const Key('review-creation-institution-target')),
@@ -1734,7 +1868,6 @@ Future<void> _fillInstitutionDraft(
 
 Future<void> _preparePlatformConflictDraft(WidgetTester tester) async {
   await _fillPlatformDraft(tester, referencePrice: '199.99');
-  await _choose(tester, const Key('platform-currency'), 'USD');
   await tester.tap(find.byKey(const Key('platform-cover-upload')));
   await tester.pump();
   await tester.tap(find.byKey(const Key('platform-gallery-upload')));
@@ -1756,7 +1889,7 @@ void _expectPlatformConflictDraftRetained(WidgetTester tester) {
   }.entries) {
     expect(_text(tester, entry.key), entry.value);
   }
-  expect(_dropdownValue(tester, 'platform-currency'), 'USD');
+  expect(find.byKey(const Key('platform-currency')), findsNothing);
   expect(find.text('https://cdn.example.com/conflict-platform-cover.jpg'),
       findsOneWidget,);
   expect(find.text('https://cdn.example.com/conflict-platform-gallery.jpg'),

@@ -166,6 +166,24 @@ void main() {
     ]);
   },);
 
+  test('repository submits a minimal doctor project leave request', () async {
+    final client = _RecordingApiClient();
+    final repository = ApiIdentityRepository(client);
+
+    final created = await repository.submitDoctorProjectLeave(
+      institutionProjectId: ' ip-1 ',
+    );
+
+    expect(created.requestType, 'LEAVE');
+    expect(client.requests, [
+      const _Request(
+        'POST',
+        '/admin/institution-project-requests',
+        {'requestType': 'LEAVE', 'institutionProjectId': 'ip-1'},
+      ),
+    ]);
+  });
+
   test('repository loads the server-owned current profile update target',
       () async {
     final client = _RecordingApiClient();
@@ -270,9 +288,25 @@ final class _RecordingApiClient extends ApiClient {
   Future<T?> post<T>(String path,
       {Object? body, required T Function(Object? json) decodeData,}) async {
     requests.add(_Request('POST', path, body));
-    return decodeData(path.endsWith('/review') ? null : _requestJson);
+    final isLeave = body is Map && body['requestType'] == 'LEAVE';
+    return decodeData(path.endsWith('/review')
+        ? null
+        : isLeave
+            ? _leaveRequestJson
+            : _requestJson,);
   }
 }
+
+final _leaveRequestJson = <String, Object?>{
+  ..._requestJson,
+  'requestType': 'LEAVE',
+  'priceSuggestion': null,
+  'consultationFee': null,
+  'commissionRate': null,
+  'institutionRate': null,
+  'platformRate': null,
+  'doctorRate': null,
+};
 
 final class _Request {
   const _Request(this.method, this.path, this.body);

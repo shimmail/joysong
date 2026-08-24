@@ -57,6 +57,7 @@ class ProfessionalProjectRequestService(
         val description = requiredText("项目说明", request.description, MAX_DESCRIPTION_LENGTH)
         requireMoney("参考价格", request.referencePrice)
         requireCount("销量", request.salesCount)
+        require(request.currency == CurrencyCode.DEFAULT) { "平台项目币种必须为 USD" }
         val tags = normalizeTargetList(
             "项目标签", request.tags, MAX_TAG_ITEMS, MAX_TAG_ITEM_LENGTH, MAX_TARGET_TAGS_LENGTH
         )
@@ -93,7 +94,7 @@ class ProfessionalProjectRequestService(
                 tags = encodeList(tags),
                 slogan = slogan,
                 detailContent = detailContent,
-                currency = request.currency.name,
+                currency = CurrencyCode.DEFAULT_CODE,
                 coverImage = coverImage,
                 images = encodeList(images),
                 salesCount = request.salesCount,
@@ -374,6 +375,7 @@ class ProfessionalProjectRequestService(
     private fun createProject(target: ProjectRequestTarget): String {
         requireMoney("参考价格", requireNotNull(target.referencePrice))
         requireCount("销量", target.salesCount)
+        require(target.currency == CurrencyCode.DEFAULT) { "非美元平台项目申请不能审核通过，请驳回后重新提交" }
         val tags = toTargetList(
             "项目标签", target.tags, MAX_TAG_ITEMS, MAX_TAG_ITEM_LENGTH, MAX_TARGET_TAGS_LENGTH
         ).orEmpty()
@@ -400,7 +402,7 @@ class ProfessionalProjectRequestService(
             target.coverImage.orEmpty(),
             images,
             target.referencePrice,
-            target.currency.name,
+            CurrencyCode.DEFAULT_CODE,
             target.slogan.orEmpty(),
             target.detailContent,
             BigDecimal.ZERO,

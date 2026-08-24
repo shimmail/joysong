@@ -3,7 +3,7 @@ package com.joysong.server.translation.service
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
-import com.joysong.server.config.AiAgentProperties
+import com.joysong.server.translation.config.TranslationProperties
 import com.joysong.server.translation.dto.TranslateTextRequest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -28,9 +28,12 @@ class TranslationServiceTest {
     private val server = MockRestServiceServer.createServer(restTemplate)
     private val service = TranslationService(
         restTemplate = restTemplate,
-        aiAgentProperties = AiAgentProperties(
-            apiKey = "test-key",
-            baseUrl = "https://example.test/v1"
+        translationProperties = TranslationProperties(
+            qwen = TranslationProperties.Qwen(
+                apiKey = "test-key",
+                baseUrl = "https://example.test/v1",
+                model = "qwen-test-model"
+            )
         )
     )
 
@@ -83,9 +86,12 @@ class TranslationServiceTest {
         val qwenServer = MockRestServiceServer.createServer(qwenRestTemplate)
         val qwenService = TranslationService(
             restTemplate = qwenRestTemplate,
-            aiAgentProperties = AiAgentProperties(
-                apiKey = "qwen-key",
-                baseUrl = "https://qwen.test/v1"
+            translationProperties = TranslationProperties(
+                qwen = TranslationProperties.Qwen(
+                    apiKey = "qwen-key",
+                    baseUrl = "https://qwen.test/v1",
+                    model = "qwen3.7-flash"
+                )
             )
         )
         qwenServer.expect(requestTo("https://qwen.test/v1/chat/completions"))
@@ -105,22 +111,23 @@ class TranslationServiceTest {
     }
 
     @Test
-    fun `translation reuses agent credentials but never agent models`() {
+    fun `translation uses its own configured credentials and model`() {
         val agentRestTemplate = RestTemplate()
         val agentServer = MockRestServiceServer.createServer(agentRestTemplate)
         val translationService = TranslationService(
             restTemplate = agentRestTemplate,
-            aiAgentProperties = AiAgentProperties(
-                apiKey = "shared-agent-key",
-                baseUrl = "https://agent.example.test/v1",
-                model = "chat-model-must-not-be-used",
-                intentModel = "intent-model-must-not-be-used"
+            translationProperties = TranslationProperties(
+                qwen = TranslationProperties.Qwen(
+                    apiKey = "translation-key",
+                    baseUrl = "https://translation.example.test/v1",
+                    model = "translation-model"
+                )
             )
         )
-        agentServer.expect(requestTo("https://agent.example.test/v1/chat/completions"))
+        agentServer.expect(requestTo("https://translation.example.test/v1/chat/completions"))
             .andExpect(method(HttpMethod.POST))
-            .andExpect(header("Authorization", "Bearer shared-agent-key"))
-            .andExpect(jsonPath("$.model").value("qwen3.7-flash"))
+            .andExpect(header("Authorization", "Bearer translation-key"))
+            .andExpect(jsonPath("$.model").value("translation-model"))
             .andRespond(withSuccess("""{"choices":[{"message":{"content":"Hello"}}]}""", MediaType.APPLICATION_JSON))
 
         val response = translationService.translate(TranslateTextRequest("你好", "en-US", "comment"))
