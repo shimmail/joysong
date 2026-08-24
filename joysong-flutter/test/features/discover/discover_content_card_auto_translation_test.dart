@@ -115,6 +115,68 @@ void main() {
   }
 
   testWidgets(
+    'joined Discover field does not retry a failed part when its sibling translates',
+    (tester) async {
+      final repository = _LiteralTranslationRepository(
+        translations: const {
+          '上海市': 'Shanghai',
+          '静安区南京西路': 'Nanjing West Road, Jing an',
+        },
+        holdResponses: true,
+      );
+      final controller = _controller(repository, active: true);
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(
+        _host(
+          controller: controller,
+          child: DiscoverContentCard(
+            item: DiscoverItem.fromJson(
+              const {
+                'id': 'joined-institution',
+                'name': 'Yuemei Clinic',
+                'city': '上海市',
+                'address': '静安区南京西路',
+              },
+              type: DiscoverContentType.institution,
+            ),
+            onTap: _noop,
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(
+        repository.callRecords,
+        const [
+          ('上海市', 'institution'),
+          ('静安区南京西路', 'institution'),
+        ],
+      );
+      expect(repository.pendingCount, 2);
+
+      repository.failSource('静安区南京西路');
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('上海市 · 静安区南京西路'), findsOneWidget);
+
+      repository.completeSource('上海市');
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('Shanghai · 静安区南京西路'), findsOneWidget);
+      expect(find.byType(SnackBar), findsNothing);
+      expect(
+        repository.callRecords,
+        const [
+          ('上海市', 'institution'),
+          ('静安区南京西路', 'institution'),
+        ],
+      );
+    },
+  );
+
+  testWidgets(
     'one Discover translation failure keeps exact source while siblings continue',
     (tester) async {
       final repository = _LiteralTranslationRepository(
@@ -461,6 +523,9 @@ final class _LiteralTranslationRepository implements TranslationRepository {
 
   List<String> get sourceTexts =>
       calls.map((call) => call.sourceText).toList(growable: false);
+  List<(String, String)> get callRecords => calls
+      .map((call) => (call.sourceText, call.contentType))
+      .toList(growable: false);
   int get pendingCount => _pending.length;
 
   @override
@@ -486,6 +551,30 @@ final class _LiteralTranslationRepository implements TranslationRepository {
     pending.completer.complete(
       _response(translations[pending.sourceText]!, 'en-US'),
     );
+  }
+
+  void completeSource(String sourceText) {
+    final pending = _removePending(sourceText);
+    pending.completer.complete(
+      _response(translations[pending.sourceText]!, 'en-US'),
+    );
+  }
+
+  void failSource(String sourceText) {
+    final pending = _removePending(sourceText);
+    pending.completer.completeError(
+      StateError('configured controlled failure for $sourceText'),
+    );
+  }
+
+  _PendingTranslation _removePending(String sourceText) {
+    final index = _pending.indexWhere(
+      (pending) => pending.sourceText == sourceText,
+    );
+    if (index < 0) {
+      throw StateError('no pending translation for $sourceText');
+    }
+    return _pending.removeAt(index);
   }
 
   ContentTranslation _response(String translatedText, String targetLanguage) {

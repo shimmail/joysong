@@ -989,26 +989,97 @@ Widget _discoverJoinedMuted(
   DiscoverItem item,
   List<(String, String)> parts, {
   int maxLines = 1,
-}) {
-  Widget buildPart(int index, List<String> visibleParts) {
-    if (index == parts.length) {
-      return _Muted(
-        visibleParts.where((value) => value.isNotEmpty).join(' · '),
-        maxLines: maxLines,
-      );
-    }
-    final part = parts[index];
-    if (!containsChineseText(part.$2)) {
-      return buildPart(index + 1, [...visibleParts, part.$2]);
-    }
-    return AutoTranslationBuilder(
-      request: _discoverRequest(item, part.$1, part.$2),
-      builder: (_, visibleText) =>
-          buildPart(index + 1, [...visibleParts, visibleText]),
+}) =>
+    _DiscoverJoinedMuted(
+      item: item,
+      parts: parts,
+      maxLines: maxLines,
     );
+
+class _DiscoverJoinedMuted extends StatefulWidget {
+  const _DiscoverJoinedMuted({
+    required this.item,
+    required this.parts,
+    required this.maxLines,
+  });
+
+  final DiscoverItem item;
+  final List<(String, String)> parts;
+  final int maxLines;
+
+  @override
+  State<_DiscoverJoinedMuted> createState() => _DiscoverJoinedMutedState();
+}
+
+class _DiscoverJoinedMutedState extends State<_DiscoverJoinedMuted> {
+  late List<AutoTranslationRequest?> _requests;
+
+  @override
+  void initState() {
+    super.initState();
+    _requests = _updatedRequests(const []);
   }
 
-  return buildPart(0, const []);
+  @override
+  void didUpdateWidget(_DiscoverJoinedMuted oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _requests = _updatedRequests(_requests);
+  }
+
+  List<AutoTranslationRequest?> _updatedRequests(
+    List<AutoTranslationRequest?> previous,
+  ) {
+    return [
+      for (var index = 0; index < widget.parts.length; index++)
+        _updatedRequest(
+          widget.parts[index],
+          index < previous.length ? previous[index] : null,
+        ),
+    ];
+  }
+
+  AutoTranslationRequest? _updatedRequest(
+    (String, String) part,
+    AutoTranslationRequest? previous,
+  ) {
+    if (!containsChineseText(part.$2)) return null;
+    final contentType = widget.item.type == DiscoverContentType.all
+        ? 'general'
+        : widget.item.type.name;
+    final contentId = '${widget.item.type.name}:${widget.item.id}';
+    if (previous != null &&
+        previous.contentType == contentType &&
+        previous.contentId == contentId &&
+        previous.field == part.$1 &&
+        previous.sourceText == part.$2) {
+      return previous;
+    }
+    return _discoverRequest(widget.item, part.$1, part.$2);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Widget buildPart(int index, List<String> visibleParts) {
+      if (index == widget.parts.length) {
+        return _Muted(
+          visibleParts.where((value) => value.isNotEmpty).join(' · '),
+          maxLines: widget.maxLines,
+        );
+      }
+      final part = widget.parts[index];
+      final request = _requests[index];
+      if (request == null) {
+        return buildPart(index + 1, [...visibleParts, part.$2]);
+      }
+      return AutoTranslationBuilder(
+        request: request,
+        builder: (_, visibleText) =>
+            buildPart(index + 1, [...visibleParts, visibleText]),
+      );
+    }
+
+    return buildPart(0, const []);
+  }
 }
 
 Widget _discoverTag(
