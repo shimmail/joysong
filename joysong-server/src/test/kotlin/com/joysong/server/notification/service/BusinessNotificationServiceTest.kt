@@ -195,7 +195,7 @@ class BusinessNotificationServiceTest {
                 Emission("user-1", "ORDER_REFUND_REQUESTED", "退款申请已提交", "订单退款申请已提交，请查看详情。", "order_refund", "order-1"),
                 Emission("user-1", "ORDER_REFUND_APPROVED", "退款申请已通过", "订单退款申请已通过，请查看详情。", "order_refund", "order-1"),
                 Emission("user-1", "ORDER_REFUND_REJECTED", "退款申请未通过", "订单退款申请未通过：退款材料不全", "order_refund", "order-1"),
-                Emission("user-1", "ORDER_REFUNDED", "退款已完成", "订单退款已完成，请查看详情。", "order_refund", "order-1")
+                Emission("user-1", "ORDER_REFUNDED", "退款已完成", "订单退款已完成，请查看详情。", "order", "order-1")
             ),
             fixture.emissions
         )

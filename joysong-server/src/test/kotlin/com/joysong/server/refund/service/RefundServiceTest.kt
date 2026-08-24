@@ -25,9 +25,16 @@ import io.mockk.slot
 import io.mockk.verify
 import io.mockk.verifyOrder
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.springframework.transaction.TransactionDefinition
+import org.springframework.transaction.annotation.Propagation
+import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.AbstractPlatformTransactionManager
+import org.springframework.transaction.support.DefaultTransactionStatus
+import org.springframework.transaction.support.TransactionTemplate
 import java.math.BigDecimal
 import java.util.Optional
 
@@ -38,6 +45,7 @@ class RefundServiceTest {
     private val paymentRepository = mockk<PaymentRepository>()
     private val orderStatusLogService = mockk<OrderStatusLogService>()
     private val couponService = mockk<CouponService>()
+    private val refundNotificationDispatcher = mockk<RefundBusinessNotificationDispatcher>(relaxed = true)
 
     @Test
     fun `admin refund list exposes the joined order payment flow for new and legacy orders`() {
@@ -84,6 +92,107 @@ class RefundServiceTest {
         assertEquals(RefundWorkflowPersistenceService.REVERSAL_NOT_REQUIRED, refund.revenueReversalStatus)
         assertEquals(OrderStatusEnum.REFUND_REVIEW.value, orderSlot.captured.status)
         verify(exactly = 0) { execution.execute(any()) }
+    }
+
+    @Test
+    fun `refund submission notifies every order participant after the request transition`() {
+        val execution = mockk<RefundExecutionService>()
+        stubServiceApplication()
+
+        service(execution = execution)
+            .applyRefund("order-1", "user-1", "行程取消", "不再来华")
+
+        verify(exactly = 1) {
+            refundNotificationDispatcher.orderRefundRequested(
+                "order-1", "user-1", "consultant-1", "doctor-1"
+            )
+        }
+    }
+
+    @Test
+    fun `refund submission notification waits for the business transaction to commit`() {
+        stubServiceApplication()
+        val transactionManager = RecordingTransactionManager()
+
+        TransactionTemplate(transactionManager).executeWithoutResult {
+            workflow().prepareApplication("order-1", "user-1", "行程取消", "不再来华", "", null)
+
+            verify(exactly = 0) { refundNotificationDispatcher.orderRefundRequested(any(), any(), any(), any()) }
+        }
+
+        assertEquals(1, transactionManager.commits)
+        verify(exactly = 1) {
+            refundNotificationDispatcher.orderRefundRequested(
+                "order-1", "user-1", "consultant-1", "doctor-1"
+            )
+        }
+    }
+
+    @Test
+    fun `refund notification dispatcher always starts a new transaction`() {
+        listOf("orderRefundRequested", "orderRefundApproved", "orderRefunded").forEach { methodName ->
+            val method = RefundBusinessNotificationDispatcher::class.java.methods
+                .single { it.name == methodName }
+            val transactional = method.getAnnotation(Transactional::class.java)
+
+            assertNotNull(transactional)
+            assertEquals(Propagation.REQUIRES_NEW, transactional.propagation)
+        }
+        val rejected = RefundBusinessNotificationDispatcher::class.java.methods
+            .single { it.name == "orderRefundRejected" }
+            .getAnnotation(Transactional::class.java)
+        assertNotNull(rejected)
+        assertEquals(Propagation.REQUIRES_NEW, rejected.propagation)
+    }
+
+    @Test
+    fun `notification failure does not undo an accepted refund request`() {
+        stubServiceApplication()
+        every {
+            refundNotificationDispatcher.orderRefundRequested(any(), any(), any(), any())
+        } throws IllegalStateException("notification storage unavailable")
+
+        val refund = service().applyRefund("order-1", "user-1", "行程取消", "不再来华")
+
+        assertEquals(RefundWorkflowPersistenceService.PENDING, refund.status)
+        verify(exactly = 1) { orderRepository.save(any()) }
+    }
+
+    @Test
+    fun `automatic refund emits completion instead of cancellation`() {
+        val execution = mockk<RefundExecutionService>()
+        val automaticOrder = legacyOrder(status = OrderStatusEnum.CONSULTATION_PAID.value).copy(
+            paidAmount = BigDecimal("100.00"),
+            paidAmountMinor = 10_000L,
+            consultantId = "consultant-1",
+            doctorId = "doctor-1"
+        )
+        var createdRefund: RefundEntity? = null
+        every { orderRepository.findByIdForUpdate("order-1") } returns automaticOrder
+        every { refundRepository.findAllByOrderIdAndStatusIn("order-1", any()) } returns emptyList()
+        every { refundRepository.saveAndFlush(any()) } answers {
+            firstArg<RefundEntity>().also { createdRefund = it }
+        }
+        every { orderRepository.save(any()) } answers { firstArg() }
+        every { refundRepository.findByIdForUpdate(any()) } answers { createdRefund }
+        every { refundRepository.save(any()) } answers { firstArg() }
+        every { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) } returns Unit
+        every { execution.execute(any()) } returns RefundExecutionOutcome(10_000L, completed = true)
+
+        val refund = service(execution = execution)
+            .applyRefund("order-1", "user-1", "不再到店", "取消预约")
+
+        assertEquals(RefundWorkflowPersistenceService.APPROVED, refund.status)
+        verify(exactly = 1) {
+            refundNotificationDispatcher.orderRefundRequested(
+                "order-1", "user-1", "consultant-1", "doctor-1"
+            )
+        }
+        verify(exactly = 1) {
+            refundNotificationDispatcher.orderRefunded(
+                "order-1", "user-1", "consultant-1", "doctor-1"
+            )
+        }
     }
 
     @Test
@@ -206,7 +315,10 @@ class RefundServiceTest {
             .copy(originalStatus = OrderStatusEnum.COMPLETED.value)
         every { refundRepository.findByIdForUpdate("refund-1") } returns pending
         every { orderRepository.findByIdForUpdate("order-1") } returns
-            serviceOrder(status = OrderStatusEnum.REFUND_REVIEW.value)
+            serviceOrder(status = OrderStatusEnum.REFUND_REVIEW.value).copy(
+                consultantId = "consultant-1",
+                doctorId = "doctor-1"
+            )
         every { refundRepository.save(any()) } answers { firstArg() }
         every { orderRepository.save(capture(savedOrder)) } answers { firstArg() }
         every { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) } returns Unit
@@ -217,6 +329,11 @@ class RefundServiceTest {
         assertEquals(RefundWorkflowPersistenceService.REJECTED, result.status)
         assertEquals(OrderStatusEnum.COMPLETED.value, savedOrder.captured.status)
         verify(exactly = 0) { execution.execute(any()) }
+        verify(exactly = 1) {
+            refundNotificationDispatcher.orderRefundRejected(
+                "order-1", "user-1", "consultant-1", "doctor-1", "服务已安排"
+            )
+        }
     }
 
     @Test
@@ -301,7 +418,10 @@ class RefundServiceTest {
         val pending = refund(status = RefundWorkflowPersistenceService.PENDING)
         every { refundRepository.findByIdForUpdate("refund-1") } returns pending
         every { orderRepository.findByIdForUpdate("order-1") } returns
-            serviceOrder(status = OrderStatusEnum.REFUND_REVIEW.value)
+            serviceOrder(status = OrderStatusEnum.REFUND_REVIEW.value).copy(
+                consultantId = "consultant-1",
+                doctorId = "doctor-1"
+            )
         every { refundRepository.save(any()) } answers { firstArg() }
         every { orderRepository.save(any()) } answers { firstArg() }
         every { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) } returns Unit
@@ -318,6 +438,11 @@ class RefundServiceTest {
             orderRepository.findByIdForUpdate("order-1")
             orderRepository.save(match { it.status == OrderStatusEnum.REFUND_PROCESSING.value })
             execution.execute(match { it.status == RefundWorkflowPersistenceService.PROCESSING })
+        }
+        verify(exactly = 1) {
+            refundNotificationDispatcher.orderRefundApproved(
+                "order-1", "user-1", "consultant-1", "doctor-1"
+            )
         }
     }
 
@@ -350,8 +475,14 @@ class RefundServiceTest {
         val processing = pending.copy(status = RefundWorkflowPersistenceService.PROCESSING)
         every { refundRepository.findByIdForUpdate("refund-1") } returnsMany listOf(pending, processing)
         every { orderRepository.findByIdForUpdate("order-1") } returnsMany listOf(
-            serviceOrder(status = OrderStatusEnum.REFUND_REVIEW.value, userCouponId = 9L),
-            serviceOrder(status = OrderStatusEnum.REFUND_PROCESSING.value, userCouponId = 9L)
+            serviceOrder(status = OrderStatusEnum.REFUND_REVIEW.value, userCouponId = 9L).copy(
+                consultantId = "consultant-1",
+                doctorId = "doctor-1"
+            ),
+            serviceOrder(status = OrderStatusEnum.REFUND_PROCESSING.value, userCouponId = 9L).copy(
+                consultantId = "consultant-1",
+                doctorId = "doctor-1"
+            )
         )
         every { refundRepository.save(any()) } answers { firstArg() }
         every { orderRepository.save(any()) } answers { firstArg() }
@@ -365,6 +496,16 @@ class RefundServiceTest {
         verify { orderRepository.save(match { it.status == OrderStatusEnum.REFUNDED.value }) }
         verify(exactly = 0) { reversal.reverseCompletedRefund(any()) }
         verify(exactly = 0) { couponService.returnCoupon(any()) }
+        verify(exactly = 1) {
+            refundNotificationDispatcher.orderRefundApproved(
+                "order-1", "user-1", "consultant-1", "doctor-1"
+            )
+        }
+        verify(exactly = 1) {
+            refundNotificationDispatcher.orderRefunded(
+                "order-1", "user-1", "consultant-1", "doctor-1"
+            )
+        }
     }
 
     @Test
@@ -381,6 +522,8 @@ class RefundServiceTest {
         assertEquals(RefundWorkflowPersistenceService.APPROVED, result.status)
         verify(exactly = 0) { execution.execute(any()) }
         verify(exactly = 0) { refundRepository.save(any()) }
+        verify(exactly = 0) { refundNotificationDispatcher.orderRefundApproved(any(), any(), any(), any()) }
+        verify(exactly = 0) { refundNotificationDispatcher.orderRefunded(any(), any(), any(), any()) }
     }
 
     @Test
@@ -398,6 +541,7 @@ class RefundServiceTest {
         verify(exactly = 0) { execution.execute(any()) }
         verify(exactly = 0) { refundRepository.save(any()) }
         verify(exactly = 0) { orderRepository.save(any()) }
+        verify(exactly = 0) { refundNotificationDispatcher.orderRefundApproved(any(), any(), any(), any()) }
     }
 
     @Test
@@ -901,7 +1045,8 @@ class RefundServiceTest {
         refundRepository,
         orderRepository,
         orderStatusLogService,
-        paymentRepository
+        paymentRepository,
+        refundNotificationDispatcher
     )
 
     private fun itemPersistence() = RefundItemPersistenceService(
@@ -917,11 +1062,15 @@ class RefundServiceTest {
             paymentRepository.findAllByOrderIdAndStatusInOrderByCreatedAtAsc("order-1", any())
         } returns listOf(serviceFeePayment())
         every { refundRepository.saveAndFlush(any()) } answers { firstArg() }
+        every { orderRepository.save(any()) } answers { firstArg() }
         every { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) } returns Unit
     }
 
     private fun stubApplicationBase() {
-        every { orderRepository.findByIdForUpdate("order-1") } returns serviceOrder()
+        every { orderRepository.findByIdForUpdate("order-1") } returns serviceOrder().copy(
+            consultantId = "consultant-1",
+            doctorId = "doctor-1"
+        )
         every { refundRepository.findAllByOrderIdAndStatusIn("order-1", any()) } returns emptyList()
     }
 
@@ -1060,4 +1209,18 @@ class RefundServiceTest {
         currency = currency,
         amountMinor = amountMinor
     )
+
+    private class RecordingTransactionManager : AbstractPlatformTransactionManager() {
+        var commits = 0
+
+        override fun doGetTransaction(): Any = Any()
+
+        override fun doBegin(transaction: Any, definition: TransactionDefinition) = Unit
+
+        override fun doCommit(status: DefaultTransactionStatus) {
+            commits += 1
+        }
+
+        override fun doRollback(status: DefaultTransactionStatus) = Unit
+    }
 }

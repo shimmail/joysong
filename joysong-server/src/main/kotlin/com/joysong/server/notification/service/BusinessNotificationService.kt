@@ -83,7 +83,14 @@ class BusinessNotificationService(
         )
 
     fun orderRefunded(orderId: String, userId: String, consultantId: String, doctorId: String) =
-        orderRefundNotification("ORDER_REFUNDED", "退款已完成", "订单退款已完成，请查看详情。", orderId, userId, consultantId, doctorId)
+        notify(
+            recipients = listOf(userId, consultantId, doctorId),
+            type = "ORDER_REFUNDED",
+            title = "退款已完成",
+            content = "订单退款已完成，请查看详情。",
+            targetType = "order",
+            targetId = orderId
+        )
 
     fun orderCancelled(orderId: String, userId: String, consultantId: String) =
         notify(
