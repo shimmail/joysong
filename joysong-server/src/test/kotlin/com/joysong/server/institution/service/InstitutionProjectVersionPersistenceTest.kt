@@ -5,7 +5,9 @@ import com.joysong.server.institution.repository.InstitutionProjectRepository
 import com.joysong.server.support.WorktreeTestDatabase
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -60,6 +62,18 @@ class InstitutionProjectVersionPersistenceTest {
             repository.flush()
         }
         assertNull(jdbc.queryForObject("SELECT deleted_at FROM institution_projects WHERE id = 'version-delete'", java.time.LocalDateTime::class.java))
+    }
+
+    @Test
+    fun `repository soft delete marks the row and increments its version`() {
+        val initial = repository.saveAndFlush(project("successful-delete"))
+
+        repository.delete(initial)
+        repository.flush()
+
+        assertNotNull(jdbc.queryForObject("SELECT deleted_at FROM institution_projects WHERE id = 'successful-delete'", java.time.LocalDateTime::class.java))
+        assertEquals(1L, jdbc.queryForObject("SELECT version FROM institution_projects WHERE id = 'successful-delete'", Long::class.java))
+        assertTrue(repository.findById("successful-delete").isEmpty)
     }
 
     private fun project(id: String) = InstitutionProjectEntity(

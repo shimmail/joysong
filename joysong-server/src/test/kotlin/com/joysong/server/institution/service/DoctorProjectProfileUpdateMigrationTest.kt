@@ -8,6 +8,8 @@ import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
+import org.springframework.jdbc.datasource.init.ScriptUtils
+import org.springframework.core.io.ClassPathResource
 import org.testcontainers.containers.MySQLContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
@@ -24,19 +26,14 @@ class DoctorProjectProfileUpdateMigrationTest {
             .use { legacyMysql ->
                 legacyMysql.start()
                 val jdbc = JdbcTemplate(DriverManagerDataSource(legacyMysql.jdbcUrl, legacyMysql.username, legacyMysql.password))
-                val legacyFlyway = { target: String? ->
-                    val config = Flyway.configure().dataSource(legacyMysql.jdbcUrl, legacyMysql.username, legacyMysql.password)
-                        .locations("classpath:db/migration")
-                    if (target != null) config.target(target)
-                    config.load()
-                }
-                legacyFlyway("19").migrate()
+                installLegacyFixture(legacyMysql)
+                migrateFromFixture(legacyMysql, "19")
                 jdbc.execute("ALTER TABLE doctor_project_change_requests DROP CHECK chk_dpcr_price_suggestion")
                 jdbc.execute("ALTER TABLE doctor_project_change_requests DROP COLUMN notes, DROP COLUMN price_suggestion")
                 jdbc.execute("DROP TABLE professional_project_requests")
                 jdbc.execute("ALTER TABLE doctor_project_change_requests DROP CHECK chk_dpcr_status, ADD CONSTRAINT chk_dpcr_status CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'WITHDRAWN'))")
 
-                legacyFlyway(null).migrate()
+                migrateFromFixture(legacyMysql, "20")
 
                 assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='doctor_project_change_requests' AND column_name='price_suggestion'", Int::class.java))
                 assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='professional_project_requests'", Int::class.java))
@@ -47,10 +44,10 @@ class DoctorProjectProfileUpdateMigrationTest {
     @Test
     fun `pre V17 profile update history is backfilled before V19 constraints`() {
         val jdbc = JdbcTemplate(DriverManagerDataSource(mysql.jdbcUrl, mysql.username, mysql.password))
-        flyway("15").migrate()
+        installLegacyFixture(mysql)
         seedV16History(jdbc)
 
-        flyway().migrate()
+        migrateFromFixture(mysql, "19")
 
         assertSnapshot(jdbc, "with-config", "120.00", "12.00", "7.00", "33.00")
         assertSnapshot(jdbc, "without-config", "220.00", "0.00", "0.00", "40.00")
@@ -67,11 +64,23 @@ class DoctorProjectProfileUpdateMigrationTest {
         }
     }
 
-    private fun flyway(target: String? = null): Flyway {
-        val config = Flyway.configure().dataSource(mysql.jdbcUrl, mysql.username, mysql.password)
+    private fun installLegacyFixture(container: MySQLContainer<*>) {
+        DriverManagerDataSource(container.jdbcUrl, container.username, container.password).connection.use { connection ->
+            ScriptUtils.executeSqlScript(connection, ClassPathResource("db/doctor-project-profile-update-history/legacy_profile_update_schema.sql"))
+        }
+        Flyway.configure().dataSource(container.jdbcUrl, container.username, container.password)
             .locations("classpath:db/migration")
-        if (target != null) config.target(target)
-        return config.load()
+            .baselineVersion("16")
+            .load()
+            .baseline()
+    }
+
+    private fun migrateFromFixture(container: MySQLContainer<*>, target: String) {
+        Flyway.configure().dataSource(container.jdbcUrl, container.username, container.password)
+            .locations("classpath:db/migration")
+            .target(target)
+            .load()
+            .migrate()
     }
 
     private fun seedV16History(jdbc: JdbcTemplate) {

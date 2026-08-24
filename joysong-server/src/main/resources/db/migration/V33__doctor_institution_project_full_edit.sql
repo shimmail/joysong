@@ -70,6 +70,5 @@ ALTER TABLE doctor_project_change_requests
             AND proposed_project_snapshot IS NOT NULL
             AND current_doctor_is_active IS NOT NULL
             AND proposed_doctor_is_active IS NOT NULL
-            AND approval_audit_snapshot IS NOT NULL
         )
     );
