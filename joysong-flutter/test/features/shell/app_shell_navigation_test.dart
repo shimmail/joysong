@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/core/config/app_environment.dart';
 import 'package:joysong_flutter/core/network/api_client.dart';
 import 'package:joysong_flutter/features/messaging/presentation/messaging_pages.dart';
+import 'package:joysong_flutter/features/orders/presentation/order_detail_page.dart';
 import 'package:joysong_flutter/features/shell/presentation/app_shell.dart';
 
 import '../orders/order_test_fixtures.dart';
@@ -268,6 +269,47 @@ void main() {
     expect(find.byType(DmThreadPage), findsNothing);
     expect(find.text('当前会话不可查看'), findsOneWidget);
   });
+
+  testWidgets('opening the messages tab does not mark all notifications read',
+      (tester) async {
+    final client = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE',
+      freshReadable: true,
+      freshSendEnabled: true,
+      includeNotification: true,
+    );
+    await _pumpShell(tester, client);
+
+    await tester.tap(find.text('消息'));
+    await tester.pumpAndSettle();
+
+    expect(client.puts, isNot(contains('notifications/read-all')));
+  });
+
+  testWidgets('order notification is read once and opens its detail directly',
+      (tester) async {
+    _useLargeTestSurface(tester);
+    final client = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE',
+      freshReadable: true,
+      freshSendEnabled: true,
+      notifications: const [_orderNotificationJson],
+    );
+    await _pumpShell(tester, client);
+
+    await tester.tap(find.text('消息'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('message-center-system')));
+    await tester.pumpAndSettle();
+    expect(find.text('订单服务已开启'), findsOneWidget);
+
+    await tester.tap(find.text('订单服务已开启'));
+    await tester.pumpAndSettle();
+
+    expect(client.puts, contains('notifications/notification-order-detail/read'));
+    expect(client.orderReads, 1);
+    expect(find.byType(OrderDetailPage), findsOneWidget);
+  });
 }
 
 void _useLargeTestSurface(WidgetTester tester) {
@@ -363,6 +405,7 @@ final class _OrderServiceApiClient extends ApiClient {
     required this.freshReadable,
     required this.freshSendEnabled,
     this.includeNotification = false,
+    this.notifications = const [],
   }) : super(
           apiRoot: Uri.parse('http://localhost/api/'),
           httpClient: _TestHttpClient(),
@@ -372,8 +415,10 @@ final class _OrderServiceApiClient extends ApiClient {
   final bool freshReadable;
   bool freshSendEnabled;
   final bool includeNotification;
+  final List<Map<String, Object?>> notifications;
   final gets = <String>[];
   final posts = <(String, Object?)>[];
+  final puts = <String>[];
   final queuedOrderReads = <Future<Map<String, Object?>>>[];
 
   int get orderReads => gets.where((path) => path == 'orders/order-1').length;
@@ -414,9 +459,12 @@ final class _OrderServiceApiClient extends ApiClient {
       return decodeData(await queuedOrderReads.removeAt(0));
     }
     final Object data = switch (path) {
-      'notifications/unread-count' => includeNotification ? 1 : 0,
+      'notifications/unread-count' =>
+        notifications.isNotEmpty || includeNotification ? 1 : 0,
       'notifications' =>
-        includeNotification ? const [_dmNotificationJson] : const <Object?>[],
+        notifications.isNotEmpty
+            ? notifications
+            : (includeNotification ? const [_dmNotificationJson] : const <Object?>[]),
       'dm/conversations' => freshReadable
           ? const [_orderServiceConversationJson]
           : const <Object?>[],
@@ -453,8 +501,10 @@ final class _OrderServiceApiClient extends ApiClient {
     String path, {
     Object? body,
     required T Function(Object? json) decodeData,
-  }) async =>
-      decodeData(null);
+  }) async {
+    puts.add(path);
+    return decodeData(null);
+  }
 }
 
 const _agentSessionJson = <String, Object?>{
@@ -531,4 +581,16 @@ const _dmNotificationJson = <String, Object?>{
   'targetId': 'conversation-order-1',
   'isRead': false,
   'createdAt': '2026-08-21T10:06:00',
+};
+
+const _orderNotificationJson = <String, Object?>{
+  'id': 'notification-order-detail',
+  'userId': 'user-1',
+  'type': 'ORDER_SERVICE_ACTIVATED',
+  'title': '订单服务已开启',
+  'content': '服务已开始，请查看订单详情',
+  'targetType': 'order',
+  'targetId': 'order-1',
+  'isRead': false,
+  'createdAt': '2026-08-25T10:00:00',
 };

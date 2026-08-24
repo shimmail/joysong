@@ -31,6 +31,8 @@ import 'package:joysong_flutter/features/home/domain/home_repository.dart';
 import 'package:joysong_flutter/features/home/presentation/home_page.dart';
 import 'package:joysong_flutter/features/identity/data/identity_repository_impl.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
+import 'package:joysong_flutter/features/identity/presentation/identity_pages.dart';
+import 'package:joysong_flutter/features/identity/presentation/institution_relationships_page.dart';
 import 'package:joysong_flutter/features/messaging/data/messaging_remote_data_source.dart';
 import 'package:joysong_flutter/features/messaging/data/messaging_repository_impl.dart';
 import 'package:joysong_flutter/features/messaging/data/secure_messaging_preferences_store.dart';
@@ -940,13 +942,6 @@ class _AppShellState extends State<AppShell> {
 
   void _openMessagesTab() {
     setState(() => _selectedIndex = 2);
-    final notificationController = _notificationController;
-    if (notificationController != null) {
-      // Opening the notification entry acknowledges the current notification
-      // badge. The controller updates the local count immediately after the
-      // server confirms the operation.
-      unawaited(notificationController.markAllRead());
-    }
     final messagingController = _messagingController;
     if (messagingController != null) {
       unawaited(messagingController.refresh());
@@ -993,8 +988,40 @@ class _AppShellState extends State<AppShell> {
       _openPublicUser(targetId);
       return;
     }
-    if (type == 'order') {
-      _openOrders();
+    if (type == 'order' || type == 'order_refund') {
+      unawaited(_openOrderDetailById(targetId));
+      return;
+    }
+    if (type == 'order_service_conversation') {
+      unawaited(_openOrderServiceConversation(targetId));
+      return;
+    }
+    if (type == 'identity_management') {
+      _openIdentityCenter();
+      return;
+    }
+    if (type == 'identity_application') {
+      _openIdentityCenter(initialApplicationId: targetId);
+      return;
+    }
+    final relationshipScope = switch (type) {
+      'professional_doctor_review' =>
+        InstitutionRelationshipScope.legalRepresentative,
+      'professional_consultant_review' =>
+        InstitutionRelationshipScope.legalRepresentative,
+      'professional_doctor_application' ||
+      'professional_doctor_relationships' =>
+        InstitutionRelationshipScope.doctor,
+      'professional_consultant_application' ||
+      'professional_consultant_relationships' =>
+        InstitutionRelationshipScope.consultant,
+      _ => null,
+    };
+    if (relationshipScope != null) {
+      _openInstitutionRelationships(
+        relationshipScope,
+        initialRequestId: targetId,
+      );
       return;
     }
     final discoverType = switch (type) {
@@ -1021,6 +1048,54 @@ class _AppShellState extends State<AppShell> {
         onOpenAi: _openAiChat,
       ),
     ));
+  }
+
+  Future<void> _openOrderDetailById(String orderId) async {
+    final repository = _ordersRepository;
+    final id = orderId.trim();
+    if (repository == null || id.isEmpty) return;
+    final controller = OrderDetailController(repository, orderId: id);
+    await _contentNavigator.push<void>(
+      MaterialPageRoute(
+        builder: (_) => OrderDetailPage(
+          controller: controller,
+          socialController: _socialController,
+          onOpenServiceConversation: _openOrderServiceConversation,
+        ),
+      ),
+    );
+    controller.dispose();
+    await _ordersController?.refresh();
+  }
+
+  void _openIdentityCenter({String? initialApplicationId}) {
+    final repository = _identityRepository;
+    if (repository == null) return;
+    _contentNavigator.push<void>(
+      MaterialPageRoute(
+        builder: (_) => IdentityCenterPage(
+          repository: repository,
+          initialApplicationId: initialApplicationId,
+        ),
+      ),
+    );
+  }
+
+  void _openInstitutionRelationships(
+    InstitutionRelationshipScope scope, {
+    String? initialRequestId,
+  }) {
+    final repository = _identityRepository;
+    if (repository == null) return;
+    _contentNavigator.push<void>(
+      MaterialPageRoute(
+        builder: (_) => InstitutionRelationshipsPage(
+          repository: repository,
+          scope: scope,
+          initialRequestId: initialRequestId,
+        ),
+      ),
+    );
   }
 
   Future<void> _openDmConversation(String conversationId) async {
