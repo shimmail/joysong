@@ -1,6 +1,7 @@
 package com.joysong.server.institution.service
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.JsonNode
 import com.joysong.server.config.OrderSplitProperties
 import com.joysong.server.identity.service.DoctorInstitutionRelationshipService
 import com.joysong.server.identity.service.InstitutionRelationshipReviewAuthorityService
@@ -10,6 +11,7 @@ import com.joysong.server.order.service.TravelGroundServicePricing
 import com.joysong.server.project.service.InstitutionProjectPayloadPolicy
 import com.joysong.server.support.WorktreeTestDatabase
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Tag
@@ -27,6 +29,7 @@ import org.testcontainers.containers.MySQLContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
 import java.math.BigDecimal
+import java.sql.Timestamp
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -66,6 +69,8 @@ class DoctorProjectFullEditPersistenceTest {
     fun `v2 shared approval atomically writes shared private compatibility and audit state`() {
         seed()
         val submitted = submit("doctor-1", sharedName = "Updated Project", price = BigDecimal("125.00"), active = false)
+        val committedCache = requireNotNull(cacheManager.getCache("projects"))
+        committedCache.put("successful-approval", "stale")
 
         val reviewed = service.reviewV2(
             legalActor(),
@@ -80,14 +85,74 @@ class DoctorProjectFullEditPersistenceTest {
         assertEquals(0L, long("SELECT is_active FROM doctor_projects WHERE doctor_id='doctor-1' AND institution_project_id='ip-1'"))
         assertEquals(BigDecimal("125.00"), decimal("SELECT medical_list_price FROM doctor_institution_project_configs WHERE doctor_id='doctor-1' AND institution_project_id='ip-1'"))
         assertEquals(BigDecimal("200.00"), decimal("SELECT price FROM doctor_projects WHERE doctor_id='doctor-2' AND institution_project_id='ip-1'"))
+        assertEquals(null, committedCache.get("successful-approval"))
         val audit = objectMapper.readTree(
             text("SELECT approval_audit_snapshot FROM doctor_project_change_requests WHERE id='${submitted.id}'")
         )
+        assertEquals(
+            setOf("beforeVersion", "afterVersion", "latestBefore", "actualApplied", "force", "driftedFields"),
+            audit.fieldNames().asSequence().toSet()
+        )
         assertEquals(0L, audit.path("beforeVersion").asLong())
         assertEquals(1L, audit.path("afterVersion").asLong())
+        assertAuditState(
+            audit.path("latestBefore"),
+            requireNotNull(submitted.currentProject),
+            BigDecimal("100.00"),
+            true,
+            BigDecimal("40.00")
+        )
+        assertAuditState(
+            audit.path("actualApplied"),
+            requireNotNull(reviewed.latestProject),
+            BigDecimal("125.00"),
+            false,
+            BigDecimal("50.00")
+        )
         assertEquals(false, audit.path("force").asBoolean())
-        assertTrue(audit.has("latestBefore"))
-        assertTrue(audit.has("actualApplied"))
+        assertEquals(emptyList<String>(), audit.path("driftedFields").map(JsonNode::asText))
+    }
+
+    @Test
+    fun `force token detects a doctor value change even when its six digit timestamp is preserved`() {
+        seed()
+        val submitted = submit("doctor-1", sharedName = null, price = BigDecimal("125.00"), active = false)
+        val oldRevision = requireNotNull(
+            (service.listV2(adminActor()).single { it.id == submitted.id } as VersionedDoctorProjectChangeViewV2)
+                .latestRevision
+        )
+        val unchangedTimestamp = jdbc.queryForObject(
+            "SELECT updated_at FROM doctor_projects WHERE doctor_id='doctor-1' AND institution_project_id='ip-1'",
+            Timestamp::class.java
+        )
+        jdbc.update(
+            "UPDATE doctor_projects SET price=111.00, updated_at=? WHERE doctor_id='doctor-1' AND institution_project_id='ip-1'",
+            unchangedTimestamp
+        )
+        val refreshedRevision = requireNotNull(
+            (service.listV2(adminActor()).single { it.id == submitted.id } as VersionedDoctorProjectChangeViewV2)
+                .latestRevision
+        )
+        val unchangedConfigTimestamp = jdbc.queryForObject(
+            "SELECT updated_at FROM doctor_institution_project_configs WHERE id='config-1'",
+            Timestamp::class.java
+        )
+        jdbc.update(
+            "UPDATE doctor_institution_project_configs SET commission_rate=1.00, updated_at=? WHERE id='config-1'",
+            unchangedConfigTimestamp
+        )
+        val configRefreshedRevision = requireNotNull(
+            (service.listV2(adminActor()).single { it.id == submitted.id } as VersionedDoctorProjectChangeViewV2)
+                .latestRevision
+        )
+
+        assertNotEquals(oldRevision, refreshedRevision)
+        assertNotEquals(refreshedRevision, configRefreshedRevision)
+        val stale = assertThrows(ProjectChangeContractException::class.java) {
+            service.reviewV2(adminActor(), submitted.id, force(refreshedRevision))
+        }
+        assertEquals(ProjectChangeErrorCode.FORCE_BASE_STALE, stale.errorCode)
+        assertEquals("PENDING", text("SELECT status FROM doctor_project_change_requests WHERE id='${submitted.id}'"))
     }
 
     @Test
@@ -181,21 +246,45 @@ class DoctorProjectFullEditPersistenceTest {
 
         seed()
         val relationshipRequest = submit("doctor-1", sharedName = "Changed", price = BigDecimal("125.00"), active = false)
+        val relationshipRevision = requireNotNull(
+            (service.listV2(adminActor()).single { it.id == relationshipRequest.id } as VersionedDoctorProjectChangeViewV2)
+                .latestRevision
+        )
         jdbc.update("UPDATE doctor_institutions SET revoked_at=NOW() WHERE id='di-1'")
         assertThrows(org.springframework.security.access.AccessDeniedException::class.java) {
-            service.reviewV2(adminActor(), relationshipRequest.id, approve())
+            service.reviewV2(adminActor(), relationshipRequest.id, force(relationshipRevision))
         }
         assertEquals("PENDING", text("SELECT status FROM doctor_project_change_requests WHERE id='${relationshipRequest.id}'"))
         assertEquals(0L, long("SELECT version FROM institution_projects WHERE id='ip-1'"))
 
         seed()
         val bindingRequest = submit("doctor-1", sharedName = "Changed", price = BigDecimal("125.00"), active = false)
+        val bindingRevision = requireNotNull(
+            (service.listV2(adminActor()).single { it.id == bindingRequest.id } as VersionedDoctorProjectChangeViewV2)
+                .latestRevision
+        )
         jdbc.update("DELETE FROM doctor_projects WHERE doctor_id='doctor-1' AND institution_project_id='ip-1'")
         assertThrows(org.springframework.security.access.AccessDeniedException::class.java) {
-            service.reviewV2(adminActor(), bindingRequest.id, approve())
+            service.reviewV2(adminActor(), bindingRequest.id, force(bindingRevision))
         }
         assertEquals("PENDING", text("SELECT status FROM doctor_project_change_requests WHERE id='${bindingRequest.id}'"))
         assertEquals(0L, long("SELECT version FROM institution_projects WHERE id='ip-1'"))
+
+        seed()
+        val associationRequest = submit("doctor-1", sharedName = "Changed", price = BigDecimal("125.00"), active = false)
+        val associationRevision = requireNotNull(
+            (service.listV2(adminActor()).single { it.id == associationRequest.id } as VersionedDoctorProjectChangeViewV2)
+                .latestRevision
+        )
+        jdbc.update(
+            "INSERT INTO projects (id,name,category,description,tags,slogan,cover_image,images) VALUES ('project-2','Other','Category','Description','[\"tag\"]','Slogan','cover','[\"image\"]')"
+        )
+        jdbc.update("UPDATE institution_projects SET project_id='project-2' WHERE id='ip-1'")
+        assertThrows(org.springframework.security.access.AccessDeniedException::class.java) {
+            service.reviewV2(adminActor(), associationRequest.id, force(associationRevision))
+        }
+        assertEquals("PENDING", text("SELECT status FROM doctor_project_change_requests WHERE id='${associationRequest.id}'"))
+        assertEquals(BigDecimal("100.00"), decimal("SELECT price FROM doctor_projects WHERE doctor_id='doctor-1' AND institution_project_id='ip-1'"))
     }
 
     @Test
@@ -209,18 +298,41 @@ class DoctorProjectFullEditPersistenceTest {
         assertEquals(ProjectChangeErrorCode.FORCE_NOT_APPLICABLE, notApplicable.errorCode)
 
         jdbc.update("UPDATE institution_projects SET version=version+1, name='latest' WHERE id='ip-1'")
-        val freshRevision = (service.listV2(adminActor()).single { it.id == noDrift.id } as VersionedDoctorProjectChangeViewV2).latestRevision
+        val latestBeforeForce = service.listV2(adminActor()).single { it.id == noDrift.id }
+            as VersionedDoctorProjectChangeViewV2
+        val freshRevision = latestBeforeForce.latestRevision
         val stale = assertThrows(ProjectChangeContractException::class.java) {
             service.reviewV2(adminActor(), noDrift.id, force("0".repeat(64)))
         }
         assertEquals(ProjectChangeErrorCode.FORCE_BASE_STALE, stale.errorCode)
-        service.reviewV2(adminActor(), noDrift.id, force(requireNotNull(freshRevision)))
+        val forcedReview = service.reviewV2(adminActor(), noDrift.id, force(requireNotNull(freshRevision)))
+            as VersionedDoctorProjectChangeViewV2
         assertEquals("APPROVED", text("SELECT status FROM doctor_project_change_requests WHERE id='${noDrift.id}'"))
         val forceAudit = objectMapper.readTree(
             text("SELECT approval_audit_snapshot FROM doctor_project_change_requests WHERE id='${noDrift.id}'")
         )
+        assertEquals(
+            setOf("beforeVersion", "afterVersion", "latestBefore", "actualApplied", "force", "driftedFields"),
+            forceAudit.fieldNames().asSequence().toSet()
+        )
+        assertEquals(1L, forceAudit.path("beforeVersion").asLong())
+        assertEquals(2L, forceAudit.path("afterVersion").asLong())
+        assertAuditState(
+            forceAudit.path("latestBefore"),
+            requireNotNull(latestBeforeForce.latestProject),
+            BigDecimal("100.00"),
+            true,
+            BigDecimal("40.00")
+        )
+        assertAuditState(
+            forceAudit.path("actualApplied"),
+            requireNotNull(forcedReview.latestProject),
+            BigDecimal("125.00"),
+            false,
+            BigDecimal("50.00")
+        )
         assertEquals(true, forceAudit.path("force").asBoolean())
-        assertTrue(forceAudit.path("driftedFields").map { it.asText() }.contains("institutionProjectVersion"))
+        assertEquals(listOf("institutionProjectVersion"), forceAudit.path("driftedFields").map(JsonNode::asText))
 
         seed()
         val inherited = submit("doctor-1", sharedName = "Changed", price = BigDecimal("125.00"), active = false)
@@ -236,13 +348,74 @@ class DoctorProjectFullEditPersistenceTest {
         val previousRate = splitProperties.platformRate
         try {
             splitProperties.platformRate = BigDecimal("41.00")
+            val pricingRevision = requireNotNull(
+                (service.listV2(adminActor()).single { it.id == priced.id } as VersionedDoctorProjectChangeViewV2)
+                    .latestRevision
+            )
             val pricingError = assertThrows(ProjectChangeContractException::class.java) {
-                service.reviewV2(adminActor(), priced.id, approve())
+                service.reviewV2(adminActor(), priced.id, force(pricingRevision))
             }
             assertEquals(ProjectChangeErrorCode.PRICING_POLICY_STALE, pricingError.errorCode)
         } finally {
             splitProperties.platformRate = previousRate
         }
+    }
+
+    @Test
+    fun `force cannot bypass invalid snapshots invalid fields or stored fee mismatch`() {
+        seed()
+        val invalidSnapshot = submit("doctor-1", sharedName = "Changed", price = BigDecimal("125.00"), active = false)
+        val invalidSnapshotRevision = requireNotNull(
+            (service.listV2(adminActor()).single { it.id == invalidSnapshot.id } as VersionedDoctorProjectChangeViewV2)
+                .latestRevision
+        )
+        jdbc.update(
+            "UPDATE doctor_project_change_requests SET proposed_project_snapshot=JSON_OBJECT() WHERE id=?",
+            invalidSnapshot.id
+        )
+        assertEquals(
+            ProjectChangeErrorCode.REQUEST_SNAPSHOT_INVALID,
+            assertThrows(ProjectChangeContractException::class.java) {
+                service.reviewV2(adminActor(), invalidSnapshot.id, force(invalidSnapshotRevision))
+            }.errorCode
+        )
+        assertEquals("PENDING", text("SELECT status FROM doctor_project_change_requests WHERE id='${invalidSnapshot.id}'"))
+
+        seed()
+        val invalidField = submit("doctor-1", sharedName = "Changed", price = BigDecimal("125.00"), active = false)
+        val invalidFieldRevision = requireNotNull(
+            (service.listV2(adminActor()).single { it.id == invalidField.id } as VersionedDoctorProjectChangeViewV2)
+                .latestRevision
+        )
+        jdbc.update(
+            "UPDATE doctor_project_change_requests SET proposed_project_snapshot=JSON_SET(proposed_project_snapshot, '\$.rawOverrides.name', '   ') WHERE id=?",
+            invalidField.id
+        )
+        assertEquals(
+            ProjectChangeErrorCode.REQUEST_SNAPSHOT_INVALID,
+            assertThrows(ProjectChangeContractException::class.java) {
+                service.reviewV2(adminActor(), invalidField.id, force(invalidFieldRevision))
+            }.errorCode
+        )
+        assertEquals("PENDING", text("SELECT status FROM doctor_project_change_requests WHERE id='${invalidField.id}'"))
+
+        seed()
+        val feeMismatch = submit("doctor-1", sharedName = null, price = BigDecimal("125.00"), active = false)
+        val feeRevision = requireNotNull(
+            (service.listV2(adminActor()).single { it.id == feeMismatch.id } as VersionedDoctorProjectChangeViewV2)
+                .latestRevision
+        )
+        jdbc.update(
+            "UPDATE doctor_project_change_requests SET proposed_travel_ground_service_fee=999.00 WHERE id=?",
+            feeMismatch.id
+        )
+        assertEquals(
+            ProjectChangeErrorCode.PRICING_POLICY_STALE,
+            assertThrows(ProjectChangeContractException::class.java) {
+                service.reviewV2(adminActor(), feeMismatch.id, force(feeRevision))
+            }.errorCode
+        )
+        assertEquals("PENDING", text("SELECT status FROM doctor_project_change_requests WHERE id='${feeMismatch.id}'"))
     }
 
     @Test
@@ -300,10 +473,33 @@ class DoctorProjectFullEditPersistenceTest {
             DoctorProjectChangeRequest(institutionProjectId = "ip-1", requestType = "LEAVE")
         )
         assertEquals("LEAVE", leave.requestType)
-        service.reviewV2(adminActor(), leave.id, approve())
+        val withdrawnLeave = service.withdrawV2(doctorActor("doctor-1"), leave.id)
+            as LegacyDoctorProjectChangeViewV2
+        assertEquals("WITHDRAWN", withdrawnLeave.status)
+        val finalLeave = service.submit(
+            doctorActor("doctor-1"),
+            DoctorProjectChangeRequest(institutionProjectId = "ip-1", requestType = "LEAVE")
+        )
+        jdbc.update("UPDATE doctor_institutions SET revoked_at=CURRENT_TIMESTAMP(6) WHERE id='di-1'")
+        service.reviewV2(adminActor(), finalLeave.id, approve())
 
         assertEquals(0L, long("SELECT COUNT(*) FROM doctor_projects WHERE doctor_id='doctor-1' AND institution_project_id='ip-1'"))
-        assertEquals("APPROVED", text("SELECT status FROM doctor_project_change_requests WHERE id='${leave.id}'"))
+        assertEquals("APPROVED", text("SELECT status FROM doctor_project_change_requests WHERE id='${finalLeave.id}'"))
+    }
+
+    @Test
+    fun `legacy submit revalidates a revoked relationship instead of trusting the actor snapshot`() {
+        seed()
+        jdbc.update("UPDATE doctor_institutions SET revoked_at=CURRENT_TIMESTAMP(6) WHERE id='di-1'")
+
+        assertThrows(org.springframework.security.access.AccessDeniedException::class.java) {
+            service.submit(
+                doctorActor("doctor-1"),
+                DoctorProjectChangeRequest(institutionProjectId = "ip-1", requestType = "LEAVE")
+            )
+        }
+
+        assertEquals(0L, long("SELECT COUNT(*) FROM doctor_project_change_requests"))
     }
 
     private fun submit(
@@ -369,6 +565,26 @@ class DoctorProjectFullEditPersistenceTest {
     private fun text(sql: String): String = jdbc.queryForObject(sql, String::class.java)!!
     private fun long(sql: String): Long = jdbc.queryForObject(sql, Long::class.java)!!
     private fun decimal(sql: String): BigDecimal = jdbc.queryForObject(sql, BigDecimal::class.java)!!
+
+    private fun assertAuditState(
+        actual: JsonNode,
+        expectedProject: InstitutionProjectSnapshotV2,
+        expectedDoctorPrice: BigDecimal,
+        expectedDoctorActive: Boolean,
+        expectedFee: BigDecimal
+    ) {
+        assertEquals(
+            setOf("project", "doctorPrice", "doctorActive", "travelGroundServiceFee"),
+            actual.fieldNames().asSequence().toSet()
+        )
+        assertEquals(
+            expectedProject,
+            DoctorProjectSnapshotCodec(objectMapper).decode(actual.path("project").toString())
+        )
+        assertEquals(0, expectedDoctorPrice.compareTo(actual.path("doctorPrice").decimalValue()))
+        assertEquals(expectedDoctorActive, actual.path("doctorActive").asBoolean())
+        assertEquals(0, expectedFee.compareTo(actual.path("travelGroundServiceFee").decimalValue()))
+    }
 
     companion object {
         @Container @ServiceConnection @JvmField

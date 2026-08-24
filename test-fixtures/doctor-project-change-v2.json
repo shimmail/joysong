@@ -101,7 +101,7 @@
       "effective": { "name": "Local Face Lift", "category": "Surgery", "description": null, "tags": ["local"], "slogan": "Natural result", "detailContent": "Detail", "salesCount": 12, "coverImage": "https://cdn.example/cover.jpg", "images": ["https://cdn.example/local.jpg"] },
       "source": { "institutionProjectVersion": 7, "platformInheritanceHash": "f4168ca8ed8e9d41b62aef5f215a78cd2c018e1a3e8b7384f4311216fdeaea81" }
     },
-    "latestRevision": "314a4110fbe7a30bbd69054b85e25fd0f6b5c646dce0f5df35d1f2913ed635f1",
+    "latestRevision": "73c12ed4aa9bf50c917dea21bb4e3bbc56cb8c80584ffd8ef64318daf88d4e8d",
     "sharedChanged": true,
     "currentDoctorPrice": 1000.00,
     "proposedDoctorPrice": 1100.00,
@@ -148,7 +148,7 @@
       "effective": { "name": "Local Face Lift", "category": "Surgery", "description": null, "tags": ["local"], "slogan": "Natural result", "detailContent": "Detail", "salesCount": 12, "coverImage": "https://cdn.example/cover.jpg", "images": ["https://cdn.example/local.jpg"] },
       "source": { "institutionProjectVersion": 7, "platformInheritanceHash": "f4168ca8ed8e9d41b62aef5f215a78cd2c018e1a3e8b7384f4311216fdeaea81" }
     },
-    "latestRevision": "314a4110fbe7a30bbd69054b85e25fd0f6b5c646dce0f5df35d1f2913ed635f1",
+    "latestRevision": "73c12ed4aa9bf50c917dea21bb4e3bbc56cb8c80584ffd8ef64318daf88d4e8d",
     "sharedChanged": true,
     "currentDoctorPrice": 1000.00,
     "proposedDoctorPrice": 1100.00,

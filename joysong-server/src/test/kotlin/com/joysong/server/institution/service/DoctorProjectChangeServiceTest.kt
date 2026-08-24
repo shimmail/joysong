@@ -323,6 +323,27 @@ class DoctorProjectChangeServiceTest {
         assertEquals("Platform Category", result.proposedProject?.effective?.category)
         assertEquals(BigDecimal("120.00"), result.proposedDoctorPrice)
         assertEquals(false, result.proposedDoctorActive)
+        val expectedLatestRevision = DoctorProjectSnapshotCodec(objectMapper).forceViewRevision(
+            DoctorProjectForceViewSource(
+                latestProject = requireNotNull(result.latestProject),
+                doctorPrice = BigDecimal("100.00"),
+                doctorActive = true,
+                doctorProjectUpdatedAt = Timestamp.valueOf(LocalDateTime.of(2026, 8, 10, 10, 0)).toInstant(),
+                config = DoctorProjectForceConfigState(
+                    id = "config-1",
+                    updatedAt = Timestamp.valueOf(LocalDateTime.of(2026, 8, 10, 10, 0)).toInstant(),
+                    consultationFee = BigDecimal("30.00"),
+                    commissionRate = BigDecimal("10.00"),
+                    institutionRate = BigDecimal("40.00"),
+                    medicalListPrice = BigDecimal("100.00")
+                ),
+                pricingPolicyRevision = "travel-ground-service-rate:0.400000",
+                platformRate = BigDecimal("40.00"),
+                travelGroundServiceFee = BigDecimal("40.00")
+            )
+        )
+        assertEquals(expectedLatestRevision, result.latestRevision)
+        assertEquals(false, result.baseRevision == result.latestRevision)
         verify(exactly = 1) { payloadPolicy.normalize(any()) }
         verify {
             jdbcTemplate.update(
@@ -648,12 +669,11 @@ class DoctorProjectChangeServiceTest {
         val sharedOnly = service.listV2(legalActor()).single() as VersionedDoctorProjectChangeViewV2
         liveState = liveState.copy(
             doctorPrice = BigDecimal("125.00"),
-            doctorActive = false,
-            doctorUpdatedAt = Timestamp.valueOf(LocalDateTime.of(2026, 8, 11, 10, 0))
+            doctorActive = false
         )
         val doctorPrivateOnly = service.listV2(legalActor()).single() as VersionedDoctorProjectChangeViewV2
         liveState = liveState.copy(
-            configUpdatedAt = Timestamp.valueOf(LocalDateTime.of(2026, 8, 12, 10, 0))
+            configCommissionRate = BigDecimal("12.00")
         )
         val configOnly = service.listV2(legalActor()).single() as VersionedDoctorProjectChangeViewV2
 
@@ -871,23 +891,7 @@ class DoctorProjectChangeServiceTest {
 
     @Test
     fun `profile update rejects zero effective project price`() {
-        every {
-            jdbcTemplate.query(
-                match<String> { it.contains("FROM institution_projects") },
-                any<RowMapper<Any>>(),
-                "ip-1"
-            )
-        } answers {
-            val mapper = secondArg<RowMapper<Any>>()
-            val rs = mockk<ResultSet> {
-                every { getString("institution_id") } returns "institution-1"
-                every { getString("project_id") } returns "project-1"
-            }
-            listOf(mapper.mapRow(rs, 0))
-        }
-        every { doctorProjectRepository.findByDoctorIdAndInstitutionProjectId("doctor-1", "ip-1") } returns doctorProject()
-        every { configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate("doctor-1", "ip-1") } returns
-            DoctorInstitutionProjectConfigEntity(doctorId = "doctor-1", institutionProjectId = "ip-1", medicalListPrice = BigDecimal("900.00"))
+        stubProfileSubmission()
 
         val error = assertThrows(IllegalArgumentException::class.java) {
             service.submit(doctorActor(), DoctorProjectChangeRequest(
@@ -903,23 +907,7 @@ class DoctorProjectChangeServiceTest {
 
     @Test
     fun `profile update rejects fractional-cent medical list price before persistence`() {
-        every {
-            jdbcTemplate.query(
-                match<String> { it.contains("FROM institution_projects") },
-                any<RowMapper<Any>>(),
-                "ip-1"
-            )
-        } answers {
-            val mapper = secondArg<RowMapper<Any>>()
-            val rs = mockk<ResultSet> {
-                every { getString("institution_id") } returns "institution-1"
-                every { getString("project_id") } returns "project-1"
-            }
-            listOf(mapper.mapRow(rs, 0))
-        }
-        every { doctorProjectRepository.findByDoctorIdAndInstitutionProjectId("doctor-1", "ip-1") } returns doctorProject()
-        every { configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate("doctor-1", "ip-1") } returns
-            DoctorInstitutionProjectConfigEntity(doctorId = "doctor-1", institutionProjectId = "ip-1", medicalListPrice = BigDecimal("900.00"))
+        stubProfileSubmission()
 
         val error = assertThrows(IllegalArgumentException::class.java) {
             service.submit(doctorActor(), DoctorProjectChangeRequest(
@@ -1138,6 +1126,105 @@ class DoctorProjectChangeServiceTest {
         verify(exactly = 0) { doctorProjectRepository.save(any()) }
     }
 
+    @Test
+    fun `legacy leave approval survives a revoked relationship and only locks rows it mutates`() {
+        stubReviewQueries(requestType = "LEAVE")
+        val binding = doctorProject()
+        val config = DoctorInstitutionProjectConfigEntity(
+            id = "config-1",
+            doctorId = "doctor-1",
+            institutionProjectId = "ip-1"
+        )
+        every { relationshipService.requireActiveRelationshipForUpdate("doctor-1", "institution-1") } throws
+            AccessDeniedException("医生与机构的有效执业关系已失效")
+        every { doctorProjectRepository.findForUpdate("doctor-1", "ip-1") } returns binding
+        every { configRepository.findForUpdate("doctor-1", "ip-1") } returns config
+        every { configRepository.delete(config) } returns Unit
+        every { doctorProjectRepository.delete(binding) } returns Unit
+        every { institutionProjectRepository.flush() } returns Unit
+        every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 1
+
+        val result = service.review(legalActor(), "request-1", "APPROVED", "", false)
+
+        assertEquals("APPROVED", result.status)
+        verify(exactly = 0) { relationshipService.requireActiveRelationshipForUpdate(any(), any()) }
+        verify(exactly = 0) { institutionProjectRepository.findForUpdate(any()) }
+        verify(exactly = 0) {
+            jdbcTemplate.query(match<String> { it.contains("FROM projects") }, any<RowMapper<Any>>(), *anyVararg())
+        }
+        verifyOrder {
+            doctorProjectRepository.findForUpdate("doctor-1", "ip-1")
+            configRepository.findForUpdate("doctor-1", "ip-1")
+            configRepository.delete(config)
+            doctorProjectRepository.delete(binding)
+            institutionProjectRepository.flush()
+            jdbcTemplate.update(match<String> { it.contains("UPDATE doctor_project_change_requests") }, *anyVararg())
+        }
+    }
+
+    @Test
+    fun `legacy submit locks live authority and project rows in the frozen order before pending insert`() {
+        stubJoinSubmission()
+        every { institutionProjectRepository.findForUpdate("ip-1") } returns InstitutionProjectEntity(
+            id = "ip-1", institutionId = "institution-1", projectId = "project-1", isActive = true
+        )
+        every {
+            jdbcTemplate.query(
+                match<String> { it.contains("FROM projects") && it.contains("FOR UPDATE") },
+                any<RowMapper<Any>>(),
+                "project-1"
+            )
+        } answers {
+            val mapper = secondArg<RowMapper<Any>>()
+            listOf(mapper.mapRow(platformResultSet(), 0))
+        }
+        every { doctorProjectRepository.findForUpdate("doctor-1", "ip-1") } returns null
+        every {
+            configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate("doctor-1", "ip-1")
+        } returns null
+        every {
+            jdbcTemplate.queryForObject(match<String> { it.contains("SELECT COUNT(*)") }, Long::class.java, *anyVararg())
+        } returns 0L
+        var submittedId = ""
+        every {
+            jdbcTemplate.update(match<String> { it.contains("INSERT INTO doctor_project_change_requests") }, *anyVararg())
+        } answers {
+            submittedId = secondArg<Array<Any?>>()[0] as String
+            1
+        }
+        every { jdbcTemplate.query(any<String>(), any<RowMapper<Any>>()) } answers {
+            val mapper = secondArg<RowMapper<Any>>()
+            val resultSet = viewResultSet("PENDING")
+            every { resultSet.getString("id") } returns submittedId
+            listOf(mapper.mapRow(resultSet, 0))
+        }
+
+        service.submit(
+            doctorActor(),
+            DoctorProjectChangeRequest(
+                institutionProjectId = "ip-1",
+                requestType = "JOIN",
+                serviceDescription = "service",
+                priceSuggestion = BigDecimal("880.00"),
+                notes = "notes"
+            )
+        )
+
+        verifyOrder {
+            relationshipService.requireActiveRelationshipForUpdate("doctor-1", "institution-1")
+            institutionProjectRepository.findForUpdate("ip-1")
+            jdbcTemplate.query(
+                match<String> { it.contains("FROM projects") && it.contains("FOR UPDATE") },
+                any<RowMapper<Any>>(),
+                "project-1"
+            )
+            doctorProjectRepository.findForUpdate("doctor-1", "ip-1")
+            configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate("doctor-1", "ip-1")
+            jdbcTemplate.queryForObject(match<String> { it.contains("SELECT COUNT(*)") }, Long::class.java, *anyVararg())
+            jdbcTemplate.update(match<String> { it.contains("INSERT INTO doctor_project_change_requests") }, *anyVararg())
+        }
+    }
+
     private fun stubV2TargetQuery(doctorActive: Boolean) {
         every {
             jdbcTemplate.query(
@@ -1247,6 +1334,10 @@ class DoctorProjectChangeServiceTest {
                 every { getString("id") } returns configId
                 every { getTimestamp("updated_at") } returns Timestamp.valueOf(lockedConfigUpdatedAt)
                 every { getTimestamp("deleted_at") } returns null
+                every { getBigDecimal("consultation_fee") } returns BigDecimal("30.00")
+                every { getBigDecimal("commission_rate") } returns BigDecimal("10.00")
+                every { getBigDecimal("institution_rate") } returns BigDecimal("40.00")
+                every { getBigDecimal("medical_list_price") } returns BigDecimal("100.00")
             }
             listOf(mapper.mapRow(rs, 0))
         }
@@ -1362,6 +1453,10 @@ class DoctorProjectChangeServiceTest {
         every { getString("config_id") } returns "config-1"
         every { getTimestamp("config_updated_at") } returns
             Timestamp.valueOf(LocalDateTime.of(2026, 8, 10, 10, 0))
+        every { getBigDecimal("config_consultation_fee") } returns BigDecimal("30.00")
+        every { getBigDecimal("config_commission_rate") } returns BigDecimal("10.00")
+        every { getBigDecimal("config_institution_rate") } returns BigDecimal("40.00")
+        every { getBigDecimal("config_medical_list_price") } returns BigDecimal("100.00")
     }
 
     private fun captureV2Ledger(values: Array<*>): CapturedV2Ledger {
@@ -1482,6 +1577,10 @@ class DoctorProjectChangeServiceTest {
         every { getTimestamp("latest_doctor_project_updated_at") } returns live.doctorUpdatedAt
         every { getString("latest_config_id") } returns live.configId
         every { getTimestamp("latest_config_updated_at") } returns live.configUpdatedAt
+        every { getBigDecimal("latest_config_consultation_fee") } returns live.configConsultationFee
+        every { getBigDecimal("latest_config_commission_rate") } returns live.configCommissionRate
+        every { getBigDecimal("latest_config_institution_rate") } returns live.configInstitutionRate
+        every { getBigDecimal("latest_config_medical_list_price") } returns live.configMedicalListPrice
     }
 
     private fun validV2Snapshot(version: Long = 7): InstitutionProjectSnapshotV2 {
@@ -1525,7 +1624,8 @@ class DoctorProjectChangeServiceTest {
             }
             listOf(mapper.mapRow(rs, 0))
         }
-        every { doctorProjectRepository.findByDoctorIdAndInstitutionProjectId("doctor-1", "ip-1") } returns doctorProject()
+        stubLegacySubmitProjectLocks()
+        every { doctorProjectRepository.findForUpdate("doctor-1", "ip-1") } returns doctorProject()
         every { configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate("doctor-1", "ip-1") } returns
             DoctorInstitutionProjectConfigEntity(
                 doctorId = "doctor-1",
@@ -1549,7 +1649,30 @@ class DoctorProjectChangeServiceTest {
             }
             listOf(mapper.mapRow(rs, 0))
         }
-        every { doctorProjectRepository.findByDoctorIdAndInstitutionProjectId("doctor-1", "ip-1") } returns null
+        stubLegacySubmitProjectLocks()
+        every { doctorProjectRepository.findForUpdate("doctor-1", "ip-1") } returns null
+        every {
+            configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate("doctor-1", "ip-1")
+        } returns null
+    }
+
+    private fun stubLegacySubmitProjectLocks() {
+        every { institutionProjectRepository.findForUpdate("ip-1") } returns InstitutionProjectEntity(
+            id = "ip-1",
+            institutionId = "institution-1",
+            projectId = "project-1",
+            isActive = true
+        )
+        every {
+            jdbcTemplate.query(
+                match<String> { it.contains("FROM projects") && it.contains("FOR UPDATE") },
+                any<RowMapper<Any>>(),
+                "project-1"
+            )
+        } answers {
+            val mapper = secondArg<RowMapper<Any>>()
+            listOf(mapper.mapRow(platformResultSet(), 0))
+        }
     }
 
     private fun profileRequest(
@@ -1734,6 +1857,10 @@ class DoctorProjectChangeServiceTest {
         val doctorActive: Boolean,
         val doctorUpdatedAt: Timestamp,
         val configId: String?,
-        val configUpdatedAt: Timestamp?
+        val configUpdatedAt: Timestamp?,
+        val configConsultationFee: BigDecimal = BigDecimal("30.00"),
+        val configCommissionRate: BigDecimal = BigDecimal("10.00"),
+        val configInstitutionRate: BigDecimal = BigDecimal("40.00"),
+        val configMedicalListPrice: BigDecimal = BigDecimal("100.00")
     )
 }

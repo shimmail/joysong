@@ -96,7 +96,11 @@ class DoctorProjectChangeService(
                    p.images AS platform_images,
                    dp.price AS doctor_price, dp.is_active AS doctor_active,
                    dp.updated_at AS doctor_project_updated_at,
-                   c.id AS config_id, c.updated_at AS config_updated_at
+                   c.id AS config_id, c.updated_at AS config_updated_at,
+                   c.consultation_fee AS config_consultation_fee,
+                   c.commission_rate AS config_commission_rate,
+                   c.institution_rate AS config_institution_rate,
+                   c.medical_list_price AS config_medical_list_price
             FROM doctor_projects dp
             JOIN doctors d ON d.id = dp.doctor_id AND d.deleted_at IS NULL
             JOIN institution_projects ip
@@ -181,8 +185,7 @@ class DoctorProjectChangeService(
             doctorPrice = doctorProject.price,
             doctorActive = doctorProject.isActive,
             doctorProjectUpdatedAt = doctorProjectUpdatedAt,
-            configId = activeConfig?.id,
-            configUpdatedAt = activeConfig?.updatedAt
+            config = activeConfig
         )
         val lockedRevision = try {
             state.revision(quote.pricingPolicyRevision)
@@ -284,6 +287,12 @@ class DoctorProjectChangeService(
                 e
             )
         }
+        val liveQuote = travelGroundServicePricing.quoteWithPolicy(doctorProject.price)
+        val latestRevision = state.forceViewRevision(
+            liveQuote.pricingPolicyRevision,
+            liveQuote.platformRate,
+            liveQuote.serviceFee
+        )
         val now = Instant.now()
         return VersionedDoctorProjectChangeViewV2(
             id = id,
@@ -300,7 +309,7 @@ class DoctorProjectChangeService(
             currentProject = currentSnapshot,
             proposedProject = proposedSnapshot,
             latestProject = currentSnapshot,
-            latestRevision = lockedRevision,
+            latestRevision = latestRevision,
             sharedChanged = sharedChanged,
             currentDoctorPrice = doctorProject.price,
             proposedDoctorPrice = request.price,
@@ -491,7 +500,11 @@ class DoctorProjectChangeService(
                    p.cover_image AS latest_platform_cover_image, p.images AS latest_platform_images,
                    dp.price AS latest_doctor_price, dp.is_active AS latest_doctor_active,
                    dp.updated_at AS latest_doctor_project_updated_at,
-                   c.id AS latest_config_id, c.updated_at AS latest_config_updated_at
+                   c.id AS latest_config_id, c.updated_at AS latest_config_updated_at,
+                   c.consultation_fee AS latest_config_consultation_fee,
+                   c.commission_rate AS latest_config_commission_rate,
+                   c.institution_rate AS latest_config_institution_rate,
+                   c.medical_list_price AS latest_config_medical_list_price
             FROM doctor_project_change_requests r
             JOIN doctors d ON d.id = r.doctor_id
             JOIN institutions i ON i.id = r.institution_id
@@ -562,8 +575,13 @@ class DoctorProjectChangeService(
             val latestSnapshot = runCatching { latestState?.snapshot() }.getOrNull()
             val latestRevision = runCatching {
                 val live = requireNotNull(latestState)
-                val currentPolicy = travelGroundServicePricing.quoteWithPolicy(requireNotNull(ledger).proposedDoctorPrice)
-                live.revision(currentPolicy.pricingPolicyRevision)
+                requireNotNull(ledger)
+                val currentPolicy = travelGroundServicePricing.quoteWithPolicy(live.doctorPrice)
+                live.forceViewRevision(
+                    currentPolicy.pricingPolicyRevision,
+                    currentPolicy.platformRate,
+                    currentPolicy.serviceFee
+                )
             }.getOrNull()
             val snapshotsValid = ledgerResult.isSuccess
             val status = rs.getString("status")
@@ -622,12 +640,21 @@ class DoctorProjectChangeService(
         require(requestType in PROJECT_CHANGE_TYPES) { "不支持的项目申请类型" }
         val institutionProjectId = request.institutionProjectId.trim()
         require(institutionProjectId.isNotEmpty()) { "机构项目不能为空" }
-        val project = projectTarget(institutionProjectId)
+        val discoveredProject = projectTarget(institutionProjectId)
             ?: throw DoctorProjectChangeNotFoundException("机构项目不存在")
-        if (project.institutionId !in actor.doctorInstitutionIds) {
-            throw AccessDeniedException("医生尚未取得该机构的有效执业关系")
+        relationshipService.requireActiveRelationshipForUpdate(doctorId, discoveredProject.institutionId)
+        val project = institutionProjectRepository.findForUpdate(institutionProjectId)
+            ?: throw DoctorProjectChangeNotFoundException("机构项目不存在")
+        if (!project.isActive || project.institutionId != discoveredProject.institutionId) {
+            throw AccessDeniedException("机构项目关联已失效")
         }
-        val existing = doctorProjectRepository.findByDoctorIdAndInstitutionProjectId(doctorId, institutionProjectId)
+        lockedPlatformProject(project.projectId)
+            ?: throw AccessDeniedException("平台项目关联已失效")
+        val existing = doctorProjectRepository.findForUpdate(doctorId, institutionProjectId)
+        val config = configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate(
+            doctorId,
+            institutionProjectId
+        )
         when (requestType) {
             "JOIN" -> {
                 require(existing == null) { "医生已加入该机构项目" }
@@ -643,7 +670,6 @@ class DoctorProjectChangeService(
             }
             "PROFILE_UPDATE", "LEAVE" -> require(existing != null) { "医生尚未加入该机构项目" }
         }
-        val config = if (requestType == "PROFILE_UPDATE") configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate(doctorId, institutionProjectId) else null
         if (requestType == "PROFILE_UPDATE") validateProfile(request)
         if (pendingCount(doctorId, institutionProjectId) != 0L) throw DoctorProjectChangeConflictException("该项目已有待处理申请")
 
@@ -792,6 +818,20 @@ class DoctorProjectChangeService(
             return
         }
 
+        if (target.payloadVersion == 1 && target.requestType == "LEAVE") {
+            val doctorProject = doctorProjectRepository.findForUpdate(target.doctorId, target.institutionProjectId)
+            val config = configRepository.findForUpdate(target.doctorId, target.institutionProjectId)
+                ?: configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate(
+                    target.doctorId,
+                    target.institutionProjectId
+                )
+            applyLegacyApprovedLocked(target, identity.platformProjectId, doctorProject, config, command.force)
+            institutionProjectRepository.flush()
+            finishReview(target, actor, command, approvalAuditSnapshot = null)
+            evictProjectCachesAfterCommit()
+            return
+        }
+
         relationshipService.requireActiveRelationshipForUpdate(target.doctorId, target.institutionId)
         val institutionProject = institutionProjectRepository.findForUpdate(target.institutionProjectId)
             ?: throw AccessDeniedException("机构项目关联已失效")
@@ -891,8 +931,7 @@ class DoctorProjectChangeService(
             }
             "LEAVE" -> {
                 require(existing != null) { "医生项目关系不存在" }
-                configRepository.findByDoctorIdAndInstitutionProjectId(target.doctorId, target.institutionProjectId)
-                    ?.let(configRepository::delete)
+                config?.takeIf { it.deletedAt == null }?.let(configRepository::delete)
                 jdbcTemplate.update(
                     "UPDATE split_config_proposals SET status = 'WITHDRAWN', decided_at = NOW(), decision_note = '医生已退出项目' WHERE doctor_id = ? AND institution_project_id = ? AND status = 'PENDING'",
                     target.doctorId,
@@ -982,10 +1021,10 @@ class DoctorProjectChangeService(
         }
         validateEffectivePayload(proposedProject.effective)
 
-        val quote = travelGroundServicePricing.quoteWithPolicy(proposedDoctorPrice)
-        if (quote.pricingPolicyRevision != pricingRevision ||
-            quote.platformRate.compareTo(storedPlatformRate) != 0 ||
-            quote.serviceFee.compareTo(storedFee) != 0) {
+        val proposalQuote = travelGroundServicePricing.quoteWithPolicy(proposedDoctorPrice)
+        if (proposalQuote.pricingPolicyRevision != pricingRevision ||
+            proposalQuote.platformRate.compareTo(storedPlatformRate) != 0 ||
+            proposalQuote.serviceFee.compareTo(storedFee) != 0) {
             throw contractConflict(ProjectChangeErrorCode.PRICING_POLICY_STALE, "定价策略已变化，请重新提交")
         }
 
@@ -1001,8 +1040,7 @@ class DoctorProjectChangeService(
             doctorPrice = doctorProject.price,
             doctorActive = doctorProject.isActive,
             doctorProjectUpdatedAt = doctorUpdatedAt,
-            configId = activeConfig?.id,
-            configUpdatedAt = activeConfig?.updatedAt
+            config = activeConfig
         )
         val latestProject = try {
             latestState.snapshot()
@@ -1044,9 +1082,14 @@ class DoctorProjectChangeService(
                 add("compatibilityConfigRevision")
             }
         }
+        val liveQuote = travelGroundServicePricing.quoteWithPolicy(doctorProject.price)
         if (command.force) {
             if (driftedFields.isEmpty()) throw forceNotApplicable("当前不存在可强制覆盖的共享或医生私有基线漂移")
-            val latestRevision = latestState.revision(quote.pricingPolicyRevision)
+            val latestRevision = latestState.forceViewRevision(
+                liveQuote.pricingPolicyRevision,
+                liveQuote.platformRate,
+                liveQuote.serviceFee
+            )
             if (command.forceBaseRevision != latestRevision) {
                 throw contractConflict(ProjectChangeErrorCode.FORCE_BASE_STALE, "强制批准确认基线已变化，请刷新后重试")
             }
@@ -1087,7 +1130,7 @@ class DoctorProjectChangeService(
         val doctorUpdated = jdbcTemplate.update(
             """
             UPDATE doctor_projects
-            SET price = ?, is_active = ?, updated_at = NOW()
+            SET price = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP(6)
             WHERE doctor_id = ? AND institution_project_id = ? AND project_id = ?
             """.trimIndent(),
             proposedDoctorPrice,
@@ -1106,13 +1149,13 @@ class DoctorProjectChangeService(
                 latestProject,
                 doctorProject.price,
                 doctorProject.isActive,
-                quote.serviceFee
+                liveQuote.serviceFee
             ),
             actualApplied = DoctorProjectApprovalAuditState(
                 appliedProject,
                 proposedDoctorPrice,
                 proposedDoctorActive,
-                quote.serviceFee
+                proposalQuote.serviceFee
             ),
             force = command.force,
             driftedFields = if (command.force) driftedFields else emptyList()
@@ -1128,7 +1171,7 @@ class DoctorProjectChangeService(
             val updated = jdbcTemplate.update(
                 """
                 UPDATE doctor_institution_project_configs
-                SET medical_list_price = ?, deleted_at = NULL, updated_at = NOW()
+                SET medical_list_price = ?, deleted_at = NULL, updated_at = CURRENT_TIMESTAMP(6)
                 WHERE id = ? AND doctor_id = ? AND institution_project_id = ?
                 """.trimIndent(),
                 proposedDoctorPrice,
@@ -1145,7 +1188,7 @@ class DoctorProjectChangeService(
             INSERT INTO doctor_institution_project_configs
                 (id, doctor_id, institution_project_id, consultation_fee, commission_rate,
                  institution_rate, medical_list_price, created_at, updated_at)
-            VALUES (?, ?, ?, 0, ?, ?, ?, NOW(), NOW())
+            VALUES (?, ?, ?, 0, ?, ?, ?, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6))
             """.trimIndent(),
             UUID.randomUUID().toString(),
             target.doctorId,
@@ -1387,18 +1430,23 @@ class DoctorProjectChangeService(
     private fun lockedActiveConfigRevision(
         doctorId: String,
         institutionProjectId: String
-    ): LockedConfigRevision? = jdbcTemplate.query(
+    ): DoctorProjectForceConfigState? = jdbcTemplate.query(
         """
-        SELECT id, updated_at, deleted_at
+        SELECT id, updated_at, deleted_at, consultation_fee, commission_rate,
+               institution_rate, medical_list_price
         FROM doctor_institution_project_configs
         WHERE doctor_id = ? AND institution_project_id = ?
         FOR UPDATE
         """.trimIndent(),
         { rs, _ ->
             if (rs.getTimestamp("deleted_at") == null) {
-                LockedConfigRevision(
+                DoctorProjectForceConfigState(
                     id = rs.getString("id"),
-                    updatedAt = rs.getTimestamp("updated_at").toInstant()
+                    updatedAt = rs.getTimestamp("updated_at").toInstant(),
+                    consultationFee = rs.getBigDecimal("consultation_fee"),
+                    commissionRate = rs.getBigDecimal("commission_rate"),
+                    institutionRate = rs.getBigDecimal("institution_rate"),
+                    medicalListPrice = rs.getBigDecimal("medical_list_price")
                 )
             } else null
         },
@@ -1439,8 +1487,7 @@ class DoctorProjectChangeService(
         doctorPrice = rs.getBigDecimal("doctor_price"),
         doctorActive = rs.getBoolean("doctor_active"),
         doctorProjectUpdatedAt = rs.getTimestamp("doctor_project_updated_at").toInstant(),
-        configId = rs.getString("config_id"),
-        configUpdatedAt = rs.getTimestamp("config_updated_at")?.toInstant()
+        config = forceConfigState(rs, "config")
     )
 
     private fun v2StateFromLatestRow(rs: java.sql.ResultSet): V2ProjectState {
@@ -1478,8 +1525,22 @@ class DoctorProjectChangeService(
             doctorPrice = doctorPrice,
             doctorActive = rs.getBoolean("latest_doctor_active"),
             doctorProjectUpdatedAt = rs.getTimestamp("latest_doctor_project_updated_at").toInstant(),
-            configId = rs.getString("latest_config_id"),
-            configUpdatedAt = rs.getTimestamp("latest_config_updated_at")?.toInstant()
+            config = forceConfigState(rs, "latest_config")
+        )
+    }
+
+    private fun forceConfigState(rs: java.sql.ResultSet, prefix: String): DoctorProjectForceConfigState? {
+        val id = rs.getString("${prefix}_id")
+        val updatedAt = rs.getTimestamp("${prefix}_updated_at")
+        require((id == null) == (updatedAt == null)) { "配置 ID 与时间戳必须同时存在" }
+        if (id == null) return null
+        return DoctorProjectForceConfigState(
+            id = id,
+            updatedAt = requireNotNull(updatedAt).toInstant(),
+            consultationFee = requireNotNull(rs.getBigDecimal("${prefix}_consultation_fee")),
+            commissionRate = requireNotNull(rs.getBigDecimal("${prefix}_commission_rate")),
+            institutionRate = requireNotNull(rs.getBigDecimal("${prefix}_institution_rate")),
+            medicalListPrice = requireNotNull(rs.getBigDecimal("${prefix}_medical_list_price"))
         )
     }
 
@@ -1521,12 +1582,29 @@ class DoctorProjectChangeService(
                 institutionProjectVersion = institutionProject.version,
                 platformInheritanceHash = snapshot.source.platformInheritanceHash,
                 doctorProjectUpdatedAt = doctorProjectUpdatedAt,
-                configId = configId,
-                configUpdatedAt = configUpdatedAt,
+                configId = config?.id,
+                configUpdatedAt = config?.updatedAt,
                 pricingPolicyRevision = pricingPolicyRevision
             )
         )
     }
+
+    private fun V2ProjectState.forceViewRevision(
+        pricingPolicyRevision: String,
+        platformRate: BigDecimal,
+        travelGroundServiceFee: BigDecimal
+    ): String = snapshotCodec.forceViewRevision(
+        DoctorProjectForceViewSource(
+            latestProject = snapshot(),
+            doctorPrice = doctorPrice,
+            doctorActive = doctorActive,
+            doctorProjectUpdatedAt = doctorProjectUpdatedAt,
+            config = config,
+            pricingPolicyRevision = pricingPolicyRevision,
+            platformRate = platformRate,
+            travelGroundServiceFee = travelGroundServiceFee
+        )
+    )
 
     private fun validateEffectivePayload(effective: ProjectEffectiveSnapshot) {
         if (effective.name.isBlank() || effective.category.isBlank()) {
@@ -1693,11 +1771,6 @@ private data class ReviewRequestIdentity(
     val platformProjectId: String
 )
 
-private data class LockedConfigRevision(
-    val id: String,
-    val updatedAt: Instant
-)
-
 private data class V2LedgerShape(
     val baseRevision: String,
     val currentProject: InstitutionProjectSnapshotV2,
@@ -1721,8 +1794,7 @@ private data class V2ProjectState(
     val doctorPrice: BigDecimal,
     val doctorActive: Boolean,
     val doctorProjectUpdatedAt: Instant,
-    val configId: String?,
-    val configUpdatedAt: Instant?
+    val config: DoctorProjectForceConfigState?
 )
 
 private data class ChangeTarget(

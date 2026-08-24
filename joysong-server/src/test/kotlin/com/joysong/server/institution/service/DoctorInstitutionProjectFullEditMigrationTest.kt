@@ -46,6 +46,17 @@ class DoctorInstitutionProjectFullEditMigrationTest {
         assertTrue(isNullable(jdbc, "institution_projects", "cover_image"))
         assertTrue(isNullable(jdbc, "institution_projects", "images"))
         assertEquals(3, jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'doctor_projects' AND index_name = 'idx_doctor_projects_public_lookup'", Int::class.java))
+        assertTimestamp6(jdbc, "doctor_projects", "updated_at", "current_timestamp(6)", "on update current_timestamp(6)")
+        assertTimestamp6(
+            jdbc,
+            "doctor_institution_project_configs",
+            "updated_at",
+            "current_timestamp(6)",
+            "on update current_timestamp(6)"
+        )
+        assertTimestamp6(jdbc, "doctor_project_change_requests", "base_doctor_project_updated_at", null, "")
+        assertTimestamp6(jdbc, "doctor_project_change_requests", "base_config_updated_at", null, "")
+        assertSixDigitTimestampRoundTrip(jdbc)
 
         jdbc.update("UPDATE doctor_project_change_requests SET status = 'APPROVED' WHERE id = 'legacy-request'")
         insertPendingV2(jdbc, "pending-v2", status = "PENDING")
@@ -161,6 +172,81 @@ class DoctorInstitutionProjectFullEditMigrationTest {
             table,
             column
         ) == "YES"
+
+    private fun assertTimestamp6(
+        jdbc: JdbcTemplate,
+        table: String,
+        column: String,
+        expectedDefault: String?,
+        expectedExtra: String
+    ) {
+        val metadata = jdbc.queryForMap(
+            """
+            SELECT data_type, datetime_precision, is_nullable, column_default, extra
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?
+            """.trimIndent(),
+            table,
+            column
+        )
+        assertEquals("timestamp", metadata["data_type"], "$table.$column data type")
+        assertEquals(6, (metadata["datetime_precision"] as Number).toInt(), "$table.$column precision")
+        assertEquals("YES", metadata["is_nullable"], "$table.$column nullability")
+        assertEquals(expectedDefault, (metadata["column_default"] as String?)?.lowercase(), "$table.$column default")
+        val extra = (metadata["extra"] as String).lowercase()
+        if (expectedExtra.isEmpty()) {
+            assertEquals(false, extra.contains("on update"), "$table.$column extra")
+        } else {
+            assertTrue(extra.contains(expectedExtra), "$table.$column extra was $extra")
+        }
+    }
+
+    private fun assertSixDigitTimestampRoundTrip(jdbc: JdbcTemplate) {
+        val precise = Timestamp.valueOf(LocalDateTime.of(2026, 8, 24, 10, 0, 0, 123456000))
+        jdbc.update(
+            """
+            INSERT INTO doctor_institution_project_configs
+                (id, doctor_id, institution_project_id, consultation_fee, commission_rate,
+                 institution_rate, medical_list_price)
+            VALUES ('legacy-config', 'legacy-doctor', 'legacy-ip', 1.00, 2.00, 3.00, 99.00)
+            """.trimIndent()
+        )
+        jdbc.update(
+            "UPDATE doctor_projects SET updated_at = ? WHERE doctor_id = 'legacy-doctor' AND institution_project_id = 'legacy-ip'",
+            precise
+        )
+        jdbc.update("UPDATE doctor_institution_project_configs SET updated_at = ? WHERE id = 'legacy-config'", precise)
+        jdbc.update(
+            "UPDATE doctor_project_change_requests SET base_doctor_project_updated_at = ?, base_config_id = 'legacy-config', base_config_updated_at = ? WHERE id = 'legacy-request'",
+            precise,
+            precise
+        )
+        assertEquals(
+            precise,
+            jdbc.queryForObject(
+                "SELECT updated_at FROM doctor_projects WHERE doctor_id = 'legacy-doctor' AND institution_project_id = 'legacy-ip'",
+                Timestamp::class.java
+            )
+        )
+        assertEquals(
+            precise,
+            jdbc.queryForObject("SELECT updated_at FROM doctor_institution_project_configs WHERE id = 'legacy-config'", Timestamp::class.java)
+        )
+        assertEquals(
+            precise,
+            jdbc.queryForObject(
+                "SELECT base_doctor_project_updated_at FROM doctor_project_change_requests WHERE id = 'legacy-request'",
+                Timestamp::class.java
+            )
+        )
+        assertEquals(
+            precise,
+            jdbc.queryForObject(
+                "SELECT base_config_updated_at FROM doctor_project_change_requests WHERE id = 'legacy-request'",
+                Timestamp::class.java
+            )
+        )
+    }
 
     companion object {
         @Container

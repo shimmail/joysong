@@ -55,6 +55,40 @@ class DoctorProjectSnapshotCodec(private val objectMapper: ObjectMapper) {
         return sha256(objectMapper.writeValueAsBytes(canonical))
     }
 
+    fun forceViewRevision(source: DoctorProjectForceViewSource): String {
+        val latestProject = objectMapper.valueToTree<JsonNode>(source.latestProject)
+        validateSnapshot(latestProject)
+        val canonical = objectMapper.createObjectNode().apply {
+            put("domain", "doctor-project-force-view")
+            put("schemaVersion", 1)
+            set<JsonNode>("latestProject", latestProject)
+            set<JsonNode>("doctor", objectMapper.createObjectNode().apply {
+                put("price", decimal(source.doctorPrice))
+                put("active", source.doctorActive)
+                put("updatedAt", DateTimeFormatter.ISO_INSTANT.format(source.doctorProjectUpdatedAt))
+            })
+            val config = source.config
+            if (config == null) {
+                putNull("config")
+            } else {
+                set<JsonNode>("config", objectMapper.createObjectNode().apply {
+                    put("id", required(config.id, "config.id"))
+                    put("updatedAt", DateTimeFormatter.ISO_INSTANT.format(config.updatedAt))
+                    put("consultationFee", decimal(config.consultationFee))
+                    put("commissionRate", decimal(config.commissionRate))
+                    put("institutionRate", decimal(config.institutionRate))
+                    put("medicalListPrice", decimal(config.medicalListPrice))
+                })
+            }
+            set<JsonNode>("pricing", objectMapper.createObjectNode().apply {
+                put("revision", required(source.pricingPolicyRevision, "pricingPolicyRevision"))
+                put("platformRate", decimal(source.platformRate))
+                put("travelGroundServiceFee", decimal(source.travelGroundServiceFee))
+            })
+        }
+        return sha256(objectMapper.writeValueAsBytes(canonical))
+    }
+
     fun encode(snapshot: InstitutionProjectSnapshotV2): String = snapshotOperation {
         validateSnapshot(objectMapper.valueToTree(snapshot))
         objectMapper.writeValueAsString(snapshot)
@@ -178,6 +212,8 @@ class DoctorProjectSnapshotCodec(private val objectMapper: ObjectMapper) {
         ?.trim()
         ?.takeIf(String::isNotEmpty)
         ?.let { Normalizer.normalize(it, Normalizer.Form.NFC) }
+
+    private fun decimal(value: java.math.BigDecimal): String = value.stripTrailingZeros().toPlainString()
 
     private fun ObjectNode.putNullable(name: String, value: String?) {
         if (value == null) putNull(name) else put(name, value)

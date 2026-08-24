@@ -90,6 +90,50 @@ class DoctorProjectSnapshotCodecTest {
     }
 
     @Test
+    fun `force view revision is domain separated and includes live business values`() {
+        val source = DoctorProjectForceViewSource(
+            latestProject = validSnapshot(),
+            doctorPrice = BigDecimal("1234.5600"),
+            doctorActive = true,
+            doctorProjectUpdatedAt = Instant.parse("2026-08-24T01:02:03.456789Z"),
+            config = DoctorProjectForceConfigState(
+                id = "config-1",
+                updatedAt = Instant.parse("2026-08-24T04:05:06.123456Z"),
+                consultationFee = BigDecimal("100.00"),
+                commissionRate = BigDecimal("0.2500"),
+                institutionRate = BigDecimal("0.3500"),
+                medicalListPrice = BigDecimal("2000.00")
+            ),
+            pricingPolicyRevision = "travel-ground-service-rate:0.400000",
+            platformRate = BigDecimal("0.400000"),
+            travelGroundServiceFee = BigDecimal("493.824000")
+        )
+
+        val revision = codec.forceViewRevision(source)
+        assertEquals("522e0ba0cd52555b28a7e2149322188b299cb4d6271e69af6902b2f676aff618", revision)
+        assertNotEquals(
+            codec.baseRevision(
+                DoctorProjectRevisionSource(
+                    institutionProjectId = "ip-1", institutionId = "inst-1", platformProjectId = "pp-1",
+                    institutionProjectVersion = 7, platformInheritanceHash = "a".repeat(64),
+                    doctorProjectUpdatedAt = source.doctorProjectUpdatedAt,
+                    configId = source.config?.id, configUpdatedAt = source.config?.updatedAt,
+                    pricingPolicyRevision = source.pricingPolicyRevision
+                )
+            ),
+            revision
+        )
+        assertNotEquals(revision, codec.forceViewRevision(source.copy(doctorPrice = BigDecimal("1234.57"))))
+        assertNotEquals(
+            revision,
+            codec.forceViewRevision(
+                source.copy(config = source.config?.copy(commissionRate = BigDecimal("0.2600")))
+            )
+        )
+        assertNotEquals(revision, codec.forceViewRevision(source.copy(config = null)))
+    }
+
+    @Test
     fun `canonicalization uses NFC compatible list decoding and preserves order duplicates nulls and instant precision`() {
         val composed = platformSource(name = "Caf\u00e9", tags = " first , first , second ")
         val decomposed = platformSource(name = "Cafe\u0301", tags = "[\"first\",\"first\",\"second\"]")
@@ -200,6 +244,24 @@ class DoctorProjectSnapshotCodecTest {
         listOf("currentProject", "proposedProject", "latestProject").forEach { key ->
             codec.decode(mapper.writeValueAsString(fixture.path("requestV2").path(key)))
         }
+        assertEquals(
+            "314a4110fbe7a30bbd69054b85e25fd0f6b5c646dce0f5df35d1f2913ed635f1",
+            fixture.path("requestV2").path("baseRevision").asText()
+        )
+        val fixtureLatestRevision = codec.forceViewRevision(
+            DoctorProjectForceViewSource(
+                latestProject = codec.decode(mapper.writeValueAsString(fixture.path("requestV2").path("latestProject"))),
+                doctorPrice = BigDecimal("1000.00"),
+                doctorActive = true,
+                doctorProjectUpdatedAt = Instant.parse("2026-08-24T01:02:03.456Z"),
+                config = null,
+                pricingPolicyRevision = "travel-ground-service-rate:0.400000",
+                platformRate = BigDecimal("40.00"),
+                travelGroundServiceFee = BigDecimal("400.00")
+            )
+        )
+        assertEquals(fixtureLatestRevision, fixture.path("requestV2").path("latestRevision").asText())
+        assertEquals(fixtureLatestRevision, fixture.path("requestV2InvalidSnapshot").path("latestRevision").asText())
     }
 
     private fun platformSource(

@@ -114,6 +114,26 @@ data class DoctorProjectRevisionSource(
     val pricingPolicyRevision: String
 )
 
+data class DoctorProjectForceConfigState(
+    val id: String,
+    val updatedAt: Instant,
+    val consultationFee: BigDecimal,
+    val commissionRate: BigDecimal,
+    val institutionRate: BigDecimal,
+    val medicalListPrice: BigDecimal
+)
+
+data class DoctorProjectForceViewSource(
+    val latestProject: InstitutionProjectSnapshotV2,
+    val doctorPrice: BigDecimal,
+    val doctorActive: Boolean,
+    val doctorProjectUpdatedAt: Instant,
+    val config: DoctorProjectForceConfigState?,
+    val pricingPolicyRevision: String,
+    val platformRate: BigDecimal,
+    val travelGroundServiceFee: BigDecimal
+)
+
 data class DoctorProjectApprovalAuditState(
     val project: InstitutionProjectSnapshotV2,
     val doctorPrice: BigDecimal,

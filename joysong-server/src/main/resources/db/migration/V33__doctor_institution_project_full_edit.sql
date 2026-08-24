@@ -1,6 +1,10 @@
+ALTER TABLE doctor_institution_project_configs
+    MODIFY updated_at TIMESTAMP(6) NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6);
+
 ALTER TABLE doctor_projects
     ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    ADD INDEX idx_doctor_projects_public_lookup (institution_project_id, is_active, price);
+    ADD INDEX idx_doctor_projects_public_lookup (institution_project_id, is_active, price),
+    MODIFY updated_at TIMESTAMP(6) NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6);
 
 ALTER TABLE institution_projects
     ADD COLUMN version BIGINT NOT NULL DEFAULT 0,
@@ -23,6 +27,8 @@ ALTER TABLE doctor_project_change_requests
     DROP CHECK chk_dpcr_profile_current_snapshot,
     MODIFY service_tags TEXT NULL,
     MODIFY images TEXT NULL,
+    MODIFY base_doctor_project_updated_at TIMESTAMP(6) NULL DEFAULT NULL,
+    MODIFY base_config_updated_at TIMESTAMP(6) NULL DEFAULT NULL,
     ADD CONSTRAINT chk_dpcr_payload_version CHECK (payload_version IN (1, 2)),
     ADD CONSTRAINT chk_dpcr_v1_legacy_shape CHECK (
         payload_version <> 1
