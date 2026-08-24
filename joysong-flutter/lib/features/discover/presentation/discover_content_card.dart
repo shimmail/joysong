@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/network/optimized_network_image.dart';
+import 'package:joysong_flutter/core/translation/translation.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/social/presentation/diary_media_grid.dart';
 
@@ -435,6 +436,8 @@ class DiaryPreviewCard extends StatelessWidget {
     required this.favoriteCount,
     required this.commentCount,
     required this.onTap,
+    this.enableAutoTranslation = false,
+    this.autoTranslationContentId = '',
     this.isLiked = false,
     this.isFavorited = false,
     this.trailing,
@@ -444,6 +447,7 @@ class DiaryPreviewCard extends StatelessWidget {
   factory DiaryPreviewCard.fromData({
     required Map<String, Object?> data,
     required VoidCallback onTap,
+    bool enableAutoTranslation = false,
     Key? key,
   }) {
     final nested = data['diary'];
@@ -455,8 +459,11 @@ class DiaryPreviewCard extends StatelessWidget {
         : data;
     final images = _tokens(source['imageUrls'] ?? source['images']);
     final coverImage = _text(source, const ['coverImage', 'imageUrl']);
+    final id = _text(source, const ['id', 'diaryId']);
     return DiaryPreviewCard(
       key: key,
+      enableAutoTranslation: enableAutoTranslation,
+      autoTranslationContentId: 'diary:$id',
       title: _text(source, const ['title']),
       content: _text(source, const ['content', 'description', 'summary']),
       authorName: _text(
@@ -500,6 +507,8 @@ class DiaryPreviewCard extends StatelessWidget {
   final int likeCount;
   final int favoriteCount;
   final int commentCount;
+  final bool enableAutoTranslation;
+  final String autoTranslationContentId;
   final bool isLiked;
   final bool isFavorited;
   final Widget? trailing;
@@ -565,7 +574,16 @@ class DiaryPreviewCard extends StatelessWidget {
                         ],
                       ),
                     ),
-                    if (projectName.isNotEmpty) _Tag(projectName),
+                    if (projectName.isNotEmpty)
+                      enableAutoTranslation
+                          ? AutoTranslationBuilder(
+                              request: _diaryRequest(
+                                field: 'projectName',
+                                source: projectName,
+                              ),
+                              builder: (_, visibleText) => _Tag(visibleText),
+                            )
+                          : _Tag(projectName),
                     if (trailing != null) ...[
                       const SizedBox(width: 6),
                       trailing!,
@@ -573,10 +591,27 @@ class DiaryPreviewCard extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 10),
-                _Title(title),
+                enableAutoTranslation
+                    ? AutoTranslationBuilder(
+                        request: _diaryRequest(
+                          field: 'title',
+                          source: title,
+                        ),
+                        builder: (_, visibleText) => _Title(visibleText),
+                      )
+                    : _Title(title),
                 if (content.isNotEmpty) ...[
                   const SizedBox(height: 5),
-                  _Muted(content, maxLines: 2),
+                  enableAutoTranslation
+                      ? AutoTranslationBuilder(
+                          request: _diaryRequest(
+                            field: 'content',
+                            source: content,
+                          ),
+                          builder: (_, visibleText) =>
+                              _Muted(visibleText, maxLines: 2),
+                        )
+                      : _Muted(content, maxLines: 2),
                 ],
                 const SizedBox(height: 10),
                 Row(
@@ -609,6 +644,18 @@ class DiaryPreviewCard extends StatelessWidget {
       ),
     );
   }
+
+  AutoTranslationRequest _diaryRequest({
+    required String field,
+    required String source,
+  }) {
+    return AutoTranslationRequest(
+      contentType: 'diary',
+      contentId: autoTranslationContentId,
+      field: field,
+      sourceText: source,
+    );
+  }
 }
 
 class DiaryPreviewRail extends StatelessWidget {
@@ -617,6 +664,7 @@ class DiaryPreviewRail extends StatelessWidget {
     this.onDiaryTap,
     this.maxItems,
     this.cardWidth = 300,
+    this.enableAutoTranslation = false,
     super.key,
   });
 
@@ -624,6 +672,7 @@ class DiaryPreviewRail extends StatelessWidget {
   final ValueChanged<String>? onDiaryTap;
   final int? maxItems;
   final double cardWidth;
+  final bool enableAutoTranslation;
 
   @override
   Widget build(BuildContext context) {
@@ -641,6 +690,7 @@ class DiaryPreviewRail extends StatelessWidget {
               width: cardWidth,
               child: DiaryPreviewCard.fromData(
                 data: diaries[index],
+                enableAutoTranslation: enableAutoTranslation,
                 onTap: () {
                   final id = _text(diaries[index], const ['id', 'diaryId']);
                   if (id.isNotEmpty) onDiaryTap?.call(id);

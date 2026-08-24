@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/network/optimized_network_image.dart';
+import 'package:joysong_flutter/core/translation/translation.dart';
 import 'package:joysong_flutter/features/discover/presentation/discover_content_card.dart';
 import 'package:joysong_flutter/features/home/domain/home_models.dart';
 import 'package:joysong_flutter/features/home/domain/home_repository.dart';
@@ -494,8 +495,8 @@ class _RecommendationBanner extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          item.title,
+                        AutoTranslatedText(
+                          request: _homeRequest(item, 'title', item.title),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.titleLarge?.copyWith(
@@ -504,8 +505,12 @@ class _RecommendationBanner extends StatelessWidget {
                         ),
                         if (item.subtitle.isNotEmpty) ...[
                           const SizedBox(height: 5),
-                          Text(
-                            item.subtitle,
+                          AutoTranslatedText(
+                            request: _homeRequest(
+                              item,
+                              'subtitle',
+                              item.subtitle,
+                            ),
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.bodySmall?.copyWith(
@@ -563,7 +568,7 @@ class _AiProjectList extends StatelessWidget {
   Widget build(BuildContext context) {
     final visibleItems = items.take(4).toList(growable: false);
     return SizedBox(
-      height: 112,
+      height: 132,
       child: ListView.separated(
         padding: const EdgeInsets.symmetric(horizontal: 16),
         scrollDirection: Axis.horizontal,
@@ -627,8 +632,12 @@ class _AiProjectCard extends StatelessWidget {
                               horizontal: 6,
                               vertical: 2,
                             ),
-                            child: Text(
-                              institution,
+                            child: AutoTranslatedText(
+                              request: _homeRequest(
+                                item,
+                                'institutionName',
+                                institution,
+                              ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.labelSmall,
@@ -636,15 +645,32 @@ class _AiProjectCard extends StatelessWidget {
                           ),
                         ),
                       const SizedBox(height: 5),
-                      Text(
-                        item.title,
+                      AutoTranslatedText(
+                        request: _homeRequest(item, 'name', item.title),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.titleSmall,
                       ),
+                      if (item.subtitle.isNotEmpty)
+                        AutoTranslatedText(
+                          request: _homeRequest(
+                            item,
+                            'slogan',
+                            item.subtitle,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
                       if (item.category.isNotEmpty)
-                        Text(
-                          item.category,
+                        AutoTranslatedText(
+                          request: _homeRequest(
+                            item,
+                            'category',
+                            item.category,
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.labelSmall?.copyWith(
@@ -744,16 +770,20 @@ class _ProjectCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      item.title,
+                    AutoTranslatedText(
+                      request: _homeRequest(item, 'name', item.title),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.titleSmall,
                     ),
                     const SizedBox(height: 3),
                     if (item.category.isNotEmpty)
-                      Text(
-                        item.category,
+                      AutoTranslatedText(
+                        request: _homeRequest(
+                          item,
+                          'category',
+                          item.category,
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.labelSmall?.copyWith(
@@ -816,18 +846,38 @@ class _ArticleItem extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    item.title,
+                  AutoTranslatedText(
+                    request: _homeRequest(item, 'title', item.title),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
                   ),
+                  if (item.category.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    AutoTranslatedText(
+                      request: _homeRequest(
+                        item,
+                        'category',
+                        item.category,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                   if (item.subtitle.isNotEmpty) ...[
                     const SizedBox(height: 5),
-                    Text(
-                      item.subtitle,
+                    AutoTranslatedText(
+                      request: _homeRequest(
+                        item,
+                        'summary',
+                        item.subtitle,
+                      ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
@@ -909,6 +959,8 @@ class _DiaryCard extends StatelessWidget {
     return SizedBox(
       width: 300,
       child: DiaryPreviewCard(
+        enableAutoTranslation: true,
+        autoTranslationContentId: '${item.kind.name}:${item.id}',
         title: item.title,
         content: item.subtitle,
         authorName: author,
@@ -939,6 +991,7 @@ class _InstitutionItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final address = item.text(const ['address', 'city']);
+    final description = item.text(const ['description']);
     final rating = item.number(const ['rating']);
     final reviews = item.count(const ['reviewCount']);
     return Card(
@@ -967,8 +1020,8 @@ class _InstitutionItem extends StatelessWidget {
                     Row(
                       children: [
                         Flexible(
-                          child: Text(
-                            item.title,
+                          child: AutoTranslatedText(
+                            request: _homeRequest(item, 'name', item.title),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.titleSmall,
@@ -986,9 +1039,24 @@ class _InstitutionItem extends StatelessWidget {
                     ),
                     if (address.isNotEmpty) ...[
                       const SizedBox(height: 4),
-                      Text(
-                        address,
+                      AutoTranslatedText(
+                        request: _homeRequest(item, 'address', address),
                         maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                    if (description.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      AutoTranslatedText(
+                        request: _homeRequest(
+                          item,
+                          'description',
+                          description,
+                        ),
+                        maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
@@ -1043,7 +1111,7 @@ class _DoctorList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 176,
+      height: 206,
       child: ListView.separated(
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
         scrollDirection: Axis.horizontal,
@@ -1115,18 +1183,42 @@ class _DoctorCard extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 3),
-                Text(
-                  title.isNotEmpty ? title : institution,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+                if (title.isNotEmpty)
+                  AutoTranslatedText(
+                    request: _homeRequest(
+                      item,
+                      'professionalTitle',
+                      title,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
-                ),
                 if (specialties.isNotEmpty) ...[
                   const SizedBox(height: 4),
-                  Text(
-                    specialties.take(2).join(' · '),
+                  AutoTranslatedText(
+                    request: _homeRequest(
+                      item,
+                      'specialties',
+                      specialties.take(2).join(' · '),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+                if (institution.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  AutoTranslatedText(
+                    request: _homeRequest(
+                      item,
+                      'institutionName',
+                      institution,
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.labelSmall?.copyWith(
@@ -1306,6 +1398,28 @@ class _HomeDataUnavailable extends StatelessWidget {
 
 bool _isEnglish(BuildContext context) =>
     Localizations.localeOf(context).languageCode == 'en';
+
+AutoTranslationRequest _homeRequest(
+  HomeContent item,
+  String field,
+  String source,
+) {
+  return AutoTranslationRequest(
+    contentType: switch (item.kind) {
+      HomeSectionKind.banner => 'general',
+      HomeSectionKind.hotProject ||
+      HomeSectionKind.recommendedInstitutionProject =>
+        'project',
+      HomeSectionKind.expertArticle => 'article',
+      HomeSectionKind.userDiary => 'diary',
+      HomeSectionKind.institution => 'institution',
+      HomeSectionKind.doctor => 'doctor',
+    },
+    contentId: '${item.kind.name}:${item.id}',
+    field: field,
+    sourceText: source,
+  );
+}
 
 const _previewFeed = HomeFeed(
   banners: [
