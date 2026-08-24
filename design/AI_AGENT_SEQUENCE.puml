@@ -1,5 +1,5 @@
 @startuml
-title JoySong AI Agent 混合路由、对比与真人咨询流程
+title JoySong AI Agent 当前语言、混合路由、对比与真人咨询流程
 scale 0.60
 
 hide footbox
@@ -32,6 +32,14 @@ Chat -> Lifecycle: beginTurn（保存用户消息、幂等/重放）
 Lifecycle -> DB: 保存消息并读取短历史
 DB --> Lifecycle: 最近对话或已完成回放
 Lifecycle --> Chat: 当前轮次 + message-bound 历史
+Chat -> Chat: 从本轮用户消息判定回答语言
+note right of Chat
+纯中文/纯英文直接识别；
+混合文本区分英文问句与中文句中的英文品牌词；
+纯数字、URL、emoji 等中性内容回退当前界面语言。
+普通、流式及固定回复共用本轮语言上下文，
+处理结束后恢复原界面语言。
+end note
 Chat -> Context: 补全当前查询
 Context --> Chat: contextualQuery
 Chat -> Router: assess(query, contextType)
@@ -80,7 +88,7 @@ else final intent == HUMAN_CONSULTATION
     机构、城市和 context 读取不属于该一次查询。
     end note
     alt 有候选机构
-        Chat -> Lifecycle: completeTurn(固定双语文案,\nSELECT_INSTITUTION, institution cards)
+        Chat -> Lifecycle: completeTurn(当前语言固定文案,\nSELECT_INSTITUTION, institution cards)
     else 全国无候选机构
         Chat -> Lifecycle: completeTurn(固定空态,\nNONE, empty cards)
     end
@@ -132,7 +140,7 @@ alt final intent == COMPARISON
     Compare --> Chat: normalized request（同类型、2～4 operands、target、dimensions/constraints）
 
     alt request incomplete
-        Chat -> Chat: 生成确定性双语 clarification
+        Chat -> Chat: 按当前消息语言生成确定性 clarification
         note right of Chat
         回答模型调用 = 0
         不展示无关候选卡片或 report
@@ -147,7 +155,7 @@ alt final intent == COMPARISON
         缺失结构化值保持 unknown，不推断。
         end note
         Catalog --> Chat: exact evidence + comparison report
-        Chat -> LLM: 一次 grounded answer request
+        Chat -> LLM: 一次 grounded answer request\n末尾附加“仅使用本轮语言”约束
         LLM --> Chat: 简短回答
         Chat -> Lifecycle: completeTurn（answer + normalized request + report）
         Lifecycle -> DB: 持久化同一 assistant message metadata
@@ -164,6 +172,11 @@ end note
 Lifecycle --> Chat: message-bound intent + action + cards/request/report
 Chat --> API: 当前 REST 结果 / SSE terminal result
 API --> App: REST 结果 / SSE started→completed（HUMAN 无 delta）
+note over Chat,API
+SSE prepare 与普通 REST 使用相同语言判定；
+SSE completed 再按已保存的本轮用户消息恢复语言上下文，
+确保规划安全文案和最终持久化内容不回退到界面语言。
+end note
 API -> Lifecycle: 历史加载或幂等 replay
 Lifecycle -> DB: 读取 assistant message metadata
 DB --> Lifecycle: request/report 或机构卡片快照（无咨询师 ID）
