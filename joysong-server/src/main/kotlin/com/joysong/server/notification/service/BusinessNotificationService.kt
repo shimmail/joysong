@@ -43,19 +43,16 @@ class BusinessNotificationService(
         )
 
     fun orderServiceActivated(orderId: String, userId: String, consultantId: String, doctorId: String) {
-        val ordinaryRecipients = linkedSetOf(userId.trim(), doctorId.trim()).filter(String::isNotEmpty).toSet()
-        val emitted = mutableSetOf<String>()
-        fun notifyOrdinary(recipientId: String) {
-            if (recipientId.trim().isNotEmpty() && emitted.add(recipientId.trim())) {
-                notifyRecipient(recipientId.trim(), "ORDER_SERVICE_ACTIVATED", "行程服务已开启", "您的订单服务已开启，请查看订单详情。", "order", orderId)
-            }
-        }
-        notifyOrdinary(userId)
-        val normalizedConsultantId = consultantId.trim()
-        if (normalizedConsultantId.isNotEmpty() && normalizedConsultantId !in ordinaryRecipients && emitted.add(normalizedConsultantId)) {
-            notifyRecipient(normalizedConsultantId, "ORDER_SERVICE_ACTIVATED", "行程服务已开启", "订单服务已开启，请进入服务会话跟进。", "order_service_conversation", orderId)
-        }
-        notifyOrdinary(doctorId)
+        notifyCandidates(
+            candidates = listOf(
+                NotificationCandidate(consultantId, "订单服务已开启，请进入服务会话跟进。", "order_service_conversation"),
+                NotificationCandidate(userId, "您的订单服务已开启，请查看订单详情。", "order"),
+                NotificationCandidate(doctorId, "您的订单服务已开启，请查看订单详情。", "order")
+            ),
+            type = "ORDER_SERVICE_ACTIVATED",
+            title = "行程服务已开启",
+            targetId = orderId
+        )
     }
 
     fun orderCompleted(orderId: String, consultantId: String, doctorId: String, institutionId: String) =
@@ -218,13 +215,25 @@ class BusinessNotificationService(
         content: String,
         targetType: String,
         targetId: String
+    ) = notifyCandidates(
+        recipients.map { recipientId -> NotificationCandidate(recipientId, content, targetType) },
+        type,
+        title,
+        targetId
+    )
+
+    private fun notifyCandidates(
+        candidates: Collection<NotificationCandidate>,
+        type: String,
+        title: String,
+        targetId: String
     ) {
-        recipients.asSequence()
-            .map(String::trim)
-            .filter(String::isNotEmpty)
-            .distinct()
-            .forEach { recipientId ->
-                notifyRecipient(recipientId, type, title, content, targetType, targetId)
+        candidates.asSequence()
+            .map { candidate -> candidate.copy(userId = candidate.userId.trim()) }
+            .filter { candidate -> candidate.userId.isNotEmpty() }
+            .distinctBy { candidate -> candidate.userId }
+            .forEach { candidate ->
+                notifyRecipient(candidate.userId, type, title, candidate.content, candidate.targetType, targetId)
             }
     }
 
@@ -259,4 +268,10 @@ class BusinessNotificationService(
             ProfessionalApplicantRole.DOCTOR -> "professional_doctor_application"
             ProfessionalApplicantRole.CONSULTANT -> "professional_consultant_application"
         }
+
+    private data class NotificationCandidate(
+        val userId: String,
+        val content: String,
+        val targetType: String
+    )
 }
