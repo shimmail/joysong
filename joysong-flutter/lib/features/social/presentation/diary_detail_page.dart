@@ -358,6 +358,13 @@ final class _DiaryDetailPageState extends State<DiaryDetailPage> {
         initial;
     final expanded = _expandedComments.contains(comment.id);
     final replies = widget.controller.repliesFor(comment.id);
+    final replyIdCounts = <String, int>{};
+    for (final reply in replies) {
+      final id = reply.id.trim();
+      if (id.isNotEmpty) {
+        replyIdCounts[id] = (replyIdCounts[id] ?? 0) + 1;
+      }
+    }
     final loadingReplies = widget.controller.isBusy(
       'replies:load:${comment.id}',
     );
@@ -407,16 +414,43 @@ final class _DiaryDetailPageState extends State<DiaryDetailPage> {
             )
           else
             for (final reply in replies)
-              Padding(
-                padding: const EdgeInsets.only(left: 32, top: 10),
-                child: _buildReply(reply),
+              _buildReplyRow(
+                parentCommentId: comment.id,
+                reply: reply,
+                replyIdCounts: replyIdCounts,
+                parentIdentityStable: enableAutoTranslation,
               ),
         ],
       ],
     );
   }
 
-  Widget _buildReply(Comment reply) {
+  Widget _buildReplyRow({
+    required String parentCommentId,
+    required Comment reply,
+    required Map<String, int> replyIdCounts,
+    required bool parentIdentityStable,
+  }) {
+    final rowKey = _replyRowKey(
+      parentCommentId,
+      reply,
+      replyIdCounts,
+      parentIdentityStable: parentIdentityStable,
+    );
+    return Padding(
+      key: rowKey,
+      padding: const EdgeInsets.only(left: 32, top: 10),
+      child: _buildReply(
+        reply,
+        enableAutoTranslation: rowKey != null,
+      ),
+    );
+  }
+
+  Widget _buildReply(
+    Comment reply, {
+    required bool enableAutoTranslation,
+  }) {
     final initial = EngagementStatus(
       active: reply.isLiked,
       count: reply.likeCount,
@@ -431,6 +465,7 @@ final class _DiaryDetailPageState extends State<DiaryDetailPage> {
         collapsed ? EngagementStatus(active: false, count: like.count) : like;
     return _translatedCommentBody(
       comment: reply,
+      enableAutoTranslation: enableAutoTranslation,
       collapsed: collapsed,
       isAuthor: reply.userId == widget.diary.userId,
       likeStatus: visibleLike,
@@ -493,6 +528,23 @@ final class _DiaryDetailPageState extends State<DiaryDetailPage> {
     final id = comment.id.trim();
     if (id.isEmpty || idCounts[id] != 1) return null;
     return ValueKey<String>('comment-row:$id');
+  }
+
+  Key? _replyRowKey(
+    String parentCommentId,
+    Comment reply,
+    Map<String, int> idCounts, {
+    required bool parentIdentityStable,
+  }) {
+    final parentId = parentCommentId.trim();
+    final replyId = reply.id.trim();
+    if (!parentIdentityStable ||
+        parentId.isEmpty ||
+        replyId.isEmpty ||
+        idCounts[replyId] != 1) {
+      return null;
+    }
+    return ValueKey<String>('reply-row:$parentId:$replyId');
   }
 
   String _displayContent(Comment comment, String automaticText) {

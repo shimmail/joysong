@@ -252,6 +252,131 @@ void main() {
   );
 
   testWidgets(
+    'failed valid reply is not retried when thread refresh prepends a reply',
+    (tester) async {
+      final repository = _DetailRepository(
+        manualTranslations: const {
+          '来自数据库的回复': 'Manual refreshed reply',
+        },
+      );
+      final controller = SocialController(repository);
+      final translations = _AutoRepository(
+        translations: const {
+          '真实日记': 'Real diary',
+          '日记正文': 'Diary body',
+          '来自数据库的评论': 'Database comment',
+        },
+        failedSources: const {'来自数据库的回复'},
+      );
+      final autoController = _activeAutoController(translations);
+      addTearDown(controller.dispose);
+      addTearDown(autoController.dispose);
+
+      await tester.pumpWidget(
+        _autoHost(
+          controller: autoController,
+          child: DiaryDetailPage(
+            controller: controller,
+            diary: repository.diaries.single,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        translations.sources.where((source) => source == '来自数据库的回复'),
+        hasLength(1),
+      );
+
+      repository.replies = const [_newRemoteReply, _remoteReply];
+      await controller.loadCommentThread('diary-1');
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining('Earlier Latin reply', findRichText: true),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('来自数据库的回复', findRichText: true),
+        findsOneWidget,
+      );
+      expect(
+        translations.sources.where((source) => source == '来自数据库的回复'),
+        hasLength(1),
+      );
+
+      final translateReply =
+          find.byKey(const Key('comment-translate-reply-remote'));
+      await tester.ensureVisible(translateReply);
+      await tester.pump();
+      await tester.tap(translateReply);
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('Manual refreshed reply', findRichText: true),
+        findsOneWidget,
+      );
+      expect(
+        repository.manualCalls,
+        const [('来自数据库的回复', 'comment')],
+      );
+    },
+  );
+
+  testWidgets('duplicate nonblank reply ids stay source-only with zero calls',
+      (tester) async {
+    final repository = _DetailRepository(
+      replies: const [_duplicateReplyA, _duplicateReplyB],
+    );
+    final controller = SocialController(repository);
+    final translations = _AutoRepository(
+      translations: const {
+        '真实日记': 'Real diary',
+        '日记正文': 'Diary body',
+        '来自数据库的评论': 'Database comment',
+        '重复回复甲': 'Duplicate reply A',
+        '重复回复乙': 'Duplicate reply B',
+      },
+    );
+    final autoController = _activeAutoController(translations);
+    addTearDown(controller.dispose);
+    addTearDown(autoController.dispose);
+
+    await tester.pumpWidget(
+      _autoHost(
+        controller: autoController,
+        child: DiaryDetailPage(
+          controller: controller,
+          diary: repository.diaries.single,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final duplicateBuilders = tester
+        .widgetList<AutoTranslationBuilder>(
+          find.byType(AutoTranslationBuilder),
+        )
+        .where(
+          (builder) => builder.request.contentId == 'comment:duplicate-reply',
+        );
+    expect(duplicateBuilders, isEmpty);
+    expect(
+      translations.sources.where(
+        (source) => source == '重复回复甲' || source == '重复回复乙',
+      ),
+      isEmpty,
+    );
+    expect(
+      find.textContaining('重复回复甲', findRichText: true),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('重复回复乙', findRichText: true),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
     'automatic comment failure leaves manual success and failure feedback unchanged',
     (tester) async {
       final repository = _DetailRepository(
@@ -452,10 +577,12 @@ final class _DetailRepository
   _DetailRepository({
     this.manualTranslations = const {},
     this.manualFailures = const {},
-  });
+    List<Comment>? replies,
+  }) : replies = replies ?? const [_remoteReply];
 
   final Map<String, String> manualTranslations;
   final Set<String> manualFailures;
+  List<Comment> replies;
   final manualCalls = <(String, String)>[];
   final diaries = [_diary];
   final commentDiaryIds = <String>[];
@@ -495,7 +622,7 @@ final class _DetailRepository
     int limit = 50,
   }) async {
     commentDiaryIds.add(diaryId);
-    return const [
+    return [
       Comment(
         id: 'comment-1',
         diaryId: 'diary-1',
@@ -514,19 +641,7 @@ final class _DetailRepository
     int offset = 0,
     int limit = 50,
   }) async =>
-      const [
-        Comment(
-          id: 'reply-remote',
-          diaryId: 'diary-1',
-          userId: 'user-3',
-          userName: '回复用户',
-          content: '来自数据库的回复',
-          parentId: 'comment-1',
-          replyToUserName: '评论用户',
-          likeCount: 1,
-          isLiked: false,
-        ),
-      ];
+      List.of(replies);
 
   @override
   Future<Comment> publishComment(CommentDraft draft) async {
@@ -684,4 +799,52 @@ const _diary = Diary(
   favoriteCount: 0,
   isLiked: false,
   status: 'published',
+);
+
+const _remoteReply = Comment(
+  id: 'reply-remote',
+  diaryId: 'diary-1',
+  userId: 'user-3',
+  userName: '回复用户',
+  content: '来自数据库的回复',
+  parentId: 'comment-1',
+  replyToUserName: '评论用户',
+  likeCount: 1,
+  isLiked: false,
+);
+
+const _newRemoteReply = Comment(
+  id: 'reply-new',
+  diaryId: 'diary-1',
+  userId: 'user-4',
+  userName: 'Latin user',
+  content: 'Earlier Latin reply',
+  parentId: 'comment-1',
+  replyToUserName: 'Latin target',
+  likeCount: 0,
+  isLiked: false,
+);
+
+const _duplicateReplyA = Comment(
+  id: 'duplicate-reply',
+  diaryId: 'diary-1',
+  userId: 'user-5',
+  userName: '重复用户甲',
+  content: '重复回复甲',
+  parentId: 'comment-1',
+  replyToUserName: '评论用户',
+  likeCount: 0,
+  isLiked: false,
+);
+
+const _duplicateReplyB = Comment(
+  id: 'duplicate-reply',
+  diaryId: 'diary-1',
+  userId: 'user-6',
+  userName: '重复用户乙',
+  content: '重复回复乙',
+  parentId: 'comment-1',
+  replyToUserName: '评论用户',
+  likeCount: 0,
+  isLiked: false,
 );
