@@ -4,6 +4,7 @@ import 'package:joysong_flutter/core/translation/translation.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/discover/presentation/article_detail_view.dart';
+import 'package:joysong_flutter/features/discover/presentation/catalog_project_detail_view.dart';
 import 'package:joysong_flutter/features/discover/presentation/discover_page.dart';
 import 'package:joysong_flutter/features/discover/presentation/rich_content_view.dart';
 
@@ -123,6 +124,113 @@ void main() {
     );
     expect(find.text('李医生'), findsOneWidget);
     _expectNeverRequested(repository, const ['李医生']);
+  });
+
+  testWidgets(
+      'deserialized author-only article renders fallback without translating it',
+      (tester) async {
+    final repository = RecordingTranslationRepository();
+    final controller = _activeController(repository);
+    addTearDown(controller.dispose);
+    final article = DiscoverItem.fromJson(
+      const {
+        'id': 'article-author-only',
+        'title': 'Care article',
+        'authorName': '赵教授',
+      },
+      type: DiscoverContentType.article,
+    );
+
+    await tester.pumpWidget(
+      _host(
+        controller: controller,
+        child: ArticleDetailView(item: article),
+      ),
+    );
+    await tester.pump();
+
+    expect(
+      tester.widget<RichContentView>(find.byType(RichContentView)).content,
+      '赵教授',
+    );
+    expect(
+      _requestRecords(tester),
+      const {
+        ('article', 'article:article-author-only', 'title', 'Care article')
+      },
+    );
+    expect(repository.calls, isEmpty);
+  });
+
+  testWidgets(
+      'deserialized author-only project renders fallback without translating it',
+      (tester) async {
+    await _useTallSurface(tester);
+    final repository = RecordingTranslationRepository();
+    final controller = _activeController(repository);
+    addTearDown(controller.dispose);
+    final project = DiscoverItem.fromJson(
+      const {
+        'id': 'project-author-only',
+        'name': 'Care project',
+        'authorName': '项目作者',
+      },
+      type: DiscoverContentType.project,
+    );
+
+    await tester.pumpWidget(
+      _host(
+        controller: controller,
+        child: CatalogProjectDetailView(
+          item: project,
+          enableAutoTranslation: true,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('项目作者'), findsOneWidget);
+    expect(
+      _requestRecords(tester),
+      const {
+        ('project', 'project:project-author-only', 'name', 'Care project'),
+      },
+    );
+    expect(repository.calls, isEmpty);
+  });
+
+  testWidgets('standalone project category stays hidden and unrequested',
+      (tester) async {
+    final repository = RecordingTranslationRepository();
+    final controller = _activeController(repository);
+    addTearDown(controller.dispose);
+    final project = DiscoverItem.fromJson(
+      const {
+        'id': 'project-hidden-category',
+        'name': 'Care project',
+        'description': 'Care description',
+        'category': '隐藏项目分类',
+      },
+      type: DiscoverContentType.project,
+    );
+
+    await tester.pumpWidget(
+      _host(
+        controller: controller,
+        child: CatalogProjectDetailView(
+          item: project,
+          enableAutoTranslation: true,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('隐藏项目分类'), findsNothing);
+    expect(
+      _requestRecords(tester).where((record) => record.$4 == '隐藏项目分类'),
+      isEmpty,
+    );
+    _expectNeverRequested(repository, const ['隐藏项目分类']);
   });
 
   testWidgets(

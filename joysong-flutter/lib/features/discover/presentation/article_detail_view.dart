@@ -19,9 +19,14 @@ class ArticleDetailView extends StatelessWidget {
     final date = _text(raw, const ['publishDate', 'publishedAt', 'createdAt']);
     final category = _text(raw, const ['category', 'categoryName']);
     final body = _text(raw, const ['content', 'body', 'contentHtml']);
-    final summary = _text(raw, const ['summary'], fallback: item.subtitle);
-    final content = body.isEmpty ? summary : body;
+    final summary = _text(raw, const ['summary']);
+    final content = body.isNotEmpty
+        ? body
+        : summary.isNotEmpty
+            ? summary
+            : item.subtitle;
     final contentField = body.isEmpty ? 'summary' : 'content';
+    final contentHasEligibleSource = body.isNotEmpty || summary.isNotEmpty;
     final contentIsHtml = _looksLikeHtml(content);
     final contentId = 'article:${item.id}';
     final images = _images(raw);
@@ -104,30 +109,25 @@ class ArticleDetailView extends StatelessWidget {
             ),
           ],
           const Divider(height: 28),
-          AutoTranslationBuilder(
-            request: AutoTranslationRequest(
-              contentType: contentIsHtml ? 'article_html' : 'article',
-              contentId: contentId,
-              field: contentField,
-              sourceText: content,
-              validator: contentIsHtml ? preservesRichContentStructure : null,
-            ),
-            builder: (_, visibleContent) => RichContentView(
-              content: visibleContent,
-              textStyle:
-                  Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.75),
-              onImageTap: (image) => Navigator.of(context).push<void>(
-                MaterialPageRoute(
-                  builder: (_) => FullscreenImagePager(
-                    images: galleryImages,
-                    contentDescription:
-                        context.localized('文章图片', 'Article image'),
-                    initialPage: galleryImages.indexOf(image),
-                  ),
-                ),
+          if (contentHasEligibleSource)
+            AutoTranslationBuilder(
+              request: AutoTranslationRequest(
+                contentType: contentIsHtml ? 'article_html' : 'article',
+                contentId: contentId,
+                field: contentField,
+                sourceText: content,
+                validator: contentIsHtml ? preservesRichContentStructure : null,
               ),
+              builder: (_, visibleContent) => _ArticleContent(
+                content: visibleContent,
+                galleryImages: galleryImages,
+              ),
+            )
+          else
+            _ArticleContent(
+              content: content,
+              galleryImages: galleryImages,
             ),
-          ),
           for (final image in galleryImages.skip(
             item.imageUrl.isEmpty ? 0 : 1,
           )) ...[
@@ -166,6 +166,29 @@ class ArticleDetailView extends StatelessWidget {
       ),
     );
   }
+}
+
+class _ArticleContent extends StatelessWidget {
+  const _ArticleContent({required this.content, required this.galleryImages});
+
+  final String content;
+  final List<String> galleryImages;
+
+  @override
+  Widget build(BuildContext context) => RichContentView(
+        content: content,
+        textStyle:
+            Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.75),
+        onImageTap: (image) => Navigator.of(context).push<void>(
+          MaterialPageRoute(
+            builder: (_) => FullscreenImagePager(
+              images: galleryImages,
+              contentDescription: context.localized('文章图片', 'Article image'),
+              initialPage: galleryImages.indexOf(image),
+            ),
+          ),
+        ),
+      );
 }
 
 String _text(Map<String, Object?> map, List<String> keys,

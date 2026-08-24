@@ -58,8 +58,10 @@ class CatalogProjectDetailView extends StatelessWidget {
     final sources = [ip, project, raw];
     final name = _text(sources, const ['name', 'projectName'], item.title);
     final slogan = _text(sources, const ['slogan'], '');
+    final eligibleDescription =
+        _text(sources, const ['description', 'summary'], '');
     final description =
-        _text(sources, const ['description', 'summary'], item.subtitle);
+        eligibleDescription.isEmpty ? item.subtitle : eligibleDescription;
     final detailContent =
         _text(sources, const ['detailContent', 'content'], '');
     final price = _number(sources, const ['price', 'referencePrice']);
@@ -79,7 +81,7 @@ class CatalogProjectDetailView extends StatelessWidget {
       '',
     );
     final tags = <(String, String)>[
-      for (final value in _tokens(sources, const ['categoryTags', 'category']))
+      for (final value in _tokens(sources, const ['categoryTags']))
         ('category', value),
       for (final value in _tokens(sources, const ['tags'])) ('tags', value),
     ];
@@ -167,7 +169,7 @@ class CatalogProjectDetailView extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
                   ],
-                  if (enableAutoTranslation && description.isNotEmpty)
+                  if (enableAutoTranslation && eligibleDescription.isNotEmpty)
                     AutoTranslatedText(
                       request: _projectRequest(
                         contentId: 'project:${item.id}',

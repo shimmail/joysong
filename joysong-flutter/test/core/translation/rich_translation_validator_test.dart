@@ -32,6 +32,16 @@ void main() {
 
       expect(preservesRichContentStructure(source, translated), isTrue);
     });
+
+    test('accepts renderer-supported void spacing and encoded query entities',
+        () {
+      const source = '<p><a href="https://care.test/a?x=1&amp;y=2" '
+          'title="Care">护理</a><br /><img src="https://cdn.test/a.jpg" /></p>';
+      const translated = '<p><a href="https://care.test/a?x=1&#38;y=2" '
+          'title="Care">Care</a><br/><img src="https://cdn.test/a.jpg"></p>';
+
+      expect(preservesRichContentStructure(source, translated), isTrue);
+    });
   });
 
   group('preservesRichContentStructure rejects structural mutation', () {
@@ -186,6 +196,9 @@ void main() {
       'data:text/html,payload',
       'file:///etc/passwd',
       'blob:https://care.test/id',
+      'jav&#97script:alert(1)',
+      'jav&#x61script:alert(1)',
+      'javascript&colon:alert(1)',
     ]) {
       test('rejects unsafe translated href $url', () {
         expect(
@@ -217,5 +230,110 @@ void main() {
         isFalse,
       );
     });
+
+    test('rejects unsafe semicolonless references in translated image URLs',
+        () {
+      expect(
+        preservesRichContentStructure(
+          '<img src="https://cdn.test/a.jpg">',
+          '<img src="jav&#97script:alert(1)">',
+        ),
+        isFalse,
+      );
+    });
+
+    test('rejects unsafe semicolonless references in source image URLs', () {
+      expect(
+        preservesRichContentStructure(
+          '<img src="jav&#x61script:alert(1)">',
+          '<img src="jav&#x61script:alert(1)">',
+        ),
+        isFalse,
+      );
+    });
+
+    test('rejects ambiguous raw ampersands but accepts ordinary safe queries',
+        () {
+      expect(
+        preservesRichContentStructure(
+          '<a href="https://care.test/a?x=1&y=2">护理</a>',
+          '<a href="https://care.test/a?x=1&y=2">Care</a>',
+        ),
+        isFalse,
+      );
+      expect(
+        preservesRichContentStructure(
+          '<a href="https://care.test/a?x=1">护理</a>',
+          '<a href="https://care.test/a?x=1">Care</a>',
+        ),
+        isTrue,
+      );
+    });
+
+    test('rejects a legacy semicolonless named reference before punctuation',
+        () {
+      const ambiguous = '<a href="https://care.test/&copy/path">Care guide</a>';
+
+      expect(preservesRichContentStructure(ambiguous, ambiguous), isFalse);
+    });
+  });
+
+  group('preservesRichContentStructure rejects renderer-incompatible syntax',
+      () {
+    final cases = <(String, String, String)>[
+      (
+        'space after opening delimiter',
+        '<img src="https://cdn.test/a.jpg">',
+        '< img src="https://cdn.test/a.jpg">',
+      ),
+      ('space after closing delimiter', '<p>Care</p>', '<p>Care</ p>'),
+      ('space before self-close end', '<br>', '<br / >'),
+      ('mixed normal and spaced tags', '<p>Care<br></p>', '<p>Care< br></p>'),
+      (
+        'raw less-than in link title',
+        '<a href="https://care.test/a" title="ab">Care</a>',
+        '<a href="https://care.test/a" title="a<b">Care</a>',
+      ),
+      (
+        'raw greater-than in link title',
+        '<a href="https://care.test/a" title="ab">Care</a>',
+        '<a href="https://care.test/a" title="a>b">Care</a>',
+      ),
+      (
+        'decoded less-than in link title',
+        '<a href="https://care.test/a" title="ab">Care</a>',
+        '<a href="https://care.test/a" title="a&lt;b">Care</a>',
+      ),
+      (
+        'decoded greater-than in link title',
+        '<a href="https://care.test/a" title="ab">Care</a>',
+        '<a href="https://care.test/a" title="a&gt;b">Care</a>',
+      ),
+      (
+        'nul in image alt',
+        '<img src="https://cdn.test/a.jpg" alt="ab">',
+        '<img src="https://cdn.test/a.jpg" alt="a\u0000b">',
+      ),
+      (
+        'control in image title',
+        '<img src="https://cdn.test/a.jpg" title="ab">',
+        '<img src="https://cdn.test/a.jpg" title="a\tb">',
+      ),
+      (
+        'control as tag whitespace',
+        '<img src="https://cdn.test/a.jpg">',
+        '<img\tsrc="https://cdn.test/a.jpg">',
+      ),
+    ];
+
+    for (final entry in cases) {
+      test('rejects ${entry.$1} in translated markup', () {
+        expect(preservesRichContentStructure(entry.$2, entry.$3), isFalse);
+      });
+
+      test('rejects ${entry.$1} in source markup', () {
+        expect(preservesRichContentStructure(entry.$3, entry.$3), isFalse);
+      });
+    }
   });
 }

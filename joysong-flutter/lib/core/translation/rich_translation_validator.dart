@@ -98,11 +98,11 @@ bool _parseTag(
   List<String> urls,
   List<String> stack,
 ) {
+  if (_containsControl(token)) return false;
   var cursor = 1;
-  cursor = _skipWhitespace(token, cursor);
   final closing = cursor < token.length && token.codeUnitAt(cursor) == 0x2f;
   if (closing) {
-    cursor = _skipWhitespace(token, cursor + 1);
+    cursor += 1;
   }
 
   final nameStart = cursor;
@@ -140,7 +140,7 @@ bool _parseTag(
       break;
     }
     if (code == 0x2f) {
-      cursor = _skipWhitespace(token, cursor + 1);
+      cursor += 1;
       if (cursor != token.length - 1 || token.codeUnitAt(cursor) != 0x3e) {
         return false;
       }
@@ -182,7 +182,13 @@ bool _parseTag(
       cursor += 1;
     }
     if (cursor >= token.length) return false;
-    attributes[attribute] = token.substring(valueStart, cursor);
+    final value = _decodeAttributeEntities(
+      token.substring(valueStart, cursor),
+    );
+    if (value == null || _containsControl(value) || _containsAngle(value)) {
+      return false;
+    }
+    attributes[attribute] = value;
     cursor += 1;
   }
 
@@ -210,9 +216,7 @@ bool _parseTag(
 }
 
 String? _canonicalUrl(String value, {required bool image}) {
-  final decoded = _decodeAttributeEntities(value);
-  if (decoded == null) return null;
-  final canonical = decoded.trim();
+  final canonical = value.trim();
   if (canonical.isEmpty || canonical.contains('\\')) return null;
 
   final schemeCandidate = canonical
@@ -231,44 +235,63 @@ String? _canonicalUrl(String value, {required bool image}) {
 }
 
 String? _decodeAttributeEntities(String value) {
+  // Raw ampersands are deliberately outside this grammar. Callers must encode
+  // query separators as &amp; (or a semicolon-terminated numeric reference),
+  // which also removes semicolonless named/numeric parsing ambiguity.
   var result = value;
   for (var pass = 0; pass < 4; pass += 1) {
+    final output = StringBuffer();
     var changed = false;
-    result = result.replaceAllMapped(
-      RegExp(
-        r'&(#x[0-9a-f]+|#[0-9]+|amp|lt|gt|quot|apos|colon|tab|newline);',
-        caseSensitive: false,
-      ),
-      (match) {
-        changed = true;
-        final entity = match.group(1)!.toLowerCase();
-        if (entity.startsWith('#x')) {
-          return _entityCodePoint(entity.substring(2), radix: 16) ?? '\u0000';
-        }
-        if (entity.startsWith('#')) {
-          return _entityCodePoint(entity.substring(1), radix: 10) ?? '\u0000';
-        }
-        return switch (entity) {
-          'amp' => '&',
-          'lt' => '<',
-          'gt' => '>',
-          'quot' => '"',
-          'apos' => "'",
-          'colon' => ':',
-          'tab' => '\t',
-          'newline' => '\n',
-          _ => '\u0000',
-        };
-      },
-    );
+    var cursor = 0;
+    while (cursor < result.length) {
+      if (result.codeUnitAt(cursor) != 0x26) {
+        output.writeCharCode(result.codeUnitAt(cursor));
+        cursor += 1;
+        continue;
+      }
+      final match = _entityPattern.matchAsPrefix(result, cursor);
+      if (match == null) {
+        if (pass == 0) return null;
+        output.write('&');
+        cursor += 1;
+        continue;
+      }
+      final decoded = _decodeEntity(match.group(1)!);
+      if (decoded == null) return null;
+      output.write(decoded);
+      cursor = match.end;
+      changed = true;
+    }
+    result = output.toString();
     if (!changed) break;
   }
-  if (result.contains('\u0000') ||
-      RegExp(r'&(?:#[^;\s]*|[a-z][^;\s]*);', caseSensitive: false)
-          .hasMatch(result)) {
-    return null;
-  }
   return result;
+}
+
+final _entityPattern = RegExp(
+  r'&(#x[0-9a-f]+|#[0-9]+|amp|lt|gt|quot|apos|colon|tab|newline);',
+  caseSensitive: false,
+);
+
+String? _decodeEntity(String entity) {
+  final normalized = entity.toLowerCase();
+  if (normalized.startsWith('#x')) {
+    return _entityCodePoint(normalized.substring(2), radix: 16);
+  }
+  if (normalized.startsWith('#')) {
+    return _entityCodePoint(normalized.substring(1), radix: 10);
+  }
+  return switch (normalized) {
+    'amp' => '&',
+    'lt' => '<',
+    'gt' => '>',
+    'quot' => '"',
+    'apos' => "'",
+    'colon' => ':',
+    'tab' => '\t',
+    'newline' => '\n',
+    _ => null,
+  };
 }
 
 String? _entityCodePoint(String digits, {required int radix}) {
@@ -289,12 +312,12 @@ int _skipWhitespace(String value, int cursor) {
   return cursor;
 }
 
-bool _isWhitespace(int code) =>
-    code == 0x20 ||
-    code == 0x09 ||
-    code == 0x0a ||
-    code == 0x0d ||
-    code == 0x0c;
+bool _isWhitespace(int code) => code == 0x20;
+
+bool _containsControl(String value) => value.codeUnits
+    .any((code) => code <= 0x1f || (code >= 0x7f && code <= 0x9f));
+
+bool _containsAngle(String value) => value.contains('<') || value.contains('>');
 
 bool _isAsciiLetter(int code) =>
     (code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a);

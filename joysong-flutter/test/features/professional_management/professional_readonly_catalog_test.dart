@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/core/translation/translation.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
+import 'package:joysong_flutter/features/discover/presentation/catalog_institution_detail_view.dart';
 import 'package:joysong_flutter/features/discover/presentation/professional_catalog_page.dart';
 
 import '../../core/translation/translation_test_fixtures.dart';
@@ -20,9 +21,56 @@ void main() {
     expect(repository.calls.take(3),
         ['institutions', 'projects', 'institution-projects']);
     expect(find.text('Visible institution'), findsOneWidget);
-    await tester.tap(find.text('Platform project'));
-    await tester.pumpAndSettle();
-    expect(find.text('Platform project'), findsWidgets);
+    await tester.tap(find.text('Visible institution'));
+
+    // The real institution route completes both reads before its unrelated
+    // unbounded-flex defect prevents the doctor list from laying out.
+    final priorErrorHandler = FlutterError.onError;
+    final routeErrors = <FlutterErrorDetails>[];
+    FlutterError.onError = routeErrors.add;
+    try {
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+      expect(repository.calls, contains('institution/i-1/doctors'));
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: _BoundedDoctorTraversalHarness(
+            repository: repository,
+            institution: repository.item(
+              'i-1',
+              DiscoverContentType.institution,
+              'Visible institution',
+            ),
+            doctor: repository.item(
+              'd-1',
+              DiscoverContentType.doctor,
+              'Visible doctor',
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+    } finally {
+      FlutterError.onError = priorErrorHandler;
+    }
+
+    await tester.tap(
+      find.byKey(const Key('bounded-visible-doctor'), skipOffstage: false),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Doctor project'), findsOneWidget);
+    expect(repository.calls, contains('institution/i-1'));
+    expect(repository.calls, contains('institution/i-1/doctors'));
+    expect(repository.calls, contains('institution/i-1/doctor/d-1/projects'));
+    expect(
+      routeErrors.map((details) => details.exceptionAsString()),
+      contains(contains('incoming height constraints are unbounded')),
+    );
   });
 
   testWidgets('legal representative browses read-only catalog', (tester) async {
@@ -89,6 +137,50 @@ void main() {
     expect(find.text('专业端评价内容'), findsOneWidget);
     expect(translationRepository.calls, isEmpty);
   });
+}
+
+class _BoundedDoctorTraversalHarness extends StatefulWidget {
+  const _BoundedDoctorTraversalHarness({
+    required this.repository,
+    required this.institution,
+    required this.doctor,
+  });
+
+  final ProfessionalCatalogRepository repository;
+  final DiscoverItem institution;
+  final DiscoverItem doctor;
+
+  @override
+  State<_BoundedDoctorTraversalHarness> createState() =>
+      _BoundedDoctorTraversalHarnessState();
+}
+
+class _BoundedDoctorTraversalHarnessState
+    extends State<_BoundedDoctorTraversalHarness> {
+  List<DiscoverItem> projects = const [];
+
+  Future<void> _openDoctor() async {
+    final visibleProjects = await widget.repository
+        .loadVisibleDoctorProjects(widget.institution.id, widget.doctor.id);
+    if (mounted) setState(() => projects = visibleProjects);
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        body: Column(
+          children: [
+            Expanded(
+              child: CatalogInstitutionDetailView(item: widget.institution),
+            ),
+            ListTile(
+              key: const Key('bounded-visible-doctor'),
+              title: Text(widget.doctor.title),
+              onTap: _openDoctor,
+            ),
+            for (final project in projects) Text(project.title),
+          ],
+        ),
+      );
 }
 
 final class _CatalogRepository implements ProfessionalCatalogRepository {
