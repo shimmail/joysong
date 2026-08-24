@@ -521,9 +521,13 @@ class DoctorProjectChangeService(
             ORDER BY CASE r.status WHEN 'PENDING' THEN 0 ELSE 1 END, r.submitted_at DESC
             """.trimIndent()
         ) { rs, _ ->
+            val currentProjectResult = runCatching {
+                snapshotCodec.decode(requireNotNull(rs.getString("current_project_snapshot")))
+            }
+            val proposedProjectResult = runCatching {
+                snapshotCodec.decode(requireNotNull(rs.getString("proposed_project_snapshot")))
+            }
             val ledgerResult = runCatching {
-                val currentProject = snapshotCodec.decode(requireNotNull(rs.getString("current_project_snapshot")))
-                val proposedProject = snapshotCodec.decode(requireNotNull(rs.getString("proposed_project_snapshot")))
                 val baseDoctorProjectUpdatedAt = requireNotNull(rs.getTimestamp("base_doctor_project_updated_at"))
                     .toInstant()
                 val baseConfigId = rs.getString("base_config_id")
@@ -558,8 +562,6 @@ class DoctorProjectChangeService(
                             pricingPolicyRevision = pricingPolicyRevision
                         )
                     ),
-                    currentProject = currentProject,
-                    proposedProject = proposedProject,
                     sharedChanged = requiredBoolean(rs, "shared_changed"),
                     currentDoctorPrice = currentDoctorPrice,
                     proposedDoctorPrice = proposedDoctorPrice,
@@ -583,7 +585,8 @@ class DoctorProjectChangeService(
                     currentPolicy.serviceFee
                 )
             }.getOrNull()
-            val snapshotsValid = ledgerResult.isSuccess
+            val snapshotsValid = ledgerResult.isSuccess &&
+                currentProjectResult.isSuccess && proposedProjectResult.isSuccess
             val status = rs.getString("status")
             VersionedDoctorProjectChangeViewV2(
                 id = rs.getString("id"),
@@ -597,8 +600,8 @@ class DoctorProjectChangeService(
                 platformProjectId = rs.getString("platform_project_id"),
                 platformProjectName = rs.getString("platform_project_name"),
                 baseRevision = ledger?.baseRevision ?: "0".repeat(64),
-                currentProject = ledger?.currentProject,
-                proposedProject = ledger?.proposedProject,
+                currentProject = currentProjectResult.getOrNull(),
+                proposedProject = proposedProjectResult.getOrNull(),
                 latestProject = latestSnapshot,
                 latestRevision = latestRevision,
                 sharedChanged = ledger?.sharedChanged ?: false,
@@ -1773,8 +1776,6 @@ private data class ReviewRequestIdentity(
 
 private data class V2LedgerShape(
     val baseRevision: String,
-    val currentProject: InstitutionProjectSnapshotV2,
-    val proposedProject: InstitutionProjectSnapshotV2,
     val sharedChanged: Boolean,
     val currentDoctorPrice: BigDecimal,
     val proposedDoctorPrice: BigDecimal,

@@ -582,6 +582,18 @@ class DoctorProjectChangeServiceTest {
         assertEquals("INVALID", broken.snapshotState)
         assertEquals(ProjectChangeErrorCode.REQUEST_SNAPSHOT_INVALID.name, broken.snapshotError)
         assertEquals(null, broken.currentProject)
+        assertEquals("Local Project", broken.proposedProject?.effective?.name)
+        assertEquals(valid.baseRevision, broken.baseRevision)
+        assertEquals(true, broken.sharedChanged)
+        assertEquals(BigDecimal("100.00"), broken.currentDoctorPrice)
+        assertEquals(BigDecimal("110.00"), broken.proposedDoctorPrice)
+        assertEquals(true, broken.currentDoctorActive)
+        assertEquals(true, broken.proposedDoctorActive)
+        assertEquals(BigDecimal("40.00"), broken.platformRate)
+        assertEquals("travel-ground-service-rate:0.400000", broken.pricingPolicyRevision)
+        assertEquals(BigDecimal("44.00"), broken.travelGroundServiceFee)
+        assertEquals("Local Project", broken.latestProject?.effective?.name)
+        assertEquals(valid.latestRevision, broken.latestRevision)
         assertEquals(false, broken.reviewable)
     }
 
