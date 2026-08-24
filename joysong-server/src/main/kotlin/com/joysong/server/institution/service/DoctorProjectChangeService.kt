@@ -6,6 +6,7 @@ import com.joysong.server.institution.entity.InstitutionProjectEntity
 import com.joysong.server.institution.repository.InstitutionProjectRepository
 import com.joysong.server.identity.service.ManagementActor
 import com.joysong.server.identity.service.DoctorInstitutionRelationshipService
+import com.joysong.server.identity.service.InstitutionRelationshipReviewAuthorityOperations
 import com.joysong.server.order.repository.DoctorInstitutionProjectConfigRepository
 import com.joysong.server.order.entity.DoctorInstitutionProjectConfigEntity
 import com.joysong.server.order.service.OrderSplitRatePolicy
@@ -27,6 +28,9 @@ import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
+import org.springframework.cache.CacheManager
+import org.springframework.transaction.support.TransactionSynchronization
+import org.springframework.transaction.support.TransactionSynchronizationManager
 
 private val PROJECT_CHANGE_TYPES = setOf("JOIN", "PROFILE_UPDATE", "LEAVE")
 private val PROJECT_CHANGE_DECISIONS = setOf("APPROVED", "REJECTED", "CHANGES_REQUESTED")
@@ -41,7 +45,9 @@ class DoctorProjectChangeService(
     private val splitRatePolicy: OrderSplitRatePolicy,
     private val travelGroundServicePricing: TravelGroundServicePricing,
     private val payloadPolicy: InstitutionProjectPayloadPolicy,
-    private val objectMapper: ObjectMapper
+    private val objectMapper: ObjectMapper,
+    private val reviewAuthority: InstitutionRelationshipReviewAuthorityOperations,
+    private val cacheManager: CacheManager
 ) {
     private val snapshotCodec = DoctorProjectSnapshotCodec(objectMapper)
     private val detailResolver = InstitutionProjectDetailResolver(objectMapper)
@@ -696,80 +702,187 @@ class DoctorProjectChangeService(
     fun review(actor: ManagementActor, id: String, decision: String, reviewNote: String, force: Boolean?): DoctorProjectChangeView {
         val normalizedDecision = decision.trim().uppercase()
         require(normalizedDecision in PROJECT_CHANGE_DECISIONS) { "审核结果不正确" }
-        if (normalizedDecision != "APPROVED") require(reviewNote.isNotBlank()) { "驳回或要求修改时必须填写原因" }
         require(force != null) { "force 字段必须显式提交" }
-        require(!force || normalizedDecision == "APPROVED") { "仅 APPROVED 决策允许强制处理" }
-        if (force) {
-            if (!actor.isAdmin) throw AccessDeniedException("只有平台管理员可以强制处理")
-            require(reviewNote.isNotBlank()) { "强制处理必须填写说明" }
-        }
-        val target = lockedTarget(id) ?: throw DoctorProjectChangeNotFoundException("项目申请不存在")
-        if (target.status != "PENDING") throw DoctorProjectChangeConflictException("项目申请已处理")
-        if (!actor.isAdmin && target.institutionId !in actor.managedInstitutionIds) {
-            throw AccessDeniedException("只有所属机构法人可以审核该申请")
-        }
-        if (normalizedDecision == "APPROVED") {
-            if (target.requestType == "JOIN") {
-                relationshipService.requireActiveRelationshipForUpdate(target.doctorId, target.institutionId)
-            }
-            applyApproved(target, force)
-        }
-        val updated = jdbcTemplate.update(
-            """
-            UPDATE doctor_project_change_requests
-            SET status = ?, reviewed_by = ?, review_note = ?, force_processed = ?, reviewed_at = NOW()
-            WHERE id = ? AND status = 'PENDING'
-            """.trimIndent(),
-            normalizedDecision,
-            actor.userId,
-            reviewNote.trim().take(1000),
-            force,
-            id
+        reviewLocked(
+            actor = actor,
+            id = id,
+            command = DoctorProjectReviewV2Command(
+                decision = ProjectChangeDecision.valueOf(normalizedDecision),
+                reviewNote = reviewNote,
+                force = force,
+                forceBaseRevision = null
+            ),
+            requiredPayloadVersion = 1,
+            allowLegacyForceWithoutRevision = true
         )
-        if (updated != 1) throw DoctorProjectChangeConflictException("项目申请已被其他审核人处理")
         return requireNotNull(list(actor).firstOrNull { it.id == id }) { "项目申请审核结果读取失败" }
     }
 
     @Transactional
+    fun reviewV2(
+        actor: ManagementActor,
+        id: String,
+        command: DoctorProjectReviewV2Command
+    ): DoctorProjectChangeViewV2 {
+        reviewLocked(actor, id, command, requiredPayloadVersion = null, allowLegacyForceWithoutRevision = false)
+        return requireNotNull(listV2(actor).firstOrNull { it.id == id }) { "项目申请审核结果读取失败" }
+    }
+
+    @Transactional
     fun withdraw(actor: ManagementActor, id: String): DoctorProjectChangeView {
+        requestIdentity(id) ?: throw DoctorProjectChangeNotFoundException("项目申请不存在")
         val target = lockedTarget(id) ?: throw DoctorProjectChangeNotFoundException("项目申请不存在")
-        require(target.status == "PENDING") { "只有待处理申请可以撤回" }
+        if (target.payloadVersion != 1) throw clientUpgradeRequired()
+        if (target.status != "PENDING") throw requestAlreadyHandled()
         if (!actor.isAdmin && (actor.doctorId != target.doctorId || actor.userId != target.submittedBy)) {
             throw AccessDeniedException("只能撤回自己提交的申请")
         }
-        jdbcTemplate.update(
+        val updated = jdbcTemplate.update(
             "UPDATE doctor_project_change_requests SET status = 'WITHDRAWN', reviewed_by = ?, reviewed_at = NOW() WHERE id = ? AND status = 'PENDING'",
             actor.userId,
             id
         )
+        if (updated != 1) throw requestAlreadyHandled()
         return requireNotNull(list(actor).firstOrNull { it.id == id }) { "项目申请撤回结果读取失败" }
     }
 
-    private fun applyApproved(target: ChangeTarget, force: Boolean) {
-        val existing = doctorProjectRepository.findForUpdate(
-            target.doctorId,
-            target.institutionProjectId
+    @Transactional
+    fun withdrawV2(actor: ManagementActor, id: String): DoctorProjectChangeViewV2 {
+        requestIdentity(id) ?: throw DoctorProjectChangeNotFoundException("项目申请不存在")
+        val target = lockedTarget(id) ?: throw DoctorProjectChangeNotFoundException("项目申请不存在")
+        if (target.status != "PENDING") throw requestAlreadyHandled()
+        if (actor.doctorId != target.doctorId || actor.userId != target.submittedBy) {
+            throw AccessDeniedException("只能撤回自己提交的申请")
+        }
+        val updated = jdbcTemplate.update(
+            "UPDATE doctor_project_change_requests SET status = 'WITHDRAWN', reviewed_by = ?, reviewed_at = NOW() WHERE id = ? AND status = 'PENDING'",
+            actor.userId,
+            id
         )
+        if (updated != 1) throw requestAlreadyHandled()
+        return requireNotNull(listV2(actor).firstOrNull { it.id == id }) { "项目申请撤回结果读取失败" }
+    }
+
+    private fun reviewLocked(
+        actor: ManagementActor,
+        id: String,
+        command: DoctorProjectReviewV2Command,
+        requiredPayloadVersion: Int?,
+        allowLegacyForceWithoutRevision: Boolean
+    ) {
+        validateReviewCommand(actor, command, allowLegacyForceWithoutRevision)
+        val identity = requestIdentity(id) ?: throw DoctorProjectChangeNotFoundException("项目申请不存在")
+        val target = lockedTarget(id) ?: throw DoctorProjectChangeNotFoundException("项目申请不存在")
+        if (identity.id != target.id || identity.payloadVersion != target.payloadVersion ||
+            identity.doctorId != target.doctorId || identity.institutionId != target.institutionId ||
+            identity.institutionProjectId != target.institutionProjectId) {
+            throw requestAlreadyHandled()
+        }
+        if (requiredPayloadVersion != null && target.payloadVersion != requiredPayloadVersion) {
+            throw clientUpgradeRequired()
+        }
+        if (target.status != "PENDING") throw requestAlreadyHandled()
+        if (!allowLegacyForceWithoutRevision && target.payloadVersion == 1 && command.force) {
+            throw forceNotApplicable("旧版申请不支持 v2 强制批准")
+        }
+
+        reviewAuthority.requireCurrentAuthority(actor, target.institutionId)
+        if (command.decision != ProjectChangeDecision.APPROVED) {
+            finishReview(target, actor, command, approvalAuditSnapshot = null)
+            return
+        }
+
+        relationshipService.requireActiveRelationshipForUpdate(target.doctorId, target.institutionId)
+        val institutionProject = institutionProjectRepository.findForUpdate(target.institutionProjectId)
+            ?: throw AccessDeniedException("机构项目关联已失效")
+        if (!institutionProject.isActive || institutionProject.institutionId != target.institutionId) {
+            throw AccessDeniedException("机构项目关联已失效")
+        }
+        if (institutionProject.projectId != identity.platformProjectId) {
+            throw AccessDeniedException("机构项目与平台项目关联已变更")
+        }
+        val platformProject = lockedPlatformProject(institutionProject.projectId)
+            ?: throw AccessDeniedException("平台项目关联已失效")
+        val doctorProject = doctorProjectRepository.findForUpdate(target.doctorId, target.institutionProjectId)
+        val config = configRepository.findForUpdate(target.doctorId, target.institutionProjectId)
+            ?: configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate(
+                target.doctorId,
+                target.institutionProjectId
+            )
+
+        if (target.payloadVersion == 1) {
+            applyLegacyApprovedLocked(target, platformProject.id, doctorProject, config, command.force)
+            institutionProjectRepository.flush()
+            finishReview(target, actor, command, approvalAuditSnapshot = null)
+            evictProjectCachesAfterCommit()
+            return
+        }
+        if (target.payloadVersion != 2 || target.requestType != "PROFILE_UPDATE") {
+            throw requestSnapshotInvalid("不支持的申请版本或类型")
+        }
+        val audit = applyV2ApprovedLocked(
+            target,
+            institutionProject,
+            platformProject,
+            doctorProject ?: throw AccessDeniedException("医生项目绑定已失效"),
+            config,
+            command
+        )
+        institutionProjectRepository.flush()
+        finishReview(target, actor, command, objectMapper.writeValueAsString(audit))
+        evictProjectCachesAfterCommit()
+    }
+
+    private fun validateReviewCommand(
+        actor: ManagementActor,
+        command: DoctorProjectReviewV2Command,
+        allowLegacyForceWithoutRevision: Boolean
+    ) {
+        if (command.decision != ProjectChangeDecision.APPROVED) {
+            require(command.reviewNote.isNotBlank()) { "驳回或要求修改时必须填写原因" }
+        }
+        if (command.force && command.decision != ProjectChangeDecision.APPROVED) {
+            throw forceNotApplicable("仅 APPROVED 决策允许强制处理")
+        }
+        if (!command.force && command.forceBaseRevision != null) {
+            throw forceNotApplicable("普通审核不得提交 forceBaseRevision")
+        }
+        if (!command.force) return
+        if (!actor.isAdmin) throw AccessDeniedException("只有平台管理员可以强制处理")
+        require(command.reviewNote.isNotBlank()) { "强制处理必须填写说明" }
+        if (!allowLegacyForceWithoutRevision && command.forceBaseRevision.isNullOrBlank()) {
+            throw forceNotApplicable("强制批准必须提交 forceBaseRevision")
+        }
+    }
+
+    private fun applyLegacyApprovedLocked(
+        target: ChangeTarget,
+        platformProjectId: String,
+        existing: DoctorProjectEntity?,
+        config: DoctorInstitutionProjectConfigEntity?,
+        force: Boolean
+    ) {
         when (target.requestType) {
             "JOIN" -> {
                 require(existing == null) { "医生已加入该机构项目，申请无法重复通过" }
                 travelGroundServicePricing.quote(
                     requireNotNull(target.priceSuggestion) { "加入申请缺少价格建议" }
                 )
-                doctorProjectRepository.save(target.toEntity(includeProfileFields = false))
+                doctorProjectRepository.save(target.toEntity(platformProjectId, includeProfileFields = false))
             }
             "PROFILE_UPDATE" -> {
                 require(existing != null) { "医生项目关系不存在" }
                 if (!force) {
-                    relationshipService.requireActiveRelationshipForUpdate(target.doctorId, target.institutionId)
-                    if (existing.updatedAt != target.baseDoctorProjectUpdatedAt) throw DoctorProjectChangeConflictException("医生项目基线已变化")
+                    if (existing.updatedAt != target.baseDoctorProjectUpdatedAt?.toLocalDateTime()) {
+                        throw DoctorProjectChangeConflictException("医生项目基线已变化")
+                    }
                 }
-                val config = configRepository.findForUpdate(target.doctorId, target.institutionProjectId)
-                    ?: configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate(target.doctorId, target.institutionProjectId)
-                if (!force && (config?.id != target.baseConfigId || config?.updatedAt != target.baseConfigUpdatedAt)) throw DoctorProjectChangeConflictException("分账配置基线已变化")
+                if (!force && (config?.id != target.baseConfigId || config?.updatedAt != target.baseConfigUpdatedAt?.toLocalDateTime())) {
+                    throw DoctorProjectChangeConflictException("分账配置基线已变化")
+                }
                 validateApprovedProfileAmounts(target)
                 splitRatePolicy.resolve(requireNotNull(target.institutionRate), requireNotNull(target.commissionRate))
-                doctorProjectRepository.save(target.toEntity(existing.createdAt, requireNotNull(target.priceSuggestion)))
+                doctorProjectRepository.save(target.toEntity(platformProjectId, existing.createdAt, requireNotNull(target.priceSuggestion)))
                 val effective = config ?: DoctorInstitutionProjectConfigEntity(doctorId=target.doctorId, institutionProjectId=target.institutionProjectId)
                 effective.consultationFee=requireNotNull(target.consultationFee); effective.commissionRate=requireNotNull(target.commissionRate)
                 effective.institutionRate=requireNotNull(target.institutionRate); effective.medicalListPrice=requireNotNull(target.priceSuggestion)
@@ -790,6 +903,318 @@ class DoctorProjectChangeService(
         }
     }
 
+    private fun applyV2ApprovedLocked(
+        target: ChangeTarget,
+        institutionProject: InstitutionProjectEntity,
+        platformProject: ProjectEntity,
+        doctorProject: DoctorProjectEntity,
+        config: DoctorInstitutionProjectConfigEntity?,
+        command: DoctorProjectReviewV2Command
+    ): DoctorProjectApprovalAuditSnapshot {
+        if (doctorProject.projectId != platformProject.id || institutionProject.projectId != platformProject.id) {
+            throw AccessDeniedException("医生项目绑定或平台项目关联已失效")
+        }
+        val currentProject = decodeReviewSnapshot(target.currentProjectSnapshot)
+        val proposedProject = decodeReviewSnapshot(target.proposedProjectSnapshot)
+        val expectedAssociation = ProjectAssociationSnapshot(
+            target.institutionProjectId,
+            target.institutionId,
+            platformProject.id
+        )
+        if (currentProject.association != expectedAssociation || proposedProject.association != expectedAssociation) {
+            throw requestSnapshotInvalid("申请关联快照不一致")
+        }
+        val baseVersion = target.baseInstitutionProjectVersion
+            ?: throw requestSnapshotInvalid("申请缺少机构项目基线版本")
+        val baseInheritanceHash = target.basePlatformInheritanceHash
+            ?: throw requestSnapshotInvalid("申请缺少平台继承基线")
+        if (currentProject.source.institutionProjectVersion != baseVersion ||
+            currentProject.source.platformInheritanceHash != baseInheritanceHash ||
+            proposedProject.source != currentProject.source) {
+            throw requestSnapshotInvalid("申请来源快照不一致")
+        }
+        val currentDoctorPrice = target.currentPrice
+            ?: throw requestSnapshotInvalid("申请缺少医生价格基线")
+        val proposedDoctorPrice = target.medicalListPrice
+            ?: throw requestSnapshotInvalid("申请缺少医生目标价格")
+        val currentDoctorActive = target.currentDoctorIsActive
+            ?: throw requestSnapshotInvalid("申请缺少医生上架基线")
+        val proposedDoctorActive = target.proposedDoctorIsActive
+            ?: throw requestSnapshotInvalid("申请缺少医生目标上架状态")
+        val pricingRevision = target.pricingPolicyRevision
+            ?: throw requestSnapshotInvalid("申请缺少定价策略版本")
+        val storedPlatformRate = target.currentPlatformRate
+            ?: throw requestSnapshotInvalid("申请缺少平台比例")
+        val storedFee = target.proposedTravelGroundServiceFee
+            ?: throw requestSnapshotInvalid("申请缺少旅游地接服务费")
+        val sharedChanged = target.sharedChanged
+            ?: throw requestSnapshotInvalid("申请缺少共享变更标记")
+
+        val normalized = try {
+            payloadPolicy.normalize(
+                InstitutionProjectPayload(
+                    name = proposedProject.rawOverrides.name,
+                    category = proposedProject.rawOverrides.category,
+                    description = proposedProject.rawOverrides.description,
+                    tags = proposedProject.rawOverrides.tags,
+                    slogan = proposedProject.rawOverrides.slogan,
+                    detailContent = proposedProject.rawOverrides.detailContent,
+                    coverImage = proposedProject.rawOverrides.coverImage,
+                    images = proposedProject.rawOverrides.images,
+                    salesCount = proposedProject.effective.salesCount
+                )
+            )
+        } catch (e: RuntimeException) {
+            throw requestSnapshotInvalid("申请项目字段不合法", e)
+        }
+        val normalizedRaw = ProjectRawOverridesSnapshot(
+            normalized.name,
+            normalized.category,
+            normalized.description,
+            normalized.tags,
+            normalized.slogan,
+            normalized.detailContent,
+            normalized.coverImage,
+            normalized.images
+        )
+        if (normalizedRaw != proposedProject.rawOverrides) {
+            throw requestSnapshotInvalid("申请项目覆盖值未规格化")
+        }
+        validateEffectivePayload(proposedProject.effective)
+
+        val quote = travelGroundServicePricing.quoteWithPolicy(proposedDoctorPrice)
+        if (quote.pricingPolicyRevision != pricingRevision ||
+            quote.platformRate.compareTo(storedPlatformRate) != 0 ||
+            quote.serviceFee.compareTo(storedFee) != 0) {
+            throw contractConflict(ProjectChangeErrorCode.PRICING_POLICY_STALE, "定价策略已变化，请重新提交")
+        }
+
+        val doctorUpdatedAt = lockedDoctorProjectUpdatedAt(target.doctorId, target.institutionProjectId)
+            ?: throw AccessDeniedException("医生项目绑定已失效")
+        val activeConfig = lockedActiveConfigRevision(target.doctorId, target.institutionProjectId)
+        val latestState = V2ProjectState(
+            institutionProject = institutionProject,
+            institutionName = "",
+            platformProject = platformProject,
+            doctorId = target.doctorId,
+            doctorName = "",
+            doctorPrice = doctorProject.price,
+            doctorActive = doctorProject.isActive,
+            doctorProjectUpdatedAt = doctorUpdatedAt,
+            configId = activeConfig?.id,
+            configUpdatedAt = activeConfig?.updatedAt
+        )
+        val latestProject = try {
+            latestState.snapshot()
+        } catch (e: RuntimeException) {
+            throw requestSnapshotInvalid("当前项目有效值不完整", e)
+        }
+
+        if (sharedChanged) {
+            if (hasInheritedField(proposedProject.rawOverrides) &&
+                latestProject.source.platformInheritanceHash != baseInheritanceHash) {
+                throw contractConflict(ProjectChangeErrorCode.INHERITANCE_SOURCE_STALE, "平台继承源已变化，请重新提交")
+            }
+            val appliedPreview = detailResolver.resolveDetails(
+                institutionProject.copy(
+                    name = normalized.name,
+                    category = normalized.category,
+                    description = normalized.description,
+                    tags = encodeOptionalList(normalized.tags),
+                    slogan = normalized.slogan,
+                    detailContent = normalized.detailContent,
+                    coverImage = normalized.coverImage,
+                    images = encodeOptionalList(normalized.images),
+                    salesCount = normalized.salesCount
+                ),
+                platformProject
+            )
+            if (appliedPreview.rawOverrides != proposedProject.rawOverrides ||
+                appliedPreview.effective != proposedProject.effective) {
+                throw requestSnapshotInvalid("申请预览与实际写入值不一致")
+            }
+        }
+
+        val driftedFields = buildList {
+            if (sharedChanged && institutionProject.version != baseVersion) add("institutionProjectVersion")
+            if (doctorProject.price.compareTo(currentDoctorPrice) != 0) add("doctorPrice")
+            if (doctorProject.isActive != currentDoctorActive) add("doctorActive")
+            if (target.baseDoctorProjectUpdatedAt?.toInstant() != doctorUpdatedAt) add("doctorProjectRevision")
+            if (target.baseConfigId != activeConfig?.id || target.baseConfigUpdatedAt?.toInstant() != activeConfig?.updatedAt) {
+                add("compatibilityConfigRevision")
+            }
+        }
+        if (command.force) {
+            if (driftedFields.isEmpty()) throw forceNotApplicable("当前不存在可强制覆盖的共享或医生私有基线漂移")
+            val latestRevision = latestState.revision(quote.pricingPolicyRevision)
+            if (command.forceBaseRevision != latestRevision) {
+                throw contractConflict(ProjectChangeErrorCode.FORCE_BASE_STALE, "强制批准确认基线已变化，请刷新后重试")
+            }
+        } else if (driftedFields.isNotEmpty()) {
+            throw contractConflict(ProjectChangeErrorCode.APPROVAL_BASE_STALE, "批准基线已变化，请刷新审核详情")
+        }
+
+        val afterVersion = if (sharedChanged) institutionProject.version + 1 else institutionProject.version
+        val appliedProject = InstitutionProjectSnapshotV2(
+            schemaVersion = 2,
+            association = expectedAssociation,
+            rawOverrides = if (sharedChanged) proposedProject.rawOverrides else latestProject.rawOverrides,
+            effective = if (sharedChanged) proposedProject.effective else latestProject.effective,
+            source = ProjectSnapshotSource(afterVersion, latestProject.source.platformInheritanceHash)
+        )
+        if (sharedChanged) {
+            val updated = jdbcTemplate.update(
+                """
+                UPDATE institution_projects
+                SET name = ?, category = ?, description = ?, tags = ?, slogan = ?, detail_content = ?,
+                    cover_image = ?, images = ?, sales_count = ?, version = version + 1, updated_at = NOW()
+                WHERE id = ? AND version = ? AND deleted_at IS NULL
+                """.trimIndent(),
+                normalized.name,
+                normalized.category,
+                normalized.description,
+                encodeOptionalList(normalized.tags),
+                normalized.slogan,
+                normalized.detailContent,
+                normalized.coverImage,
+                encodeOptionalList(normalized.images),
+                normalized.salesCount,
+                institutionProject.id,
+                institutionProject.version
+            )
+            if (updated != 1) throw contractConflict(ProjectChangeErrorCode.APPROVAL_BASE_STALE, "机构项目版本已变化")
+        }
+        val doctorUpdated = jdbcTemplate.update(
+            """
+            UPDATE doctor_projects
+            SET price = ?, is_active = ?, updated_at = NOW()
+            WHERE doctor_id = ? AND institution_project_id = ? AND project_id = ?
+            """.trimIndent(),
+            proposedDoctorPrice,
+            proposedDoctorActive,
+            target.doctorId,
+            target.institutionProjectId,
+            platformProject.id
+        )
+        if (doctorUpdated != 1) throw AccessDeniedException("医生项目绑定已失效")
+        syncCompatibilityPrice(target, config, proposedDoctorPrice)
+
+        return DoctorProjectApprovalAuditSnapshot(
+            beforeVersion = institutionProject.version,
+            afterVersion = afterVersion,
+            latestBefore = DoctorProjectApprovalAuditState(
+                latestProject,
+                doctorProject.price,
+                doctorProject.isActive,
+                quote.serviceFee
+            ),
+            actualApplied = DoctorProjectApprovalAuditState(
+                appliedProject,
+                proposedDoctorPrice,
+                proposedDoctorActive,
+                quote.serviceFee
+            ),
+            force = command.force,
+            driftedFields = if (command.force) driftedFields else emptyList()
+        )
+    }
+
+    private fun syncCompatibilityPrice(
+        target: ChangeTarget,
+        config: DoctorInstitutionProjectConfigEntity?,
+        proposedDoctorPrice: BigDecimal
+    ) {
+        if (config != null) {
+            val updated = jdbcTemplate.update(
+                """
+                UPDATE doctor_institution_project_configs
+                SET medical_list_price = ?, deleted_at = NULL, updated_at = NOW()
+                WHERE id = ? AND doctor_id = ? AND institution_project_id = ?
+                """.trimIndent(),
+                proposedDoctorPrice,
+                config.id,
+                target.doctorId,
+                target.institutionProjectId
+            )
+            if (updated != 1) throw AccessDeniedException("兼容价格配置关联已失效")
+            return
+        }
+        val defaults = splitRatePolicy.defaults()
+        jdbcTemplate.update(
+            """
+            INSERT INTO doctor_institution_project_configs
+                (id, doctor_id, institution_project_id, consultation_fee, commission_rate,
+                 institution_rate, medical_list_price, created_at, updated_at)
+            VALUES (?, ?, ?, 0, ?, ?, ?, NOW(), NOW())
+            """.trimIndent(),
+            UUID.randomUUID().toString(),
+            target.doctorId,
+            target.institutionProjectId,
+            defaults.consultantRate,
+            defaults.institutionRate,
+            proposedDoctorPrice
+        )
+    }
+
+    private fun finishReview(
+        target: ChangeTarget,
+        actor: ManagementActor,
+        command: DoctorProjectReviewV2Command,
+        approvalAuditSnapshot: String?
+    ) {
+        val updated = jdbcTemplate.update(
+            """
+            UPDATE doctor_project_change_requests
+            SET approval_audit_snapshot = ?, reviewed_by = ?, review_note = ?, force_processed = ?,
+                reviewed_at = NOW(), status = ?
+            WHERE id = ? AND status = 'PENDING'
+            """.trimIndent(),
+            approvalAuditSnapshot,
+            actor.userId,
+            command.reviewNote.trim().take(1000),
+            command.force,
+            command.decision.name,
+            target.id
+        )
+        if (updated != 1) throw requestAlreadyHandled()
+    }
+
+    private fun hasInheritedField(raw: ProjectRawOverridesSnapshot): Boolean =
+        raw.name == null || raw.category == null || raw.description == null || raw.tags == null ||
+            raw.slogan == null || raw.detailContent == null || raw.coverImage == null || raw.images == null
+
+    private fun decodeReviewSnapshot(raw: String?): InstitutionProjectSnapshotV2 = try {
+        snapshotCodec.decode(requireNotNull(raw))
+    } catch (e: RuntimeException) {
+        throw requestSnapshotInvalid("申请快照损坏", e)
+    }
+
+    private fun requestSnapshotInvalid(message: String, cause: Throwable? = null) =
+        ProjectChangeContractException(HttpStatus.UNPROCESSABLE_ENTITY, ProjectChangeErrorCode.REQUEST_SNAPSHOT_INVALID, message, cause)
+
+    private fun forceNotApplicable(message: String) =
+        ProjectChangeContractException(HttpStatus.UNPROCESSABLE_ENTITY, ProjectChangeErrorCode.FORCE_NOT_APPLICABLE, message)
+
+    private fun clientUpgradeRequired() =
+        ProjectChangeContractException(HttpStatus.UPGRADE_REQUIRED, ProjectChangeErrorCode.CLIENT_UPGRADE_REQUIRED, "请升级客户端后处理该申请")
+
+    private fun requestAlreadyHandled() =
+        contractConflict(ProjectChangeErrorCode.REQUEST_ALREADY_HANDLED, "项目申请已处理")
+
+    private fun evictProjectCachesAfterCommit() {
+        val evict = {
+            cacheManager.getCache("discover")?.clear()
+            cacheManager.getCache("home")?.clear()
+            cacheManager.getCache("projects")?.clear()
+        }
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) return
+        TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
+            override fun afterCommit() {
+                evict()
+            }
+        })
+    }
+
     /** Pending rows can predate the shared USD validation, so approval must not trust submission-time checks. */
     private fun validateApprovedProfileAmounts(target: ChangeTarget) {
         val price = requireNotNull(target.priceSuggestion) { "医生项目价格不能为空" }
@@ -801,12 +1226,13 @@ class DoctorProjectChangeService(
 
 
     private fun ChangeTarget.toEntity(
+        platformProjectId: String,
         createdAt: LocalDateTime = LocalDateTime.now(),
         effectivePrice: BigDecimal = priceSuggestion ?: throw IllegalArgumentException("医生项目价格不能为空"),
         includeProfileFields: Boolean = true
     ) = DoctorProjectEntity(
         doctorId = doctorId,
-        projectId = projectId,
+        projectId = platformProjectId,
         institutionProjectId = institutionProjectId,
         price = effectivePrice,
         serviceDescription = serviceDescription,
@@ -826,7 +1252,7 @@ class DoctorProjectChangeService(
 
     private fun projectTargetV2(institutionProjectId: String, doctorId: String): V2TargetIdentity? = jdbcTemplate.query(
         """
-        SELECT institution_id, project_id, i.name AS institution_name, d.name AS doctor_name
+        SELECT ip.institution_id, ip.project_id, i.name AS institution_name, d.name AS doctor_name
         FROM institution_projects ip
         JOIN institutions i ON i.id = ip.institution_id AND i.deleted_at IS NULL
         JOIN doctors d ON d.id = ? AND d.deleted_at IS NULL
@@ -844,24 +1270,50 @@ class DoctorProjectChangeService(
         institutionProjectId
     ).firstOrNull()
 
+    private fun requestIdentity(id: String): ReviewRequestIdentity? = jdbcTemplate.query(
+        """
+        SELECT r.id, r.payload_version, r.doctor_id, r.institution_id, r.institution_project_id,
+               ip.project_id AS platform_project_id
+        FROM doctor_project_change_requests r
+        JOIN institution_projects ip ON ip.id = r.institution_project_id
+        WHERE r.id = ?
+        """.trimIndent(),
+        { rs, _ ->
+            ReviewRequestIdentity(
+                id = rs.getString("id"),
+                payloadVersion = rs.getInt("payload_version").takeIf { it != 0 } ?: 1,
+                doctorId = rs.getString("doctor_id"),
+                institutionId = rs.getString("institution_id"),
+                institutionProjectId = rs.getString("institution_project_id"),
+                platformProjectId = rs.getString("platform_project_id")
+            )
+        },
+        id
+    ).firstOrNull()
+
     private fun lockedTarget(id: String): ChangeTarget? = jdbcTemplate.query(
         """
-        SELECT r.doctor_id, r.institution_id, r.institution_project_id, ip.project_id,
+        SELECT r.id, r.payload_version, r.doctor_id, r.institution_id, r.institution_project_id,
                r.request_type, r.service_description, r.price_suggestion, r.notes,
                r.service_tags, r.schedule_note,
                r.cover_image, r.images, r.status, r.submitted_by
                ,r.consultation_fee, r.commission_rate, r.institution_rate, r.medical_list_price,
-               r.base_doctor_project_updated_at, r.base_config_id, r.base_config_updated_at
+               r.base_doctor_project_updated_at, r.base_config_id, r.base_config_updated_at,
+               r.base_institution_project_version, r.base_platform_inheritance_hash,
+               r.pricing_policy_revision, r.proposed_travel_ground_service_fee, r.shared_changed,
+               r.current_project_snapshot, r.proposed_project_snapshot,
+               r.current_price, r.current_doctor_is_active, r.proposed_doctor_is_active,
+               r.current_platform_rate
         FROM doctor_project_change_requests r
-        JOIN institution_projects ip ON ip.id = r.institution_project_id
         WHERE r.id = ? FOR UPDATE
         """.trimIndent(),
         { rs, _ ->
             ChangeTarget(
+                id = rs.getString("id"),
+                payloadVersion = rs.getInt("payload_version").takeIf { it != 0 } ?: 1,
                 doctorId = rs.getString("doctor_id"),
                 institutionId = rs.getString("institution_id"),
                 institutionProjectId = rs.getString("institution_project_id"),
-                projectId = rs.getString("project_id"),
                 requestType = rs.getString("request_type"),
                 serviceDescription = rs.getString("service_description").orEmpty(),
                 priceSuggestion = rs.getBigDecimal("price_suggestion"),
@@ -873,8 +1325,19 @@ class DoctorProjectChangeService(
                 status = rs.getString("status"),
                 submittedBy = rs.getString("submitted_by")
                 ,consultationFee=rs.getBigDecimal("consultation_fee"), commissionRate=rs.getBigDecimal("commission_rate"),
-                institutionRate=rs.getBigDecimal("institution_rate"), medicalListPrice=rs.getBigDecimal("medical_list_price"), baseDoctorProjectUpdatedAt=rs.getTimestamp("base_doctor_project_updated_at")?.toLocalDateTime(),
-                baseConfigId=rs.getString("base_config_id"), baseConfigUpdatedAt=rs.getTimestamp("base_config_updated_at")?.toLocalDateTime()
+                institutionRate=rs.getBigDecimal("institution_rate"), medicalListPrice=rs.getBigDecimal("medical_list_price"), baseDoctorProjectUpdatedAt=rs.getTimestamp("base_doctor_project_updated_at"),
+                baseConfigId=rs.getString("base_config_id"), baseConfigUpdatedAt=rs.getTimestamp("base_config_updated_at"),
+                baseInstitutionProjectVersion = rs.getObject("base_institution_project_version")?.let { rs.getLong("base_institution_project_version") },
+                basePlatformInheritanceHash = rs.getString("base_platform_inheritance_hash"),
+                pricingPolicyRevision = rs.getString("pricing_policy_revision"),
+                proposedTravelGroundServiceFee = rs.getBigDecimal("proposed_travel_ground_service_fee"),
+                sharedChanged = rs.getObject("shared_changed")?.let { rs.getBoolean("shared_changed") },
+                currentProjectSnapshot = rs.getString("current_project_snapshot"),
+                proposedProjectSnapshot = rs.getString("proposed_project_snapshot"),
+                currentPrice = rs.getBigDecimal("current_price"),
+                currentDoctorIsActive = rs.getObject("current_doctor_is_active")?.let { rs.getBoolean("current_doctor_is_active") },
+                proposedDoctorIsActive = rs.getObject("proposed_doctor_is_active")?.let { rs.getBoolean("proposed_doctor_is_active") },
+                currentPlatformRate = rs.getBigDecimal("current_platform_rate")
             )
         },
         id
@@ -1221,6 +1684,15 @@ private data class V2TargetIdentity(
     val doctorName: String
 )
 
+private data class ReviewRequestIdentity(
+    val id: String,
+    val payloadVersion: Int,
+    val doctorId: String,
+    val institutionId: String,
+    val institutionProjectId: String,
+    val platformProjectId: String
+)
+
 private data class LockedConfigRevision(
     val id: String,
     val updatedAt: Instant
@@ -1254,10 +1726,11 @@ private data class V2ProjectState(
 )
 
 private data class ChangeTarget(
+    val id: String,
+    val payloadVersion: Int,
     val doctorId: String,
     val institutionId: String,
     val institutionProjectId: String,
-    val projectId: String,
     val requestType: String,
     val serviceDescription: String,
     val priceSuggestion: BigDecimal?,
@@ -1269,7 +1742,18 @@ private data class ChangeTarget(
     val status: String,
     val submittedBy: String,
     val consultationFee: BigDecimal?, val commissionRate: BigDecimal?, val institutionRate: BigDecimal?, val medicalListPrice: BigDecimal?,
-    val baseDoctorProjectUpdatedAt: LocalDateTime?, val baseConfigId: String?, val baseConfigUpdatedAt: LocalDateTime?
+    val baseDoctorProjectUpdatedAt: Timestamp?, val baseConfigId: String?, val baseConfigUpdatedAt: Timestamp?,
+    val baseInstitutionProjectVersion: Long?,
+    val basePlatformInheritanceHash: String?,
+    val pricingPolicyRevision: String?,
+    val proposedTravelGroundServiceFee: BigDecimal?,
+    val sharedChanged: Boolean?,
+    val currentProjectSnapshot: String?,
+    val proposedProjectSnapshot: String?,
+    val currentPrice: BigDecimal?,
+    val currentDoctorIsActive: Boolean?,
+    val proposedDoctorIsActive: Boolean?,
+    val currentPlatformRate: BigDecimal?
 )
 
 class DoctorProjectChangeConflictException(message: String) : RuntimeException(message)

@@ -6,6 +6,7 @@ import com.joysong.server.institution.entity.InstitutionProjectEntity
 import com.joysong.server.institution.repository.InstitutionProjectRepository
 import com.joysong.server.identity.service.ManagementActor
 import com.joysong.server.identity.service.DoctorInstitutionRelationshipService
+import com.joysong.server.identity.service.InstitutionRelationshipReviewAuthorityOperations
 import com.joysong.server.order.repository.DoctorInstitutionProjectConfigRepository
 import com.joysong.server.project.service.InstitutionProjectPayloadPolicy
 import io.mockk.every
@@ -13,6 +14,7 @@ import io.mockk.mockk
 import io.mockk.spyk
 import io.mockk.slot
 import io.mockk.verify
+import io.mockk.verifyOrder
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
@@ -30,13 +32,18 @@ import com.joysong.server.order.service.OrderSplitRatePolicy
 import com.joysong.server.order.service.TravelGroundServicePricing
 import com.joysong.server.config.OrderSplitProperties
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import org.springframework.cache.CacheManager
+import org.springframework.cache.Cache
+import org.springframework.transaction.support.TransactionSynchronizationManager
 
 class DoctorProjectChangeServiceTest {
     private val jdbcTemplate = mockk<JdbcTemplate>()
     private val doctorProjectRepository = mockk<DoctorProjectRepository>()
-    private val institutionProjectRepository = mockk<InstitutionProjectRepository>()
+    private val institutionProjectRepository = mockk<InstitutionProjectRepository>(relaxUnitFun = true)
     private val configRepository = mockk<DoctorInstitutionProjectConfigRepository>()
     private val relationshipService = mockk<DoctorInstitutionRelationshipService>(relaxed = true)
+    private val reviewAuthority = mockk<InstitutionRelationshipReviewAuthorityOperations>(relaxed = true)
+    private val cacheManager = mockk<CacheManager>(relaxed = true)
     private val splitRatePolicy = OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("10.00"); institutionRate = BigDecimal("40.00") })
     private val travelGroundServicePricing = TravelGroundServicePricing(
         OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("40.00") })
@@ -45,8 +52,212 @@ class DoctorProjectChangeServiceTest {
     private val objectMapper = jacksonObjectMapper()
     private val service = DoctorProjectChangeService(
         jdbcTemplate, institutionProjectRepository, doctorProjectRepository, configRepository,
-        relationshipService, splitRatePolicy, travelGroundServicePricing, payloadPolicy, objectMapper
+        relationshipService, splitRatePolicy, travelGroundServicePricing, payloadPolicy, objectMapper,
+        reviewAuthority, cacheManager
     )
+
+    @Test
+    fun `v2 review rejects force for a non approval decision before touching storage`() {
+        val error = assertThrows(ProjectChangeContractException::class.java) {
+            service.reviewV2(
+                adminActor(),
+                "request-1",
+                DoctorProjectReviewV2Command(
+                    decision = ProjectChangeDecision.REJECTED,
+                    reviewNote = "reason",
+                    force = true,
+                    forceBaseRevision = "a".repeat(64)
+                )
+            )
+        }
+
+        assertEquals(org.springframework.http.HttpStatus.UNPROCESSABLE_ENTITY, error.status)
+        assertEquals(ProjectChangeErrorCode.FORCE_NOT_APPLICABLE, error.errorCode)
+        verify(exactly = 0) { jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) }
+        verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
+    }
+
+    @Test
+    fun `v2 review denies legal representative force before touching storage`() {
+        assertThrows(AccessDeniedException::class.java) {
+            service.reviewV2(
+                legalActor(),
+                "request-1",
+                DoctorProjectReviewV2Command(
+                    decision = ProjectChangeDecision.APPROVED,
+                    reviewNote = "force reason",
+                    force = true,
+                    forceBaseRevision = "a".repeat(64)
+                )
+            )
+        }
+
+        verify(exactly = 0) { jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) }
+    }
+
+    @Test
+    fun `v2 review rejects force for a locked legacy row without changing v1 compatibility`() {
+        stubReviewQueries()
+
+        val error = assertThrows(ProjectChangeContractException::class.java) {
+            service.reviewV2(
+                adminActor(),
+                "request-1",
+                DoctorProjectReviewV2Command(
+                    decision = ProjectChangeDecision.APPROVED,
+                    reviewNote = "force reason",
+                    force = true,
+                    forceBaseRevision = "a".repeat(64)
+                )
+            )
+        }
+
+        assertEquals(org.springframework.http.HttpStatus.UNPROCESSABLE_ENTITY, error.status)
+        assertEquals(ProjectChangeErrorCode.FORCE_NOT_APPLICABLE, error.errorCode)
+        verify(exactly = 0) { institutionProjectRepository.findForUpdate(any()) }
+    }
+
+    @Test
+    fun `v2 reviews a legacy join and flushes business writes before final status`() {
+        stubReviewQueries()
+        every { doctorProjectRepository.findForUpdate("doctor-1", "ip-1") } returns null
+        every { doctorProjectRepository.save(any()) } answers { firstArg() }
+        every { institutionProjectRepository.flush() } returns Unit
+        every { jdbcTemplate.update(match<String> { it.contains("UPDATE doctor_project_change_requests") }, *anyVararg()) } returns 1
+
+        val result = service.reviewV2(legalActor(), "request-1", DoctorProjectReviewV2Command(
+            ProjectChangeDecision.APPROVED,
+            "",
+            false,
+            null
+        ))
+
+        assertEquals("APPROVED", (result as LegacyDoctorProjectChangeViewV2).status)
+        verifyOrder {
+            doctorProjectRepository.save(any())
+            institutionProjectRepository.flush()
+            jdbcTemplate.update(match<String> { it.contains("UPDATE doctor_project_change_requests") }, *anyVararg())
+        }
+    }
+
+    @Test
+    fun `v2 reject requires a note before touching business storage`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            service.reviewV2(
+                legalActor(),
+                "request-1",
+                DoctorProjectReviewV2Command(
+                    decision = ProjectChangeDecision.REJECTED,
+                    reviewNote = " ",
+                    force = false,
+                    forceBaseRevision = null
+                )
+            )
+        }
+
+        verify(exactly = 0) { doctorProjectRepository.save(any()) }
+        verify(exactly = 0) { institutionProjectRepository.save(any()) }
+        verify(exactly = 0) { configRepository.save(any()) }
+    }
+
+    @Test
+    fun `legacy review refuses a payload v2 row with client upgrade error`() {
+        stubReviewQueries(payloadVersion = 2)
+
+        val error = assertThrows(ProjectChangeContractException::class.java) {
+            service.review(legalActor(), "request-1", "APPROVED", "", false)
+        }
+
+        assertEquals(org.springframework.http.HttpStatus.UPGRADE_REQUIRED, error.status)
+        assertEquals(ProjectChangeErrorCode.CLIENT_UPGRADE_REQUIRED, error.errorCode)
+        verify(exactly = 0) { institutionProjectRepository.findForUpdate(any()) }
+    }
+
+    @Test
+    fun `legacy withdraw refuses a payload v2 row with client upgrade error`() {
+        stubReviewQueries(payloadVersion = 2)
+
+        val error = assertThrows(ProjectChangeContractException::class.java) {
+            service.withdraw(doctorActor(), "request-1")
+        }
+
+        assertEquals(org.springframework.http.HttpStatus.UPGRADE_REQUIRED, error.status)
+        assertEquals(ProjectChangeErrorCode.CLIENT_UPGRADE_REQUIRED, error.errorCode)
+        verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
+    }
+
+    @Test
+    fun `review revalidates legal authority after locking request and writes nothing when revoked`() {
+        stubReviewQueries()
+        every { reviewAuthority.requireCurrentAuthority(legalActor(), "institution-1") } throws
+            AccessDeniedException("revoked")
+
+        assertThrows(AccessDeniedException::class.java) {
+            service.reviewV2(
+                legalActor(),
+                "request-1",
+                DoctorProjectReviewV2Command(ProjectChangeDecision.APPROVED, "", false, null)
+            )
+        }
+
+        verify(exactly = 0) { institutionProjectRepository.findForUpdate(any()) }
+        verify(exactly = 0) { doctorProjectRepository.findForUpdate(any(), any()) }
+        verify(exactly = 0) { jdbcTemplate.update(any<String>(), *anyVararg()) }
+    }
+
+    @Test
+    fun `review returns typed handled conflict for withdrawn row`() {
+        stubReviewQueries(targetStatus = "WITHDRAWN")
+
+        val error = assertThrows(ProjectChangeContractException::class.java) {
+            service.reviewV2(
+                legalActor(),
+                "request-1",
+                DoctorProjectReviewV2Command(ProjectChangeDecision.APPROVED, "", false, null)
+            )
+        }
+
+        assertEquals(ProjectChangeErrorCode.REQUEST_ALREADY_HANDLED, error.errorCode)
+        verify(exactly = 0) { reviewAuthority.requireCurrentAuthority(any(), any()) }
+    }
+
+    @Test
+    fun `approved review clears project caches only after transaction commit`() {
+        stubReviewQueries()
+        every { doctorProjectRepository.findForUpdate("doctor-1", "ip-1") } returns null
+        every { doctorProjectRepository.save(any()) } answers { firstArg() }
+        every { jdbcTemplate.update(match<String> { it.contains("UPDATE doctor_project_change_requests") }, *anyVararg()) } returns 1
+        val caches = listOf(mockk<Cache>(relaxed = true), mockk(relaxed = true), mockk(relaxed = true))
+        every { cacheManager.getCache("discover") } returns caches[0]
+        every { cacheManager.getCache("home") } returns caches[1]
+        every { cacheManager.getCache("projects") } returns caches[2]
+        TransactionSynchronizationManager.initSynchronization()
+        try {
+            service.review(legalActor(), "request-1", "APPROVED", "", false)
+
+            caches.forEach { verify(exactly = 0) { it.clear() } }
+            TransactionSynchronizationManager.getSynchronizations().forEach { it.afterCommit() }
+            caches.forEach { verify(exactly = 1) { it.clear() } }
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization()
+        }
+    }
+
+    @Test
+    fun `approved review never clears project caches without an after commit callback`() {
+        stubReviewQueries()
+        every { doctorProjectRepository.findForUpdate("doctor-1", "ip-1") } returns null
+        every { doctorProjectRepository.save(any()) } answers { firstArg() }
+        every { jdbcTemplate.update(match<String> { it.contains("UPDATE doctor_project_change_requests") }, *anyVararg()) } returns 1
+        val caches = listOf(mockk<Cache>(relaxed = true), mockk(relaxed = true), mockk(relaxed = true))
+        every { cacheManager.getCache("discover") } returns caches[0]
+        every { cacheManager.getCache("home") } returns caches[1]
+        every { cacheManager.getCache("projects") } returns caches[2]
+
+        service.review(legalActor(), "request-1", "APPROVED", "", false)
+
+        caches.forEach { verify(exactly = 0) { it.clear() } }
+    }
 
     @Test
     fun `v2 targets expose raw effective inactive doctor state and canonical pricing`() {
@@ -956,7 +1167,7 @@ class DoctorProjectChangeServiceTest {
         every {
             jdbcTemplate.query(
                 match<String> {
-                    it.contains("SELECT institution_id, project_id") && !it.contains("FOR UPDATE")
+                    it.contains("SELECT ip.institution_id, ip.project_id") && !it.contains("FOR UPDATE")
                 },
                 any<RowMapper<Any>>(),
                 doctorId,
@@ -1364,8 +1575,20 @@ class DoctorProjectChangeServiceTest {
         status: String = "APPROVED",
         requestType: String = "JOIN",
         targetPriceSuggestion: BigDecimal = BigDecimal("880.00"),
-        targetMedicalListPrice: BigDecimal = BigDecimal("1000.00")
+        targetMedicalListPrice: BigDecimal = BigDecimal("1000.00"),
+        payloadVersion: Int = 1,
+        targetStatus: String = "PENDING"
     ) {
+        every { institutionProjectRepository.findForUpdate("ip-1") } returns InstitutionProjectEntity(
+            id = "ip-1",
+            institutionId = "institution-1",
+            projectId = "project-1",
+            isActive = true
+        )
+        every {
+            configRepository.findByDoctorIdAndInstitutionProjectIdIncludeDeletedForUpdate("doctor-1", "ip-1")
+        } returns null
+        every { configRepository.findForUpdate("doctor-1", "ip-1") } returns null
         every {
             jdbcTemplate.queryForObject(match<String> { it.contains("doctor_institutions") }, Long::class.java, *anyVararg())
         } returns 1L
@@ -1376,9 +1599,16 @@ class DoctorProjectChangeServiceTest {
         every { jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) } answers {
             val sql = firstArg<String>()
             val mapper = secondArg<RowMapper<Any>>()
-            val rs = if (sql.contains("FOR UPDATE")) {
-                targetResultSet(requestType, targetPriceSuggestion, targetMedicalListPrice)
-            } else viewResultSet(status)
+            val rs = when {
+                sql.contains("FROM projects") -> mockk<ResultSet>(relaxed = true) {
+                    every { getString("id") } returns "project-1"
+                    every { getString("name") } returns "Project"
+                }
+                sql.contains("FOR UPDATE") -> targetResultSet(
+                    requestType, targetPriceSuggestion, targetMedicalListPrice, payloadVersion, targetStatus
+                )
+                else -> viewResultSet(status, payloadVersion)
+            }
             listOf(mapper.mapRow(rs, 0))
         }
     }
@@ -1386,12 +1616,15 @@ class DoctorProjectChangeServiceTest {
     private fun targetResultSet(
         requestType: String = "JOIN",
         priceSuggestion: BigDecimal = BigDecimal("880.00"),
-        medicalListPrice: BigDecimal = BigDecimal("1000.00")
+        medicalListPrice: BigDecimal = BigDecimal("1000.00"),
+        payloadVersion: Int = 1,
+        status: String = "PENDING"
     ): ResultSet = mockk(relaxed = true) {
+        every { getString("id") } returns "request-1"
+        every { getInt("payload_version") } returns payloadVersion
         every { getString("doctor_id") } returns "doctor-1"
         every { getString("institution_id") } returns "institution-1"
         every { getString("institution_project_id") } returns "ip-1"
-        every { getString("project_id") } returns "project-1"
         every { getString("request_type") } returns requestType
         every { getString("service_description") } returns "service"
         every { getString("service_tags") } returns "tag"
@@ -1400,7 +1633,7 @@ class DoctorProjectChangeServiceTest {
         every { getString("images") } returns ""
         every { getBigDecimal("price_suggestion") } returns priceSuggestion
         every { getString("notes") } returns "doctor notes"
-        every { getString("status") } returns "PENDING"
+        every { getString("status") } returns status
         every { getString("submitted_by") } returns "doctor-1"
         every { getBigDecimal("consultation_fee") } returns BigDecimal("30.00")
         every { getBigDecimal("commission_rate") } returns BigDecimal("10.00")
@@ -1411,7 +1644,7 @@ class DoctorProjectChangeServiceTest {
         every { getTimestamp("base_config_updated_at") } returns Timestamp.valueOf(LocalDateTime.of(2026, 8, 10, 10, 0))
     }
 
-    private fun viewResultSet(status: String): ResultSet = mockk(relaxed = true) {
+    private fun viewResultSet(status: String, payloadVersion: Int = 1): ResultSet = mockk(relaxed = true) {
         val now = Timestamp.valueOf(LocalDateTime.of(2026, 8, 10, 10, 0))
         every { getString("id") } returns "request-1"
         every { getString("doctor_id") } returns "doctor-1"
@@ -1419,6 +1652,8 @@ class DoctorProjectChangeServiceTest {
         every { getString("institution_id") } returns "institution-1"
         every { getString("institution_name") } returns "Institution"
         every { getString("institution_project_id") } returns "ip-1"
+        every { getString("platform_project_id") } returns "project-1"
+        every { getInt("payload_version") } returns payloadVersion
         every { getString("project_name") } returns "Project"
         every { getString("request_type") } returns "JOIN"
         every { getString("service_description") } returns "service"

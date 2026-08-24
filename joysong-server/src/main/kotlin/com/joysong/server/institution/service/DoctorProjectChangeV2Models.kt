@@ -21,6 +21,19 @@ enum class ProjectChangeErrorCode {
     INSTITUTION_PROJECT_VERSION_STALE
 }
 
+enum class ProjectChangeDecision {
+    APPROVED,
+    REJECTED,
+    CHANGES_REQUESTED
+}
+
+data class DoctorProjectReviewV2Command(
+    val decision: ProjectChangeDecision,
+    val reviewNote: String,
+    val force: Boolean,
+    val forceBaseRevision: String?
+)
+
 class ProjectChangeContractException(
     val status: HttpStatus,
     val errorCode: ProjectChangeErrorCode,
@@ -99,6 +112,22 @@ data class DoctorProjectRevisionSource(
     val configId: String?,
     val configUpdatedAt: Instant?,
     val pricingPolicyRevision: String
+)
+
+data class DoctorProjectApprovalAuditState(
+    val project: InstitutionProjectSnapshotV2,
+    val doctorPrice: BigDecimal,
+    val doctorActive: Boolean,
+    val travelGroundServiceFee: BigDecimal
+)
+
+data class DoctorProjectApprovalAuditSnapshot(
+    val beforeVersion: Long,
+    val afterVersion: Long,
+    val latestBefore: DoctorProjectApprovalAuditState,
+    val actualApplied: DoctorProjectApprovalAuditState,
+    val force: Boolean,
+    val driftedFields: List<String>
 )
 
 data class InstitutionProjectDetailResolution(
