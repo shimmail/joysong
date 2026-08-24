@@ -2,7 +2,9 @@ package com.joysong.server.institution.service
 
 import com.fasterxml.jackson.annotation.JsonPropertyOrder
 import org.springframework.http.HttpStatus
+import java.math.BigDecimal
 import java.time.Instant
+import java.time.LocalDateTime
 
 enum class ProjectChangeErrorCode {
     EDIT_BASE_STALE,
@@ -103,3 +105,132 @@ data class InstitutionProjectDetailResolution(
     val rawOverrides: ProjectRawOverridesSnapshot,
     val effective: ProjectEffectiveSnapshot
 )
+
+data class DoctorProjectChangeV2Request(
+    val requestType: String,
+    val institutionProjectId: String,
+    val baseRevision: String,
+    val name: String?,
+    val category: String?,
+    val description: String?,
+    val tags: List<String>?,
+    val slogan: String?,
+    val detailContent: String?,
+    val price: BigDecimal,
+    val salesCount: Int,
+    val doctorActive: Boolean,
+    val coverImage: String?,
+    val images: List<String>?,
+    val notes: String
+)
+
+data class DoctorProjectProfileUpdateTargetV2(
+    val payloadVersion: Int = 2,
+    val institutionProjectId: String,
+    val institutionId: String,
+    val institutionName: String,
+    val platformProjectId: String,
+    val platformProjectName: String,
+    val doctorId: String,
+    val doctorName: String,
+    val baseRevision: String,
+    val currentProject: InstitutionProjectSnapshotV2,
+    val currentDoctorPrice: BigDecimal,
+    val currentDoctorActive: Boolean,
+    val platformRate: BigDecimal,
+    val pricingPolicyRevision: String,
+    val travelGroundServiceFee: BigDecimal
+)
+
+sealed interface DoctorProjectChangeViewV2 {
+    val payloadVersion: Int
+    val id: String
+}
+
+data class LegacyDoctorProjectChangeViewV2(
+    override val payloadVersion: Int = 1,
+    override val id: String,
+    val doctorId: String,
+    val doctorName: String,
+    val institutionId: String,
+    val institutionName: String,
+    val institutionProjectId: String,
+    val projectName: String,
+    val requestType: String,
+    val serviceDescription: String,
+    val priceSuggestion: BigDecimal?,
+    val notes: String,
+    val serviceTags: List<String>,
+    val scheduleNote: String,
+    val coverImage: String,
+    val images: List<String>,
+    val consultationFee: BigDecimal?,
+    val commissionRate: BigDecimal?,
+    val institutionRate: BigDecimal?,
+    val medicalListPrice: BigDecimal?,
+    val platformRate: BigDecimal?,
+    val doctorRate: BigDecimal?,
+    val forceProcessed: Boolean,
+    val currentPrice: BigDecimal?,
+    val currentServiceDescription: String?,
+    val currentServiceTags: List<String>?,
+    val currentScheduleNote: String?,
+    val currentCoverImage: String?,
+    val currentImages: List<String>?,
+    val currentConsultationFee: BigDecimal?,
+    val currentMedicalListPrice: BigDecimal?,
+    val currentCommissionRate: BigDecimal?,
+    val currentInstitutionRate: BigDecimal?,
+    val currentPlatformRate: BigDecimal?,
+    val currentDoctorRate: BigDecimal?,
+    val status: String,
+    val submittedBy: String,
+    val reviewedBy: String?,
+    val reviewerName: String?,
+    val reviewNote: String,
+    val submittedAt: LocalDateTime,
+    val reviewedAt: LocalDateTime?,
+    val updatedAt: LocalDateTime
+) : DoctorProjectChangeViewV2
+
+data class VersionedDoctorProjectChangeViewV2(
+    override val payloadVersion: Int = 2,
+    override val id: String,
+    val requestType: String,
+    val doctorId: String,
+    val doctorName: String,
+    val institutionId: String,
+    val institutionName: String,
+    val institutionProjectId: String,
+    val institutionProjectName: String,
+    val platformProjectId: String,
+    val platformProjectName: String,
+    val baseRevision: String,
+    val currentProject: InstitutionProjectSnapshotV2?,
+    val proposedProject: InstitutionProjectSnapshotV2?,
+    val latestProject: InstitutionProjectSnapshotV2?,
+    val latestRevision: String?,
+    val sharedChanged: Boolean,
+    val currentDoctorPrice: BigDecimal,
+    val proposedDoctorPrice: BigDecimal,
+    val latestDoctorPrice: BigDecimal?,
+    val currentDoctorActive: Boolean,
+    val proposedDoctorActive: Boolean,
+    val latestDoctorActive: Boolean?,
+    val platformRate: BigDecimal,
+    val pricingPolicyRevision: String,
+    val travelGroundServiceFee: BigDecimal,
+    val requestStatus: String,
+    val notes: String,
+    val forceProcessed: Boolean,
+    val submittedBy: String,
+    val submittedAt: Instant,
+    val reviewedBy: String?,
+    val reviewerName: String?,
+    val reviewNote: String?,
+    val reviewedAt: Instant?,
+    val updatedAt: Instant,
+    val snapshotState: String,
+    val snapshotError: String?,
+    val reviewable: Boolean
+) : DoctorProjectChangeViewV2
