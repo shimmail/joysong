@@ -6,7 +6,7 @@ import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/presentation/catalog_detail_shared.dart';
 import 'package:joysong_flutter/features/discover/presentation/catalog_review_section.dart';
 import 'package:joysong_flutter/features/discover/presentation/discover_content_card.dart';
-import 'package:joysong_flutter/features/discover/presentation/rich_content_view.dart';
+import 'package:joysong_flutter/features/discover/presentation/institution_project_preview_body.dart';
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
 import 'package:joysong_flutter/features/social/presentation/favorite_action_button.dart';
 import 'package:joysong_flutter/features/social/presentation/social_controller.dart';
@@ -52,6 +52,11 @@ class CatalogProjectDetailView extends StatelessWidget {
     final reviews = _maps(raw['reviews']);
     final isInstitutionProject = ip.isNotEmpty;
     final sources = [ip, project, raw];
+    final hasAvailableDoctors = _boolean(
+      sources,
+      const ['hasAvailableDoctors'],
+      fallback: true,
+    );
     final name = _text(sources, const ['name', 'projectName'], item.title);
     final slogan = _text(sources, const ['slogan'], '');
     final description =
@@ -59,7 +64,6 @@ class CatalogProjectDetailView extends StatelessWidget {
     final detailContent =
         _text(sources, const ['detailContent', 'content'], '');
     final price = _number(sources, const ['price', 'referencePrice']);
-    final originalPrice = _number(sources, const ['originalPrice']);
     final rating = _number(sources, const ['rating', 'averageRating']);
     final reviewCount = _integer(sources, const ['reviewCount', 'ratingCount']);
     final caseCount = _integer(sources, const ['caseCount', 'casesCount']);
@@ -77,11 +81,24 @@ class CatalogProjectDetailView extends StatelessWidget {
       ..._tokens(sources, const ['categoryTags']),
       ..._tokens(sources, const ['tags']),
     }.toList(growable: false);
-    final images = <String>{
-      ..._tokens(sources, const ['images']),
-      ..._tokens(sources, const ['coverImage']),
-      if (item.imageUrl.isNotEmpty) item.imageUrl,
-    }.toList(growable: false);
+    final coverImage = _text(sources, const ['coverImage'], item.imageUrl);
+    final images = institutionProjectPreviewImages(
+      coverImage: coverImage,
+      gallery: _tokens(sources, const ['images']),
+    );
+    final preview = InstitutionProjectPreviewModel(
+      name: name,
+      institutionName: _text([institution], const ['name'], ''),
+      price: price ?? 0,
+      currency: _text(sources, const ['currency'], 'USD'),
+      salesCount: _integer(sources, const ['salesCount']),
+      tags: tags,
+      slogan: slogan.isEmpty ? null : slogan,
+      description: description.isEmpty ? null : description,
+      detailContent: detailContent.isEmpty ? null : detailContent,
+      coverImage: coverImage.isEmpty ? null : coverImage,
+      images: images,
+    );
     final keys = List.generate(5, (_) => GlobalKey());
     void jump(int index) {
       final target = keys[index].currentContext;
@@ -104,15 +121,9 @@ class CatalogProjectDetailView extends StatelessWidget {
       Expanded(
         child: CustomScrollView(slivers: [
           SliverToBoxAdapter(
-            child: CatalogHero(
-              images: images,
-              title: name,
-              eyebrow: slogan,
-              subtitle: isInstitutionProject
-                  ? _text([institution], const ['name'], '')
-                  : context.localized('参考均价', 'Reference price'),
-              price: price,
-              originalPrice: originalPrice,
+            child: InstitutionProjectPreviewBody(
+              model: preview,
+              guideKey: keys[0],
             ),
           ),
           if (isInstitutionProject)
@@ -131,45 +142,6 @@ class CatalogProjectDetailView extends StatelessWidget {
           ),
           SliverToBoxAdapter(
             child: CatalogSection(
-              key: keys[0],
-              title: context.localized(
-                  isInstitutionProject ? '项目百科' : '百科攻略', 'Project guide'),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (tags.isNotEmpty) ...[
-                    Wrap(
-                      spacing: 7,
-                      runSpacing: 7,
-                      children: [for (final tag in tags) _TinyTag(tag)],
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  Text(
-                    description.isEmpty
-                        ? context.localized('暂无项目介绍', 'No project overview')
-                        : description,
-                    style:
-                        const TextStyle(height: 1.55, color: Color(0xff666666)),
-                  ),
-                  if (detailContent.isNotEmpty)
-                    Center(
-                      child: TextButton(
-                        onPressed: () => _showDetails(
-                          context,
-                          name,
-                          detailContent,
-                        ),
-                        child: Text(context.localized(
-                            '查看项目更多信息', 'View more information')),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-          SliverToBoxAdapter(
-            child: CatalogSection(
               key: keys[1],
               title: isInstitutionProject
                   ? context.localized('可预约医生', 'Bookable doctors')
@@ -185,15 +157,20 @@ class CatalogProjectDetailView extends StatelessWidget {
                     : '全部 (${isInstitutionProject ? doctors.length : institutionProjects.length})'),
               ),
               child: isInstitutionProject
-                  ? doctors.isEmpty
-                      ? _Empty(context.localized('医生排班信息暂未开放',
-                          'Doctor schedules are not available yet'))
-                      : Column(
-                          children: [
-                            for (final doctor in doctors.take(5))
-                              _DoctorRow(doctor, onDoctorTap),
-                          ],
-                        )
+                  ? !hasAvailableDoctors
+                      ? _Empty(context.localized(
+                          '当前暂无可预约医生',
+                          'No doctors are currently available for booking',
+                        ))
+                      : doctors.isEmpty
+                          ? _Empty(context.localized('医生排班信息暂未开放',
+                              'Doctor schedules are not available yet'))
+                          : Column(
+                              children: [
+                                for (final doctor in doctors.take(5))
+                                  _DoctorRow(doctor, onDoctorTap),
+                              ],
+                            )
                   : institutionProjects.isEmpty
                       ? _Empty(context.localized(
                           '暂无可预约机构', 'No institutions available'))
@@ -262,55 +239,29 @@ class CatalogProjectDetailView extends StatelessWidget {
           const SliverToBoxAdapter(child: SizedBox(height: 18)),
         ]),
       ),
-      CatalogBottomBar(
-        primaryLabel: isInstitutionProject
-            ? context.localized('预约项目', 'Book project')
-            : context.localized('查看可预约机构', 'View institutions'),
-        onPrimary: isInstitutionProject
-            ? (onBook == null ? null : () => onBook!(item))
-            : () => jump(1),
-        secondaryLabel: isInstitutionProject
-            ? context.localized('咨询机构', 'Consult institution')
-            : null,
-        onSecondary: isInstitutionProject
-            ? () {
-                final id = _text([institution], const ['id'], '');
-                if (id.isNotEmpty) onInstitutionTap?.call(id);
-              }
-            : null,
-        tertiaryLabel: context.localized(
-            isInstitutionProject ? '与AI聊聊' : '与AI聊此项目', 'Chat with AI'),
-        onTertiary: onAiChat,
-      ),
+      if (!isInstitutionProject || hasAvailableDoctors)
+        CatalogBottomBar(
+          primaryLabel: isInstitutionProject
+              ? context.localized('预约项目', 'Book project')
+              : context.localized('查看可预约机构', 'View institutions'),
+          onPrimary: isInstitutionProject
+              ? (onBook == null ? null : () => onBook!(item))
+              : () => jump(1),
+          secondaryLabel: isInstitutionProject
+              ? context.localized('咨询机构', 'Consult institution')
+              : null,
+          onSecondary: isInstitutionProject
+              ? () {
+                  final id = _text([institution], const ['id'], '');
+                  if (id.isNotEmpty) onInstitutionTap?.call(id);
+                }
+              : null,
+          tertiaryLabel: context.localized(
+              isInstitutionProject ? '与AI聊聊' : '与AI聊此项目', 'Chat with AI'),
+          onTertiary: onAiChat,
+        ),
     ]);
   }
-
-  void _showDetails(BuildContext context, String name, String content) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (_) => FractionallySizedBox(
-        heightFactor: .82,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
-          children: [
-            Text(name,
-                style: Theme.of(context)
-                    .textTheme
-                    .titleLarge
-                    ?.copyWith(fontWeight: FontWeight.w800)),
-            const SizedBox(height: 16),
-            RichContentView(
-              content: content,
-              textStyle: const TextStyle(height: 1.65),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
 }
 
 class _ProjectFacts extends StatelessWidget {
@@ -333,15 +284,22 @@ class _ProjectFacts extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
         child: Column(children: [
           Row(children: [
-            Expanded(child: _ProjectStat(
-              value: rating != null && rating! > 0 ? rating!.toStringAsFixed(1) : '—',
+            Expanded(
+                child: _ProjectStat(
+              value: rating != null && rating! > 0
+                  ? rating!.toStringAsFixed(1)
+                  : '—',
               label: context.localized('评分', 'Rating'),
               showStar: true,
             )),
-            Expanded(child: _ProjectStat(
-              value: '$reviewCount', label: context.localized('评价', 'Reviews'))),
-            Expanded(child: _ProjectStat(
-              value: '$caseCount', label: context.localized('案例', 'Cases'))),
+            Expanded(
+                child: _ProjectStat(
+                    value: '$reviewCount',
+                    label: context.localized('评价', 'Reviews'))),
+            Expanded(
+                child: _ProjectStat(
+                    value: '$caseCount',
+                    label: context.localized('案例', 'Cases'))),
           ]),
           if (address.isNotEmpty)
             _ProjectCopyLine(
@@ -360,7 +318,8 @@ class _ProjectFacts extends StatelessWidget {
 }
 
 class _ProjectStat extends StatelessWidget {
-  const _ProjectStat({required this.value, required this.label, this.showStar = false});
+  const _ProjectStat(
+      {required this.value, required this.label, this.showStar = false});
   final String value;
   final String label;
   final bool showStar;
@@ -371,15 +330,19 @@ class _ProjectStat extends StatelessWidget {
             const Icon(Icons.star_rounded, size: 18, color: Color(0xffffa000)),
             const SizedBox(width: 3),
           ],
-          Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+          Text(value,
+              style:
+                  const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
         ]),
         const SizedBox(height: 3),
-        Text(label, style: const TextStyle(fontSize: 12, color: Color(0xff777777))),
+        Text(label,
+            style: const TextStyle(fontSize: 12, color: Color(0xff777777))),
       ]);
 }
 
 class _ProjectCopyLine extends StatelessWidget {
-  const _ProjectCopyLine({required this.icon, required this.label, required this.value});
+  const _ProjectCopyLine(
+      {required this.icon, required this.label, required this.value});
   final IconData icon;
   final String label;
   final String value;
@@ -398,7 +361,9 @@ class _ProjectCopyLine extends StatelessWidget {
             Icon(icon, size: 20, color: const Color(0xff777777)),
             const SizedBox(width: 8),
             Text('$label：', style: const TextStyle(color: Color(0xff777777))),
-            Expanded(child: Text(value, maxLines: 2, overflow: TextOverflow.ellipsis)),
+            Expanded(
+                child:
+                    Text(value, maxLines: 2, overflow: TextOverflow.ellipsis)),
             Icon(
               Icons.copy_rounded,
               size: 17,
@@ -423,20 +388,6 @@ class _ProjectNavDelegate extends SliverPersistentHeaderDelegate {
       DetailAnchorBar(labels: labels, onTap: onTap);
   @override
   bool shouldRebuild(covariant _ProjectNavDelegate oldDelegate) => true;
-}
-
-class _TinyTag extends StatelessWidget {
-  const _TinyTag(this.label);
-  final String label;
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-        decoration: BoxDecoration(
-          color: const Color(0xffeeeeee),
-          borderRadius: BorderRadius.circular(5),
-        ),
-        child: Text(label, style: const TextStyle(fontSize: 12)),
-      );
 }
 
 class _InstitutionProjectRow extends StatelessWidget {
@@ -517,8 +468,7 @@ class _InstitutionRow extends StatelessWidget {
               type: FavoriteTargetType.institution,
               targetId: id,
               targetName: title ?? _text([data], const ['name'], ''),
-              targetImage:
-                  _text([data], const ['coverImage', 'logo'], ''),
+              targetImage: _text([data], const ['coverImage', 'logo'], ''),
             ),
         ]),
       ),
@@ -534,7 +484,8 @@ class _DoctorRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final id = _text([data], const ['id', 'doctorId'], '');
     final avatar = _text([data], const ['avatar'], '');
-    final phone = _text([data], const ['phone', 'contactPhone', 'telephone'], '');
+    final phone =
+        _text([data], const ['phone', 'contactPhone', 'telephone'], '');
     return ListTile(
       onTap: id.isEmpty || onTap == null ? null : () => onTap!(id),
       leading: CircleAvatar(
@@ -559,8 +510,8 @@ class _DoctorRow extends StatelessWidget {
                 await Clipboard.setData(ClipboardData(text: phone));
                 if (!context.mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: Text(context.localized(
-                      '已复制医生电话', 'Doctor phone copied')),
+                  content:
+                      Text(context.localized('已复制医生电话', 'Doctor phone copied')),
                 ));
               },
               child: Padding(
@@ -633,6 +584,20 @@ int _integer(List<Map<String, Object?>> sources, List<String> keys) {
     }
   }
   return 0;
+}
+
+bool _boolean(
+  List<Map<String, Object?>> sources,
+  List<String> keys, {
+  required bool fallback,
+}) {
+  for (final source in sources) {
+    for (final key in keys) {
+      final value = source[key];
+      if (value is bool) return value;
+    }
+  }
+  return fallback;
 }
 
 Iterable<String> _tokens(
