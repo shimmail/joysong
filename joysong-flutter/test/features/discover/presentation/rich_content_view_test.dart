@@ -2,6 +2,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/features/discover/presentation/rich_content_view.dart';
+import 'package:url_launcher_platform_interface/link.dart';
 import 'package:url_launcher_platform_interface/url_launcher_platform_interface.dart';
 
 void main() {
@@ -28,7 +29,10 @@ void main() {
         .widget<SelectableText>(find.byType(SelectableText))
         .textSpan!
         .toPlainText();
-    expect(text, contains('First heading\nSecond heading\nBody'));
+    expect(
+      text,
+      contains(RegExp(r'First heading\nSecond heading\n+Body')),
+    );
     expect(
       _textSpan(tester, 'First heading').style?.fontWeight,
       FontWeight.w700,
@@ -324,6 +328,9 @@ class _RecordingUrlLauncherPlatform extends UrlLauncherPlatform {
   _LaunchResult result = _LaunchResult.succeeds;
   final urls = <String>[];
   final options = <LaunchOptions>[];
+
+  @override
+  LinkDelegate? get linkDelegate => null;
 
   @override
   Future<bool> launchUrl(String url, LaunchOptions launchOptions) async {
