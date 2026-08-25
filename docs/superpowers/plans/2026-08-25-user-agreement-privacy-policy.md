@@ -765,4 +765,3 @@ git commit -m "test: verify legal document workflow"
 ```
 
 Skip this commit when the worktree is already clean.
-
