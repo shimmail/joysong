@@ -54,7 +54,21 @@ const institutionRequest = {
   submittedAt: '2026-08-16T10:20:00', updatedAt: '2026-08-16T10:20:00',
 };
 
-function snapshot(name: string, version = 7) {
+function snapshot(name: string, version = 7, overrides: Partial<{
+  category: string;
+  description: string;
+  tags: string[];
+  slogan: string;
+  detailContent: string;
+  salesCount: number;
+  coverImage: string;
+  images: string[];
+}> = {}) {
+  const effective = {
+    name, category: '光电', description: '机构共享说明', tags: ['共享'], slogan: null as string | null,
+    detailContent: '<p>安全详情</p>', salesCount: 12, coverImage: 'https://img.test/cover.jpg', images: ['https://img.test/one.jpg'],
+    ...overrides,
+  };
   return {
     schemaVersion: 2,
     association: { institutionProjectId: 'ip-1', institutionId: 'institution-1', platformProjectId: 'project-1' },
@@ -62,10 +76,7 @@ function snapshot(name: string, version = 7) {
       name, category: null, description: '机构共享说明', tags: ['共享'], slogan: null,
       detailContent: '<p>安全详情</p>', coverImage: 'https://img.test/cover.jpg', images: ['https://img.test/one.jpg'],
     },
-    effective: {
-      name, category: '光电', description: '机构共享说明', tags: ['共享'], slogan: null,
-      detailContent: '<p>安全详情</p>', salesCount: 12, coverImage: 'https://img.test/cover.jpg', images: ['https://img.test/one.jpg'],
-    },
+    effective,
     source: { institutionProjectVersion: version, platformInheritanceHash: `inheritance-${version}` },
   };
 }
@@ -85,7 +96,23 @@ const v2Request = {
 };
 
 const refreshedV2Request = {
-  ...v2Request, latestProject: snapshot('服务器最新项目', 8), latestRevision: 'latest-revision-8',
+  ...v2Request,
+  currentProject: snapshot('当前共享项目', 7, {
+    category: '当前分类', description: '当前共享说明', tags: ['当前标签'], slogan: '当前宣传语',
+    detailContent: '<p>当前详情内容</p>', salesCount: 21,
+    coverImage: 'https://img.test/current-cover.jpg', images: ['https://img.test/current-gallery.jpg'],
+  }),
+  proposedProject: snapshot('机构焕肤升级版', 7, {
+    category: '提议分类', description: '提议共享说明', tags: ['提议标签'], slogan: '提议宣传语',
+    detailContent: '<p>提议详情内容</p>', salesCount: 22,
+    coverImage: 'https://img.test/proposed-cover.jpg', images: ['https://img.test/proposed-gallery.jpg'],
+  }),
+  latestProject: snapshot('服务器最新项目', 8, {
+    category: '最新分类', description: '最新共享说明', tags: ['最新标签'], slogan: '最新宣传语',
+    detailContent: '<p>最新详情内容</p>', salesCount: 23,
+    coverImage: 'https://img.test/latest-cover.jpg', images: ['https://img.test/latest-gallery.jpg'],
+  }),
+  latestRevision: 'latest-revision-8',
   latestDoctorPrice: 1275, latestDoctorActive: true,
 };
 
@@ -96,12 +123,45 @@ const legacyRequest = {
   scheduleNote: '每周二', coverImage: '', images: [], status: 'PENDING', reviewNote: '', submittedAt: '2026-08-15T09:00:00',
 };
 
+const legacyProfileUpdateRequest = {
+  ...legacyRequest,
+  id: 'legacy-profile-request', requestType: 'PROFILE_UPDATE', projectName: '旧版资料变更项目',
+  serviceDescription: '更新后的服务介绍', priceSuggestion: 1600, scheduleNote: '每周三', serviceTags: ['精细'],
+  medicalListPrice: 1200, platformRate: 40, currentPrice: 1500, currentServiceDescription: '原服务介绍',
+  currentServiceTags: ['自然'], currentScheduleNote: '每周二', currentMedicalListPrice: 1000, currentPlatformRate: 38,
+};
+
+const legacyLeaveRequest = {
+  ...legacyRequest,
+  id: 'legacy-leave-request', requestType: 'LEAVE', projectName: '旧版退出项目',
+  serviceDescription: '退出当前医生项目', priceSuggestion: null, notes: '停止合作', serviceTags: [], scheduleNote: '',
+};
+
 const invalidSnapshotRequest = {
   ...v2Request, id: 'invalid-snapshot', institutionProjectName: '损坏快照项目', currentProject: null, proposedProject: null,
   snapshotState: 'INVALID', snapshotError: 'REQUEST_SNAPSHOT_INVALID', reviewable: false,
 };
 const malformedRequest = { ...v2Request, id: 'malformed-request', institutionProjectName: '载荷损坏项目' } as Record<string, unknown>;
 delete malformedRequest.baseRevision;
+
+function withoutKey<T extends object, K extends keyof T>(value: T, key: K): Omit<T, K> {
+  const copy = { ...value };
+  delete copy[key];
+  return copy;
+}
+
+const malformedCreationCases: [string, unknown][] = [
+  ['identifier boundary', { ...platformRequest, id: 'x'.repeat(37) }],
+  ['missing required field', withoutKey(platformRequest, 'doctorId')],
+  ['unsupported currency', { ...platformRequest, id: 'invalid-currency', currency: 'EUR' }],
+  ['invalid calendar timestamp', { ...platformRequest, id: 'invalid-time', submittedAt: '2026-02-30T25:61:00' }],
+  ['money precision boundary', { ...platformRequest, id: 'invalid-money', referencePrice: 399.501 }],
+  ['array count boundary', { ...platformRequest, id: 'invalid-tags', tags: Array.from({ length: 21 }, (_, index) => `tag-${index}`) }],
+  ['normalized text boundary', { ...platformRequest, id: 'invalid-name', name: '   ' }],
+  ['split sum invariant', {
+    ...institutionRequest, id: 'invalid-split', institutionSplit: { ...institutionRequest.institutionSplit, doctorRate: 44.99 },
+  }],
+];
 
 function setContext(context: ManagementContext) {
   setAdminToken('header.payload.signature', context);
@@ -177,14 +237,22 @@ describe('ProjectRequestsPage', () => {
     expect(screen.getByText('医生项目变更申请加载失败')).toBeInTheDocument();
   });
 
-  it('keeps the shared creation validator boundary and shows applicant history without review actions', async () => {
-    setContext(doctorContext);
-    mockQueues([{ ...platformRequest, id: 'x'.repeat(37), name: '损坏创建申请' }, platformRequest], [v2Request]);
+  it.each(malformedCreationCases)('keeps the shared creation validator boundary for %s', async (_caseName, malformedCreation) => {
+    setContext(adminContext);
+    mockQueues([malformedCreation, platformRequest], []);
     render(<ProjectRequestsPage />);
 
     expect(await screen.findByText('创建申请快照数据不完整，已禁止审核')).toBeInTheDocument();
-    expect(screen.queryByText('损坏创建申请')).not.toBeInTheDocument();
     expect(screen.getByText('光子焕肤')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /^查看详情 / })).toHaveLength(1);
+  });
+
+  it('shows applicant history without review actions', async () => {
+    setContext(doctorContext);
+    mockQueues([platformRequest], [v2Request]);
+    render(<ProjectRequestsPage />);
+
+    expect(await screen.findByText('光子焕肤')).toBeInTheDocument();
     expect(screen.getByText('机构焕肤')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^通过 / })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^要求修改 / })).not.toBeInTheDocument();
@@ -239,6 +307,48 @@ describe('ProjectRequestsPage', () => {
     await waitFor(() => expect(api.post).toHaveBeenCalledWith('/management/project-requests/institution-request/review', {
       decision: 'APPROVED', reviewNote: '',
     }));
+  });
+
+  it.each([
+    ['platform', platformRequest, '/admin/project-requests/platform-request/review', '光子焕肤'],
+    ['institution', institutionRequest, '/management/project-requests/institution-request/review', '机构定制光子'],
+  ])('requires a note and sends the exact %s creation rejection body', async (_kind, request, path, projectName) => {
+    const user = userEvent.setup();
+    setContext(adminContext);
+    mockQueues([request], []);
+    render(<ProjectRequestsPage />);
+
+    await user.click(await screen.findByRole('button', { name: `驳回 ${projectName}，申请ID ${request.id}` }));
+    await user.click(screen.getByRole('button', { name: /确\s*认/ }));
+    expect(await screen.findByText('请填写审核意见')).toBeInTheDocument();
+    expect(api.post).not.toHaveBeenCalled();
+    await user.type(screen.getByLabelText('审核意见'), '创建资料不符合要求');
+    await user.click(screen.getByRole('button', { name: /确\s*认/ }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith(path, {
+      decision: 'REJECTED', reviewNote: '创建资料不符合要求',
+    }));
+  });
+
+  it('synchronously de-duplicates same-frame creation actions and disables the whole review surface in flight', async () => {
+    const pending = deferred<ReturnType<typeof response>>();
+    setContext(adminContext);
+    mockQueues([platformRequest, institutionRequest], []);
+    vi.mocked(api.post).mockReturnValueOnce(pending.promise as never);
+    render(<ProjectRequestsPage />);
+
+    const approve = await screen.findByRole('button', { name: '通过 光子焕肤，申请ID platform-request' });
+    const rejectOther = screen.getByRole('button', { name: '驳回 机构定制光子，申请ID institution-request' });
+    fireEvent.click(approve);
+    fireEvent.click(rejectOther);
+
+    expect(api.post).toHaveBeenCalledTimes(1);
+    expect(api.post).toHaveBeenCalledWith('/admin/project-requests/platform-request/review', {
+      decision: 'APPROVED', reviewNote: '',
+    });
+    screen.getAllByRole('button', { name: /^(查看详情|通过|驳回) / }).forEach(button => expect(button).toBeDisabled());
+    expect(screen.queryByText('驳回项目申请')).not.toBeInTheDocument();
+    pending.resolve(response(null));
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(3));
   });
 
   it('uses shared safe previews for creation, v1 schedule, and v2 current/proposed/latest comparisons', async () => {
@@ -329,6 +439,30 @@ describe('ProjectRequestsPage', () => {
     }));
   });
 
+  it('preserves legacy v1 PROFILE_UPDATE comparisons and LEAVE review behavior on cards', async () => {
+    const user = userEvent.setup();
+    setContext(adminContext);
+    mockQueues([], [legacyProfileUpdateRequest, legacyLeaveRequest]);
+    render(<ProjectRequestsPage />);
+
+    await user.click(await screen.findByRole('button', { name: '查看详情 旧版资料变更项目，申请ID legacy-profile-request' }));
+    const drawer = screen.getByText('旧版资料变更项目审核详情').closest('[role="dialog"]') as HTMLElement;
+    [
+      '原服务介绍', '更新后的服务介绍', '自然', '精细', '每周二', '每周三',
+      'USD 1500.00', 'USD 1600.00', 'USD 1000.00', 'USD 1200.00', '38%', '40%',
+    ].forEach(value => expect(within(drawer).getAllByText(value).length).toBeGreaterThan(0));
+    fireEvent.click(document.querySelector('.ant-drawer-close')!);
+
+    await user.click(screen.getByRole('button', { name: '通过 旧版资料变更项目，申请ID legacy-profile-request' }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/v2/admin/institution-project-requests/legacy-profile-request/review', {
+      decision: 'APPROVED', reviewNote: '', force: false, forceBaseRevision: null,
+    }));
+    await user.click(screen.getByRole('button', { name: '通过 旧版退出项目，申请ID legacy-leave-request' }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledWith('/v2/admin/institution-project-requests/legacy-leave-request/review', {
+      decision: 'APPROVED', reviewNote: '', force: false, forceBaseRevision: null,
+    }));
+  });
+
   it('limits review actions by role and managed institution scope', async () => {
     setContext(representativeContext);
     const outside = { ...v2Request, id: 'outside-request', institutionId: 'institution-2', institutionName: '其他机构' };
@@ -358,7 +492,17 @@ describe('ProjectRequestsPage', () => {
     expect(await screen.findByText('审核冲突（APPROVAL_BASE_STALE）')).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: '机构焕肤审核详情' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '查看最新差异并强制通过' }));
-    expect(screen.getByText('服务器最新项目')).toBeInTheDocument();
+    const forceDialog = screen.getByText('按最新基线强制通过').closest('[role="dialog"]') as HTMLElement;
+    [
+      '当前共享项目', '当前分类', '当前共享说明', '当前标签', '当前宣传语', '当前详情内容', '21',
+      '机构焕肤升级版', '提议分类', '提议共享说明', '提议标签', '提议宣传语', '提议详情内容', '22',
+      '服务器最新项目', '最新分类', '最新共享说明', '最新标签', '最新宣传语', '最新详情内容', '23',
+      'USD 1200.00', 'USD 1350.00', 'USD 1275.00', '启用', '停用', 'USD 88.00',
+    ].forEach(value => expect(within(forceDialog).getAllByText(value).length).toBeGreaterThan(0));
+    const latestPreview = within(forceDialog).getByRole('region', { name: '刷新后最新共享项目预览' });
+    expect(within(latestPreview).getByAltText('项目封面')).toBeInTheDocument();
+    expect(within(latestPreview).getByAltText('项目图片 1')).toBeInTheDocument();
+    expect(within(forceDialog).queryByText(/https:\/\//)).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '强制通过' }));
     expect(await screen.findByText('请填写强制通过原因')).toBeInTheDocument();
     await user.type(screen.getByLabelText('强制通过原因'), '已核对并接受最新差异');
@@ -396,6 +540,42 @@ describe('ProjectRequestsPage', () => {
     expect(screen.queryByRole('dialog', { name: '机构焕肤审核详情' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '查看最新差异并强制通过' })).not.toBeInTheDocument();
     expect(api.get).toHaveBeenCalledTimes(3);
+  });
+
+  it('locks cached review rows when handled-error refresh fails and unlocks only after a successful reload', async () => {
+    const user = userEvent.setup();
+    let allowReload = false;
+    let changeLoads = 0;
+    setContext(adminContext);
+    vi.mocked(api.get).mockImplementation(async (url) => {
+      if (url === '/admin/project-requests') return response([]);
+      if (url === '/v2/admin/institution-project-requests') {
+        changeLoads += 1;
+        if (changeLoads === 1 || allowReload) return response([v2Request]);
+        throw new Error('refresh offline');
+      }
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    vi.mocked(api.post).mockRejectedValueOnce(apiError('REQUEST_ALREADY_HANDLED', '申请已处理'));
+    render(<ProjectRequestsPage />);
+
+    await user.click(await screen.findByRole('button', { name: '要求修改 机构焕肤，申请ID v2-request' }));
+    await user.type(screen.getByLabelText('审核意见'), '请补充说明');
+    await user.click(screen.getByRole('button', { name: /确\s*认/ }));
+
+    expect(await screen.findByText('审核冲突（REQUEST_ALREADY_HANDLED）')).toBeInTheDocument();
+    expect(screen.getByText(/最新审核队列刷新失败.*缓存行已锁定/)).toBeInTheDocument();
+    expect(screen.queryByText(/审核队列已刷新，请核对最新数据/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: /要求医生修改申请/ })).not.toBeInTheDocument();
+    const cachedActions = screen.getAllByRole('button', { name: /^(查看详情|通过|要求修改|驳回) 机构焕肤/ });
+    cachedActions.forEach(button => expect(button).toBeDisabled());
+    await user.click(screen.getByRole('button', { name: '通过 机构焕肤，申请ID v2-request' }));
+    expect(api.post).toHaveBeenCalledTimes(1);
+
+    allowReload = true;
+    await user.click(screen.getByRole('button', { name: '重新加载医生项目变更' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '通过 机构焕肤，申请ID v2-request' })).toBeEnabled());
+    expect(screen.getByText(/审核队列已刷新，请核对最新数据/)).toBeInTheDocument();
   });
 
   it.each(Object.entries(REVIEW_ERROR_FORCE_ELIGIBILITY))(

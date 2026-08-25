@@ -7,7 +7,8 @@ import { identityStatusColor, identityStatusLabel } from '../identity';
 import {
   adaptCreationRequestPreview, adaptLegacyProjectRequestPreview, adaptV2ProposedProjectPreview,
   isCompleteProfessionalProjectRequest, parseDoctorProjectChangeRequests,
-  type DoctorProjectChangeRequestV2, type ParsedDoctorProjectChangeRequest, type ProfessionalProjectRequest,
+  type DoctorProjectChangeRequestV1, type DoctorProjectChangeRequestV2, type InstitutionProjectPreviewModel, type InstitutionProjectSnapshotV2,
+  type ParsedDoctorProjectChangeRequest, type ProfessionalProjectRequest,
 } from '../types/projectRequests';
 
 type ReviewDecision = 'APPROVED' | 'REJECTED' | 'CHANGES_REQUESTED';
@@ -15,6 +16,13 @@ type StatusFilter = 'PENDING' | 'ALL' | 'APPROVED' | 'REJECTED' | 'CHANGES_REQUE
 type CreationItem = { source: 'CREATION'; request: ProfessionalProjectRequest };
 type ChangeItem = { source: 'CHANGE'; request: ParsedDoctorProjectChangeRequest };
 type ReviewItem = CreationItem | ChangeItem;
+type ConflictState = {
+  code: HandledReviewErrorCode;
+  message: string;
+  requestId: string;
+  source: ReviewItem['source'];
+  refreshSucceeded: boolean;
+};
 
 export const REVIEW_ERROR_FORCE_ELIGIBILITY = {
   EDIT_BASE_STALE: false,
@@ -53,7 +61,35 @@ const hasNegativeDoctorRate = (item: ReviewItem) => item.source === 'CREATION'
   && item.request.requestType === 'INSTITUTION'
   && item.request.institutionSplit.doctorRate < 0;
 
-function ChangeComparison({ request }: { request: DoctorProjectChangeRequestV2 }) {
+function SnapshotPreview({
+  label, snapshot, price, active, travelGroundServiceFee,
+}: {
+  label: string;
+  snapshot: InstitutionProjectSnapshotV2 | null;
+  price: number | null;
+  active: boolean | null;
+  travelGroundServiceFee: number;
+}) {
+  if (!snapshot) return <section aria-label={`${label}共享项目预览`}><Empty description={`${label}共享项目不可用`} /></section>;
+  const model: InstitutionProjectPreviewModel = {
+    ...snapshot.effective,
+    currency: 'USD',
+    price,
+    originalPrice: null,
+    active,
+    travelGroundServiceFee,
+  };
+  return <section aria-label={`${label}共享项目预览`}>
+    <h4>{label}共享项目</h4>
+    <InstitutionProjectPreview model={model} />
+    <Descriptions size="small" column={1} items={[
+      { key: 'sales', label: '销量', children: snapshot.effective.salesCount },
+      { key: 'active', label: '医生状态', children: activeLabel(active) },
+    ]} />
+  </section>;
+}
+
+function ChangeComparison({ request, showSnapshotPreviews = false }: { request: DoctorProjectChangeRequestV2; showSnapshotPreviews?: boolean }) {
   const current = request.currentProject?.effective;
   const proposed = request.proposedProject?.effective;
   const latest = request.latestProject?.effective;
@@ -71,12 +107,22 @@ function ChangeComparison({ request }: { request: DoctorProjectChangeRequestV2 }
       { key: 'latest-name', label: '刷新后最新机构项目名称', children: latest?.name ?? '-' },
       { key: 'current-category', label: '当前分类', children: current?.category ?? '-' },
       { key: 'proposed-category', label: '提议分类', children: proposed?.category ?? '-' },
+      { key: 'latest-category', label: '刷新后最新分类', children: latest?.category ?? '-' },
       { key: 'current-description', label: '当前说明', children: current?.description ?? '-' },
       { key: 'proposed-description', label: '提议说明', children: proposed?.description ?? '-' },
+      { key: 'latest-description', label: '刷新后最新说明', children: latest?.description ?? '-' },
       { key: 'current-tags', label: '当前标签', children: current?.tags.join('、') || '-' },
       { key: 'proposed-tags', label: '提议标签', children: proposed?.tags.join('、') || '-' },
+      { key: 'latest-tags', label: '刷新后最新标签', children: latest?.tags.join('、') || '-' },
+      { key: 'current-slogan', label: '当前宣传语', children: current?.slogan ?? '-' },
+      { key: 'proposed-slogan', label: '提议宣传语', children: proposed?.slogan ?? '-' },
+      { key: 'latest-slogan', label: '刷新后最新宣传语', children: latest?.slogan ?? '-' },
+      { key: 'current-sales', label: '当前销量', children: current?.salesCount ?? '-' },
+      { key: 'proposed-sales', label: '提议销量', children: proposed?.salesCount ?? '-' },
+      { key: 'latest-sales', label: '刷新后最新销量', children: latest?.salesCount ?? '-' },
       { key: 'current-images', label: '当前图片', children: imageState(current?.coverImage, current?.images) },
       { key: 'proposed-images', label: '提议图片', children: imageState(proposed?.coverImage, proposed?.images) },
+      { key: 'latest-images', label: '刷新后最新图片', children: imageState(latest?.coverImage, latest?.images) },
       { key: 'current-price', label: '当前医生价格', children: money('USD', request.currentDoctorPrice) },
       { key: 'proposed-price', label: '提议医生价格', children: money('USD', request.proposedDoctorPrice) },
       { key: 'latest-price', label: '刷新后最新医生价格', children: money('USD', request.latestDoctorPrice) },
@@ -85,7 +131,35 @@ function ChangeComparison({ request }: { request: DoctorProjectChangeRequestV2 }
       { key: 'latest-active', label: '刷新后最新医生状态', children: activeLabel(request.latestDoctorActive) },
       { key: 'travel', label: '旅游地接服务费（只读）', children: money('USD', request.travelGroundServiceFee) },
     ]} />
+    {showSnapshotPreviews && <Space orientation="vertical" size="large" style={{ width: '100%' }}>
+      <SnapshotPreview label="当前" snapshot={request.currentProject} price={request.currentDoctorPrice}
+        active={request.currentDoctorActive} travelGroundServiceFee={request.travelGroundServiceFee} />
+      <SnapshotPreview label="提议" snapshot={request.proposedProject} price={request.proposedDoctorPrice}
+        active={request.proposedDoctorActive} travelGroundServiceFee={request.travelGroundServiceFee} />
+      <SnapshotPreview label="刷新后最新" snapshot={request.latestProject} price={request.latestDoctorPrice}
+        active={request.latestDoctorActive} travelGroundServiceFee={request.travelGroundServiceFee} />
+    </Space>}
   </Space>;
+}
+
+function LegacyChangeComparison({ request }: { request: DoctorProjectChangeRequestV1 }) {
+  const list = (values: string[] | null | undefined) => values?.length ? values.join('、') : '-';
+  const percent = (value: number | null | undefined) => value == null ? '-' : `${value}%`;
+  return <Descriptions size="small" column={1} items={[
+    { key: 'current-description', label: '当前服务内容', children: request.currentServiceDescription || '-' },
+    { key: 'proposed-description', label: '提议服务内容', children: request.serviceDescription || '-' },
+    { key: 'current-tags', label: '当前服务标签', children: list(request.currentServiceTags) },
+    { key: 'proposed-tags', label: '提议服务标签', children: list(request.serviceTags) },
+    { key: 'current-schedule', label: '当前排期说明（旧版）', children: request.currentScheduleNote || '-' },
+    { key: 'proposed-schedule', label: '提议排期说明（旧版）', children: request.scheduleNote || '-' },
+    { key: 'current-price', label: '当前医生价格', children: money('USD', request.currentPrice) },
+    { key: 'proposed-price', label: '提议医生价格', children: money('USD', request.priceSuggestion) },
+    { key: 'current-list-price', label: '当前医疗套餐优惠前金额', children: money('USD', request.currentMedicalListPrice) },
+    { key: 'proposed-list-price', label: '提议医疗套餐优惠前金额', children: money('USD', request.medicalListPrice) },
+    { key: 'current-platform-rate', label: '当前平台服务比例（只读）', children: percent(request.currentPlatformRate) },
+    { key: 'proposed-platform-rate', label: '提议平台服务比例（只读）', children: percent(request.platformRate) },
+    { key: 'notes', label: '补充说明', children: request.notes || '-' },
+  ]} />;
 }
 
 export default function ProjectRequestsPage() {
@@ -106,7 +180,8 @@ export default function ProjectRequestsPage() {
   const [reviewDecision, setReviewDecision] = useState<Exclude<ReviewDecision, 'APPROVED'>>('REJECTED');
   const [forceTargetId, setForceTargetId] = useState<string | null>(null);
   const [forceOpen, setForceOpen] = useState(false);
-  const [conflict, setConflict] = useState<{ code: HandledReviewErrorCode; message: string } | null>(null);
+  const [conflict, setConflict] = useState<ConflictState | null>(null);
+  const [changeReviewLocked, setChangeReviewLocked] = useState(false);
   const inFlightRef = useRef<string | null>(null);
   const [inFlightKey, setInFlightKey] = useState<string | null>(null);
   const [reviewForm] = Form.useForm();
@@ -172,7 +247,7 @@ export default function ProjectRequestsPage() {
   };
 
   const beginReview = (item: ReviewItem) => {
-    if (inFlightRef.current !== null) return false;
+    if (inFlightRef.current !== null || (item.source === 'CHANGE' && changeReviewLocked)) return false;
     inFlightRef.current = itemKey(item);
     setInFlightKey(itemKey(item));
     return true;
@@ -197,22 +272,41 @@ export default function ProjectRequestsPage() {
       return;
     }
     const code = errorCode as HandledReviewErrorCode;
-    setConflict({ code, message: getApiErrorMessage(error, '审核数据已变化') });
+    const conflictMessage = getApiErrorMessage(error, '审核数据已变化');
+    setConflict({ code, message: conflictMessage, requestId: item.request.id, source: item.source, refreshSucceeded: false });
     setDetailKey(null);
+    setReviewTarget(null);
     setForceTargetId(null);
     setForceOpen(false);
     if (item.source === 'CREATION') {
-      await loadCreations();
+      const refreshed = await loadCreations();
+      if (refreshed) setConflict({ code, message: conflictMessage, requestId: item.request.id, source: item.source, refreshSucceeded: true });
       return;
     }
+    setChangeReviewLocked(true);
     const refreshed = await loadChanges();
-    if (!refreshed || !isAdminForceEligible(code, isAdmin)) return;
+    if (!refreshed) return;
+    setChangeReviewLocked(false);
+    setConflict({ code, message: conflictMessage, requestId: item.request.id, source: item.source, refreshSucceeded: true });
+    if (!isAdminForceEligible(code, isAdmin)) return;
     const latest = refreshed.find(request => request.id === item.request.id);
     if (latest?.kind === 'V2' && latest.reviewable && latest.requestStatus === 'PENDING' && latest.latestRevision) setForceTargetId(latest.id);
   };
 
+  const retryConflictRefresh = async () => {
+    if (!conflict || conflict.source !== 'CHANGE') return;
+    const refreshed = await loadChanges();
+    if (!refreshed) return;
+    setChangeReviewLocked(false);
+    setConflict(current => current ? { ...current, refreshSucceeded: true } : current);
+    if (!isAdminForceEligible(conflict.code, isAdmin)) return;
+    const latest = refreshed.find(request => request.id === conflict.requestId);
+    if (latest?.kind === 'V2' && latest.reviewable && latest.requestStatus === 'PENDING' && latest.latestRevision) setForceTargetId(latest.id);
+  };
+
   const submitDirectApproval = async (item: ReviewItem) => {
-    if (!canReview(item) || hasNegativeDoctorRate(item) || !beginReview(item)) return;
+    if (!canReview(item) || (item.source === 'CHANGE' && changeReviewLocked)
+      || hasNegativeDoctorRate(item) || !beginReview(item)) return;
     try {
       await api.post(reviewPath(item), reviewBody(item, 'APPROVED', ''));
       message.success('申请已通过');
@@ -226,7 +320,7 @@ export default function ProjectRequestsPage() {
   };
 
   const openReview = (item: ReviewItem, decision: Exclude<ReviewDecision, 'APPROVED'>) => {
-    if (inFlightRef.current !== null) return;
+    if (inFlightRef.current !== null || (item.source === 'CHANGE' && changeReviewLocked)) return;
     reviewForm.resetFields();
     setReviewDecision(decision);
     setReviewTarget(item);
@@ -234,7 +328,7 @@ export default function ProjectRequestsPage() {
   const submitReview = async () => {
     if (!reviewTarget) return;
     const target = currentItem(reviewTarget);
-    if (!target || !canReview(target)) return;
+    if (!target || !canReview(target) || (target.source === 'CHANGE' && changeReviewLocked)) return;
     let started = false;
     try {
       const values = await reviewForm.validateFields();
@@ -322,7 +416,7 @@ export default function ProjectRequestsPage() {
 
   const renderActions = (item: ReviewItem) => {
     const reviewable = canReview(item);
-    const disabled = inFlightKey !== null;
+    const disabled = inFlightKey !== null || (item.source === 'CHANGE' && changeReviewLocked);
     return <Space wrap>
       {(item.source !== 'CHANGE' || item.request.kind !== 'DAMAGED') && <Button size="small" icon={<EyeOutlined />}
         aria-label={reviewLabel('查看详情', item)} disabled={disabled} onClick={() => setDetailKey(itemKey(item))}>查看详情</Button>}
@@ -358,9 +452,13 @@ export default function ProjectRequestsPage() {
         { label: '已驳回', value: 'REJECTED' }, { label: '待修改', value: 'CHANGES_REQUESTED' }, { label: '已撤回', value: 'WITHDRAWN' },
       ]} />
     </div>
-    {conflict && <Alert type="warning" showIcon title={`审核冲突（${conflict.code}）`}
-      description={`${conflict.message}。旧详情已关闭，审核队列已刷新，请核对最新数据。`}
-      action={forceTarget && <Button onClick={() => { forceForm.resetFields(); setForceOpen(true); }}>查看最新差异并强制通过</Button>}
+    {conflict && <Alert type={conflict.refreshSucceeded ? 'warning' : 'error'} showIcon title={`审核冲突（${conflict.code}）`}
+      description={conflict.refreshSucceeded
+        ? `${conflict.message}。旧详情已关闭，审核队列已刷新，请核对最新数据。`
+        : `${conflict.message}。旧详情已关闭，但最新审核队列刷新失败；缓存行已锁定，重新加载成功前不能审核。`}
+      action={!conflict.refreshSucceeded && conflict.source === 'CHANGE'
+        ? <Button loading={changeLoading} onClick={() => void retryConflictRefresh()}>重新加载医生项目变更</Button>
+        : forceTarget && <Button onClick={() => { forceForm.resetFields(); setForceOpen(true); }}>查看最新差异并强制通过</Button>}
       style={{ marginBottom: 16 }} />}
 
     <section aria-labelledby="platform-creation-heading" style={{ marginBottom: 24 }}>
@@ -382,10 +480,7 @@ export default function ProjectRequestsPage() {
       onClose={() => setDetailKey(null)} size="large" destroyOnHidden>
       {preview && <InstitutionProjectPreview model={preview} />}
       {detailItem?.source === 'CHANGE' && detailItem.request.kind === 'V2' && <ChangeComparison request={detailItem.request} />}
-      {detailItem?.source === 'CHANGE' && detailItem.request.kind === 'V1' && <Descriptions size="small" column={1} items={[
-        { key: 'schedule', label: '排期说明（旧版）', children: detailItem.request.scheduleNote || '-' },
-        { key: 'notes', label: '补充说明', children: detailItem.request.notes || '-' },
-      ]} />}
+      {detailItem?.source === 'CHANGE' && detailItem.request.kind === 'V1' && <LegacyChangeComparison request={detailItem.request} />}
     </Drawer>
     <Modal title={reviewDecision === 'REJECTED' ? '驳回项目申请' : '要求医生修改申请'} open={Boolean(reviewTarget)}
       onOk={() => void submitReview()} onCancel={() => setReviewTarget(null)} confirmLoading={inFlightKey !== null} okText="确认" destroyOnHidden>
@@ -397,7 +492,7 @@ export default function ProjectRequestsPage() {
       okText="强制通过" destroyOnHidden>
       {forceTarget && <>
         <Alert type="warning" showIcon title="强制通过会以刷新后的最新版本为基线，请说明接受差异的原因。" style={{ marginBottom: 16 }} />
-        <ChangeComparison request={forceTarget} />
+        <ChangeComparison request={forceTarget} showSnapshotPreviews />
         <Form form={forceForm} layout="vertical"><Form.Item name="reviewNote" label="强制通过原因"
           rules={[{ required: true, whitespace: true, message: '请填写强制通过原因' }, { max: 1000 }]}><Input.TextArea rows={4} /></Form.Item></Form>
       </>}
