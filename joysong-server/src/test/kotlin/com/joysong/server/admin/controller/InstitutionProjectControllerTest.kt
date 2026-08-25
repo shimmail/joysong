@@ -3,6 +3,7 @@ package com.joysong.server.admin.controller
 import com.joysong.server.admin.entity.dto.DoctorProjectBinding
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.node.ObjectNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.joysong.server.common.GlobalExceptionHandler
 import com.joysong.server.config.OrderSplitProperties
@@ -162,15 +163,17 @@ class InstitutionProjectControllerTest {
     }
 
     @Test
-    fun `put rejects wrong-type and negative baseVersion before writes`() {
-        listOf(
-            jacksonObjectMapper().createObjectNode().put("baseVersion", "0"),
-            jacksonObjectMapper().createObjectNode().put("baseVersion", -1)
-        ).forEach { replacement ->
+    fun `put rejects invalid scalar values and types before writes`() {
+        val invalidMutations: List<ObjectNode.() -> Unit> = listOf(
+            { put("baseVersion", "0") },
+            { put("baseVersion", -1) },
+            { put("currency", "INVALID") },
+            { put("price", "3500.00") },
+            { put("isActive", 1) }
+        )
+        invalidMutations.forEach { mutate ->
             val fixture = Fixture()
-            val payload = fixture.validUpdatePayload().apply {
-                set<com.fasterxml.jackson.databind.JsonNode>("baseVersion", replacement.get("baseVersion"))
-            }
+            val payload = fixture.validUpdatePayload().apply(mutate)
 
             fixture.mockMvc.perform(
                 put("/api/admin/institution-projects/ip-1")
@@ -216,6 +219,55 @@ class InstitutionProjectControllerTest {
                 )
             }
             verify(exactly = 0) {
+                fixture.jdbc.update(
+                    match<String> { it.contains("doctor_project_change_requests") },
+                    any<String>(),
+                    any<String>()
+                )
+                fixture.jdbc.update(
+                    match<String> { it.contains("split_config_proposals") },
+                    any<String>(),
+                    any<String>()
+                )
+            }
+            assertEquals(0, TransactionSynchronizationManager.getSynchronizations().size)
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization()
+        }
+    }
+
+    @Test
+    fun `locked institution project disappearing after identity peek returns typed stale with zero downstream effects`() {
+        val fixture = Fixture()
+        every { fixture.institutionProjects.findForUpdate("ip-1") } returns null
+        TransactionSynchronizationManager.initSynchronization()
+        try {
+            fixture.mockMvc.perform(
+                put("/api/admin/institution-projects/ip-1")
+                    .principal(fixture.authentication)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(fixture.validUpdateJson())
+            )
+                .andExpect(status().isConflict)
+                .andExpect(jsonPath("$.errorCode").value("INSTITUTION_PROJECT_VERSION_STALE"))
+
+            fixture.verifyNoUpdateWrites()
+            verify(exactly = 0) { fixture.doctorProjects.findForUpdate(any(), any()) }
+            verify(exactly = 0) {
+                fixture.jdbc.queryForList(
+                    match<String> { it.contains("FROM projects") && it.contains("FOR UPDATE") },
+                    String::class.java,
+                    any<String>()
+                )
+                fixture.jdbc.queryForList(
+                    match<String> { it.contains("FROM doctor_projects") && it.contains("FOR UPDATE") },
+                    String::class.java,
+                    any<String>()
+                )
+                fixture.jdbc.queryForList(
+                    match<String> { it.contains("doctor_institution_project_configs") && it.contains("FOR UPDATE") },
+                    any<String>()
+                )
                 fixture.jdbc.update(
                     match<String> { it.contains("doctor_project_change_requests") },
                     any<String>(),

@@ -47,6 +47,7 @@ import org.testcontainers.containers.MySQLContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
 import java.math.BigDecimal
+import java.sql.DriverManager
 import java.sql.Timestamp
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -203,51 +204,95 @@ class DoctorProjectFullEditPersistenceTest {
             0,
             "Direct Winner",
             listOf(
-                DoctorProjectBinding("doctor-2", price = BigDecimal("200.00")),
+                DoctorProjectBinding("doctor-2", price = BigDecimal("230.00")),
                 DoctorProjectBinding("doctor-1", price = BigDecimal("130.00"))
             )
         )
-
-        val results = runConcurrentTransactions(
-            listOf(
-                {
-                    directController().update(adminAuthentication(), "ip-1", directPayload)
-                    "DIRECT"
-                },
-                {
-                    service.reviewV2(adminActor(), approval.id, approve())
-                    "APPROVAL"
+        val approvalPrefixHeld = CountDownLatch(1)
+        val releaseApproval = CountDownLatch(1)
+        val pool = Executors.newFixedThreadPool(2)
+        val approvalFuture = pool.submit<Result<VersionedDoctorProjectChangeViewV2>> {
+            runCatching {
+                inTransaction {
+                    lockReviewPrefix(approval.id, "doctor-1")
+                    approvalPrefixHeld.countDown()
+                    check(releaseApproval.await(10, TimeUnit.SECONDS)) { "等待释放审批事务超时" }
+                    service.reviewV2(adminActor(), approval.id, approve()) as VersionedDoctorProjectChangeViewV2
                 }
-            )
-        )
-
-        assertEquals(1, results.count { it.isSuccess })
-        assertConflictOnly(
-            results.single { it.isFailure },
-            setOf(
-                ProjectChangeErrorCode.APPROVAL_BASE_STALE,
-                ProjectChangeErrorCode.INSTITUTION_PROJECT_VERSION_STALE
-            )
-        )
-        assertEquals(1L, long("SELECT version FROM institution_projects WHERE id='ip-1'"))
-        when (results.single { it.isSuccess }.getOrThrow()) {
-            "DIRECT" -> {
-                assertEquals("Direct Winner", text("SELECT name FROM institution_projects WHERE id='ip-1'"))
-                assertEquals(BigDecimal("130.00"), decimal("SELECT price FROM doctor_projects WHERE doctor_id='doctor-1' AND institution_project_id='ip-1'"))
-                assertEquals(1L, long("SELECT is_active FROM doctor_projects WHERE doctor_id='doctor-1' AND institution_project_id='ip-1'"))
-                assertEquals(BigDecimal("130.00"), decimal("SELECT medical_list_price FROM doctor_institution_project_configs WHERE id='config-1'"))
-                assertEquals("PENDING", text("SELECT status FROM doctor_project_change_requests WHERE id='${approval.id}'"))
-            }
-            "APPROVAL" -> {
-                assertEquals("Approval Winner", text("SELECT name FROM institution_projects WHERE id='ip-1'"))
-                assertEquals(BigDecimal("125.00"), decimal("SELECT price FROM doctor_projects WHERE doctor_id='doctor-1' AND institution_project_id='ip-1'"))
-                assertEquals(0L, long("SELECT is_active FROM doctor_projects WHERE doctor_id='doctor-1' AND institution_project_id='ip-1'"))
-                assertEquals(BigDecimal("125.00"), decimal("SELECT medical_list_price FROM doctor_institution_project_configs WHERE id='config-1'"))
-                assertEquals("APPROVED", text("SELECT status FROM doctor_project_change_requests WHERE id='${approval.id}'"))
             }
         }
-        assertEquals(BigDecimal("200.00"), decimal("SELECT price FROM doctor_projects WHERE doctor_id='doctor-2' AND institution_project_id='ip-1'"))
-        assertEquals(BigDecimal("200.00"), decimal("SELECT medical_list_price FROM doctor_institution_project_configs WHERE id='config-2'"))
+        var directFuture: java.util.concurrent.Future<Result<Unit>>? = null
+        try {
+            check(approvalPrefixHeld.await(10, TimeUnit.SECONDS)) { "审批事务未在 10 秒内持有前缀锁" }
+            directFuture = pool.submit<Result<Unit>> {
+                runCatching {
+                    inTransaction {
+                        directController().update(adminAuthentication(), "ip-1", directPayload)
+                        Unit
+                    }
+                }
+            }
+            assertTrue(
+                awaitRequestTableLockWaiter(),
+                "未在 performance_schema.data_lock_waits 观察到直改事务等待 doctor_project_change_requests"
+            )
+            releaseApproval.countDown()
+
+            val reviewed = approvalFuture.get(30, TimeUnit.SECONDS).getOrThrow()
+            val directResult = directFuture.get(30, TimeUnit.SECONDS)
+            assertConflictOnly(directResult, setOf(ProjectChangeErrorCode.INSTITUTION_PROJECT_VERSION_STALE))
+
+            assertEquals("APPROVED", reviewed.requestStatus)
+            assertEquals("Approval Winner", text("SELECT name FROM institution_projects WHERE id='ip-1'"))
+            assertEquals(BigDecimal("125.00"), decimal("SELECT price FROM doctor_projects WHERE doctor_id='doctor-1' AND institution_project_id='ip-1'"))
+            assertEquals(0L, long("SELECT is_active FROM doctor_projects WHERE doctor_id='doctor-1' AND institution_project_id='ip-1'"))
+            assertEquals(BigDecimal("10.00"), decimal("SELECT consultation_fee FROM doctor_institution_project_configs WHERE id='config-1'"))
+            assertEquals(BigDecimal("0.00"), decimal("SELECT commission_rate FROM doctor_institution_project_configs WHERE id='config-1'"))
+            assertEquals(BigDecimal("40.00"), decimal("SELECT institution_rate FROM doctor_institution_project_configs WHERE id='config-1'"))
+            assertEquals(BigDecimal("125.00"), decimal("SELECT medical_list_price FROM doctor_institution_project_configs WHERE id='config-1'"))
+            assertEquals("APPROVED", text("SELECT status FROM doctor_project_change_requests WHERE id='${approval.id}'"))
+            assertEquals("admin-1", text("SELECT reviewed_by FROM doctor_project_change_requests WHERE id='${approval.id}'"))
+            assertEquals(
+                1L,
+                long("SELECT COUNT(*) FROM doctor_project_change_requests WHERE id='${approval.id}' AND reviewed_at IS NOT NULL")
+            )
+            val audit = objectMapper.readTree(
+                text("SELECT approval_audit_snapshot FROM doctor_project_change_requests WHERE id='${approval.id}'")
+            )
+            assertEquals(0L, audit.path("beforeVersion").asLong())
+            assertEquals(1L, audit.path("afterVersion").asLong())
+            assertAuditState(
+                audit.path("latestBefore"),
+                requireNotNull(approval.currentProject),
+                BigDecimal("100.00"),
+                true,
+                BigDecimal("40.00")
+            )
+            assertAuditState(
+                audit.path("actualApplied"),
+                requireNotNull(reviewed.latestProject),
+                BigDecimal("125.00"),
+                false,
+                BigDecimal("50.00")
+            )
+            assertEquals(false, audit.path("force").asBoolean())
+            assertEquals(emptyList<String>(), audit.path("driftedFields").map(JsonNode::asText))
+
+            assertEquals(BigDecimal("200.00"), decimal("SELECT price FROM doctor_projects WHERE doctor_id='doctor-2' AND institution_project_id='ip-1'"))
+            assertEquals(1L, long("SELECT is_active FROM doctor_projects WHERE doctor_id='doctor-2' AND institution_project_id='ip-1'"))
+            assertEquals(BigDecimal("20.00"), decimal("SELECT consultation_fee FROM doctor_institution_project_configs WHERE id='config-2'"))
+            assertEquals(BigDecimal("0.00"), decimal("SELECT commission_rate FROM doctor_institution_project_configs WHERE id='config-2'"))
+            assertEquals(BigDecimal("40.00"), decimal("SELECT institution_rate FROM doctor_institution_project_configs WHERE id='config-2'"))
+            assertEquals(BigDecimal("200.00"), decimal("SELECT medical_list_price FROM doctor_institution_project_configs WHERE id='config-2'"))
+        } finally {
+            releaseApproval.countDown()
+            directFuture?.cancel(true)
+            approvalFuture.cancel(true)
+            pool.shutdownNow()
+            check(pool.awaitTermination(10, TimeUnit.SECONDS)) { "direct-vs-approval 线程池未能关闭" }
+        }
+
+        assertEquals(1L, long("SELECT version FROM institution_projects WHERE id='ip-1'"))
     }
 
     @Test
@@ -928,6 +973,13 @@ class DoctorProjectFullEditPersistenceTest {
         doctorId: String,
         prefixReady: CountDownLatch
     ) {
+        lockReviewPrefix(requestId, doctorId)
+        prefixReady.countDown()
+        check(prefixReady.await(10, TimeUnit.SECONDS)) { "request relationship 前缀屏障超时" }
+        service.reviewV2(adminActor(), requestId, approve())
+    }
+
+    private fun lockReviewPrefix(requestId: String, doctorId: String) {
         assertEquals(
             requestId,
             jdbc.queryForObject(
@@ -944,9 +996,36 @@ class DoctorProjectFullEditPersistenceTest {
                 doctorId
             )
         )
-        prefixReady.countDown()
-        check(prefixReady.await(10, TimeUnit.SECONDS)) { "request relationship 前缀屏障超时" }
-        service.reviewV2(adminActor(), requestId, approve())
+    }
+
+    private fun awaitRequestTableLockWaiter(): Boolean {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        while (System.nanoTime() < deadline) {
+            val waiters = DriverManager.getConnection(mysql.jdbcUrl, "root", mysql.password).use { connection ->
+                connection.prepareStatement(
+                    """
+                    SELECT COUNT(DISTINCT waits.REQUESTING_ENGINE_TRANSACTION_ID)
+                    FROM performance_schema.data_lock_waits waits
+                    JOIN performance_schema.data_locks requested
+                      ON requested.ENGINE_LOCK_ID = waits.REQUESTING_ENGINE_LOCK_ID
+                    JOIN performance_schema.data_locks blocking
+                      ON blocking.ENGINE_LOCK_ID = waits.BLOCKING_ENGINE_LOCK_ID
+                    WHERE requested.OBJECT_SCHEMA = DATABASE()
+                      AND requested.OBJECT_NAME = 'doctor_project_change_requests'
+                      AND blocking.OBJECT_SCHEMA = DATABASE()
+                      AND blocking.OBJECT_NAME = 'doctor_project_change_requests'
+                    """.trimIndent()
+                ).use { statement ->
+                    statement.executeQuery().use { result ->
+                        check(result.next()) { "performance_schema waiter 查询未返回结果" }
+                        result.getInt(1)
+                    }
+                }
+            }
+            if (waiters >= 1) return true
+            Thread.sleep(25)
+        }
+        return false
     }
 
     private fun lockRealSubmitPrefix(doctorId: String) {

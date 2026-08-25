@@ -153,7 +153,7 @@ class InstitutionProjectController(
         }
 
         val existing = institutionProjectRepository.findForUpdate(id)
-            ?: return BaseResponse.error("机构项目不存在")
+            ?: throw institutionProjectStale("机构项目已变化")
         if (existing.institutionId != identity.institutionId || existing.projectId != identity.projectId) {
             throw institutionProjectStale("机构项目关联已变化")
         }
