@@ -155,6 +155,7 @@ class FakeOrdersRepository implements OrdersRepository {
   List<Order> orders = [sampleOrder()];
   List<Order> orderDetails = const [];
   List<Future<Order>> delayedOrderDetails = [];
+  List<OrderStatusLog> statusLogs = const [];
   int getOrdersCalls = 0;
   int getOrderCalls = 0;
   int actionCalls = 0;
@@ -359,7 +360,7 @@ class FakeOrdersRepository implements OrdersRepository {
   }
 
   @override
-  Future<List<OrderStatusLog>> getStatusLogs(String id) async => const [];
+  Future<List<OrderStatusLog>> getStatusLogs(String id) async => statusLogs;
 
   @override
   Future<Settlement> getSettlement(String id) async {

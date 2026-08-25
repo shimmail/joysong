@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/files/app_file_picker.dart';
+import 'package:joysong_flutter/core/translation/auto_translation_builder.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
 import 'package:joysong_flutter/features/orders/domain/payment_models.dart';
 import 'package:joysong_flutter/features/orders/presentation/orders_controller.dart';
@@ -19,6 +20,7 @@ class OrderDetailPage extends StatefulWidget {
     this.uploadImage,
     this.onOrderRemoved,
     this.onOpenServiceConversation,
+    this.enableAutoTranslation = false,
     super.key,
   });
 
@@ -29,6 +31,7 @@ class OrderDetailPage extends StatefulWidget {
   final Future<String?> Function(PublicMediaPurpose purpose)? uploadImage;
   final VoidCallback? onOrderRemoved;
   final ValueChanged<String>? onOpenServiceConversation;
+  final bool enableAutoTranslation;
 
   @override
   State<OrderDetailPage> createState() => _OrderDetailPageState();
@@ -270,9 +273,13 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
           _TravelGroundServiceInformation(
             order: order,
             onOpenServiceConversation: widget.onOpenServiceConversation,
+            enableAutoTranslation: widget.enableAutoTranslation,
           )
         else
-          _OrderInformation(order: order),
+          _OrderInformation(
+            order: order,
+            enableAutoTranslation: widget.enableAutoTranslation,
+          ),
         const SizedBox(height: 12),
         if (order.isTravelGroundServiceOnly)
           _TravelGroundServicePaymentInformation(order: order)
@@ -290,7 +297,10 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
         ],
         if (controller.refund != null) ...[
           const SizedBox(height: 12),
-          _RefundCard(refund: controller.refund!),
+          _RefundCard(
+            refund: controller.refund!,
+            enableAutoTranslation: widget.enableAutoTranslation,
+          ),
         ],
         if (!order.isTravelGroundServiceOnly &&
             controller.settlement != null) ...[
@@ -315,7 +325,10 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
           Text(_isEnglish(context) ? 'Order progress' : '订单进度',
               style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
-          _StatusTimeline(logs: controller.statusLogs),
+          _StatusTimeline(
+            logs: controller.statusLogs,
+            enableAutoTranslation: widget.enableAutoTranslation,
+          ),
         ],
         const SizedBox(height: 20),
         _OrderActions(
@@ -492,53 +505,84 @@ Color _orderStatusColor(
 }
 
 class _OrderInformation extends StatelessWidget {
-  const _OrderInformation({required this.order});
+  const _OrderInformation({
+    required this.order,
+    required this.enableAutoTranslation,
+  });
 
   final Order order;
+  final bool enableAutoTranslation;
 
   @override
-  Widget build(BuildContext context) => _DetailPanel(
-        title: _isEnglish(context) ? 'Appointment' : '预约信息',
-        children: [
-          _DetailLine(
-            label: _isEnglish(context) ? 'Service' : '项目',
-            value: order.projectName,
+  Widget build(BuildContext context) {
+    final orderId = order.id.trim();
+    final translateOrder = enableAutoTranslation && orderId.isNotEmpty;
+    final contentId = 'order:$orderId';
+    return _DetailPanel(
+      title: _isEnglish(context) ? 'Appointment' : '预约信息',
+      children: [
+        _DetailLine.widget(
+          label: _isEnglish(context) ? 'Service' : '项目',
+          value: StableAutoTranslatedText(
+            enabled: translateOrder,
+            contentType: 'project',
+            contentId: contentId,
+            field: 'projectName',
+            sourceText: order.projectName,
           ),
-          if (order.institutionName.isNotEmpty)
-            _DetailLine(
-              label: _isEnglish(context) ? 'Institution' : '机构',
-              value: order.institutionName,
+        ),
+        if (order.institutionName.isNotEmpty)
+          _DetailLine.widget(
+            label: _isEnglish(context) ? 'Institution' : '机构',
+            value: StableAutoTranslatedText(
+              enabled: translateOrder,
+              contentType: 'institution',
+              contentId: contentId,
+              field: 'institutionName',
+              sourceText: order.institutionName,
             ),
-          if (order.doctorName.isNotEmpty)
-            _DetailLine(
-              label: _isEnglish(context) ? 'Doctor' : '医生',
-              value: order.doctorName,
+          ),
+        if (order.doctorName.isNotEmpty)
+          _DetailLine(
+            label: _isEnglish(context) ? 'Doctor' : '医生',
+            value: order.doctorName,
+          ),
+        if (order.appointmentTime != null)
+          _DetailLine(
+            label: _isEnglish(context) ? 'Appointment time' : '预约时间',
+            value: _detailDateTime(order.appointmentTime!),
+          ),
+        if (order.remark.isNotEmpty)
+          _DetailLine.widget(
+            label: _isEnglish(context) ? 'Notes' : '备注',
+            value: StableAutoTranslatedText(
+              enabled: translateOrder,
+              contentType: 'general',
+              contentId: contentId,
+              field: 'remark',
+              sourceText: order.remark,
             ),
-          if (order.appointmentTime != null)
-            _DetailLine(
-              label: _isEnglish(context) ? 'Appointment time' : '预约时间',
-              value: _detailDateTime(order.appointmentTime!),
-            ),
-          if (order.remark.isNotEmpty)
-            _DetailLine(
-              label: _isEnglish(context) ? 'Notes' : '备注',
-              value: order.remark,
-            ),
-        ],
-      );
+          ),
+      ],
+    );
+  }
 }
 
 class _TravelGroundServiceInformation extends StatelessWidget {
   const _TravelGroundServiceInformation({
     required this.order,
+    required this.enableAutoTranslation,
     this.onOpenServiceConversation,
   });
 
   final Order order;
+  final bool enableAutoTranslation;
   final ValueChanged<String>? onOpenServiceConversation;
 
   @override
   Widget build(BuildContext context) {
+    final orderId = order.id.trim();
+    final translateOrder = enableAutoTranslation && orderId.isNotEmpty;
     if (!order.consultantDetailsVisible) {
       final message = order.status == OrderStatus.pendingServiceFee
           ? (_isEnglish(context)
@@ -577,9 +621,15 @@ class _TravelGroundServiceInformation extends StatelessWidget {
             value: order.consultantId,
           ),
         if (order.institutionName.isNotEmpty)
-          _DetailLine(
+          _DetailLine.widget(
             label: _isEnglish(context) ? 'Institution' : '服务机构',
-            value: order.institutionName,
+            value: StableAutoTranslatedText(
+              enabled: translateOrder,
+              contentType: 'institution',
+              contentId: 'order:$orderId',
+              field: 'institutionName',
+              sourceText: order.institutionName,
+            ),
           ),
         if (order.institutionId.isNotEmpty)
           _DetailLine(
@@ -731,13 +781,20 @@ class _VerificationCodeCard extends StatelessWidget {
 }
 
 class _RefundCard extends StatelessWidget {
-  const _RefundCard({required this.refund});
+  const _RefundCard({
+    required this.refund,
+    required this.enableAutoTranslation,
+  });
 
   final RefundDetail refund;
+  final bool enableAutoTranslation;
 
   @override
   Widget build(BuildContext context) {
-    final description = _refundDescription(refund);
+    final refundId = refund.id.trim();
+    final translateRefund = enableAutoTranslation && refundId.isNotEmpty;
+    final contentId = 'refund:$refundId';
+    final visibleDescription = _refundDescription(refund);
     return _DetailPanel(
       title: _isEnglish(context) ? 'Refund details' : '退款信息',
       children: [
@@ -749,19 +806,38 @@ class _RefundCard extends StatelessWidget {
           label: _isEnglish(context) ? 'Amount' : '金额',
           value: refund.amount.formatted,
         ),
-        _DetailLine(
-          label: _isEnglish(context) ? 'Reason' : '原因',
-          value: refund.reason,
-        ),
-        if (description.isNotEmpty)
-          _DetailLine(
-            label: _isEnglish(context) ? 'Details' : '说明',
-            value: description,
+        if (refund.reason.trim().isNotEmpty)
+          _DetailLine.widget(
+            label: _isEnglish(context) ? 'Reason' : '原因',
+            value: StableAutoTranslatedText(
+              enabled: translateRefund,
+              contentType: 'general',
+              contentId: contentId,
+              field: 'reason',
+              sourceText: refund.reason,
+            ),
           ),
-        if (refund.rejectReason?.isNotEmpty == true)
-          _DetailLine(
+        if (visibleDescription.trim().isNotEmpty)
+          _DetailLine.widget(
+            label: _isEnglish(context) ? 'Details' : '说明',
+            value: StableAutoTranslatedText(
+              enabled: translateRefund,
+              contentType: 'general',
+              contentId: contentId,
+              field: 'description',
+              sourceText: visibleDescription,
+            ),
+          ),
+        if (refund.rejectReason?.trim().isNotEmpty == true)
+          _DetailLine.widget(
             label: _isEnglish(context) ? 'Rejection reason' : '驳回原因',
-            value: refund.rejectReason!,
+            value: StableAutoTranslatedText(
+              enabled: translateRefund,
+              contentType: 'general',
+              contentId: contentId,
+              field: 'rejectReason',
+              sourceText: refund.rejectReason!,
+            ),
           ),
       ],
     );
@@ -845,25 +921,66 @@ class _SettlementErrorCard extends StatelessWidget {
 }
 
 class _StatusTimeline extends StatelessWidget {
-  const _StatusTimeline({required this.logs});
+  const _StatusTimeline({
+    required this.logs,
+    required this.enableAutoTranslation,
+  });
 
   final List<OrderStatusLog> logs;
+  final bool enableAutoTranslation;
 
   @override
-  Widget build(BuildContext context) => Column(
-        children: [
-          for (final log in logs)
-            ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.circle, size: 10),
-              title: Text(_orderStatusText(context, log.toStatus)),
-              subtitle: Text(
-                '${_detailDateTime(log.createdAt)}'
-                '${log.remark.isEmpty ? '' : ' · ${log.remark}'}',
+  Widget build(BuildContext context) {
+    final positiveIdCounts = <int, int>{};
+    for (final log in logs) {
+      if (log.id > 0) {
+        positiveIdCounts.update(log.id, (count) => count + 1,
+            ifAbsent: () => 1);
+      }
+    }
+    return Column(
+      children: [
+        for (final log in logs)
+          _buildLog(
+            context,
+            log,
+            identityStable: log.id > 0 && positiveIdCounts[log.id] == 1,
+          ),
+      ],
+    );
+  }
+
+  Widget _buildLog(
+    BuildContext context,
+    OrderStatusLog log, {
+    required bool identityStable,
+  }) =>
+      ListTile(
+        key: identityStable
+            ? ValueKey<String>('order-status-log:${log.id}')
+            : ObjectKey(log),
+        dense: true,
+        contentPadding: EdgeInsets.zero,
+        leading: const Icon(Icons.circle, size: 10),
+        title: Text(_orderStatusText(context, log.toStatus)),
+        subtitle: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(_detailDateTime(log.createdAt)),
+            if (log.remark.isNotEmpty) ...[
+              const Text(' · '),
+              Expanded(
+                child: StableAutoTranslatedText(
+                  enabled: enableAutoTranslation && identityStable,
+                  contentType: 'general',
+                  contentId: 'order-status-log:${log.id}',
+                  field: 'remark',
+                  sourceText: log.remark,
+                ),
               ),
-            ),
-        ],
+            ],
+          ],
+        ),
       );
 }
 
@@ -1069,10 +1186,16 @@ class _DetailPanel extends StatelessWidget {
 }
 
 class _DetailLine extends StatelessWidget {
-  const _DetailLine({required this.label, required this.value});
+  const _DetailLine({required this.label, required String value})
+      : value = null,
+        textValue = value;
+
+  const _DetailLine.widget({required this.label, required this.value})
+      : textValue = null;
 
   final String label;
-  final String value;
+  final Widget? value;
+  final String? textValue;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -1089,7 +1212,7 @@ class _DetailLine extends StatelessWidget {
                 ),
               ),
             ),
-            Expanded(child: Text(value)),
+            Expanded(child: value ?? Text(textValue!)),
           ],
         ),
       );
