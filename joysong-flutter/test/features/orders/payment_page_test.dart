@@ -56,7 +56,7 @@ void main() {
     expect(find.text('返回订单'), findsOneWidget);
   });
 
-  testWidgets('does not fall back to order consultation or balance amounts', (
+  testWidgets('falls back to the order service fee before an attempt exists', (
     tester,
   ) async {
     final repository = FakeOrdersRepository();
@@ -78,7 +78,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('payment-amount')), findsOneWidget);
-    expect(find.text('--'), findsOneWidget);
+    expect(find.text(r'$400.00'), findsOneWidget);
     expect(find.text(r'$100.00'), findsNothing);
     expect(find.text(r'$1,180.50'), findsNothing);
     expect(find.text('Travel ground service fee'), findsOneWidget);

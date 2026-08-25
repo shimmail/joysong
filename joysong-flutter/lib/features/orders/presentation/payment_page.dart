@@ -129,7 +129,14 @@ class _PaymentBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final order = controller.order;
     final amount = controller.isServiceFeeFlow
-        ? _paymentAmount(controller.payment, acceptedCurrency: 'USD')
+        ? _paymentAmount(
+            controller.payment,
+            acceptedCurrency: 'USD',
+            fallback: _minorAmount(
+              order.travelGroundServiceFeeMinor,
+              order.currency,
+            ),
+          )
         : _paymentAmount(
             controller.payment,
             fallback: controller.paymentType == PaymentType.balance
@@ -579,6 +586,12 @@ String _paymentAmount(
       (acceptedCurrency != null && currency != acceptedCurrency)) {
     return fallback;
   }
+  return _minorAmount(minor, currency);
+}
+
+String _minorAmount(int? minor, String currency) {
+  currency = currency.trim().toUpperCase();
+  if (minor == null || minor < 0 || currency.length != 3) return '--';
   final fractionDigits = const {
         'BHD': 3,
         'JOD': 3,

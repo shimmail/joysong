@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:joysong_flutter/features/booking/domain/booking_models.dart';
 import 'package:joysong_flutter/features/booking/presentation/booking_controller.dart';
 import 'package:joysong_flutter/features/booking/presentation/booking_page.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
@@ -127,4 +128,70 @@ void main() {
     expect(find.text(r'$400.00'), findsOneWidget);
     expect(find.byKey(const Key('booking-quote-retry')), findsNothing);
   });
+
+  testWidgets('switching doctors shows that doctor project quote', (
+    tester,
+  ) async {
+    final repository = _DoctorPricedBookingRepository()
+      ..doctorResults = [
+        sampleDoctor(),
+        const BookingDoctor(
+          id: 'doctor-2',
+          name: '王医生',
+          title: '副主任医师',
+          avatar: '',
+          specialties: '皮肤美容',
+          isVerified: true,
+        ),
+      ];
+    final controller = BookingController(
+      repository: repository,
+      institutionId: 'institution-1',
+      projectId: 'project-1',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('zh'),
+        supportedLocales: const [Locale('en'), Locale('zh')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
+        home: BookingPage(controller: controller, onOrderCreated: (_) {}),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await controller.selectDoctor(controller.doctors.first);
+    await tester.pump();
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('booking-price-disclaimer')),
+      260,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text(r'$400.00'), findsOneWidget);
+
+    await controller.selectDoctor(controller.doctors.last);
+    await tester.pump();
+
+    expect(find.text(r'$525.00'), findsOneWidget);
+    expect(repository.quoteDoctorId, 'doctor-2');
+    expect(repository.quoteInstitutionProjectId, 'ip-1');
+  });
+}
+
+final class _DoctorPricedBookingRepository extends FakeBookingRepository {
+  @override
+  Future<TravelGroundServiceQuote> getTravelGroundServiceQuote({
+    required String doctorId,
+    required String institutionProjectId,
+  }) {
+    quoteDoctorId = doctorId;
+    quoteInstitutionProjectId = institutionProjectId;
+    return Future.value(
+      TravelGroundServiceQuote(
+        currency: 'USD',
+        medicalListPriceMinor: doctorId == 'doctor-1' ? 100000 : 150000,
+        platformServiceRateBps: doctorId == 'doctor-1' ? 4000 : 3500,
+        travelGroundServiceFeeMinor: doctorId == 'doctor-1' ? 40000 : 52500,
+      ),
+    );
+  }
 }

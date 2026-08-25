@@ -5,6 +5,7 @@ import 'package:joysong_flutter/core/config/app_environment.dart';
 import 'package:joysong_flutter/core/files/app_file_picker.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/network/api_client.dart';
+import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/account_security/data/account_security_api.dart';
 import 'package:joysong_flutter/features/account_security/data/account_security_repository_impl.dart';
 import 'package:joysong_flutter/features/account_security/presentation/account_security_controller.dart';
@@ -727,9 +728,7 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _showJourneyComingSoon() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(context.localized('开发中', 'Coming soon'))),
-    );
+    showTransientMessage(context, context.localized('开发中', 'Coming soon'));
   }
 
   Future<void> _openAccountSecurity() async {

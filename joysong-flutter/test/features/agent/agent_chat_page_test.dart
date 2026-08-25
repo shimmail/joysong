@@ -15,6 +15,18 @@ import 'package:joysong_flutter/features/discover/domain/discover_repository.dar
 import 'package:joysong_flutter/features/shell/presentation/app_shell.dart';
 
 void main() {
+  testWidgets('agent menu hides unavailable profile and safety service',
+      (tester) async {
+    await _pumpPage(tester, _CatalogRepository(_turn()));
+
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pumpAndSettle();
+
+    expect(find.text('档案与安全筛查'), findsNothing);
+    expect(find.text('Profile & safety'), findsNothing);
+    expect(find.text('历史会话'), findsOneWidget);
+  });
+
   testWidgets('long pressing a message bubble opens copy menu', (tester) async {
     await _pumpPage(tester, _CatalogRepository(_turn()));
     await _sendAndSettle(tester);

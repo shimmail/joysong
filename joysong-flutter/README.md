@@ -32,11 +32,16 @@ flutter pub get
 flutter run --dart-define=APP_ENV=development
 ```
 
-开发环境默认地址：Android 模拟器为 `http://10.0.2.2:8080`，iOS 模拟器为 `http://127.0.0.1:8080`。真机或其他环境通过编译参数覆盖：
+开发环境默认地址：Android 模拟器为 `http://10.0.2.2:8080`，iOS 模拟器为 `http://127.0.0.1:8080`。
+
+Android 真机推荐通过 USB 调试反向映射本机服务。连接设备后执行一次：
 
 ```shell
-flutter run --dart-define=APP_ENV=development --dart-define=API_BASE_URL=http://192.168.1.10:8080
+adb reverse tcp:8080 tcp:8080
+flutter run --dart-define=APP_ENV=development --dart-define=API_BASE_URL=http://127.0.0.1:8080
 ```
+
+这样无需使用电脑当前的局域网 IP，切换 Wi-Fi 后仍可继续调试。设备重启、重新连接 USB 或撤销映射后，需要重新执行 `adb reverse`。其他环境仍可通过 `API_BASE_URL` 覆盖。
 
 当前海外 USD card 流程固定使用 Stripe Hosted Checkout；Stripe 密钥和 webhook 配置只放在服务端环境变量中，不放入 Flutter 客户端。
 

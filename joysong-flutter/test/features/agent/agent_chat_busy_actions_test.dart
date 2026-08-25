@@ -48,8 +48,8 @@ void main() {
           find.byWidgetPredicate((widget) => widget is PopupMenuItem),
         )
         .toList(growable: false);
-    expect(items, hasLength(7));
-    for (final index in [3, 4, 5, 6]) {
+    expect(items, hasLength(6));
+    for (final index in [2, 3, 4, 5]) {
       expect(
         items[index].enabled,
         isFalse,

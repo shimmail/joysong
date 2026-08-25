@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/wallet/domain/wallet_models.dart';
 import 'package:joysong_flutter/features/wallet/presentation/wallet_controller.dart';
 
@@ -122,12 +123,11 @@ class _WalletPageState extends State<WalletPage> {
             height: 46,
             child: FilledButton.tonalIcon(
               key: const Key('wallet-withdraw-button'),
-              onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(context.localized(
-                    '提现功能即将开放',
-                    'Withdrawal coming soon',
-                  )),
+              onPressed: () => showTransientMessage(
+                context,
+                context.localized(
+                  '提现功能即将开放',
+                  'Withdrawal coming soon',
                 ),
               ),
               icon: const Icon(Icons.account_balance_outlined),

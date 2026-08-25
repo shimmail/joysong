@@ -80,6 +80,14 @@ void main() {
     await tester.tap(find.byKey(const Key('wallet-withdraw-button')));
     await tester.pump();
     expect(find.text('提现功能即将开放'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('wallet-withdraw-button')));
+    await tester.tap(find.byKey(const Key('wallet-withdraw-button')));
+    await tester.pump();
+    expect(find.text('提现功能即将开放'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('提现功能即将开放'), findsNothing);
     expect(repository.withdrawCalls, 0);
   });
 

@@ -8,10 +8,8 @@ import 'package:joysong_flutter/features/agent/presentation/agent_chat_controlle
 import 'package:joysong_flutter/features/agent/presentation/agent_catalog_cards.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_plan_controller.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_plan_view.dart';
-import 'package:joysong_flutter/features/agent/presentation/agent_profile_safety_page.dart';
 
 enum _AgentMenuAction {
-  profile,
   history,
   plans,
   newChat,
@@ -124,11 +122,6 @@ class _AgentChatPageState extends State<AgentChatPage> {
                 icon: const Icon(Icons.more_vert),
                 onSelected: (action) => _handleMenuAction(action, english),
                 itemBuilder: (context) => [
-                  _menuItem(
-                    _AgentMenuAction.profile,
-                    Icons.health_and_safety_outlined,
-                    english ? 'Profile & safety' : '档案与安全筛查',
-                  ),
                   _menuItem(
                     _AgentMenuAction.history,
                     Icons.history,
@@ -315,14 +308,6 @@ class _AgentChatPageState extends State<AgentChatPage> {
     bool english,
   ) async {
     switch (action) {
-      case _AgentMenuAction.profile:
-        await Navigator.of(context).push<void>(
-          MaterialPageRoute(
-            builder: (_) => AgentProfileSafetyPage(
-              controller: widget.planController,
-            ),
-          ),
-        );
       case _AgentMenuAction.history:
         await _showHistory(widget.chatController.state.sessions);
       case _AgentMenuAction.plans:
@@ -500,7 +485,7 @@ class _AgentChatPageState extends State<AgentChatPage> {
               return AgentPlanView(plan: plan);
             }
             if (state.plans.isEmpty) {
-              return const Center(child: Text('暂无方案，请先完善档案并完成安全筛查。'));
+              return const Center(child: Text('暂无可用方案。'));
             }
             return ListView(
               children: [
