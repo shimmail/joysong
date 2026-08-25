@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:joysong_flutter/core/translation/translation.dart';
 import 'package:joysong_flutter/features/messaging/domain/messaging_models.dart';
+import 'package:joysong_flutter/features/messaging/domain/notification_target.dart';
 import 'package:joysong_flutter/features/messaging/presentation/messaging_controllers.dart';
 import 'package:joysong_flutter/features/messaging/presentation/messaging_strings.dart';
 
@@ -13,12 +14,14 @@ class NotificationPage extends StatefulWidget {
     this.onOpenNotification,
     this.title,
     this.filter,
+    this.enableAutoTranslation = false,
     super.key,
   });
   final NotificationController controller;
   final ValueChanged<AppNotification>? onOpenNotification;
   final String? title;
   final bool Function(AppNotification notification)? filter;
+  final bool enableAutoTranslation;
 
   @override
   State<NotificationPage> createState() => _NotificationPageState();
@@ -55,6 +58,7 @@ class _NotificationPageState extends State<NotificationPage> {
             controller: widget.controller,
             onOpenNotification: widget.onOpenNotification,
             filter: widget.filter,
+            enableAutoTranslation: widget.enableAutoTranslation,
           ),
         ),
       ),
@@ -67,10 +71,12 @@ class _NotificationList extends StatelessWidget {
     required this.controller,
     this.onOpenNotification,
     this.filter,
+    required this.enableAutoTranslation,
   });
   final NotificationController controller;
   final ValueChanged<AppNotification>? onOpenNotification;
   final bool Function(AppNotification notification)? filter;
+  final bool enableAutoTranslation;
 
   @override
   Widget build(BuildContext context) {
@@ -78,6 +84,15 @@ class _NotificationList extends StatelessWidget {
     final items = filter == null
         ? controller.items
         : controller.items.where(filter!).toList(growable: false);
+    final idCounts = <String, int>{};
+    for (final item in items) {
+      final id = item.id.trim();
+      if (id.isNotEmpty) idCounts[id] = (idCounts[id] ?? 0) + 1;
+    }
+    final duplicateIds = {
+      for (final entry in idCounts.entries)
+        if (entry.value > 1) entry.key,
+    };
     if (controller.isLoading && items.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -106,10 +121,27 @@ class _NotificationList extends StatelessWidget {
     return ListView.separated(
       padding: const EdgeInsets.all(16),
       itemCount: items.length,
+      findItemIndexCallback: (key) {
+        if (key is! ValueKey<String>) return null;
+        const prefix = 'notification-row:';
+        if (!key.value.startsWith(prefix)) return null;
+        final id = key.value.substring(prefix.length);
+        final index = items.indexWhere((item) {
+          final candidate = item.id.trim();
+          return candidate == id && !duplicateIds.contains(candidate);
+        });
+        return index < 0 ? null : index;
+      },
       separatorBuilder: (_, __) => const SizedBox(height: 8),
       itemBuilder: (context, index) {
         final item = items[index];
+        final notificationId = item.id.trim();
+        final identityStable =
+            notificationId.isNotEmpty && !duplicateIds.contains(notificationId);
         return Card(
+          key: identityStable
+              ? ValueKey<String>('notification-row:$notificationId')
+              : ObjectKey(item),
           elevation: 0,
           color: item.isRead
               ? null
@@ -119,8 +151,25 @@ class _NotificationList extends StatelessWidget {
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
             ),
-            title: Text(item.title),
-            subtitle: Text(item.content, maxLines: 3),
+            title: StableAutoTranslatedText(
+              enabled: enableAutoTranslation &&
+                  identityStable &&
+                  _isOrderRelatedNotification(item),
+              contentType: 'general',
+              contentId: 'notification:$notificationId',
+              field: 'title',
+              sourceText: item.title,
+            ),
+            subtitle: StableAutoTranslatedText(
+              enabled: enableAutoTranslation &&
+                  identityStable &&
+                  _isOrderRelatedNotification(item),
+              contentType: 'general',
+              contentId: 'notification:$notificationId',
+              field: 'content',
+              sourceText: item.content,
+              maxLines: 3,
+            ),
             trailing: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.end,
@@ -142,6 +191,15 @@ class _NotificationList extends StatelessWidget {
       },
     );
   }
+}
+
+bool _isOrderRelatedNotification(AppNotification item) {
+  final kind = NotificationTarget.parse(
+    item.targetType,
+    item.targetId,
+  ).kind;
+  return kind == NotificationTargetKind.orderDetail ||
+      kind == NotificationTargetKind.orderServiceConversation;
 }
 
 class CustomerServicePage extends StatelessWidget {
