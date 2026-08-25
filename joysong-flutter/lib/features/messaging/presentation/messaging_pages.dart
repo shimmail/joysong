@@ -239,6 +239,9 @@ class MessagingCenterPage extends StatefulWidget {
     this.onOpenAi,
     this.onOpenSystemMessages,
     this.onOpenActivityMessages,
+    this.onRefreshNotifications,
+    this.systemUnreadCount = 0,
+    this.activityUnreadCount = 0,
     super.key,
   });
 
@@ -250,6 +253,9 @@ class MessagingCenterPage extends StatefulWidget {
   final VoidCallback? onOpenAi;
   final VoidCallback? onOpenSystemMessages;
   final VoidCallback? onOpenActivityMessages;
+  final Future<void> Function()? onRefreshNotifications;
+  final int systemUnreadCount;
+  final int activityUnreadCount;
 
   @override
   State<MessagingCenterPage> createState() => _MessagingCenterPageState();
@@ -261,12 +267,17 @@ class _MessagingCenterPageState extends State<MessagingCenterPage> {
   @override
   void initState() {
     super.initState();
-    unawaited(widget.controller.refresh());
+    unawaited(_refresh());
     _refreshTimer = Timer.periodic(
       const Duration(seconds: 30),
-      (_) => unawaited(widget.controller.refresh()),
+      (_) => unawaited(_refresh()),
     );
   }
+
+  Future<void> _refresh() => Future.wait<void>([
+        widget.controller.refresh(),
+        if (widget.onRefreshNotifications case final refresh?) refresh(),
+      ]);
 
   @override
   void dispose() {
@@ -282,7 +293,7 @@ class _MessagingCenterPageState extends State<MessagingCenterPage> {
       builder: (context, _) => Scaffold(
         appBar: AppBar(title: Text(strings.messages)),
         body: RefreshIndicator(
-          onRefresh: widget.controller.refresh,
+          onRefresh: _refresh,
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
@@ -303,6 +314,7 @@ class _MessagingCenterPageState extends State<MessagingCenterPage> {
                 subtitle: strings.isEnglish
                     ? 'Account, order and service updates'
                     : '账号、订单与服务通知',
+                unreadCount: widget.systemUnreadCount,
                 onTap: widget.onOpenSystemMessages,
               ),
               _MessageCenterEntry(
@@ -312,6 +324,7 @@ class _MessagingCenterPageState extends State<MessagingCenterPage> {
                 subtitle: strings.isEnglish
                     ? 'Offers and campaign updates'
                     : '优惠活动与平台动态',
+                unreadCount: widget.activityUnreadCount,
                 onTap: widget.onOpenActivityMessages,
               ),
               const SizedBox(height: 16),
@@ -434,6 +447,7 @@ class _MessageCenterEntry extends StatelessWidget {
     required this.title,
     required this.subtitle,
     this.badge,
+    this.unreadCount = 0,
     this.onTap,
     super.key,
   });
@@ -442,6 +456,7 @@ class _MessageCenterEntry extends StatelessWidget {
   final String title;
   final String subtitle;
   final String? badge;
+  final int unreadCount;
   final VoidCallback? onTap;
 
   @override
@@ -474,7 +489,16 @@ class _MessageCenterEntry extends StatelessWidget {
             ],
           ),
           subtitle: Text(subtitle),
-          trailing: const Icon(Icons.chevron_right),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (unreadCount > 0) ...[
+                _UnreadBadge(count: unreadCount),
+                const SizedBox(width: 8),
+              ],
+              const Icon(Icons.chevron_right),
+            ],
+          ),
         ),
       );
 }

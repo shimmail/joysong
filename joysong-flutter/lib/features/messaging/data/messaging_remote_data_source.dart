@@ -5,6 +5,7 @@ import 'package:joysong_flutter/features/messaging/domain/messaging_models.dart'
 abstract interface class MessagingRemoteDataSource {
   Future<List<AppNotification>> getNotifications({required int limit});
   Future<int> getUnreadNotificationCount();
+  Future<NotificationUnreadCounts> getUnreadNotificationCounts();
   Future<void> markNotificationRead(String notificationId);
   Future<void> markAllNotificationsRead();
   Future<List<DmConversation>> getDmConversations();
@@ -64,6 +65,15 @@ final class ApiMessagingRemoteDataSource implements MessagingRemoteDataSource {
         },
       ) ??
       0;
+
+  @override
+  Future<NotificationUnreadCounts> getUnreadNotificationCounts() async =>
+      _required(
+        await _apiClient.get<NotificationUnreadCounts>(
+          'notifications/unread-counts',
+          decodeData: NotificationUnreadCounts.fromJson,
+        ),
+      );
 
   @override
   Future<void> markNotificationRead(String notificationId) async {

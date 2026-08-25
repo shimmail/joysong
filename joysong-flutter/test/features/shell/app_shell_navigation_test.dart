@@ -373,6 +373,39 @@ void main() {
     expect(client.puts, isNot(contains('notifications/read-all')));
   });
 
+  testWidgets('message center shows categorized notification unread counts',
+      (tester) async {
+    final client = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE',
+      freshReadable: true,
+      freshSendEnabled: true,
+      notificationUnreadCounts: const {
+        'total': 8,
+        'system': 5,
+        'activity': 3,
+      },
+    );
+    await _pumpShell(tester, client);
+
+    await tester.tap(find.text('消息'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('message-center-system')),
+        matching: find.text('5'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('message-center-activity')),
+        matching: find.text('3'),
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('order notification is read once and opens its detail directly',
       (tester) async {
     _useLargeTestSurface(tester);
@@ -578,6 +611,11 @@ final class _AgentHandoffApiClient extends ApiClient {
     required T Function(Object? json) decodeData,
   }) async {
     final Object data = switch (path) {
+      'notifications/unread-counts' => const {
+          'total': 0,
+          'system': 0,
+          'activity': 0,
+        },
       'notifications/unread-count' => 0,
       'notifications' ||
       'dm/conversations' ||
@@ -641,6 +679,11 @@ final class _OrderServiceApiClient extends ApiClient {
     required this.freshSendEnabled,
     this.includeNotification = false,
     this.notifications = const [],
+    this.notificationUnreadCounts = const {
+      'total': 0,
+      'system': 0,
+      'activity': 0,
+    },
     this.identityOverview = const {'roles': <Object?>[], 'applications': <Object?>[]},
     this.failedOrderIds = const {},
     this.failedServiceOrderIds = const {},
@@ -654,6 +697,7 @@ final class _OrderServiceApiClient extends ApiClient {
   bool freshSendEnabled;
   final bool includeNotification;
   final List<Map<String, Object?>> notifications;
+  final Map<String, Object?> notificationUnreadCounts;
   final Object identityOverview;
   final Set<String> failedOrderIds;
   final Set<String> failedServiceOrderIds;
@@ -703,6 +747,7 @@ final class _OrderServiceApiClient extends ApiClient {
       return decodeData(await queuedOrderReads.removeAt(0));
     }
     final Object data = switch (path) {
+      'notifications/unread-counts' => notificationUnreadCounts,
       'notifications/unread-count' =>
         notifications.isNotEmpty || includeNotification ? 1 : 0,
       'notifications' =>

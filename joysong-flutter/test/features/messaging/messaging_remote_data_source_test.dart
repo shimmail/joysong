@@ -4,6 +4,24 @@ import 'package:joysong_flutter/features/messaging/data/messaging_remote_data_so
 import 'package:joysong_flutter/features/messaging/domain/messaging_models.dart';
 
 void main() {
+  test('decodes categorized notification unread counts', () async {
+    final client = _RecordingApiClient()
+      ..responseData = const {
+        'total': 8,
+        'system': 5,
+        'activity': 3,
+      };
+    final dataSource = ApiMessagingRemoteDataSource(client);
+
+    final counts = await dataSource.getUnreadNotificationCounts();
+
+    expect(client.lastMethod, 'GET');
+    expect(client.lastPath, 'notifications/unread-counts');
+    expect(counts.total, 8);
+    expect(counts.system, 5);
+    expect(counts.activity, 3);
+  });
+
   test('creates service conversation by order id without target user id',
       () async {
     final client = _RecordingApiClient()..responseData = _orderConversationJson;
@@ -81,6 +99,17 @@ final class _RecordingApiClient extends ApiClient {
   String? lastPath;
   Object? lastBody;
   Object? responseData;
+
+  @override
+  Future<T?> get<T>(
+    String path, {
+    Map<String, Object?>? query,
+    required T Function(Object? json) decodeData,
+  }) async {
+    lastMethod = 'GET';
+    lastPath = path;
+    return decodeData(responseData);
+  }
 
   @override
   Future<T?> post<T>(

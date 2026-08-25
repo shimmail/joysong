@@ -8,6 +8,11 @@ import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 
+interface NotificationUnreadCountSummary {
+    val total: Long
+    val activity: Long
+}
+
 interface NotificationRepository : JpaRepository<NotificationEntity, String> {
     fun findByUserIdAndDeletedAtIsNullOrderByCreatedAtDesc(
         userId: String,
@@ -15,6 +20,23 @@ interface NotificationRepository : JpaRepository<NotificationEntity, String> {
     ): List<NotificationEntity>
 
     fun countByUserIdAndIsReadAndDeletedAtIsNull(userId: String, isRead: Boolean): Long
+
+    @Query("""
+        SELECT COUNT(n) AS total,
+               COALESCE(SUM(CASE
+                   WHEN UPPER(TRIM(n.type)) IN :types THEN 1
+                   ELSE 0
+               END), 0) AS activity
+        FROM NotificationEntity n
+        WHERE n.userId = :userId
+          AND n.isRead = false
+          AND n.deletedAt IS NULL
+    """)
+    fun summarizeUnreadByUserIdAndTypes(
+        @Param("userId") userId: String,
+        @Param("types") types: Set<String>
+    ): NotificationUnreadCountSummary
+
     fun findByIdAndUserIdAndDeletedAtIsNull(id: String, userId: String): NotificationEntity?
 
     @Modifying

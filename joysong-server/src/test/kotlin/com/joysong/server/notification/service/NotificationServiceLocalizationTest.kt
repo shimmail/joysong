@@ -2,6 +2,7 @@ package com.joysong.server.notification.service
 
 import com.joysong.server.notification.controller.NotificationController
 import com.joysong.server.notification.entity.NotificationEntity
+import com.joysong.server.notification.repository.NotificationUnreadCountSummary
 import com.joysong.server.notification.repository.NotificationRepository
 import io.mockk.every
 import io.mockk.mockk
@@ -127,6 +128,30 @@ class NotificationServiceLocalizationTest {
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.data[0].title").value("订单已创建"))
             .andExpect(jsonPath("$.data[0].content").value("您的订单已创建，请及时查看订单详情。"))
+    }
+
+    @Test
+    fun `unread counts endpoint separates system and activity notifications`() {
+        val repository = mockk<NotificationRepository>()
+        val summary = mockk<NotificationUnreadCountSummary>()
+        every { summary.total } returns 8
+        every { summary.activity } returns 3
+        every {
+            repository.summarizeUnreadByUserIdAndTypes(
+                "user-1",
+                setOf("ACTIVITY", "PROMOTION", "MARKETING", "CAMPAIGN", "OFFER")
+            )
+        } returns summary
+        val mvc = MockMvcBuilders.standaloneSetup(
+            NotificationController(NotificationService(repository))
+        ).build()
+        val principal = UsernamePasswordAuthenticationToken("user-1", "", emptyList())
+
+        mvc.perform(get("/api/notifications/unread-counts").principal(principal))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.total").value(8))
+            .andExpect(jsonPath("$.data.system").value(5))
+            .andExpect(jsonPath("$.data.activity").value(3))
     }
 
     @Test

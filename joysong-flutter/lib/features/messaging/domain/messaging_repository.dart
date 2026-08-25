@@ -5,6 +5,8 @@ abstract interface class MessagingRepository {
 
   Future<int> getUnreadNotificationCount();
 
+  Future<NotificationUnreadCounts> getUnreadNotificationCounts();
+
   Future<void> markNotificationRead(String notificationId);
 
   Future<void> markAllNotificationsRead();

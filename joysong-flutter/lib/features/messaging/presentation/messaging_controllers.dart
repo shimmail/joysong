@@ -3,6 +3,7 @@ import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/features/messaging/domain/messaging_models.dart';
 import 'package:joysong_flutter/features/messaging/domain/messaging_preferences.dart';
 import 'package:joysong_flutter/features/messaging/domain/messaging_repository.dart';
+import 'package:joysong_flutter/features/messaging/domain/notification_target.dart';
 import 'package:joysong_flutter/features/messaging/presentation/time_cursor_pager.dart';
 
 class NotificationController extends ChangeNotifier {
@@ -14,6 +15,13 @@ class NotificationController extends ChangeNotifier {
   List<AppNotification> get items => _items;
   int _unreadCount = 0;
   int get unreadCount => _unreadCount;
+  int _systemUnreadCount = 0;
+  int get systemUnreadCount => _systemUnreadCount;
+  int _activityUnreadCount = 0;
+  int get activityUnreadCount => _activityUnreadCount;
+  final Set<String> _markReadInFlight = <String>{};
+  int _stateVersion = 0;
+  int _mutationsInFlight = 0;
   bool _isLoading = false;
   bool get isLoading => _isLoading;
   String? _errorMessage;
@@ -21,16 +29,21 @@ class NotificationController extends ChangeNotifier {
 
   Future<void> refresh() async {
     if (_isLoading) return;
+    final requestVersion = _stateVersion;
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
     try {
       final results = await Future.wait<Object>([
         _repository.getNotifications(limit: limit),
-        _repository.getUnreadNotificationCount(),
+        _repository.getUnreadNotificationCounts(),
       ]);
+      if (requestVersion != _stateVersion || _mutationsInFlight > 0) return;
       _items = _deduplicate(results[0] as List<AppNotification>);
-      _unreadCount = results[1] as int;
+      final counts = results[1] as NotificationUnreadCounts;
+      _unreadCount = counts.total;
+      _systemUnreadCount = counts.system;
+      _activityUnreadCount = counts.activity;
     } on Object catch (error) {
       _errorMessage = _messageFor(error);
     } finally {
@@ -40,32 +53,63 @@ class NotificationController extends ChangeNotifier {
   }
 
   Future<void> markRead(String notificationId) async {
-    final notification = _items.where((item) => item.id == notificationId);
-    if (notification.isEmpty || notification.first.isRead) return;
+    final matches = _items.where((item) => item.id == notificationId);
+    if (matches.isEmpty ||
+        matches.first.isRead ||
+        !_markReadInFlight.add(notificationId)) {
+      return;
+    }
+    _beginMutation();
     try {
       await _repository.markNotificationRead(notificationId);
+      final current = _items.where((item) => item.id == notificationId);
+      if (current.isEmpty || current.first.isRead) return;
+      final notification = current.first;
       _items = [
         for (final item in _items)
           if (item.id == notificationId) item.copyWith(isRead: true) else item,
       ];
       if (_unreadCount > 0) _unreadCount--;
+      if (isActivityNotificationType(notification.type)) {
+        if (_activityUnreadCount > 0) _activityUnreadCount--;
+      } else if (_systemUnreadCount > 0) {
+        _systemUnreadCount--;
+      }
       notifyListeners();
     } on Object catch (error) {
       _errorMessage = _messageFor(error);
       notifyListeners();
+    } finally {
+      _markReadInFlight.remove(notificationId);
+      _endMutation();
     }
   }
 
   Future<void> markAllRead() async {
+    _beginMutation();
     try {
       await _repository.markAllNotificationsRead();
       _items = [for (final item in _items) item.copyWith(isRead: true)];
       _unreadCount = 0;
+      _systemUnreadCount = 0;
+      _activityUnreadCount = 0;
       notifyListeners();
     } on Object catch (error) {
       _errorMessage = _messageFor(error);
       notifyListeners();
+    } finally {
+      _endMutation();
     }
+  }
+
+  void _beginMutation() {
+    _mutationsInFlight++;
+    _stateVersion++;
+  }
+
+  void _endMutation() {
+    _mutationsInFlight--;
+    _stateVersion++;
   }
 
   List<AppNotification> _deduplicate(Iterable<AppNotification> source) {

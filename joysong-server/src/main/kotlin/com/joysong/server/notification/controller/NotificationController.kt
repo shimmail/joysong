@@ -39,6 +39,16 @@ class NotificationController(
     }
 
     /**
+     * 获取当前用户按消息中心分类汇总的未读通知数量
+     */
+    @GetMapping("/unread-counts")
+    fun getUnreadCounts(
+        authentication: Authentication
+    ) = BaseResponse.success(
+        notificationService.getUnreadCounts(authentication.principal as String)
+    )
+
+    /**
      * 标记单条通知为已读
      */
     @PutMapping("/{id}/read")
