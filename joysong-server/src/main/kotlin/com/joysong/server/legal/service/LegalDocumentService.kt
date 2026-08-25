@@ -95,7 +95,7 @@ class LegalDocumentService(
         release.updatedAt = now
         release.updatedBy = actorId
         contentRepository.saveAll(contents)
-        releaseRepository.save(release)
+        releaseRepository.saveAndFlush(release)
         return release.toView(contents)
     }
 
@@ -115,12 +115,13 @@ class LegalDocumentService(
             updatedAt = now
             updatedBy = actorId
         }
+        previous?.let(releaseRepository::saveAndFlush)
         draft.status = LegalDocumentStatus.PUBLISHED
         draft.publishedAt = now
         draft.publishedBy = actorId
         draft.updatedAt = now
         draft.updatedBy = actorId
-        releaseRepository.saveAll(listOfNotNull(previous, draft))
+        releaseRepository.saveAndFlush(draft)
         return draft.toView(contents)
     }
 

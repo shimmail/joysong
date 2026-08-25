@@ -14,6 +14,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
+import io.mockk.verifySequence
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -61,7 +62,9 @@ class LegalDocumentServiceTest {
         assertThrows<IllegalArgumentException> {
             service.publish(draft.id, "admin-1", PublishLegalDocumentRequest(draft.lockVersion))
         }
-        verify(exactly = 0) { releaseRepository.save(any()) }
+        verify(exactly = 0) { releaseRepository.saveAll(any<List<LegalDocumentReleaseEntity>>()) }
+        verify(exactly = 0) { releaseRepository.saveAndFlush(any()) }
+        verify(exactly = 0) { contentRepository.saveAll(any<List<LegalDocumentContentEntity>>()) }
     }
 
     @Test
@@ -87,14 +90,39 @@ class LegalDocumentServiceTest {
     }
 
     @Test
-    fun `publish supersedes the previous release together with publishing the draft`() {
+    fun `update draft flushes the release before returning the incremented lock version`() {
+        val draft = release(lockVersion = 7)
+        every { releaseRepository.findByIdForUpdate(draft.id) } returns draft
+        every { contentRepository.findAllByReleaseIdOrderByLocaleAsc(draft.id) } returns bilingualContents(draft.id)
+        every { contentRepository.saveAll(any<List<LegalDocumentContentEntity>>()) } answers { firstArg() }
+        every { releaseRepository.saveAndFlush(draft) } answers {
+            draft.lockVersion = 8
+            draft
+        }
+
+        val updated = service.updateDraft(draft.id, "admin-1", draftRequest(draft.lockVersion))
+
+        assertEquals(8, updated.lockVersion)
+        verifySequence {
+            releaseRepository.findByIdForUpdate(draft.id)
+            contentRepository.findAllByReleaseIdOrderByLocaleAsc(draft.id)
+            contentRepository.saveAll(any<List<LegalDocumentContentEntity>>())
+            releaseRepository.saveAndFlush(draft)
+        }
+    }
+
+    @Test
+    fun `publish flushes superseding release before publishing draft and returns its database version`() {
         val previous = release(id = "published-1", status = LegalDocumentStatus.PUBLISHED, version = 1)
         val draft = release(id = "draft-2", version = 2, lockVersion = 7)
-        val saved = slot<List<LegalDocumentReleaseEntity>>()
         every { releaseRepository.findByIdForUpdate(draft.id) } returns draft
         every { contentRepository.findAllByReleaseIdOrderByLocaleAsc(draft.id) } returns bilingualContents(draft.id)
         every { releaseRepository.findAllByDocumentTypeForUpdate(LegalDocumentType.USER_AGREEMENT) } returns listOf(draft, previous)
-        every { releaseRepository.saveAll(capture(saved)) } answers { saved.captured }
+        every { releaseRepository.saveAndFlush(previous) } answers { previous }
+        every { releaseRepository.saveAndFlush(draft) } answers {
+            draft.lockVersion = 8
+            draft
+        }
 
         val published = service.publish(draft.id, "admin-1", PublishLegalDocumentRequest(draft.lockVersion))
 
@@ -102,7 +130,14 @@ class LegalDocumentServiceTest {
         assertEquals("admin-1", published.publishedBy)
         assertEquals(LegalDocumentStatus.SUPERSEDED, previous.status)
         assertEquals(LegalDocumentStatus.PUBLISHED, draft.status)
-        assertEquals(setOf(previous.id, draft.id), saved.captured.map { it.id }.toSet())
+        assertEquals(8, published.lockVersion)
+        verifySequence {
+            releaseRepository.findByIdForUpdate(draft.id)
+            contentRepository.findAllByReleaseIdOrderByLocaleAsc(draft.id)
+            releaseRepository.findAllByDocumentTypeForUpdate(LegalDocumentType.USER_AGREEMENT)
+            releaseRepository.saveAndFlush(previous)
+            releaseRepository.saveAndFlush(draft)
+        }
     }
 
     private fun draftRequest(lockVersion: Long) = UpdateLegalDocumentDraftRequest(

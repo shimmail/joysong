@@ -7,6 +7,11 @@ import com.joysong.server.legal.entity.LegalDocumentStatus
 import com.joysong.server.legal.entity.LegalDocumentType
 import com.joysong.server.legal.repository.LegalDocumentContentRepository
 import com.joysong.server.legal.repository.LegalDocumentReleaseRepository
+import com.joysong.server.legal.dto.LegalDocumentLocaleInput
+import com.joysong.server.legal.dto.PublishLegalDocumentRequest
+import com.joysong.server.legal.dto.UpdateLegalDocumentDraftRequest
+import com.joysong.server.legal.service.LegalDocumentHtmlSanitizer
+import com.joysong.server.legal.service.LegalDocumentService
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Tag
@@ -174,6 +179,79 @@ class LegalDocumentMigrationTest {
             contentRepository.findAllByReleaseIdOrderByLocaleAsc("jpa-release").map { it.locale }
         )
     }
+
+    @Test
+    fun `publish switches active release without unique constraint conflict and returns database lock version`() {
+        val previous = releaseRepository.saveAndFlush(legalRelease("published-1", 1, LegalDocumentStatus.PUBLISHED))
+        val draft = releaseRepository.saveAndFlush(legalRelease("draft-2", 2, LegalDocumentStatus.DRAFT))
+        contentRepository.saveAllAndFlush(bilingualContents(draft.id))
+        val requestLockVersion = draft.lockVersion
+        entityManager.clear()
+
+        val published = legalService().publish(draft.id, "admin-2", PublishLegalDocumentRequest(requestLockVersion))
+
+        entityManager.flush()
+        entityManager.clear()
+        val databaseDraft = releaseRepository.findById(draft.id).orElseThrow()
+        val databasePrevious = releaseRepository.findById(previous.id).orElseThrow()
+        assertEquals(LegalDocumentStatus.PUBLISHED, databaseDraft.status)
+        assertEquals(LegalDocumentStatus.SUPERSEDED, databasePrevious.status)
+        assertEquals(databaseDraft.lockVersion, published.lockVersion)
+        assertEquals(1L, published.lockVersion)
+    }
+
+    @Test
+    fun `update draft returns the JPA incremented lock version`() {
+        val draft = releaseRepository.saveAndFlush(legalRelease("draft-update", 1, LegalDocumentStatus.DRAFT))
+        contentRepository.saveAllAndFlush(bilingualContents(draft.id))
+        val requestLockVersion = draft.lockVersion
+        entityManager.clear()
+
+        val updated = legalService().updateDraft(
+            draft.id,
+            "admin-2",
+            UpdateLegalDocumentDraftRequest(
+                requestLockVersion,
+                "Updated",
+                mapOf(
+                    "zh-CN" to LegalDocumentLocaleInput("中文标题", "<p>中文正文</p>"),
+                    "en-US" to LegalDocumentLocaleInput("English title", "<p>English body</p>")
+                )
+            )
+        )
+
+        entityManager.flush()
+        entityManager.clear()
+        val databaseDraft = releaseRepository.findById(draft.id).orElseThrow()
+        assertEquals(databaseDraft.lockVersion, updated.lockVersion)
+        assertEquals(1L, updated.lockVersion)
+    }
+
+    private fun legalService() = LegalDocumentService(
+        releaseRepository,
+        contentRepository,
+        LegalDocumentHtmlSanitizer()
+    )
+
+    private fun legalRelease(id: String, version: Int, status: LegalDocumentStatus) = LegalDocumentReleaseEntity(
+        id = id,
+        documentType = LegalDocumentType.USER_AGREEMENT,
+        version = version,
+        status = status,
+        publishedAt = if (status == LegalDocumentStatus.PUBLISHED) java.time.LocalDateTime.now() else null,
+        publishedBy = if (status == LegalDocumentStatus.PUBLISHED) "admin-1" else null,
+        createdBy = "admin-1",
+        updatedBy = "admin-1"
+    )
+
+    private fun bilingualContents(releaseId: String) = listOf(
+        LegalDocumentContentEntity(
+            "$releaseId-en", releaseId, LegalDocumentLocale.EN_US, "English", "<p>English body</p>", "a".repeat(64)
+        ),
+        LegalDocumentContentEntity(
+            "$releaseId-zh", releaseId, LegalDocumentLocale.ZH_CN, "中文", "<p>中文正文</p>", "b".repeat(64)
+        )
+    )
 
     private fun insertRelease(id: String, type: String, version: Int, status: String) {
         jdbc.update(
