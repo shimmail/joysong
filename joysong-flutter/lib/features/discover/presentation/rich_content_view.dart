@@ -29,53 +29,72 @@ class RichContentView extends StatefulWidget {
 
 final class _RichContentViewState extends State<RichContentView> {
   final List<TapGestureRecognizer> _linkRecognizers = [];
+  late List<_ContentPart> _parts;
+  late List<List<InlineSpan>?> _partSpans;
+  late TextStyle _baseStyle;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _refreshContent();
+  }
+
+  @override
+  void didUpdateWidget(RichContentView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.content != widget.content ||
+        oldWidget.textStyle != widget.textStyle) {
+      _refreshContent();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    _disposeLinkRecognizers();
-    final parts = _contentParts(widget.content);
-    final baseStyle = widget.textStyle ??
-        Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.7) ??
-        const TextStyle(height: 1.7);
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (final part in parts)
-          if (part.imageUrl != null)
+        for (var index = 0; index < _parts.length; index++)
+          if (_parts[index].imageUrl != null)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 10),
               child: GestureDetector(
                 onTap: widget.onImageTap == null
                     ? null
-                    : () => widget.onImageTap!(part.imageUrl!),
+                    : () => widget.onImageTap!(_parts[index].imageUrl!),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(12),
                   child: Image.network(
-                    part.imageUrl!,
+                    _parts[index].imageUrl!,
                     fit: BoxFit.fitWidth,
                     errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                   ),
                 ),
               ),
             )
-          else if (part.markup.trim().isNotEmpty)
+          else if (_parts[index].markup.trim().isNotEmpty)
             SelectableText.rich(
-              TextSpan(
-                style: baseStyle.copyWith(
-                  color: baseStyle.color ??
-                      Theme.of(context).colorScheme.onSurface,
-                ),
-                children: _inlineSpans(
-                  context,
-                  part.markup,
-                  baseStyle,
-                  _recognizerFor,
-                ),
-              ),
+              TextSpan(style: _baseStyle, children: _partSpans[index]),
             ),
       ],
     );
+  }
+
+  void _refreshContent() {
+    _disposeLinkRecognizers();
+    final theme = Theme.of(context);
+    final style = widget.textStyle ??
+        theme.textTheme.bodyLarge?.copyWith(height: 1.7) ??
+        const TextStyle(height: 1.7);
+    _baseStyle = style.copyWith(
+      color: style.color ?? theme.colorScheme.onSurface,
+    );
+    _parts = _contentParts(widget.content);
+    _partSpans = [
+      for (final part in _parts)
+        part.imageUrl == null
+            ? _inlineSpans(context, part.markup, _baseStyle, _recognizerFor)
+            : null,
+    ];
   }
 
   TapGestureRecognizer _recognizerFor(Uri uri) {
@@ -269,6 +288,7 @@ List<InlineSpan> _inlineSpans(
       continue;
     }
     final currentStyle = styleStack.last.style;
+    final uri = tag == 'a' ? _safeHref(value) : null;
     final nextStyle = switch (tag) {
       'b' || 'strong' => currentStyle.copyWith(fontWeight: FontWeight.w700),
       'i' || 'em' => currentStyle.copyWith(fontStyle: FontStyle.italic),
@@ -276,10 +296,11 @@ List<InlineSpan> _inlineSpans(
       's' ||
       'del' =>
         currentStyle.copyWith(decoration: TextDecoration.lineThrough),
-      'a' => currentStyle.copyWith(
+      'a' when uri != null => currentStyle.copyWith(
           color: Theme.of(context).colorScheme.primary,
           decoration: TextDecoration.underline,
         ),
+      'a' => currentStyle,
       'h1' => baseStyle.copyWith(
           fontSize: 25, height: 1.35, fontWeight: FontWeight.w800),
       'h2' => baseStyle.copyWith(
@@ -292,7 +313,6 @@ List<InlineSpan> _inlineSpans(
       if (const ['h1', 'h2', 'h3'].contains(tag) && spans.isNotEmpty) {
         _appendNewline(spans, baseStyle);
       }
-      final uri = tag == 'a' ? _safeHref(value) : null;
       styleStack.add(
         _InlineStyleFrame(
           tag: tag,
