@@ -139,7 +139,7 @@ class LegalDocumentService(
         return draft.toView(contents)
     }
 
-    @Cacheable(cacheNames = ["legalDocuments"], key = "#type.name() + ':' + #locale.tag")
+    @Cacheable(cacheNames = ["legalDocuments"], key = "@legalDocumentCacheInvalidator.cacheKey(#type, #locale)")
     fun findPublished(type: LegalDocumentType, locale: LegalDocumentLocale): PublicLegalDocumentView? {
         val release = releaseRepository.findFirstByDocumentTypeAndStatus(type, LegalDocumentStatus.PUBLISHED) ?: return null
         val content = contentRepository.findAllByReleaseIdOrderByLocaleAsc(release.id)
