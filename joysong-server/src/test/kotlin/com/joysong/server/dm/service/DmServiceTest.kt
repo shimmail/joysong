@@ -54,6 +54,7 @@ class DmServiceTest {
             conversationRepository.findByParticipantOrderByLastMessageAtDesc("user-1")
         } returns listOf(direct, readableOrder, unauthorizedOrder, cs)
         every { orderConversationService.canRead(readableOrder, "user-1") } returns true
+        every { orderConversationService.canHide(readableOrder, "user-1") } returns true
         every { orderConversationService.canRead(unauthorizedOrder, "user-1") } returns false
         every { messageRepository.existsByConversationIdAndSenderId(any(), any()) } returns false
         every { identityAuthorizationService.hasActiveProfessionalRole(any()) } returns false
@@ -65,6 +66,7 @@ class DmServiceTest {
         assertEquals("order-1", result[1].orderId)
         assertFalse(result[1].firstMessageLimitApplies)
         assertFalse(result[1].waitingForReply)
+        assertTrue(result[1].canHide)
     }
 
     @Test

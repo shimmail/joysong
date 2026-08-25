@@ -1,0 +1,3 @@
+ALTER TABLE notifications
+    MODIFY COLUMN type VARCHAR(64) NOT NULL,
+    MODIFY COLUMN target_type VARCHAR(64) DEFAULT '';

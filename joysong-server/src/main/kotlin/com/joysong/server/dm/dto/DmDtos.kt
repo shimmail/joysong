@@ -18,7 +18,9 @@ data class DmConversationResponse(
     /** 当前是否仍处于首条消息申请阶段：对方是普通用户，且从未在该会话发送消息。 */
     val firstMessageLimitApplies: Boolean = false,
     /** 首条消息申请阶段中，当前用户是否已经发送消息并正在等待对方回复。 */
-    val waitingForReply: Boolean = false
+    val waitingForReply: Boolean = false,
+    /** 当前用户是否可以从自己的消息列表隐藏该会话；不会删除服务端消息。 */
+    val canHide: Boolean = false
 )
 
 data class DmMessageResponse(
@@ -42,7 +44,8 @@ data class CreateDmConversationRequest(
 
 fun DmConversationEntity.toResponse(
     firstMessageLimitApplies: Boolean = false,
-    waitingForReply: Boolean = false
+    waitingForReply: Boolean = false,
+    canHide: Boolean = conversationType == DmConversationEntity.DIRECT
 ): DmConversationResponse {
     return DmConversationResponse(
         id = id,
@@ -57,7 +60,8 @@ fun DmConversationEntity.toResponse(
         createdAt = createdAt.toString(),
         updatedAt = updatedAt.toString(),
         firstMessageLimitApplies = firstMessageLimitApplies,
-        waitingForReply = waitingForReply
+        waitingForReply = waitingForReply,
+        canHide = canHide
     )
 }
 

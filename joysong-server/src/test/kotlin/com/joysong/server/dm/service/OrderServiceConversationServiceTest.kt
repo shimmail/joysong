@@ -10,12 +10,14 @@ import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
+import org.junit.jupiter.params.provider.CsvSource
 import java.math.BigDecimal
 import java.time.LocalDateTime
 import java.util.Optional
@@ -138,6 +140,22 @@ class OrderServiceConversationServiceTest {
 
         service.requireReadAccess(conversation(), "user-1")
         service.requireReadAccess(conversation(), "consultant-1")
+    }
+
+    @ParameterizedTest
+    @CsvSource(
+        "SERVICE_ACTIVE, false",
+        "REFUND_REVIEW, false",
+        "REFUND_PROCESSING, false",
+        "COMPLETED, true",
+        "REFUNDED, true"
+    )
+    fun `only ended service conversations can be hidden`(status: String, expected: Boolean) {
+        every { orderRepository.findById("order-1") } returns Optional.of(order(status = status))
+
+        val actual = service.canHide(conversation(), "user-1")
+
+        if (expected) assertTrue(actual) else assertFalse(actual)
     }
 
     @Test
