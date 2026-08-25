@@ -13,6 +13,7 @@ import com.joysong.server.legal.dto.UpdateLegalDocumentDraftRequest
 import com.joysong.server.legal.service.LegalDocumentHtmlSanitizer
 import com.joysong.server.legal.service.LegalDocumentService
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
@@ -24,11 +25,17 @@ import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.TransactionDefinition
+import org.springframework.transaction.support.TransactionTemplate
 import jakarta.persistence.EntityManager
 import org.testcontainers.containers.MySQLContainer
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 @Tag("mysql-integration")
 @DataJpaTest(
@@ -55,6 +62,9 @@ class LegalDocumentMigrationTest {
 
     @Autowired
     private lateinit var entityManager: EntityManager
+
+    @Autowired
+    private lateinit var transactionManager: PlatformTransactionManager
 
     @Test
     fun `fresh database contains legal release constraints`() {
@@ -227,6 +237,56 @@ class LegalDocumentMigrationTest {
         assertEquals(1L, updated.lockVersion)
     }
 
+    @Test
+    fun `concurrent initial privacy drafts leave exactly one active draft`() {
+        val ready = CountDownLatch(2)
+        val start = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val attempts = (1..2).map { index ->
+                executor.submit<Result<String>> {
+                    val transaction = TransactionTemplate(transactionManager)
+                    ready.countDown()
+                    check(start.await(10, TimeUnit.SECONDS)) { "并发草稿测试未能同步起跑" }
+                    runCatching {
+                        transaction.execute {
+                            legalService().createDraft(LegalDocumentType.PRIVACY_POLICY, "admin-$index").id
+                        } ?: error("草稿事务未返回结果")
+                    }
+                }
+            }
+            assertTrue(ready.await(10, TimeUnit.SECONDS), "并发草稿任务未准备完成")
+            start.countDown()
+            val outcomes = attempts.map { it.get(30, TimeUnit.SECONDS) }
+            val failures = outcomes.mapNotNull(Result<String>::exceptionOrNull)
+
+            assertEquals(1, outcomes.count(Result<String>::isSuccess))
+            assertEquals(1, failures.size)
+            assertTrue(
+                failures.single().hasCause(IllegalStateException::class.java) ||
+                    failures.single().hasCause(DataIntegrityViolationException::class.java),
+                "失败方必须因已有草稿或数据库唯一约束失败"
+            )
+            assertEquals(
+                1L,
+                jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM legal_document_releases WHERE document_type = 'PRIVACY_POLICY' AND status = 'DRAFT'",
+                    Long::class.java
+                )
+            )
+        } finally {
+            start.countDown()
+            executor.shutdownNow()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS), "并发草稿执行器未停止")
+            TransactionTemplate(transactionManager).apply {
+                propagationBehavior = TransactionDefinition.PROPAGATION_REQUIRES_NEW
+            }.executeWithoutResult {
+                jdbc.update("DELETE FROM legal_document_contents WHERE release_id IN (SELECT id FROM legal_document_releases WHERE document_type = 'PRIVACY_POLICY')")
+                jdbc.update("DELETE FROM legal_document_releases WHERE document_type = 'PRIVACY_POLICY'")
+            }
+        }
+    }
+
     private fun legalService() = LegalDocumentService(
         releaseRepository,
         contentRepository,
@@ -252,6 +312,9 @@ class LegalDocumentMigrationTest {
             "$releaseId-zh", releaseId, LegalDocumentLocale.ZH_CN, "中文", "<p>中文正文</p>", "b".repeat(64)
         )
     )
+
+    private fun Throwable.hasCause(type: Class<out Throwable>): Boolean =
+        generateSequence(this) { it.cause }.any(type::isInstance)
 
     private fun insertRelease(id: String, type: String, version: Int, status: String) {
         jdbc.update(
