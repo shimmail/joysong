@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/core/translation/auto_translation_builder.dart';
 import 'package:joysong_flutter/features/booking/domain/booking_models.dart';
 import 'package:joysong_flutter/features/booking/presentation/booking_controller.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
@@ -10,11 +11,13 @@ class BookingPage extends StatefulWidget {
   const BookingPage({
     required this.controller,
     required this.onOrderCreated,
+    this.enableAutoTranslation = false,
     super.key,
   });
 
   final BookingController controller;
   final BookingCompletedCallback onOrderCreated;
+  final bool enableAutoTranslation;
 
   @override
   State<BookingPage> createState() => _BookingPageState();
@@ -150,7 +153,10 @@ class _BookingPageState extends State<BookingPage> {
               ),
             ),
           ),
-        _ProjectCard(project: project),
+        _ProjectCard(
+          project: project,
+          enableAutoTranslation: widget.enableAutoTranslation,
+        ),
         const SizedBox(height: 20),
         _SectionTitle(
           context.localized(
@@ -205,38 +211,20 @@ class _BookingPageState extends State<BookingPage> {
           _SoftPanel(child: Text(context.localized('该项目暂时没有可预约医生', 'No doctors are currently available for this service')))
         else
           DropdownButtonFormField<BookingDoctor>(
-                key: ValueKey(controller.selectedDoctor?.id),
-                initialValue: controller.selectedDoctor,
-                isExpanded: true,
-                borderRadius: BorderRadius.circular(12),
-                menuMaxHeight: 320,
-                dropdownColor: Theme.of(context).colorScheme.surface,
-                decoration: InputDecoration(
-                  prefixIcon: const Icon(Icons.medical_services_outlined),
-                  hintText: context.localized('请选择医生', 'Select a doctor'),
-                ),
-                items: controller.doctors
-                    .map(
-                      (doctor) => DropdownMenuItem(
-                        value: doctor,
-                        child: Row(
-                          children: [
-                            _DoctorAvatar(doctor: doctor, radius: 18),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                '${doctor.name}${doctor.title.isEmpty ? '' : ' · ${doctor.title}'}',
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    )
-                    .toList(),
-                onChanged: controller.isSubmitting
-                    ? null
-                    : (doctor) => controller.selectDoctor(doctor),
+            key: ValueKey(controller.selectedDoctor?.id),
+            initialValue: controller.selectedDoctor,
+            isExpanded: true,
+            borderRadius: BorderRadius.circular(12),
+            menuMaxHeight: 320,
+            dropdownColor: Theme.of(context).colorScheme.surface,
+            decoration: InputDecoration(
+              prefixIcon: const Icon(Icons.medical_services_outlined),
+              hintText: context.localized('请选择医生', 'Select a doctor'),
+            ),
+            items: _doctorItems(controller.doctors),
+            onChanged: controller.isSubmitting
+                ? null
+                : (doctor) => controller.selectDoctor(doctor),
           ),
         const SizedBox(height: 20),
         _SectionTitle(
@@ -286,6 +274,48 @@ class _BookingPageState extends State<BookingPage> {
         ),
       ],
     );
+  }
+
+  List<DropdownMenuItem<BookingDoctor>> _doctorItems(
+    List<BookingDoctor> doctors,
+  ) {
+    final doctorIdCounts = <String, int>{};
+    for (final doctor in doctors) {
+      final doctorId = doctor.id.trim();
+      if (doctorId.isNotEmpty) {
+        doctorIdCounts.update(doctorId, (count) => count + 1, ifAbsent: () => 1);
+      }
+    }
+    return doctors.map((doctor) {
+      final doctorId = doctor.id.trim();
+      final doctorIdentityStable =
+          doctorId.isNotEmpty && doctorIdCounts[doctorId] == 1;
+      return DropdownMenuItem(
+        key: doctorIdentityStable
+            ? ValueKey('booking-doctor:$doctorId')
+            : ObjectKey(doctor),
+        value: doctor,
+        child: Row(
+          children: [
+            _DoctorAvatar(doctor: doctor, radius: 18),
+            const SizedBox(width: 10),
+            Expanded(
+              child: StableAutoTranslationBuilder(
+                enabled: widget.enableAutoTranslation && doctorIdentityStable,
+                contentType: 'doctor',
+                contentId: 'doctor:$doctorId',
+                field: 'title',
+                sourceText: doctor.title,
+                builder: (context, visibleTitle) => Text(
+                  '${doctor.name}${visibleTitle.isEmpty ? '' : ' · $visibleTitle'}',
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }).toList();
   }
 }
 
@@ -449,9 +479,13 @@ class _ScrollingTimePickerState extends State<_ScrollingTimePicker> {
 }
 
 class _ProjectCard extends StatelessWidget {
-  const _ProjectCard({required this.project});
+  const _ProjectCard({
+    required this.project,
+    required this.enableAutoTranslation,
+  });
 
   final InstitutionProject project;
+  final bool enableAutoTranslation;
 
   @override
   Widget build(BuildContext context) {
@@ -483,12 +517,24 @@ class _ProjectCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(project.name,
-                      style: Theme.of(context).textTheme.titleMedium),
+                  StableAutoTranslatedText(
+                    enabled:
+                        enableAutoTranslation && project.id.trim().isNotEmpty,
+                    contentType: 'project',
+                    contentId: 'institution-project:${project.id.trim()}',
+                    field: 'name',
+                    sourceText: project.name,
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
                   if (project.institutionName.isNotEmpty) ...[
                     const SizedBox(height: 4),
-                    Text(
-                      project.institutionName,
+                    StableAutoTranslatedText(
+                      enabled: enableAutoTranslation &&
+                          project.institutionId.trim().isNotEmpty,
+                      contentType: 'institution',
+                      contentId: 'institution:${project.institutionId.trim()}',
+                      field: 'name',
+                      sourceText: project.institutionName,
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],

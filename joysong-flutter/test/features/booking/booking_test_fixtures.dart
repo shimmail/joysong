@@ -45,6 +45,8 @@ class FakeBookingRepository implements BookingRepository {
   CreateOrderCommand? lastCommand;
   Completer<Order>? createCompleter;
   List<BookingConsultant> consultantResults = [sampleConsultant()];
+  InstitutionProject projectResult = sampleInstitutionProject();
+  List<BookingDoctor> doctorResults = [sampleDoctor()];
   String? quoteDoctorId;
   String? quoteInstitutionProjectId;
   Completer<TravelGroundServiceQuote>? quoteCompleter;
@@ -61,11 +63,11 @@ class FakeBookingRepository implements BookingRepository {
     String institutionId,
     String projectId,
   ) async =>
-      sampleInstitutionProject();
+      projectResult;
 
   @override
   Future<List<BookingDoctor>> getDoctors(String institutionProjectId) async =>
-      [sampleDoctor()];
+      doctorResults;
 
   @override
   Future<List<BookingConsultant>> getConsultants(String institutionId) async =>
