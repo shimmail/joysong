@@ -63,7 +63,7 @@ const menuGroups: MenuGroup[] = [
       { key: '/projects', icon: <MedicineBoxOutlined />, label: '项目管理' },
       { key: '/project-requests', icon: <SafetyCertificateOutlined />, label: '项目申请审核' },
       { key: '/institution-projects', icon: <ShoppingCartOutlined />, label: '机构项目管理' },
-      { key: '/project-collaboration', icon: <LinkOutlined />, label: '项目协作与审核' },
+      { key: '/project-collaboration', icon: <LinkOutlined />, label: '项目协作' },
       { key: '/orders', icon: <FileTextOutlined />, label: '订单管理' },
     ],
   },

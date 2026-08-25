@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
@@ -23,7 +23,7 @@ const adminContext: ManagementContext = {
 };
 
 const record = {
-  id: 'ip-1', institutionId: 'institution-1', projectId: 'project-1', projectName: '公共项目', baseProjectName: '公共项目',
+  id: 'ip-1', version: 7, currency: 'USD', institutionId: 'institution-1', projectId: 'project-1', projectName: '公共项目', baseProjectName: '公共项目',
   effectiveName: '机构项目', effectiveCategory: '注射', effectiveDescription: '', effectiveRating: 5, effectiveReviewCount: 0,
   effectiveTags: '', effectiveSlogan: '', price: 4999, coverImage: '', images: '', effectiveCoverImage: '', effectiveImages: '',
   salesCount: 0, isActive: true,
@@ -56,7 +56,7 @@ afterEach(cleanup);
 function renderPage() { return render(<MemoryRouter><InstitutionProjectsPage /></MemoryRouter>); }
 
 describe('InstitutionProjectsPage doctor prices', () => {
-  it('loads persisted doctor prices, previews the policy fee, and saves doctor bindings without doctorIds', async () => {
+  it('loads persisted doctor prices, previews the policy fee, and sends the exact CAS update body', async () => {
     const user = userEvent.setup();
     renderPage();
     expect(await screen.findByText(/医生 A.*旅游地接服务费 USD 1599\.60/)).toBeInTheDocument();
@@ -72,10 +72,126 @@ describe('InstitutionProjectsPage doctor prices', () => {
     await user.type(priceInputs[0], '4999');
     await user.click(screen.getByRole('button', { name: /保\s*存/ }));
 
-    await waitFor(() => expect(api.put).toHaveBeenCalledWith('/admin/institution-projects/ip-1', expect.objectContaining({
+    await waitFor(() => expect(api.put).toHaveBeenCalledWith('/admin/institution-projects/ip-1', {
+      baseVersion: 7,
+      name: null,
+      category: null,
+      description: null,
+      rating: null,
+      reviewCount: null,
+      tags: null,
+      slogan: null,
+      detailContent: null,
+      price: 4999,
+      originalPrice: null,
+      currency: 'USD',
+      coverImage: '',
+      images: '',
+      salesCount: 0,
+      isActive: true,
       doctorBindings: [{ doctorId: 'doctor-a', price: 4999 }, { doctorId: 'doctor-b', price: 4299 }],
-    })));
-    expect(vi.mocked(api.put).mock.calls[0][1]).not.toHaveProperty('doctorIds');
+    }));
+    expect(Object.keys(vi.mocked(api.put).mock.calls[0][1] as object).sort()).toEqual([
+      'baseVersion', 'category', 'coverImage', 'currency', 'description', 'detailContent',
+      'doctorBindings', 'images', 'isActive', 'name', 'originalPrice', 'price', 'rating',
+      'reviewCount', 'salesCount', 'slogan', 'tags',
+    ]);
+  }, 10_000);
+
+  it('keeps a stale draft and base version while refresh only updates the side-by-side latest values', async () => {
+    const latestRecord = { ...record, version: 8, name: '服务端最新名称', effectiveName: '服务端最新名称', price: 5399 };
+    const refreshedRecord = { ...latestRecord, version: 9, name: '再次更新的名称', effectiveName: '再次更新的名称', price: 5599 };
+    let projectReadCount = 0;
+    vi.mocked(api.get).mockImplementation(async (url) => {
+      const data = url === '/admin/institution-projects'
+        ? [[record], [latestRecord], [refreshedRecord]][Math.min(projectReadCount++, 2)]
+        : url === '/admin/institutions' ? [{ id: 'institution-1', name: '机构 A' }]
+          : url === '/admin/projects' ? [{ id: 'project-1', name: '公共项目' }]
+            : url === '/admin/doctors' ? record.doctors
+              : url === '/admin/order-split-policy' ? { platformRate: 40 } : [];
+      return { data: { code: 200, message: 'OK', data } };
+    });
+    vi.mocked(api.put).mockRejectedValueOnce({
+      isAxiosError: true,
+      response: { data: { code: 409, errorCode: 'INSTITUTION_PROJECT_VERSION_STALE', message: '本地化消息不得作为分支依据' } },
+    });
+
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByTitle('编辑'));
+    const name = screen.getByRole('textbox', { name: /独立名称/ });
+    await user.type(name, '我的陈旧草稿');
+    await user.click(screen.getByRole('button', { name: /保\s*存/ }));
+
+    expect(await screen.findByText('编辑基线版本：7')).toBeInTheDocument();
+    expect(screen.getByText('最新版本：8')).toBeInTheDocument();
+    expect(name).toHaveValue('我的陈旧草稿');
+    const comparison = screen.getByRole('table', { name: '版本冲突对比' });
+    expect(within(comparison).getByText('我的陈旧草稿')).toBeInTheDocument();
+    expect(within(comparison).getByText('服务端最新名称')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /保\s*存/ })).toBeDisabled();
+    expect(api.put).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(api.put).mock.calls[0][1]).toEqual(expect.objectContaining({ baseVersion: 7 }));
+
+    await user.click(screen.getByRole('button', { name: '刷新最新版本' }));
+    await waitFor(() => expect(screen.getByText('最新版本：9')).toBeInTheDocument());
+    expect(screen.getByText('编辑基线版本：7')).toBeInTheDocument();
+    expect(name).toHaveValue('我的陈旧草稿');
+    expect(within(screen.getByRole('table', { name: '版本冲突对比' })).getByText('再次更新的名称')).toBeInTheDocument();
+    expect(api.put).toHaveBeenCalledTimes(1);
+  }, 10_000);
+
+  it('only binds the latest version after explicit rebase resets the form and the user reapplies edits', async () => {
+    const latestRecord = {
+      ...record,
+      version: 8,
+      name: '服务端最新名称',
+      effectiveName: '服务端最新名称',
+      price: 5399,
+      doctors: [{ ...record.doctors[0], price: 4599 }, record.doctors[1]],
+    };
+    let projectReadCount = 0;
+    vi.mocked(api.get).mockImplementation(async (url) => {
+      const data = url === '/admin/institution-projects'
+        ? [projectReadCount++ === 0 ? record : latestRecord]
+        : url === '/admin/institutions' ? [{ id: 'institution-1', name: '机构 A' }]
+          : url === '/admin/projects' ? [{ id: 'project-1', name: '公共项目' }]
+            : url === '/admin/doctors' ? record.doctors
+              : url === '/admin/order-split-policy' ? { platformRate: 40 } : [];
+      return { data: { code: 200, message: 'OK', data } };
+    });
+    vi.mocked(api.put)
+      .mockRejectedValueOnce({
+        isAxiosError: true,
+        response: { data: { code: 409, errorCode: 'INSTITUTION_PROJECT_VERSION_STALE', message: '任意本地化消息' } },
+      })
+      .mockResolvedValueOnce({ data: { code: 200, message: 'OK', data: null } });
+
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByTitle('编辑'));
+    const name = screen.getByRole('textbox', { name: /独立名称/ });
+    await user.type(name, '不应自动重放的草稿');
+    await user.click(screen.getByRole('button', { name: /保\s*存/ }));
+    expect(await screen.findByText('最新版本：8')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '基于最新版本重新编辑' }));
+    expect(api.put).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('编辑基线版本：7')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('textbox', { name: /独立名称/ })).toHaveValue('服务端最新名称'));
+    const rebasedName = screen.getByRole('textbox', { name: /独立名称/ });
+    expect(screen.getByRole('spinbutton', { name: '价格' })).toHaveValue('5399');
+    expect((screen.getAllByRole('spinbutton', { name: '医生项目价格（USD）' }))[0]).toHaveValue('4599.00');
+    expect(screen.getByRole('button', { name: /保\s*存/ })).toBeEnabled();
+
+    await user.clear(rebasedName);
+    await user.type(rebasedName, '重新应用后的名称');
+    await user.click(screen.getByRole('button', { name: /保\s*存/ }));
+    await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(api.put).mock.calls[1]).toEqual([
+      '/admin/institution-projects/ip-1',
+      expect.objectContaining({ baseVersion: 8, name: '重新应用后的名称', price: 5399 }),
+    ]);
   }, 10_000);
 
   it.each([

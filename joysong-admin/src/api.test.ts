@@ -108,7 +108,7 @@ describe('professional role default routes', () => {
     render(createElement(App));
 
     expect(await screen.findByText('医生项目协作页面')).toBeInTheDocument();
-    expect(screen.getByText('项目协作与审核')).toBeInTheDocument();
+    expect(screen.getByText('项目协作')).toBeInTheDocument();
   });
 });
 
