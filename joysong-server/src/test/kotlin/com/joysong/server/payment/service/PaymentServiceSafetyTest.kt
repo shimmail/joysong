@@ -23,7 +23,8 @@ class PaymentServiceSafetyTest {
     private fun disabledService() = PaymentService(
         paymentRepository = mockk<PaymentRepository>(),
         orderRepository = mockk<OrderRepository>(),
-        orderStatusLogService = mockk<OrderStatusLogService>()
+        orderStatusLogService = mockk<OrderStatusLogService>(),
+        paymentPersistenceService = mockk<PaymentPersistenceService>()
     )
 
     @Test
@@ -58,7 +59,7 @@ class PaymentServiceSafetyTest {
                 status = "SERVICE_ACTIVE"
             )
         )
-        val service = PaymentService(payments, orders, mockk())
+        val service = PaymentService(payments, orders, mockk(), paymentPersistenceService = mockk())
 
         val error = assertThrows(IllegalArgumentException::class.java) {
             service.getLatestPayment("order-1", "user-1", PaymentType.BALANCE)
@@ -77,7 +78,8 @@ class PaymentServiceSafetyTest {
             paymentRepository = payments,
             orderRepository = mockk(relaxed = true),
             orderStatusLogService = mockk(relaxed = true),
-            paymentGatewayRegistry = PaymentGatewayRegistry(emptyList())
+            paymentGatewayRegistry = PaymentGatewayRegistry(emptyList()),
+            paymentPersistenceService = mockk()
         )
 
         val error = assertThrows(PaymentProviderException::class.java) {

@@ -40,7 +40,9 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
   @override
   void initState() {
     super.initState();
-    widget.controller.load();
+    if (widget.controller.order == null) {
+      widget.controller.load();
+    }
   }
 
   Future<void> _run(

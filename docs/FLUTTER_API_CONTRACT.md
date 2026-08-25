@@ -244,6 +244,22 @@ Flutter 不能依据本地缓存角色自行授权。每次进入专业管理中
 | 客服 | `/cs/conversations`、`/cs/conversations/{id}/messages`、`/read` |
 | 翻译 | `POST /translations` |
 
+### 6.1 系统业务消息
+
+`GET /notifications` 返回当前用户的通知；每项固定包含 `id`、`userId`、`type`、`title`、`content`、`targetType`、`targetId`、`isRead`、`createdAt`。订单、身份和机构关系的下列业务类型均属于系统消息（而非活动消息或聊天）：
+
+```text
+ORDER_CREATED, ORDER_SERVICE_ACTIVATED, ORDER_COMPLETED, ORDER_REFUND_REQUESTED,
+ORDER_REFUND_APPROVED, ORDER_REFUND_REJECTED, ORDER_REFUNDED, ORDER_CANCELLED,
+PROFESSIONAL_APPLICATION_SUBMITTED, PROFESSIONAL_APPLICATION_WITHDRAWN,
+PROFESSIONAL_APPLICATION_APPROVED, PROFESSIONAL_APPLICATION_REJECTED,
+IDENTITY_APPLICATION_APPROVED, IDENTITY_APPLICATION_REJECTED
+```
+
+`targetType` 是导航契约，`targetId` 是对应订单、申请或关系请求 ID：`order` 和 `order_refund` 打开订单详情；`order_service_conversation` 打开订单服务会话；`identity_management` 打开身份管理；`identity_application` 聚焦身份申请历史；`professional_doctor_review`、`professional_consultant_review` 打开机构法人的对应审核队列；`professional_doctor_application`、`professional_consultant_application`、`professional_doctor_relationships`、`professional_consultant_relationships` 打开申请人自己的对应关系历史。目标已失效时，Flutter 必须回退到对应列表或管理页，且不得崩溃。
+
+点击单项时先调用 `PUT /notifications/{id}/read`，再按目标导航；打开系统消息页本身不得调用 `/read-all`。`PUT /notifications/read-all` 仅用于用户主动执行的全部已读操作。服务端只在真实业务状态转换后创建消息：支付、退款或审核重放不得重复创建消息；消息写入失败不得重放支付渠道或退款完成副作用。
+
 `POST /translations` 请求：
 
 ```json

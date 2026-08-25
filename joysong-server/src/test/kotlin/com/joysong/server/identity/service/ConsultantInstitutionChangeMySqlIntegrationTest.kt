@@ -1,6 +1,7 @@
 package com.joysong.server.identity.service
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.joysong.server.notification.service.BusinessNotificationService
 import com.joysong.server.wallet.repository.WalletRepository
 import io.mockk.mockk
 import org.flywaydb.core.Flyway
@@ -1078,14 +1079,16 @@ class ConsultantInstitutionChangeMySqlIntegrationTest {
             DoctorInstitutionChangeRequestService(
                 context.getBean(DoctorInstitutionChangeRequestStore::class.java),
                 context.getBean(DoctorInstitutionRelationshipOperations::class.java),
-                context.getBean(InstitutionRelationshipReviewAuthorityOperations::class.java)
+                context.getBean(InstitutionRelationshipReviewAuthorityOperations::class.java),
+                mockk<BusinessNotificationService>(relaxed = true)
             )
         })
         context.registerBean(ConsultantInstitutionChangeRequestService::class.java, Supplier {
             ConsultantInstitutionChangeRequestService(
                 context.getBean(ConsultantInstitutionChangeRequestStore::class.java),
                 context.getBean(ConsultantInstitutionRelationshipOperations::class.java),
-                context.getBean(InstitutionRelationshipReviewAuthorityOperations::class.java)
+                context.getBean(InstitutionRelationshipReviewAuthorityOperations::class.java),
+                mockk<BusinessNotificationService>(relaxed = true)
             )
         })
         context.registerBean(AdminIdentityService::class.java, Supplier {
@@ -1094,7 +1097,8 @@ class ConsultantInstitutionChangeMySqlIntegrationTest {
                 ObjectMapper(),
                 context.getBean(DoctorInstitutionRelationshipOperations::class.java),
                 mockk<WalletRepository>(relaxed = true),
-                context.getBean(ConsultantInstitutionRelationshipOperations::class.java)
+                context.getBean(ConsultantInstitutionRelationshipOperations::class.java),
+                mockk<BusinessNotificationService>(relaxed = true)
             )
         })
         context.refresh()

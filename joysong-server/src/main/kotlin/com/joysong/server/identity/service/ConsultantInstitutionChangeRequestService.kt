@@ -1,5 +1,7 @@
 package com.joysong.server.identity.service
 
+import com.joysong.server.notification.service.BusinessNotificationService
+import com.joysong.server.notification.service.ProfessionalApplicantRole
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
@@ -42,7 +44,8 @@ interface ConsultantInstitutionChangeRequestStore {
 class ConsultantInstitutionChangeRequestService(
     private val store: ConsultantInstitutionChangeRequestStore,
     private val relationships: ConsultantInstitutionRelationshipOperations,
-    private val reviewAuthority: InstitutionRelationshipReviewAuthorityOperations
+    private val reviewAuthority: InstitutionRelationshipReviewAuthorityOperations,
+    private val businessNotifications: BusinessNotificationService
 ) {
     @Transactional
     fun submit(
@@ -72,6 +75,12 @@ class ConsultantInstitutionChangeRequestService(
         } catch (error: DuplicateKeyException) {
             if (error.isPendingRequestConflict()) pendingConflict()
             throw error
+        }.also { request ->
+            businessNotifications.professionalApplicationSubmitted(
+                request.institutionId,
+                ProfessionalApplicantRole.CONSULTANT,
+                request.id
+            )
         }
     }
 
@@ -111,7 +120,13 @@ class ConsultantInstitutionChangeRequestService(
         return request.copy(
             status = ConsultantInstitutionRequestStatus.WITHDRAWN,
             updatedAt = LocalDateTime.now()
-        )
+        ).also {
+            businessNotifications.professionalApplicationWithdrawn(
+                request.institutionId,
+                ProfessionalApplicantRole.CONSULTANT,
+                request.id
+            )
+        }
     }
 
     @Transactional
@@ -161,7 +176,21 @@ class ConsultantInstitutionChangeRequestService(
             reviewedBy = actor.userId,
             reviewedAt = now,
             updatedAt = now
-        )
+        ).also {
+            when (decision) {
+                MembershipRequestDecision.APPROVED -> businessNotifications.professionalApplicationApproved(
+                    request.consultantId,
+                    ProfessionalApplicantRole.CONSULTANT,
+                    request.id
+                )
+                MembershipRequestDecision.REJECTED -> businessNotifications.professionalApplicationRejected(
+                    request.consultantId,
+                    ProfessionalApplicantRole.CONSULTANT,
+                    request.id,
+                    normalizedReviewNote
+                )
+            }
+        }
     }
 
     private fun requireConsultant(actor: ManagementActor) {

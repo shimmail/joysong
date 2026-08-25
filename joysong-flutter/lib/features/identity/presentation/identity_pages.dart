@@ -20,11 +20,13 @@ class IdentityCenterPage extends StatefulWidget {
   const IdentityCenterPage({
     required this.repository,
     this.filePicker,
+    this.initialApplicationId,
     super.key,
   });
 
   final IdentityRepository repository;
   final IdentityFilePicker? filePicker;
+  final String? initialApplicationId;
 
   @override
   State<IdentityCenterPage> createState() => _IdentityCenterPageState();
@@ -82,6 +84,7 @@ class _IdentityCenterPageState extends State<IdentityCenterPage> {
             IdentityLoadStatus.ready => _IdentityOverviewView(
                 controller: _controller,
                 filePicker: widget.filePicker ?? _pickIdentityFile,
+                initialApplicationId: widget.initialApplicationId,
               ),
           };
         },
@@ -94,10 +97,12 @@ class _IdentityOverviewView extends StatefulWidget {
   const _IdentityOverviewView({
     required this.controller,
     required this.filePicker,
+    this.initialApplicationId,
   });
 
   final IdentityController controller;
   final IdentityFilePicker? filePicker;
+  final String? initialApplicationId;
 
   @override
   State<_IdentityOverviewView> createState() => _IdentityOverviewViewState();
@@ -105,12 +110,22 @@ class _IdentityOverviewView extends StatefulWidget {
 
 class _IdentityOverviewViewState extends State<_IdentityOverviewView> {
   var _applicationsExpanded = false;
+  var _hasUserToggledApplications = false;
 
   @override
   Widget build(BuildContext context) {
     final overview = widget.controller.overview;
     final applications = overview.applications;
-    final historyToggleText = _applicationsExpanded
+    final focusedApplicationId = widget.initialApplicationId?.trim();
+    final isFocusedApplicationPresent = focusedApplicationId != null &&
+        focusedApplicationId.isNotEmpty &&
+        applications.any(
+          (application) => application.id == focusedApplicationId,
+        );
+    final applicationsExpanded = _hasUserToggledApplications
+        ? _applicationsExpanded
+        : isFocusedApplicationPresent;
+    final historyToggleText = applicationsExpanded
         ? context.localized('收起申请记录', 'Hide application history')
         : context.localized(
             '展开全部申请记录（${applications.length}）',
@@ -178,7 +193,7 @@ class _IdentityOverviewViewState extends State<_IdentityOverviewView> {
                     key: const Key('identity-application-history-toggle'),
                     container: true,
                     button: true,
-                    expanded: _applicationsExpanded,
+                    expanded: applicationsExpanded,
                     label: historyToggleText,
                     child: ListTile(
                       leading: const Icon(Icons.history_rounded),
@@ -187,16 +202,17 @@ class _IdentityOverviewViewState extends State<_IdentityOverviewView> {
                       ),
                       subtitle: Text(historyToggleText),
                       trailing: Icon(
-                        _applicationsExpanded
+                        applicationsExpanded
                             ? Icons.expand_less_rounded
                             : Icons.expand_more_rounded,
                       ),
-                      onTap: () => setState(
-                        () => _applicationsExpanded = !_applicationsExpanded,
-                      ),
+                      onTap: () => setState(() {
+                        _hasUserToggledApplications = true;
+                        _applicationsExpanded = !applicationsExpanded;
+                      }),
                     ),
                   ),
-                  if (_applicationsExpanded) ...[
+                  if (applicationsExpanded) ...[
                     const Divider(height: 1),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),

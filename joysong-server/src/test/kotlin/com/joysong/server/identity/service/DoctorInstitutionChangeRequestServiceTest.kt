@@ -1,5 +1,7 @@
 package com.joysong.server.identity.service
 
+import com.joysong.server.notification.service.BusinessNotificationService
+import com.joysong.server.notification.service.ProfessionalApplicantRole
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -17,7 +19,13 @@ class DoctorInstitutionChangeRequestServiceTest {
     private val store = mockk<DoctorInstitutionChangeRequestStore>()
     private val relationshipService = mockk<DoctorInstitutionRelationshipService>(relaxed = true)
     private val reviewAuthority = mockk<InstitutionRelationshipReviewAuthorityOperations>(relaxed = true)
-    private val service = DoctorInstitutionChangeRequestService(store, relationshipService, reviewAuthority)
+    private val businessNotifications = mockk<BusinessNotificationService>(relaxed = true)
+    private val service = DoctorInstitutionChangeRequestService(
+        store,
+        relationshipService,
+        reviewAuthority,
+        businessNotifications
+    )
 
     init {
         every { store.isActiveInstitution(any()) } returns true
@@ -38,6 +46,13 @@ class DoctorInstitutionChangeRequestServiceTest {
         assertEquals(DoctorInstitutionAction.JOIN, result.action)
         assertEquals(DoctorInstitutionRequestStatus.PENDING, result.status)
         assertEquals("希望加入", result.requestNote)
+        verify(exactly = 1) {
+            businessNotifications.professionalApplicationSubmitted(
+                "institution-1",
+                ProfessionalApplicantRole.DOCTOR,
+                "request-1"
+            )
+        }
     }
 
     @Test
@@ -174,6 +189,9 @@ class DoctorInstitutionChangeRequestServiceTest {
             service.submit(doctorActor(), "institution-1", DoctorInstitutionAction.JOIN, "")
         }
         assertEquals("该机构已有待处理的关系申请", race.message)
+        verify(exactly = 0) {
+            businessNotifications.professionalApplicationSubmitted(any(), any(), any())
+        }
     }
 
     @Test
@@ -245,6 +263,13 @@ class DoctorInstitutionChangeRequestServiceTest {
         verify(exactly = 1) {
             store.changeStatus("request-1", DoctorInstitutionRequestStatus.WITHDRAWN, "doctor-1", "")
         }
+        verify(exactly = 1) {
+            businessNotifications.professionalApplicationWithdrawn(
+                "institution-1",
+                ProfessionalApplicantRole.DOCTOR,
+                "request-1"
+            )
+        }
     }
 
     @Test
@@ -299,6 +324,13 @@ class DoctorInstitutionChangeRequestServiceTest {
         }
         verify(exactly = 1) {
             store.changeStatus("request-1", DoctorInstitutionRequestStatus.APPROVED, "legal-1", "同意")
+        }
+        verify(exactly = 1) {
+            businessNotifications.professionalApplicationApproved(
+                "doctor-1",
+                ProfessionalApplicantRole.DOCTOR,
+                "request-1"
+            )
         }
     }
 
@@ -397,6 +429,65 @@ class DoctorInstitutionChangeRequestServiceTest {
 
         assertEquals("医生身份已失效", error.message)
         verify(exactly = 0) { store.changeStatus(any(), any(), any(), any()) }
+        verify(exactly = 0) { businessNotifications.professionalApplicationRejected(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `rejection notifies the doctor with the trimmed review note only after status change`() {
+        every { store.find("request-1") } returns request()
+        every { store.lock("request-1") } returns request()
+        every { store.changeStatus("request-1", DoctorInstitutionRequestStatus.REJECTED, "legal-1", "暂不通过") } returns true
+
+        service.review(
+            legalActor(setOf("institution-1")),
+            "request-1",
+            MembershipRequestDecision.REJECTED,
+            " 暂不通过 "
+        )
+
+        verify(exactly = 1) {
+            businessNotifications.professionalApplicationRejected(
+                "doctor-1",
+                ProfessionalApplicantRole.DOCTOR,
+                "request-1",
+                "暂不通过"
+            )
+        }
+    }
+
+    @Test
+    fun `failed doctor status transition emits no professional notification`() {
+        every { store.find("request-1") } returns request()
+        every { store.lock("request-1") } returns request()
+        every { store.changeStatus("request-1", DoctorInstitutionRequestStatus.WITHDRAWN, "doctor-1", "") } returns false
+
+        assertThrows<DoctorInstitutionRequestConflictException> {
+            service.withdraw(doctorActor(), "request-1")
+        }
+
+        verify(exactly = 0) {
+            businessNotifications.professionalApplicationWithdrawn(any(), any(), any())
+        }
+    }
+
+    @Test
+    fun `failed doctor review transition emits no professional notification`() {
+        every { store.find("request-1") } returns request()
+        every { store.lock("request-1") } returns request()
+        every { store.changeStatus("request-1", DoctorInstitutionRequestStatus.REJECTED, "legal-1", "暂不通过") } returns false
+
+        assertThrows<DoctorInstitutionRequestConflictException> {
+            service.review(
+                legalActor(setOf("institution-1")),
+                "request-1",
+                MembershipRequestDecision.REJECTED,
+                "暂不通过"
+            )
+        }
+
+        verify(exactly = 0) {
+            businessNotifications.professionalApplicationRejected(any(), any(), any(), any())
+        }
     }
 
     @Test

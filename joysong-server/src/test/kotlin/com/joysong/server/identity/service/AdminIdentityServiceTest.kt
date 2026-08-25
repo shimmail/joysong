@@ -1,12 +1,14 @@
 package com.joysong.server.identity.service
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.joysong.server.notification.service.BusinessNotificationService
 import com.joysong.server.wallet.repository.WalletRepository
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -27,8 +29,74 @@ import java.time.LocalDateTime
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.reflect.full.primaryConstructor
 
 class AdminIdentityServiceTest {
+
+    @Test
+    fun `business notification dependency is required and non nullable for identity workflows`() {
+        listOf(
+            AdminIdentityService::class,
+            DoctorInstitutionChangeRequestService::class,
+            ConsultantInstitutionChangeRequestService::class
+        ).forEach { serviceType ->
+            val notificationParameter = requireNotNull(serviceType.primaryConstructor).parameters.last()
+
+            assertEquals(BusinessNotificationService::class, notificationParameter.type.classifier)
+            assertFalse(notificationParameter.type.isMarkedNullable)
+            assertFalse(notificationParameter.isOptional)
+        }
+    }
+
+    @Test
+    fun `identity approval and rejection notify only the applicant with their target contracts`() {
+        val approvedNotifications = mockk<BusinessNotificationService>(relaxed = true)
+        identityReviewService(approvedNotifications).reviewApplication("application-1", "admin-1", "APPROVED", "")
+
+        verify(exactly = 1) {
+            approvedNotifications.identityApplicationApproved("applicant-1", "application-1")
+        }
+        verify(exactly = 0) { approvedNotifications.identityApplicationRejected(any(), any(), any()) }
+
+        val rejectedNotifications = mockk<BusinessNotificationService>(relaxed = true)
+        identityReviewService(rejectedNotifications).reviewApplication(
+            "application-2",
+            "admin-1",
+            "REJECTED",
+            " 材料不完整 "
+        )
+
+        verify(exactly = 1) {
+            rejectedNotifications.identityApplicationRejected("applicant-1", "application-2", "材料不完整")
+        }
+        verify(exactly = 0) { rejectedNotifications.identityApplicationApproved(any(), any()) }
+    }
+
+    @Test
+    fun `failed identity transition emits no notification`() {
+        val notifications = mockk<BusinessNotificationService>(relaxed = true)
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        every {
+            jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg())
+        } answers {
+            listOf(secondArg<RowMapper<Any>>().mapRow(identityReviewResultSet(), 0))
+        }
+        every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 0
+        val service = AdminIdentityService(
+            jdbcTemplate,
+            ObjectMapper(),
+            mockk(relaxed = true),
+            mockk(relaxed = true),
+            mockk(relaxed = true),
+            notifications
+        )
+
+        assertThrows(IllegalStateException::class.java) {
+            service.reviewApplication("application-1", "admin-1", "REJECTED", "材料不完整")
+        }
+
+        verify(exactly = 0) { notifications.identityApplicationRejected(any(), any(), any()) }
+    }
 
     @Test
     fun `admin doctor practice revoke uses shared relationship cleanup`() {
@@ -46,6 +114,7 @@ class AdminIdentityServiceTest {
             jdbcTemplate,
             ObjectMapper(),
             relationshipService,
+            mockk(relaxed = true),
             mockk(relaxed = true),
             mockk(relaxed = true)
         )
@@ -69,6 +138,7 @@ class AdminIdentityServiceTest {
             jdbcTemplate,
             ObjectMapper(),
             relationshipService,
+            mockk(relaxed = true),
             mockk(relaxed = true),
             mockk(relaxed = true)
         )
@@ -98,6 +168,7 @@ class AdminIdentityServiceTest {
             jdbcTemplate,
             ObjectMapper(),
             relationshipService,
+            mockk(relaxed = true),
             mockk(relaxed = true),
             mockk(relaxed = true)
         )
@@ -143,6 +214,7 @@ class AdminIdentityServiceTest {
             ObjectMapper(),
             relationshipService,
             mockk(relaxed = true),
+            mockk(relaxed = true),
             mockk(relaxed = true)
         )
 
@@ -176,6 +248,7 @@ class AdminIdentityServiceTest {
             ObjectMapper(),
             relationshipService,
             mockk(relaxed = true),
+            mockk(relaxed = true),
             mockk(relaxed = true)
         )
 
@@ -197,6 +270,7 @@ class AdminIdentityServiceTest {
             ObjectMapper(),
             relationshipService,
             mockk(relaxed = true),
+            mockk(relaxed = true),
             mockk(relaxed = true)
         )
 
@@ -216,6 +290,7 @@ class AdminIdentityServiceTest {
         val service = AdminIdentityService(
             jdbcTemplate,
             ObjectMapper(),
+            mockk(relaxed = true),
             mockk(relaxed = true),
             mockk(relaxed = true),
             mockk(relaxed = true)
@@ -296,6 +371,7 @@ class AdminIdentityServiceTest {
             ObjectMapper(),
             mockk(relaxed = true),
             mockk(relaxed = true),
+            mockk(relaxed = true),
             mockk(relaxed = true)
         )
 
@@ -336,7 +412,8 @@ class AdminIdentityServiceTest {
             ObjectMapper(),
             mockk(relaxed = true),
             mockk(relaxed = true),
-            consultantRelationships
+            consultantRelationships,
+            mockk(relaxed = true)
         )
 
         assertThrows(ConsultantInstitutionRequestConflictException::class.java) {
@@ -365,7 +442,8 @@ class AdminIdentityServiceTest {
             ObjectMapper(),
             mockk(relaxed = true),
             mockk(relaxed = true),
-            consultantRelationships
+            consultantRelationships,
+            mockk(relaxed = true)
         )
 
         assertThrows(ConsultantInstitutionRequestConflictException::class.java) {
@@ -622,7 +700,8 @@ class AdminIdentityServiceTest {
                 ObjectMapper(),
                 mockk<DoctorInstitutionRelationshipService>(relaxed = true),
                 walletRepository,
-                consultantRelationships
+                consultantRelationships,
+                mockk(relaxed = true)
             ),
             jdbcTemplate = jdbcTemplate,
             upserts = upserts,
@@ -636,6 +715,33 @@ class AdminIdentityServiceTest {
             consultantRelationships = consultantRelationships
         )
     }
+
+    private fun identityReviewService(notifications: BusinessNotificationService): AdminIdentityService {
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        every {
+            jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg())
+        } answers {
+            listOf(secondArg<RowMapper<Any>>().mapRow(identityReviewResultSet(), 0))
+        }
+        every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 1
+        return AdminIdentityService(
+            jdbcTemplate,
+            ObjectMapper(),
+            mockk(relaxed = true),
+            mockk(relaxed = true),
+            mockk(relaxed = true),
+            notifications
+        )
+    }
+
+    private fun identityReviewResultSet() = resultSet(
+        strings = mapOf(
+            "user_id" to "applicant-1",
+            "role_code" to "CONSULTANT",
+            "status" to "PENDING",
+            "application_data" to "{}"
+        )
+    )
 
     private fun bindingView() = ConsultantBindingAdminView(
         userId = "user-1",

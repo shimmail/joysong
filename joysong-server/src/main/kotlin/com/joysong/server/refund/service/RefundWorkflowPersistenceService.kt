@@ -13,8 +13,11 @@ import com.joysong.server.payment.repository.PaymentRepository
 import com.joysong.server.refund.domain.RefundReasonCode
 import com.joysong.server.refund.entity.RefundEntity
 import com.joysong.server.refund.repository.RefundRepository
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionSynchronization
+import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.math.BigDecimal
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -41,9 +44,11 @@ class RefundWorkflowPersistenceService(
     private val refundRepository: RefundRepository,
     private val orderRepository: OrderRepository,
     private val orderStatusLogService: OrderStatusLogService,
-    private val paymentRepository: PaymentRepository
+    private val paymentRepository: PaymentRepository,
+    private val businessNotificationDispatcher: RefundBusinessNotificationDispatcher
 ) {
     companion object {
+        private val log = LoggerFactory.getLogger(RefundWorkflowPersistenceService::class.java)
         const val PENDING = "PENDING"
         const val PROCESSING = "REFUND_PROCESSING"
         const val APPROVED = "APPROVED"
@@ -151,6 +156,14 @@ class RefundWorkflowPersistenceService(
                 "申请退款: $reason"
             )
         }
+        notifyAfterCommitSafely("ORDER_REFUND_REQUESTED", orderAfterRequest.id) {
+            businessNotificationDispatcher.orderRefundRequested(
+                orderAfterRequest.id,
+                orderAfterRequest.userId,
+                orderAfterRequest.consultantId,
+                orderAfterRequest.doctorId
+            )
+        }
         return RefundPreparation(refund, orderAfterRequest, automatic)
     }
 
@@ -212,6 +225,14 @@ class RefundWorkflowPersistenceService(
                 "管理员批准旅游地接服务费退款，提交原渠道处理"
             )
         }
+        notifyAfterCommitSafely("ORDER_REFUND_APPROVED", order.id) {
+            businessNotificationDispatcher.orderRefundApproved(
+                order.id,
+                order.userId,
+                order.consultantId,
+                order.doctorId
+            )
+        }
         return RefundApprovalPreparation(processing, executeProvider = true)
     }
 
@@ -267,6 +288,14 @@ class RefundWorkflowPersistenceService(
             operatorType,
             remark
         )
+        notifyAfterCommitSafely("ORDER_REFUNDED", completedOrder.id) {
+            businessNotificationDispatcher.orderRefunded(
+                completedOrder.id,
+                completedOrder.userId,
+                completedOrder.consultantId,
+                completedOrder.doctorId
+            )
+        }
         return FinalizedRefund(completedRefund, completedOrder)
     }
 
@@ -312,7 +341,38 @@ class RefundWorkflowPersistenceService(
             "ADMIN",
             "管理员拒绝退款"
         )
+        notifyAfterCommitSafely("ORDER_REFUND_REJECTED", restored.id) {
+            businessNotificationDispatcher.orderRefundRejected(
+                restored.id,
+                restored.userId,
+                restored.consultantId,
+                restored.doctorId,
+                rejectReason
+            )
+        }
         return FinalizedRefund(rejected, restored)
+    }
+
+    private fun notifyAfterCommitSafely(eventType: String, orderId: String, notification: () -> Unit) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive() ||
+            !TransactionSynchronizationManager.isActualTransactionActive()
+        ) {
+            notifySafely(eventType, orderId, notification)
+            return
+        }
+        TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
+            override fun afterCommit() {
+                notifySafely(eventType, orderId, notification)
+            }
+        })
+    }
+
+    private fun notifySafely(eventType: String, orderId: String, notification: () -> Unit) {
+        try {
+            notification()
+        } catch (error: Exception) {
+            log.error("退款订单通知发送失败: type={}, orderId={}", eventType, orderId, error)
+        }
     }
 
     private fun validateServiceFeePayment(order: OrderEntity) {

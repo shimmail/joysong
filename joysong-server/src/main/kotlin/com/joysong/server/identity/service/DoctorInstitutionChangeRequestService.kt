@@ -1,5 +1,7 @@
 package com.joysong.server.identity.service
 
+import com.joysong.server.notification.service.BusinessNotificationService
+import com.joysong.server.notification.service.ProfessionalApplicantRole
 import org.springframework.dao.DuplicateKeyException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
@@ -82,7 +84,8 @@ interface DoctorInstitutionChangeRequestStore {
 class DoctorInstitutionChangeRequestService(
     private val store: DoctorInstitutionChangeRequestStore,
     private val relationshipService: DoctorInstitutionRelationshipOperations,
-    private val reviewAuthority: InstitutionRelationshipReviewAuthorityOperations
+    private val reviewAuthority: InstitutionRelationshipReviewAuthorityOperations,
+    private val businessNotifications: BusinessNotificationService
 ) {
     @Transactional
     fun submit(
@@ -114,6 +117,12 @@ class DoctorInstitutionChangeRequestService(
         } catch (error: DuplicateKeyException) {
             if (error.isPendingRequestConflict()) duplicatePending()
             throw error
+        }.also { request ->
+            businessNotifications.professionalApplicationSubmitted(
+                request.institutionId,
+                ProfessionalApplicantRole.DOCTOR,
+                request.id
+            )
         }
     }
 
@@ -146,7 +155,13 @@ class DoctorInstitutionChangeRequestService(
         return request.copy(
             status = DoctorInstitutionRequestStatus.WITHDRAWN,
             updatedAt = LocalDateTime.now()
-        )
+        ).also {
+            businessNotifications.professionalApplicationWithdrawn(
+                request.institutionId,
+                ProfessionalApplicantRole.DOCTOR,
+                request.id
+            )
+        }
     }
 
     @Transactional
@@ -198,7 +213,21 @@ class DoctorInstitutionChangeRequestService(
             reviewedBy = actor.userId,
             reviewedAt = LocalDateTime.now(),
             updatedAt = LocalDateTime.now()
-        )
+        ).also {
+            when (decision) {
+                MembershipRequestDecision.APPROVED -> businessNotifications.professionalApplicationApproved(
+                    request.doctorId,
+                    ProfessionalApplicantRole.DOCTOR,
+                    request.id
+                )
+                MembershipRequestDecision.REJECTED -> businessNotifications.professionalApplicationRejected(
+                    request.doctorId,
+                    ProfessionalApplicantRole.DOCTOR,
+                    request.id,
+                    normalizedReviewNote
+                )
+            }
+        }
     }
 
     private fun requireDoctorActor(actor: ManagementActor): String {
