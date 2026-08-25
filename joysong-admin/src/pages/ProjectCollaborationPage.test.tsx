@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import api, { setAdminToken, type ManagementContext } from '../api';
@@ -227,6 +227,28 @@ describe('ProjectCollaborationPage profile update', () => {
       'images', 'institutionProjectId', 'name', 'notes', 'price', 'requestType', 'salesCount',
       'slogan', 'tags',
     ]);
+  }, 10_000);
+
+  it.each([
+    '<p><br></p>',
+    '  <p>&nbsp; \u00a0<br /></p>  ',
+  ])('normalizes semantically empty rich text %s to an inherited null override', async (emptyMarkup) => {
+    const user = userEvent.setup();
+    setAdminToken('header.payload.signature', doctorContext);
+    mockPageData();
+
+    render(<ProjectCollaborationPage />);
+    await user.click(await screen.findByRole('button', { name: /修改我的资料/ }));
+    const dialog = await screen.findByRole('dialog', { name: '申请修改个人项目资料' });
+    fireEvent.change(within(dialog).getByRole('textbox', { name: '独立详情正文' }), {
+      target: { value: emptyMarkup },
+    });
+    await user.click(within(dialog).getByRole('button', { name: '提交机构审核' }));
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    const payload = vi.mocked(api.post).mock.calls[0][1] as Record<string, unknown>;
+    expect(payload.detailContent).toBeNull();
+    expect(Object.keys(payload)).toHaveLength(15);
   }, 10_000);
 
   it('shows parsed v2 history as applicant-only collaboration with no duplicate reviewer surface', async () => {

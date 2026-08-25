@@ -140,7 +140,7 @@ export default function ProjectCollaborationPage() {
           description: toNullableText(values.description),
           tags: toNullableStringList(values.tags),
           slogan: toNullableText(values.slogan),
-          detailContent: toNullableText(values.detailContent),
+          detailContent: toNullableRichText(values.detailContent),
           price: values.price,
           salesCount: values.salesCount,
           doctorActive: values.doctorActive,
@@ -398,6 +398,18 @@ function toNullableText(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const normalized = value.trim();
   return normalized || null;
+}
+
+function toNullableRichText(value: unknown): string | null {
+  const normalized = toNullableText(value);
+  if (normalized === null) return null;
+  if (/<(?:img|video|audio|iframe|object|embed|svg|canvas)\b/i.test(normalized)) return normalized;
+  const visibleText = normalized
+    .replace(/<br\s*\/?>/gi, '')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&(?:nbsp|#160|#x0*a0);/gi, ' ')
+    .replace(/[\s\u00a0\u200b\ufeff]/g, '');
+  return visibleText ? normalized : null;
 }
 
 function toNullableStringList(value: unknown): string[] | null {
