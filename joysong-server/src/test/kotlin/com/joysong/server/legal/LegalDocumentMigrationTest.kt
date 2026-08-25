@@ -8,9 +8,10 @@ import com.joysong.server.legal.entity.LegalDocumentType
 import com.joysong.server.legal.repository.LegalDocumentContentRepository
 import com.joysong.server.legal.repository.LegalDocumentReleaseRepository
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest
@@ -20,14 +21,11 @@ import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.JdbcTemplate
 import jakarta.persistence.EntityManager
 import org.testcontainers.containers.MySQLContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 
 @Tag("mysql-integration")
-@Testcontainers
 @DataJpaTest(
     properties = [
         "spring.flyway.enabled=true",
@@ -206,7 +204,6 @@ class LegalDocumentMigrationTest {
     }
 
     companion object {
-        @Container
         @JvmField
         val mysql = MySqlLegalContainer("mysql:8.0.39")
             .withDatabaseName("myapp_worktree_legal_documents")
@@ -215,17 +212,27 @@ class LegalDocumentMigrationTest {
         @JvmStatic
         @DynamicPropertySource
         fun registerDataSource(registry: DynamicPropertyRegistry) {
+            validateDatabaseName()
             if (!mysql.isRunning) mysql.start()
-            printAndValidateDatabase()
+            printDatabaseConnection()
             registry.add("spring.datasource.url") { mysql.jdbcUrl }
             registry.add("spring.datasource.username") { mysql.username }
             registry.add("spring.datasource.password") { mysql.password }
             registry.add("spring.datasource.driver-class-name") { "com.mysql.cj.jdbc.Driver" }
         }
 
-        private fun printAndValidateDatabase() {
+        @JvmStatic
+        @AfterAll
+        fun stopContainer() {
+            if (mysql.isRunning) mysql.stop()
+        }
+
+        private fun validateDatabaseName() {
             require(mysql.databaseName == expectedDatabaseName())
             require(mysql.databaseName.startsWith("myapp_worktree_"))
+        }
+
+        private fun printDatabaseConnection() {
             println("Migration database host=${mysql.host}:${mysql.getMappedPort(3306)}, database=${mysql.databaseName}")
         }
 
