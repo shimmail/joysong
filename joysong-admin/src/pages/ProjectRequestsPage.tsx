@@ -20,7 +20,6 @@ type ConflictState = {
   code: HandledReviewErrorCode;
   message: string;
   requestId: string;
-  source: ReviewItem['source'];
   refreshSucceeded: boolean;
 };
 
@@ -180,7 +179,8 @@ export default function ProjectRequestsPage() {
   const [reviewDecision, setReviewDecision] = useState<Exclude<ReviewDecision, 'APPROVED'>>('REJECTED');
   const [forceTargetId, setForceTargetId] = useState<string | null>(null);
   const [forceOpen, setForceOpen] = useState(false);
-  const [conflict, setConflict] = useState<ConflictState | null>(null);
+  const [creationConflict, setCreationConflict] = useState<ConflictState | null>(null);
+  const [changeConflict, setChangeConflict] = useState<ConflictState | null>(null);
   const [creationReviewLocked, setCreationReviewLocked] = useState(false);
   const [changeReviewLocked, setChangeReviewLocked] = useState(false);
   const inFlightRef = useRef<string | null>(null);
@@ -249,7 +249,8 @@ export default function ProjectRequestsPage() {
 
   const reviewLocked = (item: ReviewItem) => item.source === 'CREATION' ? creationReviewLocked : changeReviewLocked;
   const clearConflictFor = (source: ReviewItem['source']) => {
-    setConflict(current => current?.source === source ? null : current);
+    if (source === 'CREATION') setCreationConflict(null);
+    else setChangeConflict(null);
   };
 
   const beginReview = (item: ReviewItem) => {
@@ -279,44 +280,50 @@ export default function ProjectRequestsPage() {
     }
     const code = errorCode as HandledReviewErrorCode;
     const conflictMessage = getApiErrorMessage(error, '审核数据已变化');
-    setConflict({ code, message: conflictMessage, requestId: item.request.id, source: item.source, refreshSucceeded: false });
+    const nextConflict = { code, message: conflictMessage, requestId: item.request.id, refreshSucceeded: false };
+    if (item.source === 'CREATION') setCreationConflict(nextConflict);
+    else setChangeConflict(nextConflict);
     setDetailKey(null);
     setReviewTarget(null);
-    setForceTargetId(null);
-    setForceOpen(false);
     if (item.source === 'CREATION') {
       setCreationReviewLocked(true);
       const refreshed = await loadCreations();
       if (refreshed) {
         setCreationReviewLocked(false);
-        setConflict({ code, message: conflictMessage, requestId: item.request.id, source: item.source, refreshSucceeded: true });
+        setCreationConflict({ ...nextConflict, refreshSucceeded: true });
       }
       return;
     }
+    setForceTargetId(null);
+    setForceOpen(false);
     setChangeReviewLocked(true);
     const refreshed = await loadChanges();
     if (!refreshed) return;
     setChangeReviewLocked(false);
-    setConflict({ code, message: conflictMessage, requestId: item.request.id, source: item.source, refreshSucceeded: true });
+    setChangeConflict({ ...nextConflict, refreshSucceeded: true });
     if (!isAdminForceEligible(code, isAdmin)) return;
     const latest = refreshed.find(request => request.id === item.request.id);
     if (latest?.kind === 'V2' && latest.reviewable && latest.requestStatus === 'PENDING' && latest.latestRevision) setForceTargetId(latest.id);
   };
 
-  const retryConflictRefresh = async () => {
+  const retryConflictRefresh = async (source: ReviewItem['source']) => {
+    const conflict = source === 'CREATION' ? creationConflict : changeConflict;
     if (!conflict) return;
-    if (conflict.source === 'CREATION') {
+    if (source === 'CREATION') {
       const refreshed = await loadCreations();
       if (!refreshed) return;
       setCreationReviewLocked(false);
-      setConflict(current => current ? { ...current, refreshSucceeded: true } : current);
+      setCreationConflict(null);
       return;
     }
     const refreshed = await loadChanges();
     if (!refreshed) return;
     setChangeReviewLocked(false);
-    setConflict(current => current ? { ...current, refreshSucceeded: true } : current);
-    if (!isAdminForceEligible(conflict.code, isAdmin)) return;
+    if (!isAdminForceEligible(conflict.code, isAdmin)) {
+      setChangeConflict(null);
+      return;
+    }
+    setChangeConflict({ ...conflict, refreshSucceeded: true });
     const latest = refreshed.find(request => request.id === conflict.requestId);
     if (latest?.kind === 'V2' && latest.reviewable && latest.requestStatus === 'PENDING' && latest.latestRevision) setForceTargetId(latest.id);
   };
@@ -460,6 +467,20 @@ export default function ProjectRequestsPage() {
     : detailItem?.source === 'CHANGE' && detailItem.request.kind === 'V1' ? adaptLegacyProjectRequestPreview(detailItem.request)
       : detailItem?.source === 'CHANGE' && detailItem.request.kind === 'V2' ? adaptV2ProposedProjectPreview(detailItem.request) : null;
 
+  const renderConflict = (conflict: ConflictState | null, source: ReviewItem['source']) => conflict && <Alert
+    type={conflict.refreshSucceeded ? 'warning' : 'error'} showIcon title={`审核冲突（${conflict.code}）`}
+    description={conflict.refreshSucceeded
+      ? `${conflict.message}。旧详情已关闭，审核队列已刷新，请核对最新数据。`
+      : `${conflict.message}。旧详情已关闭，但最新审核队列刷新失败；缓存行已锁定，重新加载成功前不能审核。`}
+    action={!conflict.refreshSucceeded
+      ? <Button loading={source === 'CREATION' ? creationLoading : changeLoading} onClick={() => void retryConflictRefresh(source)}>
+        {source === 'CREATION' ? '重新加载创建申请' : '重新加载医生项目变更'}
+      </Button>
+      : source === 'CHANGE' && forceTarget
+        ? <Button onClick={() => { forceForm.resetFields(); setForceOpen(true); }}>查看最新差异并强制通过</Button>
+        : null}
+    style={{ marginBottom: 16 }} />;
+
   return <div>
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 16 }}>
       <h2 style={{ margin: 0 }}>项目申请审核</h2>
@@ -468,16 +489,8 @@ export default function ProjectRequestsPage() {
         { label: '已驳回', value: 'REJECTED' }, { label: '待修改', value: 'CHANGES_REQUESTED' }, { label: '已撤回', value: 'WITHDRAWN' },
       ]} />
     </div>
-    {conflict && <Alert type={conflict.refreshSucceeded ? 'warning' : 'error'} showIcon title={`审核冲突（${conflict.code}）`}
-      description={conflict.refreshSucceeded
-        ? `${conflict.message}。旧详情已关闭，审核队列已刷新，请核对最新数据。`
-        : `${conflict.message}。旧详情已关闭，但最新审核队列刷新失败；缓存行已锁定，重新加载成功前不能审核。`}
-      action={!conflict.refreshSucceeded
-        ? <Button loading={conflict.source === 'CREATION' ? creationLoading : changeLoading} onClick={() => void retryConflictRefresh()}>
-          {conflict.source === 'CREATION' ? '重新加载创建申请' : '重新加载医生项目变更'}
-        </Button>
-        : forceTarget && <Button onClick={() => { forceForm.resetFields(); setForceOpen(true); }}>查看最新差异并强制通过</Button>}
-      style={{ marginBottom: 16 }} />}
+    {renderConflict(creationConflict, 'CREATION')}
+    {renderConflict(changeConflict, 'CHANGE')}
 
     <section aria-labelledby="platform-creation-heading" style={{ marginBottom: 24 }}>
       <h3 id="platform-creation-heading">平台项目创建申请</h3>
