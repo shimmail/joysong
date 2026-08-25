@@ -2,12 +2,26 @@ package com.joysong.server.institution.service
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.node.ObjectNode
+import com.joysong.server.admin.controller.InstitutionProjectController
+import com.joysong.server.admin.entity.dto.DoctorProjectBinding
 import com.joysong.server.config.OrderSplitProperties
+import com.joysong.server.discover.repository.DoctorProjectRepository
+import com.joysong.server.doctor.repository.DoctorInstitutionRepository
+import com.joysong.server.doctor.repository.DoctorRepository
+import com.joysong.server.doctor.service.DoctorInstitutionService
 import com.joysong.server.identity.service.DoctorInstitutionRelationshipService
 import com.joysong.server.identity.service.InstitutionRelationshipReviewAuthorityService
+import com.joysong.server.identity.service.ManagementAccessService
 import com.joysong.server.identity.service.ManagementActor
+import com.joysong.server.institution.repository.InstitutionProjectRepository
+import com.joysong.server.institution.repository.InstitutionRepository
+import com.joysong.server.institution.service.InstitutionProjectDetailResolver
+import com.joysong.server.order.repository.DoctorInstitutionProjectConfigRepository
+import com.joysong.server.order.repository.OrderRepository
 import com.joysong.server.order.service.OrderSplitRatePolicy
 import com.joysong.server.order.service.TravelGroundServicePricing
+import com.joysong.server.project.repository.ProjectRepository
 import com.joysong.server.project.service.InstitutionProjectPayloadPolicy
 import com.joysong.server.support.WorktreeTestDatabase
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -23,8 +37,12 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.context.annotation.Import
 import org.springframework.cache.CacheManager
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
+import org.springframework.security.core.authority.SimpleGrantedAuthority
+import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionTemplate
 import org.testcontainers.containers.MySQLContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
@@ -64,6 +82,279 @@ class DoctorProjectFullEditPersistenceTest {
     @Autowired private lateinit var objectMapper: ObjectMapper
     @Autowired private lateinit var splitProperties: OrderSplitProperties
     @Autowired private lateinit var cacheManager: CacheManager
+    @Autowired private lateinit var institutionProjectRepository: InstitutionProjectRepository
+    @Autowired private lateinit var doctorProjectRepository: DoctorProjectRepository
+    @Autowired private lateinit var doctorRepository: DoctorRepository
+    @Autowired private lateinit var doctorInstitutionRepository: DoctorInstitutionRepository
+    @Autowired private lateinit var projectRepository: ProjectRepository
+    @Autowired private lateinit var institutionRepository: InstitutionRepository
+    @Autowired private lateinit var configRepository: DoctorInstitutionProjectConfigRepository
+    @Autowired private lateinit var orderRepository: OrderRepository
+    @Autowired private lateinit var transactionManager: PlatformTransactionManager
+    @Autowired private lateinit var travelGroundServicePricing: TravelGroundServicePricing
+
+    @Test
+    fun `direct put commits shared doctor config and cache state then stale retry writes nothing`() {
+        seed()
+        jdbc.update("UPDATE doctor_projects SET is_active=0 WHERE doctor_id='doctor-1' AND institution_project_id='ip-1'")
+        val pending = submit("doctor-1", sharedName = null, price = BigDecimal("111.00"), active = false)
+        putCacheSentinels("direct-success")
+
+        val updated = inTransaction {
+            directController().update(
+                adminAuthentication(),
+                "ip-1",
+                directUpdatePayload(
+                    baseVersion = 0,
+                    name = "Direct Updated",
+                    doctorBindings = listOf(
+                        DoctorProjectBinding("doctor-2", price = BigDecimal("200.00")),
+                        DoctorProjectBinding("doctor-1", price = BigDecimal("125.00"))
+                    )
+                )
+            ).data!!
+        }
+
+        assertEquals(1L, updated.version)
+        assertEquals("Direct Updated", text("SELECT name FROM institution_projects WHERE id='ip-1'"))
+        assertEquals(1L, long("SELECT version FROM institution_projects WHERE id='ip-1'"))
+        assertEquals(BigDecimal("125.00"), decimal("SELECT price FROM doctor_projects WHERE doctor_id='doctor-1' AND institution_project_id='ip-1'"))
+        assertEquals(0L, long("SELECT is_active FROM doctor_projects WHERE doctor_id='doctor-1' AND institution_project_id='ip-1'"))
+        assertEquals(BigDecimal("125.00"), decimal("SELECT medical_list_price FROM doctor_institution_project_configs WHERE id='config-1'"))
+        assertEquals(BigDecimal("200.00"), decimal("SELECT price FROM doctor_projects WHERE doctor_id='doctor-2' AND institution_project_id='ip-1'"))
+        assertEquals("PENDING", text("SELECT status FROM doctor_project_change_requests WHERE id='${pending.id}'"))
+        assertCachesCleared("direct-success")
+
+        val before = directState(pending.id)
+        putCacheSentinels("direct-stale")
+        val stale = assertThrows(ProjectChangeContractException::class.java) {
+            inTransaction {
+                directController().update(
+                    adminAuthentication(),
+                    "ip-1",
+                    directUpdatePayload(
+                        baseVersion = 0,
+                        name = "Must Not Apply",
+                        doctorBindings = listOf(
+                            DoctorProjectBinding("doctor-1", price = BigDecimal("999.00")),
+                            DoctorProjectBinding("doctor-2", price = BigDecimal("999.00"))
+                        )
+                    )
+                )
+            }
+        }
+        assertEquals(ProjectChangeErrorCode.INSTITUTION_PROJECT_VERSION_STALE, stale.errorCode)
+        assertEquals(before, directState(pending.id))
+        assertCachesPresent("direct-stale")
+    }
+
+    @Test
+    fun `two direct administrators with one base produce one coherent winner and one typed stale loser`() {
+        seed()
+        val payloads = listOf(
+            directUpdatePayload(
+                0,
+                "Direct One",
+                listOf(
+                    DoctorProjectBinding("doctor-2", price = BigDecimal("210.00")),
+                    DoctorProjectBinding("doctor-1", price = BigDecimal("110.00"))
+                )
+            ),
+            directUpdatePayload(
+                0,
+                "Direct Two",
+                listOf(
+                    DoctorProjectBinding("doctor-1", price = BigDecimal("120.00")),
+                    DoctorProjectBinding("doctor-2", price = BigDecimal("220.00"))
+                )
+            )
+        )
+
+        val results = runConcurrentTransactions(payloads.map { payload ->
+            {
+                requireNotNull(directController().update(adminAuthentication(), "ip-1", payload).data!!.name)
+            }
+        })
+
+        assertEquals(1, results.count { it.isSuccess })
+        assertConflictOnly(
+            results.single { it.isFailure },
+            setOf(ProjectChangeErrorCode.INSTITUTION_PROJECT_VERSION_STALE)
+        )
+        val winner = results.single { it.isSuccess }.getOrThrow()
+        assertEquals(winner, text("SELECT name FROM institution_projects WHERE id='ip-1'"))
+        assertEquals(1L, long("SELECT version FROM institution_projects WHERE id='ip-1'"))
+        val expectedPrices = if (winner == "Direct One") {
+            mapOf("doctor-1" to BigDecimal("110.00"), "doctor-2" to BigDecimal("210.00"))
+        } else {
+            mapOf("doctor-1" to BigDecimal("120.00"), "doctor-2" to BigDecimal("220.00"))
+        }
+        expectedPrices.forEach { (doctorId, price) ->
+            assertEquals(price, decimal("SELECT price FROM doctor_projects WHERE doctor_id='$doctorId' AND institution_project_id='ip-1'"))
+            assertEquals(price, decimal("SELECT medical_list_price FROM doctor_institution_project_configs WHERE doctor_id='$doctorId' AND institution_project_id='ip-1'"))
+        }
+    }
+
+    @Test
+    fun `direct administrator racing shared approval yields one complete shared private config winner`() {
+        seed()
+        val approval = submit("doctor-1", sharedName = "Approval Winner", price = BigDecimal("125.00"), active = false)
+        val directPayload = directUpdatePayload(
+            0,
+            "Direct Winner",
+            listOf(
+                DoctorProjectBinding("doctor-2", price = BigDecimal("200.00")),
+                DoctorProjectBinding("doctor-1", price = BigDecimal("130.00"))
+            )
+        )
+
+        val results = runConcurrentTransactions(
+            listOf(
+                {
+                    directController().update(adminAuthentication(), "ip-1", directPayload)
+                    "DIRECT"
+                },
+                {
+                    service.reviewV2(adminActor(), approval.id, approve())
+                    "APPROVAL"
+                }
+            )
+        )
+
+        assertEquals(1, results.count { it.isSuccess })
+        assertConflictOnly(
+            results.single { it.isFailure },
+            setOf(
+                ProjectChangeErrorCode.APPROVAL_BASE_STALE,
+                ProjectChangeErrorCode.INSTITUTION_PROJECT_VERSION_STALE
+            )
+        )
+        assertEquals(1L, long("SELECT version FROM institution_projects WHERE id='ip-1'"))
+        when (results.single { it.isSuccess }.getOrThrow()) {
+            "DIRECT" -> {
+                assertEquals("Direct Winner", text("SELECT name FROM institution_projects WHERE id='ip-1'"))
+                assertEquals(BigDecimal("130.00"), decimal("SELECT price FROM doctor_projects WHERE doctor_id='doctor-1' AND institution_project_id='ip-1'"))
+                assertEquals(1L, long("SELECT is_active FROM doctor_projects WHERE doctor_id='doctor-1' AND institution_project_id='ip-1'"))
+                assertEquals(BigDecimal("130.00"), decimal("SELECT medical_list_price FROM doctor_institution_project_configs WHERE id='config-1'"))
+                assertEquals("PENDING", text("SELECT status FROM doctor_project_change_requests WHERE id='${approval.id}'"))
+            }
+            "APPROVAL" -> {
+                assertEquals("Approval Winner", text("SELECT name FROM institution_projects WHERE id='ip-1'"))
+                assertEquals(BigDecimal("125.00"), decimal("SELECT price FROM doctor_projects WHERE doctor_id='doctor-1' AND institution_project_id='ip-1'"))
+                assertEquals(0L, long("SELECT is_active FROM doctor_projects WHERE doctor_id='doctor-1' AND institution_project_id='ip-1'"))
+                assertEquals(BigDecimal("125.00"), decimal("SELECT medical_list_price FROM doctor_institution_project_configs WHERE id='config-1'"))
+                assertEquals("APPROVED", text("SELECT status FROM doctor_project_change_requests WHERE id='${approval.id}'"))
+            }
+        }
+        assertEquals(BigDecimal("200.00"), decimal("SELECT price FROM doctor_projects WHERE doctor_id='doctor-2' AND institution_project_id='ip-1'"))
+        assertEquals(BigDecimal("200.00"), decimal("SELECT medical_list_price FROM doctor_institution_project_configs WHERE id='config-2'"))
+    }
+
+    @Test
+    fun `outer failure after direct cache registration rolls back writes and retains all caches`() {
+        seed()
+        val before = directStateForProjectOnly()
+        putCacheSentinels("direct-rollback")
+
+        assertThrows(ForcedDirectRollback::class.java) {
+            inTransaction {
+                directController().update(
+                    adminAuthentication(),
+                    "ip-1",
+                    directUpdatePayload(
+                        0,
+                        "Rollback Direct",
+                        listOf(
+                            DoctorProjectBinding("doctor-1", price = BigDecimal("333.00")),
+                            DoctorProjectBinding("doctor-2", price = BigDecimal("444.00"))
+                        )
+                    )
+                )
+                throw ForcedDirectRollback()
+            }
+        }
+
+        assertEquals(before, directStateForProjectOnly())
+        assertCachesPresent("direct-rollback")
+    }
+
+    @Test
+    fun `direct NOWAIT avoids request gap deadlock with inflight submit prefix`() {
+        seed()
+        val actor = doctorActor("doctor-1")
+        val target = service.listProfileUpdateTargetsV2(actor).single()
+        val raw = target.currentProject.rawOverrides
+        val submitRequest = DoctorProjectChangeV2Request(
+            requestType = "PROFILE_UPDATE",
+            institutionProjectId = "ip-1",
+            baseRevision = target.baseRevision,
+            name = raw.name,
+            category = raw.category,
+            description = raw.description,
+            tags = raw.tags,
+            slogan = raw.slogan,
+            detailContent = raw.detailContent,
+            price = BigDecimal("111.00"),
+            salesCount = target.currentProject.effective.salesCount,
+            doctorActive = false,
+            coverImage = raw.coverImage,
+            images = raw.images,
+            notes = "inflight submit"
+        )
+        val before = directStateForProjectOnly()
+        putCacheSentinels("inflight-submit")
+        val prefixHeld = CountDownLatch(1)
+        val allowSubmit = CountDownLatch(1)
+        val pool = Executors.newFixedThreadPool(2)
+        val submitFuture = pool.submit<Result<VersionedDoctorProjectChangeViewV2>> {
+            runCatching {
+                inTransaction {
+                    lockRealSubmitPrefix("doctor-1")
+                    prefixHeld.countDown()
+                    check(allowSubmit.await(10, TimeUnit.SECONDS)) { "等待 direct NOWAIT 结束超时" }
+                    service.submitV2(actor, submitRequest) as VersionedDoctorProjectChangeViewV2
+                }
+            }
+        }
+        var directFuture: java.util.concurrent.Future<Result<Unit>>? = null
+        try {
+            check(prefixHeld.await(10, TimeUnit.SECONDS)) { "submit 未持有真实锁前缀" }
+            directFuture = pool.submit<Result<Unit>> {
+                runCatching {
+                    inTransaction {
+                        directController().update(
+                            adminAuthentication(),
+                            "ip-1",
+                            directUpdatePayload(
+                                0,
+                                "Must Not Apply",
+                                listOf(
+                                    DoctorProjectBinding("doctor-1", price = BigDecimal("999.00")),
+                                    DoctorProjectBinding("doctor-2", price = BigDecimal("999.00"))
+                                )
+                            )
+                        )
+                        Unit
+                    }
+                }
+            }
+            val directResult = directFuture.get(30, TimeUnit.SECONDS)
+            assertConflictOnly(directResult, setOf(ProjectChangeErrorCode.INSTITUTION_PROJECT_VERSION_STALE))
+            allowSubmit.countDown()
+            val submitted = submitFuture.get(30, TimeUnit.SECONDS).getOrThrow()
+
+            assertEquals(1L, long("SELECT COUNT(*) FROM doctor_project_change_requests"))
+            assertEquals("PENDING", text("SELECT status FROM doctor_project_change_requests WHERE id='${submitted.id}'"))
+            assertEquals(before, directStateForProjectOnly())
+            assertCachesPresent("inflight-submit")
+        } finally {
+            allowSubmit.countDown()
+            directFuture?.cancel(true)
+            submitFuture.cancel(true)
+            pool.shutdownNow()
+            check(pool.awaitTermination(10, TimeUnit.SECONDS)) { "inflight submit 线程池未关闭" }
+        }
+    }
 
     @Test
     fun `v2 shared approval atomically writes shared private compatibility and audit state`() {
@@ -160,35 +451,19 @@ class DoctorProjectFullEditPersistenceTest {
         seed()
         val first = submit("doctor-1", sharedName = "Doctor One", price = BigDecimal("111.00"), active = true)
         val second = submit("doctor-2", sharedName = "Doctor Two", price = BigDecimal("222.00"), active = true)
-        val start = CountDownLatch(1)
-        val pool = Executors.newFixedThreadPool(2)
-        try {
-            val futures = listOf(first, second).map { request ->
-                pool.submit<Result<Unit>> {
-                    start.await(10, TimeUnit.SECONDS)
-                    runCatching {
-                        service.reviewV2(
-                            adminActor(),
-                            request.id,
-                            DoctorProjectReviewV2Command(ProjectChangeDecision.APPROVED, "", false, null)
-                        )
-                        Unit
-                    }
-                }
-            }
-            start.countDown()
-            val results = futures.map { it.get(30, TimeUnit.SECONDS) }
+        val prefixReady = CountDownLatch(2)
+        val results = runConcurrentTransactions(
+            listOf(
+                { reviewAfterLockedPrefix(first.id, "doctor-1", prefixReady); Unit },
+                { reviewAfterLockedPrefix(second.id, "doctor-2", prefixReady); Unit }
+            )
+        )
 
-            assertEquals(1, results.count(Result<Unit>::isSuccess))
-            val failure = results.single { it.isFailure }.exceptionOrNull()
-            assertTrue(failure is ProjectChangeContractException)
-            assertEquals(ProjectChangeErrorCode.APPROVAL_BASE_STALE, (failure as ProjectChangeContractException).errorCode)
-            assertEquals(1L, long("SELECT version FROM institution_projects WHERE id='ip-1'"))
-            assertEquals(1L, long("SELECT COUNT(*) FROM doctor_project_change_requests WHERE status='APPROVED'"))
-            assertEquals(1L, long("SELECT COUNT(*) FROM doctor_project_change_requests WHERE status='PENDING'"))
-        } finally {
-            pool.shutdownNow()
-        }
+        assertEquals(1, results.count { it.isSuccess })
+        assertConflictOnly(results.single { it.isFailure }, setOf(ProjectChangeErrorCode.APPROVAL_BASE_STALE))
+        assertEquals(1L, long("SELECT version FROM institution_projects WHERE id='ip-1'"))
+        assertEquals(1L, long("SELECT COUNT(*) FROM doctor_project_change_requests WHERE status='APPROVED'"))
+        assertEquals(1L, long("SELECT COUNT(*) FROM doctor_project_change_requests WHERE status='PENDING'"))
     }
 
     @Test
@@ -199,12 +474,22 @@ class DoctorProjectFullEditPersistenceTest {
         jdbc.update("UPDATE institution_projects SET version=version+1, name='unrelated shared drift' WHERE id='ip-1'")
         jdbc.update("UPDATE projects SET category='unrelated platform drift' WHERE id='project-1'")
 
-        service.reviewV2(adminActor(), first.id, approve())
-        service.reviewV2(adminActor(), second.id, approve())
+        val prefixReady = CountDownLatch(2)
+        val results = runConcurrentTransactions(
+            listOf(
+                { reviewAfterLockedPrefix(first.id, "doctor-1", prefixReady); Unit },
+                { reviewAfterLockedPrefix(second.id, "doctor-2", prefixReady); Unit }
+            )
+        )
 
+        assertTrue(results.all { it.isSuccess })
         assertEquals(1L, long("SELECT version FROM institution_projects WHERE id='ip-1'"))
         assertEquals(BigDecimal("111.00"), decimal("SELECT price FROM doctor_projects WHERE doctor_id='doctor-1' AND institution_project_id='ip-1'"))
         assertEquals(BigDecimal("222.00"), decimal("SELECT price FROM doctor_projects WHERE doctor_id='doctor-2' AND institution_project_id='ip-1'"))
+        assertEquals(BigDecimal("111.00"), decimal("SELECT medical_list_price FROM doctor_institution_project_configs WHERE id='config-1'"))
+        assertEquals(BigDecimal("222.00"), decimal("SELECT medical_list_price FROM doctor_institution_project_configs WHERE id='config-2'"))
+        assertEquals(BigDecimal("10.00"), decimal("SELECT consultation_fee FROM doctor_institution_project_configs WHERE id='config-1'"))
+        assertEquals(BigDecimal("20.00"), decimal("SELECT consultation_fee FROM doctor_institution_project_configs WHERE id='config-2'"))
         assertEquals(0L, long("SELECT COUNT(*) FROM doctor_projects WHERE institution_project_id='ip-1' AND is_active=1"))
         assertEquals(2L, long("SELECT COUNT(*) FROM doctor_project_change_requests WHERE status='APPROVED'"))
     }
@@ -501,6 +786,213 @@ class DoctorProjectFullEditPersistenceTest {
 
         assertEquals(0L, long("SELECT COUNT(*) FROM doctor_project_change_requests"))
     }
+
+    private fun directController() = InstitutionProjectController(
+        institutionProjectRepository = institutionProjectRepository,
+        doctorProjectRepository = doctorProjectRepository,
+        doctorRepository = doctorRepository,
+        projectRepository = projectRepository,
+        institutionRepository = institutionRepository,
+        configRepository = configRepository,
+        orderRepository = orderRepository,
+        detailResolver = InstitutionProjectDetailResolver(),
+        doctorInstitutionService = DoctorInstitutionService(doctorInstitutionRepository, institutionRepository),
+        managementAccessService = ManagementAccessService(jdbc),
+        jdbcTemplate = jdbc,
+        travelGroundServicePricing = travelGroundServicePricing,
+        objectMapper = objectMapper,
+        cacheManager = cacheManager
+    )
+
+    private fun adminAuthentication() = UsernamePasswordAuthenticationToken(
+        "admin-1",
+        "unused",
+        listOf(SimpleGrantedAuthority("ROLE_ADMIN"))
+    )
+
+    private fun directUpdatePayload(
+        baseVersion: Long,
+        name: String,
+        doctorBindings: List<DoctorProjectBinding>
+    ): ObjectNode = objectMapper.createObjectNode().apply {
+        put("baseVersion", baseVersion)
+        put("name", name)
+        putNull("category")
+        putNull("description")
+        putNull("rating")
+        putNull("reviewCount")
+        putNull("tags")
+        putNull("slogan")
+        putNull("detailContent")
+        put("price", BigDecimal("3500.00"))
+        putNull("originalPrice")
+        put("currency", "USD")
+        putNull("coverImage")
+        putNull("images")
+        put("salesCount", 3)
+        put("isActive", true)
+        set<JsonNode>("doctorBindings", objectMapper.valueToTree(doctorBindings))
+    }
+
+    private fun <T : Any> inTransaction(block: () -> T): T =
+        requireNotNull(TransactionTemplate(transactionManager).execute { block() })
+
+    private fun putCacheSentinels(key: String) {
+        listOf("discover", "home", "projects").forEach { cacheName ->
+            requireNotNull(cacheManager.getCache(cacheName)).put(key, "present")
+        }
+    }
+
+    private fun assertCachesCleared(key: String) {
+        listOf("discover", "home", "projects").forEach { cacheName ->
+            assertEquals(null, requireNotNull(cacheManager.getCache(cacheName)).get(key))
+        }
+    }
+
+    private fun assertCachesPresent(key: String) {
+        listOf("discover", "home", "projects").forEach { cacheName ->
+            assertEquals("present", requireNotNull(cacheManager.getCache(cacheName)).get(key, String::class.java))
+        }
+    }
+
+    private fun directState(requestId: String) = DirectState(
+        project = jdbc.queryForMap(
+            "SELECT name,category,description,rating,review_count,tags,slogan,detail_content,price,original_price,currency,cover_image,images,sales_count,is_active,version,updated_at FROM institution_projects WHERE id='ip-1'"
+        ),
+        doctors = jdbc.queryForList(
+            "SELECT doctor_id,project_id,institution_project_id,price,service_description,service_tags,schedule_note,cover_image,images,is_active,created_at,updated_at FROM doctor_projects WHERE institution_project_id='ip-1' ORDER BY doctor_id"
+        ),
+        configs = jdbc.queryForList(
+            "SELECT id,doctor_id,institution_project_id,consultation_fee,commission_rate,institution_rate,medical_list_price,updated_at,deleted_at FROM doctor_institution_project_configs WHERE institution_project_id='ip-1' ORDER BY id"
+        ),
+        request = jdbc.queryForMap(
+            "SELECT status,reviewed_by,reviewed_at,review_note,approval_audit_snapshot,updated_at FROM doctor_project_change_requests WHERE id=?",
+            requestId
+        )
+    )
+
+    private data class DirectState(
+        val project: Map<String, Any>,
+        val doctors: List<Map<String, Any>>,
+        val configs: List<Map<String, Any>>,
+        val request: Map<String, Any>
+    )
+
+    private fun directStateForProjectOnly() = ProjectOnlyState(
+        project = jdbc.queryForMap(
+            "SELECT name,category,description,rating,review_count,tags,slogan,detail_content,price,original_price,currency,cover_image,images,sales_count,is_active,version,updated_at FROM institution_projects WHERE id='ip-1'"
+        ),
+        doctors = jdbc.queryForList(
+            "SELECT doctor_id,project_id,institution_project_id,price,service_description,service_tags,schedule_note,cover_image,images,is_active,created_at,updated_at FROM doctor_projects WHERE institution_project_id='ip-1' ORDER BY doctor_id"
+        ),
+        configs = jdbc.queryForList(
+            "SELECT id,doctor_id,institution_project_id,consultation_fee,commission_rate,institution_rate,medical_list_price,updated_at,deleted_at FROM doctor_institution_project_configs WHERE institution_project_id='ip-1' ORDER BY id"
+        )
+    )
+
+    private data class ProjectOnlyState(
+        val project: Map<String, Any>,
+        val doctors: List<Map<String, Any>>,
+        val configs: List<Map<String, Any>>
+    )
+
+    private fun <T : Any> runConcurrentTransactions(tasks: List<() -> T>): List<Result<T>> {
+        val enteredTransactions = CountDownLatch(tasks.size)
+        val start = CountDownLatch(1)
+        val pool = Executors.newFixedThreadPool(tasks.size)
+        val futures = tasks.map { task ->
+            pool.submit<Result<T>> {
+                runCatching {
+                    inTransaction {
+                        enteredTransactions.countDown()
+                        check(start.await(10, TimeUnit.SECONDS)) { "事务内起跑屏障超时" }
+                        task()
+                    }
+                }
+            }
+        }
+        try {
+            check(enteredTransactions.await(10, TimeUnit.SECONDS)) { "事务未在 10 秒内进入屏障" }
+            start.countDown()
+            return futures.map { it.get(30, TimeUnit.SECONDS) }
+        } finally {
+            start.countDown()
+            futures.forEach { it.cancel(true) }
+            pool.shutdownNow()
+            check(pool.awaitTermination(10, TimeUnit.SECONDS)) { "并发测试线程池未能关闭" }
+        }
+    }
+
+    private fun reviewAfterLockedPrefix(
+        requestId: String,
+        doctorId: String,
+        prefixReady: CountDownLatch
+    ) {
+        assertEquals(
+            requestId,
+            jdbc.queryForObject(
+                "SELECT id FROM doctor_project_change_requests WHERE id=? AND status='PENDING' FOR UPDATE",
+                String::class.java,
+                requestId
+            )
+        )
+        assertEquals(
+            doctorId,
+            jdbc.queryForObject(
+                "SELECT doctor_id FROM doctor_institutions WHERE doctor_id=? AND institution_id='institution-1' AND status='APPROVED' AND revoked_at IS NULL AND deleted_at IS NULL FOR UPDATE",
+                String::class.java,
+                doctorId
+            )
+        )
+        prefixReady.countDown()
+        check(prefixReady.await(10, TimeUnit.SECONDS)) { "request relationship 前缀屏障超时" }
+        service.reviewV2(adminActor(), requestId, approve())
+    }
+
+    private fun lockRealSubmitPrefix(doctorId: String) {
+        assertEquals(
+            doctorId,
+            jdbc.queryForObject(
+                "SELECT doctor_id FROM doctor_institutions WHERE doctor_id=? AND institution_id='institution-1' AND status='APPROVED' AND revoked_at IS NULL AND deleted_at IS NULL FOR UPDATE",
+                String::class.java,
+                doctorId
+            )
+        )
+        assertEquals(
+            "ip-1",
+            jdbc.queryForObject("SELECT id FROM institution_projects WHERE id='ip-1' FOR UPDATE", String::class.java)
+        )
+        assertEquals(
+            "project-1",
+            jdbc.queryForObject("SELECT id FROM projects WHERE id='project-1' FOR UPDATE", String::class.java)
+        )
+        assertEquals(
+            doctorId,
+            jdbc.queryForObject(
+                "SELECT doctor_id FROM doctor_projects WHERE doctor_id=? AND institution_project_id='ip-1' FOR UPDATE",
+                String::class.java,
+                doctorId
+            )
+        )
+        assertEquals(
+            "config-1",
+            jdbc.queryForObject(
+                "SELECT id FROM doctor_institution_project_configs WHERE doctor_id=? AND institution_project_id='ip-1' FOR UPDATE",
+                String::class.java,
+                doctorId
+            )
+        )
+    }
+
+    private fun <T> assertConflictOnly(result: Result<T>, expectedCodes: Set<ProjectChangeErrorCode>) {
+        val error = result.exceptionOrNull()
+        assertTrue(
+            error is ProjectChangeContractException && error.errorCode in expectedCodes,
+            "并发失败必须是指定的业务冲突，不能是死锁、锁超时或基础设施异常；实际=${error?.javaClass?.name}:${error?.message}"
+        )
+    }
+
+    private class ForcedDirectRollback : RuntimeException("forced rollback after cache registration")
 
     private fun submit(
         doctorId: String,
