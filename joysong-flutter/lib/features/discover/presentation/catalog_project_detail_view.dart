@@ -163,14 +163,14 @@ class CatalogProjectDetailView extends StatelessWidget {
                           'No doctors are currently available for booking',
                         ))
                       : doctors.isEmpty
-                          ? _Empty(context.localized('医生排班信息暂未开放',
-                              'Doctor schedules are not available yet'))
-                          : Column(
-                              children: [
-                                for (final doctor in doctors.take(5))
-                                  _DoctorRow(doctor, onDoctorTap),
-                              ],
-                            )
+                      ? _Empty(context.localized('医生排班信息暂未开放',
+                          'Doctor schedules are not available yet'))
+                      : Column(
+                          children: [
+                            for (final doctor in doctors.take(5))
+                              _DoctorRow(doctor, onDoctorTap),
+                          ],
+                        )
                   : institutionProjects.isEmpty
                       ? _Empty(context.localized(
                           '暂无可预约机构', 'No institutions available'))
@@ -241,27 +241,28 @@ class CatalogProjectDetailView extends StatelessWidget {
       ),
       if (!isInstitutionProject || hasAvailableDoctors)
         CatalogBottomBar(
-          primaryLabel: isInstitutionProject
-              ? context.localized('预约项目', 'Book project')
-              : context.localized('查看可预约机构', 'View institutions'),
-          onPrimary: isInstitutionProject
-              ? (onBook == null ? null : () => onBook!(item))
-              : () => jump(1),
-          secondaryLabel: isInstitutionProject
-              ? context.localized('咨询机构', 'Consult institution')
-              : null,
-          onSecondary: isInstitutionProject
-              ? () {
-                  final id = _text([institution], const ['id'], '');
-                  if (id.isNotEmpty) onInstitutionTap?.call(id);
-                }
-              : null,
-          tertiaryLabel: context.localized(
-              isInstitutionProject ? '与AI聊聊' : '与AI聊此项目', 'Chat with AI'),
-          onTertiary: onAiChat,
-        ),
+        primaryLabel: isInstitutionProject
+            ? context.localized('预约项目', 'Book project')
+            : context.localized('查看可预约机构', 'View institutions'),
+        onPrimary: isInstitutionProject
+            ? (onBook == null ? null : () => onBook!(item))
+            : () => jump(1),
+        secondaryLabel: isInstitutionProject
+            ? context.localized('咨询机构', 'Consult institution')
+            : null,
+        onSecondary: isInstitutionProject
+            ? () {
+                final id = _text([institution], const ['id'], '');
+                if (id.isNotEmpty) onInstitutionTap?.call(id);
+              }
+            : null,
+        tertiaryLabel: context.localized(
+            isInstitutionProject ? '与AI聊聊' : '与AI聊此项目', 'Chat with AI'),
+        onTertiary: onAiChat,
+      ),
     ]);
   }
+
 }
 
 class _ProjectFacts extends StatelessWidget {
@@ -284,22 +285,15 @@ class _ProjectFacts extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
         child: Column(children: [
           Row(children: [
-            Expanded(
-                child: _ProjectStat(
-              value: rating != null && rating! > 0
-                  ? rating!.toStringAsFixed(1)
-                  : '—',
+            Expanded(child: _ProjectStat(
+              value: rating != null && rating! > 0 ? rating!.toStringAsFixed(1) : '—',
               label: context.localized('评分', 'Rating'),
               showStar: true,
             )),
-            Expanded(
-                child: _ProjectStat(
-                    value: '$reviewCount',
-                    label: context.localized('评价', 'Reviews'))),
-            Expanded(
-                child: _ProjectStat(
-                    value: '$caseCount',
-                    label: context.localized('案例', 'Cases'))),
+            Expanded(child: _ProjectStat(
+              value: '$reviewCount', label: context.localized('评价', 'Reviews'))),
+            Expanded(child: _ProjectStat(
+              value: '$caseCount', label: context.localized('案例', 'Cases'))),
           ]),
           if (address.isNotEmpty)
             _ProjectCopyLine(
@@ -318,8 +312,7 @@ class _ProjectFacts extends StatelessWidget {
 }
 
 class _ProjectStat extends StatelessWidget {
-  const _ProjectStat(
-      {required this.value, required this.label, this.showStar = false});
+  const _ProjectStat({required this.value, required this.label, this.showStar = false});
   final String value;
   final String label;
   final bool showStar;
@@ -330,19 +323,15 @@ class _ProjectStat extends StatelessWidget {
             const Icon(Icons.star_rounded, size: 18, color: Color(0xffffa000)),
             const SizedBox(width: 3),
           ],
-          Text(value,
-              style:
-                  const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+          Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
         ]),
         const SizedBox(height: 3),
-        Text(label,
-            style: const TextStyle(fontSize: 12, color: Color(0xff777777))),
+        Text(label, style: const TextStyle(fontSize: 12, color: Color(0xff777777))),
       ]);
 }
 
 class _ProjectCopyLine extends StatelessWidget {
-  const _ProjectCopyLine(
-      {required this.icon, required this.label, required this.value});
+  const _ProjectCopyLine({required this.icon, required this.label, required this.value});
   final IconData icon;
   final String label;
   final String value;
@@ -361,9 +350,7 @@ class _ProjectCopyLine extends StatelessWidget {
             Icon(icon, size: 20, color: const Color(0xff777777)),
             const SizedBox(width: 8),
             Text('$label：', style: const TextStyle(color: Color(0xff777777))),
-            Expanded(
-                child:
-                    Text(value, maxLines: 2, overflow: TextOverflow.ellipsis)),
+            Expanded(child: Text(value, maxLines: 2, overflow: TextOverflow.ellipsis)),
             Icon(
               Icons.copy_rounded,
               size: 17,
@@ -468,7 +455,8 @@ class _InstitutionRow extends StatelessWidget {
               type: FavoriteTargetType.institution,
               targetId: id,
               targetName: title ?? _text([data], const ['name'], ''),
-              targetImage: _text([data], const ['coverImage', 'logo'], ''),
+              targetImage:
+                  _text([data], const ['coverImage', 'logo'], ''),
             ),
         ]),
       ),
@@ -484,8 +472,7 @@ class _DoctorRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final id = _text([data], const ['id', 'doctorId'], '');
     final avatar = _text([data], const ['avatar'], '');
-    final phone =
-        _text([data], const ['phone', 'contactPhone', 'telephone'], '');
+    final phone = _text([data], const ['phone', 'contactPhone', 'telephone'], '');
     return ListTile(
       onTap: id.isEmpty || onTap == null ? null : () => onTap!(id),
       leading: CircleAvatar(
@@ -510,8 +497,8 @@ class _DoctorRow extends StatelessWidget {
                 await Clipboard.setData(ClipboardData(text: phone));
                 if (!context.mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content:
-                      Text(context.localized('已复制医生电话', 'Doctor phone copied')),
+                  content: Text(context.localized(
+                      '已复制医生电话', 'Doctor phone copied')),
                 ));
               },
               child: Padding(

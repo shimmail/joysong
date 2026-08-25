@@ -119,289 +119,250 @@ void main() {
   });
 
   testWidgets(
-    'platform application keeps the complete ordered plain-text form and uses the injected cover/gallery uploader',
-    (tester) async {
-      _useLargeSurface(tester);
-      final repository = _ProjectRequestRepository()
-        ..managementContext = _doctorContext;
-      final uploads = <Object>[
-        'https://cdn.example.com/platform-cover.jpg',
-        'https://cdn.example.com/platform-gallery.jpg',
-        StateError('upload failed'),
-      ];
+      'platform application keeps the complete ordered plain-text form and uses the injected cover/gallery uploader',
+      (tester) async {
+    _useLargeSurface(tester);
+    final repository = _ProjectRequestRepository()
+      ..managementContext = _doctorContext;
+    final uploads = <Object>[
+      'https://cdn.example.com/platform-cover.jpg',
+      'https://cdn.example.com/platform-gallery.jpg',
+      StateError('upload failed'),
+    ];
 
-      await tester.pumpWidget(
-        _app(
-          ManagementCenterPage(
-            repository: repository,
-            discoverRepository: const _DiscoverRepository(),
-            doctorImagePicker: () async {
-              final next = uploads.removeAt(0);
-              if (next is Error) throw next;
-              return next as String;
-            },
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('申请新增平台项目'));
-      await tester.pumpAndSettle();
+    await tester.pumpWidget(_app(
+      ManagementCenterPage(
+        repository: repository,
+        discoverRepository: const _DiscoverRepository(),
+        doctorImagePicker: () async {
+          final next = uploads.removeAt(0);
+          if (next is Error) throw next;
+          return next as String;
+        },
+      ),
+    ),);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('申请新增平台项目'));
+    await tester.pumpAndSettle();
 
-      const orderedKeys = [
-        'platform-name',
-        'platform-reference-price',
-        'platform-slogan',
-        'platform-sales-count',
-        'platform-cover-upload',
-        'platform-gallery-upload',
-        'platform-category',
-        'platform-description',
-        'platform-detail-content',
-        'platform-tags',
-        'platform-category-tags',
-        'platform-notes',
-      ];
-      final tops = <double>[];
-      for (final key in orderedKeys) {
-        final finder = find.byKey(Key(key));
-        expect(finder, findsOneWidget, reason: 'missing $key');
-        tops.add(tester.getTopLeft(finder).dy);
-      }
-      expect(tops, orderedEquals([...tops]..sort()));
-      expect(
-        tester
-            .widget<TextField>(find.byKey(const Key('platform-detail-content')))
-            .maxLines,
-        greaterThan(1),
-      );
-      expect(find.textContaining('评分'), findsNothing);
-      expect(find.textContaining('评价数'), findsNothing);
-      expect(find.textContaining('选择医生'), findsNothing);
-      expect(find.byKey(const Key('platform-currency')), findsNothing);
-      expect(
-        tester
-            .widget<TextField>(
-              find.byKey(const Key('platform-reference-price')),
-            )
-            .decoration
-            ?.labelText,
-        '参考价格（USD）',
-      );
-      expect(find.byType(EditableText).evaluate().length, 10);
+    const orderedKeys = [
+      'platform-name',
+      'platform-reference-price',
+      'platform-slogan',
+      'platform-sales-count',
+      'platform-cover-upload',
+      'platform-gallery-upload',
+      'platform-category',
+      'platform-description',
+      'platform-detail-content',
+      'platform-tags',
+      'platform-category-tags',
+      'platform-notes',
+    ];
+    final tops = <double>[];
+    for (final key in orderedKeys) {
+      final finder = find.byKey(Key(key));
+      expect(finder, findsOneWidget, reason: 'missing $key');
+      tops.add(tester.getTopLeft(finder).dy);
+    }
+    expect(tops, orderedEquals([...tops]..sort()));
+    expect(
+      tester
+          .widget<TextField>(
+            find.byKey(const Key('platform-detail-content'))
+          )
+          .maxLines,
+      greaterThan(1),
+    );
+    expect(find.textContaining('评分'), findsNothing);
+    expect(find.textContaining('评价数'), findsNothing);
+    expect(find.textContaining('选择医生'), findsNothing);
+    expect(find.byKey(const Key('platform-currency')), findsNothing);
+    expect(
+      tester
+          .widget<TextField>(
+            find.byKey(const Key('platform-reference-price')),
+          )
+          .decoration
+          ?.labelText,
+      '参考价格（USD）',
+    );
+    expect(find.byType(EditableText).evaluate().length, 10);
 
-      await tester.tap(find.byKey(const Key('platform-cover-upload')));
-      await tester.pump();
-      await tester.tap(find.byKey(const Key('platform-gallery-upload')));
-      await tester.pump();
-      expect(
-        find.text('https://cdn.example.com/platform-cover.jpg'),
-        findsOneWidget,
-      );
-      expect(
-        find.text('https://cdn.example.com/platform-gallery.jpg'),
-        findsOneWidget,
-      );
-      const coverRemoveLabel =
-          '移除封面图 1：https://cdn.example.com/platform-cover.jpg';
-      const galleryRemoveLabel =
-          '移除项目图片 1：https://cdn.example.com/platform-gallery.jpg';
-      final coverRemove = find.byWidgetPredicate(
-        (widget) => widget is IconButton && widget.tooltip == coverRemoveLabel,
-      );
-      final galleryRemove = find.byWidgetPredicate(
-        (widget) =>
-            widget is IconButton && widget.tooltip == galleryRemoveLabel,
-      );
-      expect(coverRemove, findsOneWidget);
-      expect(galleryRemove, findsOneWidget);
-      expect(
-        find.ancestor(
-          of: coverRemove,
-          matching: find.byWidgetPredicate(
-            (widget) =>
-                widget is Semantics &&
-                widget.properties.label == coverRemoveLabel,
-          ),
-        ),
-        findsOneWidget,
-      );
-      expect(
-        find.ancestor(
-          of: galleryRemove,
-          matching: find.byWidgetPredicate(
-            (widget) =>
-                widget is Semantics &&
-                widget.properties.label == galleryRemoveLabel,
-          ),
-        ),
-        findsOneWidget,
-      );
+    await tester.tap(find.byKey(const Key('platform-cover-upload')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('platform-gallery-upload')));
+    await tester.pump();
+    expect(find.text('https://cdn.example.com/platform-cover.jpg'),
+        findsOneWidget,);
+    expect(find.text('https://cdn.example.com/platform-gallery.jpg'),
+        findsOneWidget,);
+    const coverRemoveLabel =
+        '移除封面图 1：https://cdn.example.com/platform-cover.jpg';
+    const galleryRemoveLabel =
+        '移除项目图片 1：https://cdn.example.com/platform-gallery.jpg';
+    final coverRemove = find.byWidgetPredicate(
+        (widget) => widget is IconButton && widget.tooltip == coverRemoveLabel,);
+    final galleryRemove = find.byWidgetPredicate((widget) =>
+        widget is IconButton && widget.tooltip == galleryRemoveLabel,);
+    expect(coverRemove, findsOneWidget);
+    expect(galleryRemove, findsOneWidget);
+    expect(
+      find.ancestor(
+        of: coverRemove,
+        matching: find.byWidgetPredicate((widget) =>
+            widget is Semantics && widget.properties.label == coverRemoveLabel,),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.ancestor(
+        of: galleryRemove,
+        matching: find.byWidgetPredicate((widget) =>
+            widget is Semantics &&
+            widget.properties.label == galleryRemoveLabel,),
+      ),
+      findsOneWidget,
+    );
 
-      await tester.tap(find.byKey(const Key('platform-gallery-upload')));
-      await tester.pump();
-      expect(
-        find.text('https://cdn.example.com/platform-cover.jpg'),
-        findsOneWidget,
-      );
-      expect(
-        find.text('https://cdn.example.com/platform-gallery.jpg'),
-        findsOneWidget,
-      );
-      expect(find.text('图片上传失败，请重试'), findsOneWidget);
-    },
-  );
+    await tester.tap(find.byKey(const Key('platform-gallery-upload')));
+    await tester.pump();
+    expect(find.text('https://cdn.example.com/platform-cover.jpg'),
+        findsOneWidget,);
+    expect(find.text('https://cdn.example.com/platform-gallery.jpg'),
+        findsOneWidget,);
+    expect(find.text('图片上传失败，请重试'), findsOneWidget);
+  },);
 
   testWidgets(
     'institution application loads inherited project details into editable fields and keeps one USD price',
-    (tester) async {
-      _useLargeSurface(tester);
-      final repository = _ProjectRequestRepository();
-      final uploads = [
-        'https://cdn.example.com/institution-cover.jpg',
-        'https://cdn.example.com/institution-gallery.jpg',
-      ];
-      await tester.pumpWidget(
-        _app(
-          InstitutionProjectRequestsPage(
-            repository: repository,
-            context: _doctorContext,
-            pickAndUploadImage: () async => uploads.removeAt(0),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
+      (tester) async {
+    _useLargeSurface(tester);
+    final repository = _ProjectRequestRepository();
+    final uploads = [
+      'https://cdn.example.com/institution-cover.jpg',
+      'https://cdn.example.com/institution-gallery.jpg',
+    ];
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      repository: repository,
+      context: _doctorContext,
+      pickAndUploadImage: () async => uploads.removeAt(0),
+    ),),);
+    await tester.pumpAndSettle();
 
-      expect(find.textContaining('doctor-1'), findsOneWidget);
-      expect(find.textContaining('唯一申请医生'), findsOneWidget);
-      expect(find.textContaining('选择医生'), findsNothing);
-      expect(find.textContaining('多医生'), findsNothing);
+    expect(find.textContaining('doctor-1'), findsOneWidget);
+    expect(find.textContaining('唯一申请医生'), findsOneWidget);
+    expect(find.textContaining('选择医生'), findsNothing);
+    expect(find.textContaining('多医生'), findsNothing);
 
-      await _choose(
-        tester,
-        const Key('institution-project'),
-        'Hydrating Facial',
-      );
-      expect(find.byKey(const Key('institution-inheritance-preview')),
-          findsNothing);
-      const inheritedValues = {
-        'institution-name': 'Hydrating Facial',
-        'institution-category': 'Skin',
-        'institution-description': 'Inherited description',
-        'institution-tags': 'hydration,gentle',
-        'institution-slogan': 'Glow naturally',
-        'institution-detail-content': 'Inherited plain detail',
-        'institution-sales-count': '18',
-      };
-      for (final entry in inheritedValues.entries) {
-        final field = tester.widget<TextField>(find.byKey(Key(entry.key)));
-        expect(
-          field.controller!.text,
-          entry.value,
-          reason: '${entry.key} must contain an editable inherited value',
-        );
-        expect(field.readOnly, isFalse);
-        expect(field.decoration?.hintText, isNull);
-      }
-      expect(
-        tester
-            .widget<TextField>(find.byKey(const Key('institution-name')))
-            .decoration
-            ?.labelText,
-        '项目名称',
-      );
-      expect(find.text('https://cdn.example.com/inherited-cover.jpg'),
-          findsOneWidget);
-      expect(find.text('https://cdn.example.com/inherited-one.jpg'),
-          findsOneWidget);
-      expect(find.text('https://cdn.example.com/inherited-two.jpg'),
-          findsOneWidget);
-      expect(find.textContaining('继承值'), findsNothing);
-      expect(find.textContaining('可选覆盖'), findsNothing);
-      expect(
-        find.byTooltip(
-          '移除封面图 1：https://cdn.example.com/inherited-cover.jpg',
-        ),
-        findsOneWidget,
-      );
-      expect(
-        find.byTooltip(
-          '移除项目图片 1：https://cdn.example.com/inherited-one.jpg',
-        ),
-        findsOneWidget,
-      );
-      await tester.enterText(
-        find.byKey(const Key('institution-name')),
-        'Doctor Hydrating Facial',
-      );
-      expect(
-        tester
-            .widget<TextField>(find.byKey(const Key('institution-name')))
-            .controller
-            ?.text,
-        'Doctor Hydrating Facial',
-      );
-      final priceField =
-          tester.widget<TextField>(find.byKey(const Key('institution-price')));
-      expect(priceField.decoration?.labelText, '医生项目价格（USD）');
-      expect(priceField.decoration?.hintText, isNull);
-      expect(
-        tester
-            .widget<TextField>(
-              find.byKey(const Key('institution-detail-content')),
-            )
-            .maxLines,
-        greaterThan(1),
-      );
-      expect(
-        find.byKey(const Key('institution-travel-ground-service-fee')),
-        findsOneWidget,
-      );
+    await _choose(tester, const Key('institution-project'), 'Hydrating Facial',);
+    expect(find.byKey(const Key('institution-inheritance-preview')), findsNothing);
+    const inheritedValues = {
+      'institution-name': 'Hydrating Facial',
+      'institution-category': 'Skin',
+      'institution-description': 'Inherited description',
+      'institution-tags': 'hydration,gentle',
+      'institution-slogan': 'Glow naturally',
+      'institution-detail-content': 'Inherited plain detail',
+      'institution-sales-count': '18',
+    };
+    for (final entry in inheritedValues.entries) {
+      final field = tester.widget<TextField>(find.byKey(Key(entry.key)));
+      expect(field.controller!.text, entry.value,
+          reason: '${entry.key} must contain an editable inherited value',);
+      expect(field.readOnly, isFalse);
+      expect(field.decoration?.hintText, isNull);
+    }
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('institution-name')))
+          .decoration
+          ?.labelText,
+      '项目名称',
+    );
+    expect(find.text('https://cdn.example.com/inherited-cover.jpg'), findsOneWidget);
+    expect(find.text('https://cdn.example.com/inherited-one.jpg'), findsOneWidget);
+    expect(find.text('https://cdn.example.com/inherited-two.jpg'), findsOneWidget);
+    expect(find.textContaining('继承值'), findsNothing);
+    expect(find.textContaining('可选覆盖'), findsNothing);
+    expect(
+      find.byTooltip(
+        '移除封面图 1：https://cdn.example.com/inherited-cover.jpg',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byTooltip(
+        '移除项目图片 1：https://cdn.example.com/inherited-one.jpg',
+      ),
+      findsOneWidget,
+    );
+    await tester.enterText(
+      find.byKey(const Key('institution-name')),
+      'Doctor Hydrating Facial',
+    );
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('institution-name')))
+          .controller
+          ?.text,
+      'Doctor Hydrating Facial',
+    );
+    final priceField =
+        tester.widget<TextField>(find.byKey(const Key('institution-price')));
+    expect(priceField.decoration?.labelText, '医生项目价格（USD）');
+    expect(priceField.decoration?.hintText, isNull);
+    expect(
+      tester
+          .widget<TextField>(
+            find.byKey(const Key('institution-detail-content')),
+          )
+          .maxLines,
+      greaterThan(1),
+    );
+    expect(find.byKey(const Key('institution-travel-ground-service-fee')), findsOneWidget,);
 
-      final orderedFinders = <Finder>[
-        _dropdown('institution-id'),
-        _dropdown('institution-project'),
-        find.byKey(const Key('institution-applicant-notice')),
-        find.byKey(const Key('institution-name')),
-        find.byKey(const Key('institution-category')),
-        find.byKey(const Key('institution-description')),
-        find.byKey(const Key('institution-tags')),
-        find.byKey(const Key('institution-slogan')),
-        find.byKey(const Key('institution-detail-content')),
+    final orderedFinders = <Finder>[
+      _dropdown('institution-id'),
+      _dropdown('institution-project'),
+      find.byKey(const Key('institution-applicant-notice')),
+      find.byKey(const Key('institution-name')),
+      find.byKey(const Key('institution-category')),
+      find.byKey(const Key('institution-description')),
+      find.byKey(const Key('institution-tags')),
+      find.byKey(const Key('institution-slogan')),
+      find.byKey(const Key('institution-detail-content')),
+      find.byKey(const Key('institution-price')),
+      find.byKey(const Key('institution-travel-ground-service-fee')),
+      find.byKey(const Key('institution-cover-upload')),
+      find.byKey(const Key('institution-gallery-upload')),
+      find.byKey(const Key('institution-sales-count')),
+      find.byKey(const Key('institution-is-active')),
+      find.byKey(const Key('institution-notes')),
+    ];
+    final tops =
+        orderedFinders.map(tester.getTopLeft).map((p) => p.dy).toList();
+    expect(tops, orderedEquals([...tops]..sort()));
+    expect(find.textContaining('评分'), findsNothing);
+    expect(find.textContaining('评价数'), findsNothing);
+    expect(find.textContaining('选择医生'), findsNothing);
+    expect(find.textContaining('多医生'), findsNothing);
+
+    await tester.enterText(
         find.byKey(const Key('institution-price')),
-        find.byKey(const Key('institution-travel-ground-service-fee')),
-        find.byKey(const Key('institution-cover-upload')),
-        find.byKey(const Key('institution-gallery-upload')),
-        find.byKey(const Key('institution-sales-count')),
-        find.byKey(const Key('institution-is-active')),
-        find.byKey(const Key('institution-notes')),
-      ];
-      final tops =
-          orderedFinders.map(tester.getTopLeft).map((p) => p.dy).toList();
-      expect(tops, orderedEquals([...tops]..sort()));
-      expect(find.textContaining('评分'), findsNothing);
-      expect(find.textContaining('评价数'), findsNothing);
-      expect(find.textContaining('选择医生'), findsNothing);
-      expect(find.textContaining('多医生'), findsNothing);
-
-      await tester.enterText(
-        find.byKey(const Key('institution-price')),
-        '799.99',
-      );
-      await tester.pump();
+        '799.99',);
+    await tester.pump();
       expect(find.textContaining('USD 82.00'), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('institution-cover-upload')));
-      await tester.pump();
+    await tester.pump();
       expect(
         find.text('https://cdn.example.com/inherited-cover.jpg'),
         findsNothing,
       );
       await tester.tap(find.byKey(const Key('institution-gallery-upload')));
       await tester.pump();
-      expect(
-        find.text('https://cdn.example.com/institution-cover.jpg'),
-        findsOneWidget,
-      );
+    expect(find.text('https://cdn.example.com/institution-cover.jpg'), findsOneWidget,);
       expect(
         find.text('https://cdn.example.com/institution-gallery.jpg'),
         findsOneWidget,
@@ -479,10 +440,8 @@ void main() {
       );
       expect(_text(tester, 'institution-sales-count'), '9');
       expect(_text(tester, 'institution-price'), '799.99');
-      expect(find.text('https://cdn.example.com/second-cover.jpg'),
-          findsOneWidget);
-      expect(find.text('https://cdn.example.com/second-gallery.jpg'),
-          findsOneWidget);
+      expect(find.text('https://cdn.example.com/second-cover.jpg'), findsOneWidget);
+      expect(find.text('https://cdn.example.com/second-gallery.jpg'), findsOneWidget);
       expect(
         find.text('https://cdn.example.com/inherited-cover.jpg'),
         findsNothing,
@@ -514,9 +473,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final price = tester.widget<TextField>(
-      find.byKey(const Key('institution-price')),
-    );
+    final price = tester.widget<TextField>(find.byKey(const Key('institution-price')),);
     expect(price.decoration?.labelText, '医生项目价格（USD）');
     expect(find.byKey(const Key('institution-original-price')), findsNothing);
     expect(_dropdown('institution-currency'), findsNothing);
@@ -525,33 +482,23 @@ void main() {
     expect(find.byKey(const Key('institution-rate')), findsNothing);
     expect(find.byKey(const Key('institution-platform-rate')), findsNothing);
     expect(find.byKey(const Key('institution-doctor-rate')), findsNothing);
-    await tester.enterText(
-      find.byKey(const Key('institution-price')),
-      '799.99',
-    );
+    await tester.enterText(find.byKey(const Key('institution-price')),
+      '799.99',);
     await tester.pump();
-    expect(
-      find.byKey(const Key('institution-travel-ground-service-fee')),
-      findsOneWidget,
-    );
-    expect(find.textContaining('USD 320.00'), findsOneWidget);
+    expect(find.byKey(const Key('institution-travel-ground-service-fee')),
+        findsOneWidget,);
+    expect(find.textContaining('USD 320.00'),
+        findsOneWidget);
   });
 
-  testWidgets(
-      'institution application submits editable inherited project details and hidden compatibility defaults',
-      (
-    tester,
-  ) async {
+  testWidgets('institution application submits editable inherited project details and hidden compatibility defaults',
+      (tester,) async {
     _useLargeSurface(tester);
     final repository = _ProjectRequestRepository()..formPlatformRate = 40;
-    await tester.pumpWidget(
-      _app(
-        InstitutionProjectRequestsPage(
-          repository: repository,
-          context: _doctorContext,
-        ),
-      ),
-    );
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      repository: repository,
+      context: _doctorContext,
+    ),),);
     await tester.pumpAndSettle();
     await _choose(tester, const Key('institution-id'), 'Joysong Clinic');
     await _choose(tester, const Key('institution-project'), 'Hydrating Facial');
@@ -560,7 +507,8 @@ void main() {
       '799.99',
     );
 
-    await _submit(tester, const Key('institution-submit'));
+    await _submit(
+      tester, const Key('institution-submit'));
 
     expect(repository.institutionSubmissions, hasLength(1));
     final body = repository.institutionSubmissions.single.toJson();
@@ -594,7 +542,7 @@ void main() {
         InstitutionProjectJoinRequestsPage(
           repository: repository,
           context: _doctorContext,
-        ),
+    ),
       ),
     );
 
@@ -655,1629 +603,1289 @@ void main() {
       );
       await _fillInstitutionDraft(
         tester,
-        price: '999999999999999999999',
-      );
-      await tester.pump();
+        price:
+      '999999999999999999999',
+    );
+    await tester.pump();
 
-      expect(tester.takeException(), isNull);
-      expect(
-        find.byKey(const Key('institution-travel-ground-service-fee')),
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const Key('institution-travel-ground-service-fee')),
         findsOneWidget,
       );
       expect(find.text('旅游地接服务费（10.25%）：-'), findsOneWidget);
-      await _submit(tester, const Key('institution-submit'));
-      expect(
-        find.text('医生项目价格必须能按当前比例计算出至少 USD 0.01 的旅游地接服务费'),
-        findsOneWidget,
-      );
-      expect(repository.institutionSubmissions, isEmpty);
-    },
-  );
+    await _submit(tester, const Key('institution-submit'));
+    expect(find.text('医生项目价格必须能按当前比例计算出至少 USD 0.01 的旅游地接服务费'), findsOneWidget,);
+    expect(repository.institutionSubmissions, isEmpty);
+  },);
 
   testWidgets(
     'institution doctor price enforces cent precision and minimum payable fee',
-    (tester) async {
-      _useLargeSurface(tester);
-      final repository = _ProjectRequestRepository()..formPlatformRate = 40;
-      await tester.pumpWidget(
-        _app(
-          InstitutionProjectRequestsPage(
-            repository: repository,
-            context: _doctorContext,
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await _choose(tester, const Key('institution-id'), 'Joysong Clinic');
-      await _choose(
-        tester,
-        const Key('institution-project'),
-        'Hydrating Facial',
-      );
-      await _fillInstitutionDraft(
-        tester,
-        price: '0.01',
-      );
+      (tester) async {
+    _useLargeSurface(tester);
+    final repository = _ProjectRequestRepository()..formPlatformRate = 40;
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      repository: repository,
+      context: _doctorContext,
+    ),),);
+    await tester.pumpAndSettle();
+    await _choose(tester, const Key('institution-id'), 'Joysong Clinic');
+    await _choose(tester, const Key('institution-project'), 'Hydrating Facial',);
+    await _fillInstitutionDraft(
+      tester,
+      price: '0.01',
+    );
 
-      for (final rejected in const ['0.01', '1.001']) {
-        await tester.enterText(
-          find.byKey(const Key('institution-price')),
-          rejected,
-        );
-        await _submit(tester, const Key('institution-submit'));
-        expect(repository.institutionSubmissions, isEmpty);
-      }
-
+    for (final rejected in const ['0.01', '1.001']) {
       await tester.enterText(
         find.byKey(const Key('institution-price')),
-        '0.02',
+          rejected,
       );
-      await tester.pump();
-      final feePreview = tester.widget<Text>(
-        find.byKey(const Key('institution-travel-ground-service-fee')),
-      );
-      expect(feePreview.data, contains('USD 0.01'));
+      await _submit( tester, const Key('institution-submit'));
+      expect(repository.institutionSubmissions, isEmpty);
+    }
 
-      await _submit(tester, const Key('institution-submit'));
-      expect(repository.institutionSubmissions, hasLength(1));
-      expect(repository.institutionSubmissions.single.price, 0.02);
-    },
-  );
+    await tester.enterText(
+      find.byKey(const Key('institution-price')),
+        '0.02',
+    );
+    await tester.pump();
+    final feePreview = tester.widget<Text>(
+      find.byKey(const Key('institution-travel-ground-service-fee')),
+    );
+    expect(feePreview.data, contains('USD 0.01'));
+
+    await _submit(tester, const Key('institution-submit'));
+    expect(repository.institutionSubmissions, hasLength(1));
+    expect(repository.institutionSubmissions.single.price, 0.02);
+  },);
 
   testWidgets(
-    'platform draft blocks malformed values, survives submit and refresh failures, and clears only after both succeed',
-    (tester) async {
-      _useLargeSurface(tester);
-      final repository = _ProjectRequestRepository();
-      final uploads = [
-        'https://cdn.example.com/retained-cover.jpg',
-        'https://cdn.example.com/retained-gallery.jpg',
-      ];
-      await tester.pumpWidget(
-        _app(
-          PlatformProjectRequestPage(
-            key: const ValueKey('applicant-platform'),
-            repository: repository,
-            context: _doctorContext,
-            pickAndUploadImage: () async => uploads.removeAt(0),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await _fillPlatformDraft(tester, referencePrice: '1.234');
-      await tester.tap(find.byKey(const Key('platform-cover-upload')));
-      await tester.pump();
-      await tester.tap(find.byKey(const Key('platform-gallery-upload')));
-      await tester.pump();
+      'platform draft blocks malformed values, survives submit and refresh failures, and clears only after both succeed',
+      (tester) async {
+    _useLargeSurface(tester);
+    final repository = _ProjectRequestRepository();
+    final uploads = [
+      'https://cdn.example.com/retained-cover.jpg',
+      'https://cdn.example.com/retained-gallery.jpg',
+    ];
+    await tester.pumpWidget(_app(PlatformProjectRequestPage(
+      key: const ValueKey('applicant-platform'),
+      repository: repository,
+      context: _doctorContext,
+      pickAndUploadImage: () async => uploads.removeAt(0),
+    ),),);
+    await tester.pumpAndSettle();
+    await _fillPlatformDraft(tester, referencePrice: '1.234');
+    await tester.tap(find.byKey(const Key('platform-cover-upload')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('platform-gallery-upload')));
+    await tester.pump();
 
-      await _submit(tester, const Key('platform-submit'));
-      expect(repository.platformSubmissions, isEmpty);
-      expect(_text(tester, 'platform-name'), 'Retained platform name');
+    await _submit(tester, const Key('platform-submit'));
+    expect(repository.platformSubmissions, isEmpty);
+    expect(_text(tester, 'platform-name'), 'Retained platform name');
 
-      await tester.enterText(
-        find.byKey(const Key('platform-reference-price')),
-        '199.99',
-      );
-      repository.platformSubmitError = true;
-      await _submit(tester, const Key('platform-submit'));
-      expect(repository.platformSubmissions, hasLength(1));
-      expect(repository.platformSubmissions.single.toJson()['currency'], 'USD');
-      expect(_text(tester, 'platform-notes'), 'Retained notes');
-      expect(
-        find.text('https://cdn.example.com/retained-cover.jpg'),
-        findsOneWidget,
-      );
+    await tester.enterText(
+        find.byKey(const Key('platform-reference-price')), '199.99',);
+    repository.platformSubmitError = true;
+    await _submit(tester, const Key('platform-submit'));
+    expect(repository.platformSubmissions, hasLength(1));
+    expect(repository.platformSubmissions.single.toJson()['currency'], 'USD');
+    expect(_text(tester, 'platform-notes'), 'Retained notes');
+    expect(find.text('https://cdn.example.com/retained-cover.jpg'),
+        findsOneWidget,);
 
-      repository.platformSubmitError = false;
-      repository.failNextRequestList = true;
-      await _submit(tester, const Key('platform-submit'));
-      expect(repository.platformSubmissions, hasLength(2));
-      expect(_text(tester, 'platform-name'), 'Retained platform name');
-      expect(
-        find.text('https://cdn.example.com/retained-gallery.jpg'),
-        findsOneWidget,
-      );
+    repository.platformSubmitError = false;
+    repository.failNextRequestList = true;
+    await _submit(tester, const Key('platform-submit'));
+    expect(repository.platformSubmissions, hasLength(2));
+    expect(_text(tester, 'platform-name'), 'Retained platform name');
+    expect(find.text('https://cdn.example.com/retained-gallery.jpg'),
+        findsOneWidget,);
 
-      await _submit(tester, const Key('platform-submit'));
-      expect(repository.platformSubmissions, hasLength(3));
-      expect(_text(tester, 'platform-name'), isEmpty);
-      expect(_text(tester, 'platform-notes'), isEmpty);
-      expect(
-        find.text('https://cdn.example.com/retained-cover.jpg'),
-        findsNothing,
-      );
-      expect(
-        find.text('https://cdn.example.com/retained-gallery.jpg'),
-        findsNothing,
-      );
-    },
-  );
+    await _submit(tester, const Key('platform-submit'));
+    expect(repository.platformSubmissions, hasLength(3));
+    expect(_text(tester, 'platform-name'), isEmpty);
+    expect(_text(tester, 'platform-notes'), isEmpty);
+    expect(
+        find.text('https://cdn.example.com/retained-cover.jpg'), findsNothing,);
+    expect(find.text('https://cdn.example.com/retained-gallery.jpg'),
+        findsNothing,);
+  },);
 
   testWidgets(
     'institution draft blocks price precision, retains every visible override on failures, and never submits platform or doctor rate',
-    (tester) async {
-      _useLargeSurface(tester);
-      final repository = _ProjectRequestRepository();
-      final uploads = [
-        'https://cdn.example.com/clinic-cover.jpg',
-        'https://cdn.example.com/clinic-gallery.jpg',
-      ];
-      await tester.pumpWidget(
-        _app(
-          InstitutionProjectRequestsPage(
-            key: const ValueKey('target-legal-institution'),
-            repository: repository,
-            context: _doctorContext,
-            pickAndUploadImage: () async => uploads.removeAt(0),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await _choose(tester, const Key('institution-id'), 'Joysong Clinic');
-      await _choose(
-        tester,
-        const Key('institution-project'),
-        'Hydrating Facial',
-      );
-      await _fillInstitutionDraft(
-        tester,
-        price: '799.999',
-      );
-      await tester.tap(find.byKey(const Key('institution-cover-upload')));
-      await tester.pump();
-      await tester.tap(find.byKey(const Key('institution-gallery-upload')));
-      await tester.pump();
+      (tester) async {
+    _useLargeSurface(tester);
+    final repository = _ProjectRequestRepository();
+    final uploads = [
+      'https://cdn.example.com/clinic-cover.jpg',
+      'https://cdn.example.com/clinic-gallery.jpg',
+    ];
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      key: const ValueKey('target-legal-institution'),
+      repository: repository,
+      context: _doctorContext,
+      pickAndUploadImage: () async => uploads.removeAt(0),
+    ),),);
+    await tester.pumpAndSettle();
+    await _choose(tester, const Key('institution-id'), 'Joysong Clinic');
+    await _choose(tester, const Key('institution-project'), 'Hydrating Facial',);
+    await _fillInstitutionDraft(tester,
+        price: '799.999',);
+    await tester.tap(find.byKey(const Key('institution-cover-upload')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('institution-gallery-upload')));
+    await tester.pump();
 
-      await _submit(tester, const Key('institution-submit'));
-      expect(repository.institutionSubmissions, isEmpty);
-      await tester.enterText(
-        find.byKey(const Key('institution-price')),
-        '799.99',
-      );
-      repository.institutionSubmitError = true;
-      await _submit(tester, const Key('institution-submit'));
-      expect(repository.institutionSubmissions, hasLength(1));
-      expect(_text(tester, 'institution-name'), 'Clinic override');
-      expect(
-        find.text('https://cdn.example.com/clinic-gallery.jpg'),
-        findsOneWidget,
-      );
+    await _submit(tester, const Key('institution-submit'));
+    expect(repository.institutionSubmissions, isEmpty);
+    await tester.enterText(
+        find.byKey(const Key('institution-price')), '799.99',);repository.institutionSubmitError = true;
+    await _submit(tester, const Key('institution-submit'));
+    expect(repository.institutionSubmissions, hasLength(1));
+    expect(_text(tester, 'institution-name'), 'Clinic override');
+    expect(find.text('https://cdn.example.com/clinic-gallery.jpg'),
+        findsOneWidget,);
 
-      repository.institutionSubmitError = false;
-      repository.failNextRequestList = true;
-      await _submit(tester, const Key('institution-submit'));
-      expect(repository.institutionSubmissions, hasLength(2));
-      expect(
-        _text(tester, 'institution-detail-content'),
-        'Override plain detail',
-      );
-      expect(find.textContaining('USD 82.00'), findsOneWidget);
+    repository.institutionSubmitError = false;
+    repository.failNextRequestList = true;
+    await _submit(tester, const Key('institution-submit'));
+    expect(repository.institutionSubmissions, hasLength(2));
+    expect(
+        _text(tester, 'institution-detail-content'), 'Override plain detail',);
+    expect(find.textContaining('USD 82.00'), findsOneWidget);
 
-      final body = repository.institutionSubmissions.last.toJson();
-      expect(body, isNot(contains('platformRate')));
-      expect(body, isNot(contains('doctorRate')));
-      expect(body, isNot(contains('doctorId')));
+    final body = repository.institutionSubmissions.last.toJson();
+    expect(body, isNot(contains('platformRate')));
+    expect(body, isNot(contains('doctorRate')));
+    expect(body, isNot(contains('doctorId')));
 
-      await _submit(tester, const Key('institution-submit'));
-      expect(repository.institutionSubmissions, hasLength(3));
-      expect(_text(tester, 'institution-name'), isEmpty);
-      expect(_text(tester, 'institution-price'), isEmpty);
-      expect(
-        find.text('https://cdn.example.com/clinic-cover.jpg'),
-        findsNothing,
-      );
-    },
-  );
+    await _submit(tester, const Key('institution-submit'));
+    expect(repository.institutionSubmissions, hasLength(3));
+    expect(_text(tester, 'institution-name'), isEmpty);
+    expect(_text(tester, 'institution-price'), isEmpty);
+    expect(find.text('https://cdn.example.com/clinic-cover.jpg'), findsNothing,);
+  },);
 
   testWidgets(
-    'platform and institution creation submissions synchronously block same-frame re-entry',
-    (tester) async {
-      _useLargeSurface(tester);
-      final platformGate = Completer<void>();
-      final platformRepository = _ProjectRequestRepository()
-        ..platformSubmitGate = platformGate;
+      'platform and institution creation submissions synchronously block same-frame re-entry',
+      (tester) async {
+    _useLargeSurface(tester);
+    final platformGate = Completer<void>();
+    final platformRepository = _ProjectRequestRepository()
+      ..platformSubmitGate = platformGate;
 
-      await tester.pumpWidget(
-        _app(
-          PlatformProjectRequestPage(
-            repository: platformRepository,
-            context: _doctorContext,
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await _fillPlatformDraft(tester, referencePrice: '199.99');
-      final platformSubmit = tester
-          .widget<FilledButton>(find.byKey(const Key('platform-submit')))
-          .onPressed!;
+    await tester.pumpWidget(_app(PlatformProjectRequestPage(
+      repository: platformRepository,
+      context: _doctorContext,
+    ),),);
+    await tester.pumpAndSettle();
+    await _fillPlatformDraft(tester, referencePrice: '199.99');
+    final platformSubmit = tester
+        .widget<FilledButton>(find.byKey(const Key('platform-submit')))
+        .onPressed!;
 
-      platformSubmit();
-      platformSubmit();
-      await tester.pump();
+    platformSubmit();
+    platformSubmit();
+    await tester.pump();
 
-      expect(platformRepository.platformSubmissions, hasLength(1));
-      platformGate.complete();
-      await tester.pumpAndSettle();
+    expect(platformRepository.platformSubmissions, hasLength(1));
+    platformGate.complete();
+    await tester.pumpAndSettle();
 
-      final institutionGate = Completer<void>();
-      final institutionRepository = _ProjectRequestRepository()
-        ..institutionSubmitGate = institutionGate;
-      await tester.pumpWidget(
-        _app(
-          InstitutionProjectRequestsPage(
-            repository: institutionRepository,
-            context: _doctorContext,
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await _choose(tester, const Key('institution-id'), 'Joysong Clinic');
-      await _choose(
-        tester,
-        const Key('institution-project'),
-        'Hydrating Facial',
-      );
-      await _fillInstitutionDraft(
-        tester,
-        price: '799.99',
-      );
-      final institutionSubmit = tester
-          .widget<FilledButton>(find.byKey(const Key('institution-submit')))
-          .onPressed!;
+    final institutionGate = Completer<void>();
+    final institutionRepository = _ProjectRequestRepository()
+      ..institutionSubmitGate = institutionGate;
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      repository: institutionRepository,
+      context: _doctorContext,
+    ),),);
+    await tester.pumpAndSettle();
+    await _choose(tester, const Key('institution-id'), 'Joysong Clinic');
+    await _choose(tester, const Key('institution-project'), 'Hydrating Facial',);
+    await _fillInstitutionDraft(
+      tester,
+      price: '799.99',
+    );
+    final institutionSubmit = tester
+        .widget<FilledButton>(find.byKey(const Key('institution-submit')))
+        .onPressed!;
 
-      institutionSubmit();
-      institutionSubmit();
-      await tester.pump();
+    institutionSubmit();
+    institutionSubmit();
+    await tester.pump();
 
-      expect(institutionRepository.institutionSubmissions, hasLength(1));
-      institutionGate.complete();
-      await tester.pumpAndSettle();
-    },
-  );
+    expect(institutionRepository.institutionSubmissions, hasLength(1));
+    institutionGate.complete();
+    await tester.pumpAndSettle();
+  },);
 
   testWidgets(
-    'platform submission conflict refreshes the latest own requests without replaying or clearing the draft',
-    (tester) async {
-      _useLargeSurface(tester);
-      final uploads = [
-        'https://cdn.example.com/conflict-platform-cover.jpg',
-        'https://cdn.example.com/conflict-platform-gallery.jpg',
-      ];
-      final repository = _ProjectRequestRepository()
-        ..platformSubmitException = const ApiException(
-          message: 'conflict',
-          httpStatus: 409,
-        );
-      repository.onPlatformSubmit = () {
-        repository.requests = [
-          _request(
-            id: 'platform-conflict-latest',
-            type: 'PLATFORM',
-            doctorId: 'doctor-1',
-          ),
-        ];
-      };
-
-      await tester.pumpWidget(
-        _app(
-          PlatformProjectRequestPage(
-            repository: repository,
-            context: _doctorContext,
-            pickAndUploadImage: () async => uploads.removeAt(0),
-          ),
+      'platform submission conflict refreshes the latest own requests without replaying or clearing the draft',
+      (tester) async {
+    _useLargeSurface(tester);
+    final uploads = [
+      'https://cdn.example.com/conflict-platform-cover.jpg',
+      'https://cdn.example.com/conflict-platform-gallery.jpg',
+    ];
+    final repository = _ProjectRequestRepository()
+      ..platformSubmitException =
+          const ApiException(message: 'conflict', httpStatus: 409,);
+    repository.onPlatformSubmit = () {
+      repository.requests = [
+        _request(
+          id: 'platform-conflict-latest',
+          type: 'PLATFORM',
+          doctorId: 'doctor-1',
         ),
-      );
-      await tester.pumpAndSettle();
-      await _preparePlatformConflictDraft(tester);
-      expect(repository.requestListLoads, 1);
+      ];
+    };
 
-      await _submit(tester, const Key('platform-submit'));
+    await tester.pumpWidget(_app(PlatformProjectRequestPage(
+      repository: repository,
+      context: _doctorContext,
+      pickAndUploadImage: () async => uploads.removeAt(0),
+    ),),);
+    await tester.pumpAndSettle();
+    await _preparePlatformConflictDraft(tester);
+    expect(repository.requestListLoads, 1);
 
-      expect(
-        repository.platformSubmissions,
-        hasLength(1),
-        reason: 'a 409 must never auto-replay the POST',
-      );
-      expect(repository.requestListLoads, 2);
-      expect(repository.institutionOptionLoads, 0);
-      expect(repository.managementProjectLoads, 0);
-      expect(repository.formConfigLoads, 0);
-      _expectPlatformConflictDraftRetained(tester);
-      expect(
-        find.byKey(const Key('professional-request-platform-conflict-latest')),
-        findsOneWidget,
-      );
-      expect(find.text('提交冲突，申请列表已刷新；草稿已保留，请核对最新申请后再决定是否重新提交'), findsOneWidget);
-    },
-  );
+    await _submit(tester, const Key('platform-submit'));
+
+    expect(repository.platformSubmissions, hasLength(1),
+        reason: 'a 409 must never auto-replay the POST',);
+    expect(repository.requestListLoads, 2);
+    expect(repository.institutionOptionLoads, 0);
+    expect(repository.managementProjectLoads, 0);
+    expect(repository.formConfigLoads, 0);
+    _expectPlatformConflictDraftRetained(tester);
+    expect(
+      find.byKey(const Key('professional-request-platform-conflict-latest')),
+      findsOneWidget,
+    );
+    expect(
+      find.text('提交冲突，申请列表已刷新；草稿已保留，请核对最新申请后再决定是否重新提交'),
+      findsOneWidget
+    );
+  },);
 
   testWidgets(
-    'platform submission conflict keeps its draft and gives recovery guidance when refresh fails',
-    (tester) async {
-      _useLargeSurface(tester);
-      final uploads = [
-        'https://cdn.example.com/conflict-platform-cover.jpg',
-        'https://cdn.example.com/conflict-platform-gallery.jpg',
-      ];
-      final repository = _ProjectRequestRepository()
-        ..platformSubmitException = const ApiException(
-          message: 'conflict',
-          httpStatus: 409,
-        );
+      'platform submission conflict keeps its draft and gives recovery guidance when refresh fails',
+      (tester) async {
+    _useLargeSurface(tester);
+    final uploads = [
+      'https://cdn.example.com/conflict-platform-cover.jpg',
+      'https://cdn.example.com/conflict-platform-gallery.jpg',
+    ];
+    final repository = _ProjectRequestRepository()
+      ..platformSubmitException =
+          const ApiException(message: 'conflict', httpStatus: 409,);
 
-      await tester.pumpWidget(
-        _app(
-          PlatformProjectRequestPage(
-            key: const ValueKey('platform-conflict-refresh-failure'),
-            repository: repository,
-            context: _doctorContext,
-            pickAndUploadImage: () async => uploads.removeAt(0),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await _preparePlatformConflictDraft(tester);
-      repository.failNextRequestList = true;
+    await tester.pumpWidget(_app(PlatformProjectRequestPage(
+      key: const ValueKey('platform-conflict-refresh-failure'),
+      repository: repository,
+      context: _doctorContext,
+      pickAndUploadImage: () async => uploads.removeAt(0),
+    ),),);
+    await tester.pumpAndSettle();
+    await _preparePlatformConflictDraft(tester);
+    repository.failNextRequestList = true;
 
-      await _submit(tester, const Key('platform-submit'));
+    await _submit(tester, const Key('platform-submit'));
 
-      expect(repository.platformSubmissions, hasLength(1));
-      expect(repository.requestListLoads, 2);
-      _expectPlatformConflictDraftRetained(tester);
-      expect(find.text('提交冲突，申请列表刷新失败；草稿已保留，请手动刷新后再提交'), findsOneWidget);
-    },
-  );
+    expect(repository.platformSubmissions, hasLength(1));
+    expect(repository.requestListLoads, 2);
+    _expectPlatformConflictDraftRetained(tester);
+    expect(
+      find.text('提交冲突，申请列表刷新失败；草稿已保留，请手动刷新后再提交'),
+      findsOneWidget
+    );
+  },);
 
   testWidgets(
-    'institution submission conflict refreshes authorized form data without replaying or clearing the draft',
-    (tester) async {
-      _useLargeSurface(tester);
-      final uploads = [
-        'https://cdn.example.com/conflict-clinic-cover.jpg',
-        'https://cdn.example.com/conflict-clinic-gallery.jpg',
-      ];
-      final repository = _ProjectRequestRepository()
-        ..institutionSubmitException = const ApiException(
-          message: 'conflict',
-          httpStatus: 409,
-        );
-      repository.onInstitutionSubmit = () {
-        repository
-          ..requests = [
-            _request(
-              id: 'institution-conflict-latest',
-              type: 'INSTITUTION',
-              doctorId: 'doctor-1',
-              institutionId: 'inst-1',
-              platformRate: 12.5,
-              doctorRate: 32.75,
-            ),
-          ]
-          ..formPlatformRate = 12.5
-          ..institutionOptions = const [
-            InstitutionOption(id: 'inst-1', name: 'Refreshed Joysong Clinic'),
-          ]
-          ..managementProjects = const [
-            ManagementProjectOption(
-              id: 'project-1',
-              name: 'Refreshed Hydrating Facial',
-              category: 'Refreshed Skin',
-              description: 'Refreshed inherited description',
-              tags: 'refreshed,hydration',
-              categoryTags: 'refreshed,facial',
-              coverImage: 'https://cdn.example.com/refreshed-cover.jpg',
-              referencePrice: 777.77,
-              currency: 'USD',
-              slogan: 'Refreshed glow',
-              detailContent: 'Refreshed inherited detail',
-              images: ['https://cdn.example.com/refreshed-gallery.jpg'],
-              salesCount: 27,
-            ),
-          ];
-      };
-
-      await tester.pumpWidget(
-        _app(
-          InstitutionProjectRequestsPage(
-            repository: repository,
-            context: _doctorContext,
-            pickAndUploadImage: () async => uploads.removeAt(0),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await _prepareInstitutionConflictDraft(tester);
-      expect(repository.requestListLoads, 1);
-      expect(repository.institutionOptionLoads, 1);
-      expect(repository.managementProjectLoads, 1);
-      expect(repository.formConfigLoads, 1);
-
-      await _submit(tester, const Key('institution-submit'));
-
-      expect(
-        repository.institutionSubmissions,
-        hasLength(1),
-        reason: 'a 409 must never auto-replay the POST',
-      );
-      expect(repository.requestListLoads, 2);
-      expect(repository.institutionOptionLoads, 2);
-      expect(repository.managementProjectLoads, 2);
-      expect(repository.formConfigLoads, 2);
-      _expectInstitutionConflictDraftRetained(tester);
-      expect(find.text('Refreshed Joysong Clinic'), findsOneWidget);
-      expect(find.text('Refreshed Hydrating Facial'), findsWidgets);
-      expect(
-        tester
-            .widget<TextField>(find.byKey(const Key('institution-name')))
-            .decoration
-            ?.hintText,
-        isNull,
-      );
-      expect(find.text('https://cdn.example.com/refreshed-cover.jpg'),
-          findsNothing);
-      expect(find.text('https://cdn.example.com/refreshed-gallery.jpg'),
-          findsNothing);
-      expect(find.textContaining('USD 100.00'), findsOneWidget);
-      expect(
-        find.byKey(
-          const Key('professional-request-institution-conflict-latest'),
-        ),
-        findsNothing,
-      );
-      expect(find.text('提交冲突，申请、项目目录与价格配置已刷新；草稿已保留，请核对后重新提交'), findsOneWidget);
-    },
-  );
-
-  testWidgets(
-    'institution submission conflict refreshes management context first and clears a relationship-revoked target',
-    (tester) async {
-      _useLargeSurface(tester);
-      final uploads = [
-        'https://cdn.example.com/conflict-clinic-cover.jpg',
-        'https://cdn.example.com/conflict-clinic-gallery.jpg',
-      ];
-      final repository = _ProjectRequestRepository()
-        ..institutionSubmitException = const ApiException(
-          message: 'conflict',
-          httpStatus: 409,
-        );
-      repository.onInstitutionSubmit = () {
-        repository
-          ..managementContext = _doctorWithoutInstitutionsContext
-          ..formPlatformRate = 12.5;
-      };
-
-      await tester.pumpWidget(
-        _app(
-          InstitutionProjectRequestsPage(
-            repository: repository,
-            context: _doctorContext,
-            pickAndUploadImage: () async => uploads.removeAt(0),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await _prepareInstitutionConflictDraft(tester);
-      repository.calls.clear();
-
-      await _submit(tester, const Key('institution-submit'));
-
-      expect(
-        repository.institutionSubmissions,
-        hasLength(1),
-        reason: 'the conflicted POST must not be replayed',
-      );
-      expect(repository.managementContextLoads, 1);
-      expect(repository.calls, [
-        'submit-institution',
-        'management-context',
-        'requests',
-        'institution-options',
-        'management-projects',
-        'form-config',
-      ]);
-      expect(
-        repository.institutionOptions.single.id,
-        'inst-1',
-        reason: 'the public directory deliberately still contains the target',
-      );
-      expect(
-        _dropdownValue(tester, 'institution-id'),
-        isNull,
-        reason: 'the refreshed doctor relationship, not the public directory, '
-            'must authorize the selection',
-      );
-      expect(_dropdownValue(tester, 'institution-project'), 'project-1');
-      _expectInstitutionConflictDraftValuesRetained(tester);
-      expect(find.textContaining('USD 100.00'), findsOneWidget);
-
-      await _submit(tester, const Key('institution-submit'));
-      expect(repository.institutionSubmissions, hasLength(1));
-      expect(find.text('请选择机构和平台项目，并填写有效的医生项目价格与销量'), findsOneWidget);
-    },
-  );
-
-  testWidgets(
-    'institution submission conflict reports stale authorization and skips form refresh when management context fails',
-    (tester) async {
-      _useLargeSurface(tester);
-      final uploads = [
-        'https://cdn.example.com/conflict-clinic-cover.jpg',
-        'https://cdn.example.com/conflict-clinic-gallery.jpg',
-      ];
-      final repository = _ProjectRequestRepository()
-        ..institutionSubmitException = const ApiException(
-          message: 'conflict',
-          httpStatus: 409,
-        );
-
-      await tester.pumpWidget(
-        _app(
-          InstitutionProjectRequestsPage(
-            repository: repository,
-            context: _doctorContext,
-            pickAndUploadImage: () async => uploads.removeAt(0),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await _prepareInstitutionConflictDraft(tester);
+      'institution submission conflict refreshes authorized form data without replaying or clearing the draft',
+      (tester) async {
+    _useLargeSurface(tester);
+    final uploads = [
+      'https://cdn.example.com/conflict-clinic-cover.jpg',
+      'https://cdn.example.com/conflict-clinic-gallery.jpg',
+    ];
+    final repository = _ProjectRequestRepository()
+      ..institutionSubmitException =
+          const ApiException(message: 'conflict', httpStatus: 409,);
+    repository.onInstitutionSubmit = () {
       repository
-        ..calls.clear()
-        ..failNextManagementContext = true;
-
-      await _submit(tester, const Key('institution-submit'));
-
-      expect(repository.institutionSubmissions, hasLength(1));
-      expect(repository.managementContextLoads, 1);
-      expect(repository.requestListLoads, 1);
-      expect(repository.institutionOptionLoads, 1);
-      expect(repository.managementProjectLoads, 1);
-      expect(repository.formConfigLoads, 1);
-      expect(repository.calls, ['submit-institution', 'management-context']);
-      _expectInstitutionConflictDraftRetained(tester);
-      expect(find.textContaining('权限刷新失败'), findsOneWidget);
-      expect(find.textContaining('可能已过期'), findsOneWidget);
-      expect(
-        find.textContaining('已刷新；草稿已保留'),
-        findsNothing,
-        reason: 'a failed context refresh must not claim fresh authorization',
-      );
-    },
-  );
-
-  testWidgets(
-    'institution submission conflict clears only targets removed from refreshed authorized catalogs and requires reselection',
-    (tester) async {
-      _useLargeSurface(tester);
-      for (final scenario in const [
-        (
-          name: 'institution-removed',
-          removeInstitution: true,
-          removeProject: false,
-          expectedInstitution: null,
-          expectedProject: 'project-1',
-        ),
-        (
-          name: 'project-removed',
-          removeInstitution: false,
-          removeProject: true,
-          expectedInstitution: 'inst-1',
-          expectedProject: null,
-        ),
-        (
-          name: 'both-removed',
-          removeInstitution: true,
-          removeProject: true,
-          expectedInstitution: null,
-          expectedProject: null,
-        ),
-      ]) {
-        final uploads = [
-          'https://cdn.example.com/conflict-clinic-cover.jpg',
-          'https://cdn.example.com/conflict-clinic-gallery.jpg',
-        ];
-        final repository = _ProjectRequestRepository()
-          ..institutionSubmitException = const ApiException(
-            message: 'conflict',
-            httpStatus: 409,
-          );
-        repository.onInstitutionSubmit = () {
-          repository
-            ..formPlatformRate = 12.5
-            ..institutionOptions = scenario.removeInstitution
-                ? const [
-                    InstitutionOption(
-                      id: 'inst-2',
-                      name: 'Alternative Authorized Clinic',
-                    ),
-                  ]
-                : repository.institutionOptions
-            ..managementProjects = scenario.removeProject
-                ? const [
-                    ManagementProjectOption(
-                      id: 'project-2',
-                      name: 'Alternative Platform Project',
-                      category: 'Alternative category',
-                      description: 'Alternative description',
-                      tags: 'alternative',
-                      categoryTags: 'alternative',
-                      coverImage: '',
-                      referencePrice: 500,
-                      currency: 'CNY',
-                      slogan: '',
-                      detailContent: null,
-                      images: [],
-                      salesCount: 0,
-                    ),
-                  ]
-                : repository.managementProjects;
-        };
-
-        await tester.pumpWidget(
-          _app(
-            InstitutionProjectRequestsPage(
-              key: ValueKey('stale-target-${scenario.name}'),
-              repository: repository,
-              context: _multiInstitutionDoctorContext,
-              pickAndUploadImage: () async => uploads.removeAt(0),
-            ),
-          ),
-        );
-        await tester.pumpAndSettle();
-        await _prepareInstitutionConflictDraft(tester);
-
-        await _submit(tester, const Key('institution-submit'));
-
-        expect(
-          tester.takeException(),
-          isNull,
-          reason:
-              '${scenario.name} must render without a stale-value assertion',
-        );
-        expect(repository.institutionSubmissions, hasLength(1));
-        expect(
-          _dropdownValue(tester, 'institution-id'),
-          scenario.expectedInstitution,
-        );
-        expect(
-          _dropdownValue(tester, 'institution-project'),
-          scenario.expectedProject,
-        );
-        _expectInstitutionConflictDraftValuesRetained(tester);
-        expect(find.textContaining('USD 100.00'), findsOneWidget);
-        expect(
-          find.text('提交冲突，申请、项目目录与价格配置已刷新；草稿已保留，请核对后重新提交'),
-          findsOneWidget,
-        );
-
-        await _submit(tester, const Key('institution-submit'));
-        expect(
-          repository.institutionSubmissions,
-          hasLength(1),
-          reason: '${scenario.name} must require a new valid target selection',
-        );
-        expect(find.text('请选择机构和平台项目，并填写有效的医生项目价格与销量'), findsOneWidget);
-        _expectInstitutionConflictDraftValuesRetained(tester);
-      }
-    },
-  );
-
-  testWidgets(
-    'institution submission conflict keeps selections and gives recovery guidance when form refresh fails',
-    (tester) async {
-      _useLargeSurface(tester);
-      final uploads = [
-        'https://cdn.example.com/conflict-clinic-cover.jpg',
-        'https://cdn.example.com/conflict-clinic-gallery.jpg',
-      ];
-      final repository = _ProjectRequestRepository()
-        ..institutionSubmitException = const ApiException(
-          message: 'conflict',
-          httpStatus: 409,
-        );
-
-      await tester.pumpWidget(
-        _app(
-          InstitutionProjectRequestsPage(
-            key: const ValueKey('institution-conflict-refresh-failure'),
-            repository: repository,
-            context: _doctorContext,
-            pickAndUploadImage: () async => uploads.removeAt(0),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await _prepareInstitutionConflictDraft(tester);
-      repository.failNextRequestList = true;
-
-      await _submit(tester, const Key('institution-submit'));
-
-      expect(repository.institutionSubmissions, hasLength(1));
-      expect(repository.requestListLoads, 2);
-      expect(repository.institutionOptionLoads, 2);
-      expect(repository.managementProjectLoads, 2);
-      expect(repository.formConfigLoads, 2);
-      _expectInstitutionConflictDraftRetained(tester);
-      expect(
-        find.text('提交冲突，申请、项目目录或价格配置刷新失败；草稿已保留，请手动刷新后再提交'),
-        findsOneWidget,
-      );
-      final feePreview = tester.widget<Text>(
-        find.byKey(const Key('institution-travel-ground-service-fee')),
-      );
-      expect(feePreview.data, endsWith('：-'));
-      await _submit(tester, const Key('institution-submit'));
-      expect(repository.institutionSubmissions, hasLength(1),
-          reason: 'a stale fee rate must never be reused after refresh fails');
-    },
-  );
-
-  testWidgets(
-    'platform submit ignores a successful refresh completed after the page is disposed',
-    (tester) async {
-      _useLargeSurface(tester);
-      final repository = _ProjectRequestRepository();
-      await tester.pumpWidget(
-        _app(
-          PlatformProjectRequestPage(
-            repository: repository,
-            context: _doctorContext,
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await _fillPlatformDraft(tester, referencePrice: '199.99');
-      final refresh = Completer<List<ProfessionalProjectRequest>>();
-      final refreshStarted = Completer<void>();
-      repository.nextRequestList = refresh;
-      repository.requestListStarted = refreshStarted;
-      final nameController = tester
-          .widget<TextField>(find.byKey(const Key('platform-name')))
-          .controller!;
-
-      await tester.tap(find.byKey(const Key('platform-submit')));
-      await tester.pump();
-      await refreshStarted.future;
-      expect(repository.platformSubmissions, hasLength(1));
-      expect(nameController.text, 'Retained platform name');
-
-      await tester.pumpWidget(_app(const SizedBox.shrink()));
-      refresh.complete(const []);
-      await tester.pump();
-      await tester.pump();
-      await tester.pump();
-      expect(tester.takeException(), isNull);
-      expect(
-        nameController.text,
-        'Retained platform name',
-        reason: 'a disposed form must not be cleared by a late refresh',
-      );
-    },
-  );
-
-  testWidgets(
-    'malformed direct review rows show a warning and fail closed without review actions',
-    (tester) async {
-      _useLargeSurface(tester);
-      final repository = _ProjectRequestRepository()
-        ..requests = [
-          _malformedRequest(id: 'malformed-platform', type: 'PLATFORM'),
-          _malformedRequest(id: 'malformed-institution', type: 'INSTITUTION'),
-        ];
-
-      await tester.pumpWidget(
-        _app(
-          PlatformProjectRequestPage(
-            repository: repository,
-            context: _adminContext,
-            reviewMode: true,
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        find.byKey(const Key('malformed-review-snapshot-malformed-platform')),
-        findsOneWidget,
-      );
-      expect(find.text('申请快照不完整，无法审核，请刷新后重试'), findsOneWidget);
-      expect(
-        find.byKey(const Key('review-creation-malformed-platform')),
-        findsNothing,
-      );
-
-      await tester.pumpWidget(
-        _app(
-          InstitutionProjectRequestsPage(
-            repository: repository,
-            context: _adminContext,
-            reviewMode: true,
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        find.byKey(
-          const Key('malformed-review-snapshot-malformed-institution'),
-        ),
-        findsOneWidget,
-      );
-      expect(find.text('申请快照不完整，无法审核，请刷新后重试'), findsOneWidget);
-      expect(
-        find.byKey(const Key('review-creation-malformed-institution')),
-        findsNothing,
-      );
-    },
-  );
-
-  testWidgets(
-    'invalid hidden compatibility rates keep the request rejectable but not approvable',
-    (tester) async {
-      _useLargeSurface(tester);
-      final repository = _ProjectRequestRepository()
-        ..requests = [
-          _negativeDriftRequest(
-            id: 'institution-negative-initial',
-            projectName: 'Current live project',
-          ),
-        ];
-
-      await tester.pumpWidget(
-        _app(
-          InstitutionProjectRequestsPage(
-            repository: repository,
-            context: _adminContext,
-            reviewMode: true,
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        find.byKey(
-          const Key('professional-request-institution-negative-initial'),
-        ),
-        findsOneWidget,
-      );
-      expect(find.text('医生项目价格（USD）：USD 799.50'), findsOneWidget);
-      expect(find.text('旅游地接服务费：USD 799.50'), findsOneWidget);
-      expect(
-        find.byKey(
-          const Key('malformed-review-snapshot-institution-negative-initial'),
-        ),
-        findsNothing,
-      );
-
-      await tester.tap(
-        find.byKey(const Key('review-creation-institution-negative-initial')),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        find.byKey(const Key('creation-review-approval-blocked')),
-        findsOneWidget,
-      );
-      final decisionField = find.byKey(const Key('creation-review-decision'));
-      final decision = tester.widget<DropdownButton<String>>(
-        find.descendant(
-          of: decisionField,
-          matching: find.byType(DropdownButton<String>),
-        ),
-      );
-      expect(decision.items!.map((item) => item.value), ['REJECTED']);
-      expect(
-        tester
-            .widget<DropdownButtonFormField<String>>(decisionField)
-            .initialValue,
-        'REJECTED',
-      );
-      await tester.enterText(
-        find.byKey(const Key('creation-review-note')),
-        'Current compatibility values are invalid',
-      );
-      await tester.tap(find.byKey(const Key('creation-review-confirm')));
-      await tester.pumpAndSettle();
-      expect(repository.institutionReviews, [
-        (
-          id: 'institution-negative-initial',
-          decision: 'REJECTED',
-          note: 'Current compatibility values are invalid',
-        ),
-      ]);
-    },
-  );
-
-  testWidgets(
-    'institution request without a name uses stable request id instead of the live project name as its title',
-    (tester) async {
-      _useLargeSurface(tester);
-      final repository = _ProjectRequestRepository()
         ..requests = [
           _request(
-            id: 'institution-stable-title',
+            id: 'institution-conflict-latest',
             type: 'INSTITUTION',
             doctorId: 'doctor-1',
             institutionId: 'inst-1',
-            inheritName: true,
-            projectName: 'Live project v1',
+            platformRate: 12.5,
+            doctorRate: 32.75,
+          ),
+        ]
+        ..formPlatformRate = 12.5
+        ..institutionOptions = const [
+          InstitutionOption(id: 'inst-1', name: 'Refreshed Joysong Clinic'),
+        ]
+        ..managementProjects = const [
+          ManagementProjectOption(
+            id: 'project-1',
+            name: 'Refreshed Hydrating Facial',
+            category: 'Refreshed Skin',
+            description: 'Refreshed inherited description',
+            tags: 'refreshed,hydration',
+            categoryTags: 'refreshed,facial',
+            coverImage: 'https://cdn.example.com/refreshed-cover.jpg',
+            referencePrice: 777.77,
+            currency: 'USD',
+            slogan: 'Refreshed glow',
+            detailContent: 'Refreshed inherited detail',
+            images: ['https://cdn.example.com/refreshed-gallery.jpg'],
+            salesCount: 27,
           ),
         ];
+    };
 
-      await tester.pumpWidget(
-        _app(
-          InstitutionProjectRequestsPage(
-            key: const ValueKey('stable-title-v1'),
-            repository: repository,
-            context: _adminContext,
-            reviewMode: true,
-          ),
-        ),
-      );
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      repository: repository,
+      context: _doctorContext,
+      pickAndUploadImage: () async => uploads.removeAt(0),
+    ),),);
+    await tester.pumpAndSettle();
+    await _prepareInstitutionConflictDraft(tester);
+    expect(repository.requestListLoads, 1);
+    expect(repository.institutionOptionLoads, 1);
+    expect(repository.managementProjectLoads, 1);
+    expect(repository.formConfigLoads, 1);
+
+    await _submit(tester, const Key('institution-submit'));
+
+    expect(repository.institutionSubmissions, hasLength(1),
+        reason: 'a 409 must never auto-replay the POST',);
+    expect(repository.requestListLoads, 2);
+    expect(repository.institutionOptionLoads, 2);
+    expect(repository.managementProjectLoads, 2);
+    expect(repository.formConfigLoads, 2);
+    _expectInstitutionConflictDraftRetained(tester);
+    expect(find.text('Refreshed Joysong Clinic'), findsOneWidget);
+    expect(find.text('Refreshed Hydrating Facial'), findsWidgets);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('institution-name')))
+          .decoration
+          ?.hintText,
+      isNull,
+    );
+    expect(find.text('https://cdn.example.com/refreshed-cover.jpg'), findsNothing);
+    expect(find.text('https://cdn.example.com/refreshed-gallery.jpg'), findsNothing);
+    expect(
+      find.textContaining('USD 100.00'), findsOneWidget);
+    expect(
+      find.byKey(
+        const Key('professional-request-institution-conflict-latest'),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.text('提交冲突，申请、项目目录与价格配置已刷新；草稿已保留，请核对后重新提交'),
+      findsOneWidget
+    );
+  },);
+
+  testWidgets(
+      'institution submission conflict refreshes management context first and clears a relationship-revoked target',
+      (tester) async {
+    _useLargeSurface(tester);
+    final uploads = [
+      'https://cdn.example.com/conflict-clinic-cover.jpg',
+      'https://cdn.example.com/conflict-clinic-gallery.jpg',
+    ];
+    final repository = _ProjectRequestRepository()
+      ..institutionSubmitException =
+          const ApiException(message: 'conflict', httpStatus: 409,);
+    repository.onInstitutionSubmit = () {
+      repository
+        ..managementContext = _doctorWithoutInstitutionsContext
+        ..formPlatformRate = 12.5;
+    };
+
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      repository: repository,
+      context: _doctorContext,
+      pickAndUploadImage: () async => uploads.removeAt(0),
+    ),),);
+    await tester.pumpAndSettle();
+    await _prepareInstitutionConflictDraft(tester);
+    repository.calls.clear();
+
+    await _submit(tester, const Key('institution-submit'));
+
+    expect(repository.institutionSubmissions, hasLength(1),
+        reason: 'the conflicted POST must not be replayed',);
+    expect(repository.managementContextLoads, 1);
+    expect(repository.calls, [
+      'submit-institution',
+      'management-context',
+      'requests',
+      'institution-options',
+      'management-projects',
+      'form-config',
+    ]);
+    expect(repository.institutionOptions.single.id, 'inst-1',
+        reason: 'the public directory deliberately still contains the target',);
+    expect(_dropdownValue(tester, 'institution-id'), isNull,
+        reason: 'the refreshed doctor relationship, not the public directory, '
+            'must authorize the selection',);
+    expect(_dropdownValue(tester, 'institution-project'), 'project-1');
+    _expectInstitutionConflictDraftValuesRetained(tester);
+    expect(find.textContaining('USD 100.00'), findsOneWidget);
+
+    await _submit(tester, const Key('institution-submit'));
+    expect(repository.institutionSubmissions, hasLength(1));
+    expect(find.text('请选择机构和平台项目，并填写有效的医生项目价格与销量'), findsOneWidget);
+  },);
+
+  testWidgets(
+      'institution submission conflict reports stale authorization and skips form refresh when management context fails',
+      (tester) async {
+    _useLargeSurface(tester);
+    final uploads = [
+      'https://cdn.example.com/conflict-clinic-cover.jpg',
+      'https://cdn.example.com/conflict-clinic-gallery.jpg',
+    ];
+    final repository = _ProjectRequestRepository()
+      ..institutionSubmitException =
+          const ApiException(message: 'conflict', httpStatus: 409,);
+
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      repository: repository,
+      context: _doctorContext,
+      pickAndUploadImage: () async => uploads.removeAt(0),
+    ),),);
+    await tester.pumpAndSettle();
+    await _prepareInstitutionConflictDraft(tester);
+    repository
+      ..calls.clear()
+      ..failNextManagementContext = true;
+
+    await _submit(tester, const Key('institution-submit'));
+
+    expect(repository.institutionSubmissions, hasLength(1));
+    expect(repository.managementContextLoads, 1);
+    expect(repository.requestListLoads, 1);
+    expect(repository.institutionOptionLoads, 1);
+    expect(repository.managementProjectLoads, 1);
+    expect(repository.formConfigLoads, 1);
+    expect(repository.calls, ['submit-institution', 'management-context']);
+    _expectInstitutionConflictDraftRetained(tester);
+    expect(find.textContaining('权限刷新失败'), findsOneWidget);
+    expect(find.textContaining('可能已过期'), findsOneWidget);
+    expect(find.textContaining('已刷新；草稿已保留'), findsNothing,
+        reason: 'a failed context refresh must not claim fresh authorization',);
+  },);
+
+  testWidgets(
+      'institution submission conflict clears only targets removed from refreshed authorized catalogs and requires reselection',
+      (tester) async {
+    _useLargeSurface(tester);
+    for (final scenario in const [
+      (
+        name: 'institution-removed',
+        removeInstitution: true,
+        removeProject: false,
+        expectedInstitution: null,
+        expectedProject: 'project-1',
+      ),
+      (
+        name: 'project-removed',
+        removeInstitution: false,
+        removeProject: true,
+        expectedInstitution: 'inst-1',
+        expectedProject: null,
+      ),
+      (
+        name: 'both-removed',
+        removeInstitution: true,
+        removeProject: true,
+        expectedInstitution: null,
+        expectedProject: null,
+      ),
+    ]) {
+      final uploads = [
+        'https://cdn.example.com/conflict-clinic-cover.jpg',
+        'https://cdn.example.com/conflict-clinic-gallery.jpg',
+      ];
+      final repository = _ProjectRequestRepository()
+        ..institutionSubmitException =
+            const ApiException(message: 'conflict', httpStatus: 409,);
+      repository.onInstitutionSubmit = () {
+        repository
+          ..formPlatformRate = 12.5
+          ..institutionOptions = scenario.removeInstitution
+              ? const [
+                  InstitutionOption(
+                    id: 'inst-2',
+                    name: 'Alternative Authorized Clinic',
+                  ),
+                ]
+              : repository.institutionOptions
+          ..managementProjects = scenario.removeProject
+              ? const [
+                  ManagementProjectOption(
+                    id: 'project-2',
+                    name: 'Alternative Platform Project',
+                    category: 'Alternative category',
+                    description: 'Alternative description',
+                    tags: 'alternative',
+                    categoryTags: 'alternative',
+                    coverImage: '',
+                    referencePrice: 500,
+                    currency: 'CNY',
+                    slogan: '',
+                    detailContent: null,
+                    images: [],
+                    salesCount: 0,
+                  ),
+                ]
+              : repository.managementProjects;
+      };
+
+      await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+        key: ValueKey('stale-target-${scenario.name}'),
+        repository: repository,
+        context: _multiInstitutionDoctorContext,
+        pickAndUploadImage: () async => uploads.removeAt(0),
+      ),),);
       await tester.pumpAndSettle();
-      expect(find.text('institution-stable-title'), findsOneWidget);
-      expect(find.text('Live project v1'), findsNothing);
-      expect(find.text('当前平台项目名称：Live project v1'), findsOneWidget);
+      await _prepareInstitutionConflictDraft(tester);
 
-      repository.requests = [
+      await _submit(tester, const Key('institution-submit'));
+
+      expect(tester.takeException(), isNull,
+          reason:
+              '${scenario.name} must render without a stale-value assertion',);
+      expect(repository.institutionSubmissions, hasLength(1));
+      expect(_dropdownValue(tester, 'institution-id'),
+          scenario.expectedInstitution,);
+      expect(_dropdownValue(tester, 'institution-project'),
+          scenario.expectedProject,);
+      _expectInstitutionConflictDraftValuesRetained(tester);
+      expect(find.textContaining('USD 100.00'), findsOneWidget);
+      expect(find.text('提交冲突，申请、项目目录与价格配置已刷新；草稿已保留，请核对后重新提交'), findsOneWidget,
+      );
+
+      await _submit(tester, const Key('institution-submit'));
+      expect(repository.institutionSubmissions, hasLength(1),
+          reason: '${scenario.name} must require a new valid target selection',);
+      expect(find.text('请选择机构和平台项目，并填写有效的医生项目价格与销量'), findsOneWidget);
+      _expectInstitutionConflictDraftValuesRetained(tester);
+    }
+  },);
+
+  testWidgets(
+      'institution submission conflict keeps selections and gives recovery guidance when form refresh fails',
+      (tester) async {
+    _useLargeSurface(tester);
+    final uploads = [
+      'https://cdn.example.com/conflict-clinic-cover.jpg',
+      'https://cdn.example.com/conflict-clinic-gallery.jpg',
+    ];
+    final repository = _ProjectRequestRepository()
+      ..institutionSubmitException =
+          const ApiException(message: 'conflict', httpStatus: 409,);
+
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      key: const ValueKey('institution-conflict-refresh-failure'),
+      repository: repository,
+      context: _doctorContext,
+      pickAndUploadImage: () async => uploads.removeAt(0),
+    ),),);
+    await tester.pumpAndSettle();
+    await _prepareInstitutionConflictDraft(tester);
+    repository.failNextRequestList = true;
+
+    await _submit(tester, const Key('institution-submit'));
+
+    expect(repository.institutionSubmissions, hasLength(1));
+    expect(repository.requestListLoads, 2);
+    expect(repository.institutionOptionLoads, 2);
+    expect(repository.managementProjectLoads, 2);
+    expect(repository.formConfigLoads, 2);
+    _expectInstitutionConflictDraftRetained(tester);
+    expect(
+      find.text('提交冲突，申请、项目目录或价格配置刷新失败；草稿已保留，请手动刷新后再提交'),
+      findsOneWidget,
+    );
+    final feePreview = tester.widget<Text>(
+      find.byKey(const Key('institution-travel-ground-service-fee')),
+    );
+    expect(feePreview.data, endsWith('：-'));
+    await _submit(tester, const Key('institution-submit'));
+    expect(repository.institutionSubmissions, hasLength(1),
+        reason: 'a stale fee rate must never be reused after refresh fails');
+  },);
+
+  testWidgets(
+      'platform submit ignores a successful refresh completed after the page is disposed',
+      (tester) async {
+    _useLargeSurface(tester);
+    final repository = _ProjectRequestRepository();
+    await tester.pumpWidget(_app(PlatformProjectRequestPage(
+      repository: repository,
+      context: _doctorContext,
+    ),),);
+    await tester.pumpAndSettle();
+    await _fillPlatformDraft(tester, referencePrice: '199.99');
+    final refresh = Completer<List<ProfessionalProjectRequest>>();
+    final refreshStarted = Completer<void>();
+    repository.nextRequestList = refresh;
+    repository.requestListStarted = refreshStarted;
+    final nameController = tester
+        .widget<TextField>(find.byKey(const Key('platform-name')))
+        .controller!;
+
+    await tester.tap(find.byKey(const Key('platform-submit')));
+    await tester.pump();
+    await refreshStarted.future;
+    expect(repository.platformSubmissions, hasLength(1));
+    expect(nameController.text, 'Retained platform name');
+
+    await tester.pumpWidget(_app(const SizedBox.shrink()));
+    refresh.complete(const []);
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(nameController.text, 'Retained platform name',
+        reason: 'a disposed form must not be cleared by a late refresh',);
+  },);
+
+  testWidgets(
+      'malformed direct review rows show a warning and fail closed without review actions',
+      (tester) async {
+    _useLargeSurface(tester);
+    final repository = _ProjectRequestRepository()
+      ..requests = [
+        _malformedRequest(id: 'malformed-platform', type: 'PLATFORM'),
+        _malformedRequest(id: 'malformed-institution', type: 'INSTITUTION'),
+      ];
+
+    await tester.pumpWidget(_app(PlatformProjectRequestPage(
+      repository: repository,
+      context: _adminContext,
+      reviewMode: true,
+    ),),);
+    await tester.pumpAndSettle();
+    expect(
+        find.byKey(const Key('malformed-review-snapshot-malformed-platform')),
+        findsOneWidget,);
+    expect(find.text('申请快照不完整，无法审核，请刷新后重试'), findsOneWidget);
+    expect(find.byKey(const Key('review-creation-malformed-platform')),
+        findsNothing,);
+
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      repository: repository,
+      context: _adminContext,
+      reviewMode: true,
+    ),),);
+    await tester.pumpAndSettle();
+    expect(
+        find.byKey(
+            const Key('malformed-review-snapshot-malformed-institution'),),
+        findsOneWidget,);
+    expect(find.text('申请快照不完整，无法审核，请刷新后重试'), findsOneWidget);
+    expect(find.byKey(const Key('review-creation-malformed-institution')),
+        findsNothing,);
+  },);
+
+  testWidgets(
+    'invalid hidden compatibility rates keep the request rejectable but not approvable',
+      (tester) async {
+    _useLargeSurface(tester);
+    final repository = _ProjectRequestRepository()
+      ..requests = [
+        _negativeDriftRequest(
+          id: 'institution-negative-initial',
+          projectName: 'Current live project',
+        ),
+      ];
+
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      repository: repository,
+      context: _adminContext,
+      reviewMode: true,
+    ),),);
+    await tester.pumpAndSettle();
+    expect(
+        find.byKey(
+            const Key('professional-request-institution-negative-initial'),),
+        findsOneWidget,);
+    expect(find.text('医生项目价格（USD）：USD 799.50'), findsOneWidget);
+    expect(
+        find.text('旅游地接服务费：USD 799.50'), findsOneWidget);
+      expect(
+        find.byKey(const Key(
+            'malformed-review-snapshot-institution-negative-initial'),),
+        findsNothing,);
+
+    await tester.tap(
+        find.byKey(const Key('review-creation-institution-negative-initial')),);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('creation-review-approval-blocked')),
+        findsOneWidget,);
+    final decisionField = find.byKey(const Key('creation-review-decision'));
+    final decision = tester.widget<DropdownButton<String>>(find.descendant(
+      of: decisionField,
+      matching: find.byType(DropdownButton<String>),
+    ),);
+    expect(decision.items!.map((item) => item.value), ['REJECTED']);
+    expect(
+      tester
+          .widget<DropdownButtonFormField<String>>(decisionField)
+          .initialValue,
+      'REJECTED',
+    );
+    await tester.enterText(find.byKey(const Key('creation-review-note')),
+        'Current compatibility values are invalid',);
+    await tester.tap(find.byKey(const Key('creation-review-confirm')));
+    await tester.pumpAndSettle();
+    expect(repository.institutionReviews, [
+      (
+        id: 'institution-negative-initial',
+        decision: 'REJECTED',
+        note: 'Current compatibility values are invalid',
+      ),
+    ]);
+  },);
+
+  testWidgets(
+      'institution request without a name uses stable request id instead of the live project name as its title',
+      (tester) async {
+    _useLargeSurface(tester);
+    final repository = _ProjectRequestRepository()
+      ..requests = [
         _request(
           id: 'institution-stable-title',
           type: 'INSTITUTION',
           doctorId: 'doctor-1',
           institutionId: 'inst-1',
           inheritName: true,
-          projectName: 'Live project v2',
+          projectName: 'Live project v1',
         ),
       ];
-      await tester.pumpWidget(
-        _app(
-          InstitutionProjectRequestsPage(
-            key: const ValueKey('stable-title-v2'),
-            repository: repository,
-            context: _adminContext,
-            reviewMode: true,
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(find.text('institution-stable-title'), findsOneWidget);
-      expect(find.text('Live project v2'), findsNothing);
-      expect(find.text('当前平台项目名称：Live project v2'), findsOneWidget);
-    },
-  );
+
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      key: const ValueKey('stable-title-v1'),
+      repository: repository,
+      context: _adminContext,
+      reviewMode: true,
+    ),),);
+    await tester.pumpAndSettle();
+    expect(find.text('institution-stable-title'), findsOneWidget);
+    expect(find.text('Live project v1'), findsNothing);
+    expect(find.text('当前平台项目名称：Live project v1'), findsOneWidget);
+
+    repository.requests = [
+      _request(
+        id: 'institution-stable-title',
+        type: 'INSTITUTION',
+        doctorId: 'doctor-1',
+        institutionId: 'inst-1',
+        inheritName: true,
+        projectName: 'Live project v2',
+      ),
+    ];
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      key: const ValueKey('stable-title-v2'),
+      repository: repository,
+      context: _adminContext,
+      reviewMode: true,
+    ),),);
+    await tester.pumpAndSettle();
+    expect(find.text('institution-stable-title'), findsOneWidget);
+    expect(find.text('Live project v2'), findsNothing);
+    expect(find.text('当前平台项目名称：Live project v2'), findsOneWidget);
+  },);
 
   testWidgets(
-    'platform and institution creation review actions synchronously block re-entry',
-    (tester) async {
-      _useLargeSurface(tester);
-      final platformGate = Completer<void>();
-      final platformRepository = _ProjectRequestRepository()
-        ..requests = [
-          _request(
-            id: 'platform-pending',
-            type: 'PLATFORM',
-            doctorId: 'doctor-1',
-          ),
-        ]
-        ..platformReviewGate = platformGate;
-      await tester.pumpWidget(
-        _app(
-          PlatformProjectRequestPage(
-            repository: platformRepository,
-            context: _adminContext,
-            reviewMode: true,
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(
-        find.byKey(const Key('review-creation-platform-pending')),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('creation-review-confirm')));
-      await tester.pumpAndSettle();
-      expect(platformRepository.platformReviews, hasLength(1));
-      expect(
-        tester
-            .widget<FilledButton>(
-              find.byKey(const Key('review-creation-platform-pending')),
-            )
-            .onPressed,
-        isNull,
-      );
-      await tester.tap(
-        find.byKey(const Key('review-creation-platform-pending')),
-        warnIfMissed: false,
-      );
-      await tester.pump();
-      expect(
-        find.byType(AlertDialog),
-        findsNothing,
-        reason: 'reject re-entry must not open while approval is pending',
-      );
-      expect(platformRepository.platformReviews, hasLength(1));
-      platformGate.complete();
-      await tester.pumpAndSettle();
+      'platform and institution creation review actions synchronously block re-entry',
+      (tester) async {
+    _useLargeSurface(tester);
+    final platformGate = Completer<void>();
+    final platformRepository = _ProjectRequestRepository()
+      ..requests = [
+        _request(id: 'platform-pending', type: 'PLATFORM', doctorId: 'doctor-1',),
+      ]
+      ..platformReviewGate = platformGate;
+    await tester.pumpWidget(_app(PlatformProjectRequestPage(
+      repository: platformRepository,
+      context: _adminContext,
+      reviewMode: true,
+    ),),);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('review-creation-platform-pending')),);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('creation-review-confirm')));
+    await tester.pumpAndSettle();
+    expect(platformRepository.platformReviews, hasLength(1));
+    expect(
+      tester
+          .widget<FilledButton>(
+              find.byKey(const Key('review-creation-platform-pending')),)
+          .onPressed,
+      isNull,
+    );
+    await tester.tap(
+      find.byKey(const Key('review-creation-platform-pending')),
+      warnIfMissed: false,
+    );
+    await tester.pump();
+    expect(find.byType(AlertDialog), findsNothing,
+        reason: 'reject re-entry must not open while approval is pending',);
+    expect(platformRepository.platformReviews, hasLength(1));
+    platformGate.complete();
+    await tester.pumpAndSettle();
 
-      final institutionGate = Completer<void>();
-      final institutionRepository = _ProjectRequestRepository()
-        ..requests = [
-          _request(
-            id: 'institution-pending',
-            type: 'INSTITUTION',
-            doctorId: 'doctor-1',
-            institutionId: 'inst-1',
-          ),
-        ]
-        ..institutionReviewGate = institutionGate;
-      await tester.pumpWidget(
-        _app(
-          InstitutionProjectRequestsPage(
-            repository: institutionRepository,
-            context: _adminContext,
-            reviewMode: true,
-          ),
+    final institutionGate = Completer<void>();
+    final institutionRepository = _ProjectRequestRepository()
+      ..requests = [
+        _request(
+          id: 'institution-pending',
+          type: 'INSTITUTION',
+          doctorId: 'doctor-1',
+          institutionId: 'inst-1',
         ),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(
-        find.byKey(const Key('review-creation-institution-pending')),
-      );
-      await tester.pumpAndSettle();
-      await _selectReviewDecision(tester, 'REJECTED');
-      await tester.enterText(
-        find.byKey(const Key('creation-review-note')),
-        'Reject later',
-      );
-      await tester.tap(find.byKey(const Key('creation-review-confirm')));
-      await tester.pumpAndSettle();
-      expect(institutionRepository.institutionReviews, hasLength(1));
-      expect(
-        tester
-            .widget<FilledButton>(
-              find.byKey(const Key('review-creation-institution-pending')),
-            )
-            .onPressed,
-        isNull,
-      );
-      await tester.tap(
-        find.byKey(const Key('review-creation-institution-pending')),
-        warnIfMissed: false,
-      );
-      await tester.pump();
-      expect(find.byType(AlertDialog), findsNothing);
-      expect(
-        institutionRepository.institutionReviews.single.decision,
-        'REJECTED',
-      );
-      institutionGate.complete();
-      await tester.pumpAndSettle();
-    },
-  );
+      ]
+      ..institutionReviewGate = institutionGate;
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      repository: institutionRepository,
+      context: _adminContext,
+      reviewMode: true,
+    ),),);
+    await tester.pumpAndSettle();
+    await tester
+        .tap(find.byKey(const Key('review-creation-institution-pending')),);
+    await tester.pumpAndSettle();
+    await _selectReviewDecision(tester, 'REJECTED');
+    await tester.enterText(
+        find.byKey(const Key('creation-review-note')), 'Reject later',);
+    await tester.tap(find.byKey(const Key('creation-review-confirm')));
+    await tester.pumpAndSettle();
+    expect(institutionRepository.institutionReviews, hasLength(1));
+    expect(
+      tester
+          .widget<FilledButton>(
+              find.byKey(const Key('review-creation-institution-pending')),)
+          .onPressed,
+      isNull,
+    );
+    await tester.tap(
+      find.byKey(const Key('review-creation-institution-pending')),
+      warnIfMissed: false,
+    );
+    await tester.pump();
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(
+        institutionRepository.institutionReviews.single.decision, 'REJECTED',);
+    institutionGate.complete();
+    await tester.pumpAndSettle();
+  },);
 
   testWidgets(
-    'review conflicts refresh current snapshots without submission-only loads or clearing its draft',
-    (tester) async {
-      _useLargeSurface(tester);
-      final platformRepository = _ProjectRequestRepository()
-        ..requests = [
-          _request(
-            id: 'platform-conflict',
-            type: 'PLATFORM',
-            doctorId: 'doctor-1',
-          ),
-        ]
-        ..platformReviewError = const ApiException(
-          message: 'conflict',
-          httpStatus: 409,
-        );
-      platformRepository.onPlatformReview = () {
-        platformRepository.requests = [
-          _request(
-            id: 'platform-conflict',
-            type: 'PLATFORM',
-            doctorId: 'doctor-1',
-            doctorName: 'Dr. Chen Updated',
-            status: 'APPROVED',
-          ),
-        ];
-      };
-      await tester.pumpWidget(
-        _app(
-          PlatformProjectRequestPage(
-            repository: platformRepository,
-            context: _adminContext,
-            reviewMode: true,
-          ),
+      'review conflicts refresh current snapshots without submission-only loads or clearing its draft',
+      (tester) async {
+    _useLargeSurface(tester);
+    final platformRepository = _ProjectRequestRepository()
+      ..requests = [
+        _request(
+            id: 'platform-conflict', type: 'PLATFORM', doctorId: 'doctor-1',),
+      ]
+      ..platformReviewError =
+          const ApiException(message: 'conflict', httpStatus: 409,);
+    platformRepository.onPlatformReview = () {
+      platformRepository.requests = [
+        _request(
+          id: 'platform-conflict',
+          type: 'PLATFORM',
+          doctorId: 'doctor-1',
+          doctorName: 'Dr. Chen Updated',
+          status: 'APPROVED',
         ),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(
-        find.byKey(const Key('review-creation-platform-conflict')),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('creation-review-confirm')));
-      await tester.pumpAndSettle();
-      expect(find.text('审核状态已变化，申请列表已刷新，请基于最新内容重试'), findsOneWidget);
-      expect(find.text('当前医生名称：Dr. Chen Updated'), findsOneWidget);
-      expect(
-        find.byKey(const Key('review-creation-platform-conflict')),
-        findsNothing,
-      );
+      ];
+    };
+    await tester.pumpWidget(_app(PlatformProjectRequestPage(
+      repository: platformRepository,
+      context: _adminContext,
+      reviewMode: true,
+    ),),);
+    await tester.pumpAndSettle();
+    await tester
+        .tap(find.byKey(const Key('review-creation-platform-conflict')),);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('creation-review-confirm')));
+    await tester.pumpAndSettle();
+    expect(find.text('审核状态已变化，申请列表已刷新，请基于最新内容重试'), findsOneWidget);
+    expect(find.text('当前医生名称：Dr. Chen Updated'), findsOneWidget);
+    expect(find.byKey(const Key('review-creation-platform-conflict')),
+        findsNothing,);
 
-      const institutionPageKey = ValueKey('institution-conflict-page');
-      final institutionRepository = _ProjectRequestRepository()
+    const institutionPageKey = ValueKey('institution-conflict-page');
+    final institutionRepository = _ProjectRequestRepository()
+      ..requests = [
+        _request(
+          id: 'institution-conflict',
+          type: 'INSTITUTION',
+          doctorId: 'doctor-1',
+          institutionId: 'inst-1',
+        ),
+      ]
+      ..institutionReviewError =
+          const ApiException(message: 'conflict', httpStatus: 409,);
+    institutionRepository.onInstitutionReview = () {
+      institutionRepository
+        ..formPlatformRate = 100
         ..requests = [
           _request(
             id: 'institution-conflict',
             type: 'INSTITUTION',
             doctorId: 'doctor-1',
             institutionId: 'inst-1',
+            platformRate: 100,
+            doctorRate: -54.75,
           ),
-        ]
-        ..institutionReviewError = const ApiException(
-          message: 'conflict',
-          httpStatus: 409,
-        );
-      institutionRepository.onInstitutionReview = () {
-        institutionRepository
-          ..formPlatformRate = 100
-          ..requests = [
-            _request(
-              id: 'institution-conflict',
-              type: 'INSTITUTION',
-              doctorId: 'doctor-1',
-              institutionId: 'inst-1',
-              platformRate: 100,
-              doctorRate: -54.75,
-            ),
-          ];
-      };
-      await tester.pumpWidget(
-        _app(
-          InstitutionProjectRequestsPage(
-            key: institutionPageKey,
-            repository: institutionRepository,
-            context: _doctorContext,
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(institutionRepository.formConfigLoads, 1);
-      await tester.enterText(
-        find.byKey(const Key('institution-name')),
-        'Unsubmitted draft',
-      );
+        ];
+    };
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      key: institutionPageKey,
+      repository: institutionRepository,
+      context: _doctorContext,
+    ),),);
+    await tester.pumpAndSettle();
+    expect(institutionRepository.formConfigLoads, 1);
+    await tester.enterText(
+        find.byKey(const Key('institution-name')), 'Unsubmitted draft',);
 
-      await tester.pumpWidget(
-        _app(
-          InstitutionProjectRequestsPage(
-            key: institutionPageKey,
-            repository: institutionRepository,
-            context: _adminContext,
-            reviewMode: true,
-          ),
-        ),
-      );
-      await tester.pump();
-      await tester.tap(
-        find.byKey(const Key('review-creation-institution-conflict')),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('creation-review-confirm')));
-      await tester.pumpAndSettle();
-      expect(find.text('审核状态已变化，申请列表已刷新，请基于最新内容重试'), findsOneWidget);
-      expect(find.text('医生项目价格（USD）：USD 799.50'), findsOneWidget);
-      expect(find.text('旅游地接服务费：USD 799.50'), findsOneWidget);
-      expect(institutionRepository.formConfigLoads, 1);
-      expect(institutionRepository.institutionOptionLoads, 1);
-      expect(institutionRepository.managementProjectLoads, 1);
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      key: institutionPageKey,
+      repository: institutionRepository,
+      context: _adminContext,
+      reviewMode: true,
+    ),),);
+    await tester.pump();
+    await tester
+        .tap(find.byKey(const Key('review-creation-institution-conflict')),);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('creation-review-confirm')));
+    await tester.pumpAndSettle();
+    expect(find.text('审核状态已变化，申请列表已刷新，请基于最新内容重试'), findsOneWidget);
+    expect(find.text('医生项目价格（USD）：USD 799.50'), findsOneWidget);
+    expect(find.text('旅游地接服务费：USD 799.50'), findsOneWidget);
+    expect(institutionRepository.formConfigLoads, 1);
+    expect(institutionRepository.institutionOptionLoads, 1);
+    expect(institutionRepository.managementProjectLoads, 1);
 
-      await tester.tap(
-        find.byKey(const Key('review-creation-institution-conflict')),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        find.byKey(const Key('creation-review-approval-blocked')),
-        findsOneWidget,
-      );
-      final refreshedDecision = tester.widget<DropdownButton<String>>(
-        find.descendant(
-          of: find.byKey(const Key('creation-review-decision')),
-          matching: find.byType(DropdownButton<String>),
-        ),
-      );
-      expect(refreshedDecision.items!.map((item) => item.value), ['REJECTED']);
-      await tester.enterText(
-        find.byKey(const Key('creation-review-note')),
-        'Reject refreshed pricing',
-      );
-      await tester.tap(find.byKey(const Key('creation-review-confirm')));
-      await tester.pumpAndSettle();
-      expect(
-        institutionRepository.institutionReviews.map(
-          (review) => review.decision,
-        ),
-        ['APPROVED', 'REJECTED'],
-      );
+    await tester
+        .tap(find.byKey(const Key('review-creation-institution-conflict')),);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('creation-review-approval-blocked')),
+        findsOneWidget,);
+    final refreshedDecision = tester.widget<DropdownButton<String>>(
+      find.descendant(
+        of: find.byKey(const Key('creation-review-decision')),
+        matching: find.byType(DropdownButton<String>),
+      ),
+    );
+    expect(refreshedDecision.items!.map((item) => item.value), ['REJECTED']);
+    await tester.enterText(find.byKey(const Key('creation-review-note')),
+        'Reject refreshed pricing',);
+    await tester.tap(find.byKey(const Key('creation-review-confirm')));
+    await tester.pumpAndSettle();
+    expect(
+      institutionRepository.institutionReviews.map((review) => review.decision,),
+      ['APPROVED', 'REJECTED'],
+    );
 
-      await tester.pumpWidget(
-        _app(
-          InstitutionProjectRequestsPage(
-            key: institutionPageKey,
-            repository: institutionRepository,
-            context: _doctorContext,
-          ),
-        ),
-      );
-      await tester.pump();
-      expect(_text(tester, 'institution-name'), 'Unsubmitted draft');
-    },
-  );
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      key: institutionPageKey,
+      repository: institutionRepository,
+      context: _doctorContext,
+    ),),);
+    await tester.pump();
+    expect(_text(tester, 'institution-name'), 'Unsubmitted draft');
+  },);
 
   testWidgets(
-    'admin and legal review conflicts refresh requests without doctor-only form loads',
-    (tester) async {
-      _useLargeSurface(tester);
-      final adminRepository = _ProjectRequestRepository()
-        ..requests = [
-          _request(
-            id: 'admin-conflict',
-            type: 'INSTITUTION',
-            doctorId: 'doctor-1',
-            institutionId: 'inst-1',
-          ),
-        ]
-        ..institutionReviewError = const ApiException(
-          message: 'conflict',
-          httpStatus: 409,
-        );
-      adminRepository.onInstitutionReview = () {
-        adminRepository.requests = [
-          _request(
-            id: 'admin-conflict',
-            type: 'INSTITUTION',
-            doctorId: 'doctor-1',
-            doctorName: 'Admin refreshed doctor',
-            institutionId: 'inst-1',
-            status: 'APPROVED',
-          ),
-        ];
-      };
-      await tester.pumpWidget(
-        _app(
-          InstitutionProjectRequestsPage(
-            repository: adminRepository,
-            context: _adminContext,
-            reviewMode: true,
-          ),
+      'admin and legal review conflicts refresh requests without doctor-only form loads',
+      (tester) async {
+    _useLargeSurface(tester);
+    final adminRepository = _ProjectRequestRepository()
+      ..requests = [
+        _request(
+          id: 'admin-conflict',
+          type: 'INSTITUTION',
+          doctorId: 'doctor-1',
+          institutionId: 'inst-1',
         ),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('review-creation-admin-conflict')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('creation-review-confirm')));
-      await tester.pumpAndSettle();
-      expect(adminRepository.requestListLoads, 2);
-      expect(find.text('当前医生名称：Admin refreshed doctor'), findsOneWidget);
-      expect(find.text('审核状态已变化，申请列表已刷新，请基于最新内容重试'), findsOneWidget);
-      expect(adminRepository.formConfigLoads, 0);
-      expect(adminRepository.institutionOptionLoads, 0);
-      expect(adminRepository.managementProjectLoads, 0);
+      ]
+      ..institutionReviewError =
+          const ApiException(message: 'conflict', httpStatus: 409,);
+    adminRepository.onInstitutionReview = () {
+      adminRepository.requests = [
+        _request(
+          id: 'admin-conflict',
+          type: 'INSTITUTION',
+          doctorId: 'doctor-1',
+          doctorName: 'Admin refreshed doctor',
+          institutionId: 'inst-1',
+          status: 'APPROVED',
+        ),
+      ];
+    };
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      repository: adminRepository,
+      context: _adminContext,
+      reviewMode: true,
+    ),),);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('review-creation-admin-conflict')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('creation-review-confirm')));
+    await tester.pumpAndSettle();
+    expect(adminRepository.requestListLoads, 2);
+    expect(find.text('当前医生名称：Admin refreshed doctor'), findsOneWidget);
+    expect(find.text('审核状态已变化，申请列表已刷新，请基于最新内容重试'), findsOneWidget);
+    expect(adminRepository.formConfigLoads, 0);
+    expect(adminRepository.institutionOptionLoads, 0);
+    expect(adminRepository.managementProjectLoads, 0);
 
-      final legalRepository = _ProjectRequestRepository()
-        ..requests = [
-          _request(
-            id: 'legal-conflict',
-            type: 'INSTITUTION',
-            doctorId: 'doctor-1',
-            institutionId: 'inst-1',
-          ),
-        ]
-        ..institutionReviewError = const ApiException(
-          message: 'conflict',
-          httpStatus: 409,
-        );
-      legalRepository.onInstitutionReview = () {
-        legalRepository.requests = [
-          _request(
-            id: 'legal-conflict',
-            type: 'INSTITUTION',
-            doctorId: 'doctor-1',
-            doctorName: 'Legal refreshed doctor',
-            institutionId: 'inst-1',
-            status: 'REJECTED',
-          ),
-        ];
-      };
-      await tester.pumpWidget(
-        _app(
-          InstitutionProjectRequestsPage(
-            key: const ValueKey('legal-conflict-page'),
-            repository: legalRepository,
-            context: _legalContext,
-            reviewMode: true,
-          ),
+    final legalRepository = _ProjectRequestRepository()
+      ..requests = [
+        _request(
+          id: 'legal-conflict',
+          type: 'INSTITUTION',
+          doctorId: 'doctor-1',
+          institutionId: 'inst-1',
         ),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('review-creation-legal-conflict')));
-      await tester.pumpAndSettle();
-      await _selectReviewDecision(tester, 'REJECTED');
-      await tester.enterText(
-        find.byKey(const Key('creation-review-note')),
-        'Legal reject',
-      );
-      await tester.tap(find.byKey(const Key('creation-review-confirm')));
-      await tester.pumpAndSettle();
-      expect(legalRepository.requestListLoads, 2);
-      expect(find.text('当前医生名称：Legal refreshed doctor'), findsOneWidget);
-      expect(find.text('审核状态已变化，申请列表已刷新，请基于最新内容重试'), findsOneWidget);
-      expect(legalRepository.formConfigLoads, 0);
-      expect(legalRepository.institutionOptionLoads, 0);
-      expect(legalRepository.managementProjectLoads, 0);
-    },
-  );
+      ]
+      ..institutionReviewError =
+          const ApiException(message: 'conflict', httpStatus: 409,);
+    legalRepository.onInstitutionReview = () {
+      legalRepository.requests = [
+        _request(
+          id: 'legal-conflict',
+          type: 'INSTITUTION',
+          doctorId: 'doctor-1',
+          doctorName: 'Legal refreshed doctor',
+          institutionId: 'inst-1',
+          status: 'REJECTED',
+        ),
+      ];
+    };
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      key: const ValueKey('legal-conflict-page'),
+      repository: legalRepository,
+      context: _legalContext,
+      reviewMode: true,
+    ),),);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('review-creation-legal-conflict')));
+    await tester.pumpAndSettle();
+    await _selectReviewDecision(tester, 'REJECTED');
+    await tester.enterText(
+        find.byKey(const Key('creation-review-note')), 'Legal reject',);
+    await tester.tap(find.byKey(const Key('creation-review-confirm')));
+    await tester.pumpAndSettle();
+    expect(legalRepository.requestListLoads, 2);
+    expect(find.text('当前医生名称：Legal refreshed doctor'), findsOneWidget);
+    expect(find.text('审核状态已变化，申请列表已刷新，请基于最新内容重试'), findsOneWidget);
+    expect(legalRepository.formConfigLoads, 0);
+    expect(legalRepository.institutionOptionLoads, 0);
+    expect(legalRepository.managementProjectLoads, 0);
+  },);
 
   testWidgets(
-    'institution creation hides history while immutable reviews remain role scoped',
-    (tester) async {
-      _useLargeSurface(tester);
-      final repository = _ProjectRequestRepository()
-        ..requests = [
-          _request(
-            id: 'platform-own',
-            type: 'PLATFORM',
-            doctorId: 'doctor-1',
-            slogan: '',
-            coverImage: '',
-            images: const [],
-            categoryTags: const [],
-          ),
-          _request(
-            id: 'platform-other',
-            type: 'PLATFORM',
-            doctorId: 'doctor-2',
-          ),
-          _request(
-            id: 'institution-target',
-            type: 'INSTITUTION',
-            doctorId: 'doctor-1',
-            institutionId: 'inst-1',
-          ),
-          _request(
-            id: 'institution-other',
-            type: 'INSTITUTION',
-            doctorId: 'doctor-2',
-            institutionId: 'inst-2',
-            slogan: null,
-            coverImage: null,
-            images: null,
-          ),
-        ];
-
-      await tester.pumpWidget(
-        _app(
-          PlatformProjectRequestPage(
-            repository: repository,
-            context: _doctorContext,
-          ),
+      'institution creation hides history while immutable reviews remain role scoped',
+      (tester) async {
+    _useLargeSurface(tester);
+    final repository = _ProjectRequestRepository()
+      ..requests = [
+        _request(
+          id: 'platform-own',
+          type: 'PLATFORM',
+          doctorId: 'doctor-1',
+          slogan: '',
+          coverImage: '',
+          images: const [],
+          categoryTags: const [],
         ),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        find.byKey(const Key('professional-request-platform-own')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const Key('professional-request-platform-other')),
-        findsNothing,
-      );
-      expect(
-        find.byKey(const Key('review-creation-platform-own')),
-        findsNothing,
-      );
-
-      await tester.pumpWidget(
-        _app(
-          InstitutionProjectRequestsPage(
-            key: const ValueKey('applicant-institution'),
-            repository: repository,
-            context: _doctorContext,
-          ),
+        _request(
+          id: 'platform-other',
+          type: 'PLATFORM',
+          doctorId: 'doctor-2',
         ),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        find.byKey(const Key('professional-request-institution-target')),
-        findsNothing,
-      );
-      expect(
-        find.byKey(const Key('professional-request-institution-other')),
-        findsNothing,
-      );
-      expect(
-        find.byKey(const Key('review-creation-institution-target')),
-        findsNothing,
-      );
-
-      await tester.pumpWidget(
-        _app(
-          InstitutionProjectRequestsPage(
-            key: const ValueKey('non-target-legal-institution'),
-            repository: repository,
-            context: _legalContext,
-            reviewMode: true,
-          ),
+        _request(
+          id: 'institution-target',
+          type: 'INSTITUTION',
+          doctorId: 'doctor-1',
+          institutionId: 'inst-1',
         ),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        find.byKey(const Key('professional-request-institution-target')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const Key('professional-request-institution-other')),
-        findsNothing,
-      );
-      expect(
-        find.byKey(const Key('professional-request-platform-own')),
-        findsNothing,
-      );
-      expect(find.textContaining('Complete immutable detail'), findsOneWidget);
-      expect(find.text('申请编号：institution-target'), findsOneWidget);
-      expect(find.text('机构编号：inst-1'), findsOneWidget);
-      expect(find.text('申请医生编号：doctor-1'), findsOneWidget);
-      expect(find.text('当前医生名称：Dr. Chen'), findsOneWidget);
-      expect(find.text('当前机构名称：Joysong Clinic'), findsOneWidget);
-      expect(find.text('平台项目编号：project-1'), findsOneWidget);
-      expect(find.text('当前平台项目名称：Hydrating Facial'), findsOneWidget);
-      expect(find.text('医生项目价格（USD）：USD 799.50'), findsOneWidget);
-      expect(find.text('旅游地接服务费：USD 79.95'), findsOneWidget);
-      expect(find.text('审核意见：未提供'), findsOneWidget);
-      expect(find.text('审核人：未提供'), findsOneWidget);
-      expect(find.text('生成平台项目：未提供'), findsOneWidget);
-      expect(
-        find.byType(TextField),
-        findsNothing,
-        reason: 'the submitted snapshot must be immutable',
-      );
-
-      await tester.tap(
-        find.byKey(const Key('review-creation-institution-target')),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        tester
-            .widget<DropdownButtonFormField<String>>(
-              find.byKey(const Key('creation-review-decision')),
-            )
-            .decoration
-            .labelText,
-        '审核决定',
-      );
-      await _selectReviewDecision(tester, 'REJECTED');
-      await tester.tap(find.byKey(const Key('creation-review-confirm')));
-      await tester.pump();
-      expect(
-        find.byType(AlertDialog),
-        findsOneWidget,
-        reason: 'blank rejection note must not close the dialog',
-      );
-      expect(find.text('驳回时必须填写审核意见'), findsOneWidget);
-      await tester.enterText(
-        find.byKey(const Key('creation-review-note')),
-        'Not ready',
-      );
-      await tester.tap(find.byKey(const Key('creation-review-confirm')));
-      await tester.pumpAndSettle();
-      expect(repository.institutionReviews.single, (
-        id: 'institution-target',
-        decision: 'REJECTED',
-        note: 'Not ready',
-      ));
-
-      await tester.pumpWidget(
-        _app(
-          InstitutionProjectRequestsPage(
-            repository: repository,
-            context: _nonTargetLegalContext,
-            reviewMode: true,
-          ),
+        _request(
+          id: 'institution-other',
+          type: 'INSTITUTION',
+          doctorId: 'doctor-2',
+          institutionId: 'inst-2',
+          slogan: null,
+          coverImage: null,
+          images: null,
         ),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        find.byKey(const Key('professional-request-institution-target')),
-        findsNothing,
-      );
-      expect(
-        find.byKey(const Key('review-creation-institution-target')),
-        findsNothing,
-      );
+      ];
 
-      await tester.pumpWidget(
-        _app(
-          PlatformProjectRequestPage(
-            key: const ValueKey('non-admin-platform-review'),
-            repository: repository,
-            context: _legalContext,
-            reviewMode: true,
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        find.byKey(const Key('professional-request-platform-own')),
-        findsNothing,
-      );
-      expect(
-        find.byKey(const Key('professional-request-platform-other')),
-        findsNothing,
-      );
-      expect(
-        find.byKey(const Key('review-creation-platform-own')),
-        findsNothing,
-      );
+    await tester.pumpWidget(_app(PlatformProjectRequestPage(
+      repository: repository,
+      context: _doctorContext,
+    ),),);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('professional-request-platform-own')),
+        findsOneWidget,);
+    expect(find.byKey(const Key('professional-request-platform-other')),
+        findsNothing,);
+    expect(find.byKey(const Key('review-creation-platform-own')), findsNothing,);
 
-      await tester.pumpWidget(
-        _app(
-          PlatformProjectRequestPage(
-            key: const ValueKey('admin-platform'),
-            repository: repository,
-            context: _adminContext,
-            reviewMode: true,
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        find.byKey(const Key('professional-request-platform-own')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const Key('professional-request-institution-target')),
-        findsNothing,
-      );
-      expect(find.text('项目标语：空字符串'), findsOneWidget);
-      expect(find.text('封面图：空字符串'), findsOneWidget);
-      expect(find.text('项目图片：空列表'), findsOneWidget);
-      expect(find.text('分类标签：空列表'), findsOneWidget);
-      await tester.tap(find.byKey(const Key('review-creation-platform-own')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('creation-review-confirm')));
-      await tester.pumpAndSettle();
-      expect(repository.platformReviews.single, (
-        id: 'platform-own',
-        decision: 'APPROVED',
-        note: '',
-      ));
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      key: const ValueKey('applicant-institution'),
+      repository: repository,
+      context: _doctorContext,
+    ),),);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('professional-request-institution-target')),
+        findsNothing,);
+    expect(find.byKey(const Key('professional-request-institution-other')),
+        findsNothing,);
+    expect(find.byKey(const Key('review-creation-institution-target')),
+        findsNothing,);
 
-      await tester.pumpWidget(
-        _app(
-          InstitutionProjectRequestsPage(
-            key: const ValueKey('admin-institution'),
-            repository: repository,
-            context: _adminContext,
-            reviewMode: true,
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(find.text('项目标语：未提供'), findsOneWidget);
-      expect(find.text('封面图：未提供'), findsOneWidget);
-      expect(find.text('项目图片：未提供'), findsOneWidget);
-      expect(find.text('分类标签：未提供'), findsWidgets);
-      await tester.tap(
-        find.byKey(const Key('review-creation-institution-other')),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('creation-review-confirm')));
-      await tester.pumpAndSettle();
-      expect(repository.institutionReviews.last, (
-        id: 'institution-other',
-        decision: 'APPROVED',
-        note: '',
-      ));
-    },
-  );
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      key: const ValueKey('non-target-legal-institution'),
+      repository: repository,
+      context: _legalContext,
+      reviewMode: true,
+    ),),);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('professional-request-institution-target')),
+        findsOneWidget,);
+    expect(find.byKey(const Key('professional-request-institution-other')),
+        findsNothing,);
+    expect(find.byKey(const Key('professional-request-platform-own')),
+        findsNothing,);
+    expect(find.textContaining('Complete immutable detail'), findsOneWidget);
+    expect(find.text('申请编号：institution-target'), findsOneWidget);
+    expect(find.text('机构编号：inst-1'), findsOneWidget);
+    expect(find.text('申请医生编号：doctor-1'), findsOneWidget);
+    expect(find.text('当前医生名称：Dr. Chen'), findsOneWidget);
+    expect(find.text('当前机构名称：Joysong Clinic'), findsOneWidget);
+    expect(find.text('平台项目编号：project-1'), findsOneWidget);
+    expect(find.text('当前平台项目名称：Hydrating Facial'), findsOneWidget);
+    expect(find.text('医生项目价格（USD）：USD 799.50'), findsOneWidget);
+    expect(find.text('旅游地接服务费：USD 79.95'), findsOneWidget);
+    expect(find.text('审核意见：未提供'), findsOneWidget);
+    expect(find.text('审核人：未提供'), findsOneWidget);
+    expect(find.text('生成平台项目：未提供'), findsOneWidget);
+    expect(find.byType(TextField), findsNothing,
+        reason: 'the submitted snapshot must be immutable',);
+
+    await tester
+        .tap(find.byKey(const Key('review-creation-institution-target')),);
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<DropdownButtonFormField<String>>(
+            find.byKey(const Key('creation-review-decision')),
+          )
+          .decoration
+          .labelText,
+      '审核决定',
+    );
+    await _selectReviewDecision(tester, 'REJECTED');
+    await tester.tap(find.byKey(const Key('creation-review-confirm')));
+    await tester.pump();
+    expect(find.byType(AlertDialog), findsOneWidget,
+        reason: 'blank rejection note must not close the dialog',);
+    expect(find.text('驳回时必须填写审核意见'), findsOneWidget);
+    await tester.enterText(
+        find.byKey(const Key('creation-review-note')), 'Not ready',);
+    await tester.tap(find.byKey(const Key('creation-review-confirm')));
+    await tester.pumpAndSettle();
+    expect(repository.institutionReviews.single,
+        (id: 'institution-target', decision: 'REJECTED', note: 'Not ready',));
+
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      repository: repository,
+      context: _nonTargetLegalContext,
+      reviewMode: true,
+    ),),);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('professional-request-institution-target')),
+        findsNothing,);
+    expect(find.byKey(const Key('review-creation-institution-target')),
+        findsNothing,);
+
+    await tester.pumpWidget(_app(PlatformProjectRequestPage(
+      key: const ValueKey('non-admin-platform-review'),
+      repository: repository,
+      context: _legalContext,
+      reviewMode: true,
+    ),),);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('professional-request-platform-own')),
+        findsNothing,);
+    expect(find.byKey(const Key('professional-request-platform-other')),
+        findsNothing,);
+    expect(find.byKey(const Key('review-creation-platform-own')), findsNothing,);
+
+    await tester.pumpWidget(_app(PlatformProjectRequestPage(
+      key: const ValueKey('admin-platform'),
+      repository: repository,
+      context: _adminContext,
+      reviewMode: true,
+    ),),);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('professional-request-platform-own')),
+        findsOneWidget,);
+    expect(find.byKey(const Key('professional-request-institution-target')),
+        findsNothing,);
+    expect(find.text('项目标语：空字符串'), findsOneWidget);
+    expect(find.text('封面图：空字符串'), findsOneWidget);
+    expect(find.text('项目图片：空列表'), findsOneWidget);
+    expect(find.text('分类标签：空列表'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('review-creation-platform-own')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('creation-review-confirm')));
+    await tester.pumpAndSettle();
+    expect(repository.platformReviews.single,
+        (id: 'platform-own', decision: 'APPROVED', note: '',));
+
+    await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+      key: const ValueKey('admin-institution'),
+      repository: repository,
+      context: _adminContext,
+      reviewMode: true,
+    ),),);
+    await tester.pumpAndSettle();
+    expect(find.text('项目标语：未提供'), findsOneWidget);
+    expect(find.text('封面图：未提供'), findsOneWidget);
+    expect(find.text('项目图片：未提供'), findsOneWidget);
+    expect(find.text('分类标签：未提供'), findsWidgets);
+    await tester
+        .tap(find.byKey(const Key('review-creation-institution-other')),);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('creation-review-confirm')));
+    await tester.pumpAndSettle();
+    expect(repository.institutionReviews.last,
+        (id: 'institution-other', decision: 'APPROVED', note: '',));
+  },);
 }
 
 void _useLargeSurface(WidgetTester tester) {
@@ -2323,10 +1931,8 @@ Future<void> _submit(WidgetTester tester, Key key) async {
   await tester.pumpAndSettle();
 }
 
-Future<void> _fillPlatformDraft(
-  WidgetTester tester, {
-  required String referencePrice,
-}) async {
+Future<void> _fillPlatformDraft(WidgetTester tester,
+    {required String referencePrice,}) async {
   final values = {
     'platform-name': 'Retained platform name',
     'platform-reference-price': referencePrice,
@@ -2388,20 +1994,19 @@ void _expectPlatformConflictDraftRetained(WidgetTester tester) {
     expect(_text(tester, entry.key), entry.value);
   }
   expect(find.byKey(const Key('platform-currency')), findsNothing);
-  expect(
-    find.text('https://cdn.example.com/conflict-platform-cover.jpg'),
-    findsOneWidget,
-  );
-  expect(
-    find.text('https://cdn.example.com/conflict-platform-gallery.jpg'),
-    findsOneWidget,
-  );
+  expect(find.text('https://cdn.example.com/conflict-platform-cover.jpg'),
+      findsOneWidget,);
+  expect(find.text('https://cdn.example.com/conflict-platform-gallery.jpg'),
+      findsOneWidget,);
 }
 
 Future<void> _prepareInstitutionConflictDraft(WidgetTester tester) async {
   await _choose(tester, const Key('institution-id'), 'Joysong Clinic');
   await _choose(tester, const Key('institution-project'), 'Hydrating Facial');
-  await _fillInstitutionDraft(tester, price: '799.99');
+  await _fillInstitutionDraft(
+    tester,
+    price: '799.99'
+  );
   await tester.tap(find.byKey(const Key('institution-is-active')));
   await tester.pump();
   await tester.tap(find.byKey(const Key('institution-cover-upload')));
@@ -2432,22 +2037,17 @@ void _expectInstitutionConflictDraftValuesRetained(WidgetTester tester) {
   }
   expect(
     find.byKey(const Key('institution-travel-ground-service-fee')),
-    findsOneWidget,
-  );
+    findsOneWidget,);
   expect(
     tester
         .widget<SwitchListTile>(find.byKey(const Key('institution-is-active')))
         .value,
     isFalse,
   );
-  expect(
-    find.text('https://cdn.example.com/conflict-clinic-cover.jpg'),
-    findsOneWidget,
-  );
-  expect(
-    find.text('https://cdn.example.com/conflict-clinic-gallery.jpg'),
-    findsOneWidget,
-  );
+  expect(find.text('https://cdn.example.com/conflict-clinic-cover.jpg'),
+      findsOneWidget,);
+  expect(find.text('https://cdn.example.com/conflict-clinic-gallery.jpg'),
+      findsOneWidget,);
 }
 
 Future<void> _selectReviewDecision(WidgetTester tester, String decision) async {
@@ -2757,14 +2357,12 @@ final class _ProjectRequestRepository implements IdentityRepository {
     formConfigLoads++;
     calls.add('form-config');
     return InstitutionProjectApplicationFormConfig(
-      platformRate: formPlatformRate,
-    );
+        platformRate: formPlatformRate,);
   }
 
   @override
   Future<void> submitPlatformProjectRequest(
-    PlatformProjectRequestDraft draft,
-  ) async {
+      PlatformProjectRequestDraft draft,) async {
     platformSubmissions.add(draft);
     calls.add('submit-platform');
     onPlatformSubmit?.call();
@@ -2776,8 +2374,7 @@ final class _ProjectRequestRepository implements IdentityRepository {
 
   @override
   Future<void> submitInstitutionProjectRequest(
-    InstitutionProjectRequestDraft draft,
-  ) async {
+      InstitutionProjectRequestDraft draft,) async {
     institutionSubmissions.add(draft);
     calls.add('submit-institution');
     onInstitutionSubmit?.call();
