@@ -134,6 +134,72 @@ void main() {
     expect(_cardText('order-c', 'Institution C'), findsOneWidget);
   });
 
+  testWidgets(
+      'failed order card retries only after an identical accepted refresh snapshot',
+      (tester) async {
+    await _useTallSurface(tester);
+    final ordersRepository = FakeOrdersRepository()
+      ..orders = [
+        sampleOrder(
+          id: 'retry-order',
+          projectName: '刷新重试项目',
+          institutionName: '',
+        ),
+      ];
+    final translations = RecordingTranslationRepository()
+      ..failuresRemaining = 1;
+    final controller = OrdersController(ordersRepository);
+    addTearDown(controller.dispose);
+    final autoController = _activeAutoController(translations);
+    addTearDown(autoController.dispose);
+
+    await tester.pumpWidget(
+      _ordersHost(
+        ordersRepository: ordersRepository,
+        translations: translations,
+        enableAutoTranslation: true,
+        controller: controller,
+        autoController: autoController,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(translations.calls.map((call) => call.text), ['刷新重试项目']);
+    expect(find.text('刷新重试项目'), findsOneWidget);
+
+    await tester.tap(find.text('All'));
+    await tester.pump();
+    await tester.pumpWidget(
+      _ordersHost(
+        ordersRepository: ordersRepository,
+        translations: translations,
+        enableAutoTranslation: true,
+        controller: controller,
+        autoController: autoController,
+      ),
+    );
+    await tester.pump();
+    expect(translations.calls, hasLength(1));
+
+    ordersRepository.orders = [
+      sampleOrder(
+        id: 'retry-order',
+        projectName: '刷新重试项目',
+        institutionName: '',
+      ),
+    ];
+    await tester
+        .widget<RefreshIndicator>(find.byType(RefreshIndicator))
+        .onRefresh();
+    await tester.pumpAndSettle();
+
+    expect(translations.calls.map((call) => call.text), [
+      '刷新重试项目',
+      '刷新重试项目',
+    ]);
+    expect(find.text('en-US:刷新重试项目'), findsOneWidget);
+  });
+
   testWidgets('empty and duplicate order IDs remain source-only',
       (tester) async {
     await _useTallSurface(tester);

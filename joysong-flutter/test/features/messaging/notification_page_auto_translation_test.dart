@@ -128,6 +128,62 @@ void main() {
     expect(translations.calls, isEmpty);
     expect(find.byType(AutoTranslationBuilder), findsNothing);
   });
+
+  testWidgets(
+      'failed notification retries only after refresh not read-state rebuilds',
+      (tester) async {
+    final notificationRepository = _NotificationRepository(
+      notifications: [_retryNotification(isRead: false)],
+    );
+    final translations = RecordingTranslationRepository()
+      ..failuresRemaining = 1;
+    final autoController = _activeAutoController(translations);
+    final controller = NotificationController(notificationRepository);
+    addTearDown(autoController.dispose);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      _host(
+        autoController,
+        NotificationPage(
+          controller: controller,
+          enableAutoTranslation: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(translations.calls.map((call) => call.text), ['通知刷新重试']);
+    expect(find.text('通知刷新重试'), findsOneWidget);
+
+    await tester.tap(find.text('通知刷新重试'));
+    await tester.pumpAndSettle();
+    await controller.markAllRead();
+    await tester.pump();
+    await tester.pumpWidget(
+      _host(
+        autoController,
+        NotificationPage(
+          controller: controller,
+          enableAutoTranslation: true,
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(translations.calls, hasLength(1));
+
+    notificationRepository.notifications = [_retryNotification(isRead: true)];
+    await tester
+        .widget<RefreshIndicator>(find.byType(RefreshIndicator))
+        .onRefresh();
+    await tester.pumpAndSettle();
+
+    expect(translations.calls.map((call) => call.text), [
+      '通知刷新重试',
+      '通知刷新重试',
+    ]);
+    expect(find.text('en-US:通知刷新重试'), findsOneWidget);
+  });
 }
 
 Set<(String, String, String, String)> _mountedRequests(WidgetTester tester) =>
@@ -170,7 +226,7 @@ final class _NotificationRepository extends Fake
     implements MessagingRepository {
   _NotificationRepository({required this.notifications});
 
-  final List<AppNotification> notifications;
+  List<AppNotification> notifications;
 
   @override
   Future<List<AppNotification>> getNotifications({int limit = 50}) async =>
@@ -182,6 +238,18 @@ final class _NotificationRepository extends Fake
   @override
   Future<void> markNotificationRead(String notificationId) async {}
 }
+
+AppNotification _retryNotification({required bool isRead}) => AppNotification(
+      id: 'notification-retry',
+      userId: 'user-1',
+      type: 'order',
+      title: '通知刷新重试',
+      content: 'Already English',
+      targetType: 'order',
+      targetId: 'order-retry',
+      isRead: isRead,
+      createdAt: '2026-08-25T12:00:00',
+    );
 
 const _orderAndIdentityNotifications = [
   AppNotification(

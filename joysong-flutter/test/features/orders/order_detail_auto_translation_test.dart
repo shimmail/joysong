@@ -172,6 +172,108 @@ void main() {
     expect(translations.calls.map((call) => call.text), ['翻译失败项目']);
   });
 
+  testWidgets(
+      'failed detail fields retry only after identical accepted snapshots reload',
+      (tester) async {
+    await _useTallSurface(tester);
+    final repository = FakeOrdersRepository()
+      ..orders = [
+        sampleOrder(
+          projectName: '重试详情项目',
+          institutionName: '',
+          refundStatus: RefundStatus.pending,
+        ),
+      ]
+      ..refundDetail = RefundDetail(
+        id: 'retry-refund',
+        orderId: 'order-1',
+        amount: Money.parse('10'),
+        reason: '重试退款原因',
+        description: '',
+        status: RefundStatus.pending,
+        createdAt: DateTime(2026, 8, 25),
+      )
+      ..statusLogs = [
+        _statusLog(id: 51, remark: '重试状态备注'),
+      ];
+    final translations = RecordingTranslationRepository()
+      ..holdResponses = true
+      ..failuresRemaining = 3;
+    final controller = OrderDetailController(repository, orderId: 'order-1');
+    addTearDown(controller.dispose);
+    final autoController = _activeAutoController(translations);
+    addTearDown(autoController.dispose);
+
+    await tester.pumpWidget(
+      _detailHost(
+        controller: controller,
+        autoController: autoController,
+        enableAutoTranslation: true,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(translations.calls, hasLength(3));
+    expect(translations.pendingCount, 0);
+
+    await tester.pumpWidget(
+      _detailHost(
+        controller: controller,
+        autoController: autoController,
+        enableAutoTranslation: true,
+      ),
+    );
+    await tester.pump();
+    expect(translations.calls, hasLength(3));
+
+    repository.orderDetails = [
+      sampleOrder(
+        projectName: '重试详情项目',
+        institutionName: '',
+        refundStatus: RefundStatus.pending,
+      ),
+    ];
+    repository.refundDetail = RefundDetail(
+      id: 'retry-refund',
+      orderId: 'order-1',
+      amount: Money.parse('10'),
+      reason: '重试退款原因',
+      description: '',
+      status: RefundStatus.pending,
+      createdAt: DateTime(2026, 8, 25),
+    );
+    repository.statusLogs = [
+      _statusLog(id: 51, remark: '重试状态备注'),
+    ];
+    await controller.load();
+    await tester.pump();
+
+    expect(translations.calls, hasLength(6));
+    expect(
+      translations.calls.map((call) => call.text),
+      containsAll(<String>[
+        '重试详情项目',
+        '重试退款原因',
+        '重试状态备注',
+      ]),
+    );
+    translations.completeText('重试详情项目', 'Retried project');
+    translations.completeText('重试退款原因', 'Retried refund reason');
+    translations.completeText('重试状态备注', 'Retried status remark');
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Retried project', skipOffstage: false), findsOneWidget);
+    expect(
+      find.text('Retried refund reason', skipOffstage: false),
+      findsOneWidget,
+    );
+    expect(
+      find.text('Retried status remark', skipOffstage: false),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('detail rejects a stale completion after reload', (tester) async {
     final repository = FakeOrdersRepository()
       ..orders = [sampleOrder(projectName: '刷新前项目', institutionName: '')];

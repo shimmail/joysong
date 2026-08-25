@@ -538,6 +538,7 @@ class _OrderInformation extends StatelessWidget {
             contentId: contentId,
             field: 'projectName',
             sourceText: order.projectName,
+            retryToken: order,
           ),
         ),
         if (order.institutionName.isNotEmpty)
@@ -549,6 +550,7 @@ class _OrderInformation extends StatelessWidget {
               contentId: contentId,
               field: 'institutionName',
               sourceText: order.institutionName,
+              retryToken: order,
             ),
           ),
         if (order.doctorName.isNotEmpty)
@@ -570,6 +572,7 @@ class _OrderInformation extends StatelessWidget {
               contentId: contentId,
               field: 'remark',
               sourceText: order.remark,
+              retryToken: order,
             ),
           ),
       ],
@@ -638,6 +641,7 @@ class _TravelGroundServiceInformation extends StatelessWidget {
               contentId: 'order:$orderId',
               field: 'institutionName',
               sourceText: order.institutionName,
+              retryToken: order,
             ),
           ),
         if (order.institutionId.isNotEmpty)
@@ -824,6 +828,7 @@ class _RefundCard extends StatelessWidget {
               contentId: contentId,
               field: 'reason',
               sourceText: refund.reason,
+              retryToken: refund,
             ),
           ),
         if (visibleDescription.trim().isNotEmpty)
@@ -835,6 +840,7 @@ class _RefundCard extends StatelessWidget {
               contentId: contentId,
               field: 'description',
               sourceText: visibleDescription,
+              retryToken: refund,
             ),
           ),
         if (refund.rejectReason?.trim().isNotEmpty == true)
@@ -846,6 +852,7 @@ class _RefundCard extends StatelessWidget {
               contentId: contentId,
               field: 'rejectReason',
               sourceText: refund.rejectReason!,
+              retryToken: refund,
             ),
           ),
       ],
@@ -985,6 +992,7 @@ class _StatusTimeline extends StatelessWidget {
                   contentId: 'order-status-log:${log.id}',
                   field: 'remark',
                   sourceText: log.remark,
+                  retryToken: log,
                 ),
               ),
             ],
@@ -1360,6 +1368,7 @@ class _FlowOrderSummary extends StatelessWidget {
                     contentId: 'order:$orderId',
                     field: 'projectName',
                     sourceText: order.projectName,
+                    retryToken: order,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   if (order.institutionName.isNotEmpty)
@@ -1369,6 +1378,7 @@ class _FlowOrderSummary extends StatelessWidget {
                       contentId: 'order:$orderId',
                       field: 'institutionName',
                       sourceText: order.institutionName,
+                      retryToken: order,
                     ),
                   if (order.orderNo.isNotEmpty)
                     Text(

@@ -345,6 +345,7 @@ class _OrderCard extends StatelessWidget {
                             contentId: 'order:${order.id.trim()}',
                             field: 'institutionName',
                             sourceText: order.institutionName,
+                            retryToken: order,
                             style: Theme.of(context).textTheme.titleSmall,
                           )
                         : Text(
@@ -401,6 +402,7 @@ class _OrderCard extends StatelessWidget {
                           contentId: 'order:${order.id.trim()}',
                           field: 'projectName',
                           sourceText: order.projectName,
+                          retryToken: order,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),

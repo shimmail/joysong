@@ -28,10 +28,19 @@ class NotificationPage extends StatefulWidget {
 }
 
 class _NotificationPageState extends State<NotificationPage> {
+  Object _refreshToken = Object();
+
   @override
   void initState() {
     super.initState();
-    unawaited(widget.controller.refresh());
+    unawaited(_refreshNotifications());
+  }
+
+  Future<void> _refreshNotifications() async {
+    final previousItems = widget.controller.items;
+    await widget.controller.refresh();
+    if (!mounted || identical(previousItems, widget.controller.items)) return;
+    setState(() => _refreshToken = Object());
   }
 
   @override
@@ -53,12 +62,14 @@ class _NotificationPageState extends State<NotificationPage> {
           ],
         ),
         body: RefreshIndicator(
-          onRefresh: widget.controller.refresh,
+          onRefresh: _refreshNotifications,
           child: _NotificationList(
             controller: widget.controller,
             onOpenNotification: widget.onOpenNotification,
             filter: widget.filter,
             enableAutoTranslation: widget.enableAutoTranslation,
+            retryToken: _refreshToken,
+            onRefresh: _refreshNotifications,
           ),
         ),
       ),
@@ -72,11 +83,15 @@ class _NotificationList extends StatelessWidget {
     this.onOpenNotification,
     this.filter,
     required this.enableAutoTranslation,
+    required this.retryToken,
+    required this.onRefresh,
   });
   final NotificationController controller;
   final ValueChanged<AppNotification>? onOpenNotification;
   final bool Function(AppNotification notification)? filter;
   final bool enableAutoTranslation;
+  final Object retryToken;
+  final Future<void> Function() onRefresh;
 
   @override
   Widget build(BuildContext context) {
@@ -103,7 +118,7 @@ class _NotificationList extends StatelessWidget {
           Center(child: Text(strings.localizedError(controller.errorMessage!))),
           Center(
             child: TextButton(
-              onPressed: controller.refresh,
+              onPressed: onRefresh,
               child: Text(strings.retry),
             ),
           ),
@@ -159,6 +174,7 @@ class _NotificationList extends StatelessWidget {
               contentId: 'notification:$notificationId',
               field: 'title',
               sourceText: item.title,
+              retryToken: retryToken,
             ),
             subtitle: StableAutoTranslatedText(
               enabled: enableAutoTranslation &&
@@ -168,6 +184,7 @@ class _NotificationList extends StatelessWidget {
               contentId: 'notification:$notificationId',
               field: 'content',
               sourceText: item.content,
+              retryToken: retryToken,
               maxLines: 3,
             ),
             trailing: Column(

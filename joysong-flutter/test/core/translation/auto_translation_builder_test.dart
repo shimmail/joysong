@@ -271,26 +271,112 @@ void main() {
     expect(repository.calls, isEmpty);
   });
 
-  testWidgets('stable builder reuses its request across equivalent rebuilds',
+  testWidgets(
+      'stable builder keeps a failed request stable for the same retry snapshot',
       (tester) async {
     final repository = RecordingTranslationRepository()..holdResponses = true;
     final controller = _activeController(repository);
+    final retrySnapshot = Object();
     addTearDown(controller.dispose);
 
-    await tester.pumpWidget(_stableTranslationHost(controller: controller));
+    await tester.pumpWidget(
+      _stableTranslationHost(
+        controller: controller,
+        retryToken: retrySnapshot,
+      ),
+    );
     final first = tester
         .widget<AutoTranslationBuilder>(find.byType(AutoTranslationBuilder))
         .request;
     repository.failNext();
     await _pumpTranslation(tester);
 
-    await tester.pumpWidget(_stableTranslationHost(controller: controller));
+    await tester.pumpWidget(
+      _stableTranslationHost(
+        controller: controller,
+        retryToken: retrySnapshot,
+      ),
+    );
     final rebuilt = tester
         .widget<AutoTranslationBuilder>(find.byType(AutoTranslationBuilder))
         .request;
 
     expect(rebuilt, same(first));
     expect(repository.calls, hasLength(1));
+  });
+
+  testWidgets(
+      'stable builder retries a failed request for a new retry snapshot',
+      (tester) async {
+    final repository = RecordingTranslationRepository()..holdResponses = true;
+    final controller = _activeController(repository);
+    final firstSnapshot = Object();
+    final refreshedSnapshot = Object();
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      _stableTranslationHost(
+        controller: controller,
+        retryToken: firstSnapshot,
+      ),
+    );
+    final failedRequest = tester
+        .widget<AutoTranslationBuilder>(find.byType(AutoTranslationBuilder))
+        .request;
+    repository.failNext();
+    await _pumpTranslation(tester);
+
+    await tester.pumpWidget(
+      _stableTranslationHost(
+        controller: controller,
+        retryToken: refreshedSnapshot,
+      ),
+    );
+    final retriedRequest = tester
+        .widget<AutoTranslationBuilder>(find.byType(AutoTranslationBuilder))
+        .request;
+
+    expect(retriedRequest, isNot(same(failedRequest)));
+    expect(repository.calls, hasLength(2));
+    repository.completeNext('Retried description');
+    await _pumpTranslation(tester);
+    expect(find.text('Retried description'), findsOneWidget);
+
+    await tester.pumpWidget(
+      _stableTranslationHost(
+        controller: controller,
+        retryToken: refreshedSnapshot,
+      ),
+    );
+    expect(repository.calls, hasLength(2));
+  });
+
+  testWidgets('a new retry snapshot reuses a successful cached translation',
+      (tester) async {
+    final repository = RecordingTranslationRepository()..holdResponses = true;
+    final controller = _activeController(repository);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      _stableTranslationHost(
+        controller: controller,
+        retryToken: Object(),
+      ),
+    );
+    repository.completeNext('Cached description');
+    await _pumpTranslation(tester);
+    expect(find.text('Cached description'), findsOneWidget);
+
+    await tester.pumpWidget(
+      _stableTranslationHost(
+        controller: controller,
+        retryToken: Object(),
+      ),
+    );
+    await _pumpTranslation(tester);
+
+    expect(repository.calls, hasLength(1));
+    expect(find.text('Cached description'), findsOneWidget);
   });
 
   testWidgets('stable builder changes identity when a request value changes',
@@ -467,6 +553,7 @@ Widget _stableTranslationHost({
   String field = 'description',
   String sourceText = '项目说明',
   TranslationValidator? validator,
+  Object? retryToken,
 }) {
   return Directionality(
     textDirection: TextDirection.ltr,
@@ -481,6 +568,7 @@ Widget _stableTranslationHost({
         field: field,
         sourceText: sourceText,
         validator: validator,
+        retryToken: retryToken,
         builder: _visibleText,
       ),
     ),

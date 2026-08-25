@@ -154,6 +154,7 @@ final class StableAutoTranslationBuilder extends StatefulWidget {
     required this.sourceText,
     required this.builder,
     this.validator,
+    this.retryToken,
     super.key,
   });
 
@@ -163,6 +164,9 @@ final class StableAutoTranslationBuilder extends StatefulWidget {
   final String field;
   final String sourceText;
   final TranslationValidator? validator;
+
+  /// Scheduling-only snapshot identity; it is never added to the request.
+  final Object? retryToken;
   final Widget Function(BuildContext context, String visibleText) builder;
 
   @override
@@ -173,6 +177,7 @@ final class StableAutoTranslationBuilder extends StatefulWidget {
 final class _StableAutoTranslationBuilderState
     extends State<StableAutoTranslationBuilder> {
   AutoTranslationRequest? _request;
+  Object? _retryToken;
 
   @override
   void initState() {
@@ -192,6 +197,7 @@ final class _StableAutoTranslationBuilderState
         widget.field.trim().isEmpty ||
         widget.sourceText.trim().isEmpty) {
       _request = null;
+      _retryToken = widget.retryToken;
       return;
     }
     final previous = _request;
@@ -200,9 +206,11 @@ final class _StableAutoTranslationBuilderState
         previous.contentId == widget.contentId &&
         previous.field == widget.field &&
         previous.sourceText == widget.sourceText &&
-        identical(previous.validator, widget.validator)) {
+        identical(previous.validator, widget.validator) &&
+        identical(_retryToken, widget.retryToken)) {
       return;
     }
+    _retryToken = widget.retryToken;
     _request = AutoTranslationRequest(
       contentType: widget.contentType,
       contentId: widget.contentId,
@@ -230,6 +238,7 @@ final class StableAutoTranslatedText extends StatelessWidget {
     required this.field,
     required this.sourceText,
     this.validator,
+    this.retryToken,
     this.style,
     this.maxLines,
     this.overflow,
@@ -244,6 +253,7 @@ final class StableAutoTranslatedText extends StatelessWidget {
   final String field;
   final String sourceText;
   final TranslationValidator? validator;
+  final Object? retryToken;
   final TextStyle? style;
   final int? maxLines;
   final TextOverflow? overflow;
@@ -258,6 +268,7 @@ final class StableAutoTranslatedText extends StatelessWidget {
         field: field,
         sourceText: sourceText,
         validator: validator,
+        retryToken: retryToken,
         builder: (context, visibleText) => Text(
           visibleText,
           style: style,
