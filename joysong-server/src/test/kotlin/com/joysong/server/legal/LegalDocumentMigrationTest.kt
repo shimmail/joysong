@@ -12,6 +12,7 @@ import com.joysong.server.legal.dto.PublishLegalDocumentRequest
 import com.joysong.server.legal.dto.UpdateLegalDocumentDraftRequest
 import com.joysong.server.legal.service.LegalDocumentHtmlSanitizer
 import com.joysong.server.legal.service.LegalDocumentService
+import com.joysong.server.legal.service.LegalDocumentConflictException
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.AfterAll
@@ -263,8 +264,7 @@ class LegalDocumentMigrationTest {
             assertEquals(1, outcomes.count(Result<String>::isSuccess))
             assertEquals(1, failures.size)
             assertTrue(
-                failures.single().hasCause(IllegalStateException::class.java) ||
-                    failures.single().hasCause(DataIntegrityViolationException::class.java),
+                failures.single().hasCause(LegalDocumentConflictException::class.java),
                 "失败方必须因已有草稿或数据库唯一约束失败"
             )
             assertEquals(

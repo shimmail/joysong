@@ -18,6 +18,7 @@ import io.mockk.verifySequence
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import org.springframework.dao.DataIntegrityViolationException
 
 class LegalDocumentServiceTest {
     private val releaseRepository = mockk<LegalDocumentReleaseRepository>()
@@ -31,7 +32,7 @@ class LegalDocumentServiceTest {
         assertThrows<LegalDocumentConflictException> {
             service.createDraft(LegalDocumentType.USER_AGREEMENT, "admin-1")
         }
-        verify(exactly = 0) { releaseRepository.save(any()) }
+        verify(exactly = 0) { releaseRepository.saveAndFlush(any()) }
     }
 
     @Test
@@ -39,7 +40,7 @@ class LegalDocumentServiceTest {
         val published = release(id = "published-1", status = LegalDocumentStatus.PUBLISHED, version = 3)
         every { releaseRepository.findAllByDocumentTypeForUpdate(LegalDocumentType.USER_AGREEMENT) } returns listOf(published)
         every { contentRepository.findAllByReleaseIdOrderByLocaleAsc(published.id) } returns bilingualContents(published.id)
-        every { releaseRepository.save(any()) } answers { firstArg() }
+        every { releaseRepository.saveAndFlush(any()) } answers { firstArg() }
         every { contentRepository.saveAll(any<List<LegalDocumentContentEntity>>()) } answers { firstArg() }
 
         val draft = service.createDraft(LegalDocumentType.USER_AGREEMENT, "admin-1")
@@ -48,6 +49,17 @@ class LegalDocumentServiceTest {
         assertEquals(LegalDocumentStatus.DRAFT, draft.status)
         assertEquals(listOf("English", "中文"), draft.contents.map { it.title })
         assertEquals(listOf("<p>English body</p>", "<p>中文正文</p>"), draft.contents.map { it.contentHtml })
+    }
+
+    @Test
+    fun `create draft converts a release uniqueness violation into a legal conflict`() {
+        every { releaseRepository.findAllByDocumentTypeForUpdate(LegalDocumentType.USER_AGREEMENT) } returns emptyList()
+        every { releaseRepository.saveAndFlush(any()) } throws DataIntegrityViolationException("duplicate draft")
+
+        assertThrows<LegalDocumentConflictException> {
+            service.createDraft(LegalDocumentType.USER_AGREEMENT, "admin-1")
+        }
+        verify(exactly = 0) { contentRepository.saveAll(any<List<LegalDocumentContentEntity>>()) }
     }
 
     @Test

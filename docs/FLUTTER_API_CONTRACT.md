@@ -851,7 +851,7 @@ resultingInstitutionProjectId, submittedAt, updatedAt
 
 ## 12. 公开用户协议与隐私政策
 
-公开协议只允许匿名 `GET`：`/api/public/legal-documents/{type}?locale={locale}` 返回标准 `ApiEnvelope`，其中 `type` 仅为 `user-agreement` 或 `privacy-policy`，`locale` 仅为 `zh-CN` 或 `en-US`。`data` 精确包含 `type`、`locale`、`version`、`title`、`contentHtml`、`publishedAt`、`contentSha256`；没有已发布的该语言内容时返回真实 HTTP 404。成功响应的 `ETag` 是带双引号的 `contentSha256`；Flutter 可在后续 GET 发送相同的 `If-None-Match`，服务端返回 304 且不发送 envelope。
+公开协议只允许匿名 `GET`：`/api/public/legal-documents/{type}?locale={locale}` 返回标准 `ApiEnvelope`，其中 `type` 仅为 `user-agreement` 或 `privacy-policy`，`locale` 仅为 `zh-CN` 或 `en-US`。不支持的 `type` 或 `locale` 返回真实 HTTP 400；没有已发布的该语言内容返回真实 HTTP 404。`data` 精确包含 `type`、`locale`、`version`、`title`、`contentHtml`、`publishedAt`、`contentSha256`。成功响应的 `ETag` 是带双引号的 `contentSha256`；Flutter 可在后续 GET 发送相同、弱匹配或通配的 `If-None-Match`，服务端返回 304 且不发送 envelope。
 
 网页分享页为 `GET /legal/{type}?locale={locale}`，采用与 JSON 完全相同的已净化内容，并提供中英文切换。它不加载第三方资源，且响应使用严格 CSP。Flutter 必须把 `contentHtml` 当作服务端已净化的富文本渲染，不能自行拼接或信任其他 HTML。
 

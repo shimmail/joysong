@@ -61,12 +61,52 @@ class LegalDocumentHttpTest @Autowired constructor(
     }
 
     @Test
+    fun `weak ETag in a comma separated JSON validator list avoids sending the document again`() {
+        given(legalDocumentService.findPublished(LegalDocumentType.PRIVACY_POLICY, LegalDocumentLocale.EN_US))
+            .willReturn(view())
+
+        mockMvc.perform(
+            get("/api/public/legal-documents/privacy-policy")
+                .param("locale", "en-US")
+                .header(HttpHeaders.IF_NONE_MATCH, "\"other\", W/\"hash-en\"")
+        )
+            .andExpect(status().isNotModified)
+            .andExpect(header().string(HttpHeaders.ETAG, "\"hash-en\""))
+    }
+
+    @Test
+    fun `wildcard JSON validator avoids sending any current document representation`() {
+        given(legalDocumentService.findPublished(LegalDocumentType.PRIVACY_POLICY, LegalDocumentLocale.EN_US))
+            .willReturn(view())
+
+        mockMvc.perform(
+            get("/api/public/legal-documents/privacy-policy")
+                .param("locale", "en-US")
+                .header(HttpHeaders.IF_NONE_MATCH, "*")
+        )
+            .andExpect(status().isNotModified)
+            .andExpect(header().string(HttpHeaders.ETAG, "\"hash-en\""))
+    }
+
+    @Test
     fun `unpublished public document is a real HTTP 404`() {
         given(legalDocumentService.findPublished(LegalDocumentType.PRIVACY_POLICY, LegalDocumentLocale.EN_US))
             .willReturn(null)
 
         mockMvc.perform(get("/api/public/legal-documents/privacy-policy").param("locale", "en-US"))
             .andExpect(status().isNotFound)
+    }
+
+    @Test
+    fun `unsupported public document type and locale are real HTTP 400 for JSON and HTML`() {
+        listOf(
+            get("/api/public/legal-documents/terms").param("locale", "en-US"),
+            get("/api/public/legal-documents/privacy-policy").param("locale", "fr-FR"),
+            get("/legal/terms").param("locale", "en-US"),
+            get("/legal/privacy-policy").param("locale", "fr-FR")
+        ).forEach { request ->
+            mockMvc.perform(request).andExpect(status().isBadRequest)
+        }
     }
 
     @Test

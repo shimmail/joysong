@@ -17,6 +17,7 @@ import com.joysong.server.legal.repository.LegalDocumentContentRepository
 import com.joysong.server.legal.repository.LegalDocumentReleaseRepository
 import org.springframework.cache.annotation.CacheEvict
 import org.springframework.cache.annotation.Cacheable
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDateTime
@@ -65,7 +66,11 @@ class LegalDocumentService(
                 updatedAt = LocalDateTime.now()
             ) ?: emptyContent(release.id, locale)
         }
-        releaseRepository.save(release)
+        try {
+            releaseRepository.saveAndFlush(release)
+        } catch (e: DataIntegrityViolationException) {
+            throw LegalDocumentConflictException("协议草稿已被并发创建")
+        }
         contentRepository.saveAll(contents)
         return release.toView(contents)
     }

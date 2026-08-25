@@ -27,7 +27,7 @@ class PublicLegalDocumentController(
         @org.springframework.web.bind.annotation.RequestHeader(HttpHeaders.IF_NONE_MATCH, required = false) ifNoneMatch: String? = null
     ): ResponseEntity<BaseResponse<PublicLegalDocumentView>> {
         val view = published(type, locale)
-        return if (ifNoneMatch?.split(',')?.map(String::trim)?.contains(quoted(view.contentSha256)) == true) {
+        return if (ifNoneMatch.matchesCurrentEtag(view.contentSha256)) {
             ResponseEntity.status(304).eTag(view.contentSha256).cacheControl(CacheControl.noCache()).build()
         } else {
             ResponseEntity.ok().eTag(view.contentSha256).cacheControl(CacheControl.noCache()).body(BaseResponse.success(view))
@@ -67,6 +67,14 @@ class PublicLegalDocumentController(
         ?: throw LegalDocumentNotFoundException("公开协议不存在")
 
     private fun quoted(value: String) = "\"$value\""
+
+    private fun String?.matchesCurrentEtag(contentSha256: String): Boolean {
+        val expected = quoted(contentSha256)
+        return this?.split(',')?.any { tag ->
+            val normalized = tag.trim()
+            normalized == "*" || normalized.removePrefix("W/") == expected
+        } == true
+    }
 
     private fun escape(value: String) = HtmlUtils.htmlEscape(value)
 
