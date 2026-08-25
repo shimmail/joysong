@@ -66,6 +66,7 @@ const SettlementsPage = lazy(() => import('./pages/SettlementsPage'));
 const SplitConfigProposalsPage = lazy(() => import('./pages/SplitConfigProposalsPage'));
 const CustomerServicePage = lazy(() => import('./pages/CustomerServicePage'));
 const IdentityManagementPage = lazy(() => import('./pages/IdentityManagementPage'));
+const LegalDocumentsPage = lazy(() => import('./pages/LegalDocumentsPage'));
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   return hasValidAdminToken() ? <>{children}</> : <Navigate to="/login" replace />;
@@ -136,6 +137,7 @@ function App() {
           <Route path="split-proposals" element={<CapabilityRoute capability="canManageSplitConfigs"><SplitConfigProposalsPage /></CapabilityRoute>} />
           <Route path="cs" element={<AdminOnlyRoute><CustomerServicePage /></AdminOnlyRoute>} />
           <Route path="identity" element={<AdminOnlyRoute><IdentityManagementPage /></AdminOnlyRoute>} />
+          <Route path="legal-documents" element={<AdminOnlyRoute><LegalDocumentsPage /></AdminOnlyRoute>} />
         </Route>
         </Routes>
       </Suspense>
