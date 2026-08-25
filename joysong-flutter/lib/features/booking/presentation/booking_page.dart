@@ -481,7 +481,7 @@ class _ScrollingTimePickerState extends State<_ScrollingTimePicker> {
 class _ProjectCard extends StatelessWidget {
   const _ProjectCard({
     required this.project,
-    required this.enableAutoTranslation,
+    this.enableAutoTranslation = false,
   });
 
   final InstitutionProject project;
