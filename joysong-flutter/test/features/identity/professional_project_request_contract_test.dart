@@ -196,6 +196,62 @@ void main() {
     expect(draft.toJson(), isNot(contains('institutionId')));
   },);
 
+  test('doctor profile update emits only the frozen 15-key v2 body', () {
+    const draft = DoctorProjectProfileUpdateDraft(
+      institutionProjectId: ' ip-1 ',
+      baseRevision: ' revision-7 ',
+      name: null,
+      category: ' Skin ',
+      description: null,
+      tags: null,
+      slogan: ' Doctor slogan ',
+      detailContent: null,
+      price: 799.99,
+      salesCount: 18,
+      doctorActive: false,
+      coverImage: null,
+      images: null,
+      platformRate: 40,
+      notes: ' Review this ',
+    );
+
+    final body = draft.toJson();
+    expect(body, {
+      'requestType': 'PROFILE_UPDATE',
+      'institutionProjectId': 'ip-1',
+      'baseRevision': 'revision-7',
+      'name': null,
+      'category': 'Skin',
+      'description': null,
+      'tags': null,
+      'slogan': 'Doctor slogan',
+      'detailContent': null,
+      'price': 799.99,
+      'salesCount': 18,
+      'doctorActive': false,
+      'coverImage': null,
+      'images': null,
+      'notes': 'Review this',
+    });
+    expect(body, hasLength(15));
+    expect(
+      body.keys.toSet().intersection({
+        'scheduleNote',
+        'institutionId',
+        'platformProjectId',
+        'currency',
+        'originalPrice',
+        'isActive',
+        'consultationFee',
+        'commissionRate',
+        'institutionRate',
+        'platformRate',
+        'doctorRate',
+      }),
+      isEmpty,
+    );
+  });
+
   test('draft validation mirrors backend amount count currency and rate limits',
       () {
     expect(

@@ -1647,7 +1647,8 @@ class _DoctorProjectProfileUpdatePageState
     BuildContext context,
     DoctorProjectProfileUpdateTarget target,
   ) {
-    final pending = _hasPending(target);
+    final pendingRequest = _pendingRequest(target);
+    final pending = pendingRequest != null;
     return ListTile(
       title: Text(target.projectName),
       subtitle: Column(
@@ -1656,7 +1657,18 @@ class _DoctorProjectProfileUpdatePageState
           Text(
             '${context.localized('当前价格', 'Current price')}: USD ${target.currentPrice}',
           ),
-          if (pending) const Text('PENDING'),
+          Text(
+            key: Key('doctor-project-active-${target.institutionProjectId}'),
+            '${context.localized('医生上架状态', 'Doctor active')}: ${target.currentDoctorActive ? context.localized('已上架', 'Active') : context.localized('未上架', 'Inactive')}',
+          ),
+          Text(
+            key: Key(
+              'doctor-project-request-status-${target.institutionProjectId}',
+            ),
+            pending
+                ? pendingRequest.status
+                : context.localized('暂无待审核申请', 'No pending request'),
+          ),
         ],
       ),
       trailing: PopupMenuButton<String>(
@@ -1685,13 +1697,23 @@ class _DoctorProjectProfileUpdatePageState
   }
 
   bool _hasPending(DoctorProjectProfileUpdateTarget target) {
+    return _pendingRequest(target) != null;
+  }
+
+  DoctorProjectChangeRequest? _pendingRequest(
+    DoctorProjectProfileUpdateTarget target,
+  ) {
     final doctorId = _doctorProfile?.id.trim();
-    return _requests.any(
-      (request) =>
-          request.institutionProjectId == target.institutionProjectId &&
+    for (final request in _requests) {
+      final requestType = request.requestType.trim().toUpperCase();
+      if (request.institutionProjectId == target.institutionProjectId &&
           request.status.trim().toUpperCase() == 'PENDING' &&
-          (doctorId == null || doctorId.isEmpty || request.doctorId == doctorId),
-    );
+          const {'EDIT', 'PROFILE_UPDATE', 'LEAVE'}.contains(requestType) &&
+          (doctorId == null || doctorId.isEmpty || request.doctorId == doctorId)) {
+        return request;
+      }
+    }
+    return null;
   }
 
   Future<void> _edit(DoctorProjectProfileUpdateTarget target) async {
@@ -1804,13 +1826,18 @@ class _DoctorProjectProfileUpdateFormPage extends StatefulWidget {
 
 class _DoctorProjectProfileUpdateFormPageState
     extends State<_DoctorProjectProfileUpdateFormPage> {
+  late final TextEditingController _name;
+  late final TextEditingController _category;
   late final TextEditingController _price;
   late final TextEditingController _description;
   late final TextEditingController _tags;
-  late final TextEditingController _schedule;
+  late final TextEditingController _slogan;
+  late final TextEditingController _detailContent;
+  late final TextEditingController _salesCount;
   late final TextEditingController _notes;
   late String _cover;
   late List<String> _images;
+  late bool _doctorActive;
   bool _saving = false, _uploading = false;
   String? _error;
 
@@ -1818,22 +1845,36 @@ class _DoctorProjectProfileUpdateFormPageState
   void initState() {
     super.initState();
     final target = widget.target;
+    final snapshot = target.currentProject;
+    _name = TextEditingController(text: snapshot?.name ?? target.projectName);
+    _category = TextEditingController(text: snapshot?.category ?? '');
     _price = TextEditingController(text: '${target.currentPrice}');
-    _description = TextEditingController(text: target.serviceDescription);
-    _tags = TextEditingController(text: target.serviceTags.join(', '));
-    _schedule = TextEditingController(text: target.scheduleNote);
+    _description = TextEditingController(
+      text: snapshot?.description ?? target.serviceDescription,
+    );
+    _tags = TextEditingController(
+      text: (snapshot?.tags ?? target.serviceTags).join(', '),
+    );
+    _slogan = TextEditingController(text: snapshot?.slogan ?? '');
+    _detailContent = TextEditingController(text: snapshot?.detailContent ?? '');
+    _salesCount = TextEditingController(text: '${snapshot?.salesCount ?? 0}');
     _notes = TextEditingController();
-    _cover = target.coverImage;
-    _images = List<String>.of(target.images);
+    _cover = snapshot?.coverImage ?? target.coverImage;
+    _images = List<String>.of(snapshot?.images ?? target.images);
+    _doctorActive = target.currentDoctorActive;
   }
 
   @override
   void dispose() {
     for (final controller in [
+      _name,
+      _category,
       _price,
       _description,
       _tags,
-      _schedule,
+      _slogan,
+      _detailContent,
+      _salesCount,
       _notes,
     ]) {
       controller.dispose();
@@ -1851,11 +1892,35 @@ class _DoctorProjectProfileUpdateFormPageState
         body: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            Text(
-              '${widget.target.institutionName} · ${widget.target.projectName}',
-              style: Theme.of(context).textTheme.titleMedium,
+            Card(
+              child: Column(
+                children: [
+                  ListTile(
+                    key: const Key('profile-update-institution-association'),
+                    title: Text(
+                      '${context.localized('机构', 'Institution')}: ${widget.target.institutionName}',
+                    ),
+                  ),
+                  ListTile(
+                    key: const Key('profile-update-platform-association'),
+                    title: Text(
+                      '${context.localized('平台项目', 'Platform project')}: ${widget.target.platformProjectName}',
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 16),
+            _requestField(
+              _name,
+              context.localized('项目名称', 'Project name'),
+              fieldKey: const Key('profile-update-name'),
+            ),
+            _requestField(
+              _category,
+              context.localized('项目分类', 'Category'),
+              fieldKey: const Key('profile-update-category'),
+            ),
             _requestField(
               _price,
               context.localized(
@@ -1875,16 +1940,25 @@ class _DoctorProjectProfileUpdateFormPageState
             _requestField(
               _description,
               context.localized('项目展示说明', 'Display description'),
+              fieldKey: const Key('profile-update-description'),
               maxLines: 4,
             ),
             _requestField(
               _tags,
               context.localized(
                   '服务标签（逗号分隔）', 'Service tags (comma separated)'),
+              fieldKey: const Key('profile-update-tags'),
             ),
             _requestField(
-              _schedule,
-              context.localized('排期说明', 'Schedule note'),
+              _slogan,
+              context.localized('项目标语', 'Slogan'),
+              fieldKey: const Key('profile-update-slogan'),
+            ),
+            _requestField(
+              _detailContent,
+              context.localized('项目详情（纯文本）', 'Detail (plain text)'),
+              fieldKey: const Key('profile-update-detail-content'),
+              maxLines: 6,
             ),
             _imageUploadField(
               context,
@@ -1916,8 +1990,24 @@ class _DoctorProjectProfileUpdateFormPageState
               }),
             ),
             _requestField(
+              _salesCount,
+              context.localized('销量', 'Sales count'),
+              fieldKey: const Key('profile-update-sales-count'),
+              keyboardType: TextInputType.number,
+            ),
+            SwitchListTile(
+              key: const Key('profile-update-doctor-active'),
+              contentPadding: EdgeInsets.zero,
+              title: Text(context.localized('医生上架', 'Doctor active')),
+              value: _doctorActive,
+              onChanged: _busy
+                  ? null
+                  : (value) => setState(() => _doctorActive = value),
+            ),
+            _requestField(
               _notes,
               context.localized('申请说明', 'Request note'),
+              fieldKey: const Key('profile-update-notes'),
               maxLines: 3,
             ),
             if (_error != null) ...[
@@ -1973,9 +2063,11 @@ class _DoctorProjectProfileUpdateFormPageState
 
   Future<void> _submit() async {
     final price = num.tryParse(_price.text.trim());
-    if (price == null) {
+    final salesCount = int.tryParse(_salesCount.text.trim());
+    if (price == null || salesCount == null) {
       setState(() => _error = context.localized(
-          '请填写有效的医生项目价格', 'Enter a valid doctor project price.'));
+          '请填写有效的医生项目价格与销量',
+          'Enter a valid doctor project price and sales count.'));
       return;
     }
     final target = widget.target;
@@ -1992,17 +2084,49 @@ class _DoctorProjectProfileUpdateFormPageState
     final draft = DoctorProjectProfileUpdateDraft(
       institutionProjectId: target.institutionProjectId,
       baseRevision: baseRevision,
-      name: snapshot.rawName,
-      category: snapshot.rawCategory,
-      description: _description.text,
-      tags: _csv(_tags.text),
-      slogan: snapshot.rawSlogan,
-      detailContent: snapshot.rawDetailContent,
+      name: _textOverride(
+        _name.text,
+        raw: snapshot.rawOverrides['name'] as String?,
+        effective: snapshot.name,
+      ),
+      category: _textOverride(
+        _category.text,
+        raw: snapshot.rawOverrides['category'] as String?,
+        effective: snapshot.category,
+      ),
+      description: _textOverride(
+        _description.text,
+        raw: snapshot.rawOverrides['description'] as String?,
+        effective: snapshot.description,
+      ),
+      tags: _itemsOverride(
+        _csv(_tags.text),
+        raw: _rawStringList(snapshot.rawOverrides['tags']),
+        effective: snapshot.tags,
+      ),
+      slogan: _textOverride(
+        _slogan.text,
+        raw: snapshot.rawOverrides['slogan'] as String?,
+        effective: snapshot.slogan,
+      ),
+      detailContent: _textOverride(
+        _detailContent.text,
+        raw: snapshot.rawOverrides['detailContent'] as String?,
+        effective: snapshot.detailContent ?? '',
+      ),
       price: price,
-      salesCount: snapshot.salesCount,
-      doctorActive: target.currentDoctorActive,
-      coverImage: _cover,
-      images: List<String>.of(_images, growable: false),
+      salesCount: salesCount,
+      doctorActive: _doctorActive,
+      coverImage: _textOverride(
+        _cover,
+        raw: snapshot.rawOverrides['coverImage'] as String?,
+        effective: snapshot.coverImage,
+      ),
+      images: _itemsOverride(
+        _images,
+        raw: _rawStringList(snapshot.rawOverrides['images']),
+        effective: snapshot.images,
+      ),
       platformRate: target.platformRate,
       notes: _notes.text,
     );
@@ -2040,6 +2164,38 @@ class _DoctorProjectProfileUpdateFormPageState
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  String? _textOverride(
+    String value, {
+    required String? raw,
+    required String effective,
+  }) {
+    final normalized = value.trim();
+    if (normalized.isEmpty) return null;
+    return normalized == effective ? raw : normalized;
+  }
+
+  List<String>? _itemsOverride(
+    List<String> value, {
+    required List<String>? raw,
+    required List<String> effective,
+  }) {
+    final normalized = List<String>.of(value, growable: false);
+    if (normalized.isEmpty) return null;
+    return _sameItems(normalized, effective) ? raw : normalized;
+  }
+
+  List<String>? _rawStringList(Object? value) => value == null
+      ? null
+      : List<String>.of((value as List).cast<String>(), growable: false);
+
+  bool _sameItems(List<String> left, List<String> right) {
+    if (left.length != right.length) return false;
+    for (var index = 0; index < left.length; index++) {
+      if (left[index] != right[index]) return false;
+    }
+    return true;
   }
 }
 

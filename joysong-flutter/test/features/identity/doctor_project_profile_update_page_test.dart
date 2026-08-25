@@ -76,6 +76,35 @@ void main() {
     expect(find.text('Confirm leave'), findsNothing);
   });
 
+  testWidgets('legacy EDIT pending request still locks edit and leave actions',
+      (tester) async {
+    _largeView(tester);
+    await tester.pumpWidget(MaterialApp(
+      home: DoctorProjectProfileUpdatePage(
+        repository: _FakeRepository(
+          requests: [_v2Request(requestType: 'EDIT')],
+          doctorProfile: _doctorProfileWithThreeInstitutions,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('doctor-project-menu-ip-1')));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<PopupMenuItem<String>>(
+        find.byKey(const Key('doctor-project-edit-ip-1')),
+      ).enabled,
+      isFalse,
+    );
+    expect(
+      tester.widget<PopupMenuItem<String>>(
+        find.byKey(const Key('doctor-project-leave-ip-1')),
+      ).enabled,
+      isFalse,
+    );
+  });
+
   testWidgets('another doctor pending request does not lock this doctor',
       (tester) async {
     _largeView(tester);
@@ -271,7 +300,150 @@ void main() {
     expect(find.textContaining('USD 320.00'), findsOneWidget);
   });
 
-  testWidgets('doctor submission emits exact v2 state from the loaded target', (
+  testWidgets(
+    'doctor editor prefills every v2 field and keeps project associations read only',
+    (tester) async {
+      _largeView(tester);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: DoctorProjectProfileUpdatePage(
+            repository: _FakeRepository(requests: const []),
+            pickAndUploadImage: () async => 'uploaded.jpg',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('doctor-project-active-ip-1')), findsOneWidget);
+      expect(
+        find.byKey(const Key('doctor-project-request-status-ip-1')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Inactive'), findsOneWidget);
+      expect(find.textContaining('No pending request'), findsOneWidget);
+
+      await _openDoctorProject(tester, 'ip-1');
+
+      expect(find.text('Institution: 娇颜颂'), findsOneWidget);
+      expect(find.text('Platform project: 平台项目一'), findsOneWidget);
+      expect(find.byType(DropdownButton<String>), findsNothing);
+      expect(
+        tester.widget<TextField>(find.byKey(const Key('profile-update-name')))
+            .controller?.text,
+        '项目一',
+      );
+      expect(
+        tester.widget<TextField>(find.byKey(const Key('profile-update-category')))
+            .controller?.text,
+        '项目分类',
+      );
+      expect(
+        tester.widget<TextField>(find.byKey(const Key('profile-update-description')))
+            .controller?.text,
+        '当前服务说明',
+      );
+      expect(
+        tester.widget<TextField>(find.byKey(const Key('profile-update-tags')))
+            .controller?.text,
+        '自然',
+      );
+      expect(
+        tester.widget<TextField>(find.byKey(const Key('profile-update-slogan')))
+            .controller?.text,
+        '自然效果',
+      );
+      expect(
+        tester.widget<TextField>(
+          find.byKey(const Key('profile-update-detail-content')),
+        ).controller?.text,
+        '项目详情',
+      );
+      expect(
+        tester.widget<TextField>(find.byKey(const Key('profile-update-price')))
+            .controller?.text,
+        '12000',
+      );
+      expect(
+        tester.widget<TextField>(
+          find.byKey(const Key('profile-update-sales-count')),
+        ).controller?.text,
+        '17',
+      );
+      expect(
+        tester.widget<SwitchListTile>(
+          find.byKey(const Key('profile-update-doctor-active')),
+        ).value,
+        isFalse,
+      );
+      expect(find.text('cover.jpg'), findsOneWidget);
+      expect(find.text('one.jpg'), findsOneWidget);
+      expect(find.textContaining('Schedule'), findsNothing);
+      expect(find.textContaining('排期'), findsNothing);
+      expect(
+        tester.widgetList<TextField>(find.byType(TextField)).where((field) {
+          final label = field.decoration?.labelText?.toLowerCase() ?? '';
+          return label.contains('url');
+        }),
+        isEmpty,
+      );
+    },
+  );
+
+  testWidgets('unchanged effective values preserve the original inheritance intent', (
+    tester,
+  ) async {
+    _largeView(tester);
+    final repository = _FakeRepository(requests: const []);
+    await tester.pumpWidget(MaterialApp(
+      home: DoctorProjectProfileUpdatePage(repository: repository),
+    ));
+    await tester.pumpAndSettle();
+
+    await _openDoctorProject(tester, 'ip-1');
+    await tester.tap(find.byKey(const Key('submit-profile-update')));
+    await tester.pumpAndSettle();
+
+    expect(repository.submitted?.toJson(), {
+      'requestType': 'PROFILE_UPDATE',
+      'institutionProjectId': 'ip-1',
+      'baseRevision': 'base-revision-1',
+      'name': null,
+      'category': 'raw-category',
+      'description': null,
+      'tags': null,
+      'slogan': null,
+      'detailContent': null,
+      'price': 12000,
+      'salesCount': 17,
+      'doctorActive': false,
+      'coverImage': null,
+      'images': null,
+      'notes': '',
+    });
+  });
+
+  testWidgets('cleared inherited cover and gallery submit null overrides', (
+    tester,
+  ) async {
+    _largeView(tester);
+    final repository = _FakeRepository(requests: const []);
+    await tester.pumpWidget(MaterialApp(
+      home: DoctorProjectProfileUpdatePage(repository: repository),
+    ));
+    await tester.pumpAndSettle();
+
+    await _openDoctorProject(tester, 'ip-1');
+    await tester.tap(find.byKey(const Key('profile-update-cover-remove-0')));
+    await tester.tap(find.byKey(const Key('profile-update-gallery-remove-0')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('submit-profile-update')));
+    await tester.pumpAndSettle();
+
+    expect(repository.submitted?.coverImage, isNull);
+    expect(repository.submitted?.images, isNull);
+  });
+
+  testWidgets('doctor submission emits changed and cleared v2 overrides', (
     tester,
   ) async {
     _largeView(tester);
@@ -301,6 +473,18 @@ void main() {
       find.byKey(const Key('profile-update-price')),
       '799.99',
     );
+    await tester.enterText(find.byKey(const Key('profile-update-name')), '新项目名称');
+    await tester.enterText(find.byKey(const Key('profile-update-category')), '   ');
+    await tester.enterText(find.byKey(const Key('profile-update-description')), '');
+    await tester.enterText(find.byKey(const Key('profile-update-tags')), '');
+    await tester.enterText(find.byKey(const Key('profile-update-slogan')), '新标语');
+    await tester.enterText(
+      find.byKey(const Key('profile-update-detail-content')),
+      '新详情',
+    );
+    await tester.enterText(find.byKey(const Key('profile-update-sales-count')), '18');
+    await tester.tap(find.byKey(const Key('profile-update-doctor-active')));
+    await tester.enterText(find.byKey(const Key('profile-update-notes')), '请审核');
     await tester.tap(find.byKey(const Key('profile-update-cover-upload')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('profile-update-gallery-upload')));
@@ -316,18 +500,18 @@ void main() {
         'requestType': 'PROFILE_UPDATE',
         'institutionProjectId': 'ip-1',
         'baseRevision': 'base-revision-1',
-        'name': null,
-        'category': 'raw-category',
-        'description': '当前服务说明',
-        'tags': ['自然'],
-        'slogan': null,
-        'detailContent': null,
+        'name': '新项目名称',
+        'category': null,
+        'description': null,
+        'tags': null,
+        'slogan': '新标语',
+        'detailContent': '新详情',
         'price': 799.99,
-        'salesCount': 17,
-        'doctorActive': false,
+        'salesCount': 18,
+        'doctorActive': true,
         'coverImage': 'new-cover.jpg',
         'images': ['new-gallery.jpg'],
-        'notes': '',
+        'notes': '请审核',
       },
     );
     expect(find.text('PENDING'), findsOneWidget);
@@ -1322,6 +1506,7 @@ DoctorProjectChangeRequest _v2Request({
   String platformProjectName = '平台项目一',
   num proposedDoctorPrice = 12800,
   bool proposedDoctorActive = true,
+  String requestType = 'PROFILE_UPDATE',
   String status = 'PENDING',
   bool reviewable = true,
   bool sharedChanged = true,
@@ -1329,7 +1514,7 @@ DoctorProjectChangeRequest _v2Request({
     DoctorProjectChangeRequest.fromJson({
       'payloadVersion': 2,
       'id': id,
-      'requestType': 'PROFILE_UPDATE',
+      'requestType': requestType,
       'doctorId': doctorId,
       'doctorName': doctorName,
       'institutionId': institutionId,
