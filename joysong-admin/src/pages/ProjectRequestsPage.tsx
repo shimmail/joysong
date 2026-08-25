@@ -181,6 +181,7 @@ export default function ProjectRequestsPage() {
   const [forceTargetId, setForceTargetId] = useState<string | null>(null);
   const [forceOpen, setForceOpen] = useState(false);
   const [conflict, setConflict] = useState<ConflictState | null>(null);
+  const [creationReviewLocked, setCreationReviewLocked] = useState(false);
   const [changeReviewLocked, setChangeReviewLocked] = useState(false);
   const inFlightRef = useRef<string | null>(null);
   const [inFlightKey, setInFlightKey] = useState<string | null>(null);
@@ -246,8 +247,13 @@ export default function ProjectRequestsPage() {
       && managementContext.managedInstitutionIds.includes(item.request.institutionId!);
   };
 
+  const reviewLocked = (item: ReviewItem) => item.source === 'CREATION' ? creationReviewLocked : changeReviewLocked;
+  const clearConflictFor = (source: ReviewItem['source']) => {
+    setConflict(current => current?.source === source ? null : current);
+  };
+
   const beginReview = (item: ReviewItem) => {
-    if (inFlightRef.current !== null || (item.source === 'CHANGE' && changeReviewLocked)) return false;
+    if (inFlightRef.current !== null || reviewLocked(item)) return false;
     inFlightRef.current = itemKey(item);
     setInFlightKey(itemKey(item));
     return true;
@@ -279,8 +285,12 @@ export default function ProjectRequestsPage() {
     setForceTargetId(null);
     setForceOpen(false);
     if (item.source === 'CREATION') {
+      setCreationReviewLocked(true);
       const refreshed = await loadCreations();
-      if (refreshed) setConflict({ code, message: conflictMessage, requestId: item.request.id, source: item.source, refreshSucceeded: true });
+      if (refreshed) {
+        setCreationReviewLocked(false);
+        setConflict({ code, message: conflictMessage, requestId: item.request.id, source: item.source, refreshSucceeded: true });
+      }
       return;
     }
     setChangeReviewLocked(true);
@@ -294,7 +304,14 @@ export default function ProjectRequestsPage() {
   };
 
   const retryConflictRefresh = async () => {
-    if (!conflict || conflict.source !== 'CHANGE') return;
+    if (!conflict) return;
+    if (conflict.source === 'CREATION') {
+      const refreshed = await loadCreations();
+      if (!refreshed) return;
+      setCreationReviewLocked(false);
+      setConflict(current => current ? { ...current, refreshSucceeded: true } : current);
+      return;
+    }
     const refreshed = await loadChanges();
     if (!refreshed) return;
     setChangeReviewLocked(false);
@@ -305,12 +322,11 @@ export default function ProjectRequestsPage() {
   };
 
   const submitDirectApproval = async (item: ReviewItem) => {
-    if (!canReview(item) || (item.source === 'CHANGE' && changeReviewLocked)
-      || hasNegativeDoctorRate(item) || !beginReview(item)) return;
+    if (!canReview(item) || reviewLocked(item) || hasNegativeDoctorRate(item) || !beginReview(item)) return;
     try {
       await api.post(reviewPath(item), reviewBody(item, 'APPROVED', ''));
       message.success('申请已通过');
-      setConflict(null);
+      clearConflictFor(item.source);
       if (item.source === 'CREATION') await loadCreations(); else await loadChanges();
     } catch (error) {
       await handleReviewError(error, item);
@@ -320,7 +336,7 @@ export default function ProjectRequestsPage() {
   };
 
   const openReview = (item: ReviewItem, decision: Exclude<ReviewDecision, 'APPROVED'>) => {
-    if (inFlightRef.current !== null || (item.source === 'CHANGE' && changeReviewLocked)) return;
+    if (inFlightRef.current !== null || reviewLocked(item)) return;
     reviewForm.resetFields();
     setReviewDecision(decision);
     setReviewTarget(item);
@@ -328,7 +344,7 @@ export default function ProjectRequestsPage() {
   const submitReview = async () => {
     if (!reviewTarget) return;
     const target = currentItem(reviewTarget);
-    if (!target || !canReview(target) || (target.source === 'CHANGE' && changeReviewLocked)) return;
+    if (!target || !canReview(target) || reviewLocked(target)) return;
     let started = false;
     try {
       const values = await reviewForm.validateFields();
@@ -337,7 +353,7 @@ export default function ProjectRequestsPage() {
       await api.post(reviewPath(target), reviewBody(target, reviewDecision, values.reviewNote));
       message.success(reviewDecision === 'REJECTED' ? '申请已驳回' : '已要求医生修改申请');
       setReviewTarget(null);
-      setConflict(null);
+      clearConflictFor(target.source);
       if (target.source === 'CREATION') await loadCreations(); else await loadChanges();
     } catch (error) {
       if (!(error && typeof error === 'object' && 'errorFields' in error)) await handleReviewError(error, target);
@@ -361,7 +377,7 @@ export default function ProjectRequestsPage() {
       message.success('已按刷新后的最新基线强制通过');
       setForceTargetId(null);
       setForceOpen(false);
-      setConflict(null);
+      clearConflictFor('CHANGE');
       await loadChanges();
     } catch (error) {
       if (!(error && typeof error === 'object' && 'errorFields' in error)) await handleReviewError(error, item);
@@ -416,7 +432,7 @@ export default function ProjectRequestsPage() {
 
   const renderActions = (item: ReviewItem) => {
     const reviewable = canReview(item);
-    const disabled = inFlightKey !== null || (item.source === 'CHANGE' && changeReviewLocked);
+    const disabled = inFlightKey !== null || reviewLocked(item);
     return <Space wrap>
       {(item.source !== 'CHANGE' || item.request.kind !== 'DAMAGED') && <Button size="small" icon={<EyeOutlined />}
         aria-label={reviewLabel('查看详情', item)} disabled={disabled} onClick={() => setDetailKey(itemKey(item))}>查看详情</Button>}
@@ -456,8 +472,10 @@ export default function ProjectRequestsPage() {
       description={conflict.refreshSucceeded
         ? `${conflict.message}。旧详情已关闭，审核队列已刷新，请核对最新数据。`
         : `${conflict.message}。旧详情已关闭，但最新审核队列刷新失败；缓存行已锁定，重新加载成功前不能审核。`}
-      action={!conflict.refreshSucceeded && conflict.source === 'CHANGE'
-        ? <Button loading={changeLoading} onClick={() => void retryConflictRefresh()}>重新加载医生项目变更</Button>
+      action={!conflict.refreshSucceeded
+        ? <Button loading={conflict.source === 'CREATION' ? creationLoading : changeLoading} onClick={() => void retryConflictRefresh()}>
+          {conflict.source === 'CREATION' ? '重新加载创建申请' : '重新加载医生项目变更'}
+        </Button>
         : forceTarget && <Button onClick={() => { forceForm.resetFields(); setForceOpen(true); }}>查看最新差异并强制通过</Button>}
       style={{ marginBottom: 16 }} />}
 

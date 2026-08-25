@@ -351,6 +351,50 @@ describe('ProjectRequestsPage', () => {
     await waitFor(() => expect(api.get).toHaveBeenCalledTimes(3));
   });
 
+  it('locks cached creation actions after a handled-error refresh failure and unlocks only fresh rows', async () => {
+    const freshRequest = { ...platformRequest, id: 'fresh-platform-request', name: '最新光子焕肤' };
+    let creationLoads = 0;
+    let allowCreationReload = false;
+    setContext(adminContext);
+    vi.mocked(api.get).mockImplementation(async (url) => {
+      if (url === '/admin/project-requests') {
+        creationLoads += 1;
+        if (creationLoads === 1) return response([platformRequest, institutionRequest]);
+        if (allowCreationReload) return response([freshRequest]);
+        throw new Error('creation refresh offline');
+      }
+      if (url === '/v2/admin/institution-project-requests') return response([v2Request]);
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    vi.mocked(api.post).mockRejectedValueOnce(apiError('REQUEST_ALREADY_HANDLED', '创建申请已处理'));
+    render(<ProjectRequestsPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '查看详情 光子焕肤，申请ID platform-request' }));
+    fireEvent.click(screen.getByRole('button', { name: '驳回 光子焕肤，申请ID platform-request' }));
+    fireEvent.change(screen.getByLabelText('审核意见'), { target: { value: '请重新提交创建资料' } });
+    fireEvent.click(screen.getByRole('button', { name: /确\s*认/ }));
+
+    expect(await screen.findByText('审核冲突（REQUEST_ALREADY_HANDLED）')).toBeInTheDocument();
+    expect(screen.getByText(/最新审核队列刷新失败.*缓存行已锁定/)).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '光子焕肤审核详情' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '驳回项目申请' })).not.toBeInTheDocument();
+    screen.getAllByRole('button', { name: /^(查看详情|通过|驳回) (光子焕肤|机构定制光子)/ })
+      .forEach(button => expect(button).toBeDisabled());
+    screen.getAllByRole('button', { name: /^(查看详情|通过|要求修改|驳回) 机构焕肤/ })
+      .forEach(button => expect(button).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '通过 光子焕肤，申请ID platform-request' }));
+    expect(api.post).toHaveBeenCalledTimes(1);
+
+    allowCreationReload = true;
+    fireEvent.click(screen.getByRole('button', { name: '重新加载创建申请' }));
+    await waitFor(() => expect(screen.getByRole('button', {
+      name: '通过 最新光子焕肤，申请ID fresh-platform-request',
+    })).toBeEnabled());
+    expect(screen.queryByRole('button', { name: '通过 光子焕肤，申请ID platform-request' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '通过 机构定制光子，申请ID institution-request' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '通过 机构焕肤，申请ID v2-request' })).toBeEnabled();
+  }, 10_000);
+
   it('uses shared safe previews for creation, v1 schedule, and v2 current/proposed/latest comparisons', async () => {
     const user = userEvent.setup();
     setContext(adminContext);
@@ -542,13 +586,13 @@ describe('ProjectRequestsPage', () => {
     expect(api.get).toHaveBeenCalledTimes(3);
   });
 
-  it('locks cached review rows when handled-error refresh fails and unlocks only after a successful reload', async () => {
+  it('locks cached doctor-change rows independently and unlocks only after a successful reload', async () => {
     const user = userEvent.setup();
     let allowReload = false;
     let changeLoads = 0;
     setContext(adminContext);
     vi.mocked(api.get).mockImplementation(async (url) => {
-      if (url === '/admin/project-requests') return response([]);
+      if (url === '/admin/project-requests') return response([platformRequest]);
       if (url === '/v2/admin/institution-project-requests') {
         changeLoads += 1;
         if (changeLoads === 1 || allowReload) return response([v2Request]);
@@ -569,12 +613,20 @@ describe('ProjectRequestsPage', () => {
     expect(screen.queryByRole('dialog', { name: /要求医生修改申请/ })).not.toBeInTheDocument();
     const cachedActions = screen.getAllByRole('button', { name: /^(查看详情|通过|要求修改|驳回) 机构焕肤/ });
     cachedActions.forEach(button => expect(button).toBeDisabled());
+    const creationApprove = screen.getByRole('button', { name: '通过 光子焕肤，申请ID platform-request' });
+    expect(creationApprove).toBeEnabled();
     await user.click(screen.getByRole('button', { name: '通过 机构焕肤，申请ID v2-request' }));
     expect(api.post).toHaveBeenCalledTimes(1);
+
+    await user.click(creationApprove);
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(2));
+    cachedActions.forEach(button => expect(button).toBeDisabled());
+    expect(screen.getByRole('button', { name: '重新加载医生项目变更' })).toBeInTheDocument();
 
     allowReload = true;
     await user.click(screen.getByRole('button', { name: '重新加载医生项目变更' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '通过 机构焕肤，申请ID v2-request' })).toBeEnabled());
+    expect(screen.getByRole('button', { name: '通过 光子焕肤，申请ID platform-request' })).toBeEnabled();
     expect(screen.getByText(/审核队列已刷新，请核对最新数据/)).toBeInTheDocument();
   });
 
