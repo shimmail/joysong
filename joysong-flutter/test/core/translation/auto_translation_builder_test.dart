@@ -270,6 +270,148 @@ void main() {
     expect(text.semanticsLabel, 'project description');
     expect(repository.calls, isEmpty);
   });
+
+  testWidgets('stable builder reuses its request across equivalent rebuilds',
+      (tester) async {
+    final repository = RecordingTranslationRepository()..holdResponses = true;
+    final controller = _activeController(repository);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(_stableTranslationHost(controller: controller));
+    final first = tester
+        .widget<AutoTranslationBuilder>(find.byType(AutoTranslationBuilder))
+        .request;
+    repository.failNext();
+    await _pumpTranslation(tester);
+
+    await tester.pumpWidget(_stableTranslationHost(controller: controller));
+    final rebuilt = tester
+        .widget<AutoTranslationBuilder>(find.byType(AutoTranslationBuilder))
+        .request;
+
+    expect(rebuilt, same(first));
+    expect(repository.calls, hasLength(1));
+  });
+
+  testWidgets('stable builder changes identity when a request value changes',
+      (tester) async {
+    final repository = RecordingTranslationRepository()..holdResponses = true;
+    final controller = _activeController(repository);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(_stableTranslationHost(controller: controller));
+    final before = tester
+        .widget<AutoTranslationBuilder>(find.byType(AutoTranslationBuilder))
+        .request;
+    await tester.pumpWidget(
+      _stableTranslationHost(
+        controller: controller,
+        contentId: 'project-2',
+        field: 'summary',
+        sourceText: '新的简介',
+      ),
+    );
+    final after = tester
+        .widget<AutoTranslationBuilder>(find.byType(AutoTranslationBuilder))
+        .request;
+
+    expect(after, isNot(same(before)));
+    expect(after.contentId, 'project-2');
+    expect(after.field, 'summary');
+    expect(after.sourceText, '新的简介');
+  });
+
+  for (final testCase in _stableIdentityCases) {
+    testWidgets('stable builder changes identity when ${testCase.name} changes',
+        (tester) async {
+      final repository = RecordingTranslationRepository()..holdResponses = true;
+      final controller = _activeController(repository);
+      addTearDown(controller.dispose);
+
+      await tester.pumpWidget(_stableTranslationHost(controller: controller));
+      final before = tester
+          .widget<AutoTranslationBuilder>(find.byType(AutoTranslationBuilder))
+          .request;
+      await tester.pumpWidget(
+        _stableTranslationHost(
+          controller: controller,
+          contentType: testCase.contentType,
+          contentId: testCase.contentId,
+          field: testCase.field,
+          sourceText: testCase.sourceText,
+          validator: testCase.validator,
+        ),
+      );
+      final after = tester
+          .widget<AutoTranslationBuilder>(find.byType(AutoTranslationBuilder))
+          .request;
+
+      expect(after, isNot(same(before)));
+      expect(after.contentType, testCase.contentType);
+      expect(after.contentId, testCase.contentId);
+      expect(after.field, testCase.field);
+      expect(after.sourceText, testCase.sourceText);
+      expect(identical(after.validator, testCase.validator), isTrue);
+    });
+  }
+
+  testWidgets('disabled stable builder stays source-only and rejects late work',
+      (tester) async {
+    final repository = RecordingTranslationRepository()..holdResponses = true;
+    final controller = _activeController(repository);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(_stableTranslationHost(controller: controller));
+    await tester.pumpWidget(
+      _stableTranslationHost(controller: controller, enabled: false),
+    );
+    repository.completeNext('Late translation');
+    await _pumpTranslation(tester);
+
+    expect(find.text('项目说明'), findsOneWidget);
+    expect(find.text('Late translation'), findsNothing);
+    expect(find.byType(AutoTranslationBuilder), findsNothing);
+  });
+
+  testWidgets('StableAutoTranslatedText forwards every requested Text property',
+      (tester) async {
+    final repository = RecordingTranslationRepository();
+    final controller = _activeController(repository);
+    addTearDown(controller.dispose);
+    const style = TextStyle(fontSize: 21, fontWeight: FontWeight.w600);
+
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: AutoTranslationScope(
+          controller: controller,
+          enabled: true,
+          targetLanguage: 'en-US',
+          child: const StableAutoTranslatedText(
+            enabled: false,
+            contentType: 'project',
+            contentId: 'project-1',
+            field: 'description',
+            sourceText: '项目说明',
+            style: style,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.end,
+            semanticsLabel: 'project description',
+          ),
+        ),
+      ),
+    );
+
+    final text = tester.widget<Text>(find.byType(Text));
+    expect(text.data, '项目说明');
+    expect(text.style, same(style));
+    expect(text.maxLines, 2);
+    expect(text.overflow, TextOverflow.ellipsis);
+    expect(text.textAlign, TextAlign.end);
+    expect(text.semanticsLabel, 'project description');
+    expect(repository.calls, isEmpty);
+  });
 }
 
 const _initialRequest = AutoTranslationRequest(
@@ -316,3 +458,90 @@ Widget _translationHost({
     ),
   );
 }
+
+Widget _stableTranslationHost({
+  required AutoTranslationController controller,
+  bool enabled = true,
+  String contentType = 'project',
+  String contentId = 'project-1',
+  String field = 'description',
+  String sourceText = '项目说明',
+  TranslationValidator? validator,
+}) {
+  return Directionality(
+    textDirection: TextDirection.ltr,
+    child: AutoTranslationScope(
+      controller: controller,
+      enabled: true,
+      targetLanguage: 'en-US',
+      child: StableAutoTranslationBuilder(
+        enabled: enabled,
+        contentType: contentType,
+        contentId: contentId,
+        field: field,
+        sourceText: sourceText,
+        validator: validator,
+        builder: _visibleText,
+      ),
+    ),
+  );
+}
+
+const _stableIdentityCases = <_StableIdentityCase>[
+  _StableIdentityCase(
+    name: 'content type',
+    contentType: 'appointment',
+    contentId: 'project-1',
+    field: 'description',
+    sourceText: '项目说明',
+  ),
+  _StableIdentityCase(
+    name: 'content ID',
+    contentType: 'project',
+    contentId: 'project-2',
+    field: 'description',
+    sourceText: '项目说明',
+  ),
+  _StableIdentityCase(
+    name: 'field',
+    contentType: 'project',
+    contentId: 'project-1',
+    field: 'summary',
+    sourceText: '项目说明',
+  ),
+  _StableIdentityCase(
+    name: 'source text',
+    contentType: 'project',
+    contentId: 'project-1',
+    field: 'description',
+    sourceText: '新的简介',
+  ),
+  _StableIdentityCase(
+    name: 'validator instance',
+    contentType: 'project',
+    contentId: 'project-1',
+    field: 'description',
+    sourceText: '项目说明',
+    validator: _acceptTranslation,
+  ),
+];
+
+final class _StableIdentityCase {
+  const _StableIdentityCase({
+    required this.name,
+    required this.contentType,
+    required this.contentId,
+    required this.field,
+    required this.sourceText,
+    this.validator,
+  });
+
+  final String name;
+  final String contentType;
+  final String contentId;
+  final String field;
+  final String sourceText;
+  final TranslationValidator? validator;
+}
+
+bool _acceptTranslation(String source, String translated) => true;

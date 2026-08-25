@@ -144,3 +144,127 @@ final class AutoTranslatedText extends StatelessWidget {
     );
   }
 }
+
+final class StableAutoTranslationBuilder extends StatefulWidget {
+  const StableAutoTranslationBuilder({
+    required this.enabled,
+    required this.contentType,
+    required this.contentId,
+    required this.field,
+    required this.sourceText,
+    required this.builder,
+    this.validator,
+    super.key,
+  });
+
+  final bool enabled;
+  final String contentType;
+  final String contentId;
+  final String field;
+  final String sourceText;
+  final TranslationValidator? validator;
+  final Widget Function(BuildContext context, String visibleText) builder;
+
+  @override
+  State<StableAutoTranslationBuilder> createState() =>
+      _StableAutoTranslationBuilderState();
+}
+
+final class _StableAutoTranslationBuilderState
+    extends State<StableAutoTranslationBuilder> {
+  AutoTranslationRequest? _request;
+
+  @override
+  void initState() {
+    super.initState();
+    _synchronizeRequest();
+  }
+
+  @override
+  void didUpdateWidget(StableAutoTranslationBuilder oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _synchronizeRequest();
+  }
+
+  void _synchronizeRequest() {
+    if (widget.contentType.trim().isEmpty ||
+        widget.contentId.trim().isEmpty ||
+        widget.field.trim().isEmpty ||
+        widget.sourceText.trim().isEmpty) {
+      _request = null;
+      return;
+    }
+    final previous = _request;
+    if (previous != null &&
+        previous.contentType == widget.contentType &&
+        previous.contentId == widget.contentId &&
+        previous.field == widget.field &&
+        previous.sourceText == widget.sourceText &&
+        identical(previous.validator, widget.validator)) {
+      return;
+    }
+    _request = AutoTranslationRequest(
+      contentType: widget.contentType,
+      contentId: widget.contentId,
+      field: widget.field,
+      sourceText: widget.sourceText,
+      validator: widget.validator,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final request = _request;
+    if (!widget.enabled || request == null) {
+      return widget.builder(context, widget.sourceText);
+    }
+    return AutoTranslationBuilder(request: request, builder: widget.builder);
+  }
+}
+
+final class StableAutoTranslatedText extends StatelessWidget {
+  const StableAutoTranslatedText({
+    required this.enabled,
+    required this.contentType,
+    required this.contentId,
+    required this.field,
+    required this.sourceText,
+    this.validator,
+    this.style,
+    this.maxLines,
+    this.overflow,
+    this.textAlign,
+    this.semanticsLabel,
+    super.key,
+  });
+
+  final bool enabled;
+  final String contentType;
+  final String contentId;
+  final String field;
+  final String sourceText;
+  final TranslationValidator? validator;
+  final TextStyle? style;
+  final int? maxLines;
+  final TextOverflow? overflow;
+  final TextAlign? textAlign;
+  final String? semanticsLabel;
+
+  @override
+  Widget build(BuildContext context) => StableAutoTranslationBuilder(
+        enabled: enabled,
+        contentType: contentType,
+        contentId: contentId,
+        field: field,
+        sourceText: sourceText,
+        validator: validator,
+        builder: (context, visibleText) => Text(
+          visibleText,
+          style: style,
+          maxLines: maxLines,
+          overflow: overflow,
+          textAlign: textAlign,
+          semanticsLabel: semanticsLabel,
+        ),
+      );
+}
