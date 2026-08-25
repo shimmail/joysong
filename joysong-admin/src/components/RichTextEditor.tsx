@@ -6,9 +6,12 @@ import '@wangeditor/editor/dist/css/style.css';
 interface RichTextEditorProps {
   value?: string;
   onChange?: (value: string) => void;
+  toolbarKeys?: string[];
+  placeholder?: string;
+  height?: number;
 }
 
-export default function RichTextEditor({ value, onChange }: RichTextEditorProps) {
+export default function RichTextEditor({ value, onChange, toolbarKeys, placeholder, height }: RichTextEditorProps) {
   const [editor, setEditor] = useState<IDomEditor | null>(null);
 
   useEffect(() => {
@@ -21,7 +24,7 @@ export default function RichTextEditor({ value, onChange }: RichTextEditorProps)
   }, [editor]);
 
   const toolbarConfig: Partial<IToolbarConfig> = {
-    toolbarKeys: [
+    toolbarKeys: toolbarKeys ?? [
       'bold',
       'italic',
       'underline',
@@ -43,7 +46,7 @@ export default function RichTextEditor({ value, onChange }: RichTextEditorProps)
   };
 
   const editorConfig: Partial<IEditorConfig> = {
-    placeholder: '请输入正文内容...',
+    placeholder: placeholder ?? '请输入正文内容...',
   };
 
   return (
@@ -60,7 +63,7 @@ export default function RichTextEditor({ value, onChange }: RichTextEditorProps)
         onCreated={setEditor}
         onChange={(editor) => onChange?.(editor.getHtml())}
         mode="default"
-        style={{ height: 400, overflowY: 'hidden' }}
+        style={{ height: height ?? 400, overflowY: 'hidden' }}
       />
     </div>
   );
