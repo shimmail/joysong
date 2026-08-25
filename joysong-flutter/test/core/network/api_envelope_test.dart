@@ -13,6 +13,20 @@ void main() {
     expect(envelope.data, 'ready');
   });
 
+  test('preserves the server error code and the absence of data', () {
+    final envelope = ApiEnvelope<Object?>.fromJson(
+      {
+        'code': 409,
+        'message': 'conflict',
+        'errorCode': 'BASE_REVISION_CONFLICT'
+      },
+      (json) => json,
+    );
+
+    expect(envelope.errorCode, 'BASE_REVISION_CONFLICT');
+    expect(envelope.hasData, isFalse);
+  });
+
   test('rejects an envelope without a numeric code', () {
     expect(
       () => ApiEnvelope<Object?>.fromJson(

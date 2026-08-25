@@ -147,6 +147,51 @@ void main() {
     );
   });
 
+  test('exposes only string server error codes on HTTP and business failures',
+      () async {
+    var request = 0;
+    final server = await _serve((incoming) async {
+      request += 1;
+      await _respond(
+        incoming,
+        status: request == 1 ? 409 : 200,
+        code: request == 1 ? 409 : 422,
+        message: '冲突',
+        data: null,
+        errorCode: request == 3 ? 'BASE_REVISION_CONFLICT' : null,
+        includeErrorCode: request >= 2,
+      );
+    });
+    addTearDown(() => server.close(force: true));
+    final client = ApiClient(apiRoot: _apiRoot(server));
+    addTearDown(client.close);
+
+    await expectLater(
+      client.get<Object?>('conflict', decodeData: (json) => json),
+      throwsA(isA<ApiException>().having(
+        (error) => error.errorCode,
+        'errorCode',
+        isNull,
+      )),
+    );
+    await expectLater(
+      client.get<Object?>('business', decodeData: (json) => json),
+      throwsA(isA<ApiException>().having(
+        (error) => error.errorCode,
+        'errorCode',
+        isNull,
+      )),
+    );
+    await expectLater(
+      client.get<Object?>('machine', decodeData: (json) => json),
+      throwsA(isA<ApiException>().having(
+        (error) => error.errorCode,
+        'errorCode',
+        'BASE_REVISION_CONFLICT',
+      )),
+    );
+  });
+
   test('idempotent write preserves its key and replays after refresh',
       () async {
     var accessToken = 'old-token';
@@ -211,6 +256,8 @@ Future<void> _respond(
   int code = 200,
   String message = 'ok',
   Object? data,
+  String? errorCode,
+  bool includeErrorCode = false,
 }) async {
   await request.drain<void>();
   request.response.statusCode = status;
@@ -219,6 +266,7 @@ Future<void> _respond(
     'code': code,
     'message': message,
     'data': data,
+    if (includeErrorCode) 'errorCode': errorCode,
   }));
   await request.response.close();
 }

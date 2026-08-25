@@ -446,7 +446,7 @@ final class ApiIdentityRepository implements IdentityRepository {
   Future<List<InstitutionProjectJoinRequest>>
       listInstitutionProjectJoinRequests() async {
     return await _apiClient.get<List<InstitutionProjectJoinRequest>>(
-          '/admin/institution-project-requests',
+          '/v2/admin/institution-project-requests',
           decodeData: (json) => _objectList(
             json,
           ).map(InstitutionProjectJoinRequest.fromJson).toList(growable: false),
@@ -460,7 +460,7 @@ final class ApiIdentityRepository implements IdentityRepository {
   ) async {
     draft.validate();
     await _apiClient.post<void>(
-      '/admin/institution-project-requests',
+      '/v2/admin/institution-project-requests',
       body: draft.toJson(),
       decodeData: (_) {},
     );
@@ -473,8 +473,13 @@ final class ApiIdentityRepository implements IdentityRepository {
     required String reviewNote,
   }) async {
     await _apiClient.post<void>(
-      '/admin/institution-project-requests/$id/review',
-      body: {'decision': decision, 'reviewNote': reviewNote},
+      '/v2/admin/institution-project-requests/${id.trim()}/review',
+      body: {
+        'decision': decision,
+        'reviewNote': reviewNote.trim(),
+        'force': false,
+        'forceBaseRevision': null,
+      },
       decodeData: (_) {},
     );
   }
@@ -484,7 +489,7 @@ final class ApiIdentityRepository implements IdentityRepository {
     DoctorProjectProfileUpdateDraft draft,
   ) async {
     final result = await _apiClient.post<DoctorProjectChangeRequest>(
-      '/admin/institution-project-requests',
+      '/v2/admin/institution-project-requests',
       body: draft.toJson(),
       decodeData: DoctorProjectChangeRequest.fromJson,
     );
@@ -501,7 +506,7 @@ final class ApiIdentityRepository implements IdentityRepository {
       throw ArgumentError.value(institutionProjectId, 'institutionProjectId');
     }
     final result = await _apiClient.post<DoctorProjectChangeRequest>(
-      '/admin/institution-project-requests',
+      '/v2/admin/institution-project-requests',
       body: {
         'requestType': 'LEAVE',
         'institutionProjectId': normalizedId,
@@ -516,7 +521,7 @@ final class ApiIdentityRepository implements IdentityRepository {
   Future<List<DoctorProjectProfileUpdateTarget>>
       listDoctorProjectProfileUpdateTargets() async {
     return await _apiClient.get<List<DoctorProjectProfileUpdateTarget>>(
-          '/admin/institution-project-requests/profile-update-targets',
+          '/v2/admin/institution-project-requests/profile-update-targets',
           decodeData: (json) => _objectList(json)
               .map(DoctorProjectProfileUpdateTarget.fromJson)
               .toList(growable: false),
@@ -528,7 +533,7 @@ final class ApiIdentityRepository implements IdentityRepository {
   Future<List<DoctorProjectChangeRequest>>
       listDoctorProjectChangeRequests() async {
     return await _apiClient.get<List<DoctorProjectChangeRequest>>(
-          '/admin/institution-project-requests',
+          '/v2/admin/institution-project-requests',
           decodeData: (json) => _objectList(
             json,
           ).map(DoctorProjectChangeRequest.fromJson).toList(growable: false),
@@ -541,7 +546,7 @@ final class ApiIdentityRepository implements IdentityRepository {
     final normalizedId = id.trim();
     if (normalizedId.isEmpty) throw ArgumentError.value(id, 'id');
     await _apiClient.post<void>(
-      '/admin/institution-project-requests/$normalizedId/withdraw',
+      '/v2/admin/institution-project-requests/$normalizedId/withdraw',
       decodeData: (_) {},
     );
   }
@@ -552,13 +557,15 @@ final class ApiIdentityRepository implements IdentityRepository {
     required String decision,
     required String reviewNote,
     required bool force,
+    required String? forceBaseRevision,
   }) async {
     await _apiClient.post<void>(
-      '/admin/institution-project-requests/$id/review',
+      '/v2/admin/institution-project-requests/${id.trim()}/review',
       body: {
         'decision': decision,
         'reviewNote': reviewNote.trim(),
         'force': force,
+        'forceBaseRevision': forceBaseRevision,
       },
       decodeData: (_) {},
     );

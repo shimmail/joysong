@@ -150,5 +150,6 @@ abstract interface class IdentityRepository {
     required String decision,
     required String reviewNote,
     required bool force,
+    required String? forceBaseRevision,
   });
 }

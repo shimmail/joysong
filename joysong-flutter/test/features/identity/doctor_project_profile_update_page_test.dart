@@ -17,9 +17,11 @@ void main() {
       requests: const [],
       doctorProfile: _doctorProfileWithThreeInstitutions,
     );
-    await tester.pumpWidget(MaterialApp(
-      home: DoctorProjectProfileUpdatePage(repository: repository),
-    ),);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DoctorProjectProfileUpdatePage(repository: repository),
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(find.byType(ExpansionTile), findsNWidgets(3));
@@ -39,14 +41,16 @@ void main() {
   testWidgets('pending profile update disables edit and leave actions',
       (tester) async {
     _largeView(tester);
-    await tester.pumpWidget(MaterialApp(
-      home: DoctorProjectProfileUpdatePage(
-        repository: _FakeRepository(
-          requests: const [_request],
-          doctorProfile: _doctorProfileWithThreeInstitutions,
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DoctorProjectProfileUpdatePage(
+          repository: _FakeRepository(
+            requests: const [_request],
+            doctorProfile: _doctorProfileWithThreeInstitutions,
+          ),
         ),
       ),
-    ),);
+    );
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const Key('doctor-project-menu-ip-1')));
@@ -81,28 +85,34 @@ void main() {
       'requestType': 'LEAVE',
       'status': 'PENDING',
     });
-    await tester.pumpWidget(MaterialApp(
-      home: DoctorProjectProfileUpdatePage(
-        repository: _FakeRepository(
-          requests: [otherDoctorRequest],
-          doctorProfile: _doctorProfileWithThreeInstitutions,
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DoctorProjectProfileUpdatePage(
+          repository: _FakeRepository(
+            requests: [otherDoctorRequest],
+            doctorProfile: _doctorProfileWithThreeInstitutions,
+          ),
         ),
       ),
-    ),);
+    );
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const Key('doctor-project-menu-ip-1')));
     await tester.pumpAndSettle();
     expect(
-      tester.widget<PopupMenuItem<String>>(
-        find.byKey(const Key('doctor-project-edit-ip-1')),
-      ).enabled,
+      tester
+          .widget<PopupMenuItem<String>>(
+            find.byKey(const Key('doctor-project-edit-ip-1')),
+          )
+          .enabled,
       isTrue,
     );
     expect(
-      tester.widget<PopupMenuItem<String>>(
-        find.byKey(const Key('doctor-project-leave-ip-1')),
-      ).enabled,
+      tester
+          .widget<PopupMenuItem<String>>(
+            find.byKey(const Key('doctor-project-leave-ip-1')),
+          )
+          .enabled,
       isTrue,
     );
   });
@@ -116,9 +126,11 @@ void main() {
       doctorProfile: _doctorProfileWithThreeInstitutions,
       leaveCompleter: leaveCompleter,
     );
-    await tester.pumpWidget(MaterialApp(
-      home: DoctorProjectProfileUpdatePage(repository: repository),
-    ),);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DoctorProjectProfileUpdatePage(repository: repository),
+      ),
+    );
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const Key('doctor-project-menu-ip-1')));
@@ -146,24 +158,29 @@ void main() {
   testWidgets('doctor editor does not render the project request history',
       (tester) async {
     _largeView(tester);
-    await tester.pumpWidget(MaterialApp(
-      home: DoctorProjectProfileUpdatePage(
-        repository: _FakeRepository(requests: const [_request]),
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DoctorProjectProfileUpdatePage(
+          repository: _FakeRepository(requests: const [_request]),
+        ),
       ),
-    ),);
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('My project requests'), findsNothing);
     expect(find.text('我的项目申请'), findsNothing);
   });
 
-  testWidgets('canceling leave does not submit and confirming keeps a pending row',
+  testWidgets(
+      'canceling leave does not submit and confirming keeps a pending row',
       (tester) async {
     _largeView(tester);
     final repository = _FakeRepository(requests: const []);
-    await tester.pumpWidget(MaterialApp(
-      home: DoctorProjectProfileUpdatePage(repository: repository),
-    ),);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DoctorProjectProfileUpdatePage(repository: repository),
+      ),
+    );
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const Key('doctor-project-menu-ip-1')));
@@ -186,15 +203,19 @@ void main() {
     expect(find.text('项目一'), findsOneWidget);
   });
 
-  testWidgets('doctor form exposes one USD price and derives the travel fee',
-      (tester,) async {
+  testWidgets('doctor form exposes one USD price and derives the travel fee', (
+    tester,
+  ) async {
     _largeView(tester);
     final repository = _FakeRepository(requests: const []);
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(
+      MaterialApp(
         home: DoctorProjectProfileUpdatePage(
-      repository: repository,
-      pickAndUploadImage: () async => 'uploaded.jpg',
-    ),),);
+          repository: repository,
+          pickAndUploadImage: () async => 'uploaded.jpg',
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('profile-update-price')), findsNothing);
@@ -225,7 +246,9 @@ void main() {
     );
     await tester.pump();
     expect(
-      find.byKey(const Key('profile-update-travel-ground-service-fee')), findsOneWidget,);
+      find.byKey(const Key('profile-update-travel-ground-service-fee')),
+      findsOneWidget,
+    );
     expect(find.textContaining('USD 320.00'), findsOneWidget);
   });
 
@@ -285,12 +308,13 @@ void main() {
     expect(find.text('PENDING'), findsOneWidget);
   });
 
-  testWidgets('doctor price rejects sub-cent fee and excess precision',
-      (tester,) async {
+  testWidgets('doctor price rejects sub-cent fee and excess precision', (
+    tester,
+  ) async {
     _largeView(tester);
     final repository = _FakeRepository(requests: const []);
-    await tester.pumpWidget(MaterialApp(
-        home: DoctorProjectProfileUpdatePage(repository: repository)),
+    await tester.pumpWidget(
+      MaterialApp(home: DoctorProjectProfileUpdatePage(repository: repository)),
     );
     await tester.pumpAndSettle();
 
@@ -323,9 +347,11 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: DoctorProjectProfileReviewPage(
-      repository: _FakeRepository(),
-      context: _legalContext,
-    ),),);
+          repository: _FakeRepository(),
+          context: _legalContext,
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('Current values at submission'), findsOneWidget);
@@ -343,66 +369,80 @@ void main() {
     expect(find.text('Approve'), findsOneWidget);
   });
 
-  testWidgets('admin supports ordinary decisions and confirmed force approval',
-      (tester) async {
-    _largeView(tester);
-    final repository = _FakeRepository();
-    await tester.pumpWidget(MaterialApp(
-        home: DoctorProjectProfileReviewPage(
-      repository: repository,
-      context: _adminContext,
-    ),),);
-    await tester.pumpAndSettle();
+  testWidgets(
+    'admin supports ordinary decisions and confirmed force approval',
+    (tester) async {
+      _largeView(tester);
+      final repository = _FakeRepository();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: DoctorProjectProfileReviewPage(
+            repository: repository,
+            context: _adminContext,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.text('Approve'), findsOneWidget);
-    expect(find.text('Reject'), findsOneWidget);
-    expect(find.text('Request changes'), findsOneWidget);
-    expect(find.text('Force approve'), findsOneWidget);
+      expect(find.text('Approve'), findsOneWidget);
+      expect(find.text('Reject'), findsOneWidget);
+      expect(find.text('Request changes'), findsOneWidget);
+      expect(find.text('Force approve'), findsOneWidget);
 
-    await tester.tap(find.text('Request changes'));
-    await tester.pumpAndSettle();
-    await tester.enterText(
-        find.byKey(const Key('profile-review-note')), 'Please revise',);
-    await tester.tap(find.text('Confirm'));
-    await tester.pumpAndSettle();
+      await tester.tap(find.text('Request changes'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('profile-review-note')),
+        'Please revise',
+      );
+      await tester.tap(find.text('Confirm'));
+      await tester.pumpAndSettle();
 
-    expect(repository.reviewDecision, 'CHANGES_REQUESTED');
-    expect(repository.reviewForce, isFalse);
+      expect(repository.reviewDecision, 'CHANGES_REQUESTED');
+      expect(repository.reviewForce, isFalse);
 
-    await tester.tap(find.text('Force approve'));
-    await tester.pumpAndSettle();
-    expect(find.text('Confirm force approval'), findsOneWidget);
-    await tester.enterText(
-        find.byKey(const Key('profile-review-note')), 'Manual handling',);
-    await tester.tap(find.text('Confirm'));
-    await tester.pumpAndSettle();
+      await tester.tap(find.text('Force approve'));
+      await tester.pumpAndSettle();
+      expect(find.text('Confirm force approval'), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const Key('profile-review-note')),
+        'Manual handling',
+      );
+      await tester.tap(find.text('Confirm'));
+      await tester.pumpAndSettle();
 
-    expect(repository.reviewForce, isTrue);
-    expect(repository.reviewDecision, 'APPROVED');
-    expect(repository.reviewNote, 'Manual handling');
-  },);
+      expect(repository.reviewForce, isTrue);
+      expect(repository.reviewDecision, 'APPROVED');
+      expect(repository.reviewNote, 'Manual handling');
+    },
+  );
 
   testWidgets(
-      'platform admin enters profile reviews without ordinary professional entries',
-      (tester) async {
-    _largeView(tester);
-    final repository = _FakeRepository(managementContext: _adminReviewContext,);
-    await tester.pumpWidget(MaterialApp(
-      home: ManagementCenterPage(
-        repository: repository,
-        discoverRepository: _UnusedDiscoverRepository(),
-      ),
-    ),);
-    await tester.pumpAndSettle();
+    'platform admin enters profile reviews without ordinary professional entries',
+    (tester) async {
+      _largeView(tester);
+      final repository = _FakeRepository(
+        managementContext: _adminReviewContext,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ManagementCenterPage(
+            repository: repository,
+            discoverRepository: _UnusedDiscoverRepository(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.text('Doctor project profile reviews'), findsOneWidget);
-    expect(find.text('Institution profile'), findsNothing);
-    expect(find.text('Apply to institution'), findsNothing);
-    await tester.tap(find.text('Doctor project profile reviews'));
-    await tester.pumpAndSettle();
-    expect(find.byType(DoctorProjectProfileReviewPage), findsOneWidget);
-    expect(find.text('Force approve'), findsOneWidget);
-  },);
+      expect(find.text('Doctor project profile reviews'), findsOneWidget);
+      expect(find.text('Institution profile'), findsNothing);
+      expect(find.text('Apply to institution'), findsNothing);
+      await tester.tap(find.text('Doctor project profile reviews'));
+      await tester.pumpAndSettle();
+      expect(find.byType(DoctorProjectProfileReviewPage), findsOneWidget);
+      expect(find.text('Force approve'), findsOneWidget);
+    },
+  );
 }
 
 void _largeView(WidgetTester tester) {
@@ -498,7 +538,8 @@ final class _FakeRepository implements IdentityRepository {
 
   @override
   Future<DoctorProjectChangeRequest> submitDoctorProjectProfileUpdate(
-      DoctorProjectProfileUpdateDraft draft,) async {
+    DoctorProjectProfileUpdateDraft draft,
+  ) async {
     submitted = draft;
     submissionCount++;
     requests = [
@@ -511,11 +552,13 @@ final class _FakeRepository implements IdentityRepository {
   int submissionCount = 0;
 
   @override
-  Future<void> reviewDoctorProjectChangeRequest(
-      {required String id,
-      required String decision,
-      required String reviewNote,
-      required bool force,}) async {
+  Future<void> reviewDoctorProjectChangeRequest({
+    required String id,
+    required String decision,
+    required String reviewNote,
+    required bool force,
+    required String? forceBaseRevision,
+  }) async {
     reviewDecision = decision;
     reviewForce = force;
     this.reviewNote = reviewNote;

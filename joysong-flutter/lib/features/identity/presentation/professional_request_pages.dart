@@ -1509,8 +1509,7 @@ class _DoctorProjectProfileUpdatePageState
       children: targets.isEmpty
           ? [
               ListTile(
-                title: Text(context.localized(
-                    '暂无已加入项目', 'No joined projects')),
+                title: Text(context.localized('暂无已加入项目', 'No joined projects')),
               ),
             ]
           : [for (final target in targets) _projectRow(context, target)],
@@ -1564,13 +1563,16 @@ class _DoctorProjectProfileUpdatePageState
       (request) =>
           request.institutionProjectId == target.institutionProjectId &&
           request.status.trim().toUpperCase() == 'PENDING' &&
-          (doctorId == null || doctorId.isEmpty || request.doctorId == doctorId),
+          (doctorId == null ||
+              doctorId.isEmpty ||
+              request.doctorId == doctorId),
     );
   }
 
   Future<void> _edit(DoctorProjectProfileUpdateTarget target) async {
     if (_saving || _hasPending(target)) return;
-    final request = await Navigator.of(context).push<DoctorProjectChangeRequest>(
+    final request =
+        await Navigator.of(context).push<DoctorProjectChangeRequest>(
       MaterialPageRoute(
         builder: (_) => _DoctorProjectProfileUpdateFormPage(
           repository: widget.repository,
@@ -1614,10 +1616,7 @@ class _DoctorProjectProfileUpdatePageState
         ],
       ),
     );
-    if (confirmed != true ||
-        !mounted ||
-        _saving ||
-        _hasPending(target)) {
+    if (confirmed != true || !mounted || _saving || _hasPending(target)) {
       return;
     }
     setState(() {
@@ -1729,8 +1728,7 @@ class _DoctorProjectProfileUpdateFormPageState
             const SizedBox(height: 16),
             _requestField(
               _price,
-              context.localized(
-                  '医生项目价格（USD）', 'Doctor project price (USD)'),
+              context.localized('医生项目价格（USD）', 'Doctor project price (USD)'),
               fieldKey: const Key('profile-update-price'),
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
@@ -1750,8 +1748,7 @@ class _DoctorProjectProfileUpdateFormPageState
             ),
             _requestField(
               _tags,
-              context.localized(
-                  '服务标签（逗号分隔）', 'Service tags (comma separated)'),
+              context.localized('服务标签（逗号分隔）', 'Service tags (comma separated)'),
             ),
             _requestField(
               _schedule,
@@ -2081,7 +2078,12 @@ class _DoctorProjectProfileReviewPageState
     });
     try {
       await widget.repository.reviewDoctorProjectChangeRequest(
-          id: request.id, decision: decision, reviewNote: result, force: force);
+        id: request.id,
+        decision: decision,
+        reviewNote: result,
+        force: force,
+        forceBaseRevision: force ? request.baseRevision : null,
+      );
       await _load();
     } catch (_) {
       if (mounted) {
@@ -2846,8 +2848,7 @@ String _formatUsd(num? value) {
   return 'USD ${value.toStringAsFixed(2)}';
 }
 
-String _formatUsdMinor(int minor) =>
-    'USD ${(minor / 100).toStringAsFixed(2)}';
+String _formatUsdMinor(int minor) => 'USD ${(minor / 100).toStringAsFixed(2)}';
 
 String _snapshotText(BuildContext context, String? value) {
   if (value == null) return context.localized('未提供', 'Not provided');

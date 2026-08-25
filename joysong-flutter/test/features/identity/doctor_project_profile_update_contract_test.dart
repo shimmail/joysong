@@ -1,319 +1,144 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/core/network/api_client.dart';
 import 'package:joysong_flutter/features/identity/data/identity_repository_impl.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 
 void main() {
-  test(
-    'PROFILE_UPDATE duplicates the doctor project price for compatibility', () {
+  late Map<String, dynamic> fixture;
+
+  setUpAll(() async {
+    fixture = jsonDecode(
+        await File('../test-fixtures/doctor-project-change-v2.json')
+            .readAsString()) as Map<String, dynamic>;
+  });
+
+  test('decodes every frozen v2 golden variant and keeps damaged rows visible',
+      () {
+    final target =
+        DoctorProjectProfileUpdateTarget.fromJson(fixture['targetV2']);
+    final request = DoctorProjectChangeRequest.fromJson(fixture['requestV2']);
+    final damaged = DoctorProjectChangeRequest.fromJson(
+        fixture['requestV2InvalidSnapshot']);
+    expect(target.payloadVersion, 2);
+    expect(target.baseRevision, isNotEmpty);
+    expect(target.currentProject!.source['institutionProjectVersion'], 7);
+    expect(request.requestStatus, 'PENDING');
+    expect(request.currentDoctorActive, isTrue);
+    expect(request.hasCompleteSnapshot, isTrue);
+    expect(damaged.hasCompleteSnapshot, isFalse);
+    expect(damaged.snapshotError, 'REQUEST_SNAPSHOT_INVALID');
+    expect(damaged.reviewable, isFalse);
+  });
+
+  test('PROFILE_UPDATE emits the exact frozen fifteen-key v2 body', () {
     const draft = DoctorProjectProfileUpdateDraft(
       institutionProjectId: ' ip-1 ',
-      priceSuggestion: 799.99,
-      serviceDescription: ' 服务说明 ',
-      serviceTags: [' 自然 ', '精细化'],
-      scheduleNote: ' 周二、四 ',
+      baseRevision: ' rev-1 ',
+      name: ' Name ',
+      category: ' Skin ',
+      description: ' Description ',
+      tags: [' one '],
+      slogan: ' Slogan ',
+      detailContent: ' Detail ',
+      price: 1100,
+      salesCount: 12,
+      doctorActive: false,
       coverImage: ' cover.jpg ',
-      images: [' one.jpg ', 'two.jpg'],
-      consultationFee: 300,
-      commissionRate: 10,
-      institutionRate: 40,
-      platformRate: 10,
-      notes: ' 整体调整 ',
+      images: [' image.jpg '],
+      notes: ' note ',
     );
-
     expect(draft.toJson(), {
       'requestType': 'PROFILE_UPDATE',
       'institutionProjectId': 'ip-1',
-      'priceSuggestion': 799.99,
-        'medicalListPrice': 799.99,
-      'serviceDescription': '服务说明',
-      'serviceTags': ['自然', '精细化'],
-      'scheduleNote': '周二、四',
+      'baseRevision': 'rev-1',
+      'name': 'Name',
+      'category': 'Skin',
+      'description': 'Description',
+      'tags': ['one'],
+      'slogan': 'Slogan',
+      'detailContent': 'Detail',
+      'price': 1100,
+      'salesCount': 12,
+      'doctorActive': false,
       'coverImage': 'cover.jpg',
-      'images': ['one.jpg', 'two.jpg'],
-      'consultationFee': 300,
-      'commissionRate': 10,
-      'institutionRate': 40,
-      'notes': '整体调整',
+      'images': ['image.jpg'],
+      'notes': 'note',
     });
-    const invalidDraft = DoctorProjectProfileUpdateDraft(
-      institutionProjectId: 'ip-1',
-      priceSuggestion: 12800,
-      serviceDescription: '服务说明',
-      serviceTags: [],
-      scheduleNote: '',
-      coverImage: '',
-      images: [],
-      consultationFee: 300,
-      commissionRate: 30,
-      institutionRate: 60,
-      platformRate: 20,
-      notes: '',
-    );
-
-    expect(invalidDraft.toJson, throwsArgumentError);
-  },);
-
-  test('PROFILE_UPDATE requires a USD price that produces a payable fee', () {
-    DoctorProjectProfileUpdateDraft draft(num price) =>
-        DoctorProjectProfileUpdateDraft(
-          institutionProjectId: 'ip-1',
-          priceSuggestion: price,
-          serviceDescription: '服务说明',
-          serviceTags: const [],
-          scheduleNote: '',
-          coverImage: '',
-          images: const [],
-          consultationFee: 300,
-          commissionRate: 10,
-          institutionRate: 40,
-          platformRate: 40,
-          notes: '',
-        );
-
-    expect(draft(0.01).toJson, throwsArgumentError);
-    expect(draft(1.001).toJson, throwsArgumentError);
-    expect(draft(0.02).toJson()['priceSuggestion'], 0.02);
-    expect(draft(0.02).toJson()['medicalListPrice'], 0.02);
   });
 
-  test('request view decodes arrays, rates, and force audit fields', () {
-    final request = DoctorProjectChangeRequest.fromJson(_requestJson);
-
-    expect(request.serviceTags, ['自然', '精细化']);
-    expect(request.images, ['one.jpg']);
-    expect(request.platformRate, 10);
-    expect(request.doctorRate, 40);
-    expect(request.forceProcessed, isTrue);
-  });
-
-  test('mixed JOIN, LEAVE and PROFILE_UPDATE requests decode by type', () {
-    final requests = [
-      DoctorProjectChangeRequest.fromJson({
-        ..._requestJson,
-        'id': 'join-1',
-        'requestType': 'JOIN',
-        'priceSuggestion': null,
-        'consultationFee': null,
-        'commissionRate': null,
-        'institutionRate': null,
-        'platformRate': null,
-        'doctorRate': null,
-      }),
-      DoctorProjectChangeRequest.fromJson({
-        ..._requestJson,
-        'id': 'leave-1',
-        'requestType': 'LEAVE',
-        'priceSuggestion': null,
-        'consultationFee': null,
-        'commissionRate': null,
-        'institutionRate': null,
-        'platformRate': null,
-        'doctorRate': null,
-      }),
-      DoctorProjectChangeRequest.fromJson(_requestJson),
-    ];
-
-    expect(requests.map((request) => request.requestType),
-        ['JOIN', 'LEAVE', 'PROFILE_UPDATE',]);
-    expect(requests.take(2).every((request) => request.platformRate == null),
-        isTrue,);
-    expect(requests.last.currentPlatformRate, 10);
-    expect(requests.last.currentDoctorRate, 45);
-    expect( DoctorProjectChangeRequest.fromJson({
-        ..._requestJson,
-        'platformRate': null,
-      }).platformRate,
-      0,
-    );
-  });
-
-  test(
-      'repository submits on the existing path and reviews with explicit force',
-      () async {
-    final client = _RecordingApiClient();
+  test('repository uses v2 paths and the exact four-key review body', () async {
+    final client = _RecordingApiClient(fixture);
     final repository = ApiIdentityRepository(client);
     const draft = DoctorProjectProfileUpdateDraft(
       institutionProjectId: 'ip-1',
-      priceSuggestion: 12800,
-      serviceDescription: '服务说明',
-      serviceTags: ['自然'],
-      scheduleNote: '',
+      baseRevision: 'rev-1',
+      name: 'Name',
+      category: 'Skin',
+      description: 'Description',
+      tags: [],
+      slogan: '',
+      price: 1100,
+      salesCount: 0,
+      doctorActive: true,
       coverImage: '',
       images: [],
-      consultationFee: 300,
-      commissionRate: 10,
-      institutionRate: 40,
-      platformRate: 10,
       notes: '',
     );
-
     final created = await repository.submitDoctorProjectProfileUpdate(draft);
     await repository.reviewDoctorProjectChangeRequest(
       id: created.id,
       decision: 'APPROVED',
-      reviewNote: '管理员强制处置',
-      force: true,
+      reviewNote: ' approved ',
+      force: false,
+      forceBaseRevision: null,
     );
-
-    expect(client.requests, [
-      _Request('POST', '/admin/institution-project-requests', draft.toJson()),
-      const _Request(
-        'POST',
-        '/admin/institution-project-requests/request-1/review',
-        {'decision': 'APPROVED', 'reviewNote': '管理员强制处置', 'force': true},
-      ),
-    ]);
-  },);
-
-  test('repository submits a minimal doctor project leave request', () async {
-    final client = _RecordingApiClient();
-    final repository = ApiIdentityRepository(client);
-
-    final created = await repository.submitDoctorProjectLeave(
-      institutionProjectId: ' ip-1 ',
+    await repository.reviewInstitutionProjectJoinRequest(
+      id: 'join-v1',
+      decision: 'REJECTED',
+      reviewNote: ' no ',
     );
-
-    expect(created.requestType, 'LEAVE');
     expect(client.requests, [
+      _Request(
+          'POST', '/v2/admin/institution-project-requests', draft.toJson()),
       const _Request(
-        'POST',
-        '/admin/institution-project-requests',
-        {'requestType': 'LEAVE', 'institutionProjectId': 'ip-1'},
-      ),
+          'POST', '/v2/admin/institution-project-requests/request-v2/review', {
+        'decision': 'APPROVED',
+        'reviewNote': 'approved',
+        'force': false,
+        'forceBaseRevision': null
+      }),
+      const _Request(
+          'POST', '/v2/admin/institution-project-requests/join-v1/review', {
+        'decision': 'REJECTED',
+        'reviewNote': 'no',
+        'force': false,
+        'forceBaseRevision': null
+      }),
     ]);
-  });
-
-  test('repository loads the server-owned current profile update target',
-      () async {
-    final client = _RecordingApiClient();
-    final targets = await ApiIdentityRepository(client,)
-        .listDoctorProjectProfileUpdateTargets();
-
-    expect(targets.single.currentPrice, 12000);
-    expect(targets.single.platformRate, 10);
-    expect(client.requests.single.path,
-        '/admin/institution-project-requests/profile-update-targets',);
-  },);
-
-  test('doctor withdraws pending project requests', () async {
-    final client = _RecordingApiClient();
-    await ApiIdentityRepository(client,)
-        .withdrawDoctorProjectChangeRequest(' request-1 ');
-
-    expect(
-        client.requests.single,
-        const _Request(
-          'POST',
-          '/admin/institution-project-requests/request-1/withdraw',
-          null,
-        ),);
   });
 }
-
-const _requestJson = <String, Object?>{
-  'id': 'request-1',
-  'doctorId': 'doctor-1',
-  'doctorName': '李医生',
-  'institutionId': 'institution-1',
-  'institutionName': '娇颜颂',
-  'institutionProjectId': 'ip-1',
-  'projectName': '项目一',
-  'requestType': 'PROFILE_UPDATE',
-  'serviceDescription': '服务说明',
-  'priceSuggestion': 12800,
-  'notes': '',
-  'serviceTags': ['自然', '精细化'],
-  'scheduleNote': '',
-  'coverImage': '',
-  'images': ['one.jpg'],
-  'consultationFee': 300,
-  'commissionRate': 10,
-  'institutionRate': 40,
-  'platformRate': 10,
-  'doctorRate': 40,
-  'forceProcessed': true,
-  'currentPrice': 12000,
-  'currentServiceDescription': '当前说明',
-  'currentServiceTags': ['当前标签'],
-  'currentScheduleNote': '周二',
-  'currentCoverImage': 'old-cover.jpg',
-  'currentImages': ['old.jpg'],
-  'currentConsultationFee': 200,
-  'currentCommissionRate': 5,
-  'currentInstitutionRate': 40,
-  'currentPlatformRate': 10,
-  'currentDoctorRate': 45,
-  'status': 'PENDING',
-  'submittedBy': 'user-1',
-  'reviewedBy': null,
-  'reviewerName': null,
-  'reviewNote': '',
-  'submittedAt': '2026-08-12T08:00:00',
-  'reviewedAt': null,
-  'updatedAt': '2026-08-12T08:00:00',
-};
-
-const _targetJson = <String, Object?>{
-  'institutionProjectId': 'ip-1',
-  'projectName': '项目一',
-  'institutionId': 'institution-1',
-  'institutionName': '娇颜颂',
-  'currentPrice': 12000,
-  'serviceDescription': '当前说明',
-  'serviceTags': ['自然'],
-  'scheduleNote': '',
-  'coverImage': '',
-  'images': <String>[],
-  'consultationFee': 200,
-  'commissionRate': 10,
-  'institutionRate': 40,
-  'platformRate': 10,
-  'doctorRate': 40,
-};
 
 final class _RecordingApiClient extends ApiClient {
-  _RecordingApiClient() : super(apiRoot: Uri.parse('http://localhost/api/'));
+  _RecordingApiClient(this.fixture)
+      : super(apiRoot: Uri.parse('http://localhost/api/'));
+  final Map<String, dynamic> fixture;
   final List<_Request> requests = [];
-
-  @override
-  Future<T?> get<T>(String path,
-      {Map<String, Object?> query = const {},
-      required T Function(Object? json) decodeData,}) async {
-    requests.add(_Request('GET', path, null));
-    return decodeData([_targetJson]);
-  }
-
   @override
   Future<T?> post<T>(String path,
-      {Object? body, required T Function(Object? json) decodeData,}) async {
+      {Object? body, required T Function(Object? json) decodeData}) async {
     requests.add(_Request('POST', path, body));
-    final isLeave = body is Map && body['requestType'] == 'LEAVE';
-    return decodeData(path.endsWith('/review')
-        ? null
-        : isLeave
-            ? _leaveRequestJson
-            : _requestJson,);
+    return decodeData(path.endsWith('/review') ? null : fixture['requestV2']);
   }
 }
-
-final _leaveRequestJson = <String, Object?>{
-  ..._requestJson,
-  'requestType': 'LEAVE',
-  'priceSuggestion': null,
-  'consultationFee': null,
-  'commissionRate': null,
-  'institutionRate': null,
-  'platformRate': null,
-  'doctorRate': null,
-};
 
 final class _Request {
   const _Request(this.method, this.path, this.body);
   final String method;
   final String path;
   final Object? body;
-
   @override
   bool operator ==(Object other) =>
       other is _Request &&
@@ -325,16 +150,14 @@ final class _Request {
 }
 
 bool _deepEquals(Object? left, Object? right) {
-  if (left is Map && right is Map) {
+  if (left is Map && right is Map)
     return left.length == right.length &&
         left.entries.every((entry) =>
             right.containsKey(entry.key) &&
-            _deepEquals(entry.value, right[entry.key]),);
-  }
-  if (left is List && right is List) {
+            _deepEquals(entry.value, right[entry.key]));
+  if (left is List && right is List)
     return left.length == right.length &&
-        Iterable.generate(left.length,)
+        Iterable.generate(left.length)
             .every((index) => _deepEquals(left[index], right[index]));
-  }
   return left == right;
 }
