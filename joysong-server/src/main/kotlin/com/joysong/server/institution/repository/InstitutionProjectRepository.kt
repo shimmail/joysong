@@ -16,6 +16,7 @@ interface InstitutionProjectIdentity {
 
 interface InstitutionProjectRepository : JpaRepository<InstitutionProjectEntity, String> {
     fun findTop8ByIsActiveTrueOrderBySalesCountDesc(): List<InstitutionProjectEntity>
+    fun findByIsActiveTrueOrderBySalesCountDesc(): List<InstitutionProjectEntity>
     fun findByProjectId(projectId: String): List<InstitutionProjectEntity>
     fun findByInstitutionId(institutionId: String): List<InstitutionProjectEntity>
     fun findByInstitutionIdAndProjectId(institutionId: String, projectId: String): InstitutionProjectEntity?

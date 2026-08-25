@@ -46,23 +46,18 @@ class DiscoverDetailService(
         val doctor = doctorRepository.findById(doctorId).orElse(null) ?: return null
 
         // 通过关联表获取医生的项目列表，优先使用 institutionProjectId
-        val doctorProjects = doctorProjectRepository.findByDoctorId(doctorId)
+        val doctorProjects = doctorProjectRepository.findPublicByDoctorId(doctorId)
 
         // N+1 修复：批量查询所有关联的 InstitutionProject、Project、Institution
         val institutionProjectIds = doctorProjects
-            .filter { it.institutionProjectId.isNotBlank() }
             .map { it.institutionProjectId }
-            .distinct()
-        val projectIdsFromIp = doctorProjects
-            .filter { it.institutionProjectId.isBlank() && it.projectId.isNotBlank() }
-            .map { it.projectId }
+            .filter { it.isNotBlank() }
             .distinct()
 
         val ipMap: Map<String, InstitutionProjectEntity> = institutionProjectRepository.findAllById(institutionProjectIds)
             .associateBy { it.id }
 
-        // 收集所有需要查询的 projectId（来自 ip 的 + 来自 doctorProject 直连的）
-        val allProjectIds = (ipMap.values.map { it.projectId } + projectIdsFromIp).distinct()
+        val allProjectIds = ipMap.values.map { it.projectId }.distinct()
         val projectMap: Map<String, ProjectEntity> = projectRepository.findAllById(allProjectIds)
             .associateBy { it.id }
 
@@ -71,46 +66,29 @@ class DiscoverDetailService(
             institutionRepository.findAllById(institutionIds).associateBy { it.id }
 
         val institutionProjectInfos = doctorProjects.mapNotNull { dp ->
-            if (dp.institutionProjectId.isNotBlank()) {
-                val ip = ipMap[dp.institutionProjectId] ?: return@mapNotNull null
-                val project = projectMap[ip.projectId]
-                val institution = institutionMap[ip.institutionId]
-                if (!ip.isActive || project == null) return@mapNotNull null
-                val effective = institutionProjectDetailResolver.resolve(ip, project)
-                DoctorInstitutionProjectInfo(
-                    institutionProjectId = ip.id,
-                    projectId = ip.projectId,
-                    projectName = effective.name,
-                    institutionId = ip.institutionId,
-                    institutionName = institution?.name ?: "",
-                    price = dp.price,
-                    originalPrice = ip.originalPrice,
-                    currency = ip.currency,
-                    coverImage = effective.coverImage,
-                    salesCount = ip.salesCount,
-                    category = effective.category,
-                    description = effective.description,
-                    rating = effective.rating,
-                    reviewCount = effective.reviewCount,
-                    tags = effective.tags,
-                    slogan = effective.slogan,
-                    detailContent = effective.detailContent
-                )
-            } else if (dp.projectId.isNotBlank()) {
-                val project = projectMap[dp.projectId] ?: return@mapNotNull null
-                DoctorInstitutionProjectInfo(
-                    institutionProjectId = "",
-                    projectId = project.id,
-                    projectName = project.name,
-                    institutionId = "",
-                    institutionName = "",
-                    price = dp.price,
-                    originalPrice = null,
-                    currency = project.currency,
-                    coverImage = project.coverImage,
-                    salesCount = project.salesCount
-                )
-            } else null
+            val ip = ipMap[dp.institutionProjectId]?.takeIf { it.isActive } ?: return@mapNotNull null
+            val project = projectMap[ip.projectId] ?: return@mapNotNull null
+            val institution = institutionMap[ip.institutionId]
+            val effective = institutionProjectDetailResolver.resolve(ip, project)
+            DoctorInstitutionProjectInfo(
+                institutionProjectId = ip.id,
+                projectId = ip.projectId,
+                projectName = effective.name,
+                institutionId = ip.institutionId,
+                institutionName = institution?.name ?: "",
+                price = dp.price,
+                originalPrice = ip.originalPrice,
+                currency = ip.currency,
+                coverImage = effective.coverImage,
+                salesCount = ip.salesCount,
+                category = effective.category,
+                description = effective.description,
+                rating = effective.rating,
+                reviewCount = effective.reviewCount,
+                tags = effective.tags,
+                slogan = effective.slogan,
+                detailContent = effective.detailContent
+            )
         }
 
         // 获取医生相关的日记
@@ -137,7 +115,14 @@ class DiscoverDetailService(
         val project = projectRepository.findById(projectId).orElse(null) ?: return null
 
         // 获取项目的所有机构项目关联
-        val institutionProjects = institutionProjectRepository.findByProjectId(projectId).filter { it.isActive }
+        val activeInstitutionProjects = institutionProjectRepository.findByProjectId(projectId).filter { it.isActive }
+        val publicBindings = activeInstitutionProjects.takeIf { it.isNotEmpty() }
+            ?.let { doctorProjectRepository.findPublicByInstitutionProjectIds(it.map { project -> project.id }) }
+            .orEmpty()
+        val minimumPrices = publicBindings.groupBy { it.institutionProjectId }
+            .mapValues { (_, bindings) -> bindings.minOf { it.price } }
+        val institutionProjects = activeInstitutionProjects.filter { it.id in minimumPrices }
+        if (institutionProjects.isEmpty()) return null
 
         // N+1 修复：批量查询所有关联的 Institution
         val institutionIds = institutionProjects.map { it.institutionId }.distinct()
@@ -147,7 +132,7 @@ class DiscoverDetailService(
         val institutionProjectsWithInstitutions = institutionProjects.mapNotNull { ip ->
             val institution = institutionMap[ip.institutionId] ?: return@mapNotNull null
             InstitutionProjectWithInstitution(
-                ip.toResponse(),
+                ip.toResponse().copy(price = minimumPrices.getValue(ip.id)),
                 institution.toResponse(),
                 institutionProjectDetailResolver.resolve(ip, project).toResponse()
             )
@@ -160,7 +145,7 @@ class DiscoverDetailService(
         )
 
         return ProjectDetailDto(
-            project = project.toResponse(),
+            project = project.toResponse().copy(referencePrice = publicBindings.minOf { it.price }),
             institutionProjects = institutionProjectsWithInstitutions,
             diaries = diaries.map { it.toResponse() },
             reviews = reviews
@@ -173,7 +158,7 @@ class DiscoverDetailService(
         val project = projectRepository.findById(projectId).orElse(null) ?: return null
         val institution = institutionRepository.findById(institutionId).orElse(null) ?: return null
         val diaries = diaryRepository.findPublishedByProjectId(projectId)
-        val doctorProjects = doctorProjectRepository.findByInstitutionProjectId(ip.id)
+        val doctorProjects = doctorProjectRepository.findPublicByInstitutionProjectIds(listOf(ip.id))
         val doctorIds = doctorProjects
             .map { it.doctorId }
             .filter { it.isNotBlank() }
@@ -182,9 +167,12 @@ class DiscoverDetailService(
         val doctors = doctorIds.mapNotNull(doctorsById::get)
         val reviews = reviewsWithUsers(reviewRepository.findByInstitutionProjectId(ip.id))
         return InstitutionProjectDetailDto(
-            institutionProject = ip.toResponse(),
+            institutionProject = ip.toResponse().copy(
+                price = doctorProjects.minOfOrNull { it.price } ?: ip.price
+            ),
             project = institutionProjectDetailResolver.resolve(ip, project).toResponse(),
             institution = institution.toResponse(),
+            hasAvailableDoctors = doctorProjects.isNotEmpty(),
             diaries = diaries.map { it.toResponse() },
             doctors = doctors.map { doctor ->
                 doctor.toResponse(doctorProjects.first { it.doctorId == doctor.id }.price)
@@ -194,9 +182,15 @@ class DiscoverDetailService(
     }
 
     fun getInstitutionProjects(institutionId: String): List<InstitutionProjectResponse> {
-        return institutionProjectRepository.findByInstitutionId(institutionId)
+        val institutionProjects = institutionProjectRepository.findByInstitutionId(institutionId)
             .filter { it.isActive }
-            .map { it.toResponse() }
+        if (institutionProjects.isEmpty()) return emptyList()
+        val minimumPrices = doctorProjectRepository.findPublicByInstitutionProjectIds(institutionProjects.map { it.id })
+            .groupBy { it.institutionProjectId }
+            .mapValues { (_, bindings) -> bindings.minOf { it.price } }
+        return institutionProjects.mapNotNull { ip ->
+            minimumPrices[ip.id]?.let { price -> ip.toResponse().copy(price = price) }
+        }
     }
 
     fun getInstitutionDiaries(institutionId: String): List<DiaryResponse> {
@@ -207,7 +201,13 @@ class DiscoverDetailService(
         val institution = institutionRepository.findById(institutionId).orElse(null) ?: return null
 
         // 通过机构项目关联表获取机构的项目列表，合并项目模板信息（名称、描述、分类）与机构特定信息（价格、封面）
-        val institutionProjects = institutionProjectRepository.findByInstitutionId(institutionId).filter { it.isActive }
+        val activeInstitutionProjects = institutionProjectRepository.findByInstitutionId(institutionId).filter { it.isActive }
+        val publicBindings = activeInstitutionProjects.takeIf { it.isNotEmpty() }
+            ?.let { doctorProjectRepository.findPublicByInstitutionProjectIds(it.map { project -> project.id }) }
+            .orEmpty()
+        val minimumPrices = publicBindings.groupBy { it.institutionProjectId }
+            .mapValues { (_, bindings) -> bindings.minOf { it.price } }
+        val institutionProjects = activeInstitutionProjects.filter { it.id in minimumPrices }
 
         // N+1 修复：批量查询所有关联的 Project
         val projectIds = institutionProjects.map { it.projectId }.distinct()
@@ -215,9 +215,7 @@ class DiscoverDetailService(
             .associateBy { it.id }
 
         val projects = institutionProjects.mapNotNull { ip ->
-            val startingPrice = doctorProjectRepository.findActiveByInstitutionProjectId(ip.id)
-                .minOfOrNull { it.price }
-                ?: return@mapNotNull null
+            val startingPrice = minimumPrices.getValue(ip.id)
             val project = projectMap[ip.projectId] ?: return@mapNotNull null
             val effective = institutionProjectDetailResolver.resolve(ip, project)
             InstitutionProjectInfo(

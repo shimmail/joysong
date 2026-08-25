@@ -13,6 +13,7 @@ import com.joysong.server.identity.service.DoctorInstitutionRelationshipService
 import com.joysong.server.institution.entity.InstitutionEntity
 import com.joysong.server.institution.entity.InstitutionProjectEntity
 import com.joysong.server.institution.repository.InstitutionProjectRepository
+import com.joysong.server.institution.repository.InstitutionProjectIdentity
 import com.joysong.server.institution.repository.InstitutionRepository
 import com.joysong.server.institution.service.InstitutionProjectDetailResolver
 import com.joysong.server.order.dto.CreateOrderRequest
@@ -120,10 +121,181 @@ class OrderServiceTest {
             institutionProjectId = "inst-proj-1",
             price = BigDecimal("4500.00")
         )
+        every { institutionProjectRepository.findIdentityById(any()) } returns institutionProjectIdentity()
+        every { institutionProjectRepository.findForUpdate(any()) } returns testInstitutionProject
+        every { doctorProjectRepository.findForUpdate(any(), any()) } returns DoctorProjectEntity(
+            doctorId = "doctor-1",
+            projectId = "project-1",
+            institutionProjectId = "inst-proj-1",
+            price = BigDecimal("4500.00")
+        )
         justRun { doctorInstitutionRelationshipService.requireActiveRelationshipForUpdate(any(), any()) }
     }
 
     // ---- 创建订单 ----
+
+    private fun institutionProjectIdentity(): InstitutionProjectIdentity = mockk<InstitutionProjectIdentity>().also { identity ->
+        every { identity.id } returns "inst-proj-1"
+        every { identity.institutionId } returns "inst-1"
+        every { identity.projectId } returns "project-1"
+        every { identity.version } returns 0
+    }
+
+    @Test
+    fun `quote locks relationship institution project and doctor project in global order`() {
+        val identity = institutionProjectIdentity()
+        val binding = DoctorProjectEntity(
+            doctorId = "doctor-1", projectId = "project-1", institutionProjectId = "inst-proj-1",
+            price = BigDecimal("3999.00")
+        )
+        every { institutionProjectRepository.findIdentityById("inst-proj-1") } returns identity
+        every { institutionProjectRepository.findForUpdate("inst-proj-1") } returns testInstitutionProject
+        every { doctorProjectRepository.findForUpdate("doctor-1", "inst-proj-1") } returns binding
+
+        val quote = orderService.quoteTravelGroundService("doctor-1", "inst-proj-1")
+
+        assertEquals(159_960L, quote.travelGroundServiceFeeMinor)
+        verifyOrder {
+            institutionProjectRepository.findIdentityById("inst-proj-1")
+            doctorInstitutionRelationshipService.requireActiveRelationshipForUpdate("doctor-1", "inst-1")
+            institutionProjectRepository.findForUpdate("inst-proj-1")
+            doctorProjectRepository.findForUpdate("doctor-1", "inst-proj-1")
+        }
+        verify(exactly = 0) {
+            doctorProjectRepository.findByDoctorIdAndInstitutionProjectId(any(), any())
+        }
+    }
+
+    @Test
+    fun `quote maps all availability failures but preserves non positive price error`() {
+        val identity = institutionProjectIdentity()
+        every { institutionProjectRepository.findIdentityById("inst-proj-1") } returns null
+        assertEquals(
+            "DOCTOR_PROJECT_NOT_CONFIGURED",
+            assertThrows<IllegalArgumentException> {
+                orderService.quoteTravelGroundService("doctor-1", "inst-proj-1")
+            }.message
+        )
+
+        every { institutionProjectRepository.findIdentityById("inst-proj-1") } returns identity
+
+        every {
+            doctorInstitutionRelationshipService.requireActiveRelationshipForUpdate("doctor-1", "inst-1")
+        } throws org.springframework.security.access.AccessDeniedException("inactive")
+        assertEquals(
+            "DOCTOR_PROJECT_NOT_CONFIGURED",
+            assertThrows<IllegalArgumentException> {
+                orderService.quoteTravelGroundService("doctor-1", "inst-proj-1")
+            }.message
+        )
+
+        justRun { doctorInstitutionRelationshipService.requireActiveRelationshipForUpdate("doctor-1", "inst-1") }
+        every { institutionProjectRepository.findForUpdate("inst-proj-1") } returns testInstitutionProject.copy(isActive = false)
+        assertEquals(
+            "DOCTOR_PROJECT_NOT_CONFIGURED",
+            assertThrows<IllegalArgumentException> {
+                orderService.quoteTravelGroundService("doctor-1", "inst-proj-1")
+            }.message
+        )
+
+        every { institutionProjectRepository.findForUpdate("inst-proj-1") } returns testInstitutionProject
+        every { doctorProjectRepository.findForUpdate("doctor-1", "inst-proj-1") } returns null
+        assertEquals(
+            "DOCTOR_PROJECT_NOT_CONFIGURED",
+            assertThrows<IllegalArgumentException> {
+                orderService.quoteTravelGroundService("doctor-1", "inst-proj-1")
+            }.message
+        )
+
+        every { doctorProjectRepository.findForUpdate("doctor-1", "inst-proj-1") } returns DoctorProjectEntity(
+            doctorId = "doctor-1", projectId = "project-1", institutionProjectId = "inst-proj-1",
+            price = BigDecimal("1000"), isActive = false
+        )
+        assertEquals(
+            "DOCTOR_PROJECT_NOT_CONFIGURED",
+            assertThrows<IllegalArgumentException> {
+                orderService.quoteTravelGroundService("doctor-1", "inst-proj-1")
+            }.message
+        )
+
+        every { doctorProjectRepository.findForUpdate("doctor-1", "inst-proj-1") } returns DoctorProjectEntity(
+            doctorId = "doctor-1", projectId = "project-1", institutionProjectId = "inst-proj-1",
+            price = BigDecimal.ZERO
+        )
+        assertEquals(
+            "MEDICAL_LIST_PRICE_NOT_POSITIVE",
+            assertThrows<IllegalArgumentException> {
+                orderService.quoteTravelGroundService("doctor-1", "inst-proj-1")
+            }.message
+        )
+    }
+
+    @Test
+    fun `new order rejects disabled doctor service before order or status log writes`() {
+        val request = CreateOrderRequest(
+            projectId = "project-1",
+            institutionProjectId = "inst-proj-1",
+            doctorId = "doctor-1",
+            consultantId = "consultant-1"
+        )
+        val identity = institutionProjectIdentity()
+        val inactiveBinding = DoctorProjectEntity(
+            doctorId = "doctor-1",
+            projectId = "project-1",
+            institutionProjectId = "inst-proj-1",
+            price = BigDecimal("4500.00"),
+            isActive = false
+        )
+        every { institutionProjectRepository.findIdentityById("inst-proj-1") } returns identity
+        every { institutionProjectRepository.findForUpdate("inst-proj-1") } returns testInstitutionProject
+        every { doctorProjectRepository.findForUpdate("doctor-1", "inst-proj-1") } returns inactiveBinding
+        every { projectRepository.findById("project-1") } returns Optional.of(testProject)
+        every { institutionProjectRepository.findById("inst-proj-1") } returns Optional.of(testInstitutionProject)
+        every { institutionRepository.findById("inst-1") } returns Optional.of(testInstitution)
+        every { doctorProjectRepository.findByDoctorIdAndInstitutionProjectId("doctor-1", "inst-proj-1") } returns inactiveBinding
+        every { doctorRepository.findById("doctor-1") } returns Optional.of(DoctorEntity("doctor-1", "Doctor"))
+        every { orderRepository.save(any()) } answers { firstArg<OrderEntity>() }
+
+        val error = assertThrows<IllegalArgumentException> {
+            orderService.createOrder("user-1", request)
+        }
+
+        assertEquals("所选医生服务已停用，暂不可预约", error.message)
+        verify(exactly = 0) { orderRepository.save(any()) }
+        verify(exactly = 0) { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) }
+
+        every { doctorProjectRepository.findForUpdate("doctor-1", "inst-proj-1") } returns inactiveBinding.copy(isActive = true)
+
+        val reactivated = orderService.createOrder("user-1", request)
+
+        assertEquals(OrderStatusEnum.PENDING_SERVICE_FEE.value, reactivated.status)
+        assertEquals(450_000L, reactivated.medicalListPriceMinor)
+        verify(exactly = 1) { orderRepository.save(any()) }
+        verify(exactly = 1) { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `new order rejects inactive institution project before order or status log writes`() {
+        every { institutionProjectRepository.findForUpdate("inst-proj-1") } returns
+            testInstitutionProject.copy(isActive = false)
+
+        val error = assertThrows<IllegalArgumentException> {
+            orderService.createOrder(
+                "user-1",
+                CreateOrderRequest(
+                    projectId = "project-1",
+                    institutionProjectId = "inst-proj-1",
+                    doctorId = "doctor-1",
+                    consultantId = "consultant-1"
+                )
+            )
+        }
+
+        assertEquals("机构项目已停用，暂不可预约", error.message)
+        verify(exactly = 0) { doctorProjectRepository.findForUpdate(any(), any()) }
+        verify(exactly = 0) { orderRepository.save(any()) }
+        verify(exactly = 0) { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) }
+    }
 
     @Test
     fun `机构法人不能查看所属机构订单`() {
@@ -349,7 +521,7 @@ class OrderServiceTest {
         every { projectRepository.findById("project-1") } returns Optional.of(testProject)
         every { institutionProjectRepository.findById("inst-proj-1") } returns Optional.of(testInstitutionProject)
         every { institutionRepository.findById("inst-1") } returns Optional.of(testInstitution)
-        every { doctorProjectRepository.findByDoctorIdAndInstitutionProjectId("doctor-1", "inst-proj-1") } returns DoctorProjectEntity(
+        every { doctorProjectRepository.findForUpdate("doctor-1", "inst-proj-1") } returns DoctorProjectEntity(
             doctorId = "doctor-1",
             projectId = "project-1",
             institutionProjectId = "inst-proj-1",
@@ -378,7 +550,7 @@ class OrderServiceTest {
         every { projectRepository.findById("project-1") } returns Optional.of(testProject)
         every { institutionProjectRepository.findById("inst-proj-1") } returns Optional.of(testInstitutionProject)
         every { institutionRepository.findById("inst-1") } returns Optional.of(testInstitution)
-        every { doctorProjectRepository.findByDoctorIdAndInstitutionProjectId("doctor-1", "inst-proj-1") } returns DoctorProjectEntity(
+        every { doctorProjectRepository.findForUpdate("doctor-1", "inst-proj-1") } returns DoctorProjectEntity(
             doctorId = "doctor-1",
             projectId = "project-1",
             institutionProjectId = "inst-proj-1",
@@ -444,7 +616,7 @@ class OrderServiceTest {
         every { projectRepository.findById("project-1") } returns Optional.of(testProject)
         every { institutionProjectRepository.findById("inst-proj-1") } returns Optional.of(testInstitutionProject)
         every { institutionRepository.findById("inst-1") } returns Optional.of(testInstitution)
-        every { doctorProjectRepository.findByDoctorIdAndInstitutionProjectId("doctor-1", "inst-proj-1") } returns doctorProject
+        every { doctorProjectRepository.findForUpdate("doctor-1", "inst-proj-1") } returns doctorProject
         every { doctorRepository.findById("doctor-1") } returns Optional.of(DoctorEntity(id = "doctor-1", name = "测试医生"))
         val error = assertThrows<IllegalArgumentException> { orderService.createOrder("user-1", request) }
 
@@ -478,7 +650,7 @@ class OrderServiceTest {
         )
 
         every { projectRepository.findById("project-1") } returns Optional.of(testProject)
-        every { institutionProjectRepository.findById("inst-proj-1") } returns Optional.of(instProjNoImage)
+        every { institutionProjectRepository.findForUpdate("inst-proj-1") } returns instProjNoImage
         every { institutionRepository.findById("inst-1") } returns Optional.of(testInstitution)
         every { doctorProjectRepository.existsByDoctorIdAndInstitutionProjectId("doctor-1", "inst-proj-1") } returns true
         every { doctorRepository.findById("doctor-1") } returns Optional.of(DoctorEntity(id = "doctor-1", name = "测试医生"))
@@ -523,6 +695,34 @@ class OrderServiceTest {
 
         assertNotNull(result)
         assertEquals("o1", result?.id)
+    }
+
+    @Test
+    fun `existing order snapshot remains unchanged after doctor service is disabled`() {
+        val snapshot = createTestOrder(
+            id = "existing-order",
+            userId = "user-1",
+            status = OrderStatusEnum.PENDING_SERVICE_FEE.value,
+            paymentFlow = "TRAVEL_GROUND_SERVICE_ONLY"
+        ).copy(
+            institutionProjectId = "inst-proj-1",
+            doctorId = "doctor-1",
+            doctorName = "测试医生",
+            currency = "USD",
+            medicalListPriceMinor = 450_000,
+            platformServiceRateBps = 4_000,
+            travelGroundServiceFeeMinor = 180_000,
+            totalAmountMinor = 180_000
+        )
+        every { orderRepository.findById("existing-order") } returns Optional.of(snapshot)
+
+        val result = orderService.getOrderById("existing-order", "user-1")
+
+        assertEquals(snapshot, result)
+        verify(exactly = 0) { doctorProjectRepository.findForUpdate(any(), any()) }
+        verify(exactly = 0) {
+            doctorProjectRepository.findByDoctorIdAndInstitutionProjectId(any(), any())
+        }
     }
 
     @Test

@@ -23,8 +23,8 @@ import com.joysong.server.institution.repository.InstitutionRepository
 import com.joysong.server.institution.service.InstitutionProjectDetailResolver
 import com.joysong.server.identity.service.InstitutionConsultantService
 import com.joysong.server.discover.repository.DoctorProjectRepository
-import com.joysong.server.order.service.TravelGroundServicePricing
 import com.joysong.server.order.service.TravelGroundServiceQuote
+import com.joysong.server.order.service.OrderService
 import com.joysong.server.project.repository.ProjectRepository
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
@@ -44,28 +44,35 @@ class DiscoverController(
     private val discoverSearchService: DiscoverSearchService,
     private val institutionProjectDetailResolver: InstitutionProjectDetailResolver,
     private val institutionConsultantService: InstitutionConsultantService,
-    private val travelGroundServicePricing: TravelGroundServicePricing
+    private val orderService: OrderService
 ) {
     @GetMapping("/filter-options")
     fun getFilterOptions(): BaseResponse<*> {
         val allProjects = projectRepository.findAll()
         val projectMap = allProjects.associateBy { it.id }
-        val effectiveInstitutionProjects = institutionProjectRepository.findAll()
-            .filter { it.isActive }
+        val activeInstitutionProjects = institutionProjectRepository.findAll().filter { it.isActive }
+        val eligibleInstitutionProjectIds = activeInstitutionProjects.takeIf { it.isNotEmpty() }
+            ?.let { doctorProjectRepository.findPublicByInstitutionProjectIds(it.map { offering -> offering.id }) }
+            .orEmpty()
+            .map { it.institutionProjectId }
+            .toSet()
+        val eligibleInstitutionProjects = activeInstitutionProjects.filter { it.id in eligibleInstitutionProjectIds }
+        val effectiveInstitutionProjects = eligibleInstitutionProjects
             .mapNotNull { ip -> projectMap[ip.projectId]?.let { institutionProjectDetailResolver.resolve(ip, it) } }
+        val eligibleProjects = eligibleInstitutionProjects.mapNotNull { projectMap[it.projectId] }.distinctBy { it.id }
 
-        // categories: projects表category字段所有DISTINCT非空值
-        val categories = (allProjects.map { it.category } + effectiveInstitutionProjects.map { it.category })
+        val categories = (eligibleProjects.map { it.category } + effectiveInstitutionProjects.map { it.category })
             .filter { it.isNotBlank() }
             .distinct()
 
-        // tags: projects表tags字段拆分后去重非空值
-        val tags = (allProjects + effectiveInstitutionProjects).flatMap { project ->
+        val tags = (eligibleProjects + effectiveInstitutionProjects).flatMap { project ->
             project.tags.split(",").map { it.trim() }.filter { it.isNotBlank() }
         }.distinct()
 
-        // cities: institutions表city字段所有DISTINCT非空值
-        val cities = institutionRepository.findAll().map { it.city }
+        val eligibleInstitutionIds = eligibleInstitutionProjects.map { it.institutionId }.toSet()
+        val cities = institutionRepository.findAll()
+            .filter { it.id in eligibleInstitutionIds }
+            .map { it.city }
             .filter { it.isNotBlank() }
             .distinct()
 
@@ -122,12 +129,20 @@ class DiscoverController(
         @RequestParam(defaultValue = "0") offset: Int,
         @RequestParam(defaultValue = "50") limit: Int
     ): ResponseEntity<BaseResponse<List<InstitutionResponse>>> {
+        val activeInstitutionProjects = institutionProjectRepository.findAll().filter { it.isActive }
+        val institutionByProjectId = activeInstitutionProjects.associate { it.id to it.institutionId }
+        val eligibleInstitutionIds = activeInstitutionProjects.takeIf { it.isNotEmpty() }
+            ?.let { doctorProjectRepository.findPublicByInstitutionProjectIds(it.map { offering -> offering.id }) }
+            .orEmpty()
+            .mapNotNull { binding -> institutionByProjectId[binding.institutionProjectId] }
+            .toSet()
         val result = if (query.isBlank()) institutionRepository.findAll()
         else {
             val escaped = query.replace("%", "\\%").replace("_", "\\_")
             institutionRepository.findByNameContainingOrCityContaining(escaped, escaped)
         }
-        return result.map { it.toResponse() }.apiPage(offset, limit).toCompatibilityResponse()
+        return result.filter { it.id in eligibleInstitutionIds }
+            .map { it.toResponse() }.apiPage(offset, limit).toCompatibilityResponse()
     }
 
     @GetMapping("/articles")
@@ -242,9 +257,6 @@ class DiscoverController(
         @RequestParam doctorId: String,
         @RequestParam institutionProjectId: String
     ): BaseResponse<TravelGroundServiceQuote> {
-        val doctorProject = doctorProjectRepository
-            .findByDoctorIdAndInstitutionProjectId(doctorId, institutionProjectId)
-            ?: throw IllegalArgumentException("DOCTOR_PROJECT_NOT_CONFIGURED")
-        return BaseResponse.success(travelGroundServicePricing.quote(doctorProject.price))
+        return BaseResponse.success(orderService.quoteTravelGroundService(doctorId, institutionProjectId))
     }
 }

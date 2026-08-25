@@ -8,6 +8,7 @@ import com.joysong.server.agent.entity.AgentPlanItemEntity
 import com.joysong.server.agent.repository.AgentPlanItemRepository
 import com.joysong.server.agent.repository.AgentPlanRepository
 import com.joysong.server.institution.repository.InstitutionProjectRepository
+import com.joysong.server.discover.repository.DoctorProjectRepository
 import com.joysong.server.institution.service.InstitutionProjectDetailResolver
 import com.joysong.server.project.entity.ProjectEntity
 import com.joysong.server.project.repository.ProjectRepository
@@ -26,6 +27,7 @@ class AgentPlanService(
     private val itemRepository: AgentPlanItemRepository,
     private val projectRepository: ProjectRepository,
     private val institutionProjectRepository: InstitutionProjectRepository,
+    private val doctorProjectRepository: DoctorProjectRepository,
     private val institutionProjectDetailResolver: InstitutionProjectDetailResolver,
     private val profileService: AgentProfileService,
     private val assessmentService: AgentAssessmentService,
@@ -43,18 +45,25 @@ class AgentPlanService(
 
         val allProjects = projectRepository.findAll()
         val projectMap = allProjects.associateBy { it.id }
-        val effectiveOfferingsByProject = institutionProjectRepository.findAll().asSequence()
-            .filter { it.isActive }
+        val activeInstitutionProjects = institutionProjectRepository.findAll().filter { it.isActive }
+        val minimumPrices = activeInstitutionProjects.takeIf { it.isNotEmpty() }
+            ?.let { doctorProjectRepository.findPublicByInstitutionProjectIds(it.map { offering -> offering.id }) }
+            .orEmpty()
+            .groupBy { it.institutionProjectId }
+            .mapValues { (_, bindings) -> bindings.minOf { it.price } }
+        val effectiveOfferingsByProject = activeInstitutionProjects.asSequence()
+            .filter { it.id in minimumPrices }
             .mapNotNull { offering ->
                 val project = projectMap[offering.projectId] ?: return@mapNotNull null
                 offering.projectId to EffectivePlanOffering(
                     detail = institutionProjectDetailResolver.resolve(offering, project),
-                    price = offering.price
+                    price = minimumPrices.getValue(offering.id)
                 )
             }
             .groupBy({ it.first }, { it.second })
         val candidates = if (goals.isEmpty()) emptyList() else allProjects
             .asSequence()
+            .filter { effectiveOfferingsByProject[it.id].orEmpty().isNotEmpty() }
             .filterNot { project ->
                 isExcluded(project, effectiveOfferingsByProject[project.id].orEmpty(), excluded)
             }
@@ -137,10 +146,7 @@ class AgentPlanService(
         val searchable = structuredSearchText(project, offerings)
         var score = goals.sumOf { goal -> if (searchable.contains(goal.lowercase())) 4 else relatedTerms(goal).count { searchable.contains(it) } }
         if (score == 0) return 0
-        if (budgetMax != null && (
-                (project.referencePrice > java.math.BigDecimal.ZERO && project.referencePrice <= budgetMax) ||
-                    offerings.any { it.price > java.math.BigDecimal.ZERO && it.price <= budgetMax }
-                )) score += 2
+        if (budgetMax != null && offerings.any { it.price > java.math.BigDecimal.ZERO && it.price <= budgetMax }) score += 2
         if ((sequenceOf(project.rating) + offerings.asSequence().map { it.detail.rating })
                 .any { it >= java.math.BigDecimal("4.5") }
         ) score += 1
