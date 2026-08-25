@@ -39,8 +39,6 @@ class OrderDetailPage extends StatefulWidget {
 
 class _OrderDetailPageState extends State<OrderDetailPage> {
   bool _reviewBusy = false;
-  String? _submittedRefundReason;
-  String? _submittedRefundDescription;
 
   @override
   void initState() {
@@ -94,10 +92,6 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
       ),
     );
     if (draft != null && mounted) {
-      setState(() {
-        _submittedRefundReason = draft.reason;
-        _submittedRefundDescription = draft.description;
-      });
       await widget.controller.requestRefund(
         reason: draft.reason,
         description: draft.description,
@@ -309,8 +303,6 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
           _RefundCard(
             refund: controller.refund!,
             enableAutoTranslation: widget.enableAutoTranslation,
-            submittedReason: _submittedRefundReason,
-            submittedDescription: _submittedRefundDescription,
           ),
         ],
         if (!order.isTravelGroundServiceOnly &&
@@ -801,14 +793,10 @@ class _RefundCard extends StatelessWidget {
   const _RefundCard({
     required this.refund,
     required this.enableAutoTranslation,
-    this.submittedReason,
-    this.submittedDescription,
   });
 
   final RefundDetail refund;
   final bool enableAutoTranslation;
-  final String? submittedReason;
-  final String? submittedDescription;
 
   @override
   Widget build(BuildContext context) {
@@ -831,8 +819,7 @@ class _RefundCard extends StatelessWidget {
           _DetailLine.widget(
             label: _isEnglish(context) ? 'Reason' : '原因',
             value: StableAutoTranslatedText(
-              enabled:
-                  translateRefund && refund.reason.trim() != submittedReason,
+              enabled: translateRefund,
               contentType: 'general',
               contentId: contentId,
               field: 'reason',
@@ -843,8 +830,7 @@ class _RefundCard extends StatelessWidget {
           _DetailLine.widget(
             label: _isEnglish(context) ? 'Details' : '说明',
             value: StableAutoTranslatedText(
-              enabled: translateRefund &&
-                  visibleDescription.trim() != submittedDescription,
+              enabled: translateRefund,
               contentType: 'general',
               contentId: contentId,
               field: 'description',

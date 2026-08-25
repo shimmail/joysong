@@ -378,7 +378,8 @@ void main() {
         find.text('institution-private', skipOffstage: false), findsOneWidget);
   });
 
-  testWidgets('refund summary translates without translating form input',
+  testWidgets(
+      'refund form input stays exact before persisted detail translates',
       (tester) async {
     await _useTallSurface(tester);
     final ordersRepository = FakeOrdersRepository()
@@ -425,24 +426,28 @@ void main() {
         translations.calls.map((call) => call.text), isNot(contains('临时改变行程')));
     expect(
         translations.calls.map((call) => call.text), isNot(contains('需要延期处理')));
+    expect(
+      translations.calls.map((call) => call.text),
+      ['光子嫩肤', '娇颜颂医疗美容'],
+    );
 
     await tester.tap(find.byKey(const Key('refund-submit-button')));
     await tester.pumpAndSettle();
 
     expect(ordersRepository.lastRefundReason, '临时改变行程');
     expect(ordersRepository.lastRefundDescription, '需要延期处理');
-    expect(
-      translations.calls.map((call) => call.text),
-      isNot(contains('临时改变行程')),
-    );
-    expect(
-      translations.calls.map((call) => call.text),
-      isNot(contains('需要延期处理')),
-    );
-    expect(
-      translations.calls.map((call) => call.text),
-      ['光子嫩肤', '娇颜颂医疗美容'],
-    );
+    expect(_mountedRequests(tester), const {
+      ('project', 'order:order-1', 'projectName', '光子嫩肤'),
+      ('institution', 'order:order-1', 'institutionName', '娇颜颂医疗美容'),
+      ('general', 'refund:refund-1', 'reason', '临时改变行程'),
+      ('general', 'refund:refund-1', 'description', '需要延期处理'),
+    });
+    expect(translations.calls.map((call) => call.text), [
+      '光子嫩肤',
+      '娇颜颂医疗美容',
+      '临时改变行程',
+      '需要延期处理',
+    ]);
   });
 }
 
