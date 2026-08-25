@@ -14,7 +14,8 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection
+import org.springframework.test.context.DynamicPropertyRegistry
+import org.springframework.test.context.DynamicPropertySource
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.JdbcTemplate
 import jakarta.persistence.EntityManager
@@ -54,7 +55,6 @@ class LegalDocumentMigrationTest {
 
     @Test
     fun `fresh database contains legal release constraints`() {
-        printAndValidateDatabase()
         assertEquals(
             1,
             jdbc.queryForObject(
@@ -177,27 +177,6 @@ class LegalDocumentMigrationTest {
         )
     }
 
-    private fun printAndValidateDatabase() {
-        require(mysql.databaseName == expectedDatabaseName())
-        require(mysql.databaseName.startsWith("myapp_worktree_"))
-        println("Migration database host=${mysql.host}:${mysql.getMappedPort(3306)}, database=${mysql.databaseName}")
-    }
-
-    private fun expectedDatabaseName(): String {
-        val worktree = generateSequence(currentDirectory()) { it.parent }
-            .firstOrNull { Files.exists(it.resolve(".git")) }
-            ?: error("Unable to find the current Git worktree from ${currentDirectory()}")
-        val worktreeId = worktree.fileName.toString()
-            .removePrefix("worktree_")
-            .replace(Regex("[^A-Za-z0-9]+"), "_")
-            .trim('_')
-            .lowercase()
-        return "myapp_worktree_$worktreeId"
-    }
-
-    private fun currentDirectory(): Path =
-        Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize()
-
     private fun insertRelease(id: String, type: String, version: Int, status: String) {
         jdbc.update(
             """
@@ -228,11 +207,42 @@ class LegalDocumentMigrationTest {
 
     companion object {
         @Container
-        @ServiceConnection
         @JvmField
         val mysql = MySqlLegalContainer("mysql:8.0.39")
             .withDatabaseName("myapp_worktree_legal_documents")
             .withTmpFs(mapOf("/var/lib/mysql" to "rw"))
+
+        @JvmStatic
+        @DynamicPropertySource
+        fun registerDataSource(registry: DynamicPropertyRegistry) {
+            if (!mysql.isRunning) mysql.start()
+            printAndValidateDatabase()
+            registry.add("spring.datasource.url") { mysql.jdbcUrl }
+            registry.add("spring.datasource.username") { mysql.username }
+            registry.add("spring.datasource.password") { mysql.password }
+            registry.add("spring.datasource.driver-class-name") { "com.mysql.cj.jdbc.Driver" }
+        }
+
+        private fun printAndValidateDatabase() {
+            require(mysql.databaseName == expectedDatabaseName())
+            require(mysql.databaseName.startsWith("myapp_worktree_"))
+            println("Migration database host=${mysql.host}:${mysql.getMappedPort(3306)}, database=${mysql.databaseName}")
+        }
+
+        private fun expectedDatabaseName(): String {
+            val worktree = generateSequence(currentDirectory()) { it.parent }
+                .firstOrNull { Files.exists(it.resolve(".git")) }
+                ?: error("Unable to find the current Git worktree from ${currentDirectory()}")
+            val worktreeId = worktree.fileName.toString()
+                .removePrefix("worktree_")
+                .replace(Regex("[^A-Za-z0-9]+"), "_")
+                .trim('_')
+                .lowercase()
+            return "myapp_worktree_$worktreeId"
+        }
+
+        private fun currentDirectory(): Path =
+            Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize()
     }
 }
 
