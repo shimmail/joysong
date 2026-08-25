@@ -150,10 +150,12 @@ the value the user may submit.
 ### Order notifications
 
 On the consumer notification page, translate `title` and `content` only for
-rows whose target type is `order`. Time, target ID, navigation data, and all
-non-order notifications stay unchanged.
+order-related rows. The eligible target types are `order`, `order_refund`, and
+`order_service_conversation`, as identified by the existing parsed target kinds
+`orderDetail` and `orderServiceConversation`. Time, target ID, navigation data,
+and all non-order notifications stay unchanged.
 
-The current behavior in which an order notification opens the order list is not
+The existing notification navigation resolved by `NotificationTarget` is not
 changed.
 
 ### Consumer diary order picker
@@ -251,8 +253,10 @@ Use only the backend's current whitelist:
 | Refund description | `general` | `refund:<id>` | `description` |
 | Refund rejection reason | `general` | `refund:<id>` | `rejectReason` |
 | Status-log remark | `general` | `order-status-log:<id>` | `remark` |
-| Order notification title | `general` | `notification:<id>` | `title` |
-| Order notification content | `general` | `notification:<id>` | `content` |
+| Order-related notification title | `general` | `notification:<id>` | `title` |
+| Order-related notification content | `general` | `notification:<id>` | `content` |
+| Manual diary project association | `project` | `project:<id>` | `name` |
+| Manual diary institution association | `institution` | `institution:<id>` | `name` |
 
 The `contentId` and `field` remain local Flutter cache/deduplication identity;
 the current API sends only text, target language, and content type.
@@ -362,7 +366,8 @@ each change.
 
 ### Notification and social adjacency tests
 
-- Only order notification title/content translate.
+- Notification title/content translate for `order`, `order_refund`, and
+  `order_service_conversation` target types.
 - Other notification types make zero calls.
 - Diary order picker translates project/institution names while keeping doctor
   name and order number unchanged.
