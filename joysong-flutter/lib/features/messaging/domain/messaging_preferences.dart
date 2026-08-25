@@ -1,3 +1,5 @@
+import 'package:joysong_flutter/features/messaging/domain/messaging_models.dart';
+
 /// A stable local key for a direct-message conversation.
 String dmConversationPreferenceKey(String conversationId) =>
     'dm:$conversationId';
@@ -32,7 +34,7 @@ class MessagingPreferences {
       localUnreadConversationKeys.contains(conversationKey);
 
   DateTime? hiddenAt(String conversationKey) =>
-      DateTime.tryParse(hiddenAtByConversationKey[conversationKey] ?? '');
+      parseMessagingServerTime(hiddenAtByConversationKey[conversationKey]);
 
   MessagingPreferences copyWith({
     Set<String>? pinnedConversationKeys,
@@ -98,8 +100,10 @@ Map<String, String> _dateTimeMap(Object? value) {
     final key = entry.key;
     final dateText = entry.value;
     if (key is! String || dateText is! String || key.trim().isEmpty) continue;
-    final parsed = DateTime.tryParse(dateText);
-    if (parsed != null) result[key.trim()] = parsed.toUtc().toIso8601String();
+    final normalizedText = dateText.trim();
+    if (parseMessagingServerTime(normalizedText) != null) {
+      result[key.trim()] = normalizedText;
+    }
   }
   return result;
 }

@@ -291,18 +291,25 @@ class MessagingHubController extends ChangeNotifier {
   /// Hides a conversation on this device without deleting any server data.
   ///
   /// It becomes visible again only when the server reports a last-message
-  /// timestamp later than the local hide timestamp.
+  /// timestamp later than the stored server activity cursor.
   Future<void> hideConversation(String conversationId) =>
       _hideConversationKey(dmConversationPreferenceKey(conversationId));
 
-  Future<void> _hideConversationKey(String conversationKey) async {
+  Future<void> _hideConversationKey(
+    String conversationKey, {
+    String? activityCursor,
+  }) async {
     await _ensurePreferencesLoaded();
     final pinned = {..._preferences.pinnedConversationKeys}
       ..remove(conversationKey);
     final unread = {..._preferences.localUnreadConversationKeys}
       ..remove(conversationKey);
+    final cursor = activityCursor?.trim() ?? '';
+    final hiddenAt = parseMessagingServerTime(cursor) == null
+        ? DateTime.now().toUtc().toIso8601String()
+        : cursor;
     final hidden = {..._preferences.hiddenAtByConversationKey}
-      ..[conversationKey] = DateTime.now().toUtc().toIso8601String();
+      ..[conversationKey] = hiddenAt;
     _preferences = _preferences.copyWith(
       pinnedConversationKeys: pinned,
       localUnreadConversationKeys: unread,
@@ -313,8 +320,15 @@ class MessagingHubController extends ChangeNotifier {
     await _savePreferences();
   }
 
-  Future<void> hideDmConversation(DmConversation conversation) =>
-      hideConversation(conversation.id);
+  Future<void> hideDmConversation(DmConversation conversation) {
+    final lastMessageAt = conversation.lastMessageAt?.trim();
+    return _hideConversationKey(
+      dmConversationPreferenceKey(conversation.id),
+      activityCursor: lastMessageAt?.isNotEmpty == true
+          ? lastMessageAt
+          : conversation.updatedAt,
+    );
+  }
 
   Future<void> _ensurePreferencesLoaded() async {
     if (_preferencesLoaded) return;
@@ -374,9 +388,9 @@ class MessagingHubController extends ChangeNotifier {
     String? lastMessageAt,
     Map<String, String> hidden,
   ) {
-    final hiddenAt = DateTime.tryParse(hidden[conversationKey] ?? '');
+    final hiddenAt = parseMessagingServerTime(hidden[conversationKey]);
     if (hiddenAt == null) return true;
-    final messageAt = DateTime.tryParse(lastMessageAt ?? '');
+    final messageAt = parseMessagingServerTime(lastMessageAt);
     if (messageAt == null || !messageAt.isAfter(hiddenAt)) return false;
     hidden.remove(conversationKey);
     return true;

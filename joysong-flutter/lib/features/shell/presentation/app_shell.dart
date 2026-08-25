@@ -934,7 +934,10 @@ class _AppShellState extends State<AppShell> {
     try {
       final conversation = await repository.createOrderServiceConversation(id);
       if (!mounted) return;
-      await _openDmThread(conversation);
+      await _openDmThread(
+        conversation,
+        orderConversationRefreshed: true,
+      );
     } on Object {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1196,32 +1199,32 @@ class _AppShellState extends State<AppShell> {
   Future<void> _openDmThread(
     DmConversation conversation, {
     String? title,
+    bool orderConversationRefreshed = false,
   }) async {
     final repository = _messagingRepository;
     if (repository == null) {
       return;
     }
+    var activeConversation = conversation;
     var sendEnabled = true;
     Future<bool> Function()? refreshSendEnabled;
     if (conversation.conversationType == DmConversationType.orderService) {
       final orderId = conversation.orderId?.trim();
-      final ordersRepository = _ordersRepository;
-      if (orderId == null || orderId.isEmpty || ordersRepository == null) {
+      if (orderId == null || orderId.isEmpty) {
         _showOrderConversationUnavailable();
         return;
       }
       try {
-        final order = await ordersRepository.getOrder(orderId);
-        if (!mounted) return;
-        if (!order.serviceConversationReadable) {
-          _showOrderConversationUnavailable();
-          return;
+        if (!orderConversationRefreshed) {
+          activeConversation =
+              await repository.createOrderServiceConversation(orderId);
         }
-        sendEnabled = order.serviceMessagingEnabled;
+        if (!mounted) return;
+        sendEnabled = activeConversation.serviceMessagingEnabled;
         refreshSendEnabled = () async {
-          final refreshedOrder = await ordersRepository.getOrder(orderId);
-          return refreshedOrder.serviceConversationReadable &&
-              refreshedOrder.serviceMessagingEnabled;
+          final refreshedConversation =
+              await repository.createOrderServiceConversation(orderId);
+          return refreshedConversation.serviceMessagingEnabled;
         };
       } on Object {
         if (!mounted) return;
@@ -1236,20 +1239,20 @@ class _AppShellState extends State<AppShell> {
         return;
       }
     }
-    final otherUserId = conversation.otherUserId(widget.currentUserId);
+    final otherUserId = activeConversation.otherUserId(widget.currentUserId);
     final currentUserFallback = context.localized('我', 'Me');
     final peers = await Future.wait<MessagingPeer>([
       _loadCurrentMessagingPeer(currentUserFallback),
       _loadOtherMessagingPeer(otherUserId, fallbackName: title),
     ]);
     if (!mounted) return;
-    unawaited(_messagingController?.clearUnread(conversation.id));
+    unawaited(_messagingController?.clearUnread(activeConversation.id));
     final controller = DmThreadController(
       repository: repository,
-      conversationId: conversation.id,
+      conversationId: activeConversation.id,
       currentUserId: widget.currentUserId,
-      firstMessageLimitApplies: conversation.firstMessageLimitApplies,
-      waitingForReply: conversation.waitingForReply,
+      firstMessageLimitApplies: activeConversation.firstMessageLimitApplies,
+      waitingForReply: activeConversation.waitingForReply,
     );
     await _contentNavigator.push<void>(
       MaterialPageRoute(
@@ -1262,7 +1265,7 @@ class _AppShellState extends State<AppShell> {
               otherUserId.isEmpty ? null : () => _openPublicUser(otherUserId),
           onPickImage: _pickAndUploadDmImage,
           onTranslate: _translateDmMessage,
-          conversationType: conversation.conversationType,
+          conversationType: activeConversation.conversationType,
           sendEnabled: sendEnabled,
           refreshSendEnabled: refreshSendEnabled,
           title:

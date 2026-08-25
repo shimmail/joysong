@@ -255,13 +255,12 @@ void main() {
       client.posts.where((request) => request.$1 == 'dm/conversations'),
       isEmpty,
     );
-    expect(client.orderReads, 2);
+    expect(client.orderReads, 1);
     expect(find.byType(DmThreadPage), findsOneWidget);
     expect(find.byType(TextField), findsOneWidget);
   });
 
-  testWidgets(
-      'message center refreshes order entitlement before read-only chat',
+  testWidgets('consultant opens an order card without the consumer order API',
       (tester) async {
     _useLargeTestSurface(tester);
     final client = _OrderServiceApiClient(
@@ -269,7 +268,7 @@ void main() {
       freshReadable: true,
       freshSendEnabled: false,
     );
-    await _pumpShell(tester, client);
+    await _pumpShell(tester, client, currentUserId: 'consultant-1');
 
     await tester.tap(find.text('消息'));
     await tester.pumpAndSettle();
@@ -278,8 +277,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(client.orderReads, 1);
-    expect(client.posts, isEmpty);
+    expect(client.orderReads, 0);
+    expect(client.orderServiceConversationCreates, 1);
     expect(find.byType(DmThreadPage), findsOneWidget);
     expect(find.byType(TextField), findsNothing);
   });
@@ -302,7 +301,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(client.orderReads, 1);
+    expect(client.orderReads, 0);
+    expect(client.orderServiceConversationCreates, 1);
     expect(find.byType(TextField), findsOneWidget);
 
     client
@@ -313,7 +313,8 @@ void main() {
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
 
-    expect(client.orderReads, 2);
+    expect(client.orderReads, 0);
+    expect(client.orderServiceConversationCreates, 2);
     expect(find.byType(TextField), findsNothing);
   });
 
@@ -338,7 +339,7 @@ void main() {
 
     final olderActiveResponse = Completer<Map<String, Object?>>();
     final newerCompletedResponse = Completer<Map<String, Object?>>();
-    client.queuedOrderReads.addAll([
+    client.queuedServiceConversationCreates.addAll([
       olderActiveResponse.future,
       newerCompletedResponse.future,
     ]);
@@ -348,16 +349,17 @@ void main() {
     await tester.pump();
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pump();
-    expect(client.orderReads, 3);
+    expect(client.orderReads, 0);
+    expect(client.orderServiceConversationCreates, 3);
 
     newerCompletedResponse.complete(
-      client.orderResponse(status: 'COMPLETED', sendEnabled: false),
+      client.serviceConversationResponse(sendEnabled: false),
     );
     await tester.pumpAndSettle();
     expect(find.byType(TextField), findsNothing);
 
     olderActiveResponse.complete(
-      client.orderResponse(status: 'SERVICE_ACTIVE', sendEnabled: true),
+      client.serviceConversationResponse(sendEnabled: true),
     );
     await tester.pumpAndSettle();
     expect(find.byType(TextField), findsNothing);
@@ -729,8 +731,9 @@ void _useLargeTestSurface(WidgetTester tester) {
 
 Future<void> _pumpShell(
   WidgetTester tester,
-  ApiClient client,
-) async {
+  ApiClient client, {
+  String currentUserId = 'user-1',
+}) async {
   FlutterSecureStorage.setMockInitialValues(const {});
   await tester.pumpWidget(
     MaterialApp(
@@ -740,7 +743,7 @@ Future<void> _pumpShell(
       home: AppShell(
         agentConfig: const AgentConfig(),
         apiClient: client,
-        currentUserId: 'user-1',
+        currentUserId: currentUserId,
       ),
     ),
   );
@@ -859,9 +862,12 @@ final class _OrderServiceApiClient extends ApiClient {
   final gets = <String>[];
   final posts = <(String, Object?)>[];
   final puts = <String>[];
-  final queuedOrderReads = <Future<Map<String, Object?>>>[];
+  final queuedServiceConversationCreates = <Future<Map<String, Object?>>>[];
 
   int get orderReads => gets.where((path) => path == 'orders/order-1').length;
+  int get orderServiceConversationCreates => posts
+      .where((request) => request.$1 == 'orders/order-1/service-conversation')
+      .length;
 
   Map<String, Object?> get _freshOrder => sampleOrderJson(
         status: freshStatus,
@@ -874,19 +880,13 @@ final class _OrderServiceApiClient extends ApiClient {
         serviceMessagingEnabled: freshSendEnabled,
       );
 
-  Map<String, Object?> orderResponse({
-    required String status,
+  Map<String, Object?> serviceConversationResponse({
     required bool sendEnabled,
   }) =>
-      sampleOrderJson(
-        status: status,
-        paymentFlow: 'TRAVEL_GROUND_SERVICE_ONLY',
-        consultantBound: true,
-        serviceActivated: true,
-        consultantDetailsVisible: true,
-        serviceConversationReadable: true,
-        serviceMessagingEnabled: sendEnabled,
-      );
+      {
+        ..._orderServiceConversationJson,
+        'serviceMessagingEnabled': sendEnabled,
+      };
 
   @override
   Future<T?> get<T>(
@@ -897,9 +897,6 @@ final class _OrderServiceApiClient extends ApiClient {
     gets.add(path);
     if (failedOrderIds.any((id) => path == 'orders/$id')) {
       throw StateError('order unavailable');
-    }
-    if (path == 'orders/order-1' && queuedOrderReads.isNotEmpty) {
-      return decodeData(await queuedOrderReads.removeAt(0));
     }
     final Object data = switch (path) {
       'notifications/unread-counts' => notificationUnreadCounts,
@@ -916,7 +913,7 @@ final class _OrderServiceApiClient extends ApiClient {
       '/management/institution-membership-requests/reviewable' =>
         const <Object?>[],
       'dm/conversations' => freshReadable
-          ? const [_orderServiceConversationJson]
+          ? [serviceConversationResponse(sendEnabled: freshSendEnabled)]
           : const <Object?>[],
       'cs/conversations' => const <Object?>[],
       'orders' => [_freshOrder],
@@ -982,7 +979,14 @@ final class _OrderServiceApiClient extends ApiClient {
       throw StateError('order service conversation unavailable');
     }
     if (path == 'orders/order-1/service-conversation') {
-      return decodeData(_orderServiceConversationJson);
+      if (queuedServiceConversationCreates.isNotEmpty) {
+        return decodeData(
+          await queuedServiceConversationCreates.removeAt(0),
+        );
+      }
+      return decodeData(
+        serviceConversationResponse(sendEnabled: freshSendEnabled),
+      );
     }
     return decodeData(const <String, Object?>{});
   }

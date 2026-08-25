@@ -14,12 +14,43 @@ interface NotificationUnreadCountSummary {
 }
 
 interface NotificationRepository : JpaRepository<NotificationEntity, String> {
+    @Query("""
+        SELECT n FROM NotificationEntity n
+        WHERE n.userId = :userId
+          AND n.deletedAt IS NULL
+          AND (
+              UPPER(TRIM(n.type)) <> 'DM_NEW'
+              OR EXISTS (
+                  SELECT conversation.id FROM DmConversationEntity conversation
+                  WHERE conversation.id = n.targetId
+                    AND (conversation.userAId = 'CS_ADMIN' OR conversation.userBId = 'CS_ADMIN')
+              )
+          )
+        ORDER BY n.createdAt DESC
+    """)
     fun findByUserIdAndDeletedAtIsNullOrderByCreatedAtDesc(
-        userId: String,
+        @Param("userId") userId: String,
         pageable: Pageable
     ): List<NotificationEntity>
 
-    fun countByUserIdAndIsReadAndDeletedAtIsNull(userId: String, isRead: Boolean): Long
+    @Query("""
+        SELECT COUNT(n) FROM NotificationEntity n
+        WHERE n.userId = :userId
+          AND n.isRead = :isRead
+          AND n.deletedAt IS NULL
+          AND (
+              UPPER(TRIM(n.type)) <> 'DM_NEW'
+              OR EXISTS (
+                  SELECT conversation.id FROM DmConversationEntity conversation
+                  WHERE conversation.id = n.targetId
+                    AND (conversation.userAId = 'CS_ADMIN' OR conversation.userBId = 'CS_ADMIN')
+              )
+          )
+    """)
+    fun countByUserIdAndIsReadAndDeletedAtIsNull(
+        @Param("userId") userId: String,
+        @Param("isRead") isRead: Boolean
+    ): Long
 
     @Query("""
         SELECT COUNT(n) AS total,
@@ -31,6 +62,14 @@ interface NotificationRepository : JpaRepository<NotificationEntity, String> {
         WHERE n.userId = :userId
           AND n.isRead = false
           AND n.deletedAt IS NULL
+          AND (
+              UPPER(TRIM(n.type)) <> 'DM_NEW'
+              OR EXISTS (
+                  SELECT conversation.id FROM DmConversationEntity conversation
+                  WHERE conversation.id = n.targetId
+                    AND (conversation.userAId = 'CS_ADMIN' OR conversation.userBId = 'CS_ADMIN')
+              )
+          )
     """)
     fun summarizeUnreadByUserIdAndTypes(
         @Param("userId") userId: String,

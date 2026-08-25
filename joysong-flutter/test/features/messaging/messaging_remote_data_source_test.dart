@@ -35,6 +35,7 @@ void main() {
     expect(client.lastBody, isNull);
     expect(conversation.conversationType, DmConversationType.orderService);
     expect(conversation.orderId, 'order-1');
+    expect(conversation.serviceMessagingEnabled, isTrue);
   });
 
   test('legacy conversations default to DIRECT', () {
@@ -55,6 +56,33 @@ void main() {
       ),
       throwsFormatException,
     );
+  });
+
+  test('ORDER_SERVICE without messaging permission fails closed', () {
+    final conversation = DmConversation.fromJson(
+      Map<String, Object?>.from(_orderConversationJson)
+        ..remove('serviceMessagingEnabled'),
+    );
+
+    expect(conversation.serviceMessagingEnabled, isFalse);
+  });
+
+  test('locally constructed conversations also default messaging closed', () {
+    const conversation = DmConversation(
+      id: 'order-local',
+      conversationType: DmConversationType.orderService,
+      orderId: 'order-local',
+      userAId: 'consultant-1',
+      userBId: 'user-1',
+      lastMessage: null,
+      lastMessageAt: null,
+      userAUnread: 0,
+      userBUnread: 0,
+      createdAt: '2026-08-25T12:00:00',
+      updatedAt: '2026-08-25T12:00:00',
+    );
+
+    expect(conversation.serviceMessagingEnabled, isFalse);
   });
 
   test('conversation parses server-provided local hide capability', () {
@@ -138,4 +166,5 @@ const _orderConversationJson = <String, Object?>{
   'updatedAt': '2026-08-21T10:01:00',
   'firstMessageLimitApplies': false,
   'waitingForReply': false,
+  'serviceMessagingEnabled': true,
 };

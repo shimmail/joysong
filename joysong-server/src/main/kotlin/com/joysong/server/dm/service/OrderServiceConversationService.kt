@@ -31,7 +31,7 @@ class OrderServiceConversationService(
         )
         if (existing != null) {
             requireConversationMatchesOrder(existing, order)
-            return existing.toResponse()
+            return existing.toResponseFor(order)
         }
 
         require(order.status == OrderStatusEnum.SERVICE_ACTIVE.value) { NOT_ACTIVE }
@@ -44,7 +44,7 @@ class OrderServiceConversationService(
             createdAt = LocalDateTime.now(),
             updatedAt = LocalDateTime.now()
         )
-        return conversationRepository.saveAndFlush(conversation).toResponse()
+        return conversationRepository.saveAndFlush(conversation).toResponseFor(order)
     }
 
     @Transactional(readOnly = true)
@@ -62,19 +62,16 @@ class OrderServiceConversationService(
         )
     }
 
-    fun canRead(conversation: DmConversationEntity, userId: String): Boolean =
+    @Transactional(readOnly = true)
+    fun responseIfReadable(
+        conversation: DmConversationEntity,
+        userId: String
+    ): DmConversationResponse? =
         try {
-            requireReadAccess(conversation, userId)
-            true
+            val order = authorize(conversation, userId, READABLE_STATUSES)
+            conversation.toResponseFor(order)
         } catch (_: IllegalArgumentException) {
-            false
-        }
-
-    fun canHide(conversation: DmConversationEntity, userId: String): Boolean =
-        try {
-            authorize(conversation, userId, READABLE_STATUSES).status in HIDEABLE_STATUSES
-        } catch (_: IllegalArgumentException) {
-            false
+            null
         }
 
     private fun authorize(
@@ -105,6 +102,15 @@ class OrderServiceConversationService(
                 order.consultantId != order.userId
         ) { NOT_ACTIVE }
     }
+
+    private fun OrderEntity.isServiceMessagingEnabled(): Boolean =
+        status == OrderStatusEnum.SERVICE_ACTIVE.value
+
+    private fun DmConversationEntity.toResponseFor(order: OrderEntity): DmConversationResponse =
+        toResponse(
+            canHide = order.status in HIDEABLE_STATUSES,
+            serviceMessagingEnabled = order.isServiceMessagingEnabled()
+        )
 
     private fun requireOrderParticipant(order: OrderEntity, userId: String) {
         require(userId == order.userId || userId == order.consultantId) { ACCESS_DENIED }

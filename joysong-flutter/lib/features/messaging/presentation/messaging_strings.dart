@@ -19,6 +19,7 @@ final class MessagingStrings {
       pick('正在连接客服…', 'Connecting to customer service…');
   String get startConsultation => pick('开始咨询', 'Start a chat');
   String get directMessages => pick('私信', 'Direct messages');
+  String get orderChat => pick('订单沟通', 'Order chat');
   String get directMessageConversation => pick('私信会话', 'Direct message');
   String get noMessages => pick('暂无消息', 'No messages');
   String get directMessageTitle => pick('私信', 'Direct message');

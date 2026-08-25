@@ -88,6 +88,7 @@ class DmConversation {
     this.firstMessageLimitApplies = false,
     this.waitingForReply = false,
     this.canHide = false,
+    this.serviceMessagingEnabled = false,
   });
 
   final String id;
@@ -104,6 +105,7 @@ class DmConversation {
   final bool firstMessageLimitApplies;
   final bool waitingForReply;
   final bool canHide;
+  final bool serviceMessagingEnabled;
 
   String otherUserId(String currentUserId) =>
       userAId == currentUserId ? userBId : userAId;
@@ -134,6 +136,7 @@ class DmConversation {
       firstMessageLimitApplies: _boolean(map['firstMessageLimitApplies']),
       waitingForReply: _boolean(map['waitingForReply']),
       canHide: _boolean(map['canHide']),
+      serviceMessagingEnabled: _boolean(map['serviceMessagingEnabled']),
     );
   }
 }
@@ -250,6 +253,21 @@ class CustomerServiceMessage {
       createdAt: _text(map['createdAt']),
     );
   }
+}
+
+/// Parses the backend's offset-less timestamps in its documented
+/// Asia/Shanghai business timezone. Explicitly offset timestamps remain
+/// supported for locally persisted legacy values.
+DateTime? parseMessagingServerTime(String? value) {
+  final text = value?.trim() ?? '';
+  if (text.isEmpty) return null;
+  final hasExplicitOffset = RegExp(
+    r'(?:[zZ]|[+-]\d{2}:?\d{2})$',
+  ).hasMatch(text);
+  final parsed = DateTime.tryParse(hasExplicitOffset ? text : '${text}Z');
+  if (parsed == null) return null;
+  final utc = parsed.toUtc();
+  return hasExplicitOffset ? utc : utc.subtract(const Duration(hours: 8));
 }
 
 Map<String, dynamic> _map(Object? json, String label) {

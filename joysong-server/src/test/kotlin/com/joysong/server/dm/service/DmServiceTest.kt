@@ -1,11 +1,11 @@
 package com.joysong.server.dm.service
 
+import com.joysong.server.dm.dto.toResponse
 import com.joysong.server.dm.entity.DmConversationEntity
 import com.joysong.server.dm.entity.DmMessageEntity
 import com.joysong.server.dm.repository.DmConversationRepository
 import com.joysong.server.dm.repository.DmMessageRepository
 import com.joysong.server.identity.service.IdentityAuthorizationService
-import com.joysong.server.notification.service.NotificationService
 import com.joysong.server.order.dto.OrderStatusEnum
 import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.repository.OrderRepository
@@ -31,14 +31,12 @@ import java.util.Optional
 class DmServiceTest {
     private val conversationRepository = mockk<DmConversationRepository>()
     private val messageRepository = mockk<DmMessageRepository>()
-    private val notificationService = mockk<NotificationService>(relaxed = true)
     private val userRepository = mockk<UserRepository>()
     private val identityAuthorizationService = mockk<IdentityAuthorizationService>()
     private val orderConversationService = mockk<OrderServiceConversationService>()
     private val service = DmService(
         conversationRepository,
         messageRepository,
-        notificationService,
         userRepository,
         identityAuthorizationService,
         orderConversationService
@@ -53,9 +51,12 @@ class DmServiceTest {
         every {
             conversationRepository.findByParticipantOrderByLastMessageAtDesc("user-1")
         } returns listOf(direct, readableOrder, unauthorizedOrder, cs)
-        every { orderConversationService.canRead(readableOrder, "user-1") } returns true
-        every { orderConversationService.canHide(readableOrder, "user-1") } returns true
-        every { orderConversationService.canRead(unauthorizedOrder, "user-1") } returns false
+        every {
+            orderConversationService.responseIfReadable(readableOrder, "user-1")
+        } returns readableOrder.toResponse(canHide = true, serviceMessagingEnabled = true)
+        every {
+            orderConversationService.responseIfReadable(unauthorizedOrder, "user-1")
+        } returns null
         every { messageRepository.existsByConversationIdAndSenderId(any(), any()) } returns false
         every { identityAuthorizationService.hasActiveProfessionalRole(any()) } returns false
 
@@ -67,6 +68,13 @@ class DmServiceTest {
         assertFalse(result[1].firstMessageLimitApplies)
         assertFalse(result[1].waitingForReply)
         assertTrue(result[1].canHide)
+        assertTrue(result[1].serviceMessagingEnabled)
+        verify(exactly = 1) {
+            orderConversationService.responseIfReadable(readableOrder, "user-1")
+        }
+        verify(exactly = 1) {
+            orderConversationService.responseIfReadable(unauthorizedOrder, "user-1")
+        }
     }
 
     @Test
@@ -116,6 +124,23 @@ class DmServiceTest {
 
         assertEquals("第二条履约消息", result.content)
         verify(exactly = 0) { identityAuthorizationService.hasActiveProfessionalRole(any()) }
+    }
+
+    @Test
+    fun `direct send keeps message and unread state in the inbox`() {
+        val conversation = directConversation(
+            userAId = "user-1",
+            userBId = "consultant-1"
+        )
+        every { conversationRepository.findByIdForUpdate(conversation.id) } returns conversation
+        every { identityAuthorizationService.hasActiveProfessionalRole("consultant-1") } returns true
+        every { messageRepository.save(any()) } answers { firstArg() }
+        every { conversationRepository.save(any()) } answers { firstArg() }
+
+        val result = service.sendMessage(conversation.id, "user-1", "普通私信")
+
+        assertEquals("普通私信", result.content)
+        assertEquals(1, conversation.userBUnread)
     }
 
     @Test
@@ -196,6 +221,7 @@ class DmServiceTest {
         val result = service.getOrCreateConversation("professional-1", "user-2")
 
         assertEquals(existing.id, result.id)
+        assertTrue(result.serviceMessagingEnabled)
         verify(exactly = 0) { conversationRepository.insertDirectIfAbsent(any(), any(), any(), any(), any()) }
     }
 

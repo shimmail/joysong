@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/features/messaging/domain/messaging_models.dart';
 import 'package:joysong_flutter/features/messaging/domain/messaging_repository.dart';
@@ -105,7 +106,79 @@ void main() {
     expect(notificationRefreshes, 2);
   });
 
-  testWidgets('ended order-service rows expose local hide but active rows do not',
+  testWidgets('order-service rows show the fixed English order-chat label',
+      (tester) async {
+    final repository = _PageMessagingRepository()
+      ..dmConversations = const [
+        _activeOrderConversation,
+        _directConversation,
+      ];
+    final controller = MessagingHubController(
+      repository,
+      currentUserId: 'user-1',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('en'),
+        home: MessagingCenterPage(
+          controller: controller,
+          currentUserId: 'user-1',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final orderCard = find.byKey(
+      const ValueKey('dm-conversation-order-active'),
+    );
+    expect(
+      find.descendant(of: orderCard, matching: find.text('Order chat')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('dm-conversation-direct-1')),
+        matching: find.text('Order chat'),
+      ),
+      findsNothing,
+    );
+    expect(find.text('订单沟通'), findsNothing);
+  });
+
+  testWidgets('order-service rows show the fixed Chinese order-chat label',
+      (tester) async {
+    final repository = _PageMessagingRepository()
+      ..dmConversations = const [_activeOrderConversation];
+    final controller = MessagingHubController(
+      repository,
+      currentUserId: 'user-1',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('zh'),
+        supportedLocales: const [Locale('zh'), Locale('en')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
+        home: MessagingCenterPage(
+          controller: controller,
+          currentUserId: 'user-1',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('dm-conversation-order-active')),
+        matching: find.text('订单沟通'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Order chat'), findsNothing);
+  });
+
+  testWidgets('all order-service and direct rows expose local hide',
       (tester) async {
     final repository = _PageMessagingRepository()
       ..dmConversations = const [
@@ -135,10 +208,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.widgetWithText(ListTile, 'Pin chat'), findsOneWidget);
     expect(find.widgetWithText(ListTile, 'Mark as unread'), findsOneWidget);
-    expect(find.widgetWithText(ListTile, 'Delete'), findsNothing);
+    expect(find.widgetWithText(ListTile, 'Delete'), findsOneWidget);
 
-    Navigator.of(tester.element(find.widgetWithText(ListTile, 'Pin chat')))
-        .pop();
+    Navigator.of(tester.element(find.widgetWithText(ListTile, 'Delete'))).pop();
     await tester.pumpAndSettle();
     await tester.longPress(
       find.byKey(const ValueKey('dm-conversation-order-ended')),
@@ -153,6 +225,46 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.widgetWithText(ListTile, 'Delete'), findsOneWidget);
+  });
+
+  testWidgets('active order row hides locally and a newer message restores it',
+      (tester) async {
+    final repository = _PageMessagingRepository()
+      ..dmConversations = const [_activeOrderConversation];
+    final controller = MessagingHubController(
+      repository,
+      currentUserId: 'user-1',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('en'),
+        home: MessagingCenterPage(
+          controller: controller,
+          currentUserId: 'user-1',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final card = find.byKey(
+      const ValueKey('dm-conversation-order-active'),
+    );
+    await tester.longPress(card);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ListTile, 'Delete'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
+    await tester.pumpAndSettle();
+
+    expect(card, findsNothing);
+
+    repository.dmConversations = const [_activeOrderConversationWithNewMessage];
+    await controller.refresh();
+    await tester.pumpAndSettle();
+
+    expect(card, findsOneWidget);
+    expect(find.text('A newer order message'), findsOneWidget);
   });
 }
 
@@ -215,6 +327,20 @@ const _endedOrderConversation = DmConversation(
   createdAt: '2026-08-20T09:00:00',
   updatedAt: '2026-08-20T10:00:00',
   canHide: true,
+);
+
+const _activeOrderConversationWithNewMessage = DmConversation(
+  id: 'conversation-order-active',
+  conversationType: DmConversationType.orderService,
+  orderId: 'order-1',
+  userAId: 'consultant-1',
+  userBId: 'user-1',
+  lastMessage: 'A newer order message',
+  lastMessageAt: '2099-08-21T10:00:00',
+  userAUnread: 0,
+  userBUnread: 1,
+  createdAt: '2026-08-21T09:00:00',
+  updatedAt: '2099-08-21T10:00:00',
 );
 
 const _directConversation = DmConversation(

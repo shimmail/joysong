@@ -258,9 +258,9 @@ IDENTITY_APPLICATION_APPROVED, IDENTITY_APPLICATION_REJECTED
 
 `targetType` 是导航契约，`targetId` 是对应订单、申请或关系请求 ID：`order` 和 `order_refund` 打开订单详情；`order_service_conversation` 打开订单服务会话；`identity_management` 打开身份管理；`identity_application` 聚焦身份申请历史；`professional_doctor_review`、`professional_consultant_review` 打开机构法人的对应审核队列；`professional_doctor_application`、`professional_consultant_application`、`professional_doctor_relationships`、`professional_consultant_relationships` 打开申请人自己的对应关系历史。目标已失效时，Flutter 必须回退到对应列表或管理页，且不得崩溃。
 
-`DM_NEW` 在英文读取时将当前系统标题“新私信”“客服回复”“用户咨询”分别投影为 `New direct message`、`Customer service reply`、`User inquiry`，图片摘要 `[图片]` 投影为 `[Image]`；实际消息摘要保持发送者原文。
+普通私信与 `ORDER_SERVICE` 订单沟通统一以 `/dm/conversations` 的会话未读数为准，不再创建 `DM_NEW`，历史上已创建的此类通知也不得出现在通知列表或未读统计中。平台客服本期保持现状：仅关联到 `CS_ADMIN` 客服会话的 `DM_NEW` 继续作为通知返回；英文读取时将“客服回复”“用户咨询”投影为 `Customer service reply`、`User inquiry`，图片摘要 `[图片]` 投影为 `[Image]`，实际消息摘要保持发送者原文。
 
-`GET /notifications/unread-counts` 返回消息中心分类徽标所需的精确未读数：`data.total`、`data.system`、`data.activity`。`ACTIVITY`、`PROMOTION`、`MARKETING`、`CAMPAIGN`、`OFFER`（忽略大小写）计入活动消息，其余通知计入系统消息；始终满足 `total = system + activity`。原有 `/unread-count` 继续返回总数，供旧客户端兼容使用。
+`GET /notifications/unread-counts` 返回消息中心分类徽标所需的精确未读数：`data.total`、`data.system`、`data.activity`。在排除普通私信与订单沟通的历史 `DM_NEW` 后，`ACTIVITY`、`PROMOTION`、`MARKETING`、`CAMPAIGN`、`OFFER`（忽略大小写）计入活动消息，其余可见通知计入系统消息；列表、总未读数和分类未读数必须使用同一过滤规则，并始终满足 `total = system + activity`。原有 `/unread-count` 继续返回过滤后的总数，供旧客户端兼容使用。
 
 点击单项时先调用 `PUT /notifications/{id}/read`，再按目标导航；打开系统消息页本身不得调用 `/read-all`。`PUT /notifications/read-all` 仅用于用户主动执行的全部已读操作。服务端只在真实业务状态转换后创建消息：支付、退款或审核重放不得重复创建消息；消息写入失败不得重放支付渠道或退款完成副作用。
 
@@ -470,7 +470,9 @@ Alipay+ 商户注册和收单参数仍在安排，仓库没有真实 gateway。�
 | GET | `/orders/{id}/refund` | 查看退款详情 |
 | POST | `/orders/{id}/cancel-refund` | 仅在待审核阶段取消申请；按退款记录的 `originalStatus` 恢复状态与会话权限 |
 
-服务会话响应必须有 `conversationType=ORDER_SERVICE` 且 `orderId` 与请求一致，否则 fail-closed。售前 `DIRECT` 与订单履约会话分离；新流程会话不提供删除/撤回入口，退款审核、渠道处理和退款成功后均为只读历史。
+服务会话响应必须有 `conversationType=ORDER_SERVICE`、与请求一致的 `orderId`，以及服务端判定的 `serviceMessagingEnabled`；字段缺失或为 `false` 时 Flutter 必须禁止发送。用户和顾问都通过 `/orders/{id}/service-conversation` 获取或刷新会话权限，不得依赖仅允许订单用户访问的订单详情接口。
+
+售前 `DIRECT` 与各订单的 `ORDER_SERVICE` 会话继续相互独立，但统一显示在“私信”列表。订单会话卡片只在姓名右侧显示固定本地文案标签：中文 `订单沟通`、英文 `Order chat`，不调用 AI 翻译，也不附加订单号、项目名称、订单状态或“只读”标签。所有订单会话卡片提供与普通私信相同的“删除”操作；该操作仅在本机隐藏列表卡片，不删除服务端会话或聊天记录，同一会话收到更新消息后必须重新出现。会话内仍不提供订单消息删除/撤回入口，退款审核、渠道处理和退款成功后均为只读历史。
 
 新流程只允许全额、人工审核、原渠道退款。申请时服务端持久化 `originalStatus`，取消申请或管理员拒绝后只能准确恢复 `SERVICE_ACTIVE` 或 `COMPLETED`：前者恢复发送，后者继续只读。退款状态只有 `PENDING`、`REFUND_PROCESSING`、`APPROVED`、`REJECTED`、`CANCELLED`，没有 `COMPLETED`。拒绝原因使用专属 `rejectReason` 字段展示一次，订单标题仍展示已恢复的实际订单状态。
 

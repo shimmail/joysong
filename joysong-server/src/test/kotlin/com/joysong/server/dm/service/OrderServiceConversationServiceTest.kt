@@ -11,6 +11,7 @@ import io.mockk.slot
 import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -91,6 +92,7 @@ class OrderServiceConversationServiceTest {
 
         assertEquals(DmConversationEntity.ORDER_SERVICE, result.conversationType)
         assertEquals("order-1", result.orderId)
+        assertTrue(result.serviceMessagingEnabled)
         assertEquals(setOf("user-1", "consultant-1"), setOf(saved.captured.userAId, saved.captured.userBId))
         assertEquals("order-1", saved.captured.orderId)
         assertEquals(DmConversationEntity.ORDER_SERVICE, saved.captured.conversationType)
@@ -111,7 +113,25 @@ class OrderServiceConversationServiceTest {
         val result = service.getOrCreate("order-1", "consultant-1")
 
         assertEquals(existing.id, result.id)
+        assertFalse(result.serviceMessagingEnabled)
         verify(exactly = 0) { conversationRepository.saveAndFlush(any()) }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["user-1", "consultant-1"])
+    fun `both active order participants receive messaging enabled capability`(participantId: String) {
+        val existing = conversation()
+        every { orderRepository.findByIdForUpdate("order-1") } returns order()
+        every {
+            conversationRepository.findByConversationTypeAndOrderId(
+                DmConversationEntity.ORDER_SERVICE,
+                "order-1"
+            )
+        } returns existing
+
+        val result = service.getOrCreate("order-1", participantId)
+
+        assertTrue(result.serviceMessagingEnabled)
     }
 
     @ParameterizedTest
@@ -144,18 +164,34 @@ class OrderServiceConversationServiceTest {
 
     @ParameterizedTest
     @CsvSource(
-        "SERVICE_ACTIVE, false",
-        "REFUND_REVIEW, false",
-        "REFUND_PROCESSING, false",
-        "COMPLETED, true",
-        "REFUNDED, true"
+        "SERVICE_ACTIVE, false, true",
+        "REFUND_REVIEW, false, false",
+        "REFUND_PROCESSING, false, false",
+        "COMPLETED, true, false",
+        "REFUNDED, true, false"
     )
-    fun `only ended service conversations can be hidden`(status: String, expected: Boolean) {
+    fun `inbox projection reads order once and returns status capabilities`(
+        status: String,
+        expectedCanHide: Boolean,
+        expectedMessagingEnabled: Boolean
+    ) {
         every { orderRepository.findById("order-1") } returns Optional.of(order(status = status))
 
-        val actual = service.canHide(conversation(), "user-1")
+        val actual = service.responseIfReadable(conversation(), "user-1")!!
 
-        if (expected) assertTrue(actual) else assertFalse(actual)
+        assertEquals(expectedCanHide, actual.canHide)
+        assertEquals(expectedMessagingEnabled, actual.serviceMessagingEnabled)
+        verify(exactly = 1) { orderRepository.findById("order-1") }
+    }
+
+    @Test
+    fun `inbox projection hides conversation from an unrelated user`() {
+        every { orderRepository.findById("order-1") } returns Optional.of(order())
+
+        val actual = service.responseIfReadable(conversation(), "unrelated-user")
+
+        assertNull(actual)
+        verify(exactly = 1) { orderRepository.findById("order-1") }
     }
 
     @Test

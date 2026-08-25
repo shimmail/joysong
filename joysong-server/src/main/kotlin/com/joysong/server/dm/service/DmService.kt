@@ -8,7 +8,6 @@ import com.joysong.server.dm.entity.DmMessageEntity
 import com.joysong.server.dm.repository.DmConversationRepository
 import com.joysong.server.dm.repository.DmMessageRepository
 import com.joysong.server.identity.service.IdentityAuthorizationService
-import com.joysong.server.notification.service.NotificationService
 import com.joysong.server.user.repository.UserRepository
 import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
@@ -25,7 +24,6 @@ private const val CONSULTANT_ROLE = "CONSULTANT"
 class DmService(
     private val conversationRepository: DmConversationRepository,
     private val messageRepository: DmMessageRepository,
-    private val notificationService: NotificationService,
     private val userRepository: UserRepository,
     private val identityAuthorizationService: IdentityAuthorizationService,
     private val orderServiceConversationService: OrderServiceConversationService
@@ -36,16 +34,19 @@ class DmService(
      */
     fun getConversations(userId: String): List<DmConversationResponse> {
         return conversationRepository.findByParticipantOrderByLastMessageAtDesc(userId)
-            .filter { conversation ->
+            .mapNotNull { conversation ->
                 when (conversation.conversationType) {
                     DmConversationEntity.DIRECT ->
-                        conversation.userAId != "CS_ADMIN" && conversation.userBId != "CS_ADMIN"
+                        if (conversation.userAId != "CS_ADMIN" && conversation.userBId != "CS_ADMIN") {
+                            conversation.toResponseFor(userId)
+                        } else {
+                            null
+                        }
                     DmConversationEntity.ORDER_SERVICE ->
-                        orderServiceConversationService.canRead(conversation, userId)
-                    else -> false
+                        orderServiceConversationService.responseIfReadable(conversation, userId)
+                    else -> null
                 }
             }
-            .map { it.toResponseFor(userId) }
     }
 
     /**
@@ -154,8 +155,6 @@ class DmService(
             else -> throw IllegalArgumentException("无权发送消息到该会话")
         }
 
-        val receiverId = conversation.otherParticipant(senderId)
-
         // 创建消息
         val message = DmMessageEntity(
             id = UUID.randomUUID().toString(),
@@ -180,18 +179,6 @@ class DmService(
         }
 
         conversationRepository.save(conversation)
-
-        // 给接收方创建通知
-        val notificationContent = if (messageType == MESSAGE_TYPE_IMAGE) IMAGE_MESSAGE_SUMMARY else content
-        val truncatedContent = if (notificationContent.length > 50) notificationContent.substring(0, 50) else notificationContent
-        notificationService.createNotification(
-            userId = receiverId,
-            type = "DM_NEW",
-            title = "新私信",
-            content = truncatedContent,
-            targetType = "dm_conversation",
-            targetId = conversationId
-        )
 
         return message.toResponse()
     }
@@ -267,11 +254,7 @@ class DmService(
     }
 
     private fun DmConversationEntity.toResponseFor(currentUserId: String): DmConversationResponse {
-        if (conversationType == DmConversationEntity.ORDER_SERVICE) {
-            return toResponse(
-                canHide = orderServiceConversationService.canHide(this, currentUserId)
-            )
-        }
+        require(conversationType == DmConversationEntity.DIRECT) { "无权访问该会话" }
         val otherUserId = otherParticipant(currentUserId)
         val otherUserHasSent = messageRepository.existsByConversationIdAndSenderId(id, otherUserId)
         val firstMessageLimitApplies =

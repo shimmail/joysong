@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/features/messaging/domain/messaging_models.dart';
+import 'package:joysong_flutter/features/messaging/domain/messaging_preferences.dart';
 import 'package:joysong_flutter/features/messaging/domain/messaging_repository.dart';
 import 'package:joysong_flutter/features/messaging/presentation/messaging_controllers.dart';
 
@@ -250,6 +251,56 @@ void main() {
     expect((await controller.openCustomerService())?.id, _conversation.id);
     expect(repository.csCreateCalls, 2);
   });
+
+  test('local hide persists the server cursor and a later message restores it',
+      () async {
+    final repository = _FakeMessagingRepository()
+      ..dmConversations = const [_orderConversation];
+    final store = _MemoryMessagingPreferencesStore();
+    final controller = MessagingHubController(
+      repository,
+      currentUserId: 'user-1',
+      preferencesStore: store,
+    );
+    await controller.refresh();
+
+    await controller.hideDmConversation(_orderConversation);
+
+    final key = dmConversationPreferenceKey(_orderConversation.id);
+    expect(controller.dmConversations, isEmpty);
+    expect(
+      store.preferences.hiddenAtByConversationKey[key],
+      _orderConversation.lastMessageAt,
+    );
+    expect(
+      MessagingPreferences.fromJson(store.preferences.toJson())
+          .hiddenAtByConversationKey[key],
+      _orderConversation.lastMessageAt,
+    );
+
+    repository.dmConversations = const [_orderConversationWithNewMessage];
+    await controller.refresh();
+
+    expect(
+        controller.dmConversations, const [_orderConversationWithNewMessage]);
+    expect(store.preferences.hiddenAtByConversationKey, isEmpty);
+  });
+
+  test('messaging server timestamps use the Asia Shanghai business zone', () {
+    expect(
+      parseMessagingServerTime('2026-08-25T12:01:02.003004'),
+      DateTime.utc(2026, 8, 25, 4, 1, 2, 3, 4),
+    );
+    expect(
+      parseMessagingServerTime('2026-08-25T04:01:02.003004Z'),
+      DateTime.utc(2026, 8, 25, 4, 1, 2, 3, 4),
+    );
+    expect(
+      parseMessagingServerTime('2026-03-08T02:30:00'),
+      DateTime.utc(2026, 3, 7, 18, 30),
+      reason: 'Device DST rules must not normalize the server wall clock.',
+    );
+  });
 }
 
 class _FakeMessagingRepository extends Fake implements MessagingRepository {
@@ -268,9 +319,10 @@ class _FakeMessagingRepository extends Fake implements MessagingRepository {
   List<AppNotification> notifications = const [_notification, _notification];
   NotificationUnreadCounts notificationUnreadCounts =
       const NotificationUnreadCounts(total: 1, system: 1, activity: 0);
+  List<DmConversation> dmConversations = const [];
 
   @override
-  Future<List<DmConversation>> getDmConversations() async => const [];
+  Future<List<DmConversation>> getDmConversations() async => dmConversations;
 
   @override
   Future<List<CustomerServiceConversation>>
@@ -400,6 +452,26 @@ class _FakeMessagingRepository extends Fake implements MessagingRepository {
   }
 }
 
+class _MemoryMessagingPreferencesStore implements MessagingPreferencesStore {
+  MessagingPreferences preferences = MessagingPreferences();
+
+  @override
+  Future<void> clear(String currentUserId) async {
+    preferences = MessagingPreferences();
+  }
+
+  @override
+  Future<MessagingPreferences> read(String currentUserId) async => preferences;
+
+  @override
+  Future<void> write(
+    String currentUserId,
+    MessagingPreferences preferences,
+  ) async {
+    this.preferences = preferences;
+  }
+}
+
 const _notification = AppNotification(
   id: 'notification-1',
   userId: 'me',
@@ -445,6 +517,34 @@ const _conversation = CustomerServiceConversation(
   unreadCount: 0,
   createdAt: '2026-08-06T10:00:00',
   updatedAt: '2026-08-06T10:00:00',
+);
+
+const _orderConversation = DmConversation(
+  id: 'order-conversation-1',
+  conversationType: DmConversationType.orderService,
+  orderId: 'order-1',
+  userAId: 'consultant-1',
+  userBId: 'user-1',
+  userAUnread: 0,
+  userBUnread: 0,
+  lastMessage: 'Current order message',
+  lastMessageAt: '2026-08-25T12:00:00',
+  createdAt: '2026-08-25T11:00:00',
+  updatedAt: '2026-08-25T12:00:00',
+);
+
+const _orderConversationWithNewMessage = DmConversation(
+  id: 'order-conversation-1',
+  conversationType: DmConversationType.orderService,
+  orderId: 'order-1',
+  userAId: 'consultant-1',
+  userBId: 'user-1',
+  userAUnread: 0,
+  userBUnread: 1,
+  lastMessage: 'New order message',
+  lastMessageAt: '2026-08-25T12:01:00',
+  createdAt: '2026-08-25T11:00:00',
+  updatedAt: '2026-08-25T12:01:00',
 );
 
 const _dm1 = DmMessage(

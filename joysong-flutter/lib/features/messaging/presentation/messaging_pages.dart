@@ -458,11 +458,7 @@ class _MessagingCenterPageState extends State<MessagingCenterPage> {
                     isPinned: widget.controller.isPinned(item.id),
                     onMarkUnread: () => widget.controller.markUnread(item.id),
                     onTogglePin: () => widget.controller.togglePin(item.id),
-                    onDelete: item.conversationType ==
-                                DmConversationType.direct ||
-                            item.canHide
-                        ? () => widget.controller.hideConversation(item.id)
-                        : null,
+                    onDelete: () => widget.controller.hideDmConversation(item),
                     onOpen: () {
                       widget.controller.clearUnread(item.id);
                       widget.onOpenDm?.call(item);
@@ -490,6 +486,10 @@ class _MessagingCenterPageState extends State<MessagingCenterPage> {
                       title: peer?.name.trim().isNotEmpty == true
                           ? peer!.name
                           : _userLabel(otherId, strings),
+                      label: item.conversationType ==
+                              DmConversationType.orderService
+                          ? strings.orderChat
+                          : null,
                       subtitle: item.lastMessage ?? strings.noMessages,
                       time: _compactTime(item.lastMessageAt),
                       unreadCount: item.unreadFor(widget.currentUserId),
@@ -587,6 +587,7 @@ class _ConversationTile extends StatelessWidget {
     required this.unreadCount,
     required this.isLocallyUnread,
     required this.isPinned,
+    this.label,
   });
 
   final Widget leading;
@@ -596,6 +597,7 @@ class _ConversationTile extends StatelessWidget {
   final int unreadCount;
   final bool isLocallyUnread;
   final bool isPinned;
+  final String? label;
 
   @override
   Widget build(BuildContext context) => Material(
@@ -615,6 +617,26 @@ class _ConversationTile extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              if (label case final label?) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    label,
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color:
+                              Theme.of(context).colorScheme.onPrimaryContainer,
+                        ),
+                  ),
+                ),
+              ],
               if (isPinned) ...[
                 const SizedBox(width: 4),
                 const Icon(
