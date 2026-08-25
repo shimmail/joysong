@@ -52,6 +52,59 @@ void main() {
     expect(repository.createCalls, 0);
   });
 
+  testWidgets('system and activity entries show their unread counts',
+      (tester) async {
+    final controller = MessagingHubController(_PageMessagingRepository());
+
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('en', 'US'),
+        home: MessagingCenterPage(
+          controller: controller,
+          systemUnreadCount: 7,
+          activityUnreadCount: 105,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('message-center-system')),
+        matching: find.text('7'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('message-center-activity')),
+        matching: find.text('99+'),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('notification counts refresh with the message hub lifecycle',
+      (tester) async {
+    var notificationRefreshes = 0;
+    final controller = MessagingHubController(_PageMessagingRepository());
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MessagingCenterPage(
+          controller: controller,
+          onRefreshNotifications: () async => notificationRefreshes++,
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(notificationRefreshes, 1);
+
+    await tester.pump(const Duration(seconds: 30));
+    await tester.pump();
+    expect(notificationRefreshes, 2);
+  });
+
   testWidgets('ended order-service rows expose local hide but active rows do not',
       (tester) async {
     final repository = _PageMessagingRepository()

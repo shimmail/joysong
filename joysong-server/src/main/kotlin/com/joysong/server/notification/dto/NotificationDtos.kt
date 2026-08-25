@@ -14,6 +14,12 @@ data class NotificationResponse(
     val createdAt: String
 )
 
+data class NotificationUnreadCountsResponse(
+    val total: Long,
+    val system: Long,
+    val activity: Long
+)
+
 fun NotificationEntity.toResponse(): NotificationResponse {
     return NotificationResponse(
         id = id,

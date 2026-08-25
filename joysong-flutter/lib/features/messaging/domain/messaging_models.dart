@@ -49,6 +49,27 @@ class AppNotification {
   }
 }
 
+class NotificationUnreadCounts {
+  const NotificationUnreadCounts({
+    required this.total,
+    required this.system,
+    required this.activity,
+  });
+
+  final int total;
+  final int system;
+  final int activity;
+
+  factory NotificationUnreadCounts.fromJson(Object? json) {
+    final map = _map(json, '通知未读统计');
+    return NotificationUnreadCounts(
+      total: _integer(map['total']),
+      system: _integer(map['system']),
+      activity: _integer(map['activity']),
+    );
+  }
+}
+
 enum DmConversationType { direct, orderService }
 
 class DmConversation {

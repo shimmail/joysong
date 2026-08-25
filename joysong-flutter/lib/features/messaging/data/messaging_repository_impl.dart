@@ -14,6 +14,9 @@ final class MessagingRepositoryImpl implements MessagingRepository {
   Future<int> getUnreadNotificationCount() =>
       _remote.getUnreadNotificationCount();
   @override
+  Future<NotificationUnreadCounts> getUnreadNotificationCounts() =>
+      _remote.getUnreadNotificationCounts();
+  @override
   Future<void> markNotificationRead(String notificationId) =>
       _remote.markNotificationRead(notificationId);
   @override

@@ -112,6 +112,8 @@ class _AppShellState extends State<AppShell> {
   AgentPlanController? _agentPlanController;
   WalletController? _walletController;
   int _unreadNotificationCount = 0;
+  int _unreadSystemNotificationCount = 0;
+  int _unreadActivityNotificationCount = 0;
   bool _institutionConsultantPickerOpen = false;
 
   NavigatorState get _contentNavigator =>
@@ -137,6 +139,8 @@ class _AppShellState extends State<AppShell> {
   void _createDependencies() {
     _disposeControllers();
     _unreadNotificationCount = 0;
+    _unreadSystemNotificationCount = 0;
+    _unreadActivityNotificationCount = 0;
     final apiClient = widget.apiClient;
     if (apiClient == null) {
       _homeRepository = null;
@@ -222,8 +226,17 @@ class _AppShellState extends State<AppShell> {
 
   void _handleNotificationStateChanged() {
     final nextCount = _notificationController?.unreadCount ?? 0;
-    if (mounted && nextCount != _unreadNotificationCount) {
-      setState(() => _unreadNotificationCount = nextCount);
+    final nextSystemCount = _notificationController?.systemUnreadCount ?? 0;
+    final nextActivityCount = _notificationController?.activityUnreadCount ?? 0;
+    if (mounted &&
+        (nextCount != _unreadNotificationCount ||
+            nextSystemCount != _unreadSystemNotificationCount ||
+            nextActivityCount != _unreadActivityNotificationCount)) {
+      setState(() {
+        _unreadNotificationCount = nextCount;
+        _unreadSystemNotificationCount = nextSystemCount;
+        _unreadActivityNotificationCount = nextActivityCount;
+      });
     }
   }
 
@@ -270,6 +283,9 @@ class _AppShellState extends State<AppShell> {
             onOpenAi: _openAiChat,
             onOpenSystemMessages: () => _openNotificationCategory(false),
             onOpenActivityMessages: () => _openNotificationCategory(true),
+            onRefreshNotifications: _notificationController!.refresh,
+            systemUnreadCount: _unreadSystemNotificationCount,
+            activityUnreadCount: _unreadActivityNotificationCount,
           )
         else if (_agentChatController != null && _agentPlanController != null)
           _buildAgentChatPage()

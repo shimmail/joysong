@@ -1,12 +1,14 @@
 package com.joysong.server.notification.service
 
 import com.joysong.server.notification.dto.NotificationResponse
+import com.joysong.server.notification.dto.NotificationUnreadCountsResponse
 import com.joysong.server.notification.dto.toResponse
 import com.joysong.server.notification.entity.NotificationEntity
 import com.joysong.server.notification.repository.NotificationRepository
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Pageable
+import org.springframework.context.i18n.LocaleContextHolder
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDateTime
@@ -22,8 +24,9 @@ class NotificationService(
      */
     fun getNotifications(userId: String, limit: Int = 50): List<NotificationResponse> {
         val pageable = PageRequest.of(0, limit)
+        val locale = LocaleContextHolder.getLocale()
         return notificationRepository.findByUserIdAndDeletedAtIsNullOrderByCreatedAtDesc(userId, pageable)
-            .map { it.toResponse() }
+            .map { NotificationTextProjection.localize(it.toResponse(), locale) }
     }
 
     /**
@@ -31,6 +34,19 @@ class NotificationService(
      */
     fun getUnreadCount(userId: String): Long {
         return notificationRepository.countByUserIdAndIsReadAndDeletedAtIsNull(userId, false)
+    }
+
+    fun getUnreadCounts(userId: String): NotificationUnreadCountsResponse {
+        val summary = notificationRepository
+            .summarizeUnreadByUserIdAndTypes(userId, ACTIVITY_NOTIFICATION_TYPES)
+        val total = summary.total.coerceAtLeast(0)
+        val activity = summary.activity
+            .coerceIn(0, total)
+        return NotificationUnreadCountsResponse(
+            total = total,
+            system = total - activity,
+            activity = activity
+        )
     }
 
     /**
@@ -145,5 +161,10 @@ class NotificationService(
             }
         }
         return count
+    }
+
+    private companion object {
+        val ACTIVITY_NOTIFICATION_TYPES =
+            setOf("ACTIVITY", "PROMOTION", "MARKETING", "CAMPAIGN", "OFFER")
     }
 }

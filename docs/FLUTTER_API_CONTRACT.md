@@ -237,7 +237,7 @@ Flutter 不能依据本地缓存角色自行授权。每次进入专业管理中
 | 点赞 | `POST /likes`、`DELETE/GET /likes/{targetType}/{targetId}` |
 | 收藏 | `GET/POST /favorites`、`DELETE /favorites/{type}/{targetId}`、`GET /favorites/{type}/{targetId}` |
 | 举报 | `POST /reports`、`GET /reports/check/{targetType}/{targetId}` |
-| 通知 | `GET /notifications`、`/unread-count`；`PUT /notifications/{id}/read`、`/read-all` |
+| 通知 | `GET /notifications`、`/unread-count`、`/unread-counts`；`PUT /notifications/{id}/read`、`/read-all` |
 | 优惠券 | `GET /coupons/available`、`/coupons/my`、`/coupons/{id}/discount` |
 | 评价 | `GET /reviews/order/{orderId}`、`PUT/DELETE /reviews/{id}` |
 | 私信 | `/dm/conversations`、`/dm/conversations/{id}/messages`、`/dm/messages/{id}` |
@@ -246,7 +246,7 @@ Flutter 不能依据本地缓存角色自行授权。每次进入专业管理中
 
 ### 6.1 系统业务消息
 
-`GET /notifications` 返回当前用户的通知；每项固定包含 `id`、`userId`、`type`、`title`、`content`、`targetType`、`targetId`、`isRead`、`createdAt`。订单、身份和机构关系的下列业务类型均属于系统消息（而非活动消息或聊天）：
+`GET /notifications` 返回当前用户的通知；每项固定包含 `id`、`userId`、`type`、`title`、`content`、`targetType`、`targetId`、`isRead`、`createdAt`。接口按 `Accept-Language` 对下列业务通知进行读取时投影：`en` 返回英文固定文案，中文及未识别类型保留数据库原文；审核驳回原因始终保留审核人填写的原文。该投影不修改历史通知。订单、身份和机构关系的下列业务类型均属于系统消息（而非活动消息或聊天）：
 
 ```text
 ORDER_CREATED, ORDER_SERVICE_ACTIVATED, ORDER_COMPLETED, ORDER_REFUND_REQUESTED,
@@ -257,6 +257,10 @@ IDENTITY_APPLICATION_APPROVED, IDENTITY_APPLICATION_REJECTED
 ```
 
 `targetType` 是导航契约，`targetId` 是对应订单、申请或关系请求 ID：`order` 和 `order_refund` 打开订单详情；`order_service_conversation` 打开订单服务会话；`identity_management` 打开身份管理；`identity_application` 聚焦身份申请历史；`professional_doctor_review`、`professional_consultant_review` 打开机构法人的对应审核队列；`professional_doctor_application`、`professional_consultant_application`、`professional_doctor_relationships`、`professional_consultant_relationships` 打开申请人自己的对应关系历史。目标已失效时，Flutter 必须回退到对应列表或管理页，且不得崩溃。
+
+`DM_NEW` 在英文读取时将当前系统标题“新私信”“客服回复”“用户咨询”分别投影为 `New direct message`、`Customer service reply`、`User inquiry`，图片摘要 `[图片]` 投影为 `[Image]`；实际消息摘要保持发送者原文。
+
+`GET /notifications/unread-counts` 返回消息中心分类徽标所需的精确未读数：`data.total`、`data.system`、`data.activity`。`ACTIVITY`、`PROMOTION`、`MARKETING`、`CAMPAIGN`、`OFFER`（忽略大小写）计入活动消息，其余通知计入系统消息；始终满足 `total = system + activity`。原有 `/unread-count` 继续返回总数，供旧客户端兼容使用。
 
 点击单项时先调用 `PUT /notifications/{id}/read`，再按目标导航；打开系统消息页本身不得调用 `/read-all`。`PUT /notifications/read-all` 仅用于用户主动执行的全部已读操作。服务端只在真实业务状态转换后创建消息：支付、退款或审核重放不得重复创建消息；消息写入失败不得重放支付渠道或退款完成副作用。
 

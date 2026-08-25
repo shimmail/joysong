@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/core/translation/translation.dart';
 import 'package:joysong_flutter/features/messaging/domain/messaging_models.dart';
 import 'package:joysong_flutter/features/messaging/domain/messaging_repository.dart';
+import 'package:joysong_flutter/features/messaging/domain/notification_target.dart';
 import 'package:joysong_flutter/features/messaging/presentation/messaging_controllers.dart';
 import 'package:joysong_flutter/features/messaging/presentation/messaging_pages.dart';
 
@@ -234,6 +235,20 @@ final class _NotificationRepository extends Fake
 
   @override
   Future<int> getUnreadNotificationCount() async => 0;
+
+  @override
+  Future<NotificationUnreadCounts> getUnreadNotificationCounts() async {
+    final unread = notifications.where((notification) => !notification.isRead);
+    final activity = unread
+        .where((notification) => isActivityNotificationType(notification.type))
+        .length;
+    final total = unread.length;
+    return NotificationUnreadCounts(
+      total: total,
+      system: total - activity,
+      activity: activity,
+    );
+  }
 
   @override
   Future<void> markNotificationRead(String notificationId) async {}
