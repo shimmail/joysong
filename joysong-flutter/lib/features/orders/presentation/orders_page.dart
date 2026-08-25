@@ -101,7 +101,7 @@ class _OrdersPageState extends State<OrdersPage> {
         controller: _scrollController,
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
         itemCount: orders.length + 1,
-        findChildIndexCallback: (key) {
+        findItemIndexCallback: (key) {
           if (key is! ValueKey<String>) return null;
           const prefix = 'consumer-order:';
           if (!key.value.startsWith(prefix)) return null;
