@@ -52,6 +52,16 @@ interface EditSession {
   projectId: string;
 }
 
+interface SaveScope {
+  generation: number;
+  projectId: string | null;
+}
+
+interface SaveOperation {
+  id: number;
+  scope: SaveScope;
+}
+
 const conflictFields = [
   ['name', '独立名称'], ['category', '独立分类'], ['description', '独立简介'],
   ['rating', '评分'], ['reviewCount', '评价数'], ['tags', '标签'], ['slogan', '宣传语'],
@@ -110,7 +120,8 @@ export default function InstitutionProjectsPage() {
   const editConflictRef = useRef<EditConflict | null>(null);
   const conflictRequestIdRef = useRef(0);
   const saveOperationIdRef = useRef(0);
-  const activeSaveOperationRef = useRef<number | null>(null);
+  const saveOperationsRef = useRef<Map<number, number>>(new Map());
+  const visibleSaveOperationRef = useRef<number | null>(null);
   const [form] = Form.useForm();
   const [filterProjectId, setFilterProjectId] = useState<string | undefined>();
   const [filterInstitutionId, setFilterInstitutionId] = useState<string | undefined>(searchParams.get('institutionId') || undefined);
@@ -162,7 +173,13 @@ export default function InstitutionProjectsPage() {
     setEditConflict(conflict);
   };
 
+  const clearVisibleSaveOperation = () => {
+    visibleSaveOperationRef.current = null;
+    setSaving(false);
+  };
+
   const beginEditSession = (projectId: string): EditSession => {
+    clearVisibleSaveOperation();
     const session = { generation: editGenerationRef.current + 1, projectId };
     editGenerationRef.current = session.generation;
     activeEditSessionRef.current = session;
@@ -174,6 +191,7 @@ export default function InstitutionProjectsPage() {
     activeEditSessionRef.current = null;
     setConflictState(null);
     setRebasePristine(false);
+    clearVisibleSaveOperation();
   };
 
   const isActiveEditSession = (session: EditSession) => {
@@ -181,9 +199,16 @@ export default function InstitutionProjectsPage() {
     return active?.generation === session.generation && active.projectId === session.projectId;
   };
 
-  const finishSaveOperation = (operationId: number) => {
-    if (activeSaveOperationRef.current !== operationId) return;
-    activeSaveOperationRef.current = null;
+  const isActiveSaveScope = (scope: SaveScope) => scope.projectId === null
+    ? editGenerationRef.current === scope.generation && activeEditSessionRef.current === null
+    : isActiveEditSession({ generation: scope.generation, projectId: scope.projectId });
+
+  const finishSaveOperation = (operation: SaveOperation) => {
+    if (saveOperationsRef.current.get(operation.scope.generation) === operation.id) {
+      saveOperationsRef.current.delete(operation.scope.generation);
+    }
+    if (!isActiveSaveScope(operation.scope) || visibleSaveOperationRef.current !== operation.id) return;
+    visibleSaveOperationRef.current = null;
     setSaving(false);
   };
 
@@ -298,23 +323,28 @@ export default function InstitutionProjectsPage() {
   };
 
   const handleSave = async () => {
-    if (editConflict || rebasePristine || activeSaveOperationRef.current !== null) return;
-    const saveOperationId = saveOperationIdRef.current + 1;
-    saveOperationIdRef.current = saveOperationId;
-    activeSaveOperationRef.current = saveOperationId;
-    setSaving(true);
+    if (editConflict || rebasePristine) return;
     const saveSession = activeEditSessionRef.current;
+    const saveScope: SaveScope | null = editingId
+      ? saveSession?.projectId === editingId ? saveSession : null
+      : { generation: editGenerationRef.current, projectId: null };
+    if (!saveScope || saveOperationsRef.current.has(saveScope.generation)) return;
+    const saveOperation: SaveOperation = { id: saveOperationIdRef.current + 1, scope: saveScope };
+    saveOperationIdRef.current = saveOperation.id;
+    saveOperationsRef.current.set(saveScope.generation, saveOperation.id);
+    visibleSaveOperationRef.current = saveOperation.id;
+    setSaving(true);
     let attemptedValues: Record<string, unknown> | null = null;
     try {
       const values = await form.validateFields();
       attemptedValues = values;
       if (!policyState.policy) {
-        message.error('分账策略不可用，暂不能保存');
+        if (isActiveSaveScope(saveScope)) message.error('分账策略不可用，暂不能保存');
         return;
       }
-      if (editingId) {
+      if (saveScope.projectId) {
         const { doctorBindings = [] } = values;
-        await api.put(`/admin/institution-projects/${editingId}`, {
+        await api.put(`/admin/institution-projects/${saveScope.projectId}`, {
           baseVersion,
           name: values.name ?? null,
           category: values.category ?? null,
@@ -334,7 +364,6 @@ export default function InstitutionProjectsPage() {
           isActive: values.isActive,
           doctorBindings,
         });
-        message.success('更新成功');
       } else {
         const { doctorBindings = [], ...rest } = values;
         const payload = {
@@ -344,15 +373,17 @@ export default function InstitutionProjectsPage() {
           doctorBindings,
         };
         await api.post('/admin/institution-projects', payload);
-        message.success('创建成功');
       }
-      setModalOpen(false);
-      invalidateEditSession();
+      if (isActiveSaveScope(saveScope)) {
+        message.success(saveScope.projectId ? '更新成功' : '创建成功');
+        setModalOpen(false);
+        invalidateEditSession();
+      }
       void fetchData();
     } catch (err: any) {
       if (err?.errorFields) return;
       if (
-        editingId && attemptedValues && saveSession && saveSession.projectId === editingId &&
+        saveScope.projectId && attemptedValues && saveSession && saveSession.projectId === saveScope.projectId &&
         getApiErrorCode(err) === 'INSTITUTION_PROJECT_VERSION_STALE'
       ) {
         if (!isActiveEditSession(saveSession)) return;
@@ -363,7 +394,7 @@ export default function InstitutionProjectsPage() {
           draft: { ...attemptedValues, currency: editingCurrency },
           latest: null,
         });
-        finishSaveOperation(saveOperationId);
+        finishSaveOperation(saveOperation);
         try {
           await loadConflictLatest(saveSession);
         } catch {
@@ -372,9 +403,9 @@ export default function InstitutionProjectsPage() {
         return;
       }
       const msg = err?.response?.data?.message || err?.message || '操作失败';
-      message.error(msg);
+      if (isActiveSaveScope(saveScope)) message.error(msg);
     } finally {
-      finishSaveOperation(saveOperationId);
+      finishSaveOperation(saveOperation);
     }
   };
 

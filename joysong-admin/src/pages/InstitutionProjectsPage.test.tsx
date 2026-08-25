@@ -57,8 +57,12 @@ function renderPage() { return render(<MemoryRouter><InstitutionProjectsPage /><
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>(resolvePromise => { resolve = resolvePromise; });
-  return { promise, resolve };
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
 }
 
 describe('InstitutionProjectsPage doctor prices', () => {
@@ -128,6 +132,100 @@ describe('InstitutionProjectsPage doctor prices', () => {
       .filter(([url]) => url === '/admin/institution-projects')).toHaveLength(readsBeforeSettle + 1));
     expect(api.put).toHaveBeenCalledTimes(1);
   }, 10_000);
+
+  it.each(['success', 'stale'] as const)(
+    'keeps project B active and pending when an abandoned project A save completes with %s',
+    async (completion) => {
+      const recordA = { ...record, name: '项目 A 初始值', effectiveName: '项目 A 初始值' };
+      const recordB = {
+        ...record,
+        id: 'ip-2', version: 17, projectId: 'project-2', projectName: '公共项目 B', baseProjectName: '公共项目 B',
+        name: '项目 B 初始值', effectiveName: '项目 B 初始值', price: 6999,
+        doctors: [{ ...record.doctors[0], price: 5999 }],
+      };
+      const response = { data: { code: 200, message: 'OK', data: null } };
+      const staleError = {
+        isAxiosError: true,
+        response: { data: { code: 409, errorCode: 'INSTITUTION_PROJECT_VERSION_STALE', message: '任意本地化消息' } },
+      };
+      const projectASave = deferred<typeof response>();
+      const projectBSave = deferred<typeof response>();
+      let projectReadCount = 0;
+      vi.mocked(api.get).mockImplementation((url) => {
+        if (url === '/admin/institution-projects') {
+          projectReadCount += 1;
+          return Promise.resolve({ data: { code: 200, message: 'OK', data: [recordA, recordB] } });
+        }
+        const data = url === '/admin/institutions' ? [{ id: 'institution-1', name: '机构 A' }]
+          : url === '/admin/projects' ? [{ id: 'project-1', name: '公共项目' }, { id: 'project-2', name: '公共项目 B' }]
+            : url === '/admin/doctors' ? record.doctors
+              : url === '/admin/order-split-policy' ? { platformRate: 40 } : [];
+        return Promise.resolve({ data: { code: 200, message: 'OK', data } });
+      });
+      vi.mocked(api.put)
+        .mockReturnValueOnce(projectASave.promise)
+        .mockReturnValueOnce(projectBSave.promise)
+        .mockResolvedValueOnce(response);
+
+      const user = userEvent.setup();
+      renderPage();
+      const rowA = (await screen.findByText('项目 A 初始值')).closest('tr');
+      expect(rowA).not.toBeNull();
+      await user.click(within(rowA!).getByTitle('编辑'));
+      await user.click(screen.getByRole('button', { name: /保\s*存/ }));
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(1));
+
+      fireEvent.click(screen.getByRole('button', { name: /取\s*消/ }));
+      const rowB = (await screen.findByText('项目 B 初始值')).closest('tr');
+      expect(rowB).not.toBeNull();
+      fireEvent.click(within(rowB!).getByTitle('编辑'));
+      const projectBName = screen.getByRole('textbox', { name: /独立名称/ });
+      await waitFor(() => expect(projectBName).toHaveValue('项目 B 初始值'));
+      await user.clear(projectBName);
+      await user.type(projectBName, '项目 B 未决草稿');
+      const projectBSaveButton = screen.getByRole('button', { name: /保\s*存/ });
+      expect(projectBSaveButton).toBeEnabled();
+      expect(projectBSaveButton).not.toHaveClass('ant-btn-loading');
+      await user.click(projectBSaveButton);
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(2));
+      expect(projectBSaveButton).toBeDisabled();
+      expect(projectBSaveButton).toHaveClass('ant-btn-loading');
+
+      const readsBeforeProjectASettles = projectReadCount;
+      await act(async () => {
+        if (completion === 'success') projectASave.resolve(response);
+        else projectASave.reject(staleError);
+        await projectASave.promise.catch(() => undefined);
+      });
+      if (completion === 'success') {
+        await waitFor(() => expect(projectReadCount).toBe(readsBeforeProjectASettles + 1));
+      } else {
+        expect(projectReadCount).toBe(readsBeforeProjectASettles);
+      }
+
+      expect(projectBName).toHaveValue('项目 B 未决草稿');
+      expect(projectBSaveButton).toBeDisabled();
+      expect(projectBSaveButton).toHaveClass('ant-btn-loading');
+      expect(screen.queryByRole('button', { name: '刷新最新版本' })).not.toBeInTheDocument();
+
+      await act(async () => {
+        projectBSave.reject(new Error('项目 B 当前请求失败'));
+        await projectBSave.promise.catch(() => undefined);
+      });
+      await waitFor(() => expect(projectBSaveButton).toBeEnabled());
+      expect(projectBSaveButton).not.toHaveClass('ant-btn-loading');
+
+      await user.clear(projectBName);
+      await user.type(projectBName, '项目 B 后续草稿');
+      await user.click(projectBSaveButton);
+      await waitFor(() => expect(api.put).toHaveBeenCalledTimes(3));
+      expect(vi.mocked(api.put).mock.calls[2]).toEqual([
+        '/admin/institution-projects/ip-2',
+        expect.objectContaining({ baseVersion: 17, name: '项目 B 后续草稿' }),
+      ]);
+    },
+    15_000,
+  );
 
   it('keeps a stale draft and base version while refresh only updates the side-by-side latest values', async () => {
     const latestRecord = { ...record, version: 8, name: '服务端最新名称', effectiveName: '服务端最新名称', price: 5399 };
