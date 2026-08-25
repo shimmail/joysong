@@ -5,13 +5,45 @@ typedef IdentityMessageResolver = String Function(
   String english,
 );
 
-enum IdentityErrorOperation { load, upload, delete, submit }
+enum IdentityErrorOperation { load, upload, delete, submit, review }
+
+enum IdentityProjectErrorAction {
+  none,
+  refresh,
+  offerForce,
+  resubmit,
+  upgrade,
+  invalid,
+  permissionExit,
+}
+
+IdentityProjectErrorAction identityProjectErrorAction(Object error) {
+  if (error is! ApiException) return IdentityProjectErrorAction.none;
+  if (error.httpStatus == 403) {
+    return IdentityProjectErrorAction.permissionExit;
+  }
+  return _projectErrorCodes[error.errorCode]?.action ??
+      IdentityProjectErrorAction.none;
+}
 
 String identityErrorMessage(
   Object error, {
   required IdentityErrorOperation operation,
   required IdentityMessageResolver resolve,
 }) {
+  if (error is ApiException) {
+    if (operation == IdentityErrorOperation.review &&
+        error.httpStatus == 403) {
+      return resolve(
+        '审核权限已变化，正在刷新权限',
+        'Review access changed. Refreshing permissions.',
+      );
+    }
+    final projectError = _projectErrorCodes[error.errorCode];
+    if (projectError != null) {
+      return resolve(projectError.chinese, projectError.english);
+    }
+  }
   final raw = switch (error) {
     ApiException(message: final message) => message.trim(),
     ArgumentError(message: final message?) => message.toString().trim(),
@@ -38,10 +70,86 @@ String identityErrorMessage(
         '身份申请提交失败，请重试',
         'Unable to submit the identity application. Please retry.',
       ),
+    IdentityErrorOperation.review => resolve(
+        '审核提交失败，请重试',
+        'Unable to submit the review. Please retry.',
+      ),
   };
   if (raw.isEmpty) return fallback;
   return resolve(raw, fallback);
 }
+
+const _projectErrorCodes = <
+    String,
+    ({
+      IdentityProjectErrorAction action,
+      String chinese,
+      String english,
+    })>{
+  'EDIT_BASE_STALE': (
+    action: IdentityProjectErrorAction.resubmit,
+    chinese: '编辑基线已变化，请刷新后重新提交',
+    english: 'The edit baseline changed. Refresh and submit again.',
+  ),
+  'APPROVAL_BASE_STALE': (
+    action: IdentityProjectErrorAction.offerForce,
+    chinese: '审批基线已变化，已刷新最新审核详情',
+    english:
+        'The approval baseline changed. The latest review details were refreshed.',
+  ),
+  'INHERITANCE_SOURCE_STALE': (
+    action: IdentityProjectErrorAction.resubmit,
+    chinese: '平台项目继承源已变化，请医生重新提交',
+    english:
+        'The inherited platform project changed. Ask the doctor to submit again.',
+  ),
+  'PRICING_POLICY_STALE': (
+    action: IdentityProjectErrorAction.resubmit,
+    chinese: '定价策略已变化，请医生重新提交',
+    english: 'The pricing policy changed. Ask the doctor to submit again.',
+  ),
+  'FORCE_BASE_STALE': (
+    action: IdentityProjectErrorAction.refresh,
+    chinese: '强制批准基线再次变化，请刷新后重新审核',
+    english:
+        'The force-approval baseline changed again. Refresh and review again.',
+  ),
+  'REQUEST_ALREADY_PENDING': (
+    action: IdentityProjectErrorAction.refresh,
+    chinese: '已有待审核申请，已刷新申请列表',
+    english: 'A request is already pending. The request list was refreshed.',
+  ),
+  'REQUEST_ALREADY_HANDLED': (
+    action: IdentityProjectErrorAction.refresh,
+    chinese: '该申请已处理，已刷新申请列表',
+    english: 'This request was already handled. The request list was refreshed.',
+  ),
+  'CLIENT_UPGRADE_REQUIRED': (
+    action: IdentityProjectErrorAction.upgrade,
+    chinese: '请升级应用后继续操作',
+    english: 'Update the app before continuing.',
+  ),
+  'FORCE_NOT_APPLICABLE': (
+    action: IdentityProjectErrorAction.refresh,
+    chinese: '当前不再允许强制批准，请刷新后重新审核',
+    english: 'Force approval is no longer available. Refresh and review again.',
+  ),
+  'PROJECT_PAYLOAD_INVALID': (
+    action: IdentityProjectErrorAction.invalid,
+    chinese: '项目申请数据异常，无法审核',
+    english: 'The project request data is invalid and cannot be reviewed.',
+  ),
+  'REQUEST_SNAPSHOT_INVALID': (
+    action: IdentityProjectErrorAction.invalid,
+    chinese: '申请快照异常，无法审核',
+    english: 'The request snapshot is invalid and cannot be reviewed.',
+  ),
+  'INSTITUTION_PROJECT_VERSION_STALE': (
+    action: IdentityProjectErrorAction.refresh,
+    chinese: '机构项目已变化，请刷新后重试',
+    english: 'The institution project changed. Refresh and try again.',
+  ),
+};
 
 String? _translateKnownMessage(String raw, IdentityMessageResolver resolve) {
   if (raw.isEmpty) return null;

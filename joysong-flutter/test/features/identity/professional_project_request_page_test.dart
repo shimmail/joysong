@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
+import 'package:joysong_flutter/features/discover/presentation/institution_project_preview_body.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
 import 'package:joysong_flutter/features/identity/presentation/identity_pages.dart';
@@ -117,6 +118,118 @@ void main() {
     expect(
         legacyPreview.model.images, ['legacy-cover.jpg', 'legacy-gallery.jpg']);
   });
+
+  testWidgets(
+    'institution creation reviews reuse grouped cards and the shared detail route',
+    (tester) async {
+      _useLargeSurface(tester);
+      final repository = _ProjectRequestRepository()
+        ..requests = [
+          _request(
+            id: 'creation-1',
+            type: 'INSTITUTION',
+            doctorId: 'doctor-1',
+            institutionId: 'inst-1',
+          ),
+          _request(
+            id: 'creation-2',
+            type: 'INSTITUTION',
+            doctorId: 'doctor-2',
+            institutionId: 'inst-1',
+          ),
+          _request(
+            id: 'creation-3',
+            type: 'INSTITUTION',
+            doctorId: 'doctor-2',
+            institutionId: 'inst-2',
+          ),
+        ];
+
+      await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+        repository: repository,
+        context: _adminContext,
+        reviewMode: true,
+      )));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('institution-review-group-inst-1')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('institution-review-group-inst-2')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('institution-review-card-creation-1')),
+        findsOneWidget,
+      );
+
+      await tester.tap(
+        find.byKey(const Key('institution-review-detail-creation-1')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(InstitutionProjectPreviewBody), findsOneWidget);
+      expect(find.text('Clinic Hydrating Facial creation-1'), findsOneWidget);
+      expect(find.text('Current values at submission'), findsNothing);
+      await tester.drag(find.byType(ListView).last, const Offset(0, -1200));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('这是新增申请，因此没有变更前快照。'),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('creation-detail-review-creation-1')),
+        findsWidgets,
+      );
+    },
+  );
+
+  testWidgets(
+    'institution creation review revokes access and refreshes management context on 403',
+    (tester) async {
+      _useLargeSurface(tester);
+      var refreshes = 0;
+      final repository = _ProjectRequestRepository()
+        ..requests = [
+          _request(
+            id: 'creation-403',
+            type: 'INSTITUTION',
+            doctorId: 'doctor-1',
+            institutionId: 'inst-1',
+          ),
+        ]
+        ..institutionReviewError = const ApiException(
+          message: 'forbidden server text',
+          httpStatus: 403,
+        );
+
+      await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+        repository: repository,
+        context: _legalContext,
+        reviewMode: true,
+        onRefreshManagementContext: () async {
+          refreshes++;
+          return _nonTargetLegalContext;
+        },
+      )));
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const Key('review-creation-creation-403')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('creation-review-confirm')));
+      await tester.pumpAndSettle();
+
+      expect(refreshes, 1);
+      expect(
+        find.byKey(const Key('review-creation-creation-403')),
+        findsNothing,
+      );
+    },
+  );
 
   testWidgets(
       'platform application keeps the complete ordered plain-text form and uses the injected cover/gallery uploader',

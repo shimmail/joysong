@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
+import 'package:joysong_flutter/features/discover/presentation/institution_project_preview_body.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
 import 'package:joysong_flutter/features/identity/presentation/identity_pages.dart';
@@ -46,7 +47,7 @@ void main() {
       MaterialApp(
         home: DoctorProjectProfileUpdatePage(
           repository: _FakeRepository(
-            requests: const [_request],
+            requests: [_request],
             doctorProfile: _doctorProfileWithThreeInstitutions,
           ),
         ),
@@ -178,7 +179,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: DoctorProjectProfileUpdatePage(
-          repository: _FakeRepository(requests: const [_request]),
+          repository: _FakeRepository(requests: [_request]),
         ),
       ),
     );
@@ -363,6 +364,149 @@ void main() {
     expect(repository.submitted?.price, 0.02);
   });
 
+  testWidgets(
+    'legal review groups institutions and opens a full proposed comparison detail',
+    (tester) async {
+      _largeView(tester);
+      final repository = _FakeRepository(
+        requests: [
+          _v2Request(),
+          _v2Request(
+            id: 'request-2',
+            institutionProjectId: 'ip-2',
+            projectName: '项目二',
+            platformProjectName: '平台项目二',
+            doctorName: '王医生',
+            proposedDoctorPrice: 9800,
+          ),
+          _v2Request(
+            id: 'request-3',
+            institutionId: 'institution-2',
+            institutionName: '悦颜',
+            institutionProjectId: 'ip-3',
+            projectName: '项目三',
+          ),
+        ],
+      );
+      await tester.pumpWidget(MaterialApp(
+        home: DoctorProjectProfileReviewPage(
+          repository: repository,
+          context: _adminContext,
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('institution-review-group-institution-1')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('institution-review-group-institution-2')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('平台项目一'), findsWidgets);
+      expect(find.textContaining('李医生'), findsWidgets);
+      expect(find.textContaining('USD 12800.00'), findsWidgets);
+      expect(
+        find.byKey(const Key('request-status-request-1')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('doctor-active-status-request-1')),
+        findsOneWidget,
+      );
+
+      await _openReviewDetail(tester, 'request-1');
+      expect(find.byType(InstitutionProjectPreviewBody), findsOneWidget);
+      expect(find.text('申请后项目名称'), findsOneWidget);
+      expect(find.text('Current values at submission'), findsOneWidget);
+      expect(find.text('Proposed values'), findsOneWidget);
+      expect(find.text('Latest values'), findsNothing);
+      expect(
+        find.text(
+          'Shared project changes affect every doctor offering this institution project.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.text(
+          'Doctor price and availability affect only the applying doctor.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('https://cdn.example.com/proposed-cover.jpg'), findsNothing);
+      expect(find.byKey(const Key('approve-request-1')), findsOneWidget);
+      expect(find.byKey(const Key('reject-request-1')), findsOneWidget);
+      expect(find.byKey(const Key('changes-request-1')), findsOneWidget);
+      expect(find.byKey(const Key('force-request-1')), findsNothing);
+    },
+  );
+
+  testWidgets('detail review submission is synchronously de-duplicated', (
+    tester,
+  ) async {
+    _largeView(tester);
+    final gate = Completer<void>();
+    final repository = _FakeRepository(
+      requests: [_v2Request()],
+      reviewCompleter: gate,
+    );
+    await tester.pumpWidget(MaterialApp(
+      home: DoctorProjectProfileReviewPage(
+        repository: repository,
+        context: _legalContext,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await _openReviewDetail(tester, 'request-1');
+
+    await tester.tap(find.byKey(const Key('approve-request-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Confirm'));
+    await tester.pump();
+
+    expect(repository.reviewDecisions, ['APPROVED']);
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const Key('approve-request-1')))
+          .onPressed,
+      isNull,
+    );
+    await tester.tap(
+      find.byKey(const Key('approve-request-1')),
+      warnIfMissed: false,
+    );
+    await tester.pump();
+    expect(repository.reviewDecisions, ['APPROVED']);
+
+    gate.complete();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('pending legacy leave remains reviewable with legacy schedule', (
+    tester,
+  ) async {
+    _largeView(tester);
+    final repository = _FakeRepository(requests: const [_pendingLeaveRequest]);
+    await tester.pumpWidget(MaterialApp(
+      home: DoctorProjectProfileReviewPage(
+        repository: repository,
+        context: _legalContext,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('institution-review-card-leave-request-1')),
+      findsOneWidget,
+    );
+    await _openReviewDetail(tester, 'leave-request-1');
+    expect(find.textContaining('Legacy schedule'), findsOneWidget);
+    expect(find.byKey(const Key('approve-leave-request-1')), findsOneWidget);
+    expect(find.byKey(const Key('reject-leave-request-1')), findsOneWidget);
+    expect(find.byKey(const Key('changes-leave-request-1')), findsOneWidget);
+  });
+
   testWidgets('review shows only current and proposed price and travel fee', (
     tester,
   ) async {
@@ -376,6 +520,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await _openReviewDetail(tester, 'request-1');
 
     expect(find.text('Current values at submission'), findsOneWidget);
     expect(find.text('Proposed values'), findsOneWidget);
@@ -407,10 +552,11 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      await _openReviewDetail(tester, 'request-1');
       expect(find.text('Approve'), findsOneWidget);
       expect(find.text('Reject'), findsOneWidget);
       expect(find.text('Request changes'), findsOneWidget);
-      expect(find.text('Force approve'), findsOneWidget);
+      expect(find.text('Force approve'), findsNothing);
 
       await tester.tap(find.text('Request changes'));
       await tester.pumpAndSettle();
@@ -424,6 +570,19 @@ void main() {
       expect(repository.reviewDecision, 'CHANGES_REQUESTED');
       expect(repository.reviewForce, isFalse);
 
+      repository.reviewError = const ApiException(
+        message: 'server text must not select force',
+        httpStatus: 409,
+        errorCode: 'APPROVAL_BASE_STALE',
+      );
+      await _openReviewDetail(tester, 'request-1');
+      await tester.tap(find.text('Approve'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Confirm'));
+      await tester.pumpAndSettle();
+
+      await _openReviewDetail(tester, 'request-1');
+      expect(find.text('Latest values'), findsOneWidget);
       await tester.tap(find.text('Force approve'));
       await tester.pumpAndSettle();
       expect(find.text('Confirm force approval'), findsOneWidget);
@@ -437,8 +596,12 @@ void main() {
       expect(repository.reviewForce, isTrue);
       expect(repository.reviewDecision, 'APPROVED');
       expect(repository.reviewNote, 'Manual handling');
-      expect(repository.reviewForceBaseRevision, 'latest-revision-1');
-      expect(repository.reviewForceBaseRevisions, [null, 'latest-revision-1']);
+      expect(repository.reviewForceBaseRevision, 'latest-revision-request-1');
+      expect(repository.reviewForceBaseRevisions, [
+        null,
+        null,
+        'latest-revision-request-1',
+      ]);
     },
   );
 
@@ -455,15 +618,115 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await _openReviewDetail(tester, 'damaged-request');
 
     final approve = tester.widget<FilledButton>(
       find.byKey(const Key('approve-damaged-request')),
     );
-    final force = tester.widget<FilledButton>(
-      find.byKey(const Key('force-damaged-request')),
-    );
     expect(approve.onPressed, isNull);
-    expect(force.onPressed, isNull);
+    expect(find.byKey(const Key('force-damaged-request')), findsNothing);
+  });
+
+  testWidgets('only APPROVAL_BASE_STALE exposes force after refreshing detail', (
+    tester,
+  ) async {
+    _largeView(tester);
+    for (final code in const [
+      'EDIT_BASE_STALE',
+      'APPROVAL_BASE_STALE',
+      'INHERITANCE_SOURCE_STALE',
+      'PRICING_POLICY_STALE',
+      'FORCE_BASE_STALE',
+      'REQUEST_ALREADY_PENDING',
+      'REQUEST_ALREADY_HANDLED',
+      'CLIENT_UPGRADE_REQUIRED',
+      'FORCE_NOT_APPLICABLE',
+      'PROJECT_PAYLOAD_INVALID',
+      'REQUEST_SNAPSHOT_INVALID',
+      'INSTITUTION_PROJECT_VERSION_STALE',
+    ]) {
+      final repository = _FakeRepository(
+        requests: [_v2Request()],
+        reviewError: ApiException(
+          message: 'server text must not select force',
+          httpStatus: code == 'CLIENT_UPGRADE_REQUIRED' ? 426 : 409,
+          errorCode: code,
+        ),
+      );
+      await tester.pumpWidget(MaterialApp(
+        key: ValueKey('error-matrix-$code'),
+        home: DoctorProjectProfileReviewPage(
+          repository: repository,
+          context: _adminContext,
+        ),
+      ));
+      await tester.pumpAndSettle();
+      await _openReviewDetail(tester, 'request-1');
+      await tester.tap(find.byKey(const Key('approve-request-1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Confirm'));
+      await tester.pumpAndSettle();
+
+      await _openReviewDetail(tester, 'request-1');
+      expect(
+        find.byKey(const Key('force-request-1')),
+        code == 'APPROVAL_BASE_STALE' ? findsOneWidget : findsNothing,
+        reason: code,
+      );
+    }
+  });
+
+  testWidgets('403 refreshes management access and exits a revoked review', (
+    tester,
+  ) async {
+    _largeView(tester);
+    var refreshCount = 0;
+    final repository = _FakeRepository(
+      requests: [_v2Request()],
+      reviewError: const ApiException(
+        message: 'arbitrary forbidden response',
+        httpStatus: 403,
+      ),
+    );
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(builder: (context) {
+        return Scaffold(
+          body: FilledButton(
+            key: const Key('open-review-route'),
+            onPressed: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(
+                builder: (_) => DoctorProjectProfileReviewPage(
+                  repository: repository,
+                  context: _adminContext,
+                  onRefreshManagementContext: () async {
+                    refreshCount++;
+                    return const ManagementContext(
+                      userId: 'former-admin',
+                      platformRole: 'USER',
+                      activeRoles: [],
+                      managedInstitutionIds: [],
+                      visibleInstitutionIds: [],
+                      canReviewInstitutionProjectRequests: false,
+                    );
+                  },
+                ),
+              ),
+            ),
+            child: const Text('Open review'),
+          ),
+        );
+      }),
+    ));
+    await tester.tap(find.byKey(const Key('open-review-route')));
+    await tester.pumpAndSettle();
+    await _openReviewDetail(tester, 'request-1');
+    await tester.tap(find.byKey(const Key('approve-request-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Confirm'));
+    await tester.pumpAndSettle();
+
+    expect(refreshCount, 1);
+    expect(find.byType(DoctorProjectProfileReviewPage), findsNothing);
   });
 
   for (final errorCode in const [
@@ -529,7 +792,10 @@ void main() {
       await tester.tap(find.text('Doctor project profile reviews'));
       await tester.pumpAndSettle();
       expect(find.byType(DoctorProjectProfileReviewPage), findsOneWidget);
-      expect(find.text('Force approve'), findsOneWidget);
+      expect(
+        find.byKey(const Key('institution-review-card-request-1')),
+        findsOneWidget,
+      );
     },
   );
 }
@@ -545,6 +811,11 @@ Future<void> _openDoctorProject(WidgetTester tester, String projectId) async {
   await tester.tap(find.byKey(Key('doctor-project-menu-$projectId')));
   await tester.pumpAndSettle();
   await tester.tap(find.byKey(Key('doctor-project-edit-$projectId')));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _openReviewDetail(WidgetTester tester, String requestId) async {
+  await tester.tap(find.byKey(Key('institution-review-detail-$requestId')));
   await tester.pumpAndSettle();
 }
 
@@ -575,17 +846,22 @@ final class _FakeRepository implements IdentityRepository {
   _FakeRepository({
     this.managementContext,
     List<DoctorProjectProfileUpdateTarget>? targets,
-    this.requests = const [_request],
+    List<DoctorProjectChangeRequest>? requests,
     this.doctorProfile,
     this.leaveCompleter,
     this.submitError,
-  }) : targets = targets ?? [_target];
+    this.reviewCompleter,
+    this.reviewError,
+  })  : requests = requests ?? [_request],
+        targets = targets ?? [_target];
   final ManagementContext? managementContext;
   final List<DoctorProjectProfileUpdateTarget> targets;
   List<DoctorProjectChangeRequest> requests;
   final DoctorSelfProfile? doctorProfile;
   final Completer<DoctorProjectChangeRequest>? leaveCompleter;
   final ApiException? submitError;
+  final Completer<void>? reviewCompleter;
+  ApiException? reviewError;
   DoctorProjectProfileUpdateDraft? submitted;
   final leaveIds = <String>[];
   bool? reviewForce;
@@ -593,6 +869,7 @@ final class _FakeRepository implements IdentityRepository {
   String? reviewNote;
   String? reviewForceBaseRevision;
   final reviewForceBaseRevisions = <String?>[];
+  final reviewDecisions = <String>[];
   int targetLoadCount = 0;
   int requestLoadCount = 0;
 
@@ -662,11 +939,16 @@ final class _FakeRepository implements IdentityRepository {
     required bool force,
     required String? forceBaseRevision,
   }) async {
+    reviewDecisions.add(decision);
     reviewDecision = decision;
     reviewForce = force;
     this.reviewNote = reviewNote;
     reviewForceBaseRevision = forceBaseRevision;
     reviewForceBaseRevisions.add(forceBaseRevision);
+    final error = reviewError;
+    reviewError = null;
+    if (error != null) throw error;
+    await reviewCompleter?.future;
   }
 
   @override
@@ -757,45 +1039,130 @@ const _targetB = DoctorProjectProfileUpdateTarget(
   platformRate: 40,
   doctorRate: 10,
 );
-const _request = DoctorProjectChangeRequest(
-  id: 'request-1',
-  doctorId: 'doctor-1',
-  doctorName: '李医生',
-  institutionId: 'institution-1',
-  institutionName: '娇颜颂',
-  institutionProjectId: 'ip-1',
-  projectName: '项目一',
-  requestType: 'EDIT',
-  serviceDescription: '申请服务说明',
-  priceSuggestion: 12800,
-  notes: '',
-  serviceTags: ['精细化'],
-  scheduleNote: '周四',
-  coverImage: 'new-cover.jpg',
-  images: ['new.jpg'],
-  consultationFee: 300,
-  commissionRate: 10,
-  institutionRate: 40,
-  platformRate: 40,
-  doctorRate: 10,
-  forceProcessed: false,
-  currentPrice: 12000,
-  currentServiceDescription: '当前服务说明',
-  currentServiceTags: ['自然'],
-  currentScheduleNote: '周二',
-  currentCoverImage: 'cover.jpg',
-  currentImages: ['one.jpg'],
-  currentConsultationFee: 200,
-  currentCommissionRate: 5,
-  currentInstitutionRate: 40,
-  currentPlatformRate: 40,
-  currentDoctorRate: 15,
-  status: 'PENDING',
-  reviewNote: '',
-  payloadVersion: 2,
-  baseRevision: 'base-revision-1',
-  latestRevision: 'latest-revision-1',
-);
+final _request = _v2Request();
+
+DoctorProjectChangeRequest _v2Request({
+  String id = 'request-1',
+  String doctorId = 'doctor-1',
+  String doctorName = '李医生',
+  String institutionId = 'institution-1',
+  String institutionName = '娇颜颂',
+  String institutionProjectId = 'ip-1',
+  String projectName = '项目一',
+  String platformProjectName = '平台项目一',
+  num proposedDoctorPrice = 12800,
+  bool proposedDoctorActive = true,
+  String status = 'PENDING',
+  bool reviewable = true,
+}) =>
+    DoctorProjectChangeRequest.fromJson({
+      'payloadVersion': 2,
+      'id': id,
+      'requestType': 'PROFILE_UPDATE',
+      'doctorId': doctorId,
+      'doctorName': doctorName,
+      'institutionId': institutionId,
+      'institutionName': institutionName,
+      'institutionProjectId': institutionProjectId,
+      'institutionProjectName': projectName,
+      'platformProjectId': 'platform-project-$institutionProjectId',
+      'platformProjectName': platformProjectName,
+      'baseRevision': 'base-revision-$id',
+      'currentProject': _v2Snapshot(
+        institutionId: institutionId,
+        institutionProjectId: institutionProjectId,
+        name: '当前项目名称',
+        description: '当前说明',
+        coverImage: 'https://cdn.example.com/current-cover.jpg',
+        images: const ['https://cdn.example.com/current-gallery.jpg'],
+        version: 7,
+      ),
+      'proposedProject': _v2Snapshot(
+        institutionId: institutionId,
+        institutionProjectId: institutionProjectId,
+        name: '申请后项目名称',
+        description: '申请后说明',
+        coverImage: 'https://cdn.example.com/proposed-cover.jpg',
+        images: const ['https://cdn.example.com/proposed-gallery.jpg'],
+        version: 7,
+      ),
+      'latestProject': _v2Snapshot(
+        institutionId: institutionId,
+        institutionProjectId: institutionProjectId,
+        name: '最新项目名称',
+        description: '最新说明',
+        coverImage: 'https://cdn.example.com/latest-cover.jpg',
+        images: const ['https://cdn.example.com/latest-gallery.jpg'],
+        version: 8,
+      ),
+      'latestRevision': 'latest-revision-$id',
+      'sharedChanged': true,
+      'currentDoctorPrice': 12000,
+      'proposedDoctorPrice': proposedDoctorPrice,
+      'latestDoctorPrice': 12500,
+      'currentDoctorActive': false,
+      'proposedDoctorActive': proposedDoctorActive,
+      'latestDoctorActive': false,
+      'platformRate': 40,
+      'pricingPolicyRevision': 'travel-ground-service-rate:0.400000',
+      'travelGroundServiceFee': proposedDoctorPrice * .4,
+      'requestStatus': status,
+      'notes': '请审核完整变更',
+      'forceProcessed': false,
+      'submittedBy': doctorId,
+      'submittedAt': '2026-08-24T09:00:00',
+      'reviewedBy': null,
+      'reviewerName': null,
+      'reviewNote': null,
+      'reviewedAt': null,
+      'updatedAt': '2026-08-24T09:00:00',
+      'snapshotState': 'VALID',
+      'snapshotError': null,
+      'reviewable': reviewable,
+    });
+
+Map<String, Object?> _v2Snapshot({
+  required String institutionId,
+  required String institutionProjectId,
+  required String name,
+  required String description,
+  required String coverImage,
+  required List<String> images,
+  required int version,
+}) =>
+    {
+      'schemaVersion': 2,
+      'association': {
+        'institutionProjectId': institutionProjectId,
+        'institutionId': institutionId,
+        'platformProjectId': 'platform-project-$institutionProjectId',
+      },
+      'rawOverrides': {
+        'name': name,
+        'category': '皮肤管理',
+        'description': description,
+        'tags': ['自然', '精细'],
+        'slogan': '自然焕新',
+        'detailContent': '完整项目详情',
+        'coverImage': coverImage,
+        'images': images,
+      },
+      'effective': {
+        'name': name,
+        'category': '皮肤管理',
+        'description': description,
+        'tags': ['自然', '精细'],
+        'slogan': '自然焕新',
+        'detailContent': '完整项目详情',
+        'salesCount': 17,
+        'coverImage': coverImage,
+        'images': images,
+      },
+      'source': {
+        'institutionProjectVersion': version,
+        'platformInheritanceHash': 'inheritance-hash-$version',
+      },
+    };
 
 const _damagedRequest = DoctorProjectChangeRequest(
   id: 'damaged-request',
@@ -844,7 +1211,7 @@ const _pendingLeaveRequest = DoctorProjectChangeRequest(
   priceSuggestion: null,
   notes: '',
   serviceTags: [],
-  scheduleNote: '',
+  scheduleNote: '周五',
   coverImage: '',
   images: [],
   consultationFee: null,
