@@ -11,6 +11,7 @@ import com.joysong.server.legal.dto.LegalDocumentLocaleInput
 import com.joysong.server.legal.dto.PublishLegalDocumentRequest
 import com.joysong.server.legal.dto.UpdateLegalDocumentDraftRequest
 import com.joysong.server.legal.service.LegalDocumentHtmlSanitizer
+import com.joysong.server.legal.service.LegalDocumentCacheInvalidator
 import com.joysong.server.legal.service.LegalDocumentService
 import com.joysong.server.legal.service.LegalDocumentConflictException
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -22,6 +23,7 @@ import org.junit.jupiter.api.assertThrows
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest
+import org.springframework.cache.concurrent.ConcurrentMapCacheManager
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.springframework.dao.DataIntegrityViolationException
@@ -290,7 +292,8 @@ class LegalDocumentMigrationTest {
     private fun legalService() = LegalDocumentService(
         releaseRepository,
         contentRepository,
-        LegalDocumentHtmlSanitizer()
+        LegalDocumentHtmlSanitizer(),
+        LegalDocumentCacheInvalidator(ConcurrentMapCacheManager("legalDocuments"))
     )
 
     private fun legalRelease(id: String, version: Int, status: LegalDocumentStatus) = LegalDocumentReleaseEntity(

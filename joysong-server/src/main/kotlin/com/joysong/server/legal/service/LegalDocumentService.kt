@@ -15,7 +15,6 @@ import com.joysong.server.legal.entity.LegalDocumentStatus
 import com.joysong.server.legal.entity.LegalDocumentType
 import com.joysong.server.legal.repository.LegalDocumentContentRepository
 import com.joysong.server.legal.repository.LegalDocumentReleaseRepository
-import org.springframework.cache.annotation.CacheEvict
 import org.springframework.cache.annotation.Cacheable
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
@@ -27,7 +26,8 @@ import java.util.UUID
 class LegalDocumentService(
     private val releaseRepository: LegalDocumentReleaseRepository,
     private val contentRepository: LegalDocumentContentRepository,
-    private val sanitizer: LegalDocumentHtmlSanitizer
+    private val sanitizer: LegalDocumentHtmlSanitizer,
+    private val cacheInvalidator: LegalDocumentCacheInvalidator
 ) {
     fun listAdmin(): List<AdminLegalDocumentSummaryView> = LegalDocumentType.entries.map { type ->
         val releases = releaseRepository.findAllByDocumentTypeOrderByVersionDesc(type)
@@ -39,7 +39,11 @@ class LegalDocumentService(
     }
 
     fun history(type: LegalDocumentType): List<LegalDocumentReleaseSummaryView> =
-        releaseRepository.findAllByDocumentTypeOrderByVersionDesc(type).map { it.toSummary() }
+        releaseRepository.findAllByDocumentTypeOrderByVersionDesc(type)
+            .filter {
+                it.status == LegalDocumentStatus.PUBLISHED || it.status == LegalDocumentStatus.SUPERSEDED
+            }
+            .map { it.toSummary() }
 
     @Transactional
     fun createDraft(type: LegalDocumentType, actorId: String): LegalDocumentReleaseView {
@@ -107,12 +111,14 @@ class LegalDocumentService(
     }
 
     @Transactional
-    @CacheEvict(cacheNames = ["legalDocuments"], allEntries = true)
     fun publish(id: String, actorId: String, request: PublishLegalDocumentRequest): LegalDocumentReleaseView {
         val draft = releaseRepository.findByIdForUpdate(id) ?: throw LegalDocumentNotFoundException("协议版本不存在")
         requireDraftWithVersion(draft, request.lockVersion)
-        val contents = contentRepository.findAllByReleaseIdOrderByLocaleAsc(id)
-        requireCompleteBilingualContents(contents)
+        val contents = normalizeContentsForPublication(
+            contentRepository.findAllByReleaseIdOrderByLocaleAsc(id),
+            LocalDateTime.now()
+        )
+        contentRepository.saveAllAndFlush(contents)
 
         val releases = releaseRepository.findAllByDocumentTypeForUpdate(draft.documentType)
         val previous = releases.firstOrNull { it.status == LegalDocumentStatus.PUBLISHED && it.id != draft.id }
@@ -129,6 +135,7 @@ class LegalDocumentService(
         draft.updatedAt = now
         draft.updatedBy = actorId
         releaseRepository.saveAndFlush(draft)
+        cacheInvalidator.evictAfterCommit(draft.documentType)
         return draft.toView(contents)
     }
 
@@ -146,12 +153,25 @@ class LegalDocumentService(
         if (release.lockVersion != lockVersion) throw LegalDocumentConflictException("协议版本已被更新")
     }
 
-    private fun requireCompleteBilingualContents(contents: List<LegalDocumentContentEntity>) {
+    private fun normalizeContentsForPublication(
+        contents: List<LegalDocumentContentEntity>,
+        updatedAt: LocalDateTime
+    ): List<LegalDocumentContentEntity> {
         val byLocale = contents.associateBy { it.locale }
-        LegalDocumentLocale.entries.forEach { locale ->
+        val normalized = LegalDocumentLocale.entries.map { locale ->
             val content = byLocale[locale] ?: throw IllegalArgumentException("协议缺少${locale.tag}内容")
-            require(content.title.trim().isNotEmpty()) { "协议${locale.tag}标题不能为空" }
-            require(sanitizer.sanitize(content.contentHtml).visibleText.isNotEmpty()) { "协议${locale.tag}正文不能为空" }
+            val title = content.title.trim()
+            val sanitized = sanitizer.sanitize(content.contentHtml)
+            require(title.isNotEmpty()) { "协议${locale.tag}标题不能为空" }
+            require(sanitized.visibleText.isNotEmpty()) { "协议${locale.tag}正文不能为空" }
+            Triple(content, title, sanitized.html)
+        }
+        return normalized.map { (content, title, sanitizedHtml) ->
+            content.title = title
+            content.contentHtml = sanitizedHtml
+            content.contentSha256 = sanitizer.sha256(title, sanitizedHtml)
+            content.updatedAt = updatedAt
+            content
         }
     }
 

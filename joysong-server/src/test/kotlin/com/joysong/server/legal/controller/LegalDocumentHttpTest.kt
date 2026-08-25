@@ -155,6 +155,24 @@ class LegalDocumentHttpTest @Autowired constructor(
             .andExpect(jsonPath("$.data.lockVersion").value(7))
     }
 
+    @Test
+    fun `admin history returns only immutable published and superseded releases`() {
+        given(legalDocumentService.history(LegalDocumentType.PRIVACY_POLICY)).willReturn(
+            listOf(
+                releaseSummary().copy(id = "published-2", status = LegalDocumentStatus.PUBLISHED),
+                releaseSummary().copy(id = "superseded-1", status = LegalDocumentStatus.SUPERSEDED)
+            )
+        )
+
+        mockMvc.perform(get("/api/admin/legal-documents/privacy-policy/history").with(user("admin").roles("ADMIN")))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.length()").value(2))
+            .andExpect(jsonPath("$.data[0].id").value("published-2"))
+            .andExpect(jsonPath("$.data[0].status").value("PUBLISHED"))
+            .andExpect(jsonPath("$.data[1].id").value("superseded-1"))
+            .andExpect(jsonPath("$.data[1].status").value("SUPERSEDED"))
+    }
+
     private fun view(
         title: String = "Privacy policy",
         contentHtml: String = "<p>Privacy body</p>"

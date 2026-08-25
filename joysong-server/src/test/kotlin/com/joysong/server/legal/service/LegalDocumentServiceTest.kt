@@ -16,14 +16,23 @@ import io.mockk.slot
 import io.mockk.verify
 import io.mockk.verifySequence
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.springframework.dao.DataIntegrityViolationException
+import java.time.LocalDateTime
 
 class LegalDocumentServiceTest {
     private val releaseRepository = mockk<LegalDocumentReleaseRepository>()
     private val contentRepository = mockk<LegalDocumentContentRepository>()
-    private val service = LegalDocumentService(releaseRepository, contentRepository, LegalDocumentHtmlSanitizer())
+    private val cacheInvalidator = mockk<LegalDocumentCacheInvalidator>(relaxed = true)
+    private val service = LegalDocumentService(
+        releaseRepository,
+        contentRepository,
+        LegalDocumentHtmlSanitizer(),
+        cacheInvalidator
+    )
 
     @Test
     fun `create draft rejects a second draft for the same document type`() {
@@ -77,6 +86,21 @@ class LegalDocumentServiceTest {
         verify(exactly = 0) { releaseRepository.saveAll(any<List<LegalDocumentReleaseEntity>>()) }
         verify(exactly = 0) { releaseRepository.saveAndFlush(any()) }
         verify(exactly = 0) { contentRepository.saveAll(any<List<LegalDocumentContentEntity>>()) }
+        verify(exactly = 0) { contentRepository.saveAllAndFlush(any<List<LegalDocumentContentEntity>>()) }
+    }
+
+    @Test
+    fun `history excludes the mutable active draft`() {
+        every { releaseRepository.findAllByDocumentTypeOrderByVersionDesc(LegalDocumentType.USER_AGREEMENT) } returns listOf(
+            release(id = "draft-3", status = LegalDocumentStatus.DRAFT, version = 3),
+            release(id = "published-2", status = LegalDocumentStatus.PUBLISHED, version = 2),
+            release(id = "superseded-1", status = LegalDocumentStatus.SUPERSEDED, version = 1)
+        )
+
+        val history = service.history(LegalDocumentType.USER_AGREEMENT)
+
+        assertEquals(listOf("published-2", "superseded-1"), history.map { it.id })
+        assertEquals(listOf(LegalDocumentStatus.PUBLISHED, LegalDocumentStatus.SUPERSEDED), history.map { it.status })
     }
 
     @Test
@@ -129,6 +153,7 @@ class LegalDocumentServiceTest {
         val draft = release(id = "draft-2", version = 2, lockVersion = 7)
         every { releaseRepository.findByIdForUpdate(draft.id) } returns draft
         every { contentRepository.findAllByReleaseIdOrderByLocaleAsc(draft.id) } returns bilingualContents(draft.id)
+        every { contentRepository.saveAllAndFlush(any<List<LegalDocumentContentEntity>>()) } answers { firstArg() }
         every { releaseRepository.findAllByDocumentTypeForUpdate(LegalDocumentType.USER_AGREEMENT) } returns listOf(draft, previous)
         every { releaseRepository.saveAndFlush(previous) } answers { previous }
         every { releaseRepository.saveAndFlush(draft) } answers {
@@ -146,10 +171,89 @@ class LegalDocumentServiceTest {
         verifySequence {
             releaseRepository.findByIdForUpdate(draft.id)
             contentRepository.findAllByReleaseIdOrderByLocaleAsc(draft.id)
+            contentRepository.saveAllAndFlush(any<List<LegalDocumentContentEntity>>())
             releaseRepository.findAllByDocumentTypeForUpdate(LegalDocumentType.USER_AGREEMENT)
             releaseRepository.saveAndFlush(previous)
             releaseRepository.saveAndFlush(draft)
         }
+    }
+
+    @Test
+    fun `publish re-normalizes stored bilingual content and returns hashes for the final public data`() {
+        val sanitizer = LegalDocumentHtmlSanitizer()
+        val draft = release(id = "draft-unsafe", version = 2, lockVersion = 4)
+        val storedContents = listOf(
+            content(
+                draft.id,
+                LegalDocumentLocale.EN_US,
+                "  User agreement  ",
+                "<p>Safe <script>alert(1)</script><strong>English</strong></p>"
+            ).apply {
+                contentSha256 = "stale-en"
+                updatedAt = LocalDateTime.of(2026, 8, 25, 8, 0)
+            },
+            content(
+                draft.id,
+                LegalDocumentLocale.ZH_CN,
+                "  用户协议  ",
+                "<p onclick=\"alert(1)\">安全<strong>中文</strong></p>"
+            ).apply {
+                contentSha256 = "stale-zh"
+                updatedAt = LocalDateTime.of(2026, 8, 25, 8, 0)
+            }
+        )
+        every { releaseRepository.findByIdForUpdate(draft.id) } returns draft
+        every { contentRepository.findAllByReleaseIdOrderByLocaleAsc(draft.id) } returns storedContents
+        every { contentRepository.saveAllAndFlush(any<List<LegalDocumentContentEntity>>()) } answers { firstArg() }
+        every { releaseRepository.findAllByDocumentTypeForUpdate(LegalDocumentType.USER_AGREEMENT) } returns listOf(draft)
+        every { releaseRepository.saveAndFlush(draft) } answers { draft }
+        every {
+            releaseRepository.findFirstByDocumentTypeAndStatus(
+                LegalDocumentType.USER_AGREEMENT,
+                LegalDocumentStatus.PUBLISHED
+            )
+        } returns draft
+
+        val published = service.publish(draft.id, "admin-1", PublishLegalDocumentRequest(draft.lockVersion))
+        val publicEnglish = service.findPublished(LegalDocumentType.USER_AGREEMENT, LegalDocumentLocale.EN_US)
+        val persisted = storedContents.associateBy { it.locale }
+
+        assertEquals("User agreement", persisted.getValue(LegalDocumentLocale.EN_US).title)
+        assertEquals("<p>Safe <strong>English</strong></p>", persisted.getValue(LegalDocumentLocale.EN_US).contentHtml)
+        assertEquals("用户协议", persisted.getValue(LegalDocumentLocale.ZH_CN).title)
+        assertEquals("<p>安全<strong>中文</strong></p>", persisted.getValue(LegalDocumentLocale.ZH_CN).contentHtml)
+        persisted.values.forEach { content ->
+            assertEquals(sanitizer.sha256(content.title, content.contentHtml), content.contentSha256)
+            assertNotEquals("stale-${if (content.locale == LegalDocumentLocale.EN_US) "en" else "zh"}", content.contentSha256)
+            assertTrue(content.updatedAt.isAfter(LocalDateTime.of(2026, 8, 25, 8, 0)))
+        }
+        assertEquals(
+            persisted.getValue(LegalDocumentLocale.EN_US).contentSha256,
+            published.contents.single { it.locale == LegalDocumentLocale.EN_US }.contentSha256
+        )
+        assertEquals("<p>Safe <strong>English</strong></p>", publicEnglish?.contentHtml)
+        assertEquals(persisted.getValue(LegalDocumentLocale.EN_US).contentSha256, publicEnglish?.contentSha256)
+        verify(exactly = 1) { contentRepository.saveAllAndFlush(any<List<LegalDocumentContentEntity>>()) }
+    }
+
+    @Test
+    fun `publish content flush failure leaves release states unpublished`() {
+        val previous = release(id = "published-1", status = LegalDocumentStatus.PUBLISHED, version = 1)
+        val draft = release(id = "draft-2", version = 2)
+        every { releaseRepository.findByIdForUpdate(draft.id) } returns draft
+        every { contentRepository.findAllByReleaseIdOrderByLocaleAsc(draft.id) } returns bilingualContents(draft.id)
+        every { contentRepository.saveAllAndFlush(any<List<LegalDocumentContentEntity>>()) } throws
+            DataIntegrityViolationException("forced content flush failure")
+
+        assertThrows<DataIntegrityViolationException> {
+            service.publish(draft.id, "admin-1", PublishLegalDocumentRequest(draft.lockVersion))
+        }
+
+        assertEquals(LegalDocumentStatus.DRAFT, draft.status)
+        assertEquals(LegalDocumentStatus.PUBLISHED, previous.status)
+        verify(exactly = 0) { releaseRepository.findAllByDocumentTypeForUpdate(any()) }
+        verify(exactly = 0) { releaseRepository.saveAndFlush(any()) }
+        verify(exactly = 0) { cacheInvalidator.evictAfterCommit(any()) }
     }
 
     private fun draftRequest(lockVersion: Long) = UpdateLegalDocumentDraftRequest(
