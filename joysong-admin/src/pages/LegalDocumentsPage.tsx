@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Card, Col, Drawer, Form, Input, Modal, Row, Space, Spin, Table, Tabs, Tag, message } from 'antd';
 import RichTextEditor from '../components/RichTextEditor';
 import { getApiErrorMessage } from '../api';
@@ -24,6 +24,18 @@ const documentDefinitions: Array<{ type: LegalDocumentType; title: string }> = [
   { type: 'privacy-policy', title: '隐私政策' },
 ];
 const legalToolbarKeys = ['headerSelect', 'bold', 'italic', 'underline', 'blockquote', 'bulletedList', 'numberedList', 'insertLink', 'undo', 'redo'];
+const previewCsp = "default-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-src 'none'";
+
+type DraftRequestTarget = { documentType: LegalDocumentType; releaseId?: string };
+
+function escapeHtmlText(value: string) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
 
 function contentFor(release: LegalDocumentRelease, locale: LegalDocumentLocale): LegalDocumentContent {
   return release.contents.find((item) => item.locale === locale) ?? {
@@ -74,23 +86,61 @@ export default function LegalDocumentsPage() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState<LegalDocumentReleaseSummary[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const mountedRef = useRef(false);
+  const summaryGenerationRef = useRef(0);
+  const draftGenerationRef = useRef(0);
+  const draftTargetRef = useRef<DraftRequestTarget | null>(null);
+  const historyGenerationRef = useRef(0);
+  const historyTypeRef = useRef<LegalDocumentType | null>(null);
+
+  const isCurrentSummaryRequest = (generation: number) => (
+    mountedRef.current && summaryGenerationRef.current === generation
+  );
+
+  const isCurrentDraftRequest = (generation: number, target: DraftRequestTarget) => (
+    mountedRef.current && draftGenerationRef.current === generation && draftTargetRef.current === target
+  );
+
+  const isExpectedDraft = (release: LegalDocumentRelease, target: DraftRequestTarget) => (
+    release.documentType === target.documentType && (!target.releaseId || release.id === target.releaseId)
+  );
+
+  const isCurrentHistoryRequest = (generation: number, type: LegalDocumentType) => (
+    mountedRef.current && historyGenerationRef.current === generation && historyTypeRef.current === type
+  );
 
   const loadSummaries = async () => {
+    const generation = ++summaryGenerationRef.current;
+    if (!mountedRef.current) return;
     setLoading(true);
     try {
-      setSummaries(await listLegalDocuments());
+      const response = await listLegalDocuments();
+      if (!isCurrentSummaryRequest(generation)) return;
+      setSummaries(response);
     } catch (error) {
+      if (!isCurrentSummaryRequest(generation)) return;
       message.error(getApiErrorMessage(error, '加载协议列表失败'));
     } finally {
-      setLoading(false);
+      if (isCurrentSummaryRequest(generation)) setLoading(false);
     }
   };
 
   useEffect(() => {
+    mountedRef.current = true;
     void loadSummaries();
+    return () => {
+      mountedRef.current = false;
+      summaryGenerationRef.current += 1;
+      draftGenerationRef.current += 1;
+      draftTargetRef.current = null;
+      historyGenerationRef.current += 1;
+      historyTypeRef.current = null;
+    };
   }, []);
 
-  const openDraft = (release: LegalDocumentRelease) => {
+  const openDraft = (release: LegalDocumentRelease, generation: number, target: DraftRequestTarget) => {
+    if (!isCurrentDraftRequest(generation, target) || !isExpectedDraft(release, target)) return false;
+    target.releaseId = release.id;
     setDraft(release);
     setSavedDraft(release);
     setActiveLocale('zh-CN');
@@ -99,44 +149,73 @@ export default function LegalDocumentsPage() {
       'zh-CN': editableContent(release, 'zh-CN'),
       'en-US': editableContent(release, 'en-US'),
     });
+    return true;
   };
 
   const closeDraft = () => {
+    draftGenerationRef.current += 1;
+    draftTargetRef.current = null;
     setDraft(null);
     setSavedDraft(null);
     setPreviewOpen(false);
     setPublishOpen(false);
+    setSaving(false);
   };
 
   const openExistingDraft = async (summary: LegalDocumentReleaseSummary) => {
+    const target = { documentType: summary.documentType, releaseId: summary.id };
+    const generation = ++draftGenerationRef.current;
+    draftTargetRef.current = target;
+    setDraft(null);
+    setSavedDraft(null);
+    setPreviewOpen(false);
+    setPublishOpen(false);
+    setSaving(false);
     try {
-      openDraft(await getLegalDocumentRelease(summary.id));
+      const response = await getLegalDocumentRelease(summary.id);
+      openDraft(response, generation, target);
     } catch (error) {
+      if (!isCurrentDraftRequest(generation, target)) return;
       message.error(getApiErrorMessage(error, '加载草稿失败'));
     }
   };
 
   const createDraft = async (type: LegalDocumentType) => {
+    const target = { documentType: type };
+    const generation = ++draftGenerationRef.current;
+    draftTargetRef.current = target;
+    setDraft(null);
+    setSavedDraft(null);
+    setPreviewOpen(false);
+    setPublishOpen(false);
+    setSaving(false);
     try {
-      openDraft(await createLegalDocumentDraft(type));
+      const response = await createLegalDocumentDraft(type);
+      if (!openDraft(response, generation, target)) return;
       await loadSummaries();
     } catch (error) {
+      if (!isCurrentDraftRequest(generation, target)) return;
       message.error(getApiErrorMessage(error, '创建草稿失败'));
     }
   };
 
-  const reloadAfterConflict = async () => {
+  const reloadAfterConflict = async (generation: number, target: DraftRequestTarget) => {
     await loadSummaries();
-    if (!draft) return;
+    if (!isCurrentDraftRequest(generation, target) || !target.releaseId) return;
     try {
-      openDraft(await getLegalDocumentRelease(draft.id));
+      const response = await getLegalDocumentRelease(target.releaseId);
+      openDraft(response, generation, target);
     } catch {
+      if (!isCurrentDraftRequest(generation, target)) return;
       closeDraft();
     }
   };
 
   const saveDraft = async () => {
     if (!draft) return;
+    const target = { documentType: draft.documentType, releaseId: draft.id };
+    const generation = ++draftGenerationRef.current;
+    draftTargetRef.current = target;
     setSaving(true);
     try {
       const response = await updateLegalDocumentDraft(draft.id, {
@@ -144,54 +223,76 @@ export default function LegalDocumentsPage() {
         changeSummary: changeSummary.trim(),
         contents,
       });
-      openDraft(response);
+      if (!openDraft(response, generation, target)) return;
+      summaryGenerationRef.current += 1;
+      setLoading(false);
       setSummaries((current) => current.map((item) => item.documentType === response.documentType
         ? { ...item, draft: releaseSummary(response) }
         : item));
       message.success('草稿已保存');
     } catch (error: any) {
+      if (!isCurrentDraftRequest(generation, target)) return;
       if (error?.response?.status === 409) {
         message.warning('草稿已被其他管理员修改，已重新加载最新版本');
-        await reloadAfterConflict();
+        await reloadAfterConflict(generation, target);
       } else {
         message.error(getApiErrorMessage(error, '保存草稿失败'));
       }
     } finally {
-      setSaving(false);
+      if (isCurrentDraftRequest(generation, target)) setSaving(false);
     }
   };
 
   const publishDraft = async () => {
     if (!draft) return;
+    const target = { documentType: draft.documentType, releaseId: draft.id };
+    const generation = ++draftGenerationRef.current;
+    draftTargetRef.current = target;
     setSaving(true);
     try {
       await publishLegalDocumentRelease(draft.id, { lockVersion: draft.lockVersion });
+      if (!isCurrentDraftRequest(generation, target)) return;
       message.success('协议已发布');
       closeDraft();
       await loadSummaries();
     } catch (error: any) {
+      if (!isCurrentDraftRequest(generation, target)) return;
       if (error?.response?.status === 409) {
+        setPublishOpen(false);
         message.warning('草稿已被其他管理员修改，已重新加载最新版本');
-        await reloadAfterConflict();
+        await reloadAfterConflict(generation, target);
       } else {
         message.error(getApiErrorMessage(error, '发布失败'));
       }
     } finally {
-      setSaving(false);
+      if (isCurrentDraftRequest(generation, target)) setSaving(false);
     }
   };
 
   const openHistory = async (type: LegalDocumentType) => {
+    const generation = ++historyGenerationRef.current;
+    historyTypeRef.current = type;
     setHistoryOpen(true);
     setHistory([]);
     setHistoryLoading(true);
     try {
-      setHistory(await getLegalDocumentHistory(type));
+      const response = await getLegalDocumentHistory(type);
+      if (!isCurrentHistoryRequest(generation, type)) return;
+      setHistory(response);
     } catch (error) {
+      if (!isCurrentHistoryRequest(generation, type)) return;
       message.error(getApiErrorMessage(error, '加载历史版本失败'));
     } finally {
-      setHistoryLoading(false);
+      if (isCurrentHistoryRequest(generation, type)) setHistoryLoading(false);
     }
+  };
+
+  const closeHistory = () => {
+    historyGenerationRef.current += 1;
+    historyTypeRef.current = null;
+    setHistoryOpen(false);
+    setHistory([]);
+    setHistoryLoading(false);
   };
 
   const dirty = useMemo(() => !savedDraft || changeSummary !== savedDraft.changeSummary
@@ -263,14 +364,14 @@ export default function LegalDocumentsPage() {
       </Drawer>
 
       <Modal title="协议预览" open={previewOpen} footer={null} onCancel={() => setPreviewOpen(false)} width={780}>
-        {savedPreview && <iframe title="协议预览" sandbox="" srcDoc={`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head><body><h1>${savedPreview.title}</h1>${savedPreview.contentHtml}</body></html>`} style={{ width: '100%', minHeight: 480, border: 0 }} />}
+        {savedPreview && <iframe title="协议预览" sandbox="" srcDoc={`<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${previewCsp}"><meta name="viewport" content="width=device-width"></head><body><h1>${escapeHtmlText(savedPreview.title)}</h1>${savedPreview.contentHtml}</body></html>`} style={{ width: '100%', minHeight: 480, border: 0 }} />}
       </Modal>
 
-      <Modal title="确认发布" open={publishOpen} onCancel={() => setPublishOpen(false)} onOk={() => void publishDraft()} okText="确认发布" cancelText="取消" okButtonProps={{ 'aria-label': '确认发布' }} confirmLoading={saving}>
+      {publishOpen && <Modal title="确认发布" open onCancel={() => setPublishOpen(false)} onOk={() => void publishDraft()} okText="确认发布" cancelText="取消" okButtonProps={{ 'aria-label': '确认发布' }} confirmLoading={saving}>
         发布后将立即替换当前生效版本，确认继续吗？
-      </Modal>
+      </Modal>}
 
-      <Drawer title="历史版本" open={historyOpen} onClose={() => setHistoryOpen(false)} size="large">
+      <Drawer title="历史版本" open={historyOpen} onClose={closeHistory} size="large">
         <Table rowKey="id" loading={historyLoading} dataSource={history} pagination={false} columns={[
           { title: '版本', dataIndex: 'version', render: (value) => `v${value}` },
           { title: '状态', dataIndex: 'status', render: (value) => <Tag>{value}</Tag> },
