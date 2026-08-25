@@ -377,6 +377,73 @@ void main() {
     expect(
         find.text('institution-private', skipOffstage: false), findsOneWidget);
   });
+
+  testWidgets('refund summary translates without translating form input',
+      (tester) async {
+    await _useTallSurface(tester);
+    final ordersRepository = FakeOrdersRepository()
+      ..orders = [sampleOrder(status: OrderStatus.consultationPaid)];
+    final translations = RecordingTranslationRepository();
+    final controller = OrderDetailController(
+      ordersRepository,
+      orderId: 'order-1',
+    );
+    addTearDown(controller.dispose);
+    final autoController = _activeAutoController(translations);
+    addTearDown(autoController.dispose);
+
+    await tester.pumpWidget(
+      _detailHost(
+        controller: controller,
+        autoController: autoController,
+        enableAutoTranslation: true,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final refundButton = find.byKey(const Key('request-refund-button'));
+    await tester.scrollUntilVisible(refundButton, 300);
+    await tester.tap(refundButton);
+    await tester.pumpAndSettle();
+
+    expect(_mountedRequests(tester), const {
+      ('project', 'order:order-1', 'projectName', '光子嫩肤'),
+      ('institution', 'order:order-1', 'institutionName', '娇颜颂医疗美容'),
+    });
+    await tester.tap(find.byKey(const Key('refund-reason-5')));
+    await tester.pump();
+    await tester.enterText(
+      find.byKey(const Key('refund-custom-reason-field')),
+      '临时改变行程',
+    );
+    await tester.enterText(
+      find.byKey(const Key('refund-description-field')),
+      '需要延期处理',
+    );
+
+    expect(
+        translations.calls.map((call) => call.text), isNot(contains('临时改变行程')));
+    expect(
+        translations.calls.map((call) => call.text), isNot(contains('需要延期处理')));
+
+    await tester.tap(find.byKey(const Key('refund-submit-button')));
+    await tester.pumpAndSettle();
+
+    expect(ordersRepository.lastRefundReason, '临时改变行程');
+    expect(ordersRepository.lastRefundDescription, '需要延期处理');
+    expect(
+      translations.calls.map((call) => call.text),
+      isNot(contains('临时改变行程')),
+    );
+    expect(
+      translations.calls.map((call) => call.text),
+      isNot(contains('需要延期处理')),
+    );
+    expect(
+      translations.calls.map((call) => call.text),
+      ['光子嫩肤', '娇颜颂医疗美容'],
+    );
+  });
 }
 
 OrderStatusLog _statusLog({

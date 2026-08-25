@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:joysong_flutter/core/translation/auto_translation_builder.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
 import 'package:joysong_flutter/features/orders/domain/payment_models.dart';
 import 'package:joysong_flutter/features/orders/presentation/payment_controller.dart';
@@ -10,11 +11,13 @@ class PaymentPage extends StatefulWidget {
   const PaymentPage({
     required this.controller,
     this.now = DateTime.now,
+    this.enableAutoTranslation = false,
     super.key,
   });
 
   final PaymentController controller;
   final DateTime Function() now;
+  final bool enableAutoTranslation;
 
   @override
   State<PaymentPage> createState() => _PaymentPageState();
@@ -97,6 +100,7 @@ class _PaymentPageState extends State<PaymentPage> with WidgetsBindingObserver {
               controller: controller,
               strings: strings,
               now: widget.now,
+              enableAutoTranslation: widget.enableAutoTranslation,
             ),
             bottomNavigationBar: _PaymentBottomBar(
               controller: controller,
@@ -113,11 +117,13 @@ class _PaymentBody extends StatelessWidget {
     required this.controller,
     required this.strings,
     required this.now,
+    required this.enableAutoTranslation,
   });
 
   final PaymentController controller;
   final PaymentStrings strings;
   final DateTime Function() now;
+  final bool enableAutoTranslation;
 
   @override
   Widget build(BuildContext context) {
@@ -138,6 +144,7 @@ class _PaymentBody extends StatelessWidget {
           order: order,
           showInstitution:
               !controller.isServiceFeeFlow || order.consultantDetailsVisible,
+          enableAutoTranslation: enableAutoTranslation,
         ),
         const SizedBox(height: 12),
         Card(
@@ -481,55 +488,72 @@ class _PaymentBottomBar extends StatelessWidget {
 }
 
 class _OrderSummary extends StatelessWidget {
-  const _OrderSummary({required this.order, required this.showInstitution});
+  const _OrderSummary({
+    required this.order,
+    required this.showInstitution,
+    required this.enableAutoTranslation,
+  });
 
   final Order order;
   final bool showInstitution;
+  final bool enableAutoTranslation;
 
   @override
-  Widget build(BuildContext context) => Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              CircleAvatar(
-                radius: 28,
-                backgroundImage: order.coverImage.isEmpty
-                    ? null
-                    : NetworkImage(order.coverImage),
-                child: order.coverImage.isEmpty
-                    ? const Icon(Icons.spa_outlined)
-                    : null,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      order.projectName,
-                      maxLines: 2,
+  Widget build(BuildContext context) {
+    final orderId = order.id.trim();
+    final translateOrder = enableAutoTranslation && orderId.isNotEmpty;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 28,
+              backgroundImage: order.coverImage.isEmpty
+                  ? null
+                  : NetworkImage(order.coverImage),
+              child: order.coverImage.isEmpty
+                  ? const Icon(Icons.spa_outlined)
+                  : null,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  StableAutoTranslatedText(
+                    enabled: translateOrder,
+                    contentType: 'project',
+                    contentId: 'order:$orderId',
+                    field: 'projectName',
+                    sourceText: order.projectName,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  if (showInstitution && order.institutionName.isNotEmpty)
+                    StableAutoTranslatedText(
+                      enabled: translateOrder,
+                      contentType: 'institution',
+                      contentId: 'order:$orderId',
+                      field: 'institutionName',
+                      sourceText: order.institutionName,
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium,
                     ),
-                    if (showInstitution && order.institutionName.isNotEmpty)
-                      Text(
-                        order.institutionName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    if (order.orderNo.isNotEmpty)
-                      Text(
-                        order.orderNo,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                  ],
-                ),
+                  if (order.orderNo.isNotEmpty)
+                    Text(
+                      order.orderNo,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
-      );
+      ),
+    );
+  }
 }
 
 IconData _providerIcon(PaymentProvider provider) => switch (provider) {
@@ -592,7 +616,8 @@ String _formatPaymentDateTime(DateTime value) {
 }
 
 String _formatPaymentRemaining(DateTime expiresAt, {DateTime Function()? now}) {
-  final milliseconds = expiresAt.difference(now?.call() ?? DateTime.now()).inMilliseconds;
+  final milliseconds =
+      expiresAt.difference(now?.call() ?? DateTime.now()).inMilliseconds;
   final totalSeconds = milliseconds <= 0 ? 0 : (milliseconds + 999) ~/ 1000;
   final hours = totalSeconds ~/ 3600;
   final minutes = (totalSeconds % 3600) ~/ 60;

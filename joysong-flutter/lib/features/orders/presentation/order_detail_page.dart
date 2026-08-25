@@ -39,6 +39,8 @@ class OrderDetailPage extends StatefulWidget {
 
 class _OrderDetailPageState extends State<OrderDetailPage> {
   bool _reviewBusy = false;
+  String? _submittedRefundReason;
+  String? _submittedRefundDescription;
 
   @override
   void initState() {
@@ -87,10 +89,15 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
           order: widget.controller.order!,
           canUploadEvidence: widget.socialController != null,
           onPickEvidence: () => _pickAndUpload(PublicMediaPurpose.review),
+          enableAutoTranslation: widget.enableAutoTranslation,
         ),
       ),
     );
     if (draft != null && mounted) {
+      setState(() {
+        _submittedRefundReason = draft.reason;
+        _submittedRefundDescription = draft.description;
+      });
       await widget.controller.requestRefund(
         reason: draft.reason,
         description: draft.description,
@@ -153,6 +160,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
       MaterialPageRoute(
         builder: (_) => ReviewOrderPage(
           order: order,
+          enableAutoTranslation: widget.enableAutoTranslation,
           onPickImage: () => _pickAndUpload(
             PublicMediaPurpose.review,
             propagateError: true,
@@ -207,6 +215,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
         builder: (_) => ReviewOrderPage(
           order: order,
           initialReview: review,
+          enableAutoTranslation: widget.enableAutoTranslation,
           onPickImage: () => _pickAndUpload(
             PublicMediaPurpose.review,
             propagateError: true,
@@ -300,6 +309,8 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
           _RefundCard(
             refund: controller.refund!,
             enableAutoTranslation: widget.enableAutoTranslation,
+            submittedReason: _submittedRefundReason,
+            submittedDescription: _submittedRefundDescription,
           ),
         ],
         if (!order.isTravelGroundServiceOnly &&
@@ -398,7 +409,10 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     bool? paid;
     try {
       paid = await Navigator.of(context).push<bool>(MaterialPageRoute(
-        builder: (_) => PaymentPage(controller: controller),
+        builder: (_) => PaymentPage(
+          controller: controller,
+          enableAutoTranslation: widget.enableAutoTranslation,
+        ),
       ));
     } finally {
       controller.dispose();
@@ -416,7 +430,10 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     );
     try {
       await Navigator.of(context).push<bool>(MaterialPageRoute(
-        builder: (_) => PaymentPage(controller: controller),
+        builder: (_) => PaymentPage(
+          controller: controller,
+          enableAutoTranslation: widget.enableAutoTranslation,
+        ),
       ));
     } finally {
       controller.dispose();
@@ -784,10 +801,14 @@ class _RefundCard extends StatelessWidget {
   const _RefundCard({
     required this.refund,
     required this.enableAutoTranslation,
+    this.submittedReason,
+    this.submittedDescription,
   });
 
   final RefundDetail refund;
   final bool enableAutoTranslation;
+  final String? submittedReason;
+  final String? submittedDescription;
 
   @override
   Widget build(BuildContext context) {
@@ -810,7 +831,8 @@ class _RefundCard extends StatelessWidget {
           _DetailLine.widget(
             label: _isEnglish(context) ? 'Reason' : '原因',
             value: StableAutoTranslatedText(
-              enabled: translateRefund,
+              enabled:
+                  translateRefund && refund.reason.trim() != submittedReason,
               contentType: 'general',
               contentId: contentId,
               field: 'reason',
@@ -821,7 +843,8 @@ class _RefundCard extends StatelessWidget {
           _DetailLine.widget(
             label: _isEnglish(context) ? 'Details' : '说明',
             value: StableAutoTranslatedText(
-              enabled: translateRefund,
+              enabled: translateRefund &&
+                  visibleDescription.trim() != submittedDescription,
               contentType: 'general',
               contentId: contentId,
               field: 'description',
@@ -1309,53 +1332,71 @@ bool _isEnglish(BuildContext context) =>
     Localizations.localeOf(context).languageCode == 'en';
 
 class _FlowOrderSummary extends StatelessWidget {
-  const _FlowOrderSummary({required this.order});
+  const _FlowOrderSummary({
+    required this.order,
+    required this.enableAutoTranslation,
+  });
 
   final Order order;
+  final bool enableAutoTranslation;
 
   @override
-  Widget build(BuildContext context) => Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: SizedBox.square(
-                  dimension: 64,
-                  child: order.coverImage.isEmpty
-                      ? const Icon(Icons.spa_outlined)
-                      : Image.network(
-                          order.coverImage,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) =>
-                              const Icon(Icons.broken_image_outlined),
-                        ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      order.projectName,
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    if (order.institutionName.isNotEmpty)
-                      Text(order.institutionName),
-                    if (order.orderNo.isNotEmpty)
-                      Text(
-                        order.orderNo,
-                        style: Theme.of(context).textTheme.bodySmall,
+  Widget build(BuildContext context) {
+    final orderId = order.id.trim();
+    final translateOrder = enableAutoTranslation && orderId.isNotEmpty;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: SizedBox.square(
+                dimension: 64,
+                child: order.coverImage.isEmpty
+                    ? const Icon(Icons.spa_outlined)
+                    : Image.network(
+                        order.coverImage,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) =>
+                            const Icon(Icons.broken_image_outlined),
                       ),
-                  ],
-                ),
               ),
-            ],
-          ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  StableAutoTranslatedText(
+                    enabled: translateOrder,
+                    contentType: 'project',
+                    contentId: 'order:$orderId',
+                    field: 'projectName',
+                    sourceText: order.projectName,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  if (order.institutionName.isNotEmpty)
+                    StableAutoTranslatedText(
+                      enabled: translateOrder,
+                      contentType: 'institution',
+                      contentId: 'order:$orderId',
+                      field: 'institutionName',
+                      sourceText: order.institutionName,
+                    ),
+                  if (order.orderNo.isNotEmpty)
+                    Text(
+                      order.orderNo,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                ],
+              ),
+            ),
+          ],
         ),
-      );
+      ),
+    );
+  }
 }
 
 final class OrderRefundDraft {
@@ -1375,12 +1416,14 @@ class RefundApplyPage extends StatefulWidget {
     required this.order,
     required this.canUploadEvidence,
     required this.onPickEvidence,
+    this.enableAutoTranslation = false,
     super.key,
   });
 
   final Order order;
   final bool canUploadEvidence;
   final Future<String?> Function() onPickEvidence;
+  final bool enableAutoTranslation;
 
   @override
   State<RefundApplyPage> createState() => _RefundApplyPageState();
@@ -1434,7 +1477,10 @@ class _RefundApplyPageState extends State<RefundApplyPage> {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          _FlowOrderSummary(order: widget.order),
+          _FlowOrderSummary(
+            order: widget.order,
+            enableAutoTranslation: widget.enableAutoTranslation,
+          ),
           const SizedBox(height: 20),
           Text(
             english ? 'Refund reason' : '退款原因',
@@ -1549,6 +1595,7 @@ class ReviewOrderPage extends StatefulWidget {
     required this.onPickImage,
     this.initialReview,
     this.controller,
+    this.enableAutoTranslation = false,
     super.key,
   });
 
@@ -1556,6 +1603,7 @@ class ReviewOrderPage extends StatefulWidget {
   final Future<String?> Function() onPickImage;
   final Review? initialReview;
   final ReviewOrderController? controller;
+  final bool enableAutoTranslation;
 
   @override
   State<ReviewOrderPage> createState() => _ReviewOrderPageState();
@@ -1602,7 +1650,10 @@ class _ReviewOrderPageState extends State<ReviewOrderPage> {
         builder: (context, _) => ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            _FlowOrderSummary(order: widget.order),
+            _FlowOrderSummary(
+              order: widget.order,
+              enableAutoTranslation: widget.enableAutoTranslation,
+            ),
             const SizedBox(height: 20),
             Text(english ? 'Rating' : '评分'),
             Row(
