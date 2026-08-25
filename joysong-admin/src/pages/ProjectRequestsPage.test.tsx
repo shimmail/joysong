@@ -3,14 +3,28 @@ import userEvent from '@testing-library/user-event';
 import { message } from 'antd';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import api, { type ManagementContext, setAdminToken } from '../api';
-import ProjectRequestsPage, {
+import ProjectRequestsPage from './ProjectRequestsPage';
+import {
   type InstitutionProjectSplit,
   type ProfessionalProjectRequestResponse,
-} from './ProjectRequestsPage';
+} from '../types/projectRequests';
 
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>();
   return { ...actual, default: { get: vi.fn(), post: vi.fn() } };
+});
+
+vi.mock('../types/projectRequests', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../types/projectRequests')>();
+  return {
+    ...actual,
+    isCompleteProfessionalProjectRequest: (value: unknown) => {
+      if (value && typeof value === 'object' && 'sharedValidatorBoundary' in value) {
+        return (value as { sharedValidatorBoundary?: unknown }).sharedValidatorBoundary === true;
+      }
+      return actual.isCompleteProfessionalProjectRequest(value);
+    },
+  };
 });
 
 const adminContext: ManagementContext = {
@@ -411,6 +425,23 @@ afterEach(() => {
 });
 
 describe('ProjectRequestsPage', () => {
+  it('uses the shared professional request validator as its list boundary', async () => {
+    setContext(adminContext);
+    mockLists('/admin/project-requests', [{
+      ...platformRequest,
+      id: 'shared-validator-request',
+      name: '共享校验器边界项目',
+      currency: 'SHARED_BOUNDARY',
+      sharedValidatorBoundary: true,
+    }]);
+
+    render(<ProjectRequestsPage />);
+
+    expect(await screen.findByText('共享校验器边界项目')).toBeInTheDocument();
+    await expectListPair('/admin/project-requests');
+    expect(screen.queryByText('申请快照数据不完整，已禁止审核')).not.toBeInTheDocument();
+  });
+
   it('renders complete immutable platform and institution snapshots with response currencies and nested split values', async () => {
     setContext(adminContext);
     mockLists('/admin/project-requests', [platformRequest, institutionRequest]);

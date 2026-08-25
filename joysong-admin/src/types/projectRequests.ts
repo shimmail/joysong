@@ -46,6 +46,43 @@ export interface ProfessionalProjectRequestResponse {
   updatedAt: string;
 }
 
+export type PlatformProjectRequest = ProfessionalProjectRequestResponse & {
+  requestType: 'PLATFORM';
+  institutionId: null;
+  institutionName: null;
+  projectId: null;
+  projectName: null;
+  name: string;
+  category: string;
+  description: string;
+  tags: string[];
+  slogan: string;
+  coverImage: string;
+  images: string[];
+  referencePrice: number;
+  categoryTags: string[];
+  price: null;
+  originalPrice: null;
+  isActive: null;
+  institutionSplit: null;
+};
+
+export type InstitutionProjectRequest = ProfessionalProjectRequestResponse & {
+  requestType: 'INSTITUTION';
+  institutionId: string;
+  institutionName: string | null;
+  projectId: string;
+  projectName: string | null;
+  referencePrice: null;
+  categoryTags: null;
+  price: number;
+  isActive: boolean;
+  institutionSplit: InstitutionProjectSplit;
+};
+
+export type CompleteProfessionalProjectRequestResponse = PlatformProjectRequest | InstitutionProjectRequest;
+export type ProfessionalProjectRequest = CompleteProfessionalProjectRequestResponse & { requestSource: 'PROFESSIONAL' };
+
 export interface InstitutionProjectSnapshotV2 {
   schemaVersion: 2;
   association: {
@@ -159,20 +196,20 @@ export interface DoctorProjectChangeRequestV2 extends ParsedRequestBase {
   baseRevision: string;
   currentProject: InstitutionProjectSnapshotV2 | null;
   proposedProject: InstitutionProjectSnapshotV2 | null;
-  latestProject: InstitutionProjectSnapshotV2;
-  latestRevision: string;
+  latestProject: InstitutionProjectSnapshotV2 | null;
+  latestRevision: string | null;
   sharedChanged: boolean;
-  currentDoctorPrice: number | null;
-  proposedDoctorPrice: number | null;
+  currentDoctorPrice: number;
+  proposedDoctorPrice: number;
   latestDoctorPrice: number | null;
-  currentDoctorActive: boolean | null;
-  proposedDoctorActive: boolean | null;
+  currentDoctorActive: boolean;
+  proposedDoctorActive: boolean;
   latestDoctorActive: boolean | null;
   platformRate: number;
   pricingPolicyRevision: string;
-  travelGroundServiceFee: number | null;
+  travelGroundServiceFee: number;
   requestStatus: DoctorProjectChangeStatus;
-  notes: string | null;
+  notes: string;
   forceProcessed: boolean;
   submittedBy: string;
   submittedAt: string;
@@ -291,7 +328,7 @@ function isCompleteSplit(value: unknown): value is InstitutionProjectSplit {
     && commissionRate + institutionRate + platformRate + doctorRate === 10_000;
 }
 
-export function isCompleteProfessionalProjectRequest(value: unknown): value is ProfessionalProjectRequestResponse {
+export function isCompleteProfessionalProjectRequest(value: unknown): value is CompleteProfessionalProjectRequestResponse {
   if (!isRecord(value)) return false;
   const common = hasValidField(value, 'requestType', field => field === 'PLATFORM' || field === 'INSTITUTION')
     && hasValidField(value, 'id', isIdentifier)
@@ -406,16 +443,17 @@ const requestV2Keys = [
 function parseV2(value: Record<string, unknown>): DoctorProjectChangeRequestV2 | null {
   if (!hasExactKeys(value, requestV2Keys)) return null;
   if (!['id', 'requestType', 'doctorId', 'doctorName', 'institutionId', 'institutionName', 'institutionProjectId',
-    'institutionProjectName', 'platformProjectId', 'platformProjectName', 'baseRevision', 'latestRevision',
+    'institutionProjectName', 'platformProjectId', 'platformProjectName', 'baseRevision',
     'pricingPolicyRevision', 'requestStatus', 'submittedBy', 'submittedAt', 'updatedAt']
     .every(key => isNonBlankString(value[key]))) return null;
-  if (!isInstitutionProjectSnapshotV2(value.latestProject)
-    || !isNullableNumber(value.currentDoctorPrice) || !isNullableNumber(value.proposedDoctorPrice)
-    || !isNullableNumber(value.latestDoctorPrice) || !isNullableBoolean(value.currentDoctorActive)
-    || !isNullableBoolean(value.proposedDoctorActive) || !isNullableBoolean(value.latestDoctorActive)
-    || !isFiniteNumber(value.platformRate) || !isNullableNumber(value.travelGroundServiceFee)
+  if (!(value.latestProject === null || isInstitutionProjectSnapshotV2(value.latestProject))
+    || !isNullableString(value.latestRevision)
+    || !isFiniteNumber(value.currentDoctorPrice) || !isFiniteNumber(value.proposedDoctorPrice)
+    || !isNullableNumber(value.latestDoctorPrice) || typeof value.currentDoctorActive !== 'boolean'
+    || typeof value.proposedDoctorActive !== 'boolean' || !isNullableBoolean(value.latestDoctorActive)
+    || !isFiniteNumber(value.platformRate) || !isFiniteNumber(value.travelGroundServiceFee)
     || typeof value.sharedChanged !== 'boolean' || typeof value.forceProcessed !== 'boolean'
-    || !isNullableString(value.notes) || !isNullableString(value.reviewedBy) || !isNullableString(value.reviewerName)
+    || !isString(value.notes) || !isNullableString(value.reviewedBy) || !isNullableString(value.reviewerName)
     || !isNullableString(value.reviewNote) || !isNullableString(value.reviewedAt)
     || typeof value.reviewable !== 'boolean') return null;
 

@@ -76,6 +76,37 @@ describe('doctor project request wire parsing', () => {
     }));
   });
 
+  it('accepts authoritative nullable latest values without disabling an otherwise valid v2 request', () => {
+    const request = {
+      ...golden.requestV2,
+      latestProject: null,
+      latestRevision: null,
+      latestDoctorPrice: null,
+      latestDoctorActive: null,
+    };
+
+    expect(parseDoctorProjectChangeRequest(request)).toEqual(expect.objectContaining({
+      kind: 'V2', id: 'request-v2', latestProject: null, latestRevision: null,
+      latestDoctorPrice: null, latestDoctorActive: null, reviewable: true, parseIssue: null,
+    }));
+  });
+
+  it.each([
+    ['currentDoctorPrice', null],
+    ['proposedDoctorPrice', null],
+    ['currentDoctorActive', null],
+    ['proposedDoctorActive', null],
+    ['travelGroundServiceFee', null],
+    ['notes', null],
+  ])('fails closed when required v2 field %s is null', (field, nullValue) => {
+    const request = { ...golden.requestV2, [field]: nullValue };
+
+    expect(parseDoctorProjectChangeRequest(request)).toEqual(expect.objectContaining({
+      kind: 'DAMAGED', payloadVersion: 2, id: 'request-v2', reviewable: false,
+      parseIssue: 'MALFORMED_V2_PAYLOAD',
+    }));
+  });
+
   it('never falls a malformed or unknown v2 payload back to the v1 parser', () => {
     const malformedV2 = structuredClone(golden.requestV2) as Record<string, unknown>;
     const proposed = malformedV2.proposedProject as Record<string, unknown>;
