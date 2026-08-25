@@ -7,6 +7,7 @@ import com.joysong.server.notification.repository.NotificationRepository
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Pageable
+import org.springframework.context.i18n.LocaleContextHolder
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDateTime
@@ -22,8 +23,9 @@ class NotificationService(
      */
     fun getNotifications(userId: String, limit: Int = 50): List<NotificationResponse> {
         val pageable = PageRequest.of(0, limit)
+        val locale = LocaleContextHolder.getLocale()
         return notificationRepository.findByUserIdAndDeletedAtIsNullOrderByCreatedAtDesc(userId, pageable)
-            .map { it.toResponse() }
+            .map { NotificationTextProjection.localize(it.toResponse(), locale) }
     }
 
     /**
