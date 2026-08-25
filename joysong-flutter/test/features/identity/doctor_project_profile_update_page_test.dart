@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
@@ -13,7 +14,7 @@ void main() {
       (tester) async {
     _largeView(tester);
     final repository = _FakeRepository(
-      targets: const [_target, _targetB],
+      targets: [_target, _targetB],
       requests: const [],
       doctorProfile: _doctorProfileWithThreeInstitutions,
     );
@@ -76,15 +77,31 @@ void main() {
   testWidgets('another doctor pending request does not lock this doctor',
       (tester) async {
     _largeView(tester);
-    final otherDoctorRequest = DoctorProjectChangeRequest.fromJson({
-      'id': 'other-doctor-request',
-      'doctorId': 'doctor-2',
-      'institutionId': 'institution-1',
-      'institutionProjectId': 'ip-1',
-      'projectName': '项目一',
-      'requestType': 'LEAVE',
-      'status': 'PENDING',
-    });
+    const otherDoctorRequest = DoctorProjectChangeRequest(
+      id: 'other-doctor-request',
+      doctorId: 'doctor-2',
+      doctorName: '其他医生',
+      institutionId: 'institution-1',
+      institutionName: '娇颜颂',
+      institutionProjectId: 'ip-1',
+      projectName: '项目一',
+      requestType: 'LEAVE',
+      serviceDescription: '',
+      priceSuggestion: null,
+      notes: '',
+      serviceTags: [],
+      scheduleNote: '',
+      coverImage: '',
+      images: [],
+      consultationFee: null,
+      commissionRate: null,
+      institutionRate: null,
+      platformRate: null,
+      doctorRate: null,
+      forceProcessed: false,
+      status: 'PENDING',
+      reviewNote: '',
+    );
     await tester.pumpWidget(
       MaterialApp(
         home: DoctorProjectProfileUpdatePage(
@@ -252,7 +269,7 @@ void main() {
     expect(find.textContaining('USD 320.00'), findsOneWidget);
   });
 
-  testWidgets('doctor submission reuses hidden legacy values from the target', (
+  testWidgets('doctor submission emits exact v2 state from the loaded target', (
     tester,
   ) async {
     _largeView(tester);
@@ -291,19 +308,25 @@ void main() {
     await tester.tap(find.byKey(const Key('submit-profile-update')));
     await tester.pumpAndSettle();
 
-    expect(repository.submitted?.institutionProjectId, 'ip-1');
-    expect(repository.submitted?.coverImage, 'new-cover.jpg');
-    expect(repository.submitted?.images, ['new-gallery.jpg']);
-    expect(repository.submitted?.consultationFee, _target.consultationFee);
-    expect(repository.submitted?.commissionRate, _target.commissionRate);
-    expect(repository.submitted?.institutionRate, _target.institutionRate);
     expect(
       repository.submitted?.toJson(),
-      containsPair('priceSuggestion', 799.99),
-    );
-    expect(
-      repository.submitted?.toJson(),
-      containsPair('medicalListPrice', 799.99),
+      {
+        'requestType': 'PROFILE_UPDATE',
+        'institutionProjectId': 'ip-1',
+        'baseRevision': 'base-revision-1',
+        'name': null,
+        'category': 'raw-category',
+        'description': '当前服务说明',
+        'tags': ['自然'],
+        'slogan': null,
+        'detailContent': null,
+        'price': 799.99,
+        'salesCount': 17,
+        'doctorActive': false,
+        'coverImage': 'new-cover.jpg',
+        'images': ['new-gallery.jpg'],
+        'notes': '',
+      },
     );
     expect(find.text('PENDING'), findsOneWidget);
   });
@@ -337,7 +360,7 @@ void main() {
     await tester.tap(find.byKey(const Key('submit-profile-update')));
     await tester.pumpAndSettle();
     expect(repository.submissionCount, 1);
-    expect(repository.submitted?.priceSuggestion, 0.02);
+    expect(repository.submitted?.price, 0.02);
   });
 
   testWidgets('review shows only current and proposed price and travel fee', (
@@ -414,8 +437,74 @@ void main() {
       expect(repository.reviewForce, isTrue);
       expect(repository.reviewDecision, 'APPROVED');
       expect(repository.reviewNote, 'Manual handling');
+      expect(repository.reviewForceBaseRevision, 'latest-revision-1');
+      expect(repository.reviewForceBaseRevisions, [null, 'latest-revision-1']);
     },
   );
+
+  testWidgets('damaged snapshot keeps the request visible but disables review', (
+    tester,
+  ) async {
+    _largeView(tester);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DoctorProjectProfileReviewPage(
+          repository: _FakeRepository(requests: const [_damagedRequest]),
+          context: _adminContext,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final approve = tester.widget<FilledButton>(
+      find.byKey(const Key('approve-damaged-request')),
+    );
+    final force = tester.widget<FilledButton>(
+      find.byKey(const Key('force-damaged-request')),
+    );
+    expect(approve.onPressed, isNull);
+    expect(force.onPressed, isNull);
+  });
+
+  for (final errorCode in const [
+    'EDIT_BASE_STALE',
+    'REQUEST_ALREADY_PENDING',
+  ]) {
+    testWidgets('stable $errorCode submit conflict refreshes and retains text', (
+      tester,
+    ) async {
+      _largeView(tester);
+      final repository = _FakeRepository(
+        requests: const [],
+        submitError: ApiException(
+          message: 'server detail must not drive the branch',
+          httpStatus: 409,
+          errorCode: errorCode,
+        ),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: DoctorProjectProfileUpdatePage(repository: repository),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(repository.targetLoadCount, 1);
+      expect(repository.requestLoadCount, 1);
+
+      await _openDoctorProject(tester, 'ip-1');
+      await tester.tap(find.byKey(const Key('submit-profile-update')));
+      await tester.pumpAndSettle();
+
+      expect(repository.targetLoadCount, 2);
+      expect(repository.requestLoadCount, 2);
+      expect(
+        find.text(
+          'The profile or pending request changed. Refresh and submit again.',
+        ),
+        findsOneWidget,
+      );
+    });
+  }
 
   testWidgets(
     'platform admin enters profile reviews without ordinary professional entries',
@@ -485,21 +574,27 @@ const _adminReviewContext = ManagementContext(
 final class _FakeRepository implements IdentityRepository {
   _FakeRepository({
     this.managementContext,
-    this.targets = const [_target],
+    List<DoctorProjectProfileUpdateTarget>? targets,
     this.requests = const [_request],
     this.doctorProfile,
     this.leaveCompleter,
-  });
+    this.submitError,
+  }) : targets = targets ?? [_target];
   final ManagementContext? managementContext;
   final List<DoctorProjectProfileUpdateTarget> targets;
   List<DoctorProjectChangeRequest> requests;
   final DoctorSelfProfile? doctorProfile;
   final Completer<DoctorProjectChangeRequest>? leaveCompleter;
+  final ApiException? submitError;
   DoctorProjectProfileUpdateDraft? submitted;
   final leaveIds = <String>[];
   bool? reviewForce;
   String? reviewDecision;
   String? reviewNote;
+  String? reviewForceBaseRevision;
+  final reviewForceBaseRevisions = <String?>[];
+  int targetLoadCount = 0;
+  int requestLoadCount = 0;
 
   @override
   Future<ManagementContext> loadManagementContext() async =>
@@ -507,11 +602,17 @@ final class _FakeRepository implements IdentityRepository {
 
   @override
   Future<List<DoctorProjectProfileUpdateTarget>>
-      listDoctorProjectProfileUpdateTargets() async => targets;
+      listDoctorProjectProfileUpdateTargets() async {
+    targetLoadCount++;
+    return targets;
+  }
 
   @override
   Future<List<DoctorProjectChangeRequest>>
-      listDoctorProjectChangeRequests() async => requests;
+      listDoctorProjectChangeRequests() async {
+    requestLoadCount++;
+    return requests;
+  }
 
   @override
   Future<DoctorSelfProfile> loadDoctorSelfProfile() async {
@@ -542,6 +643,8 @@ final class _FakeRepository implements IdentityRepository {
   ) async {
     submitted = draft;
     submissionCount++;
+    final error = submitError;
+    if (error != null) throw error;
     requests = [
       ...requests.where((request) => request.id != _request.id),
       _request,
@@ -562,6 +665,8 @@ final class _FakeRepository implements IdentityRepository {
     reviewDecision = decision;
     reviewForce = force;
     this.reviewNote = reviewNote;
+    reviewForceBaseRevision = forceBaseRevision;
+    reviewForceBaseRevisions.add(forceBaseRevision);
   }
 
   @override
@@ -585,23 +690,55 @@ const _doctorProfileWithThreeInstitutions = DoctorSelfProfile(
   institutionCount: 3,
 );
 
-const _target = DoctorProjectProfileUpdateTarget(
-  institutionProjectId: 'ip-1',
-  projectName: '项目一',
-  institutionId: 'institution-1',
-  institutionName: '娇颜颂',
-  currentPrice: 12000,
-  serviceDescription: '当前服务说明',
-  serviceTags: ['自然'],
-  scheduleNote: '周二',
-  coverImage: 'cover.jpg',
-  images: ['one.jpg'],
-  consultationFee: 200,
-  commissionRate: 10,
-  institutionRate: 40,
-  platformRate: 40,
-  doctorRate: 10,
-);
+final _target = DoctorProjectProfileUpdateTarget.fromJson({
+  'payloadVersion': 2,
+  'institutionProjectId': 'ip-1',
+  'institutionId': 'institution-1',
+  'institutionName': '娇颜颂',
+  'platformProjectId': 'platform-project-1',
+  'platformProjectName': '平台项目一',
+  'doctorId': 'doctor-1',
+  'doctorName': '李医生',
+  'baseRevision': 'base-revision-1',
+  'currentProject': {
+    'schemaVersion': 2,
+    'association': {
+      'institutionProjectId': 'ip-1',
+      'institutionId': 'institution-1',
+      'platformProjectId': 'platform-project-1',
+    },
+    'rawOverrides': {
+      'name': null,
+      'category': 'raw-category',
+      'description': null,
+      'tags': null,
+      'slogan': null,
+      'detailContent': null,
+      'coverImage': null,
+      'images': null,
+    },
+    'effective': {
+      'name': '项目一',
+      'category': '项目分类',
+      'description': '当前服务说明',
+      'tags': ['自然'],
+      'slogan': '自然效果',
+      'detailContent': '项目详情',
+      'salesCount': 17,
+      'coverImage': 'cover.jpg',
+      'images': ['one.jpg'],
+    },
+    'source': {
+      'institutionProjectVersion': 7,
+      'platformInheritanceHash': 'inheritance-hash-1',
+    },
+  },
+  'currentDoctorPrice': 12000,
+  'currentDoctorActive': false,
+  'platformRate': 40,
+  'pricingPolicyRevision': 'pricing-policy-1',
+  'travelGroundServiceFee': 4800,
+});
 
 const _targetB = DoctorProjectProfileUpdateTarget(
   institutionProjectId: 'ip-2',
@@ -628,7 +765,7 @@ const _request = DoctorProjectChangeRequest(
   institutionName: '娇颜颂',
   institutionProjectId: 'ip-1',
   projectName: '项目一',
-  requestType: 'PROFILE_UPDATE',
+  requestType: 'EDIT',
   serviceDescription: '申请服务说明',
   priceSuggestion: 12800,
   notes: '',
@@ -655,6 +792,43 @@ const _request = DoctorProjectChangeRequest(
   currentDoctorRate: 15,
   status: 'PENDING',
   reviewNote: '',
+  payloadVersion: 2,
+  baseRevision: 'base-revision-1',
+  latestRevision: 'latest-revision-1',
+);
+
+const _damagedRequest = DoctorProjectChangeRequest(
+  id: 'damaged-request',
+  doctorId: 'doctor-1',
+  doctorName: '李医生',
+  institutionId: 'institution-1',
+  institutionName: '娇颜颂',
+  institutionProjectId: 'ip-1',
+  projectName: '项目一',
+  requestType: 'EDIT',
+  serviceDescription: '',
+  priceSuggestion: 12800,
+  notes: '',
+  serviceTags: [],
+  scheduleNote: '',
+  coverImage: '',
+  images: [],
+  consultationFee: null,
+  commissionRate: null,
+  institutionRate: null,
+  platformRate: 40,
+  doctorRate: null,
+  forceProcessed: false,
+  currentPrice: 12000,
+  currentPlatformRate: 40,
+  status: 'PENDING',
+  reviewNote: '',
+  payloadVersion: 2,
+  baseRevision: 'base-revision-1',
+  latestRevision: 'latest-revision-1',
+  hasCompleteSnapshot: false,
+  snapshotError: 'REQUEST_SNAPSHOT_INVALID',
+  reviewable: false,
 );
 
 const _pendingLeaveRequest = DoctorProjectChangeRequest(

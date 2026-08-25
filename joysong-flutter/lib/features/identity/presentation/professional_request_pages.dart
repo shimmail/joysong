@@ -1576,6 +1576,7 @@ class _DoctorProjectProfileUpdatePageState
           repository: widget.repository,
           target: target,
           pickAndUploadImage: widget.pickAndUploadImage,
+          onContractConflict: _load,
         ),
       ),
     );
@@ -1662,11 +1663,13 @@ class _DoctorProjectProfileUpdateFormPage extends StatefulWidget {
     required this.repository,
     required this.target,
     required this.pickAndUploadImage,
+    required this.onContractConflict,
   });
 
   final IdentityRepository repository;
   final DoctorProjectProfileUpdateTarget target;
   final Future<String?> Function()? pickAndUploadImage;
+  final Future<void> Function() onContractConflict;
 
   @override
   State<_DoctorProjectProfileUpdateFormPage> createState() =>
@@ -1850,17 +1853,30 @@ class _DoctorProjectProfileUpdateFormPageState
       return;
     }
     final target = widget.target;
+    final snapshot = target.currentProject;
+    final baseRevision = target.baseRevision;
+    if (target.payloadVersion != 2 ||
+        snapshot == null ||
+        baseRevision == null ||
+        baseRevision.trim().isEmpty) {
+      setState(() => _error = context.localized(
+          '项目资料版本无效，请刷新后重试', 'Invalid project data. Refresh and retry.'));
+      return;
+    }
     final draft = DoctorProjectProfileUpdateDraft(
       institutionProjectId: target.institutionProjectId,
-      priceSuggestion: price,
-      serviceDescription: _description.text,
-      serviceTags: _csv(_tags.text),
-      scheduleNote: _schedule.text,
+      baseRevision: baseRevision,
+      name: snapshot.rawName,
+      category: snapshot.rawCategory,
+      description: _description.text,
+      tags: _csv(_tags.text),
+      slogan: snapshot.rawSlogan,
+      detailContent: snapshot.rawDetailContent,
+      price: price,
+      salesCount: snapshot.salesCount,
+      doctorActive: target.currentDoctorActive,
       coverImage: _cover,
       images: List<String>.of(_images, growable: false),
-      consultationFee: target.consultationFee,
-      commissionRate: target.commissionRate,
-      institutionRate: target.institutionRate,
       platformRate: target.platformRate,
       notes: _notes.text,
     );
@@ -1880,10 +1896,16 @@ class _DoctorProjectProfileUpdateFormPageState
       if (mounted) Navigator.of(context).pop(request);
     } on ApiException catch (error) {
       if (!mounted) return;
-      setState(() => _error = error.httpStatus == 409
-          ? context.localized('当前资料或待审核申请已变化，请刷新后重新申请',
-              'The profile or pending request changed. Refresh and submit again.')
-          : error.message);
+      if (const {'EDIT_BASE_STALE', 'REQUEST_ALREADY_PENDING'}
+          .contains(error.errorCode)) {
+        await widget.onContractConflict();
+        if (!mounted) return;
+        setState(() => _error = context.localized(
+            '当前资料或待审核申请已变化，请刷新后重新申请',
+            'The profile or pending request changed. Refresh and submit again.'));
+      } else {
+        setState(() => _error = error.message);
+      }
     } catch (_) {
       if (mounted) {
         setState(() => _error = context.localized(
@@ -1940,7 +1962,7 @@ class _DoctorProjectProfileReviewPageState
       if (!mounted) return;
       setState(() {
         _requests = requests
-            .where((request) => request.requestType == 'PROFILE_UPDATE')
+            .where((request) => request.isProfileUpdate)
             .toList(growable: false);
         _loading = false;
       });
@@ -2031,7 +2053,9 @@ class _DoctorProjectProfileReviewPageState
                                 Wrap(spacing: 8, runSpacing: 8, children: [
                                   FilledButton(
                                       key: Key('approve-${request.id}'),
-                                      onPressed: _submitting
+                                      onPressed: _submitting ||
+                                              !request.reviewable ||
+                                              !request.hasCompleteSnapshot
                                           ? null
                                           : () => _review(
                                               request, 'APPROVED', false),
@@ -2039,7 +2063,9 @@ class _DoctorProjectProfileReviewPageState
                                           context.localized('批准', 'Approve'))),
                                   OutlinedButton(
                                       key: Key('reject-${request.id}'),
-                                      onPressed: _submitting
+                                      onPressed: _submitting ||
+                                              !request.reviewable ||
+                                              !request.hasCompleteSnapshot
                                           ? null
                                           : () => _review(
                                               request, 'REJECTED', false),
@@ -2047,7 +2073,9 @@ class _DoctorProjectProfileReviewPageState
                                           context.localized('驳回', 'Reject'))),
                                   OutlinedButton(
                                       key: Key('changes-${request.id}'),
-                                      onPressed: _submitting
+                                      onPressed: _submitting ||
+                                              !request.reviewable ||
+                                              !request.hasCompleteSnapshot
                                           ? null
                                           : () => _review(request,
                                               'CHANGES_REQUESTED', false),
@@ -2056,7 +2084,10 @@ class _DoctorProjectProfileReviewPageState
                                   if (_isAdmin)
                                     FilledButton.tonal(
                                         key: Key('force-${request.id}'),
-                                        onPressed: _submitting
+                                        onPressed: _submitting ||
+                                                !request.reviewable ||
+                                                !request.hasCompleteSnapshot ||
+                                                request.latestRevision == null
                                             ? null
                                             : () => _review(
                                                 request, 'APPROVED', true),
@@ -2085,7 +2116,7 @@ class _DoctorProjectProfileReviewPageState
         decision: decision,
         reviewNote: result,
         force: force,
-        forceBaseRevision: force ? request.baseRevision : null,
+        forceBaseRevision: force ? request.latestRevision : null,
       );
       await _load();
     } catch (_) {

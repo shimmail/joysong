@@ -447,9 +447,10 @@ final class ApiIdentityRepository implements IdentityRepository {
       listInstitutionProjectJoinRequests() async {
     return await _apiClient.get<List<InstitutionProjectJoinRequest>>(
           '/v2/admin/institution-project-requests',
-          decodeData: (json) => _objectList(
-            json,
-          ).map(InstitutionProjectJoinRequest.fromJson).toList(growable: false),
+          decodeData: (json) => _decodeDoctorProjectChangeRequests(json)
+              .where((request) => request.isJoin)
+              .map(InstitutionProjectJoinRequest.fromChangeRequest)
+              .toList(growable: false),
         ) ??
         const [];
   }
@@ -472,15 +473,12 @@ final class ApiIdentityRepository implements IdentityRepository {
     required String decision,
     required String reviewNote,
   }) async {
-    await _apiClient.post<void>(
-      '/v2/admin/institution-project-requests/${id.trim()}/review',
-      body: {
-        'decision': decision,
-        'reviewNote': reviewNote.trim(),
-        'force': false,
-        'forceBaseRevision': null,
-      },
-      decodeData: (_) {},
+    await reviewDoctorProjectChangeRequest(
+      id: id,
+      decision: decision,
+      reviewNote: reviewNote,
+      force: false,
+      forceBaseRevision: null,
     );
   }
 
@@ -534,9 +532,9 @@ final class ApiIdentityRepository implements IdentityRepository {
       listDoctorProjectChangeRequests() async {
     return await _apiClient.get<List<DoctorProjectChangeRequest>>(
           '/v2/admin/institution-project-requests',
-          decodeData: (json) => _objectList(
-            json,
-          ).map(DoctorProjectChangeRequest.fromJson).toList(growable: false),
+          decodeData: (json) => _decodeDoctorProjectChangeRequests(json)
+              .where((request) => request.isLeave || request.isProfileUpdate)
+              .toList(growable: false),
         ) ??
         const [];
   }
@@ -571,6 +569,13 @@ final class ApiIdentityRepository implements IdentityRepository {
     );
   }
 }
+
+List<DoctorProjectChangeRequest> _decodeDoctorProjectChangeRequests(
+  Object? json,
+) =>
+    _objectList(json)
+        .map(DoctorProjectChangeRequest.fromJson)
+        .toList(growable: false);
 
 Map<String, Object?> _projectReviewBody(String decision, String reviewNote) {
   final normalizedDecision = decision.trim().toUpperCase();
