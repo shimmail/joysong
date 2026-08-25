@@ -25,9 +25,10 @@ export type ManagementContext = {
   canViewAffiliations: boolean;
 };
 
-type ApiEnvelope<T = unknown> = {
+export type ApiEnvelope<T = unknown> = {
   code: number;
   message: string;
+  errorCode?: string | null;
   data: T | null;
 };
 
@@ -292,6 +293,12 @@ export function getApiErrorMessage(error: unknown, fallback = '请求失败，�
     if (!error.response) return '无法连接服务器，请检查后台服务是否已启动';
   }
   return error instanceof Error && error.message ? error.message : fallback;
+}
+
+export function getApiErrorCode(error: unknown): string | null {
+  if (!axios.isAxiosError(error)) return null;
+  const errorCode = (error.response?.data as Partial<ApiEnvelope> | undefined)?.errorCode;
+  return typeof errorCode === 'string' && errorCode.trim().length > 0 ? errorCode : null;
 }
 
 export default api;
