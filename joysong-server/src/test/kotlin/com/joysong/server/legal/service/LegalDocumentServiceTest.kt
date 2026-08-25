@@ -28,7 +28,7 @@ class LegalDocumentServiceTest {
     fun `create draft rejects a second draft for the same document type`() {
         every { releaseRepository.findAllByDocumentTypeForUpdate(LegalDocumentType.USER_AGREEMENT) } returns listOf(release())
 
-        assertThrows<IllegalStateException> {
+        assertThrows<LegalDocumentConflictException> {
             service.createDraft(LegalDocumentType.USER_AGREEMENT, "admin-1")
         }
         verify(exactly = 0) { releaseRepository.save(any()) }
@@ -72,7 +72,7 @@ class LegalDocumentServiceTest {
         val draft = release(lockVersion = 4)
         every { releaseRepository.findByIdForUpdate(draft.id) } returns draft
 
-        assertThrows<IllegalStateException> {
+        assertThrows<LegalDocumentConflictException> {
             service.updateDraft(draft.id, "admin-1", draftRequest(lockVersion = 3))
         }
         verify(exactly = 0) { contentRepository.saveAll(any<List<LegalDocumentContentEntity>>()) }
@@ -83,7 +83,7 @@ class LegalDocumentServiceTest {
         val published = release(status = LegalDocumentStatus.PUBLISHED)
         every { releaseRepository.findByIdForUpdate(published.id) } returns published
 
-        assertThrows<IllegalStateException> {
+        assertThrows<LegalDocumentConflictException> {
             service.updateDraft(published.id, "admin-1", draftRequest(published.lockVersion))
         }
         verify(exactly = 0) { releaseRepository.save(any()) }

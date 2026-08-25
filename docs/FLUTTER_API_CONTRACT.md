@@ -849,7 +849,15 @@ resultingInstitutionProjectId, submittedAt, updatedAt
 
 `/api/admin/doctors` 及 `/api/admin/doctors/{id}` 保留为平台管理员兼容路由，医生专业中心不得再调用。管理端的 `/api/admin/**` 前缀是历史命名，不代表专业用户拥有管理员权限；除上表明确列出的迁移期对象级只读 GET 外，其他 `/admin/**` 需要平台管理员角色。
 
-## 12. 数据表示兼容规则
+## 12. 公开用户协议与隐私政策
+
+公开协议只允许匿名 `GET`：`/api/public/legal-documents/{type}?locale={locale}` 返回标准 `ApiEnvelope`，其中 `type` 仅为 `user-agreement` 或 `privacy-policy`，`locale` 仅为 `zh-CN` 或 `en-US`。`data` 精确包含 `type`、`locale`、`version`、`title`、`contentHtml`、`publishedAt`、`contentSha256`；没有已发布的该语言内容时返回真实 HTTP 404。成功响应的 `ETag` 是带双引号的 `contentSha256`；Flutter 可在后续 GET 发送相同的 `If-None-Match`，服务端返回 304 且不发送 envelope。
+
+网页分享页为 `GET /legal/{type}?locale={locale}`，采用与 JSON 完全相同的已净化内容，并提供中英文切换。它不加载第三方资源，且响应使用严格 CSP。Flutter 必须把 `contentHtml` 当作服务端已净化的富文本渲染，不能自行拼接或信任其他 HTML。
+
+这些公开读取接口不改变任何认证请求体：登录、注册、刷新令牌及其他现有 auth payload 保持原样。后台协议管理仍全部位于 `/api/admin/legal-documents/**`，仅 `ADMIN` 可访问；公开路径的非 GET 请求并不匿名开放。
+
+## 13. 数据表示兼容规则
 
 - ID：多数业务 ID 是字符串 UUID；优惠券等少数字段是 64 位整数。Dart 使用 `String` 与 `int`，不要尝试统一转 int。
 - 金额：JSON 中多数为十进制 number，个别优惠计算响应可能是字符串。Flutter 金额层须兼容 `num`/`String` 输入，并转换为十进制定点表示；禁止使用 double 直接累计结算金额。
@@ -860,7 +868,7 @@ resultingInstitutionProjectId, submittedAt, updatedAt
 - 空值：后端可能返回 `null`、空字符串或缺字段；DTO 对非关键展示字段提供安全默认值，但主键和状态缺失应视为协议错误。
 - 枚举：未知枚举值必须降级为“未知状态”，不能导致应用崩溃；同时上报日志。
 
-## 13. 当前未开放或依赖部署配置的能力
+## 14. 当前未开放或依赖部署配置的能力
 
 | 能力 | 状态 | Flutter 处理 |
 |---|---|---|
@@ -875,7 +883,7 @@ resultingInstitutionProjectId, submittedAt, updatedAt
 | iOS 推送/APNs | 尚无稳定契约 | 不纳入首期接口验收 |
 | 完整、可生成客户端的 OpenAPI | 尚未生成 | 以本文档和实际 DTO 为准 |
 
-## 14. Flutter 网络层最低验收清单
+## 15. Flutter 网络层最低验收清单
 
 - [ ] baseUrl 按 Android 模拟器、iOS 模拟器、真机和生产环境分离。
 - [ ] 所有 JSON 接口统一解析 `ApiEnvelope<T>`，同时检查 HTTP 状态和 envelope code。

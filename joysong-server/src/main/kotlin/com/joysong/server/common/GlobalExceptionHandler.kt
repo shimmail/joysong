@@ -26,6 +26,8 @@ import com.joysong.server.order.service.OrderManagementConflictException
 import com.joysong.server.order.service.OrderManagementNotFoundException
 import com.joysong.server.project.service.ProfessionalProjectRequestConflictException
 import com.joysong.server.project.service.ProfessionalProjectRequestNotFoundException
+import com.joysong.server.legal.service.LegalDocumentConflictException
+import com.joysong.server.legal.service.LegalDocumentNotFoundException
 import java.io.IOException
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
@@ -114,6 +116,14 @@ class GlobalExceptionHandler {
     @ExceptionHandler(ProfessionalProjectRequestConflictException::class)
     fun handleProfessionalProjectRequestConflict(e: ProfessionalProjectRequestConflictException) =
         ResponseEntity.status(HttpStatus.CONFLICT).body(BaseResponse.error<Nothing>(e.message ?: "项目申请冲突", 409))
+
+    @ExceptionHandler(LegalDocumentNotFoundException::class)
+    fun handleLegalDocumentNotFound(e: LegalDocumentNotFoundException) =
+        ResponseEntity.status(HttpStatus.NOT_FOUND).body(BaseResponse.error<Nothing>(e.message ?: "协议不存在", 404))
+
+    @ExceptionHandler(LegalDocumentConflictException::class)
+    fun handleLegalDocumentConflict(e: LegalDocumentConflictException) =
+        ResponseEntity.status(HttpStatus.CONFLICT).body(BaseResponse.error<Nothing>(e.message ?: "协议状态冲突", 409))
 
     @ExceptionHandler(IllegalArgumentException::class)
     fun handleIllegalArgument(
@@ -221,6 +231,7 @@ class GlobalExceptionHandler {
 
     private fun String.usesRealHttpErrorStatus(): Boolean =
         startsWith("/api/admin/") ||
+            startsWith("/api/public/legal-documents/") ||
             this == "/api/management/doctor-profile" ||
             startsWith("/api/management/institutions")
             || startsWith("/api/management/consultant-memberships")

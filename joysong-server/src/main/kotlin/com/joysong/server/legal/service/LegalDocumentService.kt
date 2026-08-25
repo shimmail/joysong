@@ -43,7 +43,9 @@ class LegalDocumentService(
     @Transactional
     fun createDraft(type: LegalDocumentType, actorId: String): LegalDocumentReleaseView {
         val releases = releaseRepository.findAllByDocumentTypeForUpdate(type)
-        check(releases.none { it.status == LegalDocumentStatus.DRAFT }) { "该协议已有草稿" }
+        if (releases.any { it.status == LegalDocumentStatus.DRAFT }) {
+            throw LegalDocumentConflictException("该协议已有草稿")
+        }
         val published = releases.firstOrNull { it.status == LegalDocumentStatus.PUBLISHED }
         val release = LegalDocumentReleaseEntity(
             id = UUID.randomUUID().toString(),
@@ -69,19 +71,19 @@ class LegalDocumentService(
     }
 
     fun getRelease(id: String): LegalDocumentReleaseView {
-        val release = releaseRepository.findById(id).orElseThrow { NoSuchElementException("协议版本不存在") }
+        val release = releaseRepository.findById(id).orElseThrow { LegalDocumentNotFoundException("协议版本不存在") }
         return release.toView(contentRepository.findAllByReleaseIdOrderByLocaleAsc(id))
     }
 
     @Transactional
     fun updateDraft(id: String, actorId: String, request: UpdateLegalDocumentDraftRequest): LegalDocumentReleaseView {
-        val release = releaseRepository.findByIdForUpdate(id) ?: throw NoSuchElementException("协议版本不存在")
+        val release = releaseRepository.findByIdForUpdate(id) ?: throw LegalDocumentNotFoundException("协议版本不存在")
         requireDraftWithVersion(release, request.lockVersion)
         val inputs = request.contents.toLocaleInputs()
         val contentsByLocale = contentRepository.findAllByReleaseIdOrderByLocaleAsc(id).associateBy { it.locale }
         val now = LocalDateTime.now()
         val contents = LegalDocumentLocale.entries.map { locale ->
-            val content = contentsByLocale[locale] ?: throw IllegalStateException("协议缺少${locale.tag}内容")
+            val content = contentsByLocale[locale] ?: throw LegalDocumentConflictException("协议缺少${locale.tag}内容")
             val input = inputs.getValue(locale)
             val title = input.title.trim()
             val sanitized = sanitizer.sanitize(input.contentHtml)
@@ -102,7 +104,7 @@ class LegalDocumentService(
     @Transactional
     @CacheEvict(cacheNames = ["legalDocuments"], allEntries = true)
     fun publish(id: String, actorId: String, request: PublishLegalDocumentRequest): LegalDocumentReleaseView {
-        val draft = releaseRepository.findByIdForUpdate(id) ?: throw NoSuchElementException("协议版本不存在")
+        val draft = releaseRepository.findByIdForUpdate(id) ?: throw LegalDocumentNotFoundException("协议版本不存在")
         requireDraftWithVersion(draft, request.lockVersion)
         val contents = contentRepository.findAllByReleaseIdOrderByLocaleAsc(id)
         requireCompleteBilingualContents(contents)
@@ -135,8 +137,8 @@ class LegalDocumentService(
     }
 
     private fun requireDraftWithVersion(release: LegalDocumentReleaseEntity, lockVersion: Long) {
-        check(release.status == LegalDocumentStatus.DRAFT) { "已发布协议不可修改" }
-        check(release.lockVersion == lockVersion) { "协议版本已被更新" }
+        if (release.status != LegalDocumentStatus.DRAFT) throw LegalDocumentConflictException("已发布协议不可修改")
+        if (release.lockVersion != lockVersion) throw LegalDocumentConflictException("协议版本已被更新")
     }
 
     private fun requireCompleteBilingualContents(contents: List<LegalDocumentContentEntity>) {
@@ -172,3 +174,7 @@ class LegalDocumentService(
         contents.sortedBy { it.locale.tag }.map(LegalDocumentContentView::from)
     )
 }
+
+class LegalDocumentNotFoundException(message: String) : RuntimeException(message)
+
+class LegalDocumentConflictException(message: String) : RuntimeException(message)

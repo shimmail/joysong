@@ -37,6 +37,7 @@ class SecurityConfig(
                     .requestMatchers("/api/discover/**").permitAll()
                     .requestMatchers(HttpMethod.GET, "/api/public/diary-shares/**").permitAll()
                     .requestMatchers(HttpMethod.GET, "/s/diary/**").permitAll()
+                    .requestMatchers(HttpMethod.GET, "/api/public/legal-documents/**", "/legal/**").permitAll()
                     .requestMatchers(HttpMethod.GET, "/api/comments", "/api/comments/replies").permitAll()
                     .requestMatchers("/api/users/*/profile").permitAll()
                     .requestMatchers("/api/users/*/diaries").permitAll()
