@@ -612,6 +612,7 @@ class _AppShellState extends State<AppShell> {
       MaterialPageRoute(
         builder: (_) => BookingPage(
           controller: controller,
+          enableAutoTranslation: true,
           onOrderCreated: (order) {
             _contentNavigator.pop();
             _openOrderDetail(order);
@@ -631,6 +632,7 @@ class _AppShellState extends State<AppShell> {
       MaterialPageRoute(
         builder: (_) => OrdersPage(
           controller: controller,
+          enableAutoTranslation: true,
           onOrderSelected: _openOrderDetail,
           onEditReview: _openOrderReviewEditor,
         ),
@@ -668,6 +670,7 @@ class _AppShellState extends State<AppShell> {
         builder: (_) => ReviewOrderPage(
           order: order,
           initialReview: review,
+          enableAutoTranslation: true,
           onPickImage: _pickAndUploadReviewImage,
         ),
       ),
@@ -781,6 +784,7 @@ class _AppShellState extends State<AppShell> {
         builder: (_) => OrderDetailPage(
           controller: controller,
           socialController: _socialController,
+          enableAutoTranslation: true,
           onOpenServiceConversation: _openOrderServiceConversation,
         ),
       ),
@@ -912,8 +916,7 @@ class _AppShellState extends State<AppShell> {
     final id = orderId.trim();
     if (repository == null || id.isEmpty) return;
     try {
-      final conversation =
-          await repository.createOrderServiceConversation(id);
+      final conversation = await repository.createOrderServiceConversation(id);
       if (!mounted) return;
       await _openDmThread(conversation);
     } on Object {
@@ -943,6 +946,7 @@ class _AppShellState extends State<AppShell> {
           diary: diary,
           discoverRepository: _discoverRepository,
           ordersRepository: _ordersRepository,
+          enableAutoTranslation: true,
         ),
       ),
     );
@@ -964,6 +968,7 @@ class _AppShellState extends State<AppShell> {
       MaterialPageRoute(
         builder: (_) => NotificationPage(
           controller: controller,
+          enableAutoTranslation: true,
           title: activity
               ? (english ? 'Activity messages' : '活动消息')
               : (english ? 'System messages' : '系统消息'),
@@ -1090,6 +1095,7 @@ class _AppShellState extends State<AppShell> {
         builder: (_) => OrderDetailPage(
           controller: controller,
           socialController: _socialController,
+          enableAutoTranslation: true,
           onOpenServiceConversation: _openOrderServiceConversation,
         ),
       ),

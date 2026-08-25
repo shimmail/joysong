@@ -7,6 +7,9 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/core/config/app_environment.dart';
 import 'package:joysong_flutter/core/network/api_client.dart';
+import 'package:joysong_flutter/features/booking/presentation/booking_page.dart';
+import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
+import 'package:joysong_flutter/features/discover/presentation/discover_page.dart';
 import 'package:joysong_flutter/features/messaging/domain/notification_target.dart';
 import 'package:joysong_flutter/features/messaging/presentation/messaging_pages.dart';
 import 'package:joysong_flutter/features/identity/presentation/identity_pages.dart';
@@ -15,14 +18,19 @@ import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/orders/presentation/order_detail_page.dart';
 import 'package:joysong_flutter/features/orders/presentation/orders_page.dart';
 import 'package:joysong_flutter/features/shell/presentation/app_shell.dart';
+import 'package:joysong_flutter/features/social/presentation/social_page.dart';
 
 import '../orders/order_test_fixtures.dart';
 
 void main() {
-  test('business notification targets remain system messages and map to scoped destinations', () {
+  test(
+      'business notification targets remain system messages and map to scoped destinations',
+      () {
     expect(isActivityNotificationType('ORDER_REFUND_APPROVED'), isFalse);
-    expect(isActivityNotificationType('PROFESSIONAL_APPLICATION_REJECTED'), isFalse);
-    expect(isActivityNotificationType('IDENTITY_APPLICATION_APPROVED'), isFalse);
+    expect(isActivityNotificationType('PROFESSIONAL_APPLICATION_REJECTED'),
+        isFalse);
+    expect(
+        isActivityNotificationType('IDENTITY_APPLICATION_APPROVED'), isFalse);
     expect(isActivityNotificationType('promotion'), isTrue);
 
     expect(
@@ -50,29 +58,37 @@ void main() {
       NotificationTargetKind.professionalDoctorReview,
     );
     expect(
-      NotificationTarget.parse('professional_consultant_review', 'request-1').kind,
+      NotificationTarget.parse('professional_consultant_review', 'request-1')
+          .kind,
       NotificationTargetKind.professionalConsultantReview,
     );
     expect(
-      NotificationTarget.parse('professional_doctor_application', 'request-1').kind,
+      NotificationTarget.parse('professional_doctor_application', 'request-1')
+          .kind,
       NotificationTargetKind.professionalDoctorApplication,
     );
     expect(
-      NotificationTarget.parse('professional_doctor_relationships', 'request-1').kind,
+      NotificationTarget.parse('professional_doctor_relationships', 'request-1')
+          .kind,
       NotificationTargetKind.professionalDoctorRelationships,
     );
     expect(
-      NotificationTarget.parse('professional_consultant_application', 'request-1').kind,
+      NotificationTarget.parse(
+              'professional_consultant_application', 'request-1')
+          .kind,
       NotificationTargetKind.professionalConsultantApplication,
     );
     expect(
-      NotificationTarget.parse('professional_consultant_relationships', 'request-1').kind,
+      NotificationTarget.parse(
+              'professional_consultant_relationships', 'request-1')
+          .kind,
       NotificationTargetKind.professionalConsultantRelationships,
     );
     expect(
       NotificationTarget.parse('identity_application', '').id,
       isEmpty,
-      reason: 'A stale target retains its destination so the shell can fall back safely.',
+      reason:
+          'A stale target retains its destination so the shell can fall back safely.',
     );
   });
 
@@ -211,8 +227,20 @@ void main() {
     await tester.ensureVisible(ordersEntry);
     await tester.tap(ordersEntry);
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('order-1')));
+    expect(
+      tester.widget<OrdersPage>(find.byType(OrdersPage)).enableAutoTranslation,
+      isTrue,
+    );
+    await tester.tap(
+      find.byKey(const ValueKey<String>('consumer-order:order-1')),
+    );
     await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<OrderDetailPage>(find.byType(OrderDetailPage))
+          .enableAutoTranslation,
+      isTrue,
+    );
 
     final chatButton = find.byKey(const Key('service-chat-button'));
     await tester.ensureVisible(chatButton);
@@ -232,7 +260,8 @@ void main() {
     expect(find.byType(TextField), findsOneWidget);
   });
 
-  testWidgets('message center refreshes order entitlement before read-only chat',
+  testWidgets(
+      'message center refreshes order entitlement before read-only chat',
       (tester) async {
     _useLargeTestSurface(tester);
     final client = _OrderServiceApiClient(
@@ -389,19 +418,125 @@ void main() {
     await tester.tap(find.byKey(const Key('message-center-system')));
     await tester.pumpAndSettle();
     expect(find.text('订单服务已开启'), findsOneWidget);
+    expect(
+      tester
+          .widget<NotificationPage>(find.byType(NotificationPage))
+          .enableAutoTranslation,
+      isTrue,
+    );
 
     await tester.tap(find.text('订单服务已开启'));
     await tester.pumpAndSettle();
 
-    expect(client.puts, contains('notifications/notification-order-detail/read'));
+    expect(
+        client.puts, contains('notifications/notification-order-detail/read'));
     expect(client.orderReads, 1);
     expect(find.byType(OrderDetailPage), findsOneWidget);
+    expect(
+      tester
+          .widget<OrderDetailPage>(find.byType(OrderDetailPage))
+          .enableAutoTranslation,
+      isTrue,
+    );
   });
 
-  testWidgets('refund and service notifications open the business destination or safe fallback',
+  testWidgets('consumer booking entry enables automatic translation',
+      (tester) async {
+    _useLargeTestSurface(tester);
+    final client = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE',
+      freshReadable: true,
+      freshSendEnabled: true,
+    );
+    await _pumpShell(tester, client);
+
+    final discover = tester.widget<DiscoverPage>(
+      find.byType(DiscoverPage, skipOffstage: false),
+    );
+    discover.onBookProject!(const DiscoverItem(
+      id: 'project-1',
+      type: DiscoverContentType.project,
+      title: '消费者中文项目',
+      raw: {
+        'institutionId': 'institution-1',
+        'projectId': 'project-1',
+      },
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(BookingPage), findsOneWidget);
+    expect(
+      tester
+          .widget<BookingPage>(find.byType(BookingPage))
+          .enableAutoTranslation,
+      isTrue,
+    );
+  });
+
+  testWidgets('consumer review entry enables automatic translation',
+      (tester) async {
+    _useLargeTestSurface(tester);
+    final client = _OrderServiceApiClient(
+      freshStatus: 'COMPLETED',
+      freshReadable: true,
+      freshSendEnabled: true,
+    );
+    await _pumpShell(tester, client);
+
+    await tester.tap(find.text('我的'));
+    await tester.pumpAndSettle();
+    final ordersEntry = find.text('我的订单');
+    await tester.ensureVisible(ordersEntry);
+    await tester.tap(ordersEntry);
+    await tester.pumpAndSettle();
+    final orders = tester.widget<OrdersPage>(find.byType(OrdersPage));
+    unawaited(orders.onEditReview!(sampleOrder(hasReview: true)));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ReviewOrderPage), findsOneWidget);
+    expect(
+      tester
+          .widget<ReviewOrderPage>(find.byType(ReviewOrderPage))
+          .enableAutoTranslation,
+      isTrue,
+    );
+  });
+
+  testWidgets('consumer diary editor entry enables automatic translation',
+      (tester) async {
+    _useLargeTestSurface(tester);
+    final client = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE',
+      freshReadable: true,
+      freshSendEnabled: true,
+    );
+    await _pumpShell(tester, client);
+
+    await tester.tap(find.text('我的'));
+    await tester.pumpAndSettle();
+    final diariesEntry = find.text('我的日记');
+    await tester.ensureVisible(diariesEntry);
+    await tester.tap(diariesEntry);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('写日记').first);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(DiaryEditorPage), findsOneWidget);
+    expect(
+      tester
+          .widget<DiaryEditorPage>(find.byType(DiaryEditorPage))
+          .enableAutoTranslation,
+      isTrue,
+    );
+  });
+
+  testWidgets(
+      'refund and service notifications open the business destination or safe fallback',
       (tester) async {
     final client = _OrderServiceApiClient(
-      freshStatus: 'SERVICE_ACTIVE', freshReadable: true, freshSendEnabled: true,
+      freshStatus: 'SERVICE_ACTIVE',
+      freshReadable: true,
+      freshSendEnabled: true,
       notifications: const [_refundNotificationJson],
     );
     await _pumpShell(tester, client);
@@ -410,7 +545,9 @@ void main() {
 
     await tester.pumpWidget(const SizedBox.shrink());
     final serviceClient = _OrderServiceApiClient(
-      freshStatus: 'SERVICE_ACTIVE', freshReadable: true, freshSendEnabled: true,
+      freshStatus: 'SERVICE_ACTIVE',
+      freshReadable: true,
+      freshSendEnabled: true,
       notifications: const [_serviceNotificationJson],
     );
     await _pumpShell(tester, serviceClient);
@@ -419,7 +556,9 @@ void main() {
 
     await tester.pumpWidget(const SizedBox.shrink());
     final emptyTargetClient = _OrderServiceApiClient(
-      freshStatus: 'SERVICE_ACTIVE', freshReadable: true, freshSendEnabled: true,
+      freshStatus: 'SERVICE_ACTIVE',
+      freshReadable: true,
+      freshSendEnabled: true,
       notifications: const [_emptyServiceNotificationJson],
     );
     await _pumpShell(tester, emptyTargetClient);
@@ -427,7 +566,8 @@ void main() {
     expect(find.text('我的订单'), findsOneWidget);
   });
 
-  testWidgets('stale non-empty order and refund notifications fall back to the orders list',
+  testWidgets(
+      'stale non-empty order and refund notifications fall back to the orders list',
       (tester) async {
     final orderClient = _OrderServiceApiClient(
       freshStatus: 'SERVICE_ACTIVE',
@@ -457,7 +597,8 @@ void main() {
     expect(find.byType(OrderDetailPage), findsNothing);
   });
 
-  testWidgets('stale service notification shows feedback and falls back to the orders list',
+  testWidgets(
+      'stale service notification shows feedback and falls back to the orders list',
       (tester) async {
     final client = _OrderServiceApiClient(
       freshStatus: 'SERVICE_ACTIVE',
@@ -474,21 +615,27 @@ void main() {
     expect(find.byType(DmThreadPage), findsNothing);
   });
 
-  testWidgets('identity notification targets open the identity center and focus an application',
+  testWidgets(
+      'identity notification targets open the identity center and focus an application',
       (tester) async {
     final client = _OrderServiceApiClient(
-      freshStatus: 'SERVICE_ACTIVE', freshReadable: true, freshSendEnabled: true,
+      freshStatus: 'SERVICE_ACTIVE',
+      freshReadable: true,
+      freshSendEnabled: true,
       notifications: const [_identityApplicationNotificationJson],
       identityOverview: _identityOverviewJson,
     );
     await _pumpShell(tester, client);
     await _openSystemNotification(tester, '身份审核结果');
     expect(find.byType(IdentityCenterPage), findsOneWidget);
-    expect(find.byKey(const ValueKey('identity-application-identity-1')), findsOneWidget);
+    expect(find.byKey(const ValueKey('identity-application-identity-1')),
+        findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
     final managementClient = _OrderServiceApiClient(
-      freshStatus: 'SERVICE_ACTIVE', freshReadable: true, freshSendEnabled: true,
+      freshStatus: 'SERVICE_ACTIVE',
+      freshReadable: true,
+      freshSendEnabled: true,
       notifications: const [_identityManagementNotificationJson],
     );
     await _pumpShell(tester, managementClient);
@@ -496,10 +643,13 @@ void main() {
     expect(find.byType(IdentityCenterPage), findsOneWidget);
   });
 
-  testWidgets('professional notification targets open the correct relationship scope',
+  testWidgets(
+      'professional notification targets open the correct relationship scope',
       (tester) async {
     final client = _OrderServiceApiClient(
-      freshStatus: 'SERVICE_ACTIVE', freshReadable: true, freshSendEnabled: true,
+      freshStatus: 'SERVICE_ACTIVE',
+      freshReadable: true,
+      freshSendEnabled: true,
       notifications: const [_doctorReviewNotificationJson],
     );
     await _pumpShell(tester, client);
@@ -513,7 +663,9 @@ void main() {
 
     await tester.pumpWidget(const SizedBox.shrink());
     final ownClient = _OrderServiceApiClient(
-      freshStatus: 'SERVICE_ACTIVE', freshReadable: true, freshSendEnabled: true,
+      freshStatus: 'SERVICE_ACTIVE',
+      freshReadable: true,
+      freshSendEnabled: true,
       notifications: const [_consultantRelationshipNotificationJson],
     );
     await _pumpShell(tester, ownClient);
@@ -641,7 +793,10 @@ final class _OrderServiceApiClient extends ApiClient {
     required this.freshSendEnabled,
     this.includeNotification = false,
     this.notifications = const [],
-    this.identityOverview = const {'roles': <Object?>[], 'applications': <Object?>[]},
+    this.identityOverview = const {
+      'roles': <Object?>[],
+      'applications': <Object?>[]
+    },
     this.failedOrderIds = const {},
     this.failedServiceOrderIds = const {},
   }) : super(
@@ -705,14 +860,16 @@ final class _OrderServiceApiClient extends ApiClient {
     final Object data = switch (path) {
       'notifications/unread-count' =>
         notifications.isNotEmpty || includeNotification ? 1 : 0,
-      'notifications' =>
-        notifications.isNotEmpty
-            ? notifications
-            : (includeNotification ? const [_dmNotificationJson] : const <Object?>[]),
+      'notifications' => notifications.isNotEmpty
+          ? notifications
+          : (includeNotification
+              ? const [_dmNotificationJson]
+              : const <Object?>[]),
       '/identity/overview' => identityOverview,
       '/management/context' => _managementContextJson,
       '/management/institution-membership-requests/owned' ||
-      '/management/institution-membership-requests/reviewable' => const <Object?>[],
+      '/management/institution-membership-requests/reviewable' =>
+        const <Object?>[],
       'dm/conversations' => freshReadable
           ? const [_orderServiceConversationJson]
           : const <Object?>[],
@@ -720,6 +877,42 @@ final class _OrderServiceApiClient extends ApiClient {
       'orders' => [_freshOrder],
       'orders/order-1' => _freshOrder,
       'orders/order-1/status-logs' => const <Object?>[],
+      'reviews/order/order-1' => const <String, Object?>{
+          'id': 'review-1',
+          'orderId': 'order-1',
+          'userId': 'user-1',
+          'userName': '消费者',
+          'doctorId': 'doctor-1',
+          'rating': 5,
+          'content': '消费者中文评价',
+          'tags': <String>['专业'],
+          'images': <String>[],
+          'createdAt': '2026-08-25T10:00:00Z',
+        },
+      'discover/institutions/institution-1/projects/project-1' =>
+        const <String, Object?>{
+          'id': 'institution-project-1',
+          'projectId': 'project-1',
+          'institutionId': 'institution-1',
+          'name': '消费者中文项目',
+          'institutionName': '消费者机构',
+          'description': '消费者中文说明',
+          'coverImage': '',
+          'price': '1280.50',
+        },
+      'discover/institution-projects/institution-project-1/doctors' =>
+        const <Object?>[
+          <String, Object?>{
+            'id': 'doctor-1',
+            'name': '消费者医生',
+            'title': '主任医师',
+            'avatar': '',
+            'specialties': '皮肤管理',
+            'isVerified': true,
+          },
+        ],
+      'discover/institutions/institution-1/consultants' => const <Object?>[],
+      'diaries/my' => const <Object?>[],
       'dm/conversations/conversation-order-1/messages' => const <Object?>[],
       '/discover/filter-options' => const <String, Object?>{
           'categories': <String>[],
@@ -859,63 +1052,132 @@ const _orderNotificationJson = <String, Object?>{
 };
 
 const _refundNotificationJson = <String, Object?>{
-  'id': 'notification-refund', 'userId': 'user-1', 'type': 'ORDER_REFUND_APPROVED',
-  'title': '退款已批准', 'content': '', 'targetType': 'order_refund', 'targetId': 'order-1',
-  'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+  'id': 'notification-refund',
+  'userId': 'user-1',
+  'type': 'ORDER_REFUND_APPROVED',
+  'title': '退款已批准',
+  'content': '',
+  'targetType': 'order_refund',
+  'targetId': 'order-1',
+  'isRead': false,
+  'createdAt': '2026-08-25T10:00:00',
 };
 const _emptyServiceNotificationJson = <String, Object?>{
-  'id': 'notification-empty-service', 'userId': 'user-1', 'type': 'ORDER_SERVICE_ACTIVATED',
-  'title': '服务会话不可用', 'content': '', 'targetType': 'order_service_conversation', 'targetId': '',
-  'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+  'id': 'notification-empty-service',
+  'userId': 'user-1',
+  'type': 'ORDER_SERVICE_ACTIVATED',
+  'title': '服务会话不可用',
+  'content': '',
+  'targetType': 'order_service_conversation',
+  'targetId': '',
+  'isRead': false,
+  'createdAt': '2026-08-25T10:00:00',
 };
 const _serviceNotificationJson = <String, Object?>{
-  'id': 'notification-service', 'userId': 'user-1', 'type': 'ORDER_SERVICE_ACTIVATED',
-  'title': '订单服务会话', 'content': '', 'targetType': 'order_service_conversation', 'targetId': 'order-1',
-  'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+  'id': 'notification-service',
+  'userId': 'user-1',
+  'type': 'ORDER_SERVICE_ACTIVATED',
+  'title': '订单服务会话',
+  'content': '',
+  'targetType': 'order_service_conversation',
+  'targetId': 'order-1',
+  'isRead': false,
+  'createdAt': '2026-08-25T10:00:00',
 };
 const _staleOrderNotificationJson = <String, Object?>{
-  'id': 'notification-stale-order', 'userId': 'user-1', 'type': 'ORDER_CANCELLED',
-  'title': '已失效订单', 'content': '', 'targetType': 'order', 'targetId': 'stale-order',
-  'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+  'id': 'notification-stale-order',
+  'userId': 'user-1',
+  'type': 'ORDER_CANCELLED',
+  'title': '已失效订单',
+  'content': '',
+  'targetType': 'order',
+  'targetId': 'stale-order',
+  'isRead': false,
+  'createdAt': '2026-08-25T10:00:00',
 };
 const _staleRefundNotificationJson = <String, Object?>{
-  'id': 'notification-stale-refund', 'userId': 'user-1', 'type': 'ORDER_REFUND_APPROVED',
-  'title': '已失效退款', 'content': '', 'targetType': 'order_refund', 'targetId': 'stale-refund-order',
-  'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+  'id': 'notification-stale-refund',
+  'userId': 'user-1',
+  'type': 'ORDER_REFUND_APPROVED',
+  'title': '已失效退款',
+  'content': '',
+  'targetType': 'order_refund',
+  'targetId': 'stale-refund-order',
+  'isRead': false,
+  'createdAt': '2026-08-25T10:00:00',
 };
 const _staleServiceNotificationJson = <String, Object?>{
-  'id': 'notification-stale-service', 'userId': 'user-1', 'type': 'ORDER_SERVICE_ACTIVATED',
-  'title': '已失效服务会话', 'content': '', 'targetType': 'order_service_conversation',
-  'targetId': 'stale-service-order', 'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+  'id': 'notification-stale-service',
+  'userId': 'user-1',
+  'type': 'ORDER_SERVICE_ACTIVATED',
+  'title': '已失效服务会话',
+  'content': '',
+  'targetType': 'order_service_conversation',
+  'targetId': 'stale-service-order',
+  'isRead': false,
+  'createdAt': '2026-08-25T10:00:00',
 };
 const _identityApplicationNotificationJson = <String, Object?>{
-  'id': 'notification-identity', 'userId': 'user-1', 'type': 'IDENTITY_APPLICATION_REJECTED',
-  'title': '身份审核结果', 'content': '', 'targetType': 'identity_application', 'targetId': 'identity-1',
-  'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+  'id': 'notification-identity',
+  'userId': 'user-1',
+  'type': 'IDENTITY_APPLICATION_REJECTED',
+  'title': '身份审核结果',
+  'content': '',
+  'targetType': 'identity_application',
+  'targetId': 'identity-1',
+  'isRead': false,
+  'createdAt': '2026-08-25T10:00:00',
 };
 const _identityManagementNotificationJson = <String, Object?>{
-  'id': 'notification-identity-management', 'userId': 'user-1', 'type': 'IDENTITY_APPLICATION_APPROVED',
-  'title': '身份管理', 'content': '', 'targetType': 'identity_management', 'targetId': 'identity-2',
-  'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+  'id': 'notification-identity-management',
+  'userId': 'user-1',
+  'type': 'IDENTITY_APPLICATION_APPROVED',
+  'title': '身份管理',
+  'content': '',
+  'targetType': 'identity_management',
+  'targetId': 'identity-2',
+  'isRead': false,
+  'createdAt': '2026-08-25T10:00:00',
 };
 const _doctorReviewNotificationJson = <String, Object?>{
-  'id': 'notification-doctor-review', 'userId': 'user-1', 'type': 'PROFESSIONAL_APPLICATION_SUBMITTED',
-  'title': '医生关系待审核', 'content': '', 'targetType': 'professional_doctor_review', 'targetId': 'request-1',
-  'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+  'id': 'notification-doctor-review',
+  'userId': 'user-1',
+  'type': 'PROFESSIONAL_APPLICATION_SUBMITTED',
+  'title': '医生关系待审核',
+  'content': '',
+  'targetType': 'professional_doctor_review',
+  'targetId': 'request-1',
+  'isRead': false,
+  'createdAt': '2026-08-25T10:00:00',
 };
 const _consultantRelationshipNotificationJson = <String, Object?>{
-  'id': 'notification-consultant-own', 'userId': 'user-1', 'type': 'PROFESSIONAL_APPLICATION_APPROVED',
-  'title': '顾问关系更新', 'content': '', 'targetType': 'professional_consultant_relationships', 'targetId': 'request-2',
-  'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+  'id': 'notification-consultant-own',
+  'userId': 'user-1',
+  'type': 'PROFESSIONAL_APPLICATION_APPROVED',
+  'title': '顾问关系更新',
+  'content': '',
+  'targetType': 'professional_consultant_relationships',
+  'targetId': 'request-2',
+  'isRead': false,
+  'createdAt': '2026-08-25T10:00:00',
 };
 const _identityOverviewJson = <String, Object?>{
   'roles': <Object?>[],
   'applications': <Object?>[
-    {'id': 'identity-1', 'roleCode': 'DOCTOR', 'status': 'REJECTED', 'reviewNote': '补充材料'},
+    {
+      'id': 'identity-1',
+      'roleCode': 'DOCTOR',
+      'status': 'REJECTED',
+      'reviewNote': '补充材料'
+    },
   ],
 };
 const _managementContextJson = <String, Object?>{
-  'userId': 'user-1', 'platformRole': 'USER', 'activeRoles': <String>[],
-  'managedInstitutionIds': <String>[], 'visibleInstitutionIds': <String>[],
-  'doctorInstitutionIds': <String>[], 'consultantInstitutionIds': <String>[],
+  'userId': 'user-1',
+  'platformRole': 'USER',
+  'activeRoles': <String>[],
+  'managedInstitutionIds': <String>[],
+  'visibleInstitutionIds': <String>[],
+  'doctorInstitutionIds': <String>[],
+  'consultantInstitutionIds': <String>[],
 };

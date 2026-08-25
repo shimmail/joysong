@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:joysong_flutter/core/network/api_client.dart';
 import 'package:joysong_flutter/core/translation/translation.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/discover/presentation/catalog_institution_detail_view.dart';
 import 'package:joysong_flutter/features/discover/presentation/professional_catalog_page.dart';
+import 'package:joysong_flutter/features/professional_management/data/professional_repository.dart';
+import 'package:joysong_flutter/features/professional_management/presentation/professional_pages.dart';
 
 import '../../core/translation/translation_test_fixtures.dart';
 
@@ -169,6 +172,43 @@ void main() {
     expect(find.text('专业端机构评价'), findsOneWidget);
     expect(translationRepository.calls, isEmpty);
   });
+
+  testWidgets(
+      'doctor order list and detail make zero automatic translation requests under active scope',
+      (tester) async {
+    final translations = RecordingTranslationRepository();
+    final autoController = AutoTranslationController(repository: translations)
+      ..synchronize(
+        enabled: true,
+        authenticated: true,
+        targetLanguage: 'en-US',
+      );
+    addTearDown(autoController.dispose);
+    final apiClient = _ProfessionalOrderApiClient();
+
+    await tester.pumpWidget(
+      AutoTranslationScope(
+        controller: autoController,
+        enabled: true,
+        targetLanguage: 'en-US',
+        child: MaterialApp(
+          locale: const Locale('en'),
+          home: DoctorOrdersPage(
+            repository: ProfessionalRepository(apiClient),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('专业端中文订单项目'), findsOneWidget);
+    expect(translations.calls, isEmpty);
+
+    await tester.tap(find.text('专业端中文订单项目'));
+    await tester.pumpAndSettle();
+    expect(find.byType(DoctorOrderDetailPage), findsOneWidget);
+    expect(find.text('PRO-20260825-001'), findsOneWidget);
+    expect(translations.calls, isEmpty);
+  });
 }
 
 ListTile _unmountedListTile(WidgetTester tester, String title) {
@@ -238,6 +278,34 @@ final class _CatalogRepository implements ProfessionalCatalogRepository {
     return [item('dp-1', DiscoverContentType.project, 'Doctor project')];
   }
 }
+
+final class _ProfessionalOrderApiClient extends Fake implements ApiClient {
+  @override
+  Future<T?> get<T>(
+    String path, {
+    Map<String, Object?> query = const {},
+    required T Function(Object? json) decodeData,
+  }) async {
+    final Object data = switch (path) {
+      '/management/orders' => const <Object?>[_chineseProfessionalOrder],
+      '/management/orders/professional-order-1' => _chineseProfessionalOrder,
+      _ => throw StateError('Unexpected professional order request: $path'),
+    };
+    return decodeData(data);
+  }
+}
+
+const _chineseProfessionalOrder = <String, Object?>{
+  'id': 'professional-order-1',
+  'orderNo': 'PRO-20260825-001',
+  'projectName': '专业端中文订单项目',
+  'institutionName': '专业端中文机构',
+  'status': 'SERVICE_ACTIVE',
+  'amount': '1280.50',
+  'createdAt': '2026-08-25T10:00:00Z',
+  'canVerify': false,
+  'canRequestCompletion': false,
+};
 
 const _chineseProfessionalProject = DiscoverItem(
   id: 'professional-project-1',
