@@ -1,5 +1,7 @@
 package com.joysong.server.legal.entity
 
+import com.fasterxml.jackson.annotation.JsonCreator
+import com.fasterxml.jackson.annotation.JsonValue
 import jakarta.persistence.AttributeConverter
 import jakarta.persistence.Column
 import jakarta.persistence.Convert
@@ -12,20 +14,24 @@ import jakarta.persistence.Table
 import jakarta.persistence.Version
 import java.time.LocalDateTime
 
-enum class LegalDocumentType(val slug: String) {
+enum class LegalDocumentType(@get:JsonValue val slug: String) {
     USER_AGREEMENT("user-agreement"),
     PRIVACY_POLICY("privacy-policy");
 
     companion object {
+        @JvmStatic
+        @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
         fun fromSlug(value: String) = entries.firstOrNull { it.slug == value }
             ?: throw IllegalArgumentException("不支持的协议类型")
     }
 }
 
-enum class LegalDocumentLocale(val tag: String) {
+enum class LegalDocumentLocale(@get:JsonValue val tag: String) {
     ZH_CN("zh-CN"), EN_US("en-US");
 
     companion object {
+        @JvmStatic
+        @JsonCreator(mode = JsonCreator.Mode.DELEGATING)
         fun fromTag(value: String) = entries.firstOrNull { it.tag == value }
             ?: throw IllegalArgumentException("不支持的协议语言")
     }

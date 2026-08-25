@@ -3,8 +3,14 @@ package com.joysong.server.legal.controller
 import com.joysong.server.config.JwtAuthenticationFilter
 import com.joysong.server.config.JwtTokenProvider
 import com.joysong.server.config.SecurityConfig
+import com.joysong.server.admin.controller.AdminLegalDocumentController
+import com.joysong.server.legal.dto.AdminLegalDocumentSummaryView
+import com.joysong.server.legal.dto.LegalDocumentContentView
+import com.joysong.server.legal.dto.LegalDocumentReleaseSummaryView
+import com.joysong.server.legal.dto.LegalDocumentReleaseView
 import com.joysong.server.legal.dto.PublicLegalDocumentView
 import com.joysong.server.legal.entity.LegalDocumentLocale
+import com.joysong.server.legal.entity.LegalDocumentStatus
 import com.joysong.server.legal.entity.LegalDocumentType
 import com.joysong.server.legal.service.LegalDocumentService
 import com.joysong.server.user.repository.UserRepository
@@ -18,13 +24,14 @@ import org.springframework.http.HttpHeaders
 import org.springframework.security.test.context.support.WithMockUser
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import java.time.LocalDateTime
 
-@WebMvcTest(PublicLegalDocumentController::class)
+@WebMvcTest(controllers = [PublicLegalDocumentController::class, AdminLegalDocumentController::class])
 @Import(SecurityConfig::class, JwtAuthenticationFilter::class)
 class LegalDocumentHttpTest @Autowired constructor(
     private val mockMvc: MockMvc
@@ -127,6 +134,27 @@ class LegalDocumentHttpTest @Autowired constructor(
             .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("https://"))))
     }
 
+    @Test
+    fun `admin list and release serialize legal enum values as client wire slugs and tags`() {
+        val summary = releaseSummary()
+        given(legalDocumentService.listAdmin()).willReturn(
+            listOf(AdminLegalDocumentSummaryView(LegalDocumentType.PRIVACY_POLICY, summary, null))
+        )
+        given(legalDocumentService.getRelease("release-1")).willReturn(releaseView())
+
+        mockMvc.perform(get("/api/admin/legal-documents").with(user("admin").roles("ADMIN")))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data[0].documentType").value("privacy-policy"))
+            .andExpect(jsonPath("$.data[0].draft.lockVersion").value(7))
+
+        mockMvc.perform(get("/api/admin/legal-documents/releases/release-1").with(user("admin").roles("ADMIN")))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.documentType").value("privacy-policy"))
+            .andExpect(jsonPath("$.data.contents[0].locale").value("zh-CN"))
+            .andExpect(jsonPath("$.data.contents[0].contentSha256").value("hash-zh"))
+            .andExpect(jsonPath("$.data.lockVersion").value(7))
+    }
+
     private fun view(
         title: String = "Privacy policy",
         contentHtml: String = "<p>Privacy body</p>"
@@ -138,5 +166,37 @@ class LegalDocumentHttpTest @Autowired constructor(
         contentHtml = contentHtml,
         publishedAt = LocalDateTime.of(2026, 8, 25, 10, 0),
         contentSha256 = "hash-en"
+    )
+
+    private fun releaseSummary() = LegalDocumentReleaseSummaryView(
+        id = "release-1",
+        documentType = LegalDocumentType.PRIVACY_POLICY,
+        version = 2,
+        status = LegalDocumentStatus.DRAFT,
+        changeSummary = "Updated contact details",
+        publishedAt = null,
+        updatedAt = LocalDateTime.of(2026, 8, 26, 9, 0),
+        lockVersion = 7
+    )
+
+    private fun releaseView() = LegalDocumentReleaseView(
+        id = "release-1",
+        documentType = LegalDocumentType.PRIVACY_POLICY,
+        version = 2,
+        status = LegalDocumentStatus.DRAFT,
+        changeSummary = "Updated contact details",
+        publishedAt = null,
+        publishedBy = null,
+        createdAt = LocalDateTime.of(2026, 8, 26, 8, 0),
+        updatedAt = LocalDateTime.of(2026, 8, 26, 9, 0),
+        lockVersion = 7,
+        contents = listOf(
+            LegalDocumentContentView(
+                locale = LegalDocumentLocale.ZH_CN,
+                title = "隐私政策",
+                contentHtml = "<p>中文</p>",
+                contentSha256 = "hash-zh"
+            )
+        )
     )
 }

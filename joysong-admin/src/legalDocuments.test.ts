@@ -9,13 +9,13 @@ import {
   updateLegalDocumentDraft,
 } from './legalDocuments';
 
-vi.mock('./api', () => ({
+vi.mock('./api', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./api')>(),
   default: {
     get: vi.fn(),
     post: vi.fn(),
     put: vi.fn(),
   },
-  getData: (response: { data: unknown }) => response.data,
 }));
 
 const mockedApi = vi.mocked(api);
@@ -37,13 +37,28 @@ const release = {
     contentSha256: 'hash-zh',
   }],
 };
+const releaseSummary = {
+  id: release.id,
+  documentType: release.documentType,
+  version: release.version,
+  status: release.status,
+  changeSummary: release.changeSummary,
+  publishedAt: release.publishedAt,
+  updatedAt: release.updatedAt,
+  lockVersion: release.lockVersion,
+};
+const list = [{ documentType: 'privacy-policy', draft: releaseSummary, published: null }];
+const envelope = <T,>(data: T) => ({ data: { code: 200, message: 'OK', data } });
 
 describe('legal document admin client', () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    mockedApi.get.mockResolvedValue({ data: release });
-    mockedApi.post.mockResolvedValue({ data: release });
-    mockedApi.put.mockResolvedValue({ data: release });
+    mockedApi.get.mockResolvedValueOnce(envelope(list));
+    mockedApi.get.mockResolvedValueOnce(envelope([releaseSummary]));
+    mockedApi.get.mockResolvedValueOnce(envelope(release));
+    mockedApi.post.mockResolvedValueOnce(envelope(release));
+    mockedApi.post.mockResolvedValueOnce(envelope(release));
+    mockedApi.put.mockResolvedValue(envelope(release));
   });
 
   it('maps every legal document operation to its admin endpoint and exact request body', async () => {
@@ -56,12 +71,12 @@ describe('legal document admin client', () => {
       },
     };
 
-    await listLegalDocuments();
-    await getLegalDocumentHistory('privacy-policy');
-    await createLegalDocumentDraft('privacy-policy');
-    await getLegalDocumentRelease('draft-1');
-    await updateLegalDocumentDraft('draft-1', update);
-    await publishLegalDocumentRelease('draft-1', { lockVersion: 2 });
+    expect(await listLegalDocuments()).toEqual(list);
+    expect(await getLegalDocumentHistory('privacy-policy')).toEqual([releaseSummary]);
+    expect(await createLegalDocumentDraft('privacy-policy')).toEqual(release);
+    expect(await getLegalDocumentRelease('draft-1')).toEqual(release);
+    expect(await updateLegalDocumentDraft('draft-1', update)).toEqual(release);
+    expect(await publishLegalDocumentRelease('draft-1', { lockVersion: 2 })).toEqual(release);
 
     expect(mockedApi.get).toHaveBeenNthCalledWith(1, '/admin/legal-documents');
     expect(mockedApi.get).toHaveBeenNthCalledWith(2, '/admin/legal-documents/privacy-policy/history');
