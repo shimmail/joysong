@@ -14,7 +14,7 @@ data class NotificationEntity(
     @Column(name = "user_id", nullable = false)
     var userId: String = "",
 
-    @Column(name = "type", nullable = false)
+    @Column(name = "type", nullable = false, length = 64)
     var type: String = "",
 
     @Column(name = "title", nullable = false)
@@ -23,7 +23,7 @@ data class NotificationEntity(
     @Column(name = "content", columnDefinition = "TEXT")
     var content: String = "",
 
-    @Column(name = "target_type")
+    @Column(name = "target_type", length = 64)
     var targetType: String = "",
 
     @Column(name = "target_id")

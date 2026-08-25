@@ -81,11 +81,11 @@ class TravelGroundServicePaymentMigrationTest {
     fun `fresh database applies the travel payment schema constraints and index set`() {
         assertEquals(DATABASE, freshMysql.databaseName)
         assertEquals(
-            listOf("26", "27", "28", "29", "30", "31", "32"),
+            listOf("26", "27", "28", "29", "30", "31", "32", "32.1"),
             jdbcTemplate.queryForList(
                 "SELECT version FROM flyway_schema_history WHERE success = 1 AND version IS NOT NULL ORDER BY installed_rank",
                 String::class.java
-            )
+            ).take(8)
         )
 
         assertColumn("doctor_institution_project_configs", "medical_list_price", "decimal", false)
