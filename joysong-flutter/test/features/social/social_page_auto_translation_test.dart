@@ -9,6 +9,9 @@ import 'package:joysong_flutter/features/social/domain/social_repository.dart';
 import 'package:joysong_flutter/features/social/presentation/social_controller.dart';
 import 'package:joysong_flutter/features/social/presentation/social_page.dart';
 
+import '../../core/translation/translation_test_fixtures.dart';
+import '../orders/order_test_fixtures.dart';
+
 void main() {
   testWidgets(
     'Social diary opts in with exact fields and keeps stable requests on refresh',
@@ -177,6 +180,291 @@ void main() {
       expect(translations.sources, isEmpty);
     });
   }
+
+  testWidgets(
+    'diary order picker translates snapshots without doctor or order number',
+    (tester) async {
+      await _useTallSurface(tester);
+      final socialController = SocialController(_SocialRepository());
+      final ordersRepository = FakeOrdersRepository()..orders = [sampleOrder()];
+      final translations = RecordingTranslationRepository()
+        ..holdResponses = true;
+      final autoController = _autoController(translations, active: true);
+      addTearDown(socialController.dispose);
+      addTearDown(autoController.dispose);
+
+      await tester.pumpWidget(
+        _editorHost(
+          controller: autoController,
+          child: DiaryEditorPage(
+            controller: socialController,
+            ordersRepository: ordersRepository,
+            enableAutoTranslation: true,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Title'),
+        '中文日记标题',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Content'),
+        '中文日记正文',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Tags (comma separated)'),
+        '中文标签',
+      );
+
+      await _openOrderPicker(tester);
+
+      expect(_mountedRequests(tester), const {
+        ('project', 'order:order-1', 'projectName', '光子嫩肤'),
+        ('institution', 'order:order-1', 'institutionName', '娇颜颂医疗美容'),
+      });
+      expect(find.text('张医生'), findsOneWidget);
+      expect(find.text('JOY202608060001'), findsOneWidget);
+      expect(
+        translations.calls.map((call) => call.text),
+        isNot(contains('张医生')),
+      );
+      expect(
+        translations.calls.map((call) => call.text),
+        isNot(contains('JOY202608060001')),
+      );
+      expect(
+        translations.calls.any((call) => call.text.contains('order-1')),
+        isFalse,
+      );
+
+      await tester.tap(find.text('光子嫩肤'));
+      await tester.pumpAndSettle();
+
+      expect(_mountedRequests(tester), const {
+        ('project', 'order:order-1', 'projectName', '光子嫩肤'),
+        ('institution', 'order:order-1', 'institutionName', '娇颜颂医疗美容'),
+      });
+      expect(
+        tester
+            .widget<TextFormField>(
+              find.widgetWithText(TextFormField, 'Title'),
+            )
+            .controller!
+            .text,
+        '中文日记标题',
+      );
+      expect(
+        tester
+            .widget<TextFormField>(
+              find.widgetWithText(TextFormField, 'Content'),
+            )
+            .controller!
+            .text,
+        '中文日记正文',
+      );
+      expect(
+        tester
+            .widget<TextFormField>(
+              find.widgetWithText(TextFormField, 'Tags (comma separated)'),
+            )
+            .controller!
+            .text,
+        '中文标签',
+      );
+      for (final source in const ['中文日记标题', '中文日记正文', '中文标签']) {
+        expect(
+          translations.calls.map((call) => call.text),
+          isNot(contains(source)),
+          reason: source,
+        );
+      }
+    },
+  );
+
+  testWidgets(
+      'diary association summary translates project and institution only',
+      (tester) async {
+    final socialController = SocialController(_SocialRepository());
+    final translations = RecordingTranslationRepository()..holdResponses = true;
+    final autoController = _autoController(translations, active: true);
+    addTearDown(socialController.dispose);
+    addTearDown(autoController.dispose);
+
+    await tester.pumpWidget(
+      _editorHost(
+        controller: autoController,
+        child: DiaryEditorPage(
+          controller: socialController,
+          diary: _manualAssociationDiary,
+          enableAutoTranslation: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(_mountedRequests(tester), const {
+      ('project', 'project:project-manual', 'name', '手动项目'),
+      (
+        'institution',
+        'institution:institution-manual',
+        'name',
+        '手动机构',
+      ),
+    });
+    expect(find.text('手动医生'), findsOneWidget);
+    for (final source in const [
+      '编辑器标题',
+      '编辑器正文',
+      '编辑器标签',
+      '手动医生',
+    ]) {
+      expect(
+        translations.calls.map((call) => call.text),
+        isNot(contains(source)),
+        reason: source,
+      );
+    }
+
+    await tester.pumpWidget(const SizedBox());
+    final missingIdSocialController = SocialController(_SocialRepository());
+    final missingIdTranslations = RecordingTranslationRepository();
+    final missingIdAutoController =
+        _autoController(missingIdTranslations, active: true);
+    addTearDown(missingIdSocialController.dispose);
+    addTearDown(missingIdAutoController.dispose);
+
+    await tester.pumpWidget(
+      _editorHost(
+        controller: missingIdAutoController,
+        child: DiaryEditorPage(
+          controller: missingIdSocialController,
+          diary: _missingAssociationIdsDiary,
+          enableAutoTranslation: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('无项目身份名称'), findsOneWidget);
+    expect(find.text('无机构身份名称'), findsOneWidget);
+    expect(_mountedRequests(tester), isEmpty);
+    expect(missingIdTranslations.calls, isEmpty);
+  });
+
+  testWidgets('diary order picker defaults off under an active scope',
+      (tester) async {
+    await _useTallSurface(tester);
+    final socialController = SocialController(_SocialRepository());
+    final ordersRepository = FakeOrdersRepository()
+      ..orders = [
+        sampleOrder(
+          projectName: '默认关闭项目',
+          institutionName: '默认关闭机构',
+        ),
+      ];
+    final translations = RecordingTranslationRepository();
+    final autoController = _autoController(translations, active: true);
+    addTearDown(socialController.dispose);
+    addTearDown(autoController.dispose);
+
+    await tester.pumpWidget(
+      _editorHost(
+        controller: autoController,
+        child: DiaryEditorPage(
+          controller: socialController,
+          ordersRepository: ordersRepository,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await _openOrderPicker(tester);
+
+    expect(find.text('默认关闭项目'), findsOneWidget);
+    expect(find.text('默认关闭机构'), findsOneWidget);
+    expect(translations.calls, isEmpty);
+    expect(find.byType(AutoTranslationBuilder), findsNothing);
+  });
+
+  testWidgets(
+      'diary order picker keeps blank and duplicate order IDs source-only',
+      (tester) async {
+    await _useTallSurface(tester);
+    final socialController = SocialController(_SocialRepository());
+    final ordersRepository = FakeOrdersRepository()
+      ..orders = [
+        sampleOrder(
+          id: ' ',
+          projectName: '空身份项目',
+          institutionName: '空身份机构',
+        ),
+        sampleOrder(
+          id: 'duplicate-order',
+          projectName: '重复项目甲',
+          institutionName: '重复机构甲',
+        ),
+        sampleOrder(
+          id: ' duplicate-order ',
+          projectName: '重复项目乙',
+          institutionName: '重复机构乙',
+        ),
+        sampleOrder(
+          id: 'unique-order',
+          projectName: '唯一项目',
+          institutionName: '唯一机构',
+        ),
+      ];
+    final translations = RecordingTranslationRepository()..holdResponses = true;
+    final autoController = _autoController(translations, active: true);
+    addTearDown(socialController.dispose);
+    addTearDown(autoController.dispose);
+
+    await tester.pumpWidget(
+      _editorHost(
+        controller: autoController,
+        child: DiaryEditorPage(
+          controller: socialController,
+          ordersRepository: ordersRepository,
+          enableAutoTranslation: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await _openOrderPicker(tester);
+
+    for (final text in const [
+      '空身份项目',
+      '空身份机构',
+      '重复项目甲',
+      '重复机构甲',
+      '重复项目乙',
+      '重复机构乙',
+    ]) {
+      expect(find.text(text), findsOneWidget, reason: text);
+    }
+    expect(_mountedRequests(tester), const {
+      ('project', 'order:unique-order', 'projectName', '唯一项目'),
+      (
+        'institution',
+        'order:unique-order',
+        'institutionName',
+        '唯一机构',
+      ),
+    });
+    expect(
+      translations.calls.map((call) => call.text),
+      const ['唯一项目', '唯一机构'],
+    );
+    expect(
+      find.byKey(const ValueKey<String>('diary-order:unique-order')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('diary-order:duplicate-order')),
+      findsNothing,
+    );
+  });
 }
 
 typedef _RequestRecord = (String, String, String, String);
@@ -187,6 +475,25 @@ _RequestRecord _requestRecord(AutoTranslationRequest request) => (
       request.field,
       request.sourceText,
     );
+
+Set<_RequestRecord> _mountedRequests(WidgetTester tester) => tester
+    .widgetList<AutoTranslationBuilder>(find.byType(AutoTranslationBuilder))
+    .map((widget) => _requestRecord(widget.request))
+    .toSet();
+
+Future<void> _openOrderPicker(WidgetTester tester) async {
+  final relatedOrder = find.text('Related order');
+  await tester.ensureVisible(relatedOrder);
+  await tester.tap(relatedOrder);
+  await tester.pumpAndSettle();
+}
+
+Future<void> _useTallSurface(WidgetTester tester) async {
+  tester.view.devicePixelRatio = 1;
+  tester.view.physicalSize = const Size(1200, 1800);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  addTearDown(tester.view.resetPhysicalSize);
+}
 
 final class _SocialRepository extends Fake implements SocialRepository {
   _SocialRepository([List<Diary>? diaries])
@@ -274,6 +581,20 @@ Widget _host({
       ),
     );
 
+Widget _editorHost({
+  required AutoTranslationController controller,
+  required Widget child,
+}) =>
+    AutoTranslationScope(
+      controller: controller,
+      enabled: true,
+      targetLanguage: 'en-US',
+      child: MaterialApp(
+        locale: const Locale('en'),
+        home: child,
+      ),
+    );
+
 const _diary = Diary(
   id: 'diary-1',
   title: '真实日记',
@@ -323,4 +644,42 @@ const _blankDiary = Diary(
   favoriteCount: 0,
   isLiked: false,
   status: 'published',
+);
+
+const _manualAssociationDiary = Diary(
+  id: 'manual-diary',
+  title: '编辑器标题',
+  userId: 'author-manual',
+  authorName: '日记作者',
+  content: '编辑器正文',
+  images: [],
+  tags: ['编辑器标签'],
+  likeCount: 0,
+  commentCount: 0,
+  favoriteCount: 0,
+  isLiked: false,
+  status: 'published',
+  projectId: 'project-manual',
+  doctorId: 'doctor-manual',
+  institutionId: 'institution-manual',
+  projectName: '手动项目',
+  doctorName: '手动医生',
+  institutionName: '手动机构',
+);
+
+const _missingAssociationIdsDiary = Diary(
+  id: 'missing-association-ids-diary',
+  title: 'Missing association ids',
+  userId: 'author-missing-association-ids',
+  authorName: 'Author',
+  content: 'Source content',
+  images: [],
+  tags: [],
+  likeCount: 0,
+  commentCount: 0,
+  favoriteCount: 0,
+  isLiked: false,
+  status: 'published',
+  projectName: '无项目身份名称',
+  institutionName: '无机构身份名称',
 );

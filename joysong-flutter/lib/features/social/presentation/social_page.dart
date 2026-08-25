@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/files/app_file_picker.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/core/translation/translation.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/discover/presentation/discover_content_card.dart';
@@ -189,6 +190,7 @@ final class DiaryEditorPage extends StatefulWidget {
     this.diary,
     this.imagePicker,
     this.contentSafety = const SocialContentSafety(),
+    this.enableAutoTranslation = false,
     super.key,
   });
 
@@ -198,6 +200,7 @@ final class DiaryEditorPage extends StatefulWidget {
   final Diary? diary;
   final DiaryImagePicker? imagePicker;
   final SocialContentSafety contentSafety;
+  final bool enableAutoTranslation;
 
   @override
   State<DiaryEditorPage> createState() => _DiaryEditorPageState();
@@ -309,9 +312,12 @@ final class _DiaryEditorPageState extends State<DiaryEditorPage> {
               _AssociationPicker(
                 order: _order,
                 orderId: _orderId,
+                projectId: _projectId,
+                institutionId: _institutionId,
                 projectName: _projectName,
                 doctorName: _doctorName,
                 institutionName: _institutionName,
+                enableAutoTranslation: widget.enableAutoTranslation,
                 canPickOrder: widget.ordersRepository != null && !_isSubmitting,
                 canPickManually:
                     widget.discoverRepository != null && !_isSubmitting,
@@ -495,7 +501,12 @@ final class _DiaryEditorPageState extends State<DiaryEditorPage> {
     final repository = widget.ordersRepository;
     if (repository == null) return;
     final selected = await Navigator.of(context).push<Order>(
-      MaterialPageRoute(builder: (_) => _DiaryOrderPickerPage(repository)),
+      MaterialPageRoute(
+        builder: (_) => _DiaryOrderPickerPage(
+          repository,
+          enableAutoTranslation: widget.enableAutoTranslation,
+        ),
+      ),
     );
     if (selected == null || !mounted) return;
     setState(() {
@@ -735,9 +746,12 @@ class _AssociationPicker extends StatelessWidget {
   const _AssociationPicker({
     required this.order,
     required this.orderId,
+    required this.projectId,
+    required this.institutionId,
     required this.projectName,
     required this.doctorName,
     required this.institutionName,
+    required this.enableAutoTranslation,
     required this.canPickOrder,
     required this.canPickManually,
     required this.canClear,
@@ -747,9 +761,12 @@ class _AssociationPicker extends StatelessWidget {
   });
   final Order? order;
   final String orderId;
+  final String projectId;
+  final String institutionId;
   final String projectName;
   final String doctorName;
   final String institutionName;
+  final bool enableAutoTranslation;
   final bool canPickOrder;
   final bool canPickManually;
   final bool canClear;
@@ -784,13 +801,11 @@ class _AssociationPicker extends StatelessWidget {
             contentPadding: EdgeInsets.zero,
             leading: const Icon(Icons.receipt_long_outlined),
             title: Text(english ? 'Related order' : '关联订单'),
-            subtitle: Text(
-              order == null
-                  ? (orderId.isEmpty
-                      ? (english ? 'Select from my orders' : '从我的订单中选择')
-                      : orderId)
-                  : '${order!.projectName} · ${order!.orderNo}',
-            ),
+            subtitle: order == null
+                ? Text(orderId.isEmpty
+                    ? (english ? 'Select from my orders' : '从我的订单中选择')
+                    : orderId)
+                : _orderSubtitle(context, order!),
             trailing: const Icon(Icons.chevron_right),
             onTap: canPickOrder ? onPickOrder : null,
           ),
@@ -805,36 +820,114 @@ class _AssociationPicker extends StatelessWidget {
               ),
             ),
           ),
-          _row(context, DiscoverContentType.project,
-              english ? 'Related project' : '关联项目', projectName),
-          _row(context, DiscoverContentType.doctor,
-              english ? 'Related doctor' : '关联医生', doctorName),
-          _row(context, DiscoverContentType.institution,
-              english ? 'Related institution' : '关联机构', institutionName),
+          _row(
+            context,
+            DiscoverContentType.project,
+            english ? 'Related project' : '关联项目',
+            projectName,
+          ),
+          _row(
+            context,
+            DiscoverContentType.doctor,
+            english ? 'Related doctor' : '关联医生',
+            doctorName,
+          ),
+          _row(
+            context,
+            DiscoverContentType.institution,
+            english ? 'Related institution' : '关联机构',
+            institutionName,
+          ),
         ]),
       ),
     );
   }
 
-  Widget _row(BuildContext context, DiscoverContentType type, String label,
-          String value) =>
+  Widget _orderSubtitle(BuildContext context, Order selected) {
+    final showSeparator =
+        selected.projectName.isNotEmpty && selected.orderNo.isNotEmpty;
+    return Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        if (selected.projectName.isNotEmpty)
+          _associationValue(
+            context,
+            DiscoverContentType.project,
+            selected.projectName,
+          ),
+        if (showSeparator) const Text(' · '),
+        if (selected.orderNo.isNotEmpty) Text(selected.orderNo),
+      ],
+    );
+  }
+
+  Widget _row(
+    BuildContext context,
+    DiscoverContentType type,
+    String label,
+    String value,
+  ) =>
       ListTile(
         contentPadding: EdgeInsets.zero,
         title: Text(label),
-        subtitle: Text(value.isEmpty
-            ? (Localizations.localeOf(context).languageCode == 'en'
+        subtitle: value.isEmpty
+            ? Text(Localizations.localeOf(context).languageCode == 'en'
                 ? 'Optional'
                 : '选填')
-            : value),
+            : _associationValue(context, type, value),
         trailing: const Icon(Icons.chevron_right),
         onTap: canPickManually ? () => onPick(type) : null,
       );
+
+  Widget _associationValue(
+    BuildContext context,
+    DiscoverContentType type,
+    String value,
+  ) {
+    if (type == DiscoverContentType.doctor) return Text(value);
+
+    final normalizedOrderId = order?.id.trim().isNotEmpty ?? false
+        ? order!.id.trim()
+        : orderId.trim();
+    final rawId = switch (type) {
+      DiscoverContentType.project => projectId.trim(),
+      DiscoverContentType.institution => institutionId.trim(),
+      _ => '',
+    };
+    final contentType = switch (type) {
+      DiscoverContentType.project => 'project',
+      DiscoverContentType.institution => 'institution',
+      _ => '',
+    };
+    final hasOrderIdentity = normalizedOrderId.isNotEmpty;
+    final hasIdentity = hasOrderIdentity || rawId.isNotEmpty;
+    final contentId =
+        hasOrderIdentity ? 'order:$normalizedOrderId' : '$contentType:$rawId';
+    final field = hasOrderIdentity
+        ? switch (type) {
+            DiscoverContentType.project => 'projectName',
+            DiscoverContentType.institution => 'institutionName',
+            _ => 'name',
+          }
+        : 'name';
+    return StableAutoTranslatedText(
+      enabled: enableAutoTranslation && hasIdentity,
+      contentType: contentType,
+      contentId: contentId,
+      field: field,
+      sourceText: value,
+    );
+  }
 }
 
 class _DiaryOrderPickerPage extends StatefulWidget {
-  const _DiaryOrderPickerPage(this.repository);
+  const _DiaryOrderPickerPage(
+    this.repository, {
+    required this.enableAutoTranslation,
+  });
 
   final OrdersRepository repository;
+  final bool enableAutoTranslation;
 
   @override
   State<_DiaryOrderPickerPage> createState() => _DiaryOrderPickerPageState();
@@ -869,6 +962,7 @@ class _DiaryOrderPickerPageState extends State<_DiaryOrderPickerPage> {
   @override
   Widget build(BuildContext context) {
     final english = context.isEnglish;
+    final duplicateIds = _duplicateDiaryOrderIds(_orders);
     return Scaffold(
       appBar: AppBar(title: Text(english ? 'Select order' : '选择关联订单')),
       body: _loading
@@ -886,24 +980,69 @@ class _DiaryOrderPickerPageState extends State<_DiaryOrderPickerPage> {
                   : ListView.separated(
                       padding: const EdgeInsets.symmetric(vertical: 8),
                       itemCount: _orders.length,
+                      findItemIndexCallback: (key) {
+                        if (key is! ValueKey<String>) return null;
+                        const prefix = 'diary-order:';
+                        if (!key.value.startsWith(prefix)) return null;
+                        final id = key.value.substring(prefix.length);
+                        final index = _orders.indexWhere((order) {
+                          final candidate = order.id.trim();
+                          return candidate == id &&
+                              !duplicateIds.contains(candidate);
+                        });
+                        return index < 0 ? null : index;
+                      },
                       separatorBuilder: (_, __) => const Divider(height: 1),
                       itemBuilder: (context, index) {
                         final order = _orders[index];
-                        final details = [
-                          order.institutionName,
-                          order.doctorName,
-                        ].where((value) => value.isNotEmpty).join(' · ');
+                        final id = order.id.trim();
+                        final identityStable =
+                            id.isNotEmpty && !duplicateIds.contains(id);
+                        final hasDetails = order.institutionName.isNotEmpty ||
+                            order.doctorName.isNotEmpty;
                         return ListTile(
+                          key: identityStable
+                              ? ValueKey<String>('diary-order:$id')
+                              : ObjectKey(order),
                           leading: const CircleAvatar(
                             child: Icon(Icons.receipt_long_outlined),
                           ),
-                          title: Text(order.projectName),
-                          subtitle: Text(
-                            [order.orderNo, details]
-                                .where((value) => value.isNotEmpty)
-                                .join('\n'),
+                          title: StableAutoTranslatedText(
+                            enabled:
+                                widget.enableAutoTranslation && identityStable,
+                            contentType: 'project',
+                            contentId: 'order:$id',
+                            field: 'projectName',
+                            sourceText: order.projectName,
                           ),
-                          isThreeLine: details.isNotEmpty,
+                          subtitle: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (order.orderNo.isNotEmpty) Text(order.orderNo),
+                              if (hasDetails)
+                                Wrap(
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  children: [
+                                    if (order.institutionName.isNotEmpty)
+                                      StableAutoTranslatedText(
+                                        enabled: widget.enableAutoTranslation &&
+                                            identityStable,
+                                        contentType: 'institution',
+                                        contentId: 'order:$id',
+                                        field: 'institutionName',
+                                        sourceText: order.institutionName,
+                                      ),
+                                    if (order.institutionName.isNotEmpty &&
+                                        order.doctorName.isNotEmpty)
+                                      const Text(' · '),
+                                    if (order.doctorName.isNotEmpty)
+                                      Text(order.doctorName),
+                                  ],
+                                ),
+                            ],
+                          ),
+                          isThreeLine: hasDetails,
                           trailing: const Icon(Icons.chevron_right),
                           onTap: () => Navigator.pop(context, order),
                         );
@@ -911,6 +1050,16 @@ class _DiaryOrderPickerPageState extends State<_DiaryOrderPickerPage> {
                     ),
     );
   }
+}
+
+Set<String> _duplicateDiaryOrderIds(Iterable<Order> orders) {
+  final seen = <String>{};
+  final duplicates = <String>{};
+  for (final order in orders) {
+    final id = order.id.trim();
+    if (id.isNotEmpty && !seen.add(id)) duplicates.add(id);
+  }
+  return duplicates;
 }
 
 class _DiaryEntityPickerPage extends StatefulWidget {
