@@ -1,27 +1,40 @@
+import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 /// Lightweight rich-content renderer for API-provided HTML or Markdown.
 ///
 /// Keeping this renderer in the shared Flutter layer gives Android and iOS the
 /// same presentation without adding a platform WebView or another dependency.
-class RichContentView extends StatelessWidget {
+class RichContentView extends StatefulWidget {
   const RichContentView({
     required this.content,
     this.textStyle,
     this.onImageTap,
+    this.onLinkTap,
     super.key,
   });
 
   final String content;
   final TextStyle? textStyle;
   final ValueChanged<String>? onImageTap;
+  final ValueChanged<Uri>? onLinkTap;
+
+  @override
+  State<RichContentView> createState() => _RichContentViewState();
+}
+
+final class _RichContentViewState extends State<RichContentView> {
+  final List<TapGestureRecognizer> _linkRecognizers = [];
 
   @override
   Widget build(BuildContext context) {
-    final parts = _contentParts(content);
-    final baseStyle = textStyle ??
+    _disposeLinkRecognizers();
+    final parts = _contentParts(widget.content);
+    final baseStyle = widget.textStyle ??
         Theme.of(context).textTheme.bodyLarge?.copyWith(height: 1.7) ??
         const TextStyle(height: 1.7);
 
@@ -33,9 +46,9 @@ class RichContentView extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 10),
               child: GestureDetector(
-                onTap: onImageTap == null
+                onTap: widget.onImageTap == null
                     ? null
-                    : () => onImageTap!(part.imageUrl!),
+                    : () => widget.onImageTap!(part.imageUrl!),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(12),
                   child: Image.network(
@@ -53,12 +66,48 @@ class RichContentView extends StatelessWidget {
                   color: baseStyle.color ??
                       Theme.of(context).colorScheme.onSurface,
                 ),
-                children: _inlineSpans(context, part.markup, baseStyle),
+                children: _inlineSpans(
+                  context,
+                  part.markup,
+                  baseStyle,
+                  _recognizerFor,
+                ),
               ),
             ),
       ],
     );
   }
+
+  TapGestureRecognizer _recognizerFor(Uri uri) {
+    final recognizer = TapGestureRecognizer()
+      ..onTap = () {
+        final callback = widget.onLinkTap;
+        if (callback != null) {
+          callback(uri);
+        } else {
+          unawaited(_launchExternal(uri));
+        }
+      };
+    _linkRecognizers.add(recognizer);
+    return recognizer;
+  }
+
+  void _disposeLinkRecognizers() {
+    for (final recognizer in _linkRecognizers) {
+      recognizer.dispose();
+    }
+    _linkRecognizers.clear();
+  }
+
+  @override
+  void dispose() {
+    _disposeLinkRecognizers();
+    super.dispose();
+  }
+}
+
+Future<void> _launchExternal(Uri uri) async {
+  await launchUrl(uri, mode: LaunchMode.externalApplication);
 }
 
 List<String> richContentImageUrls(String content) => _contentParts(content)
@@ -147,23 +196,23 @@ List<InlineSpan> _inlineSpans(
   BuildContext context,
   String markup,
   TextStyle baseStyle,
+  TapGestureRecognizer Function(Uri uri) recognizerFor,
 ) {
   final source = markup
       .replaceAll(RegExp(r'<\s*br\s*\/?>', caseSensitive: false), '\n')
-      .replaceAll(RegExp(r'<\s*li\b[^>]*>', caseSensitive: false), '\n• ')
-      .replaceAll(RegExp(r'<\s*\/\s*li\s*>', caseSensitive: false), '')
       .replaceAll(
           RegExp(r'<\s*blockquote\b[^>]*>', caseSensitive: false), '\n“')
       .replaceAll(
           RegExp(r'<\s*\/\s*blockquote\s*>', caseSensitive: false), '”\n')
       .replaceAll(
-          RegExp(r'<\s*\/?\s*(p|div|section|ul|ol)\b[^>]*>',
-              caseSensitive: false),
+          RegExp(r'<\s*\/?\s*(p|div|section)\b[^>]*>', caseSensitive: false),
           '\n');
 
   final spans = <InlineSpan>[];
-  final styleStack = <TextStyle>[baseStyle];
-  final tagStack = <String>[];
+  final styleStack = <_InlineStyleFrame>[
+    _InlineStyleFrame(tag: '', style: baseStyle),
+  ];
+  final listStack = <_ListFrame>[];
   final tokenPattern = RegExp(r'<[^>]+>|[^<]+');
 
   for (final token in tokenPattern.allMatches(source)) {
@@ -171,7 +220,13 @@ List<InlineSpan> _inlineSpans(
     if (!value.startsWith('<')) {
       final decoded = _decodeEntities(value);
       if (decoded.isNotEmpty) {
-        spans.add(TextSpan(text: decoded, style: styleStack.last));
+        spans.add(
+          TextSpan(
+            text: decoded,
+            style: styleStack.last.style,
+            recognizer: styleStack.last.recognizer,
+          ),
+        );
       }
       continue;
     }
@@ -180,13 +235,18 @@ List<InlineSpan> _inlineSpans(
         .firstMatch(value);
     if (closing != null) {
       final tag = closing.group(1)!.toLowerCase();
-      final index = tagStack.lastIndexOf(tag);
-      if (index >= 0) {
-        tagStack.removeRange(index, tagStack.length);
-        styleStack.removeRange(index + 1, styleStack.length);
+      if (tag == 'ul' || tag == 'ol') {
+        if (listStack.isNotEmpty && listStack.last.tag == tag) {
+          listStack.removeLast();
+        }
+        _appendNewline(spans, baseStyle);
+      }
+      final index = styleStack.lastIndexWhere((frame) => frame.tag == tag);
+      if (index > 0) {
+        styleStack.removeRange(index, styleStack.length);
       }
       if (const ['h1', 'h2', 'h3'].contains(tag)) {
-        spans.add(const TextSpan(text: '\n'));
+        _appendNewline(spans, baseStyle);
       }
       continue;
     }
@@ -195,14 +255,28 @@ List<InlineSpan> _inlineSpans(
         RegExp(r'^<\s*([a-z0-9]+)', caseSensitive: false).firstMatch(value);
     if (opening == null) continue;
     final tag = opening.group(1)!.toLowerCase();
+    if (tag == 'ul' || tag == 'ol') {
+      _appendNewline(spans, baseStyle);
+      listStack.add(_ListFrame(tag));
+      continue;
+    }
+    if (tag == 'li') {
+      _appendNewline(spans, baseStyle);
+      final marker = listStack.isEmpty
+          ? '• '
+          : '${'  ' * (listStack.length - 1)}${listStack.last.nextMarker()} ';
+      spans.add(TextSpan(text: marker, style: styleStack.last.style));
+      continue;
+    }
+    final currentStyle = styleStack.last.style;
     final nextStyle = switch (tag) {
-      'b' || 'strong' => styleStack.last.copyWith(fontWeight: FontWeight.w700),
-      'i' || 'em' => styleStack.last.copyWith(fontStyle: FontStyle.italic),
-      'u' => styleStack.last.copyWith(decoration: TextDecoration.underline),
+      'b' || 'strong' => currentStyle.copyWith(fontWeight: FontWeight.w700),
+      'i' || 'em' => currentStyle.copyWith(fontStyle: FontStyle.italic),
+      'u' => currentStyle.copyWith(decoration: TextDecoration.underline),
       's' ||
       'del' =>
-        styleStack.last.copyWith(decoration: TextDecoration.lineThrough),
-      'a' => styleStack.last.copyWith(
+        currentStyle.copyWith(decoration: TextDecoration.lineThrough),
+      'a' => currentStyle.copyWith(
           color: Theme.of(context).colorScheme.primary,
           decoration: TextDecoration.underline,
         ),
@@ -216,13 +290,70 @@ List<InlineSpan> _inlineSpans(
     };
     if (nextStyle != null) {
       if (const ['h1', 'h2', 'h3'].contains(tag) && spans.isNotEmpty) {
-        spans.add(const TextSpan(text: '\n'));
+        _appendNewline(spans, baseStyle);
       }
-      tagStack.add(tag);
-      styleStack.add(nextStyle);
+      final uri = tag == 'a' ? _safeHref(value) : null;
+      styleStack.add(
+        _InlineStyleFrame(
+          tag: tag,
+          style: nextStyle,
+          recognizer: tag == 'a'
+              ? (uri == null ? null : recognizerFor(uri))
+              : styleStack.last.recognizer,
+        ),
+      );
     }
   }
   return spans;
+}
+
+final class _InlineStyleFrame {
+  const _InlineStyleFrame({
+    required this.tag,
+    required this.style,
+    this.recognizer,
+  });
+
+  final String tag;
+  final TextStyle style;
+  final GestureRecognizer? recognizer;
+}
+
+final class _ListFrame {
+  _ListFrame(this.tag);
+
+  final String tag;
+  int count = 0;
+
+  String nextMarker() {
+    if (tag == 'ul') return '•';
+    count += 1;
+    return '$count.';
+  }
+}
+
+void _appendNewline(List<InlineSpan> spans, TextStyle style) {
+  if (spans.isEmpty) return;
+  final last = spans.last;
+  if (last is TextSpan && (last.text ?? '').endsWith('\n')) return;
+  spans.add(TextSpan(text: '\n', style: style));
+}
+
+Uri? _safeHref(String anchorTag) {
+  final match = RegExp(
+    r'''\bhref\s*=\s*(["'])(.*?)\1''',
+    caseSensitive: false,
+  ).firstMatch(anchorTag);
+  final href = _decodeEntities(match?.group(2) ?? '').trim();
+  if (href.isEmpty) return null;
+  final uri = Uri.tryParse(href);
+  if (uri == null) return null;
+  final scheme = uri.scheme.toLowerCase();
+  return switch (scheme) {
+    'https' when uri.host.isNotEmpty => uri,
+    'mailto' || 'tel' when uri.path.trim().isNotEmpty => uri,
+    _ => null,
+  };
 }
 
 String _decodeEntities(String value) {

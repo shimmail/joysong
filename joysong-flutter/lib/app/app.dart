@@ -18,6 +18,8 @@ import 'package:joysong_flutter/features/auth/domain/auth_repository.dart';
 import 'package:joysong_flutter/features/auth/domain/token_store.dart';
 import 'package:joysong_flutter/features/auth/presentation/auth_controller.dart';
 import 'package:joysong_flutter/features/auth/presentation/auth_gate.dart';
+import 'package:joysong_flutter/features/legal_documents/data/legal_document_repository_impl.dart';
+import 'package:joysong_flutter/features/legal_documents/domain/legal_document_repository.dart';
 import 'package:joysong_flutter/features/settings/data/settings_preferences_store.dart';
 import 'package:joysong_flutter/features/settings/domain/settings_preferences.dart';
 import 'package:joysong_flutter/features/settings/domain/settings_services.dart';
@@ -55,6 +57,8 @@ class _JoysongAppState extends State<JoysongApp> {
   late final AppLocaleController _localeController;
   late final AutoTranslationController _autoTranslationController;
   late final LanguageTagProvider _languageTagProvider;
+  late final ApiClient _legalApiClient;
+  late final LegalDocumentRepository _legalDocumentRepository;
   late final String _startupRouteName;
   ApiClient? _apiClient;
 
@@ -71,6 +75,11 @@ class _JoysongAppState extends State<JoysongApp> {
     );
     _languageTagProvider = () =>
         _localeController.language == AppLanguage.english ? 'en-US' : 'zh-CN';
+    _legalApiClient = ApiClient(
+      apiRoot: widget.environment.apiRoot,
+      languageTagProvider: _languageTagProvider,
+    );
+    _legalDocumentRepository = ApiLegalDocumentRepository(_legalApiClient);
     final repository =
         widget.authRepository ?? _createAuthRepository(secureStorage);
     final translationRepository = widget.translationRepository ??
@@ -161,6 +170,7 @@ class _JoysongAppState extends State<JoysongApp> {
     _settingsController.dispose();
     _localeController.dispose();
     _autoTranslationController.dispose();
+    _legalApiClient.close();
     _apiClient?.close();
     super.dispose();
   }
@@ -226,6 +236,7 @@ class _JoysongAppState extends State<JoysongApp> {
                 agentConfig: widget.environment.agentConfig,
                 themeController: _themeController,
                 settingsController: _settingsController,
+                legalDocumentRepository: _legalDocumentRepository,
                 apiClient: _apiClient,
                 onLogout: _authController.logout,
               ),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/config/app_environment.dart';
 import 'package:joysong_flutter/core/network/api_client.dart';
+import 'package:joysong_flutter/core/routing/app_router.dart';
 import 'package:joysong_flutter/features/auth/data/google_identity_provider.dart';
 import 'package:joysong_flutter/features/auth/presentation/auth_action_page.dart';
 import 'package:joysong_flutter/features/auth/presentation/auth_controller.dart';
@@ -49,15 +50,11 @@ class AuthGate extends StatelessWidget {
                 // failures are surfaced by AuthController, not as cancellation.
                 return true;
               },
-              onUserAgreement: () => _showLegalText(
-                context,
-                chineseTitle: '用户协议',
-                englishTitle: 'Terms of Service',
+              onUserAgreement: () => Navigator.of(context).pushNamed(
+                AppRoutes.userAgreement,
               ),
-              onPrivacyPolicy: () => _showLegalText(
-                context,
-                chineseTitle: '隐私政策',
-                englishTitle: 'Privacy Policy',
+              onPrivacyPolicy: () => Navigator.of(context).pushNamed(
+                AppRoutes.privacyPolicy,
               ),
               isLoading: controller.isBusy,
               errorMessage: controller.errorMessage,
@@ -111,42 +108,13 @@ class AuthGate extends StatelessWidget {
           onRegister: controller.registerAccount,
           onResetPassword: controller.resetPassword,
           errorMessage: () => controller.errorMessage,
-          onUserAgreement: () => _showLegalText(
-            context,
-            chineseTitle: '用户协议',
-            englishTitle: 'Terms of Service',
+          onUserAgreement: () => Navigator.of(context).pushNamed(
+            AppRoutes.userAgreement,
           ),
-          onPrivacyPolicy: () => _showLegalText(
-            context,
-            chineseTitle: '隐私政策',
-            englishTitle: 'Privacy Policy',
+          onPrivacyPolicy: () => Navigator.of(context).pushNamed(
+            AppRoutes.privacyPolicy,
           ),
         ),
-      ),
-    );
-  }
-
-  Future<void> _showLegalText(
-    BuildContext context, {
-    required String chineseTitle,
-    required String englishTitle,
-  }) {
-    final english = _isEnglish(context);
-    return showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(english ? englishTitle : chineseTitle),
-        content: Text(
-          english
-              ? 'The complete text will be loaded from a controlled content source before release.'
-              : '正式发布前将从受控内容源加载完整文本。',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text(english ? 'Got it' : '知道了'),
-          ),
-        ],
       ),
     );
   }

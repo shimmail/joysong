@@ -97,6 +97,52 @@ void main() {
     );
     localeController.dispose();
   });
+
+  testWidgets('registration remains blocked until both agreements are accepted',
+      (tester) async {
+    final localeController = AppLocaleController(
+      preferenceStore: _MemoryLocaleStore(),
+    );
+    var registerCalls = 0;
+    await tester.pumpWidget(
+      _testApp(
+        localeController,
+        AuthActionPage(
+          mode: AuthActionMode.register,
+          onCheckPhoneRegistered: (_) async => false,
+          onSendCode: (_) async {},
+          onRegister: (_, __, ___) async {
+            registerCalls += 1;
+            return true;
+          },
+        ),
+      ),
+    );
+
+    await tester.enterText(
+      find.byKey(const Key('auth-action-phone')),
+      '13800000000',
+    );
+    await tester.enterText(
+      find.byKey(const Key('auth-action-code')),
+      '123456',
+    );
+    await tester.enterText(
+      find.byKey(const Key('auth-action-password')),
+      'password8',
+    );
+    await tester.enterText(
+      find.byKey(const Key('auth-action-confirm-password')),
+      'password8',
+    );
+    await tester.tap(find.byKey(const Key('auth-action-submit')));
+    await tester.pump();
+
+    expect(registerCalls, 0);
+    expect(find.text('请先同意用户协议和隐私政策'), findsOneWidget);
+    expect(find.byKey(const Key('auth-action-agreement')), findsOneWidget);
+    localeController.dispose();
+  });
 }
 
 Widget _testApp(
