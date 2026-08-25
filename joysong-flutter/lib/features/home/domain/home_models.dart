@@ -61,6 +61,13 @@ final class HomeContent {
           'bio'
         ],
       HomeSectionKind.institution => const ['address', 'city', 'description'],
+      HomeSectionKind.expertArticle || HomeSectionKind.userDiary => const [
+          'subtitle',
+          'description',
+          'summary',
+          'content',
+          'institutionName',
+        ],
       _ => const [
           'subtitle',
           'description',

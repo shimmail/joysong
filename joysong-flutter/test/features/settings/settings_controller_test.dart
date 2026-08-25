@@ -37,6 +37,22 @@ void main() {
     expect(controller.isSaving, isFalse);
   });
 
+  test('failed AI translation write keeps the prior value', () async {
+    final store = _MemorySettingsStore()..failWrites = true;
+    final controller = SettingsController(
+      preferenceStore: store,
+      cacheMaintenance: _FakeCacheMaintenance(),
+    );
+
+    await expectLater(
+      controller.setAiTranslationEnabled(true),
+      throwsStateError,
+    );
+
+    expect(controller.aiTranslationEnabled, isFalse);
+    expect(controller.isSaving, isFalse);
+  });
+
   test('notification sync failure keeps local preferences unchanged', () async {
     final store = _MemorySettingsStore();
     final controller = SettingsController(

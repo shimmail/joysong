@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/features/auth/data/login_preferences_store.dart';
@@ -226,6 +228,48 @@ void main() {
     expect(preferencesStore.value?.autoLogin, isFalse);
   });
 
+  test('logout publishes unauthenticated before remote cleanup completes',
+      () async {
+    preferencesStore.value = const LoginPreferences(
+      phone: '+8613800000000',
+      password: 'password8',
+      rememberPassword: true,
+      autoLogin: true,
+      agreementsAccepted: true,
+    );
+    repository.tokens = _tokens('access-existing', 'refresh-existing');
+    await controller.restoreSession();
+    final logoutCompleter = Completer<void>();
+    repository.logoutCompleter = logoutCompleter;
+    addTearDown(() {
+      if (!logoutCompleter.isCompleted) logoutCompleter.complete();
+    });
+    var notifications = 0;
+    controller.addListener(() => notifications += 1);
+
+    final logoutFuture = controller.logout();
+
+    expect(controller.status, AuthStatus.unauthenticated);
+    expect(controller.currentUser, isNull);
+    expect(controller.isBusy, isTrue);
+    expect(notifications, 1);
+
+    await pumpEventQueue();
+    expect(repository.logoutCount, 1);
+    expect(controller.isBusy, isTrue);
+    await controller.logout();
+    expect(repository.logoutCount, 1);
+
+    logoutCompleter.complete();
+    await logoutFuture;
+
+    expect(controller.status, AuthStatus.unauthenticated);
+    expect(controller.currentUser, isNull);
+    expect(controller.isBusy, isFalse);
+    expect(notifications, 2);
+    expect(preferencesStore.value?.autoLogin, isFalse);
+  });
+
   test('remote logout failure still preserves credentials with auto login off',
       () async {
     preferencesStore.value = const LoginPreferences(
@@ -273,6 +317,7 @@ final class _FakeAuthRepository implements AuthRepository {
   AuthTokens? tokens;
   Object? passwordLoginError;
   Object? logoutError;
+  Completer<void>? logoutCompleter;
   Object? refreshError;
   String? lastPhone;
   String? lastPassword;
@@ -314,6 +359,10 @@ final class _FakeAuthRepository implements AuthRepository {
   Future<void> logout() async {
     logoutCount += 1;
     tokens = null;
+    final completer = logoutCompleter;
+    if (completer != null) {
+      await completer.future;
+    }
     final error = logoutError;
     if (error != null) {
       throw error;

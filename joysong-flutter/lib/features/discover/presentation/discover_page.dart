@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/network/optimized_network_image.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/core/translation/translation.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/discover/presentation/discover_controller.dart';
@@ -1084,6 +1085,7 @@ class _DiscoverDetailPageState extends State<DiscoverDetailPage> {
                   : switch (item!.type) {
                       DiscoverContentType.project => CatalogProjectDetailView(
                           item: item,
+                          enableAutoTranslation: true,
                           socialController: widget.socialController,
                           onBook: widget.onBookProject,
                           onInstitutionTap: (id) =>
@@ -1122,6 +1124,7 @@ class _DiscoverDetailPageState extends State<DiscoverDetailPage> {
                         ),
                       DiscoverContentType.doctor => DoctorDetailView(
                           item: item,
+                          enableAutoTranslation: true,
                           onInstitutionTap: (id) =>
                               _openRelated(DiscoverContentType.institution, id),
                           onProjectTap: (institutionId, projectId) =>
@@ -1161,6 +1164,7 @@ class _DiscoverDetailPageState extends State<DiscoverDetailPage> {
                       DiscoverContentType.institution =>
                         CatalogInstitutionDetailView(
                           item: item,
+                          enableAutoTranslation: true,
                           socialController: widget.socialController,
                           onConsultInstitution: widget.onConsultInstitution,
                           onProjectTap: (institutionId, projectId) =>
@@ -1275,6 +1279,9 @@ class _DiscoverDetailPageState extends State<DiscoverDetailPage> {
           ? _AllReviewsPage(
               reviews: entries,
               socialController: widget.socialController,
+              enableAutoTranslation: true,
+              ownerType: item.type.name,
+              ownerId: item.id,
             )
           : _AllRelatedContentPage(
               groups: {key: entries},
@@ -1359,6 +1366,21 @@ class _GenericDetailView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final titleField = _matchingVisibleField(
+      item.raw,
+      item.title,
+      const ['title', 'name', 'projectName'],
+    );
+    final metaField = _matchingVisibleField(
+      item.raw,
+      item.meta,
+      const ['city', 'category', 'institutionName', 'department'],
+    );
+    final subtitleField = _matchingVisibleField(
+      item.raw,
+      item.subtitle,
+      const ['description', 'summary', 'content', 'specialties', 'address'],
+    );
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
@@ -1373,30 +1395,86 @@ class _GenericDetailView extends StatelessWidget {
             ),
           ),
         const SizedBox(height: 20),
-        Text(item.title, style: Theme.of(context).textTheme.headlineSmall),
+        titleField == null
+            ? Text(item.title, style: Theme.of(context).textTheme.headlineSmall)
+            : AutoTranslatedText(
+                request: _genericDetailRequest(item, titleField, item.title),
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
         if (item.meta.isNotEmpty) ...[
           const SizedBox(height: 8),
-          Text(
-            item.meta,
-            style: TextStyle(color: Theme.of(context).colorScheme.primary),
-          ),
+          metaField == null
+              ? Text(
+                  item.meta,
+                  style:
+                      TextStyle(color: Theme.of(context).colorScheme.primary),
+                )
+              : AutoTranslatedText(
+                  request: _genericDetailRequest(item, metaField, item.meta),
+                  style:
+                      TextStyle(color: Theme.of(context).colorScheme.primary),
+                ),
         ],
         const SizedBox(height: 16),
-        Text(
-          item.subtitle.isEmpty
-              ? context.localized('暂无更多介绍', 'No additional information')
-              : item.subtitle,
-        ),
+        if (subtitleField != null)
+          AutoTranslatedText(
+            request: _genericDetailRequest(
+              item,
+              subtitleField,
+              item.subtitle,
+            ),
+          )
+        else
+          Text(
+            item.subtitle.isEmpty
+                ? context.localized('暂无更多介绍', 'No additional information')
+                : item.subtitle,
+          ),
       ],
     );
   }
 }
 
+String? _matchingVisibleField(
+  Map<String, Object?> data,
+  String visible,
+  List<String> fields,
+) {
+  if (visible.isEmpty) return null;
+  for (final field in fields) {
+    if (data[field]?.toString().trim() == visible) return field;
+  }
+  return null;
+}
+
+AutoTranslationRequest _genericDetailRequest(
+  DiscoverItem item,
+  String field,
+  String source,
+) {
+  return AutoTranslationRequest(
+    contentType:
+        item.type == DiscoverContentType.all ? 'general' : item.type.name,
+    contentId: '${item.type.name}:${item.id}',
+    field: field,
+    sourceText: source,
+  );
+}
+
 class _AllReviewsPage extends StatefulWidget {
-  const _AllReviewsPage({required this.reviews, this.socialController});
+  const _AllReviewsPage({
+    required this.reviews,
+    required this.enableAutoTranslation,
+    required this.ownerType,
+    required this.ownerId,
+    this.socialController,
+  });
 
   final List<Map<String, Object?>> reviews;
   final SocialController? socialController;
+  final bool enableAutoTranslation;
+  final String ownerType;
+  final String ownerId;
 
   @override
   State<_AllReviewsPage> createState() => _AllReviewsPageState();
@@ -1408,6 +1486,23 @@ class _AllReviewsPageState extends State<_AllReviewsPage> {
   @override
   Widget build(BuildContext context) {
     final filtered = filterCatalogReviews(widget.reviews, _filter);
+    final duplicateReviewIds = _duplicateAllReviewIds(widget.reviews);
+    final rows = [
+      for (final review in filtered)
+        (
+          review: review,
+          reviewId: _allReviewId(review),
+          key: _allReviewKey(
+            review,
+            widget.ownerType,
+            widget.ownerId,
+            duplicateReviewIds,
+          ),
+        ),
+    ];
+    final rowIndexes = <Key, int>{
+      for (var index = 0; index < rows.length; index++) rows[index].key: index,
+    };
     return Scaffold(
       appBar: AppBar(title: Text(context.localized('全部评价', 'All reviews'))),
       body: Column(
@@ -1421,7 +1516,7 @@ class _AllReviewsPageState extends State<_AllReviewsPage> {
             ),
           ),
           Expanded(
-            child: filtered.isEmpty
+            child: rows.isEmpty
                 ? Center(
                     child: Text(context.localized(
                       '暂无符合条件的评价',
@@ -1430,18 +1525,57 @@ class _AllReviewsPageState extends State<_AllReviewsPage> {
                   )
                 : ListView.separated(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                    itemCount: filtered.length,
+                    itemCount: rows.length,
+                    findItemIndexCallback: (key) => rowIndexes[key],
                     separatorBuilder: (_, __) => const SizedBox(height: 10),
-                    itemBuilder: (_, index) => CatalogReviewCard(
-                      review: filtered[index],
-                      socialController: widget.socialController,
-                    ),
+                    itemBuilder: (_, index) {
+                      final row = rows[index];
+                      return CatalogReviewCard(
+                        key: row.key,
+                        review: row.review,
+                        reviewId: row.reviewId,
+                        socialController: widget.socialController,
+                        enableAutoTranslation: widget.enableAutoTranslation,
+                        ownerType: widget.ownerType,
+                        ownerId: widget.ownerId,
+                      );
+                    },
                   ),
           ),
         ],
       ),
     );
   }
+}
+
+String _allReviewId(Map<String, Object?> review) => _rawText(
+      review['id'],
+      fallback: _rawText(review['reviewId']),
+    );
+
+Set<String> _duplicateAllReviewIds(List<Map<String, Object?>> reviews) {
+  final seen = <String>{};
+  final duplicates = <String>{};
+  for (final review in reviews) {
+    final reviewId = _allReviewId(review);
+    if (reviewId.isNotEmpty && !seen.add(reviewId)) {
+      duplicates.add(reviewId);
+    }
+  }
+  return duplicates;
+}
+
+Key _allReviewKey(
+  Map<String, Object?> review,
+  String ownerType,
+  String ownerId,
+  Set<String> duplicateReviewIds,
+) {
+  final reviewId = _allReviewId(review);
+  if (reviewId.isEmpty || duplicateReviewIds.contains(reviewId)) {
+    return ObjectKey(review);
+  }
+  return ValueKey<String>('all-review:$ownerType:$ownerId:$reviewId');
 }
 
 class _AllRelatedContentPage extends StatelessWidget {
@@ -1471,39 +1605,105 @@ class _AllRelatedContentPage extends StatelessWidget {
           body: TabBarView(
             children: [
               for (final group in groups.entries)
-                ListView.separated(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: group.value.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (_, index) {
-                    final entry = group.value[index];
-                    if (group.key == 'diaries') {
-                      return DiaryPreviewCard.fromData(
-                        data: entry,
-                        onTap: () => onOpen?.call(group.key, entry),
-                      );
-                    }
-                    if (group.key == 'reviews') {
-                      return _AllReviewCard(
-                        entry: entry,
-                        socialController: socialController,
-                      );
-                    }
-                    final item = _relatedDiscoverItem(group.key, entry);
-                    if (item != null) {
-                      return DiscoverContentCard(
-                        key: ValueKey('all-${group.key}-${item.id}'),
-                        item: item,
-                        onTap: () => onOpen?.call(group.key, entry),
-                      );
-                    }
-                    return const SizedBox.shrink();
-                  },
-                ),
+                if (group.key == 'diaries')
+                  _AllDiaryList(
+                    diaries: group.value,
+                    onOpen: onOpen == null
+                        ? null
+                        : (entry) => onOpen!(group.key, entry),
+                  )
+                else
+                  ListView.separated(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: group.value.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (_, index) {
+                      final entry = group.value[index];
+                      if (group.key == 'reviews') {
+                        return _AllReviewCard(
+                          entry: entry,
+                          socialController: socialController,
+                        );
+                      }
+                      final item = _relatedDiscoverItem(group.key, entry);
+                      if (item != null) {
+                        return DiscoverContentCard(
+                          key: ValueKey('all-${group.key}-${item.id}'),
+                          item: item,
+                          onTap: () => onOpen?.call(group.key, entry),
+                        );
+                      }
+                      return const SizedBox.shrink();
+                    },
+                  ),
             ],
           ),
         ),
       );
+}
+
+class _AllDiaryList extends StatelessWidget {
+  const _AllDiaryList({required this.diaries, this.onOpen});
+
+  final List<Map<String, Object?>> diaries;
+  final ValueChanged<Map<String, Object?>>? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final duplicateIds = _duplicateAllDiaryIds(diaries);
+    final rows = [
+      for (final diary in diaries)
+        (
+          diary: diary,
+          id: _allDiaryId(diary),
+          key: _allDiaryKey(diary, duplicateIds),
+        ),
+    ];
+    final rowIndexes = <Key, int>{
+      for (var index = 0; index < rows.length; index++) rows[index].key: index,
+    };
+    return ListView.separated(
+      padding: const EdgeInsets.all(16),
+      itemCount: rows.length,
+      findItemIndexCallback: (key) => rowIndexes[key],
+      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      itemBuilder: (_, index) {
+        final row = rows[index];
+        return DiaryPreviewCard.fromData(
+          key: row.key,
+          data: row.diary,
+          enableAutoTranslation:
+              row.id.isNotEmpty && !duplicateIds.contains(row.id),
+          onTap: () => onOpen?.call(row.diary),
+        );
+      },
+    );
+  }
+}
+
+Set<String> _duplicateAllDiaryIds(List<Map<String, Object?>> diaries) {
+  final seen = <String>{};
+  final duplicates = <String>{};
+  for (final diary in diaries) {
+    final id = _allDiaryId(diary);
+    if (id.isNotEmpty && !seen.add(id)) duplicates.add(id);
+  }
+  return duplicates;
+}
+
+String _allDiaryId(Map<String, Object?> diary) {
+  final nested = _relatedMap(diary['diary']);
+  final source = <String, Object?>{...nested, ...diary};
+  return _rawText(source['id'], fallback: _rawText(source['diaryId']));
+}
+
+Key _allDiaryKey(
+  Map<String, Object?> diary,
+  Set<String> duplicateIds,
+) {
+  final id = _allDiaryId(diary);
+  if (id.isEmpty || duplicateIds.contains(id)) return ObjectKey(diary);
+  return ValueKey<String>('all-diary:$id');
 }
 
 class _AllReviewCard extends StatelessWidget {
@@ -1546,15 +1746,14 @@ class _AllReviewCard extends StatelessWidget {
               children: [
                 CircleAvatar(
                   radius: 20,
-                  foregroundImage:
-                      avatar.isEmpty
-                          ? null
-                          : optimizedNetworkImageProvider(
-                              context,
-                              avatar,
-                              width: 40,
-                              height: 40,
-                            ),
+                  foregroundImage: avatar.isEmpty
+                      ? null
+                      : optimizedNetworkImageProvider(
+                          context,
+                          avatar,
+                          width: 40,
+                          height: 40,
+                        ),
                   child: Text(userName.characters.first),
                 ),
                 const SizedBox(width: 10),

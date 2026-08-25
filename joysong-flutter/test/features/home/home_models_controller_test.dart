@@ -160,7 +160,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.text('查看全部'));
+    await tester.tap(find.byType(TextButton).first);
     await tester.pump();
 
     expect(selectedSection, HomeSectionKind.hotProject);

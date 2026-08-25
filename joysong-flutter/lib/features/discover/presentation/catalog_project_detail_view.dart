@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/network/optimized_network_image.dart';
+import 'package:joysong_flutter/core/translation/rich_translation_validator.dart';
+import 'package:joysong_flutter/core/translation/translation.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/presentation/catalog_detail_shared.dart';
 import 'package:joysong_flutter/features/discover/presentation/catalog_review_section.dart';
@@ -24,6 +26,7 @@ class CatalogProjectDetailView extends StatelessWidget {
     this.onViewAllReviews,
     this.onAiChat,
     this.socialController,
+    this.enableAutoTranslation = false,
     super.key,
   });
 
@@ -39,6 +42,7 @@ class CatalogProjectDetailView extends StatelessWidget {
   final VoidCallback? onViewAllReviews;
   final VoidCallback? onAiChat;
   final SocialController? socialController;
+  final bool enableAutoTranslation;
 
   @override
   Widget build(BuildContext context) {
@@ -54,8 +58,10 @@ class CatalogProjectDetailView extends StatelessWidget {
     final sources = [ip, project, raw];
     final name = _text(sources, const ['name', 'projectName'], item.title);
     final slogan = _text(sources, const ['slogan'], '');
+    final eligibleDescription =
+        _text(sources, const ['description', 'summary'], '');
     final description =
-        _text(sources, const ['description', 'summary'], item.subtitle);
+        eligibleDescription.isEmpty ? item.subtitle : eligibleDescription;
     final detailContent =
         _text(sources, const ['detailContent', 'content'], '');
     final price = _number(sources, const ['price', 'referencePrice']);
@@ -64,6 +70,7 @@ class CatalogProjectDetailView extends StatelessWidget {
     final reviewCount = _integer(sources, const ['reviewCount', 'ratingCount']);
     final caseCount = _integer(sources, const ['caseCount', 'casesCount']);
     final institutionSources = [institution, ip, raw];
+    final institutionName = _text([institution], const ['name'], '');
     final institutionAddress = [
       _text(institutionSources, const ['city', 'institutionCity'], ''),
       _text(institutionSources, const ['address', 'institutionAddress'], ''),
@@ -73,10 +80,14 @@ class CatalogProjectDetailView extends StatelessWidget {
       const ['contactPhone', 'institutionPhone', 'phone', 'telephone'],
       '',
     );
-    final tags = <String>{
-      ..._tokens(sources, const ['categoryTags']),
-      ..._tokens(sources, const ['tags']),
-    }.toList(growable: false);
+    final tags = <(String, String)>[
+      for (final value in _tokens(sources, const ['categoryTags']))
+        ('category', value),
+      for (final value in _tokens(sources, const ['tags'])) ('tags', value),
+    ];
+    final seenTags = <String>{};
+    final visibleTags =
+        tags.where((entry) => seenTags.add(entry.$2)).toList(growable: false);
     final images = <String>{
       ..._tokens(sources, const ['images']),
       ..._tokens(sources, const ['coverImage']),
@@ -104,15 +115,18 @@ class CatalogProjectDetailView extends StatelessWidget {
       Expanded(
         child: CustomScrollView(slivers: [
           SliverToBoxAdapter(
-            child: CatalogHero(
+            child: _ProjectHero(
               images: images,
-              title: name,
-              eyebrow: slogan,
+              name: name,
+              slogan: slogan,
               subtitle: isInstitutionProject
-                  ? _text([institution], const ['name'], '')
+                  ? institutionName
                   : context.localized('参考均价', 'Reference price'),
               price: price,
               originalPrice: originalPrice,
+              contentId: 'project:${item.id}',
+              translateSubtitle: isInstitutionProject,
+              enableAutoTranslation: enableAutoTranslation,
             ),
           ),
           if (isInstitutionProject)
@@ -123,6 +137,8 @@ class CatalogProjectDetailView extends StatelessWidget {
                 caseCount: caseCount,
                 address: institutionAddress,
                 phone: institutionPhone,
+                contentId: 'project:${item.id}',
+                enableAutoTranslation: enableAutoTranslation,
               ),
             ),
           SliverPersistentHeader(
@@ -137,21 +153,44 @@ class CatalogProjectDetailView extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (tags.isNotEmpty) ...[
+                  if (visibleTags.isNotEmpty) ...[
                     Wrap(
                       spacing: 7,
                       runSpacing: 7,
-                      children: [for (final tag in tags) _TinyTag(tag)],
+                      children: [
+                        for (final tag in visibleTags)
+                          _TinyTag(
+                            tag.$2,
+                            field: tag.$1,
+                            contentId: 'project:${item.id}',
+                            enableAutoTranslation: enableAutoTranslation,
+                          ),
+                      ],
                     ),
                     const SizedBox(height: 12),
                   ],
-                  Text(
-                    description.isEmpty
-                        ? context.localized('暂无项目介绍', 'No project overview')
-                        : description,
-                    style:
-                        const TextStyle(height: 1.55, color: Color(0xff666666)),
-                  ),
+                  if (enableAutoTranslation && eligibleDescription.isNotEmpty)
+                    AutoTranslatedText(
+                      request: _projectRequest(
+                        contentId: 'project:${item.id}',
+                        field: 'description',
+                        source: description,
+                      ),
+                      style: const TextStyle(
+                        height: 1.55,
+                        color: Color(0xff666666),
+                      ),
+                    )
+                  else
+                    Text(
+                      description.isEmpty
+                          ? context.localized('暂无项目介绍', 'No project overview')
+                          : description,
+                      style: const TextStyle(
+                        height: 1.55,
+                        color: Color(0xff666666),
+                      ),
+                    ),
                   if (detailContent.isNotEmpty)
                     Center(
                       child: TextButton(
@@ -205,6 +244,7 @@ class CatalogProjectDetailView extends StatelessWidget {
                                 item.id,
                                 onInstitutionProjectTap,
                                 socialController,
+                                enableAutoTranslation,
                               ),
                           ],
                         ),
@@ -226,6 +266,7 @@ class CatalogProjectDetailView extends StatelessWidget {
                       diaries: diaries,
                       onDiaryTap: onDiaryTap,
                       maxItems: 5,
+                      enableAutoTranslation: enableAutoTranslation,
                     ),
             ),
           ),
@@ -244,6 +285,9 @@ class CatalogProjectDetailView extends StatelessWidget {
                 socialController: socialController,
                 onViewAll: onViewAllReviews,
                 showHeader: false,
+                enableAutoTranslation: enableAutoTranslation,
+                ownerType: 'project',
+                ownerId: item.id,
               ),
             ),
           ),
@@ -256,6 +300,8 @@ class CatalogProjectDetailView extends StatelessWidget {
                   institution,
                   onInstitutionTap,
                   socialController: socialController,
+                  enableAutoTranslation: enableAutoTranslation,
+                  autoTranslationContentId: 'project:${item.id}',
                 ),
               ),
             ),
@@ -286,6 +332,8 @@ class CatalogProjectDetailView extends StatelessWidget {
   }
 
   void _showDetails(BuildContext context, String name, String content) {
+    final contentId = 'project:${item.id}';
+    final contentIsHtml = _looksLikeHtml(content);
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -295,22 +343,131 @@ class CatalogProjectDetailView extends StatelessWidget {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
           children: [
-            Text(name,
+            if (enableAutoTranslation)
+              AutoTranslatedText(
+                request: _projectRequest(
+                  contentId: contentId,
+                  field: 'name',
+                  source: name,
+                ),
                 style: Theme.of(context)
                     .textTheme
                     .titleLarge
-                    ?.copyWith(fontWeight: FontWeight.w800)),
+                    ?.copyWith(fontWeight: FontWeight.w800),
+              )
+            else
+              Text(name,
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleLarge
+                      ?.copyWith(fontWeight: FontWeight.w800)),
             const SizedBox(height: 16),
-            RichContentView(
-              content: content,
-              textStyle: const TextStyle(height: 1.65),
-            ),
+            if (enableAutoTranslation)
+              AutoTranslationBuilder(
+                request: _projectRequest(
+                  contentId: contentId,
+                  field: 'content',
+                  source: content,
+                  contentType: contentIsHtml ? 'project_html' : 'project',
+                  validator: preservesRichContentStructure,
+                ),
+                builder: (_, visibleContent) => RichContentView(
+                  content: visibleContent,
+                  textStyle: const TextStyle(height: 1.65),
+                ),
+              )
+            else
+              RichContentView(
+                content: content,
+                textStyle: const TextStyle(height: 1.65),
+              ),
           ],
         ),
       ),
     );
   }
+}
 
+class _ProjectHero extends StatelessWidget {
+  const _ProjectHero({
+    required this.images,
+    required this.name,
+    required this.slogan,
+    required this.subtitle,
+    required this.price,
+    required this.originalPrice,
+    required this.contentId,
+    required this.translateSubtitle,
+    required this.enableAutoTranslation,
+  });
+
+  final List<String> images;
+  final String name;
+  final String slogan;
+  final String subtitle;
+  final double? price;
+  final double? originalPrice;
+  final String contentId;
+  final bool translateSubtitle;
+  final bool enableAutoTranslation;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget hero(
+        String visibleName, String visibleSlogan, String visibleSubtitle) {
+      return CatalogHero(
+        images: images,
+        title: visibleName,
+        eyebrow: visibleSlogan,
+        subtitle: visibleSubtitle,
+        price: price,
+        originalPrice: originalPrice,
+      );
+    }
+
+    if (!enableAutoTranslation) return hero(name, slogan, subtitle);
+    final nameRequest = _projectRequest(
+      contentId: contentId,
+      field: 'name',
+      source: name,
+    );
+    final sloganRequest = slogan.isEmpty
+        ? null
+        : _projectRequest(
+            contentId: contentId,
+            field: 'slogan',
+            source: slogan,
+          );
+    final subtitleRequest = !translateSubtitle || subtitle.isEmpty
+        ? null
+        : _projectRequest(
+            contentId: contentId,
+            field: 'institutionName',
+            source: subtitle,
+          );
+
+    return AutoTranslationBuilder(
+      request: nameRequest,
+      builder: (_, visibleName) {
+        Widget withSubtitle(String visibleSlogan) {
+          if (subtitleRequest == null) {
+            return hero(visibleName, visibleSlogan, subtitle);
+          }
+          return AutoTranslationBuilder(
+            request: subtitleRequest,
+            builder: (_, visibleSubtitle) =>
+                hero(visibleName, visibleSlogan, visibleSubtitle),
+          );
+        }
+
+        if (sloganRequest == null) return withSubtitle(slogan);
+        return AutoTranslationBuilder(
+          request: sloganRequest,
+          builder: (_, visibleSlogan) => withSubtitle(visibleSlogan),
+        );
+      },
+    );
+  }
 }
 
 class _ProjectFacts extends StatelessWidget {
@@ -320,12 +477,16 @@ class _ProjectFacts extends StatelessWidget {
     required this.caseCount,
     required this.address,
     required this.phone,
+    required this.contentId,
+    required this.enableAutoTranslation,
   });
   final double? rating;
   final int reviewCount;
   final int caseCount;
   final String address;
   final String phone;
+  final String contentId;
+  final bool enableAutoTranslation;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -333,21 +494,31 @@ class _ProjectFacts extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
         child: Column(children: [
           Row(children: [
-            Expanded(child: _ProjectStat(
-              value: rating != null && rating! > 0 ? rating!.toStringAsFixed(1) : '—',
+            Expanded(
+                child: _ProjectStat(
+              value: rating != null && rating! > 0
+                  ? rating!.toStringAsFixed(1)
+                  : '—',
               label: context.localized('评分', 'Rating'),
               showStar: true,
             )),
-            Expanded(child: _ProjectStat(
-              value: '$reviewCount', label: context.localized('评价', 'Reviews'))),
-            Expanded(child: _ProjectStat(
-              value: '$caseCount', label: context.localized('案例', 'Cases'))),
+            Expanded(
+                child: _ProjectStat(
+                    value: '$reviewCount',
+                    label: context.localized('评价', 'Reviews'))),
+            Expanded(
+                child: _ProjectStat(
+                    value: '$caseCount',
+                    label: context.localized('案例', 'Cases'))),
           ]),
           if (address.isNotEmpty)
             _ProjectCopyLine(
               icon: Icons.location_on_outlined,
               label: context.localized('机构位置', 'Location'),
               value: address,
+              field: 'address',
+              contentId: contentId,
+              enableAutoTranslation: enableAutoTranslation,
             ),
           if (phone.isNotEmpty)
             _ProjectCopyLine(
@@ -360,7 +531,8 @@ class _ProjectFacts extends StatelessWidget {
 }
 
 class _ProjectStat extends StatelessWidget {
-  const _ProjectStat({required this.value, required this.label, this.showStar = false});
+  const _ProjectStat(
+      {required this.value, required this.label, this.showStar = false});
   final String value;
   final String label;
   final bool showStar;
@@ -371,18 +543,31 @@ class _ProjectStat extends StatelessWidget {
             const Icon(Icons.star_rounded, size: 18, color: Color(0xffffa000)),
             const SizedBox(width: 3),
           ],
-          Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+          Text(value,
+              style:
+                  const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
         ]),
         const SizedBox(height: 3),
-        Text(label, style: const TextStyle(fontSize: 12, color: Color(0xff777777))),
+        Text(label,
+            style: const TextStyle(fontSize: 12, color: Color(0xff777777))),
       ]);
 }
 
 class _ProjectCopyLine extends StatelessWidget {
-  const _ProjectCopyLine({required this.icon, required this.label, required this.value});
+  const _ProjectCopyLine({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.field = '',
+    this.contentId = '',
+    this.enableAutoTranslation = false,
+  });
   final IconData icon;
   final String label;
   final String value;
+  final String field;
+  final String contentId;
+  final bool enableAutoTranslation;
   @override
   Widget build(BuildContext context) => InkWell(
         onTap: () async {
@@ -398,7 +583,23 @@ class _ProjectCopyLine extends StatelessWidget {
             Icon(icon, size: 20, color: const Color(0xff777777)),
             const SizedBox(width: 8),
             Text('$label：', style: const TextStyle(color: Color(0xff777777))),
-            Expanded(child: Text(value, maxLines: 2, overflow: TextOverflow.ellipsis)),
+            Expanded(
+              child: enableAutoTranslation
+                  ? AutoTranslatedText(
+                      request: _projectRequest(
+                        contentId: contentId,
+                        field: field,
+                        source: value,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    )
+                  : Text(
+                      value,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+            ),
             Icon(
               Icons.copy_rounded,
               size: 17,
@@ -426,8 +627,16 @@ class _ProjectNavDelegate extends SliverPersistentHeaderDelegate {
 }
 
 class _TinyTag extends StatelessWidget {
-  const _TinyTag(this.label);
+  const _TinyTag(
+    this.label, {
+    required this.field,
+    required this.contentId,
+    required this.enableAutoTranslation,
+  });
   final String label;
+  final String field;
+  final String contentId;
+  final bool enableAutoTranslation;
   @override
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
@@ -435,7 +644,16 @@ class _TinyTag extends StatelessWidget {
           color: const Color(0xffeeeeee),
           borderRadius: BorderRadius.circular(5),
         ),
-        child: Text(label, style: const TextStyle(fontSize: 12)),
+        child: enableAutoTranslation
+            ? AutoTranslatedText(
+                request: _projectRequest(
+                  contentId: contentId,
+                  field: field,
+                  source: label,
+                ),
+                style: const TextStyle(fontSize: 12),
+              )
+            : Text(label, style: const TextStyle(fontSize: 12)),
       );
 }
 
@@ -445,11 +663,13 @@ class _InstitutionProjectRow extends StatelessWidget {
     this.projectId,
     this.onTap,
     this.socialController,
+    this.enableAutoTranslation,
   );
   final Map<String, Object?> data;
   final String projectId;
   final void Function(String institutionId, String projectId)? onTap;
   final SocialController? socialController;
+  final bool enableAutoTranslation;
   @override
   Widget build(BuildContext context) {
     final institution = _map(data['institution']);
@@ -461,6 +681,8 @@ class _InstitutionProjectRow extends StatelessWidget {
       id.isEmpty || onTap == null ? null : (_) => onTap!(id, projectId),
       title: _text([data, institution], const ['institutionName', 'name'], ''),
       socialController: socialController,
+      enableAutoTranslation: enableAutoTranslation,
+      autoTranslationContentId: 'project:$projectId',
     );
   }
 }
@@ -471,11 +693,15 @@ class _InstitutionRow extends StatelessWidget {
     this.onTap, {
     this.title,
     this.socialController,
+    this.enableAutoTranslation = false,
+    this.autoTranslationContentId = '',
   });
   final Map<String, Object?> data;
   final ValueChanged<String>? onTap;
   final String? title;
   final SocialController? socialController;
+  final bool enableAutoTranslation;
+  final String autoTranslationContentId;
   @override
   Widget build(BuildContext context) {
     final id = _text([data], const ['institutionId', 'id'], '');
@@ -495,16 +721,43 @@ class _InstitutionRow extends StatelessWidget {
           Expanded(
             child:
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(title ?? _text([data], const ['name'], ''),
+              if (enableAutoTranslation)
+                AutoTranslatedText(
+                  request: _projectRequest(
+                    contentId: autoTranslationContentId,
+                    field: 'institutionName',
+                    source: title ?? _text([data], const ['name'], ''),
+                  ),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.w800)),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                )
+              else
+                Text(title ?? _text([data], const ['name'], ''),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.w800)),
               const SizedBox(height: 5),
-              Text(_text([data], const ['address', 'city'], ''),
+              if (enableAutoTranslation)
+                AutoTranslatedText(
+                  request: _projectRequest(
+                    contentId: autoTranslationContentId,
+                    field: 'address',
+                    source: _text([data], const ['address', 'city'], ''),
+                  ),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Color(0xff777777))),
+                  style: const TextStyle(color: Color(0xff777777)),
+                )
+              else
+                Text(_text([data], const ['address', 'city'], ''),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Color(0xff777777))),
               if (rating != null && rating > 0) ...[
                 const SizedBox(height: 6),
                 Text('★ ${rating.toStringAsFixed(1)}'),
@@ -517,8 +770,7 @@ class _InstitutionRow extends StatelessWidget {
               type: FavoriteTargetType.institution,
               targetId: id,
               targetName: title ?? _text([data], const ['name'], ''),
-              targetImage:
-                  _text([data], const ['coverImage', 'logo'], ''),
+              targetImage: _text([data], const ['coverImage', 'logo'], ''),
             ),
         ]),
       ),
@@ -534,7 +786,8 @@ class _DoctorRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final id = _text([data], const ['id', 'doctorId'], '');
     final avatar = _text([data], const ['avatar'], '');
-    final phone = _text([data], const ['phone', 'contactPhone', 'telephone'], '');
+    final phone =
+        _text([data], const ['phone', 'contactPhone', 'telephone'], '');
     return ListTile(
       onTap: id.isEmpty || onTap == null ? null : () => onTap!(id),
       leading: CircleAvatar(
@@ -559,8 +812,8 @@ class _DoctorRow extends StatelessWidget {
                 await Clipboard.setData(ClipboardData(text: phone));
                 if (!context.mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: Text(context.localized(
-                      '已复制医生电话', 'Doctor phone copied')),
+                  content:
+                      Text(context.localized('已复制医生电话', 'Doctor phone copied')),
                 ));
               },
               child: Padding(
@@ -651,3 +904,22 @@ List<String> _split(Object? value) {
       .where((value) => value.isNotEmpty)
       .toList(growable: false);
 }
+
+AutoTranslationRequest _projectRequest({
+  required String contentId,
+  required String field,
+  required String source,
+  String contentType = 'project',
+  TranslationValidator? validator,
+}) {
+  return AutoTranslationRequest(
+    contentType: contentType,
+    contentId: contentId,
+    field: field,
+    sourceText: source,
+    validator: validator,
+  );
+}
+
+bool _looksLikeHtml(String value) =>
+    RegExp(r'<\/?[a-z][^>]*>', caseSensitive: false).hasMatch(value);

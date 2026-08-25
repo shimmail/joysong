@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/network/optimized_network_image.dart';
+import 'package:joysong_flutter/core/translation/translation.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/social/presentation/diary_media_grid.dart';
 
@@ -55,6 +56,21 @@ class _ProjectCardState extends State<_ProjectCard> {
   Widget build(BuildContext context) {
     final item = widget.item;
     final data = _primary(item);
+    final titleField = _matchingField(
+      data,
+      item.title,
+      const ['title', 'name', 'projectName'],
+    );
+    final metaField = _matchingField(
+      data,
+      item.meta,
+      const ['city', 'category', 'institutionName', 'department'],
+    );
+    final subtitleField = _matchingField(
+      data,
+      item.subtitle,
+      const ['description', 'summary', 'content', 'specialties', 'address'],
+    );
     final price = _number(data, const ['price', 'referencePrice']);
     final rating = _number(data, const ['rating']);
     final reviews = _integer(data, const ['reviewCount']);
@@ -84,14 +100,33 @@ class _ProjectCardState extends State<_ProjectCard> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _Title(item.title),
+                          titleField == null
+                              ? _Title(item.title)
+                              : _discoverTitle(
+                                  item,
+                                  titleField,
+                                  item.title,
+                                ),
                           if (item.meta.isNotEmpty) ...[
                             const SizedBox(height: 4),
-                            _Muted(item.meta),
+                            metaField == null
+                                ? _Muted(item.meta)
+                                : _discoverMuted(
+                                    item,
+                                    metaField,
+                                    item.meta,
+                                  ),
                           ],
                           if (item.subtitle.isNotEmpty) ...[
                             const SizedBox(height: 6),
-                            _Muted(item.subtitle, maxLines: 2),
+                            subtitleField == null
+                                ? _Muted(item.subtitle, maxLines: 2)
+                                : _discoverMuted(
+                                    item,
+                                    subtitleField,
+                                    item.subtitle,
+                                    maxLines: 2,
+                                  ),
                           ],
                           const SizedBox(height: 8),
                           Row(
@@ -194,9 +229,8 @@ class _InstitutionProjectEntry extends StatelessWidget {
     final institutionName = _text(data, const ['institutionName']);
     final price = _number(data, const ['price']);
     final cover = _firstImageValue(data);
-    final enabled = institutionId.isNotEmpty &&
-        projectId.isNotEmpty &&
-        onTap != null;
+    final enabled =
+        institutionId.isNotEmpty && projectId.isNotEmpty && onTap != null;
     return InkWell(
       onTap: enabled ? () => onTap!(institutionId, projectId) : null,
       child: Padding(
@@ -253,7 +287,11 @@ class _DoctorCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final data = _primary(item);
-    final title = _text(data, const ['title']);
+    final name = _text(data, const ['name', 'nickname']);
+    final title = _text(
+      data,
+      const ['title', 'professionalTitle', 'doctorTitle'],
+    );
     final institution = _text(data, const ['institutionName']);
     final specialties = _tokens(data['specialties']).take(3).toList();
     final verified = _boolean(data['isVerified']);
@@ -277,7 +315,9 @@ class _DoctorCard extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Flexible(child: _Title(item.title)),
+                    Flexible(
+                      child: _Title(name.isEmpty ? item.title : name),
+                    ),
                     if (verified) ...[
                       const SizedBox(width: 5),
                       Icon(
@@ -289,17 +329,22 @@ class _DoctorCard extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 4),
-                _Muted(
-                  [title, institution]
-                      .where((value) => value.isNotEmpty)
-                      .join(' · '),
+                _discoverJoinedMuted(
+                  item,
+                  [
+                    ('professionalTitle', title),
+                    ('institutionName', institution),
+                  ],
                 ),
                 if (specialties.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 6,
                     runSpacing: 5,
-                    children: [for (final value in specialties) _Tag(value)],
+                    children: [
+                      for (final value in specialties)
+                        _discoverTag(item, 'specialties', value),
+                    ],
                   ),
                 ],
                 if (rating != null && rating > 0) ...[
@@ -328,10 +373,20 @@ class _InstitutionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final data = _primary(item);
     final verified = _boolean(data['isVerified']);
-    final address = [
-      _text(data, const ['city']),
-      _text(data, const ['address']),
-    ].where((value) => value.isNotEmpty).join(' · ');
+    final city = _text(data, const ['city']);
+    final streetAddress = _text(data, const ['address']);
+    final address =
+        [city, streetAddress].where((value) => value.isNotEmpty).join(' · ');
+    final titleField = _matchingField(
+      data,
+      item.title,
+      const ['title', 'name', 'projectName'],
+    );
+    final subtitleField = _matchingField(
+      data,
+      item.subtitle,
+      const ['description', 'summary', 'content', 'specialties', 'address'],
+    );
     return _CardShell(
       onTap: onTap,
       child: Row(
@@ -349,7 +404,15 @@ class _InstitutionCard extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Expanded(child: _Title(item.title)),
+                    Expanded(
+                      child: titleField == null
+                          ? _Title(item.title)
+                          : _discoverTitle(
+                              item,
+                              titleField,
+                              item.title,
+                            ),
+                    ),
                     if (verified)
                       Icon(
                         Icons.verified_rounded,
@@ -364,13 +427,28 @@ class _InstitutionCard extends StatelessWidget {
                     children: [
                       const Icon(Icons.location_on_outlined, size: 15),
                       const SizedBox(width: 3),
-                      Expanded(child: _Muted(address)),
+                      Expanded(
+                        child: _discoverJoinedMuted(
+                          item,
+                          [
+                            ('city', city),
+                            ('address', streetAddress),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
                 ],
                 if (item.subtitle.isNotEmpty) ...[
                   const SizedBox(height: 6),
-                  _Muted(item.subtitle, maxLines: 2),
+                  subtitleField == null
+                      ? _Muted(item.subtitle, maxLines: 2)
+                      : _discoverMuted(
+                          item,
+                          subtitleField,
+                          item.subtitle,
+                          maxLines: 2,
+                        ),
                 ],
                 const SizedBox(height: 7),
                 _Rating(
@@ -413,6 +491,8 @@ class _DiaryCard extends StatelessWidget {
       likeCount: _integer(data, const ['likeCount']),
       favoriteCount: _integer(data, const ['favoriteCount']),
       commentCount: _integer(data, const ['commentCount']),
+      enableAutoTranslation: true,
+      autoTranslationContentId: '${item.type.name}:${item.id}',
       isLiked: _boolean(data['isLiked']),
       isFavorited: _boolean(data['isFavorited']),
       onTap: onTap,
@@ -435,6 +515,8 @@ class DiaryPreviewCard extends StatelessWidget {
     required this.favoriteCount,
     required this.commentCount,
     required this.onTap,
+    this.enableAutoTranslation = false,
+    this.autoTranslationContentId = '',
     this.isLiked = false,
     this.isFavorited = false,
     this.trailing,
@@ -444,6 +526,7 @@ class DiaryPreviewCard extends StatelessWidget {
   factory DiaryPreviewCard.fromData({
     required Map<String, Object?> data,
     required VoidCallback onTap,
+    bool enableAutoTranslation = false,
     Key? key,
   }) {
     final nested = data['diary'];
@@ -455,8 +538,11 @@ class DiaryPreviewCard extends StatelessWidget {
         : data;
     final images = _tokens(source['imageUrls'] ?? source['images']);
     final coverImage = _text(source, const ['coverImage', 'imageUrl']);
+    final id = _text(source, const ['id', 'diaryId']);
     return DiaryPreviewCard(
       key: key,
+      enableAutoTranslation: enableAutoTranslation && id.isNotEmpty,
+      autoTranslationContentId: id.isEmpty ? '' : 'diary:$id',
       title: _text(source, const ['title']),
       content: _text(source, const ['content', 'description', 'summary']),
       authorName: _text(
@@ -500,6 +586,8 @@ class DiaryPreviewCard extends StatelessWidget {
   final int likeCount;
   final int favoriteCount;
   final int commentCount;
+  final bool enableAutoTranslation;
+  final String autoTranslationContentId;
   final bool isLiked;
   final bool isFavorited;
   final Widget? trailing;
@@ -565,7 +653,15 @@ class DiaryPreviewCard extends StatelessWidget {
                         ],
                       ),
                     ),
-                    if (projectName.isNotEmpty) _Tag(projectName),
+                    if (projectName.isNotEmpty)
+                      enableAutoTranslation && containsChineseText(projectName)
+                          ? _StableDiaryTranslation(
+                              contentId: autoTranslationContentId,
+                              field: 'projectName',
+                              source: projectName,
+                              builder: (_, visibleText) => _Tag(visibleText),
+                            )
+                          : _Tag(projectName),
                     if (trailing != null) ...[
                       const SizedBox(width: 6),
                       trailing!,
@@ -573,10 +669,25 @@ class DiaryPreviewCard extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 10),
-                _Title(title),
+                enableAutoTranslation
+                    ? _StableDiaryTranslation(
+                        contentId: autoTranslationContentId,
+                        field: 'title',
+                        source: title,
+                        builder: (_, visibleText) => _Title(visibleText),
+                      )
+                    : _Title(title),
                 if (content.isNotEmpty) ...[
                   const SizedBox(height: 5),
-                  _Muted(content, maxLines: 2),
+                  enableAutoTranslation
+                      ? _StableDiaryTranslation(
+                          contentId: autoTranslationContentId,
+                          field: 'content',
+                          source: content,
+                          builder: (_, visibleText) =>
+                              _Muted(visibleText, maxLines: 2),
+                        )
+                      : _Muted(content, maxLines: 2),
                 ],
                 const SizedBox(height: 10),
                 Row(
@@ -611,12 +722,58 @@ class DiaryPreviewCard extends StatelessWidget {
   }
 }
 
+class _StableDiaryTranslation extends StatefulWidget {
+  const _StableDiaryTranslation({
+    required this.contentId,
+    required this.field,
+    required this.source,
+    required this.builder,
+  });
+
+  final String contentId;
+  final String field;
+  final String source;
+  final Widget Function(BuildContext context, String visibleText) builder;
+
+  @override
+  State<_StableDiaryTranslation> createState() =>
+      _StableDiaryTranslationState();
+}
+
+class _StableDiaryTranslationState extends State<_StableDiaryTranslation> {
+  late AutoTranslationRequest _request = _createRequest();
+
+  @override
+  void didUpdateWidget(_StableDiaryTranslation oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.contentId != oldWidget.contentId ||
+        widget.field != oldWidget.field ||
+        widget.source != oldWidget.source) {
+      _request = _createRequest();
+    }
+  }
+
+  AutoTranslationRequest _createRequest() => AutoTranslationRequest(
+        contentType: 'diary',
+        contentId: widget.contentId,
+        field: widget.field,
+        sourceText: widget.source,
+      );
+
+  @override
+  Widget build(BuildContext context) => AutoTranslationBuilder(
+        request: _request,
+        builder: widget.builder,
+      );
+}
+
 class DiaryPreviewRail extends StatelessWidget {
   const DiaryPreviewRail({
     required this.diaries,
     this.onDiaryTap,
     this.maxItems,
     this.cardWidth = 300,
+    this.enableAutoTranslation = false,
     super.key,
   });
 
@@ -624,12 +781,14 @@ class DiaryPreviewRail extends StatelessWidget {
   final ValueChanged<String>? onDiaryTap;
   final int? maxItems;
   final double cardWidth;
+  final bool enableAutoTranslation;
 
   @override
   Widget build(BuildContext context) {
     final count = maxItems == null || diaries.length <= maxItems!
         ? diaries.length
         : maxItems!;
+    final duplicateIds = _duplicateDiaryPreviewIds(diaries);
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
@@ -638,9 +797,15 @@ class DiaryPreviewRail extends StatelessWidget {
           for (var index = 0; index < count; index++) ...[
             if (index > 0) const SizedBox(width: 10),
             SizedBox(
+              key: _diaryPreviewKey(diaries[index], duplicateIds),
               width: cardWidth,
               child: DiaryPreviewCard.fromData(
                 data: diaries[index],
+                enableAutoTranslation: enableAutoTranslation &&
+                    _hasUniqueDiaryPreviewId(
+                      diaries[index],
+                      duplicateIds,
+                    ),
                 onTap: () {
                   final id = _text(diaries[index], const ['id', 'diaryId']);
                   if (id.isNotEmpty) onDiaryTap?.call(id);
@@ -654,6 +819,40 @@ class DiaryPreviewRail extends StatelessWidget {
   }
 }
 
+Set<String> _duplicateDiaryPreviewIds(
+  List<Map<String, Object?>> diaries,
+) {
+  final seen = <String>{};
+  final duplicates = <String>{};
+  for (final diary in diaries) {
+    final id = _diaryPreviewId(diary);
+    if (id.isNotEmpty && !seen.add(id)) duplicates.add(id);
+  }
+  return duplicates;
+}
+
+bool _hasUniqueDiaryPreviewId(
+  Map<String, Object?> diary,
+  Set<String> duplicateIds,
+) {
+  final id = _diaryPreviewId(diary);
+  return id.isNotEmpty && !duplicateIds.contains(id);
+}
+
+Key _diaryPreviewKey(
+  Map<String, Object?> diary,
+  Set<String> duplicateIds,
+) {
+  final id = _diaryPreviewId(diary);
+  if (id.isEmpty || duplicateIds.contains(id)) return ObjectKey(diary);
+  return ValueKey<String>('diary-preview:$id');
+}
+
+String _diaryPreviewId(Map<String, Object?> diary) {
+  final nested = _map(diary['diary']);
+  return _text(<String, Object?>{...nested, ...diary}, const ['id', 'diaryId']);
+}
+
 class _ArticleCard extends StatelessWidget {
   const _ArticleCard({required this.item, required this.onTap});
   final DiscoverItem item;
@@ -662,6 +861,16 @@ class _ArticleCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final data = _primary(item);
+    final titleField = _matchingField(
+      data,
+      item.title,
+      const ['title', 'name', 'projectName'],
+    );
+    final subtitleField = _matchingField(
+      data,
+      item.subtitle,
+      const ['description', 'summary', 'content', 'specialties', 'address'],
+    );
     return _CardShell(
       padding: EdgeInsets.zero,
       onTap: onTap,
@@ -679,10 +888,19 @@ class _ArticleCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _Title(item.title),
+                titleField == null
+                    ? _Title(item.title)
+                    : _discoverTitle(item, titleField, item.title),
                 if (item.subtitle.isNotEmpty) ...[
                   const SizedBox(height: 5),
-                  _Muted(item.subtitle, maxLines: 2),
+                  subtitleField == null
+                      ? _Muted(item.subtitle, maxLines: 2)
+                      : _discoverMuted(
+                          item,
+                          subtitleField,
+                          item.subtitle,
+                          maxLines: 2,
+                        ),
                 ],
                 const SizedBox(height: 10),
                 Row(
@@ -732,10 +950,15 @@ class _BaseCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _Title(item.title),
+                  _discoverTitle(item, 'title', item.title),
                   if (item.subtitle.isNotEmpty) ...[
                     const SizedBox(height: 5),
-                    _Muted(item.subtitle, maxLines: 2),
+                    _discoverMuted(
+                      item,
+                      'summary',
+                      item.subtitle,
+                      maxLines: 2,
+                    ),
                   ],
                 ],
               ),
@@ -796,6 +1019,149 @@ class _Cover extends StatelessWidget {
       ),
     );
   }
+}
+
+AutoTranslationRequest _discoverRequest(
+  DiscoverItem item,
+  String field,
+  String source,
+) =>
+    AutoTranslationRequest(
+      contentType:
+          item.type == DiscoverContentType.all ? 'general' : item.type.name,
+      contentId: '${item.type.name}:${item.id}',
+      field: field,
+      sourceText: source,
+    );
+
+Widget _discoverTitle(
+  DiscoverItem item,
+  String field,
+  String source,
+) =>
+    AutoTranslationBuilder(
+      request: _discoverRequest(item, field, source),
+      builder: (_, visibleText) => _Title(visibleText),
+    );
+
+Widget _discoverMuted(
+  DiscoverItem item,
+  String field,
+  String source, {
+  int maxLines = 1,
+}) =>
+    AutoTranslationBuilder(
+      request: _discoverRequest(item, field, source),
+      builder: (_, visibleText) => _Muted(visibleText, maxLines: maxLines),
+    );
+
+Widget _discoverJoinedMuted(
+  DiscoverItem item,
+  List<(String, String)> parts, {
+  int maxLines = 1,
+}) =>
+    _DiscoverJoinedMuted(
+      item: item,
+      parts: parts,
+      maxLines: maxLines,
+    );
+
+class _DiscoverJoinedMuted extends StatefulWidget {
+  const _DiscoverJoinedMuted({
+    required this.item,
+    required this.parts,
+    required this.maxLines,
+  });
+
+  final DiscoverItem item;
+  final List<(String, String)> parts;
+  final int maxLines;
+
+  @override
+  State<_DiscoverJoinedMuted> createState() => _DiscoverJoinedMutedState();
+}
+
+class _DiscoverJoinedMutedState extends State<_DiscoverJoinedMuted> {
+  late List<AutoTranslationRequest?> _requests;
+
+  @override
+  void initState() {
+    super.initState();
+    _requests = _updatedRequests(const []);
+  }
+
+  @override
+  void didUpdateWidget(_DiscoverJoinedMuted oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _requests = _updatedRequests(_requests);
+  }
+
+  List<AutoTranslationRequest?> _updatedRequests(
+    List<AutoTranslationRequest?> previous,
+  ) {
+    return [
+      for (var index = 0; index < widget.parts.length; index++)
+        _updatedRequest(
+          widget.parts[index],
+          index < previous.length ? previous[index] : null,
+        ),
+    ];
+  }
+
+  AutoTranslationRequest? _updatedRequest(
+    (String, String) part,
+    AutoTranslationRequest? previous,
+  ) {
+    if (!containsChineseText(part.$2)) return null;
+    final contentType = widget.item.type == DiscoverContentType.all
+        ? 'general'
+        : widget.item.type.name;
+    final contentId = '${widget.item.type.name}:${widget.item.id}';
+    if (previous != null &&
+        previous.contentType == contentType &&
+        previous.contentId == contentId &&
+        previous.field == part.$1 &&
+        previous.sourceText == part.$2) {
+      return previous;
+    }
+    return _discoverRequest(widget.item, part.$1, part.$2);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Widget buildPart(int index, List<String> visibleParts) {
+      if (index == widget.parts.length) {
+        return _Muted(
+          visibleParts.where((value) => value.isNotEmpty).join(' · '),
+          maxLines: widget.maxLines,
+        );
+      }
+      final part = widget.parts[index];
+      final request = _requests[index];
+      if (request == null) {
+        return buildPart(index + 1, [...visibleParts, part.$2]);
+      }
+      return AutoTranslationBuilder(
+        request: request,
+        builder: (_, visibleText) =>
+            buildPart(index + 1, [...visibleParts, visibleText]),
+      );
+    }
+
+    return buildPart(0, const []);
+  }
+}
+
+Widget _discoverTag(
+  DiscoverItem item,
+  String field,
+  String source,
+) {
+  if (!containsChineseText(source)) return _Tag(source);
+  return AutoTranslationBuilder(
+    request: _discoverRequest(item, field, source),
+    builder: (_, visibleText) => _Tag(visibleText),
+  );
 }
 
 class _Title extends StatelessWidget {
@@ -908,6 +1274,17 @@ String _text(Map<String, Object?> data, List<String> keys) {
   return '';
 }
 
+String? _matchingField(
+  Map<String, Object?> data,
+  String visibleText,
+  List<String> keys,
+) {
+  for (final key in keys) {
+    if (_text(data, [key]) == visibleText) return key;
+  }
+  return null;
+}
+
 String _diaryDate(Map<String, Object?> data, {String fallback = ''}) {
   final value = _text(data, const [
     'publishDate',
@@ -954,8 +1331,8 @@ List<Map<String, Object?>> _maps(Object? value) {
   if (value is! List) return const [];
   return value
       .whereType<Map>()
-      .map((entry) =>
-          entry.map((key, value) => MapEntry(key.toString(), value)))
+      .map(
+          (entry) => entry.map((key, value) => MapEntry(key.toString(), value)))
       .toList(growable: false);
 }
 

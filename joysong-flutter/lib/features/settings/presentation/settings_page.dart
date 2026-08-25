@@ -247,6 +247,24 @@ class _SettingsPageState extends State<SettingsPage> {
                         : strings.chinese,
                     onTap: _showLanguageDialog,
                   ),
+                  if (AppLocaleScope.maybeOf(context)?.language ==
+                      AppLanguage.english)
+                    SwitchListTile(
+                      key: const Key('ai-translation-switch'),
+                      secondary: const Icon(Icons.translate_rounded),
+                      title: Text(strings.aiTranslation),
+                      subtitle: Text(strings.aiTranslationSubtitle),
+                      value: settings.aiTranslationEnabled,
+                      onChanged: settings.isSaving
+                          ? null
+                          : (value) async {
+                              try {
+                                await settings.setAiTranslationEnabled(value);
+                              } on Object {
+                                _showMessage(_strings.aiTranslationSaveFailed);
+                              }
+                            },
+                    ),
                   _SettingsTile(
                     key: const Key('app-preferences-entry'),
                     icon: Icons.tune_rounded,

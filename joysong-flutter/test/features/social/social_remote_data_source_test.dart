@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/core/network/api_client.dart';
 import 'package:joysong_flutter/core/network/api_exception.dart';
+import 'package:joysong_flutter/core/translation/content_translation.dart'
+    as core_translation;
 import 'package:joysong_flutter/features/social/data/social_remote_data_source.dart';
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
 
@@ -101,6 +103,31 @@ void main() {
       'content': '修改后的评价',
       'tags': '专业,耐心',
       'images': 'https://img/one.jpg,https://img/two.jpg',
+    });
+  });
+
+  test('returns the shared translation model through the social API', () async {
+    client.responseData = {
+      'translatedText': 'Recovery is progressing well',
+      'detectedLanguage': 'zh',
+      'targetLanguage': 'en-US',
+      'provider': 'qwen',
+      'cached': true,
+    };
+
+    final result = await dataSource.translateText(
+      text: ' 恢复得很好 ',
+      targetLanguage: ' en-US ',
+      contentType: ' diary ',
+    );
+
+    expect(result, isA<core_translation.ContentTranslation>());
+    expect(client.lastMethod, 'POST');
+    expect(client.lastPath, 'translations');
+    expect(client.lastBody, {
+      'text': '恢复得很好',
+      'targetLanguage': 'en-US',
+      'contentType': 'diary',
     });
   });
 }

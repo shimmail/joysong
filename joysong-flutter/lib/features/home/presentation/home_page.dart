@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/network/optimized_network_image.dart';
+import 'package:joysong_flutter/core/translation/translation.dart';
 import 'package:joysong_flutter/features/discover/presentation/discover_content_card.dart';
 import 'package:joysong_flutter/features/home/domain/home_models.dart';
 import 'package:joysong_flutter/features/home/domain/home_repository.dart';
@@ -454,6 +455,9 @@ class _RecommendationBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
+    final authorName = item.text(const ['authorName']);
+    final subtitleIsAuthorName =
+        authorName.isNotEmpty && item.subtitle == authorName;
     return Material(
       color: colors.primaryContainer,
       borderRadius: BorderRadius.circular(16),
@@ -494,8 +498,8 @@ class _RecommendationBanner extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          item.title,
+                        AutoTranslatedText(
+                          request: _homeRequest(item, 'title', item.title),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.titleLarge?.copyWith(
@@ -504,14 +508,28 @@ class _RecommendationBanner extends StatelessWidget {
                         ),
                         if (item.subtitle.isNotEmpty) ...[
                           const SizedBox(height: 5),
-                          Text(
-                            item.subtitle,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: colors.onSurfaceVariant,
+                          if (subtitleIsAuthorName)
+                            Text(
+                              item.subtitle,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: colors.onSurfaceVariant,
+                              ),
+                            )
+                          else
+                            AutoTranslatedText(
+                              request: _homeRequest(
+                                item,
+                                'subtitle',
+                                item.subtitle,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: colors.onSurfaceVariant,
+                              ),
                             ),
-                          ),
                         ],
                       ],
                     ),
@@ -598,7 +616,7 @@ class _AiProjectCard extends StatelessWidget {
         child: InkWell(
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: Row(
               children: [
                 ClipRRect(
@@ -627,8 +645,12 @@ class _AiProjectCard extends StatelessWidget {
                               horizontal: 6,
                               vertical: 2,
                             ),
-                            child: Text(
-                              institution,
+                            child: AutoTranslatedText(
+                              request: _homeRequest(
+                                item,
+                                'institutionName',
+                                institution,
+                              ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.labelSmall,
@@ -636,15 +658,19 @@ class _AiProjectCard extends StatelessWidget {
                           ),
                         ),
                       const SizedBox(height: 5),
-                      Text(
-                        item.title,
+                      AutoTranslatedText(
+                        request: _homeRequest(item, 'name', item.title),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.titleSmall,
                       ),
                       if (item.category.isNotEmpty)
-                        Text(
-                          item.category,
+                        AutoTranslatedText(
+                          request: _homeRequest(
+                            item,
+                            'category',
+                            item.category,
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.labelSmall?.copyWith(
@@ -744,16 +770,20 @@ class _ProjectCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      item.title,
+                    AutoTranslatedText(
+                      request: _homeRequest(item, 'name', item.title),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.titleSmall,
                     ),
                     const SizedBox(height: 3),
                     if (item.category.isNotEmpty)
-                      Text(
-                        item.category,
+                      AutoTranslatedText(
+                        request: _homeRequest(
+                          item,
+                          'category',
+                          item.category,
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.labelSmall?.copyWith(
@@ -816,8 +846,8 @@ class _ArticleItem extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    item.title,
+                  AutoTranslatedText(
+                    request: _homeRequest(item, 'title', item.title),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.titleMedium?.copyWith(
@@ -826,8 +856,12 @@ class _ArticleItem extends StatelessWidget {
                   ),
                   if (item.subtitle.isNotEmpty) ...[
                     const SizedBox(height: 5),
-                    Text(
-                      item.subtitle,
+                    AutoTranslatedText(
+                      request: _homeRequest(
+                        item,
+                        'summary',
+                        item.subtitle,
+                      ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
@@ -909,6 +943,8 @@ class _DiaryCard extends StatelessWidget {
     return SizedBox(
       width: 300,
       child: DiaryPreviewCard(
+        enableAutoTranslation: true,
+        autoTranslationContentId: '${item.kind.name}:${item.id}',
         title: item.title,
         content: item.subtitle,
         authorName: author,
@@ -967,8 +1003,8 @@ class _InstitutionItem extends StatelessWidget {
                     Row(
                       children: [
                         Flexible(
-                          child: Text(
-                            item.title,
+                          child: AutoTranslatedText(
+                            request: _homeRequest(item, 'name', item.title),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.titleSmall,
@@ -986,8 +1022,8 @@ class _InstitutionItem extends StatelessWidget {
                     ),
                     if (address.isNotEmpty) ...[
                       const SizedBox(height: 4),
-                      Text(
-                        address,
+                      AutoTranslatedText(
+                        request: _homeRequest(item, 'address', address),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodySmall?.copyWith(
@@ -1074,6 +1110,9 @@ class _DoctorCard extends StatelessWidget {
         item.text(const ['professionalTitle', 'doctorTitle', 'title']);
     final specialties = item.values(const ['specialties']);
     final institution = item.text(const ['institutionName']);
+    final professionalText = title.isNotEmpty ? title : institution;
+    final professionalField =
+        title.isNotEmpty ? 'professionalTitle' : 'institutionName';
     return SizedBox(
       width: 132,
       child: Card(
@@ -1115,8 +1154,12 @@ class _DoctorCard extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 3),
-                Text(
-                  title.isNotEmpty ? title : institution,
+                AutoTranslatedText(
+                  request: _homeRequest(
+                    item,
+                    professionalField,
+                    professionalText,
+                  ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.labelSmall?.copyWith(
@@ -1125,8 +1168,12 @@ class _DoctorCard extends StatelessWidget {
                 ),
                 if (specialties.isNotEmpty) ...[
                   const SizedBox(height: 4),
-                  Text(
-                    specialties.take(2).join(' · '),
+                  AutoTranslatedText(
+                    request: _homeRequest(
+                      item,
+                      'specialties',
+                      specialties.take(2).join(' · '),
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.labelSmall?.copyWith(
@@ -1306,6 +1353,28 @@ class _HomeDataUnavailable extends StatelessWidget {
 
 bool _isEnglish(BuildContext context) =>
     Localizations.localeOf(context).languageCode == 'en';
+
+AutoTranslationRequest _homeRequest(
+  HomeContent item,
+  String field,
+  String source,
+) {
+  return AutoTranslationRequest(
+    contentType: switch (item.kind) {
+      HomeSectionKind.banner => 'general',
+      HomeSectionKind.hotProject ||
+      HomeSectionKind.recommendedInstitutionProject =>
+        'project',
+      HomeSectionKind.expertArticle => 'article',
+      HomeSectionKind.userDiary => 'diary',
+      HomeSectionKind.institution => 'institution',
+      HomeSectionKind.doctor => 'doctor',
+    },
+    contentId: '${item.kind.name}:${item.id}',
+    field: field,
+    sourceText: source,
+  );
+}
 
 const _previewFeed = HomeFeed(
   banners: [

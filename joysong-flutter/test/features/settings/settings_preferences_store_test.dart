@@ -56,6 +56,45 @@ void main() {
     expect(preferences.notifications.orderUpdates, isTrue);
     expect(preferences.notifications.productNews, isFalse);
   });
+
+  test('legacy settings keep AI translation disabled', () {
+    final value = SettingsPreferences.fromJson({
+      'version': 1,
+      'appearanceMode': 'system',
+      'notifications': <String, Object?>{},
+    });
+
+    expect(value.aiTranslationEnabled, isFalse);
+  });
+
+  test('malformed AI translation preference values stay disabled', () {
+    for (final value in <Object?>[
+      null,
+      'true',
+      0,
+      <String, Object?>{},
+    ]) {
+      final preferences = SettingsPreferences.fromJson({
+        'aiTranslationEnabled': value,
+      });
+
+      expect(preferences.aiTranslationEnabled, isFalse);
+    }
+  });
+
+  test('AI translation preference survives a secure-store round trip',
+      () async {
+    final storage = _MemorySecureStore();
+    final store = SecureSettingsPreferenceStore(storage: storage);
+
+    await store.write(const SettingsPreferences(aiTranslationEnabled: true));
+
+    expect((await store.read()).aiTranslationEnabled, isTrue);
+    final json = jsonDecode(
+      storage.values[SecureSettingsPreferenceStore.preferenceKey]!,
+    ) as Map<String, dynamic>;
+    expect(json['aiTranslationEnabled'], isTrue);
+  });
 }
 
 final class _MemorySecureStore implements SecureKeyValueStore {

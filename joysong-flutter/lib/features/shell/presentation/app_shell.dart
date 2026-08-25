@@ -1257,7 +1257,7 @@ class _AppShellState extends State<AppShell> {
       final translation = await translationRepository.translateText(
         text: text,
         targetLanguage: english ? 'zh-CN' : 'en',
-        contentType: 'direct_message',
+        contentType: 'message',
       );
       return translation.translatedText;
     } on Object {

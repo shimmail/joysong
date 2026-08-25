@@ -77,26 +77,43 @@ final class _SocialPageState extends State<SocialPage> {
               onCreate: widget.onCreateDiary,
             );
           }
+          final diaries = controller.diaries;
+          final diaryIdCounts = <String, int>{};
+          for (final diary in diaries) {
+            final id = diary.id.trim();
+            if (id.isNotEmpty) {
+              diaryIdCounts[id] = (diaryIdCounts[id] ?? 0) + 1;
+            }
+          }
+          final diaryRowIndices = <Key, int>{};
+          for (var index = 0; index < diaries.length; index += 1) {
+            final key = _diaryRowKey(diaries[index], diaryIdCounts);
+            if (key != null) diaryRowIndices[key] = index;
+          }
           return RefreshIndicator(
             onRefresh: () async {
               await controller.loadMyDiaries(refresh: true);
             },
             child: ListView.separated(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-              itemCount: controller.diaries.length + 1,
+              itemCount: diaries.length + 1,
+              findItemIndexCallback: (key) => diaryRowIndices[key],
               separatorBuilder: (_, __) => const SizedBox(height: 12),
               itemBuilder: (context, index) {
-                if (index == controller.diaries.length) {
+                if (index == diaries.length) {
                   return _LoadMore(
                     isLoading: controller.isLoadingDiaries,
                     hasMore: controller.hasMoreDiaries,
                     onLoad: controller.loadMyDiaries,
                   );
                 }
-                final diary = controller.diaries[index];
+                final diary = diaries[index];
+                final rowKey = _diaryRowKey(diary, diaryIdCounts);
                 return _DiaryCard(
+                  key: rowKey,
                   diary: diary,
                   repository: controller.repository,
+                  enableAutoTranslation: rowKey != null,
                   onOpen: () => Navigator.of(context).push<void>(
                     MaterialPageRoute(
                       builder: (_) => DiaryDetailPage(
@@ -1065,24 +1082,57 @@ class _DiaryImageTile extends StatelessWidget {
   }
 }
 
-final class _DiaryCard extends StatelessWidget {
+final class _DiaryCard extends StatefulWidget {
   const _DiaryCard({
     required this.diary,
     required this.repository,
+    required this.enableAutoTranslation,
     required this.onOpen,
     required this.onDelete,
     this.onEdit,
+    super.key,
   });
 
   final Diary diary;
   final SocialRepository repository;
+  final bool enableAutoTranslation;
   final VoidCallback onOpen;
   final VoidCallback? onEdit;
   final VoidCallback onDelete;
 
   @override
+  State<_DiaryCard> createState() => _DiaryCardState();
+}
+
+final class _DiaryCardState extends State<_DiaryCard> {
+  DiaryPreviewCard? _cachedCard;
+  Locale? _locale;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final locale = Localizations.localeOf(context);
+    if (_locale != locale) {
+      _locale = locale;
+      _cachedCard = null;
+    }
+  }
+
+  @override
+  void didUpdateWidget(_DiaryCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_sameDiaryCard(oldWidget.diary, widget.diary) ||
+        oldWidget.repository != widget.repository ||
+        oldWidget.enableAutoTranslation != widget.enableAutoTranslation ||
+        (oldWidget.onEdit == null) != (widget.onEdit == null)) {
+      _cachedCard = null;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return DiaryPreviewCard(
+    final diary = widget.diary;
+    return _cachedCard ??= DiaryPreviewCard(
       key: Key('open-diary-${diary.id}'),
       title: diary.title,
       content: diary.content,
@@ -1098,9 +1148,11 @@ final class _DiaryCard extends StatelessWidget {
       likeCount: diary.likeCount,
       favoriteCount: diary.favoriteCount,
       commentCount: diary.commentCount,
+      enableAutoTranslation: widget.enableAutoTranslation,
+      autoTranslationContentId: 'diary:${diary.id}',
       isLiked: diary.isLiked,
       isFavorited: false,
-      onTap: onOpen,
+      onTap: () => widget.onOpen(),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1109,11 +1161,11 @@ final class _DiaryCard extends StatelessWidget {
             tooltip: context.localized('更多操作', 'More actions'),
             onSelected: (value) {
               if (value == 'share') {
-                shareDiary(context, diary, repository: repository);
+                shareDiary(context, diary, repository: widget.repository);
               } else if (value == 'edit') {
-                onEdit?.call();
+                widget.onEdit?.call();
               } else if (value == 'delete') {
-                onDelete();
+                widget.onDelete();
               }
             },
             itemBuilder: (_) => [
@@ -1127,7 +1179,7 @@ final class _DiaryCard extends StatelessWidget {
                   ],
                 ),
               ),
-              if (onEdit != null)
+              if (widget.onEdit != null)
                 PopupMenuItem(
                   value: 'edit',
                   child: Text(context.localized('编辑', 'Edit')),
@@ -1142,6 +1194,38 @@ final class _DiaryCard extends StatelessWidget {
       ),
     );
   }
+}
+
+Key? _diaryRowKey(Diary diary, Map<String, int> idCounts) {
+  final id = diary.id.trim();
+  if (id.isEmpty || idCounts[id] != 1) return null;
+  return ValueKey<String>('social-diary-row:$id');
+}
+
+bool _sameDiaryCard(Diary first, Diary second) =>
+    first.id == second.id &&
+    first.title == second.title &&
+    first.content == second.content &&
+    first.authorName == second.authorName &&
+    first.authorAvatar == second.authorAvatar &&
+    first.publishDate == second.publishDate &&
+    first.createdAt == second.createdAt &&
+    first.projectName == second.projectName &&
+    _sameStrings(first.images, second.images) &&
+    _sameStrings(first.beforeImages, second.beforeImages) &&
+    _sameStrings(first.afterImages, second.afterImages) &&
+    first.likeCount == second.likeCount &&
+    first.favoriteCount == second.favoriteCount &&
+    first.commentCount == second.commentCount &&
+    first.isLiked == second.isLiked &&
+    first.status == second.status;
+
+bool _sameStrings(List<String> first, List<String> second) {
+  if (first.length != second.length) return false;
+  for (var index = 0; index < first.length; index += 1) {
+    if (first[index] != second[index]) return false;
+  }
+  return true;
 }
 
 final class _StatusChip extends StatelessWidget {

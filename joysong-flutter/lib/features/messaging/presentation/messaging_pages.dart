@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:joysong_flutter/core/translation/translation.dart';
 import 'package:joysong_flutter/features/messaging/domain/messaging_models.dart';
 import 'package:joysong_flutter/features/messaging/presentation/messaging_controllers.dart';
 import 'package:joysong_flutter/features/messaging/presentation/messaging_strings.dart';
@@ -372,8 +373,7 @@ class _MessagingCenterPageState extends State<MessagingCenterPage> {
                     onDelete:
                         item.conversationType == DmConversationType.orderService
                             ? null
-                            : () =>
-                                widget.controller.hideConversation(item.id),
+                            : () => widget.controller.hideConversation(item.id),
                     onOpen: () {
                       widget.controller.clearUnread(item.id);
                       widget.onOpenDm?.call(item);
@@ -571,8 +571,7 @@ class _ConversationActionCard extends StatefulWidget {
 
 class _ConversationActionCardState extends State<_ConversationActionCard> {
   static const _actionWidth = 80.0;
-  double get _actionsWidth =>
-      _actionWidth * (widget.onDelete == null ? 2 : 3);
+  double get _actionsWidth => _actionWidth * (widget.onDelete == null ? 2 : 3);
   double _offset = 0;
 
   void _close() {
@@ -854,6 +853,7 @@ class DmThreadPage extends StatelessWidget {
         otherPeer: otherPeer,
         onOtherAvatarTap: onOtherAvatarTap,
         waitingForReply: () => controller.waitingForReply,
+        enableAutoTranslation: true,
         sendEnabled: sendEnabled,
         refreshSendEnabled: refreshSendEnabled,
         showRemovalActions: conversationType == DmConversationType.direct,
@@ -901,6 +901,8 @@ class CustomerServiceThreadPage extends StatelessWidget {
       );
 }
 
+enum _MessageAction { copy, showTranslation, showOriginal, delete }
+
 class _ThreadScaffold<T> extends StatefulWidget {
   const _ThreadScaffold({
     required this.title,
@@ -930,6 +932,7 @@ class _ThreadScaffold<T> extends StatefulWidget {
     this.sendEnabled = true,
     this.refreshSendEnabled,
     this.showRemovalActions = true,
+    this.enableAutoTranslation = false,
   });
 
   final String title;
@@ -959,6 +962,7 @@ class _ThreadScaffold<T> extends StatefulWidget {
   final bool sendEnabled;
   final Future<bool> Function()? refreshSendEnabled;
   final bool showRemovalActions;
+  final bool enableAutoTranslation;
 
   @override
   State<_ThreadScaffold<T>> createState() => _ThreadScaffoldState<T>();
@@ -969,8 +973,10 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
   final _input = TextEditingController();
   final _scrollController = ScrollController();
   final Map<String, String> _translations = <String, String>{};
+  final Map<String, String> _automaticTranslations = <String, String>{};
   final Set<String> _translating = <String>{};
   final Set<String> _showingTranslations = <String>{};
+  final Set<String> _translationSourceOverrides = <String>{};
   Timer? _refreshTimer;
   bool _isPickingImage = false;
   bool? _refreshedSendEnabled;
@@ -1061,6 +1067,7 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
                 controller: _scrollController,
                 padding: const EdgeInsets.all(16),
                 itemCount: widget.items().length + (widget.hasMore() ? 1 : 0),
+                findChildIndexCallback: _findMessageChildIndex,
                 itemBuilder: (context, index) {
                   if (widget.hasMore() && index == 0) {
                     return TextButton(
@@ -1073,10 +1080,10 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
                   final mine = widget.isMine(item);
                   final messageType = widget.typeOf(item).toUpperCase();
                   final messageId = widget.idOf(item);
-                  final translation = _translations[messageId];
-                  final showingTranslation =
-                      _showingTranslations.contains(messageId);
+                  final sourceText = widget.contentOf(item);
+                  final rowKey = _messageRowKey(item);
                   return Padding(
+                    key: rowKey,
                     padding: const EdgeInsets.symmetric(vertical: 6),
                     child: Column(
                       children: [
@@ -1156,11 +1163,14 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
                                             ),
                                           ),
                                         )
-                                      : Text(
-                                          showingTranslation &&
-                                                  translation != null
-                                              ? translation
-                                              : widget.contentOf(item),
+                                      : _buildMessageText(
+                                          messageId: messageId,
+                                          sourceText: sourceText,
+                                          automaticEligible:
+                                              widget.enableAutoTranslation &&
+                                                  !mine &&
+                                                  messageType == 'TEXT' &&
+                                                  rowKey != null,
                                           style: TextStyle(
                                             color: mine
                                                 ? Theme.of(context)
@@ -1231,6 +1241,67 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
     );
   }
 
+  Widget _buildMessageText({
+    required String messageId,
+    required String sourceText,
+    required bool automaticEligible,
+    required TextStyle style,
+  }) {
+    Widget buildText(BuildContext context, String automaticText) {
+      if (_usableMessageTranslation(automaticText, sourceText)) {
+        _automaticTranslations[messageId] = automaticText.trim();
+      } else {
+        _automaticTranslations.remove(messageId);
+      }
+      return Text(
+        _visibleMessageText(messageId, sourceText),
+        style: style,
+      );
+    }
+
+    if (!automaticEligible) return buildText(context, sourceText);
+    return _StableAutomaticMessageText(
+      key: ValueKey('automatic-message:$messageId'),
+      messageId: messageId,
+      sourceText: sourceText,
+      builder: buildText,
+    );
+  }
+
+  String _visibleMessageText(String messageId, String sourceText) {
+    if (_translationSourceOverrides.contains(messageId)) return sourceText;
+    final manual = _translations[messageId];
+    if (_showingTranslations.contains(messageId) &&
+        _usableMessageTranslation(manual, sourceText)) {
+      return manual!.trim();
+    }
+    final automatic = _automaticTranslations[messageId];
+    if (_usableMessageTranslation(automatic, sourceText)) {
+      return automatic!.trim();
+    }
+    return sourceText;
+  }
+
+  Key? _messageRowKey(T item) {
+    final id = widget.idOf(item).trim();
+    if (id.isEmpty) return null;
+    var matches = 0;
+    for (final candidate in widget.items()) {
+      if (widget.idOf(candidate).trim() == id) matches += 1;
+      if (matches > 1) return null;
+    }
+    return ValueKey<String>('message-row:$id');
+  }
+
+  int? _findMessageChildIndex(Key key) {
+    final items = widget.items();
+    final offset = widget.hasMore() ? 1 : 0;
+    for (var index = 0; index < items.length; index += 1) {
+      if (_messageRowKey(items[index]) == key) return index + offset;
+    }
+    return null;
+  }
+
   Future<void> _sendText() async {
     if (widget.waitingForReply?.call() ?? false) return;
     final text = _input.text;
@@ -1250,9 +1321,10 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
     final strings = _strings(context);
     final messageId = widget.idOf(item);
     final isText = widget.typeOf(item).toUpperCase() == 'TEXT';
-    final showingTranslation = _showingTranslations.contains(messageId);
-    final hasTranslation = _translations.containsKey(messageId);
-    final action = await showModalBottomSheet<String>(
+    final sourceText = widget.contentOf(item);
+    final showingTranslation =
+        _visibleMessageText(messageId, sourceText) != sourceText;
+    final action = await showModalBottomSheet<_MessageAction>(
       context: context,
       showDragHandle: true,
       builder: (context) => SafeArea(
@@ -1262,7 +1334,7 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
             ListTile(
               leading: const Icon(Icons.copy_outlined),
               title: Text(strings.copy),
-              onTap: () => Navigator.pop(context, 'copy'),
+              onTap: () => Navigator.pop(context, _MessageAction.copy),
             ),
             ListTile(
               enabled: false,
@@ -1274,11 +1346,14 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
                 enabled: !_translating.contains(messageId),
                 leading: const Icon(Icons.translate),
                 title: Text(
-                  hasTranslation && showingTranslation
-                      ? strings.showOriginal
-                      : strings.translate,
+                  showingTranslation ? strings.showOriginal : strings.translate,
                 ),
-                onTap: () => Navigator.pop(context, 'translate'),
+                onTap: () => Navigator.pop(
+                  context,
+                  showingTranslation
+                      ? _MessageAction.showOriginal
+                      : _MessageAction.showTranslation,
+                ),
               ),
             if (widget.showRemovalActions)
               ListTile(
@@ -1292,22 +1367,24 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
                 title: Text(strings.delete),
                 textColor: Theme.of(context).colorScheme.error,
                 iconColor: Theme.of(context).colorScheme.error,
-                onTap: () => Navigator.pop(context, 'delete'),
+                onTap: () => Navigator.pop(context, _MessageAction.delete),
               ),
           ],
         ),
       ),
     );
     if (!mounted) return;
-    if (action == 'copy') {
+    if (action == _MessageAction.copy) {
       await Clipboard.setData(ClipboardData(text: widget.contentOf(item)));
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(strings.copied)));
       }
-    } else if (action == 'translate') {
-      await _translateMessage(item);
-    } else if (action == 'delete') {
+    } else if (action == _MessageAction.showTranslation) {
+      await _showMessageTranslation(item);
+    } else if (action == _MessageAction.showOriginal) {
+      _showMessageOriginal(item);
+    } else if (action == _MessageAction.delete) {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
@@ -1343,26 +1420,36 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
     }
   }
 
-  Future<void> _translateMessage(T item) async {
+  void _showMessageOriginal(T item) {
+    final messageId = widget.idOf(item);
+    setState(() => _translationSourceOverrides.add(messageId));
+  }
+
+  Future<void> _showMessageTranslation(T item) async {
     final translate = widget.translate;
     final messageId = widget.idOf(item);
-    if (_translations.containsKey(messageId)) {
+    final sourceText = widget.contentOf(item);
+    final manual = _translations[messageId];
+    final automatic = _automaticTranslations[messageId];
+    final hasManual = _usableMessageTranslation(manual, sourceText);
+    final hasAutomatic = _usableMessageTranslation(automatic, sourceText);
+    if (hasManual || hasAutomatic) {
       setState(() {
-        if (!_showingTranslations.remove(messageId)) {
-          _showingTranslations.add(messageId);
-        }
+        _translationSourceOverrides.remove(messageId);
+        if (hasManual) _showingTranslations.add(messageId);
       });
       return;
     }
     if (translate == null || !_translating.add(messageId)) return;
     setState(() {});
     try {
-      final translated = await translate(widget.contentOf(item));
+      final translated = await translate(sourceText);
       if (!mounted) return;
       if (translated?.trim().isNotEmpty == true) {
         setState(() {
           _translations[messageId] = translated!.trim();
           _showingTranslations.add(messageId);
+          _translationSourceOverrides.remove(messageId);
         });
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1395,6 +1482,74 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
       ),
     );
   }
+}
+
+final class _StableAutomaticMessageText extends StatefulWidget {
+  const _StableAutomaticMessageText({
+    required this.messageId,
+    required this.sourceText,
+    required this.builder,
+    super.key,
+  });
+
+  final String messageId;
+  final String sourceText;
+  final Widget Function(BuildContext context, String automaticText) builder;
+
+  @override
+  State<_StableAutomaticMessageText> createState() =>
+      _StableAutomaticMessageTextState();
+}
+
+final class _StableAutomaticMessageTextState
+    extends State<_StableAutomaticMessageText> {
+  AutoTranslationRequest? _request;
+
+  @override
+  void initState() {
+    super.initState();
+    _synchronizeRequest();
+  }
+
+  @override
+  void didUpdateWidget(_StableAutomaticMessageText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _synchronizeRequest();
+  }
+
+  void _synchronizeRequest() {
+    final contentId = 'message:${widget.messageId}';
+    final previous = _request;
+    if (widget.messageId.trim().isEmpty || widget.sourceText.trim().isEmpty) {
+      _request = null;
+    } else if (previous == null ||
+        previous.contentType != 'message' ||
+        previous.contentId != contentId ||
+        previous.field != 'content' ||
+        previous.sourceText != widget.sourceText) {
+      _request = AutoTranslationRequest(
+        contentType: 'message',
+        contentId: contentId,
+        field: 'content',
+        sourceText: widget.sourceText,
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final request = _request;
+    if (request == null) return widget.builder(context, widget.sourceText);
+    return AutoTranslationBuilder(
+      request: request,
+      builder: widget.builder,
+    );
+  }
+}
+
+bool _usableMessageTranslation(String? candidate, String sourceText) {
+  final value = candidate?.trim() ?? '';
+  return value.isNotEmpty && value != sourceText;
 }
 
 class _MessageTimePill extends StatelessWidget {

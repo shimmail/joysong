@@ -8,6 +8,7 @@ import 'package:joysong_flutter/core/network/api_client.dart';
 import 'package:joysong_flutter/core/routing/app_router.dart';
 import 'package:joysong_flutter/core/theme/theme_controller.dart';
 import 'package:joysong_flutter/core/theme/theme_preferences_store.dart';
+import 'package:joysong_flutter/core/translation/translation.dart';
 import 'package:joysong_flutter/features/auth/data/auth_remote_data_source.dart';
 import 'package:joysong_flutter/features/auth/data/auth_repository_impl.dart';
 import 'package:joysong_flutter/features/auth/data/login_preferences_store.dart';
@@ -31,6 +32,7 @@ class JoysongApp extends StatefulWidget {
     this.themePreferenceStore,
     this.settingsPreferenceStore,
     this.localePreferenceStore,
+    this.translationRepository,
     super.key,
   });
 
@@ -40,6 +42,7 @@ class JoysongApp extends StatefulWidget {
   final ThemePreferenceStore? themePreferenceStore;
   final SettingsPreferenceStore? settingsPreferenceStore;
   final LocalePreferenceStore? localePreferenceStore;
+  final TranslationRepository? translationRepository;
 
   @override
   State<JoysongApp> createState() => _JoysongAppState();
@@ -50,6 +53,7 @@ class _JoysongAppState extends State<JoysongApp> {
   late final ThemeController _themeController;
   late final SettingsController _settingsController;
   late final AppLocaleController _localeController;
+  late final AutoTranslationController _autoTranslationController;
   late final LanguageTagProvider _languageTagProvider;
   late final String _startupRouteName;
   ApiClient? _apiClient;
@@ -69,6 +73,11 @@ class _JoysongAppState extends State<JoysongApp> {
         _localeController.language == AppLanguage.english ? 'en-US' : 'zh-CN';
     final repository =
         widget.authRepository ?? _createAuthRepository(secureStorage);
+    final translationRepository = widget.translationRepository ??
+        (_apiClient == null ? null : ApiTranslationRepository(_apiClient!));
+    _autoTranslationController = AutoTranslationController(
+      repository: translationRepository,
+    );
     _authController = AuthController(
       repository,
       loginPreferencesStore: widget.loginPreferencesStore ??
@@ -151,6 +160,7 @@ class _JoysongAppState extends State<JoysongApp> {
     _themeController.dispose();
     _settingsController.dispose();
     _localeController.dispose();
+    _autoTranslationController.dispose();
     _apiClient?.close();
     super.dispose();
   }
@@ -163,48 +173,66 @@ class _JoysongAppState extends State<JoysongApp> {
         _themeController,
         _settingsController,
         _localeController,
+        _authController,
       ]),
-      builder: (context, _) => AppLocaleScope(
-        controller: _localeController,
-        child: MaterialApp(
-          onGenerateTitle: (context) =>
-              _localeController.language == AppLanguage.english
-                  ? 'Joysong'
-                  : '娇颜颂',
-          debugShowCheckedModeBanner:
-              widget.environment.flavor != AppFlavor.production,
-          locale: _localeController.language.locale,
-          supportedLocales: const [Locale('zh'), Locale('en')],
-          localizationsDelegates: const [
-            GlobalMaterialLocalizations.delegate,
-            GlobalWidgetsLocalizations.delegate,
-            GlobalCupertinoLocalizations.delegate,
-          ],
-          theme: _themeController.lightTheme,
-          darkTheme: _themeController.darkTheme,
-          themeMode: _settingsController.appearanceMode.themeMode,
-          home: publicShareToken != null
-              ? PublicDiarySharePage(
-                  apiRoot: widget.environment.apiRoot,
-                  token: publicShareToken,
-                )
-              : AuthGate(
-                  controller: _authController,
-                  agentConfig: widget.environment.agentConfig,
-                  apiClient: _apiClient,
-                  allowPreviewData:
-                      widget.environment.flavor != AppFlavor.production,
-                ),
-          onGenerateRoute: (settings) => AppRouter.onGenerateRoute(
-            settings,
-            agentConfig: widget.environment.agentConfig,
-            themeController: _themeController,
-            settingsController: _settingsController,
-            apiClient: _apiClient,
-            onLogout: _authController.logout,
+      builder: (context, _) {
+        final consentEnabled =
+            _localeController.language == AppLanguage.english &&
+                _settingsController.aiTranslationEnabled;
+        final translationEnabled = consentEnabled &&
+            _authController.status == AuthStatus.authenticated;
+        _autoTranslationController.synchronize(
+          enabled: consentEnabled,
+          authenticated: _authController.status == AuthStatus.authenticated,
+          targetLanguage: 'en-US',
+        );
+        return AppLocaleScope(
+          controller: _localeController,
+          child: AutoTranslationScope(
+            controller: _autoTranslationController,
+            enabled: translationEnabled,
+            targetLanguage: 'en-US',
+            child: MaterialApp(
+              onGenerateTitle: (context) =>
+                  _localeController.language == AppLanguage.english
+                      ? 'Joysong'
+                      : '娇颜颂',
+              debugShowCheckedModeBanner:
+                  widget.environment.flavor != AppFlavor.production,
+              locale: _localeController.language.locale,
+              supportedLocales: const [Locale('zh'), Locale('en')],
+              localizationsDelegates: const [
+                GlobalMaterialLocalizations.delegate,
+                GlobalWidgetsLocalizations.delegate,
+                GlobalCupertinoLocalizations.delegate,
+              ],
+              theme: _themeController.lightTheme,
+              darkTheme: _themeController.darkTheme,
+              themeMode: _settingsController.appearanceMode.themeMode,
+              home: publicShareToken != null
+                  ? PublicDiarySharePage(
+                      apiRoot: widget.environment.apiRoot,
+                      token: publicShareToken,
+                    )
+                  : AuthGate(
+                      controller: _authController,
+                      agentConfig: widget.environment.agentConfig,
+                      apiClient: _apiClient,
+                      allowPreviewData:
+                          widget.environment.flavor != AppFlavor.production,
+                    ),
+              onGenerateRoute: (settings) => AppRouter.onGenerateRoute(
+                settings,
+                agentConfig: widget.environment.agentConfig,
+                themeController: _themeController,
+                settingsController: _settingsController,
+                apiClient: _apiClient,
+                onLogout: _authController.logout,
+              ),
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

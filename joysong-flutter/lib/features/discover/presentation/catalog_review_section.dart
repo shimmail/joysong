@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/network/optimized_network_image.dart';
+import 'package:joysong_flutter/core/translation/translation.dart';
 import 'package:joysong_flutter/features/discover/presentation/catalog_detail_shared.dart';
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
 import 'package:joysong_flutter/features/social/presentation/report_action_button.dart';
@@ -11,7 +12,8 @@ enum CatalogReviewFilter { all, positive, negative }
 List<Map<String, Object?>> filterCatalogReviews(
   List<Map<String, Object?>> reviews,
   CatalogReviewFilter filter,
-) => switch (filter) {
+) =>
+    switch (filter) {
       CatalogReviewFilter.all => reviews,
       CatalogReviewFilter.positive =>
         reviews.where((review) => _rating(review) >= 4).toList(growable: false),
@@ -58,6 +60,9 @@ class CatalogReviewPreview extends StatefulWidget {
     this.socialController,
     this.previewCount = 5,
     this.showHeader = true,
+    this.enableAutoTranslation = false,
+    this.ownerType = '',
+    this.ownerId = '',
     super.key,
   });
 
@@ -66,6 +71,9 @@ class CatalogReviewPreview extends StatefulWidget {
   final SocialController? socialController;
   final int previewCount;
   final bool showHeader;
+  final bool enableAutoTranslation;
+  final String ownerType;
+  final String ownerId;
 
   @override
   State<CatalogReviewPreview> createState() => _CatalogReviewPreviewState();
@@ -78,6 +86,7 @@ class _CatalogReviewPreviewState extends State<CatalogReviewPreview> {
   Widget build(BuildContext context) {
     final filtered = filterCatalogReviews(widget.reviews, _filter);
     final visible = filtered.take(widget.previewCount).toList(growable: false);
+    final duplicateReviewIds = _duplicateReviewIds(widget.reviews);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -121,8 +130,18 @@ class _CatalogReviewPreviewState extends State<CatalogReviewPreview> {
         else
           for (var index = 0; index < visible.length; index++) ...[
             CatalogReviewCard(
+              key: _reviewKey(
+                visible[index],
+                widget.ownerType,
+                widget.ownerId,
+                duplicateReviewIds,
+              ),
               review: visible[index],
               socialController: widget.socialController,
+              enableAutoTranslation: widget.enableAutoTranslation,
+              ownerType: widget.ownerType,
+              ownerId: widget.ownerId,
+              reviewId: _reviewId(visible[index]),
             ),
             if (index != visible.length - 1) const SizedBox(height: 10),
           ],
@@ -135,15 +154,28 @@ class CatalogReviewCard extends StatelessWidget {
   const CatalogReviewCard({
     required this.review,
     this.socialController,
+    this.enableAutoTranslation = false,
+    this.ownerType = '',
+    this.ownerId = '',
+    this.reviewId = '',
     super.key,
   });
 
   final Map<String, Object?> review;
   final SocialController? socialController;
+  final bool enableAutoTranslation;
+  final String ownerType;
+  final String ownerId;
+  final String reviewId;
 
   @override
   Widget build(BuildContext context) {
-    final id = _text(review['id'] ?? review['reviewId']);
+    final id = reviewId.trim().isEmpty ? _reviewId(review) : reviewId.trim();
+    final translationContentId = _reviewTranslationContentId(
+      ownerType: ownerType,
+      ownerId: ownerId,
+      reviewId: id,
+    );
     final userName = _text(review['userName']).isEmpty
         ? context.localized('匿名用户', 'Anonymous user')
         : _text(review['userName']);
@@ -156,6 +188,7 @@ class CatalogReviewCard extends StatelessWidget {
     final tags = _list(review['tags']);
     final images = _list(review['imageUrls'] ?? review['images']);
     final projectName = _text(review['projectName'] ?? review['serviceName']);
+    final eligibleProjectName = _text(review['projectName']);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(14),
@@ -174,7 +207,8 @@ class CatalogReviewCard extends StatelessWidget {
                           width: 40,
                           height: 40,
                         ),
-                  child: avatar.isEmpty ? Text(userName.characters.first) : null,
+                  child:
+                      avatar.isEmpty ? Text(userName.characters.first) : null,
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -212,15 +246,33 @@ class CatalogReviewCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 10),
-            Text(
-              content.isEmpty
-                  ? context.localized('用户未填写文字评价', 'No written review')
-                  : content,
-              style: const TextStyle(height: 1.45),
-            ),
+            if (content.isEmpty)
+              Text(
+                context.localized('用户未填写文字评价', 'No written review'),
+                style: const TextStyle(height: 1.45),
+              )
+            else
+              _ReviewTranslatedText(
+                enabled: enableAutoTranslation,
+                contentId: translationContentId,
+                field: 'content',
+                source: content,
+                style: const TextStyle(height: 1.45),
+              ),
             if (projectName.isNotEmpty) ...[
               const SizedBox(height: 7),
-              Text(projectName, style: Theme.of(context).textTheme.bodySmall),
+              eligibleProjectName.isEmpty
+                  ? Text(
+                      projectName,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    )
+                  : _ReviewTranslatedText(
+                      enabled: enableAutoTranslation,
+                      contentId: translationContentId,
+                      field: 'projectName',
+                      source: eligibleProjectName,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
             ],
             if (tags.isNotEmpty) ...[
               const SizedBox(height: 10),
@@ -228,8 +280,16 @@ class CatalogReviewCard extends StatelessWidget {
                 spacing: 6,
                 runSpacing: 6,
                 children: [
-                  for (final tag in tags)
-                    Chip(label: Text(tag), visualDensity: VisualDensity.compact),
+                  for (var index = 0; index < tags.length; index++)
+                    Chip(
+                      label: _ReviewTranslatedText(
+                        enabled: enableAutoTranslation,
+                        contentId: translationContentId,
+                        field: 'tags:$index',
+                        source: tags[index],
+                      ),
+                      visualDensity: VisualDensity.compact,
+                    ),
                 ],
               ),
             ],
@@ -280,16 +340,121 @@ class CatalogReviewCard extends StatelessWidget {
   }
 }
 
+class _ReviewTranslatedText extends StatefulWidget {
+  const _ReviewTranslatedText({
+    required this.enabled,
+    required this.contentId,
+    required this.field,
+    required this.source,
+    this.style,
+  });
+
+  final bool enabled;
+  final String contentId;
+  final String field;
+  final String source;
+  final TextStyle? style;
+
+  @override
+  State<_ReviewTranslatedText> createState() => _ReviewTranslatedTextState();
+}
+
+class _ReviewTranslatedTextState extends State<_ReviewTranslatedText> {
+  AutoTranslationRequest? _request;
+
+  @override
+  void initState() {
+    super.initState();
+    _updateRequest();
+  }
+
+  @override
+  void didUpdateWidget(_ReviewTranslatedText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _updateRequest();
+  }
+
+  void _updateRequest() {
+    if (!widget.enabled || widget.contentId.isEmpty || widget.source.isEmpty) {
+      _request = null;
+      return;
+    }
+    final previous = _request;
+    if (previous != null &&
+        previous.contentId == widget.contentId &&
+        previous.field == widget.field &&
+        previous.sourceText == widget.source) {
+      return;
+    }
+    _request = AutoTranslationRequest(
+      contentType: 'comment',
+      contentId: widget.contentId,
+      field: widget.field,
+      sourceText: widget.source,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final request = _request;
+    if (request == null) return Text(widget.source, style: widget.style);
+    return AutoTranslatedText(request: request, style: widget.style);
+  }
+}
+
 double _rating(Map<String, Object?> review) {
   final value = review['rating'];
   return value is num ? value.toDouble() : double.tryParse('$value') ?? 0;
 }
 
+String _reviewId(Map<String, Object?> review) {
+  final id = _text(review['id']);
+  return id.isNotEmpty ? id : _text(review['reviewId']);
+}
+
+Set<String> _duplicateReviewIds(List<Map<String, Object?>> reviews) {
+  final seen = <String>{};
+  final duplicates = <String>{};
+  for (final review in reviews) {
+    final reviewId = _reviewId(review);
+    if (reviewId.isNotEmpty && !seen.add(reviewId)) {
+      duplicates.add(reviewId);
+    }
+  }
+  return duplicates;
+}
+
+Key _reviewKey(
+  Map<String, Object?> review,
+  String ownerType,
+  String ownerId,
+  Set<String> duplicateReviewIds,
+) {
+  final reviewId = _reviewId(review);
+  if (reviewId.isEmpty || duplicateReviewIds.contains(reviewId)) {
+    return ObjectKey(review);
+  }
+  return ValueKey<String>(
+    'catalog-review:${ownerType.trim()}:${ownerId.trim()}:$reviewId',
+  );
+}
+
+String _reviewTranslationContentId({
+  required String ownerType,
+  required String ownerId,
+  required String reviewId,
+}) {
+  final type = ownerType.trim();
+  final owner = ownerId.trim();
+  final review = reviewId.trim();
+  if (type.isEmpty || owner.isEmpty || review.isEmpty) return '';
+  return '$type:$owner:review:$review';
+}
+
 String _text(Object? value) => value?.toString().trim() ?? '';
 
-List<String> _list(Object? value) => (value is Iterable
-        ? value
-        : _text(value).split(','))
-    .map((item) => _text(item))
-    .where((item) => item.isNotEmpty)
-    .toList(growable: false);
+List<String> _list(Object? value) =>
+    (value is Iterable ? value : _text(value).split(','))
+        .map((item) => _text(item))
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
