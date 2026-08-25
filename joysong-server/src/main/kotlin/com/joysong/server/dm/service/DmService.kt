@@ -267,8 +267,10 @@ class DmService(
     }
 
     private fun DmConversationEntity.toResponseFor(currentUserId: String): DmConversationResponse {
-        if (conversationType != DmConversationEntity.DIRECT) {
-            return toResponse()
+        if (conversationType == DmConversationEntity.ORDER_SERVICE) {
+            return toResponse(
+                canHide = orderServiceConversationService.canHide(this, currentUserId)
+            )
         }
         val otherUserId = otherParticipant(currentUserId)
         val otherUserHasSent = messageRepository.existsByConversationIdAndSenderId(id, otherUserId)

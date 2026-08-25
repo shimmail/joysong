@@ -39,6 +39,15 @@ void main() {
     );
   });
 
+  test('conversation parses server-provided local hide capability', () {
+    final conversation = DmConversation.fromJson({
+      ..._orderConversationJson,
+      'canHide': true,
+    });
+
+    expect(conversation.canHide, isTrue);
+  });
+
   test('order endpoint rejects a DIRECT conversation', () async {
     final client = _RecordingApiClient()
       ..responseData = (Map<String, Object?>.from(_orderConversationJson)

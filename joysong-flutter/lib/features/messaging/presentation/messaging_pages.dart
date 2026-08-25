@@ -370,10 +370,11 @@ class _MessagingCenterPageState extends State<MessagingCenterPage> {
                     isPinned: widget.controller.isPinned(item.id),
                     onMarkUnread: () => widget.controller.markUnread(item.id),
                     onTogglePin: () => widget.controller.togglePin(item.id),
-                    onDelete:
-                        item.conversationType == DmConversationType.orderService
-                            ? null
-                            : () => widget.controller.hideConversation(item.id),
+                    onDelete: item.conversationType ==
+                                DmConversationType.direct ||
+                            item.canHide
+                        ? () => widget.controller.hideConversation(item.id)
+                        : null,
                     onOpen: () {
                       widget.controller.clearUnread(item.id);
                       widget.onOpenDm?.call(item);

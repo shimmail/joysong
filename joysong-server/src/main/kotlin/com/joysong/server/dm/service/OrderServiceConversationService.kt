@@ -70,12 +70,19 @@ class OrderServiceConversationService(
             false
         }
 
+    fun canHide(conversation: DmConversationEntity, userId: String): Boolean =
+        try {
+            authorize(conversation, userId, READABLE_STATUSES).status in HIDEABLE_STATUSES
+        } catch (_: IllegalArgumentException) {
+            false
+        }
+
     private fun authorize(
         conversation: DmConversationEntity,
         userId: String,
         allowedStatuses: Set<String>,
         lockOrder: Boolean = false
-    ) {
+    ): OrderEntity {
         require(conversation.conversationType == DmConversationEntity.ORDER_SERVICE) { ACCESS_DENIED }
         val orderId = conversation.orderId ?: throw IllegalArgumentException(ACCESS_DENIED)
         val order = if (lockOrder) {
@@ -87,6 +94,7 @@ class OrderServiceConversationService(
         require(order.status in allowedStatuses) { NOT_ACTIVE }
         requireOrderParticipant(order, userId)
         requireConversationMatchesOrder(conversation, order)
+        return order
     }
 
     private fun requireActivatedService(order: OrderEntity) {
@@ -123,6 +131,10 @@ class OrderServiceConversationService(
             OrderStatusEnum.COMPLETED.value,
             OrderStatusEnum.REFUND_REVIEW.value,
             OrderStatusEnum.REFUND_PROCESSING.value,
+            OrderStatusEnum.REFUNDED.value
+        )
+        private val HIDEABLE_STATUSES = setOf(
+            OrderStatusEnum.COMPLETED.value,
             OrderStatusEnum.REFUNDED.value
         )
     }

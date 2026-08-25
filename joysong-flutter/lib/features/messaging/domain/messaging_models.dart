@@ -66,6 +66,7 @@ class DmConversation {
     this.orderId,
     this.firstMessageLimitApplies = false,
     this.waitingForReply = false,
+    this.canHide = false,
   });
 
   final String id;
@@ -81,6 +82,7 @@ class DmConversation {
   final String? orderId;
   final bool firstMessageLimitApplies;
   final bool waitingForReply;
+  final bool canHide;
 
   String otherUserId(String currentUserId) =>
       userAId == currentUserId ? userBId : userAId;
@@ -110,6 +112,7 @@ class DmConversation {
       orderId: orderId,
       firstMessageLimitApplies: _boolean(map['firstMessageLimitApplies']),
       waitingForReply: _boolean(map['waitingForReply']),
+      canHide: _boolean(map['canHide']),
     );
   }
 }
