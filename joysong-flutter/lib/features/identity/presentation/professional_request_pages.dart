@@ -1353,7 +1353,7 @@ class _InstitutionProjectRequestsPageState
                     request.institutionId != null &&
                     refreshed.managedInstitutionIds
                         .contains(request.institutionId)));
-        if (!canStillReview) await Navigator.of(context).maybePop();
+        if (!canStillReview) _exitCreationReviewSurface();
       } else if (error.httpStatus == 409) {
         final refreshed = await _refreshRequests();
         if (!mounted) return;
@@ -1374,6 +1374,19 @@ class _InstitutionProjectRequestsPageState
     } finally {
       if (mounted) setState(() => _reviewing = false);
     }
+  }
+
+  void _exitCreationReviewSurface() {
+    final pageRoute = ModalRoute.of(context);
+    final navigator = Navigator.of(context);
+    if (pageRoute == null) {
+      navigator.maybePop();
+      return;
+    }
+    navigator.popUntil(
+      (route) => identical(route, pageRoute) || route.isFirst,
+    );
+    if (pageRoute.isCurrent && navigator.canPop()) navigator.pop();
   }
 
   void _selectProject(String projectId) {
@@ -2222,16 +2235,25 @@ class _DoctorProjectProfileReviewPageState
         setState(() => _accessRevoked = true);
         final refreshed = await widget.onRefreshManagementContext?.call();
         if (!mounted) return true;
-        if (refreshed != null) _currentContext = refreshed;
+        if (refreshed != null) {
+          setState(() {
+            _currentContext = refreshed;
+            _requests = _requests.where(_isVisible).toList(growable: false);
+          });
+        }
         final canStillReview = refreshed != null &&
-            refreshed.canReviewInstitutionProjectRequests &&
             (refreshed.platformRole == 'ADMIN' ||
-                refreshed.managedInstitutionIds.isNotEmpty);
+                (refreshed.canReviewInstitutionProjectRequests &&
+                    refreshed.managedInstitutionIds
+                        .contains(request.institutionId)));
         _exitAfterDetail = !canStillReview;
       } else if (action != IdentityProjectErrorAction.none) {
-        await _load(preserveError: true);
+        _forceEligibleRequestIds.remove(request.id);
+        final refreshed = await _load(preserveError: true);
         if (!mounted) return true;
-        if (action == IdentityProjectErrorAction.offerForce && _isAdmin) {
+        if (refreshed &&
+            action == IdentityProjectErrorAction.offerForce &&
+            _isAdmin) {
           DoctorProjectChangeRequest? latest;
           for (final candidate in _requests) {
             if (candidate.id == request.id) {
@@ -2245,8 +2267,6 @@ class _DoctorProjectProfileReviewPageState
               latest.latestRevision != null) {
             _forceEligibleRequestIds.add(request.id);
           }
-        } else {
-          _forceEligibleRequestIds.remove(request.id);
         }
       }
       if (mounted) {

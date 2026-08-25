@@ -232,6 +232,65 @@ void main() {
   );
 
   testWidgets(
+    'fix round 1: creation 403 from detail exits detail and parent review routes',
+    (tester) async {
+      _useLargeSurface(tester);
+      final repository = _ProjectRequestRepository()
+        ..requests = [
+          _request(
+            id: 'creation-detail-403',
+            type: 'INSTITUTION',
+            doctorId: 'doctor-1',
+            institutionId: 'inst-1',
+          ),
+        ]
+        ..institutionReviewError = const ApiException(
+          message: 'detail permission revoked',
+          httpStatus: 403,
+        );
+
+      await tester.pumpWidget(_app(Builder(builder: (context) {
+        return Scaffold(
+          body: FilledButton(
+            key: const Key('open-creation-review-route'),
+            onPressed: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(
+                builder: (_) => InstitutionProjectRequestsPage(
+                  repository: repository,
+                  context: _legalContext,
+                  reviewMode: true,
+                  onRefreshManagementContext: () async =>
+                      _nonTargetLegalContext,
+                ),
+              ),
+            ),
+            child: const Text('Open creation reviews'),
+          ),
+        );
+      })));
+      await tester.tap(find.byKey(const Key('open-creation-review-route')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(
+          const Key('institution-review-detail-creation-detail-403'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final review = find.byKey(
+        const Key('creation-detail-review-creation-detail-403'),
+      );
+      await tester.ensureVisible(review.last);
+      await tester.tap(review.last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('creation-review-confirm')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(InstitutionProjectRequestsPage), findsNothing);
+      expect(find.byType(InstitutionProjectReviewDetailPage), findsNothing);
+    },
+  );
+
+  testWidgets(
       'platform application keeps the complete ordered plain-text form and uses the injected cover/gallery uploader',
       (tester) async {
     _useLargeSurface(tester);

@@ -8,6 +8,7 @@ import 'package:joysong_flutter/features/discover/presentation/institution_proje
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
 import 'package:joysong_flutter/features/identity/presentation/identity_pages.dart';
+import 'package:joysong_flutter/features/identity/presentation/institution_project_review_widgets.dart';
 import 'package:joysong_flutter/features/identity/presentation/professional_request_pages.dart';
 
 void main() {
@@ -417,7 +418,7 @@ void main() {
       );
 
       await _openReviewDetail(tester, 'request-1');
-      expect(find.byType(InstitutionProjectPreviewBody), findsOneWidget);
+      expect(find.byType(InstitutionProjectPreviewBody), findsNWidgets(2));
       expect(find.text('申请后项目名称'), findsOneWidget);
       expect(find.text('Current values at submission'), findsOneWidget);
       expect(find.text('Proposed values'), findsOneWidget);
@@ -439,6 +440,112 @@ void main() {
       expect(find.byKey(const Key('reject-request-1')), findsOneWidget);
       expect(find.byKey(const Key('changes-request-1')), findsOneWidget);
       expect(find.byKey(const Key('force-request-1')), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'fix round 1: review displays only the server-provided proposed travel fee',
+    (tester) async {
+      _largeView(tester);
+      await tester.pumpWidget(MaterialApp(
+        home: InstitutionProjectReviewDetailPage(
+          item: InstitutionProjectReviewItem.fromDoctorChange(_v2Request()),
+          showLatest: true,
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining('Travel ground service fee'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Travel ground service fee: USD 5120.00'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('USD 4800.00'), findsNothing);
+      expect(find.textContaining('USD 5000.00'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'fix round 1: doctor-only request omits the shared-project impact warning',
+    (tester) async {
+      _largeView(tester);
+      await tester.pumpWidget(MaterialApp(
+        home: DoctorProjectProfileReviewPage(
+          repository: _FakeRepository(
+            requests: [_v2Request(sharedChanged: false)],
+          ),
+          context: _legalContext,
+        ),
+      ));
+      await tester.pumpAndSettle();
+      await _openReviewDetail(tester, 'request-1');
+
+      expect(
+        find.text(
+          'Shared project changes affect every doctor offering this institution project.',
+        ),
+        findsNothing,
+      );
+      expect(
+        find.text(
+          'Doctor price and availability affect only the applying doctor.',
+        ),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'fix round 1: current proposed and latest comparisons render every safe preview field',
+    (tester) async {
+      _largeView(tester);
+      await tester.pumpWidget(MaterialApp(
+        home: InstitutionProjectReviewDetailPage(
+          item: InstitutionProjectReviewItem.fromDoctorChange(_v2Request()),
+          showLatest: true,
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      final previews = tester
+          .widgetList<InstitutionProjectPreviewBody>(
+            find.byType(InstitutionProjectPreviewBody),
+          )
+          .map((preview) => preview.model)
+          .toList(growable: false);
+      expect(previews.map((preview) => preview.name), [
+        '当前项目名称',
+        '申请后项目名称',
+        '最新项目名称',
+      ]);
+      expect(previews[0].images, [
+        'https://cdn.example.com/current-cover.jpg',
+        'https://cdn.example.com/current-gallery.jpg',
+      ]);
+      expect(previews[1].images, [
+        'https://cdn.example.com/proposed-cover.jpg',
+        'https://cdn.example.com/proposed-gallery.jpg',
+      ]);
+      expect(previews[2].images, [
+        'https://cdn.example.com/latest-cover.jpg',
+        'https://cdn.example.com/latest-gallery.jpg',
+      ]);
+      expect(find.text('Category: 皮肤管理'), findsNWidgets(3));
+      expect(find.text('当前说明'), findsOneWidget);
+      expect(find.text('申请后说明'), findsOneWidget);
+      expect(find.text('最新说明'), findsOneWidget);
+      expect(find.text('自然焕新'), findsNWidgets(3));
+      expect(
+        previews.map((preview) => preview.detailContent),
+        ['完整项目详情', '完整项目详情', '完整项目详情'],
+      );
+      expect(
+        find.text('https://cdn.example.com/current-cover.jpg'),
+        findsNothing,
+      );
     },
   );
 
@@ -507,7 +614,8 @@ void main() {
     expect(find.byKey(const Key('changes-leave-request-1')), findsOneWidget);
   });
 
-  testWidgets('review shows only current and proposed price and travel fee', (
+  testWidgets(
+      'review shows current and proposed prices with only the server proposed travel fee', (
     tester,
   ) async {
     _largeView(tester);
@@ -525,7 +633,7 @@ void main() {
     expect(find.text('Current values at submission'), findsOneWidget);
     expect(find.text('Proposed values'), findsOneWidget);
     expect(find.textContaining('USD 12000.00'), findsOneWidget);
-    expect(find.textContaining('USD 4800.00'), findsOneWidget);
+    expect(find.textContaining('USD 4800.00'), findsNothing);
     expect(find.textContaining('USD 12800.00'), findsOneWidget);
     expect(find.textContaining('USD 5120.00'), findsOneWidget);
     expect(find.textContaining('Consultation fee'), findsNothing);
@@ -602,6 +710,39 @@ void main() {
         null,
         'latest-revision-request-1',
       ]);
+    },
+  );
+
+  testWidgets(
+    'fix round 1: failed stale refresh never enables force from a cached request',
+    (tester) async {
+      _largeView(tester);
+      final repository = _FakeRepository(
+        requests: [_v2Request()],
+        reviewError: const ApiException(
+          message: 'stale approval baseline',
+          httpStatus: 409,
+          errorCode: 'APPROVAL_BASE_STALE',
+        ),
+      );
+      await tester.pumpWidget(MaterialApp(
+        home: DoctorProjectProfileReviewPage(
+          repository: repository,
+          context: _adminContext,
+        ),
+      ));
+      await tester.pumpAndSettle();
+      repository.failNextDoctorRequestList = true;
+
+      await _openReviewDetail(tester, 'request-1');
+      await tester.tap(find.byKey(const Key('approve-request-1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Confirm'));
+      await tester.pumpAndSettle();
+
+      expect(repository.requestLoadCount, 2);
+      await _openReviewDetail(tester, 'request-1');
+      expect(find.byKey(const Key('force-request-1')), findsNothing);
     },
   );
 
@@ -728,6 +869,130 @@ void main() {
     expect(refreshCount, 1);
     expect(find.byType(DoctorProjectProfileReviewPage), findsNothing);
   });
+
+  testWidgets(
+    'fix round 1: doctor 403 uses the failed institution and refilters stale cards',
+    (tester) async {
+      _largeView(tester);
+      final repository = _FakeRepository(
+        requests: [
+          _v2Request(),
+          _v2Request(
+            id: 'request-2',
+            institutionId: 'institution-2',
+            institutionName: '悦颜',
+            institutionProjectId: 'ip-2',
+          ),
+        ],
+        reviewError: const ApiException(
+          message: 'institution scope changed',
+          httpStatus: 403,
+        ),
+      );
+      await tester.pumpWidget(MaterialApp(
+        home: DoctorProjectProfileReviewPage(
+          repository: repository,
+          context: const ManagementContext(
+            userId: 'legal-both',
+            platformRole: 'USER',
+            activeRoles: ['INSTITUTION_LEGAL_REPRESENTATIVE'],
+            managedInstitutionIds: ['institution-1', 'institution-2'],
+            visibleInstitutionIds: ['institution-1', 'institution-2'],
+            canReviewInstitutionProjectRequests: true,
+          ),
+          onRefreshManagementContext: () async => const ManagementContext(
+            userId: 'legal-one',
+            platformRole: 'USER',
+            activeRoles: ['INSTITUTION_LEGAL_REPRESENTATIVE'],
+            managedInstitutionIds: ['institution-1'],
+            visibleInstitutionIds: ['institution-1'],
+            canReviewInstitutionProjectRequests: true,
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      await _openReviewDetail(tester, 'request-1');
+      await tester.tap(find.byKey(const Key('approve-request-1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Confirm'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('institution-review-card-request-1')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('institution-review-card-request-2')),
+        findsNothing,
+      );
+
+      final revokedRepository = _FakeRepository(
+        requests: [
+          _v2Request(),
+          _v2Request(
+            id: 'request-2',
+            institutionId: 'institution-2',
+            institutionName: '悦颜',
+            institutionProjectId: 'ip-2',
+          ),
+        ],
+        reviewError: const ApiException(
+          message: 'failed institution removed',
+          httpStatus: 403,
+        ),
+      );
+      await tester.pumpWidget(MaterialApp(
+        key: const ValueKey('request-specific-permission-exit'),
+        home: Builder(builder: (context) {
+          return Scaffold(
+            body: FilledButton(
+              key: const Key('open-scoped-review-route'),
+              onPressed: () => Navigator.of(context).push<void>(
+                MaterialPageRoute(
+                  builder: (_) => DoctorProjectProfileReviewPage(
+                    repository: revokedRepository,
+                    context: const ManagementContext(
+                      userId: 'legal-both',
+                      platformRole: 'USER',
+                      activeRoles: ['INSTITUTION_LEGAL_REPRESENTATIVE'],
+                      managedInstitutionIds: [
+                        'institution-1',
+                        'institution-2',
+                      ],
+                      visibleInstitutionIds: [
+                        'institution-1',
+                        'institution-2',
+                      ],
+                      canReviewInstitutionProjectRequests: true,
+                    ),
+                    onRefreshManagementContext: () async =>
+                        const ManagementContext(
+                      userId: 'legal-two',
+                      platformRole: 'USER',
+                      activeRoles: ['INSTITUTION_LEGAL_REPRESENTATIVE'],
+                      managedInstitutionIds: ['institution-2'],
+                      visibleInstitutionIds: ['institution-2'],
+                      canReviewInstitutionProjectRequests: true,
+                    ),
+                  ),
+                ),
+              ),
+              child: const Text('Open scoped review'),
+            ),
+          );
+        }),
+      ));
+      await tester.tap(find.byKey(const Key('open-scoped-review-route')));
+      await tester.pumpAndSettle();
+      await _openReviewDetail(tester, 'request-1');
+      await tester.tap(find.byKey(const Key('approve-request-1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Confirm'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(DoctorProjectProfileReviewPage), findsNothing);
+    },
+  );
 
   for (final errorCode in const [
     'EDIT_BASE_STALE',
@@ -862,6 +1127,7 @@ final class _FakeRepository implements IdentityRepository {
   final ApiException? submitError;
   final Completer<void>? reviewCompleter;
   ApiException? reviewError;
+  bool failNextDoctorRequestList = false;
   DoctorProjectProfileUpdateDraft? submitted;
   final leaveIds = <String>[];
   bool? reviewForce;
@@ -888,6 +1154,10 @@ final class _FakeRepository implements IdentityRepository {
   Future<List<DoctorProjectChangeRequest>>
       listDoctorProjectChangeRequests() async {
     requestLoadCount++;
+    if (failNextDoctorRequestList) {
+      failNextDoctorRequestList = false;
+      throw StateError('doctor request refresh failed');
+    }
     return requests;
   }
 
@@ -1054,6 +1324,7 @@ DoctorProjectChangeRequest _v2Request({
   bool proposedDoctorActive = true,
   String status = 'PENDING',
   bool reviewable = true,
+  bool sharedChanged = true,
 }) =>
     DoctorProjectChangeRequest.fromJson({
       'payloadVersion': 2,
@@ -1096,7 +1367,7 @@ DoctorProjectChangeRequest _v2Request({
         version: 8,
       ),
       'latestRevision': 'latest-revision-$id',
-      'sharedChanged': true,
+      'sharedChanged': sharedChanged,
       'currentDoctorPrice': 12000,
       'proposedDoctorPrice': proposedDoctorPrice,
       'latestDoctorPrice': 12500,

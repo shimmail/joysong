@@ -168,11 +168,12 @@ final class InstitutionProjectReviewItem {
     required this.creation,
     this.currentPreview,
     this.latestPreview,
+    this.currentCategory,
+    this.proposedCategory,
+    this.latestCategory,
     this.currentDoctorActive,
     this.latestDoctorActive,
-    this.currentTravelGroundServiceFee,
     this.proposedTravelGroundServiceFee,
-    this.latestTravelGroundServiceFee,
     this.sharedChanged = false,
     this.legacyScheduleNote,
   });
@@ -200,14 +201,11 @@ final class InstitutionProjectReviewItem {
         proposedDoctorActive: request.proposedDoctorActive,
         currentDoctorActive: request.currentDoctorActive,
         latestDoctorActive: request.latestDoctorActive,
-        currentTravelGroundServiceFee: request.currentDoctorPrice! *
-            (request.currentPlatformRate ?? request.platformRate ?? 0) /
-            100,
+        currentCategory: request.currentProject!.category,
+        proposedCategory: request.proposedProject!.category,
+        latestCategory: request.latestProject?.category,
         proposedTravelGroundServiceFee:
             request.travelGroundServiceFee?.toDouble(),
-        latestTravelGroundServiceFee: request.latestDoctorPrice == null
-            ? null
-            : request.latestDoctorPrice! * (request.platformRate ?? 0) / 100,
         preview: InstitutionProjectPreviewAdapters.fromV2(request),
         currentPreview:
             InstitutionProjectPreviewAdapters.fromV2Current(request),
@@ -274,12 +272,13 @@ final class InstitutionProjectReviewItem {
   final bool? proposedDoctorActive;
   final bool? currentDoctorActive;
   final bool? latestDoctorActive;
-  final num? currentTravelGroundServiceFee;
   final num? proposedTravelGroundServiceFee;
-  final num? latestTravelGroundServiceFee;
   final InstitutionProjectPreviewModel preview;
   final InstitutionProjectPreviewModel? currentPreview;
   final InstitutionProjectPreviewModel? latestPreview;
+  final String? currentCategory;
+  final String? proposedCategory;
+  final String? latestCategory;
   final bool valid;
   final bool creation;
   final bool sharedChanged;
@@ -424,7 +423,8 @@ class InstitutionProjectReviewDetailPage extends StatelessWidget {
         body: ListView(
           padding: const EdgeInsets.only(bottom: 24),
           children: [
-            InstitutionProjectPreviewBody(model: item.preview),
+            if (item.currentPreview == null)
+              InstitutionProjectPreviewBody(model: item.preview),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Column(
@@ -432,18 +432,21 @@ class InstitutionProjectReviewDetailPage extends StatelessWidget {
                 children: [
                   if (item.currentPreview != null) ...[
                     _ReviewComparisonSection(
+                      key: Key('review-comparison-current-${item.id}'),
                       title: context.localized(
                         '提交时当前值',
                         'Current values at submission',
                       ),
                       model: item.currentPreview!,
+                      category: item.currentCategory,
                       doctorActive: item.currentDoctorActive,
-                      travelGroundServiceFee:
-                          item.currentTravelGroundServiceFee,
+                      travelGroundServiceFee: null,
                     ),
                     _ReviewComparisonSection(
+                      key: Key('review-comparison-proposed-${item.id}'),
                       title: context.localized('申请值', 'Proposed values'),
                       model: item.preview,
+                      category: item.proposedCategory,
                       doctorActive: item.proposedDoctorActive,
                       travelGroundServiceFee:
                           item.proposedTravelGroundServiceFee,
@@ -451,10 +454,12 @@ class InstitutionProjectReviewDetailPage extends StatelessWidget {
                   ],
                   if (showLatest && item.latestPreview != null)
                     _ReviewComparisonSection(
+                      key: Key('review-comparison-latest-${item.id}'),
                       title: context.localized('最新值', 'Latest values'),
                       model: item.latestPreview!,
+                      category: item.latestCategory,
                       doctorActive: item.latestDoctorActive,
-                      travelGroundServiceFee: item.latestTravelGroundServiceFee,
+                      travelGroundServiceFee: null,
                     ),
                   if (item.creation)
                     Padding(
@@ -466,11 +471,13 @@ class InstitutionProjectReviewDetailPage extends StatelessWidget {
                     )
                   else ...[
                     const SizedBox(height: 16),
-                    Text(context.localized(
-                      '共享项目变更会影响该机构项目下的全部医生。',
-                      'Shared project changes affect every doctor offering this institution project.',
-                    )),
-                    const SizedBox(height: 8),
+                    if (item.sharedChanged) ...[
+                      Text(context.localized(
+                        '共享项目变更会影响该机构项目下的全部医生。',
+                        'Shared project changes affect every doctor offering this institution project.',
+                      )),
+                      const SizedBox(height: 8),
+                    ],
                     Text(context.localized(
                       '医生价格与上架状态只影响申请医生。',
                       'Doctor price and availability affect only the applying doctor.',
@@ -637,12 +644,15 @@ class _ReviewComparisonSection extends StatelessWidget {
   const _ReviewComparisonSection({
     required this.title,
     required this.model,
+    required this.category,
     required this.doctorActive,
     required this.travelGroundServiceFee,
+    super.key,
   });
 
   final String title;
   final InstitutionProjectPreviewModel model;
+  final String? category;
   final bool? doctorActive;
   final num? travelGroundServiceFee;
 
@@ -656,13 +666,16 @@ class _ReviewComparisonSection extends StatelessWidget {
             children: [
               Text(title, style: Theme.of(context).textTheme.titleSmall),
               Text('${context.localized('项目名称', 'Name')}: ${model.name}'),
+              if ((category ?? '').trim().isNotEmpty)
+                Text(
+                  '${context.localized('项目分类', 'Category')}: ${category!.trim()}',
+                ),
               Text('${context.localized('价格', 'Price')}: ${_reviewMoney(model.price, model.currency)}'),
+              InstitutionProjectPreviewBody(model: model),
               if (travelGroundServiceFee != null)
                 Text(
                   '${context.localized('旅游地接服务费', 'Travel ground service fee')}: ${_reviewMoney(travelGroundServiceFee!.toDouble(), model.currency)}',
                 ),
-              Text('${context.localized('销量', 'Sales')}: ${model.salesCount}'),
-              Text('${context.localized('标签', 'Tags')}: ${model.tags.join(', ')}'),
               if (doctorActive != null)
                 Text(context.localized(
                   doctorActive! ? '医生上架：是' : '医生上架：否',
