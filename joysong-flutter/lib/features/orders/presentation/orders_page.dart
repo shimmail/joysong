@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/core/translation/translation.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
 import 'package:joysong_flutter/features/orders/presentation/orders_controller.dart';
 
@@ -12,6 +13,7 @@ class OrdersPage extends StatefulWidget {
     this.onEditReview,
     this.title,
     this.initialFilter,
+    this.enableAutoTranslation = false,
     super.key,
   });
 
@@ -20,6 +22,7 @@ class OrdersPage extends StatefulWidget {
   final Future<void> Function(Order order)? onEditReview;
   final String? title;
   final OrderStatus? initialFilter;
+  final bool enableAutoTranslation;
 
   @override
   State<OrdersPage> createState() => _OrdersPageState();
@@ -86,6 +89,7 @@ class _OrdersPageState extends State<OrdersPage> {
     final orders = controller.orders
         .where((order) => _selectedTab.matches(order))
         .toList(growable: false);
+    final duplicateIds = _duplicateOrderIds(orders);
     if (orders.isEmpty) {
       return _OrdersMessageState(
         message: context.localized('这里还没有订单', 'No orders yet'),
@@ -97,6 +101,17 @@ class _OrdersPageState extends State<OrdersPage> {
         controller: _scrollController,
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
         itemCount: orders.length + 1,
+        findChildIndexCallback: (key) {
+          if (key is! ValueKey<String>) return null;
+          const prefix = 'consumer-order:';
+          if (!key.value.startsWith(prefix)) return null;
+          final id = key.value.substring(prefix.length);
+          final index = orders.indexWhere((order) {
+            final candidate = order.id.trim();
+            return candidate == id && !duplicateIds.contains(candidate);
+          });
+          return index < 0 ? null : index;
+        },
         separatorBuilder: (_, __) => const SizedBox(height: 12),
         itemBuilder: (context, index) {
           if (index == orders.length) {
@@ -119,9 +134,15 @@ class _OrdersPageState extends State<OrdersPage> {
             return const SizedBox(height: 8);
           }
           final order = orders[index];
+          final id = order.id.trim();
+          final identityStable = id.isNotEmpty && !duplicateIds.contains(id);
           return _OrderCard(
-            key: ValueKey(order.id),
+            key: identityStable
+                ? ValueKey<String>('consumer-order:$id')
+                : ObjectKey(order),
             order: order,
+            enableAutoTranslation:
+                widget.enableAutoTranslation && identityStable,
             onTap: () => widget.onOrderSelected(order),
             onEditReview: order.hasReview && widget.onEditReview != null
                 ? () => widget.onEditReview!(order)
@@ -131,6 +152,16 @@ class _OrdersPageState extends State<OrdersPage> {
       ),
     );
   }
+}
+
+Set<String> _duplicateOrderIds(Iterable<Order> orders) {
+  final seen = <String>{};
+  final duplicates = <String>{};
+  for (final order in orders) {
+    final id = order.id.trim();
+    if (id.isNotEmpty && !seen.add(id)) duplicates.add(id);
+  }
+  return duplicates;
 }
 
 class _OrderFilters extends StatelessWidget {
@@ -266,7 +297,8 @@ _OrderListTab _tabForInitialStatus(OrderStatus? status) => switch (status) {
       OrderStatus.serviceActive ||
       OrderStatus.pendingCompletion =>
         _OrderListTab.pending,
-      OrderStatus.refundReview || OrderStatus.refundProcessing =>
+      OrderStatus.refundReview ||
+      OrderStatus.refundProcessing =>
         _OrderListTab.underReview,
       OrderStatus.cancelled ||
       OrderStatus.refunded ||
@@ -279,16 +311,21 @@ class _OrderCard extends StatelessWidget {
   const _OrderCard({
     required this.order,
     required this.onTap,
+    required this.enableAutoTranslation,
     this.onEditReview,
     super.key,
   });
 
   final Order order;
   final VoidCallback onTap;
+  final bool enableAutoTranslation;
   final VoidCallback? onEditReview;
 
   @override
   Widget build(BuildContext context) {
+    final showInstitutionName =
+        !(order.isTravelGroundServiceOnly && !order.consultantDetailsVisible) &&
+            order.institutionName.isNotEmpty;
     return Card(
       child: InkWell(
         onTap: onTap,
@@ -301,14 +338,19 @@ class _OrderCard extends StatelessWidget {
               Row(
                 children: [
                   Expanded(
-                    child: Text(
-                      (order.isTravelGroundServiceOnly &&
-                                  !order.consultantDetailsVisible) ||
-                              order.institutionName.isEmpty
-                          ? context.localized('娇颜颂预约', 'Joysong booking')
-                          : order.institutionName,
-                      style: Theme.of(context).textTheme.titleSmall,
-                    ),
+                    child: showInstitutionName
+                        ? StableAutoTranslatedText(
+                            enabled: enableAutoTranslation,
+                            contentType: 'institution',
+                            contentId: 'order:${order.id.trim()}',
+                            field: 'institutionName',
+                            sourceText: order.institutionName,
+                            style: Theme.of(context).textTheme.titleSmall,
+                          )
+                        : Text(
+                            context.localized('娇颜颂预约', 'Joysong booking'),
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
                   ),
                   Text(
                     !order.isTravelGroundServiceOnly &&
@@ -353,8 +395,12 @@ class _OrderCard extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          order.projectName,
+                        StableAutoTranslatedText(
+                          enabled: enableAutoTranslation,
+                          contentType: 'project',
+                          contentId: 'order:${order.id.trim()}',
+                          field: 'projectName',
+                          sourceText: order.projectName,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
