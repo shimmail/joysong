@@ -131,6 +131,22 @@ describe('LegalDocumentsPage', () => {
     expect(screen.queryByRole('textbox', { name: '变更说明' })).not.toBeInTheDocument();
   });
 
+  it('clears previously loaded rows when another document history fails to load', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getLegalDocumentHistory).mockImplementation((type) => type === 'privacy-policy'
+      ? Promise.resolve([{ ...summary('privacy-policy').draft!, status: 'PUBLISHED', publishedAt: '2026-08-26T10:00:00' }])
+      : Promise.reject(new Error('历史版本不可用')));
+    render(<LegalDocumentsPage />);
+
+    await user.click((await screen.findAllByRole('button', { name: '历史版本' }))[1]);
+    expect(await screen.findByText('PUBLISHED')).toBeInTheDocument();
+    await user.click(screen.getAllByRole('button', { name: 'Close' }).at(-1)!);
+
+    await user.click(screen.getAllByRole('button', { name: '历史版本' })[0]);
+    await waitFor(() => expect(getLegalDocumentHistory).toHaveBeenLastCalledWith('user-agreement'));
+    expect(screen.queryByText('PUBLISHED')).not.toBeInTheDocument();
+  });
+
   it('reloads the latest state after a version conflict', async () => {
     const user = userEvent.setup();
     vi.mocked(updateLegalDocumentDraft).mockRejectedValueOnce({ response: { status: 409 } });

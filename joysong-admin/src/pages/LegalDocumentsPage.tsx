@@ -183,6 +183,7 @@ export default function LegalDocumentsPage() {
 
   const openHistory = async (type: LegalDocumentType) => {
     setHistoryOpen(true);
+    setHistory([]);
     setHistoryLoading(true);
     try {
       setHistory(await getLegalDocumentHistory(type));
