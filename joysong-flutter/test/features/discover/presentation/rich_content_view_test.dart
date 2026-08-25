@@ -2,8 +2,88 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/features/discover/presentation/rich_content_view.dart';
+import 'package:url_launcher_platform_interface/url_launcher_platform_interface.dart';
 
 void main() {
+  late UrlLauncherPlatform originalPlatform;
+
+  setUp(() {
+    originalPlatform = UrlLauncherPlatform.instance;
+  });
+
+  tearDown(() {
+    UrlLauncherPlatform.instance = originalPlatform;
+  });
+
+  testWidgets('renders h4 as separated bold block headings', (tester) async {
+    await tester.pumpWidget(
+      _app(
+        const RichContentView(
+          content: '<h4>First heading</h4><h4>Second heading</h4><p>Body</p>',
+        ),
+      ),
+    );
+
+    final text = tester
+        .widget<SelectableText>(find.byType(SelectableText))
+        .textSpan!
+        .toPlainText();
+    expect(text, contains('First heading\nSecond heading\nBody'));
+    expect(
+      _textSpan(tester, 'First heading').style?.fontWeight,
+      FontWeight.w700,
+    );
+    expect(
+      _textSpan(tester, 'Second heading').style?.fontWeight,
+      FontWeight.w700,
+    );
+  });
+
+  testWidgets(
+    'default link launcher uses external mode and safely ignores platform failures',
+    (tester) async {
+      final platform = _RecordingUrlLauncherPlatform();
+      UrlLauncherPlatform.instance = platform;
+      const uri = 'https://example.com/privacy?source=content';
+
+      for (final result in const [
+        _LaunchResult.succeeds,
+        _LaunchResult.returnsFalse,
+        _LaunchResult.throwsError,
+      ]) {
+        platform.result = result;
+        await tester.pumpWidget(
+          _app(RichContentView(content: '<a href="$uri">Open</a>')),
+        );
+        await tester.tapAt(_glyphCenter(tester, 'Open'));
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+      }
+
+      expect(platform.urls, [uri, uri, uri]);
+      expect(
+        platform.options.map((options) => options.mode),
+        everyElement(PreferredLaunchMode.externalApplication),
+      );
+      expect(
+        platform.options,
+        everyElement(
+          isA<LaunchOptions>()
+              .having(
+                (options) => options.webOnlyWindowName,
+                'window name',
+                isNull,
+              )
+              .having(
+                (options) => options.webViewConfiguration.headers,
+                'headers',
+                isEmpty,
+              ),
+        ),
+      );
+    },
+  );
+
   testWidgets('actual taps on https mailto and tel text call the launcher', (
     tester,
   ) async {
@@ -235,5 +315,23 @@ class _LinkHarnessState extends State<_LinkHarness> {
   @override
   Widget build(BuildContext context) {
     return RichContentView(content: _content, onLinkTap: _onLinkTap);
+  }
+}
+
+enum _LaunchResult { succeeds, returnsFalse, throwsError }
+
+class _RecordingUrlLauncherPlatform extends UrlLauncherPlatform {
+  _LaunchResult result = _LaunchResult.succeeds;
+  final urls = <String>[];
+  final options = <LaunchOptions>[];
+
+  @override
+  Future<bool> launchUrl(String url, LaunchOptions launchOptions) async {
+    urls.add(url);
+    options.add(launchOptions);
+    if (result == _LaunchResult.throwsError) {
+      throw StateError('launcher unavailable');
+    }
+    return result == _LaunchResult.succeeds;
   }
 }

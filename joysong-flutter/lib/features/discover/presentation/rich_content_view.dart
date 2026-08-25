@@ -126,7 +126,11 @@ final class _RichContentViewState extends State<RichContentView> {
 }
 
 Future<void> _launchExternal(Uri uri) async {
-  await launchUrl(uri, mode: LaunchMode.externalApplication);
+  try {
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  } catch (_) {
+    // A missing platform handler must not surface from a tap recognizer.
+  }
 }
 
 List<String> richContentImageUrls(String content) => _contentParts(content)
@@ -264,7 +268,7 @@ List<InlineSpan> _inlineSpans(
       if (index > 0) {
         styleStack.removeRange(index, styleStack.length);
       }
-      if (const ['h1', 'h2', 'h3'].contains(tag)) {
+      if (const ['h1', 'h2', 'h3', 'h4'].contains(tag)) {
         _appendNewline(spans, baseStyle);
       }
       continue;
@@ -307,10 +311,12 @@ List<InlineSpan> _inlineSpans(
           fontSize: 21, height: 1.4, fontWeight: FontWeight.w800),
       'h3' => baseStyle.copyWith(
           fontSize: 18, height: 1.45, fontWeight: FontWeight.w700),
+      'h4' => baseStyle.copyWith(
+          fontSize: 16, height: 1.5, fontWeight: FontWeight.w700),
       _ => null,
     };
     if (nextStyle != null) {
-      if (const ['h1', 'h2', 'h3'].contains(tag) && spans.isNotEmpty) {
+      if (const ['h1', 'h2', 'h3', 'h4'].contains(tag) && spans.isNotEmpty) {
         _appendNewline(spans, baseStyle);
       }
       styleStack.add(
