@@ -1388,7 +1388,7 @@ class _AppShellState extends State<AppShell> {
       final english = Localizations.localeOf(context).languageCode == 'en';
       final translation = await translationRepository.translateText(
         text: text,
-        targetLanguage: english ? 'zh-CN' : 'en',
+        targetLanguage: english ? 'en' : 'zh-CN',
         contentType: 'message',
       );
       return translation.translatedText;

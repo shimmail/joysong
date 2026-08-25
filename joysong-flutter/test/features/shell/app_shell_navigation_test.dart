@@ -143,7 +143,7 @@ void main() {
   });
 
   testWidgets(
-      'agent institution handoff translates direct messages with the supported type',
+      'agent institution handoff translates English direct messages into the active Chinese locale',
       (tester) async {
     final client = _AgentHandoffApiClient();
     await tester.pumpWidget(
@@ -186,8 +186,8 @@ void main() {
     expect(dmPost.$2, {'targetId': 'consultant-2'});
 
     expect(find.byType(DmThreadPage), findsOneWidget);
-    expect(find.text('恢复得很好'), findsOneWidget);
-    await tester.longPress(find.text('恢复得很好'));
+    expect(find.text('Recovery is progressing well'), findsOneWidget);
+    await tester.longPress(find.text('Recovery is progressing well'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('翻译'));
     await tester.pumpAndSettle();
@@ -197,10 +197,11 @@ void main() {
         .toList(growable: false);
     expect(translationPosts, hasLength(1));
     expect(translationPosts.single.$2, {
-      'text': '恢复得很好',
-      'targetLanguage': 'en',
+      'text': 'Recovery is progressing well',
+      'targetLanguage': 'zh-CN',
       'contentType': 'message',
     });
+    expect(find.text('恢复得很好'), findsOneWidget);
     expect(
       translationPosts.any(
         (request) =>
@@ -281,6 +282,42 @@ void main() {
     expect(client.orderServiceConversationCreates, 1);
     expect(find.byType(DmThreadPage), findsOneWidget);
     expect(find.byType(TextField), findsNothing);
+  });
+
+  testWidgets(
+      'Chinese order chat translates English messages into the active locale',
+      (tester) async {
+    _useLargeTestSurface(tester);
+    final client = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE',
+      freshReadable: true,
+      freshSendEnabled: true,
+    );
+    await _pumpShell(tester, client);
+
+    await tester.tap(find.text('消息'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey('dm-conversation-order-1')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Order update received'), findsOneWidget);
+    await tester.longPress(find.text('Order update received'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('翻译'));
+    await tester.pumpAndSettle();
+
+    final translationPosts = client.posts
+        .where((request) => request.$1 == 'translations')
+        .toList(growable: false);
+    expect(translationPosts, hasLength(1));
+    expect(translationPosts.single.$2, {
+      'text': 'Order update received',
+      'targetLanguage': 'zh-CN',
+      'contentType': 'message',
+    });
+    expect(find.text('已收到订单更新'), findsOneWidget);
   });
 
   testWidgets(
@@ -806,9 +843,9 @@ final class _AgentHandoffApiClient extends ApiClient {
     if (path == 'dm/conversations') return decodeData(_dmConversationJson);
     if (path == 'translations') {
       return decodeData(const <String, Object?>{
-        'translatedText': 'Recovery is progressing well',
-        'detectedLanguage': 'zh',
-        'targetLanguage': 'en',
+        'translatedText': '恢复得很好',
+        'detectedLanguage': 'en',
+        'targetLanguage': 'zh-CN',
         'provider': 'qwen',
         'cached': false,
       });
@@ -955,7 +992,9 @@ final class _OrderServiceApiClient extends ApiClient {
         ],
       'discover/institutions/institution-1/consultants' => const <Object?>[],
       'diaries/my' => const <Object?>[],
-      'dm/conversations/conversation-order-1/messages' => const <Object?>[],
+      'dm/conversations/conversation-order-1/messages' => const <Object?>[
+          _orderDmMessageJson,
+        ],
       '/discover/filter-options' => const <String, Object?>{
           'categories': <String>[],
           'tags': <String>[],
@@ -987,6 +1026,15 @@ final class _OrderServiceApiClient extends ApiClient {
       return decodeData(
         serviceConversationResponse(sendEnabled: freshSendEnabled),
       );
+    }
+    if (path == 'translations') {
+      return decodeData(const <String, Object?>{
+        'translatedText': '已收到订单更新',
+        'detectedLanguage': 'en',
+        'targetLanguage': 'zh-CN',
+        'provider': 'qwen',
+        'cached': false,
+      });
     }
     return decodeData(const <String, Object?>{});
   }
@@ -1054,10 +1102,20 @@ const _dmMessageJson = <String, Object?>{
   'id': 'message-human-1',
   'conversationId': 'dm-human',
   'senderId': 'consultant-2',
-  'content': '恢复得很好',
+  'content': 'Recovery is progressing well',
   'messageType': 'TEXT',
   'isRead': true,
   'createdAt': '2026-08-17T09:03:00Z',
+};
+
+const _orderDmMessageJson = <String, Object?>{
+  'id': 'message-order-1',
+  'conversationId': 'conversation-order-1',
+  'senderId': 'consultant-1',
+  'content': 'Order update received',
+  'messageType': 'TEXT',
+  'isRead': false,
+  'createdAt': '2026-08-21T10:06:00',
 };
 
 const _orderServiceConversationJson = <String, Object?>{
