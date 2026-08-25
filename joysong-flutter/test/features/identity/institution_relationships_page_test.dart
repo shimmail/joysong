@@ -902,6 +902,105 @@ void main() {
       );
     },
   );
+  testWidgets(
+    'relationship notification target expands the matching reviewed request',
+    (tester) async {
+      final repository = _FakeIdentityRepository(
+        contexts: [_dualContext(canApply: false)],
+        ownedResponses: [
+          [
+            _request(
+              id: 'doctor-request-1',
+              type: InstitutionMembershipRequestType.doctor,
+              institutionId: 'institution-1',
+              institutionName: 'Focused Clinic',
+              action: InstitutionMembershipAction.join,
+              status: InstitutionMembershipRequestStatus.rejected,
+              reviewNote: '需要补充排班证明',
+            ),
+          ],
+        ],
+      );
+
+      await _mount(
+        tester,
+        InstitutionRelationshipsPage(
+          repository: repository,
+          scope: InstitutionRelationshipScope.doctor,
+          initialRequestId: 'doctor-request-1',
+        ),
+      );
+
+      expect(
+        tester
+            .getSemantics(find.byKey(const Key('relationship-history-toggle')))
+            .flagsCollection
+            .isExpanded,
+        Tristate.isTrue,
+      );
+      expect(find.byKey(const ValueKey('history-doctor-request-1')), findsOneWidget);
+      expect(find.text('Review: 需要补充排班证明'), findsOneWidget);
+    },
+  );
+
+  testWidgets('stale relationship notification target stays on the scoped page',
+      (tester) async {
+    await _mount(
+      tester,
+      InstitutionRelationshipsPage(
+        repository: _FakeIdentityRepository(
+          contexts: [_dualContext(canApply: false)],
+        ),
+        scope: InstitutionRelationshipScope.consultant,
+        initialRequestId: 'missing-request',
+      ),
+    );
+
+    expect(find.text('Institution relationships'), findsOneWidget);
+    expect(find.text('No request history'), findsOneWidget);
+  });
+
+  testWidgets('legal review target filters to the notified professional type',
+      (tester) async {
+    final repository = _FakeIdentityRepository(
+      contexts: [_legalContext()],
+      reviewableResponses: [
+        [
+          _request(
+            id: 'doctor-request',
+            type: InstitutionMembershipRequestType.doctor,
+            institutionId: 'managed-1',
+            institutionName: 'Doctor Clinic',
+            action: InstitutionMembershipAction.join,
+            status: InstitutionMembershipRequestStatus.pending,
+            applicantName: 'Doctor Applicant',
+          ),
+          _request(
+            id: 'consultant-request',
+            type: InstitutionMembershipRequestType.consultant,
+            institutionId: 'managed-1',
+            institutionName: 'Consultant Clinic',
+            action: InstitutionMembershipAction.join,
+            status: InstitutionMembershipRequestStatus.pending,
+            applicantName: 'Consultant Applicant',
+          ),
+        ],
+      ],
+    );
+
+    await _mount(
+      tester,
+      InstitutionRelationshipsPage(
+        repository: repository,
+        scope: InstitutionRelationshipScope.legalRepresentative,
+        initialRequestId: 'doctor-request',
+        initialReviewType: InstitutionMembershipRequestType.doctor,
+      ),
+    );
+
+    expect(find.byKey(const ValueKey('pending-doctor-request')), findsOneWidget);
+    expect(find.byKey(const ValueKey('pending-consultant-request')), findsNothing);
+  });
 }
 
 Future<void> _mount(

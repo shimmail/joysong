@@ -19,15 +19,19 @@ import com.joysong.server.order.dto.CreateOrderRequest
 import com.joysong.server.order.dto.OrderStatusEnum
 import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.repository.OrderRepository
+import com.joysong.server.order.service.OrderBusinessNotificationDispatcher
 import com.joysong.server.order.service.OrderService
 import com.joysong.server.order.service.OrderSplitRatePolicy
 import com.joysong.server.order.service.OrderStatusLogService
 import com.joysong.server.order.service.TravelGroundServicePricing
+import com.joysong.server.notification.service.BusinessNotificationService
 import com.joysong.server.project.entity.ProjectEntity
 import com.joysong.server.project.repository.ProjectRepository
 import com.joysong.server.settlement.entity.SettlementEntity
 import com.joysong.server.settlement.service.SettlementService
 import com.joysong.server.refund.repository.RefundRepository
+import com.joysong.server.refund.service.RefundExecutionOutcome
+import com.joysong.server.refund.service.RefundExecutionService
 import com.joysong.server.review.service.ReviewService
 import io.mockk.*
 import io.mockk.impl.annotations.MockK
@@ -37,6 +41,17 @@ import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import org.springframework.aop.framework.ProxyFactory
+import org.springframework.aop.support.AopUtils
+import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.datasource.DataSourceTransactionManager
+import org.springframework.jdbc.datasource.DriverManagerDataSource
+import org.springframework.transaction.TransactionManager
+import org.springframework.transaction.TransactionDefinition
+import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource
+import org.springframework.transaction.interceptor.TransactionInterceptor
+import org.springframework.transaction.support.DefaultTransactionStatus
+import org.springframework.transaction.support.TransactionTemplate
 import java.math.BigDecimal
 import java.time.LocalDateTime
 import java.util.*
@@ -57,6 +72,8 @@ class OrderServiceTest {
     @MockK private lateinit var reviewService: ReviewService
     @MockK private lateinit var institutionConsultantService: InstitutionConsultantService
     @MockK private lateinit var doctorInstitutionRelationshipService: DoctorInstitutionRelationshipService
+    @MockK(relaxed = true) private lateinit var businessNotificationService: BusinessNotificationService
+    @MockK(relaxed = true) private lateinit var orderBusinessNotificationDispatcher: OrderBusinessNotificationDispatcher
     private val institutionProjectDetailResolver = InstitutionProjectDetailResolver()
 
     private lateinit var orderService: OrderService
@@ -102,7 +119,9 @@ class OrderServiceTest {
             reviewService,
             institutionConsultantService = institutionConsultantService,
             doctorInstitutionRelationshipService = doctorInstitutionRelationshipService,
-            travelGroundServicePricing = TravelGroundServicePricing(OrderSplitRatePolicy(splitProperties))
+            travelGroundServicePricing = TravelGroundServicePricing(OrderSplitRatePolicy(splitProperties)),
+            businessNotificationService = businessNotificationService,
+            orderBusinessNotificationDispatcher = orderBusinessNotificationDispatcher
         )
         // 默认 stub：logTransition 不做任何事
         justRun { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) }
@@ -335,6 +354,9 @@ class OrderServiceTest {
         verify(exactly = 0) { couponService.listUserAvailableCoupons(any()) }
         verify(exactly = 0) { couponService.calculateDiscount(any(), any()) }
         verify(exactly = 0) { couponService.redeemCoupon(any(), any()) }
+        verify(exactly = 1) {
+            businessNotificationService.orderCreated("order-new", "user-1", "consultant-1")
+        }
     }
 
     @Test
@@ -668,6 +690,9 @@ class OrderServiceTest {
         verify { orderRepository.save(capture(saved)) }
         assertNotNull(saved.captured.settlementAt)
         verify { settlementService.saveSettlement("o1", saved.captured.settlementAt) }
+        verify(exactly = 1) {
+            businessNotificationService.orderCompleted("o1", "consultant-1", "doctor-1", "inst-1")
+        }
     }
 
     @Test
@@ -701,6 +726,11 @@ class OrderServiceTest {
             )
         }
         verify(exactly = 0) { settlementService.saveSettlement(any(), any()) }
+        verify(exactly = 1) {
+            businessNotificationService.orderCompleted(
+                "travel-completion", "consultant-1", "doctor-1", "inst-1"
+            )
+        }
     }
 
     @Test
@@ -738,6 +768,9 @@ class OrderServiceTest {
             )
         }
         verify(exactly = 0) { entityManager.createNativeQuery(any<String>()) }
+        verify(exactly = 1) {
+            businessNotificationService.orderCancelled("o1", "user-1", "consultant-1")
+        }
     }
 
     @Test
@@ -853,6 +886,9 @@ class OrderServiceTest {
                 "支付超时自动取消"
             )
         }
+        verify(exactly = 1) {
+            businessNotificationService.orderCancelled("travel-pending", "user-1", "consultant-1")
+        }
     }
 
     @Test
@@ -868,24 +904,101 @@ class OrderServiceTest {
     @Test
     fun `cancelBalanceTimeoutOrder 取消尾款超时订单`() {
         val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.VERIFIED.value)
-        every { orderRepository.findById("o1") } returns Optional.of(order)
+        every { orderRepository.findByIdForUpdate("o1") } returns order
         every { orderRepository.save(any()) } answers { firstArg() }
 
         orderService.cancelBalanceTimeoutOrder("o1")
 
         val saved = slot<OrderEntity>()
+        verify(exactly = 1) { orderRepository.findByIdForUpdate("o1") }
         verify { orderRepository.save(capture(saved)) }
         assertEquals(OrderStatusEnum.CANCELLED.value, saved.captured.status)
+        verify(exactly = 1) {
+            orderBusinessNotificationDispatcher.orderCancelled("o1", "user-1", "consultant-1")
+        }
     }
 
     @Test
     fun `cancelBalanceTimeoutOrder 非 VERIFIED 状态跳过`() {
         val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.CONSULTATION_PAID.value)
-        every { orderRepository.findById("o1") } returns Optional.of(order)
+        every { orderRepository.findByIdForUpdate("o1") } returns order
 
         orderService.cancelBalanceTimeoutOrder("o1")
 
+        verify(exactly = 1) { orderRepository.findByIdForUpdate("o1") }
         verify(exactly = 0) { orderRepository.save(any()) }
+    }
+
+    @Test
+    fun `cancelExpiredConsultationPaidOrder emits one refunded notification for the real transition only`() {
+        val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.CONSULTATION_PAID.value)
+            .copy(paidAmount = BigDecimal("100.00"), paidAmountMinor = 10_000)
+        every { orderRepository.findByIdForUpdate("o1") } returnsMany listOf(
+            order,
+            order.copy(status = OrderStatusEnum.REFUNDED.value)
+        )
+        every { orderRepository.save(any()) } answers { firstArg() }
+        every { refundRepository.save(any()) } answers { firstArg() }
+
+        orderService.cancelExpiredConsultationPaidOrder("o1")
+        orderService.cancelExpiredConsultationPaidOrder("o1")
+
+        verify(exactly = 1) { orderRepository.save(match { it.status == OrderStatusEnum.REFUNDED.value }) }
+        verify(exactly = 0) { orderBusinessNotificationDispatcher.orderCancelled(any(), any(), any()) }
+        verify(exactly = 1) {
+            orderBusinessNotificationDispatcher.orderRefunded("o1", "user-1", "consultant-1", "doctor-1")
+        }
+    }
+
+    @Test
+    fun `failed balance-timeout notification rolls back independently after the refund business commit`() {
+        val dataSource = DriverManagerDataSource(
+            "jdbc:h2:mem:order_timeout_notification_failure;DB_CLOSE_DELAY=-1",
+            "sa",
+            ""
+        )
+        val jdbc = JdbcTemplate(dataSource)
+        jdbc.execute("CREATE TABLE business_events (id INT PRIMARY KEY)")
+        jdbc.execute("CREATE TABLE notification_events (id INT PRIMARY KEY)")
+        val transactionManager = CountingDataSourceTransactionManager(dataSource)
+        val notificationService = mockk<BusinessNotificationService>(relaxed = true)
+        every { notificationService.orderCancelled("o1", "user-1", "consultant-1") } answers {
+            jdbc.update("INSERT INTO notification_events (id) VALUES (1)")
+            throw IllegalStateException("notification persistence unavailable")
+        }
+        val refundExecutionService = mockk<RefundExecutionService>()
+        every { refundExecutionService.execute(any()) } returns RefundExecutionOutcome(
+            refundedAmountMinor = 10_000,
+            completed = true
+        )
+        val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.VERIFIED.value).copy(
+            consultationFee = BigDecimal("100.00"),
+            paidAmount = BigDecimal("100.00"),
+            paidAmountMinor = 10_000
+        )
+        every { orderRepository.findByIdForUpdate("o1") } returns order
+        every { orderRepository.save(any()) } answers { firstArg() }
+        every { refundRepository.save(any()) } answers { firstArg() }
+        val service = orderService(
+            businessNotificationService = notificationService,
+            refundExecutionService = refundExecutionService,
+            orderBusinessNotificationDispatcher = proxiedNotificationDispatcher(
+                notificationService,
+                transactionManager
+            )
+        )
+
+        assertDoesNotThrow {
+            TransactionTemplate(transactionManager).executeWithoutResult {
+                jdbc.update("INSERT INTO business_events (id) VALUES (1)")
+                service.cancelBalanceTimeoutOrder("o1")
+            }
+        }
+
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM business_events", Int::class.java))
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM notification_events", Int::class.java))
+        assertEquals(2, transactionManager.begins)
+        verify(exactly = 1) { refundExecutionService.execute(any()) }
     }
 
     // ---- 删除订单 ----
@@ -1063,6 +1176,9 @@ class OrderServiceTest {
                 "管理员修改状态"
             )
         }
+        verify(exactly = 1) {
+            businessNotificationService.orderCancelled("travel-1", "user-1", "consultant-1")
+        }
     }
 
     @Test
@@ -1175,7 +1291,67 @@ class OrderServiceTest {
         paymentFlow = paymentFlow,
         projectId = "project-1",
         institutionId = "inst-1",
+        consultantId = "consultant-1",
+        doctorId = "doctor-1",
         verifyCode = "123456",
         orderNo = "JOY202607311200001234"
     )
+
+    private fun orderService(
+        businessNotificationService: BusinessNotificationService,
+        refundExecutionService: RefundExecutionService,
+        orderBusinessNotificationDispatcher: OrderBusinessNotificationDispatcher
+    ) = OrderService(
+        orderRepository,
+        projectRepository,
+        institutionProjectRepository,
+        institutionRepository,
+        doctorProjectRepository,
+        doctorRepository,
+        orderStatusLogService,
+        couponService,
+        settlementService,
+        entityManager,
+        refundRepository,
+        institutionProjectDetailResolver,
+        reviewService,
+        institutionConsultantService = institutionConsultantService,
+        doctorInstitutionRelationshipService = doctorInstitutionRelationshipService,
+        travelGroundServicePricing = TravelGroundServicePricing(
+            OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("40.00") })
+        ),
+        businessNotificationService = businessNotificationService,
+        orderBusinessNotificationDispatcher = orderBusinessNotificationDispatcher,
+        refundExecutionService = refundExecutionService
+    )
+
+    private fun proxiedNotificationDispatcher(
+        businessNotificationService: BusinessNotificationService,
+        transactionManager: DataSourceTransactionManager
+    ): OrderBusinessNotificationDispatcher {
+        val transactionAdvice = TransactionInterceptor(
+            transactionManager as TransactionManager,
+            AnnotationTransactionAttributeSource()
+        )
+        return (ProxyFactory(OrderBusinessNotificationDispatcher(businessNotificationService)).apply {
+            isProxyTargetClass = true
+            addAdvice(transactionAdvice)
+        }.proxy as OrderBusinessNotificationDispatcher).also { dispatcher ->
+            assertTrue(AopUtils.isAopProxy(dispatcher))
+        }
+    }
+
+    private class CountingDataSourceTransactionManager(dataSource: javax.sql.DataSource) :
+        DataSourceTransactionManager(dataSource) {
+        var begins = 0
+
+        override fun doBegin(transaction: Any, definition: TransactionDefinition) {
+            begins += 1
+            super.doBegin(transaction, definition)
+        }
+
+        override fun doRollback(status: DefaultTransactionStatus) {
+            super.doRollback(status)
+        }
+    }
 }

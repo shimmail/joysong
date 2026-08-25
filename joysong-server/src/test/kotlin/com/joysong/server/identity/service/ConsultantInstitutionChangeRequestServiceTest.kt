@@ -1,5 +1,8 @@
 package com.joysong.server.identity.service
 
+import com.joysong.server.notification.service.BusinessNotificationService
+import com.joysong.server.notification.service.ProfessionalApplicantRole
+import io.mockk.mockk
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -14,7 +17,13 @@ class ConsultantInstitutionChangeRequestServiceTest {
     private val store = FakeChangeRequestStore(events)
     private val relationships = FakeRelationshipOperations(events)
     private val reviewAuthority = FakeReviewAuthority(events)
-    private val service = ConsultantInstitutionChangeRequestService(store, relationships, reviewAuthority)
+    private val businessNotifications = mockk<BusinessNotificationService>(relaxed = true)
+    private val service = ConsultantInstitutionChangeRequestService(
+        store,
+        relationships,
+        reviewAuthority,
+        businessNotifications
+    )
 
     @Test
     fun `only the active consultant submits a request for self`() {
@@ -32,6 +41,13 @@ class ConsultantInstitutionChangeRequestServiceTest {
         assertEquals("consultant-1", submitted.consultantId)
         assertEquals("institution-1", submitted.institutionId)
         assertEquals("join", submitted.requestNote)
+        io.mockk.verify(exactly = 1) {
+            businessNotifications.professionalApplicationSubmitted(
+                "institution-1",
+                ProfessionalApplicantRole.CONSULTANT,
+                "new-1"
+            )
+        }
     }
 
     @Test
@@ -110,6 +126,9 @@ class ConsultantInstitutionChangeRequestServiceTest {
         assertThrows(DuplicateKeyException::class.java) {
             service.submit(actor(), "institution-1", ConsultantInstitutionAction.JOIN, "")
         }
+        io.mockk.verify(exactly = 0) {
+            businessNotifications.professionalApplicationSubmitted(any(), any(), any())
+        }
     }
 
     @Test
@@ -156,6 +175,13 @@ class ConsultantInstitutionChangeRequestServiceTest {
         val withdrawn = service.withdraw(actor(), "request-1")
         assertEquals(ConsultantInstitutionRequestStatus.WITHDRAWN, withdrawn.status)
         assertEquals(1, store.statusChanges)
+        io.mockk.verify(exactly = 1) {
+            businessNotifications.professionalApplicationWithdrawn(
+                "institution-1",
+                ProfessionalApplicantRole.CONSULTANT,
+                "request-1"
+            )
+        }
     }
 
     @Test
@@ -201,6 +227,14 @@ class ConsultantInstitutionChangeRequestServiceTest {
             "not eligible"
         )
         assertEquals(ConsultantInstitutionRequestStatus.REJECTED, reviewed.status)
+        io.mockk.verify(exactly = 1) {
+            businessNotifications.professionalApplicationRejected(
+                "consultant-1",
+                ProfessionalApplicantRole.CONSULTANT,
+                "request-1",
+                "not eligible"
+            )
+        }
     }
 
     @Test
@@ -292,6 +326,49 @@ class ConsultantInstitutionChangeRequestServiceTest {
         service.review(admin(), "request-1", MembershipRequestDecision.REJECTED, "not now")
 
         assertTrue(relationships.approvedEffects.isEmpty())
+    }
+
+    @Test
+    fun `approval notifies the consultant only after the status transition succeeds`() {
+        store.locked = request()
+
+        service.review(admin(), "request-1", MembershipRequestDecision.APPROVED, "")
+
+        io.mockk.verify(exactly = 1) {
+            businessNotifications.professionalApplicationApproved(
+                "consultant-1",
+                ProfessionalApplicantRole.CONSULTANT,
+                "request-1"
+            )
+        }
+    }
+
+    @Test
+    fun `failed consultant status transition emits no professional notification`() {
+        store.locked = request()
+        store.changeStatusResult = false
+
+        assertThrows(ConsultantInstitutionRequestConflictException::class.java) {
+            service.withdraw(actor(), "request-1")
+        }
+
+        io.mockk.verify(exactly = 0) {
+            businessNotifications.professionalApplicationWithdrawn(any(), any(), any())
+        }
+    }
+
+    @Test
+    fun `failed consultant review transition emits no professional notification`() {
+        store.locked = request()
+        store.changeStatusResult = false
+
+        assertThrows(ConsultantInstitutionRequestConflictException::class.java) {
+            service.review(admin(), "request-1", MembershipRequestDecision.REJECTED, "not eligible")
+        }
+
+        io.mockk.verify(exactly = 0) {
+            businessNotifications.professionalApplicationRejected(any(), any(), any(), any())
+        }
     }
 
     private fun actor(

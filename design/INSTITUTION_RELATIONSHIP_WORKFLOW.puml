@@ -17,6 +17,7 @@ actor "Institution legal representative\nor platform administrator" as Reviewer
 database "Doctor relationship projection\ndoctor_institutions" as DoctorProjection
 database "Consultant relationship projection\ninstitution_memberships" as ConsultantProjection
 database "Active sessions\nauth_sessions" as Sessions
+participant "System-message inbox\nnotifications" as Notifications
 
 note over Flutter,API
   Flutter always supplies an explicit DOCTOR, CONSULTANT,
@@ -30,12 +31,14 @@ group Submit JOIN or LEAVE
     Flutter -> API: POST request\n{requestType: DOCTOR, institutionId, action, requestNote}
     API -> DoctorLedger: INSERT fresh PENDING request
     DoctorLedger --> API: normalized 17-field request
+    API -> Notifications: PROFESSIONAL_APPLICATION_SUBMITTED\nlegal representatives; doctor review target
     API --> Flutter: PENDING
   else CONSULTANT
     Consultant -> Flutter: choose eligible institution and action
     Flutter -> API: POST request\n{requestType: CONSULTANT, institutionId, action, requestNote}
     API -> ConsultantLedger: INSERT fresh PENDING request
     ConsultantLedger --> API: normalized 17-field request
+    API -> Notifications: PROFESSIONAL_APPLICATION_SUBMITTED\nlegal representatives; consultant review target
     API --> Flutter: PENDING
   end
 end
@@ -55,6 +58,7 @@ group Applicant withdrawal
   else CONSULTANT request
     API -> ConsultantLedger: PENDING -> WITHDRAWN
   end
+  API -> Notifications: PROFESSIONAL_APPLICATION_WITHDRAWN\ncurrent legal representatives only
   note right of API: WITHDRAW is a projection no-op
   API --> Flutter: normalized WITHDRAWN request
 end
@@ -72,6 +76,7 @@ group Legal/platform review
     else CONSULTANT request
       API -> ConsultantLedger: PENDING -> REJECTED
     end
+    API -> Notifications: PROFESSIONAL_APPLICATION_REJECTED\napplicant; role-specific application target + review note
     note right of API: REJECT is a projection and session no-op
   else APPROVED JOIN
     group one transaction
@@ -83,6 +88,7 @@ group Legal/platform review
         API -> ConsultantLedger: PENDING -> APPROVED
       end
     end
+    API -> Notifications: PROFESSIONAL_APPLICATION_APPROVED\napplicant; role-specific application target
   else APPROVED LEAVE
     group one transaction
       alt DOCTOR request
@@ -95,6 +101,7 @@ group Legal/platform review
         API -> ConsultantLedger: PENDING -> APPROVED
       end
     end
+    API -> Notifications: PROFESSIONAL_APPLICATION_APPROVED\napplicant; role-specific application target
   end
 
   alt every transactional write succeeds
@@ -109,6 +116,13 @@ note over DoctorProjection,Sessions
   PENDING, WITHDRAWN, and REJECTED LEAVE keep the current relation.
   APPROVED LEAVE affects only the target institution; other relations,
   identities, wallet, orders, and history remain intact.
+end note
+
+note over API,Notifications
+  Messages are written only after the authoritative request transition
+  succeeds. Recipients are resolved server-side from active, approved,
+  non-revoked legal-representative memberships and are de-duplicated.
+  Replayed or already-closed requests do not emit another message.
 end note
 
 @enduml

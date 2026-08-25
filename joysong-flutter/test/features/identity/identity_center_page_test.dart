@@ -1,3 +1,5 @@
+import 'dart:ui' show Tristate;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -78,6 +80,63 @@ void main() {
       expect(find.text('请补充证明材料'), findsNothing);
     },
   );
+
+  testWidgets(
+    'identity notification target expands the matching application and shows its review note',
+    (tester) async {
+      final repository = _IdentityRepositoryStub(
+        overview: const IdentityOverview(
+          applications: [
+            IdentityApplication(
+              id: 'identity-request-1',
+              role: IdentityRoleType.doctor,
+              status: IdentityStatus.rejected,
+              reviewNote: '请补充执业证明',
+            ),
+          ],
+        ),
+      );
+
+      await tester.pumpWidget(
+        _localizedApp(
+          home: IdentityCenterPage(
+            repository: repository,
+            initialApplicationId: 'identity-request-1',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        tester
+            .getSemantics(find.byKey(const Key('identity-application-history-toggle')))
+            .flagsCollection
+            .isExpanded,
+        Tristate.isTrue,
+      );
+      expect(find.text('请补充执业证明'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('identity-application-identity-request-1')),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets('stale identity notification target keeps the identity overview usable',
+      (tester) async {
+    await tester.pumpWidget(
+      _localizedApp(
+        home: IdentityCenterPage(
+          repository: const _IdentityRepositoryStub(),
+          initialApplicationId: 'missing-request',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('身份认证'), findsOneWidget);
+    expect(find.text('暂无身份申请记录'), findsOneWidget);
+  });
 
   testWidgets('professional management only shows available identity groups',
       (tester) async {

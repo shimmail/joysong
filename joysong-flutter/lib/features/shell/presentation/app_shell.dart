@@ -30,12 +30,16 @@ import 'package:joysong_flutter/features/home/domain/home_models.dart';
 import 'package:joysong_flutter/features/home/domain/home_repository.dart';
 import 'package:joysong_flutter/features/home/presentation/home_page.dart';
 import 'package:joysong_flutter/features/identity/data/identity_repository_impl.dart';
+import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
+import 'package:joysong_flutter/features/identity/presentation/identity_pages.dart';
+import 'package:joysong_flutter/features/identity/presentation/institution_relationships_page.dart';
 import 'package:joysong_flutter/features/messaging/data/messaging_remote_data_source.dart';
 import 'package:joysong_flutter/features/messaging/data/messaging_repository_impl.dart';
 import 'package:joysong_flutter/features/messaging/data/secure_messaging_preferences_store.dart';
 import 'package:joysong_flutter/features/messaging/domain/messaging_models.dart';
 import 'package:joysong_flutter/features/messaging/domain/messaging_repository.dart';
+import 'package:joysong_flutter/features/messaging/domain/notification_target.dart';
 import 'package:joysong_flutter/features/messaging/presentation/messaging_controllers.dart';
 import 'package:joysong_flutter/features/messaging/presentation/messaging_pages.dart';
 import 'package:joysong_flutter/features/orders/data/orders_remote_data_source.dart';
@@ -900,7 +904,10 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
-  Future<void> _openOrderServiceConversation(String orderId) async {
+  Future<void> _openOrderServiceConversation(
+    String orderId, {
+    bool fallbackToOrdersOnFailure = false,
+  }) async {
     final repository = _messagingRepository;
     final id = orderId.trim();
     if (repository == null || id.isEmpty) return;
@@ -919,6 +926,9 @@ class _AppShellState extends State<AppShell> {
           )),
         ),
       );
+      if (fallbackToOrdersOnFailure) {
+        await _openOrders();
+      }
     }
   }
 
@@ -940,13 +950,6 @@ class _AppShellState extends State<AppShell> {
 
   void _openMessagesTab() {
     setState(() => _selectedIndex = 2);
-    final notificationController = _notificationController;
-    if (notificationController != null) {
-      // Opening the notification entry acknowledges the current notification
-      // badge. The controller updates the local count immediately after the
-      // server confirms the operation.
-      unawaited(notificationController.markAllRead());
-    }
     final messagingController = _messagingController;
     if (messagingController != null) {
       unawaited(messagingController.refresh());
@@ -965,14 +968,7 @@ class _AppShellState extends State<AppShell> {
               ? (english ? 'Activity messages' : '活动消息')
               : (english ? 'System messages' : '系统消息'),
           filter: (notification) {
-            final type = notification.type.trim().toLowerCase();
-            final isActivity = const {
-              'activity',
-              'promotion',
-              'marketing',
-              'campaign',
-              'offer',
-            }.contains(type);
+            final isActivity = isActivityNotificationType(notification.type);
             return activity ? isActivity : !isActivity;
           },
           onOpenNotification: _openNotificationTarget,
@@ -982,22 +978,73 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _openNotificationTarget(AppNotification notification) {
-    final targetId = notification.targetId.trim();
-    if (targetId.isEmpty) return;
-    final type = notification.targetType.trim().toLowerCase();
-    if (type == 'dm_conversation') {
-      unawaited(_openDmConversation(targetId));
-      return;
+    final target = NotificationTarget.parse(
+      notification.targetType,
+      notification.targetId,
+    );
+    switch (target.kind) {
+      case NotificationTargetKind.directMessage:
+        if (target.id.isNotEmpty) unawaited(_openDmConversation(target.id));
+        return;
+      case NotificationTargetKind.user:
+        if (target.id.isNotEmpty) _openPublicUser(target.id);
+        return;
+      case NotificationTargetKind.orderDetail:
+        if (target.id.isEmpty) {
+          unawaited(_openOrders());
+        } else {
+          unawaited(_openOrderDetailById(target.id));
+        }
+        return;
+      case NotificationTargetKind.orderServiceConversation:
+        if (target.id.isNotEmpty) {
+          unawaited(_openOrderServiceConversation(
+            target.id,
+            fallbackToOrdersOnFailure: true,
+          ));
+        } else {
+          unawaited(_openOrders());
+        }
+        return;
+      case NotificationTargetKind.identityManagement:
+        _openIdentityCenter();
+        return;
+      case NotificationTargetKind.identityApplication:
+        _openIdentityCenter(initialApplicationId: target.id);
+        return;
+      case NotificationTargetKind.professionalDoctorReview:
+        _openInstitutionRelationships(
+          InstitutionRelationshipScope.legalRepresentative,
+          initialRequestId: target.id,
+          initialReviewType: InstitutionMembershipRequestType.doctor,
+        );
+        return;
+      case NotificationTargetKind.professionalConsultantReview:
+        _openInstitutionRelationships(
+          InstitutionRelationshipScope.legalRepresentative,
+          initialRequestId: target.id,
+          initialReviewType: InstitutionMembershipRequestType.consultant,
+        );
+        return;
+      case NotificationTargetKind.professionalDoctorApplication:
+      case NotificationTargetKind.professionalDoctorRelationships:
+        _openInstitutionRelationships(
+          InstitutionRelationshipScope.doctor,
+          initialRequestId: target.id,
+        );
+        return;
+      case NotificationTargetKind.professionalConsultantApplication:
+      case NotificationTargetKind.professionalConsultantRelationships:
+        _openInstitutionRelationships(
+          InstitutionRelationshipScope.consultant,
+          initialRequestId: target.id,
+        );
+        return;
+      case NotificationTargetKind.discover:
+      case NotificationTargetKind.unknown:
+        break;
     }
-    if (type == 'user') {
-      _openPublicUser(targetId);
-      return;
-    }
-    if (type == 'order') {
-      _openOrders();
-      return;
-    }
-    final discoverType = switch (type) {
+    final discoverType = switch (notification.targetType.trim().toLowerCase()) {
       'project' => DiscoverContentType.project,
       'institution' => DiscoverContentType.institution,
       'doctor' => DiscoverContentType.doctor,
@@ -1006,12 +1053,12 @@ class _AppShellState extends State<AppShell> {
       _ => null,
     };
     final repository = _discoverRepository;
-    if (discoverType == null || repository == null) return;
+    if (target.id.isEmpty || discoverType == null || repository == null) return;
     _contentNavigator.push<void>(MaterialPageRoute(
       builder: (_) => DiscoverDetailPage(
         repository: repository,
         type: discoverType,
-        id: targetId,
+        id: target.id,
         onBookProject: _bookingRepository == null ? null : _openBooking,
         socialController: _socialController,
         onOpenUser: _openPublicUser,
@@ -1021,6 +1068,66 @@ class _AppShellState extends State<AppShell> {
         onOpenAi: _openAiChat,
       ),
     ));
+  }
+
+  Future<void> _openOrderDetailById(String orderId) async {
+    final repository = _ordersRepository;
+    final id = orderId.trim();
+    if (repository == null || id.isEmpty) return;
+    final controller = OrderDetailController(repository, orderId: id);
+    await controller.load();
+    if (!mounted) {
+      controller.dispose();
+      return;
+    }
+    if (controller.order == null) {
+      controller.dispose();
+      await _openOrders();
+      return;
+    }
+    await _contentNavigator.push<void>(
+      MaterialPageRoute(
+        builder: (_) => OrderDetailPage(
+          controller: controller,
+          socialController: _socialController,
+          onOpenServiceConversation: _openOrderServiceConversation,
+        ),
+      ),
+    );
+    controller.dispose();
+    await _ordersController?.refresh();
+  }
+
+  void _openIdentityCenter({String? initialApplicationId}) {
+    final repository = _identityRepository;
+    if (repository == null) return;
+    _contentNavigator.push<void>(
+      MaterialPageRoute(
+        builder: (_) => IdentityCenterPage(
+          repository: repository,
+          initialApplicationId: initialApplicationId,
+        ),
+      ),
+    );
+  }
+
+  void _openInstitutionRelationships(
+    InstitutionRelationshipScope scope, {
+    String? initialRequestId,
+    InstitutionMembershipRequestType? initialReviewType,
+  }) {
+    final repository = _identityRepository;
+    if (repository == null) return;
+    _contentNavigator.push<void>(
+      MaterialPageRoute(
+        builder: (_) => InstitutionRelationshipsPage(
+          repository: repository,
+          scope: scope,
+          initialRequestId: initialRequestId,
+          initialReviewType: initialReviewType,
+        ),
+      ),
+    );
   }
 
   Future<void> _openDmConversation(String conversationId) async {

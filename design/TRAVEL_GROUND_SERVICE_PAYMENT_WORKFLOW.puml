@@ -12,6 +12,7 @@ start
 :创建订单并立即绑定顾问;
 :固化 USD、套餐金额、平台比例和服务费快照;
 :订单进入 PENDING_SERVICE_FEE;
+:写入 ORDER_CREATED 系统消息\n通知用户与绑定顾问，订单详情目标;
 :确定订单支付截止时间\norderPaymentDeadline = createdAt + 30 分钟;
 :支付前锁定顾问履约资料和订单服务会话;
 
@@ -38,6 +39,7 @@ if (Alipay+ merchant / gateway 可用?) then (是)
       :订单进入 SERVICE_ACTIVE;
       :记录 serviceActivatedAt;
       :开放允许公开的顾问资料和订单服务会话;
+      :写入 ORDER_SERVICE_ACTIVATED 系统消息\n顾问打开订单服务会话，用户/医生打开订单详情;
     else (否：错额/错币种/重复或晚到成功)
       :保留渠道 SUCCEEDED 事实和实收金额/币种;
       :按 paymentId 唯一创建补偿工单 PENDING_REVIEW;
@@ -68,6 +70,7 @@ if (Alipay+ merchant / gateway 可用?) then (是)
       :无渠道单号的本地尝试直接 EXPIRED，\n不得再创建渠道支付单;
       :已有渠道单号的尝试继续查原单，\n不得以本地过期掩盖真实扣款;
       :PENDING_SERVICE_FEE -> CANCELLED;
+      :写入 ORDER_CANCELLED 系统消息\n通知用户与绑定顾问，订单详情目标;
       :客户端倒计时归零后只刷新服务端状态，\n不再打开已过期收银台动作;
       :支付渠道此后若确认成功，进入补偿退款;
       stop
@@ -107,6 +110,7 @@ if (确认旅游地接服务完成?) then (是)
   |平台|
   :SERVICE_ACTIVE -> COMPLETED;
   :只记录 completedAt;
+  :写入 ORDER_COMPLETED 系统消息\n通知顾问、医生和当前机构法人;
   :顾问公开资料和历史会话保留只读;
   :禁止发送新消息;
   :保留全额退款入口，退款完成前不可删除订单;
@@ -122,6 +126,7 @@ if (从 SERVICE_ACTIVE 或 COMPLETED 申请全额退款?) then (是)
   :创建全额旅游地接服务费退款申请;
   :保存 refund.originalStatus;
   :订单进入 REFUND_REVIEW;
+  :写入 ORDER_REFUND_REQUESTED 系统消息\n通知用户、顾问和医生;
   :保留资料和历史会话读取，暂停发送;
 
   if (用户取消申请?) then (是)
@@ -140,6 +145,7 @@ if (从 SERVICE_ACTIVE 或 COMPLETED 申请全额退款?) then (是)
       |平台|
       :退款记录进入 REJECTED;
       :按 originalStatus 恢复订单;
+      :写入 ORDER_REFUND_REJECTED 系统消息\n通知用户、顾问和医生并包含审核理由;
       if (originalStatus = SERVICE_ACTIVE?) then (是)
         :恢复消息发送;
       else (COMPLETED)
@@ -150,6 +156,7 @@ if (从 SERVICE_ACTIVE 或 COMPLETED 申请全额退款?) then (是)
       |平台|
       :仅为原成功旅游地接服务费支付创建退款项;
       :订单进入 REFUND_PROCESSING;
+      :写入 ORDER_REFUND_APPROVED 系统消息\n通知用户、顾问和医生;
       :提交原渠道退款;
       while (所有退款项渠道确认成功?) is (否)
         if (存在至少一个明确 FAILED 项?) then (是)
@@ -177,6 +184,7 @@ if (从 SERVICE_ACTIVE 或 COMPLETED 申请全额退款?) then (是)
       :订单进入 REFUNDED;
       :撤销顾问履约资料;
       :历史会话受控只读，禁止发送;
+      :写入 ORDER_REFUNDED 系统消息\n通知用户、顾问和医生，订单详情目标;
       stop
     endif
   endif
@@ -191,6 +199,8 @@ endif
 note right
 不建设姓名、护照、航班、酒店等来华备案。
 新流程没有 Stripe 新入口。
+每条系统消息只在对应真实状态转换后创建；支付/退款重放不重复写入，
+且消息写入失败不能重放支付渠道或退款完成副作用。
 end note
 stop
 @enduml

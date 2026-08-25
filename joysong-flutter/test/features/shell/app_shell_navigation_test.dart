@@ -7,12 +7,75 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/core/config/app_environment.dart';
 import 'package:joysong_flutter/core/network/api_client.dart';
+import 'package:joysong_flutter/features/messaging/domain/notification_target.dart';
 import 'package:joysong_flutter/features/messaging/presentation/messaging_pages.dart';
+import 'package:joysong_flutter/features/identity/presentation/identity_pages.dart';
+import 'package:joysong_flutter/features/identity/presentation/institution_relationships_page.dart';
+import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
+import 'package:joysong_flutter/features/orders/presentation/order_detail_page.dart';
+import 'package:joysong_flutter/features/orders/presentation/orders_page.dart';
 import 'package:joysong_flutter/features/shell/presentation/app_shell.dart';
 
 import '../orders/order_test_fixtures.dart';
 
 void main() {
+  test('business notification targets remain system messages and map to scoped destinations', () {
+    expect(isActivityNotificationType('ORDER_REFUND_APPROVED'), isFalse);
+    expect(isActivityNotificationType('PROFESSIONAL_APPLICATION_REJECTED'), isFalse);
+    expect(isActivityNotificationType('IDENTITY_APPLICATION_APPROVED'), isFalse);
+    expect(isActivityNotificationType('promotion'), isTrue);
+
+    expect(
+      NotificationTarget.parse('order', 'order-1').kind,
+      NotificationTargetKind.orderDetail,
+    );
+    expect(
+      NotificationTarget.parse('order_refund', 'order-1').kind,
+      NotificationTargetKind.orderDetail,
+    );
+    expect(
+      NotificationTarget.parse('order_service_conversation', 'order-1').kind,
+      NotificationTargetKind.orderServiceConversation,
+    );
+    expect(
+      NotificationTarget.parse('identity_management', 'identity-1').kind,
+      NotificationTargetKind.identityManagement,
+    );
+    expect(
+      NotificationTarget.parse('identity_application', 'identity-1').kind,
+      NotificationTargetKind.identityApplication,
+    );
+    expect(
+      NotificationTarget.parse('professional_doctor_review', 'request-1').kind,
+      NotificationTargetKind.professionalDoctorReview,
+    );
+    expect(
+      NotificationTarget.parse('professional_consultant_review', 'request-1').kind,
+      NotificationTargetKind.professionalConsultantReview,
+    );
+    expect(
+      NotificationTarget.parse('professional_doctor_application', 'request-1').kind,
+      NotificationTargetKind.professionalDoctorApplication,
+    );
+    expect(
+      NotificationTarget.parse('professional_doctor_relationships', 'request-1').kind,
+      NotificationTargetKind.professionalDoctorRelationships,
+    );
+    expect(
+      NotificationTarget.parse('professional_consultant_application', 'request-1').kind,
+      NotificationTargetKind.professionalConsultantApplication,
+    );
+    expect(
+      NotificationTarget.parse('professional_consultant_relationships', 'request-1').kind,
+      NotificationTargetKind.professionalConsultantRelationships,
+    );
+    expect(
+      NotificationTarget.parse('identity_application', '').id,
+      isEmpty,
+      reason: 'A stale target retains its destination so the shell can fall back safely.',
+    );
+  });
+
   testWidgets('system back pops nested content before leaving the app shell',
       (tester) async {
     await tester.pumpWidget(
@@ -293,6 +356,183 @@ void main() {
     expect(find.byType(DmThreadPage), findsNothing);
     expect(find.text('当前会话不可查看'), findsOneWidget);
   });
+
+  testWidgets('opening the messages tab does not mark all notifications read',
+      (tester) async {
+    final client = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE',
+      freshReadable: true,
+      freshSendEnabled: true,
+      includeNotification: true,
+    );
+    await _pumpShell(tester, client);
+
+    await tester.tap(find.text('消息'));
+    await tester.pumpAndSettle();
+
+    expect(client.puts, isNot(contains('notifications/read-all')));
+  });
+
+  testWidgets('order notification is read once and opens its detail directly',
+      (tester) async {
+    _useLargeTestSurface(tester);
+    final client = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE',
+      freshReadable: true,
+      freshSendEnabled: true,
+      notifications: const [_orderNotificationJson],
+    );
+    await _pumpShell(tester, client);
+
+    await tester.tap(find.text('消息'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('message-center-system')));
+    await tester.pumpAndSettle();
+    expect(find.text('订单服务已开启'), findsOneWidget);
+
+    await tester.tap(find.text('订单服务已开启'));
+    await tester.pumpAndSettle();
+
+    expect(client.puts, contains('notifications/notification-order-detail/read'));
+    expect(client.orderReads, 1);
+    expect(find.byType(OrderDetailPage), findsOneWidget);
+  });
+
+  testWidgets('refund and service notifications open the business destination or safe fallback',
+      (tester) async {
+    final client = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE', freshReadable: true, freshSendEnabled: true,
+      notifications: const [_refundNotificationJson],
+    );
+    await _pumpShell(tester, client);
+    await _openSystemNotification(tester, '退款已批准');
+    expect(find.byType(OrderDetailPage), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    final serviceClient = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE', freshReadable: true, freshSendEnabled: true,
+      notifications: const [_serviceNotificationJson],
+    );
+    await _pumpShell(tester, serviceClient);
+    await _openSystemNotification(tester, '订单服务会话');
+    expect(find.byType(DmThreadPage), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    final emptyTargetClient = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE', freshReadable: true, freshSendEnabled: true,
+      notifications: const [_emptyServiceNotificationJson],
+    );
+    await _pumpShell(tester, emptyTargetClient);
+    await _openSystemNotification(tester, '服务会话不可用');
+    expect(find.text('我的订单'), findsOneWidget);
+  });
+
+  testWidgets('stale non-empty order and refund notifications fall back to the orders list',
+      (tester) async {
+    final orderClient = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE',
+      freshReadable: true,
+      freshSendEnabled: true,
+      notifications: const [_staleOrderNotificationJson],
+      failedOrderIds: const {'stale-order'},
+    );
+    await _pumpShell(tester, orderClient);
+    await _openSystemNotification(tester, '已失效订单');
+
+    expect(find.byType(OrdersPage), findsOneWidget);
+    expect(find.byType(OrderDetailPage), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    final refundClient = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE',
+      freshReadable: true,
+      freshSendEnabled: true,
+      notifications: const [_staleRefundNotificationJson],
+      failedOrderIds: const {'stale-refund-order'},
+    );
+    await _pumpShell(tester, refundClient);
+    await _openSystemNotification(tester, '已失效退款');
+
+    expect(find.byType(OrdersPage), findsOneWidget);
+    expect(find.byType(OrderDetailPage), findsNothing);
+  });
+
+  testWidgets('stale service notification shows feedback and falls back to the orders list',
+      (tester) async {
+    final client = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE',
+      freshReadable: true,
+      freshSendEnabled: true,
+      notifications: const [_staleServiceNotificationJson],
+      failedServiceOrderIds: const {'stale-service-order'},
+    );
+    await _pumpShell(tester, client);
+    await _openSystemNotification(tester, '已失效服务会话');
+
+    expect(find.text('暂时无法打开订单沟通，请稍后重试'), findsOneWidget);
+    expect(find.byType(OrdersPage), findsOneWidget);
+    expect(find.byType(DmThreadPage), findsNothing);
+  });
+
+  testWidgets('identity notification targets open the identity center and focus an application',
+      (tester) async {
+    final client = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE', freshReadable: true, freshSendEnabled: true,
+      notifications: const [_identityApplicationNotificationJson],
+      identityOverview: _identityOverviewJson,
+    );
+    await _pumpShell(tester, client);
+    await _openSystemNotification(tester, '身份审核结果');
+    expect(find.byType(IdentityCenterPage), findsOneWidget);
+    expect(find.byKey(const ValueKey('identity-application-identity-1')), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    final managementClient = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE', freshReadable: true, freshSendEnabled: true,
+      notifications: const [_identityManagementNotificationJson],
+    );
+    await _pumpShell(tester, managementClient);
+    await _openSystemNotification(tester, '身份管理');
+    expect(find.byType(IdentityCenterPage), findsOneWidget);
+  });
+
+  testWidgets('professional notification targets open the correct relationship scope',
+      (tester) async {
+    final client = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE', freshReadable: true, freshSendEnabled: true,
+      notifications: const [_doctorReviewNotificationJson],
+    );
+    await _pumpShell(tester, client);
+    await _openSystemNotification(tester, '医生关系待审核');
+    var page = tester.widget<InstitutionRelationshipsPage>(
+      find.byType(InstitutionRelationshipsPage),
+    );
+    expect(page.scope, InstitutionRelationshipScope.legalRepresentative);
+    expect(page.initialReviewType, InstitutionMembershipRequestType.doctor);
+    expect(page.initialRequestId, 'request-1');
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    final ownClient = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE', freshReadable: true, freshSendEnabled: true,
+      notifications: const [_consultantRelationshipNotificationJson],
+    );
+    await _pumpShell(tester, ownClient);
+    await _openSystemNotification(tester, '顾问关系更新');
+    page = tester.widget<InstitutionRelationshipsPage>(
+      find.byType(InstitutionRelationshipsPage),
+    );
+    expect(page.scope, InstitutionRelationshipScope.consultant);
+    expect(page.initialRequestId, 'request-2');
+  });
+}
+
+Future<void> _openSystemNotification(WidgetTester tester, String title) async {
+  await tester.tap(find.text('消息'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(const Key('message-center-system')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(title));
+  await tester.pumpAndSettle();
 }
 
 void _useLargeTestSurface(WidgetTester tester) {
@@ -400,6 +640,10 @@ final class _OrderServiceApiClient extends ApiClient {
     required this.freshReadable,
     required this.freshSendEnabled,
     this.includeNotification = false,
+    this.notifications = const [],
+    this.identityOverview = const {'roles': <Object?>[], 'applications': <Object?>[]},
+    this.failedOrderIds = const {},
+    this.failedServiceOrderIds = const {},
   }) : super(
           apiRoot: Uri.parse('http://localhost/api/'),
           httpClient: _TestHttpClient(),
@@ -409,8 +653,13 @@ final class _OrderServiceApiClient extends ApiClient {
   final bool freshReadable;
   bool freshSendEnabled;
   final bool includeNotification;
+  final List<Map<String, Object?>> notifications;
+  final Object identityOverview;
+  final Set<String> failedOrderIds;
+  final Set<String> failedServiceOrderIds;
   final gets = <String>[];
   final posts = <(String, Object?)>[];
+  final puts = <String>[];
   final queuedOrderReads = <Future<Map<String, Object?>>>[];
 
   int get orderReads => gets.where((path) => path == 'orders/order-1').length;
@@ -447,13 +696,23 @@ final class _OrderServiceApiClient extends ApiClient {
     required T Function(Object? json) decodeData,
   }) async {
     gets.add(path);
+    if (failedOrderIds.any((id) => path == 'orders/$id')) {
+      throw StateError('order unavailable');
+    }
     if (path == 'orders/order-1' && queuedOrderReads.isNotEmpty) {
       return decodeData(await queuedOrderReads.removeAt(0));
     }
     final Object data = switch (path) {
-      'notifications/unread-count' => includeNotification ? 1 : 0,
+      'notifications/unread-count' =>
+        notifications.isNotEmpty || includeNotification ? 1 : 0,
       'notifications' =>
-        includeNotification ? const [_dmNotificationJson] : const <Object?>[],
+        notifications.isNotEmpty
+            ? notifications
+            : (includeNotification ? const [_dmNotificationJson] : const <Object?>[]),
+      '/identity/overview' => identityOverview,
+      '/management/context' => _managementContextJson,
+      '/management/institution-membership-requests/owned' ||
+      '/management/institution-membership-requests/reviewable' => const <Object?>[],
       'dm/conversations' => freshReadable
           ? const [_orderServiceConversationJson]
           : const <Object?>[],
@@ -479,6 +738,11 @@ final class _OrderServiceApiClient extends ApiClient {
     required T Function(Object? json) decodeData,
   }) async {
     posts.add((path, body));
+    if (failedServiceOrderIds.any(
+      (id) => path == 'orders/$id/service-conversation',
+    )) {
+      throw StateError('order service conversation unavailable');
+    }
     if (path == 'orders/order-1/service-conversation') {
       return decodeData(_orderServiceConversationJson);
     }
@@ -490,8 +754,10 @@ final class _OrderServiceApiClient extends ApiClient {
     String path, {
     Object? body,
     required T Function(Object? json) decodeData,
-  }) async =>
-      decodeData(null);
+  }) async {
+    puts.add(path);
+    return decodeData(null);
+  }
 }
 
 const _agentSessionJson = <String, Object?>{
@@ -578,4 +844,78 @@ const _dmNotificationJson = <String, Object?>{
   'targetId': 'conversation-order-1',
   'isRead': false,
   'createdAt': '2026-08-21T10:06:00',
+};
+
+const _orderNotificationJson = <String, Object?>{
+  'id': 'notification-order-detail',
+  'userId': 'user-1',
+  'type': 'ORDER_SERVICE_ACTIVATED',
+  'title': '订单服务已开启',
+  'content': '服务已开始，请查看订单详情',
+  'targetType': 'order',
+  'targetId': 'order-1',
+  'isRead': false,
+  'createdAt': '2026-08-25T10:00:00',
+};
+
+const _refundNotificationJson = <String, Object?>{
+  'id': 'notification-refund', 'userId': 'user-1', 'type': 'ORDER_REFUND_APPROVED',
+  'title': '退款已批准', 'content': '', 'targetType': 'order_refund', 'targetId': 'order-1',
+  'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+};
+const _emptyServiceNotificationJson = <String, Object?>{
+  'id': 'notification-empty-service', 'userId': 'user-1', 'type': 'ORDER_SERVICE_ACTIVATED',
+  'title': '服务会话不可用', 'content': '', 'targetType': 'order_service_conversation', 'targetId': '',
+  'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+};
+const _serviceNotificationJson = <String, Object?>{
+  'id': 'notification-service', 'userId': 'user-1', 'type': 'ORDER_SERVICE_ACTIVATED',
+  'title': '订单服务会话', 'content': '', 'targetType': 'order_service_conversation', 'targetId': 'order-1',
+  'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+};
+const _staleOrderNotificationJson = <String, Object?>{
+  'id': 'notification-stale-order', 'userId': 'user-1', 'type': 'ORDER_CANCELLED',
+  'title': '已失效订单', 'content': '', 'targetType': 'order', 'targetId': 'stale-order',
+  'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+};
+const _staleRefundNotificationJson = <String, Object?>{
+  'id': 'notification-stale-refund', 'userId': 'user-1', 'type': 'ORDER_REFUND_APPROVED',
+  'title': '已失效退款', 'content': '', 'targetType': 'order_refund', 'targetId': 'stale-refund-order',
+  'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+};
+const _staleServiceNotificationJson = <String, Object?>{
+  'id': 'notification-stale-service', 'userId': 'user-1', 'type': 'ORDER_SERVICE_ACTIVATED',
+  'title': '已失效服务会话', 'content': '', 'targetType': 'order_service_conversation',
+  'targetId': 'stale-service-order', 'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+};
+const _identityApplicationNotificationJson = <String, Object?>{
+  'id': 'notification-identity', 'userId': 'user-1', 'type': 'IDENTITY_APPLICATION_REJECTED',
+  'title': '身份审核结果', 'content': '', 'targetType': 'identity_application', 'targetId': 'identity-1',
+  'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+};
+const _identityManagementNotificationJson = <String, Object?>{
+  'id': 'notification-identity-management', 'userId': 'user-1', 'type': 'IDENTITY_APPLICATION_APPROVED',
+  'title': '身份管理', 'content': '', 'targetType': 'identity_management', 'targetId': 'identity-2',
+  'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+};
+const _doctorReviewNotificationJson = <String, Object?>{
+  'id': 'notification-doctor-review', 'userId': 'user-1', 'type': 'PROFESSIONAL_APPLICATION_SUBMITTED',
+  'title': '医生关系待审核', 'content': '', 'targetType': 'professional_doctor_review', 'targetId': 'request-1',
+  'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+};
+const _consultantRelationshipNotificationJson = <String, Object?>{
+  'id': 'notification-consultant-own', 'userId': 'user-1', 'type': 'PROFESSIONAL_APPLICATION_APPROVED',
+  'title': '顾问关系更新', 'content': '', 'targetType': 'professional_consultant_relationships', 'targetId': 'request-2',
+  'isRead': false, 'createdAt': '2026-08-25T10:00:00',
+};
+const _identityOverviewJson = <String, Object?>{
+  'roles': <Object?>[],
+  'applications': <Object?>[
+    {'id': 'identity-1', 'roleCode': 'DOCTOR', 'status': 'REJECTED', 'reviewNote': '补充材料'},
+  ],
+};
+const _managementContextJson = <String, Object?>{
+  'userId': 'user-1', 'platformRole': 'USER', 'activeRoles': <String>[],
+  'managedInstitutionIds': <String>[], 'visibleInstitutionIds': <String>[],
+  'doctorInstitutionIds': <String>[], 'consultantInstitutionIds': <String>[],
 };

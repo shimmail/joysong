@@ -11,11 +11,15 @@ class InstitutionRelationshipsPage extends StatefulWidget {
   const InstitutionRelationshipsPage({
     required this.repository,
     required this.scope,
+    this.initialRequestId,
+    this.initialReviewType,
     super.key,
   });
 
   final IdentityRepository repository;
   final InstitutionRelationshipScope scope;
+  final String? initialRequestId;
+  final InstitutionMembershipRequestType? initialReviewType;
 
   @override
   State<InstitutionRelationshipsPage> createState() =>
@@ -39,6 +43,7 @@ class _InstitutionRelationshipsPageState
   InstitutionMembershipAction? _loadingCandidatesFor;
   var _initialLoading = true;
   var _historyExpanded = false;
+  var _hasUserToggledHistory = false;
   var _loadGeneration = 0;
   var _candidateRequestToken = 0;
 
@@ -86,7 +91,10 @@ class _InstitutionRelationshipsPageState
         if (generation != _loadGeneration || !mounted) return;
         final managed = managementContext.managedInstitutionIds.toSet();
         final requests = reviewable
-            .where((request) => managed.contains(request.institutionId))
+            .where((request) =>
+                managed.contains(request.institutionId) &&
+                (widget.initialReviewType == null ||
+                    request.requestType == widget.initialReviewType))
             .toList(growable: false);
         setState(() {
           _managementContext = managementContext;
@@ -391,15 +399,22 @@ class _InstitutionRelationshipsPageState
     required List<InstitutionMembershipRequest> history,
     required String emptyText,
     required Widget Function(InstitutionMembershipRequest) builder,
-  }) =>
-      Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+  }) {
+    final initialRequestId = widget.initialRequestId?.trim();
+    final focusedRequestIsInHistory = initialRequestId != null &&
+        initialRequestId.isNotEmpty &&
+        history.any((request) => request.id == initialRequestId);
+    final historyExpanded = _hasUserToggledHistory
+        ? _historyExpanded
+        : focusedRequestIsInHistory;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
           Semantics(
             key: const Key('relationship-history-toggle'),
             container: true,
             button: true,
-            expanded: _historyExpanded,
+            expanded: historyExpanded,
             label: _isLegal
                 ? context.localized('审核历史', 'Review history')
                 : context.localized('申请历史', 'Request history'),
@@ -412,18 +427,22 @@ class _InstitutionRelationshipsPageState
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               subtitle: history.isEmpty ? Text(emptyText) : null,
-              trailing: Icon(_historyExpanded
+              trailing: Icon(historyExpanded
                   ? Icons.expand_less_rounded
                   : Icons.expand_more_rounded),
-              onTap: () => setState(() => _historyExpanded = !_historyExpanded),
+              onTap: () => setState(() {
+                _hasUserToggledHistory = true;
+                _historyExpanded = !historyExpanded;
+              }),
             ),
           ),
-          if (_historyExpanded) ...[
+          if (historyExpanded) ...[
             if (history.isEmpty) _EmptyText(text: emptyText),
             for (final request in history) builder(request),
           ],
-        ],
-      );
+      ],
+    );
+  }
 
   Widget _applicantRequestTile(
     BuildContext context,

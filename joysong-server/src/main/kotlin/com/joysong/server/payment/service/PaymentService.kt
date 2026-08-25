@@ -33,11 +33,7 @@ class PaymentService(
     private val orderRepository: OrderRepository,
     private val orderStatusLogService: OrderStatusLogService,
     private val paymentGatewayRegistry: PaymentGatewayRegistry = PaymentGatewayRegistry(emptyList()),
-    private val paymentPersistenceService: PaymentPersistenceService = PaymentPersistenceService(
-        paymentRepository,
-        orderRepository,
-        orderStatusLogService
-    ),
+    private val paymentPersistenceService: PaymentPersistenceService,
     private val paymentAttemptExpiryService: PaymentAttemptExpiryService =
         PaymentAttemptExpiryService(paymentRepository)
 ) {
