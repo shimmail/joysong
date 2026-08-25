@@ -1,11 +1,23 @@
 package com.joysong.server.legal
 
-import org.flywaydb.core.Flyway
+import com.joysong.server.legal.entity.LegalDocumentContentEntity
+import com.joysong.server.legal.entity.LegalDocumentLocale
+import com.joysong.server.legal.entity.LegalDocumentReleaseEntity
+import com.joysong.server.legal.entity.LegalDocumentStatus
+import com.joysong.server.legal.entity.LegalDocumentType
+import com.joysong.server.legal.repository.LegalDocumentContentRepository
+import com.joysong.server.legal.repository.LegalDocumentReleaseRepository
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase
+import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.jdbc.datasource.DriverManagerDataSource
+import jakarta.persistence.EntityManager
 import org.testcontainers.containers.MySQLContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
@@ -15,18 +27,34 @@ import java.nio.file.Paths
 
 @Tag("mysql-integration")
 @Testcontainers
+@DataJpaTest(
+    properties = [
+        "spring.flyway.enabled=true",
+        "spring.flyway.locations=classpath:db/migration",
+        "spring.flyway.baseline-on-migrate=false",
+        "spring.flyway.validate-on-migrate=true",
+        "spring.jpa.hibernate.ddl-auto=validate",
+        "spring.sql.init.mode=never"
+    ]
+)
+@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 class LegalDocumentMigrationTest {
+
+    @Autowired
+    private lateinit var jdbc: JdbcTemplate
+
+    @Autowired
+    private lateinit var releaseRepository: LegalDocumentReleaseRepository
+
+    @Autowired
+    private lateinit var contentRepository: LegalDocumentContentRepository
+
+    @Autowired
+    private lateinit var entityManager: EntityManager
 
     @Test
     fun `fresh database contains legal release constraints`() {
         printAndValidateDatabase()
-        Flyway.configure()
-            .dataSource(mysql.jdbcUrl, mysql.username, mysql.password)
-            .locations("classpath:db/migration")
-            .load()
-            .migrate()
-
-        val jdbc = JdbcTemplate(DriverManagerDataSource(mysql.jdbcUrl, mysql.username, mysql.password))
         assertEquals(
             1,
             jdbc.queryForObject(
@@ -40,6 +68,112 @@ class LegalDocumentMigrationTest {
                 "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'legal_document_contents'",
                 Int::class.java
             )
+        )
+    }
+
+    @Test
+    fun `legal schema enforces locale unique foreign key and hash contracts`() {
+        insertRelease("draft-1", "USER_AGREEMENT", 1, "DRAFT")
+        insertContent("content-zh", "draft-1", "zh-CN")
+
+        assertThrows<DataIntegrityViolationException> {
+            insertContent("content-duplicate-locale", "draft-1", "zh-CN")
+        }
+        assertThrows<DataIntegrityViolationException> {
+            insertContent("content-invalid-locale", "draft-1", "fr-FR")
+        }
+        assertThrows<DataIntegrityViolationException> {
+            insertContent("content-missing-release", "missing-release", "en-US")
+        }
+        assertThrows<DataIntegrityViolationException> {
+            insertRelease("draft-2", "USER_AGREEMENT", 2, "DRAFT")
+        }
+        assertThrows<DataIntegrityViolationException> {
+            insertRelease("duplicate-version", "USER_AGREEMENT", 1, "SUPERSEDED")
+        }
+        insertRelease("published-1", "PRIVACY_POLICY", 1, "PUBLISHED")
+        assertThrows<DataIntegrityViolationException> {
+            insertRelease("published-2", "PRIVACY_POLICY", 2, "PUBLISHED")
+        }
+        assertThrows<DataIntegrityViolationException> {
+            insertRelease("invalid-type", "TERMS", 1, "SUPERSEDED")
+        }
+        assertThrows<DataIntegrityViolationException> {
+            insertRelease("invalid-status", "PRIVACY_POLICY", 3, "ARCHIVED")
+        }
+
+        assertEquals(
+            64,
+            jdbc.queryForObject(
+                """
+                SELECT character_maximum_length
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'legal_document_contents'
+                  AND column_name = 'content_sha256'
+                """.trimIndent(),
+                Int::class.java
+            )
+        )
+        assertEquals(
+            "char",
+            jdbc.queryForObject(
+                """
+                SELECT data_type
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'legal_document_contents'
+                  AND column_name = 'content_sha256'
+                """.trimIndent(),
+                String::class.java
+            )
+        )
+    }
+
+    @Test
+    fun `JPA stores and reads locale tags for both legal document languages`() {
+        releaseRepository.saveAndFlush(
+            LegalDocumentReleaseEntity(
+                id = "jpa-release",
+                documentType = LegalDocumentType.PRIVACY_POLICY,
+                version = 1,
+                status = LegalDocumentStatus.DRAFT,
+                createdBy = "admin",
+                updatedBy = "admin"
+            )
+        )
+        contentRepository.saveAllAndFlush(
+            listOf(
+                LegalDocumentContentEntity(
+                    id = "jpa-content-zh",
+                    releaseId = "jpa-release",
+                    locale = LegalDocumentLocale.ZH_CN,
+                    title = "中文",
+                    contentHtml = "<p>zh</p>",
+                    contentSha256 = "a".repeat(64)
+                ),
+                LegalDocumentContentEntity(
+                    id = "jpa-content-en",
+                    releaseId = "jpa-release",
+                    locale = LegalDocumentLocale.EN_US,
+                    title = "English",
+                    contentHtml = "<p>en</p>",
+                    contentSha256 = "b".repeat(64)
+                )
+            )
+        )
+        entityManager.clear()
+
+        assertEquals(
+            listOf("en-US", "zh-CN"),
+            jdbc.queryForList(
+                "SELECT locale FROM legal_document_contents WHERE release_id = 'jpa-release' ORDER BY locale",
+                String::class.java
+            )
+        )
+        assertEquals(
+            listOf(LegalDocumentLocale.EN_US, LegalDocumentLocale.ZH_CN),
+            contentRepository.findAllByReleaseIdOrderByLocaleAsc("jpa-release").map { it.locale }
         )
     }
 
@@ -64,8 +198,37 @@ class LegalDocumentMigrationTest {
     private fun currentDirectory(): Path =
         Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize()
 
+    private fun insertRelease(id: String, type: String, version: Int, status: String) {
+        jdbc.update(
+            """
+            INSERT INTO legal_document_releases
+                (id, document_type, version, status, created_by, updated_by)
+            VALUES (?, ?, ?, ?, 'admin', 'admin')
+            """.trimIndent(),
+            id,
+            type,
+            version,
+            status
+        )
+    }
+
+    private fun insertContent(id: String, releaseId: String, locale: String) {
+        jdbc.update(
+            """
+            INSERT INTO legal_document_contents
+                (id, release_id, locale, content_html, content_sha256)
+            VALUES (?, ?, ?, '<p>content</p>', ?)
+            """.trimIndent(),
+            id,
+            releaseId,
+            locale,
+            "c".repeat(64)
+        )
+    }
+
     companion object {
         @Container
+        @ServiceConnection
         @JvmField
         val mysql = MySqlLegalContainer("mysql:8.0.39")
             .withDatabaseName("myapp_worktree_legal_documents")

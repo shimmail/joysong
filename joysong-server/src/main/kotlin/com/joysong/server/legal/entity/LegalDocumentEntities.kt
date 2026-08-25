@@ -1,6 +1,9 @@
 package com.joysong.server.legal.entity
 
+import jakarta.persistence.AttributeConverter
 import jakarta.persistence.Column
+import jakarta.persistence.Convert
+import jakarta.persistence.Converter
 import jakarta.persistence.Entity
 import jakarta.persistence.EnumType
 import jakarta.persistence.Enumerated
@@ -30,6 +33,14 @@ enum class LegalDocumentLocale(val tag: String) {
 
 enum class LegalDocumentStatus { DRAFT, PUBLISHED, SUPERSEDED }
 
+@Converter
+class LegalDocumentLocaleConverter : AttributeConverter<LegalDocumentLocale, String> {
+    override fun convertToDatabaseColumn(attribute: LegalDocumentLocale?): String? = attribute?.tag
+
+    override fun convertToEntityAttribute(dbData: String?): LegalDocumentLocale? =
+        dbData?.let(LegalDocumentLocale::fromTag)
+}
+
 @Entity
 @Table(name = "legal_document_releases")
 data class LegalDocumentReleaseEntity(
@@ -52,10 +63,10 @@ data class LegalDocumentReleaseEntity(
 data class LegalDocumentContentEntity(
     @Id val id: String,
     @Column(name = "release_id") val releaseId: String,
-    @Enumerated(EnumType.STRING) val locale: LegalDocumentLocale,
+    @Convert(converter = LegalDocumentLocaleConverter::class) val locale: LegalDocumentLocale,
     var title: String = "",
     @Column(name = "content_html", columnDefinition = "MEDIUMTEXT") var contentHtml: String,
-    @Column(name = "content_sha256") var contentSha256: String,
+    @Column(name = "content_sha256", columnDefinition = "CHAR(64)") var contentSha256: String,
     @Column(name = "created_at") val createdAt: LocalDateTime = LocalDateTime.now(),
     @Column(name = "updated_at") var updatedAt: LocalDateTime = LocalDateTime.now()
 )

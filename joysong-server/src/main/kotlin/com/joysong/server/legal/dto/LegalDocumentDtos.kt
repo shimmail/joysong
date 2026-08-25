@@ -1,6 +1,8 @@
 package com.joysong.server.legal.dto
 
 import com.joysong.server.legal.entity.LegalDocumentLocale
+import com.joysong.server.legal.entity.LegalDocumentContentEntity
+import com.joysong.server.legal.entity.LegalDocumentReleaseEntity
 import com.joysong.server.legal.entity.LegalDocumentStatus
 import com.joysong.server.legal.entity.LegalDocumentType
 import jakarta.validation.Valid
@@ -41,8 +43,18 @@ data class AdminLegalDocumentSummaryView(
 data class LegalDocumentContentView(
     val locale: LegalDocumentLocale,
     val title: String,
-    val contentHtml: String
-)
+    val contentHtml: String,
+    val contentSha256: String
+) {
+    companion object {
+        fun from(entity: LegalDocumentContentEntity) = LegalDocumentContentView(
+            entity.locale,
+            entity.title,
+            entity.contentHtml,
+            entity.contentSha256
+        )
+    }
+}
 
 data class LegalDocumentReleaseView(
     val id: String,
@@ -59,8 +71,26 @@ data class LegalDocumentReleaseView(
 )
 
 data class PublicLegalDocumentView(
-    val documentType: LegalDocumentType,
+    val type: String,
+    val locale: String,
     val version: Int,
+    val title: String,
+    val contentHtml: String,
     val publishedAt: LocalDateTime,
-    val contents: List<LegalDocumentContentView>
-)
+    val contentSha256: String
+) {
+    companion object {
+        fun from(
+            release: LegalDocumentReleaseEntity,
+            content: LegalDocumentContentEntity
+        ): PublicLegalDocumentView = PublicLegalDocumentView(
+            type = release.documentType.slug,
+            locale = content.locale.tag,
+            version = release.version,
+            title = content.title,
+            contentHtml = content.contentHtml,
+            publishedAt = requireNotNull(release.publishedAt),
+            contentSha256 = content.contentSha256
+        )
+    }
+}
