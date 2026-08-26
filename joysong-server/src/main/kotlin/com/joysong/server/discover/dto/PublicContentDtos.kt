@@ -287,8 +287,8 @@ fun InstitutionProjectEntity.toResponse() = InstitutionProjectResponse(
     price = price,
     originalPrice = originalPrice,
     currency = currency,
-    coverImage = coverImage,
-    images = images,
+    coverImage = coverImage.orEmpty(),
+    images = images.orEmpty(),
     salesCount = salesCount,
     isActive = isActive
 )

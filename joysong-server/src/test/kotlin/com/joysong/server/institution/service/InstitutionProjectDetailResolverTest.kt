@@ -82,4 +82,41 @@ class InstitutionProjectDetailResolverTest {
         assertEquals("已配置", resolver.normalize("  已配置  "))
         assertNull(resolver.normalizeRichText("<p><br></p>"))
     }
+
+    @Test
+    fun `null inherited media resolves to the platform project media`() {
+        val project = ProjectEntity(id = "project-1", name = "平台项目", coverImage = "platform-cover", images = "platform-images")
+
+        val resolved = resolver.resolve(
+            InstitutionProjectEntity(
+                id = "institution-project-1",
+                institutionId = "institution-1",
+                projectId = project.id,
+                price = BigDecimal("100.00"),
+                coverImage = null,
+                images = null
+            ),
+            project
+        )
+
+        assertEquals("platform-cover", resolved.coverImage)
+        assertEquals("platform-images", resolved.images)
+    }
+
+    @Test
+    fun `details expose normalized raw overrides separately from effective inherited media`() {
+        val details = resolver.resolveDetails(
+            InstitutionProjectEntity(
+                id = "institution-project-1", institutionId = "institution-1", projectId = project.id,
+                price = BigDecimal("100.00"), coverImage = " ", images = null, tags = " local "
+            ),
+            project
+        )
+
+        assertNull(details.rawOverrides.coverImage)
+        assertNull(details.rawOverrides.images)
+        assertEquals(listOf("local"), details.rawOverrides.tags)
+        assertEquals("public-cover", details.effective.coverImage)
+        assertEquals(listOf("public-1", "public-2"), details.effective.images)
+    }
 }

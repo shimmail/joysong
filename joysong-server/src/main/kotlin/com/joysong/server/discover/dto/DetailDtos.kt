@@ -54,6 +54,7 @@ data class InstitutionProjectDetailDto(
     val institutionProject: InstitutionProjectResponse,
     val project: ProjectResponse,
     val institution: InstitutionResponse,
+    val hasAvailableDoctors: Boolean,
     val diaries: List<DiaryResponse> = emptyList(),
     val doctors: List<DoctorResponse> = emptyList(),
     val reviews: List<ReviewResponse> = emptyList()

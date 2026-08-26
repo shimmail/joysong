@@ -11,6 +11,8 @@ import com.joysong.server.agent.repository.AgentUserProfileRepository
 import com.joysong.server.institution.entity.InstitutionProjectEntity
 import com.joysong.server.institution.repository.InstitutionProjectRepository
 import com.joysong.server.institution.service.InstitutionProjectDetailResolver
+import com.joysong.server.discover.repository.DoctorProjectRepository
+import com.joysong.server.discover.repository.PublicDoctorProjectView
 import com.joysong.server.project.entity.ProjectEntity
 import com.joysong.server.project.repository.ProjectRepository
 import io.mockk.every
@@ -29,6 +31,7 @@ class AgentPlanServiceTest {
     private val itemRepository = mockk<AgentPlanItemRepository>()
     private val projectRepository = mockk<ProjectRepository>()
     private val institutionProjectRepository = mockk<InstitutionProjectRepository>()
+    private val doctorProjectRepository = mockk<DoctorProjectRepository>()
     private val profileRepository = mockk<AgentUserProfileRepository>()
     private val assessmentService = mockk<AgentAssessmentService>()
     private val objectMapper = ObjectMapper()
@@ -38,6 +41,7 @@ class AgentPlanServiceTest {
         itemRepository,
         projectRepository,
         institutionProjectRepository,
+        doctorProjectRepository,
         InstitutionProjectDetailResolver(),
         profileService,
         assessmentService,
@@ -54,6 +58,72 @@ class AgentPlanServiceTest {
         every { institutionProjectRepository.findAll() } returns emptyList()
     }
 
+    private fun publicBinding(
+        doctorId: String,
+        institutionProjectId: String,
+        projectId: String,
+        price: String
+    ): PublicDoctorProjectView = mockk<PublicDoctorProjectView>().also { binding ->
+        every { binding.doctorId } returns doctorId
+        every { binding.projectId } returns projectId
+        every { binding.institutionProjectId } returns institutionProjectId
+        every { binding.price } returns BigDecimal(price)
+    }
+
+    private fun offering(projectId: String, name: String? = null) = InstitutionProjectEntity(
+        id = "ip-$projectId",
+        institutionId = "institution-1",
+        projectId = projectId,
+        name = name,
+        price = BigDecimal("2000")
+    )
+
+    private fun stubEligibleOfferings(offerings: List<InstitutionProjectEntity>) {
+        every { institutionProjectRepository.findAll() } returns offerings
+        every {
+            doctorProjectRepository.findPublicByInstitutionProjectIds(offerings.map { it.id })
+        } returns offerings.map { current ->
+            publicBinding("doctor-${current.projectId}", current.id, current.projectId, "2000")
+        }
+    }
+
+    @Test
+    fun `plan omits unavailable offerings and ranks budget from eligible doctor minimum price`() {
+        every { profileRepository.findByUserId("user-1") } returns profile()
+        every { projectRepository.findAll() } returns listOf(
+            project("project-expensive", "Expensive"),
+            project("project-affordable", "Affordable"),
+            project("project-unavailable", "Unavailable")
+        )
+        val offerings = listOf(
+            InstitutionProjectEntity(
+                id = "ip-expensive", institutionId = "institution-1", projectId = "project-expensive",
+                price = BigDecimal("100")
+            ),
+            InstitutionProjectEntity(
+                id = "ip-affordable", institutionId = "institution-1", projectId = "project-affordable",
+                price = BigDecimal("10000")
+            ),
+            InstitutionProjectEntity(
+                id = "ip-unavailable", institutionId = "institution-1", projectId = "project-unavailable",
+                price = BigDecimal("100")
+            )
+        )
+        every { institutionProjectRepository.findAll() } returns offerings
+        every {
+            doctorProjectRepository.findPublicByInstitutionProjectIds(offerings.map { it.id })
+        } returns listOf(
+            publicBinding("doctor-expensive", "ip-expensive", "project-expensive", "6000"),
+            publicBinding("doctor-affordable-high", "ip-affordable", "project-affordable", "4500"),
+            publicBinding("doctor-affordable-low", "ip-affordable", "project-affordable", "4000")
+        )
+
+        val result = service.create("user-1", "assessment-1")
+
+        assertEquals(listOf("project-affordable", "project-expensive"), result.items.map { it.projectId })
+        assertFalse(result.items.any { it.projectId == "project-unavailable" })
+    }
+
     @Test
     fun `excluded project ids are never presented as candidates`() {
         every { profileRepository.findByUserId("user-1") } returns profile(
@@ -63,6 +133,7 @@ class AgentPlanServiceTest {
             project("excluded-project", "光电项目 A"),
             project("included-project", "光电项目 B")
         )
+        stubEligibleOfferings(listOf(offering("excluded-project"), offering("included-project")))
 
         val result = service.create("user-1", "assessment-1")
 
@@ -75,6 +146,7 @@ class AgentPlanServiceTest {
             excludedProjectsJson = """["  laser peel  "]"""
         )
         every { projectRepository.findAll() } returns listOf(project("project-1", "LASER PEEL"))
+        stubEligibleOfferings(listOf(offering("project-1")))
 
         val result = service.create("user-1", "assessment-1")
 
@@ -87,13 +159,9 @@ class AgentPlanServiceTest {
             excludedProjectsJson = """["院线焕肤升级版"]"""
         )
         every { projectRepository.findAll() } returns listOf(project("project-1", "基础焕肤"))
-        every { institutionProjectRepository.findAll() } returns listOf(
-            InstitutionProjectEntity(
-                id = "offering-1",
-                institutionId = "institution-1",
-                projectId = "project-1",
-                name = "院线焕肤升级版",
-                price = BigDecimal("2000")
+        stubEligibleOfferings(
+            listOf(
+                offering("project-1", name = "院线焕肤升级版").copy(id = "offering-1")
             )
         )
 
@@ -117,6 +185,7 @@ class AgentPlanServiceTest {
                 detailContent = "<p>神奇词零风险</p>"
             )
         )
+        stubEligibleOfferings(listOf(offering("project-1")))
 
         val result = service.create("user-1", "assessment-1")
 
@@ -133,6 +202,7 @@ class AgentPlanServiceTest {
                 description = "最适合你，恢复期1天、无痛、零风险"
             )
         )
+        stubEligibleOfferings(listOf(offering("project-1")))
 
         val result = service.create("user-1", "assessment-1")
 

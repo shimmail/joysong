@@ -1917,6 +1917,29 @@ final class InstitutionProjectJoinRequest {
     );
   }
 
+  factory InstitutionProjectJoinRequest.fromChangeRequest(
+    DoctorProjectChangeRequest request,
+  ) {
+    if (!request.isJoin) {
+      throw const FormatException('机构项目加入申请类型无效');
+    }
+    return InstitutionProjectJoinRequest(
+      id: request.id,
+      doctorId: request.doctorId,
+      doctorName: request.doctorName,
+      institutionId: request.institutionId,
+      institutionName: request.institutionName,
+      institutionProjectId: request.institutionProjectId,
+      projectName: request.projectName,
+      requestType: request.requestType,
+      serviceDescription: request.serviceDescription,
+      priceSuggestion: request.priceSuggestion ?? 0,
+      notes: request.notes,
+      status: request.status,
+      reviewNote: request.reviewNote ?? '',
+    );
+  }
+
   final String id;
   final String doctorId;
   final String doctorName;
@@ -1975,29 +1998,35 @@ final class InstitutionProjectJoinRequestDraft {
 final class DoctorProjectProfileUpdateDraft {
   const DoctorProjectProfileUpdateDraft({
     required this.institutionProjectId,
-    required this.priceSuggestion,
-    required this.serviceDescription,
-    required this.serviceTags,
-    required this.scheduleNote,
+    required this.baseRevision,
+    required this.name,
+    required this.category,
+    required this.description,
+    required this.tags,
+    required this.slogan,
+    required this.detailContent,
+    required this.price,
+    required this.salesCount,
+    required this.doctorActive,
     required this.coverImage,
     required this.images,
-    required this.consultationFee,
-    required this.commissionRate,
-    required this.institutionRate,
-    required this.platformRate,
-    required this.notes,
+    this.notes = '',
+    this.platformRate = 0,
   });
 
   final String institutionProjectId;
-  final num priceSuggestion;
-  final String serviceDescription;
-  final List<String> serviceTags;
-  final String scheduleNote;
-  final String coverImage;
-  final List<String> images;
-  final num consultationFee;
-  final num commissionRate;
-  final num institutionRate;
+  final String baseRevision;
+  final String? name;
+  final String? category;
+  final String? description;
+  final List<String>? tags;
+  final String? slogan;
+  final String? detailContent;
+  final num price;
+  final int salesCount;
+  final bool doctorActive;
+  final String? coverImage;
+  final List<String>? images;
   final num platformRate;
   final String notes;
 
@@ -2005,62 +2034,161 @@ final class DoctorProjectProfileUpdateDraft {
     if (institutionProjectId.trim().isEmpty) {
       throw ArgumentError('请选择机构项目');
     }
-    final description = serviceDescription.trim();
-    if (description.isEmpty || description.length > 5000) {
-      throw ArgumentError('服务说明不能为空且不能超过 5000 字');
+    if (baseRevision.trim().isEmpty) {
+      throw ArgumentError('项目资料已失效，请刷新后重试');
     }
-    if (scheduleNote.trim().length > 500 || notes.trim().length > 2000) {
-      throw ArgumentError('排期或补充说明过长');
+    if (!_validDecimal(price, 99999999.99) ||
+        salesCount < 0) {
+      throw ArgumentError('项目价格或销量不合法');
     }
-    if (coverImage.trim().length > 500 ||
-        images.length > 20 ||
-        images.any(
-            (value) => value.trim().isEmpty || value.trim().length > 500)) {
-      throw ArgumentError('图片地址不合法');
-    }
-    if (serviceTags.length > 20 ||
-        serviceTags.any(
-            (value) => value.trim().isEmpty || value.trim().length > 100)) {
-      throw ArgumentError('服务标签不合法');
-    }
-    if (!_validDecimal(consultationFee, 99999999.99)) {
-      throw ArgumentError('金额必须为非负且最多保留两位小数');
-    }
-    for (final rate in [commissionRate, institutionRate, platformRate]) {
-      if (!_validDecimal(rate, 100)) {
-        throw ArgumentError('分账比例必须在 0 到 100 之间且最多两位小数');
-      }
-    }
-    if (commissionRate + institutionRate + platformRate > 100) {
-      throw ArgumentError('平台、机构和顾问比例合计不能超过 100%');
-    }
-    if (calculateTravelGroundServiceFeeMinor(
-          doctorProjectPrice: priceSuggestion,
-          platformRate: platformRate,
-        ) ==
-        null) {
+    if (platformRate > 0 &&
+        calculateTravelGroundServiceFeeMinor(
+              doctorProjectPrice: price,
+              platformRate: platformRate,
+            ) ==
+            null) {
       throw ArgumentError('医生项目价格必须能按当前比例计算出至少 USD 0.01 的旅游地接服务费');
     }
   }
 
   Map<String, Object?> toJson() {
     validate();
-    return {
+    return <String, Object?>{
       'requestType': 'PROFILE_UPDATE',
       'institutionProjectId': institutionProjectId.trim(),
-      'priceSuggestion': priceSuggestion,
-      'medicalListPrice': priceSuggestion,
-      'serviceDescription': serviceDescription.trim(),
-      'serviceTags': serviceTags.map((value) => value.trim()).toList(),
-      'scheduleNote': scheduleNote.trim(),
-      'coverImage': coverImage.trim(),
-      'images': images.map((value) => value.trim()).toList(),
-      'consultationFee': consultationFee,
-      'commissionRate': commissionRate,
-      'institutionRate': institutionRate,
+      'baseRevision': baseRevision.trim(),
+      'name': _nullableTrimmedValue(name),
+      'category': _nullableTrimmedValue(category),
+      'description': _nullableTrimmedValue(description),
+      'tags': tags == null ? null : _normalizedItems(tags!),
+      'slogan': _nullableTrimmedValue(slogan),
+      'detailContent': _nullableTrimmedValue(detailContent),
+      'price': price,
+      'salesCount': salesCount,
+      'doctorActive': doctorActive,
+      'coverImage': _nullableTrimmedValue(coverImage),
+      'images': images == null ? null : _normalizedItems(images!),
       'notes': notes.trim(),
     };
   }
+}
+
+final class DoctorInstitutionProjectSnapshot {
+  const DoctorInstitutionProjectSnapshot({
+    required this.rawOverrides,
+    required this.effective,
+    required this.source,
+  });
+
+  factory DoctorInstitutionProjectSnapshot.fromJson(Object? json) {
+    final map = _jsonMap(json, '机构项目快照');
+    _requireExactKeys(
+        map,
+        const {
+          'schemaVersion',
+          'association',
+          'rawOverrides',
+          'effective',
+          'source'
+        },
+        '机构项目快照');
+    if (map['schemaVersion'] is! int || map['schemaVersion'] != 2) {
+      throw const FormatException('机构项目快照版本无效');
+    }
+    final association = _jsonMap(map['association'], '项目关联');
+    _requireExactKeys(
+        association,
+        const {'institutionProjectId', 'institutionId', 'platformProjectId'},
+        '项目关联');
+    final raw = _jsonMap(map['rawOverrides'], '原始覆盖值');
+    _requireExactKeys(
+        raw,
+        const {
+          'name',
+          'category',
+          'description',
+          'tags',
+          'slogan',
+          'detailContent',
+          'coverImage',
+          'images'
+        },
+        '原始覆盖值');
+    final effective = _jsonMap(map['effective'], '有效项目值');
+    _requireExactKeys(
+        effective,
+        const {
+          'name',
+          'category',
+          'description',
+          'tags',
+          'slogan',
+          'detailContent',
+          'salesCount',
+          'coverImage',
+          'images'
+        },
+        '有效项目值');
+    final source = _jsonMap(map['source'], '继承来源');
+    _requireExactKeys(
+      source,
+      const {'institutionProjectVersion', 'platformInheritanceHash'},
+      '继承来源',
+    );
+    _requiredWireText(association['institutionProjectId'], '机构项目 id');
+    _requiredWireText(association['institutionId'], '机构 id');
+    _requiredWireText(association['platformProjectId'], '平台项目 id');
+    for (final key in const [
+      'name',
+      'category',
+      'description',
+      'slogan',
+      'detailContent',
+      'coverImage',
+    ]) {
+      _strictNullableString(raw, key, '原始覆盖值 $key');
+    }
+    _strictNullableStringList(raw, 'tags', '原始覆盖值 tags');
+    _strictNullableStringList(raw, 'images', '原始覆盖值 images');
+    _requiredWireText(effective['name'], '有效项目名称');
+    _requiredWireText(effective['category'], '有效项目分类');
+    for (final key in const [
+      'description',
+      'slogan',
+      'detailContent',
+      'coverImage',
+    ]) {
+      _strictNullableString(effective, key, '有效项目值 $key');
+    }
+    _strictStringList(effective['tags'], '有效项目标签');
+    _strictStringList(effective['images'], '有效项目图片');
+    _requiredWireInteger(effective['salesCount'], '有效项目销量');
+    _requiredWireInteger(source['institutionProjectVersion'], '机构项目版本');
+    _requiredWireText(source['platformInheritanceHash'], '平台继承来源');
+    return DoctorInstitutionProjectSnapshot(
+      rawOverrides: Map.unmodifiable(raw),
+      effective: Map.unmodifiable(effective),
+      source: Map.unmodifiable(source),
+    );
+  }
+
+  final Map<String, dynamic> rawOverrides;
+  final Map<String, dynamic> effective;
+  final Map<String, dynamic> source;
+
+  String get name => effective['name'] as String;
+  String get category => effective['category'] as String;
+  String get description => effective['description']?.toString() ?? '';
+  List<String> get tags => _stringList(effective['tags']);
+  String get slogan => effective['slogan']?.toString() ?? '';
+  String? get detailContent => _nullableText(effective['detailContent']);
+  int get salesCount => (effective['salesCount'] as num).toInt();
+  String get coverImage => effective['coverImage']?.toString() ?? '';
+  List<String> get images => _strictStringList(effective['images'], '有效项目图片');
+  String? get rawName => rawOverrides['name'] as String?;
+  String? get rawCategory => rawOverrides['category'] as String?;
+  String? get rawSlogan => rawOverrides['slogan'] as String?;
+  String? get rawDetailContent => rawOverrides['detailContent'] as String?;
 }
 
 final class DoctorProjectProfileUpdateTarget {
@@ -2080,10 +2208,101 @@ final class DoctorProjectProfileUpdateTarget {
     required this.institutionRate,
     required this.platformRate,
     required this.doctorRate,
+    this.payloadVersion = 1,
+    this.baseRevision,
+    this.currentProject,
+    this.currentDoctorActive = true,
+    this.pricingPolicyRevision,
+    this.travelGroundServiceFee,
+    this.platformProjectId = '',
+    this.platformProjectName = '',
+    this.doctorId = '',
+    this.doctorName = '',
   });
 
   factory DoctorProjectProfileUpdateTarget.fromJson(Object? json) {
     final map = _jsonMap(json, '医生项目资料修改目标');
+    final payloadVersion = map['payloadVersion'];
+    if (payloadVersion is! int) {
+      throw const FormatException('医生项目资料修改目标版本无效');
+    }
+    return switch (payloadVersion) {
+      1 => DoctorProjectProfileUpdateTarget._fromV1(map),
+      2 => DoctorProjectProfileUpdateTarget._fromV2(map),
+      _ => throw const FormatException('医生项目资料修改目标版本无效'),
+    };
+  }
+
+  factory DoctorProjectProfileUpdateTarget._fromV2(
+    Map<String, dynamic> map,
+  ) {
+      _requireExactKeys(
+          map,
+          const {
+            'payloadVersion',
+            'institutionProjectId',
+            'institutionId',
+            'institutionName',
+            'platformProjectId',
+            'platformProjectName',
+            'doctorId',
+            'doctorName',
+            'baseRevision',
+            'currentProject',
+            'currentDoctorPrice',
+            'currentDoctorActive',
+            'platformRate',
+            'pricingPolicyRevision',
+            'travelGroundServiceFee',
+          },
+          '医生项目资料修改目标');
+    final snapshot =
+        DoctorInstitutionProjectSnapshot.fromJson(map['currentProject']);
+    return DoctorProjectProfileUpdateTarget(
+        institutionProjectId: _requiredWireText(
+          map['institutionProjectId'],
+          '机构项目 id',
+        ),
+        projectName: snapshot.name,
+        institutionId: _requiredWireText(map['institutionId'], '机构 id'),
+        institutionName: _requiredWireText(map['institutionName'], '机构名称'),
+        currentPrice:
+            _requiredWireDecimal(map['currentDoctorPrice'], '当前医生价格'),
+        serviceDescription: snapshot.description,
+        serviceTags: snapshot.tags,
+        scheduleNote: '',
+        coverImage: snapshot.coverImage,
+        images: snapshot.images,
+        consultationFee: 0,
+        commissionRate: 0,
+        institutionRate: 0,
+        platformRate: _requiredWireDecimal(map['platformRate'], '平台比例'),
+        doctorRate: 0,
+        payloadVersion: 2,
+        baseRevision: _requiredWireText(map['baseRevision'], '基线版本'),
+        currentProject: snapshot,
+        currentDoctorActive:
+            _requiredWireBoolean(map['currentDoctorActive'], '当前医生上架状态'),
+        pricingPolicyRevision: _requiredWireText(
+          map['pricingPolicyRevision'],
+          '定价策略版本',
+        ),
+        travelGroundServiceFee: _requiredWireDecimal(
+          map['travelGroundServiceFee'],
+          '旅游地接服务费',
+        ),
+        platformProjectId:
+            _requiredWireText(map['platformProjectId'], '平台项目 id'),
+        platformProjectName:
+            _requiredWireText(map['platformProjectName'], '平台项目名称'),
+        doctorId: _requiredWireText(map['doctorId'], '医生 id'),
+        doctorName: _requiredWireText(map['doctorName'], '医生名称'),
+      );
+  }
+
+  factory DoctorProjectProfileUpdateTarget._fromV1(
+    Map<String, dynamic> map,
+  ) {
     return DoctorProjectProfileUpdateTarget(
       institutionProjectId:
           _requiredText(map['institutionProjectId'], '机构项目 id'),
@@ -2101,6 +2320,7 @@ final class DoctorProjectProfileUpdateTarget {
       institutionRate: _decimal(map['institutionRate']),
       platformRate: _decimal(map['platformRate']),
       doctorRate: _decimal(map['doctorRate']),
+      payloadVersion: 1,
     );
   }
 
@@ -2109,6 +2329,13 @@ final class DoctorProjectProfileUpdateTarget {
   final num currentPrice, consultationFee, commissionRate, institutionRate;
   final num platformRate, doctorRate;
   final List<String> serviceTags, images;
+  final int payloadVersion;
+  final String? baseRevision;
+  final DoctorInstitutionProjectSnapshot? currentProject;
+  final bool currentDoctorActive;
+  final String? pricingPolicyRevision;
+  final num? travelGroundServiceFee;
+  final String platformProjectId, platformProjectName, doctorId, doctorName;
 }
 
 final class DoctorProjectChangeRequest {
@@ -2147,10 +2374,163 @@ final class DoctorProjectChangeRequest {
     this.currentDoctorRate,
     required this.status,
     required this.reviewNote,
+    this.payloadVersion = 1,
+    this.baseRevision,
+    this.currentProject,
+    this.proposedProject,
+    this.latestProject,
+    this.latestRevision,
+    this.sharedChanged = false,
+    this.currentDoctorPrice,
+    this.proposedDoctorPrice,
+    this.latestDoctorPrice,
+    this.currentDoctorActive,
+    this.proposedDoctorActive,
+    this.latestDoctorActive,
+    this.pricingPolicyRevision,
+    this.travelGroundServiceFee,
+    this.requestStatus,
+    this.hasCompleteSnapshot = true,
+    this.snapshotError,
+    this.reviewable = true,
+    this.platformProjectId = '',
+    this.platformProjectName = '',
+    this.submittedBy = '',
+    this.submittedAt,
+    this.reviewedBy,
+    this.reviewerName,
+    this.reviewedAt,
+    this.updatedAt,
+    this.snapshotState,
   });
 
   factory DoctorProjectChangeRequest.fromJson(Object? json) {
     final map = _jsonMap(json, '医生项目变更申请');
+    final payloadVersion = map['payloadVersion'];
+    if (payloadVersion is! int) {
+      throw const FormatException('医生项目变更申请版本无效');
+    }
+    return switch (payloadVersion) {
+      1 => DoctorProjectChangeRequest._fromV1(map),
+      2 => DoctorProjectChangeRequest._fromV2(map),
+      _ => throw const FormatException('医生项目变更申请版本无效'),
+    };
+  }
+
+  factory DoctorProjectChangeRequest._fromV2(Map<String, dynamic> map) {
+    _requireExactKeys(map, _doctorProjectChangeV2Keys, '医生项目变更申请');
+    var snapshotDamaged = false;
+    DoctorInstitutionProjectSnapshot? parseSnapshot(Object? value) {
+      if (value == null) return null;
+      try {
+        return DoctorInstitutionProjectSnapshot.fromJson(value);
+      } on FormatException {
+        snapshotDamaged = true;
+        return null;
+      }
+    }
+
+    final current = parseSnapshot(map['currentProject']);
+    final proposed = parseSnapshot(map['proposedProject']);
+    final latest = parseSnapshot(map['latestProject']);
+    final snapshotState = _requiredWireText(map['snapshotState'], '快照状态');
+    final complete = !snapshotDamaged &&
+        snapshotState == 'VALID' &&
+        current != null &&
+        proposed != null;
+    final wireSnapshotError =
+        _nullableWireString(map, 'snapshotError', '快照错误码');
+    final currentPrice =
+        _requiredWireDecimal(map['currentDoctorPrice'], '当前医生价格');
+    final proposedPrice =
+        _requiredWireDecimal(map['proposedDoctorPrice'], '申请医生价格');
+    final platformRate = _requiredWireDecimal(map['platformRate'], '平台比例');
+    final status = _requiredWireText(map['requestStatus'], '申请状态');
+    return DoctorProjectChangeRequest(
+      id: _requiredWireText(map['id'], '申请 id'),
+      doctorId: _requiredWireText(map['doctorId'], '医生 id'),
+      doctorName: _requiredWireText(map['doctorName'], '医生名称'),
+      institutionId: _requiredWireText(map['institutionId'], '机构 id'),
+      institutionName: _requiredWireText(map['institutionName'], '机构名称'),
+      institutionProjectId:
+          _requiredWireText(map['institutionProjectId'], '机构项目 id'),
+      projectName:
+          _requiredWireText(map['institutionProjectName'], '机构项目名称'),
+      requestType: _requiredWireText(map['requestType'], '申请类型'),
+      serviceDescription: proposed?.description ?? '',
+      priceSuggestion: proposedPrice,
+      notes: _requiredWireString(map, 'notes', '申请说明'),
+      serviceTags: proposed?.tags ?? const [],
+      scheduleNote: '',
+      coverImage: proposed?.coverImage ?? '',
+      images: proposed?.images ?? const [],
+      consultationFee: null,
+      commissionRate: null,
+      institutionRate: null,
+      platformRate: platformRate,
+      doctorRate: null,
+      forceProcessed:
+          _requiredWireBoolean(map['forceProcessed'], '强制处理状态'),
+      currentPrice: currentPrice,
+      currentServiceDescription: current?.description,
+      currentServiceTags: current?.tags,
+      currentScheduleNote: null,
+      currentCoverImage: current?.coverImage,
+      currentImages: current?.images,
+      currentConsultationFee: null,
+      currentCommissionRate: null,
+      currentInstitutionRate: null,
+      currentPlatformRate: platformRate,
+      currentDoctorRate: null,
+      status: status,
+      reviewNote: _nullableWireString(map, 'reviewNote', '审核意见'),
+      payloadVersion: 2,
+      baseRevision: _requiredWireText(map['baseRevision'], '基线版本'),
+      currentProject: current,
+      proposedProject: proposed,
+      latestProject: latest,
+      latestRevision:
+          _nullableWireText(map, 'latestRevision', '最新版本'),
+      sharedChanged:
+          _requiredWireBoolean(map['sharedChanged'], '共享字段变更状态'),
+      currentDoctorPrice: currentPrice,
+      proposedDoctorPrice: proposedPrice,
+      latestDoctorPrice:
+          _nullableWireDecimal(map, 'latestDoctorPrice', '最新医生价格'),
+      currentDoctorActive:
+          _requiredWireBoolean(map['currentDoctorActive'], '当前医生上架状态'),
+      proposedDoctorActive:
+          _requiredWireBoolean(map['proposedDoctorActive'], '申请医生上架状态'),
+      latestDoctorActive:
+          _nullableWireBoolean(map, 'latestDoctorActive', '最新医生上架状态'),
+      pricingPolicyRevision:
+          _requiredWireText(map['pricingPolicyRevision'], '定价策略版本'),
+      travelGroundServiceFee: _requiredWireDecimal(
+        map['travelGroundServiceFee'],
+        '旅游地接服务费',
+      ),
+      requestStatus: status,
+      hasCompleteSnapshot: complete,
+      snapshotError:
+          complete ? wireSnapshotError : wireSnapshotError ?? 'REQUEST_SNAPSHOT_INVALID',
+      reviewable:
+          _requiredWireBoolean(map['reviewable'], '可审核状态') && complete,
+      platformProjectId:
+          _requiredWireText(map['platformProjectId'], '平台项目 id'),
+      platformProjectName:
+          _requiredWireText(map['platformProjectName'], '平台项目名称'),
+      submittedBy: _requiredWireText(map['submittedBy'], '提交人'),
+      submittedAt: _requiredWireDateTime(map['submittedAt'], '提交时间'),
+      reviewedBy: _nullableWireText(map, 'reviewedBy', '审核人'),
+      reviewerName: _nullableWireText(map, 'reviewerName', '审核人名称'),
+      reviewedAt: _nullableWireDateTime(map, 'reviewedAt', '审核时间'),
+      updatedAt: _requiredWireDateTime(map['updatedAt'], '更新时间'),
+      snapshotState: snapshotState,
+    );
+  }
+
+  factory DoctorProjectChangeRequest._fromV1(Map<String, dynamic> map) {
+    _requireExactKeys(map, _doctorProjectChangeV1Keys, '版本 1 医生项目变更申请');
     final requestType = _requiredText(map['requestType'], '申请类型');
     final requiresProfileValues = requestType == 'PROFILE_UPDATE';
     num? proposedDecimal(String field) => requiresProfileValues
@@ -2196,7 +2576,14 @@ final class DoctorProjectChangeRequest {
       currentPlatformRate: _nullableDecimal(map['currentPlatformRate']),
       currentDoctorRate: _nullableDecimal(map['currentDoctorRate']),
       status: _requiredText(map['status'], '申请状态'),
-      reviewNote: map['reviewNote']?.toString() ?? '',
+      reviewNote: _requiredWireString(map, 'reviewNote', '审核意见'),
+      payloadVersion: 1,
+      submittedBy: _requiredWireText(map['submittedBy'], '提交人'),
+      submittedAt: _requiredWireDateTime(map['submittedAt'], '提交时间'),
+      reviewedBy: _nullableWireText(map, 'reviewedBy', '审核人'),
+      reviewerName: _nullableWireText(map, 'reviewerName', '审核人名称'),
+      reviewedAt: _nullableWireDateTime(map, 'reviewedAt', '审核时间'),
+      updatedAt: _requiredWireDateTime(map['updatedAt'], '更新时间'),
     );
   }
 
@@ -2212,7 +2599,128 @@ final class DoctorProjectChangeRequest {
   final String? currentServiceDescription, currentScheduleNote;
   final String? currentCoverImage;
   final List<String>? currentServiceTags, currentImages;
-  final String status, reviewNote;
+  final String status;
+  final String? reviewNote;
+  final int payloadVersion;
+  final String? baseRevision,
+      latestRevision,
+      pricingPolicyRevision,
+      requestStatus;
+  final DoctorInstitutionProjectSnapshot? currentProject,
+      proposedProject,
+      latestProject;
+  final bool sharedChanged, hasCompleteSnapshot, reviewable;
+  final num? currentDoctorPrice, proposedDoctorPrice, latestDoctorPrice;
+  final bool? currentDoctorActive, proposedDoctorActive, latestDoctorActive;
+  final num? travelGroundServiceFee;
+  final String? snapshotError;
+  final String platformProjectId, platformProjectName, submittedBy;
+  final DateTime? submittedAt, reviewedAt, updatedAt;
+  final String? reviewedBy, reviewerName, snapshotState;
+
+  bool get isJoin => requestType == 'JOIN';
+  bool get isLeave => requestType == 'LEAVE';
+  bool get isProfileUpdate =>
+      requestType == 'EDIT' || requestType == 'PROFILE_UPDATE';
+}
+
+const _doctorProjectChangeV2Keys = <String>{
+  'payloadVersion',
+  'id',
+  'requestType',
+  'doctorId',
+  'doctorName',
+  'institutionId',
+  'institutionName',
+  'institutionProjectId',
+  'institutionProjectName',
+  'platformProjectId',
+  'platformProjectName',
+  'baseRevision',
+  'currentProject',
+  'proposedProject',
+  'latestProject',
+  'latestRevision',
+  'sharedChanged',
+  'currentDoctorPrice',
+  'proposedDoctorPrice',
+  'latestDoctorPrice',
+  'currentDoctorActive',
+  'proposedDoctorActive',
+  'latestDoctorActive',
+  'platformRate',
+  'pricingPolicyRevision',
+  'travelGroundServiceFee',
+  'requestStatus',
+  'notes',
+  'forceProcessed',
+  'submittedBy',
+  'submittedAt',
+  'reviewedBy',
+  'reviewerName',
+  'reviewNote',
+  'reviewedAt',
+  'updatedAt',
+  'snapshotState',
+  'snapshotError',
+  'reviewable',
+};
+
+const _doctorProjectChangeV1Keys = <String>{
+  'payloadVersion',
+  'id',
+  'doctorId',
+  'doctorName',
+  'institutionId',
+  'institutionName',
+  'institutionProjectId',
+  'projectName',
+  'requestType',
+  'serviceDescription',
+  'priceSuggestion',
+  'notes',
+  'serviceTags',
+  'scheduleNote',
+  'coverImage',
+  'images',
+  'consultationFee',
+  'commissionRate',
+  'institutionRate',
+  'medicalListPrice',
+  'platformRate',
+  'doctorRate',
+  'forceProcessed',
+  'currentPrice',
+  'currentServiceDescription',
+  'currentServiceTags',
+  'currentScheduleNote',
+  'currentCoverImage',
+  'currentImages',
+  'currentConsultationFee',
+  'currentMedicalListPrice',
+  'currentCommissionRate',
+  'currentInstitutionRate',
+  'currentPlatformRate',
+  'currentDoctorRate',
+  'status',
+  'submittedBy',
+  'reviewedBy',
+  'reviewerName',
+  'reviewNote',
+  'submittedAt',
+  'reviewedAt',
+  'updatedAt',
+};
+
+void _requireExactKeys(
+  Map<String, dynamic> map,
+  Set<String> expected,
+  String label,
+) {
+  if (map.length != expected.length ||
+      !map.keys.toSet().containsAll(expected)) {
+    throw FormatException('$label 字段集无效');
+  }
 }
 
 bool _validDecimal(num value, num max) {
@@ -2610,6 +3118,11 @@ void _validateItems(
 List<String> _normalizedItems(List<String> values) =>
     values.map((value) => value.trim()).toList(growable: false);
 
+String? _nullableTrimmedValue(String? value) {
+  final normalized = value?.trim();
+  return normalized == null || normalized.isEmpty ? null : normalized;
+}
+
 String _csvText(Object? value) {
   final values = switch (value) {
     final String text => text.split(','),
@@ -2674,6 +3187,13 @@ String? _nullableWireString(
   return normalized.isEmpty ? null : normalized;
 }
 
+String? _nullableWireText(
+  Map<String, Object?> map,
+  String key,
+  String field,
+) =>
+    _nullableWireString(map, key, field);
+
 DateTime _requiredWireDateTime(Object? value, String field) {
   final parsed = _nullableWireDateTimeValue(value);
   if (parsed == null) throw FormatException('响应缺少有效的 $field');
@@ -2706,6 +3226,64 @@ int _requiredWireInteger(Object? value, String field) {
 bool _requiredWireBoolean(Object? value, String field) {
   if (value is bool) return value;
   throw FormatException('响应缺少有效的 $field');
+}
+
+bool? _nullableWireBoolean(
+  Map<String, Object?> map,
+  String key,
+  String field,
+) {
+  if (!map.containsKey(key)) throw FormatException('响应缺少 $field');
+  final value = map[key];
+  if (value == null) return null;
+  if (value is bool) return value;
+  throw FormatException('响应包含无效的 $field');
+}
+
+num _requiredWireDecimal(Object? value, String field) {
+  if (value is num && value.isFinite) return value;
+  throw FormatException('响应缺少有效的 $field');
+}
+
+num? _nullableWireDecimal(
+  Map<String, Object?> map,
+  String key,
+  String field,
+) {
+  if (!map.containsKey(key)) throw FormatException('响应缺少 $field');
+  final value = map[key];
+  if (value == null) return null;
+  if (value is num && value.isFinite) return value;
+  throw FormatException('响应包含无效的 $field');
+}
+
+String? _strictNullableString(
+  Map<String, Object?> map,
+  String key,
+  String field,
+) {
+  if (!map.containsKey(key)) throw FormatException('响应缺少 $field');
+  final value = map[key];
+  if (value == null) return null;
+  if (value is String) return value;
+  throw FormatException('响应包含无效的 $field');
+}
+
+List<String> _strictStringList(Object? value, String field) {
+  if (value is! List || value.any((item) => item is! String)) {
+    throw FormatException('响应包含无效的 $field');
+  }
+  return value.cast<String>().toList(growable: false);
+}
+
+List<String>? _strictNullableStringList(
+  Map<String, Object?> map,
+  String key,
+  String field,
+) {
+  if (!map.containsKey(key)) throw FormatException('响应缺少 $field');
+  final value = map[key];
+  return value == null ? null : _strictStringList(value, field);
 }
 
 String? _nullableText(Object? value) {

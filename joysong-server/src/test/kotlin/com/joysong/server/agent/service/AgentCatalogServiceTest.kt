@@ -1,6 +1,7 @@
 package com.joysong.server.agent.service
 
 import com.joysong.server.agent.dto.AgentCatalogItemResponse
+import com.joysong.server.agent.dto.AgentCatalogReportRequest
 import com.joysong.server.agent.dto.AgentCatalogReportResponse
 import com.joysong.server.agent.dto.AgentProfileResponse
 import com.joysong.server.discover.dto.InstitutionProjectItemResponse
@@ -9,6 +10,7 @@ import com.joysong.server.discover.service.DiscoverSearchRequest
 import com.joysong.server.discover.service.DiscoverSearchResult
 import com.joysong.server.discover.service.DiscoverKeywordExtractor
 import com.joysong.server.discover.repository.DoctorProjectRepository
+import com.joysong.server.discover.repository.PublicDoctorProjectView
 import com.joysong.server.discover.service.DiscoverSearchService
 import com.joysong.server.discover.service.RequestedEntityType
 import com.joysong.server.doctor.entity.DoctorEntity
@@ -61,6 +63,32 @@ class AgentCatalogServiceTest {
         institutionConsultantService,
         agentProfileService
     )
+
+    private fun publicBinding(
+        doctorId: String,
+        institutionProjectId: String,
+        projectId: String,
+        price: String
+    ): PublicDoctorProjectView = mockk<PublicDoctorProjectView>().also { binding ->
+        every { binding.doctorId } returns doctorId
+        every { binding.projectId } returns projectId
+        every { binding.institutionProjectId } returns institutionProjectId
+        every { binding.price } returns BigDecimal(price)
+    }
+
+    private fun stubPublicOfferings(offerings: List<InstitutionProjectEntity>) {
+        every { institutionProjectRepository.findAll() } returns offerings
+        every {
+            doctorProjectRepository.findPublicByInstitutionProjectIds(offerings.map { it.id })
+        } returns offerings.map { offering ->
+            publicBinding(
+                doctorId = "doctor-${offering.id}",
+                institutionProjectId = offering.id,
+                projectId = offering.projectId,
+                price = offering.price.toPlainString()
+            )
+        }
+    }
 
     @BeforeEach
     fun useChineseLocale() {
@@ -180,6 +208,7 @@ class AgentCatalogServiceTest {
             institutionRepository = institutionRepository,
             institutionProjectRepository = institutionProjectRepository,
             doctorRepository = doctorRepository,
+            doctorProjectRepository = doctorProjectRepository,
             keywordExtractor = DiscoverKeywordExtractor(),
             doctorInstitutionService = doctorInstitutionService,
             institutionProjectDetailResolver = InstitutionProjectDetailResolver()
@@ -253,6 +282,7 @@ class AgentCatalogServiceTest {
             institutionRepository = institutionRepository,
             institutionProjectRepository = institutionProjectRepository,
             doctorRepository = doctorRepository,
+            doctorProjectRepository = doctorProjectRepository,
             keywordExtractor = DiscoverKeywordExtractor(),
             doctorInstitutionService = doctorInstitutionService,
             institutionProjectDetailResolver = InstitutionProjectDetailResolver()
@@ -301,6 +331,7 @@ class AgentCatalogServiceTest {
             institutionRepository = institutionRepository,
             institutionProjectRepository = institutionProjectRepository,
             doctorRepository = doctorRepository,
+            doctorProjectRepository = doctorProjectRepository,
             keywordExtractor = DiscoverKeywordExtractor(),
             doctorInstitutionService = doctorInstitutionService,
             institutionProjectDetailResolver = InstitutionProjectDetailResolver()
@@ -370,7 +401,7 @@ class AgentCatalogServiceTest {
             tags = "补水,保湿"
         )
         every { projectRepository.findAll() } returns listOf(baseProject)
-        every { institutionProjectRepository.findAll() } returns listOf(
+        val offerings = listOf(
             InstitutionProjectEntity(
                 id = "offering-inherited",
                 institutionId = "institution-1",
@@ -386,6 +417,11 @@ class AgentCatalogServiceTest {
                 price = BigDecimal("880")
             )
         )
+        every { institutionProjectRepository.findAll() } returns offerings
+        every { doctorProjectRepository.findPublicByInstitutionProjectIds(offerings.map { it.id }) } returns listOf(
+            publicBinding("doctor-1", "offering-inherited", baseProject.id, "680"),
+            publicBinding("doctor-2", "offering-custom", baseProject.id, "880")
+        )
         every { discoverSearchService.extractMatchingFragments("基础水光怎么样") } returns emptySet()
         every { discoverSearchService.extractMatchingFragments("院线焕亮升级版多少钱") } returns emptySet()
         every { discoverSearchService.extractMatchingFragments("我想提亮肤色") } returns setOf("提亮", "肤色")
@@ -395,6 +431,85 @@ class AgentCatalogServiceTest {
         assertTrue(service.hasInstitutionProjectMatch("院线焕亮升级版多少钱"))
         assertTrue(service.hasInstitutionProjectMatch("我想提亮肤色"))
         assertFalse(service.hasInstitutionProjectMatch("完全不存在的服务"))
+    }
+
+    @Test
+    fun `catalog matching omits unavailable institution offerings`() {
+        val baseProject = ProjectEntity(id = "project-1", name = "Base", category = "Skin")
+        val offerings = listOf(
+            InstitutionProjectEntity(
+                id = "offering-available", institutionId = "institution-1", projectId = baseProject.id,
+                name = "Available Special", price = BigDecimal("1000")
+            ),
+            InstitutionProjectEntity(
+                id = "offering-unavailable", institutionId = "institution-1", projectId = baseProject.id,
+                name = "Unavailable Secret", price = BigDecimal("100")
+            )
+        )
+        every { projectRepository.findAll() } returns listOf(baseProject)
+        every { institutionProjectRepository.findAll() } returns offerings
+        every { doctorProjectRepository.findPublicByInstitutionProjectIds(offerings.map { it.id }) } returns listOf(
+            publicBinding("doctor-1", "offering-available", baseProject.id, "700")
+        )
+        every { discoverSearchService.extractMatchingFragments(any()) } returns emptySet()
+
+        assertTrue(service.hasInstitutionProjectMatch("Available Special"))
+        assertFalse(service.hasInstitutionProjectMatch("Unavailable Secret"))
+    }
+
+    @Test
+    fun `real report uses eligible doctor minimum for project and offering reference prices`() {
+        val project = ProjectEntity(
+            id = "project-1",
+            name = "水光项目",
+            category = "护理",
+            referencePrice = BigDecimal("1200")
+        )
+        val offerings = listOf(
+            InstitutionProjectEntity(
+                id = "offering-1",
+                institutionId = "institution-1",
+                projectId = project.id,
+                name = "水光基础版",
+                price = BigDecimal("1000")
+            ),
+            InstitutionProjectEntity(
+                id = "offering-2",
+                institutionId = "institution-1",
+                projectId = project.id,
+                name = "水光升级版",
+                price = BigDecimal("1100")
+            )
+        )
+        val candidates = listOf(
+            institutionProjectCandidate("offering-1", "星颜", "水光基础版", project.id, 2, "institution-1"),
+            institutionProjectCandidate("offering-2", "星颜", "水光升级版", project.id, 1, "institution-1")
+        )
+        val institution = InstitutionEntity(id = "institution-1", name = "星颜", city = "上海")
+        every { discoverSearchService.citiesMentionedIn(any()) } returns emptyList()
+        every { discoverSearchService.explicitlyRequestedEntityTypes(any()) } returns emptySet()
+        every { discoverSearchService.extractMatchingFragments(any()) } returns emptySet()
+        every { discoverSearchService.search(any<DiscoverSearchRequest>()) } returns DiscoverSearchResult(
+            projects = listOf(projectWithOfferings(project, candidates))
+        )
+        every { institutionRepository.findAll() } returns listOf(institution)
+        every { institutionRepository.findAllById(any()) } returns listOf(institution)
+        every { projectRepository.findAll() } returns listOf(project)
+        every { projectRepository.findAllById(any()) } returns listOf(project)
+        every { institutionProjectRepository.findAll() } returns offerings
+        every {
+            doctorProjectRepository.findPublicByInstitutionProjectIds(offerings.map { it.id })
+        } returns listOf(
+            publicBinding("doctor-expensive", "offering-1", project.id, "900"),
+            publicBinding("doctor-affordable", "offering-1", project.id, "700"),
+            publicBinding("doctor-upgrade", "offering-2", project.id, "800")
+        )
+
+        val report = service.report(AgentCatalogReportRequest("水光项目", "SUMMARY"))
+
+        assertEquals("$700", report.items.single { it.type == "PROJECT" }.attributes["项目参考价"])
+        assertEquals("$700", report.items.single { it.id == "offering-1" }.attributes["项目参考价"])
+        assertEquals("$800", report.items.single { it.id == "offering-2" }.attributes["项目参考价"])
     }
 
     @Test
@@ -552,7 +667,7 @@ class AgentCatalogServiceTest {
         every { institutionRepository.findAllById(any()) } returns institutions
         every { projectRepository.findAll() } returns listOf(baseProject)
         every { projectRepository.findAllById(any()) } returns listOf(baseProject)
-        every { institutionProjectRepository.findAll() } returns offeringEntities
+        stubPublicOfferings(offeringEntities)
         every { discoverSearchService.citiesMentionedIn(any()) } returns emptyList()
         every { discoverSearchService.extractMatchingFragments(any()) } returns emptySet()
         every { discoverSearchService.explicitlyRequestedEntityTypes(any()) } returns emptySet<RequestedEntityType>()
@@ -603,7 +718,7 @@ class AgentCatalogServiceTest {
         every { institutionRepository.findAllById(any()) } returns institutions
         every { projectRepository.findAll() } returns listOf(baseProject)
         every { projectRepository.findAllById(any()) } returns listOf(baseProject)
-        every { institutionProjectRepository.findAll() } returns offeringEntities
+        stubPublicOfferings(offeringEntities)
         every { discoverSearchService.citiesMentionedIn(any()) } returns emptyList()
         every { discoverSearchService.extractMatchingFragments(any()) } returns emptySet()
         every { discoverSearchService.explicitlyRequestedEntityTypes(any()) } returns emptySet<RequestedEntityType>()

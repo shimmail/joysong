@@ -478,7 +478,7 @@ Alipay+ 商户注册和收单参数仍在安排，仓库没有真实 gateway。�
 
 管理员批准后订单进入 `REFUND_PROCESSING`；只有渠道确认全部退款项成功才到 `REFUNDED`。失败或未知项不得伪装成功：管理端 `GET /admin/refunds` 显示每项 `provider`、`status`、`failureCode`、`failureMessage` 与 `providerRefundId`，并仅当父退款为 `REFUND_PROCESSING` 且存在 `FAILED` 项时可调用 `POST /admin/refunds/{id}/retry`。重试只处理原 `FAILED` 项：已有 `providerRefundId` 查询/续办原退款，没有 ID 才用原幂等键重发，`SUCCEEDED` 项绝不重放；刷新列表失败也必须释放页面重试锁。医院医疗费直接向医院支付，不适用平台退款、分账、结算或钱包。
 
-本期没有姓名、护照、航班、酒店备案。订单服务通知属于后续工作，不得由客户端假定已实现。
+本期没有姓名、护照、航班、酒店备案。订单状态转换产生的站内系统消息已经实现；实时推送与外部渠道通知仍属于后续工作，不得由客户端假定已实现。
 
 ### 10.5 既有历史订单兼容接口（仅 `LEGACY_MEDICAL`）
 
@@ -574,7 +574,8 @@ provider-aware `POST /orders/{id}/payment-attempts` 不是订单创建接口，�
 | 平台管理员全量机构 CRUD | `GET/POST /admin/institutions`、`GET/PUT/DELETE /admin/institutions/{id}`；其中写操作仅限 `ADMIN`，GET 对专业用户仅提供下行所述对象级兼容读取 |
 | 医生本人文章 | `GET/POST /management/doctor-articles`、`PUT/DELETE /management/doctor-articles/{id}` |
 | 机构项目 | `GET/POST /admin/institution-projects`、`PUT/DELETE /admin/institution-projects/{id}` |
-| 医生项目协作 | `GET /admin/institution-project-requests/profile-update-targets`、`GET/POST /admin/institution-project-requests`、`POST /{id}/review`、`/{id}/withdraw` |
+| 医生项目协作 v2（新客户端） | `GET /v2/admin/institution-project-requests/profile-update-targets`、`GET/POST /v2/admin/institution-project-requests`、`POST /v2/admin/institution-project-requests/{id}/review`、`POST /v2/admin/institution-project-requests/{id}/withdraw` |
+| 医生项目协作 v1（滚动兼容） | `GET /admin/institution-project-requests/profile-update-targets`、`GET/POST /admin/institution-project-requests`、`POST /admin/institution-project-requests/{id}/review`、`POST /admin/institution-project-requests/{id}/withdraw` |
 | 当前分账 | `GET /admin/doctor-institution-project-configs` |
 | 分账提案 | `GET/POST /admin/doctor-institution-project-config-proposals`、`POST /{id}/confirm`、`/reject`、`/withdraw` |
 | 相关订单 | `GET /management/orders?status=...`、`GET /management/orders/{id}`、核销接口见上节 |
@@ -833,15 +834,142 @@ resultingInstitutionProjectId, submittedAt, updatedAt
 - 法人可审核本机构的成员关系和机构项目申请；不能编辑医生档案，也不能绕过项目申请/审核流程直接创建、修改或删除机构项目。旧专业端 `/admin/institutions/{id}` PUT 已移除；`POST/PUT/DELETE /api/admin/institutions...` 等机构写操作及平台全量 CRUD 始终仅限 `ADMIN`。上表列出的机构范围 GET 旧读路径仅在后续切换完成前向已认证专业用户兼容，并由服务端按 `visibleInstitutionIds` 做对象级只读过滤；`GET /admin/projects` 则只提供全局项目目录。所有兼容 GET 均不授予任何写权限。
 - 医生和顾问机构关系统一遵循 11.1 的独立申请账本契约；两种身份都可提交 `JOIN`/`LEAVE` 并撤回本人 `PENDING`，法人从 `/reviewable` 审核本机构申请。旧顾问接口只承担滚动兼容，已处理申请不会被重提覆盖。
 - Flutter 专业项目选择统一使用 `GET /management/projects`，不得继续调用 `/admin/projects`。该目录只检查用户是否拥有至少一个活跃 `DOCTOR`、`CONSULTANT` 或 `INSTITUTION_LEGAL_REPRESENTATIVE` 身份；同时具有 `ADMIN` 身份不会改变该授权结果。它返回全局只读数组，按 `name`、`id` 排序。每项完整固定包含 13 个字段：`id`、`name`、`category`、`description`、`tags`、`categoryTags`、`coverImage`、`referencePrice`、`currency`、`slogan`、`detailContent`、`images`、`salesCount`；不接受查询参数，也不授予任何项目写能力。
-- `POST /admin/institution-project-requests` 的 `JOIN` 表单同样只编辑一个 USD 医生项目价格，并用 `GET /management/project-requests/institution-form-config` 返回的 `platformRate` 预览旅游地接服务费。JOIN 请求体保持既有精确 5 键：固定值 `requestType: JOIN`、`institutionProjectId`、`serviceDescription`、`priceSuggestion`、`notes`；不得增加 `medicalListPrice`、历史收费或比例字段。比例未加载或服务费不足 USD 0.01 时 Flutter 禁止提交。
-- `POST /admin/institution-project-requests` 的 `PROFILE_UPDATE` 是医生修改本人医生级项目资料与价格的生效前申请入口。Flutter 请求 VO 必须精确包含 13 个键：`institutionProjectId`、固定值 `requestType: PROFILE_UPDATE`、`serviceDescription`、`priceSuggestion`、`notes`、`serviceTags`、`scheduleNote`、`coverImage`、`images`、`consultationFee`、`commissionRate`、`institutionRate`、`medicalListPrice`；其中 `serviceTags`、`images` 是 JSON 字符串数组，不能发送 `doctorId`、`platformRate`、`doctorRate` 或任何 `current*` 基线字段。`priceSuggestion` 是界面唯一可编辑的 USD 医生项目价格；`medicalListPrice` 仅为滚动兼容字段，必须与 `priceSuggestion` 相同。`consultationFee`、`commissionRate`、`institutionRate` 不再作为表单控件展示，必须原样透传所选 `profile-update-targets` 当前值，客户端不能另行猜测或重置。
-- `GET /admin/institution-project-requests/profile-update-targets` 是表单唯一的当前值来源，只返回已认证医生本人仍有效的医生—机构项目。响应是数组，每项 `DoctorProjectProfileUpdateTargetView` 精确包含：`institutionProjectId`、`projectName`、`institutionId`、`institutionName`、`currentPrice`、`serviceDescription`、`serviceTags`、`scheduleNote`、`coverImage`、`images`、`consultationFee`、`commissionRate`、`institutionRate`、`medicalListPrice`、`platformRate`、`doctorRate`。16 个字段全部非 null；`currentPrice` 是当前 `DoctorProjectEntity.price`，`medicalListPrice` 是其兼容镜像。无有效配置时返回面诊费 0、项目价格 0、顾问率 0、策略默认机构率以及当前平台率和推导医生率。Flutter 不得用机构项目价、本地默认金额或默认比例伪造基线。
-- `serviceDescription` 非空且最长 5000；`notes`/`scheduleNote`/`coverImage` 最长分别为 2000/500/500；两个数组各最多 20 项，标签每项非空且最长 100，图片每项最长 500。服务端兼容 DTO 仍允许 `priceSuggestion`、`consultationFee` 为 `0..99999999.99` 的最多两位小数；Flutter 对唯一可编辑的 `priceSuggestion` 额外要求能按 target 返回的 `platformRate` 计算出至少 USD 0.01 的旅游地接服务费。兼容字段 `medicalListPrice` 必须与 `priceSuggestion` 相同。`commissionRate`（兼容字段名，语义为顾问率）和 `institutionRate`（机构率）均为 `0..100` 的最多两位小数。
-- `platformRate` 是服务端价格政策参数、不可编辑。Flutter 的新增、加入、编辑表单都只展示一个“医生项目价格（USD）”输入和按该比例派生的“旅游地接服务费”；不展示面诊费、原价、币种选择或历史顾问/机构/平台/医生比例。所选 `DoctorProjectEntity.price` 是当前新支付唯一的价格/金额基础；当前生效政策为 40.00% / 4000 bps，服务费按整数分 HALF_UP。`doctorRate` 仅为历史兼容派生值，不能进入新订单金额或结算计算。
-- 提交成功只创建 `PENDING` 申请。机构法人通过 `POST /admin/institution-project-requests/{id}/review` 且显式发送 `force: false` 批准后，服务端才按 `(doctorId, institutionProjectId)` 在同一事务中更新本人 `doctor_projects` 与本人分账配置；基线变化返回 409，绝不波及同项目其他医生。平台管理员可显式发送 `force: true` 强制处理，但必须填写 `reviewNote`，响应以 `forceProcessed`、`reviewedBy`、`reviewedAt` 留痕。
-- `DoctorProjectChangeView`/Flutter 响应 VO 字段固定为：`id`、`doctorId`、`doctorName`、`institutionId`、`institutionName`、`institutionProjectId`、`projectName`、`requestType`、`serviceDescription`、`priceSuggestion`、`notes`、`serviceTags`、`scheduleNote`、`coverImage`、`images`、`consultationFee`、`commissionRate`、`institutionRate`、`medicalListPrice`、`platformRate`、`doctorRate`、`forceProcessed`、`currentPrice`、`currentServiceDescription`、`currentServiceTags`、`currentScheduleNote`、`currentCoverImage`、`currentImages`、`currentConsultationFee`、`currentMedicalListPrice`、`currentCommissionRate`、`currentInstitutionRate`、`currentPlatformRate`、`currentDoctorRate`、`status`、`submittedBy`、`reviewedBy`、`reviewerName`、`reviewNote`、`submittedAt`、`reviewedAt`、`updatedAt`。`medicalListPrice` / `currentMedicalListPrice` 是兼容字段名，分别镜像申请价格 / 当前 `DoctorProjectEntity.price`，不得作为另一套运行时价格。新申请的 `current*` 是提交事务固化的 before 快照；审核页使用已固化字段，不能在审批时重新读取当前表冒充原值。非 `PROFILE_UPDATE` 的这些字段仍为 null。
-- 该接口族使用真实 HTTP 状态：400 参数错误、403 身份/对象/强制处理越权、409 重复 `PENDING`/基线变化/已处理或并发冲突、500 服务端异常。写请求不得自动重试；409 应刷新申请与当前项目配置后提示用户重新提交。
-- 医生不能直接修改机构项目价格、销量、评分、评价数或上下架状态。
+### 11.4 医生机构项目完整编辑、审核与滚动兼容
+
+新 Flutter 以 `/api/v2/admin/institution-project-requests` 为唯一协作根路径。服务端仍保留无 `/v2` 的 v1 路径承接已发布客户端与历史待审申请；两套路径不是两套业务账本，均读取 `doctor_project_change_requests`。兼容边界如下：
+
+| 路径族 | 可提交内容 | 读取/处理规则 |
+|---|---|---|
+| `/api/admin/institution-project-requests` | v1 `JOIN`、`LEAVE`、13 键 v1 `PROFILE_UPDATE`；部署可关闭 v1 `PROFILE_UPDATE` | 只返回 v1 平铺视图；v1 审核/撤回遇到 v2 记录返回 HTTP 426 / `CLIENT_UPGRADE_REQUIRED` |
+| `/api/v2/admin/institution-project-requests` | v1 兼容 `JOIN`（精确 5 键）、`LEAVE`（精确 2 键）以及 v2 完整编辑（精确 15 键） | `GET` 列表返回带 `payloadVersion: 1|2` 的严格判别联合；v1 `PROFILE_UPDATE` 在该列表中规范为 `requestType: EDIT`；审核和撤回可处理列表中的兼容记录 |
+
+v2 根路径的兼容 `JOIN` 仍只编辑一个 USD 医生项目价格，请求精确为 `requestType`、`institutionProjectId`、`serviceDescription`、`priceSuggestion`、`notes`；兼容 `LEAVE` 精确为 `requestType`、`institutionProjectId`。这两类 `POST` 的即时 `data` 仍是无 `payloadVersion` 的 v1 平铺对象，提交端应把成功状态作为写入确认并刷新 v2 列表，不能把即时对象交给 v2 严格联合解析器。`scheduleNote`、`serviceDescription`、历史面诊费/分账字段及 `medicalListPrice` 都只属于 payload v1；v2 完整编辑不得提交、显示或写回排期。
+
+#### v2 目标与精确 15 键请求体
+
+`GET /api/v2/admin/institution-project-requests/profile-update-targets` 只返回当前认证医生本人、机构项目仍启用且执业关系仍为 `APPROVED` 的目标。每项必须且只能包含 15 个键：
+
+```text
+payloadVersion, institutionProjectId, institutionId, institutionName,
+platformProjectId, platformProjectName, doctorId, doctorName, baseRevision,
+currentProject, currentDoctorPrice, currentDoctorActive, platformRate,
+pricingPolicyRevision, travelGroundServiceFee
+```
+
+`payloadVersion` 固定为 `2`。关联 ID、机构/平台项目名称和医生身份只读；`currentDoctorPrice` 是 `doctor_projects.price`，币种固定 USD；`travelGroundServiceFee` 由服务端按该医生价格和当前 `platformRate` 推导，客户端不得提交金额、比例或定价版本。表单提交 `POST /api/v2/admin/institution-project-requests` 时必须且只能发送下列 15 个键：
+
+```json
+{
+  "requestType": "PROFILE_UPDATE",
+  "institutionProjectId": "institution-project-id",
+  "baseRevision": "64-character-lowercase-sha256",
+  "name": null,
+  "category": null,
+  "description": null,
+  "tags": null,
+  "slogan": null,
+  "detailContent": null,
+  "price": 1280.00,
+  "salesCount": 0,
+  "doctorActive": true,
+  "coverImage": null,
+  "images": null,
+  "notes": "申请说明"
+}
+```
+
+所有键都必须出现，未知键、缺键或类型不符为 HTTP 422 / `PROJECT_PAYLOAD_INVALID`。`institutionProjectId`、`baseRevision`、`notes` 必须是字符串；六个可空文本和 `tags`/`images` 必须分别是 `string|null` 与 `string[]|null`；`price` 是最多两位小数且不超过 `99999999.99` 的正数 USD number，并且按当前平台比例派生的旅游地接服务费必须至少为 USD 0.01；`salesCount` 是非负整数，`doctorActive` 是 boolean。`notes` trim 后最长 2000；共享字段沿用 11.2 的文本、数组及目标存储长度上限。客户端不提交 `institutionId`、平台项目 ID、`doctorId`、币种、原价、评分、评价数、分账比例、面诊费、排期或旅游地接服务费。
+
+可空共享字段采用继承语义：文本 `null`、空字符串或纯空白在服务端规格化为 `null`，数组 `null` 或 `[]` 规格化为 `null`，均表示继承平台项目；只有非空、逐项 trim 后合法的数组才成为机构覆盖值。`salesCount` 没有继承态，始终提交明确整数。机构共享字段为 `name`、`category`、`description`、`tags`、`slogan`、`detailContent`、`salesCount`、`coverImage`、`images`；医生专属字段只有 `price`、`doctorActive`。共享字段批准后影响同一机构项目的所有医生，医生专属字段只更新申请医生。
+
+#### 不可变快照、`baseRevision` 与实时审核视图
+
+`currentProject`、`proposedProject` 是提交事务写入账本的不可变快照，结构严格为：
+
+```text
+schemaVersion: 2
+association: {institutionProjectId, institutionId, platformProjectId}
+rawOverrides: {name, category, description, tags, slogan, detailContent, coverImage, images}
+effective: {name, category, description, tags, slogan, detailContent, salesCount, coverImage, images}
+source: {institutionProjectVersion, platformInheritanceHash}
+```
+
+`rawOverrides` 保存 `null` 继承状态，`effective` 保存当时解析后的实际展示值，不能互相替代。`baseRevision` 是服务端对目标关联、机构项目 version、平台继承哈希、医生项目更新时间、兼容 config 的 id/更新时间以及定价策略版本做规范化后计算的 SHA-256；提交时服务端在锁内重算，不一致返回 409 / `EDIT_BASE_STALE`。
+
+v2 申请视图严格包含：
+
+```text
+payloadVersion, id, requestType, doctorId, doctorName, institutionId,
+institutionName, institutionProjectId, institutionProjectName,
+platformProjectId, platformProjectName, baseRevision, currentProject,
+proposedProject, latestProject, latestRevision, sharedChanged,
+currentDoctorPrice, proposedDoctorPrice, latestDoctorPrice,
+currentDoctorActive, proposedDoctorActive, latestDoctorActive, platformRate,
+pricingPolicyRevision, travelGroundServiceFee, requestStatus, notes,
+forceProcessed, submittedBy, submittedAt, reviewedBy, reviewerName,
+reviewNote, reviewedAt, updatedAt, snapshotState, snapshotError, reviewable
+```
+
+v2 `requestType` 对完整编辑返回 `EDIT`。`current*`/`proposed*` 来自不可变账本，`latestProject`、`latestDoctorPrice`、`latestDoctorActive` 和 `latestRevision` 是每次读取时从当前生效表重新计算的实时视图，目标已不存在或无法解析时可为 `null`。`latestRevision` 是强制审核确认令牌，覆盖最新项目快照、医生价格/上架/更新时间、兼容 config 值与版本、当前定价策略和旅游地接服务费；不能用 `baseRevision` 替代。`sharedChanged` 只在机构共享覆盖值或有效 `salesCount` 发生变化时为 true；只改医生价格/上架时为 false，不增加机构项目 version。
+
+损坏或无法严格解码的账本仍返回可诊断行：`snapshotState: INVALID`、`snapshotError: REQUEST_SNAPSHOT_INVALID`、`reviewable: false`，对应快照可为 `null`。客户端必须按 `payloadVersion` 选择解析器，并以 `snapshotState`/`reviewable` 禁止审核，不能用 v1 安全默认值伪造 v2 快照。
+
+#### 精确四键审核、权限与强制批准边界
+
+`POST /api/v2/admin/institution-project-requests/{id}/review` 必须且只能发送四个键：
+
+```json
+{
+  "decision": "APPROVED",
+  "reviewNote": "",
+  "force": false,
+  "forceBaseRevision": null
+}
+```
+
+`decision` 只允许 `APPROVED`、`REJECTED`、`CHANGES_REQUESTED`；后两者必须提供非空 `reviewNote`。普通审核必须显式发送 `force: false` 和 `forceBaseRevision: null`。法人只能以当前实时 `managedInstitutionIds` 审核本机构记录；平台管理员可普通审核。服务端先锁申请并重新校验审核权限，不能依赖列表时的权限快照。
+
+强制批准只允许平台管理员、只允许 `APPROVED`，必须 `force: true`、非空 `reviewNote`，并把刚刷新审核详情的 `latestRevision` 原样放入 `forceBaseRevision`。它仅可接受已检测到的机构项目 version、医生价格/上架/医生项目 revision 或兼容 config revision 基线漂移；没有漂移返回 422 / `FORCE_NOT_APPLICABLE`，确认后最新视图再次变化返回 409 / `FORCE_BASE_STALE`。强制批准不能绕过当前法人/管理员权限、医生有效执业关系、机构/平台/医生项目关联、申请状态 CAS、快照完整性与规范化、平台继承源校验、定价策略/服务费校验或目标存在性；v1 记录也不允许通过 v2 `force=true` 强制处理。
+
+批准事务的锁与写入顺序固定为：申请身份读取 → 申请行 `FOR UPDATE` → 当前审核权限 → 有效医生机构关系 → 机构项目 → 平台项目 → 申请医生 `doctor_projects` → 该医生兼容 config（含逻辑删除行）→ 全部快照/基线/策略校验 → 可选机构共享 CAS 更新 → 申请医生价格/上架更新 → 兼容价格同步 → 申请状态 `PENDING` CAS 关闭。任一步失败整体回滚；`REJECTED`/`CHANGES_REQUESTED` 只关闭账本，不写生效表。成功提交后才清理 `discover`、`home`、`projects` 三个缓存，回滚不得清缓存。
+
+#### 稳定错误 envelope 与冲突处理
+
+该接口族的合同错误使用真实 HTTP 状态，并返回稳定 envelope：
+
+```json
+{
+  "code": 409,
+  "message": "本地化说明，仅用于展示",
+  "errorCode": "EDIT_BASE_STALE",
+  "data": null
+}
+```
+
+带稳定码的 v2 合同错误在 wire 上精确包含 `code`、`message`、`errorCode`、`data` 四个键，不增加其他键。后端对 `errorCode` 使用 `NON_NULL` 序列化：当它为 `null` 时，该字段从 JSON 中省略，因此成功响应和既有 v1 响应的 wire shape 保持不变。
+
+客户端必须按 HTTP 与 `errorCode` 分支，不能解析本地化 `message`：
+
+| HTTP | 稳定 `errorCode` |
+|---|---|
+| 409 | `EDIT_BASE_STALE`、`APPROVAL_BASE_STALE`、`INHERITANCE_SOURCE_STALE`、`PRICING_POLICY_STALE`、`FORCE_BASE_STALE`、`REQUEST_ALREADY_PENDING`、`REQUEST_ALREADY_HANDLED`、`INSTITUTION_PROJECT_VERSION_STALE` |
+| 422 | `PROJECT_PAYLOAD_INVALID`、`REQUEST_SNAPSHOT_INVALID`、`FORCE_NOT_APPLICABLE` |
+| 426 | `CLIENT_UPGRADE_REQUIRED` |
+
+401、403、404 分别表示未认证、身份/对象权限失败、申请或目标不存在；这三类当前可不提供专用 `errorCode`，此时 wire 上不会出现 `errorCode` 键。写请求不得自动重放。409 后保留用户草稿，刷新 target/申请详情；`EDIT_BASE_STALE` 重新以 target 的 `baseRevision` 编辑，`APPROVAL_BASE_STALE` 刷新审核详情，管理员只有在最新详情仍可审核且明确接受差异时才可使用 `latestRevision` 强制批准。
+
+#### 平台管理员直编 CAS、公开可预约性与详情例外
+
+平台管理员直接编辑机构项目使用 `PUT /api/admin/institution-projects/{id}`，必须且只能提交 17 个键：`baseVersion`、`name`、`category`、`description`、`rating`、`reviewCount`、`tags`、`slogan`、`detailContent`、`price`、`originalPrice`、`currency`、`coverImage`、`images`、`salesCount`、`isActive`、`doctorBindings`。`baseVersion` 必须取自最近一次机构项目响应的只读 `version`；服务端在锁内执行 CAS，过期、参与关系/绑定/config 集合变化或并发锁冲突统一为 409 / `INSTITUTION_PROJECT_VERSION_STALE`。该路径仅限平台管理员，不能作为法人或医生绕过审核的写入口。
+
+直编事务按稳定全局顺序锁定：按 id 排序的待处理医生项目变更 → 按 id 排序的待处理 split 提案 → 按医生 id 排序的有效执业关系（NOWAIT）→ 机构项目 → 重验待处理集合（NOWAIT）→ 平台项目 → 全部医生项目 → 兼容 config 参与者 → 各医生 config；随后才更新机构项目、医生绑定和兼容价格。提交后同样只在 `afterCommit` 清理 `discover`、`home`、`projects` 缓存。
+
+公开列表、搜索、筛选、医生详情中的服务、机构详情中的项目、机构项目医生候选以及报价/下单，都只把同时满足以下条件的绑定视为可预约：机构项目 `isActive=true`、医生项目 `doctorActive/is_active=true`、医生与机构关系仍为有效 `APPROVED`。报价和下单会在事务锁内再次检查，客户端可见不等于下单授权。
+
+唯一的直接详情例外是 `GET /api/discover/institutions/{institutionId}/projects/{projectId}`：只要机构项目本身启用且目标存在，即使没有可预约医生也返回详情，`hasAvailableDoctors=false`、医生数组为空，并以机构项目自身价格作为展示回退；它不能出现在依赖可预约医生的公共列表，也不能据此创建订单。
+
+- `platformRate` 是服务端价格政策参数、不可编辑。Flutter 的新增、加入、编辑表单都只展示一个“医生项目价格（USD）”输入和服务端派生的“旅游地接服务费”；不展示面诊费、原价、币种选择或历史顾问/机构/平台/医生比例。所选 `doctor_projects.price` 是新支付唯一的价格基础，服务费按整数分 HALF_UP；不得把历史 v1 `doctorRate` 或 config 金额带入新订单计算。
+- 医生不能无审核直接写入生效表；v2 只允许申请修改机构共享 `salesCount` 以及本人医生项目的 `price`/`doctorActive`，不能修改 `institution_projects.price`、机构级 `isActive`、评分或评价数。
 - 医生和机构法人都不能修改自己的评分、评价数和认证状态；服务端会保留原值。
 - 医生档案的 `credentials` 与 `credentialImages` 是医生自主维护的公开展示材料，和私有身份审核材料相互独立；UI 只能使用“医生上传的证书图片/展示材料”等中性文案，不得写“资质保险箱”“查资质”或“平台已核验”。公开图片经 `POST /upload` 上传并使用 `data.url`，多图再以逗号拼接提交；这条遗留传输规则不适用于法人机构档案的 JSON 数组字段。
 - 通用分账调整仍通过提案完成；医生项目 `PROFILE_UPDATE` 是受法人审核和基线保护的专用例外。两种流程都不能由专业用户直接写生效配置。

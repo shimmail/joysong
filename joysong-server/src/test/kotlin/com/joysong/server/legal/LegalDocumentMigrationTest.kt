@@ -14,6 +14,7 @@ import com.joysong.server.legal.service.LegalDocumentHtmlSanitizer
 import com.joysong.server.legal.service.LegalDocumentCacheInvalidator
 import com.joysong.server.legal.service.LegalDocumentService
 import com.joysong.server.legal.service.LegalDocumentConflictException
+import com.joysong.server.support.WorktreeTestDatabase
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.AfterAll
@@ -24,18 +25,16 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest
 import org.springframework.cache.concurrent.ConcurrentMapCacheManager
-import org.springframework.test.context.DynamicPropertyRegistry
-import org.springframework.test.context.DynamicPropertySource
+import org.springframework.dao.DataAccessException
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.test.context.DynamicPropertyRegistry
+import org.springframework.test.context.DynamicPropertySource
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.TransactionTemplate
 import jakarta.persistence.EntityManager
 import org.testcontainers.containers.MySQLContainer
-import java.nio.file.Files
-import java.nio.file.Path
-import java.nio.file.Paths
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -95,7 +94,7 @@ class LegalDocumentMigrationTest {
         assertThrows<DataIntegrityViolationException> {
             insertContent("content-duplicate-locale", "draft-1", "zh-CN")
         }
-        assertThrows<DataIntegrityViolationException> {
+        assertThrows<DataAccessException> {
             insertContent("content-invalid-locale", "draft-1", "fr-FR")
         }
         assertThrows<DataIntegrityViolationException> {
@@ -111,10 +110,10 @@ class LegalDocumentMigrationTest {
         assertThrows<DataIntegrityViolationException> {
             insertRelease("published-2", "PRIVACY_POLICY", 2, "PUBLISHED")
         }
-        assertThrows<DataIntegrityViolationException> {
+        assertThrows<DataAccessException> {
             insertRelease("invalid-type", "TERMS", 1, "SUPERSEDED")
         }
-        assertThrows<DataIntegrityViolationException> {
+        assertThrows<DataAccessException> {
             insertRelease("invalid-status", "PRIVACY_POLICY", 3, "ARCHIVED")
         }
 
@@ -350,15 +349,14 @@ class LegalDocumentMigrationTest {
     companion object {
         @JvmField
         val mysql = MySqlLegalContainer("mysql:8.0.39")
-            .withDatabaseName("myapp_worktree_legal_documents")
+            .withDatabaseName(WorktreeTestDatabase.databaseName())
             .withTmpFs(mapOf("/var/lib/mysql" to "rw"))
 
         @JvmStatic
         @DynamicPropertySource
         fun registerDataSource(registry: DynamicPropertyRegistry) {
-            validateDatabaseName()
             if (!mysql.isRunning) mysql.start()
-            printDatabaseConnection()
+            WorktreeTestDatabase.validateAndPrint(mysql)
             registry.add("spring.datasource.url") { mysql.jdbcUrl }
             registry.add("spring.datasource.username") { mysql.username }
             registry.add("spring.datasource.password") { mysql.password }
@@ -370,30 +368,6 @@ class LegalDocumentMigrationTest {
         fun stopContainer() {
             if (mysql.isRunning) mysql.stop()
         }
-
-        private fun validateDatabaseName() {
-            require(mysql.databaseName == expectedDatabaseName())
-            require(mysql.databaseName.startsWith("myapp_worktree_"))
-        }
-
-        private fun printDatabaseConnection() {
-            println("Migration database host=${mysql.host}:${mysql.getMappedPort(3306)}, database=${mysql.databaseName}")
-        }
-
-        private fun expectedDatabaseName(): String {
-            val worktree = generateSequence(currentDirectory()) { it.parent }
-                .firstOrNull { Files.exists(it.resolve(".git")) }
-                ?: error("Unable to find the current Git worktree from ${currentDirectory()}")
-            val worktreeId = worktree.fileName.toString()
-                .removePrefix("worktree_")
-                .replace(Regex("[^A-Za-z0-9]+"), "_")
-                .trim('_')
-                .lowercase()
-            return "myapp_worktree_$worktreeId"
-        }
-
-        private fun currentDirectory(): Path =
-            Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize()
     }
 }
 

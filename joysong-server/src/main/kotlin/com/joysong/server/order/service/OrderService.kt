@@ -8,6 +8,8 @@ import com.joysong.server.review.service.ReviewService
 import com.joysong.server.discover.repository.DoctorProjectRepository
 import com.joysong.server.doctor.repository.DoctorRepository
 import com.joysong.server.institution.repository.InstitutionProjectRepository
+import com.joysong.server.institution.entity.InstitutionProjectEntity
+import com.joysong.server.discover.entity.DoctorProjectEntity
 import com.joysong.server.institution.repository.InstitutionRepository
 import com.joysong.server.institution.service.InstitutionProjectDetailResolver
 import com.joysong.server.identity.service.ManagementActor
@@ -68,6 +70,11 @@ class OrderService(
     private val orderBusinessNotificationDispatcher: OrderBusinessNotificationDispatcher,
     private val refundExecutionService: RefundExecutionService? = null
 ) {
+    private data class LockedBookableDoctorProject(
+        val institutionProject: InstitutionProjectEntity,
+        val doctorProject: DoctorProjectEntity
+    )
+
     private val secureRandom = SecureRandom()
 
     companion object {
@@ -117,16 +124,15 @@ class OrderService(
         require(!request.institutionProjectId.isNullOrBlank()) { "订单必须关联机构项目" }
         require(request.doctorId.isNotBlank()) { "订单必须关联医生" }
         require(request.consultantId.isNotBlank()) { "订单必须关联医美顾问" }
-        val project = projectRepository.findById(request.projectId)
-            .orElseThrow { IllegalArgumentException("项目不存在: ${request.projectId}") }
-
         val orderNo = generateOrderNo()
         val now = LocalDateTime.now()
 
         val institutionProjectId = request.institutionProjectId.trim()
-        val institutionProject = institutionProjectRepository.findById(institutionProjectId)
-            .orElseThrow { IllegalArgumentException("机构项目不存在: $institutionProjectId") }
-        require(institutionProject.isActive) { "机构项目已停用，暂不可预约" }
+        val lockedBookability = lockAndRequireBookableDoctorProject(request.doctorId, institutionProjectId)
+        val institutionProject = lockedBookability.institutionProject
+        val doctorProject = lockedBookability.doctorProject
+        val project = projectRepository.findById(request.projectId)
+            .orElseThrow { IllegalArgumentException("项目不存在: ${request.projectId}") }
         require(institutionProject.projectId == project.id) { "机构项目与所选项目不一致" }
         val effectiveProject = institutionProjectDetailResolver.resolve(institutionProject, project)
 
@@ -134,11 +140,6 @@ class OrderService(
             .orElseThrow { IllegalArgumentException("机构不存在: ${institutionProject.institutionId}") }
         require(institution.name.isNotBlank()) { "机构名称不能为空" }
 
-        val doctorProject = doctorProjectRepository.findByDoctorIdAndInstitutionProjectId(
-            request.doctorId,
-            institutionProject.id
-        ) ?: throw IllegalArgumentException("所选医生未加入该机构项目")
-        doctorInstitutionRelationshipService.requireActiveRelationshipForUpdate(request.doctorId, institution.id)
         val doctor = doctorRepository.findById(request.doctorId)
             .orElseThrow { IllegalArgumentException("医生不存在") }
         require(doctor.name.isNotBlank()) { "医生名称不能为空" }
@@ -224,6 +225,39 @@ class OrderService(
             businessNotificationService.orderCreated(saved.id, saved.userId, saved.consultantId)
         }
         return OrderResponse.from(saved)
+    }
+
+    @Transactional(rollbackFor = [Exception::class])
+    fun quoteTravelGroundService(doctorId: String, institutionProjectId: String): TravelGroundServiceQuote {
+        val locked = try {
+            lockAndRequireBookableDoctorProject(doctorId, institutionProjectId)
+        } catch (_: IllegalArgumentException) {
+            throw IllegalArgumentException("DOCTOR_PROJECT_NOT_CONFIGURED")
+        } catch (_: AccessDeniedException) {
+            throw IllegalArgumentException("DOCTOR_PROJECT_NOT_CONFIGURED")
+        }
+        return travelGroundServicePricing.quote(locked.doctorProject.price)
+    }
+
+    private fun lockAndRequireBookableDoctorProject(
+        doctorId: String,
+        institutionProjectId: String
+    ): LockedBookableDoctorProject {
+        val identity = institutionProjectRepository.findIdentityById(institutionProjectId)
+            ?: throw IllegalArgumentException("机构项目不存在: $institutionProjectId")
+        doctorInstitutionRelationshipService.requireActiveRelationshipForUpdate(doctorId, identity.institutionId)
+        val institutionProject = institutionProjectRepository.findForUpdate(institutionProjectId)
+            ?: throw IllegalArgumentException("机构项目不存在: $institutionProjectId")
+        require(
+            institutionProject.institutionId == identity.institutionId &&
+                institutionProject.projectId == identity.projectId
+        ) { "机构项目关联信息已变更，请重试" }
+        require(institutionProject.isActive) { "机构项目已停用，暂不可预约" }
+        val doctorProject = doctorProjectRepository.findForUpdate(doctorId, institutionProjectId)
+            ?: throw IllegalArgumentException("所选医生未加入该机构项目")
+        require(doctorProject.projectId == institutionProject.projectId) { "医生项目与机构项目不一致" }
+        require(doctorProject.isActive) { "所选医生服务已停用，暂不可预约" }
+        return LockedBookableDoctorProject(institutionProject, doctorProject)
     }
 
     /**

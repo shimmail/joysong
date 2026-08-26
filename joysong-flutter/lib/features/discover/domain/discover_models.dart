@@ -125,6 +125,47 @@ final class DiscoverPageResult {
   final bool hasMore;
 }
 
+class InstitutionProjectPreviewModel {
+  const InstitutionProjectPreviewModel({
+    required this.name,
+    required this.institutionName,
+    required this.price,
+    required this.currency,
+    required this.salesCount,
+    required this.tags,
+    required this.slogan,
+    required this.description,
+    required this.detailContent,
+    required this.coverImage,
+    required this.images,
+  });
+
+  final String name;
+  final String institutionName;
+  final double price;
+  final String currency;
+  final int salesCount;
+  final List<String> tags;
+  final String? slogan;
+  final String? description;
+  final String? detailContent;
+  final String? coverImage;
+  final List<String> images;
+}
+
+List<String> institutionProjectPreviewImages({
+  String? coverImage,
+  Iterable<String> gallery = const [],
+}) {
+  final seen = <String>{};
+  final images = <String>[];
+  for (final value in [coverImage, ...gallery]) {
+    final url = value?.trim() ?? '';
+    if (url.isNotEmpty && seen.add(url)) images.add(url);
+  }
+  return List.unmodifiable(images);
+}
+
 Map<String, Object?> _nestedEntity(
   Map<String, Object?> map,
   DiscoverContentType type,

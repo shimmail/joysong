@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import org.springframework.dao.CannotAcquireLockException
 import org.springframework.dao.DataIntegrityViolationException
 import java.time.LocalDateTime
 
@@ -64,6 +65,17 @@ class LegalDocumentServiceTest {
     fun `create draft converts a release uniqueness violation into a legal conflict`() {
         every { releaseRepository.findAllByDocumentTypeForUpdate(LegalDocumentType.USER_AGREEMENT) } returns emptyList()
         every { releaseRepository.saveAndFlush(any()) } throws DataIntegrityViolationException("duplicate draft")
+
+        assertThrows<LegalDocumentConflictException> {
+            service.createDraft(LegalDocumentType.USER_AGREEMENT, "admin-1")
+        }
+        verify(exactly = 0) { contentRepository.saveAll(any<List<LegalDocumentContentEntity>>()) }
+    }
+
+    @Test
+    fun `create draft converts an initial draft insertion deadlock into a legal conflict`() {
+        every { releaseRepository.findAllByDocumentTypeForUpdate(LegalDocumentType.USER_AGREEMENT) } returns emptyList()
+        every { releaseRepository.saveAndFlush(any()) } throws CannotAcquireLockException("initial draft deadlock")
 
         assertThrows<LegalDocumentConflictException> {
             service.createDraft(LegalDocumentType.USER_AGREEMENT, "admin-1")

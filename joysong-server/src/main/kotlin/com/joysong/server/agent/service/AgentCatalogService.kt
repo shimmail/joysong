@@ -9,6 +9,7 @@ import com.joysong.server.discover.service.DiscoverSearchService
 import com.joysong.server.discover.service.DiscoverSearchRequest
 import com.joysong.server.discover.service.RequestedEntityType
 import com.joysong.server.discover.repository.DoctorProjectRepository
+import com.joysong.server.discover.repository.PublicDoctorProjectView
 import com.joysong.server.institution.entity.InstitutionEntity
 import com.joysong.server.institution.entity.InstitutionProjectEntity
 import com.joysong.server.institution.repository.InstitutionProjectRepository
@@ -39,6 +40,12 @@ private data class EffectiveCatalogOffering(
     val detail: ProjectEntity
 )
 
+private data class PublicCatalogOfferings(
+    val offerings: List<InstitutionProjectEntity>,
+    val bindings: List<PublicDoctorProjectView>,
+    val minimumPrices: Map<String, java.math.BigDecimal>
+)
+
 data class ConsultableInstitutionSelection(
     val items: List<AgentCatalogItemResponse>,
     val requestedInstitutionUnavailable: Boolean
@@ -66,8 +73,7 @@ class AgentCatalogService(
         if (normalizedQuery.length < 2) return false
         val projects = projectRepository.findAll().associateBy { it.id }
         val terms = discoverSearchService.extractMatchingFragments(query)
-        return institutionProjectRepository.findAll().asSequence()
-            .filter { it.isActive }
+        return loadPublicCatalogOfferings().offerings.asSequence()
             .any { offering ->
                 val project = projects[offering.projectId] ?: return@any false
                 offeringMatchesQuery(
@@ -195,6 +201,9 @@ class AgentCatalogService(
                 else offerings.distinctBy { it.second.institutionId }
             }
             .take(requestedCount)
+        val publicCatalog = loadPublicCatalogOfferings()
+        val projectMinimumPrices = publicCatalog.bindings.groupBy { it.projectId }
+            .mapValues { (_, bindings) -> bindings.minOf { it.price } }
 
         val offeringInstitutions = if (reportTarget == ReportTarget.INSTITUTION) {
             institutionRepository.findAllById(discoveredOfferings.map { it.second.institutionId })
@@ -209,7 +218,7 @@ class AgentCatalogService(
         val relatedDoctorIds = if (reportTarget == ReportTarget.DOCTOR && discoveredProjects.isNotEmpty()) {
             val discoveredProjectIds = discoveredProjects.map { it.id }.toSet()
             val offeringIds = discoveredOfferings.map { it.second.id }.toSet()
-            doctorProjectRepository.findAll()
+            publicCatalog.bindings
                 .filter { it.projectId in discoveredProjectIds || it.institutionProjectId in offeringIds }
                 .map { it.doctorId }
                 .distinct()
@@ -253,7 +262,7 @@ class AgentCatalogService(
             .filter { it.name.isNotBlank() && effectiveSearchQuery.contains(it.name, true) }
             .map { it.id }
             .toSet()
-        val allInstitutionProjects = institutionProjectRepository.findAll().filter { it.isActive }
+        val allInstitutionProjects = publicCatalog.offerings
         val allInstitutions = institutionRepository.findAll().associateBy { it.id }
         val allProjectsById = projectRepository.findAll().associateBy { it.id }
         val directSearchTerms = discoverSearchService.extractMatchingFragments(effectiveSearchQuery)
@@ -361,7 +370,8 @@ class AgentCatalogService(
                     summary = project.description.takeUnless { mode == "COMPARISON" }.orEmpty(),
                     attributes = linkedMapOf(
                         AgentText.value("项目分类", "Category") to project.category,
-                        AgentText.value("项目参考价", "Reference price") to "$${project.referencePrice.toPlainString()}",
+                        AgentText.value("项目参考价", "Reference price") to
+                            "$${projectMinimumPrices.getValue(project.id).toPlainString()}",
                         AgentText.value("评分", "Rating") to project.rating.toPlainString(),
                         AgentText.value("标签", "Tags") to project.tags
                     ).filterValues { it.isNotBlank() },
@@ -379,8 +389,10 @@ class AgentCatalogService(
                     attributes = linkedMapOf(
                         AgentText.value("城市", "City") to institution.city,
                         AgentText.value("项目分类", "Category") to effective.category,
-                        AgentText.value("机构价格", "Clinic price") to "$${offering.price.toPlainString()}",
-                        AgentText.value("项目参考价", "Reference price") to "$${project.referencePrice.toPlainString()}",
+                        AgentText.value("机构价格", "Clinic price") to
+                            "$${publicCatalog.minimumPrices.getValue(offering.id).toPlainString()}",
+                        AgentText.value("项目参考价", "Reference price") to
+                            "$${publicCatalog.minimumPrices.getValue(offering.id).toPlainString()}",
                         AgentText.value("评分", "Rating") to effective.rating.toPlainString(),
                         AgentText.value("评价数", "Review count") to effective.reviewCount.toString(),
                         AgentText.value("销量", "Sales") to offering.salesCount.toString(),
@@ -491,8 +503,7 @@ class AgentCatalogService(
         val doctors = doctorRepository.findAll()
         val projectMap = projects.associateBy { it.id }
         val institutionMap = institutions.associateBy { it.id }
-        val effectiveOfferings = institutionProjectRepository.findAll().asSequence()
-            .filter { it.isActive }
+        val effectiveOfferings = loadPublicCatalogOfferings().offerings.asSequence()
             .mapNotNull { offering ->
                 val project = projectMap[offering.projectId] ?: return@mapNotNull null
                 EffectiveCatalogOffering(
@@ -545,6 +556,19 @@ class AgentCatalogService(
         val normalizedTerms = terms.map { it.trim().lowercase() }.filter { it.length >= 2 }
         return atomicValues.any(normalizedQuery::contains) ||
             searchable.contains(normalizedQuery) || normalizedTerms.any(searchable::contains)
+    }
+
+    private fun loadPublicCatalogOfferings(): PublicCatalogOfferings {
+        val activeOfferings = institutionProjectRepository.findAll().filter { it.isActive }
+        if (activeOfferings.isEmpty()) return PublicCatalogOfferings(emptyList(), emptyList(), emptyMap())
+        val bindings = doctorProjectRepository.findPublicByInstitutionProjectIds(activeOfferings.map { it.id })
+        val minimumPrices = bindings.groupBy { it.institutionProjectId }
+            .mapValues { (_, values) -> values.minOf { it.price } }
+        return PublicCatalogOfferings(
+            offerings = activeOfferings.filter { it.id in minimumPrices },
+            bindings = bindings,
+            minimumPrices = minimumPrices
+        )
     }
 
     private fun offeringAtomicValues(

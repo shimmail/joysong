@@ -5,6 +5,8 @@ import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
+import 'package:joysong_flutter/features/identity/presentation/identity_error_messages.dart';
+import 'package:joysong_flutter/features/identity/presentation/institution_project_review_widgets.dart';
 import 'package:joysong_flutter/features/identity/presentation/institution_relationships_page.dart';
 
 class DoctorSelfProfilePage extends StatefulWidget {
@@ -774,6 +776,7 @@ class InstitutionProjectRequestsPage extends StatefulWidget {
     required this.context,
     this.reviewMode = false,
     this.pickAndUploadImage,
+    this.onRefreshManagementContext,
     super.key,
   });
 
@@ -781,6 +784,7 @@ class InstitutionProjectRequestsPage extends StatefulWidget {
   final ManagementContext context;
   final bool reviewMode;
   final Future<String?> Function()? pickAndUploadImage;
+  final Future<ManagementContext?> Function()? onRefreshManagementContext;
 
   @override
   State<InstitutionProjectRequestsPage> createState() =>
@@ -810,6 +814,7 @@ class _InstitutionProjectRequestsPageState
   String? _error;
   var _loading = true;
   var _saving = false, _uploading = false, _reviewing = false;
+  var _reviewAccessRevoked = false;
   late ManagementContext _currentContext;
 
   @override
@@ -924,7 +929,11 @@ class _InstitutionProjectRequestsPageState
   }
 
   bool _canReview(ProfessionalProjectRequest request) {
-    if (!widget.reviewMode || !request.isCreationReviewable) return false;
+    if (_reviewAccessRevoked ||
+        !widget.reviewMode ||
+        !request.isCreationReviewable) {
+      return false;
+    }
     if (_currentContext.platformRole == 'ADMIN') return true;
     return _currentContext.canReviewInstitutionProjectRequests &&
         request.institutionId != null &&
@@ -1114,17 +1123,96 @@ class _InstitutionProjectRequestsPageState
                         style: TextStyle(
                             color: Theme.of(context).colorScheme.error)),
                   if (widget.reviewMode)
-                    for (final request in _requests)
-                      _professionalRequestSnapshot(
-                        context,
-                        request,
-                        canReview: _canReview(request),
-                        reviewEnabled: !_reviewing,
-                        onReview: () => _review(request),
+                    for (final entry in _creationReviewGroups.entries)
+                      InstitutionProjectReviewGroup(
+                        institutionId: entry.key,
+                        institutionName: entry.value.first.institutionName,
+                        items: entry.value,
+                        onOpen: _openCreationDetail,
+                        summaryDetailsBuilder: _creationSummaryDetails,
+                        summaryActionBuilder: _creationSummaryAction,
                       ),
                 ],
               ),
       );
+
+  Map<String, List<InstitutionProjectReviewItem>> get _creationReviewGroups {
+    final groups = <String, List<InstitutionProjectReviewItem>>{};
+    for (final request in _requests) {
+      final item = InstitutionProjectReviewItem.fromCreation(request);
+      groups.putIfAbsent(item.institutionId, () => []).add(item);
+    }
+    return groups;
+  }
+
+  ProfessionalProjectRequest _creationRequest(
+    InstitutionProjectReviewItem item,
+  ) =>
+      _requests.firstWhere((request) => request.id == item.id);
+
+  Widget _creationSummaryDetails(
+    BuildContext context,
+    InstitutionProjectReviewItem item,
+  ) {
+    final request = _creationRequest(item);
+    final rows = [
+      '${context.localized('申请编号', 'Request ID')}：${request.id}',
+      '${context.localized('机构编号', 'Institution ID')}：${_snapshotText(context, request.institutionId)}',
+      '${context.localized('申请医生编号', 'Applicant doctor ID')}：${request.doctorId}',
+      '${context.localized('当前医生名称', 'Current doctor name')}：${_snapshotText(context, request.doctorName)}',
+      '${context.localized('当前机构名称', 'Current institution name')}：${_snapshotText(context, request.institutionName)}',
+      '${context.localized('平台项目编号', 'Platform project ID')}：${_snapshotText(context, request.projectId)}',
+      '${context.localized('当前平台项目名称', 'Current platform project name')}：${_snapshotText(context, request.projectName)}',
+      '${context.localized('项目标语', 'Slogan')}：${_snapshotText(context, request.slogan)}',
+      '${context.localized('项目详情', 'Detail')}：${_snapshotText(context, request.detailContent)}',
+      '${context.localized('封面图', 'Cover')}：${_snapshotText(context, request.coverImage)}',
+      '${context.localized('项目图片', 'Images')}：${_snapshotItems(context, request.images)}',
+      '${context.localized('分类标签', 'Category tags')}：${_snapshotItems(context, request.categoryTags)}',
+      '${context.localized('医生项目价格（USD）', 'Doctor project price (USD)')}：${_formatUsd(request.price)}',
+      '${context.localized('旅游地接服务费', 'Travel ground service fee')}：${_travelGroundServiceFeeValue(request.price, request.institutionSplit?.platformRate)}',
+      '${context.localized('审核意见', 'Review note')}：${_snapshotText(context, request.reviewNote)}',
+      '${context.localized('审核人', 'Reviewed by')}：${_snapshotText(context, request.reviewedBy)}',
+      '${context.localized('生成平台项目', 'Resulting platform project')}：${_snapshotText(context, request.resultingProjectId)}',
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [for (final row in rows) Text(row)],
+    );
+  }
+
+  Widget _creationSummaryAction(
+    BuildContext context,
+    InstitutionProjectReviewItem item,
+  ) {
+    final request = _creationRequest(item);
+    if (!_canReview(request) || !item.valid) return const SizedBox.shrink();
+    return FilledButton.tonalIcon(
+      key: Key('review-creation-${request.id}'),
+      onPressed: _reviewing ? null : () => _review(request),
+      icon: const Icon(Icons.fact_check_outlined),
+      label: Text(context.localized('审核', 'Review')),
+    );
+  }
+
+  void _openCreationDetail(InstitutionProjectReviewItem item) {
+    final request = _creationRequest(item);
+    Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => InstitutionProjectReviewDetailPage(
+        item: item,
+        actions: _canReview(request) && item.valid
+            ? Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton.tonalIcon(
+                  key: Key('creation-detail-review-${request.id}'),
+                  onPressed: _reviewing ? null : () => _review(request),
+                  icon: const Icon(Icons.fact_check_outlined),
+                  label: Text(context.localized('审核', 'Review')),
+                ),
+              )
+            : null,
+      ),
+    ));
+  }
 
   Future<void> _submit() async {
     if (_saving || _uploading) return;
@@ -1242,7 +1330,32 @@ class _InstitutionProjectRequestsPageState
       await _load();
     } on ApiException catch (error) {
       if (!mounted) return;
-      if (error.httpStatus == 409) {
+      if (identityProjectErrorAction(error) ==
+          IdentityProjectErrorAction.permissionExit) {
+        setState(() {
+          _reviewAccessRevoked = true;
+          _error = identityErrorMessage(
+            error,
+            operation: IdentityErrorOperation.review,
+            resolve: context.localized,
+          );
+        });
+        final refreshed = await widget.onRefreshManagementContext?.call();
+        if (!mounted) return;
+        if (refreshed != null) {
+          setState(() {
+            _currentContext = refreshed;
+            _requests = _requests.where(_isVisible).toList(growable: false);
+          });
+        }
+        final canStillReview = refreshed != null &&
+            (refreshed.platformRole == 'ADMIN' ||
+                (refreshed.canReviewInstitutionProjectRequests &&
+                    request.institutionId != null &&
+                    refreshed.managedInstitutionIds
+                        .contains(request.institutionId)));
+        if (!canStillReview) _exitCreationReviewSurface();
+      } else if (error.httpStatus == 409) {
         final refreshed = await _refreshRequests();
         if (!mounted) return;
         setState(() => _error = refreshed
@@ -1262,6 +1375,19 @@ class _InstitutionProjectRequestsPageState
     } finally {
       if (mounted) setState(() => _reviewing = false);
     }
+  }
+
+  void _exitCreationReviewSurface() {
+    final pageRoute = ModalRoute.of(context);
+    final navigator = Navigator.of(context);
+    if (pageRoute == null) {
+      navigator.maybePop();
+      return;
+    }
+    navigator.popUntil(
+      (route) => identical(route, pageRoute) || route.isFirst,
+    );
+    if (pageRoute.isCurrent && navigator.canPop()) navigator.pop();
   }
 
   void _selectProject(String projectId) {
@@ -1521,7 +1647,8 @@ class _DoctorProjectProfileUpdatePageState
     BuildContext context,
     DoctorProjectProfileUpdateTarget target,
   ) {
-    final pending = _hasPending(target);
+    final pendingRequest = _pendingRequest(target);
+    final pending = pendingRequest != null;
     return ListTile(
       title: Text(target.projectName),
       subtitle: Column(
@@ -1530,7 +1657,18 @@ class _DoctorProjectProfileUpdatePageState
           Text(
             '${context.localized('当前价格', 'Current price')}: USD ${target.currentPrice}',
           ),
-          if (pending) const Text('PENDING'),
+          Text(
+            key: Key('doctor-project-active-${target.institutionProjectId}'),
+            '${context.localized('医生上架状态', 'Doctor active')}: ${target.currentDoctorActive ? context.localized('已上架', 'Active') : context.localized('未上架', 'Inactive')}',
+          ),
+          Text(
+            key: Key(
+              'doctor-project-request-status-${target.institutionProjectId}',
+            ),
+            pending
+                ? pendingRequest.status
+                : context.localized('暂无待审核申请', 'No pending request'),
+          ),
         ],
       ),
       trailing: PopupMenuButton<String>(
@@ -1559,15 +1697,25 @@ class _DoctorProjectProfileUpdatePageState
   }
 
   bool _hasPending(DoctorProjectProfileUpdateTarget target) {
+    return _pendingRequest(target) != null;
+  }
+
+  DoctorProjectChangeRequest? _pendingRequest(
+    DoctorProjectProfileUpdateTarget target,
+  ) {
     final doctorId = _doctorProfile?.id.trim();
-    return _requests.any(
-      (request) =>
-          request.institutionProjectId == target.institutionProjectId &&
+    for (final request in _requests) {
+      final requestType = request.requestType.trim().toUpperCase();
+      if (request.institutionProjectId == target.institutionProjectId &&
           request.status.trim().toUpperCase() == 'PENDING' &&
+          const {'EDIT', 'PROFILE_UPDATE', 'LEAVE'}.contains(requestType) &&
           (doctorId == null ||
               doctorId.isEmpty ||
-              request.doctorId == doctorId),
-    );
+              request.doctorId == doctorId)) {
+        return request;
+      }
+    }
+    return null;
   }
 
   Future<void> _edit(DoctorProjectProfileUpdateTarget target) async {
@@ -1579,6 +1727,7 @@ class _DoctorProjectProfileUpdatePageState
           repository: widget.repository,
           target: target,
           pickAndUploadImage: widget.pickAndUploadImage,
+          onContractConflict: _load,
         ),
       ),
     );
@@ -1625,9 +1774,8 @@ class _DoctorProjectProfileUpdatePageState
       _saving = true;
       _error = null;
     });
-    late final DoctorProjectChangeRequest request;
     try {
-      request = await widget.repository.submitDoctorProjectLeave(
+      await widget.repository.submitDoctorProjectLeave(
         institutionProjectId: target.institutionProjectId,
       );
     } catch (_) {
@@ -1642,8 +1790,9 @@ class _DoctorProjectProfileUpdatePageState
     if (!mounted) return;
     setState(() {
       _saving = false;
-      _rememberPending(request);
     });
+    await _load();
+    if (!mounted) return;
     showTransientMessage(
       context,
       context.localized(
@@ -1666,11 +1815,13 @@ class _DoctorProjectProfileUpdateFormPage extends StatefulWidget {
     required this.repository,
     required this.target,
     required this.pickAndUploadImage,
+    required this.onContractConflict,
   });
 
   final IdentityRepository repository;
   final DoctorProjectProfileUpdateTarget target;
   final Future<String?> Function()? pickAndUploadImage;
+  final Future<void> Function() onContractConflict;
 
   @override
   State<_DoctorProjectProfileUpdateFormPage> createState() =>
@@ -1679,13 +1830,19 @@ class _DoctorProjectProfileUpdateFormPage extends StatefulWidget {
 
 class _DoctorProjectProfileUpdateFormPageState
     extends State<_DoctorProjectProfileUpdateFormPage> {
+  late final TextEditingController _name;
+  late final TextEditingController _category;
   late final TextEditingController _price;
   late final TextEditingController _description;
   late final TextEditingController _tags;
-  late final TextEditingController _schedule;
+  late final TextEditingController _slogan;
+  late final TextEditingController _detailContent;
+  late final TextEditingController _salesCount;
   late final TextEditingController _notes;
   late String _cover;
   late List<String> _images;
+  late bool _doctorActive;
+  final _editedSharedFields = <String>{};
   bool _saving = false, _uploading = false;
   String? _error;
 
@@ -1693,22 +1850,36 @@ class _DoctorProjectProfileUpdateFormPageState
   void initState() {
     super.initState();
     final target = widget.target;
+    final snapshot = target.currentProject;
+    _name = TextEditingController(text: snapshot?.name ?? target.projectName);
+    _category = TextEditingController(text: snapshot?.category ?? '');
     _price = TextEditingController(text: '${target.currentPrice}');
-    _description = TextEditingController(text: target.serviceDescription);
-    _tags = TextEditingController(text: target.serviceTags.join(', '));
-    _schedule = TextEditingController(text: target.scheduleNote);
+    _description = TextEditingController(
+      text: snapshot?.description ?? target.serviceDescription,
+    );
+    _tags = TextEditingController(
+      text: (snapshot?.tags ?? target.serviceTags).join(', '),
+    );
+    _slogan = TextEditingController(text: snapshot?.slogan ?? '');
+    _detailContent = TextEditingController(text: snapshot?.detailContent ?? '');
+    _salesCount = TextEditingController(text: '${snapshot?.salesCount ?? 0}');
     _notes = TextEditingController();
-    _cover = target.coverImage;
-    _images = List<String>.of(target.images);
+    _cover = snapshot?.coverImage ?? target.coverImage;
+    _images = List<String>.of(snapshot?.images ?? target.images);
+    _doctorActive = target.currentDoctorActive;
   }
 
   @override
   void dispose() {
     for (final controller in [
+      _name,
+      _category,
       _price,
       _description,
       _tags,
-      _schedule,
+      _slogan,
+      _detailContent,
+      _salesCount,
       _notes,
     ]) {
       controller.dispose();
@@ -1726,11 +1897,37 @@ class _DoctorProjectProfileUpdateFormPageState
         body: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            Text(
-              '${widget.target.institutionName} · ${widget.target.projectName}',
-              style: Theme.of(context).textTheme.titleMedium,
+            Card(
+              child: Column(
+                children: [
+                  ListTile(
+                    key: const Key('profile-update-institution-association'),
+                    title: Text(
+                      '${context.localized('机构', 'Institution')}: ${widget.target.institutionName}',
+                    ),
+                  ),
+                  ListTile(
+                    key: const Key('profile-update-platform-association'),
+                    title: Text(
+                      '${context.localized('平台项目', 'Platform project')}: ${widget.target.platformProjectName}',
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 16),
+            _requestField(
+              _name,
+              context.localized('项目名称', 'Project name'),
+              fieldKey: const Key('profile-update-name'),
+              onChanged: (_) => _editedSharedFields.add('name'),
+            ),
+            _requestField(
+              _category,
+              context.localized('项目分类', 'Category'),
+              fieldKey: const Key('profile-update-category'),
+              onChanged: (_) => _editedSharedFields.add('category'),
+            ),
             _requestField(
               _price,
               context.localized('医生项目价格（USD）', 'Doctor project price (USD)'),
@@ -1749,15 +1946,29 @@ class _DoctorProjectProfileUpdateFormPageState
             _requestField(
               _description,
               context.localized('项目展示说明', 'Display description'),
+              fieldKey: const Key('profile-update-description'),
               maxLines: 4,
+              onChanged: (_) => _editedSharedFields.add('description'),
             ),
             _requestField(
               _tags,
-              context.localized('服务标签（逗号分隔）', 'Service tags (comma separated)'),
+              context.localized(
+                  '服务标签（逗号分隔）', 'Service tags (comma separated)'),
+              fieldKey: const Key('profile-update-tags'),
+              onChanged: (_) => _editedSharedFields.add('tags'),
             ),
             _requestField(
-              _schedule,
-              context.localized('排期说明', 'Schedule note'),
+              _slogan,
+              context.localized('项目标语', 'Slogan'),
+              fieldKey: const Key('profile-update-slogan'),
+              onChanged: (_) => _editedSharedFields.add('slogan'),
+            ),
+            _requestField(
+              _detailContent,
+              context.localized('项目详情（纯文本）', 'Detail (plain text)'),
+              fieldKey: const Key('profile-update-detail-content'),
+              maxLines: 6,
+              onChanged: (_) => _editedSharedFields.add('detailContent'),
             ),
             _imageUploadField(
               context,
@@ -1770,7 +1981,10 @@ class _DoctorProjectProfileUpdateFormPageState
               enabled: !_busy && widget.pickAndUploadImage != null,
               removeEnabled: !_busy,
               onAdd: () => _uploadImage(cover: true),
-              onRemove: (_) => setState(() => _cover = ''),
+              onRemove: (_) => setState(() {
+                _cover = '';
+                _editedSharedFields.add('coverImage');
+              }),
             ),
             _imageUploadField(
               context,
@@ -1786,11 +2000,28 @@ class _DoctorProjectProfileUpdateFormPageState
               onRemove: (value) => setState(() {
                 final images = List<String>.of(_images)..remove(value);
                 _images = images;
+                _editedSharedFields.add('images');
               }),
+            ),
+            _requestField(
+              _salesCount,
+              context.localized('销量', 'Sales count'),
+              fieldKey: const Key('profile-update-sales-count'),
+              keyboardType: TextInputType.number,
+            ),
+            SwitchListTile(
+              key: const Key('profile-update-doctor-active'),
+              contentPadding: EdgeInsets.zero,
+              title: Text(context.localized('医生上架', 'Doctor active')),
+              value: _doctorActive,
+              onChanged: _busy
+                  ? null
+                  : (value) => setState(() => _doctorActive = value),
             ),
             _requestField(
               _notes,
               context.localized('申请说明', 'Request note'),
+              fieldKey: const Key('profile-update-notes'),
               maxLines: 3,
             ),
             if (_error != null) ...[
@@ -1830,8 +2061,10 @@ class _DoctorProjectProfileUpdateFormPageState
       setState(() {
         if (cover) {
           _cover = image;
+          _editedSharedFields.add('coverImage');
         } else {
           _images = [..._images, image];
+          _editedSharedFields.add('images');
         }
       });
     } catch (_) {
@@ -1846,23 +2079,70 @@ class _DoctorProjectProfileUpdateFormPageState
 
   Future<void> _submit() async {
     final price = num.tryParse(_price.text.trim());
-    if (price == null) {
+    final salesCount = int.tryParse(_salesCount.text.trim());
+    if (price == null || salesCount == null) {
       setState(() => _error = context.localized(
-          '请填写有效的医生项目价格', 'Enter a valid doctor project price.'));
+          '请填写有效的医生项目价格与销量',
+          'Enter a valid doctor project price and sales count.'));
       return;
     }
     final target = widget.target;
+    final snapshot = target.currentProject;
+    final baseRevision = target.baseRevision;
+    if (target.payloadVersion != 2 ||
+        snapshot == null ||
+        baseRevision == null ||
+        baseRevision.trim().isEmpty) {
+      setState(() => _error = context.localized(
+          '项目资料版本无效，请刷新后重试', 'Invalid project data. Refresh and retry.'));
+      return;
+    }
     final draft = DoctorProjectProfileUpdateDraft(
       institutionProjectId: target.institutionProjectId,
-      priceSuggestion: price,
-      serviceDescription: _description.text,
-      serviceTags: _csv(_tags.text),
-      scheduleNote: _schedule.text,
-      coverImage: _cover,
-      images: List<String>.of(_images, growable: false),
-      consultationFee: target.consultationFee,
-      commissionRate: target.commissionRate,
-      institutionRate: target.institutionRate,
+      baseRevision: baseRevision,
+      name: _textOverride(
+        _name.text,
+        raw: snapshot.rawOverrides['name'] as String?,
+        edited: _editedSharedFields.contains('name'),
+      ),
+      category: _textOverride(
+        _category.text,
+        raw: snapshot.rawOverrides['category'] as String?,
+        edited: _editedSharedFields.contains('category'),
+      ),
+      description: _textOverride(
+        _description.text,
+        raw: snapshot.rawOverrides['description'] as String?,
+        edited: _editedSharedFields.contains('description'),
+      ),
+      tags: _itemsOverride(
+        _csv(_tags.text),
+        raw: _rawStringList(snapshot.rawOverrides['tags']),
+        edited: _editedSharedFields.contains('tags'),
+      ),
+      slogan: _textOverride(
+        _slogan.text,
+        raw: snapshot.rawOverrides['slogan'] as String?,
+        edited: _editedSharedFields.contains('slogan'),
+      ),
+      detailContent: _textOverride(
+        _detailContent.text,
+        raw: snapshot.rawOverrides['detailContent'] as String?,
+        edited: _editedSharedFields.contains('detailContent'),
+      ),
+      price: price,
+      salesCount: salesCount,
+      doctorActive: _doctorActive,
+      coverImage: _textOverride(
+        _cover,
+        raw: snapshot.rawOverrides['coverImage'] as String?,
+        edited: _editedSharedFields.contains('coverImage'),
+      ),
+      images: _itemsOverride(
+        _images,
+        raw: _rawStringList(snapshot.rawOverrides['images']),
+        edited: _editedSharedFields.contains('images'),
+      ),
       platformRate: target.platformRate,
       notes: _notes.text,
     );
@@ -1882,10 +2162,16 @@ class _DoctorProjectProfileUpdateFormPageState
       if (mounted) Navigator.of(context).pop(request);
     } on ApiException catch (error) {
       if (!mounted) return;
-      setState(() => _error = error.httpStatus == 409
-          ? context.localized('当前资料或待审核申请已变化，请刷新后重新申请',
-              'The profile or pending request changed. Refresh and submit again.')
-          : error.message);
+      if (const {'EDIT_BASE_STALE', 'REQUEST_ALREADY_PENDING'}
+          .contains(error.errorCode)) {
+        await widget.onContractConflict();
+        if (!mounted) return;
+        setState(() => _error = context.localized(
+            '当前资料或待审核申请已变化，请刷新后重新申请',
+            'The profile or pending request changed. Refresh and submit again.'));
+      } else {
+        setState(() => _error = error.message);
+      }
     } catch (_) {
       if (mounted) {
         setState(() => _error = context.localized(
@@ -1895,6 +2181,32 @@ class _DoctorProjectProfileUpdateFormPageState
       if (mounted) setState(() => _saving = false);
     }
   }
+
+  String? _textOverride(
+    String value, {
+    required String? raw,
+    required bool edited,
+  }) {
+    if (!edited) return raw;
+    final normalized = value.trim();
+    if (normalized.isEmpty) return null;
+    return normalized;
+  }
+
+  List<String>? _itemsOverride(
+    List<String> value, {
+    required List<String>? raw,
+    required bool edited,
+  }) {
+    if (!edited) return raw;
+    final normalized = List<String>.of(value, growable: false);
+    if (normalized.isEmpty) return null;
+    return normalized;
+  }
+
+  List<String>? _rawStringList(Object? value) => value == null
+      ? null
+      : List<String>.of((value as List).cast<String>(), growable: false);
 }
 
 List<String> _csv(String value) => value
@@ -1907,11 +2219,13 @@ class DoctorProjectProfileReviewPage extends StatefulWidget {
   const DoctorProjectProfileReviewPage({
     required this.repository,
     required this.context,
+    this.onRefreshManagementContext,
     super.key,
   });
 
   final IdentityRepository repository;
   final ManagementContext context;
+  final Future<ManagementContext?> Function()? onRefreshManagementContext;
 
   @override
   State<DoctorProjectProfileReviewPage> createState() =>
@@ -1921,31 +2235,39 @@ class DoctorProjectProfileReviewPage extends StatefulWidget {
 class _DoctorProjectProfileReviewPageState
     extends State<DoctorProjectProfileReviewPage> {
   List<DoctorProjectChangeRequest> _requests = const [];
-  bool _loading = true, _submitting = false;
+  final _forceEligibleRequestIds = <String>{};
+  final _staleLockedRequestIds = <String>{};
+  final _submittingRequestIds = <String>{};
+  bool _loading = true, _accessRevoked = false, _exitAfterDetail = false;
   String? _error;
-  bool get _isAdmin => widget.context.platformRole == 'ADMIN';
+  late ManagementContext _currentContext;
+  bool get _isAdmin => _currentContext.platformRole == 'ADMIN';
 
   @override
   void initState() {
     super.initState();
+    _currentContext = widget.context;
     _load();
   }
 
-  Future<void> _load() async {
+  Future<bool> _load({bool preserveError = false}) async {
     setState(() {
       _loading = true;
-      _error = null;
+      if (!preserveError) _error = null;
     });
     try {
       final requests =
           await widget.repository.listDoctorProjectChangeRequests();
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() {
         _requests = requests
-            .where((request) => request.requestType == 'PROFILE_UPDATE')
+            .where((request) => request.isProfileUpdate || request.isLeave)
+            .where(_isVisible)
             .toList(growable: false);
+        _staleLockedRequestIds.clear();
         _loading = false;
       });
+      return true;
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -1954,185 +2276,194 @@ class _DoctorProjectProfileReviewPageState
               'Failed to load profile update requests. Please retry.');
         });
       }
+      return false;
     }
   }
 
-  @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(
-            title: Text(context.localized(
-                '医生项目资料审核', 'Doctor project profile reviews'))),
-        body: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : RefreshIndicator(
-                onRefresh: _load,
-                child: ListView(
-                  padding: const EdgeInsets.all(16),
-                  children: [
-                    if (_error != null) ...[
-                      Text(_error!,
-                          style: TextStyle(
-                              color: Theme.of(context).colorScheme.error)),
-                      TextButton(
-                          onPressed: _load,
-                          child: Text(context.localized('重试', 'Retry'))),
-                    ],
-                    if (_requests.isEmpty && _error == null)
-                      Text(context.localized('暂无医生项目资料变更申请',
-                          'No doctor project profile update requests.')),
-                    for (final request in _requests)
-                      Card(
-                          child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                  '${request.institutionName} · ${request.projectName}',
-                                  style:
-                                      Theme.of(context).textTheme.titleMedium),
-                              Text(
-                                  '${context.localized('医生', 'Doctor')}: ${request.doctorName}'),
-                              Text(
-                                  '${context.localized('状态', 'Status')}: ${request.status}'),
-                              const Divider(),
-                              Text(
-                                  context.localized(
-                                      '提交时当前值', 'Current values at submission'),
-                                  style:
-                                      Theme.of(context).textTheme.titleSmall),
-                              Text(
-                                  '${context.localized('医生项目价格（USD）', 'Doctor project price (USD)')}: ${_formatUsd(request.currentPrice)}'),
-                              Text(
-                                  '${context.localized('旅游地接服务费', 'Travel ground service fee')}: ${_travelGroundServiceFeeValue(request.currentPrice, request.currentPlatformRate)}'),
-                              Text(
-                                  '${context.localized('项目展示说明', 'Display description')}: ${request.currentServiceDescription ?? '-'}'),
-                              Text(
-                                  '${context.localized('标签', 'Tags')}: ${request.currentServiceTags?.join(', ') ?? '-'}'),
-                              Text(
-                                  '${context.localized('排期', 'Schedule')}: ${request.currentScheduleNote ?? '-'}'),
-                              const Divider(),
-                              Text(context.localized('申请值', 'Proposed values'),
-                                  style:
-                                      Theme.of(context).textTheme.titleSmall),
-                              Text(
-                                  '${context.localized('医生项目价格（USD）', 'Doctor project price (USD)')}: ${_formatUsd(request.priceSuggestion)}'),
-                              Text(
-                                  '${context.localized('旅游地接服务费', 'Travel ground service fee')}: ${_travelGroundServiceFeeValue(request.priceSuggestion, request.platformRate)}'),
-                              Text(
-                                  '${context.localized('项目展示说明', 'Display description')}: ${request.serviceDescription}'),
-                              Text(
-                                  '${context.localized('标签', 'Tags')}: ${request.serviceTags.join(', ')}'),
-                              Text(
-                                  '${context.localized('排期', 'Schedule')}: ${request.scheduleNote}'),
-                              if (request.forceProcessed)
-                                Text(context.localized('已由管理员强制处理',
-                                    'Force-processed by an administrator')),
-                              if (request.status == 'PENDING') ...[
-                                const SizedBox(height: 12),
-                                Wrap(spacing: 8, runSpacing: 8, children: [
-                                  FilledButton(
-                                      key: Key('approve-${request.id}'),
-                                      onPressed: _submitting
-                                          ? null
-                                          : () => _review(
-                                              request, 'APPROVED', false),
-                                      child: Text(
-                                          context.localized('批准', 'Approve'))),
-                                  OutlinedButton(
-                                      key: Key('reject-${request.id}'),
-                                      onPressed: _submitting
-                                          ? null
-                                          : () => _review(
-                                              request, 'REJECTED', false),
-                                      child: Text(
-                                          context.localized('驳回', 'Reject'))),
-                                  OutlinedButton(
-                                      key: Key('changes-${request.id}'),
-                                      onPressed: _submitting
-                                          ? null
-                                          : () => _review(request,
-                                              'CHANGES_REQUESTED', false),
-                                      child: Text(context.localized(
-                                          '要求修改', 'Request changes'))),
-                                  if (_isAdmin)
-                                    FilledButton.tonal(
-                                        key: Key('force-${request.id}'),
-                                        onPressed: _submitting
-                                            ? null
-                                            : () => _review(
-                                                request, 'APPROVED', true),
-                                        child: Text(context.localized(
-                                            '强制批准', 'Force approve'))),
-                                ]),
-                              ],
-                            ]),
-                      )),
-                  ],
-                )),
-      );
+  bool _isVisible(DoctorProjectChangeRequest request) {
+    if (_isAdmin) return true;
+    return _currentContext.managedInstitutionIds.contains(request.institutionId);
+  }
 
-  Future<void> _review(
-      DoctorProjectChangeRequest request, String decision, bool force) async {
-    final result = await _showProfileReviewDialog(context,
-        decision: decision, force: force);
-    if (result == null) return;
+  @override
+  Widget build(BuildContext context) {
+    final groups = <String, List<InstitutionProjectReviewItem>>{};
+    for (final request in _requests) {
+      final item = InstitutionProjectReviewItem.fromDoctorChange(request);
+      groups.putIfAbsent(item.institutionId, () => []).add(item);
+    }
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(context.localized(
+          '医生项目资料审核',
+          'Doctor project profile reviews',
+        )),
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: () async {
+                await _load();
+              },
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  if (_error != null) ...[
+                    Text(
+                      _error!,
+                      style: TextStyle(
+                          color: Theme.of(context).colorScheme.error),
+                    ),
+                    TextButton(
+                      onPressed: _load,
+                      child: Text(context.localized('重试', 'Retry')),
+                    ),
+                  ],
+                  if (_accessRevoked)
+                    Text(context.localized(
+                      '审核权限已失效，操作已关闭',
+                      'Review access was revoked. Actions are disabled.',
+                    )),
+                  if (_requests.isEmpty && _error == null)
+                    Text(context.localized(
+                      '暂无医生项目资料变更申请',
+                      'No doctor project profile update requests.',
+                    )),
+                  for (final entry in groups.entries)
+                    InstitutionProjectReviewGroup(
+                      institutionId: entry.key,
+                      institutionName: entry.value.first.institutionName,
+                      items: entry.value,
+                      onOpen: _openDetail,
+                    ),
+                ],
+              ),
+            ),
+    );
+  }
+
+  void _openDetail(InstitutionProjectReviewItem item) {
+    final request = _requests.firstWhere((request) => request.id == item.id);
+    final allowForce = _isAdmin &&
+        _forceEligibleRequestIds.contains(request.id) &&
+        request.latestRevision != null &&
+        item.latestPreview != null;
+    Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => InstitutionProjectReviewDetailPage(
+        item: item,
+        showLatest: allowForce,
+        actions: request.status == 'PENDING'
+            ? InstitutionProjectReviewActions(
+                item: item,
+                enabled: !_accessRevoked &&
+                    item.valid &&
+                    request.reviewable &&
+                    !_staleLockedRequestIds.contains(request.id) &&
+                    !_submittingRequestIds.contains(request.id),
+                allowForce: allowForce,
+                onSubmit: (decision, note, force) async {
+                  final close =
+                      await _review(request, decision, note, force);
+                  if (close && _exitAfterDetail) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted) Navigator.of(context).maybePop();
+                    });
+                  }
+                  return close;
+                },
+              )
+            : null,
+      ),
+    ));
+  }
+
+  Future<bool> _review(DoctorProjectChangeRequest request, String decision,
+      String note, bool force) async {
+    if (_submittingRequestIds.contains(request.id) || _accessRevoked) {
+      return false;
+    }
     setState(() {
-      _submitting = true;
+      _submittingRequestIds.add(request.id);
       _error = null;
     });
     try {
       await widget.repository.reviewDoctorProjectChangeRequest(
-          id: request.id, decision: decision, reviewNote: result, force: force);
+        id: request.id,
+        decision: decision,
+        reviewNote: note,
+        force: force,
+        forceBaseRevision: force ? request.latestRevision : null,
+      );
+
       await _load();
-    } catch (_) {
-      if (mounted) {
-        setState(() => _error = context.localized('审核提交失败，请刷新后重试',
-            'Failed to submit the review. Refresh and retry.'));
+      return true;
+    } on ApiException catch (error) {
+      if (!mounted) return true;
+      final action = identityProjectErrorAction(error);
+      if (action == IdentityProjectErrorAction.permissionExit) {
+        setState(() => _accessRevoked = true);
+        final refreshed = await widget.onRefreshManagementContext?.call();
+        if (!mounted) return true;
+        if (refreshed != null) {
+          setState(() {
+            _currentContext = refreshed;
+            _requests = _requests.where(_isVisible).toList(growable: false);
+          });
+        }
+        final canStillReview = refreshed != null &&
+            (refreshed.platformRole == 'ADMIN' ||
+                (refreshed.canReviewInstitutionProjectRequests &&
+                    refreshed.managedInstitutionIds
+                        .contains(request.institutionId)));
+        _exitAfterDetail = !canStillReview;
+      } else if (action != IdentityProjectErrorAction.none) {
+        setState(() {
+          _forceEligibleRequestIds.remove(request.id);
+          _staleLockedRequestIds.add(request.id);
+        });
+        final refreshed = await _load(preserveError: true);
+        if (!mounted) return true;
+        if (refreshed &&
+            action == IdentityProjectErrorAction.offerForce &&
+            _isAdmin) {
+          DoctorProjectChangeRequest? latest;
+          for (final candidate in _requests) {
+            if (candidate.id == request.id) {
+              latest = candidate;
+              break;
+            }
+          }
+          if (latest != null &&
+              latest.status == 'PENDING' &&
+              latest.reviewable &&
+              latest.latestRevision != null) {
+            _forceEligibleRequestIds.add(request.id);
+          }
+        }
       }
+      if (mounted) {
+        setState(() => _error = identityErrorMessage(
+              error,
+              operation: IdentityErrorOperation.review,
+              resolve: context.localized,
+            ));
+      }
+      return true;
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = identityErrorMessage(
+              error,
+              operation: IdentityErrorOperation.review,
+              resolve: context.localized,
+            ));
+      }
+      return true;
     } finally {
-      if (mounted) setState(() => _submitting = false);
+      if (mounted) {
+        setState(() => _submittingRequestIds.remove(request.id));
+      }
     }
   }
-}
-
-Future<String?> _showProfileReviewDialog(BuildContext context,
-    {required String decision, required bool force}) async {
-  final note = TextEditingController();
-  final accepted = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-            title: Text(force
-                ? context.localized('确认强制批准', 'Confirm force approval')
-                : context.localized('提交审核', 'Submit review')),
-            content: Column(mainAxisSize: MainAxisSize.min, children: [
-              if (force)
-                Text(context.localized('强制批准会绕过关系失效或基线漂移阻断，但仍原子更新本人项目。此操作会被审计。',
-                    'Force approval bypasses relationship or baseline drift checks, while retaining atomic scoped updates. This action is audited.')),
-              TextField(
-                  key: const Key('profile-review-note'),
-                  controller: note,
-                  decoration: InputDecoration(
-                      labelText: context.localized('审核说明', 'Review note')),
-                  maxLines: 3),
-            ]),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(dialogContext, false),
-                  child: Text(context.localized('取消', 'Cancel'))),
-              FilledButton(
-                  onPressed: () {
-                    if ((force || decision != 'APPROVED') &&
-                        note.text.trim().isEmpty) {
-                      return;
-                    }
-                    Navigator.pop(dialogContext, true);
-                  },
-                  child: Text(context.localized('确认', 'Confirm'))),
-            ],
-          ));
-  final value = note.text.trim();
-  return accepted == true ? value : null;
 }
 
 class _InstitutionProjectJoinRequestsPageState

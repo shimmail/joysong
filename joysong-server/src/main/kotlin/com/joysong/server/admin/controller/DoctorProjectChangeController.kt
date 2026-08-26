@@ -1,9 +1,15 @@
 package com.joysong.server.admin.controller
 
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.joysong.server.common.BaseResponse
+import com.joysong.server.config.ProjectChangeCompatibilityProperties
 import com.joysong.server.identity.service.ManagementAccessService
 import com.joysong.server.institution.service.DoctorProjectChangeRequest
 import com.joysong.server.institution.service.DoctorProjectChangeService
+import com.joysong.server.institution.service.ProjectChangeContractException
+import com.joysong.server.institution.service.ProjectChangeErrorCode
+import org.springframework.http.HttpStatus
 import org.springframework.security.core.Authentication
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -11,15 +17,14 @@ import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
-import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.ObjectMapper
 
 @RestController
 @RequestMapping("/api/admin/institution-project-requests")
 class DoctorProjectChangeController(
     private val service: DoctorProjectChangeService,
     private val managementAccessService: ManagementAccessService,
-    private val objectMapper: ObjectMapper
+    private val objectMapper: ObjectMapper,
+    private val compatibilityProperties: ProjectChangeCompatibilityProperties
 ) {
     @GetMapping("/profile-update-targets")
     fun listProfileUpdateTargets(authentication: Authentication): BaseResponse<*> =
@@ -33,9 +38,21 @@ class DoctorProjectChangeController(
     fun submit(
         authentication: Authentication,
         @RequestBody body: JsonNode
-    ): BaseResponse<*> = BaseResponse.success(
-        service.submit(managementAccessService.actor(authentication), parseRequest(body))
-    )
+    ): BaseResponse<*> {
+        val request = parseRequest(body)
+        if (request.requestType.trim().uppercase() == "PROFILE_UPDATE" &&
+            !compatibilityProperties.v1ProfileUpdateEnabled
+        ) {
+            throw ProjectChangeContractException(
+                HttpStatus.UPGRADE_REQUIRED,
+                ProjectChangeErrorCode.CLIENT_UPGRADE_REQUIRED,
+                "当前客户端版本不再支持项目资料修改，请升级客户端"
+            )
+        }
+        return BaseResponse.success(
+            service.submit(managementAccessService.actor(authentication), request)
+        )
+    }
 
     private fun parseRequest(body: JsonNode): DoctorProjectChangeRequest {
         require(body.isObject) { "请求内容格式不正确" }

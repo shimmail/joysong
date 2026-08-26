@@ -192,7 +192,7 @@ class SplitConfigProposalService(
             VALUES (?, ?, ?, ?, ?, ?, NULL)
             ON DUPLICATE KEY UPDATE
                 consultation_fee = VALUES(consultation_fee), commission_rate = VALUES(commission_rate),
-                institution_rate = VALUES(institution_rate), deleted_at = NULL, updated_at = NOW()
+                institution_rate = VALUES(institution_rate), deleted_at = NULL, updated_at = CURRENT_TIMESTAMP(6)
             """.trimIndent(),
             configId,
             target.doctorId,

@@ -1,11 +1,15 @@
 package com.joysong.server.institution.service
 
 import com.joysong.server.config.OrderSplitProperties
+import com.joysong.server.support.WorktreeTestDatabase
 import com.joysong.server.discover.repository.DoctorProjectRepository
 import com.joysong.server.identity.service.DoctorInstitutionRelationshipService
+import com.joysong.server.identity.service.InstitutionRelationshipReviewAuthorityService
 import com.joysong.server.identity.service.ManagementActor
 import com.joysong.server.order.repository.DoctorInstitutionProjectConfigRepository
 import com.joysong.server.order.service.OrderSplitRatePolicy
+import com.joysong.server.order.service.TravelGroundServicePricing
+import com.joysong.server.project.service.InstitutionProjectPayloadPolicy
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Tag
@@ -29,6 +33,8 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
+import org.springframework.cache.CacheManager
+import org.springframework.cache.concurrent.ConcurrentMapCacheManager
 
 @Tag("mysql-integration")
 @Testcontainers
@@ -43,7 +49,16 @@ import org.springframework.context.annotation.Bean
     "order.split.institution-rate=40.00"
 ])
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import(DoctorProjectChangeService::class, DoctorInstitutionRelationshipService::class, OrderSplitRatePolicy::class, OrderSplitProperties::class, ProfileUpdatePersistenceTestConfig::class)
+@Import(
+    DoctorProjectChangeService::class,
+    DoctorInstitutionRelationshipService::class,
+    InstitutionRelationshipReviewAuthorityService::class,
+    OrderSplitRatePolicy::class,
+    TravelGroundServicePricing::class,
+    InstitutionProjectPayloadPolicy::class,
+    OrderSplitProperties::class,
+    ProfileUpdatePersistenceTestConfig::class
+)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class DoctorProjectProfileUpdatePersistenceTest {
@@ -53,7 +68,7 @@ class DoctorProjectProfileUpdatePersistenceTest {
     @Test
     @Order(1)
     fun `fresh migrations and approval atomically update only target doctor`() {
-        assertEquals(((1..15).toList() + listOf(17, 18, 19)).map(Int::toString), jdbc.queryForList(
+        assertEquals((26..33).map(Int::toString), jdbc.queryForList(
             "SELECT version FROM flyway_schema_history WHERE success = 1 AND version IS NOT NULL ORDER BY installed_rank",
             String::class.java
         ))
@@ -90,6 +105,8 @@ class DoctorProjectProfileUpdatePersistenceTest {
 
     private fun seed() {
         jdbc.update("DELETE FROM doctor_project_change_requests")
+        jdbc.update("DELETE FROM institution_memberships")
+        jdbc.update("DELETE FROM user_roles")
         jdbc.update("DELETE FROM doctor_institution_project_configs")
         jdbc.update("DELETE FROM doctor_projects")
         jdbc.update("DELETE FROM doctor_institutions")
@@ -99,8 +116,10 @@ class DoctorProjectProfileUpdatePersistenceTest {
         jdbc.update("DELETE FROM institutions")
         jdbc.update("DELETE FROM users")
         jdbc.update("INSERT INTO users (id,password_hash,nickname) VALUES ('doctor-1','x','D1'),('doctor-2','x','D2'),('legal-1','x','L')")
+        jdbc.update("INSERT INTO user_roles (user_id,role_code,status) VALUES ('legal-1','INSTITUTION_LEGAL_REPRESENTATIVE','ACTIVE')")
         jdbc.update("INSERT INTO doctors (id,name,is_verified) VALUES ('doctor-1','D1',1),('doctor-2','D2',1)")
         jdbc.update("INSERT INTO institutions (id,name,is_verified) VALUES ('institution-1','I',1)")
+        jdbc.update("INSERT INTO institution_memberships (id,user_id,institution_id,member_role,status) VALUES ('membership-legal','legal-1','institution-1','INSTITUTION_LEGAL_REPRESENTATIVE','APPROVED')")
         jdbc.update("INSERT INTO projects (id,name) VALUES ('project-1','P')")
         jdbc.update("INSERT INTO institution_projects (id,institution_id,project_id,is_active) VALUES ('ip-1','institution-1','project-1',1)")
         jdbc.update("INSERT INTO doctor_institutions (id,doctor_id,institution_id,status) VALUES ('di-1','doctor-1','institution-1','APPROVED'),('di-2','doctor-2','institution-1','APPROVED')")
@@ -112,7 +131,8 @@ class DoctorProjectProfileUpdatePersistenceTest {
         institutionProjectId="ip-1", requestType="PROFILE_UPDATE", serviceDescription="after",
         priceSuggestion=BigDecimal("880.00"), serviceTags=listOf("new"), scheduleNote="schedule",
         coverImage="cover", images=listOf("image"), consultationFee=BigDecimal("30.00"),
-        commissionRate=BigDecimal("10.00"), institutionRate=BigDecimal("40.00")
+        commissionRate=BigDecimal("10.00"), institutionRate=BigDecimal("40.00"),
+        medicalListPrice=BigDecimal("880.00")
     )
 
     private fun doctorActor() = ManagementActor("doctor-1", false, setOf("DOCTOR"), "doctor-1", emptySet(), setOf("institution-1"), setOf("doctor-1"))
@@ -121,11 +141,9 @@ class DoctorProjectProfileUpdatePersistenceTest {
     private fun text(sql: String): String = jdbc.queryForObject(sql, String::class.java)!!
 
     companion object {
-        private const val DB_NAME = "myapp_worktree_doctor_profile_update_request"
-
         @Container @ServiceConnection @JvmField
         val mysql = DoctorProjectProfileUpdateMySqlContainer("mysql:8.0.39")
-            .withDatabaseName(DB_NAME)
+            .withDatabaseName(WorktreeTestDatabase.databaseName())
             .withTmpFs(mapOf("/var/lib/mysql" to "rw"))
     }
 }
@@ -133,13 +151,12 @@ class DoctorProjectProfileUpdatePersistenceTest {
 @TestConfiguration
 class ProfileUpdatePersistenceTestConfig {
     @Bean fun objectMapper(): ObjectMapper = jacksonObjectMapper()
+    @Bean fun cacheManager(): CacheManager = ConcurrentMapCacheManager("discover", "home", "projects")
 }
 
 class DoctorProjectProfileUpdateMySqlContainer(imageName: String) : MySQLContainer<DoctorProjectProfileUpdateMySqlContainer>(imageName) {
     override fun start() {
-        require(databaseName == "myapp_worktree_doctor_profile_update_request")
         super.start()
-        println("DOCTOR_PROFILE_UPDATE_TEST_DB_HOST=$host:${getMappedPort(3306)}")
-        println("DOCTOR_PROFILE_UPDATE_TEST_DB_NAME=$databaseName")
+        WorktreeTestDatabase.validateAndPrint(this)
     }
 }

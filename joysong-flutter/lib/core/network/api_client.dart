@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:joysong_flutter/core/network/api_exception.dart';
+import 'package:joysong_flutter/core/network/api_envelope.dart';
 
 typedef AccessTokenProvider = Future<String?> Function();
 typedef UnauthorizedHandler = Future<String?> Function();
@@ -272,7 +273,7 @@ class ApiClient {
           await utf8.decoder.bind(response).join().timeout(_requestTimeout);
       final successfulHttp = response.statusCode >= 200 &&
           response.statusCode < HttpStatus.multipleChoices;
-      _RawEnvelope? envelope;
+      ApiEnvelope<Object?>? envelope;
       try {
         envelope = _decodeEnvelope(text);
       } on FormatException {
@@ -287,6 +288,7 @@ class ApiClient {
               : _localizedServerMessage(envelope.message),
           httpStatus: response.statusCode,
           businessCode: envelope?.code,
+          errorCode: envelope?.errorCode,
         );
       }
       return envelope.hasData ? decodeData(envelope.data) : null;
@@ -359,7 +361,7 @@ class ApiClient {
           await utf8.decoder.bind(response).join().timeout(_requestTimeout);
       final successfulHttp = response.statusCode >= 200 &&
           response.statusCode < HttpStatus.multipleChoices;
-      _RawEnvelope? envelope;
+      ApiEnvelope<Object?>? envelope;
       try {
         envelope = _decodeEnvelope(text);
       } on FormatException {
@@ -394,6 +396,7 @@ class ApiClient {
               : _localizedServerMessage(envelope.message),
           httpStatus: response.statusCode,
           businessCode: envelope?.code,
+          errorCode: envelope?.errorCode,
         );
       }
       return envelope.hasData ? decodeData(envelope.data) : null;
@@ -497,7 +500,7 @@ class ApiClient {
     return parameters.isEmpty ? uri : uri.replace(queryParameters: parameters);
   }
 
-  _RawEnvelope _decodeEnvelope(String text) {
+  ApiEnvelope<Object?> _decodeEnvelope(String text) {
     if (text.trim().isEmpty) {
       throw const FormatException('响应体为空');
     }
@@ -505,16 +508,7 @@ class ApiClient {
     if (json is! Map<String, dynamic>) {
       throw const FormatException('响应不是 JSON 对象');
     }
-    final rawCode = json['code'];
-    if (rawCode is! num) {
-      throw const FormatException('响应缺少有效的 code');
-    }
-    return _RawEnvelope(
-      code: rawCode.toInt(),
-      message: json['message']?.toString() ?? '',
-      data: json['data'],
-      hasData: json.containsKey('data'),
-    );
+    return ApiEnvelope<Object?>.fromJson(json, (data) => data);
   }
 
   void _validateMultipartToken(String value, String label) {
@@ -552,20 +546,6 @@ final class MultipartFilePart {
   final String fileName;
   final String contentType;
   final List<int> bytes;
-}
-
-final class _RawEnvelope {
-  const _RawEnvelope({
-    required this.code,
-    required this.message,
-    required this.data,
-    required this.hasData,
-  });
-
-  final int code;
-  final String message;
-  final Object? data;
-  final bool hasData;
 }
 
 final class _IoStreamHttpRequest implements StreamHttpRequest {

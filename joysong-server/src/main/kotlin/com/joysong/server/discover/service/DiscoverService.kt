@@ -6,7 +6,6 @@ import com.joysong.server.discover.dto.DoctorResponse
 import com.joysong.server.discover.dto.toResponse
 import com.joysong.server.doctor.entity.DoctorEntity
 import com.joysong.server.doctor.repository.DoctorRepository
-import com.joysong.server.doctor.repository.DoctorInstitutionRepository
 import com.joysong.server.institution.entity.InstitutionProjectEntity
 import com.joysong.server.institution.repository.InstitutionProjectRepository
 import com.joysong.server.institution.service.InstitutionProjectDetailResolver
@@ -20,7 +19,6 @@ class DiscoverService(
     private val projectRepository: ProjectRepository,
     private val doctorProjectRepository: DoctorProjectRepository,
     private val doctorRepository: DoctorRepository,
-    private val doctorInstitutionRepository: DoctorInstitutionRepository,
     private val institutionProjectDetailResolver: InstitutionProjectDetailResolver
 ) {
 
@@ -28,7 +26,13 @@ class DiscoverService(
      * 获取某机构下的项目列表，批量查询 Project 避免 N+1
      */
     fun getInstitutionProjectsWithProject(institutionId: String): List<InstitutionProjectWithProject> {
-        val institutionProjects = institutionProjectRepository.findByInstitutionId(institutionId).filter { it.isActive }
+        val activeInstitutionProjects = institutionProjectRepository.findByInstitutionId(institutionId).filter { it.isActive }
+        if (activeInstitutionProjects.isEmpty()) return emptyList()
+        val minimumPrices = doctorProjectRepository
+            .findPublicByInstitutionProjectIds(activeInstitutionProjects.map { it.id })
+            .groupBy { it.institutionProjectId }
+            .mapValues { (_, bindings) -> bindings.minOf { it.price } }
+        val institutionProjects = activeInstitutionProjects.filter { it.id in minimumPrices }
         if (institutionProjects.isEmpty()) return emptyList()
 
         // 批量查询所有关联的 Project
@@ -39,7 +43,7 @@ class DiscoverService(
         return institutionProjects.mapNotNull { ip ->
             val project = projectMap[ip.projectId] ?: return@mapNotNull null
             InstitutionProjectWithProject(
-                institutionProject = ip.toResponse(),
+                institutionProject = ip.toResponse().copy(price = minimumPrices.getValue(ip.id)),
                 project = institutionProjectDetailResolver.resolve(ip, project).toResponse()
             )
         }
@@ -51,7 +55,7 @@ class DiscoverService(
     fun getDoctorsByInstitutionProject(institutionProjectId: String): List<DoctorResponse> {
         val institutionProject = institutionProjectRepository.findById(institutionProjectId).orElse(null)
         if (institutionProject?.isActive != true) return emptyList()
-        val doctorProjects = doctorProjectRepository.findByInstitutionProjectId(institutionProjectId)
+        val doctorProjects = doctorProjectRepository.findPublicByInstitutionProjectIds(listOf(institutionProjectId))
         if (doctorProjects.isEmpty()) return emptyList()
 
         // 批量查询所有关联的 Doctor
@@ -59,15 +63,6 @@ class DiscoverService(
         val doctorMap: Map<String, DoctorEntity> = doctorRepository.findAllById(doctorIds)
             .associateBy { it.id }
 
-        return doctorProjects.mapNotNull { dp ->
-            val activePractice = doctorInstitutionRepository
-                .findByDoctorIdOrderByCreatedAtAsc(dp.doctorId)
-                .any {
-                    it.institutionId == institutionProject.institutionId &&
-                        it.status == "APPROVED" &&
-                        it.revokedAt == null
-                }
-            if (!activePractice) null else doctorMap[dp.doctorId]?.toResponse(dp.price)
-        }
+        return doctorProjects.mapNotNull { dp -> doctorMap[dp.doctorId]?.toResponse(dp.price) }
     }
 }

@@ -31,17 +31,12 @@ class BaselineMigrationIntegrationTest {
     private lateinit var jdbcTemplate: JdbcTemplate
 
     @Test
-    fun `fresh database applies B26 baseline followed by V32_1`() {
+    fun `fresh database applies B26 baseline followed by migrations through V33`() {
         val history = jdbcTemplate.query(
             """
             SELECT version, type, script
             FROM flyway_schema_history
             WHERE success = 1 AND version IS NOT NULL
-              AND installed_rank <= (
-                  SELECT installed_rank
-                  FROM flyway_schema_history
-                  WHERE version = '32.1' AND success = 1
-              )
             ORDER BY installed_rank
             """.trimIndent()
         ) { rs, _ -> Triple(rs.getString("version"), rs.getString("type"), rs.getString("script")) }
@@ -55,7 +50,9 @@ class BaselineMigrationIntegrationTest {
                 Triple("30", "SQL", "V30__order_service_conversations.sql"),
                 Triple("31", "SQL", "V31__store_raw_payment_event_payload.sql"),
                 Triple("32", "SQL", "V32__payment_compensation_and_usd_price_precision.sql"),
-                Triple("32.1", "SQL", "V32_1__expand_notification_type_columns.sql")
+                Triple("32.1", "SQL", "V32_1__expand_notification_type_columns.sql"),
+                Triple("32.2", "SQL", "V32_2__add_legal_documents.sql"),
+                Triple("33", "SQL", "V33__doctor_institution_project_full_edit.sql")
             ),
             history
         )

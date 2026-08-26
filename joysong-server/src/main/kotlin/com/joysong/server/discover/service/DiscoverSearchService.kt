@@ -5,6 +5,7 @@ import com.joysong.server.discover.dto.ProjectWithInstitutionsResponse
 import com.joysong.server.doctor.entity.DoctorEntity
 import com.joysong.server.doctor.repository.DoctorRepository
 import com.joysong.server.doctor.service.DoctorInstitutionService
+import com.joysong.server.discover.repository.DoctorProjectRepository
 import com.joysong.server.institution.entity.InstitutionEntity
 import com.joysong.server.institution.repository.InstitutionProjectRepository
 import com.joysong.server.institution.repository.InstitutionRepository
@@ -18,6 +19,7 @@ class DiscoverSearchService(
     private val institutionRepository: InstitutionRepository,
     private val institutionProjectRepository: InstitutionProjectRepository,
     private val doctorRepository: DoctorRepository,
+    private val doctorProjectRepository: DoctorProjectRepository,
     private val keywordExtractor: DiscoverKeywordExtractor,
     private val doctorInstitutionService: DoctorInstitutionService,
     private val institutionProjectDetailResolver: InstitutionProjectDetailResolver
@@ -107,7 +109,13 @@ class DiscoverSearchService(
         tags: Collection<String>,
         fallbackWhenNoMatch: Boolean
     ): List<ProjectWithInstitutionsResponse> {
-        val allInstitutionProjects = institutionProjectRepository.findAll().filter { it.isActive }
+        val activeInstitutionProjects = institutionProjectRepository.findAll().filter { it.isActive }
+        val minimumPrices = activeInstitutionProjects.takeIf { it.isNotEmpty() }
+            ?.let { doctorProjectRepository.findPublicByInstitutionProjectIds(it.map { offering -> offering.id }) }
+            .orEmpty()
+            .groupBy { it.institutionProjectId }
+            .mapValues { (_, bindings) -> bindings.minOf { it.price } }
+        val allInstitutionProjects = activeInstitutionProjects.filter { it.id in minimumPrices }
         val institutionMap = institutionRepository.findAll().associateBy { it.id }
         val allProjects = projectRepository.findAll()
         val projectMap = allProjects.associateBy { it.id }
@@ -135,7 +143,7 @@ class DiscoverSearchService(
                     tags = effective.tags,
                     slogan = effective.slogan,
                     detailContent = effective.detailContent,
-                    price = offering.price,
+                    price = minimumPrices.getValue(offering.id),
                     originalPrice = offering.originalPrice,
                     currency = offering.currency,
                     coverImage = effective.coverImage,
@@ -154,7 +162,8 @@ class DiscoverSearchService(
             }.lowercase()
             val combinedSearchable = "$searchable $offeringSearchable"
             val projectCities = projectOfferings.map { it.institutionCity }
-            (categories.isEmpty() || categories.any { category ->
+            projectOfferings.isNotEmpty() &&
+                (categories.isEmpty() || categories.any { category ->
                 category.equals(project.category, true) || projectOfferings.any { category.equals(it.category, true) }
             }) &&
                 (cities.isEmpty() || projectCities.any { city -> cities.any { it.equals(city, true) } }) &&
@@ -182,14 +191,16 @@ class DiscoverSearchService(
             }.sortedWith(compareByDescending<com.joysong.server.project.entity.ProjectEntity> { it.rating }.thenByDescending { it.reviewCount }).take(3)
         } else matchedProjects
 
-        return selectedProjects.map { project ->
+        return selectedProjects.mapNotNull { project ->
             val offerings = offeringsByProject[project.id].orEmpty()
                 .filter { it.isActive && (cities.isEmpty() || cities.any { city -> city.equals(it.institutionCity, true) }) }
                 .sortedWith(compareByDescending<InstitutionProjectItemResponse> { it.salesCount }.thenBy { it.price })
+            if (offerings.isEmpty()) return@mapNotNull null
             ProjectWithInstitutionsResponse(
                 id = project.id, name = project.name, category = project.category,
                 description = project.description, tags = project.tags, categoryTags = project.categoryTags,
-                coverImage = project.coverImage, images = project.images, referencePrice = project.referencePrice, currency = project.currency,
+                coverImage = project.coverImage, images = project.images,
+                referencePrice = offerings.minOf { it.price }, currency = project.currency,
                 slogan = project.slogan, detailContent = project.detailContent, salesCount = project.salesCount,
                 rating = project.rating, reviewCount = project.reviewCount, institutionProjects = offerings
             )
@@ -266,8 +277,14 @@ class DiscoverSearchService(
                 .any { normalized.contains(it.lowercase()) }
         }) return true
         val projectMap = projects.associateBy { it.id }
-        return institutionProjectRepository.findAll().asSequence()
-            .filter { it.isActive }
+        val activeInstitutionProjects = institutionProjectRepository.findAll().filter { it.isActive }
+        val publicInstitutionProjectIds = activeInstitutionProjects.takeIf { it.isNotEmpty() }
+            ?.let { doctorProjectRepository.findPublicByInstitutionProjectIds(it.map { offering -> offering.id }) }
+            .orEmpty()
+            .map { it.institutionProjectId }
+            .toSet()
+        return activeInstitutionProjects.asSequence()
+            .filter { it.id in publicInstitutionProjectIds }
             .mapNotNull { offering ->
                 projectMap[offering.projectId]?.let { institutionProjectDetailResolver.resolve(offering, it) }
             }

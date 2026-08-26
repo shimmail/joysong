@@ -6,13 +6,289 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
+import 'package:joysong_flutter/features/discover/presentation/institution_project_preview_body.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
 import 'package:joysong_flutter/features/identity/presentation/identity_pages.dart';
+import 'package:joysong_flutter/features/identity/presentation/institution_project_review_widgets.dart';
 import 'package:joysong_flutter/features/identity/presentation/professional_request_pages.dart';
 
 void main() {
   setUp(() {});
+
+  test('preview adapters preserve snapshot, creation, and legacy contracts',
+      () {
+    const snapshot = DoctorInstitutionProjectSnapshot(
+      rawOverrides: {},
+      effective: {
+        'name': 'Effective facial',
+        'category': 'Skin',
+        'description': 'Effective description',
+        'tags': ['skin'],
+        'slogan': 'Effective slogan',
+        'detailContent': 'Effective detail',
+        'coverImage': ' cover.jpg ',
+        'images': ['gallery.jpg', 'cover.jpg', ' ', 'gallery-2.jpg'],
+        'salesCount': 18,
+      },
+      source: {},
+    );
+    final v2 = DoctorProjectChangeRequest(
+      id: 'v2',
+      doctorId: 'doctor',
+      doctorName: 'Dr. Chen',
+      institutionId: 'institution',
+      institutionName: 'Joysong Clinic',
+      institutionProjectId: 'ip',
+      projectName: 'Legacy name',
+      requestType: 'EDIT',
+      serviceDescription: '',
+      priceSuggestion: 0,
+      notes: '',
+      serviceTags: const [],
+      scheduleNote: '',
+      coverImage: '',
+      images: const [],
+      consultationFee: null,
+      commissionRate: null,
+      institutionRate: null,
+      platformRate: 10,
+      doctorRate: null,
+      forceProcessed: false,
+      status: 'PENDING',
+      reviewNote: null,
+      payloadVersion: 2,
+      proposedProject: snapshot,
+      proposedDoctorPrice: 321.25,
+    );
+    final v2Preview = InstitutionProjectPreviewAdapters.fromV2(v2);
+    expect(v2Preview.name, 'Effective facial');
+    expect(v2Preview.price, 321.25);
+    expect(v2Preview.currency, 'USD');
+    expect(v2Preview.images, ['cover.jpg', 'gallery.jpg', 'gallery-2.jpg']);
+
+    const creation = InstitutionProjectRequestDraft(
+      institutionId: 'institution',
+      projectId: 'platform-project',
+      name: 'Created facial',
+      description: 'Created description',
+      price: 88.5,
+      currency: 'CNY',
+      coverImage: 'created-cover.jpg',
+      images: ['created-cover.jpg', 'created-gallery.jpg'],
+      salesCount: 7,
+    );
+    final creationPreview = InstitutionProjectPreviewAdapters.fromCreation(
+        creation,
+        institutionName: 'Joysong Clinic');
+    expect(creationPreview.name, 'Created facial');
+    expect(creationPreview.currency, 'CNY');
+    expect(
+        creationPreview.images, ['created-cover.jpg', 'created-gallery.jpg']);
+
+    final v1 = DoctorProjectChangeRequest(
+      id: 'v1',
+      doctorId: 'doctor',
+      doctorName: 'Dr. Chen',
+      institutionId: 'institution',
+      institutionName: 'Joysong Clinic',
+      institutionProjectId: 'ip',
+      projectName: 'Legacy facial',
+      requestType: 'PROFILE_UPDATE',
+      serviceDescription: 'Legacy description',
+      priceSuggestion: 66,
+      notes: '',
+      serviceTags: const ['legacy'],
+      scheduleNote: 'Tuesday 10:00',
+      coverImage: 'legacy-cover.jpg',
+      images: const ['legacy-gallery.jpg'],
+      consultationFee: 0,
+      commissionRate: 0,
+      institutionRate: 0,
+      platformRate: 0,
+      doctorRate: 100,
+      forceProcessed: false,
+      status: 'PENDING',
+      reviewNote: null,
+      payloadVersion: 1,
+    );
+    final legacyPreview = InstitutionProjectPreviewAdapters.fromV1(v1);
+    expect(legacyPreview.model.name, 'Legacy facial');
+    expect(legacyPreview.scheduleNote, 'Tuesday 10:00');
+    expect(
+        legacyPreview.model.images, ['legacy-cover.jpg', 'legacy-gallery.jpg']);
+  });
+
+  testWidgets(
+    'institution creation reviews reuse grouped cards and the shared detail route',
+    (tester) async {
+      _useLargeSurface(tester);
+      final repository = _ProjectRequestRepository()
+        ..requests = [
+          _request(
+            id: 'creation-1',
+            type: 'INSTITUTION',
+            doctorId: 'doctor-1',
+            institutionId: 'inst-1',
+          ),
+          _request(
+            id: 'creation-2',
+            type: 'INSTITUTION',
+            doctorId: 'doctor-2',
+            institutionId: 'inst-1',
+          ),
+          _request(
+            id: 'creation-3',
+            type: 'INSTITUTION',
+            doctorId: 'doctor-2',
+            institutionId: 'inst-2',
+          ),
+        ];
+
+      await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+        repository: repository,
+        context: _adminContext,
+        reviewMode: true,
+      )));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('institution-review-group-inst-1')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('institution-review-group-inst-2')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('institution-review-card-creation-1')),
+        findsOneWidget,
+      );
+
+      await tester.tap(
+        find.byKey(const Key('institution-review-detail-creation-1')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(InstitutionProjectPreviewBody), findsOneWidget);
+      expect(find.text('Clinic Hydrating Facial creation-1'), findsOneWidget);
+      expect(find.text('Current values at submission'), findsNothing);
+      await tester.drag(find.byType(ListView).last, const Offset(0, -1200));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('这是新增申请，因此没有变更前快照。'),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('creation-detail-review-creation-1')),
+        findsWidgets,
+      );
+    },
+  );
+
+  testWidgets(
+    'institution creation review revokes access and refreshes management context on 403',
+    (tester) async {
+      _useLargeSurface(tester);
+      var refreshes = 0;
+      final repository = _ProjectRequestRepository()
+        ..requests = [
+          _request(
+            id: 'creation-403',
+            type: 'INSTITUTION',
+            doctorId: 'doctor-1',
+            institutionId: 'inst-1',
+          ),
+        ]
+        ..institutionReviewError = const ApiException(
+          message: 'forbidden server text',
+          httpStatus: 403,
+        );
+
+      await tester.pumpWidget(_app(InstitutionProjectRequestsPage(
+        repository: repository,
+        context: _legalContext,
+        reviewMode: true,
+        onRefreshManagementContext: () async {
+          refreshes++;
+          return _nonTargetLegalContext;
+        },
+      )));
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const Key('review-creation-creation-403')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('creation-review-confirm')));
+      await tester.pumpAndSettle();
+
+      expect(refreshes, 1);
+      expect(
+        find.byKey(const Key('review-creation-creation-403')),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets(
+    'fix round 1: creation 403 from detail exits detail and parent review routes',
+    (tester) async {
+      _useLargeSurface(tester);
+      final repository = _ProjectRequestRepository()
+        ..requests = [
+          _request(
+            id: 'creation-detail-403',
+            type: 'INSTITUTION',
+            doctorId: 'doctor-1',
+            institutionId: 'inst-1',
+          ),
+        ]
+        ..institutionReviewError = const ApiException(
+          message: 'detail permission revoked',
+          httpStatus: 403,
+        );
+
+      await tester.pumpWidget(_app(Builder(builder: (context) {
+        return Scaffold(
+          body: FilledButton(
+            key: const Key('open-creation-review-route'),
+            onPressed: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(
+                builder: (_) => InstitutionProjectRequestsPage(
+                  repository: repository,
+                  context: _legalContext,
+                  reviewMode: true,
+                  onRefreshManagementContext: () async =>
+                      _nonTargetLegalContext,
+                ),
+              ),
+            ),
+            child: const Text('Open creation reviews'),
+          ),
+        );
+      })));
+      await tester.tap(find.byKey(const Key('open-creation-review-route')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(
+          const Key('institution-review-detail-creation-detail-403'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final review = find.byKey(
+        const Key('creation-detail-review-creation-detail-403'),
+      );
+      await tester.ensureVisible(review.last);
+      await tester.tap(review.last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('creation-review-confirm')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(InstitutionProjectRequestsPage), findsNothing);
+      expect(find.byType(InstitutionProjectReviewDetailPage), findsNothing);
+    },
+  );
 
   testWidgets(
       'platform application keeps the complete ordered plain-text form and uses the injected cover/gallery uploader',

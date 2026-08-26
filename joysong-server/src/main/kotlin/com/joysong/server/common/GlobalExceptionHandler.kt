@@ -21,6 +21,7 @@ import com.joysong.server.identity.service.InstitutionMembershipRequestConflictE
 import com.joysong.server.identity.service.InstitutionMembershipRequestNotFoundException
 import com.joysong.server.institution.service.DoctorProjectChangeConflictException
 import com.joysong.server.institution.service.DoctorProjectChangeNotFoundException
+import com.joysong.server.institution.service.ProjectChangeContractException
 import com.joysong.server.article.service.ArticleNotFoundException
 import com.joysong.server.order.service.OrderManagementConflictException
 import com.joysong.server.order.service.OrderManagementNotFoundException
@@ -38,6 +39,11 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 class GlobalExceptionHandler {
 
     private val log = LoggerFactory.getLogger(javaClass)
+
+    @ExceptionHandler(ProjectChangeContractException::class)
+    fun handleProjectChangeContract(e: ProjectChangeContractException): ResponseEntity<BaseResponse<Nothing>> =
+        ResponseEntity.status(e.status)
+            .body(BaseResponse.error(e.message ?: "项目变更请求失败", e.status.value(), e.errorCode.name))
 
     @ExceptionHandler(HttpRequestMethodNotSupportedException::class)
     fun handleMethodNotSupported(): ResponseEntity<BaseResponse<Nothing>> =
@@ -233,6 +239,7 @@ class GlobalExceptionHandler {
         startsWith("/api/admin/") ||
             startsWith("/api/public/legal-documents/") ||
             startsWith("/legal/") ||
+            startsWith("/api/v2/admin/institution-project-requests") ||
             this == "/api/management/doctor-profile" ||
             startsWith("/api/management/institutions")
             || startsWith("/api/management/consultant-memberships")

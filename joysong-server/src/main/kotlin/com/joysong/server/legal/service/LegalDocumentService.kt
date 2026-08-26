@@ -16,6 +16,7 @@ import com.joysong.server.legal.entity.LegalDocumentType
 import com.joysong.server.legal.repository.LegalDocumentContentRepository
 import com.joysong.server.legal.repository.LegalDocumentReleaseRepository
 import org.springframework.cache.annotation.Cacheable
+import org.springframework.dao.CannotAcquireLockException
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -73,6 +74,8 @@ class LegalDocumentService(
         try {
             releaseRepository.saveAndFlush(release)
         } catch (e: DataIntegrityViolationException) {
+            throw LegalDocumentConflictException("协议草稿已被并发创建")
+        } catch (e: CannotAcquireLockException) {
             throw LegalDocumentConflictException("协议草稿已被并发创建")
         }
         contentRepository.saveAll(contents)

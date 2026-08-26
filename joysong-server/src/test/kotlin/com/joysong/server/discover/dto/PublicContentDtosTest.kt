@@ -6,7 +6,9 @@ import com.joysong.server.discover.service.DiscoverDetailService
 import com.joysong.server.discover.service.DiscoverService
 import com.joysong.server.home.service.HomeService
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
+import com.joysong.server.institution.entity.InstitutionProjectEntity
 import org.junit.jupiter.api.Test
 import org.springframework.cache.annotation.Cacheable
 import java.time.LocalDateTime
@@ -64,5 +66,20 @@ class PublicContentDtosTest {
             .filter { it.type.packageName.contains(".entity") }
 
         assertTrue(entityFields.isEmpty(), "Public DTOs must not contain JPA entity fields")
+    }
+
+    @Test
+    fun `inherited null institution media keeps the legacy public empty strings`() {
+        val response = InstitutionProjectEntity(
+            id = "institution-project-1",
+            institutionId = "institution-1",
+            projectId = "project-1",
+            price = java.math.BigDecimal("100.00"),
+            coverImage = null,
+            images = null
+        ).toResponse()
+
+        assertEquals("", response.coverImage)
+        assertEquals("", response.images)
     }
 }

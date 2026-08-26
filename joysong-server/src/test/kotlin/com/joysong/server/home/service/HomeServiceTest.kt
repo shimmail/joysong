@@ -3,8 +3,8 @@ package com.joysong.server.home.service
 import com.joysong.server.article.repository.ArticleRepository
 import com.joysong.server.banner.repository.BannerRepository
 import com.joysong.server.diary.repository.DiaryRepository
-import com.joysong.server.discover.entity.DoctorProjectEntity
 import com.joysong.server.discover.repository.DoctorProjectRepository
+import com.joysong.server.discover.repository.PublicDoctorProjectView
 import com.joysong.server.institution.entity.InstitutionEntity
 import com.joysong.server.institution.entity.InstitutionProjectEntity
 import com.joysong.server.institution.repository.InstitutionProjectRepository
@@ -37,28 +37,74 @@ class HomeServiceTest {
         doctorProjectRepository = doctorProjectRepository
     )
 
+    private fun publicBinding(
+        doctorId: String,
+        institutionProjectId: String,
+        projectId: String,
+        price: String
+    ): PublicDoctorProjectView = mockk<PublicDoctorProjectView>().also { binding ->
+        every { binding.doctorId } returns doctorId
+        every { binding.projectId } returns projectId
+        every { binding.institutionProjectId } returns institutionProjectId
+        every { binding.price } returns BigDecimal(price)
+    }
+
     @Test
-    fun `recommended projects use database limited query and batch load relations`() {
+    fun `recommended projects filter unavailable high sales entries before top eight limit`() {
+        val unavailable = (1..8).map { index ->
+            InstitutionProjectEntity(
+                id = "ip-unavailable-$index",
+                institutionId = "institution-1",
+                projectId = "project-unavailable-$index",
+                price = BigDecimal("100"),
+                salesCount = 100 - index
+            )
+        }
+        val available = InstitutionProjectEntity(
+            id = "ip-available",
+            institutionId = "institution-1",
+            projectId = "project-available",
+            price = BigDecimal("1000"),
+            salesCount = 1
+        )
+        val ordered = unavailable + available
+        every { institutionProjectRepository.findByIsActiveTrueOrderBySalesCountDesc() } returns ordered
+        every { doctorProjectRepository.findPublicByInstitutionProjectIds(ordered.map { it.id }) } returns listOf(
+            publicBinding("doctor-1", "ip-available", "project-available", "700")
+        )
+        every { projectRepository.findAllById(listOf("project-available")) } returns listOf(
+            ProjectEntity("project-available", "Available")
+        )
+        every { institutionRepository.findAllById(listOf("institution-1")) } returns listOf(
+            InstitutionEntity("institution-1", "Institution")
+        )
+
+        val result = service.getRecommendedInstitutionProjects()
+
+        assertEquals(listOf("ip-available"), result.map { it.institutionProjectId })
+        assertEquals(BigDecimal("700"), result.single().price)
+        verify(exactly = 0) { institutionProjectRepository.findTop8ByIsActiveTrueOrderBySalesCountDesc() }
+    }
+
+    @Test
+    fun `recommended projects use sales ordered query and batch load relations`() {
         val institutionProject = InstitutionProjectEntity(
             id = "ip-1", institutionId = "institution-1", projectId = "project-1",
             price = BigDecimal("1000"), salesCount = 9
         )
-        every { institutionProjectRepository.findTop8ByIsActiveTrueOrderBySalesCountDesc() } returns listOf(institutionProject)
+        every { institutionProjectRepository.findByIsActiveTrueOrderBySalesCountDesc() } returns listOf(institutionProject)
         every { projectRepository.findAllById(listOf("project-1")) } returns listOf(ProjectEntity("project-1", "Project"))
         every { institutionRepository.findAllById(listOf("institution-1")) } returns listOf(InstitutionEntity("institution-1", "Institution"))
-        every { doctorProjectRepository.findActiveByInstitutionProjectId("ip-1") } returns listOf(
-            DoctorProjectEntity(
-                doctorId = "doctor-1",
-                institutionProjectId = "ip-1",
-                price = BigDecimal("800")
-            )
+        every { doctorProjectRepository.findPublicByInstitutionProjectIds(listOf("ip-1")) } returns listOf(
+            publicBinding("doctor-1", "ip-1", "project-1", "800")
         )
 
         val result = service.getRecommendedInstitutionProjects()
 
         assertEquals(1, result.size)
         assertEquals("ip-1", result.single().institutionProjectId)
-        verify(exactly = 1) { institutionProjectRepository.findTop8ByIsActiveTrueOrderBySalesCountDesc() }
+        verify(exactly = 1) { institutionProjectRepository.findByIsActiveTrueOrderBySalesCountDesc() }
+        verify(exactly = 0) { institutionProjectRepository.findTop8ByIsActiveTrueOrderBySalesCountDesc() }
         verify(exactly = 0) { institutionProjectRepository.findAll() }
         verify(exactly = 1) { projectRepository.findAllById(listOf("project-1")) }
         verify(exactly = 1) { institutionRepository.findAllById(listOf("institution-1")) }
@@ -78,27 +124,19 @@ class HomeServiceTest {
             projectId = "project-2",
             price = BigDecimal("100")
         )
-        every { institutionProjectRepository.findTop8ByIsActiveTrueOrderBySalesCountDesc() } returns
+        every { institutionProjectRepository.findByIsActiveTrueOrderBySalesCountDesc() } returns
             listOf(pricedProject, unboundProject)
-        every { projectRepository.findAllById(listOf("project-1", "project-2")) } returns listOf(
-            ProjectEntity("project-1", "Priced Project"),
-            ProjectEntity("project-2", "Unbound Project")
+        every { projectRepository.findAllById(listOf("project-1")) } returns listOf(
+            ProjectEntity("project-1", "Priced Project")
         )
         every { institutionRepository.findAllById(listOf("institution-1")) } returns
             listOf(InstitutionEntity("institution-1", "Institution"))
-        every { doctorProjectRepository.findActiveByInstitutionProjectId("ip-priced") } returns listOf(
-            DoctorProjectEntity(
-                doctorId = "doctor-expensive",
-                institutionProjectId = "ip-priced",
-                price = BigDecimal("900")
-            ),
-            DoctorProjectEntity(
-                doctorId = "doctor-affordable",
-                institutionProjectId = "ip-priced",
-                price = BigDecimal("700")
-            )
+        every {
+            doctorProjectRepository.findPublicByInstitutionProjectIds(listOf("ip-priced", "ip-unbound"))
+        } returns listOf(
+            publicBinding("doctor-expensive", "ip-priced", "project-1", "900"),
+            publicBinding("doctor-affordable", "ip-priced", "project-1", "700")
         )
-        every { doctorProjectRepository.findActiveByInstitutionProjectId("ip-unbound") } returns emptyList()
 
         val result = service.getRecommendedInstitutionProjects()
 
@@ -107,8 +145,49 @@ class HomeServiceTest {
     }
 
     @Test
-    fun `home sections use bounded repository queries`() {
-        every { projectRepository.findTop8ByOrderBySalesCountDesc() } returns emptyList()
+    fun `hot projects filter unavailable entries before top eight and use minimum eligible doctor price`() {
+        val unavailableProjects = (1..8).map { index ->
+            ProjectEntity(
+                id = "project-unavailable-$index",
+                name = "Unavailable $index",
+                referencePrice = BigDecimal("100"),
+                salesCount = 100 - index
+            )
+        }
+        val availableProject = ProjectEntity(
+            id = "project-available",
+            name = "Available",
+            referencePrice = BigDecimal("1200"),
+            salesCount = 1
+        )
+        val institutionProjects = (unavailableProjects + availableProject).map { project ->
+            InstitutionProjectEntity(
+                id = "ip-${project.id}",
+                institutionId = "institution-1",
+                projectId = project.id,
+                price = project.referencePrice,
+                salesCount = project.salesCount
+            )
+        }
+        every { projectRepository.findTop8ByOrderBySalesCountDesc() } returns unavailableProjects
+        every { institutionProjectRepository.findByIsActiveTrueOrderBySalesCountDesc() } returns institutionProjects
+        every {
+            doctorProjectRepository.findPublicByInstitutionProjectIds(institutionProjects.map { it.id })
+        } returns listOf(
+            publicBinding("doctor-expensive", "ip-project-available", "project-available", "800"),
+            publicBinding("doctor-affordable", "ip-project-available", "project-available", "650")
+        )
+        every { projectRepository.findAll() } returns unavailableProjects + availableProject
+
+        val result = service.getHotProjects()
+
+        assertEquals(listOf("project-available"), result.map { it.id })
+        assertEquals(BigDecimal("650"), result.single().referencePrice)
+    }
+
+    @Test
+    fun `home sections use eligibility query and bounded article diary queries`() {
+        every { institutionProjectRepository.findByIsActiveTrueOrderBySalesCountDesc() } returns emptyList()
         every { articleRepository.findTop6ByOrderByPublishDateDesc() } returns emptyList()
         every { diaryRepository.findTop8ByStatusOrderByPublishDateDesc("published") } returns emptyList()
 
@@ -116,7 +195,8 @@ class HomeServiceTest {
         service.getExpertArticles()
         service.getUserDiaries()
 
-        verify(exactly = 1) { projectRepository.findTop8ByOrderBySalesCountDesc() }
+        verify(exactly = 1) { institutionProjectRepository.findByIsActiveTrueOrderBySalesCountDesc() }
+        verify(exactly = 0) { projectRepository.findTop8ByOrderBySalesCountDesc() }
         verify(exactly = 1) { articleRepository.findTop6ByOrderByPublishDateDesc() }
         verify(exactly = 1) { diaryRepository.findTop8ByStatusOrderByPublishDateDesc("published") }
         verify(exactly = 0) { projectRepository.findAll() }

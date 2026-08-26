@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Table, Button, Modal, Form, Input, InputNumber, Select, Switch, Space,
   message, Popconfirm, Tag, Alert, Divider, Typography
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
-import api, { getData, getManagementContext } from '../api';
+import api, { getApiErrorCode, getData, getManagementContext } from '../api';
 import ImageUpload from '../components/ImageUpload';
 import MultiImageUpload from '../components/MultiImageUpload';
 import RichTextEditor from '../components/RichTextEditor';
@@ -29,14 +29,74 @@ interface Doctor {
   price?: number;
 }
 interface InstitutionProjectRecord {
-  id: string; institutionId: string; projectId: string; projectName: string; baseProjectName: string;
+  id: string; version: number; institutionId: string; projectId: string; projectName: string; baseProjectName: string;
   name?: string | null; category?: string | null; description?: string | null; rating?: number | null;
   reviewCount?: number | null; tags?: string | null; slogan?: string | null; detailContent?: string | null;
   effectiveName: string; effectiveCategory: string; effectiveDescription: string; effectiveRating: number;
   effectiveReviewCount: number; effectiveTags: string; effectiveSlogan: string; effectiveDetailContent?: string | null;
-  price: number; originalPrice?: number | null; coverImage: string; images: string;
+  price: number; originalPrice?: number | null; currency: string; coverImage: string; images: string;
   effectiveCoverImage: string; effectiveImages: string; salesCount: number; isActive: boolean;
   doctors: Doctor[];
+}
+
+interface EditConflict {
+  generation: number;
+  projectId: string;
+  latestRequestId: number;
+  draft: Record<string, unknown>;
+  latest: InstitutionProjectRecord | null;
+}
+
+interface EditSession {
+  generation: number;
+  projectId: string;
+}
+
+interface SaveScope {
+  generation: number;
+  projectId: string | null;
+}
+
+interface SaveOperation {
+  id: number;
+  scope: SaveScope;
+}
+
+const conflictFields = [
+  ['name', '独立名称'], ['category', '独立分类'], ['description', '独立简介'],
+  ['rating', '评分'], ['reviewCount', '评价数'], ['tags', '标签'], ['slogan', '宣传语'],
+  ['detailContent', '独立详情正文'], ['price', '价格'], ['originalPrice', '原价'],
+  ['currency', '币种'], ['coverImage', '封面图'], ['images', '图集'], ['salesCount', '销量'],
+  ['isActive', '是否上架'], ['doctorBindings', '医生项目价格'],
+] as const;
+
+function editFormValues(record: InstitutionProjectRecord) {
+  return {
+    institutionId: record.institutionId,
+    projectId: record.projectId,
+    name: record.name ?? null,
+    category: record.category ?? null,
+    description: record.description ?? null,
+    rating: record.rating ?? null,
+    reviewCount: record.reviewCount ?? null,
+    tags: record.tags ?? null,
+    slogan: record.slogan ?? null,
+    detailContent: record.detailContent ?? null,
+    price: record.price,
+    originalPrice: record.originalPrice ?? null,
+    coverImage: record.coverImage ?? '',
+    images: record.images ?? '',
+    salesCount: record.salesCount,
+    isActive: record.isActive,
+    doctorBindings: record.doctors?.map(doctor => ({ doctorId: doctor.id, price: doctor.price })) || [],
+  };
+}
+
+function conflictValue(value: unknown): string {
+  if (value == null || value === '') return '（空）';
+  if (typeof value === 'boolean') return value ? '是' : '否';
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
 }
 
 export default function InstitutionProjectsPage() {
@@ -50,6 +110,18 @@ export default function InstitutionProjectsPage() {
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [baseVersion, setBaseVersion] = useState<number | null>(null);
+  const [editingCurrency, setEditingCurrency] = useState('USD');
+  const [editConflict, setEditConflict] = useState<EditConflict | null>(null);
+  const [rebasePristine, setRebasePristine] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const editGenerationRef = useRef(0);
+  const activeEditSessionRef = useRef<EditSession | null>(null);
+  const editConflictRef = useRef<EditConflict | null>(null);
+  const conflictRequestIdRef = useRef(0);
+  const saveOperationIdRef = useRef(0);
+  const saveOperationsRef = useRef<Map<number, number>>(new Map());
+  const visibleSaveOperationRef = useRef<number | null>(null);
   const [form] = Form.useForm();
   const [filterProjectId, setFilterProjectId] = useState<string | undefined>();
   const [filterInstitutionId, setFilterInstitutionId] = useState<string | undefined>(searchParams.get('institutionId') || undefined);
@@ -59,18 +131,27 @@ export default function InstitutionProjectsPage() {
   const selectedProjectId = Form.useWatch('projectId', form);
   const selectedProject = projects.find(p => p.id === selectedProjectId);
 
-  const fetchData = () => {
-    setLoading(true);
+  const requestInstitutionProjects = async () => {
     const params = new URLSearchParams();
     if (filterProjectId) params.append('projectId', filterProjectId);
     if (filterInstitutionId) params.append('institutionId', filterInstitutionId);
     const query = params.toString();
-    api.get(`/admin/institution-projects${query ? `?${query}` : ''}`)
-      .then(res => setData(getData(res as any)))
-      .finally(() => setLoading(false));
+    const res = await api.get(`/admin/institution-projects${query ? `?${query}` : ''}`);
+    return getData<InstitutionProjectRecord[]>(res as any);
   };
 
-  useEffect(() => { fetchData(); }, [filterProjectId, filterInstitutionId]);
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const records = await requestInstitutionProjects();
+      setData(records);
+      return records;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { void fetchData(); }, [filterProjectId, filterInstitutionId]);
 
   useEffect(() => {
     api.get('/admin/institutions').then(res => setInstitutions(getData<Institution[]>(res as any)));
@@ -87,8 +168,55 @@ export default function InstitutionProjectsPage() {
       )
       .map(d => ({ label: `${d.name}${d.title ? `（${d.title}）` : ''}`, value: d.id }));
 
+  const setConflictState = (conflict: EditConflict | null) => {
+    editConflictRef.current = conflict;
+    setEditConflict(conflict);
+  };
+
+  const clearVisibleSaveOperation = () => {
+    visibleSaveOperationRef.current = null;
+    setSaving(false);
+  };
+
+  const beginEditSession = (projectId: string): EditSession => {
+    clearVisibleSaveOperation();
+    const session = { generation: editGenerationRef.current + 1, projectId };
+    editGenerationRef.current = session.generation;
+    activeEditSessionRef.current = session;
+    return session;
+  };
+
+  const invalidateEditSession = () => {
+    editGenerationRef.current += 1;
+    activeEditSessionRef.current = null;
+    setConflictState(null);
+    setRebasePristine(false);
+    clearVisibleSaveOperation();
+  };
+
+  const isActiveEditSession = (session: EditSession) => {
+    const active = activeEditSessionRef.current;
+    return active?.generation === session.generation && active.projectId === session.projectId;
+  };
+
+  const isActiveSaveScope = (scope: SaveScope) => scope.projectId === null
+    ? editGenerationRef.current === scope.generation && activeEditSessionRef.current === null
+    : isActiveEditSession({ generation: scope.generation, projectId: scope.projectId });
+
+  const finishSaveOperation = (operation: SaveOperation) => {
+    if (saveOperationsRef.current.get(operation.scope.generation) === operation.id) {
+      saveOperationsRef.current.delete(operation.scope.generation);
+    }
+    if (!isActiveSaveScope(operation.scope) || visibleSaveOperationRef.current !== operation.id) return;
+    visibleSaveOperationRef.current = null;
+    setSaving(false);
+  };
+
   const handleAdd = () => {
+    invalidateEditSession();
     setEditingId(null);
+    setBaseVersion(null);
+    setEditingCurrency('USD');
     setSelectedInstitutionId(undefined);
     form.resetFields();
     form.setFieldsValue({ price: 0, originalPrice: null, salesCount: 0, isActive: true, doctorBindings: [] });
@@ -96,13 +224,15 @@ export default function InstitutionProjectsPage() {
   };
 
   const handleEdit = (record: InstitutionProjectRecord) => {
+    beginEditSession(record.id);
+    setRebasePristine(false);
     setEditingId(record.id);
+    setBaseVersion(record.version);
+    setEditingCurrency(record.currency);
+    setConflictState(null);
     setSelectedInstitutionId(record.institutionId);
-    form.setFieldsValue({
-      ...record,
-      originalPrice: record.originalPrice ?? null,
-      doctorBindings: record.doctors?.map((doctor) => ({ doctorId: doctor.id, price: doctor.price })) || [],
-    });
+    form.resetFields();
+    form.setFieldsValue(editFormValues(record));
     setModalOpen(true);
   };
 
@@ -128,36 +258,168 @@ export default function InstitutionProjectsPage() {
     }
   };
 
-  const handleSave = async () => {
+  const fetchLatestProject = async (session: EditSession) => {
+    const records = await requestInstitutionProjects();
+    return { records, latest: records.find(record => record.id === session.projectId) || null };
+  };
+
+  const applyConflictLatest = (
+    session: EditSession,
+    requestId: number,
+    records: InstitutionProjectRecord[],
+    latest: InstitutionProjectRecord,
+  ) => {
+    const conflict = editConflictRef.current;
+    if (
+      !isActiveEditSession(session) || latest.id !== session.projectId ||
+      conflict?.generation !== session.generation || conflict.projectId !== session.projectId ||
+      requestId < conflict.latestRequestId ||
+      (conflict.latest !== null && latest.version < conflict.latest.version)
+    ) return false;
+    setData(records);
+    setConflictState({ ...conflict, latest, latestRequestId: requestId });
+    return true;
+  };
+
+  const loadConflictLatest = async (session: EditSession) => {
+    const requestId = conflictRequestIdRef.current + 1;
+    conflictRequestIdRef.current = requestId;
+    const { records, latest } = await fetchLatestProject(session);
+    if (!isActiveEditSession(session)) return;
+    if (!latest || latest.id !== session.projectId) {
+      message.error('无法在最新列表中找到该机构项目');
+      return;
+    }
+    applyConflictLatest(session, requestId, records, latest);
+  };
+
+  const refreshConflictLatest = async () => {
+    const conflict = editConflictRef.current;
+    const session = activeEditSessionRef.current;
+    if (!session || !conflict || session.projectId !== conflict.projectId || session.generation !== conflict.generation) return;
     try {
-      const values = await form.validateFields();
-      if (!policyState.policy) {
-        message.error('分账策略不可用，暂不能保存');
-        return;
-      }
-      const { doctorBindings = [], ...rest } = values;
-      const payload = {
-        ...rest,
-        // InputNumber 清空后可能返回 undefined；显式提交 null 才能清除已有原价。
-        originalPrice: rest.originalPrice ?? null,
-        doctorBindings,
-      };
-      if (editingId) {
-        payload.id = editingId;
-        await api.put(`/admin/institution-projects/${editingId}`, payload);
-        message.success('更新成功');
-      } else {
-        await api.post('/admin/institution-projects', payload);
-        message.success('创建成功');
-      }
-      setModalOpen(false);
-      fetchData();
-    } catch (err: any) {
-      if (err?.errorFields) return;
-      const msg = err?.response?.data?.message || err?.message || '操作失败';
-      message.error(msg);
+      await loadConflictLatest(session);
+    } catch {
+      if (isActiveEditSession(session)) message.error('刷新最新机构项目失败');
     }
   };
+
+  const rebaseToLatest = () => {
+    const conflict = editConflictRef.current;
+    const session = activeEditSessionRef.current;
+    const latest = conflict?.latest;
+    if (
+      !session || !conflict || !latest || editingId !== session.projectId ||
+      conflict.generation !== session.generation || conflict.projectId !== session.projectId ||
+      latest.id !== session.projectId
+    ) return;
+    form.resetFields();
+    form.setFieldsValue(editFormValues(latest));
+    setSelectedInstitutionId(latest.institutionId);
+    setBaseVersion(latest.version);
+    setEditingCurrency(latest.currency);
+    setConflictState(null);
+    setRebasePristine(true);
+  };
+
+  const handleSave = async () => {
+    if (editConflict || rebasePristine) return;
+    const saveSession = activeEditSessionRef.current;
+    const saveScope: SaveScope | null = editingId
+      ? saveSession?.projectId === editingId ? saveSession : null
+      : { generation: editGenerationRef.current, projectId: null };
+    if (!saveScope || saveOperationsRef.current.has(saveScope.generation)) return;
+    const saveOperation: SaveOperation = { id: saveOperationIdRef.current + 1, scope: saveScope };
+    saveOperationIdRef.current = saveOperation.id;
+    saveOperationsRef.current.set(saveScope.generation, saveOperation.id);
+    visibleSaveOperationRef.current = saveOperation.id;
+    setSaving(true);
+    let attemptedValues: Record<string, unknown> | null = null;
+    try {
+      const values = await form.validateFields();
+      attemptedValues = values;
+      if (!policyState.policy) {
+        if (isActiveSaveScope(saveScope)) message.error('分账策略不可用，暂不能保存');
+        return;
+      }
+      if (saveScope.projectId) {
+        const { doctorBindings = [] } = values;
+        await api.put(`/admin/institution-projects/${saveScope.projectId}`, {
+          baseVersion,
+          name: values.name ?? null,
+          category: values.category ?? null,
+          description: values.description ?? null,
+          rating: values.rating ?? null,
+          reviewCount: values.reviewCount ?? null,
+          tags: values.tags ?? null,
+          slogan: values.slogan ?? null,
+          detailContent: values.detailContent ?? null,
+          price: values.price,
+          // InputNumber 清空后可能返回 undefined；显式提交 null 才能清除已有原价。
+          originalPrice: values.originalPrice ?? null,
+          currency: editingCurrency,
+          coverImage: values.coverImage ?? '',
+          images: values.images ?? '',
+          salesCount: values.salesCount,
+          isActive: values.isActive,
+          doctorBindings,
+        });
+      } else {
+        const { doctorBindings = [], ...rest } = values;
+        const payload = {
+          ...rest,
+          // InputNumber 清空后可能返回 undefined；显式提交 null 才能清除已有原价。
+          originalPrice: rest.originalPrice ?? null,
+          doctorBindings,
+        };
+        await api.post('/admin/institution-projects', payload);
+      }
+      if (isActiveSaveScope(saveScope)) {
+        message.success(saveScope.projectId ? '更新成功' : '创建成功');
+        setModalOpen(false);
+        invalidateEditSession();
+      }
+      void fetchData();
+    } catch (err: any) {
+      if (err?.errorFields) return;
+      if (
+        saveScope.projectId && attemptedValues && saveSession && saveSession.projectId === saveScope.projectId &&
+        getApiErrorCode(err) === 'INSTITUTION_PROJECT_VERSION_STALE'
+      ) {
+        if (!isActiveEditSession(saveSession)) return;
+        setConflictState({
+          generation: saveSession.generation,
+          projectId: saveSession.projectId,
+          latestRequestId: 0,
+          draft: { ...attemptedValues, currency: editingCurrency },
+          latest: null,
+        });
+        finishSaveOperation(saveOperation);
+        try {
+          await loadConflictLatest(saveSession);
+        } catch {
+          if (isActiveEditSession(saveSession)) message.error('已检测到版本冲突，但刷新最新机构项目失败');
+        }
+        return;
+      }
+      const msg = err?.response?.data?.message || err?.message || '操作失败';
+      if (isActiveSaveScope(saveScope)) message.error(msg);
+    } finally {
+      finishSaveOperation(saveOperation);
+    }
+  };
+
+  const latestConflictValues = editConflict?.latest
+    ? { ...editFormValues(editConflict.latest), currency: editConflict.latest.currency }
+    : null;
+  const conflictRows = latestConflictValues && editConflict
+    ? conflictFields.map(([key, label]) => ({
+      key,
+      label,
+      draft: editConflict.draft[key],
+      latest: latestConflictValues[key],
+    })).filter(row => JSON.stringify(row.draft ?? null) !== JSON.stringify(row.latest ?? null))
+    : [];
 
   const getInstitutionName = (id: string) => institutions.find(i => i.id === id)?.name || id;
   const getProjectName = (id: string) => projects.find(p => p.id === id)?.name || id;
@@ -231,8 +493,51 @@ export default function InstitutionProjectsPage() {
           onChange: keys => setSelectedRowKeys(keys),
         } : undefined}
       />
-      <Modal title={editingId ? '编辑机构项目' : '新增机构项目'} open={modalOpen} onOk={handleSave} onCancel={() => setModalOpen(false)} width={900} okText="保存" cancelText="取消">
-        <Form form={form} layout="vertical" style={{ marginTop: 16, maxHeight: '65vh', overflowY: 'auto', paddingRight: 8 }}>
+      <Modal
+        title={editingId ? '编辑机构项目' : '新增机构项目'}
+        open={modalOpen}
+        onOk={handleSave}
+        onCancel={() => { setModalOpen(false); invalidateEditSession(); }}
+        width={900}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={saving}
+        okButtonProps={{ disabled: Boolean(editConflict) || rebasePristine || saving }}
+      >
+        {editConflict && <Alert
+          style={{ marginTop: 16 }}
+          type="error"
+          showIcon
+          title="该机构项目已被其他人更新，当前草稿未被覆盖"
+          description={<Space orientation="vertical" size="middle" style={{ width: '100%' }}>
+            <Space wrap>
+              <Typography.Text strong>编辑基线版本：{baseVersion}</Typography.Text>
+              <Typography.Text strong>最新版本：{editConflict.latest?.version ?? '加载中'}</Typography.Text>
+            </Space>
+            {editConflict.latest && <table aria-label="版本冲突对比" style={{ width: '100%', tableLayout: 'fixed' }}>
+              <thead>
+                <tr><th>差异字段</th><th>你的陈旧草稿</th><th>服务端最新值</th></tr>
+              </thead>
+              <tbody>
+                {conflictRows.length > 0 ? conflictRows.map(row => <tr key={row.key}>
+                  <th>{row.label}</th>
+                  <td style={{ overflowWrap: 'anywhere' }}>{conflictValue(row.draft)}</td>
+                  <td style={{ overflowWrap: 'anywhere' }}>{conflictValue(row.latest)}</td>
+                </tr>) : <tr><td colSpan={3}>最新响应未包含可见字段差异</td></tr>}
+              </tbody>
+            </table>}
+            <Space wrap>
+              <Button onClick={refreshConflictLatest}>刷新最新版本</Button>
+              {editConflict.latest && <Button type="primary" onClick={rebaseToLatest}>基于最新版本重新编辑</Button>}
+            </Space>
+          </Space>}
+        />}
+        <Form
+          form={form}
+          layout="vertical"
+          style={{ marginTop: 16, maxHeight: '65vh', overflowY: 'auto', paddingRight: 8 }}
+          onValuesChange={() => { if (rebasePristine) setRebasePristine(false); }}
+        >
           <Form.Item name="institutionId" label="所属机构" rules={[{ required: true }]}>
             <Select disabled={!!editingId} options={institutionOptions} showSearch placeholder="请选择机构" onChange={(v) => { setSelectedInstitutionId(v); form.setFieldsValue({ doctorBindings: [] }); }} />
           </Form.Item>

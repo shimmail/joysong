@@ -1,6 +1,8 @@
 package com.joysong.server.discover.service
 
 import com.joysong.server.doctor.entity.DoctorEntity
+import com.joysong.server.discover.repository.DoctorProjectRepository
+import com.joysong.server.discover.repository.PublicDoctorProjectView
 import com.joysong.server.doctor.repository.DoctorRepository
 import com.joysong.server.doctor.service.DoctorInstitutionService
 import com.joysong.server.institution.entity.InstitutionEntity
@@ -20,15 +22,78 @@ import java.math.BigDecimal
 
 class DiscoverSearchServiceTest {
     private val institutionRepository = mockk<InstitutionRepository>()
+    private val doctorProjectRepository = mockk<DoctorProjectRepository>(relaxed = true)
     private val service = DiscoverSearchService(
         projectRepository = mockk<ProjectRepository>(),
         institutionRepository = institutionRepository,
         institutionProjectRepository = mockk<InstitutionProjectRepository>(),
         doctorRepository = mockk<DoctorRepository>(),
+        doctorProjectRepository = doctorProjectRepository,
         keywordExtractor = DiscoverKeywordExtractor(),
         doctorInstitutionService = mockk<DoctorInstitutionService>(),
         institutionProjectDetailResolver = InstitutionProjectDetailResolver()
     )
+
+    private fun publicBinding(
+        doctorId: String,
+        institutionProjectId: String,
+        projectId: String,
+        price: String
+    ): PublicDoctorProjectView = mockk<PublicDoctorProjectView>().also { binding ->
+        every { binding.doctorId } returns doctorId
+        every { binding.projectId } returns projectId
+        every { binding.institutionProjectId } returns institutionProjectId
+        every { binding.price } returns BigDecimal(price)
+    }
+
+    @Test
+    fun `project search omits unavailable offerings and uses minimum eligible doctor price before limit`() {
+        val projectRepository = mockk<ProjectRepository>()
+        val institutionProjectRepository = mockk<InstitutionProjectRepository>()
+        val doctorRepository = mockk<DoctorRepository>()
+        val projects = listOf(
+            ProjectEntity("project-unavailable", "Unavailable", rating = BigDecimal("5.0")),
+            ProjectEntity("project-available", "Available", rating = BigDecimal("4.0"))
+        )
+        val offerings = listOf(
+            InstitutionProjectEntity(
+                id = "ip-unavailable", institutionId = "institution-1", projectId = "project-unavailable",
+                price = BigDecimal("100"), salesCount = 999
+            ),
+            InstitutionProjectEntity(
+                id = "ip-available", institutionId = "institution-1", projectId = "project-available",
+                price = BigDecimal("1000"), salesCount = 10
+            )
+        )
+        every { projectRepository.findAll() } returns projects
+        every { institutionRepository.findAll() } returns listOf(InstitutionEntity("institution-1", "Institution"))
+        every { institutionProjectRepository.findAll() } returns offerings
+        every { doctorRepository.findAll() } returns emptyList()
+        every {
+            doctorProjectRepository.findPublicByInstitutionProjectIds(listOf("ip-unavailable", "ip-available"))
+        } returns listOf(
+            publicBinding("doctor-expensive", "ip-available", "project-available", "900"),
+            publicBinding("doctor-affordable", "ip-available", "project-available", "700")
+        )
+        val localService = DiscoverSearchService(
+            projectRepository = projectRepository,
+            institutionRepository = institutionRepository,
+            institutionProjectRepository = institutionProjectRepository,
+            doctorRepository = doctorRepository,
+            doctorProjectRepository = doctorProjectRepository,
+            keywordExtractor = DiscoverKeywordExtractor(),
+            doctorInstitutionService = mockk(relaxed = true),
+            institutionProjectDetailResolver = InstitutionProjectDetailResolver()
+        )
+
+        val result = localService.search(
+            DiscoverSearchRequest(query = "", scopes = setOf(DiscoverSearchScope.PROJECT), limit = 1)
+        )
+
+        assertEquals(listOf("project-available"), result.projects.map { it.id })
+        assertEquals(BigDecimal("700"), result.projects.single().referencePrice)
+        assertEquals(BigDecimal("700"), result.projects.single().institutionProjects.single().price)
+    }
 
     @Test
     fun `matching fragments keep custom terms and remove conversational noise`() {
@@ -111,12 +176,18 @@ class DiscoverSearchServiceTest {
         every { projectRepository.findAll() } returns projects
         every { institutionRepository.findAll() } returns institutions
         every { institutionProjectRepository.findAll() } returns offerings
+        every {
+            doctorProjectRepository.findPublicByInstitutionProjectIds(offerings.map { it.id })
+        } returns offerings.mapIndexed { index, offering ->
+            publicBinding("doctor-$index", offering.id, offering.projectId, "100")
+        }
         every { doctorRepository.findAll() } returns doctors
         val localService = DiscoverSearchService(
             projectRepository = projectRepository,
             institutionRepository = institutionRepository,
             institutionProjectRepository = institutionProjectRepository,
             doctorRepository = doctorRepository,
+            doctorProjectRepository = doctorProjectRepository,
             keywordExtractor = DiscoverKeywordExtractor(),
             doctorInstitutionService = mockk(relaxed = true),
             institutionProjectDetailResolver = InstitutionProjectDetailResolver()
@@ -161,12 +232,18 @@ class DiscoverSearchServiceTest {
         every { projectRepository.findAll() } returns projects
         every { institutionRepository.findAll() } returns listOf(sharedInstitution)
         every { institutionProjectRepository.findAll() } returns offerings
+        every {
+            doctorProjectRepository.findPublicByInstitutionProjectIds(offerings.map { it.id })
+        } returns offerings.mapIndexed { index, offering ->
+            publicBinding("doctor-$index", offering.id, offering.projectId, "100")
+        }
         every { doctorRepository.findAll() } returns emptyList()
         val localService = DiscoverSearchService(
             projectRepository = projectRepository,
             institutionRepository = institutionRepository,
             institutionProjectRepository = institutionProjectRepository,
             doctorRepository = doctorRepository,
+            doctorProjectRepository = doctorProjectRepository,
             keywordExtractor = DiscoverKeywordExtractor(),
             doctorInstitutionService = mockk(relaxed = true),
             institutionProjectDetailResolver = InstitutionProjectDetailResolver()

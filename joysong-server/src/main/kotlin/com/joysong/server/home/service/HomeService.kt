@@ -33,8 +33,25 @@ class HomeService(
     fun getBanners(): List<BannerResponse> =
         bannerRepository.findAllByOrderBySortOrderAsc().map { it.toResponse() }
 
-    fun getHotProjects(): List<ProjectResponse> =
-        projectRepository.findTop8ByOrderBySalesCountDesc().map { it.toResponse() }
+    fun getHotProjects(): List<ProjectResponse> {
+        val activeInstitutionProjects = institutionProjectRepository.findByIsActiveTrueOrderBySalesCountDesc()
+        if (activeInstitutionProjects.isEmpty()) return emptyList()
+        val minimumPrices = doctorProjectRepository
+            .findPublicByInstitutionProjectIds(activeInstitutionProjects.map { it.id })
+            .groupBy { it.projectId }
+            .mapValues { (_, bindings) -> bindings.minOf { it.price } }
+        if (minimumPrices.isEmpty()) return emptyList()
+
+        return projectRepository.findAll()
+            .asSequence()
+            .filter { it.id in minimumPrices }
+            .sortedByDescending { it.salesCount }
+            .take(8)
+            .map { project ->
+                project.toResponse().copy(referencePrice = minimumPrices.getValue(project.id))
+            }
+            .toList()
+    }
 
     fun getExpertArticles(): List<ArticleResponse> =
         articleRepository.findTop6ByOrderByPublishDateDesc().map { it.toResponse() }
@@ -47,7 +64,15 @@ class HomeService(
      * 仅查询需展示的项目，再批量查出关联的 Project 和 Institution 进行组装。
      */
     fun getRecommendedInstitutionProjects(): List<RecommendedInstitutionProjectDto> {
-        val institutionProjects = institutionProjectRepository.findTop8ByIsActiveTrueOrderBySalesCountDesc()
+        val activeInstitutionProjects = institutionProjectRepository.findByIsActiveTrueOrderBySalesCountDesc()
+        if (activeInstitutionProjects.isEmpty()) return emptyList()
+        val minimumPrices = doctorProjectRepository
+            .findPublicByInstitutionProjectIds(activeInstitutionProjects.map { it.id })
+            .groupBy { it.institutionProjectId }
+            .mapValues { (_, bindings) -> bindings.minOf { it.price } }
+        val institutionProjects = activeInstitutionProjects
+            .filter { it.id in minimumPrices }
+            .take(8)
         if (institutionProjects.isEmpty()) return emptyList()
 
         // Only the eight displayed records need their associated data.
@@ -62,9 +87,7 @@ class HomeService(
 
         // 在内存中组装结果
         return institutionProjects.mapNotNull { ip ->
-            val startingPrice = doctorProjectRepository.findActiveByInstitutionProjectId(ip.id)
-                .minOfOrNull { it.price }
-                ?: return@mapNotNull null
+            val startingPrice = minimumPrices.getValue(ip.id)
             val project = projectMap[ip.projectId] ?: return@mapNotNull null
             val institution = institutionMap[ip.institutionId] ?: return@mapNotNull null
             val effective = institutionProjectDetailResolver.resolve(ip, project)

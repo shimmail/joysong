@@ -2,7 +2,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { createElement } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
-import { getDefaultManagementPath, setAdminToken, type ManagementContext } from './api';
+import { getApiErrorCode, getDefaultManagementPath, setAdminToken, type ManagementContext } from './api';
 
 vi.mock('./pages/ProjectCollaborationPage', () => ({
   default: () => '医生项目协作页面',
@@ -108,6 +108,21 @@ describe('professional role default routes', () => {
     render(createElement(App));
 
     expect(await screen.findByText('医生项目协作页面')).toBeInTheDocument();
-    expect(screen.getByText('项目协作与审核')).toBeInTheDocument();
+    expect(screen.getByText('项目协作')).toBeInTheDocument();
+  });
+});
+
+describe('getApiErrorCode', () => {
+  it('extracts the stable envelope errorCode instead of the localized server message', () => {
+    expect(getApiErrorCode({
+      isAxiosError: true,
+      response: { data: { code: 409, message: '当前中文提示会变化', errorCode: 'PROJECT_REVISION_CONFLICT', data: null } },
+    })).toBe('PROJECT_REVISION_CONFLICT');
+  });
+
+  it('returns null for message-only, blank, or non-error envelopes', () => {
+    expect(getApiErrorCode({ isAxiosError: true, response: { data: { code: 400, message: '旧提示', data: null } } })).toBeNull();
+    expect(getApiErrorCode({ isAxiosError: true, response: { data: { errorCode: '   ' } } })).toBeNull();
+    expect(getApiErrorCode(new Error('PROJECT_REVISION_CONFLICT'))).toBeNull();
   });
 });

@@ -7,6 +7,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.springframework.jdbc.core.JdbcTemplate
@@ -17,6 +18,42 @@ import java.sql.Timestamp
 import java.time.LocalDateTime
 
 class SplitConfigProposalServiceTest {
+    @Test
+    fun `active config upsert writes a six digit revision timestamp`() {
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        val service = SplitConfigProposalService(
+            jdbcTemplate,
+            mockk(),
+            OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("40.00") })
+        )
+        var lockedRead = 0
+        var activeConfigSql = ""
+        every { jdbcTemplate.update(any<String>(), *anyVararg()) } answers {
+            val sql = firstArg<String>()
+            if (sql.contains("INSERT INTO doctor_institution_project_configs")) {
+                activeConfigSql = sql
+                throw IllegalStateException("active config writer reached")
+            }
+            1
+        }
+        every {
+            jdbcTemplate.query(
+                match<String> { it.contains("FROM split_config_proposals") && it.contains("FOR UPDATE") },
+                any<RowMapper<Any>>(),
+                *anyVararg()
+            )
+        } answers {
+            lockedRead += 1
+            val rowMapper = secondArg<RowMapper<Any>>()
+            listOf(rowMapper.mapRow(proposalResultSet(fullyConfirmed = lockedRead > 1), 0))
+        }
+
+        val stop = assertThrows<IllegalStateException> { service.confirm(adminActor(), "proposal-1", null) }
+
+        assertEquals("active config writer reached", stop.message)
+        assertTrue(activeConfigSql.contains("updated_at = CURRENT_TIMESTAMP(6)"))
+    }
+
     @Test
     fun `final confirmation rejects a proposal invalidated by a platform rate change without applying it`() {
         val jdbcTemplate = mockk<JdbcTemplate>()

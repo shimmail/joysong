@@ -561,6 +561,11 @@ class ManagementCenterPage extends StatefulWidget {
 class _ManagementCenterPageState extends State<ManagementCenterPage> {
   late final ManagementController _controller;
 
+  Future<ManagementContext?> _refreshManagementContext() async {
+    await _controller.enter();
+    return _controller.context;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -607,6 +612,7 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
                 repository: widget.repository,
                 discoverRepository: widget.discoverRepository,
                 onRefresh: _controller.enter,
+                refreshManagementContext: _refreshManagementContext,
                 institutionImagePicker: widget.institutionImagePicker,
                 doctorImagePicker: widget.doctorImagePicker,
                 professionalRepository: widget.professionalRepository,
@@ -624,6 +630,7 @@ class _ManagementCapabilities extends StatelessWidget {
     required this.repository,
     required this.discoverRepository,
     required this.onRefresh,
+    required this.refreshManagementContext,
     this.institutionImagePicker,
     this.doctorImagePicker,
     this.professionalRepository,
@@ -633,6 +640,7 @@ class _ManagementCapabilities extends StatelessWidget {
   final IdentityRepository repository;
   final DiscoverRepository discoverRepository;
   final Future<void> Function() onRefresh;
+  final Future<ManagementContext?> Function() refreshManagementContext;
   final InstitutionProfileImagePicker? institutionImagePicker;
   final Future<String?> Function()? doctorImagePicker;
   final ProfessionalRepository? professionalRepository;
@@ -1093,6 +1101,7 @@ class _ManagementCapabilities extends StatelessWidget {
             context: this.context,
             reviewMode: true,
             pickAndUploadImage: doctorImagePicker,
+            onRefreshManagementContext: refreshManagementContext,
           ),
         ),
       );
@@ -1138,6 +1147,7 @@ class _ManagementCapabilities extends StatelessWidget {
           builder: (_) => DoctorProjectProfileReviewPage(
             repository: repository,
             context: this.context,
+            onRefreshManagementContext: refreshManagementContext,
           ),
         ),
       );

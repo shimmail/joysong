@@ -119,6 +119,10 @@ describe('direct project creation regressions', () => {
         { doctorId: 'doctor-2', price: 4299 },
       ],
     })));
-    expect(vi.mocked(api.post).mock.calls[0][1]).not.toHaveProperty('doctorIds');
-  });
+    const payload = vi.mocked(api.post).mock.calls[0][1];
+    expect(payload).not.toHaveProperty('doctorIds');
+    expect(payload).not.toHaveProperty('baseVersion');
+    expect(payload).not.toHaveProperty('version');
+    expect(payload).not.toHaveProperty('id');
+  }, 15_000);
 });

@@ -1,5 +1,7 @@
 # 医生机构项目资料变更申请设计
 
+> **历史规格（payload v1）**：本文记录第一版 `PROFILE_UPDATE` 的设计与迁移背景，保留用于理解滚动兼容及历史申请，不再代表当前完整编辑契约。当前确认规格见 [医生机构项目完整编辑与法人审核设计](./2026-08-24-doctor-institution-project-full-edit-design.md)。请勿改写本文的历史实施计划，也不要依据本文的 v1 金额、分账或审核形状实现新客户端。
+
 ## 1. 目标与边界
 
 扩展现有 `POST /api/admin/institution-project-requests` 的 `PROFILE_UPDATE`，让已认证医生一次申请替换本人在一个机构项目下的：

@@ -411,6 +411,7 @@ class AgentWorkflowCoreTest {
             institutionRepository = institutionRepository,
             institutionProjectRepository = institutionProjectRepository,
             doctorRepository = doctorRepository,
+            doctorProjectRepository = doctorProjectRepository,
             keywordExtractor = DiscoverKeywordExtractor(),
             doctorInstitutionService = doctorInstitutionService,
             institutionProjectDetailResolver = InstitutionProjectDetailResolver()

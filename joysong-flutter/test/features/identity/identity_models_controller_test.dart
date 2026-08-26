@@ -21,46 +21,48 @@ void main() {
     expect(IdentityDocumentType.consultantProof.label, '医美顾问证明');
   });
 
-  test('identity application protocol decodes all application and role states',
-      () {
-    final applicationStatuses = <String, IdentityStatus>{
-      'PENDING': IdentityStatus.pending,
-      'APPROVED': IdentityStatus.approved,
-      'REJECTED': IdentityStatus.rejected,
-      'WITHDRAWN': IdentityStatus.withdrawn,
-    };
+  test(
+    'identity application protocol decodes all application and role states',
+    () {
+      final applicationStatuses = <String, IdentityStatus>{
+        'PENDING': IdentityStatus.pending,
+        'APPROVED': IdentityStatus.approved,
+        'REJECTED': IdentityStatus.rejected,
+        'WITHDRAWN': IdentityStatus.withdrawn,
+      };
 
-    for (final entry in applicationStatuses.entries) {
-      final application = IdentityApplication.fromJson({
-        'id': 'application-${entry.key.toLowerCase()}',
-        'roleCode': 'DOCTOR',
-        'status': entry.key,
-        'reviewNote': '',
-        'submittedAt': '2026-08-15T09:00:00Z',
-        'reviewedAt': null,
-      });
-      expect(application.status, entry.value);
-      expect(application.status, isNot(IdentityStatus.unknown));
-    }
+      for (final entry in applicationStatuses.entries) {
+        final application = IdentityApplication.fromJson({
+          'id': 'application-${entry.key.toLowerCase()}',
+          'roleCode': 'DOCTOR',
+          'status': entry.key,
+          'reviewNote': '',
+          'submittedAt': '2026-08-15T09:00:00Z',
+          'reviewedAt': null,
+        });
+        expect(application.status, entry.value);
+        expect(application.status, isNot(IdentityStatus.unknown));
+      }
 
-    expect(IdentityStatus.approved.label, '已通过');
-    expect(IdentityStatus.approved.englishLabel, 'Approved');
-    expect(IdentityStatus.withdrawn.label, '已撤回');
-    expect(IdentityStatus.withdrawn.englishLabel, 'Withdrawn');
+      expect(IdentityStatus.approved.label, '已通过');
+      expect(IdentityStatus.approved.englishLabel, 'Approved');
+      expect(IdentityStatus.withdrawn.label, '已撤回');
+      expect(IdentityStatus.withdrawn.englishLabel, 'Withdrawn');
 
-    for (final entry in const <String, IdentityStatus>{
-      'ACTIVE': IdentityStatus.active,
-      'REVOKED': IdentityStatus.revoked,
-    }.entries) {
-      final role = IdentityRoleRecord.fromJson({
-        'roleCode': 'DOCTOR',
-        'status': entry.key,
-        'activatedAt': '2026-08-15T09:00:00Z',
-        'revokedAt': null,
-      });
-      expect(role.status, entry.value);
-    }
-  },);
+      for (final entry in const <String, IdentityStatus>{
+        'ACTIVE': IdentityStatus.active,
+        'REVOKED': IdentityStatus.revoked,
+      }.entries) {
+        final role = IdentityRoleRecord.fromJson({
+          'roleCode': 'DOCTOR',
+          'status': entry.key,
+          'activatedAt': '2026-08-15T09:00:00Z',
+          'revokedAt': null,
+        });
+        expect(role.status, entry.value);
+      }
+    },
+  );
 
   test('doctor identity draft contract excludes practicing institution', () {
     const draft = IdentityApplicationDraft(
@@ -99,214 +101,228 @@ void main() {
     );
 
     expect(draft.validate, returnsNormally);
-    expect(
-      draft.toJson()['applicationData'],
-      isNot(contains('hospitalName'))
-    );
+    expect(draft.toJson()['applicationData'], isNot(contains('hospitalName')));
   });
 
-  test('doctor identity draft rejects caller-provided practicing institution',
-      () {
-    for (final hospitalName in const ['', '悦美医疗美容']) {
-      final draft = IdentityApplicationDraft(
-        role: IdentityRoleType.doctor,
-        applicationData: {
-          'realName': '李医生',
-          'idNumber': 'A1234567',
-          'hospitalName': hospitalName,
-          'department': '整形外科',
-          'title': '主任医师',
-          'qualificationNo': 'QUALIFICATION-001',
-          'practiceNo': 'PRACTICE-001',
-          'reason': '申请医生身份',
-        },
-        documents: const [
-          IdentityDocumentReference(
-            fileId: 'id-front',
-            type: IdentityDocumentType.idCardFront,
+  test(
+    'doctor identity draft rejects caller-provided practicing institution',
+    () {
+      for (final hospitalName in const ['', '悦美医疗美容']) {
+        final draft = IdentityApplicationDraft(
+          role: IdentityRoleType.doctor,
+          applicationData: {
+            'realName': '李医生',
+            'idNumber': 'A1234567',
+            'hospitalName': hospitalName,
+            'department': '整形外科',
+            'title': '主任医师',
+            'qualificationNo': 'QUALIFICATION-001',
+            'practiceNo': 'PRACTICE-001',
+            'reason': '申请医生身份',
+          },
+          documents: const [
+            IdentityDocumentReference(
+              fileId: 'id-front',
+              type: IdentityDocumentType.idCardFront,
+            ),
+            IdentityDocumentReference(
+              fileId: 'id-back',
+              type: IdentityDocumentType.idCardBack,
+            ),
+            IdentityDocumentReference(
+              fileId: 'id-handheld',
+              type: IdentityDocumentType.idCardHandheld,
+            ),
+            IdentityDocumentReference(
+              fileId: 'doctor-qualification',
+              type: IdentityDocumentType.doctorQualification,
+            ),
+            IdentityDocumentReference(
+              fileId: 'doctor-practice',
+              type: IdentityDocumentType.doctorPracticeCertificate,
+            ),
+          ],
+        );
+
+        expect(
+          draft.validate,
+          throwsArgumentError,
+          reason: 'value=$hospitalName',
+        );
+      }
+    },
+  );
+
+  testWidgets(
+    'doctor identity application omits institution and keeps fields and documents',
+    (tester) async {
+      tester.view.physicalSize = const Size(800, 1800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(
+        _localizedApp(
+          home: IdentityApplicationPage(
+            controller: IdentityController(_FakeIdentityRepository()),
+            role: IdentityRoleType.doctor,
           ),
-          IdentityDocumentReference(
-            fileId: 'id-back',
-            type: IdentityDocumentType.idCardBack,
-          ),
-          IdentityDocumentReference(
-            fileId: 'id-handheld',
-            type: IdentityDocumentType.idCardHandheld,
-          ),
-          IdentityDocumentReference(
-            fileId: 'doctor-qualification',
-            type: IdentityDocumentType.doctorQualification,
-          ),
-          IdentityDocumentReference(
-            fileId: 'doctor-practice',
-            type: IdentityDocumentType.doctorPracticeCertificate,
-          ),
-        ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('identity-field-hospitalName')),
+        findsNothing,
+      );
+      expect(find.text('执业机构'), findsNothing);
+      for (final field in const [
+        'realName',
+        'idNumber',
+        'department',
+        'title',
+        'qualificationNo',
+        'practiceNo',
+        'reason',
+      ]) {
+        expect(find.byKey(Key('identity-field-$field')), findsOneWidget);
+      }
+      for (final documentLabel in const [
+        '身份证人像面',
+        '身份证国徽面',
+        '手持身份证照片',
+        '医师资格证',
+        '医师执业证',
+      ]) {
+        expect(find.text(documentLabel), findsOneWidget);
+      }
+    },
+  );
+
+  testWidgets(
+    'identity application history is controlled collapsed localized and survives controller notifications',
+    (tester) async {
+      tester.view.physicalSize = const Size(800, 1800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final repository = _FakeIdentityRepository()
+        ..identityOverview = IdentityOverview.fromJson({
+          'roles': const <Object?>[],
+          'applications': [
+            {
+              'id': 'approved-application',
+              'roleCode': 'DOCTOR',
+              'status': 'APPROVED',
+              'reviewNote': 'Approved application note',
+              'submittedAt': '2026-08-15T09:00:00Z',
+              'reviewedAt': '2026-08-15T10:00:00Z',
+            },
+            {
+              'id': 'withdrawn-application',
+              'roleCode': 'CONSULTANT',
+              'status': 'WITHDRAWN',
+              'reviewNote': 'Withdrawn application note',
+              'submittedAt': '2026-08-14T09:00:00Z',
+              'reviewedAt': null,
+            },
+          ],
+        });
+      final page = IdentityCenterPage(
+        key: const ValueKey('identity-center-history'),
+        repository: repository,
       );
 
-      expect(draft.validate, throwsArgumentError, reason: 'value=$hospitalName',);
-    }
-  },);
+      await tester.pumpWidget(
+        _localizedApp(home: page, locale: const Locale('en')),
+      );
+      await tester.pumpAndSettle();
 
-  testWidgets(
-      'doctor identity application omits institution and keeps fields and documents',
-      (tester) async {
-    tester.view.physicalSize = const Size(800, 1800);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
+      expect(find.text('Approved application note'), findsNothing);
+      expect(find.text('Withdrawn application note'), findsNothing);
+      expect(find.text('Unknown status'), findsNothing);
+      expect(find.text('未知状态'), findsNothing);
+      expect(find.text('Show all applications (2)'), findsOneWidget);
+      final semantics = tester.getSemantics(
+        find.byKey(const Key('identity-application-history-toggle')),
+      );
+      expect(semantics.flagsCollection.isButton, isTrue);
+      expect(semantics.flagsCollection.isExpanded, Tristate.isFalse);
 
-    await tester.pumpWidget(_localizedApp(
-      home: IdentityApplicationPage(
-        controller: IdentityController(_FakeIdentityRepository()),
-        role: IdentityRoleType.doctor,
-      ),
-    ),);
-    await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const Key('identity-application-history-toggle')),
+      );
+      await tester.pump();
+      expect(find.text('Approved application note'), findsOneWidget);
+      expect(find.text('Withdrawn application note'), findsOneWidget);
+      expect(find.text('Approved'), findsOneWidget);
+      expect(find.text('Withdrawn'), findsOneWidget);
 
-    expect(
-      find.byKey(const Key('identity-field-hospitalName')),
-      findsNothing,
-    );
-    expect(find.text('执业机构'), findsNothing);
-    for (final field in const [
-      'realName',
-      'idNumber',
-      'department',
-      'title',
-      'qualificationNo',
-      'practiceNo',
-      'reason',
-    ]) {
-      expect(find.byKey(Key('identity-field-$field')), findsOneWidget);
-    }
-    for (final documentLabel in const [
-      '身份证人像面',
-      '身份证国徽面',
-      '手持身份证照片',
-      '医师资格证',
-      '医师执业证',
-    ]) {
-      expect(find.text(documentLabel), findsOneWidget);
-    }
-  },);
-
-  testWidgets(
-      'identity application history is controlled collapsed localized and survives controller notifications',
-      (tester) async {
-    tester.view.physicalSize = const Size(800, 1800);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final repository = _FakeIdentityRepository()
-      ..identityOverview = IdentityOverview.fromJson({
-        'roles': const <Object?>[],
-        'applications': [
-          {
-            'id': 'approved-application',
-            'roleCode': 'DOCTOR',
-            'status': 'APPROVED',
-            'reviewNote': 'Approved application note',
-            'submittedAt': '2026-08-15T09:00:00Z',
-            'reviewedAt': '2026-08-15T10:00:00Z',
-          },
-          {
-            'id': 'withdrawn-application',
-            'roleCode': 'CONSULTANT',
-            'status': 'WITHDRAWN',
-            'reviewNote': 'Withdrawn application note',
-            'submittedAt': '2026-08-14T09:00:00Z',
-            'reviewedAt': null,
-          },
-        ],
-      });
-    final page = IdentityCenterPage(
-      key: const ValueKey('identity-center-history'),
-      repository: repository,
-    );
-
-    await tester
-        .pumpWidget(_localizedApp(home: page, locale: const Locale('en')),);
-    await tester.pumpAndSettle();
-
-    expect(find.text('Approved application note'), findsNothing);
-    expect(find.text('Withdrawn application note'), findsNothing);
-    expect(find.text('Unknown status'), findsNothing);
-    expect(find.text('未知状态'), findsNothing);
-    expect(find.text('Show all applications (2)'), findsOneWidget);
-    final semantics = tester.getSemantics(
-      find.byKey(const Key('identity-application-history-toggle')),
-    );
-    expect(semantics.flagsCollection.isButton, isTrue);
-    expect(semantics.flagsCollection.isExpanded, Tristate.isFalse);
-
-    await tester.tap(
-      find.byKey(const Key('identity-application-history-toggle')),
-    );
-    await tester.pump();
-    expect(find.text('Approved application note'), findsOneWidget);
-    expect(find.text('Withdrawn application note'), findsOneWidget);
-    expect(find.text('Approved'), findsOneWidget);
-    expect(find.text('Withdrawn'), findsOneWidget);
-
-    final controller = tester
-        .widget<ListenableBuilder>(find.byWidgetPredicate(
-          (widget) =>
-              widget is ListenableBuilder &&
-              widget.listenable is IdentityController,
-        ),)
-        .listenable as IdentityController;
-    await controller.upload(IdentityFileDraft(
-      bytes: Uint8List.fromList(const [0x89, 0x50, 0x4e, 0x47]),
-      fileName: 'notification.png',
-      contentType: 'image/png',
-      purpose: IdentityDocumentType.idCardFront,
-    ),);
-    await tester.pump();
-    expect(find.text('Approved application note'), findsOneWidget);
-    expect(
-      tester
-          .getSemantics(
-            find.byKey(const Key('identity-application-history-toggle')),
+      final controller = tester
+          .widget<ListenableBuilder>(
+            find.byWidgetPredicate(
+              (widget) =>
+                  widget is ListenableBuilder &&
+                  widget.listenable is IdentityController,
+            ),
           )
-          .flagsCollection
-          .isExpanded,
-      Tristate.isTrue,
-    );
+          .listenable as IdentityController;
+      await controller.upload(
+        IdentityFileDraft(
+          bytes: Uint8List.fromList(const [0x89, 0x50, 0x4e, 0x47]),
+          fileName: 'notification.png',
+          contentType: 'image/png',
+          purpose: IdentityDocumentType.idCardFront,
+        ),
+      );
+      await tester.pump();
+      expect(find.text('Approved application note'), findsOneWidget);
+      expect(
+        tester
+            .getSemantics(
+              find.byKey(const Key('identity-application-history-toggle')),
+            )
+            .flagsCollection
+            .isExpanded,
+        Tristate.isTrue,
+      );
 
-    await tester.tap(
-      find.byKey(const Key('identity-application-history-toggle')),
-    );
-    await tester.pump();
-    expect(find.text('Approved application note'), findsNothing);
-    expect(find.text('Withdrawn application note'), findsNothing);
-    expect(find.text('Show all applications (2)'), findsOneWidget);
+      await tester.tap(
+        find.byKey(const Key('identity-application-history-toggle')),
+      );
+      await tester.pump();
+      expect(find.text('Approved application note'), findsNothing);
+      expect(find.text('Withdrawn application note'), findsNothing);
+      expect(find.text('Show all applications (2)'), findsOneWidget);
 
-    await tester.pumpWidget(_localizedApp(home: page));
-    await tester.pumpAndSettle();
-    expect(find.text('展开全部申请记录（2）'), findsOneWidget);
-    await tester.tap(
-      find.byKey(const Key('identity-application-history-toggle')),
-    );
-    await tester.pump();
-    expect(find.text('收起申请记录'), findsOneWidget);
-    expect(find.text('已通过'), findsOneWidget);
-    expect(find.text('已撤回'), findsOneWidget);
+      await tester.pumpWidget(_localizedApp(home: page));
+      await tester.pumpAndSettle();
+      expect(find.text('展开全部申请记录（2）'), findsOneWidget);
+      await tester.tap(
+        find.byKey(const Key('identity-application-history-toggle')),
+      );
+      await tester.pump();
+      expect(find.text('收起申请记录'), findsOneWidget);
+      expect(find.text('已通过'), findsOneWidget);
+      expect(find.text('已撤回'), findsOneWidget);
 
-    await tester.pumpWidget(_localizedApp(
-      home: IdentityCenterPage(
-        key: const ValueKey('identity-center-empty'),
-        repository: _FakeIdentityRepository(),
-      ),
-      locale: const Locale('en'),
-    ),);
-    await tester.pumpAndSettle();
-    expect(find.text('No identity applications yet'), findsOneWidget);
-    expect(
-      find.byKey(const Key('identity-application-history-toggle')),
-      findsNothing,
-    );
-  },);
+      await tester.pumpWidget(
+        _localizedApp(
+          home: IdentityCenterPage(
+            key: const ValueKey('identity-center-empty'),
+            repository: _FakeIdentityRepository(),
+          ),
+          locale: const Locale('en'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('No identity applications yet'), findsOneWidget);
+      expect(
+        find.byKey(const Key('identity-application-history-toggle')),
+        findsNothing,
+      );
+    },
+  );
 
   test('management capabilities fail closed when booleans are missing', () {
     final context = ManagementContext.fromJson({
@@ -358,140 +374,149 @@ void main() {
     expect(PublicMediaPurpose.institutionProfile.name, 'institutionProfile');
   });
 
-  test('unified membership request parses both professional scopes and audits',
-      () {
-    final doctorRequest = InstitutionMembershipRequest.fromJson({
-      'id': 'request-1',
-      'requestType': 'DOCTOR',
-      'applicantId': 'doctor-1',
-      'applicantName': 'Dr. Lin',
-      'institutionId': 'institution-1',
-      'institutionName': 'Joysong Clinic',
-      'action': 'JOIN',
-      'status': 'PENDING',
-      'relationshipStatus': 'NONE',
-      'requestNote': 'Please add me',
-      'reviewNote': '',
-      'submittedBy': 'doctor-user-1',
-      'reviewedBy': null,
-      'submittedAt': '2026-08-10T09:00:00Z',
-      'reviewedAt': null,
-      'createdAt': '2026-08-10T09:00:00Z',
-      'updatedAt': '2026-08-10T09:01:00Z',
-    });
-    final consultantRequest = InstitutionMembershipRequest.fromJson({
-      'id': 'request-2',
-      'requestType': 'CONSULTANT',
-      'applicantId': 'consultant-1',
-      'applicantName': 'Ms. Chen',
-      'institutionId': 'institution-2',
-      'institutionName': 'Harbor Clinic',
-      'action': 'LEAVE',
-      'status': 'APPROVED',
-      'relationshipStatus': 'APPROVED',
-      'requestNote': 'Changing practices',
-      'reviewNote': 'Approved',
-      'submittedBy': 'consultant-user-1',
-      'reviewedBy': 'legal-user-1',
-      'submittedAt': '2026-08-11T09:00:00',
-      'reviewedAt': '2026-08-11T10:00:00',
-      'createdAt': '2026-08-11T09:00:00',
-      'updatedAt': '2026-08-11T10:00:00',
-    });
+  test(
+    'unified membership request parses both professional scopes and audits',
+    () {
+      final doctorRequest = InstitutionMembershipRequest.fromJson({
+        'id': 'request-1',
+        'requestType': 'DOCTOR',
+        'applicantId': 'doctor-1',
+        'applicantName': 'Dr. Lin',
+        'institutionId': 'institution-1',
+        'institutionName': 'Joysong Clinic',
+        'action': 'JOIN',
+        'status': 'PENDING',
+        'relationshipStatus': 'NONE',
+        'requestNote': 'Please add me',
+        'reviewNote': '',
+        'submittedBy': 'doctor-user-1',
+        'reviewedBy': null,
+        'submittedAt': '2026-08-10T09:00:00Z',
+        'reviewedAt': null,
+        'createdAt': '2026-08-10T09:00:00Z',
+        'updatedAt': '2026-08-10T09:01:00Z',
+      });
+      final consultantRequest = InstitutionMembershipRequest.fromJson({
+        'id': 'request-2',
+        'requestType': 'CONSULTANT',
+        'applicantId': 'consultant-1',
+        'applicantName': 'Ms. Chen',
+        'institutionId': 'institution-2',
+        'institutionName': 'Harbor Clinic',
+        'action': 'LEAVE',
+        'status': 'APPROVED',
+        'relationshipStatus': 'APPROVED',
+        'requestNote': 'Changing practices',
+        'reviewNote': 'Approved',
+        'submittedBy': 'consultant-user-1',
+        'reviewedBy': 'legal-user-1',
+        'submittedAt': '2026-08-11T09:00:00',
+        'reviewedAt': '2026-08-11T10:00:00',
+        'createdAt': '2026-08-11T09:00:00',
+        'updatedAt': '2026-08-11T10:00:00',
+      });
 
-    expect(doctorRequest.requestType, InstitutionMembershipRequestType.doctor,);
-    expect(doctorRequest.action, InstitutionMembershipAction.join);
-    expect(doctorRequest.status, InstitutionMembershipRequestStatus.pending);
-    expect(
-        doctorRequest.relationshipStatus, InstitutionRelationshipStatus.none,);
-    expect(doctorRequest.applicantName, 'Dr. Lin');
-    expect(doctorRequest.institutionName, 'Joysong Clinic');
-    expect(doctorRequest.submittedAt, DateTime.parse('2026-08-10T09:00:00Z'));
-    expect(doctorRequest.reviewedBy, isNull);
-    expect(doctorRequest.reviewedAt, isNull);
-    expect(
-      consultantRequest.requestType,
-      InstitutionMembershipRequestType.consultant,
-    );
-    expect(consultantRequest.action, InstitutionMembershipAction.leave);
-    expect(
-      consultantRequest.relationshipStatus,
-      InstitutionRelationshipStatus.approved,
-    );
-    expect(consultantRequest.reviewedBy, 'legal-user-1');
-    expect(
-      consultantRequest.reviewedAt,
-      DateTime.parse('2026-08-11T10:00:00'),
-    );
-  },);
-
-  test('membership protocol parses every status and rejects malformed values',
-      () {
-    final statuses = <String, InstitutionMembershipRequestStatus>{
-      'PENDING': InstitutionMembershipRequestStatus.pending,
-      'APPROVED': InstitutionMembershipRequestStatus.approved,
-      'REJECTED': InstitutionMembershipRequestStatus.rejected,
-      'WITHDRAWN': InstitutionMembershipRequestStatus.withdrawn,
-    };
-    for (final entry in statuses.entries) {
       expect(
-        InstitutionMembershipRequest.fromJson({
-          ..._normalizedMembershipRequestJson,
-          'status': entry.key,
-        }).status,
-        entry.value,
+        doctorRequest.requestType,
+        InstitutionMembershipRequestType.doctor,
       );
-    }
+      expect(doctorRequest.action, InstitutionMembershipAction.join);
+      expect(doctorRequest.status, InstitutionMembershipRequestStatus.pending);
+      expect(
+        doctorRequest.relationshipStatus,
+        InstitutionRelationshipStatus.none,
+      );
+      expect(doctorRequest.applicantName, 'Dr. Lin');
+      expect(doctorRequest.institutionName, 'Joysong Clinic');
+      expect(doctorRequest.submittedAt, DateTime.parse('2026-08-10T09:00:00Z'));
+      expect(doctorRequest.reviewedBy, isNull);
+      expect(doctorRequest.reviewedAt, isNull);
+      expect(
+        consultantRequest.requestType,
+        InstitutionMembershipRequestType.consultant,
+      );
+      expect(consultantRequest.action, InstitutionMembershipAction.leave);
+      expect(
+        consultantRequest.relationshipStatus,
+        InstitutionRelationshipStatus.approved,
+      );
+      expect(consultantRequest.reviewedBy, 'legal-user-1');
+      expect(
+        consultantRequest.reviewedAt,
+        DateTime.parse('2026-08-11T10:00:00'),
+      );
+    },
+  );
 
-    for (final malformed in const <String, String>{
-      'requestType': 'NURSE',
-      'action': 'TRANSFER',
-      'status': 'UNKNOWN',
-      'relationshipStatus': 'REVOKED',
-    }.entries) {
+  test(
+    'membership protocol parses every status and rejects malformed values',
+    () {
+      final statuses = <String, InstitutionMembershipRequestStatus>{
+        'PENDING': InstitutionMembershipRequestStatus.pending,
+        'APPROVED': InstitutionMembershipRequestStatus.approved,
+        'REJECTED': InstitutionMembershipRequestStatus.rejected,
+        'WITHDRAWN': InstitutionMembershipRequestStatus.withdrawn,
+      };
+      for (final entry in statuses.entries) {
+        expect(
+          InstitutionMembershipRequest.fromJson({
+            ..._normalizedMembershipRequestJson,
+            'status': entry.key,
+          }).status,
+          entry.value,
+        );
+      }
+
+      for (final malformed in const <String, String>{
+        'requestType': 'NURSE',
+        'action': 'TRANSFER',
+        'status': 'UNKNOWN',
+        'relationshipStatus': 'REVOKED',
+      }.entries) {
+        expect(
+          () => InstitutionMembershipRequest.fromJson({
+            ..._normalizedMembershipRequestJson,
+            malformed.key: malformed.value,
+          }),
+          throwsFormatException,
+        );
+      }
+      for (final requiredField in const [
+        'id',
+        'requestType',
+        'applicantId',
+        'applicantName',
+        'institutionId',
+        'institutionName',
+        'action',
+        'status',
+        'relationshipStatus',
+        'requestNote',
+        'reviewNote',
+        'submittedBy',
+        'reviewedBy',
+        'submittedAt',
+        'reviewedAt',
+        'createdAt',
+        'updatedAt',
+      ]) {
+        final json = Map<String, Object?>.of(_normalizedMembershipRequestJson)
+          ..remove(requiredField);
+        expect(
+          () => InstitutionMembershipRequest.fromJson(json),
+          throwsFormatException,
+          reason: '$requiredField is required by the normalized response',
+        );
+      }
       expect(
         () => InstitutionMembershipRequest.fromJson({
           ..._normalizedMembershipRequestJson,
-          malformed.key: malformed.value,
+          'updatedAt': 'not-a-date',
         }),
         throwsFormatException,
       );
-    }
-    for (final requiredField in const [
-      'id',
-      'requestType',
-      'applicantId',
-      'applicantName',
-      'institutionId',
-      'institutionName',
-      'action',
-      'status',
-      'relationshipStatus',
-      'requestNote',
-      'reviewNote',
-      'submittedBy',
-      'reviewedBy',
-      'submittedAt',
-      'reviewedAt',
-      'createdAt',
-      'updatedAt',
-    ]) {
-      final json = Map<String, Object?>.of(_normalizedMembershipRequestJson)
-        ..remove(requiredField);
-      expect(
-        () => InstitutionMembershipRequest.fromJson(json),
-        throwsFormatException,
-        reason: '$requiredField is required by the normalized response',
-      );
-    }
-    expect(
-      () => InstitutionMembershipRequest.fromJson({
-        ..._normalizedMembershipRequestJson,
-        'updatedAt': 'not-a-date',
-      }),
-      throwsFormatException,
-    );
-  },);
+    },
+  );
 
   test('normalized membership text fields require JSON strings', () {
     for (final field in const [
@@ -568,47 +593,49 @@ void main() {
     }
   });
 
-  test('membership draft and candidate page use the normalized wire contract',
-      () {
-    expect(
-      const InstitutionMembershipRequestDraft(
-        requestType: InstitutionMembershipRequestType.consultant,
-        action: InstitutionMembershipAction.leave,
-        institutionId: ' institution-1 ',
-        requestNote: ' Please remove me ',
-      ).toJson(),
-      {
-        'requestType': 'CONSULTANT',
-        'action': 'LEAVE',
-        'institutionId': 'institution-1',
-        'requestNote': 'Please remove me',
-      },
-    );
+  test(
+    'membership draft and candidate page use the normalized wire contract',
+    () {
+      expect(
+        const InstitutionMembershipRequestDraft(
+          requestType: InstitutionMembershipRequestType.consultant,
+          action: InstitutionMembershipAction.leave,
+          institutionId: ' institution-1 ',
+          requestNote: ' Please remove me ',
+        ).toJson(),
+        {
+          'requestType': 'CONSULTANT',
+          'action': 'LEAVE',
+          'institutionId': 'institution-1',
+          'requestNote': 'Please remove me',
+        },
+      );
 
-    final page = InstitutionMembershipCandidatePage.fromJson({
-      'items': [
-        {'id': 'institution-1', 'name': 'Joysong Clinic'},
-      ],
-      'offset': 20,
-      'limit': 100,
-      'hasMore': true,
-    });
-    expect(page.items.single.id, 'institution-1');
-    expect(page.items.single.name, 'Joysong Clinic');
-    expect(page.offset, 20);
-    expect(page.limit, 100);
-    expect(page.hasMore, isTrue);
+      final page = InstitutionMembershipCandidatePage.fromJson({
+        'items': [
+          {'id': 'institution-1', 'name': 'Joysong Clinic'},
+        ],
+        'offset': 20,
+        'limit': 100,
+        'hasMore': true,
+      });
+      expect(page.items.single.id, 'institution-1');
+      expect(page.items.single.name, 'Joysong Clinic');
+      expect(page.offset, 20);
+      expect(page.limit, 100);
+      expect(page.hasMore, isTrue);
 
-    final context = ManagementContext.fromJson({
-      'userId': 'consultant-user-1',
-      'platformRole': 'USER',
-      'activeRoles': ['CONSULTANT'],
-      'managedInstitutionIds': const [],
-      'visibleInstitutionIds': ['institution-1'],
-      'consultantInstitutionIds': ['institution-1'],
-    });
-    expect(context.consultantInstitutionIds, ['institution-1']);
-  },);
+      final context = ManagementContext.fromJson({
+        'userId': 'consultant-user-1',
+        'platformRole': 'USER',
+        'activeRoles': ['CONSULTANT'],
+        'managedInstitutionIds': const [],
+        'visibleInstitutionIds': ['institution-1'],
+        'consultantInstitutionIds': ['institution-1'],
+      });
+      expect(context.consultantInstitutionIds, ['institution-1']);
+    },
+  );
 
   test('management context is fetched again on every entry', () async {
     final repository = _FakeIdentityRepository();
@@ -727,239 +754,256 @@ void main() {
     expect(request.priceSuggestion, 699);
   });
 
-  test('institution profile controller loads and saves managed institution',
-      () async {
-    final repository = _FakeIdentityRepository();
-    final controller = InstitutionProfileController(repository);
+  test(
+    'institution profile controller loads and saves managed institution',
+    () async {
+      final repository = _FakeIdentityRepository();
+      final controller = InstitutionProfileController(repository);
 
-    await controller.load();
-    expect(controller.status, InstitutionProfileLoadStatus.ready);
-    expect(controller.summaries.single.id, 'inst-1');
+      await controller.load();
+      expect(controller.status, InstitutionProfileLoadStatus.ready);
+      expect(controller.summaries.single.id, 'inst-1');
 
-    final selected = await controller.select(controller.summaries.single.id);
-    expect(selected, isTrue);
-    expect(controller.selectedProfile?.id, 'inst-1');
+      final selected = await controller.select(controller.summaries.single.id);
+      expect(selected, isTrue);
+      expect(controller.selectedProfile?.id, 'inst-1');
 
-    final saved = await controller.save(
-      controller.selectedProfile!.toUpdate().copyWith(city: '宁波市'),
-    );
+      final saved = await controller.save(
+        controller.selectedProfile!.toUpdate().copyWith(city: '宁波市'),
+      );
 
-    expect(saved, isTrue);
-    expect(repository.savedUpdates.single.toJson()['city'], '宁波');
-    expect(controller.selectedProfile?.description, '服务端保存结果');
-  },);
-
-  testWidgets('institution profile edit uses public info and album image copy',
-      (tester) async {
-    tester.view.physicalSize = const Size(800, 2200);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final repository = _FakeIdentityRepository();
-    final pickedImages = [
-      'https://cdn.example.com/institutions/cover.jpg',
-      'https://cdn.example.com/institutions/license.png',
-    ];
-
-    await tester.pumpWidget(
-      _localizedApp(
-        home: ManagedInstitutionProfilesPage(
-          repository: repository,
-          imagePicker: () async => pickedImages.removeAt(0),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('悦美医疗美容'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('这是向用户公开展示的信息，请勿填写内部管理或隐私资料。'), findsOneWidget);
-    expect(find.text('评分、评价数与认证状态由平台管理，此处仅维护公开机构档案。'), findsNothing);
-    expect(find.text('封面图 URL'), findsNothing);
-    expect(find.text('资质证书图片 URL（逗号分隔）'), findsNothing);
-    expect(find.text('环境图片 URL（逗号分隔）'), findsNothing);
-    expect(find.text('从相册选择封面图'), findsOneWidget);
-    expect(find.text('从相册添加资质图片'), findsOneWidget);
-    expect(find.text('从相册添加环境图片'), findsOneWidget);
-
-    await tester.tap(find.text('从相册选择封面图'));
-    await tester.pump();
-    await tester.tap(find.text('从相册添加资质图片'));
-    await tester.pump();
-
-    expect(
-      find.text('https://cdn.example.com/institutions/cover.jpg'),
-      findsOneWidget,
-    );
-    expect(
-      find.text('https://cdn.example.com/institutions/license.png'),
-      findsOneWidget,
-    );
-  },);
+      expect(saved, isTrue);
+      expect(repository.savedUpdates.single.toJson()['city'], '宁波');
+      expect(controller.selectedProfile?.description, '服务端保存结果');
+    },
+  );
 
   testWidgets(
-      'creation review has two decisions while the legacy JOIN review retains request changes',
-      (tester) async {
-    const context = ManagementContext(
-      userId: 'legal-1',
-      platformRole: 'USER',
-      activeRoles: ['INSTITUTION_LEGAL_REPRESENTATIVE'],
-      managedInstitutionIds: ['inst-1'],
-      visibleInstitutionIds: ['inst-1'],
-      canReviewInstitutionRequests: true,
-    );
-    final repository = _FakeIdentityRepository()
-      ..managementContext = context
-      ..membershipRequests = [
-        InstitutionMembershipRequest.fromJson({
-          ..._normalizedMembershipRequestJson,
-          'id': 'membership-1',
-          'requestType': 'CONSULTANT',
-          'applicantId': 'consultant-1',
-          'applicantName': '顾问一号',
-          'institutionId': 'inst-1',
-          'institutionName': '悦美医疗美容',
-          'status': 'PENDING',
-        }),
+    'institution profile edit uses public info and album image copy',
+    (tester) async {
+      tester.view.physicalSize = const Size(800, 2200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final repository = _FakeIdentityRepository();
+      final pickedImages = [
+        'https://cdn.example.com/institutions/cover.jpg',
+        'https://cdn.example.com/institutions/license.png',
       ];
-    await tester.pumpWidget(_localizedApp(
-      home: InstitutionMembershipRequestsPage(
-        repository: repository,
-        discoverRepository: const _FakeDiscoverRepository(),
-        context: context,
-        requestType: 'DOCTOR',
-        reviewMode: true,
-      ),
-    ),);
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('approve-membership-1')), findsOneWidget);
-    expect(find.byKey(const Key('reject-membership-1')), findsOneWidget);
-    expect(find.text('要求修改'), findsNothing);
 
-    await tester.pumpWidget(_localizedApp(
-      home: Builder(
-        builder: (context) => TextButton(
-          onPressed: () => showProfessionalProjectCreationReviewDialog(context),
-          child: const Text('open creation review'),
+      await tester.pumpWidget(
+        _localizedApp(
+          home: ManagedInstitutionProfilesPage(
+            repository: repository,
+            imagePicker: () async => pickedImages.removeAt(0),
+          ),
         ),
-      ),
-    ),);
-    await tester.tap(find.text('open creation review'));
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('悦美医疗美容'));
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('creation-review-decision')));
-    await tester.pumpAndSettle();
-    expect(find.text('通过'), findsWidgets);
-    expect(find.text('驳回'), findsOneWidget);
-    expect(find.text('要求修改'), findsNothing);
+      expect(find.text('这是向用户公开展示的信息，请勿填写内部管理或隐私资料。'), findsOneWidget);
+      expect(find.text('评分、评价数与认证状态由平台管理，此处仅维护公开机构档案。'), findsNothing);
+      expect(find.text('封面图 URL'), findsNothing);
+      expect(find.text('资质证书图片 URL（逗号分隔）'), findsNothing);
+      expect(find.text('环境图片 URL（逗号分隔）'), findsNothing);
+      expect(find.text('从相册选择封面图'), findsOneWidget);
+      expect(find.text('从相册添加资质图片'), findsOneWidget);
+      expect(find.text('从相册添加环境图片'), findsOneWidget);
 
-    await tester.tap(find.text('通过').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('取消'));
-    await tester.pumpAndSettle();
-    await tester.pumpWidget(_localizedApp(
-      home: Builder(
-        builder: (context) => TextButton(
-          onPressed: () => showProfessionalProjectReviewDialog(context),
-          child: const Text('open JOIN review'),
-        ),
-      ),
-    ),);
-    await tester.tap(find.text('open JOIN review'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byType(DropdownButtonFormField<String>));
-    await tester.pumpAndSettle();
-    expect(find.text('要求修改'), findsOneWidget,
-        reason: 'the unrelated legacy JOIN workflow keeps three decisions',);
-  },);
+      await tester.tap(find.text('从相册选择封面图'));
+      await tester.pump();
+      await tester.tap(find.text('从相册添加资质图片'));
+      await tester.pump();
+
+      expect(
+        find.text('https://cdn.example.com/institutions/cover.jpg'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('https://cdn.example.com/institutions/license.png'),
+        findsOneWidget,
+      );
+    },
+  );
 
   testWidgets(
-      'legal representative sees only institution profile and review queues',
-      (tester) async {
-    final repository = _FakeIdentityRepository()
-      ..rejectProfessionalProjectCatalog = true
-      ..professionalProjectRequests = [
-        ProfessionalProjectRequest.fromJson({
-          'id': 'request-1',
-          'requestType': 'INSTITUTION',
-          'doctorId': 'doctor-1',
-          'doctorName': 'Doctor Joy',
-          'institutionId': 'inst-1',
-          'institutionName': 'Joysong Clinic',
-          'projectId': 'project-1',
-          'projectName': 'Skin Renewal',
-          'name': 'Clinic Skin Renewal',
-          'category': 'Skin',
-          'description': 'Immutable description',
-          'tags': ['skin'],
-          'slogan': 'Renew naturally',
-          'detailContent': 'Immutable detail',
-          'currency': 'CNY',
-          'coverImage': null,
-          'images': null,
-          'salesCount': 0,
-          'referencePrice': null,
-          'categoryTags': null,
-          'price': 699,
-          'originalPrice': null,
-          'isActive': true,
-          'institutionSplit': {
-            'consultationFee': 0,
-            'commissionRate': 0,
-            'institutionRate': 50,
-            'platformRate': 10,
-            'doctorRate': 40,
-          },
-          'notes': null,
-          'status': 'PENDING',
-          'reviewNote': null,
-          'reviewedBy': null,
-          'reviewedAt': null,
-          'resultingProjectId': null,
-          'resultingInstitutionProjectId': null,
-          'submittedAt': '2026-08-16T08:00:00',
-          'updatedAt': '2026-08-16T08:00:00',
-        }),
-      ]
-      ..managementContext = const ManagementContext(
-        userId: 'user-legal',
+    'creation review has two decisions while the legacy JOIN review retains request changes',
+    (tester) async {
+      const context = ManagementContext(
+        userId: 'legal-1',
         platformRole: 'USER',
         activeRoles: ['INSTITUTION_LEGAL_REPRESENTATIVE'],
         managedInstitutionIds: ['inst-1'],
         visibleInstitutionIds: ['inst-1'],
-        canManageInstitutions: true,
-        canManageInstitutionProjects: true,
-        canManageOrders: true,
         canReviewInstitutionRequests: true,
-        canReviewInstitutionProjectRequests: true,
       );
-
-    await tester.pumpWidget(
-      _localizedApp(
-        home: ManagementCenterPage(
-          repository: repository,
-          discoverRepository: const _FakeDiscoverRepository(),
+      final repository = _FakeIdentityRepository()
+        ..managementContext = context
+        ..membershipRequests = [
+          InstitutionMembershipRequest.fromJson({
+            ..._normalizedMembershipRequestJson,
+            'id': 'membership-1',
+            'requestType': 'CONSULTANT',
+            'applicantId': 'consultant-1',
+            'applicantName': '顾问一号',
+            'institutionId': 'inst-1',
+            'institutionName': '悦美医疗美容',
+            'status': 'PENDING',
+          }),
+        ];
+      await tester.pumpWidget(
+        _localizedApp(
+          home: InstitutionMembershipRequestsPage(
+            repository: repository,
+            discoverRepository: const _FakeDiscoverRepository(),
+            context: context,
+            requestType: 'DOCTOR',
+            reviewMode: true,
+          ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('approve-membership-1')), findsOneWidget);
+      expect(find.byKey(const Key('reject-membership-1')), findsOneWidget);
+      expect(find.text('要求修改'), findsNothing);
 
-    expect(find.text('机构档案'), findsOneWidget);
-    expect(find.text('机构关系审核'), findsOneWidget);
-    expect(find.text('机构项目申请审核'), findsOneWidget);
-    expect(find.text('机构项目加入审核'), findsOneWidget);
-    expect(find.text('平台项目申请审核'), findsNothing);
-    expect(find.text('机构项目'), findsNothing);
-    expect(find.text('专业订单'), findsNothing);
+      await tester.pumpWidget(
+        _localizedApp(
+          home: Builder(
+            builder: (context) => TextButton(
+              onPressed: () =>
+                  showProfessionalProjectCreationReviewDialog(context),
+              child: const Text('open creation review'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open creation review'));
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.text('机构项目申请审核'));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('Skin Renewal'), findsWidgets);
-    expect(find.text('机构项目申请加载失败，请重试'), findsNothing);
-  },);
+      await tester.tap(find.byKey(const Key('creation-review-decision')));
+      await tester.pumpAndSettle();
+      expect(find.text('通过'), findsWidgets);
+      expect(find.text('驳回'), findsOneWidget);
+      expect(find.text('要求修改'), findsNothing);
 
-  testWidgets('doctor sees self profile and request capabilities',
-      (tester,) async {
+      await tester.tap(find.text('通过').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(
+        _localizedApp(
+          home: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => showProfessionalProjectReviewDialog(context),
+              child: const Text('open JOIN review'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open JOIN review'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('要求修改'),
+        findsOneWidget,
+        reason: 'the unrelated legacy JOIN workflow keeps three decisions',
+      );
+    },
+  );
+
+  testWidgets(
+    'legal representative sees only institution profile and review queues',
+    (tester) async {
+      final repository = _FakeIdentityRepository()
+        ..rejectProfessionalProjectCatalog = true
+        ..professionalProjectRequests = [
+          ProfessionalProjectRequest.fromJson({
+            'id': 'request-1',
+            'requestType': 'INSTITUTION',
+            'doctorId': 'doctor-1',
+            'doctorName': 'Doctor Joy',
+            'institutionId': 'inst-1',
+            'institutionName': 'Joysong Clinic',
+            'projectId': 'project-1',
+            'projectName': 'Skin Renewal',
+            'name': 'Clinic Skin Renewal',
+            'category': 'Skin',
+            'description': 'Immutable description',
+            'tags': ['skin'],
+            'slogan': 'Renew naturally',
+            'detailContent': 'Immutable detail',
+            'currency': 'CNY',
+            'coverImage': null,
+            'images': null,
+            'salesCount': 0,
+            'referencePrice': null,
+            'categoryTags': null,
+            'price': 699,
+            'originalPrice': null,
+            'isActive': true,
+            'institutionSplit': {
+              'consultationFee': 0,
+              'commissionRate': 0,
+              'institutionRate': 50,
+              'platformRate': 10,
+              'doctorRate': 40,
+            },
+            'notes': null,
+            'status': 'PENDING',
+            'reviewNote': null,
+            'reviewedBy': null,
+            'reviewedAt': null,
+            'resultingProjectId': null,
+            'resultingInstitutionProjectId': null,
+            'submittedAt': '2026-08-16T08:00:00',
+            'updatedAt': '2026-08-16T08:00:00',
+          }),
+        ]
+        ..managementContext = const ManagementContext(
+          userId: 'user-legal',
+          platformRole: 'USER',
+          activeRoles: ['INSTITUTION_LEGAL_REPRESENTATIVE'],
+          managedInstitutionIds: ['inst-1'],
+          visibleInstitutionIds: ['inst-1'],
+          canManageInstitutions: true,
+          canManageInstitutionProjects: true,
+          canManageOrders: true,
+          canReviewInstitutionRequests: true,
+          canReviewInstitutionProjectRequests: true,
+        );
+
+      await tester.pumpWidget(
+        _localizedApp(
+          home: ManagementCenterPage(
+            repository: repository,
+            discoverRepository: const _FakeDiscoverRepository(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('机构档案'), findsOneWidget);
+      expect(find.text('机构关系审核'), findsOneWidget);
+      expect(find.text('机构项目申请审核'), findsOneWidget);
+      expect(find.text('机构项目加入审核'), findsOneWidget);
+      expect(find.text('平台项目申请审核'), findsNothing);
+      expect(find.text('机构项目'), findsNothing);
+      expect(find.text('专业订单'), findsNothing);
+
+      await tester.tap(find.text('机构项目申请审核'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Skin Renewal'), findsWidgets);
+      expect(find.text('机构项目申请加载失败，请重试'), findsNothing);
+    },
+  );
+
+  testWidgets('doctor sees self profile and request capabilities', (
+    tester,
+  ) async {
     final repository = _FakeIdentityRepository()
       ..managementContext = const ManagementContext(
         userId: 'doctor-1',
@@ -976,12 +1020,14 @@ void main() {
         canSubmitInstitutionProjectRequests: true,
       );
 
-    await tester.pumpWidget(_localizedApp(
-      home: ManagementCenterPage(
-        repository: repository,
-        discoverRepository: const _FakeDiscoverRepository(),
+    await tester.pumpWidget(
+      _localizedApp(
+        home: ManagementCenterPage(
+          repository: repository,
+          discoverRepository: const _FakeDiscoverRepository(),
+        ),
       ),
-    ),);
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('医生档案'), findsOneWidget);
@@ -1015,36 +1061,41 @@ void main() {
     expect(page.scope, InstitutionRelationshipScope.doctor);
   });
 
-  testWidgets('admin without a doctor role does not see the self profile entry',
-      (tester) async {
-    tester.view.physicalSize = const Size(800, 1800);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final repository = _FakeIdentityRepository()
-      ..managementContext = const ManagementContext(
-        userId: 'admin-1',
-        platformRole: 'ADMIN',
-        activeRoles: [],
-        managedInstitutionIds: [],
-        visibleInstitutionIds: [],
-        canManageDoctors: true,
+  testWidgets(
+    'admin without a doctor role does not see the self profile entry',
+    (tester) async {
+      tester.view.physicalSize = const Size(800, 1800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final repository = _FakeIdentityRepository()
+        ..managementContext = const ManagementContext(
+          userId: 'admin-1',
+          platformRole: 'ADMIN',
+          activeRoles: [],
+          managedInstitutionIds: [],
+          visibleInstitutionIds: [],
+          canManageDoctors: true,
+        );
+
+      await tester.pumpWidget(
+        _localizedApp(
+          home: ManagementCenterPage(
+            repository: repository,
+            discoverRepository: const _FakeDiscoverRepository(),
+          ),
+        ),
       );
+      await tester.pumpAndSettle();
 
-    await tester.pumpWidget(_localizedApp(
-      home: ManagementCenterPage(
-        repository: repository,
-        discoverRepository: const _FakeDiscoverRepository(),
-      ),
-    ),);
-    await tester.pumpAndSettle();
+      expect(find.text('医生档案'), findsNothing);
+      expect(find.text('Doctor profile'), findsNothing);
+    },
+  );
 
-    expect(find.text('医生档案'), findsNothing);
-    expect(find.text('Doctor profile'), findsNothing);
-  },);
-
-  testWidgets('administrator receives both creation review entry points',
-      (tester,) async {
+  testWidgets('administrator receives both creation review entry points', (
+    tester,
+  ) async {
     Future<String?> picker() async => 'https://cdn.example.com/review.jpg';
     final repository = _FakeIdentityRepository()
       ..managementContext = const ManagementContext(
@@ -1056,13 +1107,15 @@ void main() {
         canReviewInstitutionProjectRequests: true,
       );
 
-    await tester.pumpWidget(_localizedApp(
-      home: ManagementCenterPage(
-        repository: repository,
-        discoverRepository: const _FakeDiscoverRepository(),
-        doctorImagePicker: picker,
+    await tester.pumpWidget(
+      _localizedApp(
+        home: ManagementCenterPage(
+          repository: repository,
+          discoverRepository: const _FakeDiscoverRepository(),
+          doctorImagePicker: picker,
+        ),
       ),
-    ),);
+    );
     await tester.pumpAndSettle();
 
     final adminGroup = find.byKey(const Key('management-group-platform-admin'));
@@ -1095,179 +1148,183 @@ void main() {
   });
 
   testWidgets(
-      'dual doctor and consultant context has one scoped consultant relationship action',
-      (tester) async {
-    final repository = _FakeIdentityRepository()
-      ..managementContext = const ManagementContext(
-        userId: 'consultant-1',
-        platformRole: 'USER',
-        activeRoles: ['DOCTOR', 'CONSULTANT'],
-        doctorId: 'doctor-1',
-        managedInstitutionIds: [],
-        visibleInstitutionIds: [],
-        canApplyToInstitutions: true,
-        canViewAffiliations: true,
+    'dual doctor and consultant context has one scoped consultant relationship action',
+    (tester) async {
+      final repository = _FakeIdentityRepository()
+        ..managementContext = const ManagementContext(
+          userId: 'consultant-1',
+          platformRole: 'USER',
+          activeRoles: ['DOCTOR', 'CONSULTANT'],
+          doctorId: 'doctor-1',
+          managedInstitutionIds: [],
+          visibleInstitutionIds: [],
+          canApplyToInstitutions: true,
+          canViewAffiliations: true,
+        );
+
+      await tester.pumpWidget(
+        _localizedApp(
+          home: ManagementCenterPage(
+            repository: repository,
+            discoverRepository: const _FakeDiscoverRepository(),
+          ),
+        ),
       );
-
-    await tester.pumpWidget(_localizedApp(
-      home: ManagementCenterPage(
-        repository: repository,
-        discoverRepository: const _FakeDiscoverRepository(),
-      ),
-    ),);
-    await tester.pumpAndSettle();
-
-    final consultantGroup = find.byKey(
-      const Key('management-group-consultant'),
-    );
-    final relationshipAction = find.byKey(
-      const Key('management-institution-relationships-consultant'),
-    );
-    expect(consultantGroup, findsOneWidget);
-    expect(
-      find.descendant(of: consultantGroup, matching: relationshipAction),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(
-        of: consultantGroup,
-        matching: find.text('机构关系')
-      ),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(
-        of: consultantGroup,
-        matching: find.text('申请加入机构')
-      ),
-      findsNothing,
-    );
-    expect(
-      find.descendant(
-        of: consultantGroup,
-        matching: find.text('机构归属')
-      ),
-      findsNothing,
-    );
-    expect(find.text('专业订单'), findsNothing);
-    expect(find.text('机构项目'), findsNothing);
-
-    await tester.ensureVisible(relationshipAction);
-    await tester.tap(relationshipAction);
-    await tester.pumpAndSettle();
-
-    expect(
-      tester
-          .widget<InstitutionRelationshipsPage>(
-            find.byType(InstitutionRelationshipsPage),
-          )
-          .scope,
-      InstitutionRelationshipScope.consultant,
-    );
-  },);
-
-  testWidgets(
-      'legal representative routes its stable relationship action with legal scope',
-      (tester) async {
-    final repository = _FakeIdentityRepository()
-      ..managementContext = const ManagementContext(
-        userId: 'legal-1',
-        platformRole: 'USER',
-        activeRoles: ['INSTITUTION_LEGAL_REPRESENTATIVE'],
-        managedInstitutionIds: ['inst-1'],
-        visibleInstitutionIds: ['inst-1'],
-        canReviewInstitutionRequests: true,
-      );
-
-    await tester.pumpWidget(_localizedApp(
-      home: ManagementCenterPage(
-        repository: repository,
-        discoverRepository: const _FakeDiscoverRepository(),
-      ),
-    ),);
-    await tester.pumpAndSettle();
-
-    final legalGroup = find.byKey(
-      const Key('management-group-legal-representative'),
-    );
-    final relationshipAction = find.byKey(
-      const Key('management-institution-relationships-legal-representative'),
-    );
-    expect(
-      find.descendant(of: legalGroup, matching: relationshipAction),
-      findsOneWidget,
-    );
-
-    await tester.ensureVisible(relationshipAction);
-    await tester.tap(relationshipAction);
-    await tester.pumpAndSettle();
-
-    expect(
-      tester
-          .widget<InstitutionRelationshipsPage>(
-            find.byType(InstitutionRelationshipsPage),
-          )
-          .scope,
-      InstitutionRelationshipScope.legalRepresentative,
-    );
-  },);
-
-  testWidgets(
-      'doctor and legal catalog entries keep their explicit read-only scopes',
-      (tester) async {
-    final repository = _FakeIdentityRepository()
-      ..managementContext = const ManagementContext(
-        userId: 'doctor-legal-1',
-        platformRole: 'USER',
-        activeRoles: ['DOCTOR', 'INSTITUTION_LEGAL_REPRESENTATIVE'],
-        doctorId: 'doctor-1',
-        managedInstitutionIds: ['inst-1'],
-        visibleInstitutionIds: ['inst-1'],
-        canApplyToInstitutions: true,
-      );
-    const catalogRepository = _FakeProfessionalCatalogRepository();
-
-    await tester.pumpWidget(_localizedApp(
-      home: ManagementCenterPage(
-        repository: repository,
-        discoverRepository: catalogRepository,
-      ),
-    ),);
-    await tester.pumpAndSettle();
-
-    for (final testCase in const [
-      (
-        actionKey: 'management-professional-catalog-doctor',
-        scope: ProfessionalCatalogScope.doctor,
-      ),
-      (
-        actionKey: 'management-professional-catalog-legal-representative',
-        scope: ProfessionalCatalogScope.legalRepresentative,
-      ),
-    ]) {
-      final action = find.byKey(Key(testCase.actionKey));
-      await tester.ensureVisible(action);
-      await tester.tap(action);
       await tester.pumpAndSettle();
 
-      final page = tester.widget<ProfessionalCatalogPage>(
-        find.byType(ProfessionalCatalogPage),
+      final consultantGroup = find.byKey(
+        const Key('management-group-consultant'),
       );
-      expect(page.scope, testCase.scope);
-      expect(find.byType(InstitutionRelationshipsPage), findsNothing);
+      final relationshipAction = find.byKey(
+        const Key('management-institution-relationships-consultant'),
+      );
+      expect(consultantGroup, findsOneWidget);
       expect(
-        find.byKey(const Key('relationship-institution-picker')),
+        find.descendant(of: consultantGroup, matching: relationshipAction),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: consultantGroup, matching: find.text('机构关系')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: consultantGroup, matching: find.text('申请加入机构')),
         findsNothing,
       );
+      expect(
+        find.descendant(of: consultantGroup, matching: find.text('机构归属')),
+        findsNothing,
+      );
+      expect(find.text('专业订单'), findsNothing);
+      expect(find.text('机构项目'), findsNothing);
 
-      Navigator.of(tester.element(find.byType(ProfessionalCatalogPage)),).pop();
+      await tester.ensureVisible(relationshipAction);
+      await tester.tap(relationshipAction);
       await tester.pumpAndSettle();
-    }
-  },);
+
+      expect(
+        tester
+            .widget<InstitutionRelationshipsPage>(
+              find.byType(InstitutionRelationshipsPage),
+            )
+            .scope,
+        InstitutionRelationshipScope.consultant,
+      );
+    },
+  );
+
+  testWidgets(
+    'legal representative routes its stable relationship action with legal scope',
+    (tester) async {
+      final repository = _FakeIdentityRepository()
+        ..managementContext = const ManagementContext(
+          userId: 'legal-1',
+          platformRole: 'USER',
+          activeRoles: ['INSTITUTION_LEGAL_REPRESENTATIVE'],
+          managedInstitutionIds: ['inst-1'],
+          visibleInstitutionIds: ['inst-1'],
+          canReviewInstitutionRequests: true,
+        );
+
+      await tester.pumpWidget(
+        _localizedApp(
+          home: ManagementCenterPage(
+            repository: repository,
+            discoverRepository: const _FakeDiscoverRepository(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final legalGroup = find.byKey(
+        const Key('management-group-legal-representative'),
+      );
+      final relationshipAction = find.byKey(
+        const Key('management-institution-relationships-legal-representative'),
+      );
+      expect(
+        find.descendant(of: legalGroup, matching: relationshipAction),
+        findsOneWidget,
+      );
+
+      await tester.ensureVisible(relationshipAction);
+      await tester.tap(relationshipAction);
+      await tester.pumpAndSettle();
+
+      expect(
+        tester
+            .widget<InstitutionRelationshipsPage>(
+              find.byType(InstitutionRelationshipsPage),
+            )
+            .scope,
+        InstitutionRelationshipScope.legalRepresentative,
+      );
+    },
+  );
+
+  testWidgets(
+    'doctor and legal catalog entries keep their explicit read-only scopes',
+    (tester) async {
+      final repository = _FakeIdentityRepository()
+        ..managementContext = const ManagementContext(
+          userId: 'doctor-legal-1',
+          platformRole: 'USER',
+          activeRoles: ['DOCTOR', 'INSTITUTION_LEGAL_REPRESENTATIVE'],
+          doctorId: 'doctor-1',
+          managedInstitutionIds: ['inst-1'],
+          visibleInstitutionIds: ['inst-1'],
+          canApplyToInstitutions: true,
+        );
+      const catalogRepository = _FakeProfessionalCatalogRepository();
+
+      await tester.pumpWidget(
+        _localizedApp(
+          home: ManagementCenterPage(
+            repository: repository,
+            discoverRepository: catalogRepository,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      for (final testCase in const [
+        (
+          actionKey: 'management-professional-catalog-doctor',
+          scope: ProfessionalCatalogScope.doctor,
+        ),
+        (
+          actionKey: 'management-professional-catalog-legal-representative',
+          scope: ProfessionalCatalogScope.legalRepresentative,
+        ),
+      ]) {
+        final action = find.byKey(Key(testCase.actionKey));
+        await tester.ensureVisible(action);
+        await tester.tap(action);
+        await tester.pumpAndSettle();
+
+        final page = tester.widget<ProfessionalCatalogPage>(
+          find.byType(ProfessionalCatalogPage),
+        );
+        expect(page.scope, testCase.scope);
+        expect(find.byType(InstitutionRelationshipsPage), findsNothing);
+        expect(
+          find.byKey(const Key('relationship-institution-picker')),
+          findsNothing,
+        );
+
+        Navigator.of(
+          tester.element(find.byType(ProfessionalCatalogPage)),
+        ).pop();
+        await tester.pumpAndSettle();
+      }
+    },
+  );
 }
 
-Widget _localizedApp(
-        {required Widget home, Locale locale = const Locale('zh'),}) =>
+Widget _localizedApp({
+  required Widget home,
+  Locale locale = const Locale('zh'),
+}) =>
     MaterialApp(
       locale: locale,
       supportedLocales: const [Locale('zh'), Locale('en')],
@@ -1405,20 +1462,13 @@ final class _FakeIdentityRepository implements IdentityRepository {
   @override
   Future<List<ManagedInstitutionSummary>> listManagedInstitutions() async => [
         const ManagedInstitutionSummary(
-          id: 'inst-1',
-          name: '悦美医疗美容',
-          city: '杭州'
-        ),
+            id: 'inst-1', name: '悦美医疗美容', city: '杭州'),
       ];
 
   @override
   Future<List<ManagedInstitutionSummary>>
       listProfessionalVisibleInstitutions() async => const [
-            ManagedInstitutionSummary(
-              id: 'inst-1',
-              name: '悦美医疗美容',
-              city: '杭州'
-            ),
+            ManagedInstitutionSummary(id: 'inst-1', name: '悦美医疗美容', city: '杭州'),
           ];
 
   @override
@@ -1481,7 +1531,8 @@ final class _FakeIdentityRepository implements IdentityRepository {
 
   @override
   Future<void> submitSplitConfigProposal(
-      SplitConfigProposalDraft draft,) async {}
+    SplitConfigProposalDraft draft,
+  ) async {}
 
   @override
   Future<DoctorSelfProfile> loadDoctorSelfProfile() {
@@ -1641,7 +1692,7 @@ final class _FakeIdentityRepository implements IdentityRepository {
       throw UnimplementedError();
 
   @override
-  Future<DoctorProjectChangeRequest> submitDoctorProjectLeave({
+  Future<void> submitDoctorProjectLeave({
     required String institutionProjectId,
   }) =>
       throw UnimplementedError();
@@ -1663,5 +1714,6 @@ final class _FakeIdentityRepository implements IdentityRepository {
     required String decision,
     required String reviewNote,
     required bool force,
+    required String? forceBaseRevision,
   }) async {}
 }

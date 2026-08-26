@@ -9,6 +9,7 @@ import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/presentation/catalog_detail_shared.dart';
 import 'package:joysong_flutter/features/discover/presentation/catalog_review_section.dart';
 import 'package:joysong_flutter/features/discover/presentation/discover_content_card.dart';
+import 'package:joysong_flutter/features/discover/presentation/institution_project_preview_body.dart';
 import 'package:joysong_flutter/features/discover/presentation/rich_content_view.dart';
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
 import 'package:joysong_flutter/features/social/presentation/favorite_action_button.dart';
@@ -57,6 +58,11 @@ class CatalogProjectDetailView extends StatelessWidget {
     final reviews = _maps(raw['reviews']);
     final isInstitutionProject = ip.isNotEmpty;
     final sources = [ip, project, raw];
+    final hasAvailableDoctors = _boolean(
+      sources,
+      const ['hasAvailableDoctors'],
+      fallback: true,
+    );
     final name = _text(sources, const ['name', 'projectName'], item.title);
     final slogan = _text(sources, const ['slogan'], '');
     final eligibleDescription =
@@ -89,11 +95,27 @@ class CatalogProjectDetailView extends StatelessWidget {
     final seenTags = <String>{};
     final visibleTags =
         tags.where((entry) => seenTags.add(entry.$2)).toList(growable: false);
-    final images = <String>{
-      ..._tokens(sources, const ['images']),
-      ..._tokens(sources, const ['coverImage']),
-      if (item.imageUrl.isNotEmpty) item.imageUrl,
-    }.toList(growable: false);
+    final coverImage = _text(sources, const ['coverImage'], item.imageUrl);
+    final images = institutionProjectPreviewImages(
+      coverImage: coverImage,
+      gallery: [
+        ..._tokens(sources, const ['images']),
+        if (item.imageUrl.isNotEmpty) item.imageUrl,
+      ],
+    );
+    final preview = InstitutionProjectPreviewModel(
+      name: name,
+      institutionName: institutionName,
+      price: price ?? 0,
+      currency: _text(sources, const ['currency'], 'USD'),
+      salesCount: _integer(sources, const ['salesCount']),
+      tags: [for (final tag in visibleTags) tag.$2],
+      slogan: slogan.isEmpty ? null : slogan,
+      description: description.isEmpty ? null : description,
+      detailContent: detailContent.isEmpty ? null : detailContent,
+      coverImage: coverImage.isEmpty ? null : coverImage,
+      images: images,
+    );
     final keys = List.generate(5, (_) => GlobalKey());
     void jump(int index) {
       final target = keys[index].currentContext;
@@ -116,19 +138,32 @@ class CatalogProjectDetailView extends StatelessWidget {
       Expanded(
         child: CustomScrollView(slivers: [
           SliverToBoxAdapter(
-            child: _ProjectHero(
-              images: images,
-              name: name,
-              slogan: slogan,
-              subtitle: isInstitutionProject
-                  ? institutionName
-                  : context.localized('参考均价', 'Reference price'),
-              price: price,
-              originalPrice: originalPrice,
-              contentId: 'project:${item.id}',
-              translateSubtitle: isInstitutionProject,
-              enableAutoTranslation: enableAutoTranslation,
-            ),
+            child: isInstitutionProject
+                ? _InstitutionProjectPreview(
+                    model: preview,
+                    tagFields: [for (final tag in visibleTags) tag.$1],
+                    contentId: 'project:${item.id}',
+                    translateDescription: eligibleDescription.isNotEmpty,
+                    enableAutoTranslation: enableAutoTranslation,
+                    guideKey: keys[0],
+                    onViewMoreInformation: detailContent.isEmpty
+                        ? null
+                        : () => _showDetails(context, name, detailContent),
+                  )
+                : _ProjectHero(
+                    images: images,
+                    name: name,
+                    slogan: slogan,
+                    subtitle: context.localized(
+                      '参考均价',
+                      'Reference price',
+                    ),
+                    price: price,
+                    originalPrice: originalPrice,
+                    contentId: 'project:${item.id}',
+                    translateSubtitle: false,
+                    enableAutoTranslation: enableAutoTranslation,
+                  ),
           ),
           if (isInstitutionProject)
             SliverToBoxAdapter(
@@ -146,68 +181,74 @@ class CatalogProjectDetailView extends StatelessWidget {
             pinned: true,
             delegate: _ProjectNavDelegate(labels: labels, onTap: jump),
           ),
-          SliverToBoxAdapter(
-            child: CatalogSection(
+          if (!isInstitutionProject)
+            SliverToBoxAdapter(
+              child: CatalogSection(
               key: keys[0],
-              title: context.localized(
-                  isInstitutionProject ? '项目百科' : '百科攻略', 'Project guide'),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (visibleTags.isNotEmpty) ...[
-                    Wrap(
-                      spacing: 7,
-                      runSpacing: 7,
-                      children: [
-                        for (final tag in visibleTags)
-                          _TinyTag(
-                            tag.$2,
-                            field: tag.$1,
-                            contentId: 'project:${item.id}',
-                            enableAutoTranslation: enableAutoTranslation,
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  if (enableAutoTranslation && eligibleDescription.isNotEmpty)
-                    AutoTranslatedText(
-                      request: _projectRequest(
-                        contentId: 'project:${item.id}',
-                        field: 'description',
-                        source: description,
+                title: context.localized('百科攻略', 'Project guide'),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (visibleTags.isNotEmpty) ...[
+                      Wrap(
+                        spacing: 7,
+                        runSpacing: 7,
+                        children: [
+                          for (final tag in visibleTags)
+                            _TinyTag(
+                              tag.$2,
+                              field: tag.$1,
+                              contentId: 'project:${item.id}',
+                              enableAutoTranslation: enableAutoTranslation,
+                            ),
+                        ],
                       ),
-                      style: const TextStyle(
-                        height: 1.55,
-                        color: Color(0xff666666),
-                      ),
-                    )
-                  else
-                    Text(
-                      description.isEmpty
-                          ? context.localized('暂无项目介绍', 'No project overview')
-                          : description,
-                      style: const TextStyle(
-                        height: 1.55,
-                        color: Color(0xff666666),
-                      ),
-                    ),
-                  if (detailContent.isNotEmpty)
-                    Center(
-                      child: TextButton(
-                        onPressed: () => _showDetails(
-                          context,
-                          name,
-                          detailContent,
+                      const SizedBox(height: 12),
+                    ],
+                    if (enableAutoTranslation &&
+                        eligibleDescription.isNotEmpty)
+                      AutoTranslatedText(
+                        request: _projectRequest(
+                          contentId: 'project:${item.id}',
+                          field: 'description',
+                          source: description,
                         ),
-                        child: Text(context.localized(
-                            '查看项目更多信息', 'View more information')),
+                        style: const TextStyle(
+                          height: 1.55,
+                          color: Color(0xff666666),
+                        ),
+                      )
+                    else
+                      Text(
+                        description.isEmpty
+                            ? context.localized(
+                                '暂无项目介绍',
+                                'No project overview',
+                              )
+                            : description,
+                        style: const TextStyle(
+                          height: 1.55,
+                          color: Color(0xff666666),
+                        ),
                       ),
-                    ),
-                ],
+                    if (detailContent.isNotEmpty)
+                      Center(
+                        child: TextButton(
+                          onPressed: () => _showDetails(
+                            context,
+                            name,
+                            detailContent,
+                          ),
+                          child: Text(context.localized(
+                            '查看项目更多信息',
+                            'View more information',
+                          )),
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
-          ),
           SliverToBoxAdapter(
             child: CatalogSection(
               key: keys[1],
@@ -225,7 +266,12 @@ class CatalogProjectDetailView extends StatelessWidget {
                     : '全部 (${isInstitutionProject ? doctors.length : institutionProjects.length})'),
               ),
               child: isInstitutionProject
-                  ? doctors.isEmpty
+                  ? !hasAvailableDoctors
+                      ? _Empty(context.localized(
+                          '当前暂无可预约医生',
+                          'No doctors are currently available for booking',
+                        ))
+                      : doctors.isEmpty
                       ? _Empty(context.localized('医生排班信息暂未开放',
                           'Doctor schedules are not available yet'))
                       : Column(
@@ -309,7 +355,8 @@ class CatalogProjectDetailView extends StatelessWidget {
           const SliverToBoxAdapter(child: SizedBox(height: 18)),
         ]),
       ),
-      CatalogBottomBar(
+      if (!isInstitutionProject || hasAvailableDoctors)
+        CatalogBottomBar(
         primaryLabel: isInstitutionProject
             ? context.localized('预约项目', 'Book project')
             : context.localized('查看可预约机构', 'View institutions'),
@@ -387,6 +434,129 @@ class CatalogProjectDetailView extends StatelessWidget {
       ),
     );
   }
+}
+
+class _InstitutionProjectPreview extends StatelessWidget {
+  const _InstitutionProjectPreview({
+    required this.model,
+    required this.tagFields,
+    required this.contentId,
+    required this.translateDescription,
+    required this.enableAutoTranslation,
+    required this.guideKey,
+    required this.onViewMoreInformation,
+  });
+
+  final InstitutionProjectPreviewModel model;
+  final List<String> tagFields;
+  final String contentId;
+  final bool translateDescription;
+  final bool enableAutoTranslation;
+  final Key guideKey;
+  final VoidCallback? onViewMoreInformation;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget body(Map<String, String> visibleText) {
+      final visibleTags = [
+        for (final tag in model.tags.indexed)
+          visibleText['tag:${tag.$1}'] ?? tag.$2,
+      ];
+      return InstitutionProjectPreviewBody(
+        model: InstitutionProjectPreviewModel(
+          name: visibleText['name'] ?? model.name,
+          institutionName:
+              visibleText['institutionName'] ?? model.institutionName,
+          price: model.price,
+          currency: model.currency,
+          salesCount: model.salesCount,
+          tags: visibleTags,
+          slogan: visibleText['slogan'] ?? model.slogan,
+          description: visibleText['description'] ?? model.description,
+          detailContent: model.detailContent,
+          coverImage: model.coverImage,
+          images: model.images,
+        ),
+        guideKey: guideKey,
+        priceLabel: _catalogPriceLabel(model.price, model.currency),
+        detailContentReplacement: onViewMoreInformation == null
+            ? null
+            : Center(
+                child: TextButton(
+                  onPressed: onViewMoreInformation,
+                  child: Text(context.localized(
+                    '查看项目更多信息',
+                    'View more information',
+                  )),
+                ),
+              ),
+      );
+    }
+
+    if (!enableAutoTranslation) return body(const <String, String>{});
+
+    final slogan = model.slogan?.trim() ?? '';
+    final description = model.description?.trim() ?? '';
+    final translations = <_PreviewTranslation>[
+      _PreviewTranslation(key: 'name', field: 'name', source: model.name),
+      if (slogan.isNotEmpty)
+        _PreviewTranslation(key: 'slogan', field: 'slogan', source: slogan),
+      if (model.institutionName.trim().isNotEmpty)
+        _PreviewTranslation(
+          key: 'institutionName',
+          field: 'institutionName',
+          source: model.institutionName,
+        ),
+      if (translateDescription && description.isNotEmpty)
+        _PreviewTranslation(
+          key: 'description',
+          field: 'description',
+          source: description,
+        ),
+      for (final tag in model.tags.indexed)
+        _PreviewTranslation(
+          key: 'tag:${tag.$1}',
+          field: tag.$1 < tagFields.length ? tagFields[tag.$1] : 'tags',
+          source: tag.$2,
+        ),
+    ];
+
+    late Widget Function(int index, Map<String, String> visibleText)
+        translateAt;
+    translateAt = (index, visibleText) {
+      if (index == translations.length) return body(visibleText);
+      final translation = translations[index];
+      return AutoTranslationBuilder(
+        request: _projectRequest(
+          contentId: contentId,
+          field: translation.field,
+          source: translation.source,
+        ),
+        builder: (_, value) => translateAt(
+          index + 1,
+          {...visibleText, translation.key: value},
+        ),
+      );
+    };
+    return translateAt(0, const <String, String>{});
+  }
+}
+
+String _catalogPriceLabel(double value, String currency) {
+  final symbol = currency.trim().toUpperCase() == 'CNY' ? '¥' : r'$';
+  return '$symbol${catalogMoney(value)}';
+}
+
+class _PreviewTranslation {
+  const _PreviewTranslation({
+    required this.key,
+    required this.field,
+    required this.source,
+  });
+
+  final String key;
+  final String field;
+  final String source;
 }
 
 class _ProjectHero extends StatelessWidget {
@@ -658,7 +828,6 @@ class _TinyTag extends StatelessWidget {
             : Text(label, style: const TextStyle(fontSize: 12)),
       );
 }
-
 class _InstitutionProjectRow extends StatelessWidget {
   const _InstitutionProjectRow(
     this.data,
@@ -888,6 +1057,20 @@ int _integer(List<Map<String, Object?>> sources, List<String> keys) {
     }
   }
   return 0;
+}
+
+bool _boolean(
+  List<Map<String, Object?>> sources,
+  List<String> keys, {
+  required bool fallback,
+}) {
+  for (final source in sources) {
+    for (final key in keys) {
+      final value = source[key];
+      if (value is bool) return value;
+    }
+  }
+  return fallback;
 }
 
 Iterable<String> _tokens(

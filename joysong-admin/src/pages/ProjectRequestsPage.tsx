@@ -1,709 +1,532 @@
-import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Descriptions, Form, Input, message, Modal, Select, Space, Table, Tag } from 'antd';
-import { CheckOutlined, CloseOutlined, EditOutlined } from '@ant-design/icons';
-import api, { getApiErrorMessage, getData, getManagementContext } from '../api';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Button, Card, Collapse, Descriptions, Drawer, Empty, Form, Input, message, Modal, Select, Space, Tag } from 'antd';
+import { CheckOutlined, CloseOutlined, EditOutlined, EyeOutlined } from '@ant-design/icons';
+import api, { getApiErrorCode, getApiErrorMessage, getData, getManagementContext } from '../api';
+import InstitutionProjectPreview from '../components/InstitutionProjectPreview';
 import { identityStatusColor, identityStatusLabel } from '../identity';
+import {
+  adaptCreationRequestPreview, adaptLegacyProjectRequestPreview, adaptV2ProposedProjectPreview,
+  isCompleteProfessionalProjectRequest, parseDoctorProjectChangeRequests,
+  type DoctorProjectChangeRequestV1, type DoctorProjectChangeRequestV2, type InstitutionProjectPreviewModel, type InstitutionProjectSnapshotV2,
+  type ParsedDoctorProjectChangeRequest, type ProfessionalProjectRequest,
+} from '../types/projectRequests';
 
-type ProfessionalProjectRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CHANGES_REQUESTED';
-type DoctorProjectChangeStatus = ProfessionalProjectRequestStatus | 'WITHDRAWN';
-type ProjectRequestStatus = DoctorProjectChangeStatus;
-type ProjectCurrency = 'CNY' | 'USD';
+type ReviewDecision = 'APPROVED' | 'REJECTED' | 'CHANGES_REQUESTED';
+type StatusFilter = 'PENDING' | 'ALL' | 'APPROVED' | 'REJECTED' | 'CHANGES_REQUESTED' | 'WITHDRAWN';
+type CreationItem = { source: 'CREATION'; request: ProfessionalProjectRequest };
+type ChangeItem = { source: 'CHANGE'; request: ParsedDoctorProjectChangeRequest };
+type ReviewItem = CreationItem | ChangeItem;
+type ConflictState = {
+  code: HandledReviewErrorCode;
+  message: string;
+  requestId: string;
+  refreshSucceeded: boolean;
+};
 
-export interface InstitutionProjectSplit {
-  consultationFee: number;
-  commissionRate: number;
-  institutionRate: number;
-  platformRate: number;
-  doctorRate: number;
+export const REVIEW_ERROR_FORCE_ELIGIBILITY = {
+  EDIT_BASE_STALE: false,
+  APPROVAL_BASE_STALE: true,
+  INHERITANCE_SOURCE_STALE: false,
+  PRICING_POLICY_STALE: false,
+  FORCE_BASE_STALE: false,
+  REQUEST_ALREADY_PENDING: false,
+  REQUEST_ALREADY_HANDLED: false,
+  CLIENT_UPGRADE_REQUIRED: false,
+  FORCE_NOT_APPLICABLE: false,
+  PROJECT_PAYLOAD_INVALID: false,
+  REQUEST_SNAPSHOT_INVALID: false,
+  INSTITUTION_PROJECT_VERSION_STALE: false,
+  PERMISSION_DENIED: false,
+} as const satisfies Record<string, boolean>;
+
+type HandledReviewErrorCode = keyof typeof REVIEW_ERROR_FORCE_ELIGIBILITY;
+const handledReviewErrorCodes = new Set<string>(Object.keys(REVIEW_ERROR_FORCE_ELIGIBILITY));
+
+export function isAdminForceEligible(errorCode: string | null, isAdmin: boolean) {
+  return isAdmin && errorCode === 'APPROVAL_BASE_STALE';
 }
 
-export interface ProfessionalProjectRequestResponse {
-  id: string;
-  requestType: 'PLATFORM' | 'INSTITUTION';
-  doctorId: string;
-  doctorName: string;
-  institutionId: string | null;
-  institutionName: string | null;
-  projectId: string | null;
-  projectName: string | null;
-  name: string | null;
-  category: string | null;
-  description: string | null;
-  tags: string[] | null;
-  slogan: string | null;
-  detailContent: string | null;
-  currency: ProjectCurrency;
-  coverImage: string | null;
-  images: string[] | null;
-  salesCount: number;
-  referencePrice: number | null;
-  categoryTags: string[] | null;
+const money = (currency: string, value: number | null | undefined) => value == null ? '-' : `${currency} ${value.toFixed(2)}`;
+const activeLabel = (active: boolean | null | undefined) => active == null ? '-' : active ? '启用' : '停用';
+const itemKey = (item: ReviewItem) => `${item.source}:${item.request.id}`;
+const changeStatus = (request: ParsedDoctorProjectChangeRequest) => request.kind === 'V1' ? request.status : request.requestStatus;
+const itemStatus = (item: ReviewItem) => item.source === 'CREATION' ? item.request.status : changeStatus(item.request);
+const changeProjectName = (request: ParsedDoctorProjectChangeRequest) => request.kind === 'V2' ? request.institutionProjectName : request.projectName;
+const itemProjectName = (item: ReviewItem) => item.source === 'CREATION'
+  ? item.request.name?.trim() || item.request.projectName || '项目名称使用继承值'
+  : changeProjectName(item.request);
+const reviewLabel = (action: string, item: ReviewItem) => `${action} ${itemProjectName(item)}，申请ID ${item.request.id}`;
+const hasNegativeDoctorRate = (item: ReviewItem) => item.source === 'CREATION'
+  && item.request.requestType === 'INSTITUTION'
+  && item.request.institutionSplit.doctorRate < 0;
+
+function SnapshotPreview({
+  label, snapshot, price, active, travelGroundServiceFee,
+}: {
+  label: string;
+  snapshot: InstitutionProjectSnapshotV2 | null;
   price: number | null;
-  originalPrice: number | null;
-  isActive: boolean | null;
-  institutionSplit: InstitutionProjectSplit | null;
-  notes: string | null;
-  status: ProfessionalProjectRequestStatus;
-  reviewNote: string | null;
-  reviewedBy: string | null;
-  reviewedAt: string | null;
-  resultingProjectId: string | null;
-  resultingInstitutionProjectId: string | null;
-  submittedAt: string;
-  updatedAt: string;
+  active: boolean | null;
+  travelGroundServiceFee: number;
+}) {
+  if (!snapshot) return <section aria-label={`${label}共享项目预览`}><Empty description={`${label}共享项目不可用`} /></section>;
+  const model: InstitutionProjectPreviewModel = {
+    ...snapshot.effective,
+    currency: 'USD',
+    price,
+    originalPrice: null,
+    active,
+    travelGroundServiceFee,
+  };
+  return <section aria-label={`${label}共享项目预览`}>
+    <h4>{label}共享项目</h4>
+    <InstitutionProjectPreview model={model} />
+    <Descriptions size="small" column={1} items={[
+      { key: 'sales', label: '销量', children: snapshot.effective.salesCount },
+      { key: 'active', label: '医生状态', children: activeLabel(active) },
+    ]} />
+  </section>;
 }
 
-type PlatformProjectRequest = ProfessionalProjectRequestResponse & {
-  requestType: 'PLATFORM';
-  institutionId: null;
-  institutionName: null;
-  projectId: null;
-  projectName: null;
-  name: string;
-  category: string;
-  description: string;
-  tags: string[];
-  slogan: string;
-  coverImage: string;
-  images: string[];
-  referencePrice: number;
-  categoryTags: string[];
-  price: null;
-  originalPrice: null;
-  isActive: null;
-  institutionSplit: null;
-};
-
-type InstitutionProjectRequest = ProfessionalProjectRequestResponse & {
-  requestType: 'INSTITUTION';
-  institutionId: string;
-  institutionName: string | null;
-  projectId: string;
-  projectName: string | null;
-  referencePrice: null;
-  categoryTags: null;
-  price: number;
-  isActive: boolean;
-  institutionSplit: InstitutionProjectSplit;
-};
-
-type CompleteProfessionalProjectRequestResponse = PlatformProjectRequest | InstitutionProjectRequest;
-
-type ProfessionalProjectRequest = CompleteProfessionalProjectRequestResponse & {
-  requestSource: 'PROFESSIONAL';
-};
-
-interface DoctorProjectChangeRequest {
-  id: string;
-  requestSource: 'DOCTOR_PROJECT_CHANGE';
-  requestType: 'JOIN' | 'PROFILE_UPDATE' | 'LEAVE';
-  doctorId: string;
-  doctorName: string;
-  institutionId: string;
-  institutionName: string;
-  institutionProjectId: string;
-  projectName: string;
-  serviceDescription: string;
-  serviceTags?: string[];
-  scheduleNote?: string | null;
-  coverImage?: string | null;
-  images?: string[];
-  priceSuggestion?: number | null;
-  notes?: string | null;
-  consultationFee?: number | null;
-  commissionRate?: number | null;
-  institutionRate?: number | null;
-  medicalListPrice?: number | null;
-  platformRate?: number | null;
-  doctorRate?: number | null;
-  currentPrice?: number | null;
-  currentServiceDescription?: string | null;
-  currentServiceTags?: string[] | null;
-  currentScheduleNote?: string | null;
-  currentCoverImage?: string | null;
-  currentImages?: string[] | null;
-  currentConsultationFee?: number | null;
-  currentCommissionRate?: number | null;
-  currentInstitutionRate?: number | null;
-  currentMedicalListPrice?: number | null;
-  currentPlatformRate?: number | null;
-  currentDoctorRate?: number | null;
-  forceProcessed?: boolean;
-  status: DoctorProjectChangeStatus;
-  reviewNote?: string | null;
-  submittedAt?: string | null;
+function ChangeComparison({ request, showSnapshotPreviews = false }: { request: DoctorProjectChangeRequestV2; showSnapshotPreviews?: boolean }) {
+  const current = request.currentProject?.effective;
+  const proposed = request.proposedProject?.effective;
+  const latest = request.latestProject?.effective;
+  const imageState = (cover: string | null | undefined, images: string[] | undefined) =>
+    `${cover ? '有封面' : '无封面'}，${images?.length ?? 0} 张项目图`;
+  return <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
+    <Alert
+      type={request.sharedChanged ? 'warning' : 'info'}
+      showIcon
+      title={request.sharedChanged ? '本次申请修改机构共享项目资料，请同时核对其他医生受到的影响。' : '本次申请仅修改该医生的价格或启用状态。'}
+    />
+    <Descriptions size="small" column={1} items={[
+      { key: 'current-name', label: '当前机构项目名称', children: current?.name ?? '-' },
+      { key: 'proposed-name', label: '提议机构项目名称', children: proposed?.name ?? '-' },
+      { key: 'latest-name', label: '刷新后最新机构项目名称', children: latest?.name ?? '-' },
+      { key: 'current-category', label: '当前分类', children: current?.category ?? '-' },
+      { key: 'proposed-category', label: '提议分类', children: proposed?.category ?? '-' },
+      { key: 'latest-category', label: '刷新后最新分类', children: latest?.category ?? '-' },
+      { key: 'current-description', label: '当前说明', children: current?.description ?? '-' },
+      { key: 'proposed-description', label: '提议说明', children: proposed?.description ?? '-' },
+      { key: 'latest-description', label: '刷新后最新说明', children: latest?.description ?? '-' },
+      { key: 'current-tags', label: '当前标签', children: current?.tags.join('、') || '-' },
+      { key: 'proposed-tags', label: '提议标签', children: proposed?.tags.join('、') || '-' },
+      { key: 'latest-tags', label: '刷新后最新标签', children: latest?.tags.join('、') || '-' },
+      { key: 'current-slogan', label: '当前宣传语', children: current?.slogan ?? '-' },
+      { key: 'proposed-slogan', label: '提议宣传语', children: proposed?.slogan ?? '-' },
+      { key: 'latest-slogan', label: '刷新后最新宣传语', children: latest?.slogan ?? '-' },
+      { key: 'current-sales', label: '当前销量', children: current?.salesCount ?? '-' },
+      { key: 'proposed-sales', label: '提议销量', children: proposed?.salesCount ?? '-' },
+      { key: 'latest-sales', label: '刷新后最新销量', children: latest?.salesCount ?? '-' },
+      { key: 'current-images', label: '当前图片', children: imageState(current?.coverImage, current?.images) },
+      { key: 'proposed-images', label: '提议图片', children: imageState(proposed?.coverImage, proposed?.images) },
+      { key: 'latest-images', label: '刷新后最新图片', children: imageState(latest?.coverImage, latest?.images) },
+      { key: 'current-price', label: '当前医生价格', children: money('USD', request.currentDoctorPrice) },
+      { key: 'proposed-price', label: '提议医生价格', children: money('USD', request.proposedDoctorPrice) },
+      { key: 'latest-price', label: '刷新后最新医生价格', children: money('USD', request.latestDoctorPrice) },
+      { key: 'current-active', label: '当前医生状态', children: activeLabel(request.currentDoctorActive) },
+      { key: 'proposed-active', label: '提议医生状态', children: activeLabel(request.proposedDoctorActive) },
+      { key: 'latest-active', label: '刷新后最新医生状态', children: activeLabel(request.latestDoctorActive) },
+      { key: 'travel', label: '旅游地接服务费（只读）', children: money('USD', request.travelGroundServiceFee) },
+    ]} />
+    {showSnapshotPreviews && <Space orientation="vertical" size="large" style={{ width: '100%' }}>
+      <SnapshotPreview label="当前" snapshot={request.currentProject} price={request.currentDoctorPrice}
+        active={request.currentDoctorActive} travelGroundServiceFee={request.travelGroundServiceFee} />
+      <SnapshotPreview label="提议" snapshot={request.proposedProject} price={request.proposedDoctorPrice}
+        active={request.proposedDoctorActive} travelGroundServiceFee={request.travelGroundServiceFee} />
+      <SnapshotPreview label="刷新后最新" snapshot={request.latestProject} price={request.latestDoctorPrice}
+        active={request.latestDoctorActive} travelGroundServiceFee={request.travelGroundServiceFee} />
+    </Space>}
+  </Space>;
 }
 
-type ProjectRequest = ProfessionalProjectRequest | DoctorProjectChangeRequest;
-type ReviewDecision = 'REJECTED' | 'CHANGES_REQUESTED';
-
-const textOrDash = (value?: string | null) => value || '-';
-const listOrDash = (values?: string[] | null) => values?.length ? values.join('、') : '-';
-const moneyOrDash = (currency: string, value?: number | null) => value == null ? '-' : `${currency} ${value}`;
-const imageListOrDash = (values?: string[] | null) => values?.length
-  ? <Space orientation="vertical" size={0}>{values.map(value => <span key={value}>{value}</span>)}</Space>
-  : '-';
-
-const hasOwn = (value: Record<string, unknown>, key: string) => Object.prototype.hasOwnProperty.call(value, key);
-const isRecord = (value: unknown): value is Record<string, unknown> => value != null && typeof value === 'object' && !Array.isArray(value);
-const isBoundedString = (value: unknown, maximumLength: number): value is string =>
-  typeof value === 'string' && value.length <= maximumLength;
-const isNullableBoundedString = (value: unknown, maximumLength: number): value is string | null =>
-  value === null || isBoundedString(value, maximumLength);
-const isNormalizedText = (value: unknown, maximumLength: number, allowEmpty = false): value is string =>
-  typeof value === 'string'
-  && value.length <= maximumLength
-  && value.trim() === value
-  && (allowEmpty || value.length > 0);
-const isNullableNormalizedText = (value: unknown, maximumLength: number): value is string | null =>
-  value === null || isNormalizedText(value, maximumLength);
-const isIdentifier = (value: unknown): value is string => isNormalizedText(value, 36);
-const isNullableIdentifier = (value: unknown): value is string | null => value === null || isIdentifier(value);
-const isBoundedStringList = (
-  value: unknown,
-  maximumItems: number,
-  maximumItemLength: number,
-  maximumJoinedLength: number,
-): value is string[] => Array.isArray(value)
-  && value.length <= maximumItems
-  && value.every(item => isNormalizedText(item, maximumItemLength))
-  && value.join(',').length <= maximumJoinedLength;
-const isNullableBoundedStringList = (
-  value: unknown,
-  maximumItems: number,
-  maximumItemLength: number,
-  maximumJoinedLength: number,
-): value is string[] | null => value === null
-  || isBoundedStringList(value, maximumItems, maximumItemLength, maximumJoinedLength);
-const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
-const isProjectCurrency = (value: unknown): value is ProjectCurrency => value === 'CNY' || value === 'USD';
-const isMoney = (value: unknown): value is number => toHundredths(value, 0, 99_999_999.99) !== null;
-const isNullableMoney = (value: unknown): value is number | null => value === null || isMoney(value);
-const isProjectRequestStatus = (value: unknown): value is ProfessionalProjectRequestStatus => typeof value === 'string'
-  && ['PENDING', 'APPROVED', 'REJECTED', 'CHANGES_REQUESTED'].includes(value);
-const isIsoLocalDateTime = (value: unknown): value is string => {
-  if (typeof value !== 'string') return false;
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?$/.exec(value);
-  if (!match) return false;
-  const [, yearText, monthText, dayText, hourText, minuteText, secondText] = match;
-  const year = Number(yearText);
-  const month = Number(monthText);
-  const day = Number(dayText);
-  const hour = Number(hourText);
-  const minute = Number(minuteText);
-  const second = Number(secondText);
-  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59) return false;
-  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
-  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-  return day >= 1 && day <= daysInMonth[month - 1];
-};
-const isNullableIsoLocalDateTime = (value: unknown): value is string | null => value === null || isIsoLocalDateTime(value);
-const hasValidField = (
-  value: Record<string, unknown>,
-  key: string,
-  predicate: (field: unknown) => boolean,
-) => hasOwn(value, key) && predicate(value[key]);
-
-function isCompleteSplit(value: unknown): value is InstitutionProjectSplit {
-  if (!isRecord(value)) return false;
-  const consultationFee = toHundredths(value.consultationFee, 0, 99_999_999.99);
-  const commissionRate = toHundredths(value.commissionRate, 0, 100);
-  const institutionRate = toHundredths(value.institutionRate, 0, 100);
-  const platformRate = toHundredths(value.platformRate, 0, 100);
-  const doctorRate = toHundredths(value.doctorRate, -100, 100);
-  return consultationFee !== null
-    && commissionRate !== null
-    && institutionRate !== null
-    && platformRate !== null
-    && doctorRate !== null
-    && commissionRate + institutionRate <= 10_000
-    && commissionRate + institutionRate + platformRate + doctorRate === 10_000;
+function LegacyChangeComparison({ request }: { request: DoctorProjectChangeRequestV1 }) {
+  const list = (values: string[] | null | undefined) => values?.length ? values.join('、') : '-';
+  const percent = (value: number | null | undefined) => value == null ? '-' : `${value}%`;
+  return <Descriptions size="small" column={1} items={[
+    { key: 'current-description', label: '当前服务内容', children: request.currentServiceDescription || '-' },
+    { key: 'proposed-description', label: '提议服务内容', children: request.serviceDescription || '-' },
+    { key: 'current-tags', label: '当前服务标签', children: list(request.currentServiceTags) },
+    { key: 'proposed-tags', label: '提议服务标签', children: list(request.serviceTags) },
+    { key: 'current-schedule', label: '当前排期说明（旧版）', children: request.currentScheduleNote || '-' },
+    { key: 'proposed-schedule', label: '提议排期说明（旧版）', children: request.scheduleNote || '-' },
+    { key: 'current-price', label: '当前医生价格', children: money('USD', request.currentPrice) },
+    { key: 'proposed-price', label: '提议医生价格', children: money('USD', request.priceSuggestion) },
+    { key: 'current-list-price', label: '当前医疗套餐优惠前金额', children: money('USD', request.currentMedicalListPrice) },
+    { key: 'proposed-list-price', label: '提议医疗套餐优惠前金额', children: money('USD', request.medicalListPrice) },
+    { key: 'current-platform-rate', label: '当前平台服务比例（只读）', children: percent(request.currentPlatformRate) },
+    { key: 'proposed-platform-rate', label: '提议平台服务比例（只读）', children: percent(request.platformRate) },
+    { key: 'notes', label: '补充说明', children: request.notes || '-' },
+  ]} />;
 }
-
-function toHundredths(value: unknown, minimum: number, maximum: number) {
-  if (!isFiniteNumber(value) || value < minimum || value > maximum) return null;
-  const scaled = value * 100;
-  const rounded = Math.round(scaled);
-  const tolerance = Math.max(1e-9, Number.EPSILON * Math.max(1, Math.abs(scaled)) * 4);
-  return Math.abs(scaled - rounded) <= tolerance ? rounded : null;
-}
-
-function isCompleteProfessionalProjectRequest(value: unknown): value is CompleteProfessionalProjectRequestResponse {
-  if (!isRecord(value)) return false;
-
-  const hasCompleteCommonFields = hasValidField(value, 'requestType', field => field === 'PLATFORM' || field === 'INSTITUTION')
-    && hasValidField(value, 'id', isIdentifier)
-    && hasValidField(value, 'doctorId', isIdentifier)
-    && hasValidField(value, 'doctorName', field => isBoundedString(field, 100))
-    && hasValidField(value, 'institutionId', isNullableIdentifier)
-    && hasValidField(value, 'institutionName', field => isNullableBoundedString(field, 200))
-    && hasValidField(value, 'projectId', isNullableIdentifier)
-    && hasValidField(value, 'projectName', field => isNullableBoundedString(field, 200))
-    && hasValidField(value, 'currency', isProjectCurrency)
-    && hasValidField(value, 'notes', field => isNullableNormalizedText(field, 2_000))
-    && hasValidField(value, 'reviewNote', field => isNullableNormalizedText(field, 1_000))
-    && hasValidField(value, 'reviewedBy', isNullableIdentifier)
-    && hasValidField(value, 'reviewedAt', isNullableIsoLocalDateTime)
-    && hasValidField(value, 'resultingProjectId', isNullableIdentifier)
-    && hasValidField(value, 'resultingInstitutionProjectId', isNullableIdentifier)
-    && hasValidField(value, 'submittedAt', isIsoLocalDateTime)
-    && hasValidField(value, 'updatedAt', isIsoLocalDateTime)
-    && hasValidField(value, 'referencePrice', isNullableMoney)
-    && hasValidField(value, 'price', isNullableMoney)
-    && hasValidField(value, 'originalPrice', isNullableMoney)
-    && hasValidField(value, 'salesCount', field => typeof field === 'number'
-      && Number.isInteger(field)
-      && field >= 0
-      && field <= 2_147_483_647)
-    && hasValidField(value, 'status', isProjectRequestStatus)
-    && hasValidField(value, 'isActive', field => field === null || typeof field === 'boolean')
-    && hasValidField(value, 'institutionSplit', field => field === null || isCompleteSplit(field));
-
-  if (!hasCompleteCommonFields) return false;
-
-  if (value.requestType === 'PLATFORM') {
-    return value.institutionId === null
-      && value.institutionName === null
-      && value.projectId === null
-      && value.projectName === null
-      && hasValidField(value, 'name', field => isNormalizedText(field, 200))
-      && hasValidField(value, 'category', field => isNormalizedText(field, 100))
-      && hasValidField(value, 'description', field => isNormalizedText(field, 5_000))
-      && hasValidField(value, 'tags', field => isBoundedStringList(field, 20, 100, 500))
-      && hasValidField(value, 'slogan', field => isNormalizedText(field, 500, true))
-      && hasValidField(value, 'detailContent', field => isNullableNormalizedText(field, 20_000))
-      && hasValidField(value, 'coverImage', field => isNormalizedText(field, 500, true))
-      && hasValidField(value, 'images', field => isBoundedStringList(field, 20, 500, 2_000))
-      && isMoney(value.referencePrice)
-      && hasValidField(value, 'categoryTags', field => isBoundedStringList(field, 20, 100, 500))
-      && value.price === null
-      && value.originalPrice === null
-      && value.isActive === null
-      && value.institutionSplit === null;
-  }
-
-  return value.requestType === 'INSTITUTION'
-    && isIdentifier(value.institutionId)
-    && isIdentifier(value.projectId)
-    && hasValidField(value, 'name', field => isNullableNormalizedText(field, 200))
-    && hasValidField(value, 'category', field => isNullableNormalizedText(field, 100))
-    && hasValidField(value, 'description', field => isNullableNormalizedText(field, 5_000))
-    && hasValidField(value, 'tags', field => isNullableBoundedStringList(field, 20, 100, 500))
-    && hasValidField(value, 'slogan', field => isNullableNormalizedText(field, 500))
-    && hasValidField(value, 'detailContent', field => isNullableNormalizedText(field, 20_000))
-    && hasValidField(value, 'coverImage', field => isNullableNormalizedText(field, 500))
-    && hasValidField(value, 'images', field => isNullableBoundedStringList(field, 20, 500, 2_000))
-    && value.referencePrice === null
-    && value.categoryTags === null
-    && isMoney(value.price)
-    && typeof value.isActive === 'boolean'
-    && isCompleteSplit(value.institutionSplit);
-}
-
-function getHttpResponseStatus(error: unknown) {
-  if (!isRecord(error) || !isRecord(error.response)) return null;
-  return typeof error.response.status === 'number' ? error.response.status : null;
-}
-
-const requestKey = (request: ProjectRequest) => `${request.requestSource}:${request.id}`;
-const hasNegativeDoctorRate = (request: ProjectRequest) => request.requestSource === 'PROFESSIONAL'
-  && request.requestType === 'INSTITUTION'
-  && request.institutionSplit.doctorRate < 0;
-const reviewAriaLabel = (action: string, request: ProjectRequest) => {
-  const name = request.requestSource === 'DOCTOR_PROJECT_CHANGE'
-    ? request.projectName
-    : request.name?.trim() || '项目名称留空，使用继承值';
-  return `${action} ${name}，申请ID ${request.id}`;
-};
 
 export default function ProjectRequestsPage() {
   const managementContext = getManagementContext();
   const isAdmin = managementContext?.platformRole === 'ADMIN';
-  const [requests, setRequests] = useState<ProjectRequest[]>([]);
-  const requestsRef = useRef<ProjectRequest[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [malformedProfessionalCount, setMalformedProfessionalCount] = useState(0);
-  const staleReviewDataRef = useRef(false);
-  const [staleReviewData, setStaleReviewData] = useState(false);
-  const inFlightReviewRef = useRef<string | null>(null);
-  const [reviewingRequestKey, setReviewingRequestKey] = useState<string | null>(null);
-  const [status, setStatus] = useState<ProjectRequestStatus | 'ALL'>('PENDING');
-  const [reviewTarget, setReviewTarget] = useState<ProjectRequest | null>(null);
-  const [reviewDecision, setReviewDecision] = useState<ReviewDecision>('REJECTED');
+  const [creations, setCreations] = useState<ProfessionalProjectRequest[]>([]);
+  const [changes, setChanges] = useState<ParsedDoctorProjectChangeRequest[]>([]);
+  const creationsRef = useRef<ProfessionalProjectRequest[]>([]);
+  const changesRef = useRef<ParsedDoctorProjectChangeRequest[]>([]);
+  const [creationLoading, setCreationLoading] = useState(false);
+  const [changeLoading, setChangeLoading] = useState(false);
+  const [creationLoadError, setCreationLoadError] = useState<string | null>(null);
+  const [changeLoadError, setChangeLoadError] = useState<string | null>(null);
+  const [malformedCreationCount, setMalformedCreationCount] = useState(0);
+  const [status, setStatus] = useState<StatusFilter>('PENDING');
+  const [detailKey, setDetailKey] = useState<string | null>(null);
+  const [reviewTarget, setReviewTarget] = useState<ReviewItem | null>(null);
+  const [reviewDecision, setReviewDecision] = useState<Exclude<ReviewDecision, 'APPROVED'>>('REJECTED');
+  const [forceTargetId, setForceTargetId] = useState<string | null>(null);
+  const [forceOpen, setForceOpen] = useState(false);
+  const [creationConflict, setCreationConflict] = useState<ConflictState | null>(null);
+  const [changeConflict, setChangeConflict] = useState<ConflictState | null>(null);
+  const [creationReviewLocked, setCreationReviewLocked] = useState(false);
+  const [changeReviewLocked, setChangeReviewLocked] = useState(false);
+  const inFlightRef = useRef<string | null>(null);
+  const [inFlightKey, setInFlightKey] = useState<string | null>(null);
   const [reviewForm] = Form.useForm();
+  const [forceForm] = Form.useForm();
 
-  const updateStaleReviewData = (stale: boolean) => {
-    staleReviewDataRef.current = stale;
-    setStaleReviewData(stale);
-  };
-
-  const refresh = async (): Promise<boolean> => {
-    setLoading(true);
+  const loadCreations = async () => {
+    setCreationLoading(true);
     try {
-      const [professionalResponse, joinResponse] = await Promise.all([
-        api.get(isAdmin ? '/admin/project-requests' : '/management/project-requests'),
-        api.get('/admin/institution-project-requests'),
-      ]);
-      const professionalPayload = getData<unknown>(professionalResponse as any);
-      const professionalItems = Array.isArray(professionalPayload) ? professionalPayload : [];
-      const professional = professionalItems
-        .filter(isCompleteProfessionalProjectRequest)
-        .map(item => ({ ...item, requestSource: 'PROFESSIONAL' as const }));
-      const projectChanges = (getData<Omit<DoctorProjectChangeRequest, 'requestSource'>[]>(joinResponse as any) || [])
-        .filter(item => ['JOIN', 'PROFILE_UPDATE', 'LEAVE'].includes(item.requestType))
-        .map(item => ({ ...item, requestSource: 'DOCTOR_PROJECT_CHANGE' as const }));
-      setMalformedProfessionalCount(
-        Array.isArray(professionalPayload)
-          ? professionalItems.length - professional.length
-          : 1,
-      );
-      const refreshedRequests = [...professional, ...projectChanges];
-      requestsRef.current = refreshedRequests;
-      setRequests(refreshedRequests);
-      setReviewTarget(currentTarget => {
-        if (!currentTarget) return null;
-        return refreshedRequests.find(item => requestKey(item) === requestKey(currentTarget)) ?? currentTarget;
-      });
-      updateStaleReviewData(false);
-      return true;
+      const response = await api.get(isAdmin ? '/admin/project-requests' : '/management/project-requests');
+      const payload = getData<unknown>(response as never);
+      const items = Array.isArray(payload) ? payload : [];
+      const parsed = items.filter(isCompleteProfessionalProjectRequest)
+        .map(request => ({ ...request, requestSource: 'PROFESSIONAL' as const }));
+      creationsRef.current = parsed;
+      setCreations(parsed);
+      setMalformedCreationCount(Array.isArray(payload) ? items.length - parsed.length : 1);
+      setCreationLoadError(null);
+      return parsed;
     } catch (error) {
-      updateStaleReviewData(true);
-      message.error(getApiErrorMessage(error, '平台项目申请加载失败'));
-      return false;
+      setCreationLoadError(getApiErrorMessage(error, '创建申请加载失败'));
+      return null;
     } finally {
-      setLoading(false);
+      setCreationLoading(false);
     }
   };
 
-  useEffect(() => { void refresh(); }, []);
+  const loadChanges = async () => {
+    setChangeLoading(true);
+    try {
+      const response = await api.get('/v2/admin/institution-project-requests');
+      const parsed = parseDoctorProjectChangeRequests(getData<unknown>(response as never));
+      changesRef.current = parsed;
+      setChanges(parsed);
+      setChangeLoadError(null);
+      return parsed;
+    } catch (error) {
+      setChangeLoadError(getApiErrorMessage(error, '医生项目变更申请加载失败'));
+      return null;
+    } finally {
+      setChangeLoading(false);
+    }
+  };
 
-  const submitting = reviewingRequestKey !== null;
+  useEffect(() => { void Promise.all([loadCreations(), loadChanges()]); }, []);
 
-  const beginReview = (request: ProjectRequest) => {
-    if (staleReviewDataRef.current || inFlightReviewRef.current !== null) return false;
-    const key = requestKey(request);
-    inFlightReviewRef.current = key;
-    setReviewingRequestKey(key);
+  const currentItem = (item: ReviewItem): ReviewItem | null => {
+    if (item.source === 'CREATION') {
+      const request = creationsRef.current.find(candidate => candidate.id === item.request.id);
+      return request ? { source: 'CREATION', request } : null;
+    }
+    const request = changesRef.current.find(candidate => candidate.id === item.request.id);
+    return request ? { source: 'CHANGE', request } : null;
+  };
+
+  const canReview = (item: ReviewItem) => {
+    if (itemStatus(item) !== 'PENDING') return false;
+    if (item.source === 'CHANGE' && !item.request.reviewable) return false;
+    if (isAdmin) return true;
+    if (item.source === 'CREATION' && item.request.requestType !== 'INSTITUTION') return false;
+    return managementContext?.canReviewInstitutionProjectRequests === true
+      && Boolean(item.request.institutionId)
+      && managementContext.managedInstitutionIds.includes(item.request.institutionId!);
+  };
+
+  const reviewLocked = (item: ReviewItem) => item.source === 'CREATION' ? creationReviewLocked : changeReviewLocked;
+  const clearConflictFor = (source: ReviewItem['source']) => {
+    if (source === 'CREATION') setCreationConflict(null);
+    else setChangeConflict(null);
+  };
+
+  const beginReview = (item: ReviewItem) => {
+    if (inFlightRef.current !== null || reviewLocked(item)) return false;
+    inFlightRef.current = itemKey(item);
+    setInFlightKey(itemKey(item));
     return true;
   };
-
-  const finishReview = (request: ProjectRequest) => {
-    const key = requestKey(request);
-    if (inFlightReviewRef.current !== key) return;
-    inFlightReviewRef.current = null;
-    setReviewingRequestKey(null);
+  const finishReview = (item: ReviewItem) => {
+    if (inFlightRef.current !== itemKey(item)) return;
+    inFlightRef.current = null;
+    setInFlightKey(null);
   };
+  const reviewPath = (item: ReviewItem) => item.source === 'CHANGE'
+    ? `/v2/admin/institution-project-requests/${item.request.id}/review`
+    : item.request.requestType === 'PLATFORM'
+      ? `/admin/project-requests/${item.request.id}/review`
+      : `/management/project-requests/${item.request.id}/review`;
+  const reviewBody = (item: ReviewItem, decision: ReviewDecision, reviewNote: string, force = false, forceBaseRevision: string | null = null) =>
+    item.source === 'CHANGE' ? { decision, reviewNote, force, forceBaseRevision } : { decision, reviewNote };
 
-  const handleReviewError = async (error: unknown) => {
-    if (getHttpResponseStatus(error) === 409) {
-      updateStaleReviewData(true);
-      const refreshed = await refresh();
+  const handleReviewError = async (error: unknown, item: ReviewItem) => {
+    const errorCode = getApiErrorCode(error);
+    if (!errorCode || !handledReviewErrorCodes.has(errorCode)) {
+      message.error(getApiErrorMessage(error, '审核失败'));
+      return;
+    }
+    const code = errorCode as HandledReviewErrorCode;
+    const conflictMessage = getApiErrorMessage(error, '审核数据已变化');
+    const nextConflict = { code, message: conflictMessage, requestId: item.request.id, refreshSucceeded: false };
+    if (item.source === 'CREATION') setCreationConflict(nextConflict);
+    else setChangeConflict(nextConflict);
+    setDetailKey(null);
+    setReviewTarget(null);
+    if (item.source === 'CREATION') {
+      setCreationReviewLocked(true);
+      const refreshed = await loadCreations();
       if (refreshed) {
-        message.warning('审核状态或审批基线已变化，已刷新最新数据，请核对当前比例和申请状态后重试');
+        setCreationReviewLocked(false);
+        setCreationConflict({ ...nextConflict, refreshSucceeded: true });
       }
       return;
     }
-    message.error(getApiErrorMessage(error, '审核失败'));
+    setForceTargetId(null);
+    setForceOpen(false);
+    setChangeReviewLocked(true);
+    const refreshed = await loadChanges();
+    if (!refreshed) return;
+    setChangeReviewLocked(false);
+    setChangeConflict({ ...nextConflict, refreshSucceeded: true });
+    if (!isAdminForceEligible(code, isAdmin)) return;
+    const latest = refreshed.find(request => request.id === item.request.id);
+    if (latest?.kind === 'V2' && latest.reviewable && latest.requestStatus === 'PENDING' && latest.latestRevision) setForceTargetId(latest.id);
   };
 
-  const canReview = (request: ProjectRequest) => {
-    if (request.status !== 'PENDING') return false;
-    if (isAdmin) return true;
-    if (request.requestSource === 'PROFESSIONAL') {
-      return request.requestType === 'INSTITUTION'
-        && managementContext?.canReviewInstitutionProjectRequests === true
-        && request.institutionId != null
-        && managementContext.managedInstitutionIds.includes(request.institutionId);
+  const retryConflictRefresh = async (source: ReviewItem['source']) => {
+    const conflict = source === 'CREATION' ? creationConflict : changeConflict;
+    if (!conflict) return;
+    if (source === 'CREATION') {
+      const refreshed = await loadCreations();
+      if (!refreshed) return;
+      setCreationReviewLocked(false);
+      setCreationConflict(null);
+      return;
     }
-    return managementContext?.canReviewInstitutionProjectRequests === true
-      && managementContext.managedInstitutionIds.includes(request.institutionId);
-  };
-
-  const reviewPath = (request: ProjectRequest) => {
-    if (request.requestSource === 'DOCTOR_PROJECT_CHANGE') {
-      return `/admin/institution-project-requests/${request.id}/review`;
+    const refreshed = await loadChanges();
+    if (!refreshed) return;
+    setChangeReviewLocked(false);
+    if (!isAdminForceEligible(conflict.code, isAdmin)) {
+      setChangeConflict(null);
+      return;
     }
-    return request.requestType === 'PLATFORM'
-      ? `/admin/project-requests/${request.id}/review`
-      : `/management/project-requests/${request.id}/review`;
+    setChangeConflict({ ...conflict, refreshSucceeded: true });
+    const latest = refreshed.find(request => request.id === conflict.requestId);
+    if (latest?.kind === 'V2' && latest.reviewable && latest.requestStatus === 'PENDING' && latest.latestRevision) setForceTargetId(latest.id);
   };
 
-  const approve = async (request: ProjectRequest) => {
-    if (hasNegativeDoctorRate(request) || !beginReview(request)) return;
+  const submitDirectApproval = async (item: ReviewItem) => {
+    if (!canReview(item) || reviewLocked(item) || hasNegativeDoctorRate(item) || !beginReview(item)) return;
     try {
-      await api.post(reviewPath(request), request.requestSource === 'DOCTOR_PROJECT_CHANGE'
-        ? { decision: 'APPROVED', reviewNote: '', force: false }
-        : { decision: 'APPROVED', reviewNote: '' });
-      message.success(request.requestType === 'PLATFORM'
-        ? '申请已通过，平台项目已创建'
-        : request.requestSource === 'DOCTOR_PROJECT_CHANGE'
-          ? '机构项目变更申请已通过'
-          : '申请已通过，机构项目已创建');
-      await refresh();
+      await api.post(reviewPath(item), reviewBody(item, 'APPROVED', ''));
+      message.success('申请已通过');
+      clearConflictFor(item.source);
+      if (item.source === 'CREATION') await loadCreations(); else await loadChanges();
     } catch (error) {
-      await handleReviewError(error);
+      await handleReviewError(error, item);
     } finally {
-      finishReview(request);
+      finishReview(item);
     }
   };
 
-  const openReview = (request: ProjectRequest, decision: ReviewDecision) => {
-    if (staleReviewDataRef.current || inFlightReviewRef.current !== null) return;
+  const openReview = (item: ReviewItem, decision: Exclude<ReviewDecision, 'APPROVED'>) => {
+    if (inFlightRef.current !== null || reviewLocked(item)) return;
     reviewForm.resetFields();
-    setReviewTarget(request);
     setReviewDecision(decision);
+    setReviewTarget(item);
   };
-
   const submitReview = async () => {
-    if (!reviewTarget || staleReviewDataRef.current) return;
-    const target = requestsRef.current.find(item => requestKey(item) === requestKey(reviewTarget));
-    if (!target || !canReview(target)) return;
-    const decision = reviewDecision;
+    if (!reviewTarget) return;
+    const target = currentItem(reviewTarget);
+    if (!target || !canReview(target) || reviewLocked(target)) return;
     let started = false;
     try {
       const values = await reviewForm.validateFields();
       started = beginReview(target);
       if (!started) return;
-      await api.post(reviewPath(target), target.requestSource === 'DOCTOR_PROJECT_CHANGE'
-        ? { decision, reviewNote: values.reviewNote, force: false }
-        : { decision, reviewNote: values.reviewNote });
-      message.success(decision === 'REJECTED' ? '申请已驳回' : '已要求医生修改申请');
+      await api.post(reviewPath(target), reviewBody(target, reviewDecision, values.reviewNote));
+      message.success(reviewDecision === 'REJECTED' ? '申请已驳回' : '已要求医生修改申请');
       setReviewTarget(null);
-      await refresh();
-    } catch (error: unknown) {
-      if (!isRecord(error) || !Array.isArray(error.errorFields)) await handleReviewError(error);
+      clearConflictFor(target.source);
+      if (target.source === 'CREATION') await loadCreations(); else await loadChanges();
+    } catch (error) {
+      if (!(error && typeof error === 'object' && 'errorFields' in error)) await handleReviewError(error, target);
     } finally {
       if (started) finishReview(target);
     }
   };
 
-  const filteredRequests = status === 'ALL'
-    ? requests
-    : requests.filter(item => item.status === status);
-  const hasReviewableSplitConflict = filteredRequests.some(item => canReview(item) && hasNegativeDoctorRate(item));
-  const currentReviewTarget = reviewTarget
-    ? requests.find(item => requestKey(item) === requestKey(reviewTarget)) ?? null
-    : null;
-  const reviewTargetChanged = reviewTarget !== null
-    && (currentReviewTarget === null || !canReview(currentReviewTarget));
+  const forceTarget = forceTargetId
+    ? changes.find(request => request.id === forceTargetId && request.kind === 'V2') as DoctorProjectChangeRequestV2 | undefined
+    : undefined;
+  const submitForce = async () => {
+    if (!forceTarget || !forceTarget.latestRevision) return;
+    const item: ChangeItem = { source: 'CHANGE', request: forceTarget };
+    let started = false;
+    try {
+      const values = await forceForm.validateFields();
+      started = beginReview(item);
+      if (!started) return;
+      await api.post(reviewPath(item), reviewBody(item, 'APPROVED', values.reviewNote, true, forceTarget.latestRevision));
+      message.success('已按刷新后的最新基线强制通过');
+      setForceTargetId(null);
+      setForceOpen(false);
+      clearConflictFor('CHANGE');
+      await loadChanges();
+    } catch (error) {
+      if (!(error && typeof error === 'object' && 'errorFields' in error)) await handleReviewError(error, item);
+    } finally {
+      if (started) finishReview(item);
+    }
+  };
 
-  const renderActions = (item: ProjectRequest) => {
-    if (!canReview(item)) return null;
+  const allItems: ReviewItem[] = [
+    ...creations.map(request => ({ source: 'CREATION' as const, request })),
+    ...changes.map(request => ({ source: 'CHANGE' as const, request })),
+  ];
+  const visibleItems = allItems.filter(item => (item.source === 'CHANGE' && item.request.kind === 'DAMAGED')
+    || status === 'ALL' || itemStatus(item) === status);
+  const platformItems = visibleItems.filter((item): item is CreationItem => item.source === 'CREATION' && item.request.requestType === 'PLATFORM');
+  const institutionItems = visibleItems.filter(item => !(item.source === 'CREATION' && item.request.requestType === 'PLATFORM'));
+  const groups = useMemo(() => {
+    const grouped = new Map<string, { name: string; items: ReviewItem[] }>();
+    institutionItems.forEach(item => {
+      const id = item.request.institutionId || `damaged-${item.request.id}`;
+      const group = grouped.get(id) ?? { name: item.request.institutionName || '机构信息缺失', items: [] };
+      group.items.push(item);
+      grouped.set(id, group);
+    });
+    return Array.from(grouped.entries()).map(([id, group]) => ({ id, ...group }));
+  }, [institutionItems]);
+
+  const renderSummary = (item: ReviewItem) => {
+    if (item.source === 'CREATION') return <Space wrap>
+      <span>平台项目：{item.request.projectName || item.request.name || '-'}</span>
+      <span>医生：{item.request.doctorName}</span>
+      <span>申请价格：{money(item.request.currency, item.request.requestType === 'PLATFORM' ? item.request.referencePrice : item.request.price)}</span>
+      <span>申请状态：{identityStatusLabel(item.request.status)}</span>
+    </Space>;
+    if (item.request.kind === 'DAMAGED') return <Space wrap>
+      <span>医生：{item.request.doctorName}</span><Tag color="error">数据损坏：{item.request.parseIssue}</Tag>
+    </Space>;
+    if (item.request.kind === 'V1') return <Space wrap>
+      <span>医生：{item.request.doctorName}</span>
+      <span>医生价格：{money('USD', item.request.priceSuggestion ?? item.request.medicalListPrice)}</span>
+      <span>申请状态：{identityStatusLabel(item.request.status)}</span>
+    </Space>;
     return <Space wrap>
-      <Button
-        aria-label={reviewAriaLabel('通过', item)}
-        size="small"
-        type="primary"
-        icon={<CheckOutlined />}
-        loading={reviewingRequestKey === requestKey(item)}
-        disabled={submitting || staleReviewData || hasNegativeDoctorRate(item)}
-        onClick={() => void approve(item)}
-      >通过</Button>
-      {item.requestSource === 'DOCTOR_PROJECT_CHANGE' && <Button
-        aria-label={reviewAriaLabel('要求修改', item)}
-        size="small"
-        icon={<EditOutlined />}
-        disabled={submitting || staleReviewData}
-        onClick={() => openReview(item, 'CHANGES_REQUESTED')}
-      >要求修改</Button>}
-      <Button
-        aria-label={reviewAriaLabel('驳回', item)}
-        size="small"
-        danger
-        icon={<CloseOutlined />}
-        disabled={submitting || staleReviewData}
-        onClick={() => openReview(item, 'REJECTED')}
-      >驳回</Button>
+      {item.request.parseIssue && <Tag color="error">数据损坏：{item.request.parseIssue}</Tag>}
+      <span>平台项目：{item.request.platformProjectName}</span><span>医生：{item.request.doctorName}</span>
+      <span>医生价格：{money('USD', item.request.proposedDoctorPrice)}</span>
+      <span>旅游地接服务费：{money('USD', item.request.travelGroundServiceFee)}</span>
+      <span>申请状态：{identityStatusLabel(item.request.requestStatus)}</span>
+      <span>提议医生状态：{activeLabel(item.request.proposedDoctorActive)}</span>
     </Space>;
   };
 
-  const columns = [
-    {
-      title: '类型', dataIndex: 'requestType', width: 140,
-      render: (value: ProjectRequest['requestType']) => value === 'PLATFORM'
-        ? '新增平台项目'
-        : value === 'INSTITUTION' ? '新增机构项目'
-          : value === 'JOIN' ? '加入机构项目'
-            : value === 'PROFILE_UPDATE' ? '资料变更' : '退出机构项目',
-    },
-    { title: '医生', dataIndex: 'doctorName', width: 130 },
-    { title: '机构', dataIndex: 'institutionName', width: 160, render: (value?: string) => value || '-' },
-    {
-      title: '项目名称', width: 180,
-      render: (_: unknown, item: ProjectRequest) => item.requestSource === 'PROFESSIONAL'
-        ? item.name || item.projectName || '-'
-        : item.projectName || '-',
-    },
-    {
-      title: '分类', width: 120,
-      render: (_: unknown, item: ProjectRequest) => item.requestSource === 'PROFESSIONAL' ? textOrDash(item.category) : '-',
-    },
-    {
-      title: '提交内容', ellipsis: true,
-      render: (_: unknown, item: ProjectRequest) => item.requestSource === 'PROFESSIONAL'
-        ? textOrDash(item.description)
-        : textOrDash(item.serviceDescription),
-    },
-    {
-      title: '申请价格', width: 120,
-      render: (_: unknown, item: ProjectRequest) => item.requestSource === 'PROFESSIONAL'
-        ? moneyOrDash(item.currency, item.requestType === 'PLATFORM' ? item.referencePrice : item.price)
-        : item.priceSuggestion == null ? '-' : `¥${item.priceSuggestion}`,
-    },
-    { title: '补充说明', dataIndex: 'notes', width: 180, ellipsis: true, render: (value?: string) => value || '-' },
-    {
-      title: '状态', dataIndex: 'status', width: 110,
-      render: (value: ProjectRequestStatus) => <Tag color={identityStatusColor(value)}>{identityStatusLabel(value)}</Tag>,
-    },
-    { title: '审核意见', dataIndex: 'reviewNote', width: 180, ellipsis: true, render: (value?: string) => value || '-' },
-    { title: '操作', width: 200, render: (_: unknown, item: ProjectRequest) => renderActions(item) },
-  ];
-
-  const expandedItems = (item: ProjectRequest) => {
-    if (item.requestSource === 'DOCTOR_PROJECT_CHANGE') {
-      const items = [
-        { key: 'description', label: '服务内容', children: textOrDash(item.serviceDescription) },
-        { key: 'price', label: '建议价格', children: item.priceSuggestion == null ? '-' : `¥${item.priceSuggestion}` },
-        { key: 'notes', label: '补充说明', children: textOrDash(item.notes) },
-      ];
-      if (item.requestType === 'PROFILE_UPDATE') {
-        items.push(
-          { key: 'medicalListPrice', label: '医疗套餐优惠前金额（提议）', children: moneyOrDash('USD', item.medicalListPrice) },
-          { key: 'currentMedicalListPrice', label: '医疗套餐优惠前金额（当前）', children: moneyOrDash('USD', item.currentMedicalListPrice) },
-          { key: 'platformRate', label: '平台服务比例（提议，只读）', children: item.platformRate == null ? '-' : `${item.platformRate}%` },
-          { key: 'currentPlatformRate', label: '平台服务比例（当前，只读）', children: item.currentPlatformRate == null ? '-' : `${item.currentPlatformRate}%` },
-        );
-      }
-      return items;
-    }
-
-    const common = [
-      { key: 'id', label: '申请 ID', children: item.id },
-      { key: 'doctorId', label: '申请医生 ID（不可变）', children: item.doctorId },
-      { key: 'doctorName', label: '当前医生名称', children: item.doctorName },
-      { key: 'institutionId', label: '目标机构 ID（不可变）', children: textOrDash(item.institutionId) },
-      { key: 'institutionName', label: '当前机构名称', children: textOrDash(item.institutionName) },
-      { key: 'projectId', label: '目标平台项目 ID（不可变）', children: textOrDash(item.projectId) },
-      { key: 'projectName', label: '当前平台项目名称', children: textOrDash(item.projectName) },
-      { key: 'name', label: '项目名称', children: textOrDash(item.name) },
-      { key: 'category', label: '分类', children: textOrDash(item.category) },
-      { key: 'description', label: '项目说明', children: textOrDash(item.description) },
-      { key: 'tags', label: '标签', children: listOrDash(item.tags) },
-      { key: 'slogan', label: '宣传语', children: textOrDash(item.slogan) },
-      { key: 'detailContent', label: '详情内容', children: textOrDash(item.detailContent) },
-      { key: 'currency', label: '币种', children: item.currency },
-      { key: 'coverImage', label: '封面图', children: textOrDash(item.coverImage) },
-      { key: 'images', label: '项目图集', children: imageListOrDash(item.images) },
-      { key: 'salesCount', label: '销量', children: item.salesCount },
-      { key: 'notes', label: '补充说明', children: textOrDash(item.notes) },
-      { key: 'status', label: '申请状态', children: identityStatusLabel(item.status) },
-      { key: 'reviewNote', label: '审核意见', children: textOrDash(item.reviewNote) },
-      { key: 'reviewedBy', label: '审核人 ID', children: textOrDash(item.reviewedBy) },
-      { key: 'reviewedAt', label: '审核时间', children: textOrDash(item.reviewedAt) },
-      { key: 'resultingProjectId', label: '创建的平台项目 ID', children: textOrDash(item.resultingProjectId) },
-      { key: 'resultingInstitutionProjectId', label: '创建的机构项目 ID', children: textOrDash(item.resultingInstitutionProjectId) },
-      { key: 'submittedAt', label: '提交时间', children: item.submittedAt },
-      { key: 'updatedAt', label: '更新时间', children: item.updatedAt },
-    ];
-
-    if (item.requestType === 'PLATFORM') {
-      return [
-        ...common,
-        { key: 'referencePrice', label: '参考价格', children: moneyOrDash(item.currency, item.referencePrice) },
-        { key: 'categoryTags', label: '分类标签', children: listOrDash(item.categoryTags) },
-      ];
-    }
-
-    const split = item.institutionSplit;
-    return [
-      ...common,
-      { key: 'price', label: '价格', children: moneyOrDash(item.currency, item.price) },
-      { key: 'originalPrice', label: '原价', children: moneyOrDash(item.currency, item.originalPrice) },
-      { key: 'isActive', label: '是否上架', children: item.isActive == null ? '-' : item.isActive ? '是' : '否' },
-      { key: 'consultationFee', label: '面诊费', children: moneyOrDash(item.currency, split?.consultationFee) },
-      { key: 'commissionRate', label: '顾问分成', children: split ? `${split.commissionRate}%` : '-' },
-      { key: 'institutionRate', label: '机构分成', children: split ? `${split.institutionRate}%` : '-' },
-      { key: 'platformRate', label: '当前平台比例', children: split ? `${split.platformRate}%` : '-' },
-      { key: 'doctorRate', label: '按当前平台比例推导的医生净比例', children: split ? `${split.doctorRate}%` : '-' },
-    ];
+  const renderActions = (item: ReviewItem) => {
+    const reviewable = canReview(item);
+    const disabled = inFlightKey !== null || reviewLocked(item);
+    return <Space wrap>
+      {(item.source !== 'CHANGE' || item.request.kind !== 'DAMAGED') && <Button size="small" icon={<EyeOutlined />}
+        aria-label={reviewLabel('查看详情', item)} disabled={disabled} onClick={() => setDetailKey(itemKey(item))}>查看详情</Button>}
+      {reviewable && !hasNegativeDoctorRate(item) && <Button size="small" type="primary" icon={<CheckOutlined />} aria-label={reviewLabel('通过', item)}
+        loading={inFlightKey === itemKey(item)} disabled={disabled} onClick={() => void submitDirectApproval(item)}>通过</Button>}
+      {reviewable && item.source === 'CHANGE' && <Button size="small" icon={<EditOutlined />} aria-label={reviewLabel('要求修改', item)}
+        disabled={disabled} onClick={() => openReview(item, 'CHANGES_REQUESTED')}>要求修改</Button>}
+      {reviewable && <Button size="small" danger icon={<CloseOutlined />} aria-label={reviewLabel('驳回', item)}
+        disabled={disabled} onClick={() => openReview(item, 'REJECTED')}>驳回</Button>}
+    </Space>;
   };
+  const renderCard = (item: ReviewItem) => <Card key={itemKey(item)} size="small" title={<Space wrap>
+    <span>{itemProjectName(item)}</span>
+    <Tag color={identityStatusColor(itemStatus(item))}>{identityStatusLabel(itemStatus(item))}</Tag>
+    {item.source === 'CHANGE' && item.request.kind === 'V2' && <Tag color={item.request.proposedDoctorActive ? 'green' : 'default'}>
+      {item.request.proposedDoctorActive ? '医生启用' : '医生停用'}
+    </Tag>}
+  </Space>} extra={renderActions(item)} style={{ marginBottom: 12 }}>
+    {hasNegativeDoctorRate(item) && <Alert type="warning" showIcon title="当前分成比例冲突：该创建申请仅可驳回。" style={{ marginBottom: 12 }} />}
+    {renderSummary(item)}
+  </Card>;
+
+  const detailItem = detailKey ? allItems.find(item => itemKey(item) === detailKey) : undefined;
+  const preview = detailItem?.source === 'CREATION' ? adaptCreationRequestPreview(detailItem.request)
+    : detailItem?.source === 'CHANGE' && detailItem.request.kind === 'V1' ? adaptLegacyProjectRequestPreview(detailItem.request)
+      : detailItem?.source === 'CHANGE' && detailItem.request.kind === 'V2' ? adaptV2ProposedProjectPreview(detailItem.request) : null;
+
+  const renderConflict = (conflict: ConflictState | null, source: ReviewItem['source']) => conflict && <Alert
+    type={conflict.refreshSucceeded ? 'warning' : 'error'} showIcon title={`审核冲突（${conflict.code}）`}
+    description={conflict.refreshSucceeded
+      ? `${conflict.message}。旧详情已关闭，审核队列已刷新，请核对最新数据。`
+      : `${conflict.message}。旧详情已关闭，但最新审核队列刷新失败；缓存行已锁定，重新加载成功前不能审核。`}
+    action={!conflict.refreshSucceeded
+      ? <Button loading={source === 'CREATION' ? creationLoading : changeLoading} onClick={() => void retryConflictRefresh(source)}>
+        {source === 'CREATION' ? '重新加载创建申请' : '重新加载医生项目变更'}
+      </Button>
+      : source === 'CHANGE' && forceTarget
+        ? <Button onClick={() => { forceForm.resetFields(); setForceOpen(true); }}>查看最新差异并强制通过</Button>
+        : null}
+    style={{ marginBottom: 16 }} />;
 
   return <div>
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 16 }}>
       <h2 style={{ margin: 0 }}>项目申请审核</h2>
-      <Select
-        value={status}
-        style={{ width: 140 }}
-        onChange={setStatus}
-        options={[
-          { label: '待审核', value: 'PENDING' },
-          { label: '全部状态', value: 'ALL' },
-          { label: '已通过', value: 'APPROVED' },
-          { label: '已驳回', value: 'REJECTED' },
-          { label: '待修改', value: 'CHANGES_REQUESTED' },
-          { label: '已撤回', value: 'WITHDRAWN' },
-        ]}
-      />
+      <Select<StatusFilter> aria-label="申请状态筛选" value={status} style={{ width: 140 }} onChange={setStatus} options={[
+        { label: '待审核', value: 'PENDING' }, { label: '全部状态', value: 'ALL' }, { label: '已通过', value: 'APPROVED' },
+        { label: '已驳回', value: 'REJECTED' }, { label: '待修改', value: 'CHANGES_REQUESTED' }, { label: '已撤回', value: 'WITHDRAWN' },
+      ]} />
     </div>
-    {malformedProfessionalCount > 0 && <Alert
-      type="error"
-      showIcon
-      title="申请快照数据不完整，已禁止审核"
-      description="请刷新页面；若问题持续存在，请联系技术人员。"
-      style={{ marginBottom: 16 }}
-    />}
-    {staleReviewData && <Alert
-      type="error"
-      showIcon
-      title="审核状态已变化，但最新项目申请刷新失败"
-      description="当前页面数据可能已过期，所有审核操作已禁用。请重新加载后再审核。"
-      action={<Button size="small" loading={loading} onClick={() => void refresh()}>重新加载申请</Button>}
-      style={{ marginBottom: 16 }}
-    />}
-    {hasReviewableSplitConflict && <Alert
-      type="warning"
-      showIcon
-      title="当前分成比例冲突：按当前平台比例推导的医生净比例为负数，该申请仅可驳回。"
-      style={{ marginBottom: 16 }}
-    />}
-    <Table
-      rowKey={item => `${item.requestSource}-${item.id}`}
-      dataSource={filteredRequests}
-      columns={columns}
-      loading={loading}
-      size="small"
-      scroll={{ x: 'max-content' }}
-      expandable={{
-        expandedRowRender: item => <Descriptions size="small" column={1} items={expandedItems(item)} />,
-      }}
-    />
+    {renderConflict(creationConflict, 'CREATION')}
+    {renderConflict(changeConflict, 'CHANGE')}
 
-    <Modal
-      title={reviewDecision === 'REJECTED' ? '驳回项目申请' : '要求医生修改申请'}
-      open={Boolean(reviewTarget)}
-      onOk={() => void submitReview()}
-      onCancel={() => setReviewTarget(null)}
-      confirmLoading={submitting}
-      okText="确认"
-      okButtonProps={{ danger: reviewDecision === 'REJECTED', disabled: staleReviewData || reviewTargetChanged }}
-      destroyOnHidden
-    >
-      {reviewTargetChanged && <Alert
-        type="warning"
-        showIcon
-        title="审核目标已变化"
-        description="最新列表中该申请已不再处于待审核状态，请关闭窗口并核对最新数据。"
-        style={{ marginBottom: 16 }}
-      />}
-      <Form form={reviewForm} layout="vertical">
-        <Form.Item
-          name="reviewNote"
-          label="审核意见"
-          rules={[{ required: true, whitespace: true, message: '请填写审核意见' }, { max: 1000 }]}
-        >
-          <Input.TextArea rows={4} />
-        </Form.Item>
-      </Form>
+    <section aria-labelledby="platform-creation-heading" style={{ marginBottom: 24 }}>
+      <h3 id="platform-creation-heading">平台项目创建申请</h3>
+      {creationLoadError && <Alert type="error" showIcon title="创建申请加载失败" description={creationLoadError} style={{ marginBottom: 12 }} />}
+      {malformedCreationCount > 0 && <Alert type="error" showIcon title="创建申请快照数据不完整，已禁止审核" style={{ marginBottom: 12 }} />}
+      {platformItems.length ? platformItems.map(renderCard) : !creationLoading && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无平台项目创建申请" />}
+    </section>
+    <section aria-labelledby="institution-review-heading">
+      <h3 id="institution-review-heading">按机构审核</h3>
+      {changeLoadError && <Alert type="error" showIcon title="医生项目变更申请加载失败" description={changeLoadError} style={{ marginBottom: 12 }} />}
+      {groups.length ? <Collapse defaultActiveKey={groups.map(group => group.id)} items={groups.map(group => ({
+        key: group.id, label: `${group.name}（${group.items.length}）`,
+        children: <section aria-label={`${group.name}审核组`}>{group.items.map(renderCard)}</section>,
+      }))} /> : !creationLoading && !changeLoading && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无机构项目申请" />}
+    </section>
+
+    <Drawer title={detailItem ? `${itemProjectName(detailItem)}审核详情` : '审核详情'} open={Boolean(detailItem)}
+      onClose={() => setDetailKey(null)} size="large" destroyOnHidden>
+      {preview && <InstitutionProjectPreview model={preview} />}
+      {detailItem?.source === 'CHANGE' && detailItem.request.kind === 'V2' && <ChangeComparison request={detailItem.request} />}
+      {detailItem?.source === 'CHANGE' && detailItem.request.kind === 'V1' && <LegacyChangeComparison request={detailItem.request} />}
+    </Drawer>
+    <Modal title={reviewDecision === 'REJECTED' ? '驳回项目申请' : '要求医生修改申请'} open={Boolean(reviewTarget)}
+      onOk={() => void submitReview()} onCancel={() => setReviewTarget(null)} confirmLoading={inFlightKey !== null} okText="确认" destroyOnHidden>
+      <Form form={reviewForm} layout="vertical"><Form.Item name="reviewNote" label="审核意见"
+        rules={[{ required: true, whitespace: true, message: '请填写审核意见' }, { max: 1000 }]}><Input.TextArea rows={4} /></Form.Item></Form>
+    </Modal>
+    <Modal title="按最新基线强制通过" open={Boolean(forceTarget && forceOpen)}
+      onOk={() => void submitForce()} onCancel={() => setForceOpen(false)} confirmLoading={inFlightKey !== null}
+      okText="强制通过" destroyOnHidden>
+      {forceTarget && <>
+        <Alert type="warning" showIcon title="强制通过会以刷新后的最新版本为基线，请说明接受差异的原因。" style={{ marginBottom: 16 }} />
+        <ChangeComparison request={forceTarget} showSnapshotPreviews />
+        <Form form={forceForm} layout="vertical"><Form.Item name="reviewNote" label="强制通过原因"
+          rules={[{ required: true, whitespace: true, message: '请填写强制通过原因' }, { max: 1000 }]}><Input.TextArea rows={4} /></Form.Item></Form>
+      </>}
     </Modal>
   </div>;
 }
