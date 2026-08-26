@@ -17,20 +17,32 @@ afterEach(() => {
   sessionStorage.clear();
 });
 
-describe('AdminLayout legal documents navigation', () => {
-  it('shows 协议与隐私 under 服务与风控 only for admins', async () => {
+describe('AdminLayout administrator navigation', () => {
+  it('keeps administrator core navigation and removes professional-role entry points', async () => {
     const user = userEvent.setup();
     sessionStorage.setItem('management_context', JSON.stringify(context));
     render(<MemoryRouter><AdminLayout /></MemoryRouter>);
-    await user.click(screen.getByText('内容运营'));
-    expect(screen.queryByText('协议与隐私')).not.toBeInTheDocument();
+
+    expect(screen.getByText('管理系统')).toBeInTheDocument();
+    await user.click(screen.getByText('业务管理'));
+    expect(screen.getByText('项目管理')).toBeInTheDocument();
+    expect(screen.getByText('项目申请审核')).toBeInTheDocument();
+    expect(screen.getByText('机构项目管理')).toBeInTheDocument();
+    expect(screen.getByText('订单管理')).toBeInTheDocument();
+    expect(screen.queryByText('项目协作')).not.toBeInTheDocument();
+
     await user.click(screen.getByText('服务与风控'));
     expect(screen.getByText('协议与隐私')).toBeInTheDocument();
   });
 
-  it('hides 协议与隐私 for non-admin management roles', () => {
+  it('does not derive a professional-role menu from a tampered cached context', async () => {
+    const user = userEvent.setup();
     sessionStorage.setItem('management_context', JSON.stringify({ ...context, platformRole: 'DOCTOR' }));
     render(<MemoryRouter><AdminLayout /></MemoryRouter>);
-    expect(screen.queryByText('协议与隐私')).not.toBeInTheDocument();
+
+    expect(screen.getByText('管理系统')).toBeInTheDocument();
+    await user.click(screen.getByText('业务管理'));
+    expect(screen.queryByText('项目协作')).not.toBeInTheDocument();
+    expect(screen.getByText('项目管理')).toBeInTheDocument();
   });
 });

@@ -10,7 +10,6 @@ import {
   DollarOutlined,
   FileTextOutlined,
   GiftOutlined,
-  LinkOutlined,
   LockOutlined,
   LogoutOutlined,
   MessageOutlined,
@@ -29,7 +28,7 @@ import {
   WarningOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import api, { clearAdminToken, getApiErrorMessage, getManagementContext, logoutManagementSession } from '../api';
+import api, { clearAdminToken, getApiErrorMessage, logoutManagementSession } from '../api';
 import './AdminLayout.css';
 
 const { Sider, Content, Header } = Layout;
@@ -63,7 +62,6 @@ const menuGroups: MenuGroup[] = [
       { key: '/projects', icon: <MedicineBoxOutlined />, label: '项目管理' },
       { key: '/project-requests', icon: <SafetyCertificateOutlined />, label: '项目申请审核' },
       { key: '/institution-projects', icon: <ShoppingCartOutlined />, label: '机构项目管理' },
-      { key: '/project-collaboration', icon: <LinkOutlined />, label: '项目协作' },
       { key: '/orders', icon: <FileTextOutlined />, label: '订单管理' },
     ],
   },
@@ -116,8 +114,6 @@ const menuGroups: MenuGroup[] = [
 const allMenuLeaves = [dashboardItem, ...menuGroups.flatMap((group) => group.children)];
 
 export default function AdminLayout() {
-  const managementContext = getManagementContext();
-  const isAdmin = managementContext?.platformRole === 'ADMIN';
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
@@ -125,26 +121,9 @@ export default function AdminLayout() {
   const [passwordSubmitting, setPasswordSubmitting] = useState(false);
   const [passwordForm] = Form.useForm();
 
-  const canShowMenuItem = (key: string) => {
-    if (isAdmin) return true;
-    if (key === '/doctors') return managementContext?.canManageDoctors;
-    if (key === '/institution-projects') return false;
-    if (key === '/project-requests') return managementContext?.canReviewInstitutionProjectRequests;
-    if (key === '/project-collaboration') return managementContext?.canSubmitInstitutionProjectRequests;
-    if (key === '/orders') return managementContext?.canManageOrders;
-    if (key === '/institutions') return (managementContext?.visibleInstitutionIds.length || 0) > 0;
-    if (key === '/articles') return managementContext?.canManageArticles;
-    if (key === '/split-proposals') return managementContext?.canManageSplitConfigs;
-    return false;
-  };
-
-  const visibleMenuGroups = menuGroups
-    .map((group) => ({ ...group, children: group.children.filter((item) => canShowMenuItem(item.key)) }))
-    .filter((group) => group.children.length > 0);
-
   const menuItems: MenuProps['items'] = [
-    ...(canShowMenuItem(dashboardItem.key) ? [dashboardItem] : []),
-    ...visibleMenuGroups,
+    dashboardItem,
+    ...menuGroups,
   ];
 
   const selectedMenuKey = allMenuLeaves
@@ -153,7 +132,7 @@ export default function AdminLayout() {
     .find((item) => location.pathname === item.key || location.pathname.startsWith(`${item.key}/`))?.key
     ?? (location.pathname === '/' ? '/' : '');
 
-  const activeGroupKey = visibleMenuGroups.find((group) =>
+  const activeGroupKey = menuGroups.find((group) =>
     group.children.some((item) => item.key === selectedMenuKey),
   )?.key;
   const [openKeys, setOpenKeys] = useState<string[]>(() => activeGroupKey ? [activeGroupKey] : []);
@@ -166,8 +145,8 @@ export default function AdminLayout() {
     }
   }, [activeGroupKey]);
 
-  const handleLogout = async () => {
-    await logoutManagementSession();
+  const handleLogout = () => {
+    void logoutManagementSession();
     navigate('/login', { replace: true });
   };
 
@@ -206,7 +185,7 @@ export default function AdminLayout() {
           {!collapsed && (
             <span className="admin-brand__text">
               <strong>娇颜颂</strong>
-              <small>{isAdmin ? '管理系统' : '专业管理中心'}</small>
+              <small>管理系统</small>
             </span>
           )}
         </div>
@@ -226,7 +205,7 @@ export default function AdminLayout() {
         <Header className="admin-header">
           <Space>
             <Button type="text" icon={<LockOutlined />} onClick={() => setPasswordOpen(true)}>修改密码</Button>
-            <Button type="text" icon={<LogoutOutlined />} onClick={() => void handleLogout()}>退出登录</Button>
+            <Button type="text" icon={<LogoutOutlined />} onClick={handleLogout}>退出登录</Button>
           </Space>
         </Header>
         <Content className="admin-content">
@@ -253,11 +232,11 @@ export default function AdminLayout() {
           <Form.Item
             name="newPassword"
             label="新密码"
-            extra={isAdmin ? '至少 12 位，且包含大写字母、小写字母、数字和特殊字符' : '密码长度至少 8 位'}
+            extra="至少 12 位，且包含大写字母、小写字母、数字和特殊字符"
             rules={[
               { required: true, message: '请输入新密码' },
-              { min: isAdmin ? 12 : 8, max: 128, message: `密码长度应为 ${isAdmin ? 12 : 8}-128 位` },
-              ...(isAdmin ? [{ pattern: /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).+$/, message: '密码复杂度不足' }] : []),
+              { min: 12, max: 128, message: '密码长度应为 12-128 位' },
+              { pattern: /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).+$/, message: '密码复杂度不足' },
             ]}
           >
             <Input.Password autoComplete="new-password" />

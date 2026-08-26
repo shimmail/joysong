@@ -1,8 +1,8 @@
-import React, { Component, Suspense, lazy } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import React, { Component, Suspense, lazy, useEffect, useState } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Spin, Button, Result } from 'antd';
 import AdminLayout from './layouts/AdminLayout';
-import { getDefaultManagementPath, getManagementContext, hasValidAdminToken } from './api';
+import { getDefaultManagementPath, getManagementContext, restoreAdminSession } from './api';
 import type { ManagementContext } from './api';
 
 // 全局错误边界：捕获子组件渲染错误，防止白屏
@@ -59,7 +59,6 @@ const ReviewsPage = lazy(() => import('./pages/ReviewsPage'));
 const PaymentsPage = lazy(() => import('./pages/PaymentsPage'));
 const RefundsPage = lazy(() => import('./pages/RefundsPage'));
 const InstitutionProjectsPage = lazy(() => import('./pages/InstitutionProjectsPage'));
-const ProjectCollaborationPage = lazy(() => import('./pages/ProjectCollaborationPage'));
 const ReportsPage = lazy(() => import('./pages/ReportsPage'));
 const CouponsPage = lazy(() => import('./pages/CouponsPage'));
 const SettlementsPage = lazy(() => import('./pages/SettlementsPage'));
@@ -69,14 +68,36 @@ const IdentityManagementPage = lazy(() => import('./pages/IdentityManagementPage
 const LegalDocumentsPage = lazy(() => import('./pages/LegalDocumentsPage'));
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
-  return hasValidAdminToken() ? <>{children}</> : <Navigate to="/login" replace />;
+  const location = useLocation();
+  const [status, setStatus] = useState<'checking' | 'authenticated' | 'anonymous'>('checking');
+
+  useEffect(() => {
+    let active = true;
+    void restoreAdminSession().then((context) => {
+      if (active) setStatus(context?.platformRole === 'ADMIN' ? 'authenticated' : 'anonymous');
+    }).catch(() => {
+      if (active) setStatus('anonymous');
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  if (status === 'checking') {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', gap: 16, justifyContent: 'center', alignItems: 'center' }}>
+        <Spin size="large" />
+        <span>正在验证管理员身份</span>
+      </div>
+    );
+  }
+  return status === 'authenticated'
+    ? <>{children}</>
+    : <Navigate to="/login" state={{ from: location }} replace />;
 }
 
 function DefaultManagementRoute() {
-  const context = getManagementContext();
-  return context?.platformRole === 'ADMIN'
-    ? <DashboardPage />
-    : <Navigate to={getDefaultManagementPath()} replace />;
+  return <DashboardPage />;
 }
 
 function AdminOnlyRoute({ children }: { children: React.ReactNode }) {
@@ -128,7 +149,7 @@ function App() {
           <Route path="reviews" element={<AdminOnlyRoute><ReviewsPage /></AdminOnlyRoute>} />
           <Route path="payments" element={<AdminOnlyRoute><PaymentsPage /></AdminOnlyRoute>} />
           <Route path="institution-projects" element={<AdminOnlyRoute><InstitutionProjectsPage /></AdminOnlyRoute>} />
-          <Route path="project-collaboration" element={<CapabilityRoute capability="canSubmitInstitutionProjectRequests"><ProjectCollaborationPage /></CapabilityRoute>} />
+          <Route path="project-collaboration" element={<Navigate to="/" replace />} />
           <Route path="refunds" element={<AdminOnlyRoute><RefundsPage /></AdminOnlyRoute>} />
           <Route path="reports" element={<AdminOnlyRoute><ReportsPage /></AdminOnlyRoute>} />
           <Route path="coupons" element={<AdminOnlyRoute><CouponsPage /></AdminOnlyRoute>} />
@@ -138,6 +159,7 @@ function App() {
           <Route path="cs" element={<AdminOnlyRoute><CustomerServicePage /></AdminOnlyRoute>} />
           <Route path="identity" element={<AdminOnlyRoute><IdentityManagementPage /></AdminOnlyRoute>} />
           <Route path="legal-documents" element={<AdminOnlyRoute><LegalDocumentsPage /></AdminOnlyRoute>} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
         </Routes>
       </Suspense>

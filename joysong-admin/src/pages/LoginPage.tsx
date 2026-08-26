@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Form, Input, Button, Card, Typography, message } from 'antd';
 import { LockOutlined, MobileOutlined } from '@ant-design/icons';
-import { useNavigate } from 'react-router-dom';
-import api, { clearAdminToken, getApiErrorMessage, getData, getDefaultManagementPath, setAdminToken } from '../api';
-import type { ManagementContext } from '../api';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { getApiErrorMessage, loginAdminSession } from '../api';
 
 const { Title, Text } = Typography;
 
@@ -12,40 +11,28 @@ type LoginValues = {
   password: string;
 };
 
-type LoginResult = {
-  token: string;
-  accessToken: string;
-  refreshToken: string;
-  tokenType: 'Bearer';
-  expiresIn: number;
-  user: { role: string };
-  context: ManagementContext;
-};
+function safeReturnPath(state: unknown) {
+  const from = state && typeof state === 'object'
+    ? (state as { from?: { pathname?: unknown; search?: unknown; hash?: unknown } }).from
+    : undefined;
+  const pathname = typeof from?.pathname === 'string' ? from.pathname : '';
+  if (!pathname.startsWith('/') || pathname.startsWith('//') || pathname === '/login') return '/';
+  const search = typeof from?.search === 'string' && from.search.startsWith('?') ? from.search : '';
+  const hash = typeof from?.hash === 'string' && from.hash.startsWith('#') ? from.hash : '';
+  return `${pathname}${search}${hash}`;
+}
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [submitting, setSubmitting] = useState(false);
-
-  // 登录页始终从干净会话开始，避免旧管理员令牌导致 401/403 循环。
-  useEffect(() => {
-    clearAdminToken();
-  }, []);
 
   const onFinish = async (values: LoginValues) => {
     setSubmitting(true);
     try {
-      const response = await api.post('/management/login', {
-        phone: values.phone.trim(),
-        password: values.password,
-      });
-      const data = getData<LoginResult>(response);
-      const accessToken = data?.accessToken || data?.token;
-      if (!accessToken || !data?.refreshToken || !data.context || !['ADMIN', 'USER'].includes(data.user?.role)) {
-        throw new Error('服务器返回的管理凭证无效');
-      }
-      setAdminToken(accessToken, data.context, data.refreshToken);
+      await loginAdminSession(values.phone, values.password);
       message.success('登录成功');
-      navigate(getDefaultManagementPath(), { replace: true });
+      navigate(safeReturnPath(location.state), { replace: true });
     } catch (error) {
       message.error(getApiErrorMessage(error, '登录失败，请稍后重试'));
     } finally {
@@ -58,7 +45,7 @@ export default function LoginPage() {
       <Card style={{ width: '100%', maxWidth: 400 }} styles={{ body: { padding: 32 } }}>
         <div style={{ textAlign: 'center', marginBottom: 28 }}>
           <Title level={3} style={{ marginBottom: 8, color: '#E8577B' }}>娇颜颂管理系统</Title>
-          <Text type="secondary">管理员、已认证医生或机构法人均可登录</Text>
+          <Text type="secondary">仅限平台管理员登录</Text>
         </div>
         <Form<LoginValues> layout="vertical" onFinish={onFinish} requiredMark={false}>
           <Form.Item
