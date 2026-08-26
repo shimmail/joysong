@@ -1,93 +1,209 @@
 @startuml
-title Doctor project-creation application workflow
+title Doctor project applications and institution-project full-edit workflow
 
 skinparam backgroundColor #FFFFFF
 skinparam sequenceArrowThickness 1
 skinparam responseMessageBelowArrow true
-skinparam ParticipantPadding 12
-skinparam BoxPadding 8
+skinparam maxMessageSize 90
+hide footbox
 
 actor "Authenticated active\ndoctor applicant" as Doctor
-participant "Flutter\n(project application)" as Flutter
-participant "Management API\n/project-requests" as API
-database "Immutable request ledger\nprofessional_project_requests" as Ledger
-actor "Platform administrator" as Admin
+participant "Flutter\nprofessional client" as Flutter
+participant "Management API\nproject requests" as API
+database "Immutable request ledger\nproject request tables" as Ledger
 actor "Target institution\nlegal representative" as LegalRep
-database "Projects\nprojects" as Projects
+actor "Platform\nadministrator" as Admin
+database "Approved doctor-institution\nrelationship" as Relationship
+database "Platform projects\nprojects" as Projects
 database "Institution projects\ninstitution_projects" as InstitutionProjects
-database "Applicant bindings\ndoctor_projects" as DoctorProjects
-database "Applicant split configs\ndoctor_institution_project_configs" as Configs
+database "Applicant binding\ndoctor_projects" as DoctorProjects
+database "Compatibility config\ndoctor_institution_project_configs" as Configs
+collections "discover / home / projects\ncaches" as Caches
+actor "Public client /\norder flow" as Public
 
-note over Doctor,Ledger
-  No doctor selector exists. The authenticated doctor is stored as the
-  sole applicant and is the only doctor binding created after approval.
-  Submitted request fields are immutable snapshots.
-end note
+legend left
+  |= Contract |= Meaning |
+  | payload v1 | JOIN / LEAVE and historical PROFILE_UPDATE; schedule is v1-only |
+  | payload v2 | full EDIT snapshots; USD doctor price and server-derived travel fee |
+  | null / blank / [] | normalize to null and inherit the platform-project field |
+endlegend
 
-group Platform-project application
-  Doctor -> Flutter: enter complete platform project form
-  Flutter -> API: POST /platform\nall exact 13 keys; every key present
-  API -> API: require active DOCTOR\nvalidate text, arrays, money, count
-  API -> Ledger: INSERT PLATFORM snapshot (PENDING, applicant doctor)
-  Ledger --> API: request id
-  API --> Flutter: {id, requestType: PLATFORM, status: PENDING}
-
-  Admin -> API: POST /api/admin/project-requests/{id}/review\n{decision: APPROVED|REJECTED, reviewNote}
-  API -> Ledger: lock pending immutable snapshot
-  API -> API: require platform administrator\nREJECTED requires non-blank note
-  alt APPROVED
-    group one transaction
-      API -> Projects: INSERT project\nrating = 0, review_count = 0
-      API -> Ledger: close APPROVED + resultingProjectId
+group Project-creation applications (existing immutable workflow)
+  Doctor -> Flutter: complete platform-project or institution-project form
+  alt Platform project (exact 13 keys)
+    Flutter -> API: POST /api/management/project-requests/platform
+    API -> Ledger: INSERT PLATFORM immutable snapshot (PENDING, applicant doctor)
+    Admin -> API: POST /api/admin/project-requests/{id}/review
+    API -> Ledger: lock PENDING snapshot
+    alt APPROVED
+      API -> Projects: INSERT project
+      API -> Ledger: CAS close APPROVED + resultingProjectId
+    else REJECTED
+      API -> Ledger: CAS close REJECTED + non-blank note
     end
-  else REJECTED
-    API -> Ledger: close REJECTED + review note
+  else Institution project (path institution + exact 18 keys)
+    Flutter -> API: POST /api/management/project-requests/institutions/{institutionId}
+    API -> API: require current APPROVED applicant relationship\nresolve inheritance; quote USD travel-ground fee
+    API -> Ledger: INSERT INSTITUTION immutable snapshot (PENDING, applicant doctor)
+    LegalRep -> API: POST /api/management/project-requests/{id}/review
+    API -> API: re-check managedInstitutionIds in real time
+    API -> Ledger: lock PENDING snapshot
+    alt APPROVED in one transaction
+      API -> Relationship: lock and re-check applicant relationship
+      API -> InstitutionProjects: INSERT effective inherited content
+      API -> DoctorProjects: INSERT applicant binding only
+      API -> Configs: INSERT applicant compatibility config
+      API -> Ledger: CAS close APPROVED + resultingInstitutionProjectId
+    else REJECTED
+      API -> Ledger: CAS close REJECTED + non-blank note
+    end
   end
-  API --> Admin: review result
 end
 
-group Institution-project application
-  Doctor -> Flutter: choose approved institution + platform project
-  Flutter -> API: GET /institution-form-config
-  API --> Flutter: {platformRate} (read only)
-  Flutter -> API: POST /institutions/{institutionId}\nall exact 18 keys; null/blank/[] inherits
-  API -> API: require applicant approved relationship\nvalidate inheritance, money, count and split
-  API -> Ledger: INSERT INSTITUTION snapshot (PENDING, applicant doctor)
-  Ledger --> API: request id
-  API --> Flutter: {id, requestType: INSTITUTION, status: PENDING}
+note over Flutter,Ledger
+  v2 is the new collaboration root: /api/v2/admin/institution-project-requests.
+  Its GET list is a payloadVersion 1|2 union. The v1 root remains for rolling
+  compatibility; a v1 route asked to process a v2 row returns 426
+  CLIENT_UPGRADE_REQUIRED. v2 JOIN/LEAVE retain their exact v1 writer shapes.
+end note
+
+group Full-edit target and submission (payload v2)
+  Doctor -> Flutter: open an existing institution project
+  Flutter -> API: GET /api/v2/admin/institution-project-requests/profile-update-targets
+  API -> API: require authenticated doctor + active institution project\ncurrent APPROVED relationship
+  API -> InstitutionProjects: read raw overrides, effective values, version
+  API -> DoctorProjects: read applicant USD price, is_active, updated_at
+  API -> Configs: read compatibility config revision (nullable)
+  API --> Flutter: exact 15-key target\ncurrentProject + baseRevision + doctorActive\npolicy revision + server-derived travel fee
+
+  note over API,Configs
+    baseRevision is a canonical SHA-256 over association, institution-project
+    version, platform inheritance hash, applicant doctor-project revision,
+    nullable config id/revision, and pricing-policy revision.
+  end note
+
+  Flutter -> API: POST /api/v2/admin/institution-project-requests\nexact 15 keys; requestType=PROFILE_UPDATE
+  API -> Relationship: require current APPROVED applicant relationship
+  API -> InstitutionProjects: lock target and platform association
+  API -> Projects: lock inheritance source
+  API -> DoctorProjects: lock applicant binding
+  API -> Configs: lock applicant config revision (nullable)
+  API -> API: normalize null/blank/[] inheritance\nrecompute baseRevision and USD travel fee
+  alt edit baseline changed
+    API --> Flutter: HTTP 409 EDIT_BASE_STALE
+  else valid current baseline
+    API -> API: build currentProject + proposedProject snapshots\nsharedChanged = shared overrides or salesCount changed
+    API -> Ledger: INSERT immutable snapshots, baselines, policy,\ncurrent/proposed applicant price + is_active (PENDING)
+    API --> Flutter: payloadVersion=2, requestType=EDIT
+  end
+end
+
+group Review list, ordinary decision, and admin force
+  LegalRep -> API: GET /api/v2/admin/institution-project-requests
+  API -> Ledger: read immutable current/proposed snapshots
+  API -> InstitutionProjects: read latest effective project
+  API -> DoctorProjects: read latest applicant price + is_active
+  API -> Configs: read latest compatibility config
+  API --> LegalRep: latestProject/latestDoctor* + latestRevision\nsharedChanged, snapshotState, reviewable
 
   alt Target institution legal representative
-    LegalRep -> API: POST /api/management/project-requests/{id}/review
-    API -> API: require current managedInstitutionIds authority
+    LegalRep -> API: POST /{id}/review\n{decision, reviewNote, force:false, forceBaseRevision:null}
   else Platform administrator
-    Admin -> API: POST /api/management/project-requests/{id}/review
-    API -> API: require administrator authority
+    Admin -> API: POST /{id}/review\nordinary body or explicit force body
   end
-  API -> Ledger: lock pending immutable snapshot
-  alt REJECTED
-    API -> Ledger: close REJECTED + non-blank review note
-    API --> Flutter: review result
+  API -> Ledger: read identity, then lock PENDING request
+  API -> API: re-check admin or current managedInstitutionIds authority
+  alt REJECTED or CHANGES_REQUESTED
+    API -> Ledger: CAS close only; non-blank reviewNote
   else APPROVED
-    group one atomic transaction; rollback all writes on any failure
-      API -> API: revalidate current institution, applicant relationship,\nplatform project, uniqueness, current platform rate and split
-      alt any revalidation or write fails
-        API -> API: rollback transaction; ledger remains PENDING
-        API --> Flutter: 409/error; no partial project, binding, or config
-      else all current checks pass
-        API -> InstitutionProjects: INSERT effective inherited content\nrating = 0, review_count = 0
-        API -> DoctorProjects: INSERT binding for applicant doctor only
-        API -> Configs: INSERT applicant split configuration
-        API -> Ledger: close APPROVED + resultingInstitutionProjectId
-        API --> Flutter: review result
+    note over API,Configs
+      Fixed approval lock order after the request row:
+      active relationship -> institution project -> platform project ->
+      applicant doctor project -> applicant config (including deleted row).
+    end note
+    API -> Relationship: lock current APPROVED relationship
+    API -> InstitutionProjects: lock target
+    API -> Projects: lock platform inheritance source
+    API -> DoctorProjects: lock applicant binding
+    API -> Configs: lock applicant compatibility config
+    API -> API: validate association, immutable snapshots, normalization,\ninherited source, policy/rederived fee, and drift
+
+    alt ordinary approval and any baseline drift
+      API --> LegalRep: HTTP 409 APPROVAL_BASE_STALE
+    else force=true
+      API -> API: require ADMIN + APPROVED + non-blank note\nforceBaseRevision == freshly read latestRevision\nat least one allowed baseline drift
+      note right of API
+        Force may accept institution-project version, applicant price/active/
+        revision, or compatibility-config revision drift only. It never bypasses
+        authority, active relationship, target association/existence, snapshot
+        validity/normalization, inheritance-source or pricing-policy checks,
+        request CAS, and it is not available for payload v1.
+      end note
+      alt latest confirmation changed / no applicable drift
+        API --> Admin: 409 FORCE_BASE_STALE or 422 FORCE_NOT_APPLICABLE
       end
     end
+
+    alt sharedChanged = true
+      API -> InstitutionProjects: version CAS; update shared fields; version + 1
+    else sharedChanged = false
+      API -> InstitutionProjects: no shared write; version unchanged
+    end
+    API -> DoctorProjects: update applicant only: price + is_active
+    API -> Configs: sync applicant-only compatibility medical_list_price
+    API -> Ledger: status=PENDING CAS close + audit snapshot
+    API -> Caches: afterCommit clear discover, home, projects
   end
 end
 
-note over InstitutionProjects,Configs
-  Approval order is fixed: institution_projects -> doctor_projects(applicant)
-  -> doctor_institution_project_configs -> close request. Reviewers never
-  edit submitted fields. JOIN and PROFILE_UPDATE use separate contracts.
+note over API,Ledger
+  Stable contract errors use {code, message, errorCode, data:null}.
+  409: EDIT_BASE_STALE, APPROVAL_BASE_STALE, INHERITANCE_SOURCE_STALE,
+  PRICING_POLICY_STALE, FORCE_BASE_STALE, REQUEST_ALREADY_PENDING,
+  REQUEST_ALREADY_HANDLED, INSTITUTION_PROJECT_VERSION_STALE.
+  422: PROJECT_PAYLOAD_INVALID, REQUEST_SNAPSHOT_INVALID, FORCE_NOT_APPLICABLE.
+  426: CLIENT_UPGRADE_REQUIRED. Clients branch on errorCode, never message.
 end note
+
+group Platform-admin direct edit (separate CAS path)
+  Admin -> API: PUT /api/admin/institution-projects/{id}\nexact 17 keys including baseVersion + doctorBindings
+  API -> API: require platform ADMIN
+  note over API,Configs
+    Global lock order: sorted pending doctor-change requests -> sorted pending
+    split proposals -> sorted active relationships (NOWAIT) -> institution project
+    -> revalidate pending sets (NOWAIT) -> platform project -> all doctor projects
+    -> config participants -> doctor configs.
+  end note
+  alt baseVersion/participants/locks changed
+    API --> Admin: HTTP 409 INSTITUTION_PROJECT_VERSION_STALE
+  else current CAS baseline
+    API -> InstitutionProjects: update direct-admin fields
+    API -> DoctorProjects: synchronize doctor bindings and USD prices
+    API -> Configs: synchronize applicant compatibility prices
+    API -> Caches: afterCommit clear discover, home, projects
+  end
+end
+
+group Public visibility and bookability
+  Public -> API: list/search/filter, doctor or institution details,\ndoctor candidates, quote, or create order
+  API -> Relationship: require effective APPROVED relationship
+  API -> InstitutionProjects: require is_active=true
+  API -> DoctorProjects: require is_active=true for every public/bookable binding
+  alt quote or order
+    API -> Relationship: lock and re-check relationship
+    API -> InstitutionProjects: lock and re-check active target
+    API -> DoctorProjects: lock and re-check active doctor binding
+    API --> Public: server-derived USD quote / order result
+  else direct institution-project detail only
+    Public -> API: GET /api/discover/institutions/{institutionId}/projects/{projectId}
+    alt active institution project but no bookable doctor
+      API --> Public: 200 detail; hasAvailableDoctors=false; doctors=[]\nprice falls back to institution-project price; ordering remains forbidden
+    else bookable doctors exist
+      API --> Public: 200 detail with active doctors and minimum doctor price
+    end
+  else public collection has no bookable doctor
+    API --> Public: omit the institution project from collection results
+  end
+end
 
 @enduml
