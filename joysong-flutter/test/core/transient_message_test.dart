@@ -35,9 +35,9 @@ void main() {
     expect(find.text('Latest message'), findsOneWidget);
     expect(find.byType(SnackBar), findsOneWidget);
 
-    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('Latest message'), findsOneWidget);
-    await tester.pump(const Duration(milliseconds: 1900));
+    await tester.pump(const Duration(milliseconds: 1700));
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.byType(SnackBar), findsNothing);
   });
