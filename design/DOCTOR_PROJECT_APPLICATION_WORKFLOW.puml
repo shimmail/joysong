@@ -13,6 +13,7 @@ participant "Management API\nproject requests" as API
 database "Immutable request ledger\nproject request tables" as Ledger
 actor "Target institution\nlegal representative" as LegalRep
 actor "Platform\nadministrator" as Admin
+actor "Authorized reviewer\n(actual caller)" as Reviewer
 database "Approved doctor-institution\nrelationship" as Relationship
 database "Platform projects\nprojects" as Projects
 database "Institution projects\ninstitution_projects" as InstitutionProjects
@@ -128,9 +129,13 @@ group Review list, ordinary decision, and admin force
     API -> Configs: lock applicant compatibility config
     API -> API: validate association, immutable snapshots, normalization,\ninherited source, policy/rederived fee, and drift
 
-    alt ordinary approval and any baseline drift
-      API --> LegalRep: HTTP 409 APPROVAL_BASE_STALE
-    else force=true
+    alt ordinary review (force=false)
+      alt any baseline drift
+        API --> Reviewer: HTTP 409 APPROVAL_BASE_STALE
+      else clean baselines
+        API -> API: ordinary approval validation succeeds
+      end
+    else force review (force=true)
       API -> API: require ADMIN + APPROVED + non-blank note\nforceBaseRevision == freshly read latestRevision\nat least one allowed baseline drift
       note right of API
         Force may accept institution-project version, applicant price/active/
@@ -140,7 +145,9 @@ group Review list, ordinary decision, and admin force
         request CAS, and it is not available for payload v1.
       end note
       alt latest confirmation changed / no applicable drift
-        API --> Admin: 409 FORCE_BASE_STALE or 422 FORCE_NOT_APPLICABLE
+        API --> Reviewer: 409 FORCE_BASE_STALE or 422 FORCE_NOT_APPLICABLE
+      else confirmed allowed drift
+        API -> API: force approval validation succeeds
       end
     end
 

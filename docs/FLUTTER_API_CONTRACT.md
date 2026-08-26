@@ -924,6 +924,8 @@ v2 `requestType` 对完整编辑返回 `EDIT`。`current*`/`proposed*` 来自不
 }
 ```
 
+带稳定码的 v2 合同错误在 wire 上精确包含 `code`、`message`、`errorCode`、`data` 四个键，不增加其他键。后端对 `errorCode` 使用 `NON_NULL` 序列化：当它为 `null` 时，该字段从 JSON 中省略，因此成功响应和既有 v1 响应的 wire shape 保持不变。
+
 客户端必须按 HTTP 与 `errorCode` 分支，不能解析本地化 `message`：
 
 | HTTP | 稳定 `errorCode` |
@@ -932,7 +934,7 @@ v2 `requestType` 对完整编辑返回 `EDIT`。`current*`/`proposed*` 来自不
 | 422 | `PROJECT_PAYLOAD_INVALID`、`REQUEST_SNAPSHOT_INVALID`、`FORCE_NOT_APPLICABLE` |
 | 426 | `CLIENT_UPGRADE_REQUIRED` |
 
-401、403、404 分别表示未认证、身份/对象权限失败、申请或目标不存在；这三类当前不保证专用 `errorCode`。写请求不得自动重放。409 后保留用户草稿，刷新 target/申请详情；`EDIT_BASE_STALE` 重新以 target 的 `baseRevision` 编辑，`APPROVAL_BASE_STALE` 刷新审核详情，管理员只有在最新详情仍可审核且明确接受差异时才可使用 `latestRevision` 强制批准。
+401、403、404 分别表示未认证、身份/对象权限失败、申请或目标不存在；这三类当前可不提供专用 `errorCode`，此时 wire 上不会出现 `errorCode` 键。写请求不得自动重放。409 后保留用户草稿，刷新 target/申请详情；`EDIT_BASE_STALE` 重新以 target 的 `baseRevision` 编辑，`APPROVAL_BASE_STALE` 刷新审核详情，管理员只有在最新详情仍可审核且明确接受差异时才可使用 `latestRevision` 强制批准。
 
 #### 平台管理员直编 CAS、公开可预约性与详情例外
 
