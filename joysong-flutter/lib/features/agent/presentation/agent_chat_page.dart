@@ -205,7 +205,8 @@ class _AgentChatPageState extends State<AgentChatPage> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     AgentComparisonStatusCard(request: request),
-                                    if (_supportedCatalogItems(message).isNotEmpty)
+                                    if (_supportedCatalogItems(message)
+                                        .isNotEmpty)
                                       AgentCatalogLinkList(
                                         items: _supportedCatalogItems(message),
                                         onOpen: widget.onOpenCatalogItem,
@@ -546,7 +547,8 @@ class _ChatBubble extends StatelessWidget {
     LongPressStartDetails details,
   ) async {
     if (message.content.isEmpty) return;
-    final overlay = Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
     final action = await showMenu<_ChatBubbleAction>(
       context: context,
       position: RelativeRect.fromRect(

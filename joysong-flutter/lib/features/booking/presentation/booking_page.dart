@@ -101,7 +101,8 @@ class _BookingPageState extends State<BookingPage> {
       builder: (context, _) {
         final controller = widget.controller;
         return Scaffold(
-          appBar: AppBar(title: Text(context.localized('确认预约', 'Confirm booking'))),
+          appBar:
+              AppBar(title: Text(context.localized('确认预约', 'Confirm booking'))),
           bottomNavigationBar: controller.project == null
               ? null
               : SafeArea(
@@ -208,7 +209,9 @@ class _BookingPageState extends State<BookingPage> {
         _SectionTitle(context.localized('选择医生', 'Select a doctor')),
         const SizedBox(height: 8),
         if (controller.doctors.isEmpty)
-          _SoftPanel(child: Text(context.localized('该项目暂时没有可预约医生', 'No doctors are currently available for this service')))
+          _SoftPanel(
+              child: Text(context.localized('该项目暂时没有可预约医生',
+                  'No doctors are currently available for this service')))
         else
           DropdownButtonFormField<BookingDoctor>(
             key: ValueKey(controller.selectedDoctor?.id),
@@ -228,7 +231,8 @@ class _BookingPageState extends State<BookingPage> {
           ),
         const SizedBox(height: 20),
         _SectionTitle(
-          context.localized('预约时间（北京时间 UTC+8）', 'Appointment time (Beijing UTC+8)'),
+          context.localized(
+              '预约时间（北京时间 UTC+8）', 'Appointment time (Beijing UTC+8)'),
         ),
         const SizedBox(height: 8),
         _SoftPanel(
@@ -255,7 +259,8 @@ class _BookingPageState extends State<BookingPage> {
           maxLength: 500,
           maxLines: 3,
           decoration: InputDecoration(
-            hintText: context.localized('可填写需要提前沟通的事项', 'Add anything you would like to discuss in advance'),
+            hintText: context.localized('可填写需要提前沟通的事项',
+                'Add anything you would like to discuss in advance'),
           ),
           onChanged: controller.updateRemark,
         ),
@@ -283,7 +288,8 @@ class _BookingPageState extends State<BookingPage> {
     for (final doctor in doctors) {
       final doctorId = doctor.id.trim();
       if (doctorId.isNotEmpty) {
-        doctorIdCounts.update(doctorId, (count) => count + 1, ifAbsent: () => 1);
+        doctorIdCounts.update(doctorId, (count) => count + 1,
+            ifAbsent: () => 1);
       }
     }
     return doctors.map((doctor) {
@@ -332,9 +338,7 @@ class _DoctorAvatar extends StatelessWidget {
       radius: radius,
       foregroundImage: avatar.isEmpty ? null : NetworkImage(avatar),
       onForegroundImageError: avatar.isEmpty ? null : (_, __) {},
-      child: avatar.isEmpty
-          ? const Icon(Icons.person_outline_rounded)
-          : null,
+      child: avatar.isEmpty ? const Icon(Icons.person_outline_rounded) : null,
     );
   }
 }
@@ -373,13 +377,13 @@ class _ScrollingTimePickerState extends State<_ScrollingTimePicker> {
   void initState() {
     super.initState();
     _period = widget.initial.period == DayPeriod.am ? 0 : 1;
-    _hour = widget.initial.hourOfPeriod == 0
-        ? 12
-        : widget.initial.hourOfPeriod;
+    _hour = widget.initial.hourOfPeriod == 0 ? 12 : widget.initial.hourOfPeriod;
     _minute = widget.initial.minute;
     _periodController = FixedExtentScrollController(initialItem: _period);
-    _hourController = FixedExtentScrollController(initialItem: _baseIndex + _hour - 1);
-    _minuteController = FixedExtentScrollController(initialItem: _baseIndex + _minute);
+    _hourController =
+        FixedExtentScrollController(initialItem: _baseIndex + _hour - 1);
+    _minuteController =
+        FixedExtentScrollController(initialItem: _baseIndex + _minute);
   }
 
   @override
@@ -399,7 +403,9 @@ class _ScrollingTimePickerState extends State<_ScrollingTimePicker> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(context.localized('选择预约时间（北京时间 UTC+8）', 'Select time (Beijing UTC+8)'),
+            Text(
+                context.localized(
+                    '选择预约时间（北京时间 UTC+8）', 'Select time (Beijing UTC+8)'),
                 style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 8),
             SizedBox(
@@ -426,8 +432,16 @@ class _ScrollingTimePickerState extends State<_ScrollingTimePicker> {
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                TextButton(onPressed: () => Navigator.pop(context), child: Text(context.localized('取消', 'Cancel'))),
-                FilledButton(onPressed: () => Navigator.pop(context, TimeOfDay(hour: (_hour % 12) + (_period == 1 ? 12 : 0), minute: _minute)), child: Text(context.localized('确定', 'Confirm'))),
+                TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: Text(context.localized('取消', 'Cancel'))),
+                FilledButton(
+                    onPressed: () => Navigator.pop(
+                        context,
+                        TimeOfDay(
+                            hour: (_hour % 12) + (_period == 1 ? 12 : 0),
+                            minute: _minute)),
+                    child: Text(context.localized('确定', 'Confirm'))),
               ],
             ),
           ],
@@ -666,7 +680,9 @@ class _MessageState extends StatelessWidget {
             children: [
               Text(message, textAlign: TextAlign.center),
               const SizedBox(height: 12),
-          TextButton(onPressed: onRetry, child: Text(context.localized('重试', 'Retry'))),
+              TextButton(
+                  onPressed: onRetry,
+                  child: Text(context.localized('重试', 'Retry'))),
             ],
           ),
         ),

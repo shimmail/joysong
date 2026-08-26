@@ -109,7 +109,7 @@ class _FavoriteActionButtonState extends State<FavoriteActionButton> {
               ? context.localized('已收藏', 'Added to favorites')
               : context.localized('已取消收藏', 'Removed from favorites'))
           : (result.message ??
-                  context.localized('收藏操作失败，请重试',
+              context.localized('收藏操作失败，请重试',
                   'Unable to update favorites. Please try again.')),
     );
   }

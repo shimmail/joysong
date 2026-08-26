@@ -126,7 +126,8 @@ class _ProfilePageState extends State<ProfilePage> {
               _MenuItem(
                 icon: Icons.account_balance_wallet_outlined,
                 title: context.localized('钱包', 'Wallet'),
-                subtitle: context.localized('查看专业收益与流水', 'View professional earnings and ledger'),
+                subtitle: context.localized(
+                    '查看专业收益与流水', 'View professional earnings and ledger'),
                 onTap: widget.onWallet,
               ),
               _MenuItem(

@@ -137,26 +137,26 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<ProfileGender>(
-                        key: const Key('profile-gender'),
-                        initialValue: _gender,
-                        isExpanded: true,
-                        borderRadius: BorderRadius.circular(12),
-                        menuMaxHeight: 320,
-                        dropdownColor: Theme.of(context).colorScheme.surface,
-                        decoration: InputDecoration(
-                          labelText: context.localized('性别', 'Gender'),
+                    key: const Key('profile-gender'),
+                    initialValue: _gender,
+                    isExpanded: true,
+                    borderRadius: BorderRadius.circular(12),
+                    menuMaxHeight: 320,
+                    dropdownColor: Theme.of(context).colorScheme.surface,
+                    decoration: InputDecoration(
+                      labelText: context.localized('性别', 'Gender'),
+                    ),
+                    items: [
+                      for (final gender in ProfileGender.values)
+                        DropdownMenuItem(
+                          value: gender,
+                          child: Text(_genderLabel(context, gender)),
                         ),
-                        items: [
-                          for (final gender in ProfileGender.values)
-                            DropdownMenuItem(
-                              value: gender,
-                              child: Text(_genderLabel(context, gender)),
-                            ),
-                        ],
-                        onChanged: controller.isSaving
-                            ? null
-                            : (gender) =>
-                                setState(() => _gender = gender ?? _gender),
+                    ],
+                    onChanged: controller.isSaving
+                        ? null
+                        : (gender) =>
+                            setState(() => _gender = gender ?? _gender),
                   ),
                   const SizedBox(height: 12),
                   TextFormField(

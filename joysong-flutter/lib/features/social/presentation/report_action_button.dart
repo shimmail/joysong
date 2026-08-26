@@ -26,9 +26,7 @@ Future<bool> showReportFlow({
   if (!context.mounted || submitted != true) return false;
   showTransientMessage(
     context,
-    english
-        ? 'Report submitted. Thank you for your feedback.'
-        : '举报已提交，感谢您的反馈',
+    english ? 'Report submitted. Thank you for your feedback.' : '举报已提交，感谢您的反馈',
   );
   return true;
 }

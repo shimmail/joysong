@@ -405,42 +405,41 @@ class _InstitutionRelationshipsPageState
     final focusedRequestIsInHistory = initialRequestId != null &&
         initialRequestId.isNotEmpty &&
         history.any((request) => request.id == initialRequestId);
-    final historyExpanded = _hasUserToggledHistory
-        ? _historyExpanded
-        : focusedRequestIsInHistory;
+    final historyExpanded =
+        _hasUserToggledHistory ? _historyExpanded : focusedRequestIsInHistory;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-          Semantics(
-            key: const Key('relationship-history-toggle'),
-            container: true,
-            button: true,
-            expanded: historyExpanded,
-            label: _isLegal
-                ? context.localized('审核历史', 'Review history')
-                : context.localized('申请历史', 'Request history'),
-            child: ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(
-                _isLegal
-                    ? context.localized('审核历史', 'Review history')
-                    : context.localized('申请历史', 'Request history'),
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              subtitle: history.isEmpty ? Text(emptyText) : null,
-              trailing: Icon(historyExpanded
-                  ? Icons.expand_less_rounded
-                  : Icons.expand_more_rounded),
-              onTap: () => setState(() {
-                _hasUserToggledHistory = true;
-                _historyExpanded = !historyExpanded;
-              }),
+        Semantics(
+          key: const Key('relationship-history-toggle'),
+          container: true,
+          button: true,
+          expanded: historyExpanded,
+          label: _isLegal
+              ? context.localized('审核历史', 'Review history')
+              : context.localized('申请历史', 'Request history'),
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(
+              _isLegal
+                  ? context.localized('审核历史', 'Review history')
+                  : context.localized('申请历史', 'Request history'),
+              style: Theme.of(context).textTheme.titleMedium,
             ),
+            subtitle: history.isEmpty ? Text(emptyText) : null,
+            trailing: Icon(historyExpanded
+                ? Icons.expand_less_rounded
+                : Icons.expand_more_rounded),
+            onTap: () => setState(() {
+              _hasUserToggledHistory = true;
+              _historyExpanded = !historyExpanded;
+            }),
           ),
-          if (historyExpanded) ...[
-            if (history.isEmpty) _EmptyText(text: emptyText),
-            for (final request in history) builder(request),
-          ],
+        ),
+        if (historyExpanded) ...[
+          if (history.isEmpty) _EmptyText(text: emptyText),
+          for (final request in history) builder(request),
+        ],
       ],
     );
   }

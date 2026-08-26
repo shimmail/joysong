@@ -477,7 +477,8 @@ class _AppPreferencesPageState extends State<_AppPreferencesPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(strings.displayMode, style: theme.textTheme.titleSmall),
+                      Text(strings.displayMode,
+                          style: theme.textTheme.titleSmall),
                       const SizedBox(height: 4),
                       Text(strings.displayModeSubtitle,
                           style: theme.textTheme.bodySmall?.copyWith(
@@ -503,7 +504,8 @@ class _AppPreferencesPageState extends State<_AppPreferencesPage> {
                         ),
                       ),
                       const SizedBox(height: 20),
-                      Text(strings.themeColor, style: theme.textTheme.titleSmall),
+                      Text(strings.themeColor,
+                          style: theme.textTheme.titleSmall),
                       const SizedBox(height: 4),
                       Text(strings.themeColorSubtitle,
                           style: theme.textTheme.bodySmall?.copyWith(
@@ -517,7 +519,8 @@ class _AppPreferencesPageState extends State<_AppPreferencesPage> {
                           for (final preset in ThemePreset.values)
                             _ThemeChoice(
                               preset: preset,
-                              selected: widget.themeController.selectedPreset == preset,
+                              selected: widget.themeController.selectedPreset ==
+                                  preset,
                               waiting: _pendingPreset == preset,
                               strings: strings,
                               onSelected: () => _selectPreset(preset),
@@ -537,7 +540,8 @@ class _AppPreferencesPageState extends State<_AppPreferencesPage> {
                           icon: _isResettingTheme
                               ? const SizedBox.square(
                                   dimension: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
                                 )
                               : const Icon(Icons.refresh_rounded),
                           label: Text(strings.restoreDefaultTheme),

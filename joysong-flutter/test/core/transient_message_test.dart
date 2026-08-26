@@ -55,8 +55,7 @@ class _TransientMessageHarness extends StatelessWidget {
             children: [
               ElevatedButton(
                 key: const Key('first-message'),
-                onPressed: () =>
-                    showTransientMessage(context, 'First message'),
+                onPressed: () => showTransientMessage(context, 'First message'),
                 child: const Text('First'),
               ),
               ElevatedButton(

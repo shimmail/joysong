@@ -611,9 +611,7 @@ final class _DiaryEditorPageState extends State<DiaryEditorPage> {
       final english = Localizations.localeOf(context).languageCode == 'en';
       showTransientMessage(
         context,
-        english
-            ? 'Unable to read the selected image.'
-            : '无法读取所选图片，请更换图片后重试',
+        english ? 'Unable to read the selected image.' : '无法读取所选图片，请更换图片后重试',
       );
     } finally {
       if (mounted) setState(() => _isPickingImage = false);

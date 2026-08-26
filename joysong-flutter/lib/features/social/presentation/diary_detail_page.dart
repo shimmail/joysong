@@ -1312,8 +1312,7 @@ final class _TranslatedDiarySectionState
     if (!mounted || results.every((result) => result.succeeded)) return;
     showTransientMessage(
       context,
-      results.firstWhere((result) => !result.succeeded).message ??
-          '翻译失败，请稍后重试',
+      results.firstWhere((result) => !result.succeeded).message ?? '翻译失败，请稍后重试',
     );
   }
 
