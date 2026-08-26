@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
 import 'package:joysong_flutter/features/social/presentation/social_controller.dart';
 
@@ -23,14 +24,11 @@ Future<bool> showReportFlow({
     ),
   );
   if (!context.mounted || submitted != true) return false;
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text(
-        english
-            ? 'Report submitted. Thank you for your feedback.'
-            : '举报已提交，感谢您的反馈',
-      ),
-    ),
+  showTransientMessage(
+    context,
+    english
+        ? 'Report submitted. Thank you for your feedback.'
+        : '举报已提交，感谢您的反馈',
   );
   return true;
 }

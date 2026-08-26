@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:joysong_flutter/core/translation/translation.dart';
+import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/social/data/comment_collapse_store.dart';
 import 'package:joysong_flutter/features/social/domain/social_models.dart'
     hide ContentTranslation;
@@ -731,9 +732,7 @@ final class _DiaryDetailPageState extends State<DiaryDetailPage> {
       case _CommentMenuActionType.copy:
         await Clipboard.setData(ClipboardData(text: comment.content));
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(_english ? 'Copied' : '已复制')),
-          );
+          showTransientMessage(context, _english ? 'Copied' : '已复制');
         }
         break;
       case _CommentMenuActionType.reply:
@@ -980,14 +979,11 @@ final class _DiaryDetailPageState extends State<DiaryDetailPage> {
       _expandedComments.add(parentId);
     }
     setState(() => _replyTarget = null);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(_english ? 'Sent' : '已发送')),
-    );
+    showTransientMessage(context, _english ? 'Sent' : '已发送');
   }
 
   void _showFailure(String message) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    showTransientMessage(context, message);
   }
 }
 
@@ -1314,13 +1310,10 @@ final class _TranslatedDiarySectionState
     if (requests.isEmpty) return;
     final results = await Future.wait(requests);
     if (!mounted || results.every((result) => result.succeeded)) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          results.firstWhere((result) => !result.succeeded).message ??
-              '翻译失败，请稍后重试',
-        ),
-      ),
+    showTransientMessage(
+      context,
+      results.firstWhere((result) => !result.succeeded).message ??
+          '翻译失败，请稍后重试',
     );
   }
 

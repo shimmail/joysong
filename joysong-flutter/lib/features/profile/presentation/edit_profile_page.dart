@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/files/app_file_picker.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/profile/domain/profile_models.dart';
 import 'package:joysong_flutter/features/profile/presentation/profile_controller.dart';
 import 'package:joysong_flutter/features/profile/presentation/avatar_crop_page.dart';
@@ -231,12 +232,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
       ),
     );
     if (!mounted || !success) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          context.localized('个人资料已更新', 'Profile updated'),
-        ),
-      ),
+    showTransientMessage(
+      context,
+      context.localized('个人资料已更新', 'Profile updated'),
     );
     Navigator.of(context).pop(true);
   }
@@ -269,9 +267,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
       }
     });
     if (url == null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(context.localized('头像上传失败', 'Avatar upload failed')),
-      ));
+      showTransientMessage(
+        context,
+        context.localized('头像上传失败', 'Avatar upload failed'),
+      );
     }
   }
 }

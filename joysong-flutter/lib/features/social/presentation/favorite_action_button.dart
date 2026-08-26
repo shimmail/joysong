@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
 import 'package:joysong_flutter/features/social/presentation/social_controller.dart';
 
@@ -101,18 +102,15 @@ class _FavoriteActionButtonState extends State<FavoriteActionButton> {
           widget.targetId,
         ) ??
         initial;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          result.succeeded
-              ? (status.active
-                  ? context.localized('已收藏', 'Added to favorites')
-                  : context.localized('已取消收藏', 'Removed from favorites'))
-              : (result.message ??
+    showTransientMessage(
+      context,
+      result.succeeded
+          ? (status.active
+              ? context.localized('已收藏', 'Added to favorites')
+              : context.localized('已取消收藏', 'Removed from favorites'))
+          : (result.message ??
                   context.localized('收藏操作失败，请重试',
-                      'Unable to update favorites. Please try again.')),
-        ),
-      ),
+                  'Unable to update favorites. Please try again.')),
     );
   }
 

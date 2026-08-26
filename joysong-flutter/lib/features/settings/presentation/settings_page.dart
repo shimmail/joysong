@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/theme/app_theme.dart';
 import 'package:joysong_flutter/core/theme/theme_controller.dart';
+import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/settings/data/settings_preferences_store.dart';
 import 'package:joysong_flutter/features/settings/domain/settings_preferences.dart';
 import 'package:joysong_flutter/features/settings/domain/settings_services.dart';
@@ -94,9 +95,7 @@ class _SettingsPageState extends State<SettingsPage> {
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    showTransientMessage(context, message);
   }
 
   void _open(VoidCallback? callback, String unavailableMessage) {
@@ -393,9 +392,7 @@ class _AppPreferencesPageState extends State<_AppPreferencesPage> {
 
   void _showMessage(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    showTransientMessage(context, message);
   }
 
   Future<void> _selectAppearanceMode(AppAppearanceMode mode) async {

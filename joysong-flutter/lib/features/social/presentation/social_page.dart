@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/files/app_file_picker.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/translation/translation.dart';
+import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/discover/presentation/discover_content_card.dart';
@@ -172,12 +173,11 @@ final class _SocialPageState extends State<SocialPage> {
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(result.succeeded
-            ? context.localized('日记已删除', 'Diary deleted')
-            : result.message!),
-      ),
+    showTransientMessage(
+      context,
+      result.succeeded
+          ? context.localized('日记已删除', 'Diary deleted')
+          : result.message!,
     );
   }
 }
@@ -609,14 +609,11 @@ final class _DiaryEditorPageState extends State<DiaryEditorPage> {
     } catch (_) {
       if (!mounted) return;
       final english = Localizations.localeOf(context).languageCode == 'en';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            english
-                ? 'Unable to read the selected image.'
-                : '无法读取所选图片，请更换图片后重试',
-          ),
-        ),
+      showTransientMessage(
+        context,
+        english
+            ? 'Unable to read the selected image.'
+            : '无法读取所选图片，请更换图片后重试',
       );
     } finally {
       if (mounted) setState(() => _isPickingImage = false);
@@ -651,11 +648,10 @@ final class _DiaryEditorPageState extends State<DiaryEditorPage> {
       if (!upload.succeeded || upload.value == null) {
         if (!mounted) return;
         setState(() => _isSubmitting = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(upload.message ??
-                context.localized('图片上传失败', 'Failed to upload image')),
-          ),
+        showTransientMessage(
+          context,
+          upload.message ??
+              context.localized('图片上传失败', 'Failed to upload image'),
         );
         return;
       }
@@ -713,18 +709,15 @@ final class _DiaryEditorPageState extends State<DiaryEditorPage> {
     }
     setState(() => _isSubmitting = false);
     if (result.succeeded) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(existing == null
-              ? context.localized('日记已保存', 'Diary saved')
-              : context.localized('日记已更新', 'Diary updated')),
-        ),
+      showTransientMessage(
+        context,
+        existing == null
+            ? context.localized('日记已保存', 'Diary saved')
+            : context.localized('日记已更新', 'Diary updated'),
       );
       Navigator.maybePop(context, result.value);
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(result.message!)),
-      );
+      showTransientMessage(context, result.message!);
     }
   }
 
