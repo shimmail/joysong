@@ -68,7 +68,7 @@ class DoctorProjectProfileUpdatePersistenceTest {
     @Test
     @Order(1)
     fun `fresh migrations and approval atomically update only target doctor`() {
-        assertEquals((26..33).map(Int::toString), jdbc.queryForList(
+        assertEquals(listOf("33"), jdbc.queryForList(
             "SELECT version FROM flyway_schema_history WHERE success = 1 AND version IS NOT NULL ORDER BY installed_rank",
             String::class.java
         ))

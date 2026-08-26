@@ -7,6 +7,7 @@ import com.joysong.server.payment.entity.PaymentEventEntity
 import com.joysong.server.payment.repository.PaymentEventRepository
 import com.joysong.server.payment.repository.PaymentRepository
 import com.joysong.server.refund.repository.RefundItemRepository
+import com.joysong.server.support.LegacyMigrationTestResources
 import com.joysong.server.support.WorktreeTestDatabase
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.Assertions.assertArrayEquals
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest
@@ -32,6 +34,7 @@ import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
 import java.math.BigDecimal
 import java.nio.charset.StandardCharsets
+import java.nio.file.Path
 import java.sql.DriverManager
 import java.time.LocalDateTime
 import java.util.UUID
@@ -55,6 +58,9 @@ import java.util.concurrent.TimeUnit
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @Import(OrderServiceConversationService::class)
 class TravelGroundServicePaymentMigrationTest {
+
+    @TempDir
+    lateinit var legacyMigrationDirectory: Path
 
     @Autowired
     private lateinit var jdbcTemplate: JdbcTemplate
@@ -81,11 +87,11 @@ class TravelGroundServicePaymentMigrationTest {
     fun `fresh database applies the travel payment schema constraints and index set`() {
         assertEquals(DATABASE, freshMysql.databaseName)
         assertEquals(
-            listOf("26", "27", "28", "29", "30", "31", "32", "32.1"),
+            listOf("33"),
             jdbcTemplate.queryForList(
                 "SELECT version FROM flyway_schema_history WHERE success = 1 AND version IS NOT NULL ORDER BY installed_rank",
                 String::class.java
-            ).take(8)
+            )
         )
 
         assertColumn("doctor_institution_project_configs", "medical_list_price", "decimal", false)
@@ -382,7 +388,8 @@ class TravelGroundServicePaymentMigrationTest {
         val upgradeJdbc = JdbcTemplate(
             DriverManagerDataSource(v31UpgradeMysql.jdbcUrl, v31UpgradeMysql.username, v31UpgradeMysql.password)
         )
-        migrate(v31UpgradeMysql, target = "31")
+        val legacyMigrationLocation = LegacyMigrationTestResources.prepare(legacyMigrationDirectory)
+        migrate(v31UpgradeMysql, legacyMigrationLocation, target = "31")
         insertMinimalOrder(upgradeJdbc, "v31-service-order")
         upgradeJdbc.update(
             """
@@ -407,7 +414,7 @@ class TravelGroundServicePaymentMigrationTest {
             """.trimIndent()
         )
 
-        migrate(v31UpgradeMysql)
+        migrate(v31UpgradeMysql, legacyMigrationLocation)
 
         val cases = upgradeJdbc.query(
             """
@@ -480,7 +487,8 @@ class TravelGroundServicePaymentMigrationTest {
         val upgradeJdbc = JdbcTemplate(
             DriverManagerDataSource(upgradeMysql.jdbcUrl, upgradeMysql.username, upgradeMysql.password)
         )
-        migrate(upgradeMysql, target = "28")
+        val legacyMigrationLocation = LegacyMigrationTestResources.prepare(legacyMigrationDirectory)
+        migrate(upgradeMysql, legacyMigrationLocation, target = "28")
 
         upgradeJdbc.update(
             """
@@ -530,7 +538,7 @@ class TravelGroundServicePaymentMigrationTest {
             String::class.java
         )
 
-        migrate(upgradeMysql)
+        migrate(upgradeMysql, legacyMigrationLocation)
 
         val orderSnapshot = upgradeJdbc.queryForObject(
             """
@@ -796,6 +804,15 @@ class TravelGroundServicePaymentMigrationTest {
         val idempotencyKey: String
     )
 
+    private fun migrate(container: MySQLContainer<*>, migrationLocation: String, target: String? = null) {
+        WorktreeTestDatabase.validateAndPrint(container)
+        val configuration = Flyway.configure()
+            .dataSource(container.jdbcUrl, container.username, container.password)
+            .locations(migrationLocation)
+        if (target != null) configuration.target(target)
+        configuration.load().migrate()
+    }
+
     companion object {
         private val DATABASE = WorktreeTestDatabase.databaseName()
 
@@ -858,15 +875,6 @@ class TravelGroundServicePaymentMigrationTest {
         private fun rowCount(jdbc: JdbcTemplate, table: String): Int {
             require(table in setOf("orders", "dm_conversations", "payments", "payment_events"))
             return jdbc.queryForObject("SELECT COUNT(*) FROM $table", Int::class.java)!!
-        }
-
-        private fun migrate(container: MySQLContainer<*>, target: String? = null) {
-            WorktreeTestDatabase.validateAndPrint(container)
-            val configuration = Flyway.configure()
-                .dataSource(container.jdbcUrl, container.username, container.password)
-                .locations("classpath:db/migration")
-            if (target != null) configuration.target(target)
-            configuration.load().migrate()
         }
     }
 }

@@ -1,5 +1,6 @@
 package com.joysong.server.project.service
 
+import com.joysong.server.support.LegacyMigrationTestResources
 import com.joysong.server.support.WorktreeTestDatabase
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -9,23 +10,30 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.testcontainers.containers.MySQLContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
 import java.math.BigDecimal
+import java.nio.file.Path
 
 @Tag("mysql-integration")
 @Testcontainers
 class ProfessionalProjectRequestMigrationTest {
+
+    @TempDir
+    lateinit var legacyMigrationDirectory: Path
+
     @Test
     fun `V28 preserves legacy platform requests and enforces the request ledger contract`() {
-        migrateTo("27")
+        val legacyMigrationLocation = LegacyMigrationTestResources.prepare(legacyMigrationDirectory)
+        migrateTo(legacyMigrationLocation, "27")
         val jdbc = jdbc()
         seedLegacyRequests(jdbc)
 
-        migrateTo("28")
+        migrateTo(legacyMigrationLocation, "28")
 
         val legacy = jdbc.queryForObject(
             """
@@ -204,11 +212,11 @@ class ProfessionalProjectRequestMigrationTest {
         }
     }
 
-    private fun migrateTo(version: String) {
+    private fun migrateTo(migrationLocation: String, version: String) {
         WorktreeTestDatabase.validateAndPrint(mysql)
         Flyway.configure()
             .dataSource(mysql.jdbcUrl, mysql.username, mysql.password)
-            .locations("classpath:db/migration")
+            .locations(migrationLocation)
             .target(version)
             .load()
             .migrate()

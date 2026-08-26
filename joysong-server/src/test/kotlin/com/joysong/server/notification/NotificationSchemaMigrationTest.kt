@@ -1,31 +1,38 @@
 package com.joysong.server.notification
 
+import com.joysong.server.support.LegacyMigrationTestResources
 import com.joysong.server.support.WorktreeTestDatabase
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.testcontainers.containers.MySQLContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
+import java.nio.file.Path
 
 @Tag("mysql-integration")
 @Testcontainers
 class NotificationSchemaMigrationTest {
 
+    @TempDir
+    lateinit var legacyMigrationDirectory: Path
+
     @Test
     fun `V32_1 stores every professional application notification target`() {
-        migrateTo("32")
+        val legacyMigrationLocation = LegacyMigrationTestResources.prepare(legacyMigrationDirectory)
+        migrateTo(legacyMigrationLocation, "32")
         val jdbc = jdbc()
 
         assertEquals(30, columnLength(jdbc, "type"))
         assertEquals(20, columnLength(jdbc, "target_type"))
         seedLegacyNotifications(jdbc)
 
-        migrateTo("32.1")
+        migrateTo(legacyMigrationLocation, "32.1")
 
         assertEquals(
             1,
@@ -72,11 +79,11 @@ class NotificationSchemaMigrationTest {
         assertEquals(6, jdbc.queryForObject("SELECT COUNT(*) FROM notifications", Int::class.java))
     }
 
-    private fun migrateTo(version: String? = null) {
+    private fun migrateTo(migrationLocation: String, version: String? = null) {
         WorktreeTestDatabase.validateAndPrint(mysql)
         val configuration = Flyway.configure()
             .dataSource(mysql.jdbcUrl, mysql.username, mysql.password)
-            .locations("classpath:db/migration")
+            .locations(migrationLocation)
         if (version != null) configuration.target(version)
         configuration
             .load()

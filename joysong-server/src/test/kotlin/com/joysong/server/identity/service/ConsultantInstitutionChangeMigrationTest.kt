@@ -1,11 +1,13 @@
 package com.joysong.server.identity.service
 
+import com.joysong.server.support.LegacyMigrationTestResources
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.testcontainers.containers.MySQLContainer
@@ -13,14 +15,19 @@ import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
 import java.sql.DriverManager
 import java.time.LocalDateTime
+import java.nio.file.Path
 
 @Tag("mysql-integration")
 @Testcontainers
 class ConsultantInstitutionChangeMigrationTest {
 
+    @TempDir
+    lateinit var legacyMigrationDirectory: Path
+
     @Test
     fun `fresh database creates the consultant institution request ledger`() {
-        migrate(mysql.jdbcUrl, mysql.username, mysql.password, DATABASE_NAME, "27")
+        val legacyMigrationLocation = LegacyMigrationTestResources.prepare(legacyMigrationDirectory)
+        migrate(mysql.jdbcUrl, mysql.username, mysql.password, DATABASE_NAME, legacyMigrationLocation, "27")
         val jdbc = jdbc(mysql.jdbcUrl, mysql.username, mysql.password)
 
         assertEquals(
@@ -126,12 +133,13 @@ class ConsultantInstitutionChangeMigrationTest {
     fun `V27 backfills consultant join history without rewriting memberships`() {
         createHistoryDatabase()
         val historyUrl = mysql.jdbcUrl.replace("/$DATABASE_NAME", "/$HISTORY_DATABASE")
-        migrate(historyUrl, "root", mysql.password, HISTORY_DATABASE, "26")
+        val legacyMigrationLocation = LegacyMigrationTestResources.prepare(legacyMigrationDirectory)
+        migrate(historyUrl, "root", mysql.password, HISTORY_DATABASE, legacyMigrationLocation, "26")
         val jdbc = jdbc(historyUrl, "root", mysql.password)
         seedHistory(jdbc)
         val membershipsBefore = membershipSnapshots(jdbc)
 
-        migrate(historyUrl, "root", mysql.password, HISTORY_DATABASE)
+        migrate(historyUrl, "root", mysql.password, HISTORY_DATABASE, legacyMigrationLocation)
 
         assertEquals(membershipsBefore, membershipSnapshots(jdbc))
         assertEquals(
@@ -228,13 +236,14 @@ class ConsultantInstitutionChangeMigrationTest {
         username: String,
         password: String,
         databaseName: String,
+        migrationLocation: String,
         target: String? = null
     ) {
         println("Migration database host=${mysql.host}:${mysql.getMappedPort(3306)}, database=$databaseName")
         require(databaseName.startsWith("myapp_worktree_"))
         val configuration = Flyway.configure()
             .dataSource(jdbcUrl, username, password)
-            .locations("classpath:db/migration")
+            .locations(migrationLocation)
         if (target != null) configuration.target(target)
         configuration.load().migrate()
     }
