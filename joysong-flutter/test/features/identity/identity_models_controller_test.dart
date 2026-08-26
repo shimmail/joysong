@@ -1093,59 +1093,39 @@ void main() {
     },
   );
 
-  testWidgets('administrator receives both creation review entry points', (
-    tester,
-  ) async {
-    Future<String?> picker() async => 'https://cdn.example.com/review.jpg';
-    final repository = _FakeIdentityRepository()
-      ..managementContext = const ManagementContext(
-        userId: 'admin-1',
-        platformRole: 'ADMIN',
-        activeRoles: [],
-        managedInstitutionIds: [],
-        visibleInstitutionIds: [],
-        canReviewInstitutionProjectRequests: true,
-      );
+  testWidgets(
+    'administrator does not receive platform governance entry points',
+    (tester) async {
+      final repository = _FakeIdentityRepository()
+        ..managementContext = const ManagementContext(
+          userId: 'admin-1',
+          platformRole: 'ADMIN',
+          activeRoles: [],
+          managedInstitutionIds: [],
+          visibleInstitutionIds: [],
+          canReviewInstitutionProjectRequests: true,
+        );
 
-    await tester.pumpWidget(
-      _localizedApp(
-        home: ManagementCenterPage(
-          repository: repository,
-          discoverRepository: const _FakeDiscoverRepository(),
-          doctorImagePicker: picker,
+      await tester.pumpWidget(
+        _localizedApp(
+          home: ManagementCenterPage(
+            repository: repository,
+            discoverRepository: const _FakeDiscoverRepository(),
+          ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    final adminGroup = find.byKey(const Key('management-group-platform-admin'));
-    expect(
-      find.descendant(of: adminGroup, matching: find.text('平台项目申请审核')),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(of: adminGroup, matching: find.text('机构项目申请审核')),
-      findsOneWidget,
-    );
-
-    await tester.tap(find.text('平台项目申请审核'));
-    await tester.pumpAndSettle();
-    final platformPage = tester.widget<PlatformProjectRequestPage>(
-      find.byType(PlatformProjectRequestPage),
-    );
-    expect(platformPage.reviewMode, isTrue);
-    expect(identical(platformPage.pickAndUploadImage, picker), isTrue);
-
-    Navigator.of(tester.element(find.byType(PlatformProjectRequestPage))).pop();
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('机构项目申请审核'));
-    await tester.pumpAndSettle();
-    final institutionPage = tester.widget<InstitutionProjectRequestsPage>(
-      find.byType(InstitutionProjectRequestsPage),
-    );
-    expect(institutionPage.reviewMode, isTrue);
-    expect(identical(institutionPage.pickAndUploadImage, picker), isTrue);
-  });
+      expect(
+        find.byKey(const Key('management-group-platform-admin')),
+        findsNothing,
+      );
+      expect(find.text('平台管理'), findsNothing);
+      expect(find.text('平台项目申请审核'), findsNothing);
+      expect(find.text('机构项目申请审核'), findsNothing);
+      expect(find.text('医生项目资料审核'), findsNothing);
+    },
+  );
 
   testWidgets(
     'dual doctor and consultant context has one scoped consultant relationship action',
