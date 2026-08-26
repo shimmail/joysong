@@ -1691,11 +1691,11 @@ class _ManagedInstitutionProfileEditPageState
           images: _csv('images'),
         );
     if (await widget.controller.save(update) && mounted) {
-      if (!widget.embedded) Navigator.of(context).pop();
       showTransientMessage(
         context,
         context.localized('机构档案已保存', 'Institution profile saved'),
       );
+      if (!widget.embedded) Navigator.of(context).pop();
     }
   }
 
