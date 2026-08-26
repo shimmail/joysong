@@ -64,7 +64,7 @@ class BaselineMigrationIntegrationTest {
 
         val legacyMigrationLocation = LegacyMigrationTestResources.prepare(legacyMigrationDirectory)
         migrateLegacy(legacyMigrationLocation, "32")
-        migrateLegacy(legacyMigrationLocation)
+        migrateLegacy("classpath:db/migration")
 
         assertEquals(
             listOf("26", "27", "28", "29", "30", "31", "32", "32.1", "32.2", "33"),

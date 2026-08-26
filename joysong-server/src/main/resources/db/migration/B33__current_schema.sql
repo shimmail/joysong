@@ -1,6 +1,6 @@
 -- Flyway baseline for the schema produced by B26 followed by V27 through V33.
--- Generated from an empty isolated MySQL 8.0.39 database. Keep B1, B26, and V1-V33 unchanged
--- so existing databases can continue to validate and migrate normally. Add future changes as V34+.
+-- Generated from an empty isolated MySQL 8.0.39 database. B33 is frozen together with B1, B26,
+-- and V1-V33 so existing databases can continue to validate and migrate normally. All future schema changes belong in V34+.
 
 
 /*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
