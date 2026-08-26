@@ -1,5 +1,6 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { message } from 'antd';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import api, { setAdminToken, type ManagementContext } from '../api';
 import ProjectCollaborationPage from './ProjectCollaborationPage';
@@ -59,6 +60,12 @@ const joinProject = {
   doctors: [],
 };
 
+const projectB = {
+  ...project,
+  id: 'ip-2',
+  effectiveName: '项目 B',
+};
+
 const profileTarget = {
   payloadVersion: 2,
   institutionProjectId: 'ip-1', institutionId: 'institution-1', institutionName: '机构 A',
@@ -83,6 +90,24 @@ const profileTarget = {
   },
   currentDoctorPrice: 900, currentDoctorActive: true, platformRate: 40,
   pricingPolicyRevision: 'travel-ground-service-rate:0.400000', travelGroundServiceFee: 360,
+};
+
+const profileTargetB = {
+  ...profileTarget,
+  institutionProjectId: 'ip-2',
+  platformProjectId: 'project-2',
+  platformProjectName: '公共项目 B',
+  baseRevision: 'b'.repeat(64),
+  currentProject: {
+    ...profileTarget.currentProject,
+    association: {
+      institutionProjectId: 'ip-2', institutionId: 'institution-1', platformProjectId: 'project-2',
+    },
+    effective: {
+      ...profileTarget.currentProject.effective,
+      name: '公共项目 B',
+    },
+  },
 };
 
 const pendingV2 = {
@@ -121,15 +146,23 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-function mockPageData(requests: unknown[] = [], projects = [project]) {
+function mockPageData(requests: unknown[] = [], projects = [project], targets = [profileTarget]) {
   vi.mocked(api.get).mockImplementation(async (url) => {
     const data = url === '/admin/institution-projects' ? projects
       : url === '/v2/admin/institution-project-requests' ? requests
         : url === '/admin/institutions' ? [{ id: 'institution-1', name: '机构 A' }]
-          : url === '/v2/admin/institution-project-requests/profile-update-targets' ? [profileTarget]
+          : url === '/v2/admin/institution-project-requests/profile-update-targets' ? targets
             : [];
     return { data: { code: 200, message: 'OK', data } };
   });
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
 }
 
 describe('ProjectCollaborationPage profile update', () => {
@@ -227,6 +260,102 @@ describe('ProjectCollaborationPage profile update', () => {
       'images', 'institutionProjectId', 'name', 'notes', 'price', 'requestType', 'salesCount',
       'slogan', 'tags',
     ]);
+  }, 15_000);
+
+  it('keeps project B editor and submit isolated when abandoned project A submit settles', async () => {
+    const user = userEvent.setup();
+    setAdminToken('header.payload.signature', doctorContext);
+    mockPageData([], [project, projectB], [profileTarget, profileTargetB]);
+    const response = { data: { code: 200, message: 'OK', data: null } };
+    const projectASubmit = deferred<typeof response>();
+    const projectBSubmit = deferred<typeof response>();
+    const successMessage = vi.spyOn(message, 'success');
+    vi.mocked(api.post)
+      .mockReturnValueOnce(projectASubmit.promise)
+      .mockReturnValueOnce(projectBSubmit.promise);
+
+    render(<ProjectCollaborationPage />);
+    const rowA = (await screen.findByText('项目 A')).closest('tr');
+    expect(rowA).not.toBeNull();
+    await user.click(within(rowA!).getByRole('button', { name: /修改我的资料/ }));
+    const dialogA = await screen.findByRole('dialog', { name: '申请修改个人项目资料' });
+    await user.click(within(dialogA).getByRole('button', { name: '提交机构审核' }));
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.post).mock.calls[0]).toEqual([
+      '/v2/admin/institution-project-requests',
+      {
+        requestType: 'PROFILE_UPDATE',
+        institutionProjectId: 'ip-1',
+        baseRevision: 'a'.repeat(64),
+        name: null,
+        category: '机构分类',
+        description: '原项目简介',
+        tags: ['精细', '自然'],
+        slogan: null,
+        detailContent: '<p>原项目正文</p>',
+        price: 900,
+        salesCount: 12,
+        doctorActive: true,
+        coverImage: 'https://img.test/cover.jpg',
+        images: ['https://img.test/1.jpg', 'https://img.test/2.jpg'],
+        notes: '',
+      },
+    ]);
+
+    fireEvent.click(within(dialogA).getByRole('button', { name: 'Close' }));
+    const rowB = screen.getByText('项目 B').closest('tr');
+    expect(rowB).not.toBeNull();
+    fireEvent.click(within(rowB!).getByRole('button', { name: /修改我的资料/ }));
+    const dialogB = await screen.findByRole('dialog', { name: '申请修改个人项目资料' });
+    expect(within(dialogB).getByText('公共项目 B')).toBeInTheDocument();
+    const projectBName = within(dialogB).getByRole('textbox', { name: /独立名称/ });
+    await user.type(projectBName, '项目 B 独立草稿');
+    const projectBSubmitButton = within(dialogB).getByRole('button', { name: /提交机构审核/ });
+    expect(projectBSubmitButton).not.toHaveClass('ant-btn-loading');
+    await user.click(projectBSubmitButton);
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(api.post).mock.calls[1]).toEqual([
+      '/v2/admin/institution-project-requests',
+      {
+        requestType: 'PROFILE_UPDATE',
+        institutionProjectId: 'ip-2',
+        baseRevision: 'b'.repeat(64),
+        name: '项目 B 独立草稿',
+        category: '机构分类',
+        description: '原项目简介',
+        tags: ['精细', '自然'],
+        slogan: null,
+        detailContent: '<p>原项目正文</p>',
+        price: 900,
+        salesCount: 12,
+        doctorActive: true,
+        coverImage: 'https://img.test/cover.jpg',
+        images: ['https://img.test/1.jpg', 'https://img.test/2.jpg'],
+        notes: '',
+      },
+    ]);
+    expect(projectBSubmitButton).toHaveClass('ant-btn-loading');
+    const readsBeforeProjectASettles = vi.mocked(api.get).mock.calls.length;
+    const successesBeforeProjectASettles = successMessage.mock.calls.length;
+
+    await act(async () => {
+      projectASubmit.resolve(response);
+      await projectASubmit.promise;
+    });
+
+    expect(screen.getByRole('dialog', { name: '申请修改个人项目资料' })).toBeInTheDocument();
+    expect(projectBName).toHaveValue('项目 B 独立草稿');
+    expect(projectBSubmitButton).toHaveClass('ant-btn-loading');
+    expect(successMessage).toHaveBeenCalledTimes(successesBeforeProjectASettles);
+    expect(vi.mocked(api.get).mock.calls).toHaveLength(readsBeforeProjectASettles);
+
+    await act(async () => {
+      projectBSubmit.resolve(response);
+      await projectBSubmit.promise;
+    });
+    await waitFor(() => expect(vi.mocked(api.get).mock.calls.length).toBeGreaterThan(readsBeforeProjectASettles));
+    expect(successMessage).toHaveBeenCalledTimes(successesBeforeProjectASettles + 1);
+    successMessage.mockRestore();
   }, 15_000);
 
   it.each([

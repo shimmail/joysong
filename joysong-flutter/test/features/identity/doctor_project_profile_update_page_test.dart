@@ -422,6 +422,62 @@ void main() {
     });
   });
 
+  testWidgets(
+    'deliberately re-entered effective shared values submit explicit overrides',
+    (tester) async {
+      _largeView(tester);
+      final repository = _FakeRepository(requests: const []);
+      final uploads = <String>['cover.jpg', 'one.jpg'];
+      await tester.pumpWidget(MaterialApp(
+        home: DoctorProjectProfileUpdatePage(
+          repository: repository,
+          pickAndUploadImage: () async => uploads.removeAt(0),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      await _openDoctorProject(tester, 'ip-1');
+      for (final (key, temporary, explicit) in [
+        ('profile-update-name', '临时名称', '项目一'),
+        ('profile-update-category', '临时分类', '项目分类'),
+        ('profile-update-description', '临时说明', '当前服务说明'),
+        ('profile-update-tags', '临时标签', '自然'),
+        ('profile-update-slogan', '临时标语', '自然效果'),
+        ('profile-update-detail-content', '临时详情', '项目详情'),
+      ]) {
+        await tester.enterText(find.byKey(Key(key)), temporary);
+        await tester.enterText(find.byKey(Key(key)), explicit);
+      }
+      await tester.tap(find.byKey(const Key('profile-update-cover-remove-0')));
+      await tester.tap(find.byKey(const Key('profile-update-cover-upload')));
+      await tester.pumpAndSettle();
+      await tester
+          .tap(find.byKey(const Key('profile-update-gallery-remove-0')));
+      await tester.tap(find.byKey(const Key('profile-update-gallery-upload')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('submit-profile-update')));
+      await tester.pumpAndSettle();
+
+      expect(repository.submitted?.toJson(), {
+        'requestType': 'PROFILE_UPDATE',
+        'institutionProjectId': 'ip-1',
+        'baseRevision': 'base-revision-1',
+        'name': '项目一',
+        'category': '项目分类',
+        'description': '当前服务说明',
+        'tags': ['自然'],
+        'slogan': '自然效果',
+        'detailContent': '项目详情',
+        'price': 12000,
+        'salesCount': 17,
+        'doctorActive': false,
+        'coverImage': 'cover.jpg',
+        'images': ['one.jpg'],
+        'notes': '',
+      });
+    },
+  );
+
   testWidgets('cleared inherited cover and gallery submit null overrides', (
     tester,
   ) async {
@@ -898,7 +954,7 @@ void main() {
   );
 
   testWidgets(
-    'fix round 1: failed stale refresh never enables force from a cached request',
+    'handled conflict keeps cached review locked through failed refresh and unlocks from a fresh queue',
     (tester) async {
       _largeView(tester);
       final repository = _FakeRepository(
@@ -909,6 +965,7 @@ void main() {
           errorCode: 'APPROVAL_BASE_STALE',
         ),
       );
+      final failedReload = Completer<List<DoctorProjectChangeRequest>>();
       await tester.pumpWidget(MaterialApp(
         home: DoctorProjectProfileReviewPage(
           repository: repository,
@@ -916,17 +973,65 @@ void main() {
         ),
       ));
       await tester.pumpAndSettle();
-      repository.failNextDoctorRequestList = true;
+      repository.nextDoctorRequestList = failedReload;
 
       await _openReviewDetail(tester, 'request-1');
       await tester.tap(find.byKey(const Key('approve-request-1')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Confirm'));
-      await tester.pumpAndSettle();
+      await tester.pump();
 
       expect(repository.requestLoadCount, 2);
+      failedReload.completeError(StateError('doctor request refresh failed'));
+      await tester.pumpAndSettle();
       await _openReviewDetail(tester, 'request-1');
+      expect(
+        tester
+            .widget<FilledButton>(find.byKey(const Key('approve-request-1')))
+            .onPressed,
+        isNull,
+      );
+      expect(
+        tester
+            .widget<OutlinedButton>(find.byKey(const Key('reject-request-1')))
+            .onPressed,
+        isNull,
+      );
+      expect(
+        tester
+            .widget<OutlinedButton>(find.byKey(const Key('changes-request-1')))
+            .onPressed,
+        isNull,
+      );
       expect(find.byKey(const Key('force-request-1')), findsNothing);
+
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      repository.requests = [_v2Request(proposedDoctorPrice: 13000)];
+      await tester.tap(find.text('Retry'));
+      await tester.pumpAndSettle();
+
+      expect(repository.requestLoadCount, 3);
+      await _openReviewDetail(tester, 'request-1');
+      expect(find.textContaining('USD 13000.00'), findsOneWidget);
+      expect(
+        tester
+            .widget<FilledButton>(find.byKey(const Key('approve-request-1')))
+            .onPressed,
+        isNotNull,
+      );
+      expect(
+        tester
+            .widget<OutlinedButton>(find.byKey(const Key('reject-request-1')))
+            .onPressed,
+        isNotNull,
+      );
+      expect(
+        tester
+            .widget<OutlinedButton>(find.byKey(const Key('changes-request-1')))
+            .onPressed,
+        isNotNull,
+      );
     },
   );
 
@@ -1311,7 +1416,7 @@ final class _FakeRepository implements IdentityRepository {
   final ApiException? submitError;
   final Completer<void>? reviewCompleter;
   ApiException? reviewError;
-  bool failNextDoctorRequestList = false;
+  Completer<List<DoctorProjectChangeRequest>>? nextDoctorRequestList;
   DoctorProjectProfileUpdateDraft? submitted;
   final leaveIds = <String>[];
   bool? reviewForce;
@@ -1338,9 +1443,10 @@ final class _FakeRepository implements IdentityRepository {
   Future<List<DoctorProjectChangeRequest>>
       listDoctorProjectChangeRequests() async {
     requestLoadCount++;
-    if (failNextDoctorRequestList) {
-      failNextDoctorRequestList = false;
-      throw StateError('doctor request refresh failed');
+    final pending = nextDoctorRequestList;
+    nextDoctorRequestList = null;
+    if (pending != null) {
+      return pending.future;
     }
     return requests;
   }

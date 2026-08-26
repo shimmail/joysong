@@ -1838,6 +1838,7 @@ class _DoctorProjectProfileUpdateFormPageState
   late String _cover;
   late List<String> _images;
   late bool _doctorActive;
+  final _editedSharedFields = <String>{};
   bool _saving = false, _uploading = false;
   String? _error;
 
@@ -1915,11 +1916,13 @@ class _DoctorProjectProfileUpdateFormPageState
               _name,
               context.localized('项目名称', 'Project name'),
               fieldKey: const Key('profile-update-name'),
+              onChanged: (_) => _editedSharedFields.add('name'),
             ),
             _requestField(
               _category,
               context.localized('项目分类', 'Category'),
               fieldKey: const Key('profile-update-category'),
+              onChanged: (_) => _editedSharedFields.add('category'),
             ),
             _requestField(
               _price,
@@ -1942,23 +1945,27 @@ class _DoctorProjectProfileUpdateFormPageState
               context.localized('项目展示说明', 'Display description'),
               fieldKey: const Key('profile-update-description'),
               maxLines: 4,
+              onChanged: (_) => _editedSharedFields.add('description'),
             ),
             _requestField(
               _tags,
               context.localized(
                   '服务标签（逗号分隔）', 'Service tags (comma separated)'),
               fieldKey: const Key('profile-update-tags'),
+              onChanged: (_) => _editedSharedFields.add('tags'),
             ),
             _requestField(
               _slogan,
               context.localized('项目标语', 'Slogan'),
               fieldKey: const Key('profile-update-slogan'),
+              onChanged: (_) => _editedSharedFields.add('slogan'),
             ),
             _requestField(
               _detailContent,
               context.localized('项目详情（纯文本）', 'Detail (plain text)'),
               fieldKey: const Key('profile-update-detail-content'),
               maxLines: 6,
+              onChanged: (_) => _editedSharedFields.add('detailContent'),
             ),
             _imageUploadField(
               context,
@@ -1971,7 +1978,10 @@ class _DoctorProjectProfileUpdateFormPageState
               enabled: !_busy && widget.pickAndUploadImage != null,
               removeEnabled: !_busy,
               onAdd: () => _uploadImage(cover: true),
-              onRemove: (_) => setState(() => _cover = ''),
+              onRemove: (_) => setState(() {
+                _cover = '';
+                _editedSharedFields.add('coverImage');
+              }),
             ),
             _imageUploadField(
               context,
@@ -1987,6 +1997,7 @@ class _DoctorProjectProfileUpdateFormPageState
               onRemove: (value) => setState(() {
                 final images = List<String>.of(_images)..remove(value);
                 _images = images;
+                _editedSharedFields.add('images');
               }),
             ),
             _requestField(
@@ -2047,8 +2058,10 @@ class _DoctorProjectProfileUpdateFormPageState
       setState(() {
         if (cover) {
           _cover = image;
+          _editedSharedFields.add('coverImage');
         } else {
           _images = [..._images, image];
+          _editedSharedFields.add('images');
         }
       });
     } catch (_) {
@@ -2087,32 +2100,32 @@ class _DoctorProjectProfileUpdateFormPageState
       name: _textOverride(
         _name.text,
         raw: snapshot.rawOverrides['name'] as String?,
-        effective: snapshot.name,
+        edited: _editedSharedFields.contains('name'),
       ),
       category: _textOverride(
         _category.text,
         raw: snapshot.rawOverrides['category'] as String?,
-        effective: snapshot.category,
+        edited: _editedSharedFields.contains('category'),
       ),
       description: _textOverride(
         _description.text,
         raw: snapshot.rawOverrides['description'] as String?,
-        effective: snapshot.description,
+        edited: _editedSharedFields.contains('description'),
       ),
       tags: _itemsOverride(
         _csv(_tags.text),
         raw: _rawStringList(snapshot.rawOverrides['tags']),
-        effective: snapshot.tags,
+        edited: _editedSharedFields.contains('tags'),
       ),
       slogan: _textOverride(
         _slogan.text,
         raw: snapshot.rawOverrides['slogan'] as String?,
-        effective: snapshot.slogan,
+        edited: _editedSharedFields.contains('slogan'),
       ),
       detailContent: _textOverride(
         _detailContent.text,
         raw: snapshot.rawOverrides['detailContent'] as String?,
-        effective: snapshot.detailContent ?? '',
+        edited: _editedSharedFields.contains('detailContent'),
       ),
       price: price,
       salesCount: salesCount,
@@ -2120,12 +2133,12 @@ class _DoctorProjectProfileUpdateFormPageState
       coverImage: _textOverride(
         _cover,
         raw: snapshot.rawOverrides['coverImage'] as String?,
-        effective: snapshot.coverImage,
+        edited: _editedSharedFields.contains('coverImage'),
       ),
       images: _itemsOverride(
         _images,
         raw: _rawStringList(snapshot.rawOverrides['images']),
-        effective: snapshot.images,
+        edited: _editedSharedFields.contains('images'),
       ),
       platformRate: target.platformRate,
       notes: _notes.text,
@@ -2169,34 +2182,28 @@ class _DoctorProjectProfileUpdateFormPageState
   String? _textOverride(
     String value, {
     required String? raw,
-    required String effective,
+    required bool edited,
   }) {
+    if (!edited) return raw;
     final normalized = value.trim();
     if (normalized.isEmpty) return null;
-    return normalized == effective ? raw : normalized;
+    return normalized;
   }
 
   List<String>? _itemsOverride(
     List<String> value, {
     required List<String>? raw,
-    required List<String> effective,
+    required bool edited,
   }) {
+    if (!edited) return raw;
     final normalized = List<String>.of(value, growable: false);
     if (normalized.isEmpty) return null;
-    return _sameItems(normalized, effective) ? raw : normalized;
+    return normalized;
   }
 
   List<String>? _rawStringList(Object? value) => value == null
       ? null
       : List<String>.of((value as List).cast<String>(), growable: false);
-
-  bool _sameItems(List<String> left, List<String> right) {
-    if (left.length != right.length) return false;
-    for (var index = 0; index < left.length; index++) {
-      if (left[index] != right[index]) return false;
-    }
-    return true;
-  }
 }
 
 List<String> _csv(String value) => value
@@ -2226,6 +2233,7 @@ class _DoctorProjectProfileReviewPageState
     extends State<DoctorProjectProfileReviewPage> {
   List<DoctorProjectChangeRequest> _requests = const [];
   final _forceEligibleRequestIds = <String>{};
+  final _staleLockedRequestIds = <String>{};
   final _submittingRequestIds = <String>{};
   bool _loading = true, _accessRevoked = false, _exitAfterDetail = false;
   String? _error;
@@ -2253,6 +2261,7 @@ class _DoctorProjectProfileReviewPageState
             .where((request) => request.isProfileUpdate || request.isLeave)
             .where(_isVisible)
             .toList(growable: false);
+        _staleLockedRequestIds.clear();
         _loading = false;
       });
       return true;
@@ -2346,6 +2355,7 @@ class _DoctorProjectProfileReviewPageState
                 enabled: !_accessRevoked &&
                     item.valid &&
                     request.reviewable &&
+                    !_staleLockedRequestIds.contains(request.id) &&
                     !_submittingRequestIds.contains(request.id),
                 allowForce: allowForce,
                 onSubmit: (decision, note, force) async {
@@ -2404,7 +2414,10 @@ class _DoctorProjectProfileReviewPageState
                         .contains(request.institutionId)));
         _exitAfterDetail = !canStillReview;
       } else if (action != IdentityProjectErrorAction.none) {
-        _forceEligibleRequestIds.remove(request.id);
+        setState(() {
+          _forceEligibleRequestIds.remove(request.id);
+          _staleLockedRequestIds.add(request.id);
+        });
         final refreshed = await _load(preserveError: true);
         if (!mounted) return true;
         if (refreshed &&

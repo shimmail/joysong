@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert, Button, Divider, Form, Input, InputNumber, message, Modal, Space, Switch, Table, Tabs, Tag, Typography,
 } from 'antd';
@@ -34,6 +34,19 @@ interface InstitutionProject {
   doctors: ProjectDoctor[];
 }
 
+type RequestType = 'JOIN' | 'PROFILE_UPDATE';
+
+interface RequestEditSession {
+  generation: number;
+  projectId: string;
+  requestType: RequestType;
+}
+
+interface RequestSubmitOperation {
+  id: number;
+  session: RequestEditSession;
+}
+
 const requestTypeText: Record<string, string> = {
   JOIN: '申请加入',
   PROFILE_UPDATE: '资料变更',
@@ -55,8 +68,12 @@ export default function ProjectCollaborationPage() {
   const [requestOpen, setRequestOpen] = useState(false);
   const [requestProject, setRequestProject] = useState<InstitutionProject | null>(null);
   const [profileTarget, setProfileTarget] = useState<DoctorProjectChangeTargetV2 | null>(null);
-  const [requestType, setRequestType] = useState<'JOIN' | 'PROFILE_UPDATE'>('JOIN');
+  const [requestType, setRequestType] = useState<RequestType>('JOIN');
   const [submitting, setSubmitting] = useState(false);
+  const requestGenerationRef = useRef(0);
+  const activeRequestSessionRef = useRef<RequestEditSession | null>(null);
+  const submitOperationIdRef = useRef(0);
+  const activeSubmitOperationRef = useRef<RequestSubmitOperation | null>(null);
   const [requestForm] = Form.useForm();
 
   const refresh = async () => {
@@ -90,7 +107,46 @@ export default function ProjectCollaborationPage() {
       .map(item => [item.institutionProjectId, item]),
   ), [requests, doctorId]);
 
-  const openRequest = (project: InstitutionProject, type: 'JOIN' | 'PROFILE_UPDATE') => {
+  const isActiveRequestSession = (session: RequestEditSession) => {
+    const active = activeRequestSessionRef.current;
+    return active?.generation === session.generation
+      && active.projectId === session.projectId
+      && active.requestType === session.requestType;
+  };
+
+  const isActiveSubmitOperation = (operation: RequestSubmitOperation) => {
+    const active = activeSubmitOperationRef.current;
+    return active?.id === operation.id
+      && active.session.generation === operation.session.generation
+      && isActiveRequestSession(operation.session);
+  };
+
+  const invalidateRequestSession = () => {
+    requestGenerationRef.current += 1;
+    activeRequestSessionRef.current = null;
+    activeSubmitOperationRef.current = null;
+    setSubmitting(false);
+  };
+
+  const beginRequestSession = (project: InstitutionProject, type: RequestType) => {
+    const session = {
+      generation: requestGenerationRef.current + 1,
+      projectId: project.id,
+      requestType: type,
+    };
+    requestGenerationRef.current = session.generation;
+    activeRequestSessionRef.current = session;
+    activeSubmitOperationRef.current = null;
+    setSubmitting(false);
+  };
+
+  const finishSubmitOperation = (operation: RequestSubmitOperation) => {
+    if (!isActiveSubmitOperation(operation)) return;
+    activeSubmitOperationRef.current = null;
+    setSubmitting(false);
+  };
+
+  const openRequest = (project: InstitutionProject, type: RequestType) => {
     const profile = project.doctors?.find(item => item.id === doctorId);
     const target = type === 'PROFILE_UPDATE'
       ? profileTargets.find(item => item.institutionProjectId === project.id)
@@ -99,6 +155,7 @@ export default function ProjectCollaborationPage() {
       message.error('无法读取该项目的资料修改基线，请刷新后重试');
       return;
     }
+    beginRequestSession(project, type);
     setRequestProject(project);
     setRequestType(type);
     setProfileTarget(target || null);
@@ -125,16 +182,26 @@ export default function ProjectCollaborationPage() {
   };
 
   const submitRequest = async () => {
-    if (!requestProject) return;
+    const project = requestProject;
+    const target = profileTarget;
+    const type = requestType;
+    const session = activeRequestSessionRef.current;
+    if (!project || !session
+      || session.projectId !== project.id || session.requestType !== type
+      || activeSubmitOperationRef.current !== null) return;
+    const operation = { id: submitOperationIdRef.current + 1, session };
+    submitOperationIdRef.current = operation.id;
+    activeSubmitOperationRef.current = operation;
+    setSubmitting(true);
     try {
       const values = await requestForm.validateFields();
-      setSubmitting(true);
-      if (requestType === 'PROFILE_UPDATE') {
-        if (!profileTarget) throw new Error('资料修改基线不存在');
+      if (!isActiveSubmitOperation(operation)) return;
+      if (type === 'PROFILE_UPDATE') {
+        if (!target) throw new Error('资料修改基线不存在');
         await api.post('/v2/admin/institution-project-requests', {
           requestType: 'PROFILE_UPDATE',
-          institutionProjectId: profileTarget.institutionProjectId,
-          baseRevision: profileTarget.baseRevision,
+          institutionProjectId: target.institutionProjectId,
+          baseRevision: target.baseRevision,
           name: toNullableText(values.name),
           category: toNullableText(values.category),
           description: toNullableText(values.description),
@@ -150,20 +217,24 @@ export default function ProjectCollaborationPage() {
         });
       } else {
         await api.post('/v2/admin/institution-project-requests', {
-          institutionProjectId: requestProject.id,
+          institutionProjectId: project.id,
           requestType: 'JOIN',
           serviceDescription: values.serviceDescription || '',
           priceSuggestion: values.priceSuggestion,
           notes: values.notes || '',
         });
       }
+      if (!isActiveSubmitOperation(operation)) return;
       message.success('已提交机构审核，审核通过后生效');
       setRequestOpen(false);
+      invalidateRequestSession();
       await refresh();
     } catch (error: any) {
-      if (!error?.errorFields) message.error(getApiErrorMessage(error, '项目申请提交失败'));
+      if (!error?.errorFields && isActiveSubmitOperation(operation)) {
+        message.error(getApiErrorMessage(error, '项目申请提交失败'));
+      }
     } finally {
-      setSubmitting(false);
+      finishSubmitOperation(operation);
     }
   };
 
@@ -264,7 +335,10 @@ export default function ProjectCollaborationPage() {
       title={requestType === 'JOIN' ? '申请加入机构项目' : '申请修改个人项目资料'}
       open={requestOpen}
       onOk={submitRequest}
-      onCancel={() => setRequestOpen(false)}
+      onCancel={() => {
+        setRequestOpen(false);
+        invalidateRequestSession();
+      }}
       confirmLoading={submitting}
       okText="提交机构审核"
       width={680}
