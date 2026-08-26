@@ -1,5 +1,6 @@
 package com.joysong.server.institution.service
 
+import com.joysong.server.support.LegacyMigrationTestResources
 import com.joysong.server.support.WorktreeTestDatabase
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -8,6 +9,7 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.testcontainers.containers.MySQLContainer
@@ -16,18 +18,23 @@ import org.testcontainers.junit.jupiter.Testcontainers
 import java.math.BigDecimal
 import java.sql.Timestamp
 import java.time.LocalDateTime
+import java.nio.file.Path
 
 @Tag("mysql-integration")
 @Testcontainers
 class DoctorInstitutionProjectFullEditMigrationTest {
+    @TempDir
+    lateinit var legacyMigrationDirectory: Path
+
     @Test
     fun `V33 preserves v1 rows while adding versioned project storage`() {
         assertEquals(WorktreeTestDatabase.databaseName(), mysql.databaseName)
         val jdbc = JdbcTemplate(DriverManagerDataSource(mysql.jdbcUrl, mysql.username, mysql.password))
+        val legacyMigrationLocation = LegacyMigrationTestResources.prepare(legacyMigrationDirectory)
 
-        migrate("32")
+        migrate(legacyMigrationLocation, "32")
         seedV32History(jdbc)
-        migrate()
+        migrate(legacyMigrationLocation)
 
         assertEquals(
             listOf("26", "27", "28", "29", "30", "31", "32", "32.1", "32.2", "33"),
@@ -79,11 +86,11 @@ class DoctorInstitutionProjectFullEditMigrationTest {
         assertV2ConstraintViolation { insertPendingV2(jdbc, "config-time-without-id", baseConfigId = null) }
     }
 
-    private fun migrate(target: String? = null) {
+    private fun migrate(location: String, target: String? = null) {
         WorktreeTestDatabase.validateAndPrint(mysql)
         val config = Flyway.configure()
             .dataSource(mysql.jdbcUrl, mysql.username, mysql.password)
-            .locations("classpath:db/migration")
+            .locations(location)
         if (target != null) config.target(target)
         config.load().migrate()
     }

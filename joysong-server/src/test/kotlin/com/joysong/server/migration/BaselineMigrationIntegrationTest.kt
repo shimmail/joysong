@@ -1,5 +1,6 @@
 package com.joysong.server.migration
 
+import com.joysong.server.support.LegacyMigrationTestResources
 import com.joysong.server.support.WorktreeTestDatabase
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -15,9 +16,7 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.testcontainers.containers.MySQLContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
-import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption
 
 @Tag("mysql-integration")
 @Testcontainers
@@ -63,9 +62,9 @@ class BaselineMigrationIntegrationTest {
             DriverManagerDataSource(legacyMysql.jdbcUrl, legacyMysql.username, legacyMysql.password)
         )
 
-        copyLegacyMigrationResources()
-        migrateLegacy("32")
-        migrateLegacy()
+        val legacyMigrationLocation = LegacyMigrationTestResources.prepare(legacyMigrationDirectory)
+        migrateLegacy(legacyMigrationLocation, "32")
+        migrateLegacy(legacyMigrationLocation)
 
         assertEquals(
             listOf("26", "27", "28", "29", "30", "31", "32", "32.1", "32.2", "33"),
@@ -77,26 +76,15 @@ class BaselineMigrationIntegrationTest {
         assertEquals(schemaSnapshot(legacyJdbc), schemaSnapshot(jdbcTemplate))
     }
 
-    private fun migrateLegacy(target: String? = null) {
+    private fun migrateLegacy(location: String, target: String? = null) {
         val configuration = Flyway.configure()
             .dataSource(legacyMysql.jdbcUrl, legacyMysql.username, legacyMysql.password)
-            .locations(legacyMigrationLocation())
+            .locations(location)
             .baselineOnMigrate(false)
             .validateOnMigrate(true)
         if (target != null) configuration.target(target)
         configuration.load().migrate()
     }
-
-    private fun copyLegacyMigrationResources() {
-        legacyMigrationFiles.forEach { filename ->
-            val resource = "db/migration/$filename"
-            requireNotNull(javaClass.classLoader.getResourceAsStream(resource)) { "Missing migration resource: $resource" }
-                .use { Files.copy(it, legacyMigrationDirectory.resolve(filename), StandardCopyOption.REPLACE_EXISTING) }
-        }
-    }
-
-    private fun legacyMigrationLocation(): String =
-        "filesystem:${legacyMigrationDirectory.toAbsolutePath().normalize().toString().replace('\\', '/')}"
 
     private data class SchemaSnapshot(
         val tables: List<List<String?>>,
@@ -186,19 +174,6 @@ class BaselineMigrationIntegrationTest {
         }
 
     companion object {
-        private val legacyMigrationFiles = listOf(
-            "B26__current_schema.sql",
-            "V27__add_consultant_institution_change_requests.sql",
-            "V28__expand_professional_project_requests.sql",
-            "V29__travel_ground_service_order_flow.sql",
-            "V30__order_service_conversations.sql",
-            "V31__store_raw_payment_event_payload.sql",
-            "V32__payment_compensation_and_usd_price_precision.sql",
-            "V32_1__expand_notification_type_columns.sql",
-            "V32_2__add_legal_documents.sql",
-            "V33__doctor_institution_project_full_edit.sql",
-        )
-
         @Container
         @ServiceConnection
         @JvmField
