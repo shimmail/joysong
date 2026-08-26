@@ -79,6 +79,10 @@ class AuthenticationService(
         // 手机号未注册则拒绝登录
         val user = userRepository.findByPhone(phone)
             .orElseThrow { IllegalArgumentException("该手机号未注册，请先注册") }
+        if (user.role == "ADMIN") {
+            passwordEncoder.matches(password, dummyPasswordHash)
+            throw IllegalArgumentException("密码错误，请重试")
+        }
         // 密码为空说明是验证码注册且未设置密码的用户
         if (user.passwordHash.isEmpty()) {
             throw IllegalArgumentException("您尚未设置密码，请使用验证码登录或通过「忘记密码」重置")

@@ -81,6 +81,21 @@ class AuthenticationServiceTest {
     }
 
     @Test
+    fun `generic password login rejects administrator without checking the real hash or issuing tokens`() {
+        val admin = adminUser()
+        every { userRepository.findByPhone(admin.phone!!) } returns Optional.of(admin)
+        every { passwordEncoder.matches("StrongAdminPassword!1", any()) } returns false
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            service.login(admin.phone!!, "StrongAdminPassword!1")
+        }
+
+        assertEquals("密码错误，请重试", error.message)
+        verify(exactly = 0) { passwordEncoder.matches("StrongAdminPassword!1", admin.passwordHash) }
+        verify(exactly = 0) { refreshTokenService.issue(any(), any(), any()) }
+    }
+
+    @Test
     fun `loginAdmin issues tokens for a valid administrator`() {
         val admin = adminUser()
         every { userRepository.findByPhone(admin.phone!!) } returns Optional.of(admin)

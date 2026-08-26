@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers.anyString
 import org.mockito.ArgumentMatchers.eq
 import org.mockito.BDDMockito.given
+import org.mockito.Mockito.never
 import org.mockito.Mockito.verify as verifyMockito
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest
@@ -28,10 +29,14 @@ import org.springframework.boot.test.mock.mockito.MockBean
 import org.springframework.context.annotation.Import
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.security.authentication.BadCredentialsException
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import java.security.MessageDigest
 import java.time.LocalDateTime
@@ -132,6 +137,7 @@ class AdminSessionSecurityHttpTest @Autowired constructor(
 ) {
 
     @MockBean lateinit var authenticationService: AuthenticationService
+    @MockBean lateinit var loginAttemptService: AdminLoginAttemptService
     @MockBean lateinit var userRepository: UserRepository
     @MockBean lateinit var jwtTokenProvider: JwtTokenProvider
     @MockBean lateinit var jdbcTemplate: JdbcTemplate
@@ -187,6 +193,148 @@ class AdminSessionSecurityHttpTest @Autowired constructor(
             eq(sha256(rawRefreshToken))
         )
     }
+
+    @Test
+    fun `management administrator login preserves the existing response fields and clears the shared limiter`() {
+        val phone = "13800000000"
+        val response = loginResponse()
+        given(userRepository.findByPhone(phone)).willReturn(Optional.of(adminUser()))
+        given(loginAttemptService.retryAfterSeconds(phone, "127.0.0.1")).willReturn(null)
+        given(authenticationService.loginAdmin(phone, "StrongAdminPassword!1")).willReturn(response)
+        givenAdminContextRows("admin-id")
+
+        mockMvc.perform(
+            post("/api/management/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"phone":"$phone","password":"StrongAdminPassword!1"}""")
+        )
+            .andExpect(status().isOk)
+            .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+            .andExpect(jsonPath("$.data.token").value(response.token))
+            .andExpect(jsonPath("$.data.accessToken").value(response.accessToken))
+            .andExpect(jsonPath("$.data.refreshToken").value(response.refreshToken))
+            .andExpect(jsonPath("$.data.tokenType").value(response.tokenType))
+            .andExpect(jsonPath("$.data.expiresIn").value(response.expiresIn))
+            .andExpect(jsonPath("$.data.user.id").value("admin-id"))
+            .andExpect(jsonPath("$.data.context.userId").value("admin-id"))
+
+        verifyMockito(loginAttemptService).retryAfterSeconds(phone, "127.0.0.1")
+        verifyMockito(loginAttemptService).recordSuccess(phone, "127.0.0.1")
+        verifyMockito(authenticationService, never()).login(anyString(), anyString())
+        verifyMockito(loginAttemptService, never()).recordFailure(anyString(), anyString())
+    }
+
+    @Test
+    fun `management administrator wrong password records failure and returns generic unauthorized`() {
+        val phone = "13800000000"
+        given(userRepository.findByPhone(phone)).willReturn(Optional.of(adminUser()))
+        given(loginAttemptService.retryAfterSeconds(phone, "127.0.0.1")).willReturn(null)
+        given(authenticationService.loginAdmin(phone, "WrongPassword!1"))
+            .willThrow(BadCredentialsException("wrong password"))
+
+        mockMvc.perform(
+            post("/api/management/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"phone":"$phone","password":"WrongPassword!1"}""")
+        )
+            .andExpect(status().isUnauthorized)
+            .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+            .andExpect(jsonPath("$.code").value(401))
+            .andExpect(jsonPath("$.message").value("管理员账号或密码错误"))
+            .andExpect(jsonPath("$.data").doesNotExist())
+
+        verifyMockito(loginAttemptService).recordFailure(phone, "127.0.0.1")
+        verifyMockito(loginAttemptService, never()).recordSuccess(anyString(), anyString())
+    }
+
+    @Test
+    fun `management administrator lock returns retry after without authenticating`() {
+        val phone = "13800000000"
+        given(userRepository.findByPhone(phone)).willReturn(Optional.of(adminUser()))
+        given(loginAttemptService.retryAfterSeconds(phone, "127.0.0.1")).willReturn(45)
+
+        mockMvc.perform(
+            post("/api/management/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"phone":"$phone","password":"StrongAdminPassword!1"}""")
+        )
+            .andExpect(status().isTooManyRequests)
+            .andExpect(header().string(HttpHeaders.RETRY_AFTER, "45"))
+            .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+            .andExpect(jsonPath("$.code").value(429))
+            .andExpect(jsonPath("$.data").doesNotExist())
+
+        verifyMockito(authenticationService, never()).loginAdmin(anyString(), anyString())
+        verifyMockito(authenticationService, never()).login(anyString(), anyString())
+        verifyMockito(loginAttemptService, never()).recordSuccess(anyString(), anyString())
+        verifyMockito(loginAttemptService, never()).recordFailure(anyString(), anyString())
+    }
+
+    @Test
+    fun `professional management login bypasses admin limiter and preserves the response fields`() {
+        val phone = "+8613800000001"
+        val professional = adminUser().copy(id = "professional-id", phone = phone, role = "USER")
+        val response = loginResponse(professional)
+        given(userRepository.findByPhone(phone)).willReturn(Optional.of(professional))
+        given(authenticationService.login(phone, "ProfessionalPassword!1")).willReturn(response)
+        givenAdminContextRows("professional-id")
+
+        mockMvc.perform(
+            post("/api/management/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"phone":"$phone","password":"ProfessionalPassword!1"}""")
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.token").value(response.token))
+            .andExpect(jsonPath("$.data.accessToken").value(response.accessToken))
+            .andExpect(jsonPath("$.data.refreshToken").value(response.refreshToken))
+            .andExpect(jsonPath("$.data.tokenType").value(response.tokenType))
+            .andExpect(jsonPath("$.data.expiresIn").value(response.expiresIn))
+            .andExpect(jsonPath("$.data.user.id").value("professional-id"))
+            .andExpect(jsonPath("$.data.context.userId").value("professional-id"))
+
+        verifyMockito(authenticationService).login(phone, "ProfessionalPassword!1")
+        verifyMockito(authenticationService, never()).loginAdmin(anyString(), anyString())
+        verifyMockito(loginAttemptService, never()).retryAfterSeconds(anyString(), anyString())
+        verifyMockito(loginAttemptService, never()).recordSuccess(anyString(), anyString())
+        verifyMockito(loginAttemptService, never()).recordFailure(anyString(), anyString())
+    }
+
+    private fun givenAdminContextRows(userId: String) {
+        given(
+            jdbcTemplate.queryForObject(
+                org.mockito.ArgumentMatchers.contains("FROM users"),
+                eq(Long::class.java),
+                eq(userId)
+            )
+        ).willReturn(1L)
+        given(
+            jdbcTemplate.queryForList(
+                org.mockito.ArgumentMatchers.contains("FROM user_roles"),
+                eq(String::class.java),
+                eq(userId)
+            )
+        ).willReturn(emptyList())
+    }
+
+    private fun loginResponse(user: UserEntity = adminUser()) = LoginResponse(
+        token = "${user.role.lowercase()}-access-token",
+        accessToken = "${user.role.lowercase()}-access-token",
+        refreshToken = "${user.role.lowercase()}-refresh-token",
+        expiresIn = 28_800,
+        user = UserDto(
+            id = user.id,
+            phone = user.phone,
+            email = user.email,
+            nickname = user.nickname,
+            avatar = user.avatar,
+            gender = user.gender,
+            city = user.city,
+            bio = user.bio,
+            birthday = user.birthday,
+            role = user.role
+        )
+    )
 
     private fun adminUser() = UserEntity(
         id = "admin-id",
