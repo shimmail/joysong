@@ -48,7 +48,7 @@ class RefreshTokenService(
     fun issue(userId: String, phone: String, role: String): IssuedTokens {
         val refresh = insertRefreshToken(userId)
         return IssuedTokens(
-            accessToken = jwtTokenProvider.generateToken(userId, phone, role),
+            accessToken = jwtTokenProvider.generateToken(userId, phone, role, refresh.id),
             refreshToken = refresh.rawToken,
             accessTokenExpiresIn = jwtTokenProvider.expirationSeconds(role)
         )
@@ -93,7 +93,7 @@ class RefreshTokenService(
         return RefreshedSession(
             userId = stored.userId,
             tokens = IssuedTokens(
-                accessToken = jwtTokenProvider.generateToken(stored.userId, user, stored.role),
+                accessToken = jwtTokenProvider.generateToken(stored.userId, user, stored.role, replacement.id),
                 refreshToken = replacement.rawToken,
                 accessTokenExpiresIn = jwtTokenProvider.expirationSeconds(stored.role)
             )
@@ -114,6 +114,24 @@ class RefreshTokenService(
             "UPDATE refresh_tokens SET revoked_at = COALESCE(revoked_at, NOW()) WHERE user_id = ?",
             userId
         )
+    }
+
+    fun isActiveSession(sessionId: String, userId: String): Boolean {
+        if (sessionId.isBlank() || userId.isBlank()) return false
+        val activeCount: Long? = jdbcTemplate.queryForObject(
+            """
+            SELECT COUNT(*)
+            FROM refresh_tokens
+            WHERE id = ?
+              AND user_id = ?
+              AND revoked_at IS NULL
+              AND expires_at > NOW()
+            """.trimIndent(),
+            Long::class.java,
+            sessionId,
+            userId
+        )
+        return activeCount == 1L
     }
 
     private fun insertRefreshToken(userId: String): NewRefreshToken {

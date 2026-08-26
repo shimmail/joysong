@@ -80,6 +80,58 @@ class AuthenticationServiceTest {
         verify(exactly = 0) { userRepository.save(any()) }
     }
 
+    @Test
+    fun `loginAdmin issues tokens for a valid administrator`() {
+        val admin = adminUser()
+        every { userRepository.findByPhone(admin.phone!!) } returns Optional.of(admin)
+        every { passwordEncoder.matches("StrongAdminPassword!1", admin.passwordHash) } returns true
+        every { refreshTokenService.issue(admin.id, admin.phone!!, "ADMIN") } returns IssuedTokens(
+            accessToken = "admin-access-token",
+            refreshToken = "admin-refresh-token",
+            accessTokenExpiresIn = 28_800
+        )
+
+        val response = service.loginAdmin(admin.phone!!, "StrongAdminPassword!1")
+
+        assertEquals("admin-access-token", response.accessToken)
+        assertEquals("admin-refresh-token", response.refreshToken)
+        assertEquals("ADMIN", response.user.role)
+    }
+
+    @Test
+    fun `loginAdmin rejects a non administrator even when the password matches`() {
+        val user = adminUser().copy(id = "user-id", role = "USER")
+        every { userRepository.findByPhone(user.phone!!) } returns Optional.of(user)
+        every { passwordEncoder.matches("CorrectUserPassword!1", user.passwordHash) } returns true
+
+        assertThrows(BadCredentialsException::class.java) {
+            service.loginAdmin(user.phone!!, "CorrectUserPassword!1")
+        }
+
+        verify(exactly = 0) { refreshTokenService.issue(any(), any(), any()) }
+    }
+
+    @Test
+    fun `loginAdmin rejects an administrator with the same generic exception for a wrong password`() {
+        val admin = adminUser()
+        every { userRepository.findByPhone(admin.phone!!) } returns Optional.of(admin)
+        every { passwordEncoder.matches("WrongPassword!1", admin.passwordHash) } returns false
+
+        val error = assertThrows(BadCredentialsException::class.java) {
+            service.loginAdmin(admin.phone!!, "WrongPassword!1")
+        }
+
+        assertEquals("管理员账号或密码错误", error.message)
+        verify(exactly = 0) { refreshTokenService.issue(any(), any(), any()) }
+    }
+
+    @Test
+    fun `logout revokes the supplied refresh token`() {
+        service.logout("refresh-token")
+
+        verify(exactly = 1) { refreshTokenService.revoke("refresh-token") }
+    }
+
     private fun adminUser(deletedAt: LocalDateTime? = null) = UserEntity(
         id = "admin-id",
         phone = "+8613800000000",

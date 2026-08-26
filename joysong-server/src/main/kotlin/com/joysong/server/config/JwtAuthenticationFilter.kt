@@ -1,5 +1,6 @@
 package com.joysong.server.config
 
+import com.joysong.server.auth.service.RefreshTokenService
 import com.joysong.server.user.repository.UserRepository
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest
@@ -7,6 +8,7 @@ import jakarta.servlet.http.HttpServletResponse
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken
 import org.springframework.security.core.authority.SimpleGrantedAuthority
 import org.springframework.security.core.context.SecurityContextHolder
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.stereotype.Component
 import org.springframework.web.filter.OncePerRequestFilter
 import java.time.LocalDateTime
@@ -15,7 +17,8 @@ import java.time.ZoneId
 @Component
 class JwtAuthenticationFilter(
     private val jwtTokenProvider: JwtTokenProvider,
-    private val userRepository: UserRepository
+    private val userRepository: UserRepository,
+    private val refreshTokenServiceProvider: ObjectProvider<RefreshTokenService>
 ) : OncePerRequestFilter() {
 
     override fun doFilterInternal(
@@ -27,7 +30,7 @@ class JwtAuthenticationFilter(
         if (token != null && jwtTokenProvider.validateToken(token)) {
             val userId = jwtTokenProvider.getUserIdFromToken(token)
             val role = jwtTokenProvider.getRoleFromToken(token)
-            // 所有令牌都与账号状态及凭据版本实时核对；改密、换绑、降权或注销后旧令牌立即失效。
+            // 所有令牌实时核对账号与凭据版本；管理员令牌还必须绑定当前有效的 refresh 会话。
             val issuedAt = LocalDateTime.ofInstant(
                 jwtTokenProvider.getIssuedAtFromToken(token).toInstant(),
                 ZoneId.systemDefault()
@@ -38,7 +41,13 @@ class JwtAuthenticationFilter(
                     roleStillValid && !issuedAt.isBefore(user.credentialsUpdatedAt)
                 }
                 .isPresent
-            if (!activeUser) {
+            val activeAdminSession = role != "ADMIN" || activeUser && jwtTokenProvider
+                .getSessionIdFromToken(token)
+                ?.let { sessionId ->
+                    refreshTokenServiceProvider.getIfAvailable()
+                        ?.isActiveSession(sessionId, userId)
+                } == true
+            if (!activeUser || !activeAdminSession) {
                 filterChain.doFilter(request, response)
                 return
             }

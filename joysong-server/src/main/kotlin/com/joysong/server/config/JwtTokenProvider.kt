@@ -16,10 +16,15 @@ class JwtTokenProvider(
 ) {
     private val key: SecretKey = Keys.hmacShaKeyFor(secret.toByteArray())
 
-    fun generateToken(userId: String, phone: String, role: String = "USER"): String {
+    fun generateToken(
+        userId: String,
+        phone: String,
+        role: String = "USER",
+        sessionId: String? = null
+    ): String {
         val normalizedRole = role.uppercase().takeIf { it == "ADMIN" } ?: "USER"
         val tokenExpiration = if (normalizedRole == "ADMIN") adminExpiration else expiration
-        return Jwts.builder()
+        val builder = Jwts.builder()
             .issuer("joysong-server")
             .subject(userId)
             .claim("phone", phone)
@@ -27,6 +32,10 @@ class JwtTokenProvider(
             .claim("tokenType", if (normalizedRole == "ADMIN") "ADMIN_ACCESS" else "USER_ACCESS")
             .issuedAt(Date())
             .expiration(Date(System.currentTimeMillis() + tokenExpiration))
+        if (normalizedRole == "ADMIN" && !sessionId.isNullOrBlank()) {
+            builder.claim("sid", sessionId)
+        }
+        return builder
             .signWith(key)
             .compact()
     }
@@ -48,6 +57,9 @@ class JwtTokenProvider(
     fun getUserIdFromToken(token: String): String = getClaims(token).subject
 
     fun getIssuedAtFromToken(token: String): Date = getClaims(token).issuedAt
+
+    fun getSessionIdFromToken(token: String): String? =
+        (getClaims(token)["sid"] as? String)?.takeIf { it.isNotBlank() }
 
     fun getRoleFromToken(token: String): String {
         return (getClaims(token)["role"] as? String)
