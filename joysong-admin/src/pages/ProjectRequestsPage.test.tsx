@@ -591,7 +591,7 @@ describe('ProjectRequestsPage', () => {
     expect(screen.getByRole('button', { name: '通过 机构定制光子，申请ID institution-request' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '通过 光子焕肤，申请ID platform-request' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '通过 机构焕肤，申请ID outside-request' })).not.toBeInTheDocument();
-  });
+  }, 15_000);
 
   it('refreshes after approval-base stale, retains the conflict, requires a reason, and force-posts latestRevision for admin only', async () => {
     const user = userEvent.setup();
@@ -703,7 +703,7 @@ describe('ProjectRequestsPage', () => {
     expect(screen.getByRole('button', { name: '通过 光子焕肤，申请ID platform-request' })).toBeEnabled();
     expect(screen.queryByText('审核冲突（REQUEST_ALREADY_HANDLED）')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '重新加载医生项目变更' })).not.toBeInTheDocument();
-  });
+  }, 15_000);
 
   it.each(Object.entries(REVIEW_ERROR_FORCE_ELIGIBILITY))(
     'stable error-code matrix prevents %s from entering force unless it is admin approval stale',

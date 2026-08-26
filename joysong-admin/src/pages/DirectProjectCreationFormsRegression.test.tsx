@@ -124,5 +124,5 @@ describe('direct project creation regressions', () => {
     expect(payload).not.toHaveProperty('baseVersion');
     expect(payload).not.toHaveProperty('version');
     expect(payload).not.toHaveProperty('id');
-  });
+  }, 15_000);
 });

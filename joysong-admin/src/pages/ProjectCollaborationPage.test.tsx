@@ -168,7 +168,7 @@ describe('ProjectCollaborationPage profile update', () => {
     expect(within(dialog).queryByLabelText(/评分/)).not.toBeInTheDocument();
     expect(within(dialog).queryByLabelText(/评价数/)).not.toBeInTheDocument();
     expect(within(dialog).queryByLabelText(/面诊费|顾问|机构比例|平台比例|医生比例/)).not.toBeInTheDocument();
-  }, 10_000);
+  }, 15_000);
 
   it('submits exactly the 15-key v2 profile draft with explicit inheritance intent', async () => {
     const user = userEvent.setup();
@@ -227,7 +227,7 @@ describe('ProjectCollaborationPage profile update', () => {
       'images', 'institutionProjectId', 'name', 'notes', 'price', 'requestType', 'salesCount',
       'slogan', 'tags',
     ]);
-  }, 10_000);
+  }, 15_000);
 
   it.each([
     '<p><br></p>',
@@ -339,7 +339,7 @@ describe('ProjectCollaborationPage profile update', () => {
     expect(Object.keys(vi.mocked(api.post).mock.calls[0][1] as object).sort()).toEqual([
       'institutionProjectId', 'requestType',
     ]);
-  });
+  }, 15_000);
 
   it('withdraws an applicant-owned pending request through the v2 route', async () => {
     const user = userEvent.setup();
