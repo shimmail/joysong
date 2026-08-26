@@ -88,7 +88,6 @@ const menuGroups: MenuGroup[] = [
       { key: '/diaries', icon: <ProfileOutlined />, label: '日记管理' },
       { key: '/reviews', icon: <MessageOutlined />, label: '评价管理' },
       { key: '/coupons', icon: <GiftOutlined />, label: '优惠券管理' },
-      { key: '/legal-documents', icon: <FileTextOutlined />, label: '协议与隐私' },
     ],
   },
   {
@@ -109,6 +108,7 @@ const menuGroups: MenuGroup[] = [
     children: [
       { key: '/cs', icon: <CustomerServiceOutlined />, label: '客服消息' },
       { key: '/reports', icon: <WarningOutlined />, label: '举报管理' },
+      { key: '/legal-documents', icon: <FileTextOutlined />, label: '协议与隐私' },
     ],
   },
 ];

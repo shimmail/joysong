@@ -18,11 +18,13 @@ afterEach(() => {
 });
 
 describe('AdminLayout legal documents navigation', () => {
-  it('shows 协议与隐私 under 内容运营 only for admins', async () => {
+  it('shows 协议与隐私 under 服务与风控 only for admins', async () => {
     const user = userEvent.setup();
     sessionStorage.setItem('management_context', JSON.stringify(context));
     render(<MemoryRouter><AdminLayout /></MemoryRouter>);
     await user.click(screen.getByText('内容运营'));
+    expect(screen.queryByText('协议与隐私')).not.toBeInTheDocument();
+    await user.click(screen.getByText('服务与风控'));
     expect(screen.getByText('协议与隐私')).toBeInTheDocument();
   });
 
