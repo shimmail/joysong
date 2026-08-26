@@ -168,7 +168,7 @@ void main() {
   testWidgets('in-flight leave cannot be submitted twice and ends pending',
       (tester) async {
     _largeView(tester);
-    final leaveCompleter = Completer<DoctorProjectChangeRequest>();
+    final leaveCompleter = Completer<void>();
     final repository = _FakeRepository(
       requests: const [],
       doctorProfile: _doctorProfileWithThreeInstitutions,
@@ -197,7 +197,7 @@ void main() {
     expect(find.byKey(const Key('doctor-project-leave-ip-1')), findsNothing);
     expect(repository.leaveIds, ['ip-1']);
 
-    leaveCompleter.complete(_pendingLeaveRequest);
+    leaveCompleter.complete();
     await tester.pumpAndSettle();
     expect(find.text('PENDING'), findsOneWidget);
     expect(find.text('项目一'), findsOneWidget);
@@ -1307,7 +1307,7 @@ final class _FakeRepository implements IdentityRepository {
   final List<DoctorProjectProfileUpdateTarget> targets;
   List<DoctorProjectChangeRequest> requests;
   final DoctorSelfProfile? doctorProfile;
-  final Completer<DoctorProjectChangeRequest>? leaveCompleter;
+  final Completer<void>? leaveCompleter;
   final ApiException? submitError;
   final Completer<void>? reviewCompleter;
   ApiException? reviewError;
@@ -1353,19 +1353,15 @@ final class _FakeRepository implements IdentityRepository {
   }
 
   @override
-  Future<DoctorProjectChangeRequest> submitDoctorProjectLeave({
+  Future<void> submitDoctorProjectLeave({
     required String institutionProjectId,
   }) async {
     leaveIds.add(institutionProjectId);
     final pending = leaveCompleter;
     if (pending != null) {
-      return pending.future.then((request) {
-        requests = [...requests, request];
-        return request;
-      });
+      await pending.future;
     }
     requests = [...requests, _pendingLeaveRequest];
-    return _pendingLeaveRequest;
   }
 
   @override

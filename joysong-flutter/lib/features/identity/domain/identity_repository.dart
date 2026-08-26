@@ -134,7 +134,7 @@ abstract interface class IdentityRepository {
     DoctorProjectProfileUpdateDraft draft,
   );
 
-  Future<DoctorProjectChangeRequest> submitDoctorProjectLeave({
+  Future<void> submitDoctorProjectLeave({
     required String institutionProjectId,
   });
 

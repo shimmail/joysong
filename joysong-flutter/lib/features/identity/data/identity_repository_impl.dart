@@ -496,23 +496,21 @@ final class ApiIdentityRepository implements IdentityRepository {
   }
 
   @override
-  Future<DoctorProjectChangeRequest> submitDoctorProjectLeave({
+  Future<void> submitDoctorProjectLeave({
     required String institutionProjectId,
   }) async {
     final normalizedId = institutionProjectId.trim();
     if (normalizedId.isEmpty) {
       throw ArgumentError.value(institutionProjectId, 'institutionProjectId');
     }
-    final result = await _apiClient.post<DoctorProjectChangeRequest>(
+    await _apiClient.post<void>(
       '/v2/admin/institution-project-requests',
       body: {
         'requestType': 'LEAVE',
         'institutionProjectId': normalizedId,
       },
-      decodeData: DoctorProjectChangeRequest.fromJson,
+      decodeData: (_) {},
     );
-    if (result == null) throw const FormatException('医生项目变更申请响应为空');
-    return result;
   }
 
   @override

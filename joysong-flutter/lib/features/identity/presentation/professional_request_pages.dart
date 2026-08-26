@@ -1773,9 +1773,8 @@ class _DoctorProjectProfileUpdatePageState
       _saving = true;
       _error = null;
     });
-    late final DoctorProjectChangeRequest request;
     try {
-      request = await widget.repository.submitDoctorProjectLeave(
+      await widget.repository.submitDoctorProjectLeave(
         institutionProjectId: target.institutionProjectId,
       );
     } catch (_) {
@@ -1790,8 +1789,9 @@ class _DoctorProjectProfileUpdatePageState
     if (!mounted) return;
     setState(() {
       _saving = false;
-      _rememberPending(request);
     });
+    await _load();
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(context.localized(
           '离开申请已提交，等待机构审核', 'Leave request submitted for review')),

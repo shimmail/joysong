@@ -228,6 +228,45 @@ void main() {
     expect(profiles.last.requestType, 'EDIT');
   });
 
+  test('LEAVE POST does not decode the flat confirmation as versioned history',
+      () async {
+    final confirmation = _cloneMap(fixture['requestV1'])
+      ..remove('payloadVersion')
+      ..['requestType'] = 'LEAVE';
+    Map<String, dynamic>? submittedBody;
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((request) async {
+      submittedBody = jsonDecode(await utf8.decoder.bind(request).join())
+          as Map<String, dynamic>;
+      request.response
+        ..headers.contentType = ContentType.json
+        ..write(jsonEncode({
+          'code': 200,
+          'message': 'ok',
+          'data': confirmation,
+        }));
+      await request.response.close();
+    });
+    addTearDown(() => server.close(force: true));
+    final client = ApiClient(
+      apiRoot: Uri.parse(
+        'http://${server.address.host}:${server.port}/api/',
+      ),
+    );
+    addTearDown(client.close);
+    final repository = ApiIdentityRepository(client);
+
+    await expectLater(
+      repository.submitDoctorProjectLeave(institutionProjectId: ' ip-1 '),
+      completes,
+    );
+
+    expect(submittedBody, {
+      'requestType': 'LEAVE',
+      'institutionProjectId': 'ip-1',
+    });
+  });
+
   test('repository uses every frozen v2 path and exact request body', () async {
     final client = _RecordingApiClient(fixture);
     final repository = ApiIdentityRepository(client);

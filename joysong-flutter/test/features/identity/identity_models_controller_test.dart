@@ -1692,7 +1692,7 @@ final class _FakeIdentityRepository implements IdentityRepository {
       throw UnimplementedError();
 
   @override
-  Future<DoctorProjectChangeRequest> submitDoctorProjectLeave({
+  Future<void> submitDoctorProjectLeave({
     required String institutionProjectId,
   }) =>
       throw UnimplementedError();
