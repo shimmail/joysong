@@ -22,8 +22,8 @@
 - Legal content is sanitized HTML stored in the database; PDF/Word upload is not added.
 - No WebView is added to Flutter.
 - Do not modify `B26__current_schema.sql` or any existing migration.
-- The provisional migration filename is `V33_20260825_1__add_legal_documents.sql`. A parallel worktree already contains `V33__doctor_institution_project_full_edit.sql`; before final integration, rescan every worktree and visible branch, integrate V33 first, and rename this migration if any equal Flyway version appears.
-- Never apply `33.20260825.1` to a persistent environment that does not already contain V33. The isolated disposable migration test is the only permitted pre-integration application.
+- The final migration filename is `V32_2__add_legal_documents.sql` (Flyway version `32.2`). Existing `V32_1__expand_notification_type_columns.sql` remains earlier, while the parallel `V33__doctor_institution_project_full_edit.sql` remains later.
+- Apply `32.2` before V33 in every persistent environment. If V33 has already run in an environment, stop and make an explicit Flyway out-of-order/baseline decision instead of silently applying this lower version.
 - The migration test must print its host and database and require the database name `myapp_worktree_legal_documents`; it must never connect to a shared development database.
 - Final Chinese and English legal language is supplied and reviewed outside this code change; production receives no placeholder seed data.
 
@@ -32,7 +32,7 @@
 ### Task 1: Database schema and legal domain model
 
 **Files:**
-- Create: `joysong-server/src/main/resources/db/migration/V33_20260825_1__add_legal_documents.sql`
+- Create: `joysong-server/src/main/resources/db/migration/V32_2__add_legal_documents.sql`
 - Create: `joysong-server/src/main/kotlin/com/joysong/server/legal/entity/LegalDocumentEntities.kt`
 - Create: `joysong-server/src/main/kotlin/com/joysong/server/legal/repository/LegalDocumentRepositories.kt`
 - Create: `joysong-server/src/main/kotlin/com/joysong/server/legal/dto/LegalDocumentDtos.kt`
@@ -206,7 +206,7 @@ Run the Step 2 command once. Expected: PASS and output explicitly includes `data
 - [ ] **Step 7: Commit Task 1**
 
 ```powershell
-git add -- joysong-server/src/main/resources/db/migration/V33_20260825_1__add_legal_documents.sql joysong-server/src/main/kotlin/com/joysong/server/legal joysong-server/src/test/kotlin/com/joysong/server/legal/LegalDocumentMigrationTest.kt
+git add -- joysong-server/src/main/resources/db/migration/V32_2__add_legal_documents.sql joysong-server/src/main/kotlin/com/joysong/server/legal joysong-server/src/test/kotlin/com/joysong/server/legal/LegalDocumentMigrationTest.kt
 git commit -m "feat: add legal document schema"
 ```
 
@@ -714,7 +714,7 @@ git commit -m "feat: connect legal document entry points"
 
 - [ ] **Step 1: Rescan migration versions before integration**
 
-List migrations from the main checkout, every worktree, and visible branch. Confirm no other file resolves to Flyway version `33.20260825.1`. Confirm `V33__doctor_institution_project_full_edit.sql` is integrated before this migration in any persistent deployment sequence. If a same-version migration exists, rename this file to the next unused `V33_20260825_N` and update the migration test assertion before running it again.
+List migrations from the main checkout, every worktree, and visible branch. Confirm no other file resolves to Flyway version `32.2`, and confirm the target persistent environment has not already applied V33. If a same-version migration exists, choose another unused `V32_*` subversion and update this plan before running the migration test again.
 
 - [ ] **Step 2: Run backend focused tests once**
 
