@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
@@ -359,9 +360,9 @@ class _DoctorProfileFormState extends State<_DoctorProfileForm> {
       });
       widget.onSaved(saved);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text(context.localized('医生档案已保存', 'Profile saved'))),
+        showTransientMessage(
+          context,
+          context.localized('医生档案已保存', 'Profile saved'),
         );
       }
     } catch (_) {
@@ -1584,12 +1585,13 @@ class _DoctorProjectProfileUpdatePageState
       _rememberPending(request);
       _error = null;
     });
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(context.localized(
+    showTransientMessage(
+      context,
+      context.localized(
         '整体变更申请已提交，当前状态：${request.status}',
         'Profile update request submitted. Status: ${request.status}',
-      )),
-    ));
+      ),
+    );
   }
 
   Future<void> _leave(DoctorProjectProfileUpdateTarget target) async {
@@ -1643,10 +1645,13 @@ class _DoctorProjectProfileUpdatePageState
       _saving = false;
       _rememberPending(request);
     });
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(context.localized(
-          '离开申请已提交，等待机构审核', 'Leave request submitted for review')),
-    ));
+    showTransientMessage(
+      context,
+      context.localized(
+        '离开申请已提交，等待机构审核',
+        'Leave request submitted for review',
+      ),
+    );
   }
 
   void _rememberPending(DoctorProjectChangeRequest request) {

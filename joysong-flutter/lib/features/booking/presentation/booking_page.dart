@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/translation/auto_translation_builder.dart';
+import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/booking/domain/booking_models.dart';
 import 'package:joysong_flutter/features/booking/presentation/booking_controller.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
@@ -76,12 +77,11 @@ class _BookingPageState extends State<BookingPage> {
     final appointment =
         DateTime(date.year, date.month, date.day, time.hour, time.minute);
     if (!appointment.isAfter(widget.controller.currentBeijingWallClock)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(context.localized(
-            '预约时间必须晚于当前北京时间',
-            'Appointment time must be later than Beijing time',
-          )),
+      showTransientMessage(
+        context,
+        context.localized(
+          '预约时间必须晚于当前北京时间',
+          'Appointment time must be later than Beijing time',
         ),
       );
       return;

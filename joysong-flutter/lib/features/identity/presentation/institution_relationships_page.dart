@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/network/api_exception.dart';
+import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/discover/presentation/institution_picker_page.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
@@ -732,9 +733,10 @@ class _InstitutionRelationshipsPageState
   Future<void> _submit() async {
     final selection = _selection;
     if (selection == null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(context.localized('请选择机构', 'Select an institution')),
-      ));
+      showTransientMessage(
+        context,
+        context.localized('请选择机构', 'Select an institution'),
+      );
       return;
     }
     if (_activeMutation == 'submit') return;

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/files/app_file_picker.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/discover/presentation/professional_catalog_page.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
@@ -478,14 +479,11 @@ class _IdentityApplicationPageState extends State<IdentityApplicationPage> {
     } catch (_) {
       if (!mounted) return;
       final english = Localizations.localeOf(context).languageCode == 'en';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            english
-                ? 'Unable to read the selected file. Please try another file.'
-                : '无法读取所选文件，请更换文件后重试',
-          ),
-        ),
+      showTransientMessage(
+        context,
+        english
+            ? 'Unable to read the selected file. Please try another file.'
+            : '无法读取所选文件，请更换文件后重试',
       );
     }
   }
@@ -1145,14 +1143,11 @@ class _ManagementCapabilities extends StatelessWidget {
       );
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          context.localized(
-            '该功能当前不可用',
-            'This feature is currently unavailable',
-          ),
-        ),
+    showTransientMessage(
+      context,
+      context.localized(
+        '该功能当前不可用',
+        'This feature is currently unavailable',
       ),
     );
   }
@@ -1696,14 +1691,10 @@ class _ManagedInstitutionProfileEditPageState
           images: _csv('images'),
         );
     if (await widget.controller.save(update) && mounted) {
-      final messenger = ScaffoldMessenger.of(context);
       if (!widget.embedded) Navigator.of(context).pop();
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            context.localized('机构档案已保存', 'Institution profile saved'),
-          ),
-        ),
+      showTransientMessage(
+        context,
+        context.localized('机构档案已保存', 'Institution profile saved'),
       );
     }
   }

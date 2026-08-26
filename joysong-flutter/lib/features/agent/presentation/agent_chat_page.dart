@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
+import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/agent/domain/agent_models.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_chat_controller.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_catalog_cards.dart';
@@ -573,18 +574,12 @@ class _ChatBubble extends StatelessWidget {
     if (action != _ChatBubbleAction.copy || !context.mounted) return;
     await Clipboard.setData(ClipboardData(text: message.content));
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(
-            Localizations.localeOf(context).languageCode == 'en'
-                ? 'Message copied'
-                : '消息已复制',
-          ),
-          duration: const Duration(seconds: 2),
-        ),
-      );
+    showTransientMessage(
+      context,
+      Localizations.localeOf(context).languageCode == 'en'
+          ? 'Message copied'
+          : '消息已复制',
+    );
   }
 
   @override

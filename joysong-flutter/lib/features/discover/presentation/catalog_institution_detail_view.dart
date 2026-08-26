@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/network/optimized_network_image.dart';
+import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/core/translation/translation.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/presentation/catalog_detail_shared.dart';
@@ -413,9 +414,10 @@ class _CopyableFact extends StatelessWidget {
         onTap: () async {
           await Clipboard.setData(ClipboardData(text: value));
           if (!context.mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(context.localized('已复制：$value', 'Copied: $value')),
-          ));
+          showTransientMessage(
+            context,
+            context.localized('已复制：$value', 'Copied: $value'),
+          );
         },
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 10),
@@ -919,10 +921,10 @@ class _DoctorRow extends StatelessWidget {
                 onTap: () async {
                   await Clipboard.setData(ClipboardData(text: phone));
                   if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(
-                        context.localized('已复制医生电话', 'Doctor phone copied')),
-                  ));
+                  showTransientMessage(
+                    context,
+                    context.localized('已复制医生电话', 'Doctor phone copied'),
+                  );
                 },
                 child: Padding(
                   padding: const EdgeInsets.only(top: 4),

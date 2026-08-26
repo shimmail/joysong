@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/agent/domain/agent_models.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_plan_controller.dart';
 
@@ -133,12 +134,12 @@ class _AgentProfileSafetyPageState extends State<AgentProfileSafetyPage> {
         return;
       }
       final assessment = widget.controller.state.assessment;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(
+      showTransientMessage(
+        context,
         assessment == null
             ? (_english ? 'Unable to complete assessment' : '评估未完成')
             : '${_english ? 'Risk level' : '风险等级'}: ${assessment.riskLevel}',
-      )));
+      );
       if (assessment != null) Navigator.pop(context, true);
     } finally {
       _submitting = false;

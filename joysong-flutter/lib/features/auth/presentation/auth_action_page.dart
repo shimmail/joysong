@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/auth/presentation/login_strings.dart';
 import 'package:joysong_flutter/features/auth/presentation/phone_country.dart';
 
@@ -414,9 +415,7 @@ class _AuthActionPageState extends State<AuthActionPage> {
       return;
     }
     if (widget.mode == AuthActionMode.resetPassword) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_strings.resetSucceeded)),
-      );
+      showTransientMessage(context, _strings.resetSucceeded);
     }
     Navigator.of(context).pop(true);
   }
