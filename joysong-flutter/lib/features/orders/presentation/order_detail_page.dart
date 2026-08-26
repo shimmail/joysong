@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/files/app_file_picker.dart';
+import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/core/translation/auto_translation_builder.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
 import 'package:joysong_flutter/features/orders/domain/payment_models.dart';
@@ -125,21 +126,16 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
         throw StateError(result.message ?? 'Image upload failed');
       }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              result.message ??
-                  (_isEnglish(context) ? 'Image upload failed' : '图片上传失败'),
-            ),
-          ),
+        showTransientMessage(
+          context,
+          result.message ??
+              (_isEnglish(context) ? 'Image upload failed' : '图片上传失败'),
         );
       }
     } on Object catch (error) {
       if (propagateError) rethrow;
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error.toString())),
-        );
+        showTransientMessage(context, error.toString());
       }
     }
     return null;
@@ -169,17 +165,12 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     final result = await socialController.submitOrderReview(order.id, draft);
     if (!mounted) return;
     setState(() => _reviewBusy = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          result.succeeded
-              ? (_isEnglish(context) ? 'Review submitted' : '评价已提交')
-              : (result.message ??
-                  (_isEnglish(context)
-                      ? 'Review submission failed'
-                      : '评价提交失败')),
-        ),
-      ),
+    showTransientMessage(
+      context,
+      result.succeeded
+          ? (_isEnglish(context) ? 'Review submitted' : '评价已提交')
+          : (result.message ??
+              (_isEnglish(context) ? 'Review submission failed' : '评价提交失败')),
     );
     if (result.succeeded) await widget.controller.load();
   }
@@ -194,13 +185,10 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     final review = loaded.value;
     if (!loaded.succeeded || review == null) {
       setState(() => _reviewBusy = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            loaded.message ??
-                (_isEnglish(context) ? 'Unable to load the review' : '评价加载失败'),
-          ),
-        ),
+      showTransientMessage(
+        context,
+        loaded.message ??
+            (_isEnglish(context) ? 'Unable to load the review' : '评价加载失败'),
       );
       return;
     }
@@ -225,15 +213,12 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     final result = await socialController.updateReview(review.id, draft);
     if (!mounted) return;
     setState(() => _reviewBusy = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          result.succeeded
-              ? (_isEnglish(context) ? 'Review updated' : '评价已修改')
-              : (result.message ??
-                  (_isEnglish(context) ? 'Review update failed' : '评价修改失败')),
-        ),
-      ),
+    showTransientMessage(
+      context,
+      result.succeeded
+          ? (_isEnglish(context) ? 'Review updated' : '评价已修改')
+          : (result.message ??
+              (_isEnglish(context) ? 'Review update failed' : '评价修改失败')),
     );
     if (result.succeeded) await widget.controller.load();
   }

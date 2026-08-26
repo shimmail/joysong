@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/network/api_exception.dart';
+import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
 import 'package:joysong_flutter/features/social/domain/social_repository.dart';
 
@@ -301,10 +302,9 @@ class _FavoritesPageState extends State<FavoritesPage> {
         false,
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(context.localized('已取消收藏', 'Removed from favorites')),
-        ),
+      showTransientMessage(
+        context,
+        context.localized('已取消收藏', 'Removed from favorites'),
       );
     } catch (error) {
       if (!mounted) return;
@@ -312,9 +312,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
         _items.insert(index.clamp(0, _items.length), item);
         _errorMessage = _messageFor(context, error);
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_errorMessage!)),
-      );
+      showTransientMessage(context, _errorMessage!);
     } finally {
       if (mounted) setState(() => _removingIds.remove(item.id));
     }

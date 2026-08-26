@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/core/translation/translation.dart';
 import 'package:joysong_flutter/features/messaging/domain/messaging_models.dart';
 import 'package:joysong_flutter/features/messaging/domain/notification_target.dart';
@@ -1499,8 +1500,7 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
     if (action == _MessageAction.copy) {
       await Clipboard.setData(ClipboardData(text: widget.contentOf(item)));
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(strings.copied)));
+        showTransientMessage(context, strings.copied);
       }
     } else if (action == _MessageAction.showTranslation) {
       await _showMessageTranslation(item);
@@ -1574,9 +1574,7 @@ class _ThreadScaffoldState<T> extends State<_ThreadScaffold<T>>
           _translationSourceOverrides.remove(messageId);
         });
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_strings(context).translationFailed)),
-        );
+        showTransientMessage(context, _strings(context).translationFailed);
       }
     } finally {
       _translating.remove(messageId);

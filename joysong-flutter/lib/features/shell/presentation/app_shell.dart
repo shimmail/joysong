@@ -461,14 +461,11 @@ class _AppShellState extends State<AppShell> {
       ));
     } on Object {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            context.localized(
-              '日记详情加载失败，请稍后重试',
-              'Unable to load diary details. Please try again.',
-            ),
-          ),
+      showTransientMessage(
+        context,
+        context.localized(
+          '日记详情加载失败，请稍后重试',
+          'Unable to load diary details. Please try again.',
         ),
       );
     }
@@ -579,14 +576,11 @@ class _AppShellState extends State<AppShell> {
     }
     final target = _bookingTarget(item);
     if (target == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            context.localized(
-              '请先选择提供该项目的机构',
-              'Please select an institution that offers this service first.',
-            ),
-          ),
+      showTransientMessage(
+        context,
+        context.localized(
+          '请先选择提供该项目的机构',
+          'Please select an institution that offers this service first.',
         ),
       );
       return;
@@ -602,24 +596,22 @@ class _AppShellState extends State<AppShell> {
       return;
     }
     if (controller.project == null || controller.errorMessage != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(context.localized(
-            '暂时无法获取该机构项目的预约信息，请稍后重试',
-            'Booking information for this institution service is temporarily unavailable. Please try again later.',
-          )),
+      showTransientMessage(
+        context,
+        context.localized(
+          '暂时无法获取该机构项目的预约信息，请稍后重试',
+          'Booking information for this institution service is temporarily unavailable. Please try again later.',
         ),
       );
       controller.dispose();
       return;
     }
     if (controller.doctors.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(context.localized(
-            '该机构项目尚未配置可预约医生，因此暂时无法预约。请联系机构或稍后再试',
-            'This institution service has no bookable doctors assigned yet. Please contact the institution or try again later.',
-          )),
+      showTransientMessage(
+        context,
+        context.localized(
+          '该机构项目尚未配置可预约医生，因此暂时无法预约。请联系机构或稍后再试',
+          'This institution service has no bookable doctors assigned yet. Please contact the institution or try again later.',
         ),
       );
       controller.dispose();
@@ -672,13 +664,10 @@ class _AppShellState extends State<AppShell> {
     if (!mounted) return;
     final review = loaded.value;
     if (!loaded.succeeded || review == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            loaded.message ??
-                context.localized('评价加载失败', 'Unable to load the review'),
-          ),
-        ),
+      showTransientMessage(
+        context,
+        loaded.message ??
+            context.localized('评价加载失败', 'Unable to load the review'),
       );
       return;
     }
@@ -695,15 +684,12 @@ class _AppShellState extends State<AppShell> {
     if (draft == null || !mounted) return;
     final result = await socialController.updateReview(review.id, draft);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          result.succeeded
-              ? context.localized('评价已修改', 'Review updated')
-              : (result.message ??
-                  context.localized('评价修改失败', 'Review update failed')),
-        ),
-      ),
+    showTransientMessage(
+      context,
+      result.succeeded
+          ? context.localized('评价已修改', 'Review updated')
+          : (result.message ??
+              context.localized('评价修改失败', 'Review update failed')),
     );
     if (result.succeeded) await _ordersController?.refresh();
   }
@@ -895,12 +881,11 @@ class _AppShellState extends State<AppShell> {
     if (repository == null || id.isEmpty) return;
     if (id == widget.currentUserId.trim()) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(context.localized(
-            '不能给自己发送私信',
-            'You cannot message yourself.',
-          )),
+      showTransientMessage(
+        context,
+        context.localized(
+          '不能给自己发送私信',
+          'You cannot message yourself.',
         ),
       );
       return;
@@ -912,12 +897,11 @@ class _AppShellState extends State<AppShell> {
       await _messagingController?.refresh();
     } on Object {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(context.localized(
-            '暂时无法发起私信，请稍后重试',
-            'Unable to start this conversation. Please try again.',
-          )),
+      showTransientMessage(
+        context,
+        context.localized(
+          '暂时无法发起私信，请稍后重试',
+          'Unable to start this conversation. Please try again.',
         ),
       );
     }
@@ -939,12 +923,11 @@ class _AppShellState extends State<AppShell> {
       );
     } on Object {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(context.localized(
-            '暂时无法打开订单沟通，请稍后重试',
-            'Unable to open this order conversation. Please try again.',
-          )),
+      showTransientMessage(
+        context,
+        context.localized(
+          '暂时无法打开订单沟通，请稍后重试',
+          'Unable to open this order conversation. Please try again.',
         ),
       );
       if (fallbackToOrdersOnFailure) {
@@ -1170,12 +1153,11 @@ class _AppShellState extends State<AppShell> {
       await _openDmThread(conversation, title: peer?.name);
     } on Object {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(context.localized(
-            '暂时无法打开该私信，请稍后重试',
-            'Unable to open this conversation. Please try again.',
-          )),
+      showTransientMessage(
+        context,
+        context.localized(
+          '暂时无法打开该私信，请稍后重试',
+          'Unable to open this conversation. Please try again.',
         ),
       );
     }
@@ -1227,12 +1209,11 @@ class _AppShellState extends State<AppShell> {
         };
       } on Object {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(context.localized(
-              '暂时无法打开订单沟通，请稍后重试',
-              'Unable to open this order conversation. Please try again.',
-            )),
+        showTransientMessage(
+          context,
+          context.localized(
+            '暂时无法打开订单沟通，请稍后重试',
+            'Unable to open this order conversation. Please try again.',
           ),
         );
         return;
@@ -1278,24 +1259,22 @@ class _AppShellState extends State<AppShell> {
 
   void _showOrderConversationUnavailable() {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(context.localized(
-          '当前订单沟通记录不可查看',
-          'This order conversation is not available.',
-        )),
+    showTransientMessage(
+      context,
+      context.localized(
+        '当前订单沟通记录不可查看',
+        'This order conversation is not available.',
       ),
     );
   }
 
   void _showConversationUnavailable() {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(context.localized(
-          '当前会话不可查看',
-          'This conversation is not available.',
-        )),
+    showTransientMessage(
+      context,
+      context.localized(
+        '当前会话不可查看',
+        'This conversation is not available.',
       ),
     );
   }
@@ -1366,12 +1345,11 @@ class _AppShellState extends State<AppShell> {
       return result.value!.trim();
     } on Object {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(context.localized(
-              '图片发送失败，请稍后重试',
-              'Unable to send the image. Please try again.',
-            )),
+        showTransientMessage(
+          context,
+          context.localized(
+            '图片发送失败，请稍后重试',
+            'Unable to send the image. Please try again.',
           ),
         );
       }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
 import 'package:joysong_flutter/features/social/domain/social_repository.dart';
 import 'package:share_plus/share_plus.dart';
@@ -45,12 +46,11 @@ Future<void> shareDiary(
     );
   } catch (_) {
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(context.localized(
-          '暂时无法打开分享面板，请稍后重试',
-          'Unable to open the share sheet. Please try again.',
-        )),
+    showTransientMessage(
+      context,
+      context.localized(
+        '暂时无法打开分享面板，请稍后重试',
+        'Unable to open the share sheet. Please try again.',
       ),
     );
   }

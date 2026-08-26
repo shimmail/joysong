@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/files/app_file_picker.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/routing/app_router.dart';
+import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/auth/domain/auth_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
@@ -125,7 +126,8 @@ class _ProfilePageState extends State<ProfilePage> {
               _MenuItem(
                 icon: Icons.account_balance_wallet_outlined,
                 title: context.localized('钱包', 'Wallet'),
-                subtitle: context.localized('查看专业收益与流水', 'View professional earnings and ledger'),
+                subtitle: context.localized(
+                    '查看专业收益与流水', 'View professional earnings and ledger'),
                 onTap: widget.onWallet,
               ),
               _MenuItem(
@@ -336,14 +338,11 @@ class _ProfilePageState extends State<ProfilePage> {
       managementContext = await repository.loadManagementContext();
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            context.localized(
-              '机构关系权限加载失败，请重试',
-              'Unable to load institution relationship access. Try again.',
-            ),
-          ),
+      showTransientMessage(
+        context,
+        context.localized(
+          '机构关系权限加载失败，请重试',
+          'Unable to load institution relationship access. Try again.',
         ),
       );
       return;
@@ -362,14 +361,11 @@ class _ProfilePageState extends State<ProfilePage> {
         InstitutionRelationshipScope.legalRepresentative,
     ];
     if (scopes.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            context.localized(
-              '当前没有可用的专业身份',
-              'No eligible professional identity is available.',
-            ),
-          ),
+      showTransientMessage(
+        context,
+        context.localized(
+          '当前没有可用的专业身份',
+          'No eligible professional identity is available.',
         ),
       );
       return;
@@ -431,9 +427,7 @@ class _ProfilePageState extends State<ProfilePage> {
     )) {
       if (progress.stage == UploadStage.failed) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(progress.message ?? '图片上传失败')),
-          );
+          showTransientMessage(context, progress.message ?? '图片上传失败');
         }
         return null;
       }

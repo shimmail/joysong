@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/files/app_file_picker.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/profile/domain/profile_models.dart';
 import 'package:joysong_flutter/features/profile/presentation/profile_controller.dart';
 import 'package:joysong_flutter/features/profile/presentation/avatar_crop_page.dart';
@@ -136,26 +137,26 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<ProfileGender>(
-                        key: const Key('profile-gender'),
-                        initialValue: _gender,
-                        isExpanded: true,
-                        borderRadius: BorderRadius.circular(12),
-                        menuMaxHeight: 320,
-                        dropdownColor: Theme.of(context).colorScheme.surface,
-                        decoration: InputDecoration(
-                          labelText: context.localized('性别', 'Gender'),
+                    key: const Key('profile-gender'),
+                    initialValue: _gender,
+                    isExpanded: true,
+                    borderRadius: BorderRadius.circular(12),
+                    menuMaxHeight: 320,
+                    dropdownColor: Theme.of(context).colorScheme.surface,
+                    decoration: InputDecoration(
+                      labelText: context.localized('性别', 'Gender'),
+                    ),
+                    items: [
+                      for (final gender in ProfileGender.values)
+                        DropdownMenuItem(
+                          value: gender,
+                          child: Text(_genderLabel(context, gender)),
                         ),
-                        items: [
-                          for (final gender in ProfileGender.values)
-                            DropdownMenuItem(
-                              value: gender,
-                              child: Text(_genderLabel(context, gender)),
-                            ),
-                        ],
-                        onChanged: controller.isSaving
-                            ? null
-                            : (gender) =>
-                                setState(() => _gender = gender ?? _gender),
+                    ],
+                    onChanged: controller.isSaving
+                        ? null
+                        : (gender) =>
+                            setState(() => _gender = gender ?? _gender),
                   ),
                   const SizedBox(height: 12),
                   TextFormField(
@@ -231,12 +232,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
       ),
     );
     if (!mounted || !success) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          context.localized('个人资料已更新', 'Profile updated'),
-        ),
-      ),
+    showTransientMessage(
+      context,
+      context.localized('个人资料已更新', 'Profile updated'),
     );
     Navigator.of(context).pop(true);
   }
@@ -269,9 +267,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
       }
     });
     if (url == null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(context.localized('头像上传失败', 'Avatar upload failed')),
-      ));
+      showTransientMessage(
+        context,
+        context.localized('头像上传失败', 'Avatar upload failed'),
+      );
     }
   }
 }

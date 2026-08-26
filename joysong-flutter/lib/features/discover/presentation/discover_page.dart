@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/network/optimized_network_image.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/core/translation/translation.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
@@ -1260,12 +1261,11 @@ class _DiscoverDetailPageState extends State<DiscoverDetailPage> {
       ));
     } on Object {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(context.localized(
-            '日记详情加载失败，请稍后重试',
-            'Unable to load diary details. Please try again.',
-          )),
+      showTransientMessage(
+        context,
+        context.localized(
+          '日记详情加载失败，请稍后重试',
+          'Unable to load diary details. Please try again.',
         ),
       );
     }
