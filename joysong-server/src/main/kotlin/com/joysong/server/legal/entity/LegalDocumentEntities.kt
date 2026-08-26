@@ -12,6 +12,8 @@ import jakarta.persistence.Enumerated
 import jakarta.persistence.Id
 import jakarta.persistence.Table
 import jakarta.persistence.Version
+import org.hibernate.annotations.JdbcTypeCode
+import org.hibernate.type.SqlTypes
 import java.time.LocalDateTime
 
 enum class LegalDocumentType(@get:JsonValue val slug: String) {
@@ -51,9 +53,9 @@ class LegalDocumentLocaleConverter : AttributeConverter<LegalDocumentLocale, Str
 @Table(name = "legal_document_releases")
 data class LegalDocumentReleaseEntity(
     @Id val id: String,
-    @Enumerated(EnumType.STRING) @Column(name = "document_type") val documentType: LegalDocumentType,
+    @Enumerated(EnumType.STRING) @JdbcTypeCode(SqlTypes.VARCHAR) @Column(name = "document_type") val documentType: LegalDocumentType,
     val version: Int,
-    @Enumerated(EnumType.STRING) var status: LegalDocumentStatus,
+    @Enumerated(EnumType.STRING) @JdbcTypeCode(SqlTypes.VARCHAR) var status: LegalDocumentStatus,
     @Column(name = "change_summary") var changeSummary: String = "",
     @Column(name = "published_at") var publishedAt: LocalDateTime? = null,
     @Column(name = "published_by") var publishedBy: String? = null,

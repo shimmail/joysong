@@ -23,6 +23,7 @@ repositories {
 // jar contain two BOOT-INF/lib/jaxb-core-4.0.4.jar entries.
 configurations.configureEach {
     exclude(group = "com.sun.xml.bind", module = "jaxb-core")
+    exclude(group = "commons-logging", module = "commons-logging")
 }
 
 dependencies {
