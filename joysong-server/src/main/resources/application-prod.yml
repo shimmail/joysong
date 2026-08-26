@@ -21,12 +21,6 @@ spring:
     restart:
       enabled: false
 
-seed:
-  demo:
-    # Deliberately not configurable in the production profile.
-    enabled: false
-    password: ${DEMO_USER_PASSWORD:}
-
 oss:
   enabled: true
   endpoint: ${OSS_ENDPOINT}

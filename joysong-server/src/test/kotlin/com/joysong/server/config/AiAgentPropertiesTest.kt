@@ -297,8 +297,7 @@ class AiAgentPropertiesTest {
         ossEnabled = true,
         smsEnabled = true,
         aiAgentProperties = properties,
-        logVerificationCodeForDev = false,
-        demoSeedEnabled = false
+        logVerificationCodeForDev = false
     )
 
     private fun Throwable?.causeChain(): String = generateSequence(this) { it.cause }

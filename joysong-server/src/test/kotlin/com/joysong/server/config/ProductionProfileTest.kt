@@ -43,7 +43,6 @@ class ProductionProfileTest {
 
     @Test
     fun `production payment environment is selected by the Stripe API key`() {
-        assertEquals(false, properties.getProperty("seed.demo.enabled"))
         assertNull(properties.getProperty("payment.mode"))
         assertNull(properties.getProperty("payment.stripe.enabled"))
         assertEquals(false, properties.getProperty("security.verification-code.log-for-dev"))

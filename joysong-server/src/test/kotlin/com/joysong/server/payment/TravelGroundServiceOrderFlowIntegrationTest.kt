@@ -104,7 +104,6 @@ import java.util.concurrent.atomic.AtomicInteger
         "spring.task.scheduling.enabled=false",
         "payment.reconciliation.enabled=false",
         "payment.stripe.legacy-enabled=false",
-        "seed.demo.enabled=false",
         "jwt.secret=0123456789abcdef0123456789abcdef",
         "google.client-id=travel-flow-test-google-client",
         "admin.bootstrap.phone=13800138000",

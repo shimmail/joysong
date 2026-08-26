@@ -59,11 +59,6 @@ admin:
     phone: ${ADMIN_PHONE:}
     password: ${ADMIN_PASSWORD:}
 
-seed:
-  demo:
-    enabled: ${SEED_DEMO_ENABLED:false}
-    password: ${DEMO_USER_PASSWORD:}
-
 security:
   admin-login:
     max-failures: 5

@@ -25,8 +25,7 @@ class ConfigValidator(
     @Value("\${oss.enabled:false}") private val ossEnabled: Boolean,
     @Value("\${aliyun.sms.enabled:false}") private val smsEnabled: Boolean,
     private val aiAgentProperties: AiAgentProperties,
-    @Value("\${security.verification-code.log-for-dev:false}") private val logVerificationCodeForDev: Boolean,
-    @Value("\${seed.demo.enabled:false}") private val demoSeedEnabled: Boolean,
+    @Value("\${security.verification-code.log-for-dev:false}") private val logVerificationCodeForDev: Boolean
 ) {
     private val logger = LoggerFactory.getLogger(ConfigValidator::class.java)
 
@@ -71,10 +70,6 @@ class ConfigValidator(
         if (isProduction && logVerificationCodeForDev) {
             missing.add("verification-code log-for-dev must be disabled in production")
         }
-        if (isProduction && demoSeedEnabled) {
-            missing.add("demo seed must be disabled in production")
-        }
-
         if (missing.isNotEmpty()) {
             val message = "Missing required environment variables: ${missing.joinToString(", ")}. " +
                 "Please set them via environment variables or application-dev.yml profile."

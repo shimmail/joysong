@@ -205,7 +205,6 @@ PAYMENT_RECONCILIATION_STALE_SECONDS=120
 | `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` | Stripe 密钥和 webhook 签名 |
 | `STRIPE_WEBHOOK_TOLERANCE_SECONDS` | webhook 时间容忍窗口 |
 | `PAYMENT_RECONCILIATION_DELAY_MS` / `PAYMENT_RECONCILIATION_STALE_SECONDS` | 订单对账周期和过期阈值 |
-| `SEED_DEMO_ENABLED` / `DEMO_USER_PASSWORD` | 仅开发环境演示数据；生产必须关闭 |
 
 不要把可选变量的默认值复制到生产密钥文件；生产 profile 的 fail-closed 校验优先于开发默认值。
 
