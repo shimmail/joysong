@@ -264,9 +264,9 @@ CREATE TABLE `consultant_institution_change_requests` (
   CONSTRAINT `fk_consultant_institution_change_requests_institution` FOREIGN KEY (`institution_id`) REFERENCES `institutions` (`id`),
   CONSTRAINT `fk_consultant_institution_change_requests_reviewer` FOREIGN KEY (`reviewed_by`) REFERENCES `users` (`id`),
   CONSTRAINT `fk_consultant_institution_change_requests_submitted_by` FOREIGN KEY (`submitted_by`) REFERENCES `users` (`id`),
-  CONSTRAINT `chk_consultant_institution_change_requests_action` CHECK ((`action` in (_latin1'JOIN',_latin1'LEAVE'))),
-  CONSTRAINT `chk_consultant_institution_change_requests_review_note` CHECK (((`status` <> _latin1'REJECTED') or (trim(`review_note`) <> _latin1''))),
-  CONSTRAINT `chk_consultant_institution_change_requests_status` CHECK ((`status` in (_latin1'PENDING',_latin1'APPROVED',_latin1'REJECTED',_latin1'WITHDRAWN')))
+  CONSTRAINT `chk_consultant_institution_change_requests_action` CHECK ((`action` in (_utf8mb4'JOIN',_utf8mb4'LEAVE'))),
+  CONSTRAINT `chk_consultant_institution_change_requests_review_note` CHECK (((`status` <> _utf8mb4'REJECTED') or (trim(`review_note`) <> _utf8mb4''))),
+  CONSTRAINT `chk_consultant_institution_change_requests_status` CHECK ((`status` in (_utf8mb4'PENDING',_utf8mb4'APPROVED',_utf8mb4'REJECTED',_utf8mb4'WITHDRAWN')))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -373,7 +373,7 @@ CREATE TABLE `dm_conversations` (
   KEY `idx_dm_conv_user_a` (`user_a_id`,`last_message_at` DESC),
   KEY `idx_dm_conv_user_b` (`user_b_id`,`last_message_at` DESC),
   CONSTRAINT `fk_dm_conversation_order` FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`),
-  CONSTRAINT `chk_dm_conversation_scope` CHECK ((((`conversation_type` = _latin1'DIRECT') and (`order_id` is null)) or ((`conversation_type` = _latin1'ORDER_SERVICE') and (`order_id` is not null))))
+  CONSTRAINT `chk_dm_conversation_scope` CHECK ((((`conversation_type` = _utf8mb4'DIRECT') and (`order_id` is null)) or ((`conversation_type` = _utf8mb4'ORDER_SERVICE') and (`order_id` is not null))))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -550,8 +550,8 @@ CREATE TABLE `doctor_project_change_requests` (
   CONSTRAINT `chk_dpcr_price_suggestion` CHECK (((`price_suggestion` is null) or (`price_suggestion` >= 0))),
   CONSTRAINT `chk_dpcr_status` CHECK ((`status` in (_utf8mb4'PENDING',_utf8mb4'APPROVED',_utf8mb4'REJECTED',_utf8mb4'CHANGES_REQUESTED',_utf8mb4'WITHDRAWN'))),
   CONSTRAINT `chk_dpcr_type` CHECK ((`request_type` in (_utf8mb4'JOIN',_utf8mb4'PROFILE_UPDATE',_utf8mb4'LEAVE'))),
-  CONSTRAINT `chk_dpcr_v1_legacy_shape` CHECK (((`payload_version` <> 1) or ((`service_tags` is not null) and (`images` is not null) and (((`request_type` = _latin1'PROFILE_UPDATE') and (`consultation_fee` is not null) and (`commission_rate` is not null) and (`institution_rate` is not null) and (`current_price` is not null) and (`current_consultation_fee` is not null) and (`current_commission_rate` is not null) and (`current_institution_rate` is not null) and (`current_platform_rate` is not null) and (`current_doctor_rate` is not null)) or ((`request_type` <> _latin1'PROFILE_UPDATE') and (`consultation_fee` is null) and (`commission_rate` is null) and (`institution_rate` is null) and (`current_price` is null) and (`current_consultation_fee` is null) and (`current_commission_rate` is null) and (`current_institution_rate` is null) and (`current_platform_rate` is null) and (`current_doctor_rate` is null)))))),
-  CONSTRAINT `chk_dpcr_v2_versioned_shape` CHECK (((`payload_version` <> 2) or ((`price_suggestion` is null) and (`medical_list_price` is not null) and (`medical_list_price` >= 0) and (`current_price` is not null) and (`current_price` >= 0) and (`base_institution_project_version` is not null) and (`base_institution_project_version` >= 0) and (`base_platform_inheritance_hash` is not null) and (char_length(`base_platform_inheritance_hash`) = 64) and regexp_like(`base_platform_inheritance_hash`,_latin1'^[0-9a-f]{64}$') and (`pricing_policy_revision` is not null) and (char_length(`pricing_policy_revision`) > 0) and (`base_doctor_project_updated_at` is not null) and (((`base_config_id` is null) and (`base_config_updated_at` is null)) or ((`base_config_id` is not null) and (`base_config_updated_at` is not null))) and (`shared_changed` is not null) and (`current_project_snapshot` is not null) and (`proposed_project_snapshot` is not null) and (`current_doctor_is_active` is not null) and (`proposed_doctor_is_active` is not null) and (`current_platform_rate` is not null) and (`current_platform_rate` >= 0) and (`current_platform_rate` <= 100) and (`proposed_travel_ground_service_fee` is not null) and (`proposed_travel_ground_service_fee` >= 0))))
+  CONSTRAINT `chk_dpcr_v1_legacy_shape` CHECK (((`payload_version` <> 1) or ((`service_tags` is not null) and (`images` is not null) and (((`request_type` = _utf8mb4'PROFILE_UPDATE') and (`consultation_fee` is not null) and (`commission_rate` is not null) and (`institution_rate` is not null) and (`current_price` is not null) and (`current_consultation_fee` is not null) and (`current_commission_rate` is not null) and (`current_institution_rate` is not null) and (`current_platform_rate` is not null) and (`current_doctor_rate` is not null)) or ((`request_type` <> _utf8mb4'PROFILE_UPDATE') and (`consultation_fee` is null) and (`commission_rate` is null) and (`institution_rate` is null) and (`current_price` is null) and (`current_consultation_fee` is null) and (`current_commission_rate` is null) and (`current_institution_rate` is null) and (`current_platform_rate` is null) and (`current_doctor_rate` is null)))))),
+  CONSTRAINT `chk_dpcr_v2_versioned_shape` CHECK (((`payload_version` <> 2) or ((`price_suggestion` is null) and (`medical_list_price` is not null) and (`medical_list_price` >= 0) and (`current_price` is not null) and (`current_price` >= 0) and (`base_institution_project_version` is not null) and (`base_institution_project_version` >= 0) and (`base_platform_inheritance_hash` is not null) and (char_length(`base_platform_inheritance_hash`) = 64) and regexp_like(`base_platform_inheritance_hash`,_utf8mb4'^[0-9a-f]{64}$') and (`pricing_policy_revision` is not null) and (char_length(`pricing_policy_revision`) > 0) and (`base_doctor_project_updated_at` is not null) and (((`base_config_id` is null) and (`base_config_updated_at` is null)) or ((`base_config_id` is not null) and (`base_config_updated_at` is not null))) and (`shared_changed` is not null) and (`current_project_snapshot` is not null) and (`proposed_project_snapshot` is not null) and (`current_doctor_is_active` is not null) and (`proposed_doctor_is_active` is not null) and (`current_platform_rate` is not null) and (`current_platform_rate` >= 0) and (`current_platform_rate` <= 100) and (`proposed_travel_ground_service_fee` is not null) and (`proposed_travel_ground_service_fee` >= 0))))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -795,7 +795,7 @@ CREATE TABLE `legal_document_contents` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_legal_release_locale` (`release_id`,`locale`),
   CONSTRAINT `fk_legal_content_release` FOREIGN KEY (`release_id`) REFERENCES `legal_document_releases` (`id`),
-  CONSTRAINT `ck_legal_content_locale` CHECK ((`locale` in (_latin1'zh-CN',_latin1'en-US')))
+  CONSTRAINT `ck_legal_content_locale` CHECK ((`locale` in (_utf8mb4'zh-CN',_utf8mb4'en-US')))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -819,8 +819,8 @@ CREATE TABLE `legal_document_releases` (
   UNIQUE KEY `uq_legal_release_version` (`document_type`,`version`),
   UNIQUE KEY `uq_legal_active_draft` (`active_draft_key`),
   UNIQUE KEY `uq_legal_active_published` (`active_published_key`),
-  CONSTRAINT `ck_legal_release_status` CHECK ((`status` in (_latin1'DRAFT',_latin1'PUBLISHED',_latin1'SUPERSEDED'))),
-  CONSTRAINT `ck_legal_release_type` CHECK ((`document_type` in (_latin1'USER_AGREEMENT',_latin1'PRIVACY_POLICY')))
+  CONSTRAINT `ck_legal_release_status` CHECK ((`status` in (_utf8mb4'DRAFT',_utf8mb4'PUBLISHED',_utf8mb4'SUPERSEDED'))),
+  CONSTRAINT `ck_legal_release_type` CHECK ((`document_type` in (_utf8mb4'USER_AGREEMENT',_utf8mb4'PRIVACY_POLICY')))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -973,7 +973,7 @@ CREATE TABLE `payment_compensation_cases` (
   KEY `idx_payment_compensation_cases_status_updated` (`status`,`updated_at`),
   CONSTRAINT `fk_payment_compensation_cases_payment` FOREIGN KEY (`payment_id`) REFERENCES `payments` (`id`),
   CONSTRAINT `chk_payment_compensation_cases_amount_positive` CHECK ((`amount_minor` > 0)),
-  CONSTRAINT `chk_payment_compensation_cases_status` CHECK ((`status` in (_latin1'PENDING_REVIEW',_latin1'PROCESSING',_latin1'SUCCEEDED',_latin1'FAILED')))
+  CONSTRAINT `chk_payment_compensation_cases_status` CHECK ((`status` in (_utf8mb4'PENDING_REVIEW',_utf8mb4'PROCESSING',_utf8mb4'SUCCEEDED',_utf8mb4'FAILED')))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -1142,12 +1142,12 @@ CREATE TABLE `professional_project_requests` (
   CONSTRAINT `fk_project_requests_result_project` FOREIGN KEY (`resulting_project_id`) REFERENCES `projects` (`id`),
   CONSTRAINT `fk_project_requests_reviewer` FOREIGN KEY (`reviewed_by`) REFERENCES `users` (`id`),
   CONSTRAINT `chk_project_requests_amounts` CHECK ((((`price` is null) or (`price` >= 0)) and ((`original_price` is null) or (`original_price` >= 0)) and ((`reference_price` is null) or (`reference_price` >= 0)) and ((`consultation_fee` is null) or (`consultation_fee` >= 0)))),
-  CONSTRAINT `chk_project_requests_currency` CHECK ((`currency` in (_latin1'USD',_latin1'CNY'))),
+  CONSTRAINT `chk_project_requests_currency` CHECK ((`currency` in (_utf8mb4'USD',_utf8mb4'CNY'))),
   CONSTRAINT `chk_project_requests_is_active` CHECK (((`is_active` is null) or (`is_active` in (0,1)))),
   CONSTRAINT `chk_project_requests_rates` CHECK ((((`commission_rate` is null) or (`commission_rate` between 0 and 100)) and ((`institution_rate` is null) or (`institution_rate` between 0 and 100)) and ((`commission_rate` is null) or (`institution_rate` is null) or ((`commission_rate` + `institution_rate`) <= 100)))),
-  CONSTRAINT `chk_project_requests_review_note` CHECK (((`status` <> _latin1'REJECTED') or ((`review_note` is not null) and (trim(`review_note`) <> _latin1'')))),
+  CONSTRAINT `chk_project_requests_review_note` CHECK (((`status` <> _utf8mb4'REJECTED') or ((`review_note` is not null) and (trim(`review_note`) <> _utf8mb4'')))),
   CONSTRAINT `chk_project_requests_sales_count` CHECK ((`sales_count` >= 0)),
-  CONSTRAINT `chk_project_requests_shape` CHECK ((((`request_type` = _latin1'PLATFORM') and (`institution_id` is null) and (`project_id` is null) and (`name` is not null) and (`category` is not null) and (`description` is not null) and (`reference_price` is not null) and (`price` is null) and (`original_price` is null) and (`is_active` is null) and (`consultation_fee` is null) and (`commission_rate` is null) and (`institution_rate` is null)) or ((`request_type` = _latin1'INSTITUTION') and (`institution_id` is not null) and (`project_id` is not null) and (`price` is not null) and (`is_active` is not null) and (`consultation_fee` is not null) and (`commission_rate` is not null) and (`institution_rate` is not null) and (`reference_price` is null) and (`category_tags` is null)))),
+  CONSTRAINT `chk_project_requests_shape` CHECK ((((`request_type` = _utf8mb4'PLATFORM') and (`institution_id` is null) and (`project_id` is null) and (`name` is not null) and (`category` is not null) and (`description` is not null) and (`reference_price` is not null) and (`price` is null) and (`original_price` is null) and (`is_active` is null) and (`consultation_fee` is null) and (`commission_rate` is null) and (`institution_rate` is null)) or ((`request_type` = _utf8mb4'INSTITUTION') and (`institution_id` is not null) and (`project_id` is not null) and (`price` is not null) and (`is_active` is not null) and (`consultation_fee` is not null) and (`commission_rate` is not null) and (`institution_rate` is not null) and (`reference_price` is null) and (`category_tags` is null)))),
   CONSTRAINT `chk_project_requests_status` CHECK ((`status` in (_utf8mb4'PENDING',_utf8mb4'APPROVED',_utf8mb4'REJECTED',_utf8mb4'CHANGES_REQUESTED'))),
   CONSTRAINT `chk_project_requests_type` CHECK ((`request_type` in (_utf8mb4'PLATFORM',_utf8mb4'INSTITUTION')))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
