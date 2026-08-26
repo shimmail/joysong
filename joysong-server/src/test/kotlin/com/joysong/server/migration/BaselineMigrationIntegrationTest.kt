@@ -31,7 +31,7 @@ class BaselineMigrationIntegrationTest {
     private lateinit var jdbcTemplate: JdbcTemplate
 
     @Test
-    fun `fresh database applies B26 baseline followed by migrations through V33`() {
+    fun `fresh database applies B33 baseline`() {
         val history = jdbcTemplate.query(
             """
             SELECT version, type, script
@@ -42,18 +42,7 @@ class BaselineMigrationIntegrationTest {
         ) { rs, _ -> Triple(rs.getString("version"), rs.getString("type"), rs.getString("script")) }
 
         assertEquals(
-            listOf(
-                Triple("26", "SQL_BASELINE", "B26__current_schema.sql"),
-                Triple("27", "SQL", "V27__add_consultant_institution_change_requests.sql"),
-                Triple("28", "SQL", "V28__expand_professional_project_requests.sql"),
-                Triple("29", "SQL", "V29__travel_ground_service_order_flow.sql"),
-                Triple("30", "SQL", "V30__order_service_conversations.sql"),
-                Triple("31", "SQL", "V31__store_raw_payment_event_payload.sql"),
-                Triple("32", "SQL", "V32__payment_compensation_and_usd_price_precision.sql"),
-                Triple("32.1", "SQL", "V32_1__expand_notification_type_columns.sql"),
-                Triple("32.2", "SQL", "V32_2__add_legal_documents.sql"),
-                Triple("33", "SQL", "V33__doctor_institution_project_full_edit.sql")
-            ),
+            listOf(Triple("33", "SQL_BASELINE", "B33__current_schema.sql")),
             history
         )
     }
