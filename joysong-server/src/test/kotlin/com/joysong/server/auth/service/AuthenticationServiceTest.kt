@@ -1,5 +1,7 @@
 package com.joysong.server.auth.service
 
+import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken
+import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier
 import com.joysong.server.user.entity.UserEntity
 import com.joysong.server.user.repository.UserRepository
 import io.mockk.every
@@ -96,6 +98,63 @@ class AuthenticationServiceTest {
     }
 
     @Test
+    fun `registration rejects active and deleted administrators without issuing tokens`() {
+        val activeAdmin = adminUser()
+        val deletedAdmin = adminUser(deletedAt = LocalDateTime.now())
+        every { verificationCodeService.validate(activeAdmin.phone!!, "123456") } returns true
+        every { userRepository.findByPhone(activeAdmin.phone!!) } returnsMany listOf(
+            Optional.of(activeAdmin),
+            Optional.empty()
+        )
+        every { userRepository.findByPhoneIncludeDeleted(activeAdmin.phone!!) } returns Optional.of(deletedAdmin)
+        every { userRepository.save(any()) } answers { firstArg() }
+        every { refreshTokenService.issue(activeAdmin.id, activeAdmin.phone!!, "ADMIN") } returns adminTokens()
+
+        repeat(2) {
+            val error = assertThrows(IllegalArgumentException::class.java) {
+                service.register(activeAdmin.phone!!, "123456", "NewAdminPassword!1")
+            }
+            assertEquals("手机号已注册", error.message)
+        }
+
+        verify(exactly = 0) { userRepository.save(any()) }
+        verify(exactly = 0) { refreshTokenService.issue(any(), any(), any()) }
+    }
+
+    @Test
+    fun `google login rejects active and deleted administrators without issuing tokens`() {
+        val email = "admin@example.com"
+        val activeAdmin = adminUser().copy(email = email)
+        val deletedAdmin = adminUser(deletedAt = LocalDateTime.now()).copy(email = email)
+        val verifier = mockk<GoogleIdTokenVerifier>()
+        val googleIdToken = mockk<GoogleIdToken>()
+        val payload = mockk<GoogleIdToken.Payload>()
+        stubGoogleVerifier(verifier)
+        every { verifier.verify("google-id-token") } returns googleIdToken
+        every { googleIdToken.payload } returns payload
+        every { payload["email_verified"] } returns true
+        every { payload.email } returns email
+        every { payload["name"] } returns "Admin"
+        every { payload["picture"] } returns null
+        every { userRepository.findByEmailIncludeDeleted(email) } returnsMany listOf(
+            Optional.of(activeAdmin),
+            Optional.of(deletedAdmin)
+        )
+        every { userRepository.save(any()) } answers { firstArg() }
+        every { refreshTokenService.issue(activeAdmin.id, activeAdmin.phone!!, "ADMIN") } returns adminTokens()
+
+        repeat(2) {
+            val error = assertThrows(IllegalArgumentException::class.java) {
+                service.loginWithGoogle("google-id-token")
+            }
+            assertEquals("Google 认证失败", error.message)
+        }
+
+        verify(exactly = 0) { userRepository.save(any()) }
+        verify(exactly = 0) { refreshTokenService.issue(any(), any(), any()) }
+    }
+
+    @Test
     fun `loginAdmin issues tokens for a valid administrator`() {
         val admin = adminUser()
         every { userRepository.findByPhone(admin.phone!!) } returns Optional.of(admin)
@@ -155,4 +214,16 @@ class AuthenticationServiceTest {
         role = "ADMIN",
         deletedAt = deletedAt
     )
+
+    private fun adminTokens() = IssuedTokens(
+        accessToken = "admin-access-token",
+        refreshToken = "admin-refresh-token",
+        accessTokenExpiresIn = 28_800
+    )
+
+    private fun stubGoogleVerifier(verifier: GoogleIdTokenVerifier) {
+        val delegate = AuthenticationService::class.java.getDeclaredField("verifier\$delegate")
+        delegate.isAccessible = true
+        delegate.set(service, lazyOf(verifier))
+    }
 }

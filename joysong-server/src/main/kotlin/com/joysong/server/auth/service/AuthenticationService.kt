@@ -121,6 +121,9 @@ class AuthenticationService(
         }
         // 查找是否有已注销的用户，若有则重新激活
         val user = userRepository.findByPhoneIncludeDeleted(phone).map { existing ->
+            if (existing.role == "ADMIN") {
+                throw IllegalArgumentException("手机号已注册")
+            }
             if (existing.deletedAt != null) {
                 // 已注销用户重新激活，更新密码
                 val reactivated = existing.copy(
@@ -169,6 +172,9 @@ class AuthenticationService(
 
         // 查找用户（包括已注销的）
         val user = userRepository.findByEmailIncludeDeleted(email).map { existing ->
+            if (existing.role == "ADMIN") {
+                throw IllegalArgumentException("Google 认证失败")
+            }
             if (existing.deletedAt != null) {
                 // 已注销用户重新激活
                 val reactivated = existing.copy(deletedAt = null)
