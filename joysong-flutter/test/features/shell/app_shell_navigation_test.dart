@@ -595,8 +595,14 @@ void main() {
     expect(find.byKey(const Key('pay-service-fee-button')), findsNothing);
     expect(find.byType(PaymentPage), findsNothing);
 
-    detailRefresh.complete(client.freshOrder);
+    Navigator.of(tester.element(find.byType(OrderDetailPage))).pop();
     await tester.pumpAndSettle();
+    expect(find.byType(OrderDetailPage), findsNothing);
+
+    detailRefresh.complete(client.freshOrder);
+    await tester.pump();
+    await tester.pump();
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('consumer review entry enables automatic translation',
