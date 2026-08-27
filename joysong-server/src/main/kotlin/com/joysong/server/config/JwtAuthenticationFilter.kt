@@ -43,6 +43,7 @@ class JwtAuthenticationFilter(
                 .isPresent
             val activeAdminSession = role != "ADMIN" || activeUser && jwtTokenProvider
                 .getSessionIdFromToken(token)
+                ?.takeIf { sessionId -> CURRENT_ADMIN_SESSION_ID.matches(sessionId) }
                 ?.let { sessionId ->
                     refreshTokenServiceProvider.getIfAvailable()
                         ?.isActiveSession(sessionId, userId)
@@ -61,5 +62,9 @@ class JwtAuthenticationFilter(
     private fun resolveToken(request: HttpServletRequest): String? {
         val bearer = request.getHeader("Authorization") ?: return null
         return if (bearer.startsWith("Bearer ")) bearer.substring(7) else null
+    }
+
+    private companion object {
+        val CURRENT_ADMIN_SESSION_ID = Regex("a1-[0-9a-f]{32}")
     }
 }

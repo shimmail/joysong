@@ -3,8 +3,12 @@ package com.joysong.server.admin.controller
 import com.joysong.server.admin.service.AdminLoginAttemptService
 import com.joysong.server.auth.dto.LoginResponse
 import com.joysong.server.auth.dto.UserDto
+import com.joysong.server.auth.controller.AuthController
 import com.joysong.server.auth.service.AuthenticationService
+import com.joysong.server.auth.service.InvalidRefreshTokenException
 import com.joysong.server.auth.service.RefreshTokenService
+import com.joysong.server.auth.service.VerificationCodeService
+import com.joysong.server.auth.service.AliyunSmsService
 import com.joysong.server.config.JwtAuthenticationFilter
 import com.joysong.server.config.JwtTokenProvider
 import com.joysong.server.config.SecurityConfig
@@ -12,12 +16,15 @@ import com.joysong.server.identity.controller.ManagementAccessController
 import com.joysong.server.identity.service.ManagementAccessService
 import com.joysong.server.user.entity.UserEntity
 import com.joysong.server.user.repository.UserRepository
+import com.joysong.server.user.service.UserProfileService
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import jakarta.servlet.http.HttpServletRequest
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
+import org.mockito.ArgumentMatchers.any
 import org.mockito.ArgumentMatchers.anyString
 import org.mockito.ArgumentMatchers.eq
 import org.mockito.BDDMockito.given
@@ -31,6 +38,7 @@ import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.core.RowMapper
 import org.springframework.security.authentication.BadCredentialsException
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
@@ -39,9 +47,11 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.header
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import java.security.MessageDigest
+import java.sql.ResultSet
 import java.time.LocalDateTime
 import java.util.Date
 import java.util.Optional
+import java.util.UUID
 
 class AdminAuthControllerTest {
 
@@ -146,17 +156,18 @@ class AdminSessionSecurityHttpTest @Autowired constructor(
     fun `revoked admin session can no longer restore shared management context`() {
         var active = true
         val rawRefreshToken = "admin-refresh-token"
+        val sessionId = "a1-0123456789abcdef0123456789abcdef"
         given(jwtTokenProvider.validateToken("admin-access-token")).willReturn(true)
         given(jwtTokenProvider.getUserIdFromToken("admin-access-token")).willReturn("admin-id")
         given(jwtTokenProvider.getRoleFromToken("admin-access-token")).willReturn("ADMIN")
         given(jwtTokenProvider.getIssuedAtFromToken("admin-access-token")).willReturn(Date())
-        given(jwtTokenProvider.getSessionIdFromToken("admin-access-token")).willReturn("session-id")
+        given(jwtTokenProvider.getSessionIdFromToken("admin-access-token")).willReturn(sessionId)
         given(userRepository.findById("admin-id")).willReturn(Optional.of(adminUser()))
         given(
             jdbcTemplate.queryForObject(
                 anyString(),
                 eq(Long::class.java),
-                eq("session-id"),
+                eq(sessionId),
                 eq("admin-id")
             )
         ).willAnswer { if (active) 1L else 0L }
@@ -335,6 +346,138 @@ class AdminSessionSecurityHttpTest @Autowired constructor(
             role = user.role
         )
     )
+
+    private fun adminUser() = UserEntity(
+        id = "admin-id",
+        phone = "13800000000",
+        passwordHash = "hash",
+        nickname = "Admin",
+        role = "ADMIN",
+        credentialsUpdatedAt = LocalDateTime.now().minusMinutes(1)
+    )
+
+    private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
+        .digest(value.toByteArray(Charsets.UTF_8))
+        .joinToString("") { "%02x".format(it) }
+}
+
+@WebMvcTest(controllers = [AuthController::class, ManagementAccessController::class])
+@Import(
+    SecurityConfig::class,
+    JwtAuthenticationFilter::class,
+    RefreshTokenService::class,
+    AuthenticationService::class,
+    ManagementAccessService::class
+)
+class AdminLogoutClosureHttpTest @Autowired constructor(
+    private val mockMvc: MockMvc,
+    private val refreshTokenService: RefreshTokenService
+) {
+
+    @MockBean lateinit var adminLoginAttemptService: AdminLoginAttemptService
+    @MockBean lateinit var userRepository: UserRepository
+    @MockBean lateinit var jwtTokenProvider: JwtTokenProvider
+    @MockBean lateinit var jdbcTemplate: JdbcTemplate
+    @MockBean lateinit var verificationCodeService: VerificationCodeService
+    @MockBean lateinit var userProfileService: UserProfileService
+    @MockBean lateinit var aliyunSmsService: AliyunSmsService
+
+    @Test
+    fun `logout route revokes the ADMIN refresh session and blocks its access token`() {
+        var active = true
+        val rawRefreshToken = "a".repeat(64)
+        val sessionId = "a1-0123456789abcdef0123456789abcdef"
+        given(jwtTokenProvider.validateToken("admin-access-token")).willReturn(true)
+        given(jwtTokenProvider.getUserIdFromToken("admin-access-token")).willReturn("admin-id")
+        given(jwtTokenProvider.getRoleFromToken("admin-access-token")).willReturn("ADMIN")
+        given(jwtTokenProvider.getIssuedAtFromToken("admin-access-token")).willReturn(Date())
+        given(jwtTokenProvider.getSessionIdFromToken("admin-access-token")).willReturn(sessionId)
+        given(userRepository.findById("admin-id")).willReturn(Optional.of(adminUser()))
+        given(
+            jdbcTemplate.queryForObject(
+                anyString(),
+                eq(Long::class.java),
+                eq(sessionId),
+                eq("admin-id")
+            )
+        ).willAnswer { if (active) 1L else 0L }
+        given(jdbcTemplate.update(anyString(), anyString())).willAnswer {
+            active = false
+            1
+        }
+        given(
+            jdbcTemplate.query(
+                org.mockito.ArgumentMatchers.contains("FROM refresh_tokens"),
+                any(RowMapper::class.java),
+                eq(sha256(rawRefreshToken))
+            )
+        ).willAnswer { emptyList<Any>() }
+        givenAdminContextRows("admin-id")
+
+        mockMvc.perform(
+            get("/api/management/context").header(HttpHeaders.AUTHORIZATION, "Bearer admin-access-token")
+        ).andExpect(status().isOk)
+
+        mockMvc.perform(
+            post("/api/auth/logout")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"refreshToken":"$rawRefreshToken"}""")
+        ).andExpect(status().isOk)
+
+        assertThrows(InvalidRefreshTokenException::class.java) {
+            refreshTokenService.rotate(rawRefreshToken)
+        }
+        mockMvc.perform(
+            get("/api/management/context").header(HttpHeaders.AUTHORIZATION, "Bearer admin-access-token")
+        ).andExpect(status().isUnauthorized)
+        verifyMockito(jdbcTemplate).update(
+            org.mockito.ArgumentMatchers.contains("WHERE token_hash = ?"),
+            eq(sha256(rawRefreshToken))
+        )
+    }
+
+    @Test
+    fun `legacy ADMIN refresh keeps the existing unauthorized response`() {
+        val rawRefreshToken = "b".repeat(64)
+        val storedResultSet = mockk<ResultSet>()
+        every { storedResultSet.getString("id") } returns UUID.randomUUID().toString()
+        every { storedResultSet.getString("user_id") } returns "admin-id"
+        every { storedResultSet.getString("role") } returns "ADMIN"
+        given(
+            jdbcTemplate.query(
+                org.mockito.ArgumentMatchers.contains("FROM refresh_tokens"),
+                any(RowMapper::class.java),
+                eq(sha256(rawRefreshToken))
+            )
+        ).willAnswer { invocation ->
+            @Suppress("UNCHECKED_CAST")
+            val mapper = invocation.getArgument<RowMapper<Any>>(1)
+            listOf(mapper.mapRow(storedResultSet, 0))
+        }
+
+        mockMvc.perform(
+            post("/api/auth/refresh")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"refreshToken":"$rawRefreshToken"}""")
+        ).andExpect(status().isUnauthorized)
+    }
+
+    private fun givenAdminContextRows(userId: String) {
+        given(
+            jdbcTemplate.queryForObject(
+                org.mockito.ArgumentMatchers.contains("FROM users"),
+                eq(Long::class.java),
+                eq(userId)
+            )
+        ).willReturn(1L)
+        given(
+            jdbcTemplate.queryForList(
+                org.mockito.ArgumentMatchers.contains("FROM user_roles"),
+                eq(String::class.java),
+                eq(userId)
+            )
+        ).willReturn(emptyList())
+    }
 
     private fun adminUser() = UserEntity(
         id = "admin-id",

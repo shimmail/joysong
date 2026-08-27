@@ -46,7 +46,7 @@ class RefreshTokenService(
 
     @Transactional
     fun issue(userId: String, phone: String, role: String): IssuedTokens {
-        val refresh = insertRefreshToken(userId)
+        val refresh = insertRefreshToken(userId, role)
         return IssuedTokens(
             accessToken = jwtTokenProvider.generateToken(userId, phone, role, refresh.id),
             refreshToken = refresh.rawToken,
@@ -73,12 +73,16 @@ class RefreshTokenService(
             hash(normalized)
         ).firstOrNull() ?: throw InvalidRefreshTokenException()
 
+        if (stored.role == "ADMIN" && !isCurrentAdminSessionId(stored.id)) {
+            throw InvalidRefreshTokenException()
+        }
+
         val user = jdbcTemplate.query(
             "SELECT phone FROM users WHERE id = ? AND deleted_at IS NULL",
             { rs, _ -> rs.getString("phone") ?: "" },
             stored.userId
         ).firstOrNull() ?: throw InvalidRefreshTokenException()
-        val replacement = insertRefreshToken(stored.userId)
+        val replacement = insertRefreshToken(stored.userId, stored.role)
         val updated = jdbcTemplate.update(
             """
             UPDATE refresh_tokens
@@ -134,8 +138,12 @@ class RefreshTokenService(
         return activeCount == 1L
     }
 
-    private fun insertRefreshToken(userId: String): NewRefreshToken {
-        val id = UUID.randomUUID().toString()
+    private fun insertRefreshToken(userId: String, role: String): NewRefreshToken {
+        val id = if (role == "ADMIN") {
+            "a1-${UUID.randomUUID().toString().replace("-", "")}"
+        } else {
+            UUID.randomUUID().toString()
+        }
         val bytes = ByteArray(48).also(secureRandom::nextBytes)
         val rawToken = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
         require(refreshExpiration > 0) { "jwt.refresh-expiration 必须大于 0" }
@@ -150,7 +158,14 @@ class RefreshTokenService(
         return NewRefreshToken(id, rawToken)
     }
 
+    private fun isCurrentAdminSessionId(sessionId: String): Boolean =
+        ADMIN_SESSION_ID.matches(sessionId)
+
     private fun hash(value: String): String = MessageDigest.getInstance("SHA-256")
         .digest(value.toByteArray(Charsets.UTF_8))
         .joinToString("") { "%02x".format(it) }
+
+    private companion object {
+        val ADMIN_SESSION_ID = Regex("a1-[0-9a-f]{32}")
+    }
 }

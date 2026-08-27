@@ -14,6 +14,7 @@ import org.springframework.jdbc.core.RowMapper
 import java.security.MessageDigest
 import java.sql.ResultSet
 import java.util.Base64
+import java.util.UUID
 
 class RefreshTokenServiceTest {
 
@@ -24,7 +25,7 @@ class RefreshTokenServiceTest {
     )
 
     @Test
-    fun `issued access token is bound to the inserted refresh session`() {
+    fun `issued ADMIN access token is bound to a current epoch refresh session`() {
         val jdbcTemplate = mockk<JdbcTemplate>()
         var insertedSessionId: String? = null
         every {
@@ -37,26 +38,33 @@ class RefreshTokenServiceTest {
 
         val issued = service.issue("admin-id", "13800000000", "ADMIN")
 
+        assertTrue(insertedSessionId!!.matches(Regex("a1-[0-9a-f]{32}")))
         assertEquals(insertedSessionId, claim(issued.accessToken, "sid"))
     }
 
     @Test
-    fun `rotated access token is bound to the replacement refresh session`() {
+    fun `legacy ADMIN refresh cannot create a replacement session`() {
         val jdbcTemplate = mockk<JdbcTemplate>()
-        val storedResultSet = mockk<ResultSet>()
-        every { storedResultSet.getString("id") } returns "old-session-id"
-        every { storedResultSet.getString("user_id") } returns "admin-id"
-        every { storedResultSet.getString("role") } returns "ADMIN"
-        every {
-            jdbcTemplate.query(
-                match<String> { it.contains("FROM refresh_tokens") },
-                any<RowMapper<Any>>(),
-                *anyVararg()
-            )
-        } answers {
-            val mapper = arg<RowMapper<Any>>(1)
-            listOf(mapper.mapRow(storedResultSet, 0))
+        stubStoredRefreshToken(jdbcTemplate, UUID.randomUUID().toString(), "ADMIN")
+        stubSuccessfulRotation(jdbcTemplate)
+        val service = RefreshTokenService(jdbcTemplate, tokenProvider, 60_000)
+
+        assertThrows(InvalidRefreshTokenException::class.java) {
+            service.rotate("a".repeat(64))
         }
+
+        io.mockk.verify(exactly = 0) {
+            jdbcTemplate.update(match<String> { it.contains("INSERT INTO refresh_tokens") }, *anyVararg())
+        }
+        io.mockk.verify(exactly = 0) {
+            jdbcTemplate.update(match<String> { it.contains("UPDATE refresh_tokens") }, *anyVararg())
+        }
+    }
+
+    @Test
+    fun `current epoch ADMIN refresh rotates to a current epoch replacement session`() {
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        stubStoredRefreshToken(jdbcTemplate, "a1-0123456789abcdef0123456789abcdef", "ADMIN")
         every {
             jdbcTemplate.query(
                 match<String> { it.contains("SELECT phone FROM users") },
@@ -78,7 +86,53 @@ class RefreshTokenServiceTest {
 
         val refreshed = service.rotate("a".repeat(64))
 
+        assertTrue(replacementSessionId!!.matches(Regex("a1-[0-9a-f]{32}")))
         assertEquals(replacementSessionId, claim(refreshed.tokens.accessToken, "sid"))
+    }
+
+    @Test
+    fun `USER refresh continues rotating with UUID sessions`() {
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        stubStoredRefreshToken(jdbcTemplate, UUID.randomUUID().toString(), "USER")
+        every {
+            jdbcTemplate.query(
+                match<String> { it.contains("SELECT phone FROM users") },
+                any<RowMapper<String>>(),
+                *anyVararg()
+            )
+        } returns listOf("13800000000")
+        var replacementSessionId: String? = null
+        every {
+            jdbcTemplate.update(match<String> { it.contains("INSERT INTO refresh_tokens") }, *anyVararg())
+        } answers {
+            replacementSessionId = secondArg<Array<out Any>>()[0] as String
+            1
+        }
+        every {
+            jdbcTemplate.update(match<String> { it.contains("UPDATE refresh_tokens") }, *anyVararg())
+        } returns 1
+        val service = RefreshTokenService(jdbcTemplate, tokenProvider, 60_000)
+
+        val refreshed = service.rotate("a".repeat(64))
+
+        assertTrue(UUID.fromString(replacementSessionId).toString() == replacementSessionId)
+        assertEquals(null, claim(refreshed.tokens.accessToken, "sid"))
+    }
+
+    @Test
+    fun `stored USER UUID is rejected after the database role becomes ADMIN`() {
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        stubStoredRefreshToken(jdbcTemplate, UUID.randomUUID().toString(), "ADMIN")
+        stubSuccessfulRotation(jdbcTemplate)
+        val service = RefreshTokenService(jdbcTemplate, tokenProvider, 60_000)
+
+        assertThrows(InvalidRefreshTokenException::class.java) {
+            service.rotate("a".repeat(64))
+        }
+
+        io.mockk.verify(exactly = 0) {
+            jdbcTemplate.update(match<String> { it.contains("INSERT INTO refresh_tokens") }, *anyVararg())
+        }
     }
 
     @Test
@@ -139,6 +193,39 @@ class RefreshTokenServiceTest {
     private fun claim(token: String, name: String): String? {
         val payload = String(Base64.getUrlDecoder().decode(token.split('.')[1]))
         return jacksonObjectMapper().readTree(payload).path(name).textValue()
+    }
+
+    private fun stubStoredRefreshToken(jdbcTemplate: JdbcTemplate, sessionId: String, role: String) {
+        val storedResultSet = mockk<ResultSet>()
+        every { storedResultSet.getString("id") } returns sessionId
+        every { storedResultSet.getString("user_id") } returns "admin-id"
+        every { storedResultSet.getString("role") } returns role
+        every {
+            jdbcTemplate.query(
+                match<String> { it.contains("FROM refresh_tokens") },
+                any<RowMapper<Any>>(),
+                *anyVararg()
+            )
+        } answers {
+            val mapper = arg<RowMapper<Any>>(1)
+            listOf(mapper.mapRow(storedResultSet, 0))
+        }
+    }
+
+    private fun stubSuccessfulRotation(jdbcTemplate: JdbcTemplate) {
+        every {
+            jdbcTemplate.query(
+                match<String> { it.contains("SELECT phone FROM users") },
+                any<RowMapper<String>>(),
+                *anyVararg()
+            )
+        } returns listOf("13800000000")
+        every {
+            jdbcTemplate.update(match<String> { it.contains("INSERT INTO refresh_tokens") }, *anyVararg())
+        } returns 1
+        every {
+            jdbcTemplate.update(match<String> { it.contains("UPDATE refresh_tokens") }, *anyVararg())
+        } returns 1
     }
 
     private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
