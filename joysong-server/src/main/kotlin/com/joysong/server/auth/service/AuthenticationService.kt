@@ -49,6 +49,9 @@ class AuthenticationService(
         if (!verificationCodeService.validate(phone, code)) {
             throw IllegalArgumentException("验证码无效或已过期")
         }
+        findBareMainlandAdmin(phone)?.let {
+            throw IllegalArgumentException("验证码无效或已过期")
+        }
         // 查找用户（包括已注销的）
         val user = userRepository.findByPhoneIncludeDeleted(phone).map { existing ->
             if (existing.role == "ADMIN") {
@@ -115,6 +118,9 @@ class AuthenticationService(
     fun register(phone: String, code: String, password: String): LoginResponse {
         if (!verificationCodeService.validate(phone, code)) {
             throw IllegalArgumentException("验证码无效或已过期")
+        }
+        findBareMainlandAdmin(phone)?.let {
+            throw IllegalArgumentException("手机号已注册")
         }
         // 检查是否有未注销的用户（@Where 过滤）
         if (userRepository.findByPhone(phone).isPresent) {
@@ -213,6 +219,13 @@ class AuthenticationService(
     private fun issueLoginResponse(user: UserEntity): LoginResponse =
         refreshTokenService.issue(user.id, user.phone.orEmpty(), user.role).toLoginResponse(user)
 
+    private fun findBareMainlandAdmin(phone: String): UserEntity? {
+        val barePhone = E164_MAINLAND_PHONE.matchEntire(phone)?.groupValues?.get(1) ?: return null
+        return userRepository.findByPhoneIncludeDeleted(barePhone)
+            .orElse(null)
+            ?.takeIf { it.role == "ADMIN" }
+    }
+
     private fun IssuedTokens.toLoginResponse(user: UserEntity) = LoginResponse(
         token = accessToken,
         accessToken = accessToken,
@@ -230,5 +243,6 @@ class AuthenticationService(
 
     private companion object {
         val ADMIN_PHONE = Regex("^1[0-9]{10}$")
+        val E164_MAINLAND_PHONE = Regex("^\\+86(1[0-9]{10})$")
     }
 }

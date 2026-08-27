@@ -62,6 +62,44 @@ class AuthenticationServiceTest {
     }
 
     @Test
+    fun `loginWithCode rejects the E164 alias of an active bare mainland ADMIN`() {
+        val requestPhone = "+8613800000000"
+        val admin = adminUser()
+        every { verificationCodeService.validate(requestPhone, "123456") } returns true
+        every { userRepository.findByPhoneIncludeDeleted(requestPhone) } returns Optional.empty()
+        every { userRepository.findByPhoneIncludeDeleted(admin.phone!!) } returns Optional.of(admin)
+        every { userRepository.save(any()) } answers { firstArg() }
+        every { refreshTokenService.issue(any(), any(), any()) } returns adminTokens()
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            service.loginWithCode(requestPhone, "123456")
+        }
+
+        assertEquals("验证码无效或已过期", error.message)
+        verify(exactly = 0) { userRepository.save(any()) }
+        verify(exactly = 0) { refreshTokenService.issue(any(), any(), any()) }
+    }
+
+    @Test
+    fun `loginWithCode rejects the E164 alias of a deleted bare mainland ADMIN`() {
+        val requestPhone = "+8613800000000"
+        val admin = adminUser(deletedAt = LocalDateTime.now())
+        every { verificationCodeService.validate(requestPhone, "123456") } returns true
+        every { userRepository.findByPhoneIncludeDeleted(requestPhone) } returns Optional.empty()
+        every { userRepository.findByPhoneIncludeDeleted(admin.phone!!) } returns Optional.of(admin)
+        every { userRepository.save(any()) } answers { firstArg() }
+        every { refreshTokenService.issue(any(), any(), any()) } returns adminTokens()
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            service.loginWithCode(requestPhone, "123456")
+        }
+
+        assertEquals("验证码无效或已过期", error.message)
+        verify(exactly = 0) { userRepository.save(any()) }
+        verify(exactly = 0) { refreshTokenService.issue(any(), any(), any()) }
+    }
+
+    @Test
     fun `loginWithCode continues to issue tokens for active user`() {
         val user = UserEntity(
             id = "user-id",
@@ -70,6 +108,7 @@ class AuthenticationServiceTest {
             nickname = "User"
         )
         every { verificationCodeService.validate(user.phone!!, "123456") } returns true
+        every { userRepository.findByPhoneIncludeDeleted("13800000001") } returns Optional.empty()
         every { userRepository.findByPhoneIncludeDeleted(user.phone!!) } returns Optional.of(user)
         every { refreshTokenService.issue(user.id, user.phone!!, "USER") } returns IssuedTokens(
             accessToken = "access-token",
@@ -116,6 +155,33 @@ class AuthenticationServiceTest {
         repeat(2) {
             val error = assertThrows(IllegalArgumentException::class.java) {
                 service.register(activeAdmin.phone!!, "123456", "NewAdminPassword!1")
+            }
+            assertEquals("手机号已注册", error.message)
+        }
+
+        verify(exactly = 0) { userRepository.save(any()) }
+        verify(exactly = 0) { refreshTokenService.issue(any(), any(), any()) }
+    }
+
+    @Test
+    fun `register rejects the E164 alias of active and deleted bare mainland ADMIN accounts`() {
+        val requestPhone = "+8613800000000"
+        val activeAdmin = adminUser()
+        val deletedAdmin = adminUser(deletedAt = LocalDateTime.now())
+        every { verificationCodeService.validate(requestPhone, "123456") } returns true
+        every { userRepository.findByPhone(requestPhone) } returns Optional.empty()
+        every { userRepository.findByPhoneIncludeDeleted(requestPhone) } returns Optional.empty()
+        every { userRepository.findByPhoneIncludeDeleted(activeAdmin.phone!!) } returnsMany listOf(
+            Optional.of(activeAdmin),
+            Optional.of(deletedAdmin)
+        )
+        every { passwordEncoder.encode("NewAdminPassword!1") } returns "new-password-hash"
+        every { userRepository.save(any()) } answers { firstArg() }
+        every { refreshTokenService.issue(any(), any(), any()) } returns adminTokens()
+
+        repeat(2) {
+            val error = assertThrows(IllegalArgumentException::class.java) {
+                service.register(requestPhone, "123456", "NewAdminPassword!1")
             }
             assertEquals("手机号已注册", error.message)
         }
