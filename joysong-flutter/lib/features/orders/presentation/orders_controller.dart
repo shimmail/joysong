@@ -85,7 +85,11 @@ enum OrderAction {
 }
 
 final class OrderDetailController extends ChangeNotifier {
-  OrderDetailController(this._repository, {required this.orderId});
+  OrderDetailController(
+    this._repository, {
+    required this.orderId,
+    Order? initialOrder,
+  }) : _order = _matchingInitialOrder(orderId, initialOrder);
 
   final OrdersRepository _repository;
   final String orderId;
@@ -102,6 +106,7 @@ final class OrderDetailController extends ChangeNotifier {
   bool _isLoading = false;
   OrderAction? _activeAction;
   bool _isRemoved = false;
+  bool _isDisposed = false;
   int _detailGeneration = 0;
 
   Order? get order => _order;
@@ -117,7 +122,7 @@ final class OrderDetailController extends ChangeNotifier {
   bool get isRemoved => _isRemoved;
 
   Future<void> load() async {
-    if (_isLoading || _activeAction != null) return;
+    if (_isDisposed || _isLoading || _activeAction != null) return;
     final generation = ++_detailGeneration;
     _isLoading = true;
     _errorMessage = null;
@@ -133,8 +138,10 @@ final class OrderDetailController extends ChangeNotifier {
         _errorMessage = _orderMessageFor(error, '订单详情加载失败');
       }
     } finally {
-      _isLoading = false;
-      notifyListeners();
+      if (_isCurrent(generation)) {
+        _isLoading = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -160,6 +167,7 @@ final class OrderDetailController extends ChangeNotifier {
     String description = '',
     String evidenceUrl = '',
   }) async {
+    if (_isDisposed) return false;
     if (reason.trim().isEmpty) {
       _errorMessage = '请选择或填写退款原因';
       notifyListeners();
@@ -204,11 +212,14 @@ final class OrderDetailController extends ChangeNotifier {
       }
       return true;
     } catch (error) {
+      if (!_isCurrent(generation)) return false;
       _errorMessage = _orderMessageFor(error, '退款申请失败');
       return false;
     } finally {
-      _activeAction = null;
-      notifyListeners();
+      if (_isCurrent(generation)) {
+        _activeAction = null;
+        notifyListeners();
+      }
     }
   }
 
@@ -228,10 +239,15 @@ final class OrderDetailController extends ChangeNotifier {
       );
 
   Future<void> retrySettlement() async {
-    if (isBusy || _order == null || !_supportsSettlement(_order!)) return;
+    if (_isDisposed ||
+        isBusy ||
+        _order == null ||
+        !_supportsSettlement(_order!)) {
+      return;
+    }
     final generation = ++_detailGeneration;
     await _loadSettlement(generation);
-    notifyListeners();
+    if (_isCurrent(generation)) notifyListeners();
   }
 
   Future<bool> _runOrderAction(
@@ -239,13 +255,15 @@ final class OrderDetailController extends ChangeNotifier {
     Future<Order> Function() operation, {
     bool refreshDetail = false,
   }) async {
-    if (_activeAction != null) return false;
+    if (_isDisposed || _activeAction != null) return false;
     final generation = ++_detailGeneration;
     _activeAction = action;
     _errorMessage = null;
     notifyListeners();
     try {
-      _order = await operation();
+      final updatedOrder = await operation();
+      if (!_isCurrent(generation)) return false;
+      _order = updatedOrder;
       if (refreshDetail) {
         final detail = await _repository.getOrder(orderId);
         if (!_isCurrent(generation)) return false;
@@ -254,11 +272,14 @@ final class OrderDetailController extends ChangeNotifier {
       }
       return true;
     } catch (error) {
+      if (!_isCurrent(generation)) return false;
       _errorMessage = _orderMessageFor(error, '订单操作失败');
       return false;
     } finally {
-      _activeAction = null;
-      notifyListeners();
+      if (_isCurrent(generation)) {
+        _activeAction = null;
+        notifyListeners();
+      }
     }
   }
 
@@ -267,25 +288,30 @@ final class OrderDetailController extends ChangeNotifier {
     Future<void> Function() operation, {
     bool removesOrder = false,
   }) async {
-    if (_activeAction != null) return false;
-    ++_detailGeneration;
+    if (_isDisposed || _activeAction != null) return false;
+    final generation = ++_detailGeneration;
     _activeAction = action;
     _errorMessage = null;
     notifyListeners();
     try {
       await operation();
+      if (!_isCurrent(generation)) return false;
       if (removesOrder) _isRemoved = true;
       return true;
     } catch (error) {
+      if (!_isCurrent(generation)) return false;
       _errorMessage = _orderMessageFor(error, '订单操作失败');
       return false;
     } finally {
-      _activeAction = null;
-      notifyListeners();
+      if (_isCurrent(generation)) {
+        _activeAction = null;
+        notifyListeners();
+      }
     }
   }
 
   Future<void> _reloadOrderOnly() async {
+    if (_isDisposed) return;
     final generation = ++_detailGeneration;
     try {
       final detail = await _repository.getOrder(orderId);
@@ -297,7 +323,7 @@ final class OrderDetailController extends ChangeNotifier {
         _errorMessage = _orderMessageFor(error, '订单刷新失败');
       }
     }
-    notifyListeners();
+    if (_isCurrent(generation)) notifyListeners();
   }
 
   Future<void> _loadSupportingData(Order detail, int generation) async {
@@ -364,7 +390,28 @@ final class OrderDetailController extends ChangeNotifier {
       error.httpStatus == 409 &&
       error.message == 'SETTLEMENT_NOT_GENERATED';
 
-  bool _isCurrent(int generation) => generation == _detailGeneration;
+  bool _isCurrent(int generation) =>
+      !_isDisposed && generation == _detailGeneration;
+
+  @override
+  void dispose() {
+    if (_isDisposed) return;
+    _isDisposed = true;
+    ++_detailGeneration;
+    super.dispose();
+  }
+}
+
+Order? _matchingInitialOrder(String orderId, Order? initialOrder) {
+  if (initialOrder == null) return null;
+  if (initialOrder.id != orderId) {
+    throw ArgumentError.value(
+      initialOrder.id,
+      'initialOrder',
+      '初始订单 ID 必须与详情订单 ID 一致',
+    );
+  }
+  return initialOrder;
 }
 
 String _orderMessageFor(Object error, String fallback) {

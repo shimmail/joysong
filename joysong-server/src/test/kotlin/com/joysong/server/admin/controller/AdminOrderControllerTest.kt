@@ -1,6 +1,7 @@
 package com.joysong.server.admin.controller
 
 import com.joysong.server.config.OrderSplitProperties
+import com.joysong.server.config.TravelGroundServicePricingProperties
 import com.joysong.server.discover.entity.DoctorProjectEntity
 import com.joysong.server.discover.repository.DoctorProjectRepository
 import com.joysong.server.identity.service.ManagementAccessService
@@ -11,6 +12,7 @@ import com.joysong.server.order.service.OrderService
 import com.joysong.server.order.service.OrderSplitRatePolicy
 import com.joysong.server.order.service.OrderStatusLogService
 import com.joysong.server.order.service.TravelGroundServicePricing
+import com.joysong.server.order.service.TravelGroundServiceFeeRatePolicy
 import com.joysong.server.settlement.repository.SettlementRepository
 import com.joysong.server.settlement.repository.SettlementAllocationRepository
 import com.joysong.server.wallet.repository.WalletLedgerEntryRepository
@@ -264,7 +266,7 @@ class AdminOrderControllerTest {
         val policy = OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("40.00") })
         val controller = AdminOrderController(
             mockk(), mockk(), mockk(), mockk(), mockk(), mockk(), mockk(), configRepository, doctorProjects,
-            accessService, policy, TravelGroundServicePricing(policy)
+            accessService, policy, travelGroundServicePricing()
         )
 
         controller.upsertConfig(authentication, UpsertConfigRequest(
@@ -333,7 +335,7 @@ class AdminOrderControllerTest {
             mockk(),
             accessService,
             policy,
-            TravelGroundServicePricing(policy)
+            travelGroundServicePricing()
         )
 
         val request = UpsertConfigRequest(
@@ -366,7 +368,7 @@ class AdminOrderControllerTest {
             orderService, logs, settlements, allocations, ledgers, wallets, issues,
             mockk<DoctorInstitutionProjectConfigRepository>(), mockk<DoctorProjectRepository>(),
             mockk<ManagementAccessService>(), OrderSplitRatePolicy(OrderSplitProperties()),
-            TravelGroundServicePricing(OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("40.00") }))
+            travelGroundServicePricing()
         )
         val settlement = SettlementEntity(
             id = 7, orderId = "order-1", currency = "USD", totalAmount = BigDecimal("8.00"), totalAmountMinor = 800
@@ -453,10 +455,14 @@ class AdminOrderControllerTest {
         val policy = OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("40.00") })
         val controller = AdminOrderController(
             mockk(), mockk(), mockk(), mockk(), mockk(), mockk(), mockk(), repository, doctorProjects,
-            accessService, policy, TravelGroundServicePricing(policy)
+            accessService, policy, travelGroundServicePricing()
         )
         return ConfigFixture(controller, repository, authentication, doctorProjects)
     }
+
+    private fun travelGroundServicePricing() = TravelGroundServicePricing(
+        TravelGroundServiceFeeRatePolicy(TravelGroundServicePricingProperties())
+    )
 
     private data class ConfigFixture(
         val controller: AdminOrderController,

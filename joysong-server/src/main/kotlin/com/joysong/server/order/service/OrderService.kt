@@ -37,7 +37,7 @@ import java.security.SecureRandom
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.UUID
-import com.joysong.server.payment.domain.Money
+import com.joysong.server.common.money.Money
 import com.joysong.server.refund.service.RefundExecutionService
 import com.joysong.server.notification.service.BusinessNotificationService
 
@@ -190,6 +190,7 @@ class OrderService(
             paymentFlow = TRAVEL_GROUND_SERVICE_PAYMENT_FLOW,
             medicalListPriceMinor = quote.medicalListPriceMinor,
             platformServiceRateBps = quote.platformServiceRateBps,
+            pricingPolicyRevision = quote.pricingPolicyRevision,
             travelGroundServiceFeeMinor = quote.travelGroundServiceFeeMinor,
             createdAt = now,
             projectId = project.id,

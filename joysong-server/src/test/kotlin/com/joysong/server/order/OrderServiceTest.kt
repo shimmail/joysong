@@ -2,6 +2,7 @@ package com.joysong.server.order
 
 import com.joysong.server.coupon.service.CouponService
 import com.joysong.server.config.OrderSplitProperties
+import com.joysong.server.config.TravelGroundServicePricingProperties
 import com.joysong.server.discover.repository.DoctorProjectRepository
 import com.joysong.server.discover.entity.DoctorProjectEntity
 import com.joysong.server.doctor.entity.DoctorEntity
@@ -25,6 +26,7 @@ import com.joysong.server.order.service.OrderService
 import com.joysong.server.order.service.OrderSplitRatePolicy
 import com.joysong.server.order.service.OrderStatusLogService
 import com.joysong.server.order.service.TravelGroundServicePricing
+import com.joysong.server.order.service.TravelGroundServiceFeeRatePolicy
 import com.joysong.server.notification.service.BusinessNotificationService
 import com.joysong.server.project.entity.ProjectEntity
 import com.joysong.server.project.repository.ProjectRepository
@@ -120,7 +122,7 @@ class OrderServiceTest {
             reviewService,
             institutionConsultantService = institutionConsultantService,
             doctorInstitutionRelationshipService = doctorInstitutionRelationshipService,
-            travelGroundServicePricing = TravelGroundServicePricing(OrderSplitRatePolicy(splitProperties)),
+            travelGroundServicePricing = travelGroundServicePricing(),
             businessNotificationService = businessNotificationService,
             orderBusinessNotificationDispatcher = orderBusinessNotificationDispatcher
         )
@@ -480,7 +482,7 @@ class OrderServiceTest {
     }
 
     @Test
-    fun `new order snapshots one USD travel ground service fee without quantity or coupon`() {
+    fun `new order persists and returns the complete immutable pricing quote`() {
         val request = CreateOrderRequest(
             projectId = "project-1",
             institutionProjectId = "inst-proj-1",
@@ -503,6 +505,7 @@ class OrderServiceTest {
         assertEquals(450_000L, saved.captured.medicalListPriceMinor)
         assertEquals(4_000, saved.captured.platformServiceRateBps)
         assertEquals(180_000L, saved.captured.travelGroundServiceFeeMinor)
+        assertEquals("travel-ground-service-rate:0.400000", saved.captured.pricingPolicyRevision)
         assertEquals(BigDecimal("1800.00"), saved.captured.price)
         assertEquals(180_000L, saved.captured.totalAmountMinor)
         assertEquals("USD", saved.captured.currency)
@@ -517,6 +520,11 @@ class OrderServiceTest {
         assertNull(result.consultantId)
         assertNull(result.consultantName)
         assertNull(result.consultantAvatar)
+        assertEquals("USD", result.currency)
+        assertEquals(450_000L, result.medicalListPriceMinor)
+        assertEquals(4_000, result.platformServiceRateBps)
+        assertEquals(180_000L, result.travelGroundServiceFeeMinor)
+        assertEquals("travel-ground-service-rate:0.400000", result.pricingPolicyRevision)
         assertEquals("doctor-1", result.doctorId)
         assertEquals("测试医生", result.doctorName)
         assertFalse(result.serviceActivated)
@@ -1518,11 +1526,15 @@ class OrderServiceTest {
         institutionConsultantService = institutionConsultantService,
         doctorInstitutionRelationshipService = doctorInstitutionRelationshipService,
         travelGroundServicePricing = TravelGroundServicePricing(
-            OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("40.00") })
+            TravelGroundServiceFeeRatePolicy(TravelGroundServicePricingProperties())
         ),
         businessNotificationService = businessNotificationService,
         orderBusinessNotificationDispatcher = orderBusinessNotificationDispatcher,
         refundExecutionService = refundExecutionService
+    )
+
+    private fun travelGroundServicePricing() = TravelGroundServicePricing(
+        TravelGroundServiceFeeRatePolicy(TravelGroundServicePricingProperties())
     )
 
     private fun proxiedNotificationDispatcher(

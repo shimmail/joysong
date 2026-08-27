@@ -779,7 +779,12 @@ class _AppShellState extends State<AppShell> {
     if (repository == null) {
       return;
     }
-    final controller = OrderDetailController(repository, orderId: order.id);
+    final controller = OrderDetailController(
+      repository,
+      orderId: order.id,
+      initialOrder: order,
+    );
+    unawaited(controller.load());
     await _contentNavigator.push<void>(
       MaterialPageRoute(
         builder: (_) => OrderDetailPage(

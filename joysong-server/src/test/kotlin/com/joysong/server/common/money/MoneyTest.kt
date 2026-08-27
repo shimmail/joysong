@@ -1,4 +1,4 @@
-package com.joysong.server.payment.domain
+package com.joysong.server.common.money
 
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows

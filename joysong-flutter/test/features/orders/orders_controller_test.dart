@@ -8,6 +8,30 @@ import 'package:joysong_flutter/features/orders/presentation/orders_controller.d
 import 'order_test_fixtures.dart';
 
 void main() {
+  test('detail exposes a matching initial order before refresh completes', () {
+    final initial = sampleOrder(status: OrderStatus.serviceActive);
+
+    final controller = OrderDetailController(
+      FakeOrdersRepository(),
+      orderId: initial.id,
+      initialOrder: initial,
+    );
+
+    expect(controller.order, same(initial));
+    expect(controller.order?.status, OrderStatus.serviceActive);
+  });
+
+  test('detail rejects an initial order for a different order id', () {
+    expect(
+      () => OrderDetailController(
+        FakeOrdersRepository(),
+        orderId: 'order-1',
+        initialOrder: sampleOrder(id: 'order-2'),
+      ),
+      throwsArgumentError,
+    );
+  });
+
   test('orders controller forwards status and offset pagination', () async {
     final repository = FakeOrdersRepository()
       ..orders = [

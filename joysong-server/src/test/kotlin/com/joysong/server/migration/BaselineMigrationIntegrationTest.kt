@@ -4,6 +4,8 @@ import com.joysong.server.support.LegacyMigrationTestResources
 import com.joysong.server.support.WorktreeTestDatabase
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -12,6 +14,7 @@ import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabas
 import org.springframework.boot.test.autoconfigure.jdbc.JdbcTest
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.dao.DataAccessException
 import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.testcontainers.containers.MySQLContainer
 import org.testcontainers.junit.jupiter.Container
@@ -39,7 +42,7 @@ class BaselineMigrationIntegrationTest {
     lateinit var legacyMigrationDirectory: Path
 
     @Test
-    fun `fresh database applies B33 baseline and V34 admin guard`() {
+    fun `fresh database applies B33 baseline then V34 and V35`() {
         val history = jdbcTemplate.query(
             """
             SELECT version, type, script
@@ -53,6 +56,7 @@ class BaselineMigrationIntegrationTest {
             listOf(
                 Triple("33", "SQL_BASELINE", "B33__current_schema.sql"),
                 Triple("34", "SQL", "V34__harden_admin_account_lifecycle.sql"),
+                Triple("35", "SQL", "V35__snapshot_order_pricing_policy_revision.sql"),
             ),
             history
         )
@@ -66,7 +70,7 @@ class BaselineMigrationIntegrationTest {
     }
 
     @Test
-    fun `B33 plus V34 schema matches legacy migrations through V34`() {
+    fun `B33 through V35 schema matches legacy migrations and backfills pricing revisions`() {
         WorktreeTestDatabase.validateAndPrint(legacyMysql)
         val legacyJdbc = JdbcTemplate(
             DriverManagerDataSource(legacyMysql.jdbcUrl, legacyMysql.username, legacyMysql.password)
@@ -74,15 +78,55 @@ class BaselineMigrationIntegrationTest {
 
         val legacyMigrationLocation = LegacyMigrationTestResources.prepare(legacyMigrationDirectory)
         migrateLegacy(legacyMigrationLocation, "32")
+        migrateLegacy("classpath:db/migration", "34")
+        legacyJdbc.update(
+            """
+            INSERT INTO orders (id, user_id, project_name, price, status, payment_flow)
+            VALUES ('legacy-medical', 'user-1', 'Medical', 100.00, 'PENDING_PAYMENT', 'LEGACY_MEDICAL')
+            """.trimIndent()
+        )
+        legacyJdbc.update(
+            """
+            INSERT INTO orders (
+                id, user_id, project_name, price, status, payment_flow,
+                medical_list_price_minor, platform_service_rate_bps, travel_ground_service_fee_minor
+            ) VALUES (
+                'legacy-travel', 'user-1', 'Travel', 125.00, 'PENDING_SERVICE_FEE',
+                'TRAVEL_GROUND_SERVICE_ONLY', 100000, 1250, 12500
+            )
+            """.trimIndent()
+        )
         migrateLegacy("classpath:db/migration")
 
         assertEquals(
-            listOf("26", "27", "28", "29", "30", "31", "32", "32.1", "32.2", "33", "34"),
+            listOf("26", "27", "28", "29", "30", "31", "32", "32.1", "32.2", "33", "34", "35"),
             legacyJdbc.queryForList(
                 "SELECT version FROM flyway_schema_history WHERE success = 1 AND version IS NOT NULL ORDER BY installed_rank",
                 String::class.java
             )
         )
+        assertEquals(
+            "travel-ground-service-rate:0.125000",
+            legacyJdbc.queryForObject(
+                "SELECT pricing_policy_revision FROM orders WHERE id = 'legacy-travel'",
+                String::class.java
+            )
+        )
+        assertNull(
+            legacyJdbc.queryForObject(
+                "SELECT pricing_policy_revision FROM orders WHERE id = 'legacy-medical'",
+                String::class.java
+            )
+        )
+        assertThrows(DataAccessException::class.java) {
+            legacyJdbc.update(
+                """
+                INSERT INTO orders (id, user_id, project_name, price, status, payment_flow)
+                VALUES ('invalid-travel', 'user-1', 'Travel', 125.00, 'PENDING_SERVICE_FEE',
+                        'TRAVEL_GROUND_SERVICE_ONLY')
+                """.trimIndent()
+            )
+        }
         assertEquals(schemaSnapshot(legacyJdbc), schemaSnapshot(jdbcTemplate))
     }
 

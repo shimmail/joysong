@@ -5,7 +5,7 @@ import com.joysong.server.settlement.entity.SettlementAllocationEntity
 import com.joysong.server.settlement.entity.SettlementEntity
 import com.joysong.server.wallet.entity.WalletEntity
 import com.joysong.server.wallet.entity.WalletLedgerEntryEntity
-import com.joysong.server.payment.domain.Money
+import com.joysong.server.common.money.Money
 import java.time.LocalDateTime
 
 data class MoneyAmountDto(val minor: Long, val currency: String)

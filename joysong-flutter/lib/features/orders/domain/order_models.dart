@@ -102,6 +102,7 @@ final class Order {
     this.medicalListPriceMinor,
     this.platformServiceRateBps,
     this.travelGroundServiceFeeMinor,
+    this.pricingPolicyRevision,
     this.consultantBound = false,
     this.serviceActivated = false,
     this.consultantDetailsVisible = false,
@@ -143,6 +144,7 @@ final class Order {
   final int? medicalListPriceMinor;
   final int? platformServiceRateBps;
   final int? travelGroundServiceFeeMinor;
+  final String? pricingPolicyRevision;
   final bool consultantBound;
   final bool serviceActivated;
   final bool consultantDetailsVisible;
@@ -242,6 +244,7 @@ final class Order {
         medicalListPriceMinor: medicalListPriceMinor,
         platformServiceRateBps: platformServiceRateBps,
         travelGroundServiceFeeMinor: travelGroundServiceFeeMinor,
+        pricingPolicyRevision: pricingPolicyRevision,
         consultantBound: consultantBound,
         serviceActivated: serviceActivated,
         consultantDetailsVisible: consultantDetailsVisible,
@@ -291,6 +294,7 @@ final class Order {
       platformServiceRateBps: nullableInt(map['platformServiceRateBps']),
       travelGroundServiceFeeMinor:
           nullableInt(map['travelGroundServiceFeeMinor']),
+      pricingPolicyRevision: nullableString(map['pricingPolicyRevision']),
       consultantBound: map['consultantBound'] == true,
       serviceActivated: map['serviceActivated'] == true,
       consultantDetailsVisible: map['consultantDetailsVisible'] == true,

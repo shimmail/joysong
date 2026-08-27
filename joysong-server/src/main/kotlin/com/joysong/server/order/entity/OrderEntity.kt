@@ -39,6 +39,7 @@ data class OrderEntity(
     @Column(name = "payment_flow", nullable = false, length = 40) val paymentFlow: String = "LEGACY_MEDICAL",
     @Column(name = "medical_list_price_minor") val medicalListPriceMinor: Long? = null,
     @Column(name = "platform_service_rate_bps") val platformServiceRateBps: Int? = null,
+    @Column(name = "pricing_policy_revision", length = 80) val pricingPolicyRevision: String? = null,
     @Column(name = "travel_ground_service_fee_minor") val travelGroundServiceFeeMinor: Long? = null,
     @Column(name = "created_at") val createdAt: LocalDateTime = LocalDateTime.now(),
     @Column(name = "appointment_time") val appointmentTime: LocalDateTime? = null,

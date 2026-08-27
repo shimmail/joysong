@@ -112,6 +112,8 @@ aliyun:
 
 payment:
   alipay-plus:
+    # Requires the dev profile and simulated gateway as independent safety gates.
+    auto-pay-on-order-create-enabled: ${ALIPAY_PLUS_AUTO_PAY_ON_ORDER_CREATE_ENABLED:false}
     # Development-only simulated gateway. The prod profile overrides this to false.
     simulated-enabled: ${ALIPAY_PLUS_SIMULATED_ENABLED:false}
   stripe:
@@ -139,6 +141,9 @@ order:
   split:
     platform-rate: 40.00    # 平台服务费比例
     institution-rate: 40.00  # 机构默认分成比例
+  pricing:
+    travel-ground-service:
+      service-fee-rate: 40.00  # 出行地接服务费比例
 
 app:
   project-change:
