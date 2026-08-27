@@ -269,6 +269,22 @@ class AuthenticationServiceTest {
     }
 
     @Test
+    fun `loginAdmin rejects a passwordless administrator even when the dummy comparison matches`() {
+        val admin = adminUser().copy(passwordHash = "")
+        every { userRepository.findByPhone(admin.phone!!) } returns Optional.of(admin)
+        every { passwordEncoder.matches("joysong-invalid-admin-password", any()) } returns true
+        every { refreshTokenService.issue(admin.id, admin.phone!!, "ADMIN") } returns adminTokens()
+
+        val error = assertThrows(BadCredentialsException::class.java) {
+            service.loginAdmin(admin.phone!!, "joysong-invalid-admin-password")
+        }
+
+        assertEquals("管理员账号或密码错误", error.message)
+        verify(exactly = 1) { passwordEncoder.matches("joysong-invalid-admin-password", any()) }
+        verify(exactly = 0) { refreshTokenService.issue(any(), any(), any()) }
+    }
+
+    @Test
     fun `loginAdmin rejects an international administrator after a dummy password comparison`() {
         val internationalAdmin = adminUser().copy(phone = "+8613800000000")
         every { userRepository.findByPhone(internationalAdmin.phone!!) } returns Optional.of(internationalAdmin)

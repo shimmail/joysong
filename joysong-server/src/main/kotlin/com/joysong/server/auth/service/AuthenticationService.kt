@@ -105,10 +105,11 @@ class AuthenticationService(
         val normalizedPhone = phone.trim()
         val validAdminPhone = ADMIN_PHONE.matches(normalizedPhone)
         val user = if (validAdminPhone) userRepository.findByPhone(normalizedPhone).orElse(null) else null
-        val passwordHash = user?.passwordHash?.takeIf { it.isNotBlank() } ?: dummyPasswordHash
+        val storedPasswordHash = user?.passwordHash?.takeIf { it.isNotBlank() }
+        val passwordHash = storedPasswordHash ?: dummyPasswordHash
         val passwordMatches = passwordEncoder.matches(password, passwordHash)
 
-        if (!validAdminPhone || user == null || user.role != "ADMIN" || !passwordMatches) {
+        if (!validAdminPhone || user == null || user.role != "ADMIN" || storedPasswordHash == null || !passwordMatches) {
             throw BadCredentialsException("管理员账号或密码错误")
         }
 
