@@ -139,6 +139,9 @@ order:
   split:
     platform-rate: 40.00    # 平台服务费比例
     institution-rate: 40.00  # 机构默认分成比例
+  pricing:
+    travel-ground-service:
+      service-fee-rate: 40.00  # 出行地接服务费比例
 
 app:
   project-change:

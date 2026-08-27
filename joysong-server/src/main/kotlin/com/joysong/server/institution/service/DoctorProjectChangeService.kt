@@ -11,7 +11,7 @@ import com.joysong.server.order.repository.DoctorInstitutionProjectConfigReposit
 import com.joysong.server.order.entity.DoctorInstitutionProjectConfigEntity
 import com.joysong.server.order.service.OrderSplitRatePolicy
 import com.joysong.server.order.service.TravelGroundServicePricing
-import com.joysong.server.payment.domain.Money
+import com.joysong.server.common.money.Money
 import com.joysong.server.project.entity.ProjectEntity
 import com.joysong.server.project.service.InstitutionProjectPayload
 import com.joysong.server.project.service.InstitutionProjectPayloadPolicy

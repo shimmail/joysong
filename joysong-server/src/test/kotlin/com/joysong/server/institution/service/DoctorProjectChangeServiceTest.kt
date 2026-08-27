@@ -30,7 +30,9 @@ import java.time.Instant
 import java.util.TimeZone
 import com.joysong.server.order.service.OrderSplitRatePolicy
 import com.joysong.server.order.service.TravelGroundServicePricing
+import com.joysong.server.order.service.TravelGroundServiceFeeRatePolicy
 import com.joysong.server.config.OrderSplitProperties
+import com.joysong.server.config.TravelGroundServicePricingProperties
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import org.springframework.cache.CacheManager
 import org.springframework.cache.Cache
@@ -46,7 +48,7 @@ class DoctorProjectChangeServiceTest {
     private val cacheManager = mockk<CacheManager>(relaxed = true)
     private val splitRatePolicy = OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("10.00"); institutionRate = BigDecimal("40.00") })
     private val travelGroundServicePricing = TravelGroundServicePricing(
-        OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("40.00") })
+        TravelGroundServiceFeeRatePolicy(TravelGroundServicePricingProperties())
     )
     private val payloadPolicy = spyk(InstitutionProjectPayloadPolicy())
     private val objectMapper = jacksonObjectMapper()

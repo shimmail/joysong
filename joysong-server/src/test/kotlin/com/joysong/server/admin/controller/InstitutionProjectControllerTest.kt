@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.joysong.server.common.GlobalExceptionHandler
 import com.joysong.server.config.OrderSplitProperties
+import com.joysong.server.config.TravelGroundServicePricingProperties
 import com.joysong.server.discover.entity.DoctorProjectEntity
 import com.joysong.server.discover.repository.DoctorProjectRepository
 import com.joysong.server.doctor.entity.DoctorEntity
@@ -26,6 +27,7 @@ import com.joysong.server.order.repository.DoctorInstitutionProjectConfigReposit
 import com.joysong.server.order.entity.DoctorInstitutionProjectConfigEntity
 import com.joysong.server.order.service.OrderSplitRatePolicy
 import com.joysong.server.order.service.TravelGroundServicePricing
+import com.joysong.server.order.service.TravelGroundServiceFeeRatePolicy
 import com.joysong.server.order.repository.OrderRepository
 import com.joysong.server.project.entity.ProjectEntity
 import com.joysong.server.project.repository.ProjectRepository
@@ -852,7 +854,7 @@ class InstitutionProjectControllerTest {
         private val access = mockk<ManagementAccessService>()
         val jdbc = mockk<JdbcTemplate>(relaxed = true)
         private val travelGroundServicePricing = TravelGroundServicePricing(
-            OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("40.00") })
+            TravelGroundServiceFeeRatePolicy(TravelGroundServicePricingProperties())
         )
         val cacheManager = ConcurrentMapCacheManager("discover", "home", "projects")
         val controller = InstitutionProjectController(

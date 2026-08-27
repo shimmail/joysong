@@ -37,7 +37,7 @@ import java.security.SecureRandom
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.UUID
-import com.joysong.server.payment.domain.Money
+import com.joysong.server.common.money.Money
 import com.joysong.server.refund.service.RefundExecutionService
 import com.joysong.server.notification.service.BusinessNotificationService
 

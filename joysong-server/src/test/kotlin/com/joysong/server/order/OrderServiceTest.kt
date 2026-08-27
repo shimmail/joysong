@@ -2,6 +2,7 @@ package com.joysong.server.order
 
 import com.joysong.server.coupon.service.CouponService
 import com.joysong.server.config.OrderSplitProperties
+import com.joysong.server.config.TravelGroundServicePricingProperties
 import com.joysong.server.discover.repository.DoctorProjectRepository
 import com.joysong.server.discover.entity.DoctorProjectEntity
 import com.joysong.server.doctor.entity.DoctorEntity
@@ -25,6 +26,7 @@ import com.joysong.server.order.service.OrderService
 import com.joysong.server.order.service.OrderSplitRatePolicy
 import com.joysong.server.order.service.OrderStatusLogService
 import com.joysong.server.order.service.TravelGroundServicePricing
+import com.joysong.server.order.service.TravelGroundServiceFeeRatePolicy
 import com.joysong.server.notification.service.BusinessNotificationService
 import com.joysong.server.project.entity.ProjectEntity
 import com.joysong.server.project.repository.ProjectRepository
@@ -120,7 +122,7 @@ class OrderServiceTest {
             reviewService,
             institutionConsultantService = institutionConsultantService,
             doctorInstitutionRelationshipService = doctorInstitutionRelationshipService,
-            travelGroundServicePricing = TravelGroundServicePricing(OrderSplitRatePolicy(splitProperties)),
+            travelGroundServicePricing = travelGroundServicePricing(),
             businessNotificationService = businessNotificationService,
             orderBusinessNotificationDispatcher = orderBusinessNotificationDispatcher
         )
@@ -1518,11 +1520,15 @@ class OrderServiceTest {
         institutionConsultantService = institutionConsultantService,
         doctorInstitutionRelationshipService = doctorInstitutionRelationshipService,
         travelGroundServicePricing = TravelGroundServicePricing(
-            OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("40.00") })
+            TravelGroundServiceFeeRatePolicy(TravelGroundServicePricingProperties())
         ),
         businessNotificationService = businessNotificationService,
         orderBusinessNotificationDispatcher = orderBusinessNotificationDispatcher,
         refundExecutionService = refundExecutionService
+    )
+
+    private fun travelGroundServicePricing() = TravelGroundServicePricing(
+        TravelGroundServiceFeeRatePolicy(TravelGroundServicePricingProperties())
     )
 
     private fun proxiedNotificationDispatcher(

@@ -4,7 +4,7 @@ import com.joysong.server.order.dto.OrderStatusEnum
 import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.repository.OrderRepository
 import com.joysong.server.order.service.OrderStatusLogService
-import com.joysong.server.payment.domain.Money
+import com.joysong.server.common.money.Money
 import com.joysong.server.payment.domain.PaymentProvider
 import com.joysong.server.payment.domain.PaymentCompensation
 import com.joysong.server.payment.domain.PaymentStatus

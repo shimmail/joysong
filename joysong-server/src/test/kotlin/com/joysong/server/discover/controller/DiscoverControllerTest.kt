@@ -124,9 +124,9 @@ class DiscoverControllerTest {
     @Test
     fun `quote uses each selected doctor price without a medical config`() {
         every { orderService.quoteTravelGroundService("doctor-a", "ip-1") } returns
-            TravelGroundServiceQuote("USD", 399_900, 4000, 159_960)
+            TravelGroundServiceQuote("USD", 399_900, 4000, 159_960, "travel-ground-service-rate:0.400000")
         every { orderService.quoteTravelGroundService("doctor-b", "ip-1") } returns
-            TravelGroundServiceQuote("USD", 429_900, 4000, 171_960)
+            TravelGroundServiceQuote("USD", 429_900, 4000, 171_960, "travel-ground-service-rate:0.400000")
 
         assertEquals(159_960L, controller.getTravelGroundServiceQuote("doctor-a", "ip-1").data!!.travelGroundServiceFeeMinor)
         assertEquals(171_960L, controller.getTravelGroundServiceQuote("doctor-b", "ip-1").data!!.travelGroundServiceFeeMinor)
