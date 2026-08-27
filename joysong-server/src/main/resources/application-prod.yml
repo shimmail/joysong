@@ -42,6 +42,9 @@ security:
     log-for-dev: false
 
 payment:
+  development:
+    # Never auto-complete newly created orders in production.
+    order-auto-pay-enabled: false
   alipay-plus:
     # Never allow simulated money movement in production.
     simulated-enabled: false

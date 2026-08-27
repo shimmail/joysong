@@ -1,6 +1,7 @@
 package com.joysong.server.payment.service
 
 import com.joysong.server.order.dto.OrderStatusEnum
+import com.joysong.server.order.application.DevelopmentOrderAutoPaymentService
 import com.joysong.server.order.repository.OrderRepository
 import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.service.OrderStatusLogService
@@ -13,6 +14,7 @@ import com.joysong.server.payment.entity.PaymentEntity
 import com.joysong.server.payment.provider.PaymentGateway
 import com.joysong.server.payment.provider.PaymentGatewayRegistry
 import com.joysong.server.payment.provider.PaymentProviderException
+import com.joysong.server.payment.provider.SimulatedAlipayPlusPaymentGateway
 import com.joysong.server.payment.provider.ProviderCreatePaymentRequest
 import com.joysong.server.payment.provider.ProviderPaymentResult
 import com.joysong.server.payment.repository.PaymentRepository
@@ -53,6 +55,70 @@ class PaymentOrchestrationTest {
     private val businessNotificationService = mockk<BusinessNotificationService>(relaxed = true)
     private val persistence = mockk<PaymentPersistenceService>()
     private val gateway = mockk<PaymentGateway>()
+
+    @Test
+    fun `development adapter creates one succeeded payment and activates the order idempotently`() {
+        val repositories = persistenceRepositories()
+        val payments = mutableListOf<PaymentEntity>()
+        var orderState = travelOrder()
+        every { repositories.payment.findByUserIdAndIdempotencyKey("user-1", any()) } answers {
+            val key = secondArg<String>()
+            payments.firstOrNull { it.userId == "user-1" && it.idempotencyKey == key }
+        }
+        every { repositories.order.findByIdForUpdate("order-1") } answers { orderState }
+        every {
+            repositories.payment.findFirstByOrderIdAndPaymentTypeAndStatusInOrderByCreatedAtDesc(
+                "order-1",
+                PaymentType.TRAVEL_GROUND_SERVICE_FEE.name,
+                PaymentStatus.successfulDatabaseValues
+            )
+        } answers {
+            payments.lastOrNull { it.status in PaymentStatus.successfulDatabaseValues }
+        }
+        every {
+            repositories.payment.findFirstByOrderIdAndPaymentTypeAndStatusInOrderByCreatedAtAsc(
+                "order-1",
+                PaymentType.TRAVEL_GROUND_SERVICE_FEE.name,
+                any()
+            )
+        } answers {
+            val statuses = thirdArg<Collection<String>>()
+            payments.firstOrNull { it.status in statuses }
+        }
+        every { repositories.payment.saveAndFlush(any()) } answers {
+            firstArg<PaymentEntity>().also(payments::add)
+        }
+        every { repositories.payment.findByIdForUpdate(any()) } answers {
+            payments.firstOrNull { it.id == firstArg<String>() }
+        }
+        every { repositories.payment.save(any()) } answers {
+            firstArg<PaymentEntity>().also { updated ->
+                val index = payments.indexOfFirst { it.id == updated.id }
+                if (index >= 0) payments[index] = updated else payments.add(updated)
+            }
+        }
+        every { repositories.order.findByIdIncludeDeletedForUpdate("order-1") } answers { orderState }
+        every { repositories.order.save(any()) } answers {
+            firstArg<OrderEntity>().also { orderState = it }
+        }
+        every { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) } returns Unit
+        val adapter = DevelopmentOrderAutoPaymentService(
+            travelService(repositories, SimulatedAlipayPlusPaymentGateway())
+        )
+
+        val first = adapter.attempt("order-1", "user-1")
+        val replay = adapter.attempt("order-1", "user-1")
+
+        assertTrue(first.successful)
+        assertTrue(replay.successful)
+        assertEquals(1, payments.size)
+        assertEquals(PaymentStatus.SUCCEEDED.name, payments.single().status)
+        assertEquals("dev-order-autopay-order-1", payments.single().idempotencyKey)
+        assertEquals(OrderStatusEnum.SERVICE_ACTIVE.value, orderState.status)
+        assertNotNull(orderState.serviceActivatedAt)
+        verify(exactly = 1) { repositories.payment.saveAndFlush(any()) }
+        verify(exactly = 1) { repositories.order.save(any()) }
+    }
 
     @Test
     fun `provider create uses payment scoped stable idempotency key`() {

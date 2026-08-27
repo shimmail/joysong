@@ -1,6 +1,8 @@
 package com.joysong.server.order.controller
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.joysong.server.order.application.DevelopmentOrderAutoPaymentResult
+import com.joysong.server.order.application.DevelopmentOrderAutoPaymentService
 import com.joysong.server.order.dto.CreateOrderRequest
 import com.joysong.server.order.dto.OrderResponse
 import com.joysong.server.order.entity.OrderEntity
@@ -22,12 +24,15 @@ import com.joysong.server.wallet.dto.ConsumerSettlementDto
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import io.mockk.verifyOrder
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.springframework.http.MediaType
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.security.authentication.TestingAuthenticationToken
 import org.springframework.security.core.Authentication
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
@@ -38,6 +43,89 @@ import java.math.BigDecimal
 import java.time.LocalDateTime
 
 class OrderControllerTest {
+    @Test
+    fun `enabled development auto payment re-reads the activated order after creation`() {
+        val authentication = mockk<Authentication>()
+        val orders = mockk<OrderService>()
+        val settlements = mockk<SettlementRepository>()
+        val autoPayment = mockk<DevelopmentOrderAutoPaymentService>()
+        val created = OrderResponse.from(serviceOrder("PENDING_SERVICE_FEE"))
+        val activated = serviceOrder("SERVICE_ACTIVE", LocalDateTime.now())
+        every { authentication.principal } returns "user-1"
+        every { orders.createOrder("user-1", any()) } returns created
+        every { autoPayment.attempt("order-1", "user-1") } returns DevelopmentOrderAutoPaymentResult(
+            successful = true,
+            payment = serviceFeePayment().copy(status = PaymentStatus.SUCCEEDED.name)
+        )
+        every { orders.getOrderById("order-1", "user-1") } returns activated
+
+        val response = controller(
+            orders,
+            settlements,
+            developmentAutoPaymentService = autoPayment
+        ).createOrder(
+            authentication,
+            CreateOrderRequest("project-1", "ip-1", "doctor-1", "consultant-1")
+        )
+
+        assertEquals(200, response.code)
+        assertEquals("SERVICE_ACTIVE", (response.data as OrderResponse).status)
+        verifyOrder {
+            orders.createOrder("user-1", any())
+            autoPayment.attempt("order-1", "user-1")
+            orders.getOrderById("order-1", "user-1")
+        }
+    }
+
+    @Test
+    fun `failed development auto payment still re-reads and returns the pending order`() {
+        val authentication = mockk<Authentication>()
+        val orders = mockk<OrderService>()
+        val settlements = mockk<SettlementRepository>()
+        val autoPayment = mockk<DevelopmentOrderAutoPaymentService>()
+        val pending = serviceOrder("PENDING_SERVICE_FEE")
+        every { authentication.principal } returns "user-1"
+        every { orders.createOrder("user-1", any()) } returns OrderResponse.from(pending)
+        every { autoPayment.attempt("order-1", "user-1") } returns DevelopmentOrderAutoPaymentResult(
+            successful = false,
+            failureCode = "PROVIDER_TIMEOUT",
+            outcomeUnknown = true
+        )
+        every { orders.getOrderById("order-1", "user-1") } returns pending
+
+        val response = controller(
+            orders,
+            settlements,
+            developmentAutoPaymentService = autoPayment
+        ).createOrder(
+            authentication,
+            CreateOrderRequest("project-1", "ip-1", "doctor-1", "consultant-1")
+        )
+
+        assertEquals(200, response.code)
+        assertEquals("PENDING_SERVICE_FEE", (response.data as OrderResponse).status)
+        verify(exactly = 1) { autoPayment.attempt("order-1", "user-1") }
+        verify(exactly = 1) { orders.getOrderById("order-1", "user-1") }
+    }
+
+    @Test
+    fun `order creation keeps the original response when development auto payment bean is absent`() {
+        val authentication = mockk<Authentication>()
+        val orders = mockk<OrderService>()
+        val settlements = mockk<SettlementRepository>()
+        val created = OrderResponse.from(serviceOrder("PENDING_SERVICE_FEE"))
+        every { authentication.principal } returns "user-1"
+        every { orders.createOrder("user-1", any()) } returns created
+
+        val response = controller(orders, settlements).createOrder(
+            authentication,
+            CreateOrderRequest("project-1", "ip-1", "doctor-1", "consultant-1")
+        )
+
+        assertSame(created, response.data)
+        verify(exactly = 0) { orders.getOrderById(any(), any()) }
+    }
+
     @Test
     fun `unavailable service fee provider returns HTTP 503 with matching error body`() {
         val orders = mockk<OrderService>()
@@ -368,10 +456,22 @@ class OrderControllerTest {
         orders: OrderService,
         settlements: SettlementRepository,
         payments: PaymentRepository = mockk(),
-        paymentService: PaymentService = mockk()
-    ) = OrderController(
-        orders, paymentService, mockk<RefundService>(), mockk<ReviewService>(), mockk<OrderStatusLogService>(), settlements, payments
-    )
+        paymentService: PaymentService = mockk(),
+        developmentAutoPaymentService: DevelopmentOrderAutoPaymentService? = null
+    ): OrderController {
+        val provider = mockk<ObjectProvider<DevelopmentOrderAutoPaymentService>>()
+        every { provider.getIfAvailable() } returns developmentAutoPaymentService
+        return OrderController(
+            orders,
+            paymentService,
+            mockk<RefundService>(),
+            mockk<ReviewService>(),
+            mockk<OrderStatusLogService>(),
+            settlements,
+            payments,
+            provider
+        )
+    }
 
     private fun serviceFeePayment() = PaymentEntity(
         id = "payment-1",

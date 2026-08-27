@@ -111,6 +111,9 @@ aliyun:
     template-code: ${SMS_TEMPLATE_CODE:}
 
 payment:
+  development:
+    # Requires the dev profile and simulated Alipay Plus gateway as independent safety gates.
+    order-auto-pay-enabled: ${DEVELOPMENT_ORDER_AUTO_PAYMENT_ENABLED:false}
   alipay-plus:
     # Development-only simulated gateway. The prod profile overrides this to false.
     simulated-enabled: ${ALIPAY_PLUS_SIMULATED_ENABLED:false}

@@ -2,6 +2,7 @@ package com.joysong.server.order.controller
 
 import com.joysong.server.common.BaseResponse
 import com.joysong.server.common.apiSlice
+import com.joysong.server.order.application.DevelopmentOrderAutoPaymentService
 import com.joysong.server.order.dto.CreateOrderRequest
 import com.joysong.server.order.dto.OrderResponse
 import com.joysong.server.order.service.OrderService
@@ -18,6 +19,7 @@ import com.joysong.server.payment.repository.PaymentRepository
 import com.joysong.server.review.dto.ReviewResponse
 import com.joysong.server.review.service.ReviewService
 import org.springframework.security.core.Authentication
+import org.springframework.beans.factory.ObjectProvider
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
@@ -39,7 +41,8 @@ class OrderController(
     private val reviewService: ReviewService,
     private val orderStatusLogService: OrderStatusLogService,
     private val settlementRepository: SettlementRepository,
-    private val paymentRepository: PaymentRepository
+    private val paymentRepository: PaymentRepository,
+    private val developmentOrderAutoPaymentServiceProvider: ObjectProvider<DevelopmentOrderAutoPaymentService>
 ) {
 
     /** 创建订单 */
@@ -50,8 +53,14 @@ class OrderController(
     ): BaseResponse<*> {
         val userId = authentication.principal as String
         return try {
-            val order = orderService.createOrder(userId, request)
-            BaseResponse.success(order)
+            val created = orderService.createOrder(userId, request)
+            val autoPayment = developmentOrderAutoPaymentServiceProvider.getIfAvailable()
+                ?: return BaseResponse.success(created)
+            autoPayment.attempt(created.id, userId)
+            val canonical = orderService.getOrderById(created.id, userId)
+                ?.let(OrderResponse::from)
+                ?: created
+            BaseResponse.success(canonical)
         } catch (e: IllegalArgumentException) {
             BaseResponse.error<Any>(e.message ?: "创建订单失败")
         }

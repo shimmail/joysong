@@ -18,6 +18,9 @@ security:
     log-for-dev: true
 
 payment:
+  development:
+    # Auto-completes newly created booking orders through the real local payment state machine.
+    order-auto-pay-enabled: true
   alipay-plus:
     # Lets the full payment/refund journey run locally without a merchant account.
     simulated-enabled: true
