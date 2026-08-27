@@ -7,10 +7,11 @@ start
 
 |平台|
 :读取所选医生的机构项目价格\ndoctor_projects.price（USD）;
+:从 order.pricing.travel-ground-service.service-fee-rate\n读取独立地接服务费率；
 :计算旅游地接服务费\nfeeMinor = roundHalfUp(\ndoctorPriceMinor × 4000 / 10000);
 :校验顾问属于该医院且状态有效;
 :创建订单并立即绑定顾问;
-:固化 USD、套餐金额、平台比例和服务费快照;
+:固化 currency、medicalListPriceMinor、\nplatformServiceRateBps（兼容字段）、\ntravelGroundServiceFeeMinor 和 pricingPolicyRevision;
 :订单进入 PENDING_SERVICE_FEE;
 :写入 ORDER_CREATED 系统消息\n通知用户与绑定顾问，订单详情目标;
 :确定订单支付截止时间\norderPaymentDeadline = createdAt + 30 分钟;
@@ -18,12 +19,29 @@ start
 
 note right
 不包含数量、优惠券或其他医疗收费。
+地接服务费率不读取 order.split；
+pricingPolicyRevision 是不可变政策快照。
 支付前仅显示“已绑定顾问”的权限状态，
 不返回顾问履约资料或私人联系方式。
 end note
 
+|平台|
+if (dev & !prod，且 simulated-enabled 与\nauto-pay-on-order-create-enabled 均为 true?) then (是)
+  :订单创建事务提交后调用真实 PaymentService / 持久化链路;
+  :使用稳定幂等键 dev-order-autopay-{orderId}\n向 dev 模拟 Alipay+ gateway 发起支付;
+  :无论成功、失败、未知或补偿成功，\n都重新读取规范订单;
+  if (规范订单已进入 SERVICE_ACTIVE?) then (是)
+    :向 Flutter 返回已激活的规范订单;
+  else (否)
+    :失败、未知或补偿成功不伪装激活；\n订单保持 PENDING_SERVICE_FEE / 可恢复状态;
+  endif
+else (否：base / prod 或任一开关关闭)
+  :不执行创建后自动支付;
+endif
+
 |海外用户|
-:可在境内或境外发起支付;
+if (规范订单仍为 PENDING_SERVICE_FEE?) then (是)
+  :可在境内或境外手动发起支付;
 
 |平台|
 if (Alipay+ merchant / gateway 可用?) then (是)
@@ -89,6 +107,9 @@ else (否)
   :订单保持 PENDING_SERVICE_FEE，零本地支付成功记录;
   stop
 endif
+else (否：仅 dev 自动支付已激活)
+  :Flutter 立即打开返回的 OrderDetailPage，\n同时后台刷新规范详情;
+endif
 
 note right
 不检查 GPS、IP 或国家；浏览器回跳不能激活服务。
@@ -100,8 +121,11 @@ note right
 Alipay+ 收银台可能更早失效，仍可在订单截止前重试。
 Alipay+ 商户参数未就绪时，生产支付和退款联调仍阻塞，
 不得伪造成功。
-仅 dev profile + 显式开关可装配模拟网关：用户仍点击支付，
-网关立即返回带 simulated-alipay-plus- 标识的成功结果且不跳转；
+生产分支始终要求真实 provider，保留用户手动支付路径；
+绝不模拟成功或创建后自动成功。
+仅 dev & !prod 且两个独立开关同时开启时才自动支付；
+单独开启 simulated-enabled 只装配模拟网关，用户仍可手动点击支付。
+模拟结果带 simulated-alipay-plus- 标识且不跳转；
 模拟退款只接受模拟支付号，prod profile 强制禁用。
 end note
 

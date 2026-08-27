@@ -392,7 +392,7 @@ Agent 调试仅使用受控、脱敏的结构化日志；不存在 traces API，
 | GET | `/orders/{id}` | 订单详情；服务端按状态裁剪顾问信息 |
 | POST | `/orders/{id}/cancel` | 取消尚未支付订单；支付尝试过期不会调用它 |
 
-`doctor_projects.price` / 所选 `DoctorProjectEntity.price` 是当前报价和新订单唯一的运行时价格依据。报价固定返回 `currency`、`medicalListPriceMinor`、`platformServiceRateBps`、`travelGroundServiceFeeMinor`；其中 `medicalListPriceMinor` 是兼容字段名及新订单价格快照，不是另一套需要维护的医疗套餐价格。当前 40.00% 策略下，服务费按 `doctorPriceMinor * 4000 / 10000` HALF_UP 舍入，不乘数量、不应用优惠券。
+`doctor_projects.price` / 所选 `DoctorProjectEntity.price` 是当前报价和新订单唯一的运行时价格依据。报价固定返回 `currency`、`medicalListPriceMinor`、`platformServiceRateBps`、`travelGroundServiceFeeMinor`、`pricingPolicyRevision`；其中 `medicalListPriceMinor` 是兼容字段名及新订单价格快照，不是另一套需要维护的医疗套餐价格。地接服务费率由 `order.pricing.travel-ground-service.service-fee-rate` 独立提供，不读取 `order.split`；`platformServiceRateBps` 是兼容字段。当前 40.00% 策略下，服务费按 `doctorPriceMinor * 4000 / 10000` HALF_UP 舍入，不乘数量、不应用优惠券。
 
 新订单请求：
 
@@ -407,7 +407,9 @@ Agent 调试仅使用受控、脱敏的结构化日志；不存在 traces API，
 }
 ```
 
-`consultantId` 必填。服务端重新校验顾问属于所选机构且有效，并在创建时按所选 `DoctorProjectEntity.price` 固化顾问、USD 价格兼容快照和平台比例快照；不存在支付后指派或自动指派。Flutter 不发送 `quantity`、`couponId`、`consultationFee`、`remainingAmount` 或任何客户端金额。
+`consultantId` 必填。服务端重新校验顾问属于所选机构且有效，并在创建时按所选 `DoctorProjectEntity.price` 固化顾问、`currency`、`medicalListPriceMinor`、`platformServiceRateBps`（兼容字段）、`travelGroundServiceFeeMinor` 和不可变的 `pricingPolicyRevision`；不存在支付后指派或自动指派。Flutter 不发送 `quantity`、`couponId`、`consultationFee`、`remainingAmount` 或任何客户端金额。
+
+开发环境可在订单事务提交后执行受三重门控的自动支付：必须同时为 `dev & !prod`，且 `payment.alipay-plus.simulated-enabled` 与 `payment.alipay-plus.auto-pay-on-order-create-enabled` 都为 true。该路径复用真实支付服务与持久化，并在所有结果后返回重新读取的规范订单。Flutter 必须立即使用 `POST /orders` 返回的 `initialOrder` 打开 `OrderDetailPage`，同时在后台刷新详情；绝不因创建响应为 `SERVICE_ACTIVE` 而自动打开 `PaymentPage`。生产环境不会执行自动支付，返回的 `PENDING_SERVICE_FEE` 订单仍在详情页保留用户手动支付入口。
 
 ### 10.2 当前订单状态和显式权限
 
@@ -421,7 +423,7 @@ PENDING_SERVICE_FEE
             -> REFUNDED                     （渠道确认全额成功）
 ```
 
-订单响应新增并以服务端值为准：`paymentFlow`、`medicalListPriceMinor`（兼容名称的订单价格快照）、`platformServiceRateBps`、`travelGroundServiceFeeMinor`、`consultantBound`、`serviceActivated`、`consultantDetailsVisible`、`serviceConversationReadable`、`serviceMessagingEnabled`、`consultantAvatar`。
+订单响应新增并以服务端值为准：`paymentFlow`、`currency`、`medicalListPriceMinor`（兼容名称的订单价格快照）、`platformServiceRateBps`（兼容字段）、`travelGroundServiceFeeMinor`、`pricingPolicyRevision`、`consultantBound`、`serviceActivated`、`consultantDetailsVisible`、`serviceConversationReadable`、`serviceMessagingEnabled`、`consultantAvatar`。
 
 - 支付前 `consultantBound=true` 只表示已绑定；`consultantId`、`institutionId`、`consultantName`、`consultantAvatar` 和履约资料不向用户返回。
 - `SERVICE_ACTIVE` 显示允许公开的顾问姓名、头像和机构，并允许读取/发送订单会话。
@@ -458,7 +460,7 @@ Flutter 只打开 `nextAction.type=REDIRECT` 的受信任 HTTPS URL；当前允�
 
 渠道已确认扣款、但实收金额/币种与快照不符，或订单因重复/晚到成功、取消、删除、缺失而不能激活时，服务端仍保存真实 `SUCCEEDED`，并按 `paymentId` 唯一创建 `payment_compensation_cases`。管理员使用 `GET /api/admin/payment-compensations` 查看异常扣款，使用 `POST /api/admin/payment-compensations/{id}/retry` 审核并触发精确实收金额的原渠道退款：已有 `providerRefundId` 只查原退款；没有 ID 时复用 `payment-compensation-{paymentId}` 幂等键。`PROCESSING` / 未知结果不能伪装成功，普通订单退款会排除这些独立补偿款，不会被第二笔成功扣款阻塞。
 
-Alipay+ 商户注册和收单参数仍在安排，仓库没有真实 gateway。当前创建接口返回 HTTP 503 / `PAYMENT_PROVIDER_UNAVAILABLE` 且零本地尝试；Flutter 显示渠道暂不可用，绝不能模拟成功。
+Alipay+ 商户注册和收单参数仍在安排，仓库没有真实生产 gateway。生产创建支付尝试接口返回 HTTP 503 / `PAYMENT_PROVIDER_UNAVAILABLE` 且零本地尝试；Flutter 显示渠道暂不可用，绝不能模拟或自动成功。开发专用模拟器和下单后自动支付受上述两个独立开关及 `dev & !prod` profile 共同约束，不能作为生产支付合同。
 
 ### 10.4 当前订单会话与退款
 
@@ -820,7 +822,7 @@ resultingInstitutionProjectId, submittedAt, updatedAt
 
 - 医生文章必须使用专业端 `/management/doctor-articles`，不得调用管理员文章接口。四个路由分别是列表、创建、完整更新和逻辑删除；没有文章详情 GET。每次请求均重新校验当前 `ACTIVE DOCTOR`，普通医生只能读写 `doctorId == self` 的文章。管理员端接口保持其既有契约，专业端新增路由不替代、不修改管理员系统行为。
 - `DoctorArticleDraft` 请求必须且只能序列化 `title`、`summary`、`coverImage`、`publishDate`、`content` 五个非 null 字段；`publishDate` 为 `yyyy-MM-dd`。响应 `DoctorArticle` 精确包含 `id`、`title`、`authorName`、`summary`、`coverImage`、`publishDate`、`content`、`readCount`、`doctorId`、`createdAt`、`updatedAt`。后六类身份、计数和时间字段均只读。创建为 HTTP 201；其余成功为 200；参数错误 400、越权 403、不存在 404、并发/状态冲突 409。列表支持 `keyword`、`offset`、`limit`，编辑页需要详情时从本人列表按 id 定位。
-- `DoctorOrder` 复用管理订单 JSON 字段：`id`、`orderNo`、`userId`、`projectId`、`institutionId`、`consultantId`、`doctorId`、`institutionProjectId`、`projectName`、`institutionName`、`consultantName`、`consultantAvatar`、`coverImage`、`amount`、`price`、`currency`、`paidAmount`、`couponId`、`userCouponId`、`discountAmount`、`status`、`paymentFlow`、`medicalListPriceMinor`、`platformServiceRateBps`、`travelGroundServiceFeeMinor`、`consultantBound`、`serviceActivated`、`consultantDetailsVisible`、`serviceConversationReadable`、`serviceMessagingEnabled`、`quantity`、`remark`、`consultationFee`、`remainingAmount`、`transactionMethod`、`userPhone`、`appointmentTime`、`paymentTime`、`verifyCode`、`qrCode`、`evidenceUrl`、`hasReview`、`refundStatus`、`refundAmount`、`doctorName`、`createdAt`、`updatedAt`、`completedAt`、`canVerify`、`canRequestCompletion`。`price` 是 `amount` 的兼容别名；金额按十进制定点解析，两个金额 `*Minor` 字段按显式币种的最小单位整数解析，`platformServiceRateBps` 按基点解析。管理响应的 `verifyCode` 恒为 `null`，UI 不能展示或缓存核销码。
+- `DoctorOrder` 复用管理订单 JSON 字段：`id`、`orderNo`、`userId`、`projectId`、`institutionId`、`consultantId`、`doctorId`、`institutionProjectId`、`projectName`、`institutionName`、`consultantName`、`consultantAvatar`、`coverImage`、`amount`、`price`、`currency`、`paidAmount`、`couponId`、`userCouponId`、`discountAmount`、`status`、`paymentFlow`、`medicalListPriceMinor`、`platformServiceRateBps`、`pricingPolicyRevision`、`travelGroundServiceFeeMinor`、`consultantBound`、`serviceActivated`、`consultantDetailsVisible`、`serviceConversationReadable`、`serviceMessagingEnabled`、`quantity`、`remark`、`consultationFee`、`remainingAmount`、`transactionMethod`、`userPhone`、`appointmentTime`、`paymentTime`、`verifyCode`、`qrCode`、`evidenceUrl`、`hasReview`、`refundStatus`、`refundAmount`、`doctorName`、`createdAt`、`updatedAt`、`completedAt`、`canVerify`、`canRequestCompletion`。`price` 是 `amount` 的兼容别名；金额按十进制定点解析，两个金额 `*Minor` 字段按显式币种的最小单位整数解析，`platformServiceRateBps` 按基点解析，`pricingPolicyRevision` 作为只读字符串保留。管理响应的 `verifyCode` 恒为 `null`，UI 不能展示或缓存核销码。
 - 订单列表接受 `status`、`offset`、`limit`，详情与列表返回同一 VO。普通医生只能访问 `doctorId == self`；法人和顾问没有订单权限。`canVerify` 仅在历史 `CONSULTATION_PAID` 为 true，`canRequestCompletion` 仅在历史 `BALANCE_PAID` 为 true；`TRAVEL_GROUND_SERVICE_ONLY` 行的两个标志均为 false，不得展示核销、完成、尾款或结算动作。Flutter 只能按服务端标志显示旧流程动作，不得单凭本地状态推断。
 - 两个订单动作请求体都必须且只能是 `{ "verificationCode": "123456" }`，核销码须为 6 位数字。服务端加锁后再次校验对象、状态和核销码：不存在 404、对象越界/身份失效 403、核销码格式或不匹配 400、状态不允许 409。`CONSULTATION_PAID -> VERIFIED` 与 `BALANCE_PAID -> PENDING_COMPLETION` 成功后清除核销码并各写一次状态日志；已处于对应目标状态且时间戳存在的直接重放返回当前对象，不重复写日志，后续其他状态仍为 409。
 
