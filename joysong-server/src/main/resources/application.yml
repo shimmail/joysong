@@ -89,13 +89,13 @@ ai-agent:
   model: ${AI_AGENT_MODEL:}
   intent-model: ${AI_AGENT_INTENT_MODEL:}
 
-# 独立翻译服务配置。与 AI Agent 凭证、地址和模型完全分离。
+# 翻译 Agent 独立配置，不回退或复用 AI Agent、OPENAI_*、QWEN_* 凭证。
 translation:
-  provider: qwen
-  qwen:
-    api-key: ${QWEN_API_KEY:${QWEN_MT_API_KEY:}}
-    base-url: ${QWEN_BASE_URL:${QWEN_MT_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}}
-    model: ${QWEN_MODEL:qwen3.7-flash}
+  provider: ${TRANSLATION_PROVIDER:qwen}
+  api-key: ${TRANSLATION_API_KEY:}
+  base-url: ${TRANSLATION_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+  model: ${TRANSLATION_MODEL:qwen3.7-flash}
+
 # 阿里云短信服务配置
 # 使用前需要：
 # 1. 在阿里云控制台开通短信服务: https://dysms.console.aliyun.com

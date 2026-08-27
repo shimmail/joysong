@@ -119,7 +119,7 @@ class ProductionProfileTest {
     }
 
     @Test
-    fun `agent deployment contract exposes exactly five environment variables`() {
+    fun `agent and translation deployment contracts expose independent environment variables`() {
         val yamlText = listOf("application.yml", "application-prod.yml", "application-dev.example.yml")
             .joinToString("\n") { ClassPathResource(it).inputStream.bufferedReader().use { reader -> reader.readText() } }
         val envText = Files.readString(Path.of(".env.example"))
@@ -138,7 +138,11 @@ class ProductionProfileTest {
             "AI_AGENT_API_KEY",
             "AI_AGENT_BASE_URL",
             "AI_AGENT_MODEL",
-            "AI_AGENT_INTENT_MODEL"
+            "AI_AGENT_INTENT_MODEL",
+            "TRANSLATION_PROVIDER",
+            "TRANSLATION_API_KEY",
+            "TRANSLATION_BASE_URL",
+            "TRANSLATION_MODEL"
         )
 
         assertEquals(expected, environmentName.findAll(yamlText).map { it.value }.toSet())
@@ -156,10 +160,17 @@ class ProductionProfileTest {
         assertEquals("\${AI_AGENT_BASE_URL:}", applicationProperties.getProperty("ai-agent.base-url"))
         assertEquals("\${AI_AGENT_MODEL:}", applicationProperties.getProperty("ai-agent.model"))
         assertEquals("\${AI_AGENT_INTENT_MODEL:}", applicationProperties.getProperty("ai-agent.intent-model"))
+        assertEquals("\${TRANSLATION_PROVIDER:qwen}", applicationProperties.getProperty("translation.provider"))
+        assertEquals("\${TRANSLATION_API_KEY:}", applicationProperties.getProperty("translation.api-key"))
+        assertEquals(
+            "\${TRANSLATION_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}",
+            applicationProperties.getProperty("translation.base-url")
+        )
+        assertEquals("\${TRANSLATION_MODEL:qwen3.7-flash}", applicationProperties.getProperty("translation.model"))
     }
 
     @Test
-    fun `agent environment guard catches legacy variables regardless of case`() {
+    fun `environment guard detects supported and legacy variable families regardless of case`() {
         val sample = "openai_api_key OpenAI_BASE_URL qWeN_model translation_provider"
 
         assertEquals(

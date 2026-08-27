@@ -58,14 +58,13 @@ class TranslationService(
     }
 
     private fun requestQwenTranslation(text: String, targetLanguage: String): TranslationResponse {
-        val qwen = translationProperties.qwen
-        check(qwen.apiKey.isNotBlank()) { "Qwen 翻译服务尚未配置" }
+        check(translationProperties.apiKey.isNotBlank()) { "Qwen 翻译服务尚未配置" }
         val headers = HttpHeaders().apply {
-            setBearerAuth(qwen.apiKey)
+            setBearerAuth(translationProperties.apiKey)
             contentType = MediaType.APPLICATION_JSON
         }
         val body = mapOf(
-            "model" to qwen.model,
+            "model" to translationProperties.model,
             "messages" to listOf(
                 mapOf(
                     "role" to "system",
@@ -78,7 +77,7 @@ class TranslationService(
             "max_tokens" to qwenTranslationMaxTokens(text),
             "stream" to false
         )
-        val url = "${qwen.baseUrl.trimEnd('/')}/chat/completions"
+        val url = "${translationProperties.baseUrl.trimEnd('/')}/chat/completions"
         val response = restTemplate.exchange(url, HttpMethod.POST, HttpEntity(body, headers), Map::class.java)
         val choice = (response.body?.get("choices") as? List<*>)?.firstOrNull() as? Map<*, *>
         val message = choice?.get("message") as? Map<*, *>

@@ -64,7 +64,7 @@ class AiAgentPropertiesTest {
     fun `agent properties do not bind legacy or translation credentials`() {
         val environment = MockEnvironment()
             .withProperty("openai.api-key", "legacy-key")
-            .withProperty("translation.qwen.api-key", "translation-key")
+            .withProperty("translation.api-key", "translation-key")
 
         val properties = Binder.get(environment)
             .bind("ai-agent", Bindable.of(AiAgentProperties::class.java))

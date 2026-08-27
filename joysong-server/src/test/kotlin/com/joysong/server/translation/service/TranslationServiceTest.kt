@@ -29,11 +29,9 @@ class TranslationServiceTest {
     private val service = TranslationService(
         restTemplate = restTemplate,
         translationProperties = TranslationProperties(
-            qwen = TranslationProperties.Qwen(
-                apiKey = "test-key",
-                baseUrl = "https://example.test/v1",
-                model = "qwen-test-model"
-            )
+            apiKey = "test-key",
+            baseUrl = "https://example.test/v1",
+            model = "qwen-test-model"
         )
     )
 
@@ -87,11 +85,9 @@ class TranslationServiceTest {
         val qwenService = TranslationService(
             restTemplate = qwenRestTemplate,
             translationProperties = TranslationProperties(
-                qwen = TranslationProperties.Qwen(
-                    apiKey = "qwen-key",
-                    baseUrl = "https://qwen.test/v1",
-                    model = "qwen3.7-flash"
-                )
+                apiKey = "qwen-key",
+                baseUrl = "https://qwen.test/v1",
+                model = "qwen3.7-flash"
             )
         )
         qwenServer.expect(requestTo("https://qwen.test/v1/chat/completions"))
@@ -117,11 +113,9 @@ class TranslationServiceTest {
         val translationService = TranslationService(
             restTemplate = agentRestTemplate,
             translationProperties = TranslationProperties(
-                qwen = TranslationProperties.Qwen(
-                    apiKey = "translation-key",
-                    baseUrl = "https://translation.example.test/v1",
-                    model = "translation-model"
-                )
+                apiKey = "translation-key",
+                baseUrl = "https://translation.example.test/v1",
+                model = "translation-model"
             )
         )
         agentServer.expect(requestTo("https://translation.example.test/v1/chat/completions"))

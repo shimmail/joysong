@@ -12,9 +12,14 @@ AI_AGENT_API_KEY=由部署平台Secret注入
 AI_AGENT_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 AI_AGENT_MODEL=qwen-plus
 AI_AGENT_INTENT_MODEL=qwen-turbo
+
+TRANSLATION_PROVIDER=qwen
+TRANSLATION_API_KEY=由部署平台Secret独立注入
+TRANSLATION_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+TRANSLATION_MODEL=qwen3.7-flash
 ```
 
-生产配置缺失必要 Agent 变量或 endpoint 不符合 Provider 策略时会 fail-fast。部署不得增加第六项 AI/翻译变量。
+生产配置缺失必要 Agent 变量或 endpoint 不符合 Provider 策略时会 fail-fast。五项 Agent 变量与四项 Translation 变量彼此独立，任一服务都不得回退读取另一套凭证。
 
 ## 2. 发布前门禁
 

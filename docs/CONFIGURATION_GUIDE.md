@@ -41,14 +41,13 @@
 3. 将控制台展示的 OpenAI 兼容 Base URL 复制出来，并配置：
 
    ```dotenv
-   AI_AGENT_PROVIDER=qwen
-   AI_AGENT_API_KEY=刚创建的百炼APIKey
-   AI_AGENT_BASE_URL=从百炼控制台复制的兼容接口地址
-   AI_AGENT_MODEL=qwen-plus
-   AI_AGENT_INTENT_MODEL=qwen-turbo
+   TRANSLATION_PROVIDER=qwen
+   TRANSLATION_API_KEY=刚创建的百炼APIKey
+   TRANSLATION_BASE_URL=从百炼控制台复制的兼容接口地址
+   TRANSLATION_MODEL=qwen3.7-flash
    ```
 
-4. 重启服务端，在 App 中翻译一条评论验证。翻译复用上述 API Key 与 Base URL，但模型固定为代码中的 `qwen3.7-flash`。百炼配置见[官方文档](https://help.aliyun.com/zh/model-studio/what-is-model-studio)。
+4. 重启服务端，在 App 中翻译一条评论验证。翻译只读取上述独立变量，不复用 AI Agent 配置。百炼配置见[官方文档](https://help.aliyun.com/zh/model-studio/what-is-model-studio)。
 
 ### 第三步：配置图片存储（需要上传图片时）
 
@@ -143,21 +142,20 @@ CORS_ALLOWED_ORIGINS=https://admin.example.com
 
 ## 4. Qwen 翻译配置
 
-评论、回复、私信、日记正文固定使用百炼 `qwen3.7-flash`。翻译复用 AI Agent 的密钥与地址，但不使用聊天或意图模型。当前完整部署因此只允许 `AI_AGENT_PROVIDER=qwen`；OpenAI-compatible 工厂 enum 仅是未来协议兼容能力，不能用于当前完整翻译部署。
+评论、回复、私信、日记正文默认使用百炼 `qwen3.7-flash`。翻译的 Provider、密钥、地址和模型均与 AI Agent 独立，不读取或回退到任何 `AI_AGENT_*` 配置。
 
 ```dotenv
-AI_AGENT_PROVIDER=qwen
-AI_AGENT_API_KEY=百炼业务空间对应的APIKey
-AI_AGENT_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-AI_AGENT_MODEL=qwen-plus
-AI_AGENT_INTENT_MODEL=qwen-turbo
+TRANSLATION_PROVIDER=qwen
+TRANSLATION_API_KEY=百炼业务空间对应的APIKey
+TRANSLATION_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+TRANSLATION_MODEL=qwen3.7-flash
 ```
 
-Qwen 的 API Key 与地域/业务空间有关，应使用百炼控制台实际提供的兼容接口地址配置 `AI_AGENT_BASE_URL`。翻译没有独立 Provider、密钥或回退配置。
+Qwen 的 API Key 与地域/业务空间有关，应使用百炼控制台实际提供的兼容接口地址配置 `TRANSLATION_BASE_URL`。开发环境可直接在系统或 IDE 进程中设置这四项变量；翻译不会使用旧的 `QWEN_*` 别名。
 
 ## 5. AI Agent 配置
 
-AI Agent 独立读取以下变量，不影响 Qwen：
+AI Agent 独立读取以下变量，不影响翻译服务：
 
 ```dotenv
 AI_AGENT_PROVIDER=qwen
@@ -169,7 +167,7 @@ AI_AGENT_INTENT_MODEL=qwen-turbo
 
 生产必须显式配置上述五项变量，任何一项为空都会导致启动失败。`AI_AGENT_MODEL` 仅用于最终回答，`AI_AGENT_INTENT_MODEL` 仅用于意图分类；两者必须分别提供，不共享默认值。解析器与最终生成共享 API Key、Base URL 和 Provider 协议；超时与直连网络策略固定在代码中。
 
-流式 Agent 使用 `POST /api/chat/sessions/{id}/messages/stream`，并以 `started`、`delta`、`completed`、`error` 四类 SSE 事件交付。它是 **Qwen-only**，不会增加第六项部署变量，也没有独立的流式启用、OpenAI 凭据或 Provider 回退开关；原有 `POST /api/chat/sessions/{id}/messages` 同步接口继续兼容旧客户端。
+流式 Agent 使用 `POST /api/chat/sessions/{id}/messages/stream`，并以 `started`、`delta`、`completed`、`error` 四类 SSE 事件交付。它是 **Qwen-only**，不会增加第六项 Agent 变量，也没有独立的流式启用、OpenAI 凭据或 Provider 回退开关；原有 `POST /api/chat/sessions/{id}/messages` 同步接口继续兼容旧客户端。
 
 `PLANNING` 流式请求会在服务端缓冲完整模型输出，安全处理完成前不发送 `delta`。若流最终以 `error` 结束，客户端可能已渲染的 partial assistant output 仅保留在本地 UI，服务端不持久化该 partial 内容，消息历史不会包含它。
 
@@ -263,7 +261,7 @@ google.client-id=OAuthWebClientID.apps.googleusercontent.com
 
 1. 创建 MySQL 数据库或允许当前 JDBC URL 自动创建；设置 `DB_PASSWORD`。
 2. 使用 `SPRING_PROFILES_ACTIVE=dev` 启动服务端；仅限本地。
-3. 填写五项 Agent 变量后验证翻译接口；翻译没有独立凭据或供应商回退。
+3. 分别填写五项 Agent 变量和四项 Translation 变量后验证 Agent 与翻译接口；两套凭证和地址互不回退。
 4. 启动管理后台开发服务，确认浏览器通过 Vite 代理访问 API。
 5. Android 模拟器使用 `10.0.2.2`，真机使用可访问的开发机地址。
 

@@ -2,6 +2,8 @@ package com.joysong.server.config
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
+import com.joysong.server.translation.config.TranslationConfiguration
+import com.joysong.server.translation.config.TranslationProperties
 import com.joysong.server.translation.service.TranslationService
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -47,19 +49,28 @@ class AiAgentProfileStartupTest {
             "ai-agent.api-key=test-key",
             "ai-agent.base-url=https://dashscope.aliyuncs.com/compatible-mode/v1",
             "ai-agent.model=test-model",
-            "ai-agent.intent-model=test-intent-model"
+            "ai-agent.intent-model=test-intent-model",
+            "TRANSLATION_PROVIDER=qwen",
+            "TRANSLATION_API_KEY=translation-key",
+            "TRANSLATION_BASE_URL=https://translation.example.test/v1",
+            "TRANSLATION_MODEL=translation-model"
         )
 
     @Test
-    fun `production profile starts with the five variable agent contract`() {
+    fun `production profile starts with independent agent and translation contracts`() {
         contextRunner.run { context ->
             assertThat(context).hasNotFailed()
             assertThat(context.environment.activeProfiles).containsExactly("prod")
             assertThat(context.environment.getProperty("spring.flyway.clean-disabled")).isEqualTo("true")
             assertThat(context).hasSingleBean(TranslationService::class.java)
-            assertThat(context.getBean(AiAgentProperties::class.java).enabled).isTrue()
-            val translationService = context.getBean(TranslationService::class.java)
-            assertThat(translationService).isNotNull
+            val agentProperties = context.getBean(AiAgentProperties::class.java)
+            val translationProperties = context.getBean(TranslationProperties::class.java)
+            assertThat(agentProperties.enabled).isTrue()
+            assertThat(translationProperties.apiKey).isEqualTo("translation-key")
+            assertThat(translationProperties.baseUrl).isEqualTo("https://translation.example.test/v1")
+            assertThat(translationProperties.model).isEqualTo("translation-model")
+            assertThat(translationProperties.apiKey).isNotEqualTo(agentProperties.apiKey)
+            assertThat(translationProperties.baseUrl).isNotEqualTo(agentProperties.baseUrl)
         }
     }
 
@@ -78,6 +89,7 @@ class AiAgentProfileStartupTest {
     @Configuration(proxyBeanMethods = false)
     @Import(
         AiAgentConfiguration::class,
+        TranslationConfiguration::class,
         RestTemplateConfig::class,
         ConfigValidator::class,
         TranslationService::class

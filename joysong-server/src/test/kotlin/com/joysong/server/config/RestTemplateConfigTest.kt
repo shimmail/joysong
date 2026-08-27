@@ -1,5 +1,6 @@
 package com.joysong.server.config
 
+import com.joysong.server.translation.config.TranslationConfiguration
 import com.joysong.server.translation.service.TranslationService
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -68,12 +69,18 @@ class RestTemplateConfigTest {
                     "test",
                     mapOf(
                         "google.proxy-url" to "http://127.0.0.1:7890",
-                        "ai-agent.api-key" to "test-key",
-                        "ai-agent.base-url" to "https://dashscope.aliyuncs.com/compatible-mode/v1"
+                        "translation.provider" to "qwen",
+                        "translation.api-key" to "translation-key",
+                        "translation.base-url" to "https://translation.example.test/v1",
+                        "translation.model" to "translation-model"
                     )
                 )
             )
-            context.register(AiAgentConfiguration::class.java, RestTemplateConfig::class.java, TranslationService::class.java)
+            context.register(
+                TranslationConfiguration::class.java,
+                RestTemplateConfig::class.java,
+                TranslationService::class.java
+            )
             context.refresh()
 
             val service = context.getBean(TranslationService::class.java)

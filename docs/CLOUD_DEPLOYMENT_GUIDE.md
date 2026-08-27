@@ -73,9 +73,15 @@ ai-agent:
   base-url: ${AI_AGENT_BASE_URL}
   model: ${AI_AGENT_MODEL}
   intent-model: ${AI_AGENT_INTENT_MODEL}
+
+translation:
+  provider: ${TRANSLATION_PROVIDER}
+  api-key: ${TRANSLATION_API_KEY}
+  base-url: ${TRANSLATION_BASE_URL}
+  model: ${TRANSLATION_MODEL}
 ```
 
-不要把真实值写入 `application-prod.yml` 或 Git。生产必须提供上述五项 Agent 变量，任何一项为空都会导致启动失败。当前完整部署只允许 `AI_AGENT_PROVIDER=qwen`；OpenAI-compatible 工厂 enum 不能用于包含翻译功能的部署。`AI_AGENT_MODEL` 只用于最终回答，`AI_AGENT_INTENT_MODEL` 只用于意图分类，必须分别配置为适合各自用途的模型 ID。翻译复用同一 API Key 与 Base URL，并在代码中固定使用 `qwen3.7-flash`。Agent 代理、超时、意图解析开关、演示回退、流式和推理设置均为代码策略，不能通过环境变量覆盖。
+不要把真实值写入 `application-prod.yml` 或 Git。生产必须提供上述五项 Agent 变量，任何一项为空都会导致启动失败；同时应显式提供四项 Translation 变量。当前 Agent 部署仍只允许 `AI_AGENT_PROVIDER=qwen`。`AI_AGENT_MODEL` 只用于最终回答，`AI_AGENT_INTENT_MODEL` 只用于意图分类。翻译只读取 `TRANSLATION_*`，不会复用 Agent 的 API Key、Base URL 或模型。Agent 代理、超时、意图解析开关、演示回退、流式和推理设置均为代码策略，不能通过环境变量覆盖。
 
 ### 4.2 管理端
 
@@ -173,6 +179,11 @@ AI_AGENT_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 AI_AGENT_MODEL=qwen-plus
 AI_AGENT_INTENT_MODEL=qwen-turbo
 
+TRANSLATION_PROVIDER=qwen
+TRANSLATION_API_KEY=<translation-key>
+TRANSLATION_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+TRANSLATION_MODEL=qwen3.7-flash
+
 STRIPE_SECRET_KEY=sk_live_<from Stripe Dashboard Live mode>
 STRIPE_WEBHOOK_SECRET=whsec_<from the production Webhook Endpoint>
 STRIPE_SUCCESS_URL=https://app.example.com/payment/success?session_id={CHECKOUT_SESSION_ID}
@@ -195,10 +206,14 @@ PAYMENT_RECONCILIATION_STALE_SECONDS=120
 | `CORS_ALLOWED_ORIGINS` | 跨域来源白名单；生产只填实际 HTTPS 域名 |
 | `GOOGLE_PROXY_URL` | 仅用于 Google ID Token 公钥校验的受控代理；不要配置为通用出网代理 |
 | `AI_AGENT_PROVIDER` | 当前完整部署固定为 `qwen`；其他 enum 值不可用于部署 |
-| `AI_AGENT_API_KEY` | Agent 与翻译共享的服务端密钥 |
-| `AI_AGENT_BASE_URL` | Agent 与翻译共享的批准 HTTPS endpoint |
+| `AI_AGENT_API_KEY` | Agent 专用的服务端密钥 |
+| `AI_AGENT_BASE_URL` | Agent 专用的批准 HTTPS endpoint |
 | `AI_AGENT_MODEL` | Agent 最终回答模型 ID |
 | `AI_AGENT_INTENT_MODEL` | 生产必填的意图分类模型 ID；与最终回答模型分开配置 |
+| `TRANSLATION_PROVIDER` | 翻译服务 Provider，当前使用 `qwen` |
+| `TRANSLATION_API_KEY` | 翻译服务独立密钥，不回退到 Agent 密钥 |
+| `TRANSLATION_BASE_URL` | 翻译服务独立 HTTPS endpoint |
+| `TRANSLATION_MODEL` | 翻译模型 ID，推荐 `qwen3.7-flash` |
 | `STRIPE_API_BASE` / `STRIPE_API_VERSION` | Stripe API 地址和版本 |
 | `STRIPE_SUCCESS_URL` / `STRIPE_CANCEL_URL` | 支付回跳页面 |
 | `STRIPE_PRODUCT_NAME` | 支付商品名 |
