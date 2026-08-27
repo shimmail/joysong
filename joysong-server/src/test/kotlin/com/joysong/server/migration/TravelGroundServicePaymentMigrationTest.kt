@@ -87,7 +87,7 @@ class TravelGroundServicePaymentMigrationTest {
     fun `fresh database applies the travel payment schema constraints and index set`() {
         assertEquals(DATABASE, freshMysql.databaseName)
         assertEquals(
-            listOf("33"),
+            listOf("33", "34", "35"),
             jdbcTemplate.queryForList(
                 "SELECT version FROM flyway_schema_history WHERE success = 1 AND version IS NOT NULL ORDER BY installed_rank",
                 String::class.java
@@ -101,6 +101,7 @@ class TravelGroundServicePaymentMigrationTest {
         assertColumn("orders", "payment_flow", "varchar", false)
         assertColumn("orders", "medical_list_price_minor", "bigint", true)
         assertColumn("orders", "platform_service_rate_bps", "int", true)
+        assertColumn("orders", "pricing_policy_revision", "varchar", true)
         assertColumn("orders", "travel_ground_service_fee_minor", "bigint", true)
         assertColumn("orders", "consultant_avatar", "varchar", true)
         assertColumn("orders", "service_activated_at", "datetime", true)
@@ -847,12 +848,14 @@ class TravelGroundServicePaymentMigrationTest {
                 """
                 INSERT INTO orders (
                     id, user_id, project_name, price, status, payment_flow,
-                    medical_list_price_minor, platform_service_rate_bps, travel_ground_service_fee_minor
+                    medical_list_price_minor, platform_service_rate_bps, pricing_policy_revision,
+                    travel_ground_service_fee_minor
                 ) VALUES (?, 'travel-user', 'Travel service', 100.00, 'PENDING_SERVICE_FEE',
-                          'TRAVEL_GROUND_SERVICE_ONLY', 10000, ?, ?)
+                          'TRAVEL_GROUND_SERVICE_ONLY', 10000, ?, ?, ?)
                 """.trimIndent(),
                 id,
                 rateBps,
+                pricingPolicyRevision(rateBps),
                 serviceFeeMinor
             )
         }
@@ -863,14 +866,18 @@ class TravelGroundServicePaymentMigrationTest {
                 INSERT INTO orders (
                     id, user_id, project_name, price, status, payment_flow,
                     consultant_id, consultant_name, medical_list_price_minor,
-                    platform_service_rate_bps, travel_ground_service_fee_minor, service_activated_at
+                    platform_service_rate_bps, pricing_policy_revision,
+                    travel_ground_service_fee_minor, service_activated_at
                 ) VALUES (?, 'service-user', 'Travel service', 100.00, 'SERVICE_ACTIVE',
                           'TRAVEL_GROUND_SERVICE_ONLY', 'service-consultant', 'Consultant',
-                          10000, 1000, 1000, CURRENT_TIMESTAMP)
+                          10000, 1000, 'travel-ground-service-rate:0.100000', 1000, CURRENT_TIMESTAMP)
                 """.trimIndent(),
                 id
             )
         }
+
+        private fun pricingPolicyRevision(rateBps: Int): String =
+            "travel-ground-service-rate:${BigDecimal.valueOf(rateBps.toLong()).movePointLeft(4).setScale(6).toPlainString()}"
 
         private fun rowCount(jdbc: JdbcTemplate, table: String): Int {
             require(table in setOf("orders", "dm_conversations", "payments", "payment_events"))
