@@ -190,6 +190,7 @@ class OrderService(
             paymentFlow = TRAVEL_GROUND_SERVICE_PAYMENT_FLOW,
             medicalListPriceMinor = quote.medicalListPriceMinor,
             platformServiceRateBps = quote.platformServiceRateBps,
+            pricingPolicyRevision = quote.pricingPolicyRevision,
             travelGroundServiceFeeMinor = quote.travelGroundServiceFeeMinor,
             createdAt = now,
             projectId = project.id,
