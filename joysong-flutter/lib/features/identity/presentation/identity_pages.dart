@@ -730,40 +730,6 @@ class _ManagementCapabilities extends StatelessWidget {
         ],
       ),
       (
-        id: 'platform-admin',
-        icon: Icons.admin_panel_settings_outlined,
-        title: buildContext.localized('平台管理', 'Platform administration'),
-        items: [
-          (
-            icon: Icons.fact_check_outlined,
-            label: buildContext.localized(
-              '平台项目申请审核',
-              'Platform project creation reviews',
-            ),
-            enabled: isAdmin && context.canReviewInstitutionProjectRequests,
-            action: _ManagementAction.platformProjectReviews,
-          ),
-          (
-            icon: Icons.add_task_outlined,
-            label: buildContext.localized(
-              '机构项目申请审核',
-              'Institution project creation reviews',
-            ),
-            enabled: isAdmin && context.canReviewInstitutionProjectRequests,
-            action: _ManagementAction.institutionProjectReviews,
-          ),
-          (
-            icon: Icons.compare_arrows_outlined,
-            label: buildContext.localized(
-              '医生项目资料审核',
-              'Doctor project profile reviews',
-            ),
-            enabled: isAdmin && context.canReviewInstitutionProjectRequests,
-            action: _ManagementAction.doctorProjectProfileReviews,
-          ),
-        ],
-      ),
-      (
         id: 'doctor',
         icon: Icons.medical_services_outlined,
         title: buildContext.localized('医生', 'Doctor'),
@@ -1068,19 +1034,6 @@ class _ManagementCapabilities extends StatelessWidget {
       );
       return;
     }
-    if (action == _ManagementAction.platformProjectReviews) {
-      Navigator.of(context).push<void>(
-        MaterialPageRoute(
-          builder: (_) => PlatformProjectRequestPage(
-            repository: repository,
-            context: this.context,
-            reviewMode: true,
-            pickAndUploadImage: doctorImagePicker,
-          ),
-        ),
-      );
-      return;
-    }
     if (action == _ManagementAction.institutionProjectRequest) {
       Navigator.of(context).push<void>(
         MaterialPageRoute(
@@ -1175,7 +1128,6 @@ enum _ManagementAction {
   doctorProjectProfileReviews,
   doctorProfile,
   platformProjectRequest,
-  platformProjectReviews,
   institutionProjectRequest,
   institutionProjectJoinRequest,
   doctorProjectProfileUpdate,
