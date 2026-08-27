@@ -31,29 +31,32 @@ class AuthenticationServiceTest {
     )
 
     @Test
-    fun `loginWithCode rejects active admin account`() {
+    fun `loginWithCode consumes a valid code then gives active admin the generic public error`() {
         val admin = adminUser()
         every { verificationCodeService.validate(admin.phone!!, "123456") } returns true
         every { userRepository.findByPhoneIncludeDeleted(admin.phone!!) } returns Optional.of(admin)
 
-        assertThrows(BadCredentialsException::class.java) {
+        val error = assertThrows(IllegalArgumentException::class.java) {
             service.loginWithCode(admin.phone!!, "123456")
         }
 
+        assertEquals("验证码无效或已过期", error.message)
+        verify(exactly = 0) { userRepository.save(any()) }
         verify(exactly = 0) { refreshTokenService.issue(any(), any(), any()) }
     }
 
     @Test
-    fun `loginWithCode rejects deleted admin without reactivating account`() {
+    fun `loginWithCode consumes a valid code then leaves deleted admin inactive`() {
         val admin = adminUser(deletedAt = LocalDateTime.now())
         every { verificationCodeService.validate(admin.phone!!, "123456") } returns true
         every { userRepository.findByPhoneIncludeDeleted(admin.phone!!) } returns Optional.of(admin)
         every { userRepository.save(any()) } answers { firstArg() }
 
-        assertThrows(BadCredentialsException::class.java) {
+        val error = assertThrows(IllegalArgumentException::class.java) {
             service.loginWithCode(admin.phone!!, "123456")
         }
 
+        assertEquals("验证码无效或已过期", error.message)
         verify(exactly = 0) { userRepository.save(any()) }
         verify(exactly = 0) { refreshTokenService.issue(any(), any(), any()) }
     }
@@ -155,7 +158,7 @@ class AuthenticationServiceTest {
     }
 
     @Test
-    fun `loginAdmin issues tokens for a valid administrator`() {
+    fun `loginAdmin accepts a trimmed mainland administrator phone`() {
         val admin = adminUser()
         every { userRepository.findByPhone(admin.phone!!) } returns Optional.of(admin)
         every { passwordEncoder.matches("StrongAdminPassword!1", admin.passwordHash) } returns true
@@ -165,7 +168,7 @@ class AuthenticationServiceTest {
             accessTokenExpiresIn = 28_800
         )
 
-        val response = service.loginAdmin(admin.phone!!, "StrongAdminPassword!1")
+        val response = service.loginAdmin("  ${admin.phone}  ", "StrongAdminPassword!1")
 
         assertEquals("admin-access-token", response.accessToken)
         assertEquals("admin-refresh-token", response.refreshToken)
@@ -200,6 +203,54 @@ class AuthenticationServiceTest {
     }
 
     @Test
+    fun `loginAdmin rejects an international administrator after a dummy password comparison`() {
+        val internationalAdmin = adminUser().copy(phone = "+8613800000000")
+        every { userRepository.findByPhone(internationalAdmin.phone!!) } returns Optional.of(internationalAdmin)
+        every { passwordEncoder.matches("StrongAdminPassword!1", any()) } returns false
+
+        val error = assertThrows(BadCredentialsException::class.java) {
+            service.loginAdmin(internationalAdmin.phone!!, "StrongAdminPassword!1")
+        }
+
+        assertEquals("管理员账号或密码错误", error.message)
+        verify(exactly = 1) { passwordEncoder.matches("StrongAdminPassword!1", any()) }
+        verify(exactly = 0) { passwordEncoder.matches("StrongAdminPassword!1", internationalAdmin.passwordHash) }
+        verify(exactly = 0) { refreshTokenService.issue(any(), any(), any()) }
+    }
+
+    @Test
+    fun `loginAdmin rejects malformed phone after a dummy password comparison`() {
+        val malformedPhone = "not-a-phone"
+        val accidentalMatch = adminUser().copy(phone = malformedPhone)
+        every { userRepository.findByPhone(malformedPhone) } returns Optional.of(accidentalMatch)
+        every { passwordEncoder.matches("StrongAdminPassword!1", any()) } returns false
+
+        val error = assertThrows(BadCredentialsException::class.java) {
+            service.loginAdmin(malformedPhone, "StrongAdminPassword!1")
+        }
+
+        assertEquals("管理员账号或密码错误", error.message)
+        verify(exactly = 1) { passwordEncoder.matches("StrongAdminPassword!1", any()) }
+        verify(exactly = 0) { passwordEncoder.matches("StrongAdminPassword!1", accidentalMatch.passwordHash) }
+        verify(exactly = 0) { refreshTokenService.issue(any(), any(), any()) }
+    }
+
+    @Test
+    fun `loginAdmin rejects an unknown phone after a dummy password comparison`() {
+        val unknownPhone = "13900000000"
+        every { userRepository.findByPhone(unknownPhone) } returns Optional.empty()
+        every { passwordEncoder.matches("StrongAdminPassword!1", any()) } returns false
+
+        val error = assertThrows(BadCredentialsException::class.java) {
+            service.loginAdmin(unknownPhone, "StrongAdminPassword!1")
+        }
+
+        assertEquals("管理员账号或密码错误", error.message)
+        verify(exactly = 1) { passwordEncoder.matches("StrongAdminPassword!1", any()) }
+        verify(exactly = 0) { refreshTokenService.issue(any(), any(), any()) }
+    }
+
+    @Test
     fun `logout revokes the supplied refresh token`() {
         service.logout("refresh-token")
 
@@ -208,7 +259,7 @@ class AuthenticationServiceTest {
 
     private fun adminUser(deletedAt: LocalDateTime? = null) = UserEntity(
         id = "admin-id",
-        phone = "+8613800000000",
+        phone = "13800000000",
         passwordHash = "admin-password-hash",
         nickname = "Admin",
         role = "ADMIN",

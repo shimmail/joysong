@@ -52,7 +52,7 @@ class AuthenticationService(
         // 查找用户（包括已注销的）
         val user = userRepository.findByPhoneIncludeDeleted(phone).map { existing ->
             if (existing.role == "ADMIN") {
-                throw BadCredentialsException("管理员账号请使用密码登录")
+                throw IllegalArgumentException("验证码无效或已过期")
             }
             if (existing.deletedAt != null) {
                 // 已注销用户重新激活
@@ -100,11 +100,12 @@ class AuthenticationService(
      */
     fun loginAdmin(phone: String, password: String): LoginResponse {
         val normalizedPhone = phone.trim()
-        val user = userRepository.findByPhone(normalizedPhone).orElse(null)
+        val validAdminPhone = ADMIN_PHONE.matches(normalizedPhone)
+        val user = if (validAdminPhone) userRepository.findByPhone(normalizedPhone).orElse(null) else null
         val passwordHash = user?.passwordHash?.takeIf { it.isNotBlank() } ?: dummyPasswordHash
         val passwordMatches = passwordEncoder.matches(password, passwordHash)
 
-        if (user == null || user.role != "ADMIN" || !passwordMatches) {
+        if (!validAdminPhone || user == null || user.role != "ADMIN" || !passwordMatches) {
             throw BadCredentialsException("管理员账号或密码错误")
         }
 
@@ -226,4 +227,8 @@ class AuthenticationService(
         role = role,
         hasPassword = passwordHash.isNotEmpty()
     )
+
+    private companion object {
+        val ADMIN_PHONE = Regex("^1[0-9]{10}$")
+    }
 }

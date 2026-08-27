@@ -30,6 +30,7 @@ class UserProfileService(
 
     companion object {
         private const val PHONE_CHANGE_AUTHORIZATION_SECONDS = 600L
+        private val ADMIN_PHONE = Regex("^1[0-9]{10}$")
     }
 
     fun getUserProfile(userId: String): UserDto {
@@ -118,12 +119,15 @@ class UserProfileService(
 
     /** 通过手机号+验证码重置密码 */
     fun resetPassword(phone: String, code: String, newPassword: String) {
-        val user = userRepository.findByPhone(phone)
-            .orElseThrow { IllegalArgumentException("该手机号未注册") }
-        validateNewPassword(newPassword, user.role)
         if (!verificationCodeService.validate(phone, code)) {
             throw IllegalArgumentException("验证码无效或已过期")
         }
+        val user = userRepository.findByPhone(phone)
+            .orElseThrow { IllegalArgumentException("验证码无效或已过期") }
+        if (user.role == "ADMIN") {
+            throw IllegalArgumentException("验证码无效或已过期")
+        }
+        validateNewPassword(newPassword, user.role)
         val updated = user.copy(
             passwordHash = passwordEncoder.encode(newPassword),
             credentialsUpdatedAt = LocalDateTime.now()
@@ -263,6 +267,9 @@ class UserProfileService(
 
     fun adminUpdateRole(id: String, role: String): UserEntity? {
         val user = userRepository.findById(id).orElse(null) ?: return null
+        if (role == "ADMIN" && !ADMIN_PHONE.matches(user.phone.orEmpty())) {
+            throw IllegalArgumentException("管理员手机号格式不正确")
+        }
         val updated = userRepository.save(
             user.copy(role = role, credentialsUpdatedAt = LocalDateTime.now())
         )
@@ -281,6 +288,9 @@ class UserProfileService(
 
     fun adminReactivate(id: String): UserEntity? {
         val user = userRepository.findByIdIncludingDeleted(id) ?: return null
+        if (user.role == "ADMIN" && !ADMIN_PHONE.matches(user.phone.orEmpty())) {
+            throw IllegalArgumentException("管理员手机号格式不正确")
+        }
         return userRepository.save(user.copy(
             deletedAt = null,
             credentialsUpdatedAt = LocalDateTime.now()
