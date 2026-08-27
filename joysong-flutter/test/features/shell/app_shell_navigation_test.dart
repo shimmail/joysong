@@ -17,6 +17,7 @@ import 'package:joysong_flutter/features/identity/presentation/institution_relat
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/orders/presentation/order_detail_page.dart';
 import 'package:joysong_flutter/features/orders/presentation/orders_page.dart';
+import 'package:joysong_flutter/features/orders/presentation/payment_page.dart';
 import 'package:joysong_flutter/features/shell/presentation/app_shell.dart';
 import 'package:joysong_flutter/features/social/presentation/social_page.dart';
 
@@ -545,6 +546,59 @@ void main() {
     );
   });
 
+  testWidgets(
+      'booking opens the returned active order while detail refresh is pending',
+      (tester) async {
+    _useLargeTestSurface(tester);
+    final detailRefresh = Completer<Map<String, Object?>>();
+    final client = _OrderServiceApiClient(
+      freshStatus: 'SERVICE_ACTIVE',
+      freshReadable: true,
+      freshSendEnabled: true,
+      orderDetailCompleter: detailRefresh,
+    );
+    await _pumpShell(tester, client);
+
+    final discover = tester.widget<DiscoverPage>(
+      find.byType(DiscoverPage, skipOffstage: false),
+    );
+    discover.onBookProject!(const DiscoverItem(
+      id: 'project-1',
+      type: DiscoverContentType.project,
+      title: '消费者中文项目',
+      raw: {
+        'institutionId': 'institution-1',
+        'projectId': 'project-1',
+      },
+    ));
+    await tester.pumpAndSettle();
+
+    final booking = tester.widget<BookingPage>(find.byType(BookingPage));
+    await booking.controller.selectConsultant(
+      booking.controller.consultants.single,
+    );
+    await booking.controller.selectDoctor(booking.controller.doctors.single);
+    booking.controller.selectAppointmentTime(
+      DateTime.now().add(const Duration(days: 2)),
+    );
+    await tester.pump();
+    await tester.ensureVisible(find.byKey(const Key('booking-submit-button')));
+    await tester.tap(find.byKey(const Key('booking-submit-button')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(
+        client.posts.where((request) => request.$1 == 'orders'), hasLength(1));
+    expect(client.orderReads, 1);
+    expect(find.byType(OrderDetailPage), findsOneWidget);
+    expect(find.text('旅游地接服务中'), findsOneWidget);
+    expect(find.byKey(const Key('pay-service-fee-button')), findsNothing);
+    expect(find.byType(PaymentPage), findsNothing);
+
+    detailRefresh.complete(client.freshOrder);
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('consumer review entry enables automatic translation',
       (tester) async {
     _useLargeTestSurface(tester);
@@ -882,6 +936,7 @@ final class _OrderServiceApiClient extends ApiClient {
     },
     this.failedOrderIds = const {},
     this.failedServiceOrderIds = const {},
+    this.orderDetailCompleter,
   }) : super(
           apiRoot: Uri.parse('http://localhost/api/'),
           httpClient: _TestHttpClient(),
@@ -896,6 +951,7 @@ final class _OrderServiceApiClient extends ApiClient {
   final Object identityOverview;
   final Set<String> failedOrderIds;
   final Set<String> failedServiceOrderIds;
+  final Completer<Map<String, Object?>>? orderDetailCompleter;
   final gets = <String>[];
   final posts = <(String, Object?)>[];
   final puts = <String>[];
@@ -906,7 +962,7 @@ final class _OrderServiceApiClient extends ApiClient {
       .where((request) => request.$1 == 'orders/order-1/service-conversation')
       .length;
 
-  Map<String, Object?> get _freshOrder => sampleOrderJson(
+  Map<String, Object?> get freshOrder => sampleOrderJson(
         status: freshStatus,
         paymentFlow: 'TRAVEL_GROUND_SERVICE_ONLY',
         consultantBound: true,
@@ -935,6 +991,9 @@ final class _OrderServiceApiClient extends ApiClient {
     if (failedOrderIds.any((id) => path == 'orders/$id')) {
       throw StateError('order unavailable');
     }
+    if (path == 'orders/order-1' && orderDetailCompleter != null) {
+      return decodeData(await orderDetailCompleter!.future);
+    }
     final Object data = switch (path) {
       'notifications/unread-counts' => notificationUnreadCounts,
       'notifications/unread-count' =>
@@ -953,8 +1012,8 @@ final class _OrderServiceApiClient extends ApiClient {
           ? [serviceConversationResponse(sendEnabled: freshSendEnabled)]
           : const <Object?>[],
       'cs/conversations' => const <Object?>[],
-      'orders' => [_freshOrder],
-      'orders/order-1' => _freshOrder,
+      'orders' => [freshOrder],
+      'orders/order-1' => freshOrder,
       'orders/order-1/status-logs' => const <Object?>[],
       'reviews/order/order-1' => const <String, Object?>{
           'id': 'review-1',
@@ -990,7 +1049,18 @@ final class _OrderServiceApiClient extends ApiClient {
             'isVerified': true,
           },
         ],
-      'discover/institutions/institution-1/consultants' => const <Object?>[],
+      'discover/institutions/institution-1/consultants' => const <Object?>[
+          <String, Object?>{
+            'id': 'consultant-1',
+            'name': '消费者顾问',
+          },
+        ],
+      'discover/travel-ground-service-quote' => const <String, Object?>{
+          'currency': 'USD',
+          'medicalListPriceMinor': 100000,
+          'platformServiceRateBps': 4000,
+          'travelGroundServiceFeeMinor': 40000,
+        },
       'diaries/my' => const <Object?>[],
       'dm/conversations/conversation-order-1/messages' => const <Object?>[
           _orderDmMessageJson,
@@ -1012,6 +1082,7 @@ final class _OrderServiceApiClient extends ApiClient {
     required T Function(Object? json) decodeData,
   }) async {
     posts.add((path, body));
+    if (path == 'orders') return decodeData(freshOrder);
     if (failedServiceOrderIds.any(
       (id) => path == 'orders/$id/service-conversation',
     )) {

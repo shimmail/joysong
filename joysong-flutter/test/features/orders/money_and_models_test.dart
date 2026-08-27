@@ -25,6 +25,21 @@ void main() {
     expect(unknown.status, OrderStatus.unknown);
   });
 
+  test('Order carries the nullable pricing policy revision snapshot', () {
+    final snapshotted = Order.fromJson(
+      sampleOrderJson(
+        pricingPolicyRevision: 'travel-ground-service-rate:0.400000',
+      ),
+    );
+    final legacy = Order.fromJson(sampleOrderJson());
+
+    expect(
+      snapshotted.pricingPolicyRevision,
+      'travel-ground-service-rate:0.400000',
+    );
+    expect(legacy.pricingPolicyRevision, isNull);
+  });
+
   test('Order requires protocol-critical id and status-safe fields', () {
     final json = sampleOrderJson()..remove('id');
 

@@ -85,7 +85,11 @@ enum OrderAction {
 }
 
 final class OrderDetailController extends ChangeNotifier {
-  OrderDetailController(this._repository, {required this.orderId});
+  OrderDetailController(
+    this._repository, {
+    required this.orderId,
+    Order? initialOrder,
+  }) : _order = _matchingInitialOrder(orderId, initialOrder);
 
   final OrdersRepository _repository;
   final String orderId;
@@ -365,6 +369,18 @@ final class OrderDetailController extends ChangeNotifier {
       error.message == 'SETTLEMENT_NOT_GENERATED';
 
   bool _isCurrent(int generation) => generation == _detailGeneration;
+}
+
+Order? _matchingInitialOrder(String orderId, Order? initialOrder) {
+  if (initialOrder == null) return null;
+  if (initialOrder.id != orderId) {
+    throw ArgumentError.value(
+      initialOrder.id,
+      'initialOrder',
+      '初始订单 ID 必须与详情订单 ID 一致',
+    );
+  }
+  return initialOrder;
 }
 
 String _orderMessageFor(Object error, String fallback) {

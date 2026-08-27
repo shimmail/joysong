@@ -22,6 +22,7 @@ Order sampleOrder({
   bool consultantDetailsVisible = false,
   bool serviceConversationReadable = false,
   bool serviceMessagingEnabled = false,
+  String? pricingPolicyRevision,
   String? verifyCode,
   bool hasReview = false,
   String remark = '',
@@ -51,6 +52,7 @@ Order sampleOrder({
       medicalListPriceMinor: 100000,
       platformServiceRateBps: 4000,
       travelGroundServiceFeeMinor: 40000,
+      pricingPolicyRevision: pricingPolicyRevision,
       consultantBound: consultantBound,
       serviceActivated: serviceActivated,
       consultantDetailsVisible: consultantDetailsVisible,
@@ -108,6 +110,7 @@ Map<String, Object?> sampleOrderJson({
   bool consultantDetailsVisible = false,
   bool serviceConversationReadable = false,
   bool serviceMessagingEnabled = false,
+  Object? pricingPolicyRevision,
   String? verifyCode,
 }) =>
     {
@@ -133,6 +136,7 @@ Map<String, Object?> sampleOrderJson({
       'medicalListPriceMinor': 100000,
       'platformServiceRateBps': 4000,
       'travelGroundServiceFeeMinor': 40000,
+      'pricingPolicyRevision': pricingPolicyRevision,
       'consultantBound': consultantBound,
       'serviceActivated': serviceActivated,
       'consultantDetailsVisible': consultantDetailsVisible,
