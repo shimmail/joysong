@@ -22,8 +22,8 @@ data class DevelopmentOrderAutoPaymentResult(
 @Service
 @Profile("dev & !prod")
 @ConditionalOnProperty(
-    prefix = "payment",
-    name = ["alipay-plus.simulated-enabled", "development.order-auto-pay-enabled"],
+    prefix = "payment.alipay-plus",
+    name = ["simulated-enabled", "auto-pay-on-order-create-enabled"],
     havingValue = "true",
     matchIfMissing = false
 )
@@ -39,18 +39,20 @@ class DevelopmentOrderAutoPaymentService(
             paymentMethod = "ALIPAY_PLUS_CASHIER",
             idempotencyKey = "dev-order-autopay-$orderId"
         ).payment
-        if (payment.status in PaymentStatus.successfulDatabaseValues) {
+        val failureCode = payment.failureCode?.takeIf { it.isNotBlank() }
+        if (payment.status in PaymentStatus.successfulDatabaseValues && failureCode == null) {
             DevelopmentOrderAutoPaymentResult(successful = true, payment = payment)
         } else {
             log.warn(
-                "Development order auto-payment did not succeed: orderId={}, paymentStatus={}",
+                "Development order auto-payment did not succeed: orderId={}, paymentStatus={}, failureCode={}",
                 orderId,
-                payment.status
+                payment.status,
+                failureCode ?: "none"
             )
             DevelopmentOrderAutoPaymentResult(
                 successful = false,
                 payment = payment,
-                failureCode = payment.status,
+                failureCode = failureCode ?: payment.status,
                 outcomeUnknown = payment.status == PaymentStatus.PROCESSING.name
             )
         }

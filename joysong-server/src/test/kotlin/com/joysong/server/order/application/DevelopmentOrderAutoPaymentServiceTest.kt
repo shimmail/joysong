@@ -119,6 +119,32 @@ class DevelopmentOrderAutoPaymentServiceTest {
     }
 
     @Test
+    fun `compensated provider success is reported as non-success with safe metadata`() {
+        val paymentService = mockk<PaymentService>()
+        val payment = payment(PaymentStatus.SUCCEEDED).copy(
+            failureCode = "PAYMENT_SUCCEEDED_ORDER_NOT_ACTIVATABLE",
+            failureMessage = "secret compensation detail"
+        )
+        every {
+            paymentService.createPaymentSession(any(), any(), any(), any(), any(), any())
+        } returns PaymentSessionResult(payment)
+        val appender = logAppender()
+
+        val result = DevelopmentOrderAutoPaymentService(paymentService)
+            .attempt("order-1", "user-1")
+
+        assertFalse(result.successful)
+        assertSame(payment, result.payment)
+        assertEquals("PAYMENT_SUCCEEDED_ORDER_NOT_ACTIVATABLE", result.failureCode)
+        assertFalse(result.outcomeUnknown)
+        val log = appender.list.joinToString("\n") { it.formattedMessage }
+        assertTrue(log.contains("orderId=order-1"))
+        assertTrue(log.contains("paymentStatus=SUCCEEDED"))
+        assertTrue(log.contains("failureCode=PAYMENT_SUCCEEDED_ORDER_NOT_ACTIVATABLE"))
+        assertFalse(log.contains("secret compensation detail"))
+    }
+
+    @Test
     fun `auto payment bean requires development profile and both payment flags`() {
         context(listOf("dev"), simulatedEnabled = true, autoPayEnabled = true).run { context ->
             assertTrue(context.containsBean("developmentOrderAutoPaymentService"))
@@ -149,7 +175,7 @@ class DevelopmentOrderAutoPaymentServiceTest {
         .withInitializer { context -> context.environment.setActiveProfiles(*profiles.toTypedArray()) }
         .withPropertyValues(
             "payment.alipay-plus.simulated-enabled=$simulatedEnabled",
-            "payment.development.order-auto-pay-enabled=$autoPayEnabled"
+            "payment.alipay-plus.auto-pay-on-order-create-enabled=$autoPayEnabled"
         )
 
     private fun payment(status: PaymentStatus) = PaymentEntity(

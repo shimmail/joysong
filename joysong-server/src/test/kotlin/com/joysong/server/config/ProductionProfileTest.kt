@@ -93,15 +93,15 @@ class ProductionProfileTest {
     @Test
     fun `development order auto payment is explicit and production stays disabled`() {
         assertEquals(
-            "\${DEVELOPMENT_ORDER_AUTO_PAYMENT_ENABLED:false}",
-            applicationProperties.getProperty("payment.development.order-auto-pay-enabled")
+            "\${ALIPAY_PLUS_AUTO_PAY_ON_ORDER_CREATE_ENABLED:false}",
+            applicationProperties.getProperty("payment.alipay-plus.auto-pay-on-order-create-enabled")
         )
-        assertEquals(true, developmentProperties.getProperty("payment.development.order-auto-pay-enabled"))
-        assertEquals(false, properties.getProperty("payment.development.order-auto-pay-enabled"))
+        assertEquals(true, developmentProperties.getProperty("payment.alipay-plus.auto-pay-on-order-create-enabled"))
+        assertEquals(false, properties.getProperty("payment.alipay-plus.auto-pay-on-order-create-enabled"))
 
         val environment = Files.readAllLines(Path.of(".env.example"))
             .associate { it.substringBefore('=') to it.substringAfter('=', "") }
-        assertEquals("false", environment["DEVELOPMENT_ORDER_AUTO_PAYMENT_ENABLED"])
+        assertEquals("false", environment["ALIPAY_PLUS_AUTO_PAY_ON_ORDER_CREATE_ENABLED"])
     }
 
     @Test
