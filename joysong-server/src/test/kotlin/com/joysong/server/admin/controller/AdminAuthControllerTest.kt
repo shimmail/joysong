@@ -384,14 +384,22 @@ class AdminLogoutClosureHttpTest @Autowired constructor(
 
     @Test
     fun `logout route revokes the ADMIN refresh session and blocks its access token`() {
-        var active = true
         val rawRefreshToken = "a".repeat(64)
         val sessionId = "a1-0123456789abcdef0123456789abcdef"
+        val refreshHash = sha256(rawRefreshToken)
+        var refreshActive = true
+        val storedResultSet = mockk<ResultSet>()
+        every { storedResultSet.getString("id") } returns sessionId
+        every { storedResultSet.getString("user_id") } returns "admin-id"
+        every { storedResultSet.getString("role") } returns "ADMIN"
         given(jwtTokenProvider.validateToken("admin-access-token")).willReturn(true)
         given(jwtTokenProvider.getUserIdFromToken("admin-access-token")).willReturn("admin-id")
         given(jwtTokenProvider.getRoleFromToken("admin-access-token")).willReturn("ADMIN")
         given(jwtTokenProvider.getIssuedAtFromToken("admin-access-token")).willReturn(Date())
         given(jwtTokenProvider.getSessionIdFromToken("admin-access-token")).willReturn(sessionId)
+        given(jwtTokenProvider.generateToken(anyString(), anyString(), anyString(), anyString()))
+            .willReturn("rotated-access-token")
+        given(jwtTokenProvider.expirationSeconds("ADMIN")).willReturn(30)
         given(userRepository.findById("admin-id")).willReturn(Optional.of(adminUser()))
         given(
             jdbcTemplate.queryForObject(
@@ -400,18 +408,60 @@ class AdminLogoutClosureHttpTest @Autowired constructor(
                 eq(sessionId),
                 eq("admin-id")
             )
-        ).willAnswer { if (active) 1L else 0L }
-        given(jdbcTemplate.update(anyString(), anyString())).willAnswer {
-            active = false
-            1
-        }
+        ).willAnswer { if (refreshActive) 1L else 0L }
         given(
             jdbcTemplate.query(
                 org.mockito.ArgumentMatchers.contains("FROM refresh_tokens"),
                 any(RowMapper::class.java),
-                eq(sha256(rawRefreshToken))
+                eq(refreshHash)
             )
-        ).willAnswer { emptyList<Any>() }
+        ).willAnswer { invocation ->
+            if (!refreshActive) {
+                emptyList<Any>()
+            } else {
+                @Suppress("UNCHECKED_CAST")
+                val mapper = invocation.getArgument<RowMapper<Any>>(1)
+                listOf(mapper.mapRow(storedResultSet, 0))
+            }
+        }
+        given(
+            jdbcTemplate.query(
+                eq("SELECT phone FROM users WHERE id = ? AND deleted_at IS NULL"),
+                any(RowMapper::class.java),
+                eq("admin-id")
+            )
+        ).willReturn(listOf("13800000000"))
+        given(
+            jdbcTemplate.update(
+                eq("INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, ?)"),
+                anyString(),
+                eq("admin-id"),
+                anyString(),
+                any(LocalDateTime::class.java)
+            )
+        ).willReturn(1)
+        given(
+            jdbcTemplate.update(
+                eq(
+                    """
+                    UPDATE refresh_tokens
+                    SET revoked_at = NOW(), last_used_at = NOW(), replaced_by_token_id = ?
+                    WHERE id = ? AND revoked_at IS NULL
+                    """.trimIndent()
+                ),
+                anyString(),
+                eq(sessionId)
+            )
+        ).willReturn(1)
+        given(
+            jdbcTemplate.update(
+                eq("UPDATE refresh_tokens SET revoked_at = COALESCE(revoked_at, NOW()) WHERE token_hash = ?"),
+                eq(refreshHash)
+            )
+        ).willAnswer {
+            refreshActive = false
+            1
+        }
         givenAdminContextRows("admin-id")
 
         mockMvc.perform(
@@ -431,8 +481,8 @@ class AdminLogoutClosureHttpTest @Autowired constructor(
             get("/api/management/context").header(HttpHeaders.AUTHORIZATION, "Bearer admin-access-token")
         ).andExpect(status().isUnauthorized)
         verifyMockito(jdbcTemplate).update(
-            org.mockito.ArgumentMatchers.contains("WHERE token_hash = ?"),
-            eq(sha256(rawRefreshToken))
+            eq("UPDATE refresh_tokens SET revoked_at = COALESCE(revoked_at, NOW()) WHERE token_hash = ?"),
+            eq(refreshHash)
         )
     }
 
