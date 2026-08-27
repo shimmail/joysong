@@ -7,8 +7,8 @@ start
 
 |平台|
 :读取所选医生的机构项目价格\ndoctor_projects.price（USD）;
-:从 order.pricing.travel-ground-service.service-fee-rate\n读取独立地接服务费率；
-:计算旅游地接服务费\nfeeMinor = roundHalfUp(\ndoctorPriceMinor × 4000 / 10000);
+:从 order.pricing.travel-ground-service.service-fee-rate\n读取独立地接服务费率并解析为 platformServiceRateBps\n（当前默认配置为 4000 bps）；
+:计算旅游地接服务费\nfeeMinor = roundHalfUp(\ndoctorPriceMinor × platformServiceRateBps / 10000);
 :校验顾问属于该医院且状态有效;
 :创建订单并立即绑定顾问;
 :固化 currency、medicalListPriceMinor、\nplatformServiceRateBps（兼容字段）、\ntravelGroundServiceFeeMinor 和 pricingPolicyRevision;
