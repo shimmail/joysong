@@ -39,7 +39,7 @@ class BaselineMigrationIntegrationTest {
     lateinit var legacyMigrationDirectory: Path
 
     @Test
-    fun `fresh database applies B33 baseline`() {
+    fun `fresh database applies B33 baseline and V34 admin guard`() {
         val history = jdbcTemplate.query(
             """
             SELECT version, type, script
@@ -50,13 +50,23 @@ class BaselineMigrationIntegrationTest {
         ) { rs, _ -> Triple(rs.getString("version"), rs.getString("type"), rs.getString("script")) }
 
         assertEquals(
-            listOf(Triple("33", "SQL_BASELINE", "B33__current_schema.sql")),
+            listOf(
+                Triple("33", "SQL_BASELINE", "B33__current_schema.sql"),
+                Triple("34", "SQL", "V34__harden_admin_account_lifecycle.sql"),
+            ),
             history
+        )
+        assertEquals(
+            listOf("ACTIVE_ADMIN"),
+            jdbcTemplate.queryForList(
+                "SELECT guard_key FROM admin_account_guard ORDER BY guard_key",
+                String::class.java,
+            )
         )
     }
 
     @Test
-    fun `B33 schema matches legacy migrations through V33`() {
+    fun `B33 plus V34 schema matches legacy migrations through V34`() {
         WorktreeTestDatabase.validateAndPrint(legacyMysql)
         val legacyJdbc = JdbcTemplate(
             DriverManagerDataSource(legacyMysql.jdbcUrl, legacyMysql.username, legacyMysql.password)
@@ -67,7 +77,7 @@ class BaselineMigrationIntegrationTest {
         migrateLegacy("classpath:db/migration")
 
         assertEquals(
-            listOf("26", "27", "28", "29", "30", "31", "32", "32.1", "32.2", "33"),
+            listOf("26", "27", "28", "29", "30", "31", "32", "32.1", "32.2", "33", "34"),
             legacyJdbc.queryForList(
                 "SELECT version FROM flyway_schema_history WHERE success = 1 AND version IS NOT NULL ORDER BY installed_rank",
                 String::class.java
