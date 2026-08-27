@@ -11,6 +11,7 @@ import com.joysong.server.user.repository.UserRepository
 import org.slf4j.LoggerFactory
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDateTime
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
@@ -23,14 +24,14 @@ class UserProfileService(
     private val diaryRepository: DiaryRepository,
     private val passwordEncoder: PasswordEncoder,
     private val verificationCodeService: VerificationCodeService,
-    private val refreshTokenService: RefreshTokenService
+    private val refreshTokenService: RefreshTokenService,
+    private val adminAccountCommandService: AdminAccountCommandService,
 ) {
     private val logger = LoggerFactory.getLogger(UserProfileService::class.java)
     private val phoneChangeAuthorizations = ConcurrentHashMap<String, PhoneChangeAuthorization>()
 
     companion object {
         private const val PHONE_CHANGE_AUTHORIZATION_SECONDS = 600L
-        private val ADMIN_PHONE = Regex("^1[0-9]{10}$")
     }
 
     fun getUserProfile(userId: String): UserDto {
@@ -58,9 +59,9 @@ class UserProfileService(
     }
 
     /** 注销账号（逻辑删除） */
+    @Transactional
     fun deleteAccount(userId: String) {
-        val user = userRepository.findById(userId)
-            .orElseThrow { IllegalArgumentException("User not found") }
+        val user = adminAccountCommandService.requireOrdinaryAccountDeletionAllowed(userId)
         logger.info(
             "deleteAccount - userId: {}, phone: {}, email: {}",
             userId,
@@ -201,7 +202,9 @@ class UserProfileService(
     }
 
     /** 校验新手机号验证码并完成换绑。 */
+    @Transactional
     fun changePhone(userId: String, phone: String, code: String) {
+        adminAccountCommandService.requireOrdinaryPhoneChangeAllowed(userId, phone)
         if (hasBoundPhone(userId)) requirePhoneChangeAuthorization(userId)
         if (getCurrentPhone(userId) == phone) throw IllegalArgumentException("新手机号不能与当前手机号相同")
         if (userRepository.existsByPhone(phone)) throw IllegalArgumentException("该手机号已被注册")
@@ -266,35 +269,15 @@ class UserProfileService(
     fun adminFindById(id: String): UserEntity? = userRepository.findById(id).orElse(null)
 
     fun adminUpdateRole(id: String, role: String): UserEntity? {
-        val user = userRepository.findById(id).orElse(null) ?: return null
-        if (role == "ADMIN" && !ADMIN_PHONE.matches(user.phone.orEmpty())) {
-            throw IllegalArgumentException("管理员手机号格式不正确")
-        }
-        val updated = userRepository.save(
-            user.copy(role = role, credentialsUpdatedAt = LocalDateTime.now())
-        )
-        refreshTokenService.revokeAll(id)
-        return updated
+        return adminAccountCommandService.updateRole(id, role)
     }
 
     fun adminDeactivate(id: String): Pair<Boolean, String> {
-        val user = userRepository.findById(id).orElse(null) ?: return false to "用户不存在"
-        if (user.deletedAt != null) return false to "该用户已被注销"
-        user.deletedAt = LocalDateTime.now()
-        userRepository.save(user)
-        refreshTokenService.revokeAll(id)
-        return true to "success"
+        return adminAccountCommandService.deactivate(id)
     }
 
     fun adminReactivate(id: String): UserEntity? {
-        val user = userRepository.findByIdIncludingDeleted(id) ?: return null
-        if (user.role == "ADMIN" && !ADMIN_PHONE.matches(user.phone.orEmpty())) {
-            throw IllegalArgumentException("管理员手机号格式不正确")
-        }
-        return userRepository.save(user.copy(
-            deletedAt = null,
-            credentialsUpdatedAt = LocalDateTime.now()
-        ))
+        return adminAccountCommandService.reactivate(id)
     }
 
     fun count(): Long = userRepository.countIncludingDeleted()

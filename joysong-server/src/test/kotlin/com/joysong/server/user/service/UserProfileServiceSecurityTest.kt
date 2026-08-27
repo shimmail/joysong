@@ -2,12 +2,14 @@ package com.joysong.server.user.service
 
 import com.joysong.server.auth.service.RefreshTokenService
 import com.joysong.server.auth.service.VerificationCodeService
+import com.joysong.server.diary.entity.DiaryEntity
 import com.joysong.server.diary.repository.DiaryRepository
 import com.joysong.server.user.entity.UserEntity
 import com.joysong.server.user.repository.UserRepository
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import io.mockk.verifyOrder
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
@@ -22,12 +24,14 @@ class UserProfileServiceSecurityTest {
     private val passwordEncoder = mockk<PasswordEncoder>()
     private val verificationCodeService = mockk<VerificationCodeService>()
     private val refreshTokenService = mockk<RefreshTokenService>(relaxed = true)
+    private val adminAccountCommandService = mockk<AdminAccountCommandService>()
     private val service = UserProfileService(
         userRepository,
         diaryRepository,
         passwordEncoder,
         verificationCodeService,
-        refreshTokenService
+        refreshTokenService,
+        adminAccountCommandService,
     )
 
     @Test
@@ -140,55 +144,83 @@ class UserProfileServiceSecurityTest {
     }
 
     @Test
-    fun `adminUpdateRole rejects an international phone before promoting to ADMIN`() {
-        val user = user(phone = "+8613800000001", role = "USER")
-        every { userRepository.findById(user.id) } returns Optional.of(user)
-        every { userRepository.save(any()) } answers { firstArg() }
+    fun `administrator account deletion is rejected before every side effect`() {
+        val admin = user(id = "admin", phone = "13900000000", role = "ADMIN")
+        every {
+            adminAccountCommandService.requireOrdinaryAccountDeletionAllowed(admin.id)
+        } throws IllegalArgumentException("管理员不能通过普通用户接口注销")
 
         assertThrows(IllegalArgumentException::class.java) {
-            service.adminUpdateRole(user.id, "ADMIN")
+            service.deleteAccount(admin.id)
         }
 
+        verify(exactly = 0) { diaryRepository.findByUserId(any()) }
+        verify(exactly = 0) { diaryRepository.save(any()) }
+        verify(exactly = 0) { refreshTokenService.revokeAll(any()) }
+        verify(exactly = 0) { userRepository.deleteById(any()) }
+    }
+
+    @Test
+    fun `ordinary user account deletion keeps diary token and soft-delete contract`() {
+        val user = user(id = "ordinary-user", role = "USER")
+        val firstDiary = DiaryEntity(
+            id = "diary-1",
+            title = "First",
+            userId = user.id,
+            authorName = "Original",
+            authorAvatar = "avatar-1",
+        )
+        val secondDiary = DiaryEntity(
+            id = "diary-2",
+            title = "Second",
+            userId = user.id,
+            authorName = "Original",
+            authorAvatar = "avatar-2",
+        )
+        every { adminAccountCommandService.requireOrdinaryAccountDeletionAllowed(user.id) } returns user
+        every { diaryRepository.findByUserId(user.id) } returns listOf(firstDiary, secondDiary)
+        every { diaryRepository.save(any()) } answers { firstArg() }
+        every { userRepository.deleteById(user.id) } returns Unit
+
+        service.deleteAccount(user.id)
+
+        verifyOrder {
+            adminAccountCommandService.requireOrdinaryAccountDeletionAllowed(user.id)
+            diaryRepository.findByUserId(user.id)
+            diaryRepository.save(match { it.id == firstDiary.id && it.authorName == "已注销用户" && it.authorAvatar.isEmpty() })
+            diaryRepository.save(match { it.id == secondDiary.id && it.authorName == "已注销用户" && it.authorAvatar.isEmpty() })
+            refreshTokenService.revokeAll(user.id)
+            userRepository.deleteById(user.id)
+        }
+    }
+
+    @Test
+    fun `bootstrap phone change is rejected before verification or account writes`() {
+        every {
+            adminAccountCommandService.requireOrdinaryPhoneChangeAllowed("bootstrap", "+8613900000000")
+        } throws IllegalArgumentException("Bootstrap 管理员不能修改引导手机号")
+
+        assertThrows(IllegalArgumentException::class.java) {
+            service.changePhone("bootstrap", "+8613900000000", "123456")
+        }
+
+        verify(exactly = 0) { verificationCodeService.validate(any(), any(), any()) }
+        verify(exactly = 0) { userRepository.existsByPhone(any()) }
         verify(exactly = 0) { userRepository.save(any()) }
         verify(exactly = 0) { refreshTokenService.revokeAll(any()) }
     }
 
     @Test
-    fun `adminUpdateRole allows an international administrator to be demoted`() {
-        val admin = user(phone = "+8613800000001", role = "ADMIN")
-        every { userRepository.findById(admin.id) } returns Optional.of(admin)
-        every { userRepository.save(any()) } answers { firstArg() }
+    fun `admin method signatures delegate to the command boundary`() {
+        val user = user(id = "user", role = "USER")
+        val deleted = user.copy(deletedAt = LocalDateTime.now())
+        every { adminAccountCommandService.updateRole(user.id, "ADMIN") } returns user.copy(role = "ADMIN")
+        every { adminAccountCommandService.deactivate(user.id) } returns (true to "success")
+        every { adminAccountCommandService.reactivate(user.id) } returns deleted.copy(deletedAt = null)
 
-        val updated = service.adminUpdateRole(admin.id, "USER")
-
-        assertEquals("USER", updated?.role)
-        verify(exactly = 1) { refreshTokenService.revokeAll(admin.id) }
-    }
-
-    @Test
-    fun `adminReactivate rejects an international administrator before saving`() {
-        val admin = user(phone = "+8613800000001", role = "ADMIN", deletedAt = LocalDateTime.now())
-        every { userRepository.findByIdIncludingDeleted(admin.id) } returns admin
-        every { userRepository.save(any()) } answers { firstArg() }
-
-        assertThrows(IllegalArgumentException::class.java) {
-            service.adminReactivate(admin.id)
-        }
-
-        verify(exactly = 0) { userRepository.save(any()) }
-    }
-
-    @Test
-    fun `adminReactivate keeps international USER and professional accounts reactivatable`() {
-        val user = user(id = "user-id", phone = "+8613800000001", role = "USER", deletedAt = LocalDateTime.now())
-        val doctor = user(id = "doctor-id", phone = "+8613800000002", role = "DOCTOR", deletedAt = LocalDateTime.now())
-        every { userRepository.findByIdIncludingDeleted(user.id) } returns user
-        every { userRepository.findByIdIncludingDeleted(doctor.id) } returns doctor
-        every { userRepository.save(any()) } answers { firstArg() }
-
+        assertEquals("ADMIN", service.adminUpdateRole(user.id, "ADMIN")?.role)
+        assertEquals(true to "success", service.adminDeactivate(user.id))
         assertEquals(null, service.adminReactivate(user.id)?.deletedAt)
-        assertEquals(null, service.adminReactivate(doctor.id)?.deletedAt)
-        verify(exactly = 2) { userRepository.save(any()) }
     }
 
     private fun user(
