@@ -1,5 +1,6 @@
 package com.joysong.server.user.entity
 
+import com.fasterxml.jackson.annotation.JsonIgnore
 import jakarta.persistence.*
 import org.hibernate.annotations.SQLDelete
 import org.hibernate.annotations.Where
@@ -14,6 +15,7 @@ data class UserEntity(
     @Id val id: String,
     @Column(unique = true, nullable = true) val phone: String? = null,
     @Column(unique = true, nullable = true) val email: String? = null,
+    @get:JsonIgnore
     @Column(name = "password_hash", nullable = false) val passwordHash: String,
     val nickname: String = "",
     val avatar: String = "",

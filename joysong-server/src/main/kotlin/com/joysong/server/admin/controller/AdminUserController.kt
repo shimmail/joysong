@@ -1,5 +1,7 @@
 package com.joysong.server.admin.controller
 
+import com.joysong.server.admin.dto.AdminUserView
+import com.joysong.server.admin.dto.toAdminUserView
 import com.joysong.server.common.BaseResponse
 import com.joysong.server.diary.service.DiaryService
 import com.joysong.server.user.service.UserProfileService
@@ -13,23 +15,26 @@ class AdminUserController(
 ) {
 
     @GetMapping("/users")
-    fun listUsers(@RequestParam(required = false) keyword: String?): BaseResponse<*> {
-        return BaseResponse.success(userProfileService.adminListUsers(keyword))
+    fun listUsers(@RequestParam(required = false) keyword: String?): BaseResponse<List<AdminUserView>> {
+        return BaseResponse.success(userProfileService.adminListUsers(keyword).map { it.toAdminUserView() })
     }
 
     @GetMapping("/users/{id}")
-    fun getUser(@PathVariable id: String): BaseResponse<*> {
+    fun getUser(@PathVariable id: String): BaseResponse<AdminUserView> {
         val user = userProfileService.adminFindById(id)
-            ?: return BaseResponse.error<Any>("用户不存在")
-        return BaseResponse.success(user)
+            ?: return BaseResponse.error("用户不存在")
+        return BaseResponse.success(user.toAdminUserView())
     }
 
     @PutMapping("/users/{id}/role")
-    fun updateUserRole(@PathVariable id: String, @RequestBody body: Map<String, String>): BaseResponse<*> {
-        val newRole = body["role"] ?: return BaseResponse.error<Any>("角色不能为空")
+    fun updateUserRole(
+        @PathVariable id: String,
+        @RequestBody body: Map<String, String>
+    ): BaseResponse<AdminUserView> {
+        val newRole = body["role"] ?: return BaseResponse.error("角色不能为空")
         val result = userProfileService.adminUpdateRole(id, newRole)
-            ?: return BaseResponse.error<Any>("用户不存在")
-        return BaseResponse.success(result)
+            ?: return BaseResponse.error("用户不存在")
+        return BaseResponse.success(result.toAdminUserView())
     }
 
     @PutMapping("/users/{id}/deactivate")
@@ -39,10 +44,10 @@ class AdminUserController(
     }
 
     @PutMapping("/users/{id}/reactivate")
-    fun reactivateUser(@PathVariable id: String): BaseResponse<*> {
+    fun reactivateUser(@PathVariable id: String): BaseResponse<AdminUserView> {
         val result = userProfileService.adminReactivate(id)
-            ?: return BaseResponse.error<Any>("用户不存在")
-        return BaseResponse.success(result)
+            ?: return BaseResponse.error("用户不存在")
+        return BaseResponse.success(result.toAdminUserView())
     }
 
     @GetMapping("/users/{id}/diaries")
