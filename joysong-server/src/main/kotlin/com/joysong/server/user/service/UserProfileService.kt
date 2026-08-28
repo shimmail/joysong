@@ -5,8 +5,8 @@ import com.joysong.server.auth.dto.UserDto
 import com.joysong.server.auth.service.VerificationCodeService
 import com.joysong.server.auth.service.VerificationCodePurposeEnum
 import com.joysong.server.auth.service.RefreshTokenService
-import com.joysong.server.diary.repository.DiaryRepository
 import com.joysong.server.user.entity.UserEntity
+import com.joysong.server.user.entity.AccountState
 import com.joysong.server.user.repository.UserRepository
 import org.slf4j.LoggerFactory
 import org.springframework.security.crypto.password.PasswordEncoder
@@ -21,11 +21,11 @@ private data class PhoneChangeAuthorization(val expireAt: Instant)
 @Service
 class UserProfileService(
     private val userRepository: UserRepository,
-    private val diaryRepository: DiaryRepository,
     private val passwordEncoder: PasswordEncoder,
     private val verificationCodeService: VerificationCodeService,
     private val refreshTokenService: RefreshTokenService,
     private val adminAccountCommandService: AdminAccountCommandService,
+    private val accountLifecycleGuard: AccountLifecycleGuard,
 ) {
     private val logger = LoggerFactory.getLogger(UserProfileService::class.java)
     private val phoneChangeAuthorizations = ConcurrentHashMap<String, PhoneChangeAuthorization>()
@@ -41,9 +41,9 @@ class UserProfileService(
         return user.toDto()
     }
 
+    @Transactional
     fun updateProfile(userId: String, request: UpdateProfileRequest): UserDto {
-        val user = userRepository.findById(userId)
-            .orElseThrow { IllegalArgumentException("User not found") }
+        val user = accountLifecycleGuard.requireActiveForWrite(userId)
         logger.info("updateProfile - userId: $userId, request.avatar: ${request.avatar}, current.avatar: ${user.avatar}")
         val updated = user.copy(
             nickname = request.nickname ?: user.nickname,
@@ -58,34 +58,10 @@ class UserProfileService(
         return updated.toDto()
     }
 
-    /** 注销账号（逻辑删除） */
-    @Transactional
-    fun deleteAccount(userId: String) {
-        val user = adminAccountCommandService.requireOrdinaryAccountDeletionAllowed(userId)
-        logger.info(
-            "deleteAccount - userId: {}, phone: {}, email: {}",
-            userId,
-            user.phone?.let(::maskPhone) ?: "未绑定",
-            user.email?.let(::maskEmail) ?: "未绑定"
-        )
-
-        // 更新该用户所有日记的作者信息为已注销状态
-        val diaries = diaryRepository.findByUserId(userId)
-        diaries.forEach { diary ->
-            diaryRepository.save(diary.copy(authorName = "已注销用户", authorAvatar = ""))
-        }
-        logger.info("deleteAccount - updated ${diaries.size} diaries for userId: $userId")
-
-        // @SQLDelete 已配置为逻辑删除：UPDATE users SET deleted_at = NOW() WHERE id = ?
-        refreshTokenService.revokeAll(userId)
-        userRepository.deleteById(userId)
-        logger.info("deleteAccount completed (soft delete) - userId: $userId")
-    }
-
     /** 修改密码 */
+    @Transactional
     fun changePassword(userId: String, oldPassword: String, newPassword: String) {
-        val user = userRepository.findById(userId)
-            .orElseThrow { IllegalArgumentException("用户不存在") }
+        val user = accountLifecycleGuard.requireActiveForWrite(userId)
         if (user.passwordHash.isEmpty()) {
             throw IllegalArgumentException("您尚未设置密码，请使用「忘记密码」功能设置")
         }
@@ -119,13 +95,14 @@ class UserProfileService(
     }
 
     /** 通过手机号+验证码重置密码 */
+    @Transactional
     fun resetPassword(phone: String, code: String, newPassword: String) {
         if (!verificationCodeService.validate(phone, code)) {
             throw IllegalArgumentException("验证码无效或已过期")
         }
-        val user = userRepository.findByPhone(phone)
-            .orElseThrow { IllegalArgumentException("验证码无效或已过期") }
-        if (user.role == "ADMIN") {
+        val user = userRepository.findByPhoneForUpdate(phone)
+            ?: throw IllegalArgumentException("验证码无效或已过期")
+        if (user.accountState != AccountState.ACTIVE || user.role == "ADMIN") {
             throw IllegalArgumentException("验证码无效或已过期")
         }
         validateNewPassword(newPassword, user.role)
@@ -139,9 +116,9 @@ class UserProfileService(
     }
 
     /** 已登录用户通过手机号验证码设置密码（适用于未设置密码的用户） */
+    @Transactional
     fun setPasswordForUser(userId: String, phone: String, code: String, newPassword: String) {
-        val user = userRepository.findById(userId)
-            .orElseThrow { IllegalArgumentException("用户不存在") }
+        val user = accountLifecycleGuard.requireActiveForWrite(userId)
         if (user.passwordHash.isNotEmpty()) {
             throw IllegalArgumentException("您已设置密码，请使用修改密码功能")
         }
@@ -169,9 +146,10 @@ class UserProfileService(
     }
 
     /** 第三方登录账号首次绑定手机号，验证码由通用 send-code 接口发送。 */
+    @Transactional
     fun bindPhone(userId: String, phone: String, code: String) {
         require(phone.matches(Regex("^\\+[1-9]\\d{6,14}$"))) { "手机号格式不正确" }
-        val user = userRepository.findById(userId).orElseThrow { IllegalArgumentException("用户不存在") }
+        val user = accountLifecycleGuard.requireActiveForWrite(userId)
         require(user.phone.isNullOrBlank()) { "当前账号已绑定手机号，请使用换绑手机号功能" }
         require(!userRepository.existsByPhone(phone)) { "该手机号已被注册" }
         require(verificationCodeService.validate(phone, code)) { "验证码无效或已过期" }
@@ -205,13 +183,13 @@ class UserProfileService(
     @Transactional
     fun changePhone(userId: String, phone: String, code: String) {
         adminAccountCommandService.requireOrdinaryPhoneChangeAllowed(userId, phone)
+        val user = accountLifecycleGuard.requireActiveForWrite(userId)
         if (hasBoundPhone(userId)) requirePhoneChangeAuthorization(userId)
         if (getCurrentPhone(userId) == phone) throw IllegalArgumentException("新手机号不能与当前手机号相同")
         if (userRepository.existsByPhone(phone)) throw IllegalArgumentException("该手机号已被注册")
         if (!verificationCodeService.validate(phone, code, VerificationCodePurposeEnum.PHONE_CHANGE_NEW)) {
             throw IllegalArgumentException("验证码无效或已过期")
         }
-        val user = userRepository.findById(userId).orElseThrow { IllegalArgumentException("用户不存在") }
         userRepository.save(user.copy(phone = phone, credentialsUpdatedAt = LocalDateTime.now()))
         refreshTokenService.revokeAll(userId)
         phoneChangeAuthorizations.remove(userId)
@@ -260,9 +238,9 @@ class UserProfileService(
 
     fun adminListUsers(keyword: String?): List<UserEntity> {
         return if (keyword.isNullOrBlank()) {
-            userRepository.findAllIncludingDeleted()
+            userRepository.findAllAnyState()
         } else {
-            userRepository.searchUsersIncludingDeleted(keyword.trim())
+            userRepository.searchUsersAnyState(keyword.trim())
         }
     }
 
@@ -280,5 +258,5 @@ class UserProfileService(
         return adminAccountCommandService.reactivate(id)
     }
 
-    fun count(): Long = userRepository.countIncludingDeleted()
+    fun count(): Long = userRepository.countAnyState()
 }

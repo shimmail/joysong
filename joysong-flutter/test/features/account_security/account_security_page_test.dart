@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:joysong_flutter/features/account_security/data/account_deletion_pending_store.dart';
 import 'package:joysong_flutter/features/account_security/domain/account_security_models.dart';
 import 'package:joysong_flutter/features/account_security/domain/account_security_repository.dart';
 import 'package:joysong_flutter/features/account_security/presentation/account_security_controller.dart';
@@ -55,13 +56,25 @@ void main() {
   testWidgets('requires an exact destructive confirmation phrase',
       (tester) async {
     final repository = _FakeRepository();
-    final controller = AccountSecurityController(repository);
+    final controller = AccountSecurityController(
+      repository,
+      pendingDeletionStore: _MemoryPendingStore(),
+      idempotencyKeyFactory: () => 'delete-key-1',
+    );
     await tester.pumpWidget(
       MaterialApp(home: AccountSecurityPage(controller: controller)),
     );
     await tester.pump();
 
     await tester.tap(find.byKey(const Key('delete-account-action')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('delete-account-send-sms')));
+    await tester.pump();
+    await tester.enterText(
+      find.byKey(const Key('delete-account-sms-code')),
+      '123456',
+    );
+    await tester.tap(find.byKey(const Key('delete-account-verify-sms')));
     await tester.pumpAndSettle();
     var button = tester.widget<FilledButton>(
       find.byKey(const Key('delete-account-submit')),
@@ -70,7 +83,7 @@ void main() {
 
     await tester.enterText(
       find.byKey(const Key('delete-account-confirmation')),
-      '注销账号',
+      'DELETE',
     );
     await tester.pump();
     button = tester.widget<FilledButton>(
@@ -81,7 +94,140 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(repository.deleteCalls, 1);
-    expect(find.text('账号已注销，请返回登录页'), findsOneWidget);
+    expect(find.text('账号已注销'), findsWidgets);
+  });
+
+  testWidgets('shows the Google deletion step in English', (tester) async {
+    final repository = _FakeRepository()
+      ..deletionMethod = AccountDeletionStepUpMethod.google;
+    final controller = AccountSecurityController(
+      repository,
+      pendingDeletionStore: _MemoryPendingStore(),
+      googleIdTokenProvider: () async => 'google-id-token',
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('en'),
+        home: AccountSecurityPage(controller: controller),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('delete-account-action')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Verify again with Google'), findsOneWidget);
+    expect(find.text('Delete account'), findsWidgets);
+    await tester.tap(find.byKey(const Key('delete-account-google-verify')));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Final confirmation: enter DELETE. This cannot be undone.'),
+      findsOneWidget,
+    );
+    expect(repository.googleTokens, ['google-id-token']);
+  });
+
+  testWidgets('shows only explicitly supported identity blocker actions',
+      (tester) async {
+    final repository = _FakeRepository()
+      ..deletionBlockers = const [
+        AccountDeletionBlocker(
+          type: 'IDENTITY_APPLICATION',
+          count: 1,
+          action: 'VIEW_IDENTITY_APPLICATION',
+        ),
+        AccountDeletionBlocker(
+          type: 'ADMIN_ACCOUNT',
+          count: 1,
+          action: 'CONTACT_SUPPORT',
+        ),
+        AccountDeletionBlocker(
+          type: 'INSTITUTION_MEMBERSHIP',
+          count: 1,
+          action: 'MANAGE_INSTITUTION_RELATIONSHIP',
+        ),
+        AccountDeletionBlocker(
+          type: 'PENDING_RELATIONSHIP_CHANGE',
+          count: 1,
+          action: 'RESOLVE_PENDING_RELATIONSHIP',
+        ),
+      ];
+    final controller = AccountSecurityController(repository);
+    final actions = <String>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AccountSecurityPage(
+          controller: controller,
+          onDeletionBlockerAction: actions.add,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('delete-account-action')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(
+        const Key('delete-account-blocker-action-VIEW_IDENTITY_APPLICATION'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(
+        const Key('delete-account-blocker-action-CONTACT_SUPPORT'),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.byKey(
+        const Key(
+          'delete-account-blocker-action-MANAGE_INSTITUTION_RELATIONSHIP',
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(
+        const Key(
+          'delete-account-blocker-action-RESOLVE_PENDING_RELATIONSHIP',
+        ),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(
+      find.byKey(
+        const Key('delete-account-blocker-action-VIEW_IDENTITY_APPLICATION'),
+      ),
+    );
+    expect(actions, ['VIEW_IDENTITY_APPLICATION']);
+  });
+
+  testWidgets('hides blocker actions when the route has no handler',
+      (tester) async {
+    final repository = _FakeRepository()
+      ..deletionBlockers = const [
+        AccountDeletionBlocker(
+          type: 'IDENTITY_APPLICATION',
+          count: 1,
+          action: 'VIEW_IDENTITY_APPLICATION',
+        ),
+      ];
+    final controller = AccountSecurityController(repository);
+    await tester.pumpWidget(
+      MaterialApp(home: AccountSecurityPage(controller: controller)),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('delete-account-action')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(
+        const Key('delete-account-blocker-action-VIEW_IDENTITY_APPLICATION'),
+      ),
+      findsNothing,
+    );
   });
 
   testWidgets('changes a bound phone through both verification stages',
@@ -149,6 +295,10 @@ final class _FakeRepository implements AccountSecurityRepository {
   int bindPhoneCalls = 0;
   String? lastPhone;
   bool hasBoundPhone = true;
+  AccountDeletionStepUpMethod deletionMethod =
+      AccountDeletionStepUpMethod.sms;
+  List<AccountDeletionBlocker> deletionBlockers = const [];
+  final googleTokens = <String>[];
 
   @override
   Future<AccountSecurityProfile> getProfile() async {
@@ -169,9 +319,48 @@ final class _FakeRepository implements AccountSecurityRepository {
   }
 
   @override
-  Future<void> deleteAccount() async {
-    deleteCalls++;
+  Future<AccountDeletionPreflight> preflightAccountDeletion() async =>
+      AccountDeletionPreflight(
+        requestId: 'request-1',
+        eligible: deletionBlockers.isEmpty,
+        stepUpMethod: deletionMethod,
+        maskedCredential: '+8613******00',
+        policyVersion: 'dev-v1',
+        blockers: deletionBlockers,
+      );
+
+  @override
+  Future<void> sendAccountDeletionSmsCode(String requestId) async {}
+
+  @override
+  Future<AccountDeletionAuthorization> stepUpAccountDeletionWithSms({
+    required String requestId,
+    required String code,
+  }) async =>
+      const AccountDeletionAuthorization(token: 'delete-auth-1');
+
+  @override
+  Future<AccountDeletionAuthorization> stepUpAccountDeletionWithGoogle({
+    required String requestId,
+    required String idToken,
+  }) async {
+    googleTokens.add(idToken);
+    return const AccountDeletionAuthorization(token: 'delete-auth-1');
   }
+
+  @override
+  Future<AccountDeletionConfirmation> confirmAccountDeletion(
+    PendingAccountDeletion pending,
+  ) async {
+    deleteCalls++;
+    return AccountDeletionConfirmation(
+      requestId: pending.requestId,
+      outcome: AccountDeletionOutcome.erased,
+    );
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 
   @override
   Future<void> sendCurrentPhoneChangeCode() async {
@@ -224,4 +413,17 @@ final class _FakeRepository implements AccountSecurityRepository {
     required String code,
     required String newPassword,
   }) async {}
+}
+
+final class _MemoryPendingStore implements AccountDeletionPendingStore {
+  PendingAccountDeletion? value;
+
+  @override
+  Future<void> clear() async => value = null;
+
+  @override
+  Future<PendingAccountDeletion?> read() async => value;
+
+  @override
+  Future<void> save(PendingAccountDeletion pending) async => value = pending;
 }

@@ -2,6 +2,7 @@ package com.joysong.server.config
 
 import com.joysong.server.auth.service.RefreshTokenService
 import com.joysong.server.user.repository.UserRepository
+import com.joysong.server.user.entity.AccountState
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
@@ -38,7 +39,8 @@ class JwtAuthenticationFilter(
             val activeUser = userRepository.findById(userId)
                 .filter { user ->
                     val roleStillValid = role != "ADMIN" || user.role == "ADMIN"
-                    roleStillValid && !issuedAt.isBefore(user.credentialsUpdatedAt)
+                    user.accountState == AccountState.ACTIVE &&
+                        roleStillValid && !issuedAt.isBefore(user.credentialsUpdatedAt)
                 }
                 .isPresent
             val activeAdminSession = role != "ADMIN" || activeUser && jwtTokenProvider

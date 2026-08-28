@@ -67,7 +67,7 @@ class AdminCustomerServiceService(
                 else -> return@mapNotNull null // 两个都是真实用户的会话，跳过
             }
 
-            val user = userRepository.findByIdIncludingDeleted(userId)
+            val user = userRepository.findByIdAnyState(userId)
             val nickname = user?.nickname ?: "未知用户"
 
             // keyword 过滤（按昵称模糊匹配）
@@ -107,7 +107,7 @@ class AdminCustomerServiceService(
             val senderName = if (msg.senderId == CS_ADMIN) {
                 "平台客服"
             } else {
-                userRepository.findByIdIncludingDeleted(msg.senderId)?.nickname ?: "未知用户"
+                userRepository.findByIdAnyState(msg.senderId)?.nickname ?: "未知用户"
             }
 
             CsMessageResponse(

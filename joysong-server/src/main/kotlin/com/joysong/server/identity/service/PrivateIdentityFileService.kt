@@ -2,8 +2,15 @@ package com.joysong.server.identity.service
 
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.jdbc.core.JdbcTemplate
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.web.multipart.MultipartFile
+import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionSynchronization
+import org.springframework.transaction.support.TransactionSynchronizationManager
+import com.joysong.server.user.deletion.UserMediaAssetService
+import com.joysong.server.user.deletion.UserMediaStorageProvider
+import com.joysong.server.user.service.AccountLifecycleGuard
 import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
@@ -22,8 +29,11 @@ val IDENTITY_DOCUMENT_TYPES = setOf(
 @Service
 class PrivateIdentityFileService(
     private val jdbcTemplate: JdbcTemplate,
+    private val lifecycleGuard: AccountLifecycleGuard,
+    private val userMediaAssetService: UserMediaAssetService,
     @Value("\${upload.private-dir:./data/private}") private val privateUploadDirectory: String
 ) {
+    private val logger = LoggerFactory.getLogger(javaClass)
     private val maxFileSize = 10 * 1024 * 1024L
     private val allowedContentTypes = mapOf(
         "image/jpeg" to "jpg",
@@ -32,7 +42,9 @@ class PrivateIdentityFileService(
         "application/pdf" to "pdf"
     )
 
+    @Transactional
     fun upload(userId: String, purpose: String, file: MultipartFile): PrivateIdentityFileView {
+        lifecycleGuard.requireActiveForWrite(userId)
         val normalizedPurpose = purpose.trim().uppercase()
         require(normalizedPurpose in IDENTITY_DOCUMENT_TYPES) { "不支持的认证材料类型" }
         require(!file.isEmpty) { "认证材料不能为空" }
@@ -53,6 +65,7 @@ class PrivateIdentityFileService(
 
         try {
             file.transferTo(targetFile)
+            deleteWrittenFileIfTransactionFails(targetFile)
             val sha256 = Files.newInputStream(targetFile).use { input ->
                 MessageDigest.getInstance("SHA-256").digest(input.readBytes()).joinToString("") { "%02x".format(it) }
             }
@@ -71,6 +84,12 @@ class PrivateIdentityFileService(
                 file.size,
                 sha256
             )
+            userMediaAssetService.register(
+                userId = userId,
+                storageKey = relativeStorageKey,
+                assetType = "IDENTITY",
+                storageProvider = UserMediaStorageProvider.LOCAL_PRIVATE,
+            )
             return PrivateIdentityFileView(id, normalizedPurpose, originalName, contentType, file.size)
         } catch (error: Exception) {
             Files.deleteIfExists(targetFile)
@@ -78,7 +97,27 @@ class PrivateIdentityFileService(
         }
     }
 
+    private fun deleteWrittenFileIfTransactionFails(targetFile: Path) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) return
+        TransactionSynchronizationManager.registerSynchronization(object : TransactionSynchronization {
+            override fun afterCompletion(status: Int) {
+                if (status == TransactionSynchronization.STATUS_COMMITTED) return
+                try {
+                    Files.deleteIfExists(targetFile)
+                } catch (error: Exception) {
+                    logger.error(
+                        "Failed to remove private identity file after transaction failure path={}",
+                        targetFile.fileName,
+                        error,
+                    )
+                }
+            }
+        })
+    }
+
+    @Transactional
     fun deleteDraft(userId: String, fileId: String) {
+        lifecycleGuard.requireActiveForWrite(userId)
         val file = findFile(
             """
             SELECT storage_key, original_name, content_type

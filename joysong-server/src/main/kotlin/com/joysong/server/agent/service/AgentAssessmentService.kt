@@ -9,16 +9,19 @@ import com.joysong.server.agent.repository.AgentAssessmentRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
+import com.joysong.server.user.service.AccountLifecycleGuard
 
 @Service
 class AgentAssessmentService(
     private val repository: AgentAssessmentRepository,
     private val profileService: AgentProfileService,
     private val safetyService: AgentSafetyService,
-    private val objectMapper: ObjectMapper
+    private val objectMapper: ObjectMapper,
+    private val accountLifecycleGuard: AccountLifecycleGuard? = null,
 ) {
     @Transactional
     fun create(userId: String, request: CreateAssessmentRequest): AgentAssessmentResponse {
+        accountLifecycleGuard?.requireActiveForWrite(userId)
         val profile = profileService.requireEntity(userId)
         val missing = profileService.missingFields(profile)
         val id = UUID.randomUUID().toString()

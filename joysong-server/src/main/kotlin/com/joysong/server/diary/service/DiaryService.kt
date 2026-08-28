@@ -12,6 +12,7 @@ import com.joysong.server.institution.service.InstitutionProjectDetailResolver
 import com.joysong.server.order.repository.OrderRepository
 import com.joysong.server.project.repository.ProjectRepository
 import com.joysong.server.user.repository.UserRepository
+import com.joysong.server.user.service.AccountLifecycleGuard
 import org.springframework.cache.annotation.CacheEvict
 import org.springframework.cache.annotation.Caching
 import org.springframework.stereotype.Service
@@ -29,7 +30,8 @@ class DiaryService(
     private val institutionProjectRepository: InstitutionProjectRepository,
     private val institutionProjectDetailResolver: InstitutionProjectDetailResolver,
     private val orderRepository: OrderRepository,
-    private val diaryShareRepository: DiaryShareRepository
+    private val diaryShareRepository: DiaryShareRepository,
+    private val accountLifecycleGuard: AccountLifecycleGuard? = null,
 ) {
 
     /**
@@ -88,7 +90,7 @@ class DiaryService(
     ])
     @Transactional
     fun publishDiary(userId: String, request: PublishDiaryRequest): Any {
-        val user = userRepository.findById(userId).orElse(null)
+        val user = accountLifecycleGuard?.requireActiveForWrite(userId) ?: userRepository.findById(userId).orElse(null)
             ?: return mapOf("error" to "用户不存在", "code" to 404)
         validateText(request.title, request.content)
         validateRating(request.rating)
@@ -140,6 +142,7 @@ class DiaryService(
     ])
     @Transactional
     fun updateDiary(userId: String, id: String, request: UpdateDiaryRequest): Any {
+        accountLifecycleGuard?.requireActiveForWrite(userId)
         val diary = diaryRepository.findById(id).orElse(null)
             ?: return mapOf("error" to "日记不存在", "code" to 404)
 
@@ -238,6 +241,7 @@ class DiaryService(
     ])
     @Transactional
     fun deleteDiary(userId: String, id: String): Any {
+        accountLifecycleGuard?.requireActiveForWrite(userId)
         val diary = diaryRepository.findById(id).orElse(null)
             ?: return mapOf("error" to "日记不存在", "code" to 404)
 

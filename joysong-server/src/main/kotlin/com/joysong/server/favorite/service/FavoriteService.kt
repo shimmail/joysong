@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDateTime
 import java.util.UUID
+import com.joysong.server.user.service.AccountLifecycleGuard
 
 @Service
 class FavoriteService(
@@ -21,7 +22,8 @@ class FavoriteService(
     private val projectRepository: ProjectRepository,
     private val institutionRepository: InstitutionRepository,
     private val doctorRepository: DoctorRepository,
-    private val articleRepository: ArticleRepository
+    private val articleRepository: ArticleRepository,
+    private val accountLifecycleGuard: AccountLifecycleGuard? = null,
 ) {
 
     fun getFavorites(userId: String): List<FavoriteEntity> {
@@ -30,6 +32,7 @@ class FavoriteService(
 
     @Transactional
     fun addFavorite(userId: String, request: AddFavoriteRequest): Any {
+        accountLifecycleGuard?.requireActiveForWrite(userId)
         val targetType = normalizeAndValidateTarget(request.targetType, request.targetId)
         // 幂等：已收藏则直接返回成功
         if (favoriteRepository.findByUserIdAndTargetTypeAndTargetId(userId, targetType, request.targetId).isPresent) {
@@ -57,6 +60,7 @@ class FavoriteService(
 
     @Transactional
     fun removeFavorite(userId: String, type: String, targetId: String): Any {
+        accountLifecycleGuard?.requireActiveForWrite(userId)
         val normalizedType = normalizeAndValidateTarget(type, targetId)
         val favorite = favoriteRepository.findByUserIdAndTargetTypeAndTargetId(userId, normalizedType, targetId).orElse(null)
             ?: return mapOf("error" to "未找到收藏记录", "code" to 404)

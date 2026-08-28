@@ -4,10 +4,16 @@ import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/config/app_environment.dart';
 import 'package:joysong_flutter/core/network/api_client.dart';
 import 'package:joysong_flutter/core/theme/theme_controller.dart';
+import 'package:joysong_flutter/features/account_security/data/account_deletion_pending_store.dart';
 import 'package:joysong_flutter/features/account_security/data/account_security_api.dart';
 import 'package:joysong_flutter/features/account_security/data/account_security_repository_impl.dart';
+import 'package:joysong_flutter/features/account_security/domain/account_security_models.dart';
+import 'package:joysong_flutter/features/account_security/domain/account_security_repository.dart';
 import 'package:joysong_flutter/features/account_security/presentation/account_security_controller.dart';
 import 'package:joysong_flutter/features/account_security/presentation/account_security_page.dart';
+import 'package:joysong_flutter/features/auth/data/google_identity_provider.dart';
+import 'package:joysong_flutter/features/identity/data/identity_repository_impl.dart';
+import 'package:joysong_flutter/features/identity/presentation/identity_pages.dart';
 import 'package:joysong_flutter/features/legal_documents/domain/legal_document_models.dart';
 import 'package:joysong_flutter/features/legal_documents/domain/legal_document_repository.dart';
 import 'package:joysong_flutter/features/legal_documents/presentation/legal_document_page.dart';
@@ -33,6 +39,10 @@ abstract final class AppRouter {
     required LegalDocumentRepository legalDocumentRepository,
     ApiClient? apiClient,
     Future<void> Function()? onLogout,
+    AccountSecurityRepository? accountDeletionRepository,
+    AccountDeletionPendingStore? pendingAccountDeletionStore,
+    Future<void> Function(String userId)? onAccountDeletionConfirmed,
+    VoidCallback? onAccountDeletionUncertain,
   }) {
     return switch (settings.name) {
       AppRoutes.root => MaterialPageRoute<void>(
@@ -81,6 +91,10 @@ abstract final class AppRouter {
           builder: (_) => _AccountSecurityRoute(
             apiClient: apiClient,
             onLogout: onLogout,
+            accountDeletionRepository: accountDeletionRepository,
+            pendingAccountDeletionStore: pendingAccountDeletionStore,
+            onAccountDeletionConfirmed: onAccountDeletionConfirmed,
+            onAccountDeletionUncertain: onAccountDeletionUncertain,
           ),
           settings: settings,
         ),
@@ -93,10 +107,21 @@ abstract final class AppRouter {
 }
 
 class _AccountSecurityRoute extends StatefulWidget {
-  const _AccountSecurityRoute({required this.apiClient, this.onLogout});
+  const _AccountSecurityRoute({
+    required this.apiClient,
+    this.onLogout,
+    this.accountDeletionRepository,
+    this.pendingAccountDeletionStore,
+    this.onAccountDeletionConfirmed,
+    this.onAccountDeletionUncertain,
+  });
 
   final ApiClient apiClient;
   final Future<void> Function()? onLogout;
+  final AccountSecurityRepository? accountDeletionRepository;
+  final AccountDeletionPendingStore? pendingAccountDeletionStore;
+  final Future<void> Function(String userId)? onAccountDeletionConfirmed;
+  final VoidCallback? onAccountDeletionUncertain;
 
   @override
   State<_AccountSecurityRoute> createState() => _AccountSecurityRouteState();
@@ -109,9 +134,15 @@ class _AccountSecurityRouteState extends State<_AccountSecurityRoute> {
   void initState() {
     super.initState();
     _controller = AccountSecurityController(
-      AccountSecurityRepositoryImpl(
-        ApiAccountSecurityRemoteDataSource(widget.apiClient),
-      ),
+      widget.accountDeletionRepository ??
+          AccountSecurityRepositoryImpl(
+            ApiAccountSecurityRemoteDataSource(widget.apiClient),
+          ),
+      pendingDeletionStore: widget.pendingAccountDeletionStore ??
+          SecureAccountDeletionPendingStore(),
+      googleIdTokenProvider: GoogleIdentityProvider.instance.requestIdToken,
+      onDeletionConfirmed: widget.onAccountDeletionConfirmed,
+      onDeletionUncertain: widget.onAccountDeletionUncertain,
     );
   }
 
@@ -125,12 +156,29 @@ class _AccountSecurityRouteState extends State<_AccountSecurityRoute> {
   Widget build(BuildContext context) {
     return AccountSecurityPage(
       controller: _controller,
+      onDeletionBlockerAction: _openDeletionBlockerAction,
       onSessionInvalidated: () {
         Navigator.of(context).popUntil((route) => route.isFirst);
         final logout = widget.onLogout;
         if (logout != null) unawaited(logout());
       },
     );
+  }
+
+  void _openDeletionBlockerAction(String action) {
+    if (!isSupportedAccountDeletionIdentityAction(action)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(
+        Navigator.of(context, rootNavigator: true).push<void>(
+          MaterialPageRoute(
+            builder: (_) => IdentityCenterPage(
+              repository: ApiIdentityRepository(widget.apiClient),
+            ),
+          ),
+        ),
+      );
+    });
   }
 }
 

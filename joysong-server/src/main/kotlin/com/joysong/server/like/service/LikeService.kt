@@ -8,16 +8,19 @@ import com.joysong.server.like.entity.dto.LikeResponse
 import com.joysong.server.like.repository.LikeRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import com.joysong.server.user.service.AccountLifecycleGuard
 
 @Service
 class LikeService(
     private val likeRepository: LikeRepository,
     private val diaryRepository: DiaryRepository,
-    private val commentRepository: CommentRepository
+    private val commentRepository: CommentRepository,
+    private val accountLifecycleGuard: AccountLifecycleGuard? = null,
 ) {
 
     @Transactional
     fun addLike(userId: String, request: LikeRequest): Any {
+        accountLifecycleGuard?.requireActiveForWrite(userId)
         val targetType = normalizeAndValidateTarget(request.targetType, request.targetId)
         val targetId = request.targetId
 
@@ -43,6 +46,7 @@ class LikeService(
 
     @Transactional
     fun removeLike(userId: String, targetType: String, targetId: String): Any {
+        accountLifecycleGuard?.requireActiveForWrite(userId)
         val normalizedType = normalizeAndValidateTarget(targetType, targetId)
         val like = likeRepository.findByUserIdAndTargetTypeAndTargetId(userId, normalizedType, targetId)
             ?: return mapOf("error" to "未找到点赞记录", "code" to 404)

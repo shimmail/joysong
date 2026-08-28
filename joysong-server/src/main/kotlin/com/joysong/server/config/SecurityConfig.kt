@@ -15,6 +15,7 @@ import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.security.web.SecurityFilterChain
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter.ReferrerPolicy
+import com.joysong.server.user.deletion.AccountDeletionErrorCode
 
 @Configuration
 @EnableWebSecurity
@@ -32,6 +33,8 @@ class SecurityConfig(
             .authorizeHttpRequests { auth ->
                 auth
                     .requestMatchers("/api/auth/**").permitAll()
+                    .requestMatchers(HttpMethod.DELETE, "/api/user/account").permitAll()
+                    .requestMatchers(HttpMethod.POST, "/api/user/account-deletion/confirm").permitAll()
                     .requestMatchers("/api/home/**").permitAll()
                     .requestMatchers(HttpMethod.POST, "/api/payment-webhooks/**").permitAll()
                     .requestMatchers("/api/discover/**").permitAll()
@@ -87,8 +90,11 @@ class SecurityConfig(
                     .anyRequest().authenticated()
             }
             .exceptionHandling { exceptions ->
-                exceptions.authenticationEntryPoint { _, response, _ ->
-                    writeSecurityError(response, 401, "登录状态已失效，请重新登录")
+                exceptions.authenticationEntryPoint { request, response, _ ->
+                    val errorCode = if (request.requestURI.startsWith("/api/user/account-deletion")) {
+                        AccountDeletionErrorCode.UNAUTHENTICATED.wireCode
+                    } else null
+                    writeSecurityError(response, 401, "登录状态已失效，请重新登录", errorCode)
                 }
                 exceptions.accessDeniedHandler { _, response, _ ->
                     writeSecurityError(response, 403, "无权执行此操作")
@@ -106,13 +112,14 @@ class SecurityConfig(
     private fun writeSecurityError(
         response: jakarta.servlet.http.HttpServletResponse,
         status: Int,
-        message: String
+        message: String,
+        errorCode: String? = null,
     ) {
         response.status = status
         response.characterEncoding = Charsets.UTF_8.name()
         response.contentType = MediaType.APPLICATION_JSON_VALUE
         response.setHeader("Cache-Control", "no-store")
-        objectMapper.writeValue(response.writer, BaseResponse.error<Nothing>(message, status))
+        objectMapper.writeValue(response.writer, BaseResponse.error<Nothing>(message, status, errorCode))
     }
 
     @Bean

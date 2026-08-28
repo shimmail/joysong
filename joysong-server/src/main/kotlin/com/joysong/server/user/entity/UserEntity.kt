@@ -2,15 +2,11 @@ package com.joysong.server.user.entity
 
 import com.fasterxml.jackson.annotation.JsonIgnore
 import jakarta.persistence.*
-import org.hibernate.annotations.SQLDelete
-import org.hibernate.annotations.Where
 import java.time.LocalDate
 import java.time.LocalDateTime
 
 @Entity
 @Table(name = "users")
-@SQLDelete(sql = "UPDATE users SET deleted_at = NOW() WHERE id = ?")
-@Where(clause = "deleted_at IS NULL")
 data class UserEntity(
     @Id val id: String,
     @Column(unique = true, nullable = true) val phone: String? = null,
@@ -27,5 +23,14 @@ data class UserEntity(
     @Column(name = "created_at") val createdAt: LocalDateTime = LocalDateTime.now(),
     @Column(name = "updated_at") val updatedAt: LocalDateTime? = null,
     @Column(name = "credentials_updated_at") val credentialsUpdatedAt: LocalDateTime = LocalDateTime.now(),
+    @Enumerated(EnumType.STRING)
+    @Column(name = "account_state", nullable = false)
+    val accountState: AccountState = AccountState.ACTIVE,
+    @get:JsonIgnore
+    @Column(name = "erased_at") val erasedAt: LocalDateTime? = null,
+    @get:JsonIgnore
+    @Column(name = "erased_phone_digest") val erasedPhoneDigest: String? = null,
+    @get:JsonIgnore
+    @Column(name = "erased_email_digest") val erasedEmailDigest: String? = null,
     @Column(name = "deleted_at") var deletedAt: LocalDateTime? = null
 )

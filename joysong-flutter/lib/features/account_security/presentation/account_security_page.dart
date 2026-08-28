@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:joysong_flutter/features/account_security/domain/account_security_models.dart';
+import 'package:joysong_flutter/features/account_security/presentation/account_deletion_strings.dart';
 import 'package:joysong_flutter/features/auth/presentation/phone_country.dart';
 import 'package:joysong_flutter/features/account_security/presentation/account_security_controller.dart';
 
@@ -8,11 +11,13 @@ class AccountSecurityPage extends StatefulWidget {
   const AccountSecurityPage({
     required this.controller,
     this.onSessionInvalidated,
+    this.onDeletionBlockerAction,
     super.key,
   });
 
   final AccountSecurityController controller;
   final VoidCallback? onSessionInvalidated;
+  final ValueChanged<String>? onDeletionBlockerAction;
 
   @override
   State<AccountSecurityPage> createState() => _AccountSecurityPageState();
@@ -68,6 +73,9 @@ class _AccountSecurityPageState extends State<AccountSecurityPage> {
 
   Widget _body(BuildContext context) {
     final controller = widget.controller;
+    final deletionStrings = AccountDeletionStrings(
+      Localizations.localeOf(context),
+    );
     if (controller.status == AccountSecurityLoadStatus.loading ||
         controller.status == AccountSecurityLoadStatus.idle) {
       return const Center(child: CircularProgressIndicator());
@@ -79,7 +87,7 @@ class _AccountSecurityPageState extends State<AccountSecurityPage> {
       );
     }
     if (controller.status == AccountSecurityLoadStatus.deleted) {
-      return const _MessageState(message: '账号已注销，请返回登录页');
+      return _MessageState(message: deletionStrings.completed);
     }
     final profile = controller.profile!;
     return ListView(
@@ -168,10 +176,10 @@ class _AccountSecurityPageState extends State<AccountSecurityPage> {
               color: Theme.of(context).colorScheme.error,
             ),
             title: Text(
-              '注销账号',
+              deletionStrings.title,
               style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
-            subtitle: const Text('账号将停用并清除当前登录凭证'),
+            subtitle: Text(deletionStrings.entrySubtitle),
             enabled: !controller.isBusy,
             onTap: _showDeleteAccount,
           ),
@@ -223,7 +231,10 @@ class _AccountSecurityPageState extends State<AccountSecurityPage> {
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => _DeleteAccountDialog(controller: widget.controller),
+      builder: (_) => _DeleteAccountDialog(
+        controller: widget.controller,
+        onBlockerAction: widget.onDeletionBlockerAction,
+      ),
     );
   }
 }
@@ -760,9 +771,13 @@ class _SmsPasswordDialogState extends State<_SmsPasswordDialog> {
 }
 
 class _DeleteAccountDialog extends StatefulWidget {
-  const _DeleteAccountDialog({required this.controller});
+  const _DeleteAccountDialog({
+    required this.controller,
+    this.onBlockerAction,
+  });
 
   final AccountSecurityController controller;
+  final ValueChanged<String>? onBlockerAction;
 
   @override
   State<_DeleteAccountDialog> createState() => _DeleteAccountDialogState();
@@ -770,61 +785,290 @@ class _DeleteAccountDialog extends StatefulWidget {
 
 class _DeleteAccountDialogState extends State<_DeleteAccountDialog> {
   final _confirmation = TextEditingController();
-  bool _submitting = false;
+  final _smsCode = TextEditingController();
+  bool _smsSent = false;
 
-  bool get _confirmed => _confirmation.text.trim() == '注销账号';
+  bool get _confirmed => _confirmation.text == 'DELETE';
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(widget.controller.beginAccountDeletion());
+  }
 
   @override
   void dispose() {
     _confirmation.dispose();
+    _smsCode.dispose();
     super.dispose();
   }
 
-  Future<void> _submit() async {
-    if (!_confirmed || _submitting) return;
-    setState(() => _submitting = true);
-    final success = await widget.controller.deleteAccount();
-    if (!mounted) return;
-    setState(() => _submitting = false);
-    if (success) Navigator.of(context).pop();
+  void _close() {
+    widget.controller.resetAccountDeletionFlow();
+    Navigator.of(context).pop();
+  }
+
+  Future<void> _sendSmsCode() async {
+    final sent = await widget.controller.sendAccountDeletionSmsCode();
+    if (mounted && sent) setState(() => _smsSent = true);
+  }
+
+  Future<void> _verifySmsCode() async {
+    await widget.controller.verifyAccountDeletionSmsCode(_smsCode.text);
+  }
+
+  Future<void> _confirm() async {
+    if (!_confirmed) return;
+    await widget.controller.confirmAccountDeletion(
+      confirmation: _confirmation.text,
+      userId: widget.controller.profile?.id ?? '',
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('注销账号？'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            '账号将停用并清除当前登录凭证，关联公开内容按规则保留；恢复能力以服务端政策为准。',
+    return AnimatedBuilder(
+      animation: widget.controller,
+      builder: (context, _) {
+        final strings = AccountDeletionStrings(Localizations.localeOf(context));
+        final stage = widget.controller.deletionStage;
+        return AlertDialog(
+          title: Text(strings.title),
+          content: SingleChildScrollView(
+            child: SizedBox(
+              width: 400,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(strings.warning),
+                  const SizedBox(height: 16),
+                  if (widget.controller.deletionErrorCode != null) ...[
+                    Text(
+                      strings.error(widget.controller.deletionErrorCode),
+                      key: const Key('delete-account-error'),
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  _content(strings, stage),
+                ],
+              ),
+            ),
           ),
-          const SizedBox(height: 12),
-          const Text('请输入“注销账号”以确认：'),
-          TextField(
-            key: const Key('delete-account-confirmation'),
-            controller: _confirmation,
-            onChanged: (_) => setState(() {}),
-            decoration: const InputDecoration(hintText: '注销账号'),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: _submitting ? null : () => Navigator.of(context).pop(),
-          child: const Text('取消'),
+          actions: _actions(strings, stage),
+        );
+      },
+    );
+  }
+
+  Widget _content(
+    AccountDeletionStrings strings,
+    AccountDeletionStage stage,
+  ) {
+    return switch (stage) {
+      AccountDeletionStage.preflighting => Row(
+          key: const Key('delete-account-preflighting'),
+          children: [
+            const SizedBox.square(
+              dimension: 22,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: Text(strings.checking)),
+          ],
         ),
-        FilledButton(
-          key: const Key('delete-account-submit'),
-          onPressed: _confirmed && !_submitting ? _submit : null,
-          style: FilledButton.styleFrom(
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-          child: Text(_submitting ? '注销中…' : '注销账号'),
+      AccountDeletionStage.blocked => _blockers(strings),
+      AccountDeletionStage.awaitingStepUp => _stepUp(strings),
+      AccountDeletionStage.awaitingConfirmation => Column(
+          key: const Key('delete-account-final-confirmation'),
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(strings.irreversible),
+            const SizedBox(height: 8),
+            TextField(
+              key: const Key('delete-account-confirmation'),
+              controller: _confirmation,
+              autocorrect: false,
+              enableSuggestions: false,
+              textCapitalization: TextCapitalization.characters,
+              onChanged: (_) => setState(() {}),
+              decoration: InputDecoration(labelText: strings.confirmationLabel),
+            ),
+          ],
         ),
+      AccountDeletionStage.confirming => Row(
+          key: const Key('delete-account-confirming'),
+          children: [
+            const SizedBox.square(
+              dimension: 22,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(width: 12),
+            Text(strings.confirming),
+          ],
+        ),
+      AccountDeletionStage.completed => Text(
+          strings.completed,
+          key: const Key('delete-account-completed'),
+        ),
+      AccountDeletionStage.idle => Text(strings.checking),
+    };
+  }
+
+  Widget _blockers(AccountDeletionStrings strings) {
+    final blockers = widget.controller.deletionPreflight?.blockers ?? const [];
+    return Column(
+      key: const Key('delete-account-blockers'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(strings.blockedTitle),
+        const SizedBox(height: 8),
+        for (final blocker in blockers)
+          _blockerTile(strings, blocker),
       ],
     );
+  }
+
+  Widget _blockerTile(
+    AccountDeletionStrings strings,
+    AccountDeletionBlocker blocker,
+  ) {
+    final action = blocker.action.trim().toUpperCase();
+    final canHandle = widget.onBlockerAction != null &&
+        isSupportedAccountDeletionIdentityAction(action);
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Text(strings.blockerTitle(blocker.type)),
+      subtitle: Text(strings.blockerCount(blocker)),
+      trailing: !canHandle
+          ? null
+          : TextButton(
+              key: Key('delete-account-blocker-action-$action'),
+              onPressed: () {
+                widget.onBlockerAction!(action);
+                _close();
+              },
+              child: Text(strings.action),
+            ),
+    );
+  }
+
+  Widget _stepUp(AccountDeletionStrings strings) {
+    final preflight = widget.controller.deletionPreflight!;
+    if (preflight.stepUpMethod == AccountDeletionStepUpMethod.google) {
+      return Column(
+        key: const Key('delete-account-google-step-up'),
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (preflight.maskedCredential.isNotEmpty)
+            Text('${strings.verificationTarget}${preflight.maskedCredential}'),
+          const SizedBox(height: 12),
+          FilledButton.tonalIcon(
+            key: const Key('delete-account-google-verify'),
+            onPressed: widget.controller.isBusy
+                ? null
+                : widget.controller.verifyAccountDeletionWithGoogle,
+            icon: const Icon(Icons.verified_user_outlined),
+            label: Text(strings.googleVerify),
+          ),
+        ],
+      );
+    }
+    return Column(
+      key: const Key('delete-account-sms-step-up'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (preflight.maskedCredential.isNotEmpty)
+          Text('${strings.verificationTarget}${preflight.maskedCredential}'),
+        const SizedBox(height: 8),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: TextField(
+                key: const Key('delete-account-sms-code'),
+                controller: _smsCode,
+                keyboardType: TextInputType.number,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(6),
+                ],
+                decoration: InputDecoration(labelText: strings.smsCodeLabel),
+              ),
+            ),
+            const SizedBox(width: 8),
+            TextButton(
+              key: const Key('delete-account-send-sms'),
+              onPressed: widget.controller.isBusy ? null : _sendSmsCode,
+              child: Text(_smsSent ? strings.resendCode : strings.sendCode),
+            ),
+          ],
+        ),
+        if (_smsSent)
+          Text(
+            strings.codeSent,
+            key: const Key('delete-account-sms-sent'),
+          ),
+      ],
+    );
+  }
+
+  List<Widget> _actions(
+    AccountDeletionStrings strings,
+    AccountDeletionStage stage,
+  ) {
+    if (stage == AccountDeletionStage.preflighting ||
+        stage == AccountDeletionStage.confirming) {
+      return const [];
+    }
+    if (stage == AccountDeletionStage.completed) {
+      return [TextButton(onPressed: _close, child: Text(strings.close))];
+    }
+    if (stage == AccountDeletionStage.blocked ||
+        stage == AccountDeletionStage.idle) {
+      return [
+        TextButton(onPressed: _close, child: Text(strings.close)),
+        FilledButton.tonal(
+          key: const Key('delete-account-retry-preflight'),
+          onPressed: widget.controller.isBusy
+              ? null
+              : widget.controller.beginAccountDeletion,
+          child: Text(strings.retry),
+        ),
+      ];
+    }
+    if (stage == AccountDeletionStage.awaitingStepUp) {
+      final method = widget.controller.deletionPreflight!.stepUpMethod;
+      return [
+        TextButton(
+          onPressed: widget.controller.isBusy ? null : _close,
+          child: Text(strings.cancel),
+        ),
+        if (method == AccountDeletionStepUpMethod.sms)
+          FilledButton(
+            key: const Key('delete-account-verify-sms'),
+            onPressed: widget.controller.isBusy ? null : _verifySmsCode,
+            child: Text(strings.verify),
+          ),
+      ];
+    }
+    return [
+      TextButton(
+        onPressed: widget.controller.isBusy ? null : _close,
+        child: Text(strings.cancel),
+      ),
+      FilledButton(
+        key: const Key('delete-account-submit'),
+        onPressed: _confirmed && !widget.controller.isBusy ? _confirm : null,
+        style: FilledButton.styleFrom(
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+        child: Text(strings.confirm),
+      ),
+    ];
   }
 }
 

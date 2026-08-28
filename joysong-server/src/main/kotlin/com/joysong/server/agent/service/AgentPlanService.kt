@@ -15,6 +15,7 @@ import com.joysong.server.project.repository.ProjectRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
+import com.joysong.server.user.service.AccountLifecycleGuard
 
 private data class EffectivePlanOffering(
     val detail: ProjectEntity,
@@ -31,10 +32,12 @@ class AgentPlanService(
     private val institutionProjectDetailResolver: InstitutionProjectDetailResolver,
     private val profileService: AgentProfileService,
     private val assessmentService: AgentAssessmentService,
-    private val objectMapper: ObjectMapper
+    private val objectMapper: ObjectMapper,
+    private val accountLifecycleGuard: AccountLifecycleGuard? = null,
 ) {
     @Transactional
     fun create(userId: String, assessmentId: String): AgentPlanResponse {
+        accountLifecycleGuard?.requireActiveForWrite(userId)
         val assessment = assessmentService.getEntity(assessmentId, userId)
         require(assessment.status == "READY_FOR_PLANNING") { AgentText.value("当前评估尚不能生成规划：", "This assessment is not ready for planning: ") + assessment.status }
         val profile = profileService.requireEntity(userId)
@@ -123,6 +126,7 @@ class AgentPlanService(
 
     @Transactional
     fun delete(userId: String, planId: String) {
+        accountLifecycleGuard?.requireActiveForWrite(userId)
         val plan = planRepository.findByIdAndUserId(planId, userId)
             ?: throw IllegalArgumentException(AgentText.value("规划不存在", "Plan not found"))
         itemRepository.deleteAll(itemRepository.findByPlanIdOrderBySortOrderAsc(planId))
@@ -131,6 +135,7 @@ class AgentPlanService(
 
     @Transactional
     fun clear(userId: String) {
+        accountLifecycleGuard?.requireActiveForWrite(userId)
         planRepository.findByUserIdOrderByVersionDesc(userId).forEach { plan ->
             itemRepository.deleteAll(itemRepository.findByPlanIdOrderBySortOrderAsc(plan.id))
             planRepository.delete(plan)

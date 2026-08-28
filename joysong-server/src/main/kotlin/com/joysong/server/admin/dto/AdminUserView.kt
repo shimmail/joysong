@@ -1,6 +1,7 @@
 package com.joysong.server.admin.dto
 
 import com.joysong.server.user.entity.UserEntity
+import com.joysong.server.user.entity.AccountState
 import java.time.LocalDate
 import java.time.LocalDateTime
 
@@ -15,9 +16,9 @@ data class AdminUserView(
     val bio: String,
     val birthday: LocalDate?,
     val role: String,
+    val accountState: AccountState,
     val createdAt: LocalDateTime,
     val updatedAt: LocalDateTime?,
-    val deletedAt: LocalDateTime?,
     val hasPassword: Boolean
 )
 
@@ -32,8 +33,8 @@ internal fun UserEntity.toAdminUserView() = AdminUserView(
     bio = bio,
     birthday = birthday,
     role = role,
+    accountState = accountState,
     createdAt = createdAt,
     updatedAt = updatedAt,
-    deletedAt = deletedAt,
     hasPassword = passwordHash.isNotEmpty()
 )

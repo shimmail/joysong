@@ -11,7 +11,9 @@ import com.joysong.server.report.repository.ReportRepository
 import com.joysong.server.review.repository.ReviewRepository
 import com.joysong.server.review.service.ReviewService
 import com.joysong.server.user.repository.UserRepository
+import com.joysong.server.user.service.AccountLifecycleGuard
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
 
 @Service
 class ReportService(
@@ -21,10 +23,13 @@ class ReportService(
     private val commentRepository: CommentRepository,
     private val userRepository: UserRepository,
     private val objectMapper: ObjectMapper,
-    private val reviewService: ReviewService
+    private val reviewService: ReviewService,
+    private val accountLifecycleGuard: AccountLifecycleGuard,
 ) {
 
+    @Transactional
     fun submitReport(userId: String, request: ReportRequest): Any {
+        accountLifecycleGuard.requireActiveForWrite(userId)
         // 防重复举报
         if (reportRepository.existsByUserIdAndTargetTypeAndTargetId(userId, request.targetType, request.targetId)) {
             return mapOf("error" to "您已举报过该内容", "code" to 409)

@@ -1,0 +1,138 @@
+@startuml
+title 用户账号注销流程（开发环境）
+
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+actor User as user
+participant "Flutter App" as app
+participant "Account Deletion API" as api
+database "account_deletion_requests" as requests
+participant "Blocker Port" as blocker
+participant "SMS / Google" as stepup
+database "Application DB" as db
+participant "Media Worker" as media
+collections "Object Storage" as storage
+
+note over api,blocker
+  Production: always disabled (503)
+  Development bypass: explicit switches only,
+  restricted to test accounts with no commerce data
+end note
+
+user -> app: Start deletion
+app -> api: POST /preflight (Bearer)
+api -> blocker: evaluate(userId)
+
+alt Business blockers found
+  blocker --> api: blockers
+  api -> requests: persist ineligible request
+  api --> app: 200 eligible=false + blockers
+  app --> user: Show type, count, action only
+else Blocker service unavailable
+  blocker --> api: Unavailable
+  api --> app: 503 stable errorCode
+else Eligible
+  blocker --> api: Eligible
+  api -> requests: create or reuse active request + policyVersion
+  api --> app: requestId, method, masked credential
+
+  alt SMS step-up
+    app -> api: POST /send-sms-code(requestId)
+    api -> requests: store HMAC(phone + code) + expiry + attempts
+    api -> stepup: send SMS (or dev-only fixed-code adapter)
+    stepup --> api: accepted
+    api --> app: resend/expiry metadata
+    app -> api: POST /step-up(requestId, code)
+  else Google step-up
+    app -> stepup: request Google ID Token
+    stepup --> app: ID Token
+    app -> api: POST /step-up(requestId, ID Token)
+    api -> stepup: verify issuer, audience,\nemail_verified and exact email
+  end
+
+  api -> requests: store authorization hash (600s)
+  api --> app: one-time deletionAuthorization
+  app -> app: securely persist pending
+  note right of app
+    requestId + policyVersion
+    idempotencyKey + authorization
+    Pending is written before confirm
+  end note
+
+  app -> api: POST /confirm (Bearer + exact pending tuple)
+  api -> db: BEGIN; lock user row
+  api -> blocker: final evaluate(userId)
+
+  alt Final check blocked
+    blocker --> api: blockers
+    api -> requests: consume authorization;\npersist terminal BLOCKED
+    api -> db: COMMIT (no erasure writes)
+    api --> app: 409 + stable errorCode
+  else Blocker service unavailable
+    blocker --> api: Unavailable
+    api -> db: ROLLBACK
+    api --> app: 503 + stable errorCode
+  else Final check eligible
+    blocker --> api: Eligible
+    api -> requests: verify and consume authorization;\nbind idempotency key
+    api -> db: revoke refresh tokens
+    api -> db: clean in-scope private data;\nanonymize PII; set ERASED
+    api -> db: mark owned media PENDING
+    api -> requests: persist success terminal outcome
+    api -> db: COMMIT
+    api --> app: success terminal outcome
+
+    par Client completion
+      app -> app: completeAccountDeletion(userId)
+      app -> app: clear pending after all local cleanup succeeds
+      app --> user: Signed out; deletion complete
+    else After-commit media deletion
+      api -> media: wake worker after commit
+      media -> db: scan PENDING / RETRY rows
+      media -> storage: idempotent delete(storageKey)
+      alt File deleted or already absent
+        storage --> media: success / not found
+        media -> db: mark DELETED
+      else Temporary failure
+        storage --> media: failure
+        media -> db: increment attempt; mark RETRY
+        media -> media: retry with alert at limit
+      end
+    end
+  end
+end
+
+== Crash and response-loss recovery ==
+
+... App restarts with pending marker ...
+app -> app: remain signed out; load exact pending tuple first
+app -> api: POST /confirm without Bearer
+
+alt Exact terminal record matches all hashes and parameters
+  api -> requests: read terminal outcome only
+  requests --> api: terminal success / terminal failure
+  api --> app: original terminal outcome (no writes)
+  alt Success
+    app -> app: finish local cleanup; delete pending
+  else Explicit blocker or expired authorization
+    app -> app: clear pending; restore original account if still valid
+  end
+else No exact terminal match
+  api --> app: 401 / 410 (no mutation)
+  app -> app: keep pending and signed out on unknown/network state
+end
+
+note over db,storage
+  No order, payment, refund, wallet, settlement,
+  review, or direct-message table is read or written.
+  users.deleted_at is ignored by account lifecycle logic.
+end note
+
+legend right
+  Update this PUML as implementation changes.
+  Diagram image is generated manually by the user.
+endlegend
+
+@enduml

@@ -2,6 +2,7 @@ package com.joysong.server.admin.dto
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.joysong.server.user.entity.UserEntity
+import com.joysong.server.user.entity.AccountState
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -20,6 +21,7 @@ class AdminUserViewSerializationTest {
         assertEquals("user-1", json.path("id").asText())
         assertEquals("admin@example.com", json.path("email").asText())
         assertEquals("ADMIN", json.path("role").asText())
+        assertEquals("ACTIVE", json.path("accountState").asText())
         assertTrue(json.path("hasPassword").asBoolean())
         assertFalse(json.toString().contains(TEST_PASSWORD_HASH))
     }
@@ -56,7 +58,6 @@ class AdminUserViewSerializationTest {
         createdAt = LocalDateTime.parse("2026-08-01T10:15:30"),
         updatedAt = LocalDateTime.parse("2026-08-02T11:16:31"),
         credentialsUpdatedAt = LocalDateTime.parse("2026-08-03T12:17:32"),
-        deletedAt = LocalDateTime.parse("2026-08-04T13:18:33")
     )
 
     private companion object {
@@ -73,9 +74,9 @@ class AdminUserViewSerializationTest {
             "bio",
             "birthday",
             "role",
+            "accountState",
             "createdAt",
             "updatedAt",
-            "deletedAt",
             "hasPassword"
         )
     }

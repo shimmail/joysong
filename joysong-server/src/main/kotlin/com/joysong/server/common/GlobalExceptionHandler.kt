@@ -33,12 +33,28 @@ import java.io.IOException
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
 import org.springframework.web.bind.MissingServletRequestParameterException
+import org.springframework.web.bind.MissingRequestHeaderException
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
+import com.joysong.server.user.deletion.AccountDeletionException
 
 @RestControllerAdvice
 class GlobalExceptionHandler {
 
     private val log = LoggerFactory.getLogger(javaClass)
+
+    @ExceptionHandler(AccountDeletionException::class)
+    fun handleAccountDeletion(e: AccountDeletionException): ResponseEntity<BaseResponse<Any>> {
+        val code = e.errorCode.status.value()
+        val data = e.blockers.takeIf { it.isNotEmpty() }?.let { mapOf("blockers" to it) }
+        return ResponseEntity.status(e.errorCode.status).body(
+            BaseResponse(
+                code = code,
+                message = e.errorCode.publicMessage,
+                errorCode = e.errorCode.wireCode,
+                data = data,
+            ),
+        )
+    }
 
     @ExceptionHandler(ProjectChangeContractException::class)
     fun handleProjectChangeContract(e: ProjectChangeContractException): ResponseEntity<BaseResponse<Nothing>> =
@@ -94,6 +110,17 @@ class GlobalExceptionHandler {
     fun handleRequestParameter(e: Exception): ResponseEntity<BaseResponse<Nothing>> =
         ResponseEntity.status(HttpStatus.BAD_REQUEST)
             .body(BaseResponse.error(e.message ?: "请求参数错误", 400))
+
+    @ExceptionHandler(MissingRequestHeaderException::class)
+    fun handleMissingHeader(
+        e: MissingRequestHeaderException,
+        request: HttpServletRequest,
+    ): ResponseEntity<BaseResponse<Nothing>> {
+        val errorCode = request.requestURI.takeIf { it.startsWith("/api/user/account-deletion") }
+            ?.let { com.joysong.server.user.deletion.AccountDeletionErrorCode.REQUEST_INVALID.wireCode }
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+            .body(BaseResponse.error("缺少必要请求头", 400, errorCode))
+    }
 
     @ExceptionHandler(DoctorProjectChangeConflictException::class)
     fun handleDoctorProjectChangeConflict(e: DoctorProjectChangeConflictException) =
@@ -152,9 +179,11 @@ class GlobalExceptionHandler {
     ): ResponseEntity<BaseResponse<Nothing>> {
         log.error("服务器错误", e)
         if (request.requestURI.usesRealHttpErrorStatus()) {
+            val errorCode = request.requestURI.takeIf { it.startsWith("/api/user/account-deletion") }
+                ?.let { com.joysong.server.user.deletion.AccountDeletionErrorCode.REQUEST_INVALID.wireCode }
             return ResponseEntity
                 .status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(BaseResponse.error("服务器内部错误", 500))
+                .body(BaseResponse.error("服务器内部错误", 500, errorCode))
         }
         return ResponseEntity.ok(BaseResponse.error<Nothing>(e.message ?: "服务器内部错误", 500))
     }
@@ -221,22 +250,32 @@ class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(MethodArgumentNotValidException::class)
-    fun handleValidation(e: MethodArgumentNotValidException): ResponseEntity<BaseResponse<Nothing>> {
+    fun handleValidation(
+        e: MethodArgumentNotValidException,
+        request: HttpServletRequest,
+    ): ResponseEntity<BaseResponse<Nothing>> {
         val message = e.bindingResult.fieldErrors.firstOrNull()?.defaultMessage ?: "请求参数不正确"
+        val errorCode = request.requestURI.takeIf { it.startsWith("/api/user/account-deletion") }
+            ?.let { com.joysong.server.user.deletion.AccountDeletionErrorCode.REQUEST_INVALID.wireCode }
         return ResponseEntity
             .status(HttpStatus.BAD_REQUEST)
-            .body(BaseResponse.error(message, 400))
+            .body(BaseResponse.error(message, 400, errorCode))
     }
 
     @ExceptionHandler(HttpMessageNotReadableException::class)
-    fun handleUnreadableBody(): ResponseEntity<BaseResponse<Nothing>> {
+    fun handleUnreadableBody(request: HttpServletRequest): ResponseEntity<BaseResponse<Nothing>> {
+        val errorCode = request.requestURI.takeIf { it.startsWith("/api/user/account-deletion") }
+            ?.let { com.joysong.server.user.deletion.AccountDeletionErrorCode.REQUEST_INVALID.wireCode }
         return ResponseEntity
             .status(HttpStatus.BAD_REQUEST)
-            .body(BaseResponse.error("请求内容格式不正确", 400))
+            .body(BaseResponse.error("请求内容格式不正确", 400, errorCode))
     }
 
     private fun String.usesRealHttpErrorStatus(): Boolean =
         startsWith("/api/admin/") ||
+            startsWith("/api/user/account-deletion") ||
+            this == "/api/auth/account" ||
+            this == "/api/user/account" ||
             startsWith("/api/public/legal-documents/") ||
             startsWith("/legal/") ||
             startsWith("/api/v2/admin/institution-project-requests") ||

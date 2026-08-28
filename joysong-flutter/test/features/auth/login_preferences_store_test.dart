@@ -12,6 +12,7 @@ void main() {
 
       await store.save(
         const LoginPreferences(
+          userId: 'user-1',
           phone: '+8613800000000',
           password: 'password8',
           rememberPassword: true,
@@ -24,6 +25,7 @@ void main() {
       final persisted =
           jsonDecode(storage.values.values.single) as Map<String, dynamic>;
       expect(persisted, {
+        'userId': 'user-1',
         'phone': '+8613800000000',
         'password': 'password8',
         'rememberPassword': true,
@@ -33,6 +35,7 @@ void main() {
 
       final restored = await store.read();
       expect(restored?.phone, '+8613800000000');
+      expect(restored?.userId, 'user-1');
       expect(restored?.password, 'password8');
       expect(restored?.canAutoLogin, isTrue);
     });

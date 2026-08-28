@@ -2,6 +2,8 @@ package com.joysong.server.identity.service
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.joysong.server.notification.service.BusinessNotificationService
+import com.joysong.server.user.entity.UserEntity
+import com.joysong.server.user.service.AccountLifecycleGuard
 import com.joysong.server.wallet.repository.WalletRepository
 import io.mockk.every
 import io.mockk.mockk
@@ -25,7 +27,6 @@ import org.springframework.transaction.interceptor.TransactionInterceptor
 import org.springframework.transaction.support.SimpleTransactionStatus
 import java.sql.ResultSet
 import java.sql.Timestamp
-import java.time.LocalDateTime
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
@@ -40,7 +41,9 @@ class AdminIdentityServiceTest {
             DoctorInstitutionChangeRequestService::class,
             ConsultantInstitutionChangeRequestService::class
         ).forEach { serviceType ->
-            val notificationParameter = requireNotNull(serviceType.primaryConstructor).parameters.last()
+            val notificationParameter = requireNotNull(serviceType.primaryConstructor).parameters.single {
+                it.type.classifier == BusinessNotificationService::class
+            }
 
             assertEquals(BusinessNotificationService::class, notificationParameter.type.classifier)
             assertFalse(notificationParameter.type.isMarkedNullable)
@@ -88,7 +91,8 @@ class AdminIdentityServiceTest {
             mockk(relaxed = true),
             mockk(relaxed = true),
             mockk(relaxed = true),
-            notifications
+            notifications,
+            relaxedLifecycleGuard(),
         )
 
         assertThrows(IllegalStateException::class.java) {
@@ -116,7 +120,8 @@ class AdminIdentityServiceTest {
             relationshipService,
             mockk(relaxed = true),
             mockk(relaxed = true),
-            mockk(relaxed = true)
+            mockk(relaxed = true),
+            relaxedLifecycleGuard(),
         )
 
         service.revokeDoctorPractice("practice-1", "admin-1")
@@ -140,7 +145,8 @@ class AdminIdentityServiceTest {
             relationshipService,
             mockk(relaxed = true),
             mockk(relaxed = true),
-            mockk(relaxed = true)
+            mockk(relaxed = true),
+            relaxedLifecycleGuard(),
         )
 
         service.revokeRole("doctor-1", "DOCTOR", "admin-1", "认证撤销")
@@ -170,7 +176,8 @@ class AdminIdentityServiceTest {
             relationshipService,
             mockk(relaxed = true),
             mockk(relaxed = true),
-            mockk(relaxed = true)
+            mockk(relaxed = true),
+            relaxedLifecycleGuard(),
         )
 
         assertThrows(DoctorInstitutionRequestConflictException::class.java) {
@@ -215,7 +222,8 @@ class AdminIdentityServiceTest {
             relationshipService,
             mockk(relaxed = true),
             mockk(relaxed = true),
-            mockk(relaxed = true)
+            mockk(relaxed = true),
+            relaxedLifecycleGuard(),
         )
 
         assertThrows(DoctorInstitutionRequestConflictException::class.java) {
@@ -249,7 +257,8 @@ class AdminIdentityServiceTest {
             relationshipService,
             mockk(relaxed = true),
             mockk(relaxed = true),
-            mockk(relaxed = true)
+            mockk(relaxed = true),
+            relaxedLifecycleGuard(),
         )
 
         service.revokeDoctorPractice("practice-1", "admin-1")
@@ -271,7 +280,8 @@ class AdminIdentityServiceTest {
             relationshipService,
             mockk(relaxed = true),
             mockk(relaxed = true),
-            mockk(relaxed = true)
+            mockk(relaxed = true),
+            relaxedLifecycleGuard(),
         )
 
         service.revokeRole(
@@ -293,7 +303,8 @@ class AdminIdentityServiceTest {
             mockk(relaxed = true),
             mockk(relaxed = true),
             mockk(relaxed = true),
-            mockk(relaxed = true)
+            mockk(relaxed = true),
+            relaxedLifecycleGuard(),
         )
 
         val error = assertThrows(DoctorInstitutionRequestConflictException::class.java) {
@@ -372,7 +383,8 @@ class AdminIdentityServiceTest {
             mockk(relaxed = true),
             mockk(relaxed = true),
             mockk(relaxed = true),
-            mockk(relaxed = true)
+            mockk(relaxed = true),
+            relaxedLifecycleGuard(),
         )
 
         assertThrows(ConsultantInstitutionRequestConflictException::class.java) {
@@ -413,7 +425,8 @@ class AdminIdentityServiceTest {
             mockk(relaxed = true),
             mockk(relaxed = true),
             consultantRelationships,
-            mockk(relaxed = true)
+            mockk(relaxed = true),
+            relaxedLifecycleGuard(),
         )
 
         assertThrows(ConsultantInstitutionRequestConflictException::class.java) {
@@ -443,7 +456,8 @@ class AdminIdentityServiceTest {
             mockk(relaxed = true),
             mockk(relaxed = true),
             consultantRelationships,
-            mockk(relaxed = true)
+            mockk(relaxed = true),
+            relaxedLifecycleGuard(),
         )
 
         assertThrows(ConsultantInstitutionRequestConflictException::class.java) {
@@ -490,7 +504,7 @@ class AdminIdentityServiceTest {
         assertTrue(fixture.finalMembershipSql.contains("JOIN user_roles ur"))
         assertTrue(fixture.finalMembershipSql.contains("ur.status = 'ACTIVE'"))
         assertTrue(fixture.finalMembershipSql.contains("im.status = 'APPROVED'"))
-        assertTrue(fixture.finalMembershipSql.contains("u.deleted_at IS NULL"))
+        assertTrue(fixture.finalMembershipSql.contains("u.account_state = 'ACTIVE'"))
         assertTrue(fixture.finalMembershipSql.contains("i.deleted_at IS NULL"))
     }
 
@@ -503,9 +517,9 @@ class AdminIdentityServiceTest {
         verify(exactly = 1) {
             fixture.consultantRelationships.lockPair("user-1", "institution-1")
         }
-        assertEquals(2, fixture.validationQueries.size)
-        assertTrue(fixture.validationQueries[0].contains("FROM users"))
-        assertTrue(fixture.validationQueries[1].contains("FROM institutions"))
+        verify(exactly = 1) { fixture.lifecycleGuard.requireActiveForWrite("user-1") }
+        assertEquals(1, fixture.validationQueries.size)
+        assertTrue(fixture.validationQueries[0].contains("FROM institutions"))
     }
 
     @Test
@@ -539,23 +553,15 @@ class AdminIdentityServiceTest {
     }
 
     @Test
-    fun `bindConsultant rejects each invalid user state before either upsert`() {
-        val cases = listOf(
-            TargetCase(userExists = false, expectedMessage = "用户不存在"),
-            TargetCase(userDeleted = true, expectedMessage = "用户已注销"),
-            TargetCase(userRole = "ADMIN", expectedMessage = "只能绑定普通用户")
-        )
+    fun `bindConsultant rejects non ordinary active user before either upsert`() {
+        val fixture = fixture(userRole = "ADMIN")
 
-        cases.forEach { case ->
-            val fixture = fixture(userExists = case.userExists, userDeleted = case.userDeleted, userRole = case.userRole)
-
-            val error = assertThrows(IllegalArgumentException::class.java) {
-                fixture.service.bindConsultant("user-1", "institution-1", "admin-1")
-            }
-
-            assertEquals(case.expectedMessage, error.message)
-            assertEquals(emptyList<SqlCall>(), fixture.upserts)
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            fixture.service.bindConsultant("user-1", "institution-1", "admin-1")
         }
+
+        assertEquals("只能绑定普通用户", error.message)
+        assertEquals(emptyList<SqlCall>(), fixture.upserts)
     }
 
     @Test
@@ -610,8 +616,6 @@ class AdminIdentityServiceTest {
     }
 
     private fun fixture(
-        userExists: Boolean = true,
-        userDeleted: Boolean = false,
         userRole: String = "USER",
         institutionExists: Boolean = true,
         institutionDeleted: Boolean = false,
@@ -622,6 +626,10 @@ class AdminIdentityServiceTest {
         val jdbcTemplate = mockk<JdbcTemplate>()
         val walletRepository = mockk<WalletRepository>(relaxed = true)
         val consultantRelationships = mockk<ConsultantInstitutionRelationshipOperations>(relaxed = true)
+        val lifecycleGuard = mockk<AccountLifecycleGuard>()
+        every { lifecycleGuard.requireActiveForWrite(any()) } answers {
+            UserEntity(id = firstArg(), passwordHash = "test", role = userRole)
+        }
         val upserts = java.util.Collections.synchronizedList(mutableListOf<SqlCall>())
         val finalMembershipQueries = AtomicInteger()
         val preInsertMembershipSelects = AtomicInteger()
@@ -662,17 +670,16 @@ class AdminIdentityServiceTest {
             val sql = firstArg<String>()
             val rowMapper = secondArg<RowMapper<Any>>()
             when {
-                sql.contains("FROM users") -> {
-                    validationQueries += sql
-                    if (!userExists) emptyList() else listOf(rowMapper.mapRow(resultSet(
-                        strings = mapOf("role" to userRole),
-                        timestamps = mapOf("deleted_at" to userDeleted.timestampOrNull())
-                    ), 0))
-                }
                 sql.contains("FROM institutions") -> {
                     validationQueries += sql
                     if (!institutionExists) emptyList() else listOf(rowMapper.mapRow(resultSet(
-                        timestamps = mapOf("deleted_at" to institutionDeleted.timestampOrNull())
+                        timestamps = mapOf(
+                            "deleted_at" to if (institutionDeleted) {
+                                Timestamp.valueOf("2026-08-28 00:00:00")
+                            } else {
+                                null
+                            },
+                        )
                     ), 0))
                 }
                 sql.contains("FROM institution_memberships") -> {
@@ -701,7 +708,8 @@ class AdminIdentityServiceTest {
                 mockk<DoctorInstitutionRelationshipService>(relaxed = true),
                 walletRepository,
                 consultantRelationships,
-                mockk(relaxed = true)
+                mockk(relaxed = true),
+                lifecycleGuard,
             ),
             jdbcTemplate = jdbcTemplate,
             upserts = upserts,
@@ -712,7 +720,8 @@ class AdminIdentityServiceTest {
             finalMembershipSqlProvider = finalMembershipSql::get,
             walletRepository = walletRepository,
             pendingQueries = pendingQueries,
-            consultantRelationships = consultantRelationships
+            consultantRelationships = consultantRelationships,
+            lifecycleGuard = lifecycleGuard,
         )
     }
 
@@ -730,9 +739,12 @@ class AdminIdentityServiceTest {
             mockk(relaxed = true),
             mockk(relaxed = true),
             mockk(relaxed = true),
-            notifications
+            notifications,
+            relaxedLifecycleGuard(),
         )
     }
+
+    private fun relaxedLifecycleGuard(): AccountLifecycleGuard = mockk(relaxed = true)
 
     private fun identityReviewResultSet() = resultSet(
         strings = mapOf(
@@ -761,14 +773,6 @@ class AdminIdentityServiceTest {
         timestamps.forEach { (column, value) -> every { resultSet.getTimestamp(column) } returns value }
     }
 
-    private fun Boolean.timestampOrNull(): Timestamp? = if (this) Timestamp.valueOf(LocalDateTime.now()) else null
-
-    private data class TargetCase(
-        val userExists: Boolean = true,
-        val userDeleted: Boolean = false,
-        val userRole: String = "USER",
-        val expectedMessage: String
-    )
     private data class InstitutionCase(val exists: Boolean, val deleted: Boolean, val expectedMessage: String)
     private data class SqlCall(val sql: String, val args: List<Any?>)
 
@@ -783,7 +787,8 @@ class AdminIdentityServiceTest {
         private val finalMembershipSqlProvider: () -> String,
         val walletRepository: WalletRepository,
         val pendingQueries: List<String>,
-        val consultantRelationships: ConsultantInstitutionRelationshipOperations
+        val consultantRelationships: ConsultantInstitutionRelationshipOperations,
+        val lifecycleGuard: AccountLifecycleGuard,
     ) {
         val finalMembershipQueries get() = finalMembershipQueriesProvider()
         val preInsertMembershipSelects get() = preInsertMembershipSelectsProvider()

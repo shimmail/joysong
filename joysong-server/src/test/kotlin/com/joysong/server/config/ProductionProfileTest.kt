@@ -105,6 +105,23 @@ class ProductionProfileTest {
     }
 
     @Test
+    fun `account deletion is default off production off and development explicit`() {
+        assertEquals(
+            "\${ACCOUNT_DELETION_ENABLED:false}",
+            applicationProperties.getProperty("app.account-deletion.enabled"),
+        )
+        assertEquals(false, properties.getProperty("app.account-deletion.enabled"))
+        assertEquals(false, properties.getProperty("app.account-deletion.allow-commerce-bypass"))
+        assertEquals(true, developmentProperties.getProperty("app.account-deletion.enabled"))
+        assertEquals(true, developmentProperties.getProperty("app.account-deletion.allow-commerce-bypass"))
+        assertEquals(
+            "\${ACCOUNT_DELETION_DEV_FIXED_SMS_CODE:000000}",
+            developmentProperties.getProperty("app.account-deletion.dev-fixed-sms-code"),
+        )
+        assertNull(properties.getProperty("app.account-deletion.dev-fixed-sms-code"))
+    }
+
+    @Test
     fun `Stripe environment example is explicitly legacy and has no fake redirect defaults`() {
         val stripe = Files.readAllLines(Path.of(".env.example"))
             .filter { it.startsWith("STRIPE_") }

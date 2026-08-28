@@ -1,6 +1,7 @@
 package com.joysong.server.auth.dto
 
 import java.time.LocalDate
+import com.joysong.server.user.entity.AccountState
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Pattern
 import jakarta.validation.constraints.Size
@@ -79,5 +80,6 @@ data class UserDto(
     val bio: String,
     val birthday: LocalDate?,
     val role: String = "USER",
+    val accountState: AccountState = AccountState.ACTIVE,
     val hasPassword: Boolean = true
 )

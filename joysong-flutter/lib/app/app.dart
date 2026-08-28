@@ -9,8 +9,13 @@ import 'package:joysong_flutter/core/routing/app_router.dart';
 import 'package:joysong_flutter/core/theme/theme_controller.dart';
 import 'package:joysong_flutter/core/theme/theme_preferences_store.dart';
 import 'package:joysong_flutter/core/translation/translation.dart';
+import 'package:joysong_flutter/features/account_security/data/account_deletion_pending_store.dart';
+import 'package:joysong_flutter/features/account_security/data/account_security_api.dart';
+import 'package:joysong_flutter/features/account_security/data/account_security_repository_impl.dart';
+import 'package:joysong_flutter/features/account_security/domain/account_security_repository.dart';
 import 'package:joysong_flutter/features/auth/data/auth_remote_data_source.dart';
 import 'package:joysong_flutter/features/auth/data/auth_repository_impl.dart';
+import 'package:joysong_flutter/features/auth/data/google_identity_provider.dart';
 import 'package:joysong_flutter/features/auth/data/login_preferences_store.dart';
 import 'package:joysong_flutter/features/auth/data/secure_token_store.dart';
 import 'package:joysong_flutter/features/auth/data/saved_account_store.dart';
@@ -20,6 +25,7 @@ import 'package:joysong_flutter/features/auth/presentation/auth_controller.dart'
 import 'package:joysong_flutter/features/auth/presentation/auth_gate.dart';
 import 'package:joysong_flutter/features/legal_documents/data/legal_document_repository_impl.dart';
 import 'package:joysong_flutter/features/legal_documents/domain/legal_document_repository.dart';
+import 'package:joysong_flutter/features/messaging/data/secure_messaging_preferences_store.dart';
 import 'package:joysong_flutter/features/settings/data/settings_preferences_store.dart';
 import 'package:joysong_flutter/features/settings/domain/settings_preferences.dart';
 import 'package:joysong_flutter/features/settings/domain/settings_services.dart';
@@ -61,6 +67,8 @@ class _JoysongAppState extends State<JoysongApp> {
   late final LegalDocumentRepository _legalDocumentRepository;
   late final String _startupRouteName;
   ApiClient? _apiClient;
+  AccountSecurityRepository? _accountDeletionRepository;
+  AccountDeletionPendingStore? _pendingAccountDeletionStore;
 
   @override
   void initState() {
@@ -82,6 +90,13 @@ class _JoysongAppState extends State<JoysongApp> {
     _legalDocumentRepository = ApiLegalDocumentRepository(_legalApiClient);
     final repository =
         widget.authRepository ?? _createAuthRepository(secureStorage);
+    if (_apiClient != null) {
+      _accountDeletionRepository = AccountSecurityRepositoryImpl(
+        ApiAccountSecurityRemoteDataSource(_apiClient!),
+      );
+      _pendingAccountDeletionStore =
+          SecureAccountDeletionPendingStore(storage: secureStorage);
+    }
     final translationRepository = widget.translationRepository ??
         (_apiClient == null ? null : ApiTranslationRepository(_apiClient!));
     _autoTranslationController = AutoTranslationController(
@@ -95,6 +110,21 @@ class _JoysongAppState extends State<JoysongApp> {
               : null),
       savedAccountStore: usesDefaultDependencies
           ? SecureSavedAccountStore(storage: secureStorage)
+          : null,
+      messagingPreferencesStore: usesDefaultDependencies
+          ? SecureMessagingPreferencesStore(storage: secureStorage)
+          : null,
+      accountDeletionRepository: _accountDeletionRepository,
+      pendingAccountDeletionStore: _pendingAccountDeletionStore,
+      googleSessionClearer: usesDefaultDependencies
+          ? GoogleIdentityProvider.instance.clearLocalSession
+          : null,
+      accountCacheClearer: usesDefaultDependencies
+          ? (_) async {
+              PaintingBinding.instance.imageCache
+                ..clear()
+                ..clearLiveImages();
+            }
           : null,
       messageResolver: (chinese, english) =>
           _localeController.language == AppLanguage.english ? english : chinese,
@@ -228,6 +258,9 @@ class _JoysongAppState extends State<JoysongApp> {
                       controller: _authController,
                       agentConfig: widget.environment.agentConfig,
                       apiClient: _apiClient,
+                      accountDeletionRepository: _accountDeletionRepository,
+                      pendingAccountDeletionStore:
+                          _pendingAccountDeletionStore,
                       allowPreviewData:
                           widget.environment.flavor != AppFlavor.production,
                     ),
@@ -239,6 +272,12 @@ class _JoysongAppState extends State<JoysongApp> {
                 legalDocumentRepository: _legalDocumentRepository,
                 apiClient: _apiClient,
                 onLogout: _authController.logout,
+                accountDeletionRepository: _accountDeletionRepository,
+                pendingAccountDeletionStore: _pendingAccountDeletionStore,
+                onAccountDeletionConfirmed:
+                    _authController.completeAccountDeletion,
+                onAccountDeletionUncertain:
+                    _authController.holdPendingAccountDeletion,
               ),
             ),
           ),

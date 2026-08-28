@@ -1,6 +1,10 @@
 package com.joysong.server.identity.service
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.joysong.server.user.entity.UserEntity
+import com.joysong.server.user.service.AccountLifecycleGuard
+import io.mockk.every
+import io.mockk.mockk
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -228,6 +232,13 @@ class AdminIdentityServiceMySqlIntegrationTest {
     class TestConfig {
         @Bean
         fun objectMapper(): ObjectMapper = ObjectMapper()
+
+        @Bean
+        fun accountLifecycleGuard(): AccountLifecycleGuard = mockk<AccountLifecycleGuard>().also { guard ->
+            every { guard.requireActiveForWrite(any()) } answers {
+                UserEntity(id = firstArg(), passwordHash = "test", role = "USER")
+            }
+        }
     }
 
     companion object {

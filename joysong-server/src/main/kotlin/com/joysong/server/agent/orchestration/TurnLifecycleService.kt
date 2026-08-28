@@ -25,6 +25,7 @@ import java.time.Clock
 import java.time.Duration
 import java.time.LocalDateTime
 import java.util.UUID
+import com.joysong.server.user.service.AccountLifecycleGuard
 
 sealed interface BeginTurnResult {
     data class Started(val turnId: String, val traceId: String, val sequenceNo: Long) : BeginTurnResult
@@ -78,7 +79,8 @@ class TurnLifecycleService(
     private val clock: Clock,
     @Qualifier("turnLease")
     private val turnLease: Duration,
-    private val comparisonRequestBuilder: ComparisonRequestBuilder
+    private val comparisonRequestBuilder: ComparisonRequestBuilder,
+    private val accountLifecycleGuard: AccountLifecycleGuard? = null,
 ) {
     private val supportedCatalogTypes = setOf("DOCTOR", "INSTITUTION", "PROJECT", "INSTITUTION_PROJECT")
 
@@ -160,6 +162,7 @@ class TurnLifecycleService(
 
     @Transactional
     fun beginTurn(sessionId: String, userId: String, content: String, idempotencyKey: String): BeginTurnResult {
+        accountLifecycleGuard?.requireActiveForWrite(userId)
         val canonicalContent = content.trim().also { require(it.isNotEmpty()) { "消息内容不能为空" } }
         val session = sessionRepository.findByIdAndUserIdForUpdate(sessionId, userId)
             ?: throw IllegalArgumentException("会话不存在或无权访问")
@@ -242,6 +245,11 @@ class TurnLifecycleService(
     @Transactional
     fun completeTurn(command: CompleteTurnCommand): ChatTurnResult {
         val sessionId = turnRepository.findSessionIdById(command.turnId) ?: throw IllegalArgumentException("回合不存在")
+        accountLifecycleGuard?.let { guard ->
+            val ownerUserId = sessionRepository.findById(sessionId).orElse(null)?.userId
+                ?: throw IllegalArgumentException("会话不存在")
+            guard.requireActiveForWrite(ownerUserId)
+        }
         val session = sessionRepository.findByIdForUpdate(sessionId) ?: throw IllegalArgumentException("会话不存在")
         val turn = turnRepository.findByIdForUpdate(command.turnId) ?: throw IllegalArgumentException("回合不存在")
         check(turn.sessionId == session.id) { "回合与会话不匹配" }
@@ -305,6 +313,7 @@ class TurnLifecycleService(
 
     @Transactional
     fun clearHistory(sessionId: String, userId: String) {
+        accountLifecycleGuard?.requireActiveForWrite(userId)
         val session = ownedSessionForUpdate(sessionId, userId)
         deleteHistory(session.id)
         session.nextSequenceNo = 1
@@ -316,6 +325,7 @@ class TurnLifecycleService(
 
     @Transactional
     fun deleteSession(sessionId: String, userId: String) {
+        accountLifecycleGuard?.requireActiveForWrite(userId)
         val session = ownedSessionForUpdate(sessionId, userId)
         deleteHistory(session.id)
         sessionRepository.delete(session)
@@ -323,6 +333,7 @@ class TurnLifecycleService(
 
     @Transactional
     fun deleteTurn(messageId: String, userId: String) {
+        accountLifecycleGuard?.requireActiveForWrite(userId)
         val session = sessionRepository.findByMessageIdAndUserIdForUpdate(messageId, userId)
             ?: throw IllegalArgumentException("消息不存在或无权访问")
         val message = messageRepository.findByIdAndSessionId(messageId, session.id)
@@ -338,6 +349,7 @@ class TurnLifecycleService(
 
     @Transactional
     fun clearSessions(userId: String, persona: String) {
+        accountLifecycleGuard?.requireActiveForWrite(userId)
         val normalizedPersona = persona.trim().uppercase().also {
             require(it in setOf("BESTIE", "CONSULTANT")) { "不支持的 AI 角色" }
         }
@@ -348,6 +360,11 @@ class TurnLifecycleService(
     }
 
     private fun finishTurn(turnId: String, status: AgentTurnStatus, errorCode: String, durationMs: Long) {
+        accountLifecycleGuard?.let { guard ->
+            val sessionId = turnRepository.findSessionIdById(turnId) ?: return
+            val ownerUserId = sessionRepository.findById(sessionId).orElse(null)?.userId ?: return
+            guard.requireActiveForWrite(ownerUserId)
+        }
         val turn = turnRepository.findByIdForUpdate(turnId) ?: return
         if (turn.status != AgentTurnStatus.RUNNING) return
         turn.status = status

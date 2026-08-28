@@ -7,6 +7,7 @@ import com.joysong.server.comment.repository.CommentRepository
 import com.joysong.server.diary.repository.DiaryRepository
 import com.joysong.server.like.repository.LikeRepository
 import com.joysong.server.user.repository.UserRepository
+import com.joysong.server.user.service.AccountLifecycleGuard
 import jakarta.persistence.EntityManager
 import org.springframework.cache.annotation.CacheEvict
 import org.springframework.cache.annotation.Caching
@@ -21,7 +22,8 @@ class CommentService(
     private val userRepository: UserRepository,
     private val likeRepository: LikeRepository,
     private val diaryRepository: DiaryRepository,
-    private val entityManager: EntityManager
+    private val entityManager: EntityManager,
+    private val accountLifecycleGuard: AccountLifecycleGuard? = null,
 ) {
 
     /**
@@ -65,7 +67,7 @@ class CommentService(
     ])
     @Transactional
     fun publishComment(userId: String, request: PublishCommentRequest): Any {
-        userRepository.findById(userId).orElse(null)
+        (accountLifecycleGuard?.requireActiveForWrite(userId) ?: userRepository.findById(userId).orElse(null))
             ?: return mapOf("error" to "用户不存在", "code" to 404)
         require(diaryRepository.existsById(request.diaryId)) { "日记不存在" }
 
@@ -115,6 +117,7 @@ class CommentService(
     ])
     @Transactional
     fun deleteComment(userId: String, id: String): Any {
+        accountLifecycleGuard?.requireActiveForWrite(userId)
         val comment = commentRepository.findById(id).orElse(null)
             ?: return mapOf("error" to "评论不存在", "code" to 404)
 

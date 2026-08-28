@@ -2,6 +2,7 @@ package com.joysong.server.config
 
 import com.joysong.server.auth.service.RefreshTokenService
 import com.joysong.server.user.entity.UserEntity
+import com.joysong.server.user.entity.AccountState
 import com.joysong.server.user.repository.UserRepository
 import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.security.Keys
@@ -102,6 +103,18 @@ class JwtAuthenticationFilterTest {
     }
 
     @Test
+    fun `erased user token never authenticates`() {
+        val token = token(userId = "erased-user", role = "USER", sessionId = null)
+        every { userRepository.findById("erased-user") } returns Optional.of(
+            user("erased-user", "USER").copy(accountState = AccountState.ERASED)
+        )
+
+        authenticate(token, activeSession = false)
+
+        assertNull(SecurityContextHolder.getContext().authentication)
+    }
+
+    @Test
     fun `session owned by another user does not authenticate current admin`() {
         val sessionId = "a1-11111111111111111111111111111111"
         val token = token(role = "ADMIN", sessionId = sessionId)
@@ -125,7 +138,7 @@ class JwtAuthenticationFilterTest {
                 *anyVararg()
             )
         } returns if (activeSession) 1L else 0L
-        val refreshTokenService = RefreshTokenService(jdbcTemplate, tokenProvider, 60_000)
+        val refreshTokenService = RefreshTokenService(jdbcTemplate, tokenProvider, 60_000, mockk(relaxed = true))
         val filter = JwtAuthenticationFilter(tokenProvider, userRepository, providerOf(refreshTokenService))
 
         filter.doFilter(request, MockHttpServletResponse(), mockk<FilterChain>(relaxed = true))

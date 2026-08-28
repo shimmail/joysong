@@ -16,6 +16,7 @@ import com.joysong.server.identity.controller.ManagementAccessController
 import com.joysong.server.identity.service.ManagementAccessService
 import com.joysong.server.user.entity.UserEntity
 import com.joysong.server.user.repository.UserRepository
+import com.joysong.server.user.service.AccountLifecycleGuard
 import com.joysong.server.user.service.UserProfileService
 import io.mockk.every
 import io.mockk.mockk
@@ -151,6 +152,7 @@ class AdminSessionSecurityHttpTest @Autowired constructor(
     @MockBean lateinit var userRepository: UserRepository
     @MockBean lateinit var jwtTokenProvider: JwtTokenProvider
     @MockBean lateinit var jdbcTemplate: JdbcTemplate
+    @MockBean lateinit var accountLifecycleGuard: AccountLifecycleGuard
 
     @Test
     fun `revoked admin session can no longer restore shared management context`() {
@@ -378,6 +380,7 @@ class AdminLogoutClosureHttpTest @Autowired constructor(
     @MockBean lateinit var userRepository: UserRepository
     @MockBean lateinit var jwtTokenProvider: JwtTokenProvider
     @MockBean lateinit var jdbcTemplate: JdbcTemplate
+    @MockBean lateinit var accountLifecycleGuard: AccountLifecycleGuard
     @MockBean lateinit var verificationCodeService: VerificationCodeService
     @MockBean lateinit var userProfileService: UserProfileService
     @MockBean lateinit var aliyunSmsService: AliyunSmsService
@@ -426,7 +429,7 @@ class AdminLogoutClosureHttpTest @Autowired constructor(
         }
         given(
             jdbcTemplate.query(
-                eq("SELECT phone FROM users WHERE id = ? AND deleted_at IS NULL"),
+                eq("SELECT phone FROM users WHERE id = ? AND account_state = 'ACTIVE'"),
                 any(RowMapper::class.java),
                 eq("admin-id")
             )

@@ -1,6 +1,7 @@
 package com.joysong.server.identity.service
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.joysong.server.user.service.AccountLifecycleGuard
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -28,7 +29,8 @@ private val REQUIRED_DOCUMENTS = mapOf(
 @Service
 class IdentityApplicationService(
     private val jdbcTemplate: JdbcTemplate,
-    private val objectMapper: ObjectMapper
+    private val objectMapper: ObjectMapper,
+    private val accountLifecycleGuard: AccountLifecycleGuard,
 ) {
     fun overview(userId: String): IdentityOverviewView {
         val roles = jdbcTemplate.query(
@@ -69,7 +71,7 @@ class IdentityApplicationService(
     fun submit(userId: String, request: SubmitIdentityApplicationRequest): UserIdentityApplicationView {
         val roleCode = request.roleCode.trim().uppercase()
         require(roleCode in SELF_SERVICE_ROLES) { "暂不支持申请该身份" }
-        require(count("SELECT COUNT(*) FROM users WHERE id = ? AND deleted_at IS NULL", userId) == 1L) { "用户不存在或已注销" }
+        accountLifecycleGuard.requireActiveForWrite(userId)
         require(count("SELECT COUNT(*) FROM user_roles WHERE user_id = ? AND role_code = ? AND status = 'ACTIVE'", userId, roleCode) == 0L) {
             "该身份已经认证通过"
         }

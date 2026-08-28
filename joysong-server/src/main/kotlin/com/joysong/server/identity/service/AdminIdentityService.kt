@@ -3,6 +3,7 @@ package com.joysong.server.identity.service
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.joysong.server.notification.service.BusinessNotificationService
+import com.joysong.server.user.service.AccountLifecycleGuard
 import com.joysong.server.wallet.repository.WalletRepository
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
@@ -31,7 +32,8 @@ class AdminIdentityService(
     private val doctorInstitutionRelationshipService: DoctorInstitutionRelationshipOperations,
     private val walletRepository: WalletRepository,
     private val consultantInstitutionRelationships: ConsultantInstitutionRelationshipOperations,
-    private val businessNotifications: BusinessNotificationService
+    private val businessNotifications: BusinessNotificationService,
+    private val accountLifecycleGuard: AccountLifecycleGuard,
 ) {
     private val namedJdbcTemplate = NamedParameterJdbcTemplate(jdbcTemplate)
 
@@ -156,13 +158,8 @@ class AdminIdentityService(
         val normalizedInstitutionId = institutionId.trim().also { require(it.isNotEmpty()) { "机构不能为空" } }
         val normalizedConfirmerId = confirmerId.trim().also { require(it.isNotEmpty()) { "确认人不能为空" } }
 
+        val user = accountLifecycleGuard.requireActiveForWrite(normalizedUserId)
         consultantInstitutionRelationships.lockPair(normalizedUserId, normalizedInstitutionId)
-        val user = jdbcTemplate.query(
-            "SELECT role, deleted_at FROM users WHERE id = ?",
-            { rs, _ -> LockedBindingUser(rs.getString("role"), rs.getTimestamp("deleted_at")?.toLocalDateTime()) },
-            normalizedUserId
-        ).firstOrNull() ?: throw IllegalArgumentException("用户不存在")
-        require(user.deletedAt == null) { "用户已注销" }
         require(user.role == "USER") { "只能绑定普通用户" }
 
         val institution = jdbcTemplate.query(
@@ -222,7 +219,7 @@ class AdminIdentityService(
             JOIN institutions i ON i.id = im.institution_id
             JOIN user_roles ur ON ur.user_id = im.user_id AND ur.role_code = im.member_role
             WHERE im.user_id = ? AND im.institution_id = ? AND im.member_role = ?
-              AND u.deleted_at IS NULL AND u.role = 'USER' AND i.deleted_at IS NULL
+              AND u.account_state = 'ACTIVE' AND u.role = 'USER' AND i.deleted_at IS NULL
               AND ur.status = 'ACTIVE' AND im.status = 'APPROVED'
             """.trimIndent(),
             { rs, _ ->
@@ -407,8 +404,8 @@ class AdminIdentityService(
         if (normalizedRole == "CONSULTANT") {
             return bindConsultant(normalizedUserId, normalizedInstitutionId, reviewerId).membershipId
         }
+        accountLifecycleGuard.requireActiveForWrite(normalizedUserId)
         requireActiveRole(normalizedUserId, normalizedRole)
-        require(count("SELECT COUNT(*) FROM users WHERE id = ? AND deleted_at IS NULL", normalizedUserId) == 1L) { "用户不存在或已注销" }
         require(count("SELECT COUNT(*) FROM institutions WHERE id = ? AND deleted_at IS NULL", normalizedInstitutionId) == 1L) { "机构不存在或已删除" }
 
         val existing = jdbcTemplate.query(
@@ -760,7 +757,6 @@ private data class ReviewTarget(
     val applicationData: JsonNode
 )
 private data class RelationTarget(val userId: String, val institutionId: String, val roleCode: String, val status: String)
-private data class LockedBindingUser(val role: String, val deletedAt: LocalDateTime?)
 private data class LockedBindingInstitution(val deletedAt: LocalDateTime?)
 
 data class IdentityDocumentAdminView(

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.joysong.server.diary.service.DiaryService
 import com.joysong.server.user.entity.UserEntity
+import com.joysong.server.user.entity.AccountState
 import com.joysong.server.user.service.UserProfileService
 import io.mockk.every
 import io.mockk.mockk
@@ -35,19 +36,17 @@ class AdminUserControllerTest {
         .build()
 
     @Test
-    fun `list response is whitelisted and keeps deleted users visible`() {
+    fun `list response is whitelisted and keeps all account states visible`() {
         val activeUser = user(id = "active-user")
-        val deletedAt = LocalDateTime.parse("2026-08-20T09:30:00")
-        val deletedUser = user(id = "deleted-user", deletedAt = deletedAt)
-        every { userProfileService.adminListUsers(null) } returns listOf(activeUser, deletedUser)
+        val erasedUser = user(id = "erased-user", accountState = AccountState.ERASED)
+        every { userProfileService.adminListUsers(null) } returns listOf(activeUser, erasedUser)
 
         val data = performAndReadData(get("/api/admin/users"))
 
         assertEquals(2, data.size())
         assertAdminUserJson(data[0], "active-user", "USER")
-        assertTrue(data[0].path("deletedAt").isNull)
-        assertAdminUserJson(data[1], "deleted-user", "USER")
-        assertEquals("2026-08-20T09:30:00", data[1].path("deletedAt").asText())
+        assertAdminUserJson(data[1], "erased-user", "USER")
+        assertEquals("ERASED", data[1].path("accountState").asText())
     }
 
     @Test
@@ -77,12 +76,22 @@ class AdminUserControllerTest {
 
     @Test
     fun `reactivate response is whitelisted`() {
-        every { userProfileService.adminReactivate("user-1") } returns user(deletedAt = null)
+        every { userProfileService.adminReactivate("user-1") } returns user(accountState = AccountState.ACTIVE)
 
         val data = performAndReadData(put("/api/admin/users/user-1/reactivate"))
 
         assertAdminUserJson(data, "user-1", "USER")
-        assertTrue(data.path("deletedAt").isNull)
+    }
+
+    @Test
+    fun `list response exposes account lifecycle state`() {
+        every { userProfileService.adminListUsers(null) } returns listOf(
+            user(id = "suspended", accountState = AccountState.ADMIN_SUSPENDED),
+        )
+
+        val data = performAndReadData(get("/api/admin/users"))
+
+        assertEquals("ADMIN_SUSPENDED", data[0].path("accountState").asText())
     }
 
     private fun performAndReadData(request: MockHttpServletRequestBuilder): JsonNode {
@@ -114,7 +123,7 @@ class AdminUserControllerTest {
     private fun user(
         id: String = "user-1",
         role: String = "USER",
-        deletedAt: LocalDateTime? = null
+        accountState: AccountState = AccountState.ACTIVE,
     ) = UserEntity(
         id = id,
         phone = "+8613800000000",
@@ -130,7 +139,7 @@ class AdminUserControllerTest {
         createdAt = LocalDateTime.parse("2026-08-01T10:15:30"),
         updatedAt = LocalDateTime.parse("2026-08-02T11:16:31"),
         credentialsUpdatedAt = LocalDateTime.parse("2026-08-03T12:17:32"),
-        deletedAt = deletedAt
+        accountState = accountState,
     )
 
     private companion object {
@@ -147,9 +156,9 @@ class AdminUserControllerTest {
             "bio",
             "birthday",
             "role",
+            "accountState",
             "createdAt",
             "updatedAt",
-            "deletedAt",
             "hasPassword"
         )
     }

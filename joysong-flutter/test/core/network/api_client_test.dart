@@ -192,6 +192,50 @@ void main() {
     );
   });
 
+  test('preserves structured error data for domain-safe recovery', () async {
+    final server = await _serve((request) async {
+      await _respond(
+        request,
+        status: 409,
+        code: 409,
+        message: 'blocked',
+        errorCode: 'ACCOUNT_DELETION_BLOCKED',
+        includeErrorCode: true,
+        data: {
+          'blockers': [
+            {
+              'type': 'IDENTITY_APPLICATION',
+              'count': 1,
+              'action': 'VIEW_IDENTITY_APPLICATION',
+            },
+          ],
+        },
+      );
+    });
+    addTearDown(() => server.close(force: true));
+    final client = ApiClient(apiRoot: _apiRoot(server));
+    addTearDown(client.close);
+
+    await expectLater(
+      client.post<Object?>('account-deletion', decodeData: (json) => json),
+      throwsA(
+        isA<ApiException>().having(
+          (error) => error.data,
+          'data',
+          {
+            'blockers': [
+              {
+                'type': 'IDENTITY_APPLICATION',
+                'count': 1,
+                'action': 'VIEW_IDENTITY_APPLICATION',
+              },
+            ],
+          },
+        ),
+      ),
+    );
+  });
+
   test('idempotent write preserves its key and replays after refresh',
       () async {
     var accessToken = 'old-token';

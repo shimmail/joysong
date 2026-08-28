@@ -146,5 +146,9 @@ order:
       service-fee-rate: 40.00  # 出行地接服务费比例
 
 app:
+  account-deletion:
+    enabled: ${ACCOUNT_DELETION_ENABLED:false}
+    allow-commerce-bypass: ${ACCOUNT_DELETION_ALLOW_COMMERCE_BYPASS:false}
+    hmac-secret: ${ACCOUNT_DELETION_HMAC_SECRET:development-only-account-deletion-secret}
   project-change:
     v1-profile-update-enabled: ${PROJECT_CHANGE_V1_PROFILE_UPDATE_ENABLED:true}

@@ -21,7 +21,11 @@ import com.joysong.server.user.repository.UserRepository
 import com.joysong.server.user.service.UserProfileService
 import org.springframework.security.core.Authentication
 import org.springframework.web.bind.annotation.*
+import org.springframework.http.HttpStatus
+import org.springframework.web.server.ResponseStatusException
 import jakarta.validation.Valid
+import com.joysong.server.user.deletion.AccountDeletionErrorCode
+import com.joysong.server.user.deletion.AccountDeletionException
 
 @RestController
 @RequestMapping("/api/auth")
@@ -75,6 +79,10 @@ class AuthController(
         return BaseResponse.success(mapOf("message" to "已退出登录"))
     }
 
+    @DeleteMapping("/account")
+    fun retiredAccountDeletion(): Nothing =
+        throw AccountDeletionException(AccountDeletionErrorCode.LEGACY_ENDPOINT_RETIRED)
+
     @GetMapping("/check-phone-registered")
     fun checkPhoneRegistered(@RequestParam phone: String): BaseResponse<*> {
         val registered = userRepository.existsByPhone(phone)
@@ -126,13 +134,10 @@ class UserController(private val userProfileService: UserProfileService) {
         return BaseResponse.success(mapOf("message" to "手机号绑定成功"))
     }
 
-    /** 注销账号（永久删除用户数据） */
+    /** 旧端点已停用，等待分阶段注销流程接管。 */
     @DeleteMapping("/account")
-    fun deleteAccount(authentication: Authentication): BaseResponse<*> {
-        val userId = authentication.principal as String
-        userProfileService.deleteAccount(userId)
-        return BaseResponse.success(mapOf("message" to "账号已注销"))
-    }
+    fun deleteAccount(): Nothing =
+        throw AccountDeletionException(AccountDeletionErrorCode.LEGACY_ENDPOINT_RETIRED)
 
     /** 修改密码 */
     @PutMapping("/password")

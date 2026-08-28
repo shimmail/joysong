@@ -7,6 +7,7 @@ import com.joysong.server.diary.repository.DiaryShareRepository
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import com.joysong.server.user.service.AccountLifecycleGuard
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.nio.charset.StandardCharsets
@@ -18,12 +19,14 @@ import java.util.UUID
 class DiaryShareService(
     private val diaryRepository: DiaryRepository,
     private val shareRepository: DiaryShareRepository,
-    @Value("\${app.share-base-url:https://app.joysong.cn/s/diary/}") private val shareBaseUrl: String
+    @Value("\${app.share-base-url:https://app.joysong.cn/s/diary/}") private val shareBaseUrl: String,
+    private val accountLifecycleGuard: AccountLifecycleGuard? = null,
 ) {
     private val random = SecureRandom()
 
     @Transactional
     fun create(userId: String, diaryId: String, request: CreateDiaryShareRequest): Any {
+        accountLifecycleGuard?.requireActiveForWrite(userId)
         val diary = diaryRepository.findById(diaryId).orElse(null) ?: return error("日记不存在", 404)
         if (diary.userId != userId) return error("无权分享他人日记", 403)
         if (diary.status != "published") return error("仅已发布日记可以分享", 403)
@@ -54,6 +57,7 @@ class DiaryShareService(
 
     @Transactional
     fun revoke(userId: String, diaryId: String): Any {
+        accountLifecycleGuard?.requireActiveForWrite(userId)
         val diary = diaryRepository.findById(diaryId).orElse(null) ?: return error("日记不存在", 404)
         if (diary.userId != userId) return error("无权撤销他人日记分享", 403)
         shareRepository.revokeActiveByDiaryId(diaryId, LocalDateTime.now())

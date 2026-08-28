@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/config/app_environment.dart';
 import 'package:joysong_flutter/core/network/api_client.dart';
 import 'package:joysong_flutter/core/routing/app_router.dart';
+import 'package:joysong_flutter/features/account_security/data/account_deletion_pending_store.dart';
+import 'package:joysong_flutter/features/account_security/domain/account_security_repository.dart';
+import 'package:joysong_flutter/features/account_security/presentation/account_security_controller.dart';
 import 'package:joysong_flutter/features/auth/data/google_identity_provider.dart';
 import 'package:joysong_flutter/features/auth/presentation/auth_action_page.dart';
 import 'package:joysong_flutter/features/auth/presentation/auth_controller.dart';
@@ -13,6 +16,8 @@ class AuthGate extends StatelessWidget {
     required this.controller,
     required this.agentConfig,
     this.apiClient,
+    this.accountDeletionRepository,
+    this.pendingAccountDeletionStore,
     this.allowPreviewData = false,
     super.key,
   });
@@ -20,6 +25,8 @@ class AuthGate extends StatelessWidget {
   final AuthController controller;
   final AgentConfig agentConfig;
   final ApiClient? apiClient;
+  final AccountSecurityRepository? accountDeletionRepository;
+  final AccountDeletionPendingStore? pendingAccountDeletionStore;
   final bool allowPreviewData;
 
   @override
@@ -29,6 +36,10 @@ class AuthGate extends StatelessWidget {
       builder: (context, _) {
         return switch (controller.status) {
           AuthStatus.restoring => const _RestoringSessionPage(),
+          AuthStatus.accountDeletionPending => _PendingAccountDeletionPage(
+              errorMessage: controller.errorMessage,
+              onRetry: controller.retryPendingAccountDeletion,
+            ),
           AuthStatus.unauthenticated => LoginPage(
               onPasswordLogin: controller.loginWithPassword,
               onVerificationCodeLogin: controller.loginWithCode,
@@ -72,6 +83,21 @@ class AuthGate extends StatelessWidget {
               apiClient: apiClient,
               allowPreviewData: allowPreviewData,
               currentUserId: controller.currentUser?.id ?? '',
+              accountSecurityControllerFactory:
+                  accountDeletionRepository == null
+                      ? null
+                      : () => AccountSecurityController(
+                            accountDeletionRepository!,
+                            pendingDeletionStore:
+                                pendingAccountDeletionStore ??
+                                    SecureAccountDeletionPendingStore(),
+                            googleIdTokenProvider: GoogleIdentityProvider
+                                .instance.requestIdToken,
+                            onDeletionConfirmed:
+                                controller.completeAccountDeletion,
+                            onDeletionUncertain:
+                                controller.holdPendingAccountDeletion,
+                          ),
               onSwitchAccount: _showAccountSwitcher,
               onLogout: controller.logout,
             ),
@@ -193,6 +219,62 @@ class _RestoringSessionPage extends StatelessWidget {
         child: Semantics(
           label: _isEnglish(context) ? 'Restoring your session' : '正在恢复登录状态',
           child: const CircularProgressIndicator(),
+        ),
+      ),
+    );
+  }
+}
+
+class _PendingAccountDeletionPage extends StatelessWidget {
+  const _PendingAccountDeletionPage({
+    required this.onRetry,
+    this.errorMessage,
+  });
+
+  final Future<void> Function() onRetry;
+  final String? errorMessage;
+
+  @override
+  Widget build(BuildContext context) {
+    final english = _isEnglish(context);
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.hourglass_top_rounded, size: 44),
+                  const SizedBox(height: 16),
+                  Text(
+                    english
+                        ? 'Account deletion is awaiting confirmation'
+                        : '账号注销结果待确认',
+                    style: Theme.of(context).textTheme.titleLarge,
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    errorMessage ??
+                        (english
+                            ? 'You remain signed out. Retry the same protected request when the network is available.'
+                            : '当前保持退出状态。网络恢复后将使用同一受保护请求续作。'),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 20),
+                  FilledButton.icon(
+                    key: const Key('retry-pending-account-deletion'),
+                    onPressed: onRetry,
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: Text(english ? 'Retry' : '重试'),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );

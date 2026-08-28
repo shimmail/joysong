@@ -4,6 +4,7 @@ class ApiException implements Exception {
     this.httpStatus,
     this.businessCode,
     this.errorCode,
+    this.data,
     this.cause,
   });
 
@@ -11,6 +12,7 @@ class ApiException implements Exception {
   final int? httpStatus;
   final int? businessCode;
   final String? errorCode;
+  final Object? data;
   final Object? cause;
 
   bool get isUnauthorized => httpStatus == 401 || businessCode == 401;
