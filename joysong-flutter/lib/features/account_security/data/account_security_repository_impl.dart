@@ -85,5 +85,47 @@ final class AccountSecurityRepositoryImpl implements AccountSecurityRepository {
       );
 
   @override
-  Future<void> deleteAccount() => _remoteDataSource.deleteAccount();
+  Future<AccountDeletionPreflight> preflightAccountDeletion() =>
+      _remoteDataSource.preflightAccountDeletion();
+
+  @override
+  Future<void> sendAccountDeletionSmsCode(String requestId) =>
+      _remoteDataSource.sendAccountDeletionSmsCode(_requiredText(
+        requestId,
+        'requestId',
+      ));
+
+  @override
+  Future<AccountDeletionAuthorization> stepUpAccountDeletionWithSms({
+    required String requestId,
+    required String code,
+  }) =>
+      _remoteDataSource.stepUpAccountDeletionWithSms(
+        requestId: _requiredText(requestId, 'requestId'),
+        code: validateVerificationCode(code),
+      );
+
+  @override
+  Future<AccountDeletionAuthorization> stepUpAccountDeletionWithGoogle({
+    required String requestId,
+    required String idToken,
+  }) =>
+      _remoteDataSource.stepUpAccountDeletionWithGoogle(
+        requestId: _requiredText(requestId, 'requestId'),
+        idToken: _requiredText(idToken, 'googleIdToken'),
+      );
+
+  @override
+  Future<AccountDeletionConfirmation> confirmAccountDeletion(
+    PendingAccountDeletion pending,
+  ) =>
+      _remoteDataSource.confirmAccountDeletion(pending);
+}
+
+String _requiredText(String value, String name) {
+  final normalized = value.trim();
+  if (normalized.isEmpty) {
+    throw ArgumentError.value(value, name, '$name 不能为空');
+  }
+  return normalized;
 }

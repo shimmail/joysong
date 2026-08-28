@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/core/config/app_environment.dart';
+import 'package:joysong_flutter/core/network/api_client.dart';
 import 'package:joysong_flutter/core/routing/app_router.dart';
 import 'package:joysong_flutter/core/theme/theme_controller.dart';
 import 'package:joysong_flutter/core/theme/theme_preferences_store.dart';
+import 'package:joysong_flutter/features/account_security/domain/account_security_models.dart';
+import 'package:joysong_flutter/features/account_security/domain/account_security_repository.dart';
+import 'package:joysong_flutter/features/identity/presentation/identity_pages.dart';
 import 'package:joysong_flutter/features/legal_documents/domain/legal_document_models.dart';
 import 'package:joysong_flutter/features/legal_documents/domain/legal_document_repository.dart';
 import 'package:joysong_flutter/features/legal_documents/presentation/legal_document_page.dart';
@@ -69,6 +73,29 @@ void main() {
 
     fixture.dispose();
   });
+
+  testWidgets('Settings routes supported deletion blockers to Identity Center',
+      (tester) async {
+    final fixture = _Fixture()..nextRoute = AppRoutes.settings;
+    await _pumpRouterHost(tester, fixture);
+
+    await tester.tap(find.byKey(const Key('open-route')));
+    await tester.pumpAndSettle();
+    await _tapAfterScroll(tester, const Key('account-security-entry'));
+    await _tapAfterScroll(tester, const Key('delete-account-action'));
+
+    final action = find.byKey(
+      const Key(
+        'delete-account-blocker-action-MANAGE_INSTITUTION_RELATIONSHIP',
+      ),
+    );
+    expect(action, findsOneWidget);
+    await tester.tap(action);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(IdentityCenterPage), findsOneWidget);
+    fixture.dispose();
+  });
 }
 
 Future<void> _pumpRouterHost(WidgetTester tester, _Fixture fixture) async {
@@ -93,6 +120,8 @@ Future<void> _pumpRouterHost(WidgetTester tester, _Fixture fixture) async {
         themeController: fixture.themeController,
         settingsController: fixture.settingsController,
         legalDocumentRepository: fixture.repository,
+        apiClient: fixture.apiClient,
+        accountDeletionRepository: fixture.accountSecurityRepository,
       ),
     ),
   );
@@ -121,11 +150,59 @@ final class _Fixture {
   final ThemeController themeController;
   final SettingsController settingsController;
   final _LegalRepository repository = _LegalRepository();
+  final ApiClient apiClient = _NoopApiClient();
+  final AccountSecurityRepository accountSecurityRepository =
+      _BlockedAccountSecurityRepository();
 
   void dispose() {
+    apiClient.close();
     themeController.dispose();
     settingsController.dispose();
   }
+}
+
+final class _NoopApiClient extends ApiClient {
+  _NoopApiClient() : super(apiRoot: Uri.parse('http://localhost/api/'));
+
+  @override
+  Future<T?> get<T>(
+    String path, {
+    Map<String, Object?> query = const {},
+    required T Function(Object? json) decodeData,
+  }) async =>
+      null;
+}
+
+final class _BlockedAccountSecurityRepository
+    implements AccountSecurityRepository {
+  @override
+  Future<AccountSecurityProfile> getProfile() async =>
+      const AccountSecurityProfile(
+        id: 'user-1',
+        phone: '+8613800000000',
+        email: null,
+        hasPassword: true,
+      );
+
+  @override
+  Future<AccountDeletionPreflight> preflightAccountDeletion() async =>
+      const AccountDeletionPreflight(
+        requestId: 'request-1',
+        eligible: false,
+        stepUpMethod: AccountDeletionStepUpMethod.sms,
+        maskedCredential: '+8613******00',
+        policyVersion: 'dev-v1',
+        blockers: [
+          AccountDeletionBlocker(
+            type: 'INSTITUTION_MEMBERSHIP',
+            count: 1,
+            action: 'MANAGE_INSTITUTION_RELATIONSHIP',
+          ),
+        ],
+      );
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 final class _LegalRepository implements LegalDocumentRepository {

@@ -178,6 +178,36 @@ class ApiClient {
     );
   }
 
+  /// Sends an idempotent POST with narrowly scoped, caller-provided headers.
+  ///
+  /// This is used by protocols whose one-time authorization is distinct from
+  /// the user's Bearer token. Header names and values are validated before any
+  /// network request is opened.
+  Future<T?> postIdempotentWithHeaders<T>(
+    String path, {
+    required String idempotencyKey,
+    required Map<String, String> headers,
+    Object? body,
+    required T Function(Object? json) decodeData,
+    bool includeAccessToken = true,
+  }) {
+    _validateHeaderToken(idempotencyKey, 'Idempotency-Key');
+    for (final entry in headers.entries) {
+      _validateHeaderName(entry.key);
+      _validateHeaderToken(entry.value, entry.key);
+    }
+    return _send<T>(
+      method: 'POST',
+      path: path,
+      body: body,
+      decodeData: decodeData,
+      replayAfterRefresh: includeAccessToken,
+      idempotencyKey: idempotencyKey,
+      extraHeaders: headers,
+      includeAccessToken: includeAccessToken,
+    );
+  }
+
   Future<T?> put<T>(
     String path, {
     Object? body,
@@ -289,6 +319,7 @@ class ApiClient {
           httpStatus: response.statusCode,
           businessCode: envelope?.code,
           errorCode: envelope?.errorCode,
+          data: envelope?.data,
         );
       }
       return envelope.hasData ? decodeData(envelope.data) : null;
@@ -336,6 +367,8 @@ class ApiClient {
     bool hasRetried = false,
     String? idempotencyKey,
     String? requestId,
+    Map<String, String> extraHeaders = const {},
+    bool includeAccessToken = true,
   }) async {
     final uri = _resolve(path, query);
     final logicalRequestId = requestId ?? _requestIdProvider();
@@ -347,9 +380,14 @@ class ApiClient {
       if (idempotencyKey != null) {
         request.headers.set('Idempotency-Key', idempotencyKey);
       }
-      final token = await _accessTokenProvider?.call();
-      if (token != null && token.isNotEmpty) {
-        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+      for (final entry in extraHeaders.entries) {
+        request.headers.set(entry.key, entry.value);
+      }
+      if (includeAccessToken) {
+        final token = await _accessTokenProvider?.call();
+        if (token != null && token.isNotEmpty) {
+          request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+        }
       }
       if (body != null) {
         request.headers.contentType = ContentType.json;
@@ -385,6 +423,8 @@ class ApiClient {
             hasRetried: true,
             idempotencyKey: idempotencyKey,
             requestId: logicalRequestId,
+            extraHeaders: extraHeaders,
+            includeAccessToken: includeAccessToken,
           );
         }
       }
@@ -397,6 +437,7 @@ class ApiClient {
           httpStatus: response.statusCode,
           businessCode: envelope?.code,
           errorCode: envelope?.errorCode,
+          data: envelope?.data,
         );
       }
       return envelope.hasData ? decodeData(envelope.data) : null;
@@ -520,6 +561,12 @@ class ApiClient {
   void _validateHeaderToken(String value, String label) {
     if (value.trim().isEmpty || value.contains('\r') || value.contains('\n')) {
       throw ArgumentError.value(value, label, '$label 格式不正确');
+    }
+  }
+
+  void _validateHeaderName(String value) {
+    if (!RegExp(r'^[A-Za-z0-9-]+$').hasMatch(value)) {
+      throw ArgumentError.value(value, 'headerName', '请求头名称格式不正确');
     }
   }
 

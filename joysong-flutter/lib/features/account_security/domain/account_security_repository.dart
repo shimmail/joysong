@@ -34,5 +34,21 @@ abstract interface class AccountSecurityRepository {
 
   Future<void> bindPhone({required String phone, required String code});
 
-  Future<void> deleteAccount();
+  Future<AccountDeletionPreflight> preflightAccountDeletion();
+
+  Future<void> sendAccountDeletionSmsCode(String requestId);
+
+  Future<AccountDeletionAuthorization> stepUpAccountDeletionWithSms({
+    required String requestId,
+    required String code,
+  });
+
+  Future<AccountDeletionAuthorization> stepUpAccountDeletionWithGoogle({
+    required String requestId,
+    required String idToken,
+  });
+
+  Future<AccountDeletionConfirmation> confirmAccountDeletion(
+    PendingAccountDeletion pending,
+  );
 }

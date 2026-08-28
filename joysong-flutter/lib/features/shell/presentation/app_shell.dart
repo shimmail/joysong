@@ -8,6 +8,7 @@ import 'package:joysong_flutter/core/network/api_client.dart';
 import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/account_security/data/account_security_api.dart';
 import 'package:joysong_flutter/features/account_security/data/account_security_repository_impl.dart';
+import 'package:joysong_flutter/features/account_security/domain/account_security_models.dart';
 import 'package:joysong_flutter/features/account_security/presentation/account_security_controller.dart';
 import 'package:joysong_flutter/features/account_security/presentation/account_security_page.dart';
 import 'package:joysong_flutter/features/agent/data/agent_remote_data_source.dart';
@@ -69,12 +70,15 @@ import 'package:joysong_flutter/features/wallet/domain/wallet_repository.dart';
 import 'package:joysong_flutter/features/wallet/presentation/wallet_controller.dart';
 import 'package:joysong_flutter/features/wallet/presentation/wallet_page.dart';
 
+typedef AccountSecurityControllerFactory = AccountSecurityController Function();
+
 class AppShell extends StatefulWidget {
   const AppShell({
     required this.agentConfig,
     this.apiClient,
     this.allowPreviewData = false,
     this.currentUserId = '',
+    this.accountSecurityControllerFactory,
     this.onSwitchAccount,
     this.onLogout,
     super.key,
@@ -84,6 +88,7 @@ class AppShell extends StatefulWidget {
   final ApiClient? apiClient;
   final bool allowPreviewData;
   final String currentUserId;
+  final AccountSecurityControllerFactory? accountSecurityControllerFactory;
   final Future<void> Function(BuildContext context)? onSwitchAccount;
   final Future<void> Function()? onLogout;
 
@@ -720,11 +725,12 @@ class _AppShellState extends State<AppShell> {
   Future<void> _openAccountSecurity() async {
     final apiClient = widget.apiClient;
     if (apiClient == null) return;
-    final controller = AccountSecurityController(
-      AccountSecurityRepositoryImpl(
-        ApiAccountSecurityRemoteDataSource(apiClient),
-      ),
-    );
+    final controller = widget.accountSecurityControllerFactory?.call() ??
+        AccountSecurityController(
+          AccountSecurityRepositoryImpl(
+            ApiAccountSecurityRemoteDataSource(apiClient),
+          ),
+        );
     await _contentNavigator.push<void>(
       MaterialPageRoute(
         builder: (_) => AccountSecurityPage(
@@ -733,6 +739,11 @@ class _AppShellState extends State<AppShell> {
             _contentNavigator.popUntil((route) => route.isFirst);
             final logout = widget.onLogout;
             if (logout != null) unawaited(logout());
+          },
+          onDeletionBlockerAction: (action) {
+            if (!isSupportedAccountDeletionIdentityAction(action)) return;
+            _contentNavigator.popUntil((route) => route.isFirst);
+            _openIdentityCenter();
           },
         ),
       ),

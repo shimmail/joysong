@@ -4,6 +4,7 @@ import 'package:joysong_flutter/features/auth/data/secure_token_store.dart';
 
 final class LoginPreferences {
   const LoginPreferences({
+    this.userId = '',
     this.phone = '',
     this.password = '',
     this.rememberPassword = false,
@@ -11,6 +12,7 @@ final class LoginPreferences {
     this.agreementsAccepted = false,
   });
 
+  final String userId;
   final String phone;
   final String password;
   final bool rememberPassword;
@@ -28,6 +30,7 @@ final class LoginPreferences {
     final normalizedPhone = phone.trim();
     final shouldRemember = rememberPassword && password.isNotEmpty;
     return LoginPreferences(
+      userId: userId.trim(),
       phone: normalizedPhone,
       password: shouldRemember ? password : '',
       rememberPassword: shouldRemember,
@@ -37,6 +40,7 @@ final class LoginPreferences {
   }
 
   LoginPreferences withAutoLoginDisabled() => LoginPreferences(
+        userId: userId,
         phone: phone,
         password: password,
         rememberPassword: rememberPassword,
@@ -57,6 +61,7 @@ final class LoginPreferences {
       throw const FormatException('登录偏好开关格式不正确');
     }
     return LoginPreferences(
+      userId: map['userId']?.toString() ?? '',
       phone: map['phone']?.toString() ?? '',
       password: map['password']?.toString() ?? '',
       rememberPassword: rememberPassword,
@@ -68,6 +73,7 @@ final class LoginPreferences {
   Map<String, Object> toJson() {
     final value = normalized();
     return {
+      'userId': value.userId,
       'phone': value.phone,
       'password': value.password,
       'rememberPassword': value.rememberPassword,
@@ -77,7 +83,8 @@ final class LoginPreferences {
   }
 
   @override
-  String toString() => 'LoginPreferences(phone: $phone, password: <redacted>, '
+  String toString() => 'LoginPreferences(userId: $userId, phone: $phone, '
+      'password: <redacted>, '
       'rememberPassword: $rememberPassword, autoLogin: $autoLogin, '
       'agreementsAccepted: $agreementsAccepted)';
 }

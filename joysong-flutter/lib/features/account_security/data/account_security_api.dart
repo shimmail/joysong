@@ -1,4 +1,5 @@
 import 'package:joysong_flutter/core/network/api_client.dart';
+import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/features/account_security/domain/account_security_models.dart';
 
 abstract interface class AccountSecurityRemoteDataSource {
@@ -35,7 +36,23 @@ abstract interface class AccountSecurityRemoteDataSource {
 
   Future<void> bindPhone({required String phone, required String code});
 
-  Future<void> deleteAccount();
+  Future<AccountDeletionPreflight> preflightAccountDeletion();
+
+  Future<void> sendAccountDeletionSmsCode(String requestId);
+
+  Future<AccountDeletionAuthorization> stepUpAccountDeletionWithSms({
+    required String requestId,
+    required String code,
+  });
+
+  Future<AccountDeletionAuthorization> stepUpAccountDeletionWithGoogle({
+    required String requestId,
+    required String idToken,
+  });
+
+  Future<AccountDeletionConfirmation> confirmAccountDeletion(
+    PendingAccountDeletion pending,
+  );
 }
 
 final class ApiAccountSecurityRemoteDataSource
@@ -158,10 +175,94 @@ final class ApiAccountSecurityRemoteDataSource
   }
 
   @override
-  Future<void> deleteAccount() async {
-    await _apiClient.delete<Object?>(
-      'user/account',
+  Future<AccountDeletionPreflight> preflightAccountDeletion() async {
+    final result = await _apiClient.post<AccountDeletionPreflight>(
+      'user/account-deletion/preflight',
+      decodeData: AccountDeletionPreflight.fromJson,
+    );
+    if (result == null) {
+      throw const FormatException('注销预检结果为空');
+    }
+    return result;
+  }
+
+  @override
+  Future<void> sendAccountDeletionSmsCode(String requestId) async {
+    await _apiClient.post<Object?>(
+      'user/account-deletion/send-sms-code',
+      body: {'requestId': requestId},
       decodeData: (json) => json,
     );
+  }
+
+  @override
+  Future<AccountDeletionAuthorization> stepUpAccountDeletionWithSms({
+    required String requestId,
+    required String code,
+  }) async {
+    final result = await _apiClient.post<AccountDeletionAuthorization>(
+      'user/account-deletion/step-up',
+      body: {'requestId': requestId, 'code': code},
+      decodeData: AccountDeletionAuthorization.fromJson,
+    );
+    if (result == null) throw const FormatException('注销授权结果为空');
+    return result;
+  }
+
+  @override
+  Future<AccountDeletionAuthorization> stepUpAccountDeletionWithGoogle({
+    required String requestId,
+    required String idToken,
+  }) async {
+    final result = await _apiClient.post<AccountDeletionAuthorization>(
+      'user/account-deletion/step-up',
+      body: {'requestId': requestId, 'googleIdToken': idToken},
+      decodeData: AccountDeletionAuthorization.fromJson,
+    );
+    if (result == null) throw const FormatException('注销授权结果为空');
+    return result;
+  }
+
+  @override
+  Future<AccountDeletionConfirmation> confirmAccountDeletion(
+    PendingAccountDeletion pending,
+  ) async {
+    Future<AccountDeletionConfirmation?> send({required bool withBearer}) {
+      return _apiClient.postIdempotentWithHeaders<AccountDeletionConfirmation>(
+        'user/account-deletion/confirm',
+        idempotencyKey: pending.idempotencyKey,
+        headers: {
+          'X-Account-Deletion-Authorization': pending.deletionAuthorization,
+        },
+        body: {
+          'requestId': pending.requestId,
+          'policyVersion': pending.policyVersion,
+          'confirmation': 'DELETE',
+        },
+        decodeData: AccountDeletionConfirmation.fromJson,
+        includeAccessToken: withBearer,
+      );
+    }
+
+    AccountDeletionConfirmation? result;
+    try {
+      result = await send(withBearer: true);
+    } on ApiException catch (error) {
+      if (!error.isUnauthorized) rethrow;
+      // After an erased account invalidates its JWT, the exact same terminal
+      // request is queried without Bearer. The server must never treat this as
+      // permission for a new mutation.
+      result = await send(withBearer: false);
+    }
+    if (result == null) {
+      throw const FormatException('注销确认结果为空');
+    }
+    if (result.requestId != pending.requestId) {
+      throw const FormatException('注销确认 requestId 不匹配');
+    }
+    if (result.outcome != AccountDeletionOutcome.erased) {
+      throw const FormatException('注销确认结果不是 ERASED');
+    }
+    return result;
   }
 }

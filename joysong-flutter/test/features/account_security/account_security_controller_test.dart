@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/features/account_security/domain/account_security_models.dart';
 import 'package:joysong_flutter/features/account_security/domain/account_security_repository.dart';
 import 'package:joysong_flutter/features/account_security/presentation/account_security_controller.dart';
@@ -40,14 +41,31 @@ void main() {
     expect(controller.successMessage, contains('重新登录'));
   });
 
-  test('does not claim account deletion when the server rejects it', () async {
-    final repository = _FakeRepository()..deleteError = Exception('offline');
+  test('does not claim account deletion when preflight is unavailable',
+      () async {
+    final repository = _FakeRepository()..preflightError = Exception('offline');
     final controller = AccountSecurityController(repository);
     await controller.load();
 
-    expect(await controller.deleteAccount(), isFalse);
+    expect(await controller.beginAccountDeletion(), isFalse);
     expect(controller.status, AccountSecurityLoadStatus.ready);
-    expect(controller.errorMessage, isNotEmpty);
+    expect(
+      controller.deletionErrorCode,
+      AccountDeletionErrorCode.requestFailed,
+    );
+  });
+
+  test('maps SMS delivery outages to a stable client error code', () {
+    expect(
+      accountDeletionErrorCodeFor(
+        const ApiException(
+          message: 'raw provider failure',
+          httpStatus: 503,
+          errorCode: 'SMS_DELIVERY_UNAVAILABLE',
+        ),
+      ),
+      AccountDeletionErrorCode.smsDeliveryUnavailable,
+    );
   });
 
   test('enforces the bound-phone verification sequence', () async {
@@ -117,7 +135,7 @@ final class _FakeRepository implements AccountSecurityRepository {
     hasPassword: true,
   );
   Completer<void>? changeCompleter;
-  Object? deleteError;
+  Object? preflightError;
   int changeCalls = 0;
   int sendCurrentPhoneCodeCalls = 0;
   int verifyCurrentPhoneCodeCalls = 0;
@@ -140,10 +158,21 @@ final class _FakeRepository implements AccountSecurityRepository {
   }
 
   @override
-  Future<void> deleteAccount() async {
-    final error = deleteError;
+  Future<AccountDeletionPreflight> preflightAccountDeletion() async {
+    final error = preflightError;
     if (error != null) throw error;
+    return const AccountDeletionPreflight(
+      requestId: 'request-1',
+      eligible: true,
+      stepUpMethod: AccountDeletionStepUpMethod.sms,
+      maskedCredential: '+8613******00',
+      policyVersion: 'dev-v1',
+      blockers: [],
+    );
   }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 
   @override
   Future<void> sendCurrentPhoneChangeCode() async {

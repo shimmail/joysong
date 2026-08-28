@@ -1,9 +1,22 @@
+import 'dart:math';
+
 import 'package:flutter/foundation.dart';
 import 'package:joysong_flutter/core/network/api_exception.dart';
+import 'package:joysong_flutter/features/account_security/data/account_deletion_pending_store.dart';
 import 'package:joysong_flutter/features/account_security/domain/account_security_models.dart';
 import 'package:joysong_flutter/features/account_security/domain/account_security_repository.dart';
 
 enum AccountSecurityLoadStatus { idle, loading, ready, failure, deleted }
+
+enum AccountDeletionStage {
+  idle,
+  preflighting,
+  blocked,
+  awaitingStepUp,
+  awaitingConfirmation,
+  confirming,
+  completed,
+}
 
 enum AccountSecurityAction {
   changePassword,
@@ -14,13 +27,38 @@ enum AccountSecurityAction {
   verifyCurrentPhoneCode,
   sendNewPhoneCode,
   completePhoneChange,
-  deleteAccount,
+  preflightAccountDeletion,
+  sendAccountDeletionSmsCode,
+  verifyAccountDeletion,
+  confirmAccountDeletion,
 }
 
+typedef AccountDeletionGoogleIdTokenProvider = Future<String?> Function();
+typedef AccountDeletionConfirmedCallback = Future<void> Function(String userId);
+typedef AccountDeletionUncertainCallback = void Function();
+typedef AccountDeletionIdempotencyKeyFactory = String Function();
+
 final class AccountSecurityController extends ChangeNotifier {
-  AccountSecurityController(this._repository);
+  AccountSecurityController(
+    this._repository, {
+    AccountDeletionPendingStore? pendingDeletionStore,
+    AccountDeletionGoogleIdTokenProvider? googleIdTokenProvider,
+    AccountDeletionConfirmedCallback? onDeletionConfirmed,
+    AccountDeletionUncertainCallback? onDeletionUncertain,
+    AccountDeletionIdempotencyKeyFactory? idempotencyKeyFactory,
+  })  : _pendingDeletionStore = pendingDeletionStore,
+        _googleIdTokenProvider = googleIdTokenProvider,
+        _onDeletionConfirmed = onDeletionConfirmed,
+        _onDeletionUncertain = onDeletionUncertain,
+        _idempotencyKeyFactory =
+            idempotencyKeyFactory ?? _newDeletionIdempotencyKey;
 
   final AccountSecurityRepository _repository;
+  final AccountDeletionPendingStore? _pendingDeletionStore;
+  final AccountDeletionGoogleIdTokenProvider? _googleIdTokenProvider;
+  final AccountDeletionConfirmedCallback? _onDeletionConfirmed;
+  final AccountDeletionUncertainCallback? _onDeletionUncertain;
+  final AccountDeletionIdempotencyKeyFactory _idempotencyKeyFactory;
 
   AccountSecurityLoadStatus _status = AccountSecurityLoadStatus.idle;
   AccountSecurityProfile? _profile;
@@ -30,6 +68,12 @@ final class AccountSecurityController extends ChangeNotifier {
   bool _sessionMustEnd = false;
   bool _currentPhoneVerified = false;
   String? _pendingNewPhone;
+  AccountDeletionStage _deletionStage = AccountDeletionStage.idle;
+  AccountDeletionPreflight? _deletionPreflight;
+  AccountDeletionAuthorization? _deletionAuthorization;
+  PendingAccountDeletion? _pendingDeletion;
+  String? _deletionErrorCode;
+  bool _disposed = false;
 
   AccountSecurityLoadStatus get status => _status;
   AccountSecurityProfile? get profile => _profile;
@@ -40,6 +84,9 @@ final class AccountSecurityController extends ChangeNotifier {
   bool get sessionMustEnd => _sessionMustEnd;
   bool get currentPhoneVerified => _currentPhoneVerified;
   String? get pendingNewPhone => _pendingNewPhone;
+  AccountDeletionStage get deletionStage => _deletionStage;
+  AccountDeletionPreflight? get deletionPreflight => _deletionPreflight;
+  String? get deletionErrorCode => _deletionErrorCode;
 
   // The server currently exposes no device/session inventory or remote logout
   // endpoint. The page must keep device management visibly disabled.
@@ -243,18 +290,257 @@ final class AccountSecurityController extends ChangeNotifier {
     return success;
   }
 
-  Future<bool> deleteAccount() async {
-    final success = await _runSensitive(
-      AccountSecurityAction.deleteAccount,
-      _repository.deleteAccount,
-      successMessage: '账号已注销',
-      endSession: true,
-    );
-    if (success) {
-      _status = AccountSecurityLoadStatus.deleted;
-      notifyListeners();
+  Future<bool> beginAccountDeletion() async {
+    if (isBusy) return false;
+    _activeAction = AccountSecurityAction.preflightAccountDeletion;
+    _deletionStage = AccountDeletionStage.preflighting;
+    _deletionPreflight = null;
+    _deletionAuthorization = null;
+    _pendingDeletion = null;
+    _deletionErrorCode = null;
+    notifyListeners();
+    try {
+      final preflight = await _repository.preflightAccountDeletion();
+      _deletionPreflight = preflight;
+      _deletionStage = !preflight.eligible || preflight.blockers.isNotEmpty
+          ? AccountDeletionStage.blocked
+          : AccountDeletionStage.awaitingStepUp;
+      return preflight.eligible && preflight.blockers.isEmpty;
+    } catch (error) {
+      _deletionErrorCode = _nonTerminalDeletionErrorCode(error);
+      _deletionStage = AccountDeletionStage.idle;
+      return false;
+    } finally {
+      _activeAction = null;
+      if (!_disposed) notifyListeners();
     }
-    return success;
+  }
+
+  Future<bool> sendAccountDeletionSmsCode() async {
+    final preflight = _deletionPreflight;
+    if (isBusy ||
+        _deletionStage != AccountDeletionStage.awaitingStepUp ||
+        preflight?.stepUpMethod != AccountDeletionStepUpMethod.sms) {
+      return false;
+    }
+    return _runDeletionAction(
+      AccountSecurityAction.sendAccountDeletionSmsCode,
+      () => _repository.sendAccountDeletionSmsCode(preflight!.requestId),
+    );
+  }
+
+  Future<bool> verifyAccountDeletionSmsCode(String code) async {
+    final preflight = _deletionPreflight;
+    if (isBusy ||
+        _deletionStage != AccountDeletionStage.awaitingStepUp ||
+        preflight?.stepUpMethod != AccountDeletionStepUpMethod.sms) {
+      return false;
+    }
+    String normalizedCode;
+    try {
+      normalizedCode = validateVerificationCode(code);
+    } on ArgumentError {
+      _deletionErrorCode = AccountDeletionErrorCode.invalidSmsCode;
+      notifyListeners();
+      return false;
+    }
+    return _verifyAccountDeletion(
+      () => _repository.stepUpAccountDeletionWithSms(
+        requestId: preflight!.requestId,
+        code: normalizedCode,
+      ),
+    );
+  }
+
+  Future<bool> verifyAccountDeletionWithGoogle() async {
+    final preflight = _deletionPreflight;
+    if (isBusy ||
+        _deletionStage != AccountDeletionStage.awaitingStepUp ||
+        preflight?.stepUpMethod != AccountDeletionStepUpMethod.google) {
+      return false;
+    }
+    final provider = _googleIdTokenProvider;
+    if (provider == null) {
+      _deletionErrorCode = AccountDeletionErrorCode.verificationFailed;
+      notifyListeners();
+      return false;
+    }
+    _activeAction = AccountSecurityAction.verifyAccountDeletion;
+    _deletionErrorCode = null;
+    notifyListeners();
+    try {
+      String? token;
+      try {
+        token = (await provider())?.trim();
+      } catch (_) {
+        _deletionErrorCode = AccountDeletionErrorCode.verificationFailed;
+        return false;
+      }
+      if (token == null || token.isEmpty) {
+        _deletionErrorCode =
+            AccountDeletionErrorCode.googleReauthenticationCancelled;
+        return false;
+      }
+      _deletionAuthorization =
+          await _repository.stepUpAccountDeletionWithGoogle(
+        requestId: preflight!.requestId,
+        idToken: token,
+      );
+      _deletionStage = AccountDeletionStage.awaitingConfirmation;
+      return true;
+    } catch (error) {
+      _deletionErrorCode = _nonTerminalDeletionErrorCode(error);
+      return false;
+    } finally {
+      _activeAction = null;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  Future<bool> confirmAccountDeletion({
+    required String confirmation,
+    required String userId,
+  }) async {
+    if (isBusy || _deletionStage != AccountDeletionStage.awaitingConfirmation) {
+      return false;
+    }
+    if (confirmation != 'DELETE') {
+      _deletionErrorCode = AccountDeletionErrorCode.invalidConfirmation;
+      notifyListeners();
+      return false;
+    }
+    final preflight = _deletionPreflight;
+    final authorization = _deletionAuthorization;
+    final store = _pendingDeletionStore;
+    if (preflight == null || authorization == null || store == null) {
+      _deletionErrorCode = AccountDeletionErrorCode.retryRequired;
+      notifyListeners();
+      return false;
+    }
+
+    final pending = _pendingDeletion ??
+        PendingAccountDeletion(
+          requestId: preflight.requestId,
+          idempotencyKey: _idempotencyKeyFactory(),
+          deletionAuthorization: authorization.token,
+          policyVersion: preflight.policyVersion,
+          userId: userId.trim(),
+        );
+    if (pending.userId.isEmpty) {
+      _deletionErrorCode = AccountDeletionErrorCode.retryRequired;
+      notifyListeners();
+      return false;
+    }
+
+    _activeAction = AccountSecurityAction.confirmAccountDeletion;
+    _deletionStage = AccountDeletionStage.confirming;
+    _deletionErrorCode = null;
+    notifyListeners();
+    var pendingSaved = false;
+    try {
+      await store.save(pending);
+      pendingSaved = true;
+      _pendingDeletion = pending;
+      await _repository.confirmAccountDeletion(pending);
+      await _onDeletionConfirmed?.call(pending.userId);
+      await store.clear();
+      _pendingDeletion = null;
+      _deletionStage = AccountDeletionStage.completed;
+      _status = AccountSecurityLoadStatus.deleted;
+      _successMessage = '账号已注销';
+      _sessionMustEnd = true;
+      return true;
+    } catch (error) {
+      final code = pendingSaved
+          ? accountDeletionErrorCodeFor(error)
+          : AccountDeletionErrorCode.requestFailed;
+      _deletionErrorCode = code;
+      final restorableCode = pendingSaved
+          ? _restorableAccountDeletionTerminalCode(error)
+          : null;
+      if (restorableCode != null) {
+        final cleared = await _clearPending(store);
+        if (!cleared) {
+          _deletionStage = AccountDeletionStage.awaitingConfirmation;
+          _onDeletionUncertain?.call();
+          return false;
+        }
+        _pendingDeletion = null;
+        _deletionAuthorization = null;
+        if (restorableCode == AccountDeletionErrorCode.authorizationExpired) {
+          _deletionPreflight = null;
+          _deletionStage = AccountDeletionStage.idle;
+        } else {
+          final blockers = _accountDeletionBlockersFrom(error);
+          _deletionPreflight = AccountDeletionPreflight(
+            requestId: preflight.requestId,
+            eligible: false,
+            stepUpMethod: preflight.stepUpMethod,
+            maskedCredential: preflight.maskedCredential,
+            policyVersion: preflight.policyVersion,
+            blockers: blockers,
+          );
+          _deletionStage = AccountDeletionStage.blocked;
+        }
+      } else {
+        _deletionStage = AccountDeletionStage.awaitingConfirmation;
+        if (pendingSaved) _onDeletionUncertain?.call();
+      }
+      return false;
+    } finally {
+      _activeAction = null;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  void resetAccountDeletionFlow() {
+    if (isBusy) return;
+    _deletionStage = AccountDeletionStage.idle;
+    _deletionPreflight = null;
+    _deletionAuthorization = null;
+    _pendingDeletion = null;
+    _deletionErrorCode = null;
+    notifyListeners();
+  }
+
+  Future<bool> _verifyAccountDeletion(
+    Future<AccountDeletionAuthorization> Function() operation,
+  ) async {
+    if (isBusy) return false;
+    _activeAction = AccountSecurityAction.verifyAccountDeletion;
+    _deletionErrorCode = null;
+    notifyListeners();
+    try {
+      _deletionAuthorization = await operation();
+      _deletionStage = AccountDeletionStage.awaitingConfirmation;
+      return true;
+    } catch (error) {
+      _deletionErrorCode = _nonTerminalDeletionErrorCode(error);
+      return false;
+    } finally {
+      _activeAction = null;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  Future<bool> _runDeletionAction(
+    AccountSecurityAction action,
+    Future<void> Function() operation,
+  ) async {
+    if (isBusy) return false;
+    _activeAction = action;
+    _deletionErrorCode = null;
+    notifyListeners();
+    try {
+      await operation();
+      return true;
+    } catch (error) {
+      _deletionErrorCode = _nonTerminalDeletionErrorCode(error);
+      return false;
+    } finally {
+      _activeAction = null;
+      if (!_disposed) notifyListeners();
+    }
   }
 
   void clearFeedback() {
@@ -294,6 +580,90 @@ final class AccountSecurityController extends ChangeNotifier {
     _successMessage = null;
     notifyListeners();
   }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+}
+
+String accountDeletionErrorCodeFor(Object error) {
+  if (error is ApiException) {
+    final serverCode = error.errorCode?.trim().toUpperCase() ?? '';
+    final stableCode = switch (serverCode) {
+      AccountDeletionErrorCode.authorizationExpired =>
+        AccountDeletionErrorCode.authorizationExpired,
+      AccountDeletionErrorCode.idempotencyConflict =>
+        AccountDeletionErrorCode.idempotencyConflict,
+      AccountDeletionErrorCode.rateLimited =>
+        AccountDeletionErrorCode.rateLimited,
+      AccountDeletionErrorCode.smsDeliveryUnavailable =>
+        AccountDeletionErrorCode.smsDeliveryUnavailable,
+      AccountDeletionErrorCode.blockerUnavailable =>
+        AccountDeletionErrorCode.blockerUnavailable,
+      AccountDeletionErrorCode.disabled => AccountDeletionErrorCode.disabled,
+      AccountDeletionErrorCode.blocked => AccountDeletionErrorCode.blocked,
+      AccountDeletionErrorCode.verificationFailed =>
+        AccountDeletionErrorCode.verificationFailed,
+      _ => null,
+    };
+    if (stableCode != null) return stableCode;
+    return switch (error.httpStatus ?? error.businessCode) {
+      400 || 401 => AccountDeletionErrorCode.verificationFailed,
+      429 => AccountDeletionErrorCode.rateLimited,
+      503 => AccountDeletionErrorCode.blockerUnavailable,
+      _ => AccountDeletionErrorCode.retryRequired,
+    };
+  }
+
+  return AccountDeletionErrorCode.retryRequired;
+}
+
+String _nonTerminalDeletionErrorCode(Object error) {
+  final code = accountDeletionErrorCodeFor(error);
+  return code == AccountDeletionErrorCode.retryRequired
+      ? AccountDeletionErrorCode.requestFailed
+      : code;
+}
+
+String? _restorableAccountDeletionTerminalCode(Object error) {
+  if (error is! ApiException) return null;
+  return switch (error.errorCode?.trim().toUpperCase()) {
+    AccountDeletionErrorCode.blocked => AccountDeletionErrorCode.blocked,
+    AccountDeletionErrorCode.authorizationExpired =>
+      AccountDeletionErrorCode.authorizationExpired,
+    _ => null,
+  };
+}
+
+List<AccountDeletionBlocker> _accountDeletionBlockersFrom(Object error) {
+  if (error is! ApiException || error.data is! Map) return const [];
+  final map = (error.data! as Map).map(
+    (key, value) => MapEntry(key.toString(), value),
+  );
+  final rawBlockers = map['blockers'];
+  if (rawBlockers is! List) return const [];
+  try {
+    return List.unmodifiable(rawBlockers.map(AccountDeletionBlocker.fromJson));
+  } catch (_) {
+    return const [];
+  }
+}
+
+Future<bool> _clearPending(AccountDeletionPendingStore store) async {
+  try {
+    await store.clear();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+String _newDeletionIdempotencyKey() {
+  final random = Random.secure();
+  final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+  return bytes.map((value) => value.toRadixString(16).padLeft(2, '0')).join();
 }
 
 String _messageFor(Object error, String fallback) {

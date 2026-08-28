@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/core/network/api_client.dart';
+import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/features/account_security/data/account_security_api.dart';
 
 void main() {
@@ -27,8 +28,7 @@ void main() {
     });
   });
 
-  test('uses supported reset, set-password and account deletion paths',
-      () async {
+  test('uses supported reset and set-password paths', () async {
     final client = _FakeApiClient();
     final remote = ApiAccountSecurityRemoteDataSource(client);
 
@@ -51,9 +51,131 @@ void main() {
     expect(client.lastMethod, 'PUT');
     expect(client.lastPath, 'user/password/set');
 
-    await remote.deleteAccount();
-    expect(client.lastMethod, 'DELETE');
-    expect(client.lastPath, 'user/account');
+  });
+
+  test('uses the four-stage deletion contract and protected headers',
+      () async {
+    final client = _FakeApiClient();
+    final remote = ApiAccountSecurityRemoteDataSource(client);
+    client.responseData = {
+      'requestId': 'request-1',
+      'eligible': true,
+      'stepUpMethod': 'SMS',
+      'maskedCredential': '+8613******00',
+      'policyVersion': 'dev-v1',
+      'blockers': <Object?>[],
+    };
+
+    final preflight = await remote.preflightAccountDeletion();
+    expect(preflight.requestId, 'request-1');
+    expect(client.lastMethod, 'POST');
+    expect(client.lastPath, 'user/account-deletion/preflight');
+
+    client.responseData = null;
+    await remote.sendAccountDeletionSmsCode('request-1');
+    expect(client.lastPath, 'user/account-deletion/send-sms-code');
+    expect(client.lastBody, {'requestId': 'request-1'});
+
+    client.responseData = {'deletionAuthorization': 'delete-auth-1'};
+    await remote.stepUpAccountDeletionWithSms(
+      requestId: 'request-1',
+      code: '123456',
+    );
+    expect(client.lastPath, 'user/account-deletion/step-up');
+    expect(client.lastBody, {'requestId': 'request-1', 'code': '123456'});
+
+    client.responseData = {
+      'requestId': 'request-1',
+      'outcome': 'ERASED',
+      'completedAt': '2026-08-28T10:00:00',
+      'blockers': <Object?>[],
+    };
+    await remote.confirmAccountDeletion(
+      const PendingAccountDeletion(
+        requestId: 'request-1',
+        idempotencyKey: 'delete-key-1',
+        deletionAuthorization: 'delete-auth-1',
+        policyVersion: 'dev-v1',
+        userId: 'user-1',
+      ),
+    );
+    expect(client.lastPath, 'user/account-deletion/confirm');
+    expect(client.lastIdempotencyKey, 'delete-key-1');
+    expect(client.lastHeaders, {
+      'X-Account-Deletion-Authorization': 'delete-auth-1',
+    });
+    expect(client.lastBody, {
+      'requestId': 'request-1',
+      'policyVersion': 'dev-v1',
+      'confirmation': 'DELETE',
+    });
+  });
+
+  test('queries the same terminal confirmation without Bearer after erasure',
+      () async {
+    final client = _FakeApiClient()
+      ..responseData = {
+        'requestId': 'request-1',
+        'outcome': 'ERASED',
+        'completedAt': '2026-08-28T10:00:00',
+        'blockers': <Object?>[],
+      }
+      ..rejectBearerConfirmation = true;
+    final remote = ApiAccountSecurityRemoteDataSource(client);
+
+    await remote.confirmAccountDeletion(
+      const PendingAccountDeletion(
+        requestId: 'request-1',
+        idempotencyKey: 'delete-key-1',
+        deletionAuthorization: 'delete-auth-1',
+        policyVersion: 'dev-v1',
+        userId: 'user-1',
+      ),
+    );
+
+    expect(client.confirmationBearerModes, [true, false]);
+    expect(client.lastIdempotencyKey, 'delete-key-1');
+  });
+
+  test('rejects ambiguous or mismatched terminal confirmation payloads',
+      () async {
+    final client = _FakeApiClient();
+    final remote = ApiAccountSecurityRemoteDataSource(client);
+    const pending = PendingAccountDeletion(
+      requestId: 'request-1',
+      idempotencyKey: 'delete-key-1',
+      deletionAuthorization: 'delete-auth-1',
+      policyVersion: 'dev-v1',
+      userId: 'user-1',
+    );
+    final invalidPayloads = <Object?>[
+      null,
+      {
+        'requestId': 'another-request',
+        'outcome': 'ERASED',
+        'completedAt': '2026-08-28T10:00:00',
+        'blockers': <Object?>[],
+      },
+      {
+        'requestId': 'request-1',
+        'outcome': 'BLOCKED',
+        'completedAt': '2026-08-28T10:00:00',
+        'blockers': <Object?>[],
+      },
+      {
+        'requestId': 'request-1',
+        'completedAt': '2026-08-28T10:00:00',
+        'blockers': <Object?>[],
+      },
+    ];
+
+    for (final payload in invalidPayloads) {
+      client.responseData = payload;
+      await expectLater(
+        remote.confirmAccountDeletion(pending),
+        throwsA(isA<FormatException>()),
+      );
+    }
   });
 
   test('uses two-stage phone change and first-bind contracts', () async {
@@ -93,6 +215,10 @@ final class _FakeApiClient extends ApiClient {
   String? lastPath;
   Object? lastBody;
   Object? responseData;
+  String? lastIdempotencyKey;
+  Map<String, String>? lastHeaders;
+  bool rejectBearerConfirmation = false;
+  final confirmationBearerModes = <bool>[];
 
   @override
   Future<T?> get<T>(
@@ -114,7 +240,28 @@ final class _FakeApiClient extends ApiClient {
     lastMethod = 'POST';
     lastPath = path;
     lastBody = body;
-    return null;
+    return responseData == null ? null : decodeData(responseData);
+  }
+
+  @override
+  Future<T?> postIdempotentWithHeaders<T>(
+    String path, {
+    required String idempotencyKey,
+    required Map<String, String> headers,
+    Object? body,
+    required T Function(Object? json) decodeData,
+    bool includeAccessToken = true,
+  }) async {
+    lastMethod = 'POST';
+    lastPath = path;
+    lastBody = body;
+    lastIdempotencyKey = idempotencyKey;
+    lastHeaders = headers;
+    confirmationBearerModes.add(includeAccessToken);
+    if (rejectBearerConfirmation && includeAccessToken) {
+      throw const ApiException(message: 'erased', httpStatus: 401);
+    }
+    return responseData == null ? null : decodeData(responseData);
   }
 
   @override
