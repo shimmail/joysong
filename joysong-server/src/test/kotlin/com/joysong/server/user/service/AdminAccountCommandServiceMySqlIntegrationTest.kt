@@ -287,7 +287,7 @@ class AdminAccountCommandServiceMySqlIntegrationTest {
     )
 
     private fun activeUserCount(id: String): Long = jdbcTemplate.queryForObject(
-        "SELECT COUNT(*) FROM users WHERE id = ? AND deleted_at IS NULL",
+        "SELECT COUNT(*) FROM users WHERE id = ? AND account_state = 'ACTIVE'",
         Long::class.java,
         id,
     )
@@ -296,7 +296,7 @@ class AdminAccountCommandServiceMySqlIntegrationTest {
         """
         SELECT COUNT(*) FROM users
         WHERE role = 'ADMIN'
-          AND deleted_at IS NULL
+          AND account_state = 'ACTIVE'
           AND phone REGEXP '^1[0-9]{10}$'
           AND TRIM(password_hash) <> ''
         """.trimIndent(),

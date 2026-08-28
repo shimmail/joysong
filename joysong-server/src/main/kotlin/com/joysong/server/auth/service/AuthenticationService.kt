@@ -7,6 +7,7 @@ import com.google.api.client.json.gson.GsonFactory
 import com.joysong.server.auth.dto.LoginResponse
 import com.joysong.server.auth.dto.UserDto
 import com.joysong.server.user.entity.UserEntity
+import com.joysong.server.user.entity.AccountState
 import com.joysong.server.user.repository.UserRepository
 import org.slf4j.LoggerFactory
 import org.springframework.security.authentication.BadCredentialsException
@@ -52,28 +53,17 @@ class AuthenticationService(
         findBareMainlandAdmin(phone)?.let {
             throw IllegalArgumentException("验证码无效或已过期")
         }
-        // 查找用户（包括已注销的）
-        val user = userRepository.findByPhoneIncludeDeleted(phone).map { existing ->
+        val user = userRepository.findByPhone(phone).map { existing ->
             if (existing.role == "ADMIN") {
                 throw IllegalArgumentException("验证码无效或已过期")
             }
-            if (existing.deletedAt != null) {
-                // 已注销用户重新激活
-                val reactivated = existing.copy(deletedAt = null)
-                userRepository.save(reactivated)
-                reactivated
-            } else {
-                existing
+            when (existing.accountState) {
+                AccountState.ACTIVE -> existing
+                AccountState.ADMIN_SUSPENDED -> throw IllegalArgumentException("验证码无效或已过期")
+                AccountState.ERASED -> newCodeUser(phone)
             }
         }.orElseGet {
-            // 全新用户（验证码注册，密码为空，后续可通过"忘记密码"设置）
-            val newUser = UserEntity(
-                id = UUID.randomUUID().toString(),
-                phone = phone,
-                passwordHash = "",
-                nickname = phone
-            )
-            userRepository.save(newUser)
+            newCodeUser(phone)
         }
         return issueLoginResponse(user)
     }
@@ -82,6 +72,7 @@ class AuthenticationService(
         // 手机号未注册则拒绝登录
         val user = userRepository.findByPhone(phone)
             .orElseThrow { IllegalArgumentException("该手机号未注册，请先注册") }
+        requireActive(user)
         if (user.role == "ADMIN") {
             passwordEncoder.matches(password, dummyPasswordHash)
             throw IllegalArgumentException("密码错误，请重试")
@@ -109,7 +100,7 @@ class AuthenticationService(
         val passwordHash = storedPasswordHash ?: dummyPasswordHash
         val passwordMatches = passwordEncoder.matches(password, passwordHash)
 
-        if (!validAdminPhone || user == null || user.role != "ADMIN" || storedPasswordHash == null || !passwordMatches) {
+        if (!validAdminPhone || user == null || user.accountState != AccountState.ACTIVE || user.role != "ADMIN" || storedPasswordHash == null || !passwordMatches) {
             throw BadCredentialsException("管理员账号或密码错误")
         }
 
@@ -123,35 +114,16 @@ class AuthenticationService(
         findBareMainlandAdmin(phone)?.let {
             throw IllegalArgumentException("手机号已注册")
         }
-        // 检查是否有未注销的用户（@Where 过滤）
-        if (userRepository.findByPhone(phone).isPresent) {
-            throw IllegalArgumentException("手机号已注册")
-        }
-        // 查找是否有已注销的用户，若有则重新激活
-        val user = userRepository.findByPhoneIncludeDeleted(phone).map { existing ->
+        val user = userRepository.findByPhone(phone).map { existing ->
             if (existing.role == "ADMIN") {
                 throw IllegalArgumentException("手机号已注册")
             }
-            if (existing.deletedAt != null) {
-                // 已注销用户重新激活，更新密码
-                val reactivated = existing.copy(
-                    deletedAt = null,
-                    passwordHash = passwordEncoder.encode(password)
-                )
-                userRepository.save(reactivated)
-                reactivated
-            } else {
-                existing
+            when (existing.accountState) {
+                AccountState.ERASED -> newPasswordUser(phone, password)
+                AccountState.ACTIVE, AccountState.ADMIN_SUSPENDED -> throw IllegalArgumentException("手机号已注册")
             }
         }.orElseGet {
-            // 全新用户
-            val newUser = UserEntity(
-                id = UUID.randomUUID().toString(),
-                phone = phone,
-                passwordHash = passwordEncoder.encode(password),
-                nickname = phone
-            )
-            userRepository.save(newUser)
+            newPasswordUser(phone, password)
         }
         return issueLoginResponse(user)
     }
@@ -178,29 +150,17 @@ class AuthenticationService(
         val name = payload["name"] as? String ?: email.substringBefore("@")
         val picture = payload["picture"] as? String ?: ""
 
-        // 查找用户（包括已注销的）
-        val user = userRepository.findByEmailIncludeDeleted(email).map { existing ->
+        val user = userRepository.findByEmail(email).map { existing ->
             if (existing.role == "ADMIN") {
                 throw IllegalArgumentException("Google 认证失败")
             }
-            if (existing.deletedAt != null) {
-                // 已注销用户重新激活
-                val reactivated = existing.copy(deletedAt = null)
-                userRepository.save(reactivated)
-                reactivated
-            } else {
-                existing
+            when (existing.accountState) {
+                AccountState.ACTIVE -> existing
+                AccountState.ADMIN_SUSPENDED -> throw IllegalArgumentException("Google 认证失败")
+                AccountState.ERASED -> newGoogleUser(email, name, picture)
             }
         }.orElseGet {
-            // 全新用户（Google 登录，密码为空）
-            val newUser = UserEntity(
-                id = UUID.randomUUID().toString(),
-                email = email,
-                passwordHash = "",
-                nickname = name,
-                avatar = picture
-            )
-            userRepository.save(newUser)
+            newGoogleUser(email, name, picture)
         }
 
         return issueLoginResponse(user)
@@ -210,6 +170,7 @@ class AuthenticationService(
         val refreshed = refreshTokenService.rotate(rawRefreshToken)
         val user = userRepository.findById(refreshed.userId)
             .orElseThrow { InvalidRefreshTokenException() }
+        if (user.accountState != AccountState.ACTIVE) throw InvalidRefreshTokenException()
         return refreshed.tokens.toLoginResponse(user)
     }
 
@@ -217,14 +178,16 @@ class AuthenticationService(
         refreshTokenService.revoke(rawRefreshToken)
     }
 
-    private fun issueLoginResponse(user: UserEntity): LoginResponse =
-        refreshTokenService.issue(user.id, user.phone.orEmpty(), user.role).toLoginResponse(user)
+    private fun issueLoginResponse(user: UserEntity): LoginResponse {
+        requireActive(user)
+        return refreshTokenService.issue(user.id, user.phone.orEmpty(), user.role).toLoginResponse(user)
+    }
 
     private fun findBareMainlandAdmin(phone: String): UserEntity? {
         val barePhone = E164_MAINLAND_PHONE.matchEntire(phone)?.groupValues?.get(1) ?: return null
-        return userRepository.findByPhoneIncludeDeleted(barePhone)
+        return userRepository.findByPhone(barePhone)
             .orElse(null)
-            ?.takeIf { it.role == "ADMIN" }
+            ?.takeIf { it.role == "ADMIN" && it.accountState == AccountState.ACTIVE }
     }
 
     private fun IssuedTokens.toLoginResponse(user: UserEntity) = LoginResponse(
@@ -239,7 +202,37 @@ class AuthenticationService(
         id = id, phone = phone, email = email, nickname = nickname,
         avatar = avatar, gender = gender, city = city, bio = bio, birthday = birthday,
         role = role,
+        accountState = accountState,
         hasPassword = passwordHash.isNotEmpty()
+    )
+
+    private fun requireActive(user: UserEntity) {
+        if (user.accountState != AccountState.ACTIVE) {
+            throw IllegalArgumentException("账号不可用")
+        }
+    }
+
+    private fun newCodeUser(phone: String): UserEntity = userRepository.save(
+        UserEntity(id = UUID.randomUUID().toString(), phone = phone, passwordHash = "", nickname = phone)
+    )
+
+    private fun newPasswordUser(phone: String, password: String): UserEntity = userRepository.save(
+        UserEntity(
+            id = UUID.randomUUID().toString(),
+            phone = phone,
+            passwordHash = passwordEncoder.encode(password),
+            nickname = phone,
+        )
+    )
+
+    private fun newGoogleUser(email: String, name: String, picture: String): UserEntity = userRepository.save(
+        UserEntity(
+            id = UUID.randomUUID().toString(),
+            email = email,
+            passwordHash = "",
+            nickname = name,
+            avatar = picture,
+        )
     )
 
     private companion object {

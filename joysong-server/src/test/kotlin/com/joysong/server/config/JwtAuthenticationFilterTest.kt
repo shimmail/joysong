@@ -2,6 +2,7 @@ package com.joysong.server.config
 
 import com.joysong.server.auth.service.RefreshTokenService
 import com.joysong.server.user.entity.UserEntity
+import com.joysong.server.user.entity.AccountState
 import com.joysong.server.user.repository.UserRepository
 import io.jsonwebtoken.Jwts
 import io.jsonwebtoken.security.Keys
@@ -99,6 +100,18 @@ class JwtAuthenticationFilterTest {
         verify(exactly = 0) {
             jdbcTemplate.queryForObject(any<String>(), Long::class.java, *anyVararg())
         }
+    }
+
+    @Test
+    fun `erased user token never authenticates`() {
+        val token = token(userId = "erased-user", role = "USER", sessionId = null)
+        every { userRepository.findById("erased-user") } returns Optional.of(
+            user("erased-user", "USER").copy(accountState = AccountState.ERASED)
+        )
+
+        authenticate(token, activeSession = false)
+
+        assertNull(SecurityContextHolder.getContext().authentication)
     }
 
     @Test

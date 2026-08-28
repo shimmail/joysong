@@ -3,6 +3,7 @@ package com.joysong.server.auth.service
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier
 import com.joysong.server.user.entity.UserEntity
+import com.joysong.server.user.entity.AccountState
 import com.joysong.server.user.repository.UserRepository
 import io.mockk.every
 import io.mockk.mockk
@@ -12,7 +13,6 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import org.springframework.security.authentication.BadCredentialsException
 import org.springframework.security.crypto.password.PasswordEncoder
-import java.time.LocalDateTime
 import java.util.Optional
 
 class AuthenticationServiceTest {
@@ -31,10 +31,50 @@ class AuthenticationServiceTest {
     )
 
     @Test
+    fun `suspended user password login does not issue tokens`() {
+        val user = UserEntity(
+            id = "suspended-user",
+            phone = "13900000001",
+            passwordHash = "password-hash",
+            nickname = "Suspended",
+            accountState = AccountState.ADMIN_SUSPENDED,
+        )
+        every { userRepository.findByPhone(user.phone!!) } returns Optional.of(user)
+        every { passwordEncoder.matches("password", user.passwordHash) } returns true
+
+        assertThrows(IllegalArgumentException::class.java) {
+            service.login(user.phone!!, "password")
+        }
+
+        verify(exactly = 0) { refreshTokenService.issue(any(), any(), any()) }
+    }
+
+    @Test
+    fun `registration creates a new user instead of reviving an erased identity`() {
+        val erased = UserEntity(
+            id = "erased-user",
+            phone = "13900000002",
+            passwordHash = "",
+            nickname = "Erased",
+            accountState = AccountState.ERASED,
+        )
+        every { verificationCodeService.validate(erased.phone!!, "123456") } returns true
+        every { userRepository.findByPhone(erased.phone!!) } returns Optional.of(erased)
+        every { passwordEncoder.encode("new-password") } returns "new-hash"
+        every { userRepository.save(any()) } answers { firstArg() }
+        every { refreshTokenService.issue(any(), any(), any()) } returns IssuedTokens("access", "refresh", 3600)
+
+        val response = service.register(erased.phone!!, "123456", "new-password")
+
+        assertEquals(AccountState.ACTIVE, response.user.accountState)
+        org.junit.jupiter.api.Assertions.assertNotEquals(erased.id, response.user.id)
+    }
+
+    @Test
     fun `loginWithCode consumes a valid code then gives active admin the generic public error`() {
         val admin = adminUser()
         every { verificationCodeService.validate(admin.phone!!, "123456") } returns true
-        every { userRepository.findByPhoneIncludeDeleted(admin.phone!!) } returns Optional.of(admin)
+        every { userRepository.findByPhone(admin.phone!!) } returns Optional.of(admin)
 
         val error = assertThrows(IllegalArgumentException::class.java) {
             service.loginWithCode(admin.phone!!, "123456")
@@ -46,10 +86,10 @@ class AuthenticationServiceTest {
     }
 
     @Test
-    fun `loginWithCode consumes a valid code then leaves deleted admin inactive`() {
-        val admin = adminUser(deletedAt = LocalDateTime.now())
+    fun `loginWithCode consumes a valid code then leaves erased admin inactive`() {
+        val admin = adminUser(accountState = AccountState.ERASED)
         every { verificationCodeService.validate(admin.phone!!, "123456") } returns true
-        every { userRepository.findByPhoneIncludeDeleted(admin.phone!!) } returns Optional.of(admin)
+        every { userRepository.findByPhone(admin.phone!!) } returns Optional.of(admin)
         every { userRepository.save(any()) } answers { firstArg() }
 
         val error = assertThrows(IllegalArgumentException::class.java) {
@@ -66,8 +106,8 @@ class AuthenticationServiceTest {
         val requestPhone = "+8613800000000"
         val admin = adminUser()
         every { verificationCodeService.validate(requestPhone, "123456") } returns true
-        every { userRepository.findByPhoneIncludeDeleted(requestPhone) } returns Optional.empty()
-        every { userRepository.findByPhoneIncludeDeleted(admin.phone!!) } returns Optional.of(admin)
+        every { userRepository.findByPhone(requestPhone) } returns Optional.empty()
+        every { userRepository.findByPhone(admin.phone!!) } returns Optional.of(admin)
         every { userRepository.save(any()) } answers { firstArg() }
         every { refreshTokenService.issue(any(), any(), any()) } returns adminTokens()
 
@@ -81,12 +121,12 @@ class AuthenticationServiceTest {
     }
 
     @Test
-    fun `loginWithCode rejects the E164 alias of a deleted bare mainland ADMIN`() {
+    fun `loginWithCode rejects the E164 alias of a erased bare mainland ADMIN`() {
         val requestPhone = "+8613800000000"
-        val admin = adminUser(deletedAt = LocalDateTime.now())
+        val admin = adminUser(accountState = AccountState.ERASED)
         every { verificationCodeService.validate(requestPhone, "123456") } returns true
-        every { userRepository.findByPhoneIncludeDeleted(requestPhone) } returns Optional.empty()
-        every { userRepository.findByPhoneIncludeDeleted(admin.phone!!) } returns Optional.of(admin)
+        every { userRepository.findByPhone(requestPhone) } returns Optional.empty()
+        every { userRepository.findByPhone(admin.phone!!) } returns Optional.of(admin)
         every { userRepository.save(any()) } answers { firstArg() }
         every { refreshTokenService.issue(any(), any(), any()) } returns adminTokens()
 
@@ -108,8 +148,8 @@ class AuthenticationServiceTest {
             nickname = "User"
         )
         every { verificationCodeService.validate(user.phone!!, "123456") } returns true
-        every { userRepository.findByPhoneIncludeDeleted("13800000001") } returns Optional.empty()
-        every { userRepository.findByPhoneIncludeDeleted(user.phone!!) } returns Optional.of(user)
+        every { userRepository.findByPhone("13800000001") } returns Optional.empty()
+        every { userRepository.findByPhone(user.phone!!) } returns Optional.of(user)
         every { refreshTokenService.issue(user.id, user.phone!!, "USER") } returns IssuedTokens(
             accessToken = "access-token",
             refreshToken = "refresh-token",
@@ -140,15 +180,15 @@ class AuthenticationServiceTest {
     }
 
     @Test
-    fun `registration rejects active and deleted administrators without issuing tokens`() {
+    fun `registration rejects active and erased administrators without issuing tokens`() {
         val activeAdmin = adminUser()
-        val deletedAdmin = adminUser(deletedAt = LocalDateTime.now())
+        val deletedAdmin = adminUser(accountState = AccountState.ERASED)
         every { verificationCodeService.validate(activeAdmin.phone!!, "123456") } returns true
         every { userRepository.findByPhone(activeAdmin.phone!!) } returnsMany listOf(
             Optional.of(activeAdmin),
             Optional.empty()
         )
-        every { userRepository.findByPhoneIncludeDeleted(activeAdmin.phone!!) } returns Optional.of(deletedAdmin)
+        every { userRepository.findByPhone(activeAdmin.phone!!) } returns Optional.of(deletedAdmin)
         every { userRepository.save(any()) } answers { firstArg() }
         every { refreshTokenService.issue(activeAdmin.id, activeAdmin.phone!!, "ADMIN") } returns adminTokens()
 
@@ -164,14 +204,14 @@ class AuthenticationServiceTest {
     }
 
     @Test
-    fun `register rejects the E164 alias of active and deleted bare mainland ADMIN accounts`() {
+    fun `register rejects the E164 alias of active and erased bare mainland ADMIN accounts`() {
         val requestPhone = "+8613800000000"
         val activeAdmin = adminUser()
-        val deletedAdmin = adminUser(deletedAt = LocalDateTime.now())
+        val deletedAdmin = adminUser(accountState = AccountState.ERASED)
         every { verificationCodeService.validate(requestPhone, "123456") } returns true
         every { userRepository.findByPhone(requestPhone) } returns Optional.empty()
-        every { userRepository.findByPhoneIncludeDeleted(requestPhone) } returns Optional.empty()
-        every { userRepository.findByPhoneIncludeDeleted(activeAdmin.phone!!) } returnsMany listOf(
+        every { userRepository.findByPhone(requestPhone) } returns Optional.empty()
+        every { userRepository.findByPhone(activeAdmin.phone!!) } returnsMany listOf(
             Optional.of(activeAdmin),
             Optional.of(deletedAdmin)
         )
@@ -191,10 +231,10 @@ class AuthenticationServiceTest {
     }
 
     @Test
-    fun `google login rejects active and deleted administrators without issuing tokens`() {
+    fun `google login rejects active and erased administrators without issuing tokens`() {
         val email = "admin@example.com"
         val activeAdmin = adminUser().copy(email = email)
-        val deletedAdmin = adminUser(deletedAt = LocalDateTime.now()).copy(email = email)
+        val deletedAdmin = adminUser(accountState = AccountState.ERASED).copy(email = email)
         val verifier = mockk<GoogleIdTokenVerifier>()
         val googleIdToken = mockk<GoogleIdToken>()
         val payload = mockk<GoogleIdToken.Payload>()
@@ -205,7 +245,7 @@ class AuthenticationServiceTest {
         every { payload.email } returns email
         every { payload["name"] } returns "Admin"
         every { payload["picture"] } returns null
-        every { userRepository.findByEmailIncludeDeleted(email) } returnsMany listOf(
+        every { userRepository.findByEmail(email) } returnsMany listOf(
             Optional.of(activeAdmin),
             Optional.of(deletedAdmin)
         )
@@ -339,13 +379,13 @@ class AuthenticationServiceTest {
         verify(exactly = 1) { refreshTokenService.revoke("refresh-token") }
     }
 
-    private fun adminUser(deletedAt: LocalDateTime? = null) = UserEntity(
+    private fun adminUser(accountState: AccountState = AccountState.ACTIVE) = UserEntity(
         id = "admin-id",
         phone = "13800000000",
         passwordHash = "admin-password-hash",
         nickname = "Admin",
         role = "ADMIN",
-        deletedAt = deletedAt
+        accountState = accountState
     )
 
     private fun adminTokens() = IssuedTokens(

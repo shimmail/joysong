@@ -2,14 +2,12 @@ package com.joysong.server.user.service
 
 import com.joysong.server.auth.service.RefreshTokenService
 import com.joysong.server.auth.service.VerificationCodeService
-import com.joysong.server.diary.entity.DiaryEntity
-import com.joysong.server.diary.repository.DiaryRepository
 import com.joysong.server.user.entity.UserEntity
+import com.joysong.server.user.entity.AccountState
 import com.joysong.server.user.repository.UserRepository
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
-import io.mockk.verifyOrder
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
@@ -20,14 +18,12 @@ import java.util.Optional
 class UserProfileServiceSecurityTest {
 
     private val userRepository = mockk<UserRepository>()
-    private val diaryRepository = mockk<DiaryRepository>()
     private val passwordEncoder = mockk<PasswordEncoder>()
     private val verificationCodeService = mockk<VerificationCodeService>()
     private val refreshTokenService = mockk<RefreshTokenService>(relaxed = true)
     private val adminAccountCommandService = mockk<AdminAccountCommandService>()
     private val service = UserProfileService(
         userRepository,
-        diaryRepository,
         passwordEncoder,
         verificationCodeService,
         refreshTokenService,
@@ -120,7 +116,7 @@ class UserProfileServiceSecurityTest {
             assertEquals("验证码无效或已过期", error.message)
         }
 
-        verify(exactly = 0) { userRepository.findByPhoneIncludeDeleted(any()) }
+        verify(exactly = 0) { userRepository.findByPhone(any()) }
         verify(exactly = 0) { passwordEncoder.encode(any()) }
         verify(exactly = 0) { userRepository.save(any()) }
         verify(exactly = 0) { refreshTokenService.revokeAll(any()) }
@@ -144,57 +140,6 @@ class UserProfileServiceSecurityTest {
     }
 
     @Test
-    fun `administrator account deletion is rejected before every side effect`() {
-        val admin = user(id = "admin", phone = "13900000000", role = "ADMIN")
-        every {
-            adminAccountCommandService.requireOrdinaryAccountDeletionAllowed(admin.id)
-        } throws IllegalArgumentException("管理员不能通过普通用户接口注销")
-
-        assertThrows(IllegalArgumentException::class.java) {
-            service.deleteAccount(admin.id)
-        }
-
-        verify(exactly = 0) { diaryRepository.findByUserId(any()) }
-        verify(exactly = 0) { diaryRepository.save(any()) }
-        verify(exactly = 0) { refreshTokenService.revokeAll(any()) }
-        verify(exactly = 0) { userRepository.deleteById(any()) }
-    }
-
-    @Test
-    fun `ordinary user account deletion keeps diary token and soft-delete contract`() {
-        val user = user(id = "ordinary-user", role = "USER")
-        val firstDiary = DiaryEntity(
-            id = "diary-1",
-            title = "First",
-            userId = user.id,
-            authorName = "Original",
-            authorAvatar = "avatar-1",
-        )
-        val secondDiary = DiaryEntity(
-            id = "diary-2",
-            title = "Second",
-            userId = user.id,
-            authorName = "Original",
-            authorAvatar = "avatar-2",
-        )
-        every { adminAccountCommandService.requireOrdinaryAccountDeletionAllowed(user.id) } returns user
-        every { diaryRepository.findByUserId(user.id) } returns listOf(firstDiary, secondDiary)
-        every { diaryRepository.save(any()) } answers { firstArg() }
-        every { userRepository.deleteById(user.id) } returns Unit
-
-        service.deleteAccount(user.id)
-
-        verifyOrder {
-            adminAccountCommandService.requireOrdinaryAccountDeletionAllowed(user.id)
-            diaryRepository.findByUserId(user.id)
-            diaryRepository.save(match { it.id == firstDiary.id && it.authorName == "已注销用户" && it.authorAvatar.isEmpty() })
-            diaryRepository.save(match { it.id == secondDiary.id && it.authorName == "已注销用户" && it.authorAvatar.isEmpty() })
-            refreshTokenService.revokeAll(user.id)
-            userRepository.deleteById(user.id)
-        }
-    }
-
-    @Test
     fun `bootstrap phone change is rejected before verification or account writes`() {
         every {
             adminAccountCommandService.requireOrdinaryPhoneChangeAllowed("bootstrap", "+8613900000000")
@@ -213,21 +158,21 @@ class UserProfileServiceSecurityTest {
     @Test
     fun `admin method signatures delegate to the command boundary`() {
         val user = user(id = "user", role = "USER")
-        val deleted = user.copy(deletedAt = LocalDateTime.now())
+        val suspended = user.copy(accountState = AccountState.ADMIN_SUSPENDED)
         every { adminAccountCommandService.updateRole(user.id, "ADMIN") } returns user.copy(role = "ADMIN")
         every { adminAccountCommandService.deactivate(user.id) } returns (true to "success")
-        every { adminAccountCommandService.reactivate(user.id) } returns deleted.copy(deletedAt = null)
+        every { adminAccountCommandService.reactivate(user.id) } returns suspended.copy(accountState = AccountState.ACTIVE)
 
         assertEquals("ADMIN", service.adminUpdateRole(user.id, "ADMIN")?.role)
         assertEquals(true to "success", service.adminDeactivate(user.id))
-        assertEquals(null, service.adminReactivate(user.id)?.deletedAt)
+        assertEquals(AccountState.ACTIVE, service.adminReactivate(user.id)?.accountState)
     }
 
     private fun user(
         id: String = "user-id",
         phone: String = "+8613800000001",
         role: String,
-        deletedAt: LocalDateTime? = null
+        accountState: AccountState = AccountState.ACTIVE
     ) = UserEntity(
         id = id,
         phone = phone,
@@ -235,6 +180,6 @@ class UserProfileServiceSecurityTest {
         nickname = "User",
         role = role,
         credentialsUpdatedAt = LocalDateTime.now().minusMinutes(1),
-        deletedAt = deletedAt
+        accountState = accountState
     )
 }

@@ -426,7 +426,7 @@ class AdminLogoutClosureHttpTest @Autowired constructor(
         }
         given(
             jdbcTemplate.query(
-                eq("SELECT phone FROM users WHERE id = ? AND deleted_at IS NULL"),
+                eq("SELECT phone FROM users WHERE id = ? AND account_state = 'ACTIVE'"),
                 any(RowMapper::class.java),
                 eq("admin-id")
             )

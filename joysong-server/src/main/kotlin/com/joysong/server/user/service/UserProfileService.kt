@@ -5,7 +5,6 @@ import com.joysong.server.auth.dto.UserDto
 import com.joysong.server.auth.service.VerificationCodeService
 import com.joysong.server.auth.service.VerificationCodePurposeEnum
 import com.joysong.server.auth.service.RefreshTokenService
-import com.joysong.server.diary.repository.DiaryRepository
 import com.joysong.server.user.entity.UserEntity
 import com.joysong.server.user.repository.UserRepository
 import org.slf4j.LoggerFactory
@@ -21,7 +20,6 @@ private data class PhoneChangeAuthorization(val expireAt: Instant)
 @Service
 class UserProfileService(
     private val userRepository: UserRepository,
-    private val diaryRepository: DiaryRepository,
     private val passwordEncoder: PasswordEncoder,
     private val verificationCodeService: VerificationCodeService,
     private val refreshTokenService: RefreshTokenService,
@@ -56,30 +54,6 @@ class UserProfileService(
         userRepository.save(updated)
         logger.info("updateProfile saved - new avatar: ${updated.avatar}")
         return updated.toDto()
-    }
-
-    /** 注销账号（逻辑删除） */
-    @Transactional
-    fun deleteAccount(userId: String) {
-        val user = adminAccountCommandService.requireOrdinaryAccountDeletionAllowed(userId)
-        logger.info(
-            "deleteAccount - userId: {}, phone: {}, email: {}",
-            userId,
-            user.phone?.let(::maskPhone) ?: "未绑定",
-            user.email?.let(::maskEmail) ?: "未绑定"
-        )
-
-        // 更新该用户所有日记的作者信息为已注销状态
-        val diaries = diaryRepository.findByUserId(userId)
-        diaries.forEach { diary ->
-            diaryRepository.save(diary.copy(authorName = "已注销用户", authorAvatar = ""))
-        }
-        logger.info("deleteAccount - updated ${diaries.size} diaries for userId: $userId")
-
-        // @SQLDelete 已配置为逻辑删除：UPDATE users SET deleted_at = NOW() WHERE id = ?
-        refreshTokenService.revokeAll(userId)
-        userRepository.deleteById(userId)
-        logger.info("deleteAccount completed (soft delete) - userId: $userId")
     }
 
     /** 修改密码 */
@@ -260,9 +234,9 @@ class UserProfileService(
 
     fun adminListUsers(keyword: String?): List<UserEntity> {
         return if (keyword.isNullOrBlank()) {
-            userRepository.findAllIncludingDeleted()
+            userRepository.findAllAnyState()
         } else {
-            userRepository.searchUsersIncludingDeleted(keyword.trim())
+            userRepository.searchUsersAnyState(keyword.trim())
         }
     }
 
@@ -280,5 +254,5 @@ class UserProfileService(
         return adminAccountCommandService.reactivate(id)
     }
 
-    fun count(): Long = userRepository.countIncludingDeleted()
+    fun count(): Long = userRepository.countAnyState()
 }

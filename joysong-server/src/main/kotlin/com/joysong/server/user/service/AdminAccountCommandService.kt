@@ -2,6 +2,7 @@ package com.joysong.server.user.service
 
 import com.joysong.server.auth.service.RefreshTokenService
 import com.joysong.server.user.entity.UserEntity
+import com.joysong.server.user.entity.AccountState
 import com.joysong.server.user.repository.AdminAccountGuardRepository
 import com.joysong.server.user.repository.UserRepository
 import org.springframework.beans.factory.annotation.Value
@@ -26,8 +27,8 @@ class AdminAccountCommandService(
         guardRepository.lock()
         val availableAdministrators = requireAvailableAdministrator()
         require(role in PLATFORM_ROLES) { "平台角色只能是 USER 或 ADMIN" }
-        val user = userRepository.findByIdIncludingDeletedForUpdate(id)
-            ?.takeIf { it.deletedAt == null }
+        val user = userRepository.findByIdForUpdate(id)
+            ?.takeIf { it.accountState != AccountState.ERASED }
             ?: return null
         require(user.phone != bootstrapPhone || role == ADMIN_ROLE) {
             "Bootstrap 管理员不能被降权"
@@ -46,15 +47,16 @@ class AdminAccountCommandService(
     fun deactivate(id: String): Pair<Boolean, String> {
         guardRepository.lock()
         val availableAdministrators = requireAvailableAdministrator()
-        val user = userRepository.findByIdIncludingDeletedForUpdate(id)
+        val user = userRepository.findByIdForUpdate(id)
             ?: return false to "用户不存在"
-        if (user.deletedAt != null) return false to "该用户已被注销"
+        if (user.accountState == AccountState.ERASED) return false to "该用户已被注销"
+        if (user.accountState == AccountState.ADMIN_SUSPENDED) return false to "该用户已被停用"
         require(user.phone != bootstrapPhone) { "Bootstrap 管理员不能被停用" }
         if (user.isAvailableAdministrator()) {
             require(availableAdministrators > 1) { "不能停用最后一个可用管理员" }
         }
         val updated = user.copy(
-            deletedAt = LocalDateTime.now(),
+            accountState = AccountState.ADMIN_SUSPENDED,
             credentialsUpdatedAt = LocalDateTime.now(),
         )
         refreshTokenService.revokeAll(id)
@@ -66,11 +68,12 @@ class AdminAccountCommandService(
     fun reactivate(id: String): UserEntity? {
         guardRepository.lock()
         requireAvailableAdministrator()
-        val user = userRepository.findByIdIncludingDeletedForUpdate(id) ?: return null
-        if (user.deletedAt == null) return user
+        val user = userRepository.findByIdForUpdate(id) ?: return null
+        if (user.accountState == AccountState.ERASED) return null
+        if (user.accountState == AccountState.ACTIVE) return user
         if (user.role == ADMIN_ROLE) requireAdministratorCredentials(user)
         val updated = user.copy(
-            deletedAt = null,
+            accountState = AccountState.ACTIVE,
             credentialsUpdatedAt = LocalDateTime.now(),
         )
         refreshTokenService.revokeAll(id)
@@ -86,14 +89,14 @@ class AdminAccountCommandService(
             "ADMIN_PASSWORD must contain 12-128 characters"
         }
         guardRepository.lock()
-        val existing = userRepository.findByPhoneIncludingDeletedForUpdate(phone)
+        val existing = userRepository.findByPhoneForUpdate(phone)
         if (existing != null) {
             check(existing.isAvailableAdministrator()) {
                 "The configured ADMIN_PHONE is already used by an unavailable or non-admin account"
             }
             return existing
         }
-        val totalUsers = userRepository.countIncludingDeleted()
+        val totalUsers = userRepository.countAnyState()
         val availableAdministrators = userRepository.countAvailableAdministrators()
         check(totalUsers == 0L || availableAdministrators > 0L) {
             "现有数据库不存在可用管理员，拒绝自动创建 bootstrap 管理员"
@@ -113,8 +116,8 @@ class AdminAccountCommandService(
     fun requireOrdinaryAccountDeletionAllowed(userId: String): UserEntity {
         guardRepository.lock()
         requireAvailableAdministrator()
-        val user = userRepository.findByIdIncludingDeletedForUpdate(userId)
-            ?.takeIf { it.deletedAt == null }
+        val user = userRepository.findByIdForUpdate(userId)
+            ?.takeIf { it.accountState == AccountState.ACTIVE }
             ?: throw IllegalArgumentException("User not found")
         require(user.phone != bootstrapPhone) { "Bootstrap 管理员不能通过普通用户接口注销" }
         require(user.role != ADMIN_ROLE) { "管理员不能通过普通用户接口注销" }
@@ -125,8 +128,8 @@ class AdminAccountCommandService(
     fun requireOrdinaryPhoneChangeAllowed(userId: String, newPhone: String): UserEntity {
         guardRepository.lock()
         val availableAdministrators = requireAvailableAdministrator()
-        val user = userRepository.findByIdIncludingDeletedForUpdate(userId)
-            ?.takeIf { it.deletedAt == null }
+        val user = userRepository.findByIdForUpdate(userId)
+            ?.takeIf { it.accountState == AccountState.ACTIVE }
             ?: throw IllegalArgumentException("用户不存在")
         require(user.phone != bootstrapPhone) { "Bootstrap 管理员不能修改引导手机号" }
         if (user.isAvailableAdministrator() && !ADMIN_PHONE.matches(newPhone)) {
@@ -147,7 +150,7 @@ class AdminAccountCommandService(
 
     private fun UserEntity.isAvailableAdministrator(): Boolean =
         role == ADMIN_ROLE &&
-            deletedAt == null &&
+            accountState == AccountState.ACTIVE &&
             ADMIN_PHONE.matches(phone.orEmpty()) &&
             passwordHash.isNotBlank()
 
