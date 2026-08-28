@@ -57,6 +57,7 @@ import java.net.URI
 import java.time.LocalDateTime
 import java.util.Locale
 import java.util.UUID
+import com.joysong.server.user.service.AccountLifecycleGuard
 
 private val hanScriptRegex = Regex("\\p{IsHan}")
 private val latinWordRegex = Regex("[A-Za-z]+(?:['’-][A-Za-z]+)?")
@@ -314,7 +315,8 @@ class ChatService(
     private val objectMapper: ObjectMapper,
     @Qualifier("agentLlmRestTemplate") private val restTemplate: RestTemplate,
     @Qualifier("agentIntentParserRestTemplate") private val intentParserRestTemplate: RestTemplate,
-    private val aiAgentProperties: AiAgentProperties
+    private val aiAgentProperties: AiAgentProperties,
+    private val accountLifecycleGuard: AccountLifecycleGuard? = null,
 ) {
     private val logger = LoggerFactory.getLogger(ChatService::class.java)
 
@@ -323,6 +325,7 @@ class ChatService(
      */
     @Transactional
     fun createSession(userId: String, request: CreateSessionRequest): ChatSessionEntity {
+        accountLifecycleGuard?.requireActiveForWrite(userId)
         val persona = request.persona.trim().uppercase()
         val contextType = request.contextType.trim().uppercase()
         require(persona in setOf("BESTIE", "CONSULTANT")) { "不支持的 AI 角色" }

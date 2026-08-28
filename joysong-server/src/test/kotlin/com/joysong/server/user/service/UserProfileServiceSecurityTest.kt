@@ -22,26 +22,28 @@ class UserProfileServiceSecurityTest {
     private val verificationCodeService = mockk<VerificationCodeService>()
     private val refreshTokenService = mockk<RefreshTokenService>(relaxed = true)
     private val adminAccountCommandService = mockk<AdminAccountCommandService>()
+    private val accountLifecycleGuard = mockk<AccountLifecycleGuard>()
     private val service = UserProfileService(
         userRepository,
         passwordEncoder,
         verificationCodeService,
         refreshTokenService,
         adminAccountCommandService,
+        accountLifecycleGuard,
     )
 
     @Test
     fun `resetPassword stops invalid code before any account or credential work`() {
         val user = user(role = "USER")
         every { verificationCodeService.validate("+8613800000001", "123456") } returns false
-        every { userRepository.findByPhone(user.phone!!) } returns Optional.of(user)
+        every { userRepository.findByPhoneForUpdate(user.phone!!) } returns user
 
         val error = assertThrows(IllegalArgumentException::class.java) {
             service.resetPassword("+8613800000001", "123456", "ValidPass1")
         }
 
         assertEquals("验证码无效或已过期", error.message)
-        verify(exactly = 0) { userRepository.findByPhone(any()) }
+        verify(exactly = 0) { userRepository.findByPhoneForUpdate(any()) }
         verify(exactly = 0) { passwordEncoder.encode(any()) }
         verify(exactly = 0) { userRepository.save(any()) }
         verify(exactly = 0) { refreshTokenService.revokeAll(any()) }
@@ -51,7 +53,7 @@ class UserProfileServiceSecurityTest {
     fun `resetPassword updates an active non admin after validating the code`() {
         val user = user(role = "USER")
         every { verificationCodeService.validate(user.phone!!, "123456") } returns true
-        every { userRepository.findByPhone(user.phone!!) } returns Optional.of(user)
+        every { userRepository.findByPhoneForUpdate(user.phone!!) } returns user
         every { passwordEncoder.encode("ValidPass1") } returns "updated-hash"
         every { userRepository.save(any()) } answers { firstArg() }
 
@@ -68,7 +70,7 @@ class UserProfileServiceSecurityTest {
     fun `resetPassword gives active administrator the generic public error without writes`() {
         val admin = user(role = "ADMIN")
         every { verificationCodeService.validate(admin.phone!!, "123456") } returns true
-        every { userRepository.findByPhone(admin.phone!!) } returns Optional.of(admin)
+        every { userRepository.findByPhoneForUpdate(admin.phone!!) } returns admin
         every { passwordEncoder.encode("StrongAdminPass1!") } returns "unexpected-hash"
         every { userRepository.save(any()) } answers { firstArg() }
 
@@ -86,7 +88,7 @@ class UserProfileServiceSecurityTest {
     fun `resetPassword gives a promoted administrator the generic public error without writes`() {
         val promotedAdmin = user(id = "promoted-admin-id", phone = "+8613800000002", role = "ADMIN")
         every { verificationCodeService.validate(promotedAdmin.phone!!, "123456") } returns true
-        every { userRepository.findByPhone(promotedAdmin.phone!!) } returns Optional.of(promotedAdmin)
+        every { userRepository.findByPhoneForUpdate(promotedAdmin.phone!!) } returns promotedAdmin
         every { passwordEncoder.encode("StrongAdminPass1!") } returns "unexpected-hash"
         every { userRepository.save(any()) } answers { firstArg() }
 
@@ -107,8 +109,8 @@ class UserProfileServiceSecurityTest {
         val erased = user(id = "erased", phone = erasedPhone, role = "USER", accountState = AccountState.ERASED)
         every { verificationCodeService.validate(unknownPhone, "123456") } returns true
         every { verificationCodeService.validate(erasedPhone, "123456") } returns true
-        every { userRepository.findByPhone(unknownPhone) } returns Optional.empty()
-        every { userRepository.findByPhone(erasedPhone) } returns Optional.of(erased)
+        every { userRepository.findByPhoneForUpdate(unknownPhone) } returns null
+        every { userRepository.findByPhoneForUpdate(erasedPhone) } returns erased
 
         listOf(unknownPhone, erasedPhone).forEach { phone ->
             val error = assertThrows(IllegalArgumentException::class.java) {
@@ -117,8 +119,8 @@ class UserProfileServiceSecurityTest {
             assertEquals("验证码无效或已过期", error.message)
         }
 
-        verify(exactly = 1) { userRepository.findByPhone(unknownPhone) }
-        verify(exactly = 1) { userRepository.findByPhone(erasedPhone) }
+        verify(exactly = 1) { userRepository.findByPhoneForUpdate(unknownPhone) }
+        verify(exactly = 1) { userRepository.findByPhoneForUpdate(erasedPhone) }
         verify(exactly = 0) { passwordEncoder.encode(any()) }
         verify(exactly = 0) { userRepository.save(any()) }
         verify(exactly = 0) { refreshTokenService.revokeAll(any()) }
@@ -128,7 +130,7 @@ class UserProfileServiceSecurityTest {
     fun `resetPassword consumes the code before rejecting an invalid user password`() {
         val user = user(role = "USER")
         every { verificationCodeService.validate(user.phone!!, "123456") } returns true
-        every { userRepository.findByPhone(user.phone!!) } returns Optional.of(user)
+        every { userRepository.findByPhoneForUpdate(user.phone!!) } returns user
 
         val error = assertThrows(IllegalArgumentException::class.java) {
             service.resetPassword(user.phone!!, "123456", "short")

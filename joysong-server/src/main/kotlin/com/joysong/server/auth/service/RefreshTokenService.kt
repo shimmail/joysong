@@ -1,6 +1,7 @@
 package com.joysong.server.auth.service
 
 import com.joysong.server.config.JwtTokenProvider
+import com.joysong.server.user.service.AccountLifecycleGuard
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
@@ -40,12 +41,20 @@ private data class NewRefreshToken(
 class RefreshTokenService(
     private val jdbcTemplate: JdbcTemplate,
     private val jwtTokenProvider: JwtTokenProvider,
-    @Value("\${jwt.refresh-expiration:2592000000}") private val refreshExpiration: Long
+    @Value("\${jwt.refresh-expiration:2592000000}") private val refreshExpiration: Long,
+    private val accountLifecycleGuard: AccountLifecycleGuard,
 ) {
     private val secureRandom = SecureRandom()
 
     @Transactional
     fun issue(userId: String, phone: String, role: String): IssuedTokens {
+        try {
+            accountLifecycleGuard.requireActiveForWrite(userId)
+        } catch (_: IllegalArgumentException) {
+            throw InvalidRefreshTokenException()
+        } catch (_: IllegalStateException) {
+            throw InvalidRefreshTokenException()
+        }
         val refresh = insertRefreshToken(userId, role)
         return IssuedTokens(
             accessToken = jwtTokenProvider.generateToken(userId, phone, role, refresh.id),

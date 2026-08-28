@@ -7,6 +7,8 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.stereotype.Service
 import org.springframework.web.multipart.MultipartFile
+import com.joysong.server.user.deletion.UserMediaAssetService
+import com.joysong.server.user.deletion.UserMediaStorageProvider
 import java.io.ByteArrayInputStream
 import java.nio.file.Files
 import java.nio.file.Path
@@ -20,13 +22,38 @@ class FileUploadService(
     @Value("\${oss.endpoint:}") private val ossEndpoint: String,
     @Value("\${oss.bucket-name:}") private val ossBucketName: String,
     @Value("\${oss.public-base-url:}") private val ossPublicBaseUrl: String,
-    private val ossClientProvider: ObjectProvider<OSS>
+    private val ossClientProvider: ObjectProvider<OSS>,
+    private val userMediaAssetService: UserMediaAssetService? = null,
 ) {
     private val logger = LoggerFactory.getLogger(FileUploadService::class.java)
     private val allowedExtensions = setOf("jpg", "jpeg", "png", "webp", "gif")
     private val maxFileSize = 10 * 1024 * 1024L // 10MB
 
-    fun upload(file: MultipartFile, folder: String = "general", customFileName: String? = null): String {
+    fun upload(file: MultipartFile, folder: String = "general", customFileName: String? = null): String =
+        uploadInternal(file, folder, customFileName).url
+
+    fun upload(
+        userId: String,
+        file: MultipartFile,
+        folder: String = "general",
+        customFileName: String? = null,
+    ): String {
+        val uploaded = uploadInternal(file, folder, customFileName)
+        try {
+            requireNotNull(userMediaAssetService) { "USER_MEDIA_REGISTRY_UNAVAILABLE" }
+                .register(userId, uploaded.storageKey, folder.uppercase().take(32), uploaded.provider)
+        } catch (error: Exception) {
+            removeUploadedObject(uploaded)
+            throw error
+        }
+        return uploaded.url
+    }
+
+    private fun uploadInternal(
+        file: MultipartFile,
+        folder: String,
+        customFileName: String?,
+    ): UploadedMedia {
         require(!file.isEmpty) { "上传文件不能为空" }
         // 校验文件大小
         if (file.size > maxFileSize) {
@@ -54,11 +81,12 @@ class FileUploadService(
         val relativePath = "$folder/$fileName.$extension"
 
         if (ossEnabled) {
-            return uploadToOss(
+            val url = uploadToOss(
                 relativePath = relativePath,
                 bytes = bytes,
                 contentType = imageContentType(extension)
             )
+            return UploadedMedia(url, relativePath, UserMediaStorageProvider.OSS_PUBLIC)
         }
 
         // 上传根目录由 UPLOAD_LOCAL_DIR / upload.local-dir 配置；默认值仅用于本地开发。
@@ -71,7 +99,25 @@ class FileUploadService(
         // 返回 HTTP 可访问 URL
         val url = "${baseUrl.trimEnd('/')}/images/$relativePath"
         logger.info("文件上传成功 - 本地路径: $targetFile, URL: $url")
-        return url
+        return UploadedMedia(url, relativePath, UserMediaStorageProvider.LOCAL_PUBLIC)
+    }
+
+    private fun removeUploadedObject(uploaded: UploadedMedia) {
+        runCatching {
+            when (uploaded.provider) {
+                UserMediaStorageProvider.LOCAL_PUBLIC -> {
+                    val base = Path.of(uploadDirectory).toAbsolutePath().normalize()
+                    val target = base.resolve(uploaded.storageKey).normalize()
+                    if (target.startsWith(base)) Files.deleteIfExists(target)
+                    Unit
+                }
+                UserMediaStorageProvider.OSS_PUBLIC ->
+                    ossClientProvider.ifAvailable?.deleteObject(ossBucketName, uploaded.storageKey)
+                UserMediaStorageProvider.LOCAL_PRIVATE -> Unit
+            }
+        }.onFailure {
+            logger.warn("Uploaded media registry failed and cleanup could not complete")
+        }
     }
 
     private fun uploadToOss(relativePath: String, bytes: ByteArray, contentType: String): String {
@@ -118,4 +164,10 @@ class FileUploadService(
         "webp" -> "image/webp"
         else -> "application/octet-stream"
     }
+
+    private data class UploadedMedia(
+        val url: String,
+        val storageKey: String,
+        val provider: UserMediaStorageProvider,
+    )
 }

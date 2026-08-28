@@ -11,11 +11,13 @@ import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
 import java.time.LocalDateTime
 import java.util.UUID
+import com.joysong.server.user.service.AccountLifecycleGuard
 
 @Service
 class AgentProfileService(
     private val repository: AgentUserProfileRepository,
-    private val objectMapper: ObjectMapper
+    private val objectMapper: ObjectMapper,
+    private val accountLifecycleGuard: AccountLifecycleGuard? = null,
 ) {
     fun get(userId: String): AgentProfileResponse {
         val profile = repository.findByUserId(userId)
@@ -24,6 +26,7 @@ class AgentProfileService(
 
     @Transactional
     fun upsert(userId: String, request: AgentProfileRequest): AgentProfileResponse {
+        accountLifecycleGuard?.requireActiveForWrite(userId)
         require(request.city.trim().length <= 100) { AgentText.value("城市名称过长", "City is too long") }
         require(request.painTolerance.trim().length <= 20) { AgentText.value("疼痛耐受值过长", "Pain tolerance is too long") }
         require(request.consentVersion.trim().length <= 50) { AgentText.value("授权版本号过长", "Consent version is too long") }
@@ -60,6 +63,7 @@ class AgentProfileService(
 
     @Transactional
     fun confirm(userId: String): AgentProfileResponse {
+        accountLifecycleGuard?.requireActiveForWrite(userId)
         val profile = repository.findByUserId(userId) ?: throw IllegalArgumentException(AgentText.value("请先填写需求档案", "Complete your needs profile first"))
         require(profile.consentVersion.isNotBlank()) { AgentText.value("请先确认隐私授权", "Confirm profile data permission first") }
         profile.confirmedAt = LocalDateTime.now()

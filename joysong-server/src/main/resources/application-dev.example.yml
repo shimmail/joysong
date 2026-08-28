@@ -17,6 +17,14 @@ security:
   verification-code:
     log-for-dev: true
 
+app:
+  account-deletion:
+    enabled: true
+    # Development-only adapter for accounts known to have no commerce data.
+    allow-commerce-bypass: true
+    # Local acceptance code. Code enforces the dev profile and never returns or logs this value.
+    dev-fixed-sms-code: ${ACCOUNT_DELETION_DEV_FIXED_SMS_CODE:000000}
+
 payment:
   alipay-plus:
     # Auto-completes newly created booking orders through the real local payment state machine.

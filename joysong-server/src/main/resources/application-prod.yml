@@ -41,6 +41,13 @@ security:
   verification-code:
     log-for-dev: false
 
+app:
+  # Production is hard-disabled in code as well. These explicit values document
+  # the release gate and cannot be used to opt in.
+  account-deletion:
+    enabled: false
+    allow-commerce-bypass: false
+
 payment:
   alipay-plus:
     # Never auto-complete newly created orders in production.

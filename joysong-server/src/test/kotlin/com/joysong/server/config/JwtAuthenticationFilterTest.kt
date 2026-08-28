@@ -138,7 +138,7 @@ class JwtAuthenticationFilterTest {
                 *anyVararg()
             )
         } returns if (activeSession) 1L else 0L
-        val refreshTokenService = RefreshTokenService(jdbcTemplate, tokenProvider, 60_000)
+        val refreshTokenService = RefreshTokenService(jdbcTemplate, tokenProvider, 60_000, mockk(relaxed = true))
         val filter = JwtAuthenticationFilter(tokenProvider, userRepository, providerOf(refreshTokenService))
 
         filter.doFilter(request, MockHttpServletResponse(), mockk<FilterChain>(relaxed = true))

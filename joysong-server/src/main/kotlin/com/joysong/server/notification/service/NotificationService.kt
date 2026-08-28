@@ -13,10 +13,12 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDateTime
 import java.util.UUID
+import com.joysong.server.user.service.AccountLifecycleGuard
 
 @Service
 class NotificationService(
-    private val notificationRepository: NotificationRepository
+    private val notificationRepository: NotificationRepository,
+    private val accountLifecycleGuard: AccountLifecycleGuard? = null,
 ) {
 
     /**
@@ -54,6 +56,7 @@ class NotificationService(
      */
     @Transactional
     fun markAsRead(notificationId: String, userId: String) {
+        accountLifecycleGuard?.requireActiveForWrite(userId)
         val notification = notificationRepository.findByIdAndUserIdAndDeletedAtIsNull(notificationId, userId)
             ?: throw IllegalArgumentException("通知不存在或无权访问")
         notification.isRead = true
@@ -65,6 +68,7 @@ class NotificationService(
      */
     @Transactional
     fun markAllAsRead(userId: String) {
+        accountLifecycleGuard?.requireActiveForWrite(userId)
         notificationRepository.markAllAsReadByUserId(userId)
     }
 
@@ -80,6 +84,7 @@ class NotificationService(
         targetType: String = "",
         targetId: String = ""
     ): NotificationEntity {
+        accountLifecycleGuard?.requireActiveForWrite(userId)
         require(userId.isNotBlank()) { "userId 不能为空" }
         require(type.isNotBlank()) { "type 不能为空" }
         require(title.isNotBlank()) { "title 不能为空" }

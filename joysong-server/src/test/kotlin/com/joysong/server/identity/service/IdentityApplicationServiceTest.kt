@@ -1,6 +1,8 @@
 package com.joysong.server.identity.service
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.joysong.server.user.entity.UserEntity
+import com.joysong.server.user.service.AccountLifecycleGuard
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -12,6 +14,11 @@ import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.jdbc.core.JdbcTemplate
 
 class IdentityApplicationServiceTest {
+    private val accountLifecycleGuard = mockk<AccountLifecycleGuard>().also { guard ->
+        every { guard.requireActiveForWrite(any()) } answers {
+            UserEntity(id = firstArg(), passwordHash = "test")
+        }
+    }
 
     @Test
     fun `doctor application succeeds without hospital name`() {
@@ -49,7 +56,7 @@ class IdentityApplicationServiceTest {
             }
         }
         every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 1
-        return IdentityApplicationService(jdbcTemplate, ObjectMapper())
+        return IdentityApplicationService(jdbcTemplate, ObjectMapper(), accountLifecycleGuard)
     }
 
     private fun doctorRequest(

@@ -23,7 +23,7 @@ class FileUploadController(
         require(customFileName == null || isAdmin || customFileName == userId) {
             "自定义文件名只能使用当前用户 ID"
         }
-        val url = fileUploadService.upload(file, folder, customFileName)
+        val url = fileUploadService.upload(userId, file, folder, customFileName)
         return BaseResponse.success(mapOf("url" to url))
     }
 }

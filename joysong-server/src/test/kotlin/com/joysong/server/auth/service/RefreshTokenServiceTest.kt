@@ -2,6 +2,8 @@ package com.joysong.server.auth.service
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.joysong.server.config.JwtTokenProvider
+import com.joysong.server.user.entity.UserEntity
+import com.joysong.server.user.service.AccountLifecycleGuard
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -34,7 +36,7 @@ class RefreshTokenServiceTest {
             insertedSessionId = secondArg<Array<out Any>>()[0] as String
             1
         }
-        val service = RefreshTokenService(jdbcTemplate, tokenProvider, 60_000)
+        val service = service(jdbcTemplate)
 
         val issued = service.issue("admin-id", "13800000000", "ADMIN")
 
@@ -47,7 +49,7 @@ class RefreshTokenServiceTest {
         val jdbcTemplate = mockk<JdbcTemplate>()
         stubStoredRefreshToken(jdbcTemplate, UUID.randomUUID().toString(), "ADMIN")
         stubSuccessfulRotation(jdbcTemplate)
-        val service = RefreshTokenService(jdbcTemplate, tokenProvider, 60_000)
+        val service = service(jdbcTemplate)
 
         assertThrows(InvalidRefreshTokenException::class.java) {
             service.rotate("a".repeat(64))
@@ -82,7 +84,7 @@ class RefreshTokenServiceTest {
         every {
             jdbcTemplate.update(match<String> { it.contains("UPDATE refresh_tokens") }, *anyVararg())
         } returns 1
-        val service = RefreshTokenService(jdbcTemplate, tokenProvider, 60_000)
+        val service = service(jdbcTemplate)
 
         val refreshed = service.rotate("a".repeat(64))
 
@@ -111,7 +113,7 @@ class RefreshTokenServiceTest {
         every {
             jdbcTemplate.update(match<String> { it.contains("UPDATE refresh_tokens") }, *anyVararg())
         } returns 1
-        val service = RefreshTokenService(jdbcTemplate, tokenProvider, 60_000)
+        val service = service(jdbcTemplate)
 
         val refreshed = service.rotate("a".repeat(64))
 
@@ -124,7 +126,7 @@ class RefreshTokenServiceTest {
         val jdbcTemplate = mockk<JdbcTemplate>()
         stubStoredRefreshToken(jdbcTemplate, UUID.randomUUID().toString(), "ADMIN")
         stubSuccessfulRotation(jdbcTemplate)
-        val service = RefreshTokenService(jdbcTemplate, tokenProvider, 60_000)
+        val service = service(jdbcTemplate)
 
         assertThrows(InvalidRefreshTokenException::class.java) {
             service.rotate("a".repeat(64))
@@ -152,7 +154,7 @@ class RefreshTokenServiceTest {
         every {
             jdbcTemplate.queryForObject(any<String>(), Long::class.java, "session-id", "other-admin-id")
         } returns 0L
-        val service = RefreshTokenService(jdbcTemplate, tokenProvider, 60_000)
+        val service = service(jdbcTemplate)
 
         assertTrue(service.isActiveSession("session-id", "admin-id"))
         assertFalse(service.isActiveSession("session-id", "other-admin-id"))
@@ -164,7 +166,7 @@ class RefreshTokenServiceTest {
         every {
             jdbcTemplate.update(match<String> { it.contains("WHERE token_hash = ?") }, any<String>())
         } returns 1
-        val service = RefreshTokenService(jdbcTemplate, tokenProvider, 60_000)
+        val service = service(jdbcTemplate)
         val rawToken = "refresh-token-to-revoke"
 
         service.revoke(rawToken)
@@ -183,7 +185,7 @@ class RefreshTokenServiceTest {
         every {
             jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg())
         } returns emptyList()
-        val service = RefreshTokenService(jdbcTemplate, tokenProvider, 60_000)
+        val service = service(jdbcTemplate)
 
         assertThrows(InvalidRefreshTokenException::class.java) {
             service.rotate("a".repeat(64))
@@ -193,6 +195,14 @@ class RefreshTokenServiceTest {
     private fun claim(token: String, name: String): String? {
         val payload = String(Base64.getUrlDecoder().decode(token.split('.')[1]))
         return jacksonObjectMapper().readTree(payload).path(name).textValue()
+    }
+
+    private fun service(jdbcTemplate: JdbcTemplate): RefreshTokenService {
+        val accountLifecycleGuard = mockk<AccountLifecycleGuard>()
+        every { accountLifecycleGuard.requireActiveForWrite(any()) } answers {
+            UserEntity(id = firstArg(), passwordHash = "test")
+        }
+        return RefreshTokenService(jdbcTemplate, tokenProvider, 60_000, accountLifecycleGuard)
     }
 
     private fun stubStoredRefreshToken(jdbcTemplate: JdbcTemplate, sessionId: String, role: String) {

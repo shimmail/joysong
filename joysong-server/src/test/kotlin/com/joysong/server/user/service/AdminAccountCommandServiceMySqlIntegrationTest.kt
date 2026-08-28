@@ -4,6 +4,7 @@ import com.joysong.server.auth.service.RefreshTokenService
 import com.joysong.server.config.JwtTokenProvider
 import com.joysong.server.support.WorktreeTestDatabase
 import com.joysong.server.user.repository.AdminAccountGuardRepository
+import com.joysong.server.user.repository.UserRepository
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -322,6 +323,10 @@ class AdminAccountCommandServiceMySqlIntegrationTest {
 
         @Bean
         fun passwordEncoder(): PasswordEncoder = BCryptPasswordEncoder()
+
+        @Bean
+        fun accountLifecycleGuard(userRepository: UserRepository): AccountLifecycleGuard =
+            AccountLifecycleGuard(userRepository)
     }
 
     companion object {

@@ -711,6 +711,74 @@
           "last": { "type": "boolean", "example": true }
         }
       },
+      "AccountDeletionBlocker": {
+        "type": "object",
+        "required": ["type", "count", "action"],
+        "description": "不包含订单号、申请号或其他敏感业务 ID 的阻断摘要",
+        "properties": {
+          "type": { "type": "string", "example": "IDENTITY_APPLICATION" },
+          "count": { "type": "integer", "format": "int64", "minimum": 1, "example": 1 },
+          "action": { "type": "string", "example": "VIEW_IDENTITY_APPLICATION" }
+        }
+      },
+      "AccountDeletionPreflightResponse": {
+        "type": "object",
+        "required": ["requestId", "eligible", "policyVersion", "blockers"],
+        "properties": {
+          "requestId": { "type": "string", "format": "uuid" },
+          "eligible": { "type": "boolean" },
+          "stepUpMethod": { "type": "string", "nullable": true, "enum": ["SMS", "GOOGLE"] },
+          "maskedCredential": { "type": "string", "nullable": true, "example": "+86****00" },
+          "policyVersion": { "type": "string", "example": "2026-08-28" },
+          "blockers": { "type": "array", "items": { "$ref": "#/components/schemas/AccountDeletionBlocker" } }
+        }
+      },
+      "AccountDeletionStepUpRequest": {
+        "type": "object",
+        "required": ["requestId"],
+        "properties": {
+          "requestId": { "type": "string", "format": "uuid" },
+          "code": { "type": "string", "pattern": "^[0-9]{6}$", "nullable": true },
+          "googleIdToken": { "type": "string", "nullable": true, "writeOnly": true }
+        }
+      },
+      "AccountDeletionSmsCodeResponse": {
+        "type": "object",
+        "required": ["requestId", "expiresInSeconds", "resendAfterSeconds"],
+        "properties": {
+          "requestId": { "type": "string", "format": "uuid" },
+          "expiresInSeconds": { "type": "integer", "format": "int64", "example": 300 },
+          "resendAfterSeconds": { "type": "integer", "format": "int64", "example": 60 }
+        }
+      },
+      "AccountDeletionStepUpResponse": {
+        "type": "object",
+        "required": ["requestId", "deletionAuthorization", "expiresInSeconds"],
+        "properties": {
+          "requestId": { "type": "string", "format": "uuid" },
+          "deletionAuthorization": { "type": "string", "readOnly": true, "description": "一次性授权，服务端仅保存 HMAC" },
+          "expiresInSeconds": { "type": "integer", "format": "int64", "example": 600 }
+        }
+      },
+      "ConfirmAccountDeletionRequest": {
+        "type": "object",
+        "required": ["requestId", "policyVersion", "confirmation"],
+        "properties": {
+          "requestId": { "type": "string", "format": "uuid" },
+          "policyVersion": { "type": "string", "example": "2026-08-28" },
+          "confirmation": { "type": "string", "enum": ["DELETE"] }
+        }
+      },
+      "AccountDeletionConfirmResponse": {
+        "type": "object",
+        "required": ["requestId", "outcome", "completedAt", "blockers"],
+        "properties": {
+          "requestId": { "type": "string", "format": "uuid" },
+          "outcome": { "type": "string", "enum": ["ERASED", "BLOCKED"] },
+          "completedAt": { "type": "string", "format": "date-time" },
+          "blockers": { "type": "array", "items": { "$ref": "#/components/schemas/AccountDeletionBlocker" } }
+        }
+      },
       "DoctorProjectBinding": {
         "type": "object",
         "description": "医生-机构项目绑定关系",
@@ -738,6 +806,118 @@
     }
   },
   "paths": {
+    "/api/user/account-deletion/preflight": {
+      "post": {
+        "tags": ["用户模块"],
+        "summary": "创建账号注销预检请求",
+        "operationId": "accountDeletionPreflight",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "预检完成；业务阻断仍返回 200 且 eligible=false",
+            "content": { "application/json": { "schema": { "allOf": [
+              { "$ref": "#/components/schemas/BaseResponse" },
+              { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/AccountDeletionPreflightResponse" } } }
+            ] } } }
+          },
+          "401": { "description": "未认证，ACCOUNT_DELETION_REQUEST_FAILED" },
+          "503": { "description": "功能关闭或交易阻断服务不可用" }
+        }
+      }
+    },
+    "/api/user/account-deletion/send-sms-code": {
+      "post": {
+        "tags": ["用户模块"],
+        "summary": "发送账号注销短信验证码",
+        "operationId": "sendAccountDeletionSmsCode",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": {
+            "type": "object", "required": ["requestId"],
+            "properties": { "requestId": { "type": "string", "format": "uuid" } }
+          } } }
+        },
+        "responses": {
+          "200": {
+            "description": "已发送；验证码 300 秒有效，60 秒后可重发",
+            "content": { "application/json": { "schema": { "allOf": [
+              { "$ref": "#/components/schemas/BaseResponse" },
+              { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/AccountDeletionSmsCodeResponse" } } }
+            ] } } }
+          },
+          "400": { "description": "请求不适用于 SMS 验证" },
+          "401": { "description": "未认证" },
+          "429": { "description": "ACCOUNT_DELETION_SMS_RATE_LIMITED" },
+          "503": { "description": "ACCOUNT_DELETION_SMS_DELIVERY_UNAVAILABLE 或功能关闭" }
+        }
+      }
+    },
+    "/api/user/account-deletion/step-up": {
+      "post": {
+        "tags": ["用户模块"],
+        "summary": "完成账号注销二次验证",
+        "operationId": "accountDeletionStepUp",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AccountDeletionStepUpRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "返回 600 秒有效的一次性注销授权",
+            "content": { "application/json": { "schema": { "allOf": [
+              { "$ref": "#/components/schemas/BaseResponse" },
+              { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/AccountDeletionStepUpResponse" } } }
+            ] } } }
+          },
+          "400": { "description": "ACCOUNT_DELETION_VERIFICATION_FAILED" },
+          "401": { "description": "未认证" },
+          "410": { "description": "ACCOUNT_DELETION_AUTHORIZATION_EXPIRED" },
+          "503": { "description": "功能关闭或 Google 验证服务不可用" }
+        }
+      }
+    },
+    "/api/user/account-deletion/confirm": {
+      "post": {
+        "tags": ["用户模块"],
+        "summary": "幂等确认不可逆账号注销",
+        "description": "首次调用必须携带 Bearer；注销后允许使用完全相同的 requestId、幂等键和授权查询原终态。",
+        "operationId": "confirmAccountDeletion",
+        "security": [{ "BearerAuth": [] }, {}],
+        "parameters": [
+          { "name": "Idempotency-Key", "in": "header", "required": true, "schema": { "type": "string", "minLength": 16, "maxLength": 256 } },
+          { "name": "X-Account-Deletion-Authorization", "in": "header", "required": true, "schema": { "type": "string", "minLength": 32, "maxLength": 512, "writeOnly": true } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ConfirmAccountDeletionRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "注销成功或完全匹配的 ERASED 终态重取",
+            "content": { "application/json": { "schema": { "allOf": [
+              { "$ref": "#/components/schemas/BaseResponse" },
+              { "type": "object", "properties": { "data": { "$ref": "#/components/schemas/AccountDeletionConfirmResponse" } } }
+            ] } } }
+          },
+          "400": { "description": "ACCOUNT_DELETION_REQUEST_FAILED" },
+          "401": { "description": "首次确认缺少有效 Bearer" },
+          "409": { "description": "ACCOUNT_DELETION_BLOCKED 或 ACCOUNT_DELETION_IDEMPOTENCY_CONFLICT" },
+          "410": { "description": "ACCOUNT_DELETION_AUTHORIZATION_EXPIRED" },
+          "503": { "description": "功能关闭或阻断服务不可用" }
+        }
+      }
+    },
+    "/api/auth/account": {
+      "delete": {
+        "tags": ["用户模块"],
+        "summary": "已退役的账号注销接口",
+        "operationId": "retiredAuthAccountDeletion",
+        "security": [],
+        "responses": { "410": { "description": "ACCOUNT_DELETION_LEGACY_ENDPOINT_RETIRED；无副作用" } }
+      }
+    },
     "/api/auth/login": {
       "post": {
         "tags": ["认证模块"],
@@ -845,11 +1025,11 @@
     "/api/user/account": {
       "delete": {
         "tags": ["用户模块"],
-        "summary": "注销账号（永久删除用户数据）",
-        "operationId": "deleteAccount",
-        "security": [{ "BearerAuth": [] }],
+        "summary": "已退役的账号注销接口",
+        "operationId": "retiredUserAccountDeletion",
+        "security": [],
         "responses": {
-          "200": { "description": "成功", "content": { "application/json": { "schema": { "allOf": [{ "$ref": "#/components/schemas/BaseResponse" }, { "type": "object", "properties": { "data": { "type": "object", "properties": { "message": { "type": "string", "example": "账号已注销" } } } } }] } } } }
+          "410": { "description": "ACCOUNT_DELETION_LEGACY_ENDPOINT_RETIRED；无副作用" }
         }
       }
     },
