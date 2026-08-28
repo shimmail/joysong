@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Table, Button, Select, Space, message, Modal, Tag, Input } from 'antd';
 import { EyeOutlined, StopOutlined, CheckCircleOutlined, SearchOutlined } from '@ant-design/icons';
 import api, { getData, debounce, getApiErrorMessage } from '../api';
+import { accountStateView, resolveAccountState } from '../accountState';
 import { identityRoleLabel, identityStatusColor } from '../identity';
 
 const roleOptions = [
@@ -69,23 +70,25 @@ export default function UsersPage() {
     fetchData();
   };
 
-  const handleDeactivate = async (record: any) => {
+  const handleSuspend = (record: any) => {
+    if (resolveAccountState(record) !== 'ACTIVE') return;
     Modal.confirm({
-      title: '确定注销该用户吗？',
-      content: `确定要注销用户「${record.nickname || record.phone}」吗？注销后该用户将无法登录。`,
-      okText: '确认注销',
+      title: '确定暂停该用户吗？',
+      content: `确定要暂停用户「${record.nickname || record.phone}」吗？暂停后该用户将无法登录。`,
+      okText: '确认暂停',
       okButtonProps: { danger: true },
       cancelText: '取消',
       onOk: async () => {
         await api.put(`/admin/users/${record.id}/deactivate`);
-        message.success('用户已注销');
+        message.success('用户已暂停');
         fetchData();
       },
     });
   };
 
-  const handleReactivate = async (id: string) => {
-    await api.put(`/admin/users/${id}/reactivate`);
+  const handleReactivate = async (record: any) => {
+    if (resolveAccountState(record) !== 'ADMIN_SUSPENDED') return;
+    await api.put(`/admin/users/${record.id}/reactivate`);
     message.success('用户已恢复');
     fetchData();
   };
@@ -106,6 +109,7 @@ export default function UsersPage() {
           options={roleOptions}
           size="small"
           style={{ width: 100 }}
+          disabled={resolveAccountState(record) === 'ERASED'}
           onChange={(value) => handleRoleChange(record.id, value)}
         />
       ),
@@ -123,42 +127,48 @@ export default function UsersPage() {
     },
     {
       title: '状态',
-      dataIndex: 'deletedAt',
-      width: 100,
-      render: (deletedAt: string | null) => (
-        deletedAt ? <Tag color="red">已注销</Tag> : <Tag color="green">正常</Tag>
-      ),
+      dataIndex: 'accountState',
+      width: 170,
+      render: (_: unknown, record: any) => {
+        const state = resolveAccountState(record);
+        const view = accountStateView[state];
+        return <Tag color={view.color} title={state}>{view.label}</Tag>;
+      },
     },
     { title: '注册时间', dataIndex: 'createdAt', width: 180 },
     {
       title: '操作', key: 'actions', width: 180,
-      render: (_: any, record: any) => (
-        <Space>
-          <Link to={`/users/${record.id}`}>
-            <Button icon={<EyeOutlined />} size="small" title="查看详情" />
-          </Link>
-          {record.deletedAt ? (
-            <Button
-              icon={<CheckCircleOutlined />}
-              size="small"
-              title="恢复用户"
-              onClick={() => handleReactivate(record.id)}
-            >
-              恢复
-            </Button>
-          ) : (
-            <Button
-              icon={<StopOutlined />}
-              size="small"
-              danger
-              title="注销用户"
-              onClick={() => handleDeactivate(record)}
-            >
-              注销
-            </Button>
-          )}
-        </Space>
-      ),
+      render: (_: any, record: any) => {
+        const state = resolveAccountState(record);
+        return (
+          <Space>
+            <Link to={`/users/${record.id}`}>
+              <Button icon={<EyeOutlined />} size="small" title="查看详情" />
+            </Link>
+            {state === 'ADMIN_SUSPENDED' && (
+              <Button
+                icon={<CheckCircleOutlined />}
+                size="small"
+                title="恢复用户"
+                onClick={() => handleReactivate(record)}
+              >
+                恢复
+              </Button>
+            )}
+            {state === 'ACTIVE' && (
+              <Button
+                icon={<StopOutlined />}
+                size="small"
+                danger
+                title="暂停用户"
+                onClick={() => handleSuspend(record)}
+              >
+                暂停
+              </Button>
+            )}
+          </Space>
+        );
+      },
     },
   ];
 

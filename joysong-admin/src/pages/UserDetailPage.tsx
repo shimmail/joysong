@@ -6,6 +6,7 @@ import {
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, ArrowLeftOutlined, StopOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import api, { getData } from '../api';
+import { accountStateView, resolveAccountState } from '../accountState';
 import { identityRoleLabel, identityStatusColor } from '../identity';
 
 const roleOptions = [
@@ -153,24 +154,24 @@ export default function UserDetailPage() {
     fetchUser();
   };
 
-  const handleDeactivate = () => {
-    if (!id) return;
+  const handleSuspend = () => {
+    if (!id || !user || resolveAccountState(user) !== 'ACTIVE') return;
     Modal.confirm({
-      title: '确定注销该用户吗？',
-      content: `确定要注销用户「${user.nickname || user.phone}」吗？注销后该用户将无法登录。`,
-      okText: '确认注销',
+      title: '确定暂停该用户吗？',
+      content: `确定要暂停用户「${user.nickname || user.phone}」吗？暂停后该用户将无法登录。`,
+      okText: '确认暂停',
       okButtonProps: { danger: true },
       cancelText: '取消',
       onOk: async () => {
         await api.put(`/admin/users/${id}/deactivate`);
-        message.success('用户已注销');
+        message.success('用户已暂停');
         fetchUser();
       },
     });
   };
 
   const handleReactivate = async () => {
-    if (!id) return;
+    if (!id || !user || resolveAccountState(user) !== 'ADMIN_SUSPENDED') return;
     await api.put(`/admin/users/${id}/reactivate`);
     message.success('用户已恢复');
     fetchUser();
@@ -179,6 +180,9 @@ export default function UserDetailPage() {
   if (!id) return <div>参数错误</div>;
   if (loading) return <div>加载中...</div>;
   if (!user) return <div>用户不存在</div>;
+
+  const accountState = resolveAccountState(user);
+  const stateView = accountStateView[accountState];
 
   const orderColumns = [
     { title: 'ID', dataIndex: 'id', width: 60 },
@@ -207,15 +211,15 @@ export default function UserDetailPage() {
         title={
           <Space>
             <span>{user.nickname || user.phone}</span>
-            {user.deletedAt ? <Tag color="red">已注销</Tag> : <Tag color="green">正常</Tag>}
+            <Tag color={stateView.color} title={accountState}>{stateView.label}</Tag>
           </Space>
         }
         extra={
-          user.deletedAt ? (
+          accountState === 'ADMIN_SUSPENDED' ? (
             <Button icon={<CheckCircleOutlined />} onClick={handleReactivate}>恢复用户</Button>
-          ) : (
-            <Button icon={<StopOutlined />} danger onClick={handleDeactivate}>注销用户</Button>
-          )
+          ) : accountState === 'ACTIVE' ? (
+            <Button icon={<StopOutlined />} danger onClick={handleSuspend}>暂停用户</Button>
+          ) : null
         }
         style={{ marginBottom: 24 }}
       >
@@ -224,7 +228,14 @@ export default function UserDetailPage() {
           <Descriptions.Item label="昵称">{user.nickname || '-'}</Descriptions.Item>
           <Descriptions.Item label="城市">{user.city || '-'}</Descriptions.Item>
           <Descriptions.Item label="后台权限">
-            <Select value={user.role} options={roleOptions} size="small" style={{ width: 120 }} onChange={handleRoleChange} />
+            <Select
+              value={user.role}
+              options={roleOptions}
+              size="small"
+              style={{ width: 120 }}
+              disabled={accountState === 'ERASED'}
+              onChange={handleRoleChange}
+            />
           </Descriptions.Item>
           <Descriptions.Item label="职业身份">
             {identityRoles.length > 0
