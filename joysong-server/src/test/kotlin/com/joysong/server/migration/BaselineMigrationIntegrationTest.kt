@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase
-import org.springframework.boot.test.autoconfigure.jdbc.JdbcTest
+import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection
 import org.springframework.jdbc.core.JdbcTemplate
 import org.testcontainers.containers.MySQLContainer
@@ -15,12 +15,13 @@ import org.testcontainers.junit.jupiter.Testcontainers
 
 @Tag("mysql-integration")
 @Testcontainers
-@JdbcTest(
+@DataJpaTest(
     properties = [
         "spring.flyway.enabled=true",
         "spring.flyway.locations=classpath:db/migration",
         "spring.flyway.baseline-on-migrate=false",
         "spring.flyway.validate-on-migrate=true",
+        "spring.jpa.hibernate.ddl-auto=validate",
         "spring.sql.init.mode=never",
     ],
 )
