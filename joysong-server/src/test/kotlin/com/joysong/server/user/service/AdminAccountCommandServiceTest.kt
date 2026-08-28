@@ -306,15 +306,16 @@ class AdminAccountCommandServiceTest {
         every { userRepository.countAvailableAdministrators() } returns 1
         every { userRepository.findByIdForUpdate(admin.id) } returns admin
 
-        assertThrows(IllegalArgumentException::class.java) {
+        val error = assertThrows(IllegalArgumentException::class.java) {
             service.reactivate(admin.id)
         }
+        assertEquals("注销账号不可恢复", error.message)
 
         verify(exactly = 0) { refreshTokenService.revokeAll(any()) }
     }
 
     @Test
-    fun `erased professional account remains unrecoverable`() {
+    fun `erased professional account fails with the unrecoverable lifecycle error`() {
         val doctor = user(
             id = "doctor",
             phone = "+8613900000000",
@@ -323,7 +324,10 @@ class AdminAccountCommandServiceTest {
         )
         every { userRepository.countAvailableAdministrators() } returns 1
         every { userRepository.findByIdForUpdate(doctor.id) } returns doctor
-        assertNull(service.reactivate(doctor.id))
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            service.reactivate(doctor.id)
+        }
+        assertEquals("注销账号不可恢复", error.message)
     }
 
     private fun user(

@@ -101,22 +101,24 @@ class UserProfileServiceSecurityTest {
     }
 
     @Test
-    fun `resetPassword gives unknown and soft deleted targets the generic public error without writes`() {
+    fun `resetPassword gives unknown and erased targets the generic public error without writes`() {
         val unknownPhone = "+8613800000001"
-        val softDeletedPhone = "+8613800000002"
+        val erasedPhone = "+8613800000002"
+        val erased = user(id = "erased", phone = erasedPhone, role = "USER", accountState = AccountState.ERASED)
         every { verificationCodeService.validate(unknownPhone, "123456") } returns true
-        every { verificationCodeService.validate(softDeletedPhone, "123456") } returns true
+        every { verificationCodeService.validate(erasedPhone, "123456") } returns true
         every { userRepository.findByPhone(unknownPhone) } returns Optional.empty()
-        every { userRepository.findByPhone(softDeletedPhone) } returns Optional.empty()
+        every { userRepository.findByPhone(erasedPhone) } returns Optional.of(erased)
 
-        listOf(unknownPhone, softDeletedPhone).forEach { phone ->
+        listOf(unknownPhone, erasedPhone).forEach { phone ->
             val error = assertThrows(IllegalArgumentException::class.java) {
                 service.resetPassword(phone, "123456", "ValidPass1")
             }
             assertEquals("验证码无效或已过期", error.message)
         }
 
-        verify(exactly = 0) { userRepository.findByPhone(any()) }
+        verify(exactly = 1) { userRepository.findByPhone(unknownPhone) }
+        verify(exactly = 1) { userRepository.findByPhone(erasedPhone) }
         verify(exactly = 0) { passwordEncoder.encode(any()) }
         verify(exactly = 0) { userRepository.save(any()) }
         verify(exactly = 0) { refreshTokenService.revokeAll(any()) }

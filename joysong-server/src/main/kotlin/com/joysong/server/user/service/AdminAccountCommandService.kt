@@ -69,7 +69,9 @@ class AdminAccountCommandService(
         guardRepository.lock()
         requireAvailableAdministrator()
         val user = userRepository.findByIdForUpdate(id) ?: return null
-        if (user.accountState == AccountState.ERASED) return null
+        if (user.accountState == AccountState.ERASED) {
+            throw IllegalArgumentException("注销账号不可恢复")
+        }
         if (user.accountState == AccountState.ACTIVE) return user
         if (user.role == ADMIN_ROLE) requireAdministratorCredentials(user)
         val updated = user.copy(

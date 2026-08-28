@@ -6,6 +6,7 @@ import com.joysong.server.auth.service.VerificationCodeService
 import com.joysong.server.auth.service.VerificationCodePurposeEnum
 import com.joysong.server.auth.service.RefreshTokenService
 import com.joysong.server.user.entity.UserEntity
+import com.joysong.server.user.entity.AccountState
 import com.joysong.server.user.repository.UserRepository
 import org.slf4j.LoggerFactory
 import org.springframework.security.crypto.password.PasswordEncoder
@@ -99,7 +100,7 @@ class UserProfileService(
         }
         val user = userRepository.findByPhone(phone)
             .orElseThrow { IllegalArgumentException("验证码无效或已过期") }
-        if (user.role == "ADMIN") {
+        if (user.accountState != AccountState.ACTIVE || user.role == "ADMIN") {
             throw IllegalArgumentException("验证码无效或已过期")
         }
         validateNewPassword(newPassword, user.role)

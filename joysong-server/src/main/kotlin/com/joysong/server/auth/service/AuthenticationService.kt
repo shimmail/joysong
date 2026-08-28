@@ -187,7 +187,7 @@ class AuthenticationService(
         val barePhone = E164_MAINLAND_PHONE.matchEntire(phone)?.groupValues?.get(1) ?: return null
         return userRepository.findByPhone(barePhone)
             .orElse(null)
-            ?.takeIf { it.role == "ADMIN" && it.accountState == AccountState.ACTIVE }
+            ?.takeIf { it.role == "ADMIN" && it.accountState != AccountState.ERASED }
     }
 
     private fun IssuedTokens.toLoginResponse(user: UserEntity) = LoginResponse(

@@ -121,9 +121,9 @@ class AuthenticationServiceTest {
     }
 
     @Test
-    fun `loginWithCode rejects the E164 alias of a erased bare mainland ADMIN`() {
+    fun `loginWithCode rejects the E164 alias of a suspended bare mainland ADMIN`() {
         val requestPhone = "+8613800000000"
-        val admin = adminUser(accountState = AccountState.ERASED)
+        val admin = adminUser(accountState = AccountState.ADMIN_SUSPENDED)
         every { verificationCodeService.validate(requestPhone, "123456") } returns true
         every { userRepository.findByPhone(requestPhone) } returns Optional.empty()
         every { userRepository.findByPhone(admin.phone!!) } returns Optional.of(admin)
@@ -137,6 +137,22 @@ class AuthenticationServiceTest {
         assertEquals("验证码无效或已过期", error.message)
         verify(exactly = 0) { userRepository.save(any()) }
         verify(exactly = 0) { refreshTokenService.issue(any(), any(), any()) }
+    }
+
+    @Test
+    fun `loginWithCode creates a distinct user for the E164 alias of an erased bare mainland ADMIN`() {
+        val requestPhone = "+8613800000000"
+        val erasedAdmin = adminUser(accountState = AccountState.ERASED)
+        every { verificationCodeService.validate(requestPhone, "123456") } returns true
+        every { userRepository.findByPhone(erasedAdmin.phone!!) } returns Optional.of(erasedAdmin)
+        every { userRepository.findByPhone(requestPhone) } returns Optional.empty()
+        every { userRepository.save(any()) } answers { firstArg() }
+        every { refreshTokenService.issue(any(), requestPhone, "USER") } returns IssuedTokens("access", "refresh", 3600)
+
+        val response = service.loginWithCode(requestPhone, "123456")
+
+        assertEquals(AccountState.ACTIVE, response.user.accountState)
+        org.junit.jupiter.api.Assertions.assertNotEquals(erasedAdmin.id, response.user.id)
     }
 
     @Test
@@ -204,16 +220,16 @@ class AuthenticationServiceTest {
     }
 
     @Test
-    fun `register rejects the E164 alias of active and erased bare mainland ADMIN accounts`() {
+    fun `register rejects the E164 alias of active and suspended bare mainland ADMIN accounts`() {
         val requestPhone = "+8613800000000"
         val activeAdmin = adminUser()
-        val deletedAdmin = adminUser(accountState = AccountState.ERASED)
+        val suspendedAdmin = adminUser(accountState = AccountState.ADMIN_SUSPENDED)
         every { verificationCodeService.validate(requestPhone, "123456") } returns true
         every { userRepository.findByPhone(requestPhone) } returns Optional.empty()
         every { userRepository.findByPhone(requestPhone) } returns Optional.empty()
         every { userRepository.findByPhone(activeAdmin.phone!!) } returnsMany listOf(
             Optional.of(activeAdmin),
-            Optional.of(deletedAdmin)
+            Optional.of(suspendedAdmin)
         )
         every { passwordEncoder.encode("NewAdminPassword!1") } returns "new-password-hash"
         every { userRepository.save(any()) } answers { firstArg() }

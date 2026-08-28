@@ -93,3 +93,21 @@ Tests:
 - The legacy delete endpoint cannot invoke repository deletion.
 - `git diff --check` completed with no whitespace errors.
 - Required focused tests and the isolated migration test still need a successful Gradle execution before merge because the local daemon did not return results.
+
+## Follow-up failure repair
+
+The offline Gradle run from the main integration found four focused failures. Root-cause review found three lifecycle boundaries behind them:
+
+- E164 alias protection considered only `ACTIVE` administrators, allowing a suspended administrator alias to create an account.
+- Password reset treated an erased account like an active ordinary account after the repository lookup.
+- Administrator recovery returned `null` for an erased account, making it indistinguishable from a missing account.
+
+The focused tests were changed first to require active and suspended alias rejection, erased alias new-user creation, erased reset-password rejection with the same public error as unknown, and `注销账号不可恢复` from erased recovery. The production changes are correspondingly limited to `AuthenticationService`, `UserProfileService`, and `AdminAccountCommandService`.
+
+Attempted verification command:
+
+```powershell
+.\gradlew.bat test --offline --tests com.joysong.server.auth.service.AuthenticationServiceTest --tests com.joysong.server.user.service.UserProfileServiceSecurityTest --tests com.joysong.server.user.service.AdminAccountCommandServiceTest --no-daemon --console=plain
+```
+
+The command reached Kotlin compilation but again returned from the client before test execution output was available. Per instruction, no further waiting or retry was performed. GREEN remains unconfirmed for this follow-up; the main integration should rerun exactly these three classes.
