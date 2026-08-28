@@ -572,7 +572,7 @@ void main() {
     expect(find.byKey(const Key('confirm-completion-button')), findsNothing);
   });
 
-  testWidgets('submits a real order review through SocialController', (
+  testWidgets('submits a completed travel order review through SocialController', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(800, 1200);
@@ -580,7 +580,13 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     final ordersRepository = FakeOrdersRepository()
-      ..orders = [sampleOrder(status: OrderStatus.completed)];
+      ..orders = [
+        sampleOrder(
+          status: OrderStatus.completed,
+          paymentFlow: OrderPaymentFlow.travelGroundServiceOnly,
+          serviceActivated: true,
+        ),
+      ];
     final socialRepository = _FakeSocialRepository();
     final orderController = OrderDetailController(
       ordersRepository,
@@ -621,7 +627,7 @@ void main() {
     expect(find.text('Review submitted'), findsOneWidget);
   });
 
-  testWidgets('loads and updates an existing review from order details', (
+  testWidgets('loads and updates an existing travel order review', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(800, 1200);
@@ -631,7 +637,9 @@ void main() {
     final ordersRepository = FakeOrdersRepository()
       ..orders = [
         sampleOrder(
-          status: OrderStatus.pendingSettlement,
+          status: OrderStatus.completed,
+          paymentFlow: OrderPaymentFlow.travelGroundServiceOnly,
+          serviceActivated: true,
           hasReview: true,
         ),
       ];

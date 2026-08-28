@@ -1074,6 +1074,18 @@ class _OrderActions extends StatelessWidget {
               onPressed: busy ? null : onCancelRefund,
               child: Text(_isEnglish(context) ? 'Cancel refund' : '撤销退款'),
             ),
+          if (canReview)
+            FilledButton.tonal(
+              key: const Key('submit-review-button'),
+              onPressed: busy || reviewBusy ? null : onReview,
+              child: Text(_isEnglish(context) ? 'Write a review' : '去评价'),
+            ),
+          if (canEditReview)
+            FilledButton.tonal(
+              key: const Key('edit-review-button'),
+              onPressed: busy || reviewBusy ? null : onEditReview,
+              child: Text(_isEnglish(context) ? 'Edit review' : '修改评价'),
+            ),
           if (order.canDelete)
             TextButton(
               key: const Key('delete-order-button'),
