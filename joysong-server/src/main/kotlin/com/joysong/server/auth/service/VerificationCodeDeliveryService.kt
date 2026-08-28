@@ -46,7 +46,7 @@ class VerificationCodeDeliveryService(
                 "验证码发送失败，请稍后重试"
             )
         }
-        if (logVerificationCodeForDev && environment.activeProfiles.contains("dev")) {
+        if (isDevelopmentFallbackEnabled()) {
             log.info("[SMS-DEV] 验证码已生成并发送至 {}", maskPhone(phone))
             log.warn("[SMS-DEV] 本地测试验证码：{}", code)
             return
@@ -55,6 +55,13 @@ class VerificationCodeDeliveryService(
             VerificationCodeDeliveryFailure.PROVIDER_UNAVAILABLE,
             "SMS_PROVIDER_UNAVAILABLE"
         )
+    }
+
+    private fun isDevelopmentFallbackEnabled(): Boolean {
+        val activeProfiles = environment.activeProfiles
+        return logVerificationCodeForDev &&
+            activeProfiles.any { it.equals("dev", ignoreCase = true) } &&
+            activeProfiles.none { it.equals("prod", ignoreCase = true) }
     }
 
     private fun maskPhone(phone: String): String = phone.take(5) + "******" + phone.takeLast(2)

@@ -15,16 +15,42 @@ class VerificationCodeDeliveryServiceTest {
     private val smsService = mockk<AliyunSmsService>()
 
     @Test
-    fun `allows an unsent code only for the dev profile when logging is enabled`() {
+    fun `allows an unsent code for the dev profile ignoring case when logging is enabled`() {
         every { smsService.sendVerificationCode("+8613800138000", "123456") } returns false
         every { smsService.isSmsEnabled() } returns false
-        val service = deliveryService(activeProfiles = arrayOf("dev"), logForDev = true)
+        val service = deliveryService(activeProfiles = arrayOf("DEV"), logForDev = true)
 
         assertDoesNotThrow {
             service.deliver("+8613800138000", "123456")
         }
 
         verify(exactly = 1) { smsService.sendVerificationCode("+8613800138000", "123456") }
+    }
+
+    @Test
+    fun `fails closed when prod and dev profiles are both active`() {
+        every { smsService.sendVerificationCode("+8613800138000", "123456") } returns false
+        every { smsService.isSmsEnabled() } returns false
+        val service = deliveryService(activeProfiles = arrayOf("prod", "dev"), logForDev = true)
+
+        val error = assertThrows(VerificationCodeDeliveryException::class.java) {
+            service.deliver("+8613800138000", "123456")
+        }
+
+        assertEquals(VerificationCodeDeliveryFailure.PROVIDER_UNAVAILABLE, error.failure)
+    }
+
+    @Test
+    fun `fails closed in dev when development logging is disabled`() {
+        every { smsService.sendVerificationCode("+8613800138000", "123456") } returns false
+        every { smsService.isSmsEnabled() } returns false
+        val service = deliveryService(activeProfiles = arrayOf("dev"), logForDev = false)
+
+        val error = assertThrows(VerificationCodeDeliveryException::class.java) {
+            service.deliver("+8613800138000", "123456")
+        }
+
+        assertEquals(VerificationCodeDeliveryFailure.PROVIDER_UNAVAILABLE, error.failure)
     }
 
     @Test

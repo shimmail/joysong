@@ -19,6 +19,8 @@ import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDateTime
@@ -157,8 +159,11 @@ class AccountDeletionStepUpServiceTest {
         }
     }
 
-    @Test
-    fun `shared delivery failure maps to stable SMS delivery unavailable error`() {
+    @ParameterizedTest
+    @EnumSource(VerificationCodeDeliveryFailure::class)
+    fun `shared delivery failures map to stable SMS delivery unavailable error`(
+        failure: VerificationCodeDeliveryFailure,
+    ) {
         every { guard.requireActiveForWrite(user.id) } returns user
         every { store.findForUpdate("request-1") } returns request(
             method = AccountDeletionStepUpMethod.SMS,
@@ -166,7 +171,7 @@ class AccountDeletionStepUpServiceTest {
         )
         every { sms.generateCode() } returns "246810"
         every { sms.deliver(user.phone!!, "246810") } throws VerificationCodeDeliveryException(
-            VerificationCodeDeliveryFailure.SEND_FAILED,
+            failure,
             "delivery failed",
         )
 
