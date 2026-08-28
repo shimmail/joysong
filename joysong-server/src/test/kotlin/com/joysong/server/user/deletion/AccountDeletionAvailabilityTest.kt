@@ -13,7 +13,6 @@ class AccountDeletionAvailabilityTest {
         val properties = AccountDeletionProperties().apply {
             enabled = true
             allowCommerceBypass = true
-            devFixedSmsCode = "246810"
         }
         val availability = AccountDeletionAvailability(
             properties,
@@ -27,7 +26,6 @@ class AccountDeletionAvailabilityTest {
         assertEquals(AccountDeletionErrorCode.FEATURE_DISABLED, error.errorCode)
         assertFalse(availability.isEnabled())
         assertFalse(availability.commerceBypassAllowed())
-        assertEquals(null, availability.developmentFixedSmsCode())
     }
 
     @Test
@@ -39,28 +37,5 @@ class AccountDeletionAvailabilityTest {
         assertFalse(availability.commerceBypassAllowed())
         properties.allowCommerceBypass = true
         assertTrue(availability.commerceBypassAllowed())
-    }
-
-    @Test
-    fun `fixed sms code is accepted only by the dev profile`() {
-        val properties = AccountDeletionProperties().apply {
-            enabled = true
-            devFixedSmsCode = "246810"
-        }
-
-        assertEquals(
-            "246810",
-            AccountDeletionAvailability(
-                properties,
-                MockEnvironment().apply { setActiveProfiles("dev") },
-            ).developmentFixedSmsCode(),
-        )
-        assertEquals(
-            null,
-            AccountDeletionAvailability(
-                properties,
-                MockEnvironment().apply { setActiveProfiles("test") },
-            ).developmentFixedSmsCode(),
-        )
     }
 }

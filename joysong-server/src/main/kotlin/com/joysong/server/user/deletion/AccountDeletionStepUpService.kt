@@ -1,6 +1,8 @@
 package com.joysong.server.user.deletion
 
-import com.joysong.server.auth.service.AliyunSmsService
+import com.joysong.server.auth.service.VerificationCodeDeliveryException
+import com.joysong.server.auth.service.VerificationCodeDeliveryService
+import com.joysong.server.auth.service.VerificationCodePolicy
 import com.joysong.server.user.entity.UserEntity
 import com.joysong.server.user.service.AccountLifecycleGuard
 import org.slf4j.LoggerFactory
@@ -18,7 +20,7 @@ class AccountDeletionStepUpService(
     private val requestStore: AccountDeletionRequestStore,
     private val localBlockerService: LocalAccountDeletionBlockerService,
     private val commerceBlockerPort: AccountDeletionBlockerPort,
-    private val smsService: AliyunSmsService,
+    private val verificationCodeDeliveryService: VerificationCodeDeliveryService,
     private val googleVerifier: GoogleAccountDeletionVerifier,
     private val crypto: AccountDeletionCrypto,
     private val clock: Clock,
@@ -61,7 +63,7 @@ class AccountDeletionStepUpService(
                     stepUpMethod = method,
                     verificationCodeHash = null,
                     verificationAttemptCount = 0,
-                    verificationMaxAttempts = MAX_VERIFICATION_ATTEMPTS,
+                    verificationMaxAttempts = VerificationCodePolicy.MAX_FAILED_ATTEMPTS,
                     verificationExpiresAt = null,
                     resendAvailableAt = null,
                     authorizationHash = null,
@@ -102,22 +104,23 @@ class AccountDeletionStepUpService(
         }
         if (request.verificationAttemptCount >= request.verificationMaxAttempts) verificationFailed()
         val phone = user.phone?.takeIf(String::isNotBlank) ?: invalidRequest()
-        val developmentCode = availability.developmentFixedSmsCode()
-        val code = developmentCode ?: crypto.randomSmsCode()
+        val code = verificationCodeDeliveryService.generateCode()
         requestStore.storeSmsChallenge(
             requestId,
             crypto.hash("$phone:$code"),
-            now.plusSeconds(properties.smsCodeTtlSeconds),
-            now.plusSeconds(properties.smsResendSeconds),
+            now.plusSeconds(VerificationCodePolicy.EXPIRE_SECONDS),
+            now.plusSeconds(VerificationCodePolicy.RESEND_INTERVAL_SECONDS),
         )
-        if (developmentCode == null && !smsService.sendVerificationCode(phone, code)) {
+        try {
+            verificationCodeDeliveryService.deliver(phone, code)
+        } catch (_: VerificationCodeDeliveryException) {
             throw AccountDeletionException(AccountDeletionErrorCode.SMS_DELIVERY_UNAVAILABLE)
         }
         logger.info("Account deletion SMS challenge sent userId={} requestId={}", userId, requestId)
         return AccountDeletionSmsCodeResponse(
             requestId = requestId,
-            expiresInSeconds = properties.smsCodeTtlSeconds,
-            resendAfterSeconds = properties.smsResendSeconds,
+            expiresInSeconds = VerificationCodePolicy.EXPIRE_SECONDS,
+            resendAfterSeconds = VerificationCodePolicy.RESEND_INTERVAL_SECONDS,
         )
     }
 
@@ -249,7 +252,6 @@ class AccountDeletionStepUpService(
         throw AccountDeletionException(AccountDeletionErrorCode.VERIFICATION_FAILED)
 
     private companion object {
-        const val MAX_VERIFICATION_ATTEMPTS = 5
         val SMS_CODE = Regex("^[0-9]{6}$")
     }
 }

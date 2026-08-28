@@ -34,5 +34,4 @@ class AccountDeletionCrypto(
         .also(random::nextBytes)
         .let { Base64.getUrlEncoder().withoutPadding().encodeToString(it) }
 
-    fun randomSmsCode(): String = random.nextInt(1_000_000).toString().padStart(6, '0')
 }

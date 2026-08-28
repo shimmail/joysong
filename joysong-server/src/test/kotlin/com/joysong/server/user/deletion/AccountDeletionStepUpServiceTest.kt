@@ -1,6 +1,9 @@
 package com.joysong.server.user.deletion
 
-import com.joysong.server.auth.service.AliyunSmsService
+import com.joysong.server.auth.service.VerificationCodeDeliveryException
+import com.joysong.server.auth.service.VerificationCodeDeliveryFailure
+import com.joysong.server.auth.service.VerificationCodeDeliveryService
+import com.joysong.server.auth.service.VerificationCodePolicy
 import com.joysong.server.user.entity.UserEntity
 import com.joysong.server.user.service.AccountLifecycleGuard
 import io.mockk.every
@@ -16,9 +19,6 @@ import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
-import org.springframework.boot.context.properties.bind.Bindable
-import org.springframework.boot.context.properties.bind.Binder
-import org.springframework.mock.env.MockEnvironment
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDateTime
@@ -28,7 +28,6 @@ class AccountDeletionStepUpServiceTest {
     private val availability = mockk<AccountDeletionAvailability> {
         every { requireEnabled() } just runs
         every { commerceBypassAllowed() } returns true
-        every { developmentFixedSmsCode() } returns null
     }
     private val properties = AccountDeletionProperties().apply {
         hmacSecret = "0123456789abcdef-test"
@@ -37,7 +36,7 @@ class AccountDeletionStepUpServiceTest {
     private val store = mockk<AccountDeletionRequestStore>(relaxed = true)
     private val localBlockers = mockk<LocalAccountDeletionBlockerService>()
     private val commerce = mockk<AccountDeletionBlockerPort>()
-    private val sms = mockk<AliyunSmsService>()
+    private val sms = mockk<VerificationCodeDeliveryService>()
     private val google = mockk<GoogleAccountDeletionVerifier>()
     private val crypto = AccountDeletionCrypto(properties)
     private val clock = Clock.fixed(Instant.parse("2026-08-28T00:00:00Z"), ZoneOffset.UTC)
@@ -115,47 +114,22 @@ class AccountDeletionStepUpServiceTest {
     }
 
     @Test
-    fun `development fixed sms code succeeds without Aliyun and is stored only as a digest`() {
-        val environment = MockEnvironment()
-            .withProperty("app.account-deletion.enabled", "true")
-            .withProperty("app.account-deletion.dev-fixed-sms-code", "246810")
-            .apply { setActiveProfiles("dev") }
-        val developmentProperties = AccountDeletionProperties().apply {
-            hmacSecret = "0123456789abcdef-test"
-        }
-        Binder.get(environment).bind(
-            "app.account-deletion",
-            Bindable.ofInstance(developmentProperties),
-        )
-        val developmentCrypto = AccountDeletionCrypto(developmentProperties)
-        val developmentStore = mockk<AccountDeletionRequestStore>(relaxed = true)
+    fun `sms challenge uses shared delivery code and stores only the phone bound digest`() {
         every { guard.requireActiveForWrite(user.id) } returns user
-        every { developmentStore.findForUpdate("request-1") } returns request(
+        every { store.findForUpdate("request-1") } returns request(
             method = AccountDeletionStepUpMethod.SMS,
             status = AccountDeletionRequestStatus.PREFLIGHTED,
         )
-        every { sms.sendVerificationCode(any(), any()) } returns false
         val digest = slot<String>()
-        every { developmentStore.storeSmsChallenge("request-1", capture(digest), any(), any()) } just runs
-        val developmentService = AccountDeletionStepUpService(
-            AccountDeletionAvailability(developmentProperties, environment),
-            developmentProperties,
-            guard,
-            developmentStore,
-            localBlockers,
-            commerce,
-            sms,
-            google,
-            developmentCrypto,
-            clock,
-            metrics,
-        )
+        every { store.storeSmsChallenge("request-1", capture(digest), any(), any()) } just runs
+        every { sms.generateCode() } returns "246810"
+        every { sms.deliver(user.phone!!, "246810") } just runs
 
-        val response = developmentService.sendSmsCode(user.id, "request-1")
+        val response = service.sendSmsCode(user.id, "request-1")
 
         assertEquals("request-1", response.requestId)
-        assertEquals(developmentCrypto.hash("${user.phone}:246810"), digest.captured)
-        verify(exactly = 0) { sms.sendVerificationCode(any(), any()) }
+        assertEquals(crypto.hash("${user.phone}:246810"), digest.captured)
+        verify(exactly = 1) { sms.deliver(user.phone!!, "246810") }
     }
 
     @Test
@@ -165,8 +139,8 @@ class AccountDeletionStepUpServiceTest {
             method = AccountDeletionStepUpMethod.SMS,
             status = AccountDeletionRequestStatus.PREFLIGHTED,
         )
-        val rawCode = slot<String>()
-        every { sms.sendVerificationCode(user.phone!!, capture(rawCode)) } returns true
+        every { sms.generateCode() } returns "123456"
+        every { sms.deliver(user.phone!!, "123456") } just runs
         val digest = slot<String>()
         every { store.storeSmsChallenge("request-1", capture(digest), any(), any()) } just runs
 
@@ -176,11 +150,31 @@ class AccountDeletionStepUpServiceTest {
         assertEquals(60, response.resendAfterSeconds)
         assertEquals(64, digest.captured.length)
         assertFalse(digest.captured.matches(Regex("^[0-9]{6}$")))
-        assertEquals(crypto.hash("${user.phone}:${rawCode.captured}"), digest.captured)
+        assertEquals(crypto.hash("${user.phone}:123456"), digest.captured)
         verifyOrder {
             store.findForUpdate("request-1")
             guard.requireActiveForWrite(user.id)
         }
+    }
+
+    @Test
+    fun `shared delivery failure maps to stable SMS delivery unavailable error`() {
+        every { guard.requireActiveForWrite(user.id) } returns user
+        every { store.findForUpdate("request-1") } returns request(
+            method = AccountDeletionStepUpMethod.SMS,
+            status = AccountDeletionRequestStatus.PREFLIGHTED,
+        )
+        every { sms.generateCode() } returns "246810"
+        every { sms.deliver(user.phone!!, "246810") } throws VerificationCodeDeliveryException(
+            VerificationCodeDeliveryFailure.SEND_FAILED,
+            "delivery failed",
+        )
+
+        val error = assertThrows(AccountDeletionException::class.java) {
+            service.sendSmsCode(user.id, "request-1")
+        }
+
+        assertEquals(AccountDeletionErrorCode.SMS_DELIVERY_UNAVAILABLE, error.errorCode)
     }
 
     @Test
@@ -323,7 +317,7 @@ class AccountDeletionStepUpServiceTest {
         stepUpMethod = method,
         verificationCodeHash = codeHash,
         verificationAttemptCount = attemptCount,
-        verificationMaxAttempts = 5,
+        verificationMaxAttempts = VerificationCodePolicy.MAX_FAILED_ATTEMPTS,
         verificationExpiresAt = verificationExpiresAt,
         resendAvailableAt = null,
         authorizationHash = null,

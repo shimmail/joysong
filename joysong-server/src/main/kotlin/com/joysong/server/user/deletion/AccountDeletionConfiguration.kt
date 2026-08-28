@@ -15,10 +15,7 @@ class AccountDeletionProperties {
     var allowCommerceBypass: Boolean = false
     var hmacSecret: String = "development-only-account-deletion-secret"
     var requestTtlSeconds: Long = 1_800
-    var smsCodeTtlSeconds: Long = 300
-    var smsResendSeconds: Long = 60
     var authorizationTtlSeconds: Long = 600
-    var devFixedSmsCode: String = ""
 }
 
 @Configuration
@@ -43,16 +40,5 @@ class AccountDeletionAvailability(
     fun commerceBypassAllowed(): Boolean =
         isEnabled() && properties.allowCommerceBypass && !isProduction()
 
-    fun developmentFixedSmsCode(): String? = properties.devFixedSmsCode
-        .trim()
-        .takeIf { isEnabled() && isDevelopment() && SMS_CODE.matches(it) }
-
     private fun isProduction(): Boolean = environment.activeProfiles.any { it.equals("prod", ignoreCase = true) }
-
-    private fun isDevelopment(): Boolean =
-        !isProduction() && environment.activeProfiles.any { it.equals("dev", ignoreCase = true) }
-
-    private companion object {
-        val SMS_CODE = Regex("^[0-9]{6}$")
-    }
 }

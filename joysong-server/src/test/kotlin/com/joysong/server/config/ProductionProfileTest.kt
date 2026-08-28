@@ -114,11 +114,9 @@ class ProductionProfileTest {
         assertEquals(false, properties.getProperty("app.account-deletion.allow-commerce-bypass"))
         assertEquals(true, developmentProperties.getProperty("app.account-deletion.enabled"))
         assertEquals(true, developmentProperties.getProperty("app.account-deletion.allow-commerce-bypass"))
-        assertEquals(
-            "\${ACCOUNT_DELETION_DEV_FIXED_SMS_CODE:000000}",
-            developmentProperties.getProperty("app.account-deletion.dev-fixed-sms-code"),
-        )
+        assertNull(developmentProperties.getProperty("app.account-deletion.dev-fixed-sms-code"))
         assertNull(properties.getProperty("app.account-deletion.dev-fixed-sms-code"))
+        assertEquals(true, developmentProperties.getProperty("security.verification-code.log-for-dev"))
     }
 
     @Test
