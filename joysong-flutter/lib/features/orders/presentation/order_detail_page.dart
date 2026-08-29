@@ -112,6 +112,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
             evidenceUrl: draft.evidenceUrl,
             evidenceFiles: draft.evidenceFiles,
           ),
+          submissionErrorMessage: () => widget.controller.errorMessage,
           enableAutoTranslation: widget.enableAutoTranslation,
         ),
       ),
@@ -1445,6 +1446,7 @@ class RefundApplyPage extends StatefulWidget {
     this.canUploadLegacyEvidence = false,
     this.onPickLegacyEvidence,
     this.onPickRefundEvidence,
+    this.submissionErrorMessage,
     this.enableAutoTranslation = false,
     super.key,
   });
@@ -1454,6 +1456,7 @@ class RefundApplyPage extends StatefulWidget {
   final bool canUploadLegacyEvidence;
   final Future<String?> Function()? onPickLegacyEvidence;
   final Future<RefundEvidenceDraft?> Function()? onPickRefundEvidence;
+  final String? Function()? submissionErrorMessage;
   final bool enableAutoTranslation;
 
   @override
@@ -1565,20 +1568,22 @@ class _RefundApplyPageState extends State<RefundApplyPage> {
     }
   }
 
-  String _failureMessage() =>
-      _isEnglish(context) ? 'Refund request failed' : '退款申请失败';
+  String _failureMessage() {
+    final provided = widget.submissionErrorMessage?.call()?.trim() ?? '';
+    return provided.isNotEmpty
+        ? provided
+        : (_isEnglish(context) ? 'Refund request failed' : '退款申请失败');
+  }
 
   String _submissionMessage(Object error) {
     final message = error.toString().trim();
     return message.isEmpty ? _failureMessage() : message;
   }
 
-  String _evidenceErrorMessage(Object error) {
-    final detail = error.toString().trim();
-    final fallback = _isEnglish(context)
+  String _evidenceErrorMessage(Object _) {
+    return _isEnglish(context)
         ? 'This evidence file is not supported.'
         : '所选退款凭证不符合要求。';
-    return detail.isEmpty ? fallback : '$fallback $detail';
   }
 
   @override
@@ -1696,7 +1701,7 @@ class _RefundApplyPageState extends State<RefundApplyPage> {
                 IconButton(
                   key: const Key('refund-evidence-add'),
                   tooltip: english ? 'Add evidence' : '添加凭证',
-                  onPressed: _busy ||
+                  onPressed: _busy || widget.onPickRefundEvidence == null ||
                           _evidenceFiles.length >= RefundEvidenceDraft.maxCount
                       ? null
                       : _pickRefundEvidence,
@@ -1720,7 +1725,8 @@ class _RefundApplyPageState extends State<RefundApplyPage> {
               ),
           ],
           if (!widget.order.isTravelGroundServiceOnly &&
-              widget.canUploadLegacyEvidence)
+              widget.canUploadLegacyEvidence &&
+              widget.onPickLegacyEvidence != null)
             ListTile(
               key: const Key('refund-legacy-evidence-add'),
               contentPadding: EdgeInsets.zero,

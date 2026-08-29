@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/features/orders/domain/money.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
 import 'package:joysong_flutter/features/orders/domain/orders_repository.dart';
@@ -23,11 +24,12 @@ void main() {
     expect(find.byKey(const Key('refund-evidence-count')), findsOneWidget);
     expect(find.text('0/5'), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('refund-evidence-add')));
+    await _tapVisible(tester, find.byKey(const Key('refund-evidence-add')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('refund-evidence-add')));
+    await _tapVisible(tester, find.byKey(const Key('refund-evidence-add')));
     await tester.pumpAndSettle();
 
+    await _ensureVisible(tester, find.text('second.pdf'));
     expect(find.text('2/5'), findsOneWidget);
     expect(find.text('first.jpg'), findsOneWidget);
     expect(find.text('second.pdf'), findsOneWidget);
@@ -50,21 +52,26 @@ void main() {
     );
 
     for (var index = 0; index < RefundEvidenceDraft.maxCount; index++) {
-      await tester.tap(find.byKey(const Key('refund-evidence-add')));
+      await _tapVisible(tester, find.byKey(const Key('refund-evidence-add')));
       await tester.pumpAndSettle();
     }
 
     expect(find.text('5/5'), findsOneWidget);
+    await _ensureVisible(tester, find.byKey(const Key('refund-evidence-add')));
     expect(
       tester.widget<IconButton>(find.byKey(const Key('refund-evidence-add'))).onPressed,
       isNull,
     );
 
-    await tester.tap(find.byKey(const Key('refund-evidence-remove-2')));
+    await _tapVisible(
+      tester,
+      find.byKey(const Key('refund-evidence-remove-2')),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('4/5'), findsOneWidget);
     expect(find.text('evidence-2.jpg'), findsNothing);
+    await _ensureVisible(tester, find.byKey(const Key('refund-evidence-add')));
     expect(
       tester.widget<IconButton>(find.byKey(const Key('refund-evidence-add'))).onPressed,
       isNotNull,
@@ -85,15 +92,58 @@ void main() {
     await _pumpRefundPage(tester, onPickRefundEvidence: () async => picks.removeAt(0));
 
     for (var index = 0; index < 3; index++) {
-      await tester.tap(find.byKey(const Key('refund-evidence-add')));
+      await _tapVisible(tester, find.byKey(const Key('refund-evidence-add')));
       await tester.pumpAndSettle();
     }
 
     expect(find.text('1/5'), findsOneWidget);
+    await _ensureVisible(tester, find.byKey(const Key('refund-evidence-remove-0')));
     expect(find.text('valid.jpg'), findsOneWidget);
     expect(find.text('oversized.jpg'), findsNothing);
     expect(find.text('unsupported.txt'), findsNothing);
     expect(find.byKey(const Key('refund-evidence-remove-0')), findsOneWidget);
+  });
+
+  testWidgets('pending evidence picker disables edits until it completes',
+      (tester) async {
+    final pending = Completer<RefundEvidenceDraft?>();
+    var pickCalls = 0;
+    await _pumpRefundPage(
+      tester,
+      onPickRefundEvidence: () {
+        pickCalls += 1;
+        return pickCalls == 1
+            ? Future.value(_evidence('existing.jpg', 'image/jpeg', [0xff, 0xd8, 0xff]))
+            : pending.future;
+      },
+    );
+
+    await _tapVisible(tester, find.byKey(const Key('refund-evidence-add')));
+    await tester.pumpAndSettle();
+    await _tapVisible(tester, find.byKey(const Key('refund-evidence-add')));
+    await tester.pump();
+
+    await _ensureVisible(tester, find.byKey(const Key('refund-evidence-add')));
+    expect(
+      tester.widget<IconButton>(find.byKey(const Key('refund-evidence-add'))).onPressed,
+      isNull,
+    );
+    await _ensureVisible(tester, find.byKey(const Key('refund-evidence-remove-0')));
+    expect(
+      tester
+          .widget<IconButton>(find.byKey(const Key('refund-evidence-remove-0')))
+          .onPressed,
+      isNull,
+    );
+
+    pending.complete(null);
+    await tester.pumpAndSettle();
+
+    await _ensureVisible(tester, find.byKey(const Key('refund-evidence-add')));
+    expect(
+      tester.widget<IconButton>(find.byKey(const Key('refund-evidence-add'))).onPressed,
+      isNotNull,
+    );
   });
 
   testWidgets('legacy medical page keeps the public evidence picker without private list',
@@ -112,58 +162,101 @@ void main() {
     expect(find.text('退款凭证（选填）'), findsNothing);
     expect(find.byKey(const Key('refund-evidence-add')), findsNothing);
 
-    await tester.tap(find.byKey(const Key('refund-legacy-evidence-add')));
+    await _tapVisible(
+      tester,
+      find.byKey(const Key('refund-legacy-evidence-add')),
+    );
     await tester.pumpAndSettle();
 
     expect(legacyPickCalls, 1);
     expect(find.text('已添加凭证'), findsOneWidget);
   });
 
+  testWidgets('evidence entries require their matching picker callbacks',
+      (tester) async {
+    await _pumpRefundPage(tester);
+
+    await _ensureVisible(tester, find.byKey(const Key('refund-evidence-add')));
+    expect(
+      tester.widget<IconButton>(find.byKey(const Key('refund-evidence-add'))).onPressed,
+      isNull,
+    );
+
+    await _pumpRefundPage(
+      tester,
+      order: _order(flow: OrderPaymentFlow.legacyMedical),
+      canUploadLegacyEvidence: true,
+    );
+
+    expect(find.byKey(const Key('refund-legacy-evidence-add')), findsNothing);
+  });
+
   testWidgets('submit disables edits and sends the exact ordered immutable draft',
       (tester) async {
     final submit = Completer<bool>();
     OrderRefundDraft? submitted;
+    var submitCalls = 0;
+    final picks = [
+      _evidence('first.jpg', 'image/jpeg', [0xff, 0xd8, 0xff]),
+      _evidence('removed.pdf', 'application/pdf', [0x25, 0x50, 0x44, 0x46]),
+      _evidence('third.png', 'image/png', [0x89, 0x50, 0x4e, 0x47]),
+    ];
     await _pumpRefundPage(
       tester,
-      onPickRefundEvidence: () async => _evidence(
-        'ordered.jpg',
-        'image/jpeg',
-        [0xff, 0xd8, 0xff],
-      ),
+      onPickRefundEvidence: () async => picks.removeAt(0),
       onSubmit: (draft) {
+        submitCalls += 1;
         submitted = draft;
         return submit.future;
       },
     );
 
-    await tester.tap(find.byKey(const Key('refund-reason-0')));
+    await _tapVisible(tester, find.byKey(const Key('refund-reason-0')));
     await tester.enterText(
       find.byKey(const Key('refund-description-field')),
       'Needs review',
     );
-    await tester.tap(find.byKey(const Key('refund-evidence-add')));
+    for (var index = 0; index < 3; index++) {
+      await _tapVisible(tester, find.byKey(const Key('refund-evidence-add')));
+      await tester.pumpAndSettle();
+    }
+    await _tapVisible(
+      tester,
+      find.byKey(const Key('refund-evidence-remove-1')),
+    );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('refund-submit')));
+    await _tapVisible(tester, find.byKey(const Key('refund-submit')));
     await tester.pump();
 
+    expect(submitCalls, 1);
     expect(submitted?.reason, '不想去了');
     expect(submitted?.description, 'Needs review');
     expect(submitted?.evidenceUrl, isEmpty);
-    expect(submitted?.evidenceFiles.map((file) => file.fileName), ['ordered.jpg']);
+    expect(
+      submitted?.evidenceFiles.map((file) => file.fileName),
+      ['first.jpg', 'third.png'],
+    );
     expect(() => submitted!.evidenceFiles.add(_evidence('x.jpg', 'image/jpeg', [1])),
         throwsUnsupportedError);
+    await _ensureVisible(tester, find.byKey(const Key('refund-evidence-add')));
     expect(
       tester.widget<IconButton>(find.byKey(const Key('refund-evidence-add'))).onPressed,
       isNull,
     );
+    await _ensureVisible(tester, find.byKey(const Key('refund-evidence-remove-0')));
     expect(
       tester.widget<IconButton>(find.byKey(const Key('refund-evidence-remove-0'))).onPressed,
       isNull,
     );
+    await _ensureVisible(tester, find.byKey(const Key('refund-submit')));
     expect(
       tester.widget<FilledButton>(find.byKey(const Key('refund-submit'))).onPressed,
       isNull,
     );
+
+    await _tapVisible(tester, find.byKey(const Key('refund-submit')));
+    await tester.pump();
+    expect(submitCalls, 1);
 
     submit.complete(false);
     await tester.pumpAndSettle();
@@ -179,26 +272,60 @@ void main() {
         [0x25, 0x50, 0x44, 0x46],
       ),
       onSubmit: (_) async => false,
+      submissionErrorMessage: () => '控制器返回的具体错误',
     );
 
-    await tester.tap(find.byKey(const Key('refund-reason-0')));
+    await _tapVisible(tester, find.byKey(const Key('refund-reason-0')));
     await tester.enterText(
       find.byKey(const Key('refund-description-field')),
       'Keep this explanation',
     );
-    await tester.tap(find.byKey(const Key('refund-evidence-add')));
+    await _tapVisible(tester, find.byKey(const Key('refund-evidence-add')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('refund-submit')));
+    await _tapVisible(tester, find.byKey(const Key('refund-submit')));
     await tester.pumpAndSettle();
 
-    expect(find.text('退款申请失败'), findsOneWidget);
+    await _ensureVisible(tester, find.text('控制器返回的具体错误'));
+    expect(find.text('控制器返回的具体错误'), findsOneWidget);
+    expect(find.byType(RefundApplyPage), findsOneWidget);
     expect(find.text('Keep this explanation'), findsOneWidget);
     expect(find.text('retain.pdf'), findsOneWidget);
     expect(find.text('1/5'), findsOneWidget);
   });
 
-  testWidgets('successful submit pops exactly once', (tester) async {
+  testWidgets('order detail forwards the controller refund error without resubmitting',
+      (tester) async {
+    final order = _order(flow: OrderPaymentFlow.travelGroundServiceOnly);
+    final repository = _RefundDetailRepository(order, failServiceFeeRefund: true);
+    final controller = OrderDetailController(
+      repository,
+      orderId: order.id,
+      initialOrder: order,
+    );
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('zh'),
+        supportedLocales: const [Locale('zh')],
+        home: OrderDetailPage(controller: controller),
+      ),
+    );
+
+    await _tapVisible(tester, find.byKey(const Key('request-refund-button')));
+    await tester.pumpAndSettle();
+    await _tapVisible(tester, find.byKey(const Key('refund-reason-0')));
+    await _tapVisible(tester, find.byKey(const Key('refund-submit')));
+    await tester.pumpAndSettle();
+
+    expect(repository.serviceFeeRefundCalls, 1);
+    expect(find.text('Controller-specific failure'), findsOneWidget);
+    expect(find.byType(RefundApplyPage), findsOneWidget);
+  });
+
+  testWidgets('failed submit can retry and only successful retry pops once',
+      (tester) async {
     final observer = _CountingNavigatorObserver();
+    var attempts = 0;
     await tester.pumpWidget(
       MaterialApp(
         locale: const Locale('zh'),
@@ -212,7 +339,8 @@ void main() {
                 MaterialPageRoute(
                   builder: (_) => RefundApplyPage(
                     order: _order(flow: OrderPaymentFlow.travelGroundServiceOnly),
-                    onSubmit: (_) async => true,
+                    onSubmit: (_) async => ++attempts > 1,
+                    submissionErrorMessage: () => 'Retry this refund',
                   ),
                 ),
               ),
@@ -223,13 +351,22 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byKey(const Key('open-refund-page')));
+    await _tapVisible(tester, find.byKey(const Key('open-refund-page')));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('refund-reason-0')));
-    await tester.tap(find.byKey(const Key('refund-submit')));
+    await _tapVisible(tester, find.byKey(const Key('refund-reason-0')));
+    await _tapVisible(tester, find.byKey(const Key('refund-submit')));
     await tester.pumpAndSettle();
 
+    expect(attempts, 1);
+    expect(find.text('Retry this refund'), findsOneWidget);
+    expect(find.byType(RefundApplyPage), findsOneWidget);
+    expect(observer.popCount, 0);
+
+    await _tapVisible(tester, find.byKey(const Key('refund-submit')));
+    await tester.pumpAndSettle();
+
+    expect(attempts, 2);
     expect(observer.popCount, 1);
   });
 
@@ -256,8 +393,11 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await _ensureVisible(tester, find.text('退款凭证（2）'));
     expect(find.text('退款凭证（2）'), findsOneWidget);
+    await _ensureVisible(tester, find.text('first-by-position.pdf'));
     expect(find.text('first-by-position.pdf'), findsOneWidget);
+    await _ensureVisible(tester, find.text('second-by-position.jpg'));
     expect(find.text('second-by-position.jpg'), findsOneWidget);
     expect(
       tester.getTopLeft(find.text('first-by-position.pdf')).dy,
@@ -273,6 +413,7 @@ Future<void> _pumpRefundPage(
   Future<String?> Function()? onPickLegacyEvidence,
   Future<RefundEvidenceDraft?> Function()? onPickRefundEvidence,
   Future<bool> Function(OrderRefundDraft draft)? onSubmit,
+  String? Function()? submissionErrorMessage,
 }) => tester.pumpWidget(
       MaterialApp(
         locale: const Locale('zh'),
@@ -283,9 +424,20 @@ Future<void> _pumpRefundPage(
           onPickLegacyEvidence: onPickLegacyEvidence,
           onPickRefundEvidence: onPickRefundEvidence,
           onSubmit: onSubmit ?? (_) async => false,
+          submissionErrorMessage: submissionErrorMessage,
         ),
       ),
     );
+
+Future<void> _tapVisible(WidgetTester tester, Finder finder) async {
+  await tester.ensureVisible(finder);
+  await tester.tap(finder);
+}
+
+Future<void> _ensureVisible(WidgetTester tester, Finder finder) async {
+  await tester.ensureVisible(finder);
+  await tester.pump();
+}
 
 RefundEvidenceDraft _evidence(
   String fileName,
@@ -342,12 +494,29 @@ final class _CountingNavigatorObserver extends NavigatorObserver {
 }
 
 final class _RefundDetailRepository implements OrdersRepository {
-  _RefundDetailRepository(this.order);
+  _RefundDetailRepository(this.order, {this.failServiceFeeRefund = false});
 
   final Order order;
+  final bool failServiceFeeRefund;
+  int serviceFeeRefundCalls = 0;
 
   @override
   Future<Order> getOrder(String id) async => order;
+
+  @override
+  Future<RefundDetail> requestServiceFeeRefund(
+    String id, {
+    required String reason,
+    required String description,
+    String? reasonCode,
+    List<RefundEvidenceDraft> evidenceFiles = const [],
+  }) async {
+    serviceFeeRefundCalls += 1;
+    if (failServiceFeeRefund) {
+      throw const ApiException(message: 'Controller-specific failure');
+    }
+    return getRefund(id);
+  }
 
   @override
   Future<RefundDetail> getRefund(String id) async => RefundDetail.fromJson(const {
