@@ -431,6 +431,7 @@ Future<void> _pumpRefundPage(
 
 Future<void> _tapVisible(WidgetTester tester, Finder finder) async {
   await tester.ensureVisible(finder);
+  await tester.pump();
   await tester.tap(finder);
 }
 
