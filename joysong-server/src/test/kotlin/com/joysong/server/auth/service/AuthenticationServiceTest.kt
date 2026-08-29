@@ -193,6 +193,19 @@ class AuthenticationServiceTest {
     }
 
     @Test
+    fun `generic password login rejects the E164 alias of the fixed administrator without querying an account`() {
+        val requestPhone = "+8613800000000"
+
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            service.login(requestPhone, "StrongAdminPassword!1")
+        }
+
+        assertEquals("密码错误，请重试", error.message)
+        verify(exactly = 0) { userRepository.findByPhone(any()) }
+        verify(exactly = 0) { refreshTokenService.issue(any(), any(), any()) }
+    }
+
+    @Test
     fun `registration rejects active and erased administrators without issuing tokens`() {
         val activeAdmin = adminUser()
         val deletedAdmin = adminUser(accountState = AccountState.ERASED)
@@ -287,6 +300,20 @@ class AuthenticationServiceTest {
         assertEquals("管理员账号或密码错误", error.message)
         verify(exactly = 0) { userRepository.findByPhone(any()) }
         verify(exactly = 0) { refreshTokenService.issue(any(), any(), any()) }
+    }
+
+    @Test
+    fun `loginAdmin issues administrator tokens for the exact active configured administrator`() {
+        val admin = adminUser()
+        every { userRepository.findByPhone(admin.phone!!) } returns Optional.of(admin)
+        every { passwordEncoder.matches("StrongAdminPassword!1", admin.passwordHash) } returns true
+        every { refreshTokenService.issue(admin.id, admin.phone!!, "ADMIN") } returns adminTokens()
+
+        val response = service.loginAdmin(admin.phone!!, "StrongAdminPassword!1")
+
+        assertEquals("admin-access-token", response.accessToken)
+        assertEquals("admin-refresh-token", response.refreshToken)
+        assertEquals("ADMIN", response.user.role)
     }
 
     @Test

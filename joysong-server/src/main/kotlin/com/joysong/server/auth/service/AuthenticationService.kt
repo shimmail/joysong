@@ -232,7 +232,4 @@ class AuthenticationService(
             avatar = picture,
         )
     )
-
-    private companion object {
-    }
 }

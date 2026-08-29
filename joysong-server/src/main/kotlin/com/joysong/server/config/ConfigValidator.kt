@@ -21,7 +21,6 @@ class ConfigValidator(
     @Value("\${aliyun.sms.template-code:}") private val smsTemplateCode: String,
     @Value("\${spring.datasource.password:}") private val dbPassword: String,
     @Value("\${admin.bootstrap.phone:}") private val adminPhone: String,
-    @Value("\${admin.bootstrap.password:}") private val adminPassword: String,
     @Value("\${oss.enabled:false}") private val ossEnabled: Boolean,
     @Value("\${aliyun.sms.enabled:false}") private val smsEnabled: Boolean,
     private val aiAgentProperties: AiAgentProperties,

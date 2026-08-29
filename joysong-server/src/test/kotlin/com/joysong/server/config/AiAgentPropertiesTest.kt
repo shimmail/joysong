@@ -293,7 +293,6 @@ class AiAgentPropertiesTest {
         smsTemplateCode = "test-template",
         dbPassword = "test-db-password",
         adminPhone = "13800000000",
-        adminPassword = "test-admin-password",
         ossEnabled = true,
         smsEnabled = true,
         aiAgentProperties = properties,
