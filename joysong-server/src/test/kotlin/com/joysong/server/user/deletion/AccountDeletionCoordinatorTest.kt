@@ -114,6 +114,23 @@ class AccountDeletionCoordinatorTest {
     }
 
     @Test
+    fun `fixed administrator is blocked in the real deletion coordinator path`() {
+        val fixedAdmin = user.copy(phone = "13800000000", role = "ADMIN")
+        val request = authorizedRequest().copy(userId = fixedAdmin.id)
+        val adminBlocker = AccountDeletionBlocker("ADMIN_ACCOUNT", 1, "CONTACT_SUPPORT")
+        every { store.findForUpdate(request.id) } returns request
+        every { guard.requireActiveForWrite(fixedAdmin.id) } returns fixedAdmin
+        every { localBlockers.evaluate(fixedAdmin) } returns listOf(adminBlocker)
+        every { commerce.evaluate(fixedAdmin.id) } returns AccountDeletionCommerceEvaluation.Eligible
+
+        val response = coordinator.confirm(fixedAdmin.id, idempotencyKey, authorization, command())
+
+        assertEquals(AccountDeletionTerminalOutcome.BLOCKED, response.outcome)
+        assertEquals(listOf(adminBlocker), response.blockers)
+        verify(exactly = 0) { eraser.erase(any(), any()) }
+    }
+
+    @Test
     fun `anonymous retry can only read an exactly matching terminal result`() {
         val terminalResponse = AccountDeletionConfirmResponse(
             requestId = "request-1",

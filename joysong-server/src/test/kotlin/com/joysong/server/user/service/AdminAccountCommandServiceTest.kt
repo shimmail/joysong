@@ -49,7 +49,8 @@ class AdminAccountCommandServiceTest {
         val configured = administrator(id = "fixed-admin")
         every { userRepository.countAnyState() } returns 1
         every { userRepository.findByPhoneForUpdate(FIXED_ADMIN_PHONE) } returns configured
-        every { userRepository.findAllAnyState() } returns listOf(configured)
+        every { userRepository.countNonErasedPhoneOwnersForUpdate(FIXED_ADMIN_PHONE, "+8613800000000") } returns 1
+        every { userRepository.countNonErasedAdministratorsForUpdate() } returns 1
 
         val verified = service.initializeBootstrapAdministrator(FIXED_ADMIN_PHONE, "")
 
@@ -67,7 +68,8 @@ class AdminAccountCommandServiceTest {
         )
         every { userRepository.countAnyState() } returns 1
         every { userRepository.findByPhoneForUpdate(FIXED_ADMIN_PHONE) } returns configured
-        every { userRepository.findAllAnyState() } returns listOf(configured)
+        every { userRepository.countNonErasedPhoneOwnersForUpdate(FIXED_ADMIN_PHONE, "+8613800000000") } returns 1
+        every { userRepository.countNonErasedAdministratorsForUpdate() } returns 1
 
         val verified = service.initializeBootstrapAdministrator(FIXED_ADMIN_PHONE, "ReplacementPassword1!")
 
@@ -107,14 +109,25 @@ class AdminAccountCommandServiceTest {
     }
 
     @Test
+    fun `E164 alias owned by another active user prevents fixed administrator startup`() {
+        val configured = administrator(id = "fixed-admin")
+        every { userRepository.countAnyState() } returns 2
+        every { userRepository.findByPhoneForUpdate(FIXED_ADMIN_PHONE) } returns configured
+        every { userRepository.countNonErasedPhoneOwnersForUpdate(FIXED_ADMIN_PHONE, "+8613800000000") } returns 2
+        every { userRepository.countNonErasedAdministratorsForUpdate() } returns 1
+
+        assertThrows(IllegalStateException::class.java) {
+            service.initializeBootstrapAdministrator(FIXED_ADMIN_PHONE, "StrongPassword1!")
+        }
+
+        verify(exactly = 0) { passwordEncoder.encode(any()) }
+        verify(exactly = 0) { userRepository.saveAndFlush(any()) }
+    }
+
+    @Test
     fun `phone drift of the fixed administrator fails startup without writes`() {
-        val driftedAdministrator = administrator(id = "fixed-admin", phone = "+8613800000000")
         every { userRepository.countAnyState() } returns 1
         every { userRepository.findByPhoneForUpdate(FIXED_ADMIN_PHONE) } returns null
-        every { userRepository.findAllAnyState() } returns listOf(driftedAdministrator)
-        every { userRepository.countAvailableAdministrators() } returns 1
-        every { passwordEncoder.encode(any()) } returns "unexpected-hash"
-        every { userRepository.saveAndFlush(any()) } answers { firstArg() }
 
         assertThrows(IllegalStateException::class.java) {
             service.initializeBootstrapAdministrator(FIXED_ADMIN_PHONE, "StrongPassword1!")
@@ -127,10 +140,10 @@ class AdminAccountCommandServiceTest {
     @Test
     fun `a second non-erased administrator fails startup without writes`() {
         val configured = administrator(id = "fixed-admin")
-        val secondAdministrator = administrator(id = "second-admin", phone = "13900000000")
         every { userRepository.countAnyState() } returns 2
         every { userRepository.findByPhoneForUpdate(FIXED_ADMIN_PHONE) } returns configured
-        every { userRepository.findAllAnyState() } returns listOf(configured, secondAdministrator)
+        every { userRepository.countNonErasedPhoneOwnersForUpdate(FIXED_ADMIN_PHONE, "+8613800000000") } returns 1
+        every { userRepository.countNonErasedAdministratorsForUpdate() } returns 2
 
         assertThrows(IllegalStateException::class.java) {
             service.initializeBootstrapAdministrator(FIXED_ADMIN_PHONE, "StrongPassword1!")
@@ -168,17 +181,6 @@ class AdminAccountCommandServiceTest {
 
         verify(exactly = 0) { refreshTokenService.revokeAll(any()) }
         verify(exactly = 0) { userRepository.saveAndFlush(any()) }
-    }
-
-    @Test
-    fun `fixed administrator cannot use the ordinary deletion boundary`() {
-        val fixedAdmin = administrator(id = "fixed-admin")
-        every { userRepository.findByIdForUpdate(fixedAdmin.id) } returns fixedAdmin
-        every { userRepository.countAvailableAdministrators() } returns 1
-
-        assertThrows(IllegalArgumentException::class.java) {
-            service.requireOrdinaryAccountDeletionAllowed(fixedAdmin.id)
-        }
     }
 
     @Test

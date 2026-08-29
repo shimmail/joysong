@@ -78,22 +78,12 @@ class AdminAccountCommandService(
                 configured.passwordHash.isNotBlank(),
         ) { "The configured ADMIN_PHONE is already used by an unavailable or non-admin account" }
         check(
-            userRepository.findAllAnyState().count {
-                it.role == ADMIN_ROLE && it.accountState != AccountState.ERASED
-            } == 1,
-        ) { "Only the configured administrator may remain active" }
+            userRepository.countNonErasedPhoneOwnersForUpdate(phone, FixedAdminPhone.e164Alias(phone)) == 1L,
+        ) { "The configured ADMIN_PHONE has another non-erased owner" }
+        check(userRepository.countNonErasedAdministratorsForUpdate() == 1L) {
+            "Only the configured administrator may remain active"
+        }
         return configured
-    }
-
-    @Transactional(propagation = Propagation.MANDATORY)
-    fun requireOrdinaryAccountDeletionAllowed(userId: String): UserEntity {
-        guardRepository.lock()
-        val user = userRepository.findByIdForUpdate(userId)
-            ?.takeIf { it.accountState == AccountState.ACTIVE }
-            ?: throw IllegalArgumentException("User not found")
-        require(!FixedAdminPhone.isReserved(user.phone, bootstrapPhone)) { "固定管理员不能通过普通用户接口注销" }
-        require(user.role != ADMIN_ROLE) { "管理员不能通过普通用户接口注销" }
-        return user
     }
 
     @Transactional(propagation = Propagation.MANDATORY)

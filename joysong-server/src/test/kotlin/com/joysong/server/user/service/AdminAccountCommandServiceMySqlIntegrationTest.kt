@@ -88,6 +88,22 @@ class AdminAccountCommandServiceMySqlIntegrationTest {
         ))
     }
 
+    @Test
+    fun `E164 alias owner prevents startup without writes`() {
+        insertUser("fixed-admin", FIXED_PHONE, "fixed-hash", "Fixed profile", "ADMIN")
+        insertUser("alias-owner", "+8613800000000", "user-hash", "Alias owner", "USER")
+
+        assertThrows(IllegalStateException::class.java) {
+            service.initializeBootstrapAdministrator(FIXED_PHONE, "")
+        }
+
+        assertEquals(2L, jdbcTemplate.queryForObject("SELECT COUNT(*) FROM users", Long::class.java))
+        assertEquals("user-hash", jdbcTemplate.queryForObject(
+            "SELECT password_hash FROM users WHERE id = 'alias-owner'",
+            String::class.java,
+        ))
+    }
+
     private fun insertUser(id: String, phone: String, passwordHash: String, nickname: String, role: String) {
         jdbcTemplate.update(
             "INSERT INTO users (id, phone, password_hash, nickname, role) VALUES (?, ?, ?, ?, ?)",

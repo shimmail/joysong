@@ -74,4 +74,13 @@ class LocalAccountDeletionBlockerServiceTest {
             blockers.mapTo(linkedSetOf()) { it.type },
         )
     }
+
+    @Test
+    fun `fixed administrator is always an account deletion blocker`() {
+        val blockers = service.evaluate(
+            UserEntity(id = "fixed-admin", phone = "13800000000", passwordHash = "hash", role = "ADMIN"),
+        )
+
+        assertTrue(blockers.any { it.type == "ADMIN_ACCOUNT" && it.action == "CONTACT_SUPPORT" })
+    }
 }

@@ -42,6 +42,33 @@ interface UserRepository : JpaRepository<UserEntity, String> {
     )
     fun countAvailableAdministrators(): Long
 
+    @Query(
+        value = """
+            SELECT COUNT(*)
+            FROM users
+            WHERE role = 'ADMIN'
+              AND account_state <> 'ERASED'
+            FOR UPDATE
+        """,
+        nativeQuery = true,
+    )
+    fun countNonErasedAdministratorsForUpdate(): Long
+
+    @Query(
+        value = """
+            SELECT COUNT(*)
+            FROM users
+            WHERE account_state <> 'ERASED'
+              AND phone IN (:barePhone, :e164Phone)
+            FOR UPDATE
+        """,
+        nativeQuery = true,
+    )
+    fun countNonErasedPhoneOwnersForUpdate(
+        @Param("barePhone") barePhone: String,
+        @Param("e164Phone") e164Phone: String,
+    ): Long
+
     @Query(value = "SELECT * FROM users ORDER BY created_at DESC", nativeQuery = true)
     fun findAllAnyState(): List<UserEntity>
 

@@ -57,3 +57,46 @@ Result after fixing a missing test-only `AccountLifecycleGuard` bean: 2 tests, 0
 - `git diff --check` passed.
 - Verified no remaining `adminUpdateRole` or `updateRole` production/test references.
 - No full backend suite was run: the requested minimal relevant unit, controller, and isolated MySQL integration coverage passed, and no migration changed.
+
+## Fix round 1: review findings
+
+### Changes
+
+- Replaced startup's full `findAllAnyState()` entity scan with two locked repository-side counts: non-erased administrators and non-erased owners of the configured bare number or its `+86` alias.
+- Startup now rejects an active ordinary user that owns `+86<ADMIN_PHONE>` without encoding a password or writing an account.
+- Removed `requireOrdinaryAccountDeletionAllowed`, which was not called by production deletion code. The actual deletion coordinator continues to use the existing universal `ADMIN_ACCOUNT` blocker; coordinator and local-blocker tests now prove a fixed administrator becomes a terminal `BLOCKED` deletion result with no erasure.
+
+### RED
+
+Files changed before implementation:
+
+- `AdminAccountCommandServiceTest.kt`: added an active ordinary `+86<ADMIN_PHONE>` owner scenario.
+- `AccountDeletionCoordinatorTest.kt` and `LocalAccountDeletionBlockerServiceTest.kt`: added real deletion-path protection coverage while retaining the existing universal ADMIN blocker.
+
+Command:
+
+```powershell
+$gradleHome = 'D:\code\kotlin\joysong\.tmp\gradle-user-home-codex'; $env:GRADLE_USER_HOME = $gradleHome; .\gradlew.bat --offline --no-daemon test --tests com.joysong.server.user.service.AdminAccountCommandServiceTest --tests com.joysong.server.user.deletion.AccountDeletionCoordinatorTest --tests com.joysong.server.user.deletion.LocalAccountDeletionBlockerServiceTest
+```
+
+Observed result before the repository/service change: `AdminAccountCommandServiceTest` had exactly one failing test, `E164 alias owned by another active user prevents fixed administrator startup`; current startup returned successfully, proving that the alias owner was not checked. The two deletion-path tests passed as characterization evidence for the existing, production-connected generic `ADMIN_ACCOUNT` blocker.
+
+### GREEN
+
+Focused unit/coordinator/blocker command (same command as RED):
+
+```text
+AdminAccountCommandServiceTest: 12 tests, 0 failures
+AccountDeletionCoordinatorTest: 11 tests, 0 failures
+LocalAccountDeletionBlockerServiceTest: 5 tests, 0 failures
+```
+
+MySQL integration files and command:
+
+- `AdminAccountCommandServiceMySqlIntegrationTest.kt` includes the bare/`+86` owner conflict against the real repository query.
+
+```powershell
+Write-Output 'MySQL migration target: host=Testcontainers dynamic host; database=myapp_worktree_fixed_single_admin'; $gradleHome = 'D:\code\kotlin\joysong\.tmp\gradle-user-home-codex'; $env:GRADLE_USER_HOME = $gradleHome; .\gradlew.bat --offline --no-daemon mysqlIntegrationTest --tests com.joysong.server.user.service.AdminAccountCommandServiceMySqlIntegrationTest
+```
+
+Result: isolated Testcontainers MySQL suite passed with 3 tests and 0 failures. The database target was printed before migration; no shared development database was used.

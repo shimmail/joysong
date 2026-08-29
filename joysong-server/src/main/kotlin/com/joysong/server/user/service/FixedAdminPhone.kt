@@ -15,6 +15,11 @@ object FixedAdminPhone {
         }
     }
 
+    fun e164Alias(configuredPhone: String): String {
+        require(isValidConfigured(configuredPhone)) { "ADMIN_PHONE must be configured as a valid mobile number" }
+        return "+86$configuredPhone"
+    }
+
     private fun normalize(phone: String?): String? = when {
         phone == null -> null
         bareMainlandPhone.matches(phone) -> phone
