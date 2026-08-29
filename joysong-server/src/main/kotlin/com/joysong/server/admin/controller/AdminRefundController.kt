@@ -27,7 +27,14 @@ class AdminRefundController(
         @PathVariable refundId: String,
         @PathVariable fileId: String,
     ): ResponseEntity<FileSystemResource> {
-        val file = refundEvidenceFileService.loadContentForAdmin(refundId, fileId)
+        val file = try {
+            refundEvidenceFileService.loadContentForAdmin(refundId, fileId)
+        } catch (error: IllegalArgumentException) {
+            if (error.message == "REFUND_EVIDENCE_NOT_FOUND") {
+                return ResponseEntity.notFound().build()
+            }
+            throw error
+        }
         val resource = FileSystemResource(file.path)
         return ResponseEntity.ok()
             .contentType(MediaType.parseMediaType(file.contentType))

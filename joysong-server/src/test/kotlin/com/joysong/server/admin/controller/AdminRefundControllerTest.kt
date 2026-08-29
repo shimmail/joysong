@@ -8,7 +8,6 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import org.springframework.http.ContentDisposition
@@ -46,18 +45,17 @@ class AdminRefundControllerTest {
     }
 
     @Test
-    fun `admin refund evidence content rejects a file not linked to the requested refund`() {
+    fun `admin refund evidence content returns 404 for a file not linked to the requested refund`() {
         val refundService = mockk<RefundService>()
         val evidenceService = mockk<RefundEvidenceFileService>()
         every { evidenceService.loadContentForAdmin("refund-1", "file-from-refund-2") } throws
             IllegalArgumentException("REFUND_EVIDENCE_NOT_FOUND")
 
-        val error = assertThrows(IllegalArgumentException::class.java) {
-            AdminRefundController(refundService, evidenceService)
-                .evidenceContent("refund-1", "file-from-refund-2")
-        }
+        val response = AdminRefundController(refundService, evidenceService)
+            .evidenceContent("refund-1", "file-from-refund-2")
 
-        assertEquals("REFUND_EVIDENCE_NOT_FOUND", error.message)
+        assertEquals(404, response.statusCode.value())
+        assertEquals(null, response.body)
     }
 
     @Test
