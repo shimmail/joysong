@@ -134,31 +134,12 @@ class DoctorDetailView extends StatelessWidget {
                   key: sectionKeys[0],
                   child: _Section(
                     title: context.localized(
-                      '医生上传的证书图片/展示材料',
-                      'Doctor-uploaded certificate images/display materials',
+                      '展示材料',
+                      'Display materials',
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          context.localized(
-                            '内容由医生公开上传，仅用于展示，不代表平台认证。',
-                            'Uploaded by the doctor for public display; this does not represent platform verification.',
-                          ),
-                          style: const TextStyle(
-                            height: 1.45,
-                            color: Color(0xff777777),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          context.localized('医生实力', 'Professional profile'),
-                          style: const TextStyle(
-                            color: Color(0xff777777),
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
                         if (profile.isEmpty)
                           Text(
                             context.localized(
@@ -442,13 +423,6 @@ class _DoctorHeader extends StatelessWidget {
           ),
           if (certificationTags.isNotEmpty || specialties.isNotEmpty) ...[
             const SizedBox(height: 8),
-            Text(
-              context.localized('展示标签', 'Display tags'),
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-            ),
-            const SizedBox(height: 5),
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(children: [
