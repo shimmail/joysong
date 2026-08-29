@@ -615,6 +615,7 @@ class DmThreadController extends ChangeNotifier {
         content,
         messageType: messageType,
       );
+      if (_disposed) return;
       pager.addNewest(message);
       _hasConversationHistory = true;
       if (firstMessageLimitApplies && isFirstSuccessfulMessage) {

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -71,6 +73,47 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets(
+    'late consultant send success does not update the disposed thread',
+    (tester) async {
+      final sendMessageCompleter = Completer<Object?>();
+      final apiClient = ConsultantRoleApiClient(
+        sendMessageCompleter: sendMessageCompleter,
+      );
+      addTearDown(apiClient.close);
+
+      await openConsultantOrderConversation(tester, apiClient);
+      final threadController = tester
+          .widget<DmThreadPage>(find.byType(DmThreadPage))
+          .controller;
+
+      await tester.enterText(find.byType(TextField), '发送后返回');
+      await tester.tap(find.byTooltip('发送'));
+      await tester.pump();
+
+      expect(apiClient.sendMessageCalls, 1);
+      expect(sendMessageCompleter.isCompleted, isFalse);
+      expect(threadController.pager.items, isEmpty);
+
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(DmThreadPage), findsNothing);
+      expect(find.text('订单沟通'), findsOneWidget);
+
+      sendMessageCompleter.complete(const {
+        ...sentMessageJson,
+        'content': '发送后返回',
+      });
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(find.byType(DmThreadPage), findsNothing);
+      expect(threadController.pager.items, isEmpty);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }
 
 Future<void> openConsultantOrderConversation(
@@ -118,10 +161,11 @@ Future<void> openConsultantOrderConversation(
 enum ConsultantRoleFailure { entitlementRefresh, send }
 
 final class ConsultantRoleApiClient extends ApiClient {
-  ConsultantRoleApiClient({required this.roleFailure})
+  ConsultantRoleApiClient({this.roleFailure, this.sendMessageCompleter})
       : super(apiRoot: Uri.parse('https://api.example.com/api/'));
 
-  final ConsultantRoleFailure roleFailure;
+  final ConsultantRoleFailure? roleFailure;
+  final Completer<Object?>? sendMessageCompleter;
 
   int managementContextCalls = 0;
   int orderConversationCalls = 0;
@@ -192,6 +236,10 @@ final class ConsultantRoleApiClient extends ApiClient {
       sendMessageCalls += 1;
       if (roleFailure == ConsultantRoleFailure.send) {
         throw roleRequiredException;
+      }
+      final completer = sendMessageCompleter;
+      if (completer != null) {
+        return decodeData(await completer.future);
       }
       return decodeData(sentMessageJson);
     }
