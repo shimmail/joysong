@@ -328,6 +328,7 @@ class AdminIdentityService(
             )
         }
         fallbackSessions(userId, normalizedRole)
+        businessNotifications.professionalIdentityRevoked(userId, normalizedRole, reason.trim())
     }
 
     fun listMemberships(
@@ -466,20 +467,23 @@ class AdminIdentityService(
                 throw ConsultantInstitutionRequestConflictException("该机构存在待审核的顾问关系申请，请先完成审核")
             }
             consultantInstitutionRelationships.forceRevoke(target.userId, target.institutionId, reviewerId)
+            businessNotifications.institutionMembershipRevoked(target.userId, target.roleCode)
             return
         }
         val target = membershipTarget(id, lock = true)
         require(target.status != "REVOKED") { "成员关系已撤销" }
-        jdbcTemplate.update(
+        val updated = jdbcTemplate.update(
             "UPDATE institution_memberships SET status = 'REVOKED', revoked_at = NOW() WHERE id = ?",
             id
         )
+        check(updated == 1) { "成员关系状态已变化，请刷新后重试" }
         jdbcTemplate.update(
             "UPDATE auth_sessions SET active_role = 'USER', active_institution_id = NULL WHERE user_id = ? AND active_role = ? AND active_institution_id = ?",
             target.userId,
             target.roleCode,
             target.institutionId
         )
+        businessNotifications.institutionMembershipRevoked(target.userId, target.roleCode)
     }
 
     fun listDoctorPractices(

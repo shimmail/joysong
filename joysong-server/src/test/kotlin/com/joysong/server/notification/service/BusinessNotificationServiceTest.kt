@@ -182,6 +182,61 @@ class BusinessNotificationServiceTest {
     }
 
     @Test
+    fun `professional identity revocation includes the normalized role reason and identity target`() {
+        val fixture = fixture()
+
+        fixture.service.professionalIdentityRevoked(
+            userId = "doctor-1",
+            roleCode = " doctor ",
+            reason = " 资质已过期 "
+        )
+
+        assertEquals(
+            listOf(
+                Emission(
+                    userId = "doctor-1",
+                    type = "PROFESSIONAL_IDENTITY_REVOKED",
+                    title = "专业身份已撤销",
+                    content = "您的医生专业身份已被管理员撤销：资质已过期",
+                    targetType = "identity_management",
+                    targetId = "DOCTOR"
+                )
+            ),
+            fixture.emissions
+        )
+    }
+
+    @Test
+    fun `membership revocation opens consultant relationships and supports legacy legal membership`() {
+        val fixture = fixture()
+
+        fixture.service.institutionMembershipRevoked("consultant-1", "CONSULTANT")
+        fixture.service.institutionMembershipRevoked("legal-1", "LEGAL_REPRESENTATIVE")
+
+        assertEquals(
+            listOf(
+                Emission(
+                    userId = "consultant-1",
+                    type = "INSTITUTION_MEMBERSHIP_REVOKED",
+                    title = "机构成员关系已撤销",
+                    content = "您的机构成员关系已被管理员撤销。",
+                    targetType = "professional_consultant_relationships",
+                    targetId = ""
+                ),
+                Emission(
+                    userId = "legal-1",
+                    type = "INSTITUTION_MEMBERSHIP_REVOKED",
+                    title = "机构成员关系已撤销",
+                    content = "您的机构成员关系已被管理员撤销。",
+                    targetType = "identity_management",
+                    targetId = ""
+                )
+            ),
+            fixture.emissions
+        )
+    }
+
+    @Test
     fun `refund lifecycle uses the refund target and preserves event specific content`() {
         val fixture = fixture()
 

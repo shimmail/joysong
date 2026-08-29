@@ -166,6 +166,28 @@ class BusinessNotificationService(
             targetId = applicationId
         )
 
+    fun professionalIdentityRevoked(userId: String, roleCode: String, reason: String) =
+        identityNotificationRole(roleCode).let { role ->
+            notify(
+                recipients = listOf(userId),
+                type = "PROFESSIONAL_IDENTITY_REVOKED",
+                title = "专业身份已撤销",
+                content = withReviewNote("您的${role.label}专业身份已被管理员撤销", reason),
+                targetType = "identity_management",
+                targetId = role.code
+            )
+        }
+
+    fun institutionMembershipRevoked(userId: String, roleCode: String) =
+        notify(
+            recipients = listOf(userId),
+            type = "INSTITUTION_MEMBERSHIP_REVOKED",
+            title = "机构成员关系已撤销",
+            content = "您的机构成员关系已被管理员撤销。",
+            targetType = identityNotificationRole(roleCode).membershipTargetType,
+            targetId = ""
+        )
+
     private fun orderRefundNotification(
         type: String,
         title: String,
@@ -276,9 +298,25 @@ class BusinessNotificationService(
             ProfessionalApplicantRole.CONSULTANT -> "professional_consultant_application"
         }
 
+    private fun identityNotificationRole(roleCode: String): IdentityNotificationRole =
+        when (val normalizedRole = roleCode.trim().uppercase()) {
+            "DOCTOR" -> IdentityNotificationRole(normalizedRole, "医生", "professional_doctor_relationships")
+            "CONSULTANT" -> IdentityNotificationRole(normalizedRole, "医美顾问", "professional_consultant_relationships")
+            "INSTITUTION_LEGAL_REPRESENTATIVE", "LEGAL_REPRESENTATIVE" ->
+                IdentityNotificationRole("INSTITUTION_LEGAL_REPRESENTATIVE", "机构法人", "identity_management")
+            "INSTITUTION_CUSTOMER_SERVICE" -> IdentityNotificationRole(normalizedRole, "机构客服", "identity_management")
+            else -> throw IllegalArgumentException("不支持的专业身份类型")
+        }
+
     private data class NotificationCandidate(
         val userId: String,
         val content: String,
         val targetType: String
+    )
+
+    private data class IdentityNotificationRole(
+        val code: String,
+        val label: String,
+        val membershipTargetType: String
     )
 }

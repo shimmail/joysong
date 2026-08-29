@@ -155,6 +155,55 @@ class AdminIdentityServiceTest {
     }
 
     @Test
+    fun `successful professional role revoke notifies the affected user with the normalized reason`() {
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        val notifications = mockk<BusinessNotificationService>(relaxed = true)
+        every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 1
+        val service = AdminIdentityService(
+            jdbcTemplate,
+            ObjectMapper(),
+            mockk(relaxed = true),
+            mockk(relaxed = true),
+            mockk(relaxed = true),
+            notifications,
+            relaxedLifecycleGuard(),
+        )
+
+        service.revokeRole("doctor-1", " doctor ", "admin-1", " 资质已过期 ")
+
+        verify(exactly = 1) {
+            notifications.professionalIdentityRevoked("doctor-1", "DOCTOR", "资质已过期")
+        }
+    }
+
+    @Test
+    fun `failed professional role transition emits no revocation notification`() {
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        val notifications = mockk<BusinessNotificationService>(relaxed = true)
+        every {
+            jdbcTemplate.update(match<String> { it.contains("UPDATE user_roles") }, *anyVararg())
+        } returns 0
+        val service = AdminIdentityService(
+            jdbcTemplate,
+            ObjectMapper(),
+            mockk(relaxed = true),
+            mockk(relaxed = true),
+            mockk(relaxed = true),
+            notifications,
+            relaxedLifecycleGuard(),
+        )
+
+        assertThrows(IllegalArgumentException::class.java) {
+            service.revokeRole("doctor-1", "DOCTOR", "admin-1", "资质已过期")
+        }
+
+        verify(exactly = 0) { notifications.professionalIdentityRevoked(any(), any(), any()) }
+        verify(exactly = 0) {
+            jdbcTemplate.update(match<String> { it.contains("UPDATE auth_sessions") }, *anyVararg())
+        }
+    }
+
+    @Test
     fun `doctor role revoke rejects a pending relationship request before any mutation`() {
         val jdbcTemplate = mockk<JdbcTemplate>()
         every {
@@ -400,6 +449,7 @@ class AdminIdentityServiceTest {
     fun `force revoke rejects a matching pending consultant request without fabricating withdrawal`() {
         val jdbcTemplate = mockk<JdbcTemplate>()
         val consultantRelationships = mockk<ConsultantInstitutionRelationshipOperations>(relaxed = true)
+        val notifications = mockk<BusinessNotificationService>(relaxed = true)
         val pendingSql = slot<String>()
         every { jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) } answers {
             listOf(secondArg<RowMapper<Any>>().mapRow(resultSet(
@@ -425,7 +475,7 @@ class AdminIdentityServiceTest {
             mockk(relaxed = true),
             mockk(relaxed = true),
             consultantRelationships,
-            mockk(relaxed = true),
+            notifications,
             relaxedLifecycleGuard(),
         )
 
@@ -439,7 +489,118 @@ class AdminIdentityServiceTest {
         verify(exactly = 0) {
             jdbcTemplate.update(match<String> { it.contains("WITHDRAWN") }, *anyVararg())
         }
+        verify(exactly = 0) { notifications.institutionMembershipRevoked(any(), any()) }
         assertTrue(pendingSql.captured.contains("FOR UPDATE"))
+    }
+
+    @Test
+    fun `successful consultant membership revoke notifies the affected user`() {
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        val consultantRelationships = mockk<ConsultantInstitutionRelationshipOperations>(relaxed = true)
+        val notifications = mockk<BusinessNotificationService>(relaxed = true)
+        every { jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) } answers {
+            listOf(secondArg<RowMapper<Any>>().mapRow(resultSet(
+                strings = mapOf(
+                    "user_id" to "consultant-1",
+                    "institution_id" to "institution-1",
+                    "member_role" to "CONSULTANT",
+                    "status" to "APPROVED"
+                )
+            ), 0))
+        }
+        every {
+            jdbcTemplate.queryForList(any<String>(), String::class.java, "consultant-1", "institution-1")
+        } returns emptyList()
+        val service = AdminIdentityService(
+            jdbcTemplate,
+            ObjectMapper(),
+            mockk(relaxed = true),
+            mockk(relaxed = true),
+            consultantRelationships,
+            notifications,
+            relaxedLifecycleGuard(),
+        )
+
+        service.revokeMembership("membership-1", "admin-1")
+
+        verify(exactly = 1) {
+            consultantRelationships.forceRevoke("consultant-1", "institution-1", "admin-1")
+        }
+        verify(exactly = 1) {
+            notifications.institutionMembershipRevoked("consultant-1", "CONSULTANT")
+        }
+    }
+
+    @Test
+    fun `successful non consultant membership revoke notifies the affected user`() {
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        val notifications = mockk<BusinessNotificationService>(relaxed = true)
+        every { jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) } answers {
+            listOf(secondArg<RowMapper<Any>>().mapRow(resultSet(
+                strings = mapOf(
+                    "user_id" to "support-1",
+                    "institution_id" to "institution-1",
+                    "member_role" to "INSTITUTION_CUSTOMER_SERVICE",
+                    "status" to "APPROVED"
+                )
+            ), 0))
+        }
+        every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 1
+        val service = AdminIdentityService(
+            jdbcTemplate,
+            ObjectMapper(),
+            mockk(relaxed = true),
+            mockk(relaxed = true),
+            mockk(relaxed = true),
+            notifications,
+            relaxedLifecycleGuard(),
+        )
+
+        service.revokeMembership("membership-1", "admin-1")
+
+        verify(exactly = 1) {
+            notifications.institutionMembershipRevoked("support-1", "INSTITUTION_CUSTOMER_SERVICE")
+        }
+    }
+
+    @Test
+    fun `failed non consultant membership transition emits no revocation notification`() {
+        val jdbcTemplate = mockk<JdbcTemplate>()
+        val notifications = mockk<BusinessNotificationService>(relaxed = true)
+        every { jdbcTemplate.query(any<String>(), any<RowMapper<Any>>(), *anyVararg()) } answers {
+            listOf(secondArg<RowMapper<Any>>().mapRow(resultSet(
+                strings = mapOf(
+                    "user_id" to "support-1",
+                    "institution_id" to "institution-1",
+                    "member_role" to "INSTITUTION_CUSTOMER_SERVICE",
+                    "status" to "APPROVED"
+                )
+            ), 0))
+        }
+        every {
+            jdbcTemplate.update(match<String> { it.contains("UPDATE institution_memberships") }, *anyVararg())
+        } returns 0
+        every {
+            jdbcTemplate.update(match<String> { it.contains("UPDATE auth_sessions") }, *anyVararg())
+        } returns 1
+        val service = AdminIdentityService(
+            jdbcTemplate,
+            ObjectMapper(),
+            mockk(relaxed = true),
+            mockk(relaxed = true),
+            mockk(relaxed = true),
+            notifications,
+            relaxedLifecycleGuard(),
+        )
+
+        assertThrows(IllegalStateException::class.java) {
+            service.revokeMembership("membership-1", "admin-1")
+        }
+
+        verify(exactly = 0) { notifications.institutionMembershipRevoked(any(), any()) }
+        verify(exactly = 0) {
+            jdbcTemplate.update(match<String> { it.contains("UPDATE auth_sessions") }, *anyVararg())
+        }
     }
 
     @Test
