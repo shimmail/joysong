@@ -1,6 +1,6 @@
 # 服务费退款多凭证与管理员安全查看设计
 
-> **状态：** 设计已确认，待用户文档复核
+> **状态：** 设计已确认，进入实施
 > **分支：** `codex/service-fee-refund-evidence`
 > **worktree：** `D:\code\kotlin\joysong\.worktrees\worktree_service_fee_refund_evidence`
 > **基线：** `8150f61f`
@@ -190,8 +190,8 @@ multipart 分支只接受 `paymentFlow=TRAVEL_GROUND_SERVICE_ONLY` 的本人订�
 
 - 迁移编号固定为 `V37`，不编辑冻结的 `B33__current_schema.sql`；
 - 在 worktree 中派生 `WORKTREE_ID=worktree_service_fee_refund_evidence`；
-- 数据库名使用 `myapp_worktree_service_fee_refund_evidence`；
-- Docker Compose 项目名使用 `myapp-worktree-service-fee-refund-evidence`；
+- 数据库名使用 `myapp_worktree_worktree_service_fee_refund_evidence`；
+- Docker Compose 项目名使用 `myapp-worktree_service_fee_refund_evidence`；
 - 迁移前打印数据库主机和数据库名；
 - 在全新空数据库验证 B33 基线后依次应用 V34 至 V37；
 - 仅允许清理名称以 `myapp_worktree_` 开头的测试数据库。
