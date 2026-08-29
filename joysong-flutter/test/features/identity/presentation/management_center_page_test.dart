@@ -424,6 +424,57 @@ void main() {
   );
 
   testWidgets(
+    'retained role callback after management removal is a completed no-op',
+    (tester) async {
+      final identityRepository = FakeIdentityRepository([
+        managementContext(),
+      ]);
+      final showManagement = ValueNotifier(true);
+      addTearDown(showManagement.dispose);
+
+      await tester.pumpWidget(
+        removableManagementApp(
+          showManagement: showManagement,
+          identityRepository: identityRepository,
+          consultantOrdersRepository: fakeConsultantOrdersRepository(),
+          onOpenConversation: (_) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const Key('management-consultant-orders')),
+      );
+      await tester.pumpAndSettle();
+      final retainedRoleHandler = tester
+          .widget<ConsultantOrdersPage>(find.byType(ConsultantOrdersPage))
+          .onConsultantRoleRequired;
+      final callsBeforeRemoval =
+          identityRepository.loadManagementContextCalls;
+
+      showManagement.value = false;
+      await tester.pump();
+      expect(
+        find.byType(ManagementCenterPage, skipOffstage: false),
+        findsNothing,
+      );
+
+      var callbackCompleted = false;
+      unawaited(
+        retainedRoleHandler().then((_) => callbackCompleted = true),
+      );
+      await tester.pump();
+
+      expect(callbackCompleted, isTrue);
+      expect(
+        identityRepository.loadManagementContextCalls,
+        callsBeforeRemoval,
+      );
+      expect(find.byType(ConsultantOrdersPage), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'back-to-back role handlers return the same future before refresh starts',
     (tester) async {
       final identityRepository = FakeIdentityRepository([
@@ -485,6 +536,8 @@ Widget managementApp({
 Widget removableManagementApp({
   required ValueNotifier<bool> showManagement,
   required FakeIdentityRepository identityRepository,
+  ConsultantOrdersRepository? consultantOrdersRepository,
+  Future<void> Function(String orderId)? onOpenConversation,
 }) =>
     MaterialApp(
       locale: const Locale('zh'),
@@ -496,6 +549,8 @@ Widget removableManagementApp({
             ? ManagementCenterPage(
                 repository: identityRepository,
                 discoverRepository: FakeDiscoverRepository(),
+                consultantOrdersRepository: consultantOrdersRepository,
+                onOpenConsultantOrderServiceConversation: onOpenConversation,
               )
             : const Scaffold(
                 body: SizedBox(key: Key('management-removed')),

@@ -596,6 +596,11 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
   }
 
   Future<void> _handleConsultantRoleRequired() {
+    if (!mounted ||
+        _disposeControllerRequested ||
+        _managementControllerDisposed) {
+      return Future<void>.value();
+    }
     final inFlight = _consultantRoleRevocation;
     if (inFlight != null) return inFlight;
     final managementRoute = ModalRoute.of(context);
