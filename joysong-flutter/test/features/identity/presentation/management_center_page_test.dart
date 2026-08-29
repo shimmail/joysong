@@ -163,6 +163,82 @@ void main() {
   });
 
   testWidgets(
+    'initial management load can finish after page removal without exception',
+    (tester) async {
+      final initialLoad = Completer<ManagementContext>();
+      final identityRepository = FakeIdentityRepository([
+        managementContext(),
+      ])..blockedInitialLoad = initialLoad;
+      final showManagement = ValueNotifier(true);
+      addTearDown(showManagement.dispose);
+
+      await tester.pumpWidget(
+        removableManagementApp(
+          showManagement: showManagement,
+          identityRepository: identityRepository,
+        ),
+      );
+      await tester.pump();
+      expect(identityRepository.loadManagementContextCalls, 1);
+
+      showManagement.value = false;
+      await tester.pump();
+      expect(
+        find.byType(ManagementCenterPage, skipOffstage: false),
+        findsNothing,
+      );
+      initialLoad.complete(identityRepository.contexts.single);
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'manual management refresh can finish after page removal without exception',
+    (tester) async {
+      final identityRepository = FakeIdentityRepository([
+        managementContext(),
+        managementContext(),
+      ]);
+      final refresh = Completer<ManagementContext>();
+      final showManagement = ValueNotifier(true);
+      addTearDown(showManagement.dispose);
+
+      await tester.pumpWidget(
+        removableManagementApp(
+          showManagement: showManagement,
+          identityRepository: identityRepository,
+        ),
+      );
+      await tester.pumpAndSettle();
+      identityRepository.blockedRefresh = refresh;
+
+      await tester.tap(find.byTooltip('刷新权限'));
+      await tester.tap(find.byTooltip('刷新权限'));
+      await tester.pump();
+      expect(identityRepository.loadManagementContextCalls, 2);
+
+      showManagement.value = false;
+      await tester.pump();
+      expect(
+        find.byType(ManagementCenterPage, skipOffstage: false),
+        findsNothing,
+      );
+      refresh.completeError(StateError('controlled refresh failure'));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'concurrent list detail and conversation role loss refreshes once and pops children',
     (tester) async {
       final identityRepository = FakeIdentityRepository([
@@ -406,6 +482,27 @@ Widget managementApp({
       ),
     );
 
+Widget removableManagementApp({
+  required ValueNotifier<bool> showManagement,
+  required FakeIdentityRepository identityRepository,
+}) =>
+    MaterialApp(
+      locale: const Locale('zh'),
+      supportedLocales: supportedTestLocales,
+      localizationsDelegates: testLocalizationDelegates,
+      home: ValueListenableBuilder<bool>(
+        valueListenable: showManagement,
+        builder: (context, visible, _) => visible
+            ? ManagementCenterPage(
+                repository: identityRepository,
+                discoverRepository: FakeDiscoverRepository(),
+              )
+            : const Scaffold(
+                body: SizedBox(key: Key('management-removed')),
+              ),
+      ),
+    );
+
 const supportedTestLocales = [Locale('zh'), Locale('en')];
 
 const List<LocalizationsDelegate<dynamic>> testLocalizationDelegates = [
@@ -496,6 +593,7 @@ final class FakeIdentityRepository implements IdentityRepository {
 
   final List<ManagementContext> contexts;
   int loadManagementContextCalls = 0;
+  Completer<ManagementContext>? blockedInitialLoad;
   Completer<ManagementContext>? blockedRefresh;
 
   @override
@@ -504,6 +602,10 @@ final class FakeIdentityRepository implements IdentityRepository {
         ? loadManagementContextCalls
         : contexts.length - 1;
     loadManagementContextCalls += 1;
+    final initialBlocker = blockedInitialLoad;
+    if (loadManagementContextCalls == 1 && initialBlocker != null) {
+      return initialBlocker.future;
+    }
     final blocker = blockedRefresh;
     if (loadManagementContextCalls > 1 && blocker != null) {
       return blocker.future;

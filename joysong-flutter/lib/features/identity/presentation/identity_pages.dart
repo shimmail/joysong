@@ -570,12 +570,29 @@ class ManagementCenterPage extends StatefulWidget {
 class _ManagementCenterPageState extends State<ManagementCenterPage> {
   late final ManagementController _controller;
   Future<void>? _consultantRoleRevocation;
-  bool _disposeControllerAfterRoleRevocation = false;
+  int _managementContextLoadsInFlight = 0;
+  bool _disposeControllerRequested = false;
   bool _managementControllerDisposed = false;
 
   Future<ManagementContext?> _refreshManagementContext() async {
-    await _controller.enter();
+    await _enterManagementContext();
     return _controller.context;
+  }
+
+  Future<void> _enterManagementContext() async {
+    if (_disposeControllerRequested || _managementControllerDisposed) return;
+    _managementContextLoadsInFlight += 1;
+    try {
+      await _controller.enter();
+    } on Object {
+      return;
+    } finally {
+      _managementContextLoadsInFlight -= 1;
+      if (_disposeControllerRequested &&
+          _managementContextLoadsInFlight == 0) {
+        _disposeManagementController();
+      }
+    }
   }
 
   Future<void> _handleConsultantRoleRequired() {
@@ -588,7 +605,7 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
     unawaited(
       Future<void>(() async {
         try {
-          await _controller.enter();
+          await _enterManagementContext();
           if (mounted && managementRoute != null && managementRoute.isActive) {
             Navigator.of(context).popUntil(
               (route) => route == managementRoute,
@@ -600,9 +617,6 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
         } finally {
           if (identical(_consultantRoleRevocation, operation)) {
             _consultantRoleRevocation = null;
-            if (_disposeControllerAfterRoleRevocation) {
-              _disposeManagementController();
-            }
           }
         }
       }),
@@ -613,13 +627,14 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
   @override
   void initState() {
     super.initState();
-    _controller = ManagementController(widget.repository)..enter();
+    _controller = ManagementController(widget.repository);
+    unawaited(_enterManagementContext());
   }
 
   @override
   void dispose() {
-    _disposeControllerAfterRoleRevocation = true;
-    if (_consultantRoleRevocation == null) {
+    _disposeControllerRequested = true;
+    if (_managementContextLoadsInFlight == 0) {
       _disposeManagementController();
     }
     super.dispose();
@@ -641,7 +656,7 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
         actions: [
           IconButton(
             tooltip: context.localized('刷新权限', 'Refresh access'),
-            onPressed: _controller.enter,
+            onPressed: _enterManagementContext,
             icon: const Icon(Icons.refresh_rounded),
           ),
         ],
@@ -658,7 +673,7 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
               _IdentityFailure(
                 message: _controller.errorMessage ??
                     context.localized('没有专业管理权限', 'No professional access'),
-                onRetry: _controller.enter,
+                onRetry: _enterManagementContext,
               ),
             ManagementLoadStatus.ready => _ManagementCapabilities(
                 context: _controller.context!,
@@ -669,7 +684,7 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
                 onOpenConsultantOrderServiceConversation:
                     widget.onOpenConsultantOrderServiceConversation,
                 onConsultantRoleRequired: _handleConsultantRoleRequired,
-                onRefresh: _controller.enter,
+                onRefresh: _enterManagementContext,
                 refreshManagementContext: _refreshManagementContext,
                 institutionImagePicker: widget.institutionImagePicker,
                 doctorImagePicker: widget.doctorImagePicker,
