@@ -320,7 +320,7 @@ RefundServiceTest
 
 OrderControllerTest
 - multipart refund forwards repeated evidence parts in submission order
-- multipart refund omits evidenceUrl and returns flat evidenceFiles metadata
+- multipart refund rejects evidenceUrl input, returns an empty compatibility evidenceUrl field, and adds flat evidenceFiles metadata
 - JSON refund request preserves legacy evidence URL handling
 
 AdminRefundControllerTest
