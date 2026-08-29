@@ -253,7 +253,10 @@ ORDER_CREATED, ORDER_SERVICE_ACTIVATED, ORDER_COMPLETED, ORDER_REFUND_REQUESTED,
 ORDER_REFUND_APPROVED, ORDER_REFUND_REJECTED, ORDER_REFUNDED, ORDER_CANCELLED,
 PROFESSIONAL_APPLICATION_SUBMITTED, PROFESSIONAL_APPLICATION_WITHDRAWN,
 PROFESSIONAL_APPLICATION_APPROVED, PROFESSIONAL_APPLICATION_REJECTED,
-IDENTITY_APPLICATION_APPROVED, IDENTITY_APPLICATION_REJECTED
+IDENTITY_APPLICATION_APPROVED, IDENTITY_APPLICATION_REJECTED,
+INSTITUTION_PROJECT_APPLICATION_SUBMITTED,
+INSTITUTION_PROJECT_APPLICATION_APPROVED,
+INSTITUTION_PROJECT_APPLICATION_REJECTED
 ```
 
 `targetType` 是导航契约，`targetId` 是对应订单、申请或关系请求 ID：`order` 和 `order_refund` 打开订单详情；`order_service_conversation` 打开订单服务会话；`identity_management` 打开身份管理；`identity_application` 聚焦身份申请历史；`professional_doctor_review`、`professional_consultant_review` 打开机构法人的对应审核队列；`professional_doctor_application`、`professional_consultant_application`、`professional_doctor_relationships`、`professional_consultant_relationships` 打开申请人自己的对应关系历史。机构项目申请提交、批准和驳回分别使用 `INSTITUTION_PROJECT_APPLICATION_SUBMITTED`、`INSTITUTION_PROJECT_APPLICATION_APPROVED`、`INSTITUTION_PROJECT_APPLICATION_REJECTED`：法人审核入口的 `targetType` 固定为 `institution_project_review`，申请医生查看本人申请状态和审核意见的 `targetType` 固定为 `institution_project_application`，两者的 `targetId` 都是机构项目申请 ID。Flutter 必须保留该 ID；目标已失效或对当前主体不再可见时，回退到相应审核列表或新建申请表单，且不得崩溃。

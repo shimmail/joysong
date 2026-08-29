@@ -1,8 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:joysong_flutter/core/config/app_environment.dart';
+import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
+import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
+import 'package:joysong_flutter/features/identity/presentation/institution_project_review_widgets.dart';
 import 'package:joysong_flutter/features/identity/presentation/professional_request_pages.dart';
+import 'package:joysong_flutter/features/messaging/domain/messaging_models.dart';
+import 'package:joysong_flutter/features/messaging/domain/messaging_repository.dart';
+import 'package:joysong_flutter/features/shell/presentation/app_shell.dart';
 
 void main() {
   testWidgets(
@@ -88,6 +95,139 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets(
+    'system review notification preserves request id and review mode',
+    (tester) async {
+      const requestId = 'review-route-target';
+      await _openSystemNotification(
+        tester,
+        targetType: 'institution_project_review',
+        requestId: requestId,
+        context: _legalRepresentativeContext,
+        requests: [
+          _request(
+            id: 'review-route-decoy',
+            doctorId: 'doctor-3',
+            status: 'PENDING',
+          ),
+          _request(
+            id: requestId,
+            doctorId: 'doctor-2',
+            status: 'PENDING',
+          ),
+        ],
+      );
+
+      final requestPageFinder = find.byType(
+        InstitutionProjectRequestsPage,
+        skipOffstage: false,
+      );
+      expect(requestPageFinder, findsOneWidget);
+      final requestPage =
+          tester.widget<InstitutionProjectRequestsPage>(requestPageFinder);
+      expect(requestPage.initialRequestId, requestId);
+      expect(requestPage.reviewMode, isTrue);
+      final detail = tester.widget<InstitutionProjectReviewDetailPage>(
+        find.byType(InstitutionProjectReviewDetailPage),
+      );
+      expect(detail.item.id, requestId);
+    },
+  );
+
+  testWidgets(
+    'system application notification opens the doctor result exactly once',
+    (tester) async {
+      const requestId = 'application-route-target';
+      await _openSystemNotification(
+        tester,
+        targetType: 'institution_project_application',
+        requestId: requestId,
+        context: _doctorContext,
+        requests: [
+          _request(id: 'application-route-decoy', doctorId: 'doctor-1'),
+          _request(id: requestId, doctorId: 'doctor-1'),
+        ],
+      );
+
+      final requestPageFinder = find.byType(
+        InstitutionProjectRequestsPage,
+        skipOffstage: false,
+      );
+      expect(requestPageFinder, findsOneWidget);
+      final requestPage =
+          tester.widget<InstitutionProjectRequestsPage>(requestPageFinder);
+      expect(requestPage.initialRequestId, requestId);
+      expect(requestPage.reviewMode, isFalse);
+      final detail = tester.widget<InstitutionProjectReviewDetailPage>(
+        find.byType(InstitutionProjectReviewDetailPage),
+      );
+      expect(detail.item.id, requestId);
+      expect(detail.actions, isNull);
+      final detailRows = (detail.details! as Column).children.whereType<Text>();
+      expect(
+        detailRows.any((row) => row.data?.contains('reviewed request') == true),
+        isTrue,
+      );
+      await tester.pump();
+      expect(
+        find.byType(InstitutionProjectRequestsPage, skipOffstage: false),
+        findsOneWidget,
+      );
+    },
+  );
+}
+
+Future<void> _openSystemNotification(
+  WidgetTester tester, {
+  required String targetType,
+  required String requestId,
+  required ManagementContext context,
+  required List<ProfessionalProjectRequest> requests,
+}) async {
+  await tester.pumpWidget(
+    MaterialApp(
+      locale: const Locale('en'),
+      home: AppShell(
+        agentConfig: const AgentConfig(),
+        allowPreviewData: true,
+        currentUserId: context.userId,
+        dependencies: AppShellDependencies(
+          identityRepository: _ProjectRequestsRepository(
+            requests: requests,
+            context: context,
+          ),
+          discoverRepository: const _UnusedDiscoverRepository(),
+          messagingRepository: _NotificationMessagingRepository(
+            AppNotification(
+              id: 'notification-$requestId',
+              userId: context.userId,
+              type: targetType == 'institution_project_review'
+                  ? 'INSTITUTION_PROJECT_APPLICATION_SUBMITTED'
+                  : 'INSTITUTION_PROJECT_APPLICATION_APPROVED',
+              title: 'Project application update',
+              content: 'Open the project request',
+              targetType: targetType,
+              targetId: requestId,
+              isRead: false,
+              createdAt: '2026-08-30T00:00:00Z',
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+  await tester.tap(find.byIcon(Icons.forum_outlined));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(const Key('message-center-system')));
+  await tester.pumpAndSettle();
+  await tester.tap(
+    find.byKey(
+      ValueKey<String>('notification-row:notification-$requestId'),
+    ),
+  );
+  await tester.pumpAndSettle();
 }
 
 const _legalRepresentativeContext = ManagementContext(
@@ -113,6 +253,7 @@ const _doctorContext = ManagementContext(
 ProfessionalProjectRequest _request({
   required String id,
   required String doctorId,
+  String status = 'APPROVED',
 }) =>
     ProfessionalProjectRequest(
       id: id,
@@ -144,7 +285,7 @@ ProfessionalProjectRequest _request({
         doctorRate: 70,
       ),
       notes: 'Application note',
-      status: 'APPROVED',
+      status: status,
       reviewNote: 'reviewed request',
       reviewedBy: 'legal-user',
       reviewedAt: DateTime(2026, 8, 30),
@@ -153,9 +294,16 @@ ProfessionalProjectRequest _request({
     );
 
 final class _ProjectRequestsRepository implements IdentityRepository {
-  const _ProjectRequestsRepository({required this.requests});
+  const _ProjectRequestsRepository({
+    required this.requests,
+    this.context = _doctorContext,
+  });
 
   final List<ProfessionalProjectRequest> requests;
+  final ManagementContext context;
+
+  @override
+  Future<ManagementContext> loadManagementContext() async => context;
 
   @override
   Future<List<ProfessionalProjectRequest>>
@@ -186,6 +334,68 @@ final class _ProjectRequestsRepository implements IdentityRepository {
   Future<InstitutionProjectApplicationFormConfig>
       loadInstitutionProjectApplicationFormConfig() async =>
           const InstitutionProjectApplicationFormConfig(platformRate: 10);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw UnsupportedError(invocation.memberName.toString());
+}
+
+final class _UnusedDiscoverRepository implements DiscoverRepository {
+  const _UnusedDiscoverRepository();
+
+  @override
+  Future<DiscoverFilterOptions> loadFilterOptions() async =>
+      const DiscoverFilterOptions();
+
+  @override
+  Future<DiscoverPageResult> loadPage({
+    required DiscoverContentType type,
+    required int offset,
+    required int limit,
+    String query = '',
+    List<String> categories = const [],
+    List<String> cities = const [],
+    List<String> tags = const [],
+  }) async =>
+      const DiscoverPageResult(items: [], hasMore: false);
+
+  @override
+  Future<DiscoverItem> loadDetail({
+    required DiscoverContentType type,
+    required String id,
+  }) =>
+      throw UnsupportedError(id);
+}
+
+final class _NotificationMessagingRepository implements MessagingRepository {
+  _NotificationMessagingRepository(this.notification);
+
+  final AppNotification notification;
+  var _read = false;
+
+  @override
+  Future<List<AppNotification>> getNotifications({int limit = 50}) async =>
+      [notification.copyWith(isRead: _read)];
+
+  @override
+  Future<NotificationUnreadCounts> getUnreadNotificationCounts() async =>
+      NotificationUnreadCounts(
+        total: _read ? 0 : 1,
+        system: _read ? 0 : 1,
+        activity: 0,
+      );
+
+  @override
+  Future<void> markNotificationRead(String notificationId) async {
+    _read = true;
+  }
+
+  @override
+  Future<List<DmConversation>> getDmConversations() async => const [];
+
+  @override
+  Future<List<CustomerServiceConversation>>
+      getCustomerServiceConversations() async => const [];
 
   @override
   dynamic noSuchMethod(Invocation invocation) =>

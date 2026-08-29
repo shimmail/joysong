@@ -73,10 +73,23 @@ import 'package:joysong_flutter/features/wallet/presentation/wallet_page.dart';
 
 typedef AccountSecurityControllerFactory = AccountSecurityController Function();
 
+final class AppShellDependencies {
+  const AppShellDependencies({
+    required this.identityRepository,
+    required this.discoverRepository,
+    required this.messagingRepository,
+  });
+
+  final IdentityRepository identityRepository;
+  final DiscoverRepository discoverRepository;
+  final MessagingRepository messagingRepository;
+}
+
 class AppShell extends StatefulWidget {
   const AppShell({
     required this.agentConfig,
     this.apiClient,
+    this.dependencies,
     this.allowPreviewData = false,
     this.currentUserId = '',
     this.accountSecurityControllerFactory,
@@ -88,6 +101,7 @@ class AppShell extends StatefulWidget {
 
   final AgentConfig agentConfig;
   final ApiClient? apiClient;
+  final AppShellDependencies? dependencies;
   final bool allowPreviewData;
   final String currentUserId;
   final AccountSecurityControllerFactory? accountSecurityControllerFactory;
@@ -138,6 +152,7 @@ class _AppShellState extends State<AppShell> {
   void didUpdateWidget(covariant AppShell oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.apiClient != widget.apiClient ||
+        oldWidget.dependencies != widget.dependencies ||
         oldWidget.agentConfig.recentMessageLimit !=
             widget.agentConfig.recentMessageLimit ||
         oldWidget.currentUserId != widget.currentUserId) {
@@ -150,6 +165,20 @@ class _AppShellState extends State<AppShell> {
     _unreadNotificationCount = 0;
     _unreadSystemNotificationCount = 0;
     _unreadActivityNotificationCount = 0;
+    final dependencies = widget.dependencies;
+    if (dependencies != null) {
+      _homeRepository = null;
+      _discoverRepository = dependencies.discoverRepository;
+      _identityRepository = dependencies.identityRepository;
+      _profileRepository = null;
+      _bookingRepository = null;
+      _ordersRepository = null;
+      _socialRepository = null;
+      _messagingRepository = dependencies.messagingRepository;
+      _walletRepository = null;
+      _createMessagingControllers();
+      return;
+    }
     final apiClient = widget.apiClient;
     if (apiClient == null) {
       _homeRepository = null;
@@ -188,22 +217,7 @@ class _AppShellState extends State<AppShell> {
     _walletRepository =
         WalletRepositoryImpl(ApiWalletRemoteDataSource(apiClient));
     _walletController = WalletController(_walletRepository!);
-    _notificationController = NotificationController(_messagingRepository!);
-    _notificationController!.addListener(_handleNotificationStateChanged);
-    unawaited(_notificationController!.refresh());
-    _messagingController = MessagingHubController(
-      _messagingRepository!,
-      currentUserId: widget.currentUserId,
-      preferencesStore: SecureMessagingPreferencesStore(),
-      peerLoader: (userId) async {
-        final profile = await _socialRepository!.getPublicUserProfile(userId);
-        return MessagingPeer(
-          id: profile.id,
-          name: profile.nickname,
-          avatar: profile.avatar,
-        );
-      },
-    );
+    _createMessagingControllers();
 
     final agentRepository = AgentRepositoryImpl(
       ApiAgentRemoteDataSource(apiClient: apiClient),
@@ -213,6 +227,31 @@ class _AppShellState extends State<AppShell> {
       recentMessageLimit: widget.agentConfig.recentMessageLimit,
     );
     _agentPlanController = AgentPlanController(agentRepository);
+  }
+
+  void _createMessagingControllers() {
+    final messagingRepository = _messagingRepository;
+    if (messagingRepository == null) return;
+    _notificationController = NotificationController(messagingRepository);
+    _notificationController!.addListener(_handleNotificationStateChanged);
+    unawaited(_notificationController!.refresh());
+    _messagingController = MessagingHubController(
+      messagingRepository,
+      currentUserId: widget.currentUserId,
+      preferencesStore:
+          _socialRepository == null ? null : SecureMessagingPreferencesStore(),
+      peerLoader: _socialRepository == null
+          ? null
+          : (userId) async {
+              final profile =
+                  await _socialRepository!.getPublicUserProfile(userId);
+              return MessagingPeer(
+                id: profile.id,
+                name: profile.nickname,
+                avatar: profile.avatar,
+              );
+            },
+    );
   }
 
   void _disposeControllers() {
