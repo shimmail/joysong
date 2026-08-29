@@ -28,6 +28,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.LocalDateTime
 
 class DiscoverControllerTest {
     private val doctorProjectRepository = mockk<DoctorProjectRepository>()
@@ -98,27 +99,58 @@ class DiscoverControllerTest {
     }
 
     @Test
-    fun `institution directory omits institutions without available offerings`() {
-        val availableOffering = InstitutionProjectEntity(
-            id = "ip-available", institutionId = "institution-available", projectId = "project-1",
-            price = BigDecimal("1000")
-        )
-        val unavailableOffering = InstitutionProjectEntity(
-            id = "ip-unavailable", institutionId = "institution-unavailable", projectId = "project-2",
-            price = BigDecimal("100")
-        )
-        every { institutionProjectRepository.findAll() } returns listOf(availableOffering, unavailableOffering)
-        every {
-            doctorProjectRepository.findPublicByInstitutionProjectIds(listOf("ip-available", "ip-unavailable"))
-        } returns listOf(publicBinding("doctor-1", "ip-available", "project-1", "700"))
+    fun `institution directory includes verified profiles without available offerings`() {
+        every { institutionProjectRepository.findAll() } returns emptyList()
         every { institutionRepository.findAll() } returns listOf(
-            InstitutionEntity("institution-unavailable", "Unavailable"),
-            InstitutionEntity("institution-available", "Available")
+            InstitutionEntity("institution-unverified", "Unverified"),
+            InstitutionEntity("institution-verified", "Verified", isVerified = true)
         )
 
         val result = controller.getInstitutions(query = "", offset = 0, limit = 50).body!!.data!!
 
-        assertEquals(listOf("institution-available"), result.map { it.id })
+        assertEquals(listOf("institution-verified"), result.map { it.id })
+    }
+
+    @Test
+    fun `institution directory pages newest verified profiles first`() {
+        every { institutionRepository.findAll() } returns listOf(
+            InstitutionEntity(
+                "institution-oldest",
+                "Oldest",
+                isVerified = true,
+                createdAt = LocalDateTime.of(2024, 1, 1, 0, 0)
+            ),
+            InstitutionEntity(
+                "institution-newest",
+                "Newest",
+                isVerified = true,
+                createdAt = LocalDateTime.of(2026, 1, 1, 0, 0)
+            ),
+            InstitutionEntity(
+                "institution-middle",
+                "Middle",
+                isVerified = true,
+                createdAt = LocalDateTime.of(2025, 1, 1, 0, 0)
+            )
+        )
+
+        val result = controller.getInstitutions(query = "", offset = 0, limit = 2).body!!.data!!
+
+        assertEquals(listOf("institution-newest", "institution-middle"), result.map { it.id })
+    }
+
+    @Test
+    fun `institution directory uses id as stable tie breaker`() {
+        val createdAt = LocalDateTime.of(2026, 1, 1, 0, 0)
+        every { institutionRepository.findAll() } returns listOf(
+            InstitutionEntity("institution-a", "A", isVerified = true, createdAt = createdAt),
+            InstitutionEntity("institution-c", "C", isVerified = true, createdAt = createdAt),
+            InstitutionEntity("institution-b", "B", isVerified = true, createdAt = createdAt)
+        )
+
+        val result = controller.getInstitutions(query = "", offset = 0, limit = 2).body!!.data!!
+
+        assertEquals(listOf("institution-c", "institution-b"), result.map { it.id })
     }
 
     @Test
