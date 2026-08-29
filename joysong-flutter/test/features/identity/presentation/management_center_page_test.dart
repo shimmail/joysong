@@ -6,7 +6,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/features/consultant_orders/domain/consultant_order_models.dart';
 import 'package:joysong_flutter/features/consultant_orders/domain/consultant_orders_repository.dart';
+import 'package:joysong_flutter/features/consultant_orders/presentation/consultant_order_detail_controller.dart';
 import 'package:joysong_flutter/features/consultant_orders/presentation/consultant_order_detail_page.dart';
+import 'package:joysong_flutter/features/consultant_orders/presentation/consultant_orders_controller.dart';
 import 'package:joysong_flutter/features/consultant_orders/presentation/consultant_orders_page.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
@@ -171,6 +173,8 @@ void main() {
         ),
       ]);
       final refreshCompleter = Completer<ManagementContext>();
+      final listRoleFailure = Completer<ConsultantOrderPage>();
+      final detailRoleFailure = Completer<ConsultantOrderDetail>();
       final consultantOrdersRepository = FakeConsultantOrdersRepository(
         page: ConsultantOrderPage(
           items: [consultantOrderSummary()],
@@ -198,7 +202,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      final listRoleHandler = tester
+      final sharedRoleHandler = tester
           .widget<ConsultantOrdersPage>(find.byType(ConsultantOrdersPage))
           .onConsultantRoleRequired;
       await tester.tap(find.text('测试项目'));
@@ -206,29 +210,139 @@ void main() {
       final conversationButton = find.text('订单沟通');
       await tester.ensureVisible(conversationButton);
       await tester.pumpAndSettle();
-      final detailRoleHandler = tester
-          .widget<ConsultantOrderDetailPage>(
-            find.byType(ConsultantOrderDetailPage),
-          )
-          .onConsultantRoleRequired;
+      final detailPage = tester.widget<ConsultantOrderDetailPage>(
+        find.byType(ConsultantOrderDetailPage),
+      );
+      expect(
+        identical(
+          detailPage.onConsultantRoleRequired,
+          sharedRoleHandler,
+        ),
+        isTrue,
+      );
 
+      consultantOrdersRepository
+        ..blockedOrders = listRoleFailure
+        ..blockedDetail = detailRoleFailure;
+      final listController = ConsultantOrdersController(
+        consultantOrdersRepository,
+        onConsultantRoleRequired: sharedRoleHandler,
+      );
+      final detailController = ConsultantOrderDetailController(
+        consultantOrdersRepository,
+        orderId: 'order-1',
+        onConsultantRoleRequired: sharedRoleHandler,
+      );
+      final listLoad = listController.load(ConsultantOrderStage.active);
+      final detailLoad = detailController.load();
       identityRepository.blockedRefresh = refreshCompleter;
-      final listFuture = listRoleHandler();
-      final detailFuture = detailRoleHandler();
-      expect(identical(listFuture, detailFuture), isTrue);
       await tester.tap(conversationButton);
       await tester.pump();
 
+      expect(consultantOrdersRepository.getOrdersCalls, 2);
+      expect(consultantOrdersRepository.getOrderCalls, 2);
+      expect(identityRepository.loadManagementContextCalls, 2);
+      listRoleFailure.completeError(roleRequiredException);
+      detailRoleFailure.completeError(roleRequiredException);
+      await tester.pump();
+      expect(
+        listController.stateFor(ConsultantOrderStage.active).status,
+        ConsultantOrderListStatus.accessRevoked,
+      );
+      expect(
+        detailController.status,
+        ConsultantOrderDetailLoadStatus.accessRevoked,
+      );
       expect(identityRepository.loadManagementContextCalls, 2);
       refreshCompleter.complete(identityRepository.contexts.last);
       await tester.pumpAndSettle();
-      await Future.wait([listFuture, detailFuture]);
+      await Future.wait([listLoad, detailLoad]);
+      listController.dispose();
+      detailController.dispose();
 
       expect(conversationCalls, 1);
       expect(identityRepository.loadManagementContextCalls, 2);
       expect(find.byType(ManagementCenterPage), findsOneWidget);
       expect(find.byType(ConsultantOrdersPage), findsNothing);
       expect(find.byType(ConsultantOrderDetailPage), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'role refresh completion after management removal has no async exception',
+    (tester) async {
+      final identityRepository = FakeIdentityRepository([
+        managementContext(),
+        managementContext(
+          isConsultant: false,
+          canAccessConsultantOrderWorkbench: false,
+        ),
+      ]);
+      final refreshCompleter = Completer<ManagementContext>();
+      final consultantOrdersRepository = FakeConsultantOrdersRepository(
+        page: ConsultantOrderPage(
+          items: [consultantOrderSummary()],
+          offset: 0,
+          limit: 20,
+          hasMore: false,
+        ),
+        detail: consultantOrderDetail(),
+      );
+      var showManagement = true;
+      late StateSetter setHostState;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          locale: const Locale('zh'),
+          supportedLocales: supportedTestLocales,
+          localizationsDelegates: testLocalizationDelegates,
+          home: StatefulBuilder(
+            builder: (context, setState) {
+              setHostState = setState;
+              return showManagement
+                  ? ManagementCenterPage(
+                      repository: identityRepository,
+                      discoverRepository: FakeDiscoverRepository(),
+                      consultantOrdersRepository: consultantOrdersRepository,
+                      onOpenConsultantOrderServiceConversation: (_) =>
+                          Future.error(roleRequiredException),
+                    )
+                  : const Scaffold(
+                      body: SizedBox(key: Key('management-removed')),
+                    );
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const Key('management-consultant-orders')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('测试项目'));
+      await tester.pumpAndSettle();
+      final conversationButton = find.text('订单沟通');
+      await tester.ensureVisible(conversationButton);
+      await tester.pumpAndSettle();
+
+      identityRepository.blockedRefresh = refreshCompleter;
+      await tester.tap(conversationButton);
+      await tester.pump();
+      expect(identityRepository.loadManagementContextCalls, 2);
+
+      setHostState(() => showManagement = false);
+      await tester.pump();
+      expect(
+        find.byType(ManagementCenterPage, skipOffstage: false),
+        findsNothing,
+      );
+      refreshCompleter.complete(identityRepository.contexts.last);
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
       expect(tester.takeException(), isNull);
     },
   );
@@ -417,6 +531,10 @@ final class FakeConsultantOrdersRepository
 
   final ConsultantOrderPage page;
   final ConsultantOrderDetail detail;
+  int getOrdersCalls = 0;
+  int getOrderCalls = 0;
+  Completer<ConsultantOrderPage>? blockedOrders;
+  Completer<ConsultantOrderDetail>? blockedDetail;
 
   @override
   Future<ConsultantOrderPage> getOrders({
@@ -424,9 +542,22 @@ final class FakeConsultantOrdersRepository
     String? institutionId,
     required int offset,
     required int limit,
-  }) async =>
-      page;
+  }) async {
+    getOrdersCalls += 1;
+    final blocker = blockedOrders;
+    if (getOrdersCalls > 1 && blocker != null) {
+      return blocker.future;
+    }
+    return page;
+  }
 
   @override
-  Future<ConsultantOrderDetail> getOrder(String orderId) async => detail;
+  Future<ConsultantOrderDetail> getOrder(String orderId) async {
+    getOrderCalls += 1;
+    final blocker = blockedDetail;
+    if (getOrderCalls > 1 && blocker != null) {
+      return blocker.future;
+    }
+    return detail;
+  }
 }

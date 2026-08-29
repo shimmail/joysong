@@ -570,6 +570,8 @@ class ManagementCenterPage extends StatefulWidget {
 class _ManagementCenterPageState extends State<ManagementCenterPage> {
   late final ManagementController _controller;
   Future<void>? _consultantRoleRevocation;
+  bool _disposeControllerAfterRoleRevocation = false;
+  bool _managementControllerDisposed = false;
 
   Future<ManagementContext?> _refreshManagementContext() async {
     await _controller.enter();
@@ -593,13 +595,14 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
             );
           }
           if (!completer.isCompleted) completer.complete();
-        } on Object catch (error, stackTrace) {
-          if (!completer.isCompleted) {
-            completer.completeError(error, stackTrace);
-          }
+        } on Object {
+          if (!completer.isCompleted) completer.complete();
         } finally {
           if (identical(_consultantRoleRevocation, operation)) {
             _consultantRoleRevocation = null;
+            if (_disposeControllerAfterRoleRevocation) {
+              _disposeManagementController();
+            }
           }
         }
       }),
@@ -615,10 +618,19 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
 
   @override
   void dispose() {
+    _disposeControllerAfterRoleRevocation = true;
+    if (_consultantRoleRevocation == null) {
+      _disposeManagementController();
+    }
+    super.dispose();
+  }
+
+  void _disposeManagementController() {
+    if (_managementControllerDisposed) return;
+    _managementControllerDisposed = true;
     _controller
       ..clear()
       ..dispose();
-    super.dispose();
   }
 
   @override
