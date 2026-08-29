@@ -756,11 +756,14 @@ describe('RefundsPage manual review operations', () => {
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:image-preview');
   });
 
-  it('PDF preview requests a blob and opens only the generated blob URL with noopener', async () => {
+  it('PDF preview replaces and revokes its authenticated blob URL with noopener', async () => {
     const user = userEvent.setup();
-    const createObjectURL = vi.fn(() => 'blob:pdf-preview');
+    const createObjectURL = vi.fn()
+      .mockReturnValueOnce('blob:pdf-preview-1')
+      .mockReturnValueOnce('blob:pdf-preview-2');
+    const revokeObjectURL = vi.fn();
     class TestUrl extends URL {}
-    Object.assign(TestUrl, { createObjectURL, revokeObjectURL: vi.fn() });
+    Object.assign(TestUrl, { createObjectURL, revokeObjectURL });
     vi.stubGlobal('URL', TestUrl);
     const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
     const pdfBlob = new Blob(['pdf'], { type: 'application/pdf' });
@@ -782,7 +785,16 @@ describe('RefundsPage manual review operations', () => {
       { responseType: 'blob' },
     ));
     expect(createObjectURL).toHaveBeenCalledWith(pdfBlob);
-    expect(openSpy).toHaveBeenCalledWith('blob:pdf-preview', '_blank', 'noopener,noreferrer');
+    expect(openSpy).toHaveBeenCalledWith('blob:pdf-preview-1', '_blank', 'noopener,noreferrer');
+
+    await user.click(within(dialog).getByRole('button', { name: '预览 receipt.pdf' }));
+    await waitFor(() => expect(openSpy).toHaveBeenCalledTimes(2));
+    expect(openSpy).toHaveBeenLastCalledWith('blob:pdf-preview-2', '_blank', 'noopener,noreferrer');
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:pdf-preview-1');
+    expect(revokeObjectURL).not.toHaveBeenCalledWith('blob:pdf-preview-2');
+
+    await user.click(within(dialog).getByRole('button', { name: /关\s*闭/ }));
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:pdf-preview-2');
   });
 
   it('evidence download uses an authenticated blob and releases its temporary anchor', async () => {

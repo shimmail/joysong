@@ -153,6 +153,7 @@ export default function RefundsPage() {
   const [imagePreview, setImagePreview] = useState<{ url: string; originalName: string } | null>(null);
   const liveObjectUrlsRef = useRef(new Set<string>());
   const imagePreviewUrlRef = useRef<string | null>(null);
+  const pdfPreviewUrlRef = useRef<string | null>(null);
   const detailSessionRef = useRef(0);
   const previewRequestRef = useRef(0);
   const mountedRef = useRef(true);
@@ -166,6 +167,7 @@ export default function RefundsPage() {
     for (const url of liveObjectUrlsRef.current) URL.revokeObjectURL(url);
     liveObjectUrlsRef.current.clear();
     imagePreviewUrlRef.current = null;
+    pdfPreviewUrlRef.current = null;
   };
 
   const clearImagePreview = () => {
@@ -173,6 +175,12 @@ export default function RefundsPage() {
     if (imageUrl) revokeObjectUrl(imageUrl);
     imagePreviewUrlRef.current = null;
     setImagePreview(null);
+  };
+
+  const clearPdfPreview = () => {
+    const pdfUrl = pdfPreviewUrlRef.current;
+    if (pdfUrl) revokeObjectUrl(pdfUrl);
+    pdfPreviewUrlRef.current = null;
   };
 
   useEffect(() => {
@@ -316,12 +324,20 @@ export default function RefundsPage() {
       const objectUrl = URL.createObjectURL(blob);
       liveObjectUrlsRef.current.add(objectUrl);
       if (file.contentType.startsWith('image/')) {
+        clearPdfPreview();
         clearImagePreview();
         imagePreviewUrlRef.current = objectUrl;
         setImagePreview({ url: objectUrl, originalName: file.originalName });
       } else if (file.contentType === 'application/pdf') {
         clearImagePreview();
-        window.open(objectUrl, '_blank', 'noopener,noreferrer');
+        clearPdfPreview();
+        pdfPreviewUrlRef.current = objectUrl;
+        try {
+          window.open(objectUrl, '_blank', 'noopener,noreferrer');
+        } catch (error) {
+          clearPdfPreview();
+          throw error;
+        }
       } else {
         revokeObjectUrl(objectUrl);
         message.error(`预览凭证失败: 不支持预览 ${file.originalName}`);
