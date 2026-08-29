@@ -143,11 +143,11 @@ final class ConsultantOrdersController extends ChangeNotifier {
       );
       _notifyIfAlive();
     } on Object catch (error) {
+      if (!_isCurrent(stage, generation)) return;
       if (_isRoleRequired(error)) {
         await _revokeAccess();
         return;
       }
-      if (!_isCurrent(stage, generation)) return;
       _states[stage] = current._copyWith(
         isLoadingMore: false,
         loadMoreFailure: consultantOrderFailureFor(error),
@@ -181,11 +181,11 @@ final class ConsultantOrdersController extends ChangeNotifier {
       );
       _notifyIfAlive();
     } on Object catch (error) {
+      if (!_isCurrent(stage, generation)) return;
       if (_isRoleRequired(error)) {
         await _revokeAccess();
         return;
       }
-      if (!_isCurrent(stage, generation)) return;
       _states[stage] = ConsultantOrderListState(
         status: ConsultantOrderListStatus.failure,
         hasMore: false,

@@ -52,11 +52,11 @@ final class ConsultantOrderDetailController extends ChangeNotifier {
       _status = ConsultantOrderDetailLoadStatus.ready;
       _notifyIfAlive();
     } on Object catch (error) {
+      if (!_isCurrent(generation)) return;
       if (_isRoleRequired(error)) {
         await _revokeAccess();
         return;
       }
-      if (!_isCurrent(generation)) return;
       _status = ConsultantOrderDetailLoadStatus.failure;
       _failure = consultantOrderFailureFor(error);
       _notifyIfAlive();

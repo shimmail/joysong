@@ -199,6 +199,73 @@ void main() {
       expect(repository.listRequests.map((request) => request.offset), [0, 0]);
     });
 
+    test('refresh ignores role loss from a stale first-page request',
+        () async {
+      final repository = FakeConsultantOrdersRepository();
+      final older = repository.enqueueListCompleter(
+        ConsultantOrderStage.active,
+      );
+      repository.enqueuePage(
+        ConsultantOrderStage.active,
+        page(offset: 10, ids: const ['fresh']),
+      );
+      var roleRequiredCalls = 0;
+      final controller = ConsultantOrdersController(
+        repository,
+        onConsultantRoleRequired: () async {
+          roleRequiredCalls += 1;
+        },
+      );
+      addTearDown(controller.dispose);
+
+      final olderLoad = controller.load(ConsultantOrderStage.active);
+      await controller.refresh(ConsultantOrderStage.active);
+      older.completeError(roleRequiredException);
+      await olderLoad;
+
+      final state = controller.stateFor(ConsultantOrderStage.active);
+      expect(state.status, ConsultantOrderListStatus.ready);
+      expect(state.items.single.id, 'fresh');
+      expect(state.nextOffset, 11);
+      expect(roleRequiredCalls, 0);
+    });
+
+    test('refresh ignores role loss from a stale load-more request',
+        () async {
+      final repository = FakeConsultantOrdersRepository()
+        ..enqueuePage(
+          ConsultantOrderStage.active,
+          page(offset: 0, ids: const ['initial'], hasMore: true),
+        );
+      final olderLoadMore = repository.enqueueListCompleter(
+        ConsultantOrderStage.active,
+      );
+      repository.enqueuePage(
+        ConsultantOrderStage.active,
+        page(offset: 20, ids: const ['fresh']),
+      );
+      var roleRequiredCalls = 0;
+      final controller = ConsultantOrdersController(
+        repository,
+        onConsultantRoleRequired: () async {
+          roleRequiredCalls += 1;
+        },
+      );
+      addTearDown(controller.dispose);
+
+      await controller.load(ConsultantOrderStage.active);
+      final olderRequest = controller.loadMore(ConsultantOrderStage.active);
+      await controller.refresh(ConsultantOrderStage.active);
+      olderLoadMore.completeError(roleRequiredException);
+      await olderRequest;
+
+      final state = controller.stateFor(ConsultantOrderStage.active);
+      expect(state.status, ConsultantOrderListStatus.ready);
+      expect(state.items.single.id, 'fresh');
+      expect(state.nextOffset, 21);
+      expect(roleRequiredCalls, 0);
+    });
+
     test('force load is a fresh offset-zero reload and invalidates old work',
         () async {
       final repository = FakeConsultantOrdersRepository()

@@ -48,6 +48,32 @@ void main() {
       expect(controller.status, ConsultantOrderDetailLoadStatus.ready);
     });
 
+    test('a newer load ignores role loss from a stale detail request',
+        () async {
+      final repository = FakeDetailRepository();
+      final older = repository.enqueueDetailCompleter();
+      repository.enqueueDetail(detail('fresh'));
+      var roleRequiredCalls = 0;
+      final controller = ConsultantOrderDetailController(
+        repository,
+        orderId: 'o1',
+        onConsultantRoleRequired: () async {
+          roleRequiredCalls += 1;
+        },
+      );
+      addTearDown(controller.dispose);
+
+      final olderLoad = controller.load();
+      await controller.load();
+      older.completeError(roleRequiredException);
+      await olderLoad;
+
+      expect(controller.status, ConsultantOrderDetailLoadStatus.ready);
+      expect(controller.detail?.summary.id, 'fresh');
+      expect(controller.failure, isNull);
+      expect(roleRequiredCalls, 0);
+    });
+
     test('detail failures expose only local failure categories', () async {
       final cases = <(Object, ConsultantOrderFailure)>[
         (
