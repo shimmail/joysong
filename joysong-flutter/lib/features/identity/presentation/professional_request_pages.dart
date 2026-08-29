@@ -776,6 +776,7 @@ class InstitutionProjectRequestsPage extends StatefulWidget {
     required this.repository,
     required this.context,
     this.reviewMode = false,
+    this.initialRequestId,
     this.pickAndUploadImage,
     this.onRefreshManagementContext,
     super.key,
@@ -784,6 +785,7 @@ class InstitutionProjectRequestsPage extends StatefulWidget {
   final IdentityRepository repository;
   final ManagementContext context;
   final bool reviewMode;
+  final String? initialRequestId;
   final Future<String?> Function()? pickAndUploadImage;
   final Future<ManagementContext?> Function()? onRefreshManagementContext;
 
@@ -816,6 +818,7 @@ class _InstitutionProjectRequestsPageState
   var _loading = true;
   var _saving = false, _uploading = false, _reviewing = false;
   var _reviewAccessRevoked = false;
+  var _initialRequestHandled = false;
   late ManagementContext _currentContext;
 
   @override
@@ -904,6 +907,7 @@ class _InstitutionProjectRequestsPageState
         _loading = false;
         _error = null;
       });
+      _openInitialRequestIfVisible();
       return true;
     } catch (_) {
       if (mounted) {
@@ -939,6 +943,24 @@ class _InstitutionProjectRequestsPageState
     return _currentContext.canReviewInstitutionProjectRequests &&
         request.institutionId != null &&
         _currentContext.managedInstitutionIds.contains(request.institutionId);
+  }
+
+  void _openInitialRequestIfVisible() {
+    if (_initialRequestHandled) return;
+    _initialRequestHandled = true;
+    final requestId = widget.initialRequestId?.trim();
+    if (requestId == null || requestId.isEmpty) return;
+    for (final request in _requests) {
+      if (request.id != requestId) continue;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _openCreationDetail(
+            InstitutionProjectReviewItem.fromCreation(request),
+          );
+        }
+      });
+      return;
+    }
   }
 
   @override
@@ -1027,8 +1049,7 @@ class _InstitutionProjectRequestsPageState
                     ),
                     StructuredProjectDetailEditor(
                       controller: _detailContent,
-                      primaryFieldKey:
-                          const Key('institution-detail-content'),
+                      primaryFieldKey: const Key('institution-detail-content'),
                       fieldKeyPrefix: 'institution-detail',
                       enabled: !_saving && !_uploading,
                     ),
@@ -1980,8 +2001,7 @@ class _DoctorProjectProfileUpdateFormPageState
             ),
             _requestField(
               _tags,
-              context.localized(
-                  '服务标签（逗号分隔）', 'Service tags (comma separated)'),
+              context.localized('服务标签（逗号分隔）', 'Service tags (comma separated)'),
               fieldKey: const Key('profile-update-tags'),
               onChanged: (_) => _editedSharedFields.add('tags'),
             ),
@@ -2109,8 +2129,7 @@ class _DoctorProjectProfileUpdateFormPageState
     final price = num.tryParse(_price.text.trim());
     final salesCount = int.tryParse(_salesCount.text.trim());
     if (price == null || salesCount == null) {
-      setState(() => _error = context.localized(
-          '请填写有效的医生项目价格与销量',
+      setState(() => _error = context.localized('请填写有效的医生项目价格与销量',
           'Enter a valid doctor project price and sales count.'));
       return;
     }
@@ -2194,8 +2213,7 @@ class _DoctorProjectProfileUpdateFormPageState
           .contains(error.errorCode)) {
         await widget.onContractConflict();
         if (!mounted) return;
-        setState(() => _error = context.localized(
-            '当前资料或待审核申请已变化，请刷新后重新申请',
+        setState(() => _error = context.localized('当前资料或待审核申请已变化，请刷新后重新申请',
             'The profile or pending request changed. Refresh and submit again.'));
       } else {
         setState(() => _error = error.message);
@@ -2310,7 +2328,8 @@ class _DoctorProjectProfileReviewPageState
 
   bool _isVisible(DoctorProjectChangeRequest request) {
     if (_isAdmin) return true;
-    return _currentContext.managedInstitutionIds.contains(request.institutionId);
+    return _currentContext.managedInstitutionIds
+        .contains(request.institutionId);
   }
 
   @override
@@ -2339,8 +2358,8 @@ class _DoctorProjectProfileReviewPageState
                   if (_error != null) ...[
                     Text(
                       _error!,
-                      style: TextStyle(
-                          color: Theme.of(context).colorScheme.error),
+                      style:
+                          TextStyle(color: Theme.of(context).colorScheme.error),
                     ),
                     TextButton(
                       onPressed: _load,
@@ -2390,8 +2409,7 @@ class _DoctorProjectProfileReviewPageState
                     !_submittingRequestIds.contains(request.id),
                 allowForce: allowForce,
                 onSubmit: (decision, note, force) async {
-                  final close =
-                      await _review(request, decision, note, force);
+                  final close = await _review(request, decision, note, force);
                   if (close && _exitAfterDetail) {
                     WidgetsBinding.instance.addPostFrameCallback((_) {
                       if (mounted) Navigator.of(context).maybePop();

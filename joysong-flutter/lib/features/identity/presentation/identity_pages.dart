@@ -545,6 +545,8 @@ class ManagementCenterPage extends StatefulWidget {
     this.institutionImagePicker,
     this.doctorImagePicker,
     this.professionalRepository,
+    this.initialInstitutionProjectRequestId,
+    this.initialInstitutionProjectReviewMode,
     super.key,
   });
 
@@ -553,6 +555,8 @@ class ManagementCenterPage extends StatefulWidget {
   final InstitutionProfileImagePicker? institutionImagePicker;
   final Future<String?> Function()? doctorImagePicker;
   final ProfessionalRepository? professionalRepository;
+  final String? initialInstitutionProjectRequestId;
+  final bool? initialInstitutionProjectReviewMode;
 
   @override
   State<ManagementCenterPage> createState() => _ManagementCenterPageState();
@@ -560,6 +564,7 @@ class ManagementCenterPage extends StatefulWidget {
 
 class _ManagementCenterPageState extends State<ManagementCenterPage> {
   late final ManagementController _controller;
+  var _initialInstitutionProjectRequestOpened = false;
 
   Future<ManagementContext?> _refreshManagementContext() async {
     await _controller.enter();
@@ -578,6 +583,45 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
       ..clear()
       ..dispose();
     super.dispose();
+  }
+
+  void _openInitialInstitutionProjectRequest() {
+    if (_initialInstitutionProjectRequestOpened ||
+        widget.initialInstitutionProjectReviewMode == null) {
+      return;
+    }
+    _initialInstitutionProjectRequestOpened = true;
+    final managementContext = _controller.context;
+    if (managementContext == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => InstitutionProjectRequestsPage(
+            repository: widget.repository,
+            context: managementContext,
+            reviewMode: widget.initialInstitutionProjectReviewMode!,
+            initialRequestId: widget.initialInstitutionProjectRequestId,
+            pickAndUploadImage: widget.doctorImagePicker,
+            onRefreshManagementContext: _refreshManagementContext,
+          ),
+        ),
+      );
+    });
+  }
+
+  Widget _buildManagementCapabilities() {
+    _openInitialInstitutionProjectRequest();
+    return _ManagementCapabilities(
+      context: _controller.context!,
+      repository: widget.repository,
+      discoverRepository: widget.discoverRepository,
+      onRefresh: _controller.enter,
+      refreshManagementContext: _refreshManagementContext,
+      institutionImagePicker: widget.institutionImagePicker,
+      doctorImagePicker: widget.doctorImagePicker,
+      professionalRepository: widget.professionalRepository,
+    );
   }
 
   @override
@@ -607,16 +651,7 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
                     context.localized('没有专业管理权限', 'No professional access'),
                 onRetry: _controller.enter,
               ),
-            ManagementLoadStatus.ready => _ManagementCapabilities(
-                context: _controller.context!,
-                repository: widget.repository,
-                discoverRepository: widget.discoverRepository,
-                onRefresh: _controller.enter,
-                refreshManagementContext: _refreshManagementContext,
-                institutionImagePicker: widget.institutionImagePicker,
-                doctorImagePicker: widget.doctorImagePicker,
-                professionalRepository: widget.professionalRepository,
-              ),
+            ManagementLoadStatus.ready => _buildManagementCapabilities(),
           };
         },
       ),

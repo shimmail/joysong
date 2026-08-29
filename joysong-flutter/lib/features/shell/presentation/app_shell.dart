@@ -703,7 +703,13 @@ class _AppShellState extends State<AppShell> {
     if (result.succeeded) await _ordersController?.refresh();
   }
 
-  Future<String?> _pickAndUploadReviewImage() async {
+  Future<String?> _pickAndUploadReviewImage() =>
+      _pickAndUploadPublicImage(PublicMediaPurpose.review);
+
+  Future<String?> _pickAndUploadDoctorManagementImage() =>
+      _pickAndUploadPublicImage(PublicMediaPurpose.doctorProfile);
+
+  Future<String?> _pickAndUploadPublicImage(PublicMediaPurpose purpose) async {
     final controller = _socialController;
     if (controller == null) return null;
     final selected = await const AppFilePicker().pickImage();
@@ -713,7 +719,7 @@ class _AppShellState extends State<AppShell> {
         bytes: selected.bytes,
         fileName: selected.fileName,
         mimeType: selected.mimeType,
-        purpose: PublicMediaPurpose.review,
+        purpose: purpose,
       ),
     );
     if (!result.succeeded || result.value?.trim().isEmpty != false) {
@@ -1066,6 +1072,18 @@ class _AppShellState extends State<AppShell> {
           initialRequestId: target.id,
         );
         return;
+      case NotificationTargetKind.institutionProjectReview:
+        _openManagementCenter(
+          initialInstitutionProjectRequestId: target.id,
+          initialInstitutionProjectReviewMode: true,
+        );
+        return;
+      case NotificationTargetKind.institutionProjectApplication:
+        _openManagementCenter(
+          initialInstitutionProjectRequestId: target.id,
+          initialInstitutionProjectReviewMode: false,
+        );
+        return;
       case NotificationTargetKind.discover:
       case NotificationTargetKind.unknown:
         break;
@@ -1133,6 +1151,33 @@ class _AppShellState extends State<AppShell> {
         builder: (_) => IdentityCenterPage(
           repository: repository,
           initialApplicationId: initialApplicationId,
+        ),
+      ),
+    );
+  }
+
+  void _openManagementCenter({
+    String? initialInstitutionProjectRequestId,
+    bool? initialInstitutionProjectReviewMode,
+  }) {
+    final identityRepository = _identityRepository;
+    final discoverRepository = _discoverRepository;
+    if (identityRepository == null || discoverRepository == null) return;
+    _contentNavigator.push<void>(
+      MaterialPageRoute(
+        builder: (_) => ManagementCenterPage(
+          repository: identityRepository,
+          discoverRepository: discoverRepository,
+          professionalRepository: widget.apiClient == null
+              ? null
+              : ProfessionalRepository(widget.apiClient!),
+          doctorImagePicker: _socialRepository == null
+              ? null
+              : _pickAndUploadDoctorManagementImage,
+          initialInstitutionProjectRequestId:
+              initialInstitutionProjectRequestId,
+          initialInstitutionProjectReviewMode:
+              initialInstitutionProjectReviewMode,
         ),
       ),
     );
