@@ -207,7 +207,7 @@ class NotificationServiceLocalizationTest {
         title = storedTitle,
         content = storedContent,
         targetType = targetType,
-        targetId = "target-$index"
+        targetId = targetId ?: "target-$index"
     )
 
     private fun com.joysong.server.notification.dto.NotificationResponse.text() =
@@ -219,7 +219,8 @@ class NotificationServiceLocalizationTest {
         val storedTitle: String,
         val storedContent: String,
         val expectedTitle: String,
-        val expectedContent: String
+        val expectedContent: String,
+        val targetId: String? = null
     )
 
     private data class LocalizedText(val title: String, val content: String)
@@ -345,6 +346,23 @@ class NotificationServiceLocalizationTest {
                 "您的身份认证申请未通过：证件照片不清晰",
                 "Identity verification rejected",
                 "Your identity verification application was rejected. Reason: 证件照片不清晰"
+            ),
+            NotificationCase(
+                "PROFESSIONAL_IDENTITY_REVOKED",
+                "identity_management",
+                "专业身份已撤销",
+                "您的医生专业身份已被管理员撤销：资质已过期",
+                "Professional identity revoked",
+                "Your professional identity as a doctor was revoked by an administrator. Reason: 资质已过期",
+                "DOCTOR"
+            ),
+            NotificationCase(
+                "INSTITUTION_MEMBERSHIP_REVOKED",
+                "professional_consultant_relationships",
+                "机构成员关系已撤销",
+                "您的机构成员关系已被管理员撤销。",
+                "Institution membership revoked",
+                "Your institution membership was revoked by an administrator."
             )
         )
     }

@@ -88,6 +88,12 @@ internal object NotificationTextProjection {
                 )
             )
 
+            "PROFESSIONAL_IDENTITY_REVOKED" -> professionalIdentityRevokedText(notification)
+            "INSTITUTION_MEMBERSHIP_REVOKED" -> NotificationText(
+                "Institution membership revoked",
+                "Your institution membership was revoked by an administrator."
+            )
+
             else -> null
         }
 
@@ -140,6 +146,18 @@ internal object NotificationTextProjection {
         )
     }
 
+    private fun professionalIdentityRevokedText(notification: NotificationResponse): NotificationText? {
+        val role = revokedIdentityRole(notification.targetId) ?: return null
+        return NotificationText(
+            "Professional identity revoked",
+            rejectionContent(
+                notification.content,
+                chinesePrefix = "您的${role.chineseLabel}专业身份已被管理员撤销",
+                englishPrefix = "Your professional identity as ${role.englishDescription} was revoked by an administrator"
+            )
+        )
+    }
+
     private fun professionalRole(targetType: String): String? = when (targetType) {
         "professional_doctor_review",
         "professional_doctor_application",
@@ -149,6 +167,14 @@ internal object NotificationTextProjection {
         "professional_consultant_application",
         "professional_consultant_relationships" -> "consultant"
 
+        else -> null
+    }
+
+    private fun revokedIdentityRole(roleCode: String): RevokedIdentityRole? = when (roleCode.trim().uppercase()) {
+        "DOCTOR" -> RevokedIdentityRole("医生", "a doctor")
+        "CONSULTANT" -> RevokedIdentityRole("医美顾问", "a medical aesthetics consultant")
+        "INSTITUTION_LEGAL_REPRESENTATIVE" -> RevokedIdentityRole("机构法人", "an institution legal representative")
+        "INSTITUTION_CUSTOMER_SERVICE" -> RevokedIdentityRole("机构客服", "institution customer service")
         else -> null
     }
 
@@ -166,4 +192,5 @@ internal object NotificationTextProjection {
     private fun String.titlecase(): String = replaceFirstChar { first -> first.titlecase(Locale.ENGLISH) }
 
     private data class NotificationText(val title: String, val content: String)
+    private data class RevokedIdentityRole(val chineseLabel: String, val englishDescription: String)
 }
