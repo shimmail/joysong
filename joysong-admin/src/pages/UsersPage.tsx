@@ -1,15 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Table, Button, Select, Space, message, Modal, Tag, Input } from 'antd';
+import { Table, Button, Space, message, Modal, Tag, Input } from 'antd';
 import { EyeOutlined, StopOutlined, CheckCircleOutlined, SearchOutlined } from '@ant-design/icons';
 import api, { getData, debounce, getApiErrorMessage } from '../api';
 import { accountStateView, resolveAccountState } from '../accountState';
 import { identityRoleLabel, identityStatusColor } from '../identity';
-
-const roleOptions = [
-  { label: '普通账号', value: 'USER' },
-  { label: '管理员账号', value: 'ADMIN' },
-];
 
 export default function UsersPage() {
   const [data, setData] = useState<any[]>([]);
@@ -64,12 +59,6 @@ export default function UsersPage() {
     }
   };
 
-  const handleRoleChange = async (id: string, role: string) => {
-    await api.put(`/admin/users/${id}/role`, { role });
-    message.success('后台权限更新成功');
-    fetchData();
-  };
-
   const handleSuspend = (record: any) => {
     if (resolveAccountState(record) !== 'ACTIVE') return;
     Modal.confirm({
@@ -103,15 +92,10 @@ export default function UsersPage() {
       title: '后台权限',
       dataIndex: 'role',
       width: 130,
-      render: (role: string, record: any) => (
-        <Select
-          value={role}
-          options={roleOptions}
-          size="small"
-          style={{ width: 100 }}
-          disabled={resolveAccountState(record) === 'ERASED'}
-          onChange={(value) => handleRoleChange(record.id, value)}
-        />
+      render: (role: string) => (
+        <Tag color={role === 'ADMIN' ? 'gold' : 'blue'}>
+          {role === 'ADMIN' ? '管理员账号' : '普通账号'}
+        </Tag>
       ),
     },
     {
@@ -145,7 +129,7 @@ export default function UsersPage() {
             <Link to={`/users/${record.id}`}>
               <Button icon={<EyeOutlined />} size="small" title="查看详情" />
             </Link>
-            {state === 'ADMIN_SUSPENDED' && (
+            {record.role !== 'ADMIN' && state === 'ADMIN_SUSPENDED' && (
               <Button
                 icon={<CheckCircleOutlined />}
                 size="small"
@@ -155,7 +139,7 @@ export default function UsersPage() {
                 恢复
               </Button>
             )}
-            {state === 'ACTIVE' && (
+            {record.role !== 'ADMIN' && state === 'ACTIVE' && (
               <Button
                 icon={<StopOutlined />}
                 size="small"

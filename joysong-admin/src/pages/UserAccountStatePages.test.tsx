@@ -22,6 +22,7 @@ const response = <T,>(data: T) => ({ data: { code: 200, message: 'OK', data } })
 const users = [
   { id: 'active-user', nickname: '活跃用户', role: 'USER', accountState: 'ACTIVE', createdAt: '2026-08-01' },
   { id: 'suspended-user', nickname: '暂停用户', role: 'USER', accountState: 'ADMIN_SUSPENDED', createdAt: '2026-08-02' },
+  { id: 'admin-user', nickname: '管理员用户', role: 'ADMIN', accountState: 'ACTIVE', createdAt: '2026-08-02' },
   { id: 'erased-user', nickname: '注销用户', role: 'USER', accountState: 'ERASED', createdAt: '2026-08-03' },
   { id: 'state-wins-user', nickname: '新状态优先用户', role: 'USER', accountState: 'ACTIVE', deletedAt: '2026-08-04' },
   { id: 'legacy-erased-user', nickname: '旧响应注销用户', role: 'USER', deletedAt: '2026-08-05' },
@@ -39,8 +40,9 @@ beforeEach(() => {
   mockGet.mockImplementation(async (url) => {
     if (url === '/admin/users') return response(users) as never;
     if (url === '/admin/identity/roles') return response([]) as never;
-    if (url === '/admin/users/erased-user') return response(users[2]) as never;
+    if (url === '/admin/users/erased-user') return response(users[3]) as never;
     if (url === '/admin/users/suspended-user') return response(users[1]) as never;
+    if (url === '/admin/users/admin-user') return response(users[2]) as never;
     if (url.endsWith('/orders') || url.endsWith('/diaries')) return response([]) as never;
     throw new Error(`Unexpected GET ${url}`);
   });
@@ -67,6 +69,16 @@ describe('UsersPage account lifecycle', () => {
 
     expect(within(erasedRow).getByText('已注销 / Erased')).toBeInTheDocument();
     expect(within(erasedRow).queryByRole('button', { name: /暂停$|恢复$|永久删除/ })).not.toBeInTheDocument();
+  });
+
+  it('renders role as read-only and hides lifecycle actions for ADMIN accounts', async () => {
+    render(<MemoryRouter><UsersPage /></MemoryRouter>);
+
+    const adminRow = (await screen.findByText('管理员用户')).closest('tr')!;
+
+    expect(within(adminRow).getByText('管理员账号')).toBeInTheDocument();
+    expect(within(adminRow).queryByRole('combobox')).not.toBeInTheDocument();
+    expect(within(adminRow).queryByRole('button', { name: /暂停$|恢复$/ })).not.toBeInTheDocument();
   });
 
   it('keeps the existing suspend and restore endpoints behind the new state actions', async () => {
@@ -120,5 +132,17 @@ describe('UserDetailPage account lifecycle', () => {
     expect(screen.queryByRole('button', { name: /暂停用户$/ })).not.toBeInTheDocument();
     await actor.click(screen.getByRole('button', { name: /恢复用户$/ }));
     await waitFor(() => expect(mockPut).toHaveBeenCalledWith('/admin/users/suspended-user/reactivate'));
+  });
+
+  it('renders an ADMIN role as read-only without suspend or restore controls', async () => {
+    render(
+      <MemoryRouter initialEntries={['/users/admin-user']}>
+        <Routes><Route path="/users/:id" element={<UserDetailPage />} /></Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('管理员账号')).toBeInTheDocument();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /暂停用户$|恢复用户$/ })).not.toBeInTheDocument();
   });
 });

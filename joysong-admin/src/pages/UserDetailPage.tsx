@@ -2,17 +2,12 @@ import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   Card, Descriptions, Tabs, Table, Button, Modal, Form,
-  Input, InputNumber, Space, message, Popconfirm, Select, Tag
+  Input, InputNumber, Space, message, Popconfirm, Tag
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, ArrowLeftOutlined, StopOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import api, { getData } from '../api';
 import { accountStateView, resolveAccountState } from '../accountState';
 import { identityRoleLabel, identityStatusColor } from '../identity';
-
-const roleOptions = [
-  { label: '普通账号', value: 'USER' },
-  { label: '管理员账号', value: 'ADMIN' },
-];
 
 interface DiarySectionProps {
   apiPath: string;
@@ -147,13 +142,6 @@ export default function UserDetailPage() {
     api.get(`/admin/users/${id}/orders`).then(res => setOrders(getData(res as any)));
   }, [id]);
 
-  const handleRoleChange = async (role: string) => {
-    if (!id) return;
-    await api.put(`/admin/users/${id}/role`, { role });
-    message.success('后台权限更新成功');
-    fetchUser();
-  };
-
   const handleSuspend = () => {
     if (!id || !user || resolveAccountState(user) !== 'ACTIVE') return;
     Modal.confirm({
@@ -215,9 +203,9 @@ export default function UserDetailPage() {
           </Space>
         }
         extra={
-          accountState === 'ADMIN_SUSPENDED' ? (
+          user.role !== 'ADMIN' && accountState === 'ADMIN_SUSPENDED' ? (
             <Button icon={<CheckCircleOutlined />} onClick={handleReactivate}>恢复用户</Button>
-          ) : accountState === 'ACTIVE' ? (
+          ) : user.role !== 'ADMIN' && accountState === 'ACTIVE' ? (
             <Button icon={<StopOutlined />} danger onClick={handleSuspend}>暂停用户</Button>
           ) : null
         }
@@ -228,14 +216,9 @@ export default function UserDetailPage() {
           <Descriptions.Item label="昵称">{user.nickname || '-'}</Descriptions.Item>
           <Descriptions.Item label="城市">{user.city || '-'}</Descriptions.Item>
           <Descriptions.Item label="后台权限">
-            <Select
-              value={user.role}
-              options={roleOptions}
-              size="small"
-              style={{ width: 120 }}
-              disabled={accountState === 'ERASED'}
-              onChange={handleRoleChange}
-            />
+            <Tag color={user.role === 'ADMIN' ? 'gold' : 'blue'}>
+              {user.role === 'ADMIN' ? '管理员账号' : '普通账号'}
+            </Tag>
           </Descriptions.Item>
           <Descriptions.Item label="职业身份">
             {identityRoles.length > 0
