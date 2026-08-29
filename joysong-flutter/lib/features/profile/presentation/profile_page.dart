@@ -48,7 +48,7 @@ class ProfilePage extends StatefulWidget {
   final SocialRepository? socialRepository;
   final ProfessionalRepository? professionalRepository;
   final ConsultantOrdersRepository? consultantOrdersRepository;
-  final Future<void> Function(String orderId)?
+  final ConsultantOrderServiceConversationLauncher?
       onOpenConsultantOrderServiceConversation;
   final VoidCallback? onOrders;
   final VoidCallback? onWallet;

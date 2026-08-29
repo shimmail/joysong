@@ -381,7 +381,7 @@ void main() {
                       repository: identityRepository,
                       discoverRepository: FakeDiscoverRepository(),
                       consultantOrdersRepository: consultantOrdersRepository,
-                      onOpenConsultantOrderServiceConversation: (_) =>
+                      onOpenConsultantOrderServiceConversation: (_, __) =>
                           Future.error(roleRequiredException),
                     )
                   : const Scaffold(
@@ -529,7 +529,9 @@ Widget managementApp({
         repository: identityRepository,
         discoverRepository: FakeDiscoverRepository(),
         consultantOrdersRepository: consultantOrdersRepository,
-        onOpenConsultantOrderServiceConversation: onOpenConversation,
+        onOpenConsultantOrderServiceConversation: onOpenConversation == null
+            ? null
+            : (orderId, _) => onOpenConversation(orderId),
       ),
     );
 
@@ -550,7 +552,10 @@ Widget removableManagementApp({
                 repository: identityRepository,
                 discoverRepository: FakeDiscoverRepository(),
                 consultantOrdersRepository: consultantOrdersRepository,
-                onOpenConsultantOrderServiceConversation: onOpenConversation,
+                onOpenConsultantOrderServiceConversation:
+                    onOpenConversation == null
+                        ? null
+                        : (orderId, _) => onOpenConversation(orderId),
               )
             : const Scaffold(
                 body: SizedBox(key: Key('management-removed')),

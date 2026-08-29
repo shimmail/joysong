@@ -533,7 +533,9 @@ class DmThreadController extends ChangeNotifier {
     this.firstMessageLimitApplies = false,
     bool waitingForReply = false,
     int pageSize = 30,
+    Future<bool> Function(Object error)? sendErrorHandler,
   })  : _repository = repository,
+        _sendErrorHandler = sendErrorHandler,
         _waitingForReply = waitingForReply,
         pager = TimeCursorPager<DmMessage>(
           loader: ({required limit, before}) => repository.getDmMessages(
@@ -549,12 +551,14 @@ class DmThreadController extends ChangeNotifier {
   }
 
   final MessagingRepository _repository;
+  final Future<bool> Function(Object error)? _sendErrorHandler;
   final String conversationId;
   final String currentUserId;
   final bool firstMessageLimitApplies;
   final TimeCursorPager<DmMessage> pager;
   bool _waitingForReply;
   bool _hasConversationHistory = false;
+  bool _disposed = false;
   bool get waitingForReply => firstMessageLimitApplies && _waitingForReply;
   bool get canSend => !isSending && !waitingForReply;
   bool isSending = false;
@@ -594,7 +598,7 @@ class DmThreadController extends ChangeNotifier {
     String content, {
     required String messageType,
   }) async {
-    if (isSending || content.trim().isEmpty) return;
+    if (_disposed || isSending || content.trim().isEmpty) return;
     if (waitingForReply) {
       sendError = '请等待对方回复后再发送消息';
       notifyListeners();
@@ -617,10 +621,17 @@ class DmThreadController extends ChangeNotifier {
         _waitingForReply = true;
       }
     } on Object catch (error) {
-      sendError = _messageFor(error);
+      var handled = false;
+      final handler = _sendErrorHandler;
+      if (!_disposed && handler != null) {
+        handled = await handler(error);
+      }
+      if (!_disposed && !handled) {
+        sendError = _messageFor(error);
+      }
     } finally {
       isSending = false;
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -649,6 +660,8 @@ class DmThreadController extends ChangeNotifier {
 
   @override
   void dispose() {
+    if (_disposed) return;
+    _disposed = true;
     pager.removeListener(notifyListeners);
     pager.dispose();
     super.dispose();

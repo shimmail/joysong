@@ -941,6 +941,7 @@ class _AppShellState extends State<AppShell> {
     String orderId, {
     bool fallbackToOrdersOnFailure = false,
     bool propagateConsultantRoleRequired = false,
+    Future<void> Function()? onConsultantRoleRequired,
   }) async {
     final repository = _messagingRepository;
     final id = orderId.trim();
@@ -951,6 +952,7 @@ class _AppShellState extends State<AppShell> {
       await _openDmThread(
         conversation,
         orderConversationRefreshed: true,
+        onConsultantRoleRequired: onConsultantRoleRequired,
       );
     } on ApiException catch (error) {
       if (propagateConsultantRoleRequired &&
@@ -983,10 +985,14 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
-  Future<void> _openConsultantOrderServiceConversation(String orderId) =>
+  Future<void> _openConsultantOrderServiceConversation(
+    String orderId,
+    Future<void> Function() onConsultantRoleRequired,
+  ) =>
       _openOrderServiceConversation(
         orderId,
         propagateConsultantRoleRequired: true,
+        onConsultantRoleRequired: onConsultantRoleRequired,
       );
 
   Future<void> _openDiaryEditor(
@@ -1234,6 +1240,7 @@ class _AppShellState extends State<AppShell> {
     DmConversation conversation, {
     String? title,
     bool orderConversationRefreshed = false,
+    Future<void> Function()? onConsultantRoleRequired,
   }) async {
     final repository = _messagingRepository;
     if (repository == null) {
@@ -1256,9 +1263,17 @@ class _AppShellState extends State<AppShell> {
         if (!mounted) return;
         sendEnabled = activeConversation.serviceMessagingEnabled;
         refreshSendEnabled = () async {
-          final refreshedConversation =
-              await repository.createOrderServiceConversation(orderId);
-          return refreshedConversation.serviceMessagingEnabled;
+          try {
+            final refreshedConversation =
+                await repository.createOrderServiceConversation(orderId);
+            return refreshedConversation.serviceMessagingEnabled;
+          } on ApiException catch (error) {
+            if (error.errorCode == 'CONSULTANT_ROLE_REQUIRED' &&
+                onConsultantRoleRequired != null) {
+              await onConsultantRoleRequired();
+            }
+            rethrow;
+          }
         };
       } on Object {
         if (!mounted) return;
@@ -1280,12 +1295,23 @@ class _AppShellState extends State<AppShell> {
     ]);
     if (!mounted) return;
     unawaited(_messagingController?.clearUnread(activeConversation.id));
+    final consultantRoleRequired = onConsultantRoleRequired;
     final controller = DmThreadController(
       repository: repository,
       conversationId: activeConversation.id,
       currentUserId: widget.currentUserId,
       firstMessageLimitApplies: activeConversation.firstMessageLimitApplies,
       waitingForReply: activeConversation.waitingForReply,
+      sendErrorHandler: consultantRoleRequired == null
+          ? null
+          : (error) async {
+              if (error is! ApiException ||
+                  error.errorCode != 'CONSULTANT_ROLE_REQUIRED') {
+                return false;
+              }
+              await consultantRoleRequired();
+              return true;
+            },
     );
     await _contentNavigator.push<void>(
       MaterialPageRoute(

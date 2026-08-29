@@ -20,6 +20,10 @@ import 'package:joysong_flutter/features/professional_management/presentation/pr
 typedef IdentityFilePicker = Future<IdentityFileDraft?> Function(
     IdentityDocumentType type);
 typedef InstitutionProfileImagePicker = Future<String?> Function();
+typedef ConsultantOrderServiceConversationLauncher = Future<void> Function(
+  String orderId,
+  Future<void> Function() onConsultantRoleRequired,
+);
 
 class IdentityCenterPage extends StatefulWidget {
   const IdentityCenterPage({
@@ -557,7 +561,7 @@ class ManagementCenterPage extends StatefulWidget {
   final IdentityRepository repository;
   final DiscoverRepository discoverRepository;
   final ConsultantOrdersRepository? consultantOrdersRepository;
-  final Future<void> Function(String orderId)?
+  final ConsultantOrderServiceConversationLauncher?
       onOpenConsultantOrderServiceConversation;
   final InstitutionProfileImagePicker? institutionImagePicker;
   final Future<String?> Function()? doctorImagePicker;
@@ -721,7 +725,7 @@ class _ManagementCapabilities extends StatelessWidget {
   final IdentityRepository repository;
   final DiscoverRepository discoverRepository;
   final ConsultantOrdersRepository? consultantOrdersRepository;
-  final Future<void> Function(String orderId)?
+  final ConsultantOrderServiceConversationLauncher?
       onOpenConsultantOrderServiceConversation;
   final Future<void> Function() onConsultantRoleRequired;
   final Future<void> Function() onRefresh;
@@ -1123,8 +1127,11 @@ class _ManagementCapabilities extends StatelessWidget {
         MaterialPageRoute(
           builder: (_) => ConsultantOrdersPage(
             repository: consultantOrdersRepository!,
-            onOpenServiceConversation:
-                onOpenConsultantOrderServiceConversation!,
+            onOpenServiceConversation: (orderId) =>
+                onOpenConsultantOrderServiceConversation!(
+              orderId,
+              onConsultantRoleRequired,
+            ),
             onConsultantRoleRequired: onConsultantRoleRequired,
           ),
         ),

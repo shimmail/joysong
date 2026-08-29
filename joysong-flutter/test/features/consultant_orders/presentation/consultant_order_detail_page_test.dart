@@ -195,6 +195,104 @@ void main() {
     },
   );
 
+  testWidgets(
+    'late role-required conversation error after disposal skips role callback',
+    (tester) async {
+      final repository = FakeDetailRepository()
+        ..enqueueDetail(detail(id: 'late-role'));
+      final conversation = Completer<void>();
+      var showPage = true;
+      var roleRequiredCalls = 0;
+      late StateSetter setHostState;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          locale: const Locale('zh'),
+          supportedLocales: supportedTestLocales,
+          localizationsDelegates: testLocalizationDelegates,
+          home: StatefulBuilder(
+            builder: (context, setState) {
+              setHostState = setState;
+              return showPage
+                  ? ConsultantOrderDetailPage(
+                      repository: repository,
+                      orderId: 'late-role',
+                      onOpenServiceConversation: (_) => conversation.future,
+                      onConsultantRoleRequired: () async {
+                        roleRequiredCalls += 1;
+                      },
+                    )
+                  : const Scaffold(body: Text('next page'));
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('订单沟通'));
+      await tester.tap(find.text('订单沟通'));
+      await tester.pump();
+
+      setHostState(() => showPage = false);
+      await tester.pump();
+      conversation.completeError(roleRequiredException);
+      await tester.pumpAndSettle();
+
+      expect(find.text('next page'), findsOneWidget);
+      expect(roleRequiredCalls, 0);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'in-flight detail role loss uses the latest role callback',
+    (tester) async {
+      final detailLoad = Completer<ConsultantOrderDetail>();
+      final repository = FakeDetailRepository()
+        ..enqueueDetailFuture(detailLoad.future);
+      var oldRoleRequiredCalls = 0;
+      var newRoleRequiredCalls = 0;
+      Future<void> Function() roleCallback = () async {
+        oldRoleRequiredCalls += 1;
+      };
+      late StateSetter setHostState;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          locale: const Locale('zh'),
+          supportedLocales: supportedTestLocales,
+          localizationsDelegates: testLocalizationDelegates,
+          home: StatefulBuilder(
+            builder: (context, setState) {
+              setHostState = setState;
+              return ConsultantOrderDetailPage(
+                repository: repository,
+                orderId: 'callback-role',
+                onOpenServiceConversation: (_) async {},
+                onConsultantRoleRequired: roleCallback,
+              );
+            },
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(repository.orderIds, ['callback-role']);
+
+      setHostState(() {
+        roleCallback = () async {
+          newRoleRequiredCalls += 1;
+        };
+      });
+      await tester.pump();
+      detailLoad.completeError(roleRequiredException);
+      await tester.pumpAndSettle();
+
+      expect(repository.orderIds, ['callback-role']);
+      expect(oldRoleRequiredCalls, 0);
+      expect(newRoleRequiredCalls, 1);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('other conversation failures show only local bilingual messages', (
     tester,
   ) async {
@@ -410,6 +508,10 @@ final class FakeDetailRepository implements ConsultantOrdersRepository {
 
   void enqueueDetailError(Object error) {
     _detailResponses.add(() => Future.error(error));
+  }
+
+  void enqueueDetailFuture(Future<ConsultantOrderDetail> value) {
+    _detailResponses.add(() => value);
   }
 
   @override

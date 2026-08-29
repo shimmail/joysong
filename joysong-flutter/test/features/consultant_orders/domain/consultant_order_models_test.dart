@@ -1,5 +1,7 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/features/consultant_orders/domain/consultant_order_models.dart';
+import 'package:joysong_flutter/features/consultant_orders/presentation/consultant_order_card.dart';
 
 const summaryJson = <String, Object?>{
   'id': 'order-1',
@@ -456,6 +458,70 @@ void main() {
     expect(jsonKeys(detailJson).intersection(forbiddenKeys), isEmpty);
     expect(summaryJson.keys.toSet(), approvedSummaryKeys);
   });
+
+  testWidgets(
+    'forbidden server fields are discarded before model rendering',
+    (tester) async {
+      const privateValue = 'PRIVATE_SERVER_ONLY_VALUE';
+      final serverJson = <String, Object?>{
+        ...summaryJson,
+        'userPhone': privateValue,
+        'realName': privateValue,
+        'verifyCode': privateValue,
+        'verificationCode': privateValue,
+        'price': privateValue,
+        'payment': <String, Object?>{'transaction': privateValue},
+        'refundAmount': privateValue,
+        'evidenceUrl': privateValue,
+        'settlement': <String, Object?>{'account': privateValue},
+        'statusLogs': <Object?>[privateValue],
+        'project': <String, Object?>{
+          ...(summaryJson['project']! as Map<String, Object?>),
+          'coverImage': '',
+          'price': privateValue,
+        },
+        'customer': <String, Object?>{
+          ...(summaryJson['customer']! as Map<String, Object?>),
+          'avatar': null,
+          'phone': privateValue,
+          'realName': privateValue,
+        },
+      };
+      expect(jsonKeys(serverJson).intersection({
+        ...forbiddenKeys,
+        'userPhone',
+        'verifyCode',
+        'refundAmount',
+        'evidenceUrl',
+      }), isNotEmpty);
+
+      final summary = ConsultantOrderSummary.fromJson(serverJson);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: ConsultantOrderCard(summary: summary)),
+        ),
+      );
+      await tester.pump();
+
+      expect(summary.customer.displayName, '用户一');
+      final modelStrings = <String>[
+        summary.id,
+        summary.orderNo,
+        summary.status,
+        summary.refundStatus,
+        summary.project.id,
+        summary.project.name,
+        summary.project.coverImage,
+        summary.institution.id,
+        summary.institution.name,
+        summary.customer.displayName,
+        summary.customer.avatar ?? '',
+      ];
+      expect(modelStrings.join('|'), isNot(contains(privateValue)));
+      expect(find.textContaining(privateValue), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }
 
 Set<String> jsonKeys(Object? value) {

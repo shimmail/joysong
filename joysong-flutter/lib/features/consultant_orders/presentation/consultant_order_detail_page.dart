@@ -45,8 +45,11 @@ class _ConsultantOrderDetailPageState
       ConsultantOrderDetailController(
         widget.repository,
         orderId: widget.orderId,
-        onConsultantRoleRequired: widget.onConsultantRoleRequired,
+        onConsultantRoleRequired: _handleDetailRoleRequired,
       );
+
+  Future<void> _handleDetailRoleRequired() =>
+      mounted ? widget.onConsultantRoleRequired() : Future<void>.value();
 
   @override
   void didUpdateWidget(covariant ConsultantOrderDetailPage oldWidget) {
@@ -177,7 +180,7 @@ class _ConsultantOrderDetailPageState
       if (!mounted) return;
     } on ApiException catch (error) {
       if (error.errorCode == 'CONSULTANT_ROLE_REQUIRED') {
-        if (_conversationRoleRequiredHandled) return;
+        if (!mounted || _conversationRoleRequiredHandled) return;
         _conversationRoleRequiredHandled = true;
         await widget.onConsultantRoleRequired();
         if (!mounted) return;
