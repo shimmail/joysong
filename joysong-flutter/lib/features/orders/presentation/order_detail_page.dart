@@ -4,6 +4,7 @@ import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/core/translation/auto_translation_builder.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
 import 'package:joysong_flutter/features/orders/domain/payment_models.dart';
+import 'package:joysong_flutter/features/orders/domain/refund_evidence_models.dart';
 import 'package:joysong_flutter/features/orders/presentation/orders_controller.dart';
 import 'package:joysong_flutter/features/orders/presentation/payment_action_launcher.dart';
 import 'package:joysong_flutter/features/orders/presentation/payment_controller.dart';
@@ -82,23 +83,39 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
   }
 
   Future<void> _requestRefund() async {
-    final draft = await Navigator.of(context).push<OrderRefundDraft>(
+    final order = widget.controller.order;
+    if (order == null) return;
+    await Navigator.of(context).push<void>(
       MaterialPageRoute(
         builder: (_) => RefundApplyPage(
-          order: widget.controller.order!,
-          canUploadEvidence: widget.socialController != null,
-          onPickEvidence: () => _pickAndUpload(PublicMediaPurpose.review),
+          order: order,
+          canUploadLegacyEvidence:
+              !order.isTravelGroundServiceOnly && widget.socialController != null,
+          onPickLegacyEvidence: !order.isTravelGroundServiceOnly
+              ? () => _pickAndUpload(PublicMediaPurpose.review)
+              : null,
+          onPickRefundEvidence: order.isTravelGroundServiceOnly
+              ? () async {
+                  final picked = await widget.filePicker.pickRefundEvidence();
+                  if (picked == null) return null;
+                  return RefundEvidenceDraft(
+                    bytes: picked.bytes,
+                    fileName: picked.fileName,
+                    contentType: picked.mimeType,
+                  );
+                }
+              : null,
+          onSubmit: (draft) => widget.controller.requestRefund(
+            reason: draft.reason,
+            description: draft.description,
+            reasonCode: draft.reasonCode,
+            evidenceUrl: draft.evidenceUrl,
+            evidenceFiles: draft.evidenceFiles,
+          ),
           enableAutoTranslation: widget.enableAutoTranslation,
         ),
       ),
     );
-    if (draft != null && mounted) {
-      await widget.controller.requestRefund(
-        reason: draft.reason,
-        description: draft.description,
-        evidenceUrl: draft.evidenceUrl,
-      );
-    }
   }
 
   Future<String?> _pickAndUpload(
@@ -828,6 +845,19 @@ class _RefundCard extends StatelessWidget {
               retryToken: refund,
             ),
           ),
+        if (refund.evidenceFiles.isNotEmpty)
+          _DetailLine.widget(
+            label: _isEnglish(context)
+                ? 'Evidence (${refund.evidenceFiles.length})'
+                : '退款凭证（${refund.evidenceFiles.length}）',
+            value: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final evidence in refund.evidenceFiles)
+                  Text(evidence.originalName),
+              ],
+            ),
+          ),
         if (refund.rejectReason?.trim().isNotEmpty == true)
           _DetailLine.widget(
             label: _isEnglish(context) ? 'Rejection reason' : '驳回原因',
@@ -1396,26 +1426,34 @@ final class OrderRefundDraft {
   const OrderRefundDraft({
     required this.reason,
     required this.description,
-    required this.evidenceUrl,
+    this.reasonCode,
+    this.evidenceUrl = '',
+    this.evidenceFiles = const [],
   });
 
   final String reason;
   final String description;
+  final String? reasonCode;
   final String evidenceUrl;
+  final List<RefundEvidenceDraft> evidenceFiles;
 }
 
 class RefundApplyPage extends StatefulWidget {
   const RefundApplyPage({
     required this.order,
-    required this.canUploadEvidence,
-    required this.onPickEvidence,
+    required this.onSubmit,
+    this.canUploadLegacyEvidence = false,
+    this.onPickLegacyEvidence,
+    this.onPickRefundEvidence,
     this.enableAutoTranslation = false,
     super.key,
   });
 
   final Order order;
-  final bool canUploadEvidence;
-  final Future<String?> Function() onPickEvidence;
+  final Future<bool> Function(OrderRefundDraft draft) onSubmit;
+  final bool canUploadLegacyEvidence;
+  final Future<String?> Function()? onPickLegacyEvidence;
+  final Future<RefundEvidenceDraft?> Function()? onPickRefundEvidence;
   final bool enableAutoTranslation;
 
   @override
@@ -1427,7 +1465,12 @@ class _RefundApplyPageState extends State<RefundApplyPage> {
   final _description = TextEditingController();
   int? _selectedReasonIndex;
   String _evidenceUrl = '';
-  bool _uploading = false;
+  final List<RefundEvidenceDraft> _evidenceFiles = [];
+  bool _picking = false;
+  bool _submitting = false;
+  String? _submitError;
+
+  bool get _busy => _picking || _submitting;
 
   @override
   void dispose() {
@@ -1436,14 +1479,106 @@ class _RefundApplyPageState extends State<RefundApplyPage> {
     super.dispose();
   }
 
-  Future<void> _pickEvidence() async {
-    setState(() => _uploading = true);
-    final url = await widget.onPickEvidence();
-    if (!mounted) return;
+  Future<void> _pickLegacyEvidence() async {
+    final picker = widget.onPickLegacyEvidence;
+    if (_busy || picker == null) return;
     setState(() {
-      _uploading = false;
-      if (url != null) _evidenceUrl = url;
+      _picking = true;
+      _submitError = null;
     });
+    try {
+      final url = await picker();
+      if (!mounted) return;
+      setState(() {
+        if (url != null) _evidenceUrl = url;
+      });
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() => _submitError = _submissionMessage(error));
+    } finally {
+      if (mounted) setState(() => _picking = false);
+    }
+  }
+
+  Future<void> _pickRefundEvidence() async {
+    final picker = widget.onPickRefundEvidence;
+    if (_busy || picker == null ||
+        _evidenceFiles.length >= RefundEvidenceDraft.maxCount) {
+      return;
+    }
+    setState(() {
+      _picking = true;
+      _submitError = null;
+    });
+    try {
+      final evidence = await picker();
+      evidence?.validate();
+      if (!mounted) return;
+      setState(() {
+        if (evidence != null) _evidenceFiles.add(evidence);
+      });
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() => _submitError = _evidenceErrorMessage(error));
+    } finally {
+      if (mounted) setState(() => _picking = false);
+    }
+  }
+
+  void _removeEvidence(int position) {
+    if (_busy || position < 0 || position >= _evidenceFiles.length) return;
+    setState(() {
+      _evidenceFiles.removeAt(position);
+      _submitError = null;
+    });
+  }
+
+  Future<void> _submit(String selectedReason, bool requiresCustomReason) async {
+    if (_busy || selectedReason.isEmpty ||
+        (requiresCustomReason && _customReason.text.trim().isEmpty)) {
+      return;
+    }
+    final draft = OrderRefundDraft(
+      reason: requiresCustomReason ? _customReason.text.trim() : selectedReason,
+      description: _description.text.trim(),
+      evidenceUrl: _evidenceUrl,
+      evidenceFiles: List.unmodifiable(_evidenceFiles),
+    );
+    setState(() {
+      _submitting = true;
+      _submitError = null;
+    });
+    try {
+      final succeeded = await widget.onSubmit(draft);
+      if (!mounted) return;
+      if (succeeded) {
+        setState(() => _submitting = false);
+        Navigator.of(context).pop();
+        return;
+      }
+      setState(() => _submitError = _failureMessage());
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() => _submitError = _submissionMessage(error));
+    } finally {
+      if (mounted && _submitting) setState(() => _submitting = false);
+    }
+  }
+
+  String _failureMessage() =>
+      _isEnglish(context) ? 'Refund request failed' : '退款申请失败';
+
+  String _submissionMessage(Object error) {
+    final message = error.toString().trim();
+    return message.isEmpty ? _failureMessage() : message;
+  }
+
+  String _evidenceErrorMessage(Object error) {
+    final detail = error.toString().trim();
+    final fallback = _isEnglish(context)
+        ? 'This evidence file is not supported.'
+        : '所选退款凭证不符合要求。';
+    return detail.isEmpty ? fallback : '$fallback $detail';
   }
 
   @override
@@ -1462,7 +1597,7 @@ class _RefundApplyPageState extends State<RefundApplyPage> {
     final selectedReason =
         _selectedReasonIndex == null ? '' : reasons[_selectedReasonIndex!];
     final requiresCustomReason = _selectedReasonIndex == reasons.length - 1;
-    final canSubmit = !_uploading &&
+    final canSubmit = !_busy &&
         selectedReason.isNotEmpty &&
         (!requiresCustomReason || _customReason.text.trim().isNotEmpty);
     return Scaffold(
@@ -1488,7 +1623,7 @@ class _RefundApplyPageState extends State<RefundApplyPage> {
             clipBehavior: Clip.antiAlias,
             child: RadioGroup<int>(
               groupValue: _selectedReasonIndex,
-              onChanged: (value) => setState(() {
+              onChanged: _busy ? null : (value) => setState(() {
                 _selectedReasonIndex = value;
                 if (value != reasons.length - 1) {
                   _customReason.clear();
@@ -1516,6 +1651,7 @@ class _RefundApplyPageState extends State<RefundApplyPage> {
             TextField(
               key: const Key('refund-custom-reason-field'),
               controller: _customReason,
+              enabled: !_busy,
               onChanged: (_) => setState(() {}),
               maxLines: 2,
               maxLength: 100,
@@ -1530,8 +1666,9 @@ class _RefundApplyPageState extends State<RefundApplyPage> {
           TextField(
             key: const Key('refund-description-field'),
             controller: _description,
+            enabled: !_busy,
             maxLines: 3,
-            maxLength: 500,
+            maxLength: 1000,
             decoration: InputDecoration(
               labelText: english ? 'Additional details (optional)' : '退款说明（选填）',
               hintText: english
@@ -1539,10 +1676,55 @@ class _RefundApplyPageState extends State<RefundApplyPage> {
                   : '可补充有助于审核的信息',
             ),
           ),
-          if (widget.canUploadEvidence)
+          if (widget.order.isTravelGroundServiceOnly) ...[
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    english ? 'Refund evidence (optional)' : '退款凭证（选填）',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleSmall
+                        ?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                ),
+                Text(
+                  '${_evidenceFiles.length}/${RefundEvidenceDraft.maxCount}',
+                  key: const Key('refund-evidence-count'),
+                ),
+                IconButton(
+                  key: const Key('refund-evidence-add'),
+                  tooltip: english ? 'Add evidence' : '添加凭证',
+                  onPressed: _busy ||
+                          _evidenceFiles.length >= RefundEvidenceDraft.maxCount
+                      ? null
+                      : _pickRefundEvidence,
+                  icon: _picking
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.add_circle_outline),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            for (var position = 0; position < _evidenceFiles.length; position++)
+              _RefundEvidencePreview(
+                evidence: _evidenceFiles[position],
+                position: position,
+                english: english,
+                disabled: _busy,
+                onRemove: () => _removeEvidence(position),
+              ),
+          ],
+          if (!widget.order.isTravelGroundServiceOnly &&
+              widget.canUploadLegacyEvidence)
             ListTile(
+              key: const Key('refund-legacy-evidence-add'),
               contentPadding: EdgeInsets.zero,
-              leading: _uploading
+              leading: _picking
                   ? const SizedBox.square(
                       dimension: 22,
                       child: CircularProgressIndicator(strokeWidth: 2),
@@ -1553,33 +1735,107 @@ class _RefundApplyPageState extends State<RefundApplyPage> {
                     ? (english ? 'Add optional evidence' : '添加可选凭证')
                     : (english ? 'Evidence attached' : '已添加凭证'),
               ),
-              onTap: _uploading ? null : _pickEvidence,
+              onTap: _busy ? null : _pickLegacyEvidence,
             ),
+          if (_submitError != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              _submitError!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
         ],
       ),
       bottomNavigationBar: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: FilledButton(
-            key: const Key('refund-submit-button'),
+            key: const Key('refund-submit'),
             onPressed: !canSubmit
                 ? null
-                : () => Navigator.pop(
-                      context,
-                      OrderRefundDraft(
-                        reason: requiresCustomReason
-                            ? _customReason.text.trim()
-                            : selectedReason,
-                        description: _description.text.trim(),
-                        evidenceUrl: _evidenceUrl,
-                      ),
-                    ),
+                : () => _submit(selectedReason, requiresCustomReason),
             child: Text(english ? 'Submit' : '提交申请'),
           ),
         ),
       ),
     );
   }
+}
+
+class _RefundEvidencePreview extends StatelessWidget {
+  const _RefundEvidencePreview({
+    required this.evidence,
+    required this.position,
+    required this.english,
+    required this.disabled,
+    required this.onRemove,
+  });
+
+  final RefundEvidenceDraft evidence;
+  final int position;
+  final bool english;
+  final bool disabled;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final isImage = evidence.contentType.startsWith('image/');
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Row(
+          children: [
+            SizedBox.square(
+              dimension: 42,
+              child: isImage
+                  ? ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: Image.memory(
+                        evidence.bytes,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const Icon(
+                          Icons.image_outlined,
+                        ),
+                      ),
+                    )
+                  : Icon(
+                      evidence.contentType == 'application/pdf'
+                          ? Icons.picture_as_pdf_outlined
+                          : Icons.insert_drive_file_outlined,
+                    ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(evidence.fileName, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${evidence.contentType} · ${_formattedEvidenceSize(evidence.bytes.length)}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              key: Key('refund-evidence-remove-$position'),
+              tooltip: english ? 'Remove evidence' : '删除凭证',
+              onPressed: disabled ? null : onRemove,
+              icon: const Icon(Icons.close),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _formattedEvidenceSize(int bytes) {
+  if (bytes < 1024) return '$bytes B';
+  if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KiB';
+  return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MiB';
 }
 
 class ReviewOrderPage extends StatefulWidget {
