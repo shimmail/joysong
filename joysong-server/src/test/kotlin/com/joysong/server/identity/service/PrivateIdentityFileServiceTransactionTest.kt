@@ -103,6 +103,16 @@ class PrivateIdentityFileServiceTransactionTest {
     }
 
     @Test
+    fun `identity upload accepts a valid signed file name without an extension`() {
+        val response = service.upload("user-1", "ID_CARD_FRONT", validPng("identity-document"))
+
+        assertEquals("identity-document", response.originalName)
+        assertEquals("image/png", response.contentType)
+        assertEquals(1, count("private_files"))
+        assertTrue(singleStoredFile().fileName.toString().endsWith(".png"))
+    }
+
+    @Test
     fun `transaction rollback removes delegated identity file and metadata`() {
         lateinit var storedPath: Path
 
@@ -129,15 +139,40 @@ class PrivateIdentityFileServiceTransactionTest {
         assertEquals("image/png", download.contentType)
     }
 
+    @Test
+    fun `deleteDraft marks metadata deleted when the physical file is already missing`() {
+        val uploaded = service.upload("user-1", "ID_CARD_FRONT", validPng())
+        Files.delete(singleStoredFile())
+
+        service.deleteDraft("user-1", uploaded.fileId)
+
+        assertEquals(
+            "DELETED",
+            jdbc.queryForObject(
+                "SELECT status FROM private_files WHERE id = ?",
+                String::class.java,
+                uploaded.fileId,
+            ),
+        )
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM private_files WHERE id = ? AND deleted_at IS NOT NULL",
+                Int::class.java,
+                uploaded.fileId,
+            ),
+        )
+    }
+
     private fun count(table: String): Int = jdbc.queryForObject("SELECT COUNT(*) FROM $table", Int::class.java)!!
 
     private fun singleStoredFile(): Path = Files.walk(privateDirectory).use { paths ->
         paths.filter { Files.isRegularFile(it) }.toList().single()
     }
 
-    private fun validPng() = MockMultipartFile(
+    private fun validPng(originalName: String = "identity.png") = MockMultipartFile(
         "file",
-        "identity.png",
+        originalName,
         "image/png",
         byteArrayOf(
             0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,

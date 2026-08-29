@@ -33,6 +33,7 @@ class PrivateIdentityFileService(
             "image/webp" to "webp",
             "application/pdf" to "pdf",
         ),
+        requireMatchingExtension = false,
     )
 
     @Transactional
@@ -73,7 +74,11 @@ class PrivateIdentityFileService(
             userId,
         ) ?: 0
         if (eligible == 0) throw IllegalArgumentException("认证材料不存在、已提交或不属于当前用户")
-        val file = loadIdentityFile(fileId, "认证材料不存在、已提交或不属于当前用户")
+        val file = try {
+            privateFileStorageService.resolveActive(fileId)
+        } catch (_: IllegalArgumentException) {
+            throw IllegalArgumentException("认证材料不存在、已提交或不属于当前用户")
+        }
         jdbcTemplate.update(
             "UPDATE private_files SET status = 'DELETED', deleted_at = NOW() WHERE id = ? AND owner_user_id = ?",
             fileId,

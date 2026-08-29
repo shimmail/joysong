@@ -44,7 +44,7 @@ class PrivateFileStorageService(
             .orEmpty()
         val extensionMatches = declaredExtension == canonicalExtension ||
             (contentType == "image/jpeg" && declaredExtension == "jpeg" && canonicalExtension == "jpg")
-        require(extensionMatches) { "文件扩展名与声明格式不匹配" }
+        require(!policy.requireMatchingExtension || extensionMatches) { "文件扩展名与声明格式不匹配" }
 
         val bytes = file.bytes
         require(bytes.isNotEmpty()) { "私有文件不能为空" }
@@ -104,6 +104,12 @@ class PrivateFileStorageService(
     }
 
     fun loadActive(fileId: String): PrivateFileDownload {
+        val file = resolveActive(fileId)
+        if (!Files.isRegularFile(file.path)) throw IllegalArgumentException(PRIVATE_FILE_NOT_FOUND)
+        return file
+    }
+
+    internal fun resolveActive(fileId: String): PrivateFileDownload {
         val metadata = jdbcTemplate.query(
             """
             SELECT storage_key, original_name, content_type
@@ -124,7 +130,6 @@ class PrivateFileStorageService(
         } catch (_: IllegalArgumentException) {
             throw IllegalArgumentException(PRIVATE_FILE_NOT_FOUND)
         }
-        if (!Files.isRegularFile(path)) throw IllegalArgumentException(PRIVATE_FILE_NOT_FOUND)
         return PrivateFileDownload(
             path = path,
             originalName = metadata.second.ifBlank { fileId },

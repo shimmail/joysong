@@ -5,6 +5,7 @@ import java.nio.file.Path
 data class PrivateFilePolicy(
     val allowedContentTypes: Map<String, String>,
     val maxFileSizeBytes: Long = 10L * 1024 * 1024,
+    val requireMatchingExtension: Boolean = true,
 )
 
 data class StoredPrivateFile(
