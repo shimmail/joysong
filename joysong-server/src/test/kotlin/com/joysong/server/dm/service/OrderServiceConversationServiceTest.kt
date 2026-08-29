@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.params.ParameterizedTest
@@ -32,6 +33,16 @@ class OrderServiceConversationServiceTest {
     private val conversationRepository = mockk<DmConversationRepository>()
     private val policy = mockk<ConsultantOrderAccessPolicy>(relaxed = true)
     private val service = OrderServiceConversationService(orderRepository, conversationRepository, policy)
+
+    @BeforeEach
+    fun noExistingConversationByDefault() {
+        every {
+            conversationRepository.findByConversationTypeAndOrderId(
+                DmConversationEntity.ORDER_SERVICE,
+                any()
+            )
+        } returns null
+    }
 
     @Test
     fun `unpaid order cannot create service conversation`() {
@@ -117,6 +128,27 @@ class OrderServiceConversationServiceTest {
         verify(exactly = 0) {
             conversationRepository.findByConversationTypeAndOrderId(any(), any())
         }
+    }
+
+    @Test
+    fun existingMismatchedConversationMasksInvalidOrderStateForParticipant() {
+        val legacyOrder = order(paymentFlow = "LEGACY_MEDICAL")
+        val mismatchedConversation = conversation().copy(userBId = "another-consultant")
+        every { orderRepository.findByIdForUpdate("order-1") } returns legacyOrder
+        every {
+            conversationRepository.findByConversationTypeAndOrderId(
+                DmConversationEntity.ORDER_SERVICE,
+                "order-1"
+            )
+        } returns mismatchedConversation
+
+        val error = assertThrows<OrderContractException> {
+            service.getOrCreate("order-1", "user-1")
+        }
+
+        assertEquals(HttpStatus.NOT_FOUND, error.status)
+        assertEquals(OrderContractErrorCode.ORDER_SERVICE_ACCESS_DENIED, error.errorCode)
+        verify(exactly = 0) { conversationRepository.saveAndFlush(any()) }
     }
 
     @Test

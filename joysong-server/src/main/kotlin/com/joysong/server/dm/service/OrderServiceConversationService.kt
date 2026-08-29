@@ -25,10 +25,6 @@ class OrderServiceConversationService(
         val order = orderRepository.findByIdForUpdate(orderId)
             ?: throw OrderContractException.serviceAccessDenied()
         consultantAccessPolicy.requireConversationParticipant(order, userId)
-        requireActivatedService(order)
-        if (order.status !in READABLE_STATUSES) {
-            throw OrderContractException.serviceNotActive()
-        }
 
         val existing = conversationRepository.findByConversationTypeAndOrderId(
             DmConversationEntity.ORDER_SERVICE,
@@ -36,6 +32,13 @@ class OrderServiceConversationService(
         )
         if (existing != null) {
             requireConversationMatchesOrder(existing, order)
+        }
+
+        requireActivatedService(order)
+        if (order.status !in READABLE_STATUSES) {
+            throw OrderContractException.serviceNotActive()
+        }
+        if (existing != null) {
             return existing.toResponseFor(order)
         }
 
