@@ -287,10 +287,15 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    final detailScrollable = find.descendant(
+      of: find.byKey(const Key('consultant-order-detail-scroll')),
+      matching: find.byType(Scrollable),
+    );
+    expect(detailScrollable, findsOneWidget);
     await tester.scrollUntilVisible(
       find.text('Order conversation'),
       220,
-      scrollable: find.byKey(const Key('consultant-order-detail-scroll')),
+      scrollable: detailScrollable,
     );
     await tester.pump();
 

@@ -173,10 +173,15 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('重试新增项目'), findsOneWidget);
+    final listScrollable = find.descendant(
+      of: find.byKey(const Key('consultant-orders-active-list')),
+      matching: find.byType(Scrollable),
+    );
+    expect(listScrollable, findsOneWidget);
     await tester.scrollUntilVisible(
       find.text('项目 0'),
       -300,
-      scrollable: find.byKey(const Key('consultant-orders-active-list')),
+      scrollable: listScrollable,
     );
     expect(find.text('项目 0'), findsOneWidget);
   });
@@ -278,10 +283,15 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    final listScrollable = find.descendant(
+      of: find.byKey(const Key('consultant-orders-active-list')),
+      matching: find.byType(Scrollable),
+    );
+    expect(listScrollable, findsOneWidget);
     await tester.scrollUntilVisible(
       find.text('大字号项目 9 的完整名称'),
       240,
-      scrollable: find.byKey(const Key('consultant-orders-active-list')),
+      scrollable: listScrollable,
     );
     await tester.pump();
 
