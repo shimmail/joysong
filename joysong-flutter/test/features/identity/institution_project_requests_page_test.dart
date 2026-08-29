@@ -34,7 +34,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Review details'), findsOneWidget);
-      expect(find.textContaining('已通过'), findsOneWidget);
+      expect(find.textContaining('Approved'), findsOneWidget);
       expect(
         find.textContaining('reviewed request'),
         findsOneWidget,
@@ -53,7 +53,13 @@ void main() {
           locale: const Locale('en'),
           home: InstitutionProjectRequestsPage(
             repository: _ProjectRequestsRepository(
-              requests: [_request(id: requestId, doctorId: 'doctor-1')],
+              requests: [
+                _request(
+                  id: requestId,
+                  doctorId: 'doctor-1',
+                  status: 'REJECTED',
+                ),
+              ],
             ),
             context: _doctorContext,
             initialRequestId: requestId,
@@ -63,7 +69,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Review details'), findsOneWidget);
-      expect(find.textContaining('已通过'), findsOneWidget);
+      expect(find.textContaining('Rejected'), findsOneWidget);
       expect(
         find.textContaining('reviewed request'),
         findsOneWidget,
@@ -169,9 +175,17 @@ void main() {
         detailRows.any((row) => row.data?.contains('reviewed request') == true),
         isTrue,
       );
+      expect(
+        find.byType(InstitutionProjectReviewDetailPage, skipOffstage: false),
+        findsOneWidget,
+      );
       await tester.pump();
       expect(
         find.byType(InstitutionProjectRequestsPage, skipOffstage: false),
+        findsOneWidget,
+      );
+      expect(
+        find.byType(InstitutionProjectReviewDetailPage, skipOffstage: false),
         findsOneWidget,
       );
     },

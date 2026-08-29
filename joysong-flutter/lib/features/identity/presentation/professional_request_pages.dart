@@ -1213,7 +1213,7 @@ class _InstitutionProjectRequestsPageState
         '${context.localized('医生比例', 'Doctor rate')}：${_formatNumber(split.doctorRate)}%',
       ],
       '${context.localized('申请说明', 'Notes')}：${_snapshotText(context, request.notes)}',
-      '${context.localized('申请状态', 'Request status')}：${_statusLabel(request.status)}',
+      '${context.localized('申请状态', 'Request status')}：${_statusLabel(context, request.status)}',
       '${context.localized('审核意见', 'Review note')}：${_snapshotText(context, request.reviewNote)}',
       '${context.localized('审核人', 'Reviewed by')}：${_snapshotText(context, request.reviewedBy)}',
       '${context.localized('审核时间', 'Reviewed at')}：${request.reviewedAt?.toIso8601String() ?? '-'}',
@@ -2701,7 +2701,7 @@ class _InstitutionProjectJoinRequestsPageState
                       request.serviceDescription,
                       '${context.localized('医生项目价格（USD）', 'Doctor project price (USD)')}：${_formatUsd(request.priceSuggestion)}',
                       if (request.notes.isNotEmpty) request.notes,
-                      _statusLabel(request.status),
+                      _statusLabel(context, request.status),
                       if (request.reviewNote.isNotEmpty)
                         '审核意见：${request.reviewNote}',
                     ].where((item) => item.isNotEmpty).join('\n')),
@@ -3124,7 +3124,7 @@ Widget _professionalRequestSnapshot(
       '${context.localized('按当前平台比例推导的医生净比例', 'Doctor net rate derived from the current platform rate')}：${_formatNumber(split.doctorRate)}%',
     ],
     '${context.localized('申请说明', 'Notes')}：${_snapshotText(context, request.notes)}',
-    '${context.localized('状态', 'Status')}：${_statusLabel(request.status)}',
+    '${context.localized('状态', 'Status')}：${_statusLabel(context, request.status)}',
     '${context.localized('审核意见', 'Review note')}：${_snapshotText(context, request.reviewNote)}',
     '${context.localized('提交时间', 'Submitted at')}：${request.submittedAt.toIso8601String()}',
     '${context.localized('更新时间', 'Updated at')}：${request.updatedAt.toIso8601String()}',
@@ -3245,11 +3245,11 @@ List<String> _parseCsv(String value) => value
     .where((item) => item.isNotEmpty)
     .toList();
 
-String _statusLabel(String status) => switch (status) {
-      'PENDING' => '待审核',
-      'APPROVED' => '已通过',
-      'REJECTED' => '已驳回',
-      'CHANGES_REQUESTED' => '待修改',
-      'REVOKED' => '已撤销',
+String _statusLabel(BuildContext context, String status) => switch (status) {
+      'PENDING' => context.localized('待审核', 'Pending'),
+      'APPROVED' => context.localized('已通过', 'Approved'),
+      'REJECTED' => context.localized('已驳回', 'Rejected'),
+      'CHANGES_REQUESTED' => context.localized('待修改', 'Changes requested'),
+      'REVOKED' => context.localized('已撤销', 'Revoked'),
       _ => status,
     };
