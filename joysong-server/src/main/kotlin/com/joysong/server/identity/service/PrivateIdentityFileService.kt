@@ -60,18 +60,23 @@ class PrivateIdentityFileService(
     @Transactional
     fun deleteDraft(userId: String, fileId: String) {
         lifecycleGuard.requireActiveForWrite(userId)
+        val identityPurposePlaceholders = IDENTITY_DOCUMENT_TYPES.joinToString(",") { "?" }
+        val eligibilityArguments = arrayOf(fileId, userId, *IDENTITY_DOCUMENT_TYPES.toTypedArray())
         val eligible = jdbcTemplate.queryForObject(
             """
             SELECT COUNT(*)
             FROM private_files pf
             WHERE pf.id = ? AND pf.owner_user_id = ? AND pf.status = 'ACTIVE' AND pf.deleted_at IS NULL
+              AND pf.purpose IN ($identityPurposePlaceholders)
               AND NOT EXISTS (
                 SELECT 1 FROM identity_application_documents iad WHERE iad.file_id = pf.id
               )
+              AND NOT EXISTS (
+                SELECT 1 FROM refund_evidence_files ref WHERE ref.file_id = pf.id
+              )
             """.trimIndent(),
             Int::class.java,
-            fileId,
-            userId,
+            *eligibilityArguments,
         ) ?: 0
         if (eligible == 0) throw IllegalArgumentException("认证材料不存在、已提交或不属于当前用户")
         val file = try {

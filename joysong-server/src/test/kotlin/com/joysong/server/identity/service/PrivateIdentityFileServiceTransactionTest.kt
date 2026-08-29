@@ -7,6 +7,7 @@ import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -72,6 +73,9 @@ class PrivateIdentityFileServiceTransactionTest {
             """.trimIndent(),
         )
         jdbc.execute("CREATE TABLE identity_application_documents (file_id VARCHAR(36) PRIMARY KEY)")
+        jdbc.execute(
+            "CREATE TABLE refund_evidence_files (file_id VARCHAR(36) PRIMARY KEY, refund_id VARCHAR(36) NOT NULL, position INT NOT NULL)"
+        )
         val lifecycleGuard = mockk<AccountLifecycleGuard> {
             every { requireActiveForWrite(any()) } returns mockk(relaxed = true)
         }
@@ -158,6 +162,39 @@ class PrivateIdentityFileServiceTransactionTest {
             1,
             jdbc.queryForObject(
                 "SELECT COUNT(*) FROM private_files WHERE id = ? AND deleted_at IS NOT NULL",
+                Int::class.java,
+                uploaded.fileId,
+            ),
+        )
+    }
+
+    @Test
+    fun `identity draft deletion cannot remove bound refund evidence`() {
+        val uploaded = service.upload("user-1", "ID_CARD_FRONT", validPng("refund.png"))
+        jdbc.update("UPDATE private_files SET purpose = 'REFUND_EVIDENCE' WHERE id = ?", uploaded.fileId)
+        jdbc.update(
+            "INSERT INTO refund_evidence_files (file_id, refund_id, position) VALUES (?, 'refund-1', 0)",
+            uploaded.fileId,
+        )
+        val storedPath = singleStoredFile()
+
+        assertThrows(IllegalArgumentException::class.java) {
+            service.deleteDraft("user-1", uploaded.fileId)
+        }
+
+        assertTrue(Files.isRegularFile(storedPath))
+        assertEquals(
+            "ACTIVE",
+            jdbc.queryForObject(
+                "SELECT status FROM private_files WHERE id = ?",
+                String::class.java,
+                uploaded.fileId,
+            ),
+        )
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "SELECT COUNT(*) FROM refund_evidence_files WHERE file_id = ?",
                 Int::class.java,
                 uploaded.fileId,
             ),
