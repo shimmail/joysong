@@ -332,6 +332,30 @@ class NotificationServiceLocalizationTest {
                 "Your consultant institution relationship application was rejected. Reason: 机构名不一致"
             ),
             NotificationCase(
+                "INSTITUTION_PROJECT_APPLICATION_SUBMITTED",
+                "institution_project_review",
+                "新的机构项目申请",
+                "有新的机构项目申请待审核。",
+                "New institution project application",
+                "A new institution project application is awaiting review."
+            ),
+            NotificationCase(
+                "INSTITUTION_PROJECT_APPLICATION_APPROVED",
+                "institution_project_application",
+                "机构项目申请已通过",
+                "您的机构项目申请已通过。",
+                "Institution project application approved",
+                "Your institution project application has been approved."
+            ),
+            NotificationCase(
+                "INSTITUTION_PROJECT_APPLICATION_REJECTED",
+                "institution_project_application",
+                "机构项目申请未通过",
+                "您的机构项目申请未通过：材料不全",
+                "Institution project application rejected",
+                "Your institution project application was rejected. Reason: 材料不全"
+            ),
+            NotificationCase(
                 "IDENTITY_APPLICATION_APPROVED",
                 "identity_management",
                 "身份认证已通过",

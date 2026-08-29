@@ -22,7 +22,9 @@ class BusinessNotificationService(
             JOIN user_roles ur ON ur.user_id = im.user_id
               AND ur.role_code = 'INSTITUTION_LEGAL_REPRESENTATIVE'
               AND ur.status = 'ACTIVE'
-            JOIN users u ON u.id = im.user_id AND u.deleted_at IS NULL
+            JOIN users u ON u.id = im.user_id
+              AND u.account_state = 'ACTIVE'
+              AND u.deleted_at IS NULL
             WHERE im.institution_id = ?
               AND im.member_role IN ('INSTITUTION_LEGAL_REPRESENTATIVE', 'LEGAL_REPRESENTATIVE')
               AND im.status = 'APPROVED'
@@ -145,6 +147,36 @@ class BusinessNotificationService(
         "${applicantRole.label}机构关系申请未通过",
         withReviewNote("您的${applicantRole.label}机构关系申请未通过", reviewNote)
     )
+
+    fun institutionProjectApplicationSubmitted(institutionId: String, requestId: String) =
+        notify(
+            recipients = currentLegalRepresentativeIds(institutionId),
+            type = "INSTITUTION_PROJECT_APPLICATION_SUBMITTED",
+            title = "新的机构项目申请",
+            content = "有新的机构项目申请待审核。",
+            targetType = "institution_project_review",
+            targetId = requestId
+        )
+
+    fun institutionProjectApplicationApproved(applicantId: String, requestId: String) =
+        notify(
+            recipients = listOf(applicantId),
+            type = "INSTITUTION_PROJECT_APPLICATION_APPROVED",
+            title = "机构项目申请已通过",
+            content = "您的机构项目申请已通过。",
+            targetType = "institution_project_application",
+            targetId = requestId
+        )
+
+    fun institutionProjectApplicationRejected(applicantId: String, requestId: String, reviewNote: String) =
+        notify(
+            recipients = listOf(applicantId),
+            type = "INSTITUTION_PROJECT_APPLICATION_REJECTED",
+            title = "机构项目申请未通过",
+            content = withReviewNote("您的机构项目申请未通过", reviewNote),
+            targetType = "institution_project_application",
+            targetId = requestId
+        )
 
     fun identityApplicationApproved(applicantId: String, applicationId: String) =
         notify(

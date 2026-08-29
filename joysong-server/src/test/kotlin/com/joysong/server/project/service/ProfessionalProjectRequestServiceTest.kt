@@ -8,6 +8,7 @@ import com.joysong.server.common.GlobalExceptionHandler
 import com.joysong.server.config.OrderSplitProperties
 import com.joysong.server.identity.service.InstitutionRelationshipReviewAuthorityOperations
 import com.joysong.server.identity.service.ManagementActor
+import com.joysong.server.notification.service.BusinessNotificationService
 import com.joysong.server.order.service.OrderSplitRatePolicy
 import com.joysong.server.institution.service.ProjectChangeContractException
 import com.joysong.server.institution.service.ProjectChangeErrorCode
@@ -36,12 +37,14 @@ class ProfessionalProjectRequestServiceTest {
     })
     private val reviewAuthority = mockk<InstitutionRelationshipReviewAuthorityOperations>(relaxed = true)
     private val cacheManager = mockk<CacheManager>(relaxed = true)
+    private val businessNotifications = mockk<BusinessNotificationService>(relaxed = true)
     private val service = ProfessionalProjectRequestService(
         jdbcTemplate,
         objectMapper,
         splitRatePolicy,
         reviewAuthority,
         cacheManager,
+        businessNotifications,
         InstitutionProjectPayloadPolicy()
     )
 
@@ -81,6 +84,9 @@ class ProfessionalProjectRequestServiceTest {
 
         assertEquals("PLATFORM", result.requestType)
         assertEquals("PENDING", result.status)
+        verify(exactly = 0) {
+            businessNotifications.institutionProjectApplicationSubmitted(any(), any())
+        }
         verify(exactly = 1) {
             jdbcTemplate.update(
                 match<String> {
@@ -147,6 +153,9 @@ class ProfessionalProjectRequestServiceTest {
                 BigDecimal("10.00"), BigDecimal("15.00"), BigDecimal("25.00"),
                 "institution note"
             )
+        }
+        verify(exactly = 1) {
+            businessNotifications.institutionProjectApplicationSubmitted("institution-1", result.id)
         }
     }
 
@@ -625,6 +634,12 @@ class ProfessionalProjectRequestServiceTest {
                 BigDecimal.ZERO, 0, 1
             )
         }
+        verify(exactly = 0) {
+            businessNotifications.institutionProjectApplicationApproved(any(), any())
+        }
+        verify(exactly = 0) {
+            businessNotifications.institutionProjectApplicationRejected(any(), any(), any())
+        }
     }
 
     @Test
@@ -818,6 +833,13 @@ class ProfessionalProjectRequestServiceTest {
             reviewAuthority.requireCurrentAuthority(actor, "institution-1")
         }
         verify(exactly = 0) { cacheManager.getCache(any()) }
+        verify(exactly = 1) {
+            businessNotifications.institutionProjectApplicationRejected(
+                "doctor-1",
+                "request-1",
+                "Not eligible"
+            )
+        }
     }
 
     @Test
@@ -833,6 +855,26 @@ class ProfessionalProjectRequestServiceTest {
                 match<String> { it.contains("UPDATE professional_project_requests") },
                 "APPROVED", null, "admin-1", any(), null, "request-1"
             )
+        }
+    }
+
+    @Test
+    fun `platform rejection does not send institution project application notifications`() {
+        stubLockedRequest(targetResultSet("PLATFORM", null))
+        every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 1
+
+        val result = service.reviewPlatform(
+            adminActor(),
+            "request-1",
+            ProjectRequestReview("REJECTED", "Not eligible")
+        )
+
+        assertEquals("REJECTED", result.status)
+        verify(exactly = 0) {
+            businessNotifications.institutionProjectApplicationApproved(any(), any())
+        }
+        verify(exactly = 0) {
+            businessNotifications.institutionProjectApplicationRejected(any(), any(), any())
         }
     }
 
@@ -859,6 +901,33 @@ class ProfessionalProjectRequestServiceTest {
         }
 
         assertEquals("项目申请已被其他审核人处理", error.message)
+    }
+
+    @Test
+    fun `institution compare and set loss creates no applicant notification`() {
+        stubLockedRequest(targetResultSet("INSTITUTION", "institution-1"))
+        stubInstitutionLock(found = true)
+        stubRelationshipLock(found = true)
+        stubCurrentProject(found = true)
+        stubInstitutionProjectLookup(found = false)
+        every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 1
+        every {
+            jdbcTemplate.update(
+                match<String> { it.contains("UPDATE professional_project_requests") },
+                *anyVararg()
+            )
+        } returns 0
+
+        assertThrows<ProfessionalProjectRequestConflictException> {
+            service.reviewInstitution(adminActor(), "request-1", ProjectRequestReview("APPROVED"))
+        }
+
+        verify(exactly = 0) {
+            businessNotifications.institutionProjectApplicationApproved(any(), any())
+        }
+        verify(exactly = 0) {
+            businessNotifications.institutionProjectApplicationRejected(any(), any(), any())
+        }
     }
 
     @Test
@@ -963,6 +1032,9 @@ class ProfessionalProjectRequestServiceTest {
         }
         verify(exactly = 1) {
             jdbcTemplate.update(match<String> { it.contains("UPDATE professional_project_requests") }, *anyVararg())
+        }
+        verify(exactly = 1) {
+            businessNotifications.institutionProjectApplicationApproved("doctor-1", "request-1")
         }
     }
 

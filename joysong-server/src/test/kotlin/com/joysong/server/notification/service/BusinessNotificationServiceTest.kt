@@ -149,6 +149,34 @@ class BusinessNotificationServiceTest {
     }
 
     @Test
+    fun `institution project application lifecycle uses legal review and doctor application targets`() {
+        val fixture = fixture(legalRepresentatives = listOf("legal-1", "legal-1", "legal-2"))
+
+        fixture.service.institutionProjectApplicationSubmitted("institution-1", "request-1")
+        fixture.service.institutionProjectApplicationApproved("doctor-1", "request-2")
+        fixture.service.institutionProjectApplicationRejected("doctor-1", "request-3", " 资料不完整 ")
+
+        assertEquals(
+            listOf(
+                Emission("legal-1", "INSTITUTION_PROJECT_APPLICATION_SUBMITTED", "新的机构项目申请", "有新的机构项目申请待审核。", "institution_project_review", "request-1"),
+                Emission("legal-2", "INSTITUTION_PROJECT_APPLICATION_SUBMITTED", "新的机构项目申请", "有新的机构项目申请待审核。", "institution_project_review", "request-1"),
+                Emission("doctor-1", "INSTITUTION_PROJECT_APPLICATION_APPROVED", "机构项目申请已通过", "您的机构项目申请已通过。", "institution_project_application", "request-2"),
+                Emission("doctor-1", "INSTITUTION_PROJECT_APPLICATION_REJECTED", "机构项目申请未通过", "您的机构项目申请未通过：资料不完整", "institution_project_application", "request-3")
+            ),
+            fixture.emissions
+        )
+    }
+
+    @Test
+    fun `institution project submission with no active legal representatives creates no notifications`() {
+        val fixture = fixture()
+
+        fixture.service.institutionProjectApplicationSubmitted("institution-1", "request-1")
+
+        assertTrue(fixture.emissions.isEmpty())
+    }
+
+    @Test
     fun `legal representative resolution requires an active role approved non-revoked membership and active user`() {
         val fixture = fixture(legalRepresentatives = listOf("legal-1", "legal-1", "legal-2"))
 

@@ -5,8 +5,10 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.joysong.server.config.OrderSplitProperties
 import com.joysong.server.identity.service.InstitutionRelationshipReviewAuthorityOperations
 import com.joysong.server.identity.service.ManagementActor
+import com.joysong.server.notification.service.BusinessNotificationService
 import com.joysong.server.order.service.OrderSplitRatePolicy
 import com.joysong.server.support.WorktreeTestDatabase
+import io.mockk.mockk
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
@@ -540,7 +542,8 @@ class ProfessionalProjectRequestPersistenceTest {
         objectMapper,
         OrderSplitRatePolicy(OrderSplitProperties().apply { platformRate = BigDecimal("40.00") }),
         authority,
-        cacheManager
+        cacheManager,
+        mockk<BusinessNotificationService>(relaxed = true)
     )
 
     private fun requestStatus(id: String): String = jdbc.queryForObject(

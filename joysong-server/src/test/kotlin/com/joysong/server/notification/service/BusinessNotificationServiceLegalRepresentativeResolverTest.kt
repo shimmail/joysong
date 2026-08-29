@@ -18,6 +18,7 @@ class BusinessNotificationServiceLegalRepresentativeResolverTest {
         insertUser(jdbcTemplate, "inactive-role")
         insertUser(jdbcTemplate, "pending-membership")
         insertUser(jdbcTemplate, "revoked-membership")
+        insertUser(jdbcTemplate, "suspended-user", accountState = "ADMIN_SUSPENDED")
         insertUser(jdbcTemplate, "deleted-user", deleted = true)
         insertUser(jdbcTemplate, "wrong-role-code")
         insertUser(jdbcTemplate, "wrong-member-role")
@@ -26,6 +27,7 @@ class BusinessNotificationServiceLegalRepresentativeResolverTest {
         insertRole(jdbcTemplate, "inactive-role", status = "INACTIVE")
         insertRole(jdbcTemplate, "pending-membership")
         insertRole(jdbcTemplate, "revoked-membership")
+        insertRole(jdbcTemplate, "suspended-user")
         insertRole(jdbcTemplate, "deleted-user")
         insertRole(jdbcTemplate, "wrong-role-code", roleCode = "CONSULTANT")
         insertRole(jdbcTemplate, "wrong-member-role")
@@ -35,6 +37,7 @@ class BusinessNotificationServiceLegalRepresentativeResolverTest {
         insertMembership(jdbcTemplate, "inactive-role")
         insertMembership(jdbcTemplate, "pending-membership", status = "PENDING")
         insertMembership(jdbcTemplate, "revoked-membership", revoked = true)
+        insertMembership(jdbcTemplate, "suspended-user")
         insertMembership(jdbcTemplate, "deleted-user")
         insertMembership(jdbcTemplate, "wrong-role-code")
         insertMembership(jdbcTemplate, "wrong-member-role", memberRole = "CONSULTANT")
@@ -47,15 +50,27 @@ class BusinessNotificationServiceLegalRepresentativeResolverTest {
     }
 
     private fun createSchema(jdbcTemplate: JdbcTemplate) {
-        jdbcTemplate.execute("CREATE TABLE users (id VARCHAR(64) PRIMARY KEY, deleted_at TIMESTAMP NULL)")
+        jdbcTemplate.execute(
+            "CREATE TABLE users (id VARCHAR(64) PRIMARY KEY, account_state VARCHAR(32) NOT NULL, deleted_at TIMESTAMP NULL)"
+        )
         jdbcTemplate.execute("CREATE TABLE user_roles (user_id VARCHAR(64), role_code VARCHAR(64), status VARCHAR(32))")
         jdbcTemplate.execute(
             "CREATE TABLE institution_memberships (user_id VARCHAR(64), institution_id VARCHAR(64), member_role VARCHAR(64), status VARCHAR(32), revoked_at TIMESTAMP NULL)"
         )
     }
 
-    private fun insertUser(jdbcTemplate: JdbcTemplate, id: String, deleted: Boolean = false) {
-        jdbcTemplate.update("INSERT INTO users (id, deleted_at) VALUES (?, ?)", id, if (deleted) java.sql.Timestamp(1) else null)
+    private fun insertUser(
+        jdbcTemplate: JdbcTemplate,
+        id: String,
+        accountState: String = "ACTIVE",
+        deleted: Boolean = false
+    ) {
+        jdbcTemplate.update(
+            "INSERT INTO users (id, account_state, deleted_at) VALUES (?, ?, ?)",
+            id,
+            accountState,
+            if (deleted) java.sql.Timestamp(1) else null
+        )
     }
 
     private fun insertRole(

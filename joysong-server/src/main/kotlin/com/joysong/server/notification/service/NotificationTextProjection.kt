@@ -74,6 +74,25 @@ internal object NotificationTextProjection {
             )
 
             "PROFESSIONAL_APPLICATION_REJECTED" -> professionalRejectionText(notification)
+            "INSTITUTION_PROJECT_APPLICATION_SUBMITTED" -> NotificationText(
+                "New institution project application",
+                "A new institution project application is awaiting review."
+            )
+
+            "INSTITUTION_PROJECT_APPLICATION_APPROVED" -> NotificationText(
+                "Institution project application approved",
+                "Your institution project application has been approved."
+            )
+
+            "INSTITUTION_PROJECT_APPLICATION_REJECTED" -> NotificationText(
+                "Institution project application rejected",
+                rejectionContent(
+                    notification.content,
+                    chinesePrefix = "您的机构项目申请未通过",
+                    englishPrefix = "Your institution project application was rejected"
+                )
+            )
+
             "IDENTITY_APPLICATION_APPROVED" -> NotificationText(
                 "Identity verification approved",
                 "Your identity verification application has been approved."
