@@ -17,12 +17,16 @@ import com.joysong.server.payment.entity.PaymentEntity
 import com.joysong.server.payment.provider.PaymentProviderException
 import com.joysong.server.payment.repository.PaymentRepository
 import com.joysong.server.refund.service.RefundService
+import com.joysong.server.refund.dto.RefundDetailResponse
+import com.joysong.server.refund.dto.RefundEvidenceFileResponse
+import com.joysong.server.refund.entity.RefundEntity
 import com.joysong.server.review.service.ReviewService
 import com.joysong.server.settlement.repository.SettlementRepository
 import com.joysong.server.settlement.entity.SettlementEntity
 import com.joysong.server.wallet.dto.ConsumerSettlementDto
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import io.mockk.verify
 import io.mockk.verifyOrder
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -36,13 +40,91 @@ import org.springframework.beans.factory.ObjectProvider
 import org.springframework.security.authentication.TestingAuthenticationToken
 import org.springframework.security.core.Authentication
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import java.math.BigDecimal
 import java.time.LocalDateTime
+import org.springframework.mock.web.MockMultipartFile
+import org.springframework.web.multipart.MultipartFile
 
 class OrderControllerTest {
+    @Test
+    fun `multipart refund forwards repeated evidence parts in submission order`() {
+        val refunds = mockk<RefundService>()
+        val files = slot<List<MultipartFile>>()
+        every {
+            refunds.applyTravelServiceRefundWithEvidence(
+                "order-1", "user-1", "行程取消", "", null, capture(files)
+            )
+        } returns refundDetail()
+        val mvc = MockMvcBuilders.standaloneSetup(
+            controller(mockk(), mockk(), refundService = refunds)
+        ).build()
+
+        mvc.perform(
+            multipart("/api/orders/order-1/refund")
+                .file(MockMultipartFile("evidenceFiles", "first.png", "image/png", PNG_BYTES))
+                .file(MockMultipartFile("evidenceFiles", "second.png", "image/png", PNG_BYTES))
+                .param("reason", "行程取消")
+                .principal(TestingAuthenticationToken("user-1", null))
+        ).andExpect(status().isOk)
+
+        assertEquals(listOf("first.png", "second.png"), files.captured.map { it.originalFilename })
+    }
+
+    @Test
+    fun `multipart refund omits evidenceUrl input and returns flat evidenceFiles metadata`() {
+        val refunds = mockk<RefundService>()
+        every {
+            refunds.applyTravelServiceRefundWithEvidence(any(), any(), any(), any(), any(), any())
+        } returns refundDetail()
+        val mvc = MockMvcBuilders.standaloneSetup(
+            controller(mockk(), mockk(), refundService = refunds)
+        ).build()
+
+        mvc.perform(
+            multipart("/api/orders/order-1/refund")
+                .param("reason", "行程取消")
+                .principal(TestingAuthenticationToken("user-1", null))
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.id").value("refund-1"))
+            .andExpect(jsonPath("$.data.evidenceUrl").value(""))
+            .andExpect(jsonPath("$.data.evidenceFiles[0].fileId").value("file-1"))
+            .andExpect(jsonPath("$.data.evidenceFiles[0].originalName").value("receipt.png"))
+            .andExpect(jsonPath("$.data.evidenceFiles[0].position").value(0))
+            .andExpect(jsonPath("$.data.evidenceFiles[0].storageKey").doesNotExist())
+            .andExpect(jsonPath("$.data.refund").doesNotExist())
+    }
+
+    @Test
+    fun `JSON refund request preserves legacy evidence URL handling`() {
+        val refunds = mockk<RefundService>()
+        every {
+            refunds.applyRefund("order-1", "user-1", "医疗退款", "说明", "https://legacy/evidence.jpg", "OTHER")
+        } returns refundEntity(evidenceUrl = "https://legacy/evidence.jpg")
+        val mvc = MockMvcBuilders.standaloneSetup(
+            controller(mockk(), mockk(), refundService = refunds)
+        ).build()
+
+        mvc.perform(
+            post("/api/orders/order-1/refund")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """{"reason":"医疗退款","description":"说明","evidenceUrl":"https://legacy/evidence.jpg","reasonCode":"OTHER"}"""
+                )
+                .principal(TestingAuthenticationToken("user-1", null))
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.evidenceUrl").value("https://legacy/evidence.jpg"))
+
+        verify(exactly = 1) {
+            refunds.applyRefund("order-1", "user-1", "医疗退款", "说明", "https://legacy/evidence.jpg", "OTHER")
+        }
+    }
+
     @Test
     fun `enabled development auto payment re-reads the activated order after creation`() {
         val authentication = mockk<Authentication>()
@@ -457,14 +539,15 @@ class OrderControllerTest {
         settlements: SettlementRepository,
         payments: PaymentRepository = mockk(),
         paymentService: PaymentService = mockk(),
-        developmentAutoPaymentService: DevelopmentOrderAutoPaymentService? = null
+        developmentAutoPaymentService: DevelopmentOrderAutoPaymentService? = null,
+        refundService: RefundService = mockk(),
     ): OrderController {
         val provider = mockk<ObjectProvider<DevelopmentOrderAutoPaymentService>>()
         every { provider.getIfAvailable() } returns developmentAutoPaymentService
         return OrderController(
             orders,
             paymentService,
-            mockk<RefundService>(),
+            refundService,
             mockk<ReviewService>(),
             mockk<OrderStatusLogService>(),
             settlements,
@@ -485,6 +568,30 @@ class OrderControllerTest {
         paymentMethod = "ALIPAY_PLUS_CASHIER",
         currency = "USD",
         amountMinor = 40_000
+    )
+
+    private fun refundDetail() = RefundDetailResponse(
+        refund = refundEntity(),
+        evidenceFiles = listOf(
+            RefundEvidenceFileResponse(
+                fileId = "file-1",
+                originalName = "receipt.png",
+                contentType = "image/png",
+                sizeBytes = PNG_BYTES.size.toLong(),
+                position = 0,
+            )
+        ),
+    )
+
+    private fun refundEntity(evidenceUrl: String = "") = RefundEntity(
+        id = "refund-1",
+        orderId = "order-1",
+        userId = "user-1",
+        amount = BigDecimal("400.00"),
+        reason = "行程取消",
+        evidenceUrl = evidenceUrl,
+        originalStatus = "SERVICE_ACTIVE",
+        status = "PENDING",
     )
 
     private fun serviceOrder(
@@ -509,4 +616,11 @@ class OrderControllerTest {
         status = status,
         serviceActivatedAt = serviceActivatedAt
     )
+
+    companion object {
+        private val PNG_BYTES = byteArrayOf(
+            0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+            0x00, 0x00, 0x00, 0x00,
+        )
+    }
 }

@@ -1,6 +1,7 @@
 package com.joysong.server.refund.service
 
 import com.joysong.server.coupon.service.CouponService
+import com.joysong.server.common.privatefile.PrivateFileStorageService
 import com.joysong.server.notification.service.BusinessNotificationService
 import com.joysong.server.order.dto.OrderStatusEnum
 import com.joysong.server.order.entity.OrderEntity
@@ -17,9 +18,12 @@ import com.joysong.server.payment.provider.SimulatedAlipayPlusPaymentGateway
 import com.joysong.server.payment.repository.PaymentRepository
 import com.joysong.server.refund.entity.RefundEntity
 import com.joysong.server.refund.entity.RefundItemEntity
+import com.joysong.server.refund.dto.RefundEvidenceFileResponse
 import com.joysong.server.refund.repository.RefundItemRepository
 import com.joysong.server.refund.repository.RefundRepository
 import com.joysong.server.settlement.service.SettlementReversalService
+import com.joysong.server.user.deletion.UserMediaAssetService
+import com.joysong.server.user.service.AccountLifecycleGuard
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -30,6 +34,7 @@ import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 import org.springframework.aop.framework.ProxyFactory
 import org.springframework.aop.support.AopUtils
 import org.springframework.jdbc.core.JdbcTemplate
@@ -44,10 +49,18 @@ import org.springframework.transaction.interceptor.TransactionInterceptor
 import org.springframework.transaction.support.AbstractPlatformTransactionManager
 import org.springframework.transaction.support.DefaultTransactionStatus
 import org.springframework.transaction.support.TransactionTemplate
+import org.springframework.mock.web.MockMultipartFile
+import org.springframework.web.multipart.MultipartFile
+import java.nio.file.Files
+import java.nio.file.Path
 import java.math.BigDecimal
 import java.util.Optional
+import java.util.UUID
 
 class RefundServiceTest {
+    @TempDir
+    lateinit var privateDirectory: Path
+
     private val refundRepository = mockk<RefundRepository>()
     private val refundItemRepository = mockk<RefundItemRepository>()
     private val orderRepository = mockk<OrderRepository>()
@@ -55,6 +68,125 @@ class RefundServiceTest {
     private val orderStatusLogService = mockk<OrderStatusLogService>()
     private val couponService = mockk<CouponService>()
     private val refundNotificationDispatcher = mockk<RefundBusinessNotificationDispatcher>(relaxed = true)
+    private val refundEvidenceFileService = mockk<RefundEvidenceFileService>(relaxed = true)
+
+    @Test
+    fun `service fee multipart refund accepts zero evidence files`() {
+        stubServiceApplication()
+        every { refundEvidenceFileService.storeForRefund(any(), "user-1", emptyList()) } returns emptyList()
+        every { refundEvidenceFileService.listForRefund(any()) } returns emptyList()
+
+        val detail = service().applyTravelServiceRefundWithEvidence(
+            "order-1", "user-1", "行程取消", "不再来华", null, emptyList()
+        )
+
+        assertEquals(RefundWorkflowPersistenceService.PENDING, detail.refund.status)
+        assertEquals(emptyList<Any>(), detail.evidenceFiles)
+    }
+
+    @Test
+    fun `service fee multipart refund persists five ordered private evidence files`() {
+        val harness = evidenceHarness()
+        stubServiceApplication()
+        val workflow = transactionalWorkflow(workflow(evidence = harness.service), harness.transactionManager)
+        val files = (0..4).map { validPng("evidence-$it.png") }
+
+        val detail = service(workflow = workflow, evidence = harness.service)
+            .applyTravelServiceRefundWithEvidence(
+                "order-1", "user-1", "行程取消", "不再来华", null, files
+            )
+
+        assertEquals(listOf(0, 1, 2, 3, 4), detail.evidenceFiles.map { it.position })
+        assertEquals(files.map { it.originalFilename }, detail.evidenceFiles.map { it.originalName })
+        assertEquals(5, harness.count("private_files"))
+        assertEquals(5, harness.count("refund_evidence_files"))
+    }
+
+    @Test
+    fun `service fee multipart refund rejects six files before refund persistence`() {
+        stubServiceApplication()
+        val files = (0..5).map { validPng("evidence-$it.png") }
+
+        assertThrows(IllegalArgumentException::class.java) {
+            service().applyTravelServiceRefundWithEvidence(
+                "order-1", "user-1", "行程取消", "不再来华", null, files
+            )
+        }
+
+        verify(exactly = 0) { refundRepository.saveAndFlush(any()) }
+        verify(exactly = 0) { orderRepository.save(any()) }
+    }
+
+    @Test
+    fun `service fee multipart refund rejects legacy medical order without writing private files`() {
+        val harness = evidenceHarness()
+        every { orderRepository.findByIdForUpdate("order-1") } returns
+            legacyOrder(OrderStatusEnum.CONSULTATION_PAID.value)
+        every { refundRepository.findAllByOrderIdAndStatusIn("order-1", any()) } returns emptyList()
+        val workflow = transactionalWorkflow(workflow(evidence = harness.service), harness.transactionManager)
+
+        assertThrows(IllegalArgumentException::class.java) {
+            service(workflow = workflow, evidence = harness.service)
+                .applyTravelServiceRefundWithEvidence(
+                    "order-1", "user-1", "不再到店", "取消预约", null,
+                    listOf(validPng("medical.png"))
+                )
+        }
+
+        assertEquals(0, harness.count("private_files"))
+        assertEquals(0, harness.count("refund_evidence_files"))
+        verify(exactly = 0) { refundRepository.saveAndFlush(any()) }
+    }
+
+    @Test
+    fun `invalid refund evidence rolls back refund metadata order transition and every written file`() {
+        val harness = evidenceHarness()
+        stubServiceApplication()
+        val workflow = transactionalWorkflow(workflow(evidence = harness.service), harness.transactionManager)
+        val invalid = MockMultipartFile("evidenceFiles", "bad.pdf", "application/pdf", "not-pdf".toByteArray())
+
+        assertThrows(IllegalArgumentException::class.java) {
+            service(workflow = workflow, evidence = harness.service)
+                .applyTravelServiceRefundWithEvidence(
+                    "order-1", "user-1", "行程取消", "无效凭证", null,
+                    listOf(validPng("valid.png"), invalid)
+                )
+        }
+
+        assertEquals(0, harness.count("private_files"))
+        assertEquals(0, harness.count("refund_evidence_files"))
+        assertEquals(0L, Files.walk(privateDirectory).use { paths -> paths.filter(Files::isRegularFile).count() })
+    }
+
+    @Test
+    fun `user refund detail adds safe evidence metadata and preserves evidenceUrl`() {
+        val refund = refund(RefundWorkflowPersistenceService.PENDING).copy(evidenceUrl = "legacy-url")
+        val evidence = evidenceMetadata("file-1", 0)
+        every { orderRepository.findById("order-1") } returns Optional.of(serviceOrder())
+        every { refundRepository.findFirstByOrderIdOrderByCreatedAtDesc("order-1") } returns refund
+        every { refundEvidenceFileService.listForRefund("refund-1") } returns listOf(evidence)
+
+        val detail = service().getRefundDetailByOrderId("order-1", "user-1")!!
+
+        assertEquals("legacy-url", detail.refund.evidenceUrl)
+        assertEquals(listOf(evidence), detail.evidenceFiles)
+    }
+
+    @Test
+    fun `admin refund list adds safe evidence metadata without storage path`() {
+        val refund = refund(RefundWorkflowPersistenceService.PENDING).copy(evidenceUrl = "legacy-url")
+        every { refundRepository.findAll() } returns listOf(refund)
+        every { orderRepository.findAllById(listOf("order-1")) } returns listOf(serviceOrder())
+        every { refundItemRepository.findAllByRefundIdOrderByCreatedAtAsc("refund-1") } returns emptyList()
+        every { refundEvidenceFileService.listForRefund("refund-1") } returns listOf(evidenceMetadata("file-1", 0))
+
+        val row = service().adminListAll().single()
+
+        assertEquals("legacy-url", row["evidenceUrl"])
+        val metadata = (row["evidenceFiles"] as List<*>).single() as RefundEvidenceFileResponse
+        assertEquals("file-1", metadata.fileId)
+        assertTrue(row.keys.none { it == "storageKey" || it == "path" })
+    }
 
     @Test
     fun `admin refund list exposes the joined order payment flow for new and legacy orders`() {
@@ -1135,7 +1267,8 @@ class RefundServiceTest {
     private fun service(
         workflow: RefundWorkflowPersistenceService = workflow(),
         execution: RefundExecutionService? = null,
-        reversal: SettlementReversalService? = null
+        reversal: SettlementReversalService? = null,
+        evidence: RefundEvidenceFileService = refundEvidenceFileService
     ) = RefundService(
         refundRepository = refundRepository,
         orderRepository = orderRepository,
@@ -1144,18 +1277,107 @@ class RefundServiceTest {
         workflowPersistenceService = workflow,
         refundExecutionService = execution,
         settlementReversalService = reversal,
-        refundItemRepository = refundItemRepository
+        refundItemRepository = refundItemRepository,
+        refundEvidenceFileService = evidence
     )
 
     private fun workflow(
-        dispatcher: RefundBusinessNotificationDispatcher = refundNotificationDispatcher
+        dispatcher: RefundBusinessNotificationDispatcher = refundNotificationDispatcher,
+        evidence: RefundEvidenceFileService = refundEvidenceFileService,
     ) = RefundWorkflowPersistenceService(
         refundRepository,
         orderRepository,
         orderStatusLogService,
         paymentRepository,
-        dispatcher
+        dispatcher,
+        evidence
     )
+
+    private fun transactionalWorkflow(
+        target: RefundWorkflowPersistenceService,
+        transactionManager: DataSourceTransactionManager,
+    ): RefundWorkflowPersistenceService {
+        val advice = TransactionInterceptor(transactionManager, AnnotationTransactionAttributeSource())
+        return ProxyFactory(target).apply {
+            isProxyTargetClass = true
+            addAdvice(advice)
+        }.proxy as RefundWorkflowPersistenceService
+    }
+
+    private fun evidenceHarness(): EvidenceHarness {
+        val dataSource = DriverManagerDataSource(
+            "jdbc:h2:mem:refund_workflow_${UUID.randomUUID()};MODE=MySQL;DB_CLOSE_DELAY=-1",
+            "sa",
+            "",
+        )
+        val jdbc = JdbcTemplate(dataSource)
+        jdbc.execute(
+            """
+            CREATE TABLE private_files (
+                id VARCHAR(36) PRIMARY KEY, owner_user_id VARCHAR(36) NOT NULL,
+                purpose VARCHAR(40) NOT NULL, storage_key VARCHAR(500) NOT NULL UNIQUE,
+                original_name VARCHAR(255), content_type VARCHAR(100) NOT NULL,
+                size_bytes BIGINT NOT NULL, sha256 VARCHAR(64) NOT NULL,
+                status VARCHAR(20) NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                deleted_at TIMESTAMP NULL
+            )
+            """.trimIndent(),
+        )
+        jdbc.execute(
+            """
+            CREATE TABLE user_media_assets (
+                id VARCHAR(36) PRIMARY KEY, owner_user_id VARCHAR(36) NOT NULL,
+                storage_key VARCHAR(512) NOT NULL UNIQUE, asset_type VARCHAR(32) NOT NULL,
+                storage_provider VARCHAR(32) NOT NULL, delete_status VARCHAR(32) NOT NULL,
+                delete_attempt_count INT NOT NULL DEFAULT 0, retry_after TIMESTAMP NULL,
+                last_delete_attempt_at TIMESTAMP NULL, last_delete_error VARCHAR(512),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """.trimIndent(),
+        )
+        jdbc.execute(
+            """
+            CREATE TABLE refund_evidence_files (
+                file_id VARCHAR(36) PRIMARY KEY, refund_id VARCHAR(36) NOT NULL,
+                position SMALLINT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (refund_id, position)
+            )
+            """.trimIndent(),
+        )
+        val guard = mockk<AccountLifecycleGuard> {
+            every { requireActiveForWrite(any()) } returns mockk(relaxed = true)
+        }
+        val storage = PrivateFileStorageService(
+            jdbc,
+            UserMediaAssetService(jdbc, guard),
+            privateDirectory.toString(),
+        )
+        return EvidenceHarness(
+            jdbc,
+            RefundEvidenceFileService(jdbc, storage),
+            DataSourceTransactionManager(dataSource),
+        )
+    }
+
+    private fun evidenceMetadata(fileId: String, position: Int) = RefundEvidenceFileResponse(
+        fileId = fileId,
+        originalName = "evidence-$position.png",
+        contentType = "image/png",
+        sizeBytes = PNG_BYTES.size.toLong(),
+        position = position,
+    )
+
+    private fun validPng(name: String): MultipartFile =
+        MockMultipartFile("evidenceFiles", name, "image/png", PNG_BYTES)
+
+    private data class EvidenceHarness(
+        val jdbc: JdbcTemplate,
+        val service: RefundEvidenceFileService,
+        val transactionManager: DataSourceTransactionManager,
+    ) {
+        fun count(table: String): Int = jdbc.queryForObject("SELECT COUNT(*) FROM $table", Int::class.java)!!
+    }
 
     private fun proxiedRefundDispatcher(
         businessNotificationService: BusinessNotificationService,
@@ -1356,5 +1578,12 @@ class RefundServiceTest {
             begins += 1
             super.doBegin(transaction, definition)
         }
+    }
+
+    companion object {
+        private val PNG_BYTES = byteArrayOf(
+            0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+            0x00, 0x00, 0x00, 0x00,
+        )
     }
 }

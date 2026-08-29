@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.transaction.support.TransactionSynchronization
 import org.springframework.transaction.support.TransactionSynchronizationManager
+import org.springframework.web.multipart.MultipartFile
 import java.math.BigDecimal
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -45,7 +46,8 @@ class RefundWorkflowPersistenceService(
     private val orderRepository: OrderRepository,
     private val orderStatusLogService: OrderStatusLogService,
     private val paymentRepository: PaymentRepository,
-    private val businessNotificationDispatcher: RefundBusinessNotificationDispatcher
+    private val businessNotificationDispatcher: RefundBusinessNotificationDispatcher,
+    private val refundEvidenceFileService: RefundEvidenceFileService,
 ) {
     companion object {
         private val log = LoggerFactory.getLogger(RefundWorkflowPersistenceService::class.java)
@@ -66,6 +68,50 @@ class RefundWorkflowPersistenceService(
         description: String,
         evidenceUrl: String,
         reasonCode: String?
+    ): RefundPreparation = prepareApplicationInternal(
+        orderId = orderId,
+        userId = userId,
+        reason = reason,
+        description = description,
+        evidenceUrl = evidenceUrl,
+        reasonCode = reasonCode,
+        requireTravelGroundService = false,
+        afterRefundCreated = {},
+    )
+
+    @Transactional(rollbackFor = [Exception::class])
+    fun prepareTravelServiceApplicationWithEvidence(
+        orderId: String,
+        userId: String,
+        reason: String,
+        description: String,
+        reasonCode: String?,
+        evidenceFiles: List<MultipartFile>,
+    ): RefundPreparation {
+        require(evidenceFiles.size <= 5) { "退款凭证最多上传 5 个文件" }
+        return prepareApplicationInternal(
+            orderId = orderId,
+            userId = userId,
+            reason = reason,
+            description = description,
+            evidenceUrl = "",
+            reasonCode = reasonCode,
+            requireTravelGroundService = true,
+            afterRefundCreated = { refund ->
+                refundEvidenceFileService.storeForRefund(refund.id, userId, evidenceFiles)
+            },
+        )
+    }
+
+    private fun prepareApplicationInternal(
+        orderId: String,
+        userId: String,
+        reason: String,
+        description: String,
+        evidenceUrl: String,
+        reasonCode: String?,
+        requireTravelGroundService: Boolean,
+        afterRefundCreated: (RefundEntity) -> Unit,
     ): RefundPreparation {
         require(reason.isNotBlank()) { "退款原因不能为空" }
         require(description.length <= 1000) { "退款说明不能超过1000字" }
@@ -75,6 +121,9 @@ class RefundWorkflowPersistenceService(
         val order = orderRepository.findByIdForUpdate(orderId)
             ?: throw IllegalArgumentException("订单不存在: $orderId")
         require(order.userId == userId) { "无权操作该订单" }
+        require(!requireTravelGroundService || order.paymentFlow == TRAVEL_GROUND_SERVICE_ONLY) {
+            "仅旅游地接服务费订单支持 multipart 退款"
+        }
         val current = OrderStatusEnum.fromValue(order.status)
             ?: throw IllegalStateException("订单状态无效: ${order.status}")
         val isTravelGroundService = order.paymentFlow == TRAVEL_GROUND_SERVICE_ONLY
@@ -134,6 +183,7 @@ class RefundWorkflowPersistenceService(
                 revenueReversedAt = if (isTravelGroundService) now else null
             )
         )
+        afterRefundCreated(refund)
         val orderAfterRequest = orderRepository.save(
             order.copy(
                 status = when {

@@ -2,17 +2,47 @@ package com.joysong.server.admin.controller
 
 import com.joysong.server.common.BaseResponse
 import com.joysong.server.refund.service.RefundService
+import com.joysong.server.refund.service.RefundEvidenceFileService
+import org.springframework.core.io.FileSystemResource
+import org.springframework.http.CacheControl
+import org.springframework.http.ContentDisposition
+import org.springframework.http.HttpHeaders
+import org.springframework.http.MediaType
+import org.springframework.http.ResponseEntity
 import org.springframework.security.core.Authentication
 import org.springframework.web.bind.annotation.*
 
 @RestController
 @RequestMapping("/api/admin")
 class AdminRefundController(
-    private val refundService: RefundService
+    private val refundService: RefundService,
+    private val refundEvidenceFileService: RefundEvidenceFileService,
 ) {
 
     @GetMapping("/refunds")
     fun listRefunds(): BaseResponse<*> = BaseResponse.success(refundService.adminListAll())
+
+    @GetMapping("/refunds/{refundId}/evidence/{fileId}/content")
+    fun evidenceContent(
+        @PathVariable refundId: String,
+        @PathVariable fileId: String,
+    ): ResponseEntity<FileSystemResource> {
+        val file = refundEvidenceFileService.loadContentForAdmin(refundId, fileId)
+        val resource = FileSystemResource(file.path)
+        return ResponseEntity.ok()
+            .contentType(MediaType.parseMediaType(file.contentType))
+            .contentLength(resource.contentLength())
+            .cacheControl(CacheControl.noStore())
+            .header("X-Content-Type-Options", "nosniff")
+            .header(
+                HttpHeaders.CONTENT_DISPOSITION,
+                ContentDisposition.inline()
+                    .filename(file.originalName, Charsets.UTF_8)
+                    .build()
+                    .toString(),
+            )
+            .body(resource)
+    }
 
     @PutMapping("/refunds/{id}/status")
     fun updateRefundStatus(
