@@ -1160,53 +1160,6 @@ class _InstitutionProjectRequestsPageState
     );
   }
 
-  Widget _creationDetailMetadata(
-    BuildContext context,
-    InstitutionProjectReviewItem item,
-  ) {
-    final request = _creationRequest(item);
-    final split = request.institutionSplit;
-    final activeLabel = switch (request.isActive) {
-      true => context.localized('上架', 'Active'),
-      false => context.localized('下架', 'Inactive'),
-      null => _snapshotText(context, null),
-    };
-    final rows = [
-      '${context.localized('申请编号', 'Request ID')}：${request.id}',
-      '${context.localized('机构编号', 'Institution ID')}：${_snapshotText(context, request.institutionId)}',
-      '${context.localized('申请医生编号', 'Applicant doctor ID')}：${request.doctorId}',
-      '${context.localized('当前医生名称', 'Current doctor name')}：${_snapshotText(context, request.doctorName)}',
-      '${context.localized('当前机构名称', 'Current institution name')}：${_snapshotText(context, request.institutionName)}',
-      '${context.localized('平台项目编号', 'Platform project ID')}：${_snapshotText(context, request.projectId)}',
-      '${context.localized('当前平台项目名称', 'Current platform project name')}：${_snapshotText(context, request.projectName)}',
-      '${context.localized('项目分类', 'Category')}：${_snapshotText(context, request.category)}',
-      '${context.localized('分类标签', 'Category tags')}：${_snapshotItems(context, request.categoryTags)}',
-      '${context.localized('原价（USD）', 'Original price (USD)')}：${_formatUsd(request.originalPrice)}',
-      '${context.localized('旅游地接服务费', 'Travel ground service fee')}：${_travelGroundServiceFeeValue(request.price, request.institutionSplit?.platformRate)}',
-      '${context.localized('审批后医生项目状态', 'Doctor project status after approval')}：$activeLabel',
-      if (split != null) ...[
-        '${context.localized('面诊费（USD）', 'Consultation fee (USD)')}：${_formatUsd(split.consultationFee)}',
-        '${context.localized('顾问比例', 'Consultant rate')}：${_formatNumber(split.commissionRate)}%',
-        '${context.localized('机构比例', 'Institution rate')}：${_formatNumber(split.institutionRate)}%',
-        '${context.localized('平台比例', 'Platform rate')}：${_formatNumber(split.platformRate)}%',
-        '${context.localized('医生比例', 'Doctor rate')}：${_formatNumber(split.doctorRate)}%',
-      ],
-      '${context.localized('申请说明', 'Notes')}：${_snapshotText(context, request.notes)}',
-      '${context.localized('申请状态', 'Request status')}：${_statusLabel(request.status)}',
-      '${context.localized('审核意见', 'Review note')}：${_snapshotText(context, request.reviewNote)}',
-      '${context.localized('审核人', 'Reviewed by')}：${_snapshotText(context, request.reviewedBy)}',
-      '${context.localized('审核时间', 'Reviewed at')}：${request.reviewedAt?.toIso8601String() ?? '-'}',
-      '${context.localized('提交时间', 'Submitted at')}：${request.submittedAt.toIso8601String()}',
-      '${context.localized('更新时间', 'Updated at')}：${request.updatedAt.toIso8601String()}',
-      '${context.localized('生成平台项目', 'Resulting platform project')}：${_snapshotText(context, request.resultingProjectId)}',
-      '${context.localized('生成机构项目', 'Resulting institution project')}：${_snapshotText(context, request.resultingInstitutionProjectId)}',
-    ];
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [for (final row in rows) Text(row)],
-    );
-  }
-
   Widget _creationSummaryAction(
     BuildContext context,
     InstitutionProjectReviewItem item,
@@ -1226,7 +1179,6 @@ class _InstitutionProjectRequestsPageState
     Navigator.of(context).push<void>(MaterialPageRoute(
       builder: (_) => InstitutionProjectReviewDetailPage(
         item: item,
-        details: _creationDetailMetadata(context, item),
         actions: _canReview(request) && item.valid
             ? Align(
                 alignment: Alignment.centerRight,
