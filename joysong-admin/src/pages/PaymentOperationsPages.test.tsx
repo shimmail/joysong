@@ -805,12 +805,15 @@ describe('RefundsPage manual review operations', () => {
     await user.click(within(row).getByRole('button', { name: /详情/ }));
     const dialog = (await screen.findByText('退款详情')).closest('.ant-modal') as HTMLElement;
     const nativeCreateElement = document.createElement.bind(document);
-    let temporaryAnchor: HTMLAnchorElement | null = null;
-    vi.spyOn(document, 'createElement').mockImplementation(((tagName: string) => {
-      const element = nativeCreateElement(tagName);
-      if (tagName === 'a') temporaryAnchor = element as HTMLAnchorElement;
-      return element;
-    }) as typeof document.createElement);
+    const temporaryAnchors: HTMLAnchorElement[] = [];
+    vi.spyOn(document, 'createElement').mockImplementation((tagName) => {
+      if (tagName === 'a') {
+        const anchor = nativeCreateElement('a');
+        temporaryAnchors.push(anchor);
+        return anchor;
+      }
+      return nativeCreateElement(tagName);
+    });
     const appendSpy = vi.spyOn(document.body, 'appendChild');
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
 
@@ -821,11 +824,14 @@ describe('RefundsPage manual review operations', () => {
       { responseType: 'blob' },
     ));
     expect(createObjectURL).toHaveBeenCalledWith(evidenceBlob);
+    expect(temporaryAnchors).toHaveLength(1);
+    const temporaryAnchor = temporaryAnchors[0];
+    if (!temporaryAnchor) throw new Error('temporary download anchor was not created');
     expect(temporaryAnchor).not.toBeNull();
-    expect(temporaryAnchor?.download).toBe('receipt.jpg');
+    expect(temporaryAnchor.download).toBe('receipt.jpg');
     expect(appendSpy).toHaveBeenCalledWith(temporaryAnchor);
     expect(clickSpy).toHaveBeenCalledTimes(1);
-    expect(temporaryAnchor?.isConnected).toBe(false);
+    expect(temporaryAnchor.isConnected).toBe(false);
     expect(document.body.querySelector('a[download="receipt.jpg"]')).toBeNull();
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:download');
   });
@@ -857,18 +863,24 @@ describe('RefundsPage manual review operations', () => {
     await user.click(within(pendingRow).getByRole('button', { name: /详情/ }));
     const dialog = (await screen.findByText('退款详情')).closest('.ant-modal') as HTMLElement;
     const nativeCreateElement = document.createElement.bind(document);
-    let temporaryAnchor: HTMLAnchorElement | null = null;
-    vi.spyOn(document, 'createElement').mockImplementation(((tagName: string) => {
-      const element = nativeCreateElement(tagName);
-      if (tagName === 'a') temporaryAnchor = element as HTMLAnchorElement;
-      return element;
-    }) as typeof document.createElement);
+    const temporaryAnchors: HTMLAnchorElement[] = [];
+    vi.spyOn(document, 'createElement').mockImplementation((tagName) => {
+      if (tagName === 'a') {
+        const anchor = nativeCreateElement('a');
+        temporaryAnchors.push(anchor);
+        return anchor;
+      }
+      return nativeCreateElement(tagName);
+    });
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => { throw new Error('点击失败'); });
     await user.click(within(dialog).getByRole('button', { name: '下载 broken.jpg' }));
 
     await waitFor(() => expect(errorSpy).toHaveBeenCalledWith('下载凭证失败: 点击失败'));
     expect(createObjectURL).toHaveBeenCalledWith(evidenceBlob);
-    expect(temporaryAnchor?.isConnected).toBe(false);
+    expect(temporaryAnchors).toHaveLength(1);
+    const temporaryAnchor = temporaryAnchors[0];
+    if (!temporaryAnchor) throw new Error('temporary download anchor was not created');
+    expect(temporaryAnchor.isConnected).toBe(false);
     expect(document.body.querySelector('a[download="broken.jpg"]')).toBeNull();
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:download-failure');
     expect(within(pendingRow).getByRole('button', { name: /批准/ })).toBeEnabled();
