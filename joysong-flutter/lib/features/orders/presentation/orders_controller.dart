@@ -106,6 +106,7 @@ final class OrderDetailController extends ChangeNotifier {
   bool _isSettlementGenerationPending = false;
   bool _isLoading = false;
   OrderAction? _activeAction;
+  bool _refundSubmissionUncertain = false;
   bool _isRemoved = false;
   bool _isDisposed = false;
   int _detailGeneration = 0;
@@ -132,6 +133,7 @@ final class OrderDetailController extends ChangeNotifier {
       final detail = await _repository.getOrder(orderId);
       if (!_isCurrent(generation)) return;
       _order = detail;
+      _refundSubmissionUncertain = false;
       _isRemoved = false;
       await _loadSupportingData(detail, generation);
     } catch (error) {
@@ -182,6 +184,11 @@ final class OrderDetailController extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+    if (_refundSubmissionUncertain) {
+      _errorMessage = '退款申请结果待确认，请刷新订单详情后再试';
+      notifyListeners();
+      return false;
+    }
     if (_activeAction != null) return false;
     final generation = ++_detailGeneration;
     _activeAction = OrderAction.refund;
@@ -203,6 +210,7 @@ final class OrderDetailController extends ChangeNotifier {
               evidenceUrl: evidenceUrl.trim(),
             );
       if (!_isCurrent(generation)) return false;
+      _refundSubmissionUncertain = false;
       _refund = refund;
       final currentAfterRefund = _order;
       if (currentAfterRefund != null && refund.status == RefundStatus.pending) {
@@ -230,6 +238,25 @@ final class OrderDetailController extends ChangeNotifier {
       return true;
     } catch (error) {
       if (!_isCurrent(generation)) return false;
+      if (current.isTravelGroundServiceOnly) {
+        try {
+          final detail = await _repository.getOrder(orderId);
+          if (!_isCurrent(generation)) return false;
+          _order = detail;
+          _refundSubmissionUncertain = false;
+          if (_hasActiveRefund(detail)) {
+            await _loadSupportingData(detail, generation);
+            if (!_isCurrent(generation)) return false;
+            _errorMessage = null;
+            return true;
+          }
+        } catch (_) {
+          if (!_isCurrent(generation)) return false;
+          _refundSubmissionUncertain = true;
+          _errorMessage = '退款申请结果待确认，请刷新订单详情后再试';
+          return false;
+        }
+      }
       _errorMessage = _orderMessageFor(error, '退款申请失败');
       return false;
     } finally {
@@ -382,6 +409,12 @@ final class OrderDetailController extends ChangeNotifier {
         OrderStatus.pendingSettlement,
         OrderStatus.settled,
       }.contains(order.status);
+
+  bool _hasActiveRefund(Order order) => const {
+        RefundStatus.pending,
+        RefundStatus.processing,
+        RefundStatus.approved,
+      }.contains(order.refundStatus);
 
   Future<void> _loadSettlement(int generation) async {
     if (!_isCurrent(generation)) return;

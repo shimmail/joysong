@@ -80,6 +80,72 @@ void main() {
     expect(repository.serviceFeeEvidenceFiles, same(drafts));
   });
 
+  test(
+      'service fee refund reconciles an accepted request when its response is lost',
+      () async {
+    final order = _order(flow: OrderPaymentFlow.travelGroundServiceOnly);
+    final repository = _RecordingOrdersRepository(
+      order: order,
+      failsServiceFee: true,
+      refreshedOrder: order.copyWith(
+        status: OrderStatus.refundReview,
+        refundStatus: RefundStatus.pending,
+        serviceMessagingEnabled: false,
+      ),
+    );
+    final controller = OrderDetailController(
+      repository,
+      orderId: order.id,
+      initialOrder: order,
+    );
+
+    final success = await controller.requestRefund(
+      reason: 'Changed plans',
+      description: 'Cannot travel',
+    );
+
+    expect(success, isTrue);
+    expect(repository.serviceFeeRefundCalls, 1);
+    expect(repository.getOrderCalls, 1);
+    expect(repository.getRefundCalls, 1);
+    expect(controller.order?.refundStatus, RefundStatus.pending);
+    expect(controller.refund?.id, 'refund-1');
+    expect(controller.errorMessage, isNull);
+  });
+
+  test(
+      'unconfirmed service fee refund blocks resubmission until order refresh succeeds',
+      () async {
+    final order = _order(flow: OrderPaymentFlow.travelGroundServiceOnly);
+    final repository = _RecordingOrdersRepository(
+      order: order,
+      failsServiceFee: true,
+      failsGetOrder: true,
+    );
+    final controller = OrderDetailController(
+      repository,
+      orderId: order.id,
+      initialOrder: order,
+    );
+
+    final first = await controller.requestRefund(reason: 'Changed plans');
+    final blockedRetry =
+        await controller.requestRefund(reason: 'Changed plans');
+
+    expect(first, isFalse);
+    expect(blockedRetry, isFalse);
+    expect(repository.serviceFeeRefundCalls, 1);
+    expect(repository.getOrderCalls, 1);
+    expect(controller.errorMessage, '退款申请结果待确认，请刷新订单详情后再试');
+
+    repository.failsGetOrder = false;
+    await controller.load();
+    await controller.requestRefund(reason: 'Changed plans');
+
+    expect(repository.serviceFeeRefundCalls, 2);
+    expect(repository.getOrderCalls, 3);
+  });
+
   test('unloaded order reports an error without selecting either refund API', () async {
     final order = _order(flow: OrderPaymentFlow.travelGroundServiceOnly);
     final repository = _RecordingOrdersRepository(order: order);
@@ -98,17 +164,36 @@ void main() {
 }
 
 final class _RecordingOrdersRepository implements OrdersRepository {
-  _RecordingOrdersRepository({required this.order, this.failsServiceFee = false});
+  _RecordingOrdersRepository({
+    required this.order,
+    this.failsServiceFee = false,
+    this.failsGetOrder = false,
+    Order? refreshedOrder,
+  }) : refreshedOrder = refreshedOrder ?? order;
 
   final Order order;
+  final Order refreshedOrder;
   final bool failsServiceFee;
+  bool failsGetOrder;
   List<RefundEvidenceDraft>? serviceFeeEvidenceFiles;
   String? legacyEvidenceUrl;
   int serviceFeeRefundCalls = 0;
   int legacyRefundCalls = 0;
+  int getOrderCalls = 0;
+  int getRefundCalls = 0;
 
   @override
-  Future<Order> getOrder(String id) async => order;
+  Future<Order> getOrder(String id) async {
+    getOrderCalls += 1;
+    if (failsGetOrder) throw StateError('offline');
+    return refreshedOrder;
+  }
+
+  @override
+  Future<RefundDetail> getRefund(String id) async {
+    getRefundCalls += 1;
+    return _refund;
+  }
 
   @override
   Future<RefundDetail> requestServiceFeeRefund(
