@@ -2,9 +2,12 @@ package com.joysong.server.dm.service
 
 import com.joysong.server.dm.entity.DmConversationEntity
 import com.joysong.server.dm.repository.DmConversationRepository
+import com.joysong.server.order.consultant.ConsultantOrderAccessPolicy
 import com.joysong.server.order.dto.OrderStatusEnum
 import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.repository.OrderRepository
+import com.joysong.server.order.service.OrderContractErrorCode
+import com.joysong.server.order.service.OrderContractException
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -26,18 +29,19 @@ import java.util.Optional
 class OrderServiceConversationServiceTest {
     private val orderRepository = mockk<OrderRepository>()
     private val conversationRepository = mockk<DmConversationRepository>()
-    private val service = OrderServiceConversationService(orderRepository, conversationRepository)
+    private val policy = mockk<ConsultantOrderAccessPolicy>(relaxed = true)
+    private val service = OrderServiceConversationService(orderRepository, conversationRepository, policy)
 
     @Test
     fun `unpaid order cannot create service conversation`() {
         every { orderRepository.findByIdForUpdate("order-1") } returns
             order(status = OrderStatusEnum.PENDING_SERVICE_FEE.value, activatedAt = null)
 
-        val error = assertThrows<IllegalArgumentException> {
+        val error = assertThrows<OrderContractException> {
             service.getOrCreate("order-1", "user-1")
         }
 
-        assertEquals("ORDER_SERVICE_NOT_ACTIVE", error.message)
+        assertEquals(OrderContractErrorCode.ORDER_SERVICE_NOT_ACTIVE, error.errorCode)
         verify(exactly = 0) { conversationRepository.saveAndFlush(any()) }
     }
 
@@ -46,11 +50,11 @@ class OrderServiceConversationServiceTest {
         every { orderRepository.findByIdForUpdate("order-1") } returns
             order(status = OrderStatusEnum.SERVICE_ACTIVE.value, activatedAt = null)
 
-        val error = assertThrows<IllegalArgumentException> {
+        val error = assertThrows<OrderContractException> {
             service.getOrCreate("order-1", "user-1")
         }
 
-        assertEquals("ORDER_SERVICE_NOT_ACTIVE", error.message)
+        assertEquals(OrderContractErrorCode.ORDER_SERVICE_NOT_ACTIVE, error.errorCode)
     }
 
     @Test
@@ -58,22 +62,26 @@ class OrderServiceConversationServiceTest {
         every { orderRepository.findByIdForUpdate("order-1") } returns
             order(paymentFlow = "LEGACY_MEDICAL")
 
-        val error = assertThrows<IllegalArgumentException> {
+        val error = assertThrows<OrderContractException> {
             service.getOrCreate("order-1", "user-1")
         }
 
-        assertEquals("ORDER_SERVICE_NOT_ACTIVE", error.message)
+        assertEquals(OrderContractErrorCode.ORDER_SERVICE_NOT_ACTIVE, error.errorCode)
     }
 
     @Test
     fun `unrelated user cannot create service conversation`() {
         every { orderRepository.findByIdForUpdate("order-1") } returns order()
 
-        val error = assertThrows<IllegalArgumentException> {
+        every {
+            policy.requireConversationParticipant(any(), "other-user")
+        } throws OrderContractException.serviceAccessDenied()
+
+        val error = assertThrows<OrderContractException> {
             service.getOrCreate("order-1", "other-user")
         }
 
-        assertEquals("ORDER_SERVICE_ACCESS_DENIED", error.message)
+        assertEquals(OrderContractErrorCode.ORDER_SERVICE_ACCESS_DENIED, error.errorCode)
     }
 
     @Test
@@ -100,7 +108,7 @@ class OrderServiceConversationServiceTest {
 
     @ParameterizedTest
     @ValueSource(strings = ["COMPLETED", "REFUND_REVIEW", "REFUND_PROCESSING", "REFUNDED"])
-    fun `refund state returns existing activated conversation without creating another`(status: String) {
+    fun `readonly state returns existing conversation but never creates`(status: String) {
         val existing = conversation()
         every { orderRepository.findByIdForUpdate("order-1") } returns order(status = status)
         every {
@@ -135,8 +143,8 @@ class OrderServiceConversationServiceTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = ["REFUND_REVIEW", "REFUND_PROCESSING", "REFUNDED"])
-    fun `refund state never creates a missing conversation`(status: String) {
+    @ValueSource(strings = ["REFUND_REVIEW", "REFUND_PROCESSING", "COMPLETED", "REFUNDED"])
+    fun `readonly state without an existing conversation returns read only`(status: String) {
         every { orderRepository.findByIdForUpdate("order-1") } returns order(status = status)
         every {
             conversationRepository.findByConversationTypeAndOrderId(
@@ -145,11 +153,37 @@ class OrderServiceConversationServiceTest {
             )
         } returns null
 
-        val error = assertThrows<IllegalArgumentException> {
+        val error = assertThrows<OrderContractException> {
             service.getOrCreate("order-1", "user-1")
         }
 
-        assertEquals("ORDER_SERVICE_NOT_ACTIVE", error.message)
+        assertEquals(OrderContractErrorCode.ORDER_SERVICE_READ_ONLY, error.errorCode)
+        verify(exactly = 0) { conversationRepository.saveAndFlush(any()) }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["PENDING_SERVICE_FEE", "UNKNOWN_STATUS"])
+    fun `unpaid and unknown statuses remain not active`(status: String) {
+        every { orderRepository.findByIdForUpdate("order-1") } returns order(status = status)
+
+        val error = assertThrows<OrderContractException> {
+            service.getOrCreate("order-1", "user-1")
+        }
+
+        assertEquals(OrderContractErrorCode.ORDER_SERVICE_NOT_ACTIVE, error.errorCode)
+        verify(exactly = 0) { conversationRepository.saveAndFlush(any()) }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["", "user-1"])
+    fun `invalid consultant assignment never activates service conversation`(consultantId: String) {
+        every { orderRepository.findByIdForUpdate("order-1") } returns order(consultantId = consultantId)
+
+        val error = assertThrows<OrderContractException> {
+            service.getOrCreate("order-1", "user-1")
+        }
+
+        assertEquals(OrderContractErrorCode.ORDER_SERVICE_NOT_ACTIVE, error.errorCode)
         verify(exactly = 0) { conversationRepository.saveAndFlush(any()) }
     }
 
@@ -160,6 +194,28 @@ class OrderServiceConversationServiceTest {
 
         service.requireReadAccess(conversation(), "user-1")
         service.requireReadAccess(conversation(), "consultant-1")
+    }
+
+    @Test
+    fun `revoked consultant cannot read or send but consumer still can`() {
+        val currentOrder = order()
+        every { orderRepository.findById("order-1") } returns Optional.of(currentOrder)
+        every { orderRepository.findByIdForUpdate("order-1") } returns currentOrder
+        every {
+            policy.requireConversationParticipant(currentOrder, "consultant-1")
+        } throws OrderContractException.roleRequired()
+        every {
+            policy.requireConversationParticipant(currentOrder, "user-1")
+        } returns Unit
+
+        assertThrows<OrderContractException> {
+            service.requireReadAccess(conversation(), "consultant-1")
+        }
+        assertThrows<OrderContractException> {
+            service.requireSendAccess(conversation(), "consultant-1")
+        }
+        service.requireReadAccess(conversation(), "user-1")
+        service.requireSendAccess(conversation(), "user-1")
     }
 
     @ParameterizedTest
@@ -186,7 +242,11 @@ class OrderServiceConversationServiceTest {
 
     @Test
     fun `inbox projection hides conversation from an unrelated user`() {
-        every { orderRepository.findById("order-1") } returns Optional.of(order())
+        val currentOrder = order()
+        every { orderRepository.findById("order-1") } returns Optional.of(currentOrder)
+        every {
+            policy.requireConversationParticipant(currentOrder, "unrelated-user")
+        } throws OrderContractException.serviceAccessDenied()
 
         val actual = service.responseIfReadable(conversation(), "unrelated-user")
 
@@ -199,11 +259,11 @@ class OrderServiceConversationServiceTest {
         every { orderRepository.findById("order-1") } returns Optional.of(order())
         val mismatched = conversation().copy(userBId = "another-consultant")
 
-        val error = assertThrows<IllegalArgumentException> {
+        val error = assertThrows<OrderContractException> {
             service.requireReadAccess(mismatched, "user-1")
         }
 
-        assertEquals("ORDER_SERVICE_ACCESS_DENIED", error.message)
+        assertEquals(OrderContractErrorCode.ORDER_SERVICE_ACCESS_DENIED, error.errorCode)
     }
 
     @Test
@@ -214,11 +274,11 @@ class OrderServiceConversationServiceTest {
         ).forEach { invalidOrder ->
             every { orderRepository.findById("order-1") } returns Optional.of(invalidOrder)
 
-            val error = assertThrows<IllegalArgumentException> {
+            val error = assertThrows<OrderContractException> {
                 service.requireReadAccess(conversation(), "user-1")
             }
 
-            assertEquals("ORDER_SERVICE_NOT_ACTIVE", error.message)
+            assertEquals(OrderContractErrorCode.ORDER_SERVICE_NOT_ACTIVE, error.errorCode)
         }
     }
 
@@ -229,11 +289,11 @@ class OrderServiceConversationServiceTest {
 
         every { orderRepository.findByIdForUpdate("order-1") } returns
             order(status = OrderStatusEnum.REFUND_REVIEW.value)
-        val error = assertThrows<IllegalArgumentException> {
+        val error = assertThrows<OrderContractException> {
             service.requireSendAccess(conversation(), "user-1")
         }
 
-        assertEquals("ORDER_SERVICE_NOT_ACTIVE", error.message)
+        assertEquals(OrderContractErrorCode.ORDER_SERVICE_READ_ONLY, error.errorCode)
         verify(exactly = 0) { orderRepository.findById("order-1") }
     }
 
@@ -244,11 +304,11 @@ class OrderServiceConversationServiceTest {
         every { orderRepository.findByIdForUpdate("order-1") } returns completed
 
         service.requireReadAccess(conversation(), "user-1")
-        val error = assertThrows<IllegalArgumentException> {
+        val error = assertThrows<OrderContractException> {
             service.requireSendAccess(conversation(), "user-1")
         }
 
-        assertEquals("ORDER_SERVICE_NOT_ACTIVE", error.message)
+        assertEquals(OrderContractErrorCode.ORDER_SERVICE_READ_ONLY, error.errorCode)
     }
 
     @Test
@@ -303,7 +363,8 @@ class OrderServiceConversationServiceTest {
         id: String = "order-1",
         status: String = OrderStatusEnum.SERVICE_ACTIVE.value,
         paymentFlow: String = "TRAVEL_GROUND_SERVICE_ONLY",
-        activatedAt: LocalDateTime? = LocalDateTime.of(2026, 8, 22, 9, 0)
+        activatedAt: LocalDateTime? = LocalDateTime.of(2026, 8, 22, 9, 0),
+        consultantId: String = "consultant-1"
     ) = OrderEntity(
         id = id,
         userId = "user-1",
@@ -311,7 +372,7 @@ class OrderServiceConversationServiceTest {
         price = BigDecimal("400.00"),
         status = status,
         paymentFlow = paymentFlow,
-        consultantId = "consultant-1",
+        consultantId = consultantId,
         serviceActivatedAt = activatedAt
     )
 

@@ -4,9 +4,11 @@ import com.joysong.server.dm.dto.DmConversationResponse
 import com.joysong.server.dm.dto.toResponse
 import com.joysong.server.dm.entity.DmConversationEntity
 import com.joysong.server.dm.repository.DmConversationRepository
+import com.joysong.server.order.consultant.ConsultantOrderAccessPolicy
 import com.joysong.server.order.dto.OrderStatusEnum
 import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.repository.OrderRepository
+import com.joysong.server.order.service.OrderContractException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDateTime
@@ -15,15 +17,18 @@ import java.util.UUID
 @Service
 class OrderServiceConversationService(
     private val orderRepository: OrderRepository,
-    private val conversationRepository: DmConversationRepository
+    private val conversationRepository: DmConversationRepository,
+    private val consultantAccessPolicy: ConsultantOrderAccessPolicy
 ) {
     @Transactional
     fun getOrCreate(orderId: String, userId: String): DmConversationResponse {
         val order = orderRepository.findByIdForUpdate(orderId)
-            ?: throw IllegalArgumentException(ACCESS_DENIED)
+            ?: throw OrderContractException.serviceAccessDenied()
         requireActivatedService(order)
-        requireOrderParticipant(order, userId)
-        require(order.status in READABLE_STATUSES) { NOT_ACTIVE }
+        consultantAccessPolicy.requireConversationParticipant(order, userId)
+        if (order.status !in READABLE_STATUSES) {
+            throw OrderContractException.serviceNotActive()
+        }
 
         val existing = conversationRepository.findByConversationTypeAndOrderId(
             DmConversationEntity.ORDER_SERVICE,
@@ -34,17 +39,10 @@ class OrderServiceConversationService(
             return existing.toResponseFor(order)
         }
 
-        require(order.status == OrderStatusEnum.SERVICE_ACTIVE.value) { NOT_ACTIVE }
-        val conversation = DmConversationEntity(
-            id = UUID.randomUUID().toString(),
-            conversationType = DmConversationEntity.ORDER_SERVICE,
-            orderId = order.id,
-            userAId = minOf(order.userId, order.consultantId),
-            userBId = maxOf(order.userId, order.consultantId),
-            createdAt = LocalDateTime.now(),
-            updatedAt = LocalDateTime.now()
-        )
-        return conversationRepository.saveAndFlush(conversation).toResponseFor(order)
+        if (order.status != OrderStatusEnum.SERVICE_ACTIVE.value) {
+            throw OrderContractException.serviceReadOnly()
+        }
+        return conversationRepository.saveAndFlush(newConversation(order)).toResponseFor(order)
     }
 
     @Transactional(readOnly = true)
@@ -70,7 +68,7 @@ class OrderServiceConversationService(
         try {
             val order = authorize(conversation, userId, READABLE_STATUSES)
             conversation.toResponseFor(order)
-        } catch (_: IllegalArgumentException) {
+        } catch (_: OrderContractException) {
             null
         }
 
@@ -80,27 +78,33 @@ class OrderServiceConversationService(
         allowedStatuses: Set<String>,
         lockOrder: Boolean = false
     ): OrderEntity {
-        require(conversation.conversationType == DmConversationEntity.ORDER_SERVICE) { ACCESS_DENIED }
-        val orderId = conversation.orderId ?: throw IllegalArgumentException(ACCESS_DENIED)
+        if (conversation.conversationType != DmConversationEntity.ORDER_SERVICE) {
+            throw OrderContractException.serviceAccessDenied()
+        }
+        val orderId = conversation.orderId ?: throw OrderContractException.serviceAccessDenied()
         val order = if (lockOrder) {
             orderRepository.findByIdForUpdate(orderId)
         } else {
             orderRepository.findById(orderId).orElse(null)
-        } ?: throw IllegalArgumentException(ACCESS_DENIED)
+        } ?: throw OrderContractException.serviceAccessDenied()
         requireActivatedService(order)
-        require(order.status in allowedStatuses) { NOT_ACTIVE }
-        requireOrderParticipant(order, userId)
+        if (order.status !in READABLE_STATUSES) {
+            throw OrderContractException.serviceNotActive()
+        }
+        consultantAccessPolicy.requireConversationParticipant(order, userId)
         requireConversationMatchesOrder(conversation, order)
+        if (order.status !in allowedStatuses) {
+            throw OrderContractException.serviceReadOnly()
+        }
         return order
     }
 
     private fun requireActivatedService(order: OrderEntity) {
-        require(
-            order.paymentFlow == TRAVEL_GROUND_SERVICE_ONLY &&
-                order.serviceActivatedAt != null &&
-                order.consultantId.isNotBlank() &&
-                order.consultantId != order.userId
-        ) { NOT_ACTIVE }
+        val activated = order.paymentFlow == TRAVEL_GROUND_SERVICE_ONLY &&
+            order.serviceActivatedAt != null &&
+            order.consultantId.isNotBlank() &&
+            order.consultantId != order.userId
+        if (!activated) throw OrderContractException.serviceNotActive()
     }
 
     private fun OrderEntity.isServiceMessagingEnabled(): Boolean =
@@ -112,26 +116,29 @@ class OrderServiceConversationService(
             serviceMessagingEnabled = order.isServiceMessagingEnabled()
         )
 
-    private fun requireOrderParticipant(order: OrderEntity, userId: String) {
-        require(userId == order.userId || userId == order.consultantId) { ACCESS_DENIED }
-    }
-
     private fun requireConversationMatchesOrder(
         conversation: DmConversationEntity,
         order: OrderEntity
     ) {
-        require(
-            conversation.conversationType == DmConversationEntity.ORDER_SERVICE &&
-                conversation.orderId == order.id &&
-                conversation.userAId == minOf(order.userId, order.consultantId) &&
-                conversation.userBId == maxOf(order.userId, order.consultantId)
-        ) { ACCESS_DENIED }
+        val matches = conversation.conversationType == DmConversationEntity.ORDER_SERVICE &&
+            conversation.orderId == order.id &&
+            conversation.userAId == minOf(order.userId, order.consultantId) &&
+            conversation.userBId == maxOf(order.userId, order.consultantId)
+        if (!matches) throw OrderContractException.serviceAccessDenied()
     }
+
+    private fun newConversation(order: OrderEntity): DmConversationEntity = DmConversationEntity(
+        id = UUID.randomUUID().toString(),
+        conversationType = DmConversationEntity.ORDER_SERVICE,
+        orderId = order.id,
+        userAId = minOf(order.userId, order.consultantId),
+        userBId = maxOf(order.userId, order.consultantId),
+        createdAt = LocalDateTime.now(),
+        updatedAt = LocalDateTime.now()
+    )
 
     companion object {
         private const val TRAVEL_GROUND_SERVICE_ONLY = "TRAVEL_GROUND_SERVICE_ONLY"
-        private const val NOT_ACTIVE = "ORDER_SERVICE_NOT_ACTIVE"
-        private const val ACCESS_DENIED = "ORDER_SERVICE_ACCESS_DENIED"
         private val READABLE_STATUSES = setOf(
             OrderStatusEnum.SERVICE_ACTIVE.value,
             OrderStatusEnum.COMPLETED.value,
