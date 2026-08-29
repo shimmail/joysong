@@ -165,6 +165,57 @@ void main() {
         findsOneWidget,
       );
 
+      final card = find.byKey(
+        const Key('institution-review-card-creation-1'),
+      );
+      for (final text in const [
+        'Clinic Hydrating Facial creation-1',
+        '平台项目: Hydrating Facial',
+        '医生: Dr. Chen',
+        'USD 799.50',
+      ]) {
+        expect(
+          find.descendant(of: card, matching: find.text(text)),
+          findsOneWidget,
+        );
+      }
+      expect(
+        find.descendant(
+          of: card,
+          matching: find.textContaining('旅游地接服务费'),
+        ),
+        findsOneWidget,
+      );
+      for (final key in const [
+        'request-status-creation-1',
+        'doctor-active-status-creation-1',
+        'institution-review-detail-creation-1',
+        'review-creation-creation-1',
+      ]) {
+        expect(
+          find.descendant(of: card, matching: find.byKey(Key(key))),
+          findsOneWidget,
+        );
+      }
+      for (final label in const [
+        '申请编号',
+        '机构编号',
+        '申请医生编号',
+        '项目标语',
+        '项目详情',
+        '封面图',
+        '项目图片',
+        '分类标签',
+        '审核意见',
+        '审核人',
+        '生成平台项目',
+      ]) {
+        expect(
+          find.descendant(of: card, matching: find.textContaining(label)),
+          findsNothing,
+        );
+      }
+
       await tester.tap(
         find.byKey(const Key('institution-review-detail-creation-1')),
       );
@@ -173,6 +224,10 @@ void main() {
       expect(find.byType(InstitutionProjectPreviewBody), findsOneWidget);
       expect(find.text('Clinic Hydrating Facial creation-1'), findsOneWidget);
       expect(find.text('Current values at submission'), findsNothing);
+      expect(find.text('申请编号：creation-1'), findsOneWidget);
+      expect(find.textContaining('申请医生编号：doctor-1'), findsOneWidget);
+      expect(find.textContaining('Complete immutable detail'), findsOneWidget);
+      expect(find.textContaining('项目详情：'), findsNothing);
       await tester.drag(find.byType(ListView).last, const Offset(0, -1200));
       await tester.pumpAndSettle();
       expect(
@@ -291,7 +346,7 @@ void main() {
   );
 
   testWidgets(
-      'platform application keeps the complete ordered plain-text form and uses the injected cover/gallery uploader',
+      'platform application keeps the complete ordered form and uses the injected cover/gallery uploader',
       (tester) async {
     _useLargeSurface(tester);
     final repository = _ProjectRequestRepository()
@@ -327,6 +382,11 @@ void main() {
       'platform-category',
       'platform-description',
       'platform-detail-content',
+      'platform-detail-suitable',
+      'platform-detail-contraindications',
+      'platform-detail-recovery',
+      'platform-detail-highlights',
+      'platform-detail-risks',
       'platform-tags',
       'platform-category-tags',
       'platform-notes',
@@ -359,7 +419,7 @@ void main() {
           ?.labelText,
       '参考价格（USD）',
     );
-    expect(find.byType(EditableText).evaluate().length, 10);
+    expect(find.byType(EditableText).evaluate().length, 15);
 
     await tester.tap(find.byKey(const Key('platform-cover-upload')));
     await tester.pump();
@@ -407,6 +467,89 @@ void main() {
   },);
 
   testWidgets(
+    'platform application composes six structured project detail fields into canonical HTML',
+    (tester) async {
+      _useLargeSurface(tester);
+      final repository = _ProjectRequestRepository();
+      await tester.pumpWidget(_app(PlatformProjectRequestPage(
+        repository: repository,
+        context: _doctorContext,
+      ),),);
+      await tester.pumpAndSettle();
+
+      for (final key in const [
+        'platform-name',
+        'platform-reference-price',
+        'platform-slogan',
+        'platform-sales-count',
+        'platform-category',
+        'platform-description',
+        'platform-tags',
+        'platform-category-tags',
+        'platform-notes',
+      ]) {
+        expect(find.byKey(Key(key)), findsOneWidget);
+      }
+      for (final key in const [
+        'platform-detail-content',
+        'platform-detail-suitable',
+        'platform-detail-contraindications',
+        'platform-detail-recovery',
+        'platform-detail-highlights',
+        'platform-detail-risks',
+      ]) {
+        expect(find.byKey(Key(key)), findsOneWidget);
+        expect(tester.widget<TextField>(find.byKey(Key(key))).maxLines,
+            greaterThan(1),);
+      }
+      expect(find.text('作用原理'), findsOneWidget);
+      expect(find.text('适合人群'), findsOneWidget);
+      expect(find.text('禁忌人群'), findsOneWidget);
+      expect(find.text('恢复周期'), findsOneWidget);
+      expect(find.text('项目亮点'), findsOneWidget);
+      expect(find.text('潜在风险及副作用'), findsOneWidget);
+      expect(find.textContaining('标题不可修改'), findsNothing);
+
+      const values = {
+        'platform-name': 'Hydrating Facial',
+        'platform-reference-price': '320',
+        'platform-sales-count': '0',
+        'platform-category': 'Skin',
+        'platform-description': 'Clinic description',
+        'platform-detail-content': 'A&B <设备>\n改善方向',
+        'platform-detail-suitable': '干燥、缺水肌肤',
+        'platform-detail-contraindications': '孕期及感染期人群',
+        'platform-detail-recovery': '通常 1–3 天恢复',
+        'platform-detail-highlights': '方案可按面诊结果调整',
+        'platform-detail-risks': '短期泛红；异常时及时复诊',
+      };
+      for (final entry in values.entries) {
+        await tester.enterText(find.byKey(Key(entry.key)), entry.value);
+      }
+
+      await _submit(tester, const Key('platform-submit'));
+
+      expect(repository.platformSubmissions, hasLength(1));
+      expect(
+        repository.platformSubmissions.single.detailContent,
+        '<h1>作用原理</h1>\n'
+        '<p>A&amp;B &lt;设备&gt;<br>改善方向</p>\n'
+        '<h1>适合人群</h1>\n'
+        '<p>干燥、缺水肌肤</p>\n'
+        '<h1>禁忌人群</h1>\n'
+        '<p>孕期及感染期人群</p>\n'
+        '<h1>恢复周期</h1>\n'
+        '<p>通常 1–3 天恢复</p>\n'
+        '<h1>项目亮点</h1>\n'
+        '<p>方案可按面诊结果调整</p>\n'
+        '<h1>潜在风险及副作用</h1>\n'
+        '<p>实际效果和恢复情况因人而异，具体方案需由专业医生面诊后确定。</p>\n'
+        '<p>短期泛红；异常时及时复诊</p>',
+      );
+    },
+  );
+
+  testWidgets(
     'institution application loads inherited project details into editable fields and keeps one USD price',
       (tester) async {
     _useLargeSurface(tester);
@@ -443,7 +586,25 @@ void main() {
       expect(field.controller!.text, entry.value,
           reason: '${entry.key} must contain an editable inherited value',);
       expect(field.readOnly, isFalse);
-      expect(field.decoration?.hintText, isNull);
+      if (entry.key == 'institution-detail-content') {
+        expect(
+          field.decoration?.hintText,
+          '请填写项目的治疗原理、作用层次、主要材料或设备，以及预期改善方向。',
+        );
+      } else {
+        expect(field.decoration?.hintText, isNull);
+      }
+    }
+    for (final key in const [
+      'institution-detail-suitable',
+      'institution-detail-contraindications',
+      'institution-detail-recovery',
+      'institution-detail-highlights',
+      'institution-detail-risks',
+    ]) {
+      final field = tester.widget<TextField>(find.byKey(Key(key)));
+      expect(field.controller!.text, isEmpty);
+      expect(field.maxLines, greaterThan(1));
     }
     expect(
       tester
@@ -504,6 +665,11 @@ void main() {
       find.byKey(const Key('institution-tags')),
       find.byKey(const Key('institution-slogan')),
       find.byKey(const Key('institution-detail-content')),
+      find.byKey(const Key('institution-detail-suitable')),
+      find.byKey(const Key('institution-detail-contraindications')),
+      find.byKey(const Key('institution-detail-recovery')),
+      find.byKey(const Key('institution-detail-highlights')),
+      find.byKey(const Key('institution-detail-risks')),
       find.byKey(const Key('institution-price')),
       find.byKey(const Key('institution-travel-ground-service-fee')),
       find.byKey(const Key('institution-cover-upload')),
@@ -560,7 +726,15 @@ void main() {
           referencePrice: 699,
           currency: 'USD',
           slogan: 'Clear and bright',
-          detailContent: 'Second inherited detail',
+          detailContent: '<h1>作用原理</h1>\n'
+              '<p>Second inherited detail &#999999999999999999;</p>\n'
+              '<h1>适合人群</h1><p>Second suitable group</p>\n'
+              '<h1>禁忌人群</h1><p>Second contraindications</p>\n'
+              '<h1>恢复周期</h1><p>Second recovery</p>\n'
+              '<h1>项目亮点</h1><p>Second highlights</p>\n'
+              '<h1>Potential risks and side effects</h1>\n'
+              '<p>Results and recovery vary by patient. A qualified doctor must confirm the final treatment plan after an in-person assessment.</p>\n'
+              '<p>Second risks</p>',
           images: ['https://cdn.example.com/second-gallery.jpg'],
           salesCount: 9,
         ),
@@ -608,8 +782,26 @@ void main() {
       expect(_text(tester, 'institution-slogan'), 'Clear and bright');
       expect(
         _text(tester, 'institution-detail-content'),
-        'Second inherited detail',
+        'Second inherited detail &#999999999999999999;',
       );
+      expect(
+        _text(tester, 'institution-detail-suitable'),
+        'Second suitable group',
+      );
+      expect(
+        _text(tester, 'institution-detail-contraindications'),
+        'Second contraindications',
+      );
+      expect(
+        _text(tester, 'institution-detail-recovery'),
+        'Second recovery',
+      );
+      expect(
+        _text(tester, 'institution-detail-highlights'),
+        'Second highlights',
+      );
+      expect(_text(tester, 'institution-detail-risks'), 'Second risks');
+      expect(tester.takeException(), isNull);
       expect(_text(tester, 'institution-sales-count'), '9');
       expect(_text(tester, 'institution-price'), '799.99');
       expect(find.text('https://cdn.example.com/second-cover.jpg'), findsOneWidget);
@@ -1495,7 +1687,7 @@ void main() {
         find.byKey(
             const Key('professional-request-institution-negative-initial'),),
         findsOneWidget,);
-    expect(find.text('医生项目价格（USD）：USD 799.50'), findsOneWidget);
+    expect(find.text('USD 799.50'), findsOneWidget);
     expect(
         find.text('旅游地接服务费：USD 799.50'), findsOneWidget);
       expect(
@@ -1558,7 +1750,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('institution-stable-title'), findsOneWidget);
     expect(find.text('Live project v1'), findsNothing);
-    expect(find.text('当前平台项目名称：Live project v1'), findsOneWidget);
+    expect(find.text('平台项目: Live project v1'), findsOneWidget);
 
     repository.requests = [
       _request(
@@ -1579,7 +1771,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('institution-stable-title'), findsOneWidget);
     expect(find.text('Live project v2'), findsNothing);
-    expect(find.text('当前平台项目名称：Live project v2'), findsOneWidget);
+    expect(find.text('平台项目: Live project v2'), findsOneWidget);
   },);
 
   testWidgets(
@@ -1753,7 +1945,7 @@ void main() {
     await tester.tap(find.byKey(const Key('creation-review-confirm')));
     await tester.pumpAndSettle();
     expect(find.text('审核状态已变化，申请列表已刷新，请基于最新内容重试'), findsOneWidget);
-    expect(find.text('医生项目价格（USD）：USD 799.50'), findsOneWidget);
+    expect(find.text('USD 799.50'), findsOneWidget);
     expect(find.text('旅游地接服务费：USD 799.50'), findsOneWidget);
     expect(institutionRepository.formConfigLoads, 1);
     expect(institutionRepository.institutionOptionLoads, 1);
@@ -1827,7 +2019,7 @@ void main() {
     await tester.tap(find.byKey(const Key('creation-review-confirm')));
     await tester.pumpAndSettle();
     expect(adminRepository.requestListLoads, 2);
-    expect(find.text('当前医生名称：Admin refreshed doctor'), findsOneWidget);
+    expect(find.text('医生: Admin refreshed doctor'), findsOneWidget);
     expect(find.text('审核状态已变化，申请列表已刷新，请基于最新内容重试'), findsOneWidget);
     expect(adminRepository.formConfigLoads, 0);
     expect(adminRepository.institutionOptionLoads, 0);
@@ -1871,7 +2063,7 @@ void main() {
     await tester.tap(find.byKey(const Key('creation-review-confirm')));
     await tester.pumpAndSettle();
     expect(legalRepository.requestListLoads, 2);
-    expect(find.text('当前医生名称：Legal refreshed doctor'), findsOneWidget);
+    expect(find.text('医生: Legal refreshed doctor'), findsOneWidget);
     expect(find.text('审核状态已变化，申请列表已刷新，请基于最新内容重试'), findsOneWidget);
     expect(legalRepository.formConfigLoads, 0);
     expect(legalRepository.institutionOptionLoads, 0);
@@ -1952,7 +2144,36 @@ void main() {
         findsNothing,);
     expect(find.byKey(const Key('professional-request-platform-own')),
         findsNothing,);
+    final institutionCard =
+        find.byKey(const Key('institution-review-card-institution-target'));
+    expect(
+      find.descendant(
+        of: institutionCard,
+        matching: find.text('平台项目: Hydrating Facial'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: institutionCard,
+        matching: find.text('医生: Dr. Chen'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: institutionCard,
+        matching: find.textContaining('Complete immutable detail'),
+      ),
+      findsNothing,
+    );
+
+    await tester.tap(
+      find.byKey(const Key('institution-review-detail-institution-target')),
+    );
+    await tester.pumpAndSettle();
     expect(find.textContaining('Complete immutable detail'), findsOneWidget);
+    expect(find.textContaining('项目详情：'), findsNothing);
     expect(find.text('申请编号：institution-target'), findsOneWidget);
     expect(find.text('机构编号：inst-1'), findsOneWidget);
     expect(find.text('申请医生编号：doctor-1'), findsOneWidget);
@@ -1960,13 +2181,21 @@ void main() {
     expect(find.text('当前机构名称：Joysong Clinic'), findsOneWidget);
     expect(find.text('平台项目编号：project-1'), findsOneWidget);
     expect(find.text('当前平台项目名称：Hydrating Facial'), findsOneWidget);
-    expect(find.text('医生项目价格（USD）：USD 799.50'), findsOneWidget);
+    expect(find.text('项目分类：Skin'), findsOneWidget);
+    expect(find.text('原价（USD）：USD 999.99'), findsOneWidget);
     expect(find.text('旅游地接服务费：USD 79.95'), findsOneWidget);
+    expect(find.text('申请说明：Clinic note'), findsOneWidget);
+    expect(find.text('申请状态：待审核'), findsOneWidget);
     expect(find.text('审核意见：未提供'), findsOneWidget);
     expect(find.text('审核人：未提供'), findsOneWidget);
     expect(find.text('生成平台项目：未提供'), findsOneWidget);
+    expect(find.text('生成机构项目：未提供'), findsOneWidget);
     expect(find.byType(TextField), findsNothing,
         reason: 'the submitted snapshot must be immutable',);
+    Navigator.of(
+      tester.element(find.byType(InstitutionProjectReviewDetailPage)),
+    ).pop();
+    await tester.pumpAndSettle();
 
     await tester
         .tap(find.byKey(const Key('review-creation-institution-target')),);
@@ -2046,10 +2275,18 @@ void main() {
       reviewMode: true,
     ),),);
     await tester.pumpAndSettle();
-    expect(find.text('项目标语：未提供'), findsOneWidget);
-    expect(find.text('封面图：未提供'), findsOneWidget);
-    expect(find.text('项目图片：未提供'), findsOneWidget);
+    await tester.tap(
+      find.byKey(const Key('institution-review-detail-institution-other')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('项目详情：'), findsNothing);
     expect(find.text('分类标签：未提供'), findsWidgets);
+    expect(find.text('审核时间：-'), findsOneWidget);
+    expect(find.text('生成机构项目：未提供'), findsOneWidget);
+    Navigator.of(
+      tester.element(find.byType(InstitutionProjectReviewDetailPage)),
+    ).pop();
+    await tester.pumpAndSettle();
     await tester
         .tap(find.byKey(const Key('review-creation-institution-other')),);
     await tester.pumpAndSettle();

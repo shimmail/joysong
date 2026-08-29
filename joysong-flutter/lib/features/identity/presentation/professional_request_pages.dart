@@ -8,6 +8,7 @@ import 'package:joysong_flutter/features/identity/domain/identity_repository.dar
 import 'package:joysong_flutter/features/identity/presentation/identity_error_messages.dart';
 import 'package:joysong_flutter/features/identity/presentation/institution_project_review_widgets.dart';
 import 'package:joysong_flutter/features/identity/presentation/institution_relationships_page.dart';
+import 'package:joysong_flutter/features/identity/presentation/structured_project_detail_editor.dart';
 
 class DoctorSelfProfilePage extends StatefulWidget {
   const DoctorSelfProfilePage({
@@ -576,11 +577,11 @@ class _PlatformProjectRequestPageState
                 fieldKey: const Key('platform-description'),
                 maxLines: 4,
               ),
-              _requestField(
-                _detailContent,
-                context.localized('项目详情（纯文本）', 'Detail (plain text)'),
-                fieldKey: const Key('platform-detail-content'),
-                maxLines: 6,
+              StructuredProjectDetailEditor(
+                controller: _detailContent,
+                primaryFieldKey: const Key('platform-detail-content'),
+                fieldKeyPrefix: 'platform-detail',
+                enabled: !_saving && !_uploading,
               ),
               _requestField(
                 _tags,
@@ -1024,14 +1025,12 @@ class _InstitutionProjectRequestsPageState
                       context.localized('项目标语', 'Slogan'),
                       fieldKey: const Key('institution-slogan'),
                     ),
-                    _requestField(
-                      _detailContent,
-                      context.localized(
-                        '项目详情（纯文本）',
-                        'Detail (plain text)',
-                      ),
-                      fieldKey: const Key('institution-detail-content'),
-                      maxLines: 6,
+                    StructuredProjectDetailEditor(
+                      controller: _detailContent,
+                      primaryFieldKey:
+                          const Key('institution-detail-content'),
+                      fieldKeyPrefix: 'institution-detail',
+                      enabled: !_saving && !_uploading,
                     ),
                     _requestField(
                       _price,
@@ -1129,7 +1128,7 @@ class _InstitutionProjectRequestsPageState
                         institutionName: entry.value.first.institutionName,
                         items: entry.value,
                         onOpen: _openCreationDetail,
-                        summaryDetailsBuilder: _creationSummaryDetails,
+                        summaryDetailsBuilder: _creationCardDetails,
                         summaryActionBuilder: _creationSummaryAction,
                       ),
                 ],
@@ -1150,11 +1149,28 @@ class _InstitutionProjectRequestsPageState
   ) =>
       _requests.firstWhere((request) => request.id == item.id);
 
-  Widget _creationSummaryDetails(
+  Widget _creationCardDetails(
     BuildContext context,
     InstitutionProjectReviewItem item,
   ) {
     final request = _creationRequest(item);
+    return Text(
+      '${context.localized('旅游地接服务费', 'Travel ground service fee')}：'
+      '${_travelGroundServiceFeeValue(request.price, request.institutionSplit?.platformRate)}',
+    );
+  }
+
+  Widget _creationDetailMetadata(
+    BuildContext context,
+    InstitutionProjectReviewItem item,
+  ) {
+    final request = _creationRequest(item);
+    final split = request.institutionSplit;
+    final activeLabel = switch (request.isActive) {
+      true => context.localized('上架', 'Active'),
+      false => context.localized('下架', 'Inactive'),
+      null => _snapshotText(context, null),
+    };
     final rows = [
       '${context.localized('申请编号', 'Request ID')}：${request.id}',
       '${context.localized('机构编号', 'Institution ID')}：${_snapshotText(context, request.institutionId)}',
@@ -1163,16 +1179,27 @@ class _InstitutionProjectRequestsPageState
       '${context.localized('当前机构名称', 'Current institution name')}：${_snapshotText(context, request.institutionName)}',
       '${context.localized('平台项目编号', 'Platform project ID')}：${_snapshotText(context, request.projectId)}',
       '${context.localized('当前平台项目名称', 'Current platform project name')}：${_snapshotText(context, request.projectName)}',
-      '${context.localized('项目标语', 'Slogan')}：${_snapshotText(context, request.slogan)}',
-      '${context.localized('项目详情', 'Detail')}：${_snapshotText(context, request.detailContent)}',
-      '${context.localized('封面图', 'Cover')}：${_snapshotText(context, request.coverImage)}',
-      '${context.localized('项目图片', 'Images')}：${_snapshotItems(context, request.images)}',
+      '${context.localized('项目分类', 'Category')}：${_snapshotText(context, request.category)}',
       '${context.localized('分类标签', 'Category tags')}：${_snapshotItems(context, request.categoryTags)}',
-      '${context.localized('医生项目价格（USD）', 'Doctor project price (USD)')}：${_formatUsd(request.price)}',
+      '${context.localized('原价（USD）', 'Original price (USD)')}：${_formatUsd(request.originalPrice)}',
       '${context.localized('旅游地接服务费', 'Travel ground service fee')}：${_travelGroundServiceFeeValue(request.price, request.institutionSplit?.platformRate)}',
+      '${context.localized('审批后医生项目状态', 'Doctor project status after approval')}：$activeLabel',
+      if (split != null) ...[
+        '${context.localized('面诊费（USD）', 'Consultation fee (USD)')}：${_formatUsd(split.consultationFee)}',
+        '${context.localized('顾问比例', 'Consultant rate')}：${_formatNumber(split.commissionRate)}%',
+        '${context.localized('机构比例', 'Institution rate')}：${_formatNumber(split.institutionRate)}%',
+        '${context.localized('平台比例', 'Platform rate')}：${_formatNumber(split.platformRate)}%',
+        '${context.localized('医生比例', 'Doctor rate')}：${_formatNumber(split.doctorRate)}%',
+      ],
+      '${context.localized('申请说明', 'Notes')}：${_snapshotText(context, request.notes)}',
+      '${context.localized('申请状态', 'Request status')}：${_statusLabel(request.status)}',
       '${context.localized('审核意见', 'Review note')}：${_snapshotText(context, request.reviewNote)}',
       '${context.localized('审核人', 'Reviewed by')}：${_snapshotText(context, request.reviewedBy)}',
+      '${context.localized('审核时间', 'Reviewed at')}：${request.reviewedAt?.toIso8601String() ?? '-'}',
+      '${context.localized('提交时间', 'Submitted at')}：${request.submittedAt.toIso8601String()}',
+      '${context.localized('更新时间', 'Updated at')}：${request.updatedAt.toIso8601String()}',
       '${context.localized('生成平台项目', 'Resulting platform project')}：${_snapshotText(context, request.resultingProjectId)}',
+      '${context.localized('生成机构项目', 'Resulting institution project')}：${_snapshotText(context, request.resultingInstitutionProjectId)}',
     ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1199,6 +1226,7 @@ class _InstitutionProjectRequestsPageState
     Navigator.of(context).push<void>(MaterialPageRoute(
       builder: (_) => InstitutionProjectReviewDetailPage(
         item: item,
+        details: _creationDetailMetadata(context, item),
         actions: _canReview(request) && item.valid
             ? Align(
                 alignment: Alignment.centerRight,

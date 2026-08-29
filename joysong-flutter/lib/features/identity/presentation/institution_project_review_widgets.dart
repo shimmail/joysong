@@ -407,12 +407,14 @@ class InstitutionProjectReviewDetailPage extends StatelessWidget {
   const InstitutionProjectReviewDetailPage({
     required this.item,
     this.showLatest = false,
+    this.details,
     this.actions,
     super.key,
   });
 
   final InstitutionProjectReviewItem item;
   final bool showLatest;
+  final Widget? details;
   final Widget? actions;
 
   @override
@@ -461,6 +463,10 @@ class InstitutionProjectReviewDetailPage extends StatelessWidget {
                       doctorActive: item.latestDoctorActive,
                       travelGroundServiceFee: null,
                     ),
+                  if (details != null) ...[
+                    const SizedBox(height: 16),
+                    details!,
+                  ],
                   if (item.creation)
                     Padding(
                       padding: const EdgeInsets.only(top: 16),
