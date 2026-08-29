@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
 import 'package:joysong_flutter/features/orders/domain/orders_repository.dart';
+import 'package:joysong_flutter/features/orders/domain/refund_evidence_models.dart';
 
 final class OrdersController extends ChangeNotifier {
   OrdersController(this._repository, {this.pageSize = 20});
@@ -166,6 +167,8 @@ final class OrderDetailController extends ChangeNotifier {
     required String reason,
     String description = '',
     String evidenceUrl = '',
+    String? reasonCode,
+    List<RefundEvidenceDraft> evidenceFiles = const [],
   }) async {
     if (_isDisposed) return false;
     if (reason.trim().isEmpty) {
@@ -179,23 +182,32 @@ final class OrderDetailController extends ChangeNotifier {
     _errorMessage = null;
     notifyListeners();
     try {
-      final refund = await _repository.requestRefund(
-        orderId,
-        reason: reason.trim(),
-        description: description.trim(),
-        evidenceUrl: evidenceUrl.trim(),
-      );
+      final current = _order;
+      final refund = current?.isTravelGroundServiceOnly == true
+          ? await _repository.requestServiceFeeRefund(
+              orderId,
+              reason: reason.trim(),
+              description: description.trim(),
+              reasonCode: reasonCode,
+              evidenceFiles: evidenceFiles,
+            )
+          : await _repository.requestRefund(
+              orderId,
+              reason: reason.trim(),
+              description: description.trim(),
+              evidenceUrl: evidenceUrl.trim(),
+            );
       if (!_isCurrent(generation)) return false;
       _refund = refund;
-      final current = _order;
-      if (current != null && refund.status == RefundStatus.pending) {
-        _order = current.copyWith(
-          status: current.isTravelGroundServiceOnly
+      final currentAfterRefund = _order;
+      if (currentAfterRefund != null && refund.status == RefundStatus.pending) {
+        _order = currentAfterRefund.copyWith(
+          status: currentAfterRefund.isTravelGroundServiceOnly
               ? OrderStatus.refundReview
               : OrderStatus.disputeMediation,
           refundStatus: RefundStatus.pending,
           serviceMessagingEnabled:
-              current.isTravelGroundServiceOnly ? false : null,
+              currentAfterRefund.isTravelGroundServiceOnly ? false : null,
         );
       }
       notifyListeners();
