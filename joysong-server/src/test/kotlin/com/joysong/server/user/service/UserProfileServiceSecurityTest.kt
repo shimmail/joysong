@@ -160,14 +160,36 @@ class UserProfileServiceSecurityTest {
     }
 
     @Test
-    fun `admin method signatures delegate to the command boundary`() {
+    fun `phone binding rejects the E164 alias of the fixed administrator before account work`() {
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            service.bindPhone("user-id", "+8613800000000", "123456")
+        }
+
+        assertEquals("该手机号为系统管理员保留号码", error.message)
+        verify(exactly = 0) { accountLifecycleGuard.requireActiveForWrite(any()) }
+        verify(exactly = 0) { userRepository.existsByPhone(any()) }
+        verify(exactly = 0) { verificationCodeService.validate(any(), any()) }
+    }
+
+    @Test
+    fun `new phone code rejects the E164 alias of the fixed administrator before account work`() {
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            service.sendNewPhoneChangeCode("user-id", "+8613800000000")
+        }
+
+        assertEquals("该手机号为系统管理员保留号码", error.message)
+        verify(exactly = 0) { userRepository.findById(any()) }
+        verify(exactly = 0) { userRepository.existsByPhone(any()) }
+        verify(exactly = 0) { verificationCodeService.generate(any(), any()) }
+    }
+
+    @Test
+    fun `admin lifecycle methods delegate to the command boundary`() {
         val user = user(id = "user", role = "USER")
         val suspended = user.copy(accountState = AccountState.ADMIN_SUSPENDED)
-        every { adminAccountCommandService.updateRole(user.id, "ADMIN") } returns user.copy(role = "ADMIN")
         every { adminAccountCommandService.deactivate(user.id) } returns (true to "success")
         every { adminAccountCommandService.reactivate(user.id) } returns suspended.copy(accountState = AccountState.ACTIVE)
 
-        assertEquals("ADMIN", service.adminUpdateRole(user.id, "ADMIN")?.role)
         assertEquals(true to "success", service.adminDeactivate(user.id))
         assertEquals(AccountState.ACTIVE, service.adminReactivate(user.id)?.accountState)
     }

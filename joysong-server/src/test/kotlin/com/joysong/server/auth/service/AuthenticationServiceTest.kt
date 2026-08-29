@@ -140,19 +140,16 @@ class AuthenticationServiceTest {
     }
 
     @Test
-    fun `loginWithCode creates a distinct user for the E164 alias of an erased bare mainland ADMIN`() {
+    fun `loginWithCode keeps the E164 alias of the fixed phone reserved after an erased account`() {
         val requestPhone = "+8613800000000"
-        val erasedAdmin = adminUser(accountState = AccountState.ERASED)
         every { verificationCodeService.validate(requestPhone, "123456") } returns true
-        every { userRepository.findByPhone(erasedAdmin.phone!!) } returns Optional.of(erasedAdmin)
-        every { userRepository.findByPhone(requestPhone) } returns Optional.empty()
-        every { userRepository.save(any()) } answers { firstArg() }
-        every { refreshTokenService.issue(any(), requestPhone, "USER") } returns IssuedTokens("access", "refresh", 3600)
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            service.loginWithCode(requestPhone, "123456")
+        }
 
-        val response = service.loginWithCode(requestPhone, "123456")
-
-        assertEquals(AccountState.ACTIVE, response.user.accountState)
-        org.junit.jupiter.api.Assertions.assertNotEquals(erasedAdmin.id, response.user.id)
+        assertEquals("验证码无效或已过期", error.message)
+        verify(exactly = 0) { userRepository.findByPhone(any()) }
+        verify(exactly = 0) { userRepository.save(any()) }
     }
 
     @Test
@@ -280,21 +277,16 @@ class AuthenticationServiceTest {
     }
 
     @Test
-    fun `loginAdmin accepts a trimmed mainland administrator phone`() {
+    fun `loginAdmin rejects the configured phone when it is not the exact configured value`() {
         val admin = adminUser()
-        every { userRepository.findByPhone(admin.phone!!) } returns Optional.of(admin)
-        every { passwordEncoder.matches("StrongAdminPassword!1", admin.passwordHash) } returns true
-        every { refreshTokenService.issue(admin.id, admin.phone!!, "ADMIN") } returns IssuedTokens(
-            accessToken = "admin-access-token",
-            refreshToken = "admin-refresh-token",
-            accessTokenExpiresIn = 28_800
-        )
 
-        val response = service.loginAdmin("  ${admin.phone}  ", "StrongAdminPassword!1")
+        val error = assertThrows(BadCredentialsException::class.java) {
+            service.loginAdmin("  ${admin.phone}  ", "StrongAdminPassword!1")
+        }
 
-        assertEquals("admin-access-token", response.accessToken)
-        assertEquals("admin-refresh-token", response.refreshToken)
-        assertEquals("ADMIN", response.user.role)
+        assertEquals("管理员账号或密码错误", error.message)
+        verify(exactly = 0) { userRepository.findByPhone(any()) }
+        verify(exactly = 0) { refreshTokenService.issue(any(), any(), any()) }
     }
 
     @Test

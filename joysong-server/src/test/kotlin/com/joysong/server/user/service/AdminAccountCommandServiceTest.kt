@@ -1,21 +1,18 @@
 package com.joysong.server.user.service
 
 import com.joysong.server.auth.service.RefreshTokenService
-import com.joysong.server.user.entity.UserEntity
 import com.joysong.server.user.entity.AccountState
+import com.joysong.server.user.entity.UserEntity
 import com.joysong.server.user.repository.AdminAccountGuardRepository
 import com.joysong.server.user.repository.UserRepository
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertNotNull
-import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import org.springframework.security.crypto.password.PasswordEncoder
-import java.time.LocalDateTime
 
 class AdminAccountCommandServiceTest {
 
@@ -28,324 +25,200 @@ class AdminAccountCommandServiceTest {
         guardRepository,
         refreshTokenService,
         passwordEncoder,
-        BOOTSTRAP_PHONE
+        FIXED_ADMIN_PHONE,
     )
 
     @Test
-    fun `bootstrap administrator cannot be demoted`() {
-        val bootstrap = user(id = "bootstrap", phone = BOOTSTRAP_PHONE, role = "ADMIN")
-        every { userRepository.countAvailableAdministrators() } returns 2
-        every { userRepository.findByIdForUpdate(bootstrap.id) } returns bootstrap
-
-        assertThrows(IllegalArgumentException::class.java) {
-            service.updateRole(bootstrap.id, "USER")
-        }
-
-        verify(exactly = 0) { refreshTokenService.revokeAll(any()) }
-        verify(exactly = 0) { userRepository.saveAndFlush(any()) }
-    }
-
-    @Test
-    fun `bootstrap administrator cannot be deactivated`() {
-        val bootstrap = user(id = "bootstrap", phone = BOOTSTRAP_PHONE, role = "ADMIN")
-        every { userRepository.countAvailableAdministrators() } returns 2
-        every { userRepository.findByIdForUpdate(bootstrap.id) } returns bootstrap
-
-        assertThrows(IllegalArgumentException::class.java) {
-            service.deactivate(bootstrap.id)
-        }
-
-        verify(exactly = 0) { refreshTokenService.revokeAll(any()) }
-        verify(exactly = 0) { userRepository.saveAndFlush(any()) }
-    }
-
-    @Test
-    fun `non-bootstrap administrator can be demoted when another available administrator remains`() {
-        val admin = user(id = "admin-2", role = "ADMIN")
-        every { userRepository.countAvailableAdministrators() } returns 2
-        every { userRepository.findByIdForUpdate(admin.id) } returns admin
-        every { userRepository.saveAndFlush(any()) } answers { firstArg() }
-
-        val updated = service.updateRole(admin.id, "USER")
-
-        assertEquals("USER", updated?.role)
-        verify(exactly = 1) { refreshTokenService.revokeAll(admin.id) }
-    }
-
-    @Test
-    fun `non-bootstrap administrator can be deactivated when another available administrator remains`() {
-        val admin = user(id = "admin-2", role = "ADMIN")
-        every { userRepository.countAvailableAdministrators() } returns 2
-        every { userRepository.findByIdForUpdate(admin.id) } returns admin
-        every { userRepository.saveAndFlush(any()) } answers { firstArg() }
-
-        val result = service.deactivate(admin.id)
-
-        assertEquals(true to "success", result)
-        verify(exactly = 1) {
-            userRepository.saveAndFlush(match { it.id == admin.id && it.accountState == AccountState.ADMIN_SUSPENDED })
-        }
-        verify(exactly = 1) { refreshTokenService.revokeAll(admin.id) }
-    }
-
-    @Test
-    fun `last available administrator cannot be demoted`() {
-        val admin = user(id = "last-admin", role = "ADMIN")
-        every { userRepository.countAvailableAdministrators() } returns 1
-        every { userRepository.findByIdForUpdate(admin.id) } returns admin
-
-        assertThrows(IllegalArgumentException::class.java) {
-            service.updateRole(admin.id, "USER")
-        }
-
-        verify(exactly = 0) { refreshTokenService.revokeAll(any()) }
-        verify(exactly = 0) { userRepository.saveAndFlush(any()) }
-    }
-
-    @Test
-    fun `last available administrator cannot be deactivated`() {
-        val admin = user(id = "last-admin", role = "ADMIN")
-        every { userRepository.countAvailableAdministrators() } returns 1
-        every { userRepository.findByIdForUpdate(admin.id) } returns admin
-
-        assertThrows(IllegalArgumentException::class.java) {
-            service.deactivate(admin.id)
-        }
-
-        verify(exactly = 0) { refreshTokenService.revokeAll(any()) }
-        verify(exactly = 0) { userRepository.saveAndFlush(any()) }
-    }
-
-    @Test
-    fun `user without a password cannot be promoted to administrator`() {
-        val user = user(id = "passwordless-user", passwordHash = "", role = "USER")
-        every { userRepository.countAvailableAdministrators() } returns 1
-        every { userRepository.findByIdForUpdate(user.id) } returns user
-
-        assertThrows(IllegalArgumentException::class.java) {
-            service.updateRole(user.id, "ADMIN")
-        }
-
-        verify(exactly = 0) { refreshTokenService.revokeAll(any()) }
-        verify(exactly = 0) { userRepository.saveAndFlush(any()) }
-    }
-
-    @Test
-    fun `user without a valid administrator phone cannot be promoted`() {
-        val user = user(id = "international-user", phone = "+8613900000000", role = "USER")
-        every { userRepository.countAvailableAdministrators() } returns 1
-        every { userRepository.findByIdForUpdate(user.id) } returns user
-
-        assertThrows(IllegalArgumentException::class.java) {
-            service.updateRole(user.id, "ADMIN")
-        }
-
-        verify(exactly = 0) { refreshTokenService.revokeAll(any()) }
-        verify(exactly = 0) { userRepository.saveAndFlush(any()) }
-    }
-
-    @Test
-    fun `valid user can be promoted to administrator`() {
-        val user = user(id = "promoted-user", role = "USER")
-        every { userRepository.countAvailableAdministrators() } returns 1
-        every { userRepository.findByIdForUpdate(user.id) } returns user
-        every { userRepository.saveAndFlush(any()) } answers { firstArg() }
-
-        val updated = service.updateRole(user.id, "ADMIN")
-
-        assertEquals("ADMIN", updated?.role)
-        verify(exactly = 1) { refreshTokenService.revokeAll(user.id) }
-    }
-
-    @Test
-    fun `platform role outside USER and ADMIN is rejected`() {
-        val user = user(id = "user", role = "USER")
-        every { userRepository.countAvailableAdministrators() } returns 1
-        every { userRepository.findByIdForUpdate(user.id) } returns user
-
-        assertThrows(IllegalArgumentException::class.java) {
-            service.updateRole(user.id, "DOCTOR")
-        }
-
-        verify(exactly = 0) { refreshTokenService.revokeAll(any()) }
-        verify(exactly = 0) { userRepository.saveAndFlush(any()) }
-    }
-
-    @Test
-    fun `zero available administrator database fails closed`() {
-        every { userRepository.countAvailableAdministrators() } returns 0
-
-        val error = assertThrows(IllegalArgumentException::class.java) {
-            service.updateRole("any-user", "USER")
-        }
-
-        assertEquals("系统不存在可用管理员，拒绝管理员账号变更", error.message)
-        verify(exactly = 0) { userRepository.findByIdForUpdate(any()) }
-        verify(exactly = 0) { refreshTokenService.revokeAll(any()) }
-    }
-
-    @Test
-    fun `refresh token revocation failure prevents administrator role write`() {
-        val admin = user(id = "admin-2", role = "ADMIN")
-        every { userRepository.countAvailableAdministrators() } returns 2
-        every { userRepository.findByIdForUpdate(admin.id) } returns admin
-        every { refreshTokenService.revokeAll(admin.id) } throws IllegalStateException("revoke failed")
-
-        assertThrows(IllegalStateException::class.java) {
-            service.updateRole(admin.id, "USER")
-        }
-
-        verify(exactly = 0) { userRepository.saveAndFlush(any()) }
-    }
-
-    @Test
-    fun `suspended administrator can be reactivated with sessions revoked`() {
-        val admin = user(id = "admin-2", role = "ADMIN", accountState = AccountState.ADMIN_SUSPENDED)
-        every { userRepository.countAvailableAdministrators() } returns 1
-        every { userRepository.findByIdForUpdate(admin.id) } returns admin
-        every { userRepository.saveAndFlush(any()) } answers { firstArg() }
-
-        val updated = service.reactivate(admin.id)
-
-        assertNotNull(updated)
-        assertEquals(AccountState.ACTIVE, updated?.accountState)
-        verify(exactly = 1) { refreshTokenService.revokeAll(admin.id) }
-    }
-
-    @Test
-    fun `fresh empty database creates configured bootstrap administrator`() {
-        every { userRepository.findByPhoneForUpdate(BOOTSTRAP_PHONE) } returns null
+    fun `empty users table creates the configured fixed administrator`() {
         every { userRepository.countAnyState() } returns 0
+        every { userRepository.findByPhoneForUpdate(FIXED_ADMIN_PHONE) } returns null
         every { userRepository.countAvailableAdministrators() } returns 0
         every { passwordEncoder.encode("StrongPassword1!") } returns "encoded-password"
         every { userRepository.saveAndFlush(any()) } answers { firstArg() }
 
-        val created = service.initializeBootstrapAdministrator(BOOTSTRAP_PHONE, "StrongPassword1!")
+        val created = service.initializeBootstrapAdministrator(FIXED_ADMIN_PHONE, "StrongPassword1!")
 
-        assertEquals(BOOTSTRAP_PHONE, created.phone)
+        assertEquals(FIXED_ADMIN_PHONE, created.phone)
         assertEquals("ADMIN", created.role)
-        assertEquals("encoded-password", created.passwordHash)
         assertEquals(AccountState.ACTIVE, created.accountState)
+        assertEquals("encoded-password", created.passwordHash)
     }
 
     @Test
-    fun `populated zero-administrator database is not repaired by bootstrap guessing`() {
-        every { userRepository.findByPhoneForUpdate(BOOTSTRAP_PHONE) } returns null
-        every { userRepository.countAnyState() } returns 3
-        every { userRepository.countAvailableAdministrators() } returns 0
+    fun `valid configured administrator is verified without an admin password or writes`() {
+        val configured = administrator(id = "fixed-admin")
+        every { userRepository.countAnyState() } returns 1
+        every { userRepository.findByPhoneForUpdate(FIXED_ADMIN_PHONE) } returns configured
+        every { userRepository.findAllAnyState() } returns listOf(configured)
 
-        val error = assertThrows(IllegalStateException::class.java) {
-            service.initializeBootstrapAdministrator(BOOTSTRAP_PHONE, "StrongPassword1!")
-        }
+        val verified = service.initializeBootstrapAdministrator(FIXED_ADMIN_PHONE, "")
 
-        assertEquals("现有数据库不存在可用管理员，拒绝自动创建 bootstrap 管理员", error.message)
+        assertSame(configured, verified)
         verify(exactly = 0) { passwordEncoder.encode(any()) }
         verify(exactly = 0) { userRepository.saveAndFlush(any()) }
     }
 
     @Test
-    fun `administrator cannot use ordinary account deletion boundary`() {
-        val admin = user(id = "admin", role = "ADMIN")
-        every { userRepository.countAvailableAdministrators() } returns 1
-        every { userRepository.findByIdForUpdate(admin.id) } returns admin
+    fun `configured administrator is not rewritten when a password is supplied`() {
+        val configured = administrator(
+            id = "fixed-admin",
+            passwordHash = "existing-hash",
+            nickname = "Existing profile",
+        )
+        every { userRepository.countAnyState() } returns 1
+        every { userRepository.findByPhoneForUpdate(FIXED_ADMIN_PHONE) } returns configured
+        every { userRepository.findAllAnyState() } returns listOf(configured)
 
-        assertThrows(IllegalArgumentException::class.java) {
-            service.requireOrdinaryAccountDeletionAllowed(admin.id)
+        val verified = service.initializeBootstrapAdministrator(FIXED_ADMIN_PHONE, "ReplacementPassword1!")
+
+        assertSame(configured, verified)
+        assertEquals("existing-hash", verified.passwordHash)
+        assertEquals("Existing profile", verified.nickname)
+        verify(exactly = 0) { passwordEncoder.encode(any()) }
+        verify(exactly = 0) { userRepository.saveAndFlush(any()) }
+    }
+
+    @Test
+    fun `nonempty database without the configured administrator fails without writes`() {
+        every { userRepository.countAnyState() } returns 1
+        every { userRepository.findByPhoneForUpdate(FIXED_ADMIN_PHONE) } returns null
+        every { userRepository.countAvailableAdministrators() } returns 0
+
+        assertThrows(IllegalStateException::class.java) {
+            service.initializeBootstrapAdministrator(FIXED_ADMIN_PHONE, "StrongPassword1!")
         }
+
+        verify(exactly = 0) { passwordEncoder.encode(any()) }
+        verify(exactly = 0) { userRepository.saveAndFlush(any()) }
     }
 
     @Test
-    fun `ordinary user remains eligible for account deletion`() {
-        val user = user(id = "user", phone = "+8613900000000", role = "USER")
-        every { userRepository.countAvailableAdministrators() } returns 1
-        every { userRepository.findByIdForUpdate(user.id) } returns user
+    fun `configured phone conflict fails without writes`() {
+        val conflictingUser = administrator(role = "USER")
+        every { userRepository.countAnyState() } returns 1
+        every { userRepository.findByPhoneForUpdate(FIXED_ADMIN_PHONE) } returns conflictingUser
 
-        assertSame(user, service.requireOrdinaryAccountDeletionAllowed(user.id))
-    }
-
-    @Test
-    fun `bootstrap administrator cannot change configured phone through ordinary boundary`() {
-        val bootstrap = user(id = "bootstrap", phone = BOOTSTRAP_PHONE, role = "ADMIN")
-        every { userRepository.countAvailableAdministrators() } returns 1
-        every { userRepository.findByIdForUpdate(bootstrap.id) } returns bootstrap
-
-        assertThrows(IllegalArgumentException::class.java) {
-            service.requireOrdinaryPhoneChangeAllowed(bootstrap.id, "+8613900000000")
+        assertThrows(IllegalStateException::class.java) {
+            service.initializeBootstrapAdministrator(FIXED_ADMIN_PHONE, "StrongPassword1!")
         }
+
+        verify(exactly = 0) { passwordEncoder.encode(any()) }
+        verify(exactly = 0) { userRepository.saveAndFlush(any()) }
     }
 
     @Test
-    fun `last available administrator cannot change to a non-admin login phone`() {
-        val admin = user(id = "last-admin", role = "ADMIN")
+    fun `phone drift of the fixed administrator fails startup without writes`() {
+        val driftedAdministrator = administrator(id = "fixed-admin", phone = "+8613800000000")
+        every { userRepository.countAnyState() } returns 1
+        every { userRepository.findByPhoneForUpdate(FIXED_ADMIN_PHONE) } returns null
+        every { userRepository.findAllAnyState() } returns listOf(driftedAdministrator)
         every { userRepository.countAvailableAdministrators() } returns 1
-        every { userRepository.findByIdForUpdate(admin.id) } returns admin
-
-        assertThrows(IllegalArgumentException::class.java) {
-            service.requireOrdinaryPhoneChangeAllowed(admin.id, "+8613900000000")
-        }
-    }
-
-    @Test
-    fun `unavailable international administrator can still be demoted`() {
-        val admin = user(id = "legacy-admin", phone = "+8613900000000", role = "ADMIN")
-        every { userRepository.countAvailableAdministrators() } returns 1
-        every { userRepository.findByIdForUpdate(admin.id) } returns admin
+        every { passwordEncoder.encode(any()) } returns "unexpected-hash"
         every { userRepository.saveAndFlush(any()) } answers { firstArg() }
 
-        assertEquals("USER", service.updateRole(admin.id, "USER")?.role)
+        assertThrows(IllegalStateException::class.java) {
+            service.initializeBootstrapAdministrator(FIXED_ADMIN_PHONE, "StrongPassword1!")
+        }
+
+        verify(exactly = 0) { passwordEncoder.encode(any()) }
+        verify(exactly = 0) { userRepository.saveAndFlush(any()) }
     }
 
     @Test
-    fun `erased administrator cannot be reactivated`() {
-        val admin = user(
-            id = "legacy-admin",
-            phone = "+8613900000000",
-            role = "ADMIN",
-            accountState = AccountState.ERASED,
-        )
-        every { userRepository.countAvailableAdministrators() } returns 1
-        every { userRepository.findByIdForUpdate(admin.id) } returns admin
+    fun `a second non-erased administrator fails startup without writes`() {
+        val configured = administrator(id = "fixed-admin")
+        val secondAdministrator = administrator(id = "second-admin", phone = "13900000000")
+        every { userRepository.countAnyState() } returns 2
+        every { userRepository.findByPhoneForUpdate(FIXED_ADMIN_PHONE) } returns configured
+        every { userRepository.findAllAnyState() } returns listOf(configured, secondAdministrator)
 
-        val error = assertThrows(IllegalArgumentException::class.java) {
-            service.reactivate(admin.id)
+        assertThrows(IllegalStateException::class.java) {
+            service.initializeBootstrapAdministrator(FIXED_ADMIN_PHONE, "StrongPassword1!")
         }
-        assertEquals("注销账号不可恢复", error.message)
+
+        verify(exactly = 0) { passwordEncoder.encode(any()) }
+        verify(exactly = 0) { userRepository.saveAndFlush(any()) }
+    }
+
+    @Test
+    fun `fixed administrator cannot be deactivated`() {
+        val fixedAdmin = administrator(id = "fixed-admin")
+        every { userRepository.findByIdForUpdate(fixedAdmin.id) } returns fixedAdmin
+        every { userRepository.countAvailableAdministrators() } returns 1
+        every { userRepository.saveAndFlush(any()) } answers { firstArg() }
+
+        assertThrows(IllegalArgumentException::class.java) {
+            service.deactivate(fixedAdmin.id)
+        }
 
         verify(exactly = 0) { refreshTokenService.revokeAll(any()) }
+        verify(exactly = 0) { userRepository.saveAndFlush(any()) }
     }
 
     @Test
-    fun `erased professional account fails with the unrecoverable lifecycle error`() {
-        val doctor = user(
-            id = "doctor",
-            phone = "+8613900000000",
-            role = "DOCTOR",
-            accountState = AccountState.ERASED,
-        )
+    fun `fixed administrator cannot be reactivated`() {
+        val fixedAdmin = administrator(id = "fixed-admin", accountState = AccountState.ADMIN_SUSPENDED)
+        every { userRepository.findByIdForUpdate(fixedAdmin.id) } returns fixedAdmin
         every { userRepository.countAvailableAdministrators() } returns 1
-        every { userRepository.findByIdForUpdate(doctor.id) } returns doctor
-        val error = assertThrows(IllegalArgumentException::class.java) {
-            service.reactivate(doctor.id)
+        every { userRepository.saveAndFlush(any()) } answers { firstArg() }
+
+        assertThrows(IllegalArgumentException::class.java) {
+            service.reactivate(fixedAdmin.id)
         }
-        assertEquals("注销账号不可恢复", error.message)
+
+        verify(exactly = 0) { refreshTokenService.revokeAll(any()) }
+        verify(exactly = 0) { userRepository.saveAndFlush(any()) }
     }
 
-    private fun user(
-        id: String,
-        phone: String = "13900000000",
+    @Test
+    fun `fixed administrator cannot use the ordinary deletion boundary`() {
+        val fixedAdmin = administrator(id = "fixed-admin")
+        every { userRepository.findByIdForUpdate(fixedAdmin.id) } returns fixedAdmin
+        every { userRepository.countAvailableAdministrators() } returns 1
+
+        assertThrows(IllegalArgumentException::class.java) {
+            service.requireOrdinaryAccountDeletionAllowed(fixedAdmin.id)
+        }
+    }
+
+    @Test
+    fun `fixed administrator cannot change phone through the ordinary boundary`() {
+        val fixedAdmin = administrator(id = "fixed-admin")
+        every { userRepository.findByIdForUpdate(fixedAdmin.id) } returns fixedAdmin
+        every { userRepository.countAvailableAdministrators() } returns 1
+
+        assertThrows(IllegalArgumentException::class.java) {
+            service.requireOrdinaryPhoneChangeAllowed(fixedAdmin.id, "+8613900000000")
+        }
+    }
+
+    @Test
+    fun `ordinary user cannot change to the E164 alias of the fixed phone`() {
+        val user = administrator(id = "user-id", phone = "+8613900000000", role = "USER")
+        every { userRepository.findByIdForUpdate(user.id) } returns user
+
+        assertThrows(IllegalArgumentException::class.java) {
+            service.requireOrdinaryPhoneChangeAllowed(user.id, "+8613800000000")
+        }
+    }
+
+    private fun administrator(
+        id: String = "admin-id",
+        phone: String = FIXED_ADMIN_PHONE,
         passwordHash: String = "password-hash",
-        role: String,
+        nickname: String = "Admin",
+        role: String = "ADMIN",
         accountState: AccountState = AccountState.ACTIVE,
     ) = UserEntity(
         id = id,
         phone = phone,
         passwordHash = passwordHash,
-        nickname = "Admin",
+        nickname = nickname,
         role = role,
         accountState = accountState,
     )
 
     private companion object {
-        const val BOOTSTRAP_PHONE = "13800000000"
+        const val FIXED_ADMIN_PHONE = "13800000000"
     }
 }

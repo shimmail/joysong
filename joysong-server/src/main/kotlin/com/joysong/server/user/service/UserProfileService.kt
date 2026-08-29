@@ -9,6 +9,7 @@ import com.joysong.server.user.entity.UserEntity
 import com.joysong.server.user.entity.AccountState
 import com.joysong.server.user.repository.UserRepository
 import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -26,6 +27,7 @@ class UserProfileService(
     private val refreshTokenService: RefreshTokenService,
     private val adminAccountCommandService: AdminAccountCommandService,
     private val accountLifecycleGuard: AccountLifecycleGuard,
+    @Value("\${admin.bootstrap.phone:}") private val bootstrapPhone: String = "13800000000",
 ) {
     private val logger = LoggerFactory.getLogger(UserProfileService::class.java)
     private val phoneChangeAuthorizations = ConcurrentHashMap<String, PhoneChangeAuthorization>()
@@ -149,6 +151,7 @@ class UserProfileService(
     @Transactional
     fun bindPhone(userId: String, phone: String, code: String) {
         require(phone.matches(Regex("^\\+[1-9]\\d{6,14}$"))) { "手机号格式不正确" }
+        require(!FixedAdminPhone.isReserved(phone, bootstrapPhone)) { "该手机号为系统管理员保留号码" }
         val user = accountLifecycleGuard.requireActiveForWrite(userId)
         require(user.phone.isNullOrBlank()) { "当前账号已绑定手机号，请使用换绑手机号功能" }
         require(!userRepository.existsByPhone(phone)) { "该手机号已被注册" }
@@ -172,6 +175,7 @@ class UserProfileService(
     /** 检查新手机号未被占用后，才发送绑定验证码。 */
     fun sendNewPhoneChangeCode(userId: String, phone: String): Map<String, String> {
         require(phone.matches(Regex("^\\+[1-9]\\d{6,14}$"))) { "手机号格式不正确" }
+        require(!FixedAdminPhone.isReserved(phone, bootstrapPhone)) { "该手机号为系统管理员保留号码" }
         if (hasBoundPhone(userId)) requirePhoneChangeAuthorization(userId)
         if (getCurrentPhone(userId) == phone) throw IllegalArgumentException("新手机号不能与当前手机号相同")
         if (userRepository.existsByPhone(phone)) throw IllegalArgumentException("该手机号已被注册")
@@ -245,10 +249,6 @@ class UserProfileService(
     }
 
     fun adminFindById(id: String): UserEntity? = userRepository.findById(id).orElse(null)
-
-    fun adminUpdateRole(id: String, role: String): UserEntity? {
-        return adminAccountCommandService.updateRole(id, role)
-    }
 
     fun adminDeactivate(id: String): Pair<Boolean, String> {
         return adminAccountCommandService.deactivate(id)

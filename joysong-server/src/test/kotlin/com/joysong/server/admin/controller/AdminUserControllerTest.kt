@@ -62,16 +62,14 @@ class AdminUserControllerTest {
     }
 
     @Test
-    fun `role update response is whitelisted`() {
-        every { userProfileService.adminUpdateRole("user-1", "ADMIN") } returns user(role = "ADMIN")
-
-        val data = performAndReadData(
+    fun `role update endpoint is unavailable`() {
+        mockMvc.perform(
             put("/api/admin/users/user-1/role")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""{"role":"ADMIN"}""")
         )
 
-        assertAdminUserJson(data, "user-1", "ADMIN")
+            .andExpect(status().isNotFound)
     }
 
     @Test

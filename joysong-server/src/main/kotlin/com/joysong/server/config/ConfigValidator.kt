@@ -45,7 +45,6 @@ class ConfigValidator(
         if (smsEnabled && smsTemplateCode.isBlank()) missing.add("SMS_TEMPLATE_CODE")
         if (dbPassword.isBlank()) missing.add("DB_PASSWORD")
         if (!adminPhone.matches(Regex("^1\\d{10}$"))) missing.add("ADMIN_PHONE (valid mobile number)")
-        if (adminPassword.length !in 12..128) missing.add("ADMIN_PASSWORD (12-128 characters)")
         val isProduction = environment.activeProfiles.any { it.equals("prod", ignoreCase = true) }
         if (isProduction && !ossEnabled) missing.add("OSS_ENABLED=true")
         if (isProduction && !smsEnabled) missing.add("SMS_ENABLED=true")

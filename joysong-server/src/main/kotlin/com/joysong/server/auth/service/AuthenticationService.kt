@@ -9,6 +9,7 @@ import com.joysong.server.auth.dto.UserDto
 import com.joysong.server.user.entity.UserEntity
 import com.joysong.server.user.entity.AccountState
 import com.joysong.server.user.repository.UserRepository
+import com.joysong.server.user.service.FixedAdminPhone
 import org.slf4j.LoggerFactory
 import org.springframework.security.authentication.BadCredentialsException
 import org.springframework.beans.factory.annotation.Value
@@ -23,7 +24,8 @@ class AuthenticationService(
     private val refreshTokenService: RefreshTokenService,
     private val verificationCodeService: VerificationCodeService,
     @Value("\${google.client-id:}") private val googleClientId: String,
-    @Value("\${google.proxy-url:}") private val googleProxyUrl: String
+    @Value("\${google.proxy-url:}") private val googleProxyUrl: String,
+    @Value("\${admin.bootstrap.phone:}") private val bootstrapPhone: String = "13800000000",
 ) {
     private val logger = LoggerFactory.getLogger(AuthenticationService::class.java)
     private val dummyPasswordHash = passwordEncoder.encode("joysong-invalid-admin-password")
@@ -50,7 +52,7 @@ class AuthenticationService(
         if (!verificationCodeService.validate(phone, code)) {
             throw IllegalArgumentException("验证码无效或已过期")
         }
-        findBareMainlandAdmin(phone)?.let {
+        if (FixedAdminPhone.isReserved(phone, bootstrapPhone)) {
             throw IllegalArgumentException("验证码无效或已过期")
         }
         val user = userRepository.findByPhone(phone).map { existing ->
@@ -69,6 +71,10 @@ class AuthenticationService(
     }
 
     fun login(phone: String, password: String): LoginResponse {
+        if (FixedAdminPhone.isReserved(phone, bootstrapPhone)) {
+            passwordEncoder.matches(password, dummyPasswordHash)
+            throw IllegalArgumentException("密码错误，请重试")
+        }
         // 手机号未注册则拒绝登录
         val user = userRepository.findByPhone(phone)
             .orElseThrow { IllegalArgumentException("该手机号未注册，请先注册") }
@@ -93,14 +99,13 @@ class AuthenticationService(
      * 对不存在的账号同样执行一次 BCrypt 校验，降低通过响应耗时枚举账号的风险。
      */
     fun loginAdmin(phone: String, password: String): LoginResponse {
-        val normalizedPhone = phone.trim()
-        val validAdminPhone = ADMIN_PHONE.matches(normalizedPhone)
-        val user = if (validAdminPhone) userRepository.findByPhone(normalizedPhone).orElse(null) else null
+        val configuredPhone = FixedAdminPhone.isReserved(phone, bootstrapPhone) && phone == bootstrapPhone
+        val user = if (configuredPhone) userRepository.findByPhone(phone).orElse(null) else null
         val storedPasswordHash = user?.passwordHash?.takeIf { it.isNotBlank() }
         val passwordHash = storedPasswordHash ?: dummyPasswordHash
         val passwordMatches = passwordEncoder.matches(password, passwordHash)
 
-        if (!validAdminPhone || user == null || user.accountState != AccountState.ACTIVE || user.role != "ADMIN" || storedPasswordHash == null || !passwordMatches) {
+        if (!configuredPhone || user == null || user.accountState != AccountState.ACTIVE || user.role != "ADMIN" || storedPasswordHash == null || !passwordMatches) {
             throw BadCredentialsException("管理员账号或密码错误")
         }
 
@@ -111,7 +116,7 @@ class AuthenticationService(
         if (!verificationCodeService.validate(phone, code)) {
             throw IllegalArgumentException("验证码无效或已过期")
         }
-        findBareMainlandAdmin(phone)?.let {
+        if (FixedAdminPhone.isReserved(phone, bootstrapPhone)) {
             throw IllegalArgumentException("手机号已注册")
         }
         val user = userRepository.findByPhone(phone).map { existing ->
@@ -183,13 +188,6 @@ class AuthenticationService(
         return refreshTokenService.issue(user.id, user.phone.orEmpty(), user.role).toLoginResponse(user)
     }
 
-    private fun findBareMainlandAdmin(phone: String): UserEntity? {
-        val barePhone = E164_MAINLAND_PHONE.matchEntire(phone)?.groupValues?.get(1) ?: return null
-        return userRepository.findByPhone(barePhone)
-            .orElse(null)
-            ?.takeIf { it.role == "ADMIN" && it.accountState != AccountState.ERASED }
-    }
-
     private fun IssuedTokens.toLoginResponse(user: UserEntity) = LoginResponse(
         token = accessToken,
         accessToken = accessToken,
@@ -236,7 +234,5 @@ class AuthenticationService(
     )
 
     private companion object {
-        val ADMIN_PHONE = Regex("^1[0-9]{10}$")
-        val E164_MAINLAND_PHONE = Regex("^\\+86(1[0-9]{10})$")
     }
 }

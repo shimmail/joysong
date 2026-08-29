@@ -26,17 +26,6 @@ class AdminUserController(
         return BaseResponse.success(user.toAdminUserView())
     }
 
-    @PutMapping("/users/{id}/role")
-    fun updateUserRole(
-        @PathVariable id: String,
-        @RequestBody body: Map<String, String>
-    ): BaseResponse<AdminUserView> {
-        val newRole = body["role"] ?: return BaseResponse.error("角色不能为空")
-        val result = userProfileService.adminUpdateRole(id, newRole)
-            ?: return BaseResponse.error("用户不存在")
-        return BaseResponse.success(result.toAdminUserView())
-    }
-
     @PutMapping("/users/{id}/deactivate")
     fun deactivateUser(@PathVariable id: String): BaseResponse<*> {
         val (success, message) = userProfileService.adminDeactivate(id)
