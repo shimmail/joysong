@@ -711,7 +711,7 @@ describe('RefundsPage manual review operations', () => {
 
     const row = await screen.findByRole('row', { name: /SO-001/ });
     expect(within(row).getByText('3')).toBeInTheDocument();
-    await userEvent.setup().click(within(row).getByRole('button', { name: '详情' }));
+    await userEvent.setup().click(within(row).getByRole('button', { name: /详情/ }));
 
     const dialog = (await screen.findByText('退款详情')).closest('.ant-modal') as HTMLElement;
     const metadata = within(dialog).getAllByTestId('refund-evidence-metadata');
@@ -724,7 +724,7 @@ describe('RefundsPage manual review operations', () => {
     expect(metadata[1]).toHaveTextContent('1.0 MB');
   });
 
-  it('authenticated image preview requests a blob and revokes its object URL when detail closes', async () => {
+  it('authenticated evidence image preview requests a blob and revokes its object URL when detail closes', async () => {
     const user = userEvent.setup();
     const createObjectURL = vi.fn(() => 'blob:image-preview');
     const revokeObjectURL = vi.fn();
@@ -741,7 +741,7 @@ describe('RefundsPage manual review operations', () => {
 
     render(<RefundsPage />);
     const row = await screen.findByRole('row', { name: /SO-001/ });
-    await user.click(within(row).getByRole('button', { name: '详情' }));
+    await user.click(within(row).getByRole('button', { name: /详情/ }));
     const dialog = (await screen.findByText('退款详情')).closest('.ant-modal') as HTMLElement;
     await user.click(within(dialog).getByRole('button', { name: '预览 receipt.jpg' }));
 
@@ -773,7 +773,7 @@ describe('RefundsPage manual review operations', () => {
 
     render(<RefundsPage />);
     const row = await screen.findByRole('row', { name: /SO-001/ });
-    await user.click(within(row).getByRole('button', { name: '详情' }));
+    await user.click(within(row).getByRole('button', { name: /详情/ }));
     const dialog = (await screen.findByText('退款详情')).closest('.ant-modal') as HTMLElement;
     await user.click(within(dialog).getByRole('button', { name: '预览 receipt.pdf' }));
 
@@ -802,7 +802,7 @@ describe('RefundsPage manual review operations', () => {
 
     render(<RefundsPage />);
     const row = await screen.findByRole('row', { name: /SO-001/ });
-    await user.click(within(row).getByRole('button', { name: '详情' }));
+    await user.click(within(row).getByRole('button', { name: /详情/ }));
     const dialog = (await screen.findByText('退款详情')).closest('.ant-modal') as HTMLElement;
     const nativeCreateElement = document.createElement.bind(document);
     let temporaryAnchor: HTMLAnchorElement | null = null;
@@ -854,7 +854,7 @@ describe('RefundsPage manual review operations', () => {
     await user.selectOptions(await screen.findByRole('combobox', { name: '退款状态' }), '__all__');
     const pendingRow = await screen.findByRole('row', { name: /SO-001/ });
     const retryRow = screen.getByRole('row', { name: /RETRY-001/ });
-    await user.click(within(pendingRow).getByRole('button', { name: '详情' }));
+    await user.click(within(pendingRow).getByRole('button', { name: /详情/ }));
     const dialog = (await screen.findByText('退款详情')).closest('.ant-modal') as HTMLElement;
     const nativeCreateElement = document.createElement.bind(document);
     let temporaryAnchor: HTMLAnchorElement | null = null;
@@ -871,8 +871,8 @@ describe('RefundsPage manual review operations', () => {
     expect(temporaryAnchor?.isConnected).toBe(false);
     expect(document.body.querySelector('a[download="broken.jpg"]')).toBeNull();
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:download-failure');
-    expect(within(pendingRow).getByRole('button', { name: '批准' })).toBeEnabled();
-    expect(within(pendingRow).getByRole('button', { name: '拒绝' })).toBeEnabled();
+    expect(within(pendingRow).getByRole('button', { name: /批准/ })).toBeEnabled();
+    expect(within(pendingRow).getByRole('button', { name: /拒绝/ })).toBeEnabled();
     expect(within(retryRow).getByRole('button', { name: '重试失败项' })).toBeEnabled();
   });
 
@@ -891,7 +891,7 @@ describe('RefundsPage manual review operations', () => {
     render(<RefundsPage />);
     const row = await screen.findByRole('row', { name: /SO-001/ });
     expect(within(row).getByText('5')).toBeInTheDocument();
-    await userEvent.setup().click(within(row).getByRole('button', { name: '详情' }));
+    await userEvent.setup().click(within(row).getByRole('button', { name: /详情/ }));
 
     const dialog = (await screen.findByText('退款详情')).closest('.ant-modal') as HTMLElement;
     const legacyLinks = within(dialog).getAllByRole('link', { name: '旧版凭证（公开链接）' });
