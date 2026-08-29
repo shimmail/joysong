@@ -52,6 +52,78 @@ const paidAmount = (record: any) => formatMoney(
 const isRetryableRefund = (record: any) =>
   record?.status === 'REFUND_PROCESSING' && record.items?.some((item: any) => item.status === 'FAILED');
 
+type RefundEvidenceFile = {
+  fileId: string;
+  originalName: string;
+  contentType: string;
+  sizeBytes: number;
+  position: number;
+};
+
+const allowedEvidenceContentTypes = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'application/pdf',
+]);
+
+const evidenceContentPath = (refundId: string, fileId: string) =>
+  `/admin/refunds/${refundId}/evidence/${fileId}/content`;
+
+const refundEvidenceFiles = (value: unknown): RefundEvidenceFile[] => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item, index) => {
+      if (!item || typeof item !== 'object') return null;
+      const file = item as Record<string, unknown>;
+      const sizeBytes = file.sizeBytes;
+      const position = file.position;
+      if (
+        typeof file.fileId !== 'string' || !file.fileId.trim()
+        || typeof file.originalName !== 'string' || !file.originalName.trim()
+        || typeof file.contentType !== 'string' || !allowedEvidenceContentTypes.has(file.contentType.trim())
+        || typeof sizeBytes !== 'number' || !Number.isSafeInteger(sizeBytes) || sizeBytes < 0
+        || typeof position !== 'number' || !Number.isInteger(position) || position < 0 || position > 4
+      ) return null;
+      return {
+        fileId: file.fileId.trim(),
+        originalName: file.originalName.trim(),
+        contentType: file.contentType.trim(),
+        sizeBytes,
+        position,
+        index,
+      };
+    })
+    .filter((file): file is RefundEvidenceFile & { index: number } => file !== null)
+    .sort((left, right) => left.position - right.position || left.index - right.index)
+    .slice(0, 5)
+    .map(({ index: _index, ...file }) => file);
+};
+
+const legacyEvidenceUrls = (value: unknown): string[] => {
+  if (typeof value !== 'string') return [];
+  return value
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean)
+    .flatMap(item => {
+      try {
+        const url = new URL(item);
+        return url.protocol === 'http:' || url.protocol === 'https:' ? [url.href] : [];
+      } catch {
+        return [];
+      }
+    })
+    .slice(0, 5);
+};
+
+const formatFileSize = (bytes: number): string => {
+  if (!Number.isFinite(bytes) || bytes < 0) return '-';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
 export default function RefundsPage() {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -78,6 +150,40 @@ export default function RefundsPage() {
   const [detailRecord, setDetailRecord] = useState<any | null>(null);
   const [retryingRefundId, setRetryingRefundId] = useState<string | null>(null);
   const retryingRefundIdRef = useRef<string | null>(null);
+  const [imagePreview, setImagePreview] = useState<{ url: string; originalName: string } | null>(null);
+  const liveObjectUrlsRef = useRef(new Set<string>());
+  const imagePreviewUrlRef = useRef<string | null>(null);
+  const detailSessionRef = useRef(0);
+  const previewRequestRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  const revokeObjectUrl = (url: string) => {
+    if (!liveObjectUrlsRef.current.delete(url)) return;
+    URL.revokeObjectURL(url);
+  };
+
+  const revokeAllObjectUrls = () => {
+    for (const url of liveObjectUrlsRef.current) URL.revokeObjectURL(url);
+    liveObjectUrlsRef.current.clear();
+    imagePreviewUrlRef.current = null;
+  };
+
+  const clearImagePreview = () => {
+    const imageUrl = imagePreviewUrlRef.current;
+    if (imageUrl) revokeObjectUrl(imageUrl);
+    imagePreviewUrlRef.current = null;
+    setImagePreview(null);
+  };
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      detailSessionRef.current += 1;
+      previewRequestRef.current += 1;
+      revokeAllObjectUrls();
+    };
+  }, []);
 
   const fetchData = async () => {
     setLoading(true);
@@ -176,8 +282,76 @@ export default function RefundsPage() {
   };
 
   const openDetail = (record: any) => {
+    detailSessionRef.current += 1;
+    previewRequestRef.current += 1;
+    revokeAllObjectUrls();
+    setImagePreview(null);
     setDetailRecord(record);
     setDetailVisible(true);
+  };
+
+  const closeDetail = () => {
+    detailSessionRef.current += 1;
+    previewRequestRef.current += 1;
+    revokeAllObjectUrls();
+    setImagePreview(null);
+    setDetailVisible(false);
+    setDetailRecord(null);
+  };
+
+  const requestEvidenceBlob = async (refundId: string, file: RefundEvidenceFile) => {
+    const response = await api.get(evidenceContentPath(refundId, file.fileId), { responseType: 'blob' });
+    return response.data as Blob;
+  };
+
+  const previewEvidence = async (file: RefundEvidenceFile) => {
+    const refundId = detailRecord?.id;
+    if (!refundId) return;
+    const session = detailSessionRef.current;
+    const request = previewRequestRef.current + 1;
+    previewRequestRef.current = request;
+    try {
+      const blob = await requestEvidenceBlob(refundId, file);
+      if (!mountedRef.current || session !== detailSessionRef.current || request !== previewRequestRef.current) return;
+      const objectUrl = URL.createObjectURL(blob);
+      liveObjectUrlsRef.current.add(objectUrl);
+      if (file.contentType.startsWith('image/')) {
+        clearImagePreview();
+        imagePreviewUrlRef.current = objectUrl;
+        setImagePreview({ url: objectUrl, originalName: file.originalName });
+      } else if (file.contentType === 'application/pdf') {
+        clearImagePreview();
+        window.open(objectUrl, '_blank', 'noopener,noreferrer');
+      } else {
+        revokeObjectUrl(objectUrl);
+        message.error(`预览凭证失败: 不支持预览 ${file.originalName}`);
+      }
+    } catch (error: any) {
+      if (!mountedRef.current || session !== detailSessionRef.current || request !== previewRequestRef.current) return;
+      message.error(`预览凭证失败: ${error?.response?.data?.message || error?.message || '未知错误'}`);
+    }
+  };
+
+  const downloadEvidence = async (file: RefundEvidenceFile) => {
+    const refundId = detailRecord?.id;
+    if (!refundId) return;
+    const session = detailSessionRef.current;
+    try {
+      const blob = await requestEvidenceBlob(refundId, file);
+      if (!mountedRef.current || session !== detailSessionRef.current) return;
+      const objectUrl = URL.createObjectURL(blob);
+      liveObjectUrlsRef.current.add(objectUrl);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = file.originalName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      revokeObjectUrl(objectUrl);
+    } catch (error: any) {
+      if (!mountedRef.current || session !== detailSessionRef.current) return;
+      message.error(`下载凭证失败: ${error?.response?.data?.message || error?.message || '未知错误'}`);
+    }
   };
 
   const handleRetry = async (record: any) => {
@@ -241,6 +415,10 @@ export default function RefundsPage() {
     {
       title: '退款类型', dataIndex: 'refundType', width: 90,
       render: (v: string) => refundTypeLabels[v] || v || '全额退款',
+    },
+    {
+      title: '凭证', key: 'evidence', width: 70,
+      render: (_: unknown, record: any) => refundEvidenceFiles(record.evidenceFiles).length + legacyEvidenceUrls(record.evidenceUrl).length,
     },
     { title: '原因', dataIndex: 'reason', width: 180, ellipsis: true },
     {
@@ -370,7 +548,7 @@ export default function RefundsPage() {
       <Modal
         title="退款详情"
         open={detailVisible}
-        onCancel={() => { setDetailVisible(false); setDetailRecord(null); }}
+        onCancel={closeDetail}
         footer={(
           <Space>
             {isRetryableRefund(detailRecord) && (
@@ -382,14 +560,14 @@ export default function RefundsPage() {
                 重试失败项
               </Button>
             )}
-            <Button onClick={() => setDetailVisible(false)}>关闭</Button>
+            <Button onClick={closeDetail}>关闭</Button>
           </Space>
         )}
         width={600}
       >
         {detailRecord && (
           <>
-          <Descriptions column={2} bordered size="small">
+           <Descriptions column={2} bordered size="small">
             <Descriptions.Item label="退款ID" span={2}>{detailRecord.id}</Descriptions.Item>
             <Descriptions.Item label="订单ID" span={2}>{detailRecord.orderId}</Descriptions.Item>
             <Descriptions.Item label="订单编号">{detailRecord.orderNo || '-'}</Descriptions.Item>
@@ -410,8 +588,31 @@ export default function RefundsPage() {
             {detailRecord.rejectReason && <Descriptions.Item label="拒绝原因" span={2}>{detailRecord.rejectReason}</Descriptions.Item>}
             <Descriptions.Item label="创建时间">{detailRecord.createdAt}</Descriptions.Item>
             <Descriptions.Item label="处理时间">{detailRecord.processedAt || '-'}</Descriptions.Item>
-          </Descriptions>
-          <div style={{ marginTop: 16 }}>
+           </Descriptions>
+           <div style={{ marginTop: 16 }}>
+             <h3>退款凭证</h3>
+             {refundEvidenceFiles(detailRecord.evidenceFiles).map((file) => (
+               <div key={file.fileId} data-testid="refund-evidence-metadata" style={{ marginBottom: 8 }}>
+                 <div>{file.originalName} · {file.contentType} · {formatFileSize(file.sizeBytes)}</div>
+                 <Space size="small">
+                   <Button size="small" onClick={() => void previewEvidence(file)} aria-label={`预览 ${file.originalName}`}>预览</Button>
+                   <Button size="small" onClick={() => void downloadEvidence(file)} aria-label={`下载 ${file.originalName}`}>下载</Button>
+                 </Space>
+               </div>
+             ))}
+             {legacyEvidenceUrls(detailRecord.evidenceUrl).map((url) => (
+               <div key={url} style={{ marginBottom: 8 }}>
+                 <a href={url} target="_blank" rel="noopener noreferrer">旧版凭证（公开链接）</a>
+               </div>
+             ))}
+             {!refundEvidenceFiles(detailRecord.evidenceFiles).length && !legacyEvidenceUrls(detailRecord.evidenceUrl).length && <span>-</span>}
+             {imagePreview && (
+               <div style={{ marginTop: 12 }}>
+                 <img src={imagePreview.url} alt={imagePreview.originalName} style={{ maxWidth: '100%', maxHeight: 360 }} />
+               </div>
+             )}
+           </div>
+           <div style={{ marginTop: 16 }}>
             <h3>渠道退款项</h3>
             <Table
               dataSource={detailRecord.items || []}
