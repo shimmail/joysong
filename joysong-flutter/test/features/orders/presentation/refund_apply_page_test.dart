@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/features/orders/domain/money.dart';
@@ -20,6 +21,7 @@ void main() {
     ];
     await _pumpRefundPage(tester, onPickRefundEvidence: () async => picks.removeAt(0));
 
+    await _ensureVisible(tester, find.text('退款凭证（选填）'));
     expect(find.text('退款凭证（选填）'), findsOneWidget);
     expect(find.byKey(const Key('refund-evidence-count')), findsOneWidget);
     expect(find.text('0/5'), findsOneWidget);
@@ -307,6 +309,7 @@ void main() {
       MaterialApp(
         locale: const Locale('zh'),
         supportedLocales: const [Locale('zh')],
+        localizationsDelegates: _testLocalizationsDelegates,
         home: OrderDetailPage(controller: controller),
       ),
     );
@@ -318,6 +321,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(repository.serviceFeeRefundCalls, 1);
+    await _ensureVisible(tester, find.text('Controller-specific failure'));
     expect(find.text('Controller-specific failure'), findsOneWidget);
     expect(find.byType(RefundApplyPage), findsOneWidget);
   });
@@ -330,6 +334,7 @@ void main() {
       MaterialApp(
         locale: const Locale('zh'),
         supportedLocales: const [Locale('zh')],
+        localizationsDelegates: _testLocalizationsDelegates,
         navigatorObservers: [observer],
         home: Builder(
           builder: (context) => Scaffold(
@@ -359,6 +364,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(attempts, 1);
+    await _ensureVisible(tester, find.text('Retry this refund'));
     expect(find.text('Retry this refund'), findsOneWidget);
     expect(find.byType(RefundApplyPage), findsOneWidget);
     expect(observer.popCount, 0);
@@ -388,6 +394,7 @@ void main() {
       MaterialApp(
         locale: const Locale('zh'),
         supportedLocales: const [Locale('zh')],
+        localizationsDelegates: _testLocalizationsDelegates,
         home: OrderDetailPage(controller: controller),
       ),
     );
@@ -418,6 +425,7 @@ Future<void> _pumpRefundPage(
       MaterialApp(
         locale: const Locale('zh'),
         supportedLocales: const [Locale('zh')],
+        localizationsDelegates: _testLocalizationsDelegates,
         home: RefundApplyPage(
           order: order ?? _order(flow: OrderPaymentFlow.travelGroundServiceOnly),
           canUploadLegacyEvidence: canUploadLegacyEvidence,
@@ -430,15 +438,28 @@ Future<void> _pumpRefundPage(
     );
 
 Future<void> _tapVisible(WidgetTester tester, Finder finder) async {
-  await tester.ensureVisible(finder);
-  await tester.pump();
+  await _ensureVisible(tester, finder);
   await tester.tap(finder);
 }
 
 Future<void> _ensureVisible(WidgetTester tester, Finder finder) async {
-  await tester.ensureVisible(finder);
+  if (finder.evaluate().isEmpty) {
+    await tester.scrollUntilVisible(
+      finder,
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+  } else {
+    await tester.ensureVisible(finder);
+  }
   await tester.pump();
 }
+
+const _testLocalizationsDelegates = [
+  GlobalMaterialLocalizations.delegate,
+  GlobalWidgetsLocalizations.delegate,
+  GlobalCupertinoLocalizations.delegate,
+];
 
 RefundEvidenceDraft _evidence(
   String fileName,

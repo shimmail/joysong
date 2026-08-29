@@ -1628,18 +1628,22 @@ class _RefundApplyPageState extends State<RefundApplyPage> {
             clipBehavior: Clip.antiAlias,
             child: RadioGroup<int>(
               groupValue: _selectedReasonIndex,
-              onChanged: _busy ? null : (value) => setState(() {
-                _selectedReasonIndex = value;
-                if (value != reasons.length - 1) {
-                  _customReason.clear();
-                }
-              }),
+              onChanged: (value) {
+                if (_busy) return;
+                setState(() {
+                  _selectedReasonIndex = value;
+                  if (value != reasons.length - 1) {
+                    _customReason.clear();
+                  }
+                });
+              },
               child: Column(
                 children: [
                   for (var index = 0; index < reasons.length; index++) ...[
                     RadioListTile<int>(
                       key: Key('refund-reason-$index'),
                       value: index,
+                      enabled: !_busy,
                       title: Text(reasons[index]),
                       dense: true,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 8),
