@@ -146,14 +146,42 @@ endif
 
 |海外用户|
 if (从 SERVICE_ACTIVE 或 COMPLETED 申请全额退款?) then (是)
+  |Flutter 退款页|
+  :显示退款凭证（选填）与 0/5 计数;
+  :提交前可反复单选、按选择顺序展示或删除凭证;
+  :multipart 退款申请\nreason + description + reasonCode\n+  0..5 evidenceFiles;
+
+  |平台 API|
+  :鉴权并确认订单为\nTRAVEL_GROUND_SERVICE_ONLY;
+
   |平台|
-  :创建全额旅游地接服务费退款申请;
+  :在同一事务创建全额旅游地接服务费退款申请;
   :保存 refund.originalStatus;
+
+  |私有文件服务|
+  :同一事务校验扩展名、MIME、签名、\n单文件 10 MiB 与最多 5 个;
+  :写入私有文件、REFUND_EVIDENCE 元数据\n及有序 refundId/fileId 关联;
+
+  |平台|
   :订单进入 REFUND_REVIEW;
   :写入 ORDER_REFUND_REQUESTED 系统消息\n通知用户、顾问和医生;
   :保留资料和历史会话读取，暂停发送;
 
+  |平台 API|
+  :仅返回安全元数据\nfileId、originalName、contentType、\nsizeBytes、position（无 URL/路径）;
+
+  |Flutter 退款页|
+  :显示退款详情 + evidenceFiles;
+  :提交成功后冻结凭证，只读展示文件名;
+  note right
+  任一凭证校验或持久化失败时，
+  整个退款事务回滚并清理本次物理文件；
+  页面保留原因、说明和已选凭证供重试。
+  end note
+
+  |海外用户|
   if (用户取消申请?) then (是)
+    |平台|
     :退款记录进入 CANCELLED;
     :按 originalStatus 恢复订单;
     if (originalStatus = SERVICE_ACTIVE?) then (是)
@@ -163,6 +191,18 @@ if (从 SERVICE_ACTIVE 或 COMPLETED 申请全额退款?) then (是)
     endif
     stop
   else (否)
+    |管理员退款页|
+    :鉴权读取\nGET /api/admin/refunds/{refundId}/evidence/{fileId}/content;
+
+    |平台 API|
+    :校验管理员权限及\nrefundId 与 fileId 有效关联;
+
+    |私有文件服务|
+    :读取 ACTIVE 私有 image/PDF;
+
+    |管理员退款页|
+    :通过认证 blob 预览或下载\nno-store + nosniff;
+
     |管理员|
     :记录审核人、理由、证据和决定;
     if (审核拒绝?) then (是)
