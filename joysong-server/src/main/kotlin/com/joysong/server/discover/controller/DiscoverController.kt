@@ -18,6 +18,7 @@ import com.joysong.server.discover.dto.toResponse
 import com.joysong.server.discover.service.DiscoverDetailService
 import com.joysong.server.discover.service.DiscoverService
 import com.joysong.server.discover.service.DiscoverSearchService
+import com.joysong.server.institution.entity.InstitutionEntity
 import com.joysong.server.institution.repository.InstitutionProjectRepository
 import com.joysong.server.institution.repository.InstitutionRepository
 import com.joysong.server.institution.service.InstitutionProjectDetailResolver
@@ -129,20 +130,18 @@ class DiscoverController(
         @RequestParam(defaultValue = "0") offset: Int,
         @RequestParam(defaultValue = "50") limit: Int
     ): ResponseEntity<BaseResponse<List<InstitutionResponse>>> {
-        val activeInstitutionProjects = institutionProjectRepository.findAll().filter { it.isActive }
-        val institutionByProjectId = activeInstitutionProjects.associate { it.id to it.institutionId }
-        val eligibleInstitutionIds = activeInstitutionProjects.takeIf { it.isNotEmpty() }
-            ?.let { doctorProjectRepository.findPublicByInstitutionProjectIds(it.map { offering -> offering.id }) }
-            .orEmpty()
-            .mapNotNull { binding -> institutionByProjectId[binding.institutionProjectId] }
-            .toSet()
         val result = if (query.isBlank()) institutionRepository.findAll()
         else {
             val escaped = query.replace("%", "\\%").replace("_", "\\_")
             institutionRepository.findByNameContainingOrCityContaining(escaped, escaped)
         }
-        return result.filter { it.id in eligibleInstitutionIds }
-            .map { it.toResponse() }.apiPage(offset, limit).toCompatibilityResponse()
+        return result.asSequence()
+            .filter { it.isVerified }
+            .sortedWith(compareByDescending<InstitutionEntity> { it.createdAt }.thenByDescending { it.id })
+            .map { it.toResponse() }
+            .toList()
+            .apiPage(offset, limit)
+            .toCompatibilityResponse()
     }
 
     @GetMapping("/articles")
