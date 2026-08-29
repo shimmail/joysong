@@ -42,6 +42,12 @@ class ProductionProfileTest {
     }
 
     @Test
+    fun `multipart limits accept five maximum-size refund evidence files`() {
+        assertEquals("10MB", applicationProperties.getProperty("spring.servlet.multipart.max-file-size"))
+        assertEquals("52MB", applicationProperties.getProperty("spring.servlet.multipart.max-request-size"))
+    }
+
+    @Test
     fun `production payment environment is selected by the Stripe API key`() {
         assertNull(properties.getProperty("payment.mode"))
         assertNull(properties.getProperty("payment.stripe.enabled"))
