@@ -128,10 +128,7 @@ DB_PASSWORD=替换为高强度数据库密码
 JWT_SECRET=替换为至少32字节的随机密钥
 
 # ADMIN_PHONE 始终指定唯一固定管理员。
-# ADMIN_PASSWORD 仅空数据库首次创建时临时提供；成功创建后应移除。
-# 已有管理员时正常重启不得要求或设置 ADMIN_PASSWORD，且不会重置现有密码。
 ADMIN_PHONE=13800138000
-ADMIN_PASSWORD=替换为强密码
 
 # 对外 API 域名与本地上传目录
 SERVER_BASE_URL=https://api.example.com
@@ -140,6 +137,16 @@ UPLOAD_LOCAL_DIR=/var/lib/joysong/uploads
 # 前端管理域名。多个地址用英文逗号分隔，不要在生产使用 *
 CORS_ALLOWED_ORIGINS=https://admin.example.com
 ```
+
+### 3.1 仅空数据库首次启动的临时管理员变量
+
+仅当数据库为空、尚未创建 `ADMIN_PHONE` 指定的固定管理员时，才临时设置：
+
+```dotenv
+ADMIN_PASSWORD=替换为强密码
+```
+
+首次创建成功后立即从部署环境移除该变量。已有管理员的正常启动不得要求或使用 `ADMIN_PASSWORD`，配置也不会重置现有管理员密码。
 
 当前默认数据库连接为 `localhost:3306/joysong`，用户名为 `root`。若生产库不在本机、名称或用户名不同，应通过受控的生产配置文件覆盖 `spring.datasource.url` 与 `spring.datasource.username`，不要修改并提交默认配置。Flyway 启动时会执行 `db/migration` 下的迁移；上线前先备份数据库。
 
