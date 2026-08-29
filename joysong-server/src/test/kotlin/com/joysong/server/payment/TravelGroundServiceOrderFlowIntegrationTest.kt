@@ -1,5 +1,6 @@
 package com.joysong.server.payment
 
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.joysong.server.discover.entity.DoctorProjectEntity
 import com.joysong.server.discover.repository.DoctorProjectRepository
@@ -46,6 +47,7 @@ import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -63,16 +65,21 @@ import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequ
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.MvcResult
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import org.springframework.mock.web.MockMultipartFile
 import org.testcontainers.containers.MySQLContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
 import java.math.BigDecimal
+import java.nio.file.Files
+import java.nio.file.Path
 import java.sql.DriverManager
 import java.time.LocalDateTime
+import java.util.Comparator
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ConcurrentHashMap
@@ -113,7 +120,8 @@ import java.util.concurrent.atomic.AtomicInteger
         "ai-agent.api-key=travel-flow-test-key",
         "ai-agent.model=travel-flow-test-model",
         "ai-agent.intent-model=travel-flow-test-intent-model",
-        "order.split.platform-rate=40.00"
+        "order.split.platform-rate=40.00",
+        "upload.private-dir=./build/test-private/travel-refund-evidence",
     ]
 )
 @AutoConfigureMockMvc
@@ -296,6 +304,125 @@ class TravelGroundServiceOrderFlowIntegrationTest {
             fixture.institutionId,
             fixture.adminId
         )
+    }
+
+    @AfterEach
+    fun cleanFixturePrivateFiles() {
+        val fixtureDirectory = privateUploadDirectory().resolve(fixture.userId)
+        if (!Files.exists(fixtureDirectory)) return
+        Files.walk(fixtureDirectory).use { paths ->
+            paths.sorted(Comparator.reverseOrder()).forEach(Files::deleteIfExists)
+        }
+    }
+
+    @Test
+    fun `invalid refund evidence atomically rolls back refund order metadata and written files`() {
+        val orderId = createActiveTravelOrder()
+        val before = jdbcTemplate.queryForMap(
+            "SELECT status, refund_status, refund_amount FROM orders WHERE id = ?",
+            orderId,
+        )
+        val valid = MockMultipartFile("evidenceFiles", "valid.png", "image/png", PNG_BYTES)
+        val invalid = MockMultipartFile(
+            "evidenceFiles",
+            "invalid.pdf",
+            "application/pdf",
+            "not-a-pdf".toByteArray(),
+        )
+
+        mockMvc.perform(
+            multipart("/api/orders/$orderId/refund")
+                .file(valid)
+                .file(invalid)
+                .param("reason", "invalid evidence rollback")
+                .with(authentication(principal(fixture.userId, "USER")))
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.code").value(400))
+            .andExpect(jsonPath("$.message").value("文件内容与声明格式不匹配"))
+
+        assertEquals(
+            0L,
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM refunds WHERE order_id = ?",
+                Long::class.java,
+                orderId,
+            ),
+        )
+        val after = jdbcTemplate.queryForMap(
+            "SELECT status, refund_status, refund_amount FROM orders WHERE id = ?",
+            orderId,
+        )
+        assertEquals(before["status"], after["status"])
+        assertEquals(before["refund_status"], after["refund_status"])
+        assertEquals(0, (before["refund_amount"] as BigDecimal).compareTo(after["refund_amount"] as BigDecimal))
+        assertEquals(
+            0L,
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM private_files WHERE owner_user_id = ?",
+                Long::class.java,
+                fixture.userId,
+            ),
+        )
+        assertEquals(
+            0L,
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM refund_evidence_files ref
+                JOIN refunds r ON r.id = ref.refund_id
+                WHERE r.order_id = ?
+                """.trimIndent(),
+                Long::class.java,
+                orderId,
+            ),
+        )
+        assertEquals(0L, countRegularFiles(refundEvidenceDirectory()))
+    }
+
+    @Test
+    fun `refund evidence metadata is flat and safe in user detail and admin list JSON`() {
+        val orderId = createActiveTravelOrder()
+        val originalName = "receipt-${fixture.token}.png"
+        val result = mockMvc.perform(
+            multipart("/api/orders/$orderId/refund")
+                .file(MockMultipartFile("evidenceFiles", originalName, "image/png", PNG_BYTES))
+                .param("reason", "safe metadata response")
+                .with(authentication(principal(fixture.userId, "USER")))
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.code").value(200))
+            .andExpect(jsonPath("$.data.evidenceUrl").value(""))
+            .andReturn()
+        val refundId = responseData(result, "id")
+
+        val userResult = mockMvc.perform(
+            get("/api/orders/$orderId/refund")
+                .with(authentication(principal(fixture.userId, "USER")))
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.code").value(200))
+            .andExpect(jsonPath("$.data.id").value(refundId))
+            .andExpect(jsonPath("$.data.refund").doesNotExist())
+            .andExpect(jsonPath("$.data.evidenceUrl").value(""))
+            .andReturn()
+        val userData = objectMapper.readTree(userResult.response.contentAsString).path("data")
+        assertSafeEvidenceMetadata(userData, originalName)
+        assertNoForbiddenStorageFields(userData)
+
+        val adminResult = mockMvc.perform(
+            get("/api/admin/refunds")
+                .with(authentication(principal(fixture.adminId, "ADMIN")))
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.code").value(200))
+            .andReturn()
+        val adminRecord = objectMapper.readTree(adminResult.response.contentAsString)
+            .path("data")
+            .single { it.path("id").asText() == refundId }
+        assertEquals("", adminRecord.path("evidenceUrl").asText())
+        assertSafeEvidenceMetadata(adminRecord, originalName)
+        assertNoForbiddenStorageFields(adminRecord)
     }
 
     @Test
@@ -829,6 +956,29 @@ class TravelGroundServiceOrderFlowIntegrationTest {
         return orderId
     }
 
+    private fun createActiveTravelOrder(): String {
+        val orderId = createTravelOrder()
+        mockMvc.perform(
+            post("/api/orders/$orderId/service-fee-payment-attempts")
+                .header("Idempotency-Key", "evidence-payment-${fixture.token}")
+                .with(authentication(principal(fixture.userId, "USER")))
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.status").value("REQUIRES_ACTION"))
+        val providerPaymentId = requireNotNull(
+            paymentRepository.findByOrderId(orderId).orElseThrow().providerPaymentId
+        )
+        mockMvc.perform(
+            post("/api/payment-webhooks/ALIPAY_PLUS")
+                .contentType(MediaType.TEXT_PLAIN)
+                .content("service-fee-succeeded:$providerPaymentId")
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.status").value("PROCESSED"))
+        assertEquals("SERVICE_ACTIVE", orderRepository.findById(orderId).orElseThrow().status)
+        return orderId
+    }
+
     private fun applyRefund(orderId: String, reason: String): String {
         val result = mockMvc.perform(
             post("/api/orders/$orderId/refund")
@@ -866,6 +1016,43 @@ class TravelGroundServiceOrderFlowIntegrationTest {
             .path("data")
             .path(field)
             .asText()
+
+    private fun assertSafeEvidenceMetadata(payload: JsonNode, expectedOriginalName: String) {
+        val evidenceFiles = payload.path("evidenceFiles")
+        assertTrue(evidenceFiles.isArray)
+        assertEquals(1, evidenceFiles.size())
+        val metadata = evidenceFiles.single()
+        assertEquals(SAFE_EVIDENCE_FIELDS, metadata.fieldNames().asSequence().toSet())
+        assertTrue(metadata.path("fileId").asText().isNotBlank())
+        assertEquals(expectedOriginalName, metadata.path("originalName").asText())
+        assertEquals("image/png", metadata.path("contentType").asText())
+        assertEquals(PNG_BYTES.size.toLong(), metadata.path("sizeBytes").asLong())
+        assertEquals(0, metadata.path("position").asInt())
+    }
+
+    private fun assertNoForbiddenStorageFields(node: JsonNode) {
+        when {
+            node.isObject -> node.fields().forEachRemaining { (name, value) ->
+                assertTrue(
+                    name.lowercase() !in FORBIDDEN_STORAGE_FIELDS,
+                    "Serialized refund response leaked forbidden field: $name",
+                )
+                assertNoForbiddenStorageFields(value)
+            }
+            node.isArray -> node.forEach(::assertNoForbiddenStorageFields)
+        }
+    }
+
+    private fun privateUploadDirectory(): Path =
+        Path.of(PRIVATE_UPLOAD_DIRECTORY).toAbsolutePath().normalize()
+
+    private fun refundEvidenceDirectory(): Path =
+        privateUploadDirectory().resolve(fixture.userId).resolve("REFUND_EVIDENCE")
+
+    private fun countRegularFiles(directory: Path): Long {
+        if (!Files.exists(directory)) return 0
+        return Files.walk(directory).use { paths -> paths.filter(Files::isRegularFile).count() }
+    }
 
     private fun principal(userId: String, role: String) = UsernamePasswordAuthenticationToken(
         userId,
@@ -975,6 +1162,19 @@ class TravelGroundServiceOrderFlowIntegrationTest {
     }
 
     companion object {
+        private const val PRIVATE_UPLOAD_DIRECTORY = "./build/test-private/travel-refund-evidence"
+        private val SAFE_EVIDENCE_FIELDS = setOf(
+            "fileId",
+            "originalName",
+            "contentType",
+            "sizeBytes",
+            "position",
+        )
+        private val FORBIDDEN_STORAGE_FIELDS = setOf("storagekey", "path", "url")
+        private val PNG_BYTES = byteArrayOf(
+            0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+            0x00, 0x00, 0x00, 0x00,
+        )
         private val DATABASE = WorktreeTestDatabase.databaseName()
 
         @Container
