@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/files/app_file_picker.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/transient_message.dart';
+import 'package:joysong_flutter/features/consultant_orders/domain/consultant_orders_repository.dart';
+import 'package:joysong_flutter/features/consultant_orders/presentation/consultant_orders_page.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/discover/presentation/professional_catalog_page.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
@@ -542,6 +546,8 @@ class ManagementCenterPage extends StatefulWidget {
   const ManagementCenterPage({
     required this.repository,
     required this.discoverRepository,
+    this.consultantOrdersRepository,
+    this.onOpenConsultantOrderServiceConversation,
     this.institutionImagePicker,
     this.doctorImagePicker,
     this.professionalRepository,
@@ -550,6 +556,9 @@ class ManagementCenterPage extends StatefulWidget {
 
   final IdentityRepository repository;
   final DiscoverRepository discoverRepository;
+  final ConsultantOrdersRepository? consultantOrdersRepository;
+  final Future<void> Function(String orderId)?
+      onOpenConsultantOrderServiceConversation;
   final InstitutionProfileImagePicker? institutionImagePicker;
   final Future<String?> Function()? doctorImagePicker;
   final ProfessionalRepository? professionalRepository;
@@ -560,10 +569,42 @@ class ManagementCenterPage extends StatefulWidget {
 
 class _ManagementCenterPageState extends State<ManagementCenterPage> {
   late final ManagementController _controller;
+  Future<void>? _consultantRoleRevocation;
 
   Future<ManagementContext?> _refreshManagementContext() async {
     await _controller.enter();
     return _controller.context;
+  }
+
+  Future<void> _handleConsultantRoleRequired() {
+    final inFlight = _consultantRoleRevocation;
+    if (inFlight != null) return inFlight;
+    final managementRoute = ModalRoute.of(context);
+    final completer = Completer<void>();
+    final operation = completer.future;
+    _consultantRoleRevocation = operation;
+    unawaited(
+      Future<void>(() async {
+        try {
+          await _controller.enter();
+          if (mounted && managementRoute != null && managementRoute.isActive) {
+            Navigator.of(context).popUntil(
+              (route) => route == managementRoute,
+            );
+          }
+          if (!completer.isCompleted) completer.complete();
+        } on Object catch (error, stackTrace) {
+          if (!completer.isCompleted) {
+            completer.completeError(error, stackTrace);
+          }
+        } finally {
+          if (identical(_consultantRoleRevocation, operation)) {
+            _consultantRoleRevocation = null;
+          }
+        }
+      }),
+    );
+    return operation;
   }
 
   @override
@@ -611,6 +652,11 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
                 context: _controller.context!,
                 repository: widget.repository,
                 discoverRepository: widget.discoverRepository,
+                consultantOrdersRepository:
+                    widget.consultantOrdersRepository,
+                onOpenConsultantOrderServiceConversation:
+                    widget.onOpenConsultantOrderServiceConversation,
+                onConsultantRoleRequired: _handleConsultantRoleRequired,
                 onRefresh: _controller.enter,
                 refreshManagementContext: _refreshManagementContext,
                 institutionImagePicker: widget.institutionImagePicker,
@@ -629,6 +675,9 @@ class _ManagementCapabilities extends StatelessWidget {
     required this.context,
     required this.repository,
     required this.discoverRepository,
+    required this.consultantOrdersRepository,
+    required this.onOpenConsultantOrderServiceConversation,
+    required this.onConsultantRoleRequired,
     required this.onRefresh,
     required this.refreshManagementContext,
     this.institutionImagePicker,
@@ -639,6 +688,10 @@ class _ManagementCapabilities extends StatelessWidget {
   final ManagementContext context;
   final IdentityRepository repository;
   final DiscoverRepository discoverRepository;
+  final ConsultantOrdersRepository? consultantOrdersRepository;
+  final Future<void> Function(String orderId)?
+      onOpenConsultantOrderServiceConversation;
+  final Future<void> Function() onConsultantRoleRequired;
   final Future<void> Function() onRefresh;
   final Future<ManagementContext?> Function() refreshManagementContext;
   final InstitutionProfileImagePicker? institutionImagePicker;
@@ -827,6 +880,15 @@ class _ManagementCapabilities extends StatelessWidget {
             label: buildContext.localized('项目目录', 'Project catalog'),
             enabled: isConsultant,
             action: _ManagementAction.consultantProjects,
+          ),
+          (
+            icon: Icons.receipt_long_outlined,
+            label: buildContext.localized('服务订单', 'Service orders'),
+            enabled: consultantOrdersRepository != null &&
+                onOpenConsultantOrderServiceConversation != null &&
+                isConsultant &&
+                context.canAccessConsultantOrderWorkbench,
+            action: _ManagementAction.consultantOrders,
           ),
         ],
       ),
@@ -1022,6 +1084,21 @@ class _ManagementCapabilities extends StatelessWidget {
       );
       return;
     }
+    if (action == _ManagementAction.consultantOrders &&
+        consultantOrdersRepository != null &&
+        onOpenConsultantOrderServiceConversation != null) {
+      Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => ConsultantOrdersPage(
+            repository: consultantOrdersRepository!,
+            onOpenServiceConversation:
+                onOpenConsultantOrderServiceConversation!,
+            onConsultantRoleRequired: onConsultantRoleRequired,
+          ),
+        ),
+      );
+      return;
+    }
     if (action == _ManagementAction.platformProjectRequest) {
       Navigator.of(context).push<void>(
         MaterialPageRoute(
@@ -1132,6 +1209,7 @@ enum _ManagementAction {
   institutionProjectJoinRequest,
   doctorProjectProfileUpdate,
   consultantProjects,
+  consultantOrders,
   doctorArticles,
   doctorOrders,
 }
@@ -1147,6 +1225,8 @@ Key? _managementActionKey(_ManagementAction action) => switch (action) {
         const Key('management-professional-catalog-doctor'),
       _ManagementAction.legalProfessionalCatalog =>
         const Key('management-professional-catalog-legal-representative'),
+      _ManagementAction.consultantOrders =>
+        const Key('management-consultant-orders'),
       _ => null,
     };
 

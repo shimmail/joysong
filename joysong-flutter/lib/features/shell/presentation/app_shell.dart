@@ -5,6 +5,7 @@ import 'package:joysong_flutter/core/config/app_environment.dart';
 import 'package:joysong_flutter/core/files/app_file_picker.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/network/api_client.dart';
+import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/account_security/data/account_security_api.dart';
 import 'package:joysong_flutter/features/account_security/data/account_security_repository_impl.dart';
@@ -22,6 +23,9 @@ import 'package:joysong_flutter/features/booking/data/booking_repository_impl.da
 import 'package:joysong_flutter/features/booking/domain/booking_repository.dart';
 import 'package:joysong_flutter/features/booking/presentation/booking_controller.dart';
 import 'package:joysong_flutter/features/booking/presentation/booking_page.dart';
+import 'package:joysong_flutter/features/consultant_orders/data/consultant_orders_remote_data_source.dart';
+import 'package:joysong_flutter/features/consultant_orders/data/consultant_orders_repository_impl.dart';
+import 'package:joysong_flutter/features/consultant_orders/domain/consultant_orders_repository.dart';
 import 'package:joysong_flutter/features/discover/data/discover_repository_impl.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
@@ -107,6 +111,7 @@ class _AppShellState extends State<AppShell> {
   ProfileRepository? _profileRepository;
   BookingRepository? _bookingRepository;
   OrdersRepository? _ordersRepository;
+  ConsultantOrdersRepository? _consultantOrdersRepository;
   SocialRepository? _socialRepository;
   MessagingRepository? _messagingRepository;
   WalletRepository? _walletRepository;
@@ -155,6 +160,7 @@ class _AppShellState extends State<AppShell> {
       _profileRepository = null;
       _bookingRepository = null;
       _ordersRepository = null;
+      _consultantOrdersRepository = null;
       _socialRepository = null;
       _messagingRepository = null;
       _walletRepository = null;
@@ -170,6 +176,9 @@ class _AppShellState extends State<AppShell> {
     _ordersRepository =
         OrdersRepositoryImpl(ApiOrdersRemoteDataSource(apiClient));
     _ordersController = OrdersController(_ordersRepository!);
+    _consultantOrdersRepository = ConsultantOrdersRepositoryImpl(
+      ApiConsultantOrdersRemoteDataSource(apiClient),
+    );
     _socialRepository = SocialRepositoryImpl(
       remoteDataSource: ApiSocialRemoteDataSource(apiClient),
       imagePreprocessor: const PassthroughPublicImagePreprocessor(),
@@ -305,6 +314,11 @@ class _AppShellState extends State<AppShell> {
           professionalRepository: widget.apiClient == null
               ? null
               : ProfessionalRepository(widget.apiClient!),
+          consultantOrdersRepository: _consultantOrdersRepository,
+          onOpenConsultantOrderServiceConversation:
+              _consultantOrdersRepository == null
+                  ? null
+                  : _openConsultantOrderServiceConversation,
           onOrders: _ordersController == null ? null : _openOrders,
           onWallet: _walletController == null ? null : _openWallet,
           onDiaries: _socialController == null ? null : _openSocial,
@@ -926,6 +940,7 @@ class _AppShellState extends State<AppShell> {
   Future<void> _openOrderServiceConversation(
     String orderId, {
     bool fallbackToOrdersOnFailure = false,
+    bool propagateConsultantRoleRequired = false,
   }) async {
     final repository = _messagingRepository;
     final id = orderId.trim();
@@ -937,6 +952,22 @@ class _AppShellState extends State<AppShell> {
         conversation,
         orderConversationRefreshed: true,
       );
+    } on ApiException catch (error) {
+      if (propagateConsultantRoleRequired &&
+          error.errorCode == 'CONSULTANT_ROLE_REQUIRED') {
+        rethrow;
+      }
+      if (!mounted) return;
+      showTransientMessage(
+        context,
+        context.localized(
+          '暂时无法打开订单沟通，请稍后重试',
+          'Unable to open this order conversation. Please try again.',
+        ),
+      );
+      if (fallbackToOrdersOnFailure) {
+        await _openOrders();
+      }
     } on Object {
       if (!mounted) return;
       showTransientMessage(
@@ -951,6 +982,12 @@ class _AppShellState extends State<AppShell> {
       }
     }
   }
+
+  Future<void> _openConsultantOrderServiceConversation(String orderId) =>
+      _openOrderServiceConversation(
+        orderId,
+        propagateConsultantRoleRequired: true,
+      );
 
   Future<void> _openDiaryEditor(
     SocialController controller, {
