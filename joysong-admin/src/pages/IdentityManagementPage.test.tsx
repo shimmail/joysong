@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import api from '../api';
@@ -29,7 +29,48 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-describe('IdentityManagementPage institution memberships', () => {
+describe('IdentityManagementPage', () => {
+  it('keeps document actions inside a constrained, horizontally scrollable material table', async () => {
+    mockGet.mockResolvedValue({
+      data: {
+        code: 200,
+        message: 'OK',
+        data: [{
+          id: 'application-1',
+          userId: 'user-1',
+          userName: '法人测试甲',
+          roleCode: 'INSTITUTION_LEGAL_REPRESENTATIVE',
+          status: 'PENDING',
+          applicationData: {},
+          reviewNote: '',
+          documents: [{
+            fileId: 'document-1',
+            documentType: 'BUSINESS_LICENSE',
+            originalName: '闵侯-重要天气预警报告-2026032_27247_260828_174615(1).pdf',
+            contentType: 'application/pdf',
+            sizeBytes: 328704,
+            status: 'ACTIVE',
+          }],
+        }],
+      },
+    });
+    render(<IdentityManagementPage />);
+
+    const materialsButton = (await screen.findByText('材料')).closest('button');
+    if (!materialsButton) throw new Error('材料按钮未渲染');
+    fireEvent.click(materialsButton);
+    const dialog = (await screen.findByText('申请材料')).closest('.ant-modal');
+    if (!(dialog instanceof HTMLElement)) throw new Error('申请材料弹窗未渲染');
+    const materialTable = within(dialog).getByText('认证材料').parentElement?.querySelector('.ant-table-wrapper');
+    if (!materialTable) throw new Error('认证材料表格未渲染');
+
+    expect(dialog).toHaveStyle({ width: '960px' });
+    expect(materialTable).toHaveStyle({ maxWidth: '100%' });
+    expect(materialTable.querySelector('table')).toHaveStyle({ tableLayout: 'fixed' });
+    expect(materialTable.querySelector('.ant-table-cell-fix-end')).toHaveTextContent('操作');
+    expect(within(dialog).getByText('安全查看').closest('button')).toBeInTheDocument();
+  });
+
   it('keeps generic creation while removing the direct consultant binding entry', async () => {
     const user = userEvent.setup();
     render(<IdentityManagementPage />);

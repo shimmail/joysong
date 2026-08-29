@@ -260,7 +260,7 @@ function ApplicationSection() {
       </Space>
       <Table rowKey="id" dataSource={data} columns={columns} loading={loading} size="small" scroll={{ x: 1100 }} />
 
-      <Modal title="申请材料" open={Boolean(detail)} footer={null} onCancel={() => setDetail(null)} width={760} destroyOnHidden>
+      <Modal title="申请材料" open={Boolean(detail)} footer={null} onCancel={() => setDetail(null)} width={960} destroyOnHidden>
         {detail && (
           <Space direction="vertical" size="middle" style={{ width: '100%' }}>
             <Descriptions bordered size="small" column={2}>
@@ -282,16 +282,21 @@ function ApplicationSection() {
                 rowKey="fileId"
                 size="small"
                 pagination={false}
+                tableLayout="fixed"
+                scroll={{ x: 820 }}
+                style={{ maxWidth: '100%' }}
                 dataSource={detail.documents}
                 columns={[
-                  { title: '材料类型', dataIndex: 'documentType' },
-                  { title: '文件名', dataIndex: 'originalName', render: (value: string) => value || '-' },
-                  { title: '格式', dataIndex: 'contentType' },
-                  { title: '大小', dataIndex: 'sizeBytes', render: (value: number) => `${Math.ceil(value / 1024)} KB` },
-                  { title: '状态', dataIndex: 'status' },
+                  { title: '材料类型', dataIndex: 'documentType', width: 150, ellipsis: true },
+                  { title: '文件名', dataIndex: 'originalName', width: 260, ellipsis: true, render: (value: string) => value || '-' },
+                  { title: '格式', dataIndex: 'contentType', width: 130, ellipsis: true },
+                  { title: '大小', dataIndex: 'sizeBytes', width: 75, render: (value: number) => `${Math.ceil(value / 1024)} KB` },
+                  { title: '状态', dataIndex: 'status', width: 90, ellipsis: true },
                   {
                     title: '操作',
                     key: 'action',
+                    width: 115,
+                    fixed: 'right',
                     render: (_: unknown, document: IdentityDocument) => (
                       <Button
                         type="link"
