@@ -17,6 +17,7 @@ import 'package:joysong_flutter/features/agent/domain/agent_models.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_chat_controller.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_chat_page.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_plan_controller.dart';
+import 'package:joysong_flutter/features/auth/domain/auth_models.dart';
 import 'package:joysong_flutter/features/booking/data/booking_remote_data_source.dart';
 import 'package:joysong_flutter/features/booking/data/booking_repository_impl.dart';
 import 'package:joysong_flutter/features/booking/domain/booking_repository.dart';
@@ -80,6 +81,7 @@ class AppShell extends StatefulWidget {
     this.currentUserId = '',
     this.accountSecurityControllerFactory,
     this.onSwitchAccount,
+    this.onProfileUpdated,
     this.onLogout,
     super.key,
   });
@@ -90,6 +92,7 @@ class AppShell extends StatefulWidget {
   final String currentUserId;
   final AccountSecurityControllerFactory? accountSecurityControllerFactory;
   final Future<void> Function(BuildContext context)? onSwitchAccount;
+  final Future<void> Function(AuthUser user)? onProfileUpdated;
   final Future<void> Function()? onLogout;
 
   @override
@@ -315,6 +318,7 @@ class _AppShellState extends State<AppShell> {
               widget.apiClient == null ? null : _openAccountSecurity,
           onOpenFavorite: _discoverRepository == null ? null : _openFavorite,
           onSwitchAccount: widget.onSwitchAccount,
+          onProfileUpdated: widget.onProfileUpdated,
           onLogout: widget.onLogout,
         ),
       ];

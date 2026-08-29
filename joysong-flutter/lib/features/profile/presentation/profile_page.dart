@@ -35,6 +35,7 @@ class ProfilePage extends StatefulWidget {
     this.onAccountSecurity,
     this.onOpenFavorite,
     this.onSwitchAccount,
+    this.onProfileUpdated,
     this.onLogout,
     super.key,
   });
@@ -52,6 +53,7 @@ class ProfilePage extends StatefulWidget {
   final VoidCallback? onAccountSecurity;
   final Future<void> Function(FavoriteItem item)? onOpenFavorite;
   final Future<void> Function(BuildContext context)? onSwitchAccount;
+  final Future<void> Function(AuthUser user)? onProfileUpdated;
   final Future<void> Function()? onLogout;
 
   @override
@@ -269,13 +271,17 @@ class _ProfilePageState extends State<ProfilePage> {
   Future<void> _openEditProfile() async {
     final controller = _controller;
     if (controller == null || controller.user == null) return;
-    await Navigator.of(context).push<bool>(
+    final updated = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
           builder: (_) => EditProfilePage(
                 controller: controller,
                 socialRepository: widget.socialRepository,
               )),
     );
+    final user = controller.user;
+    if (updated == true && user != null) {
+      await widget.onProfileUpdated?.call(user);
+    }
   }
 
   void _openFavorites() {
