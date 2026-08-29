@@ -68,7 +68,7 @@ const allowedEvidenceContentTypes = new Set([
 ]);
 
 const evidenceContentPath = (refundId: string, fileId: string) =>
-  `/admin/refunds/${refundId}/evidence/${fileId}/content`;
+  `/admin/refunds/${encodeURIComponent(refundId)}/evidence/${encodeURIComponent(fileId)}/content`;
 
 const refundEvidenceFiles = (value: unknown): RefundEvidenceFile[] => {
   if (!Array.isArray(value)) return [];
@@ -341,13 +341,20 @@ export default function RefundsPage() {
       if (!mountedRef.current || session !== detailSessionRef.current) return;
       const objectUrl = URL.createObjectURL(blob);
       liveObjectUrlsRef.current.add(objectUrl);
-      const anchor = document.createElement('a');
-      anchor.href = objectUrl;
-      anchor.download = file.originalName;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      revokeObjectUrl(objectUrl);
+      let anchor: HTMLAnchorElement | null = null;
+      try {
+        anchor = document.createElement('a');
+        anchor.href = objectUrl;
+        anchor.download = file.originalName;
+        document.body.appendChild(anchor);
+        anchor.click();
+      } finally {
+        try {
+          anchor?.remove();
+        } finally {
+          revokeObjectUrl(objectUrl);
+        }
+      }
     } catch (error: any) {
       if (!mountedRef.current || session !== detailSessionRef.current) return;
       message.error(`下载凭证失败: ${error?.response?.data?.message || error?.message || '未知错误'}`);

@@ -785,9 +785,60 @@ describe('RefundsPage manual review operations', () => {
     expect(openSpy).toHaveBeenCalledWith('blob:pdf-preview', '_blank', 'noopener,noreferrer');
   });
 
+  it('evidence download uses an authenticated blob and releases its temporary anchor', async () => {
+    const user = userEvent.setup();
+    const createObjectURL = vi.fn(() => 'blob:download');
+    const revokeObjectURL = vi.fn();
+    class TestUrl extends URL {}
+    Object.assign(TestUrl, { createObjectURL, revokeObjectURL });
+    vi.stubGlobal('URL', TestUrl);
+    const evidenceBlob = new Blob(['evidence'], { type: 'image/jpeg' });
+    mockGet.mockImplementation((url) => url === '/admin/refunds'
+      ? response([{
+          ...serviceRefund,
+          evidenceFiles: [{ fileId: 'file-image', originalName: 'receipt.jpg', contentType: 'image/jpeg', sizeBytes: 12, position: 1 }],
+        }])
+      : Promise.resolve({ data: evidenceBlob }));
+
+    render(<RefundsPage />);
+    const row = await screen.findByRole('row', { name: /SO-001/ });
+    await user.click(within(row).getByRole('button', { name: '详情' }));
+    const dialog = (await screen.findByText('退款详情')).closest('.ant-modal') as HTMLElement;
+    const nativeCreateElement = document.createElement.bind(document);
+    let temporaryAnchor: HTMLAnchorElement | null = null;
+    vi.spyOn(document, 'createElement').mockImplementation(((tagName: string) => {
+      const element = nativeCreateElement(tagName);
+      if (tagName === 'a') temporaryAnchor = element as HTMLAnchorElement;
+      return element;
+    }) as typeof document.createElement);
+    const appendSpy = vi.spyOn(document.body, 'appendChild');
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+
+    await user.click(within(dialog).getByRole('button', { name: '下载 receipt.jpg' }));
+
+    await waitFor(() => expect(mockGet).toHaveBeenCalledWith(
+      '/admin/refunds/refund-service-1/evidence/file-image/content',
+      { responseType: 'blob' },
+    ));
+    expect(createObjectURL).toHaveBeenCalledWith(evidenceBlob);
+    expect(temporaryAnchor).not.toBeNull();
+    expect(temporaryAnchor?.download).toBe('receipt.jpg');
+    expect(appendSpy).toHaveBeenCalledWith(temporaryAnchor);
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+    expect(temporaryAnchor?.isConnected).toBe(false);
+    expect(document.body.querySelector('a[download="receipt.jpg"]')).toBeNull();
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:download');
+  });
+
   it('evidence download failure shows an error without locking approve reject or retry actions', async () => {
     const user = userEvent.setup();
     const errorSpy = vi.spyOn(message, 'error');
+    const createObjectURL = vi.fn(() => 'blob:download-failure');
+    const revokeObjectURL = vi.fn();
+    class TestUrl extends URL {}
+    Object.assign(TestUrl, { createObjectURL, revokeObjectURL });
+    vi.stubGlobal('URL', TestUrl);
+    const evidenceBlob = new Blob(['evidence'], { type: 'image/jpeg' });
     const retryableRefund = {
       ...failedProcessingRefund,
       evidenceFiles: [{ fileId: 'file-retry', originalName: 'retry.png', contentType: 'image/png', sizeBytes: 12, position: 1 }],
@@ -797,7 +848,7 @@ describe('RefundsPage manual review operations', () => {
           ...serviceRefund,
           evidenceFiles: [{ fileId: 'file-image', originalName: 'broken.jpg', contentType: 'image/jpeg', sizeBytes: 12, position: 1 }],
         }, retryableRefund])
-      : Promise.reject(new Error('凭证不可用')));
+      : Promise.resolve({ data: evidenceBlob }));
 
     render(<RefundsPage />);
     await user.selectOptions(await screen.findByRole('combobox', { name: '退款状态' }), '__all__');
@@ -805,9 +856,21 @@ describe('RefundsPage manual review operations', () => {
     const retryRow = screen.getByRole('row', { name: /RETRY-001/ });
     await user.click(within(pendingRow).getByRole('button', { name: '详情' }));
     const dialog = (await screen.findByText('退款详情')).closest('.ant-modal') as HTMLElement;
+    const nativeCreateElement = document.createElement.bind(document);
+    let temporaryAnchor: HTMLAnchorElement | null = null;
+    vi.spyOn(document, 'createElement').mockImplementation(((tagName: string) => {
+      const element = nativeCreateElement(tagName);
+      if (tagName === 'a') temporaryAnchor = element as HTMLAnchorElement;
+      return element;
+    }) as typeof document.createElement);
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => { throw new Error('点击失败'); });
     await user.click(within(dialog).getByRole('button', { name: '下载 broken.jpg' }));
 
-    await waitFor(() => expect(errorSpy).toHaveBeenCalledWith('下载凭证失败: 凭证不可用'));
+    await waitFor(() => expect(errorSpy).toHaveBeenCalledWith('下载凭证失败: 点击失败'));
+    expect(createObjectURL).toHaveBeenCalledWith(evidenceBlob);
+    expect(temporaryAnchor?.isConnected).toBe(false);
+    expect(document.body.querySelector('a[download="broken.jpg"]')).toBeNull();
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:download-failure');
     expect(within(pendingRow).getByRole('button', { name: '批准' })).toBeEnabled();
     expect(within(pendingRow).getByRole('button', { name: '拒绝' })).toBeEnabled();
     expect(within(retryRow).getByRole('button', { name: '重试失败项' })).toBeEnabled();
