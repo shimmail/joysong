@@ -34,8 +34,8 @@ class ConsultantOrderAccessPolicy(
 
     fun requireConversationParticipant(order: OrderEntity, requesterId: String) {
         when (requesterId) {
-            order.userId -> Unit
             order.consultantId -> requireActiveConsultant(requesterId)
+            order.userId -> Unit
             else -> throw OrderContractException.serviceAccessDenied()
         }
     }

@@ -44,6 +44,22 @@ class ConsultantOrderAccessPolicyTest {
         verify(exactly = 1) { identities.hasActiveRole("consultant-1", "CONSULTANT") }
     }
 
+    @Test
+    fun overlappingConsumerAndConsultantStillRequiresActiveConsultantRole() {
+        every { identities.hasActiveRole("shared-1", "CONSULTANT") } returns false
+
+        val error = assertThrows<OrderContractException> {
+            policy.requireConversationParticipant(
+                order(userId = "shared-1", consultantId = "shared-1"),
+                "shared-1"
+            )
+        }
+
+        assertEquals(HttpStatus.FORBIDDEN, error.status)
+        assertEquals(OrderContractErrorCode.CONSULTANT_ROLE_REQUIRED, error.errorCode)
+        verify(exactly = 1) { identities.hasActiveRole("shared-1", "CONSULTANT") }
+    }
+
     private fun order(
         userId: String = "user-1",
         consultantId: String = "consultant-1",
