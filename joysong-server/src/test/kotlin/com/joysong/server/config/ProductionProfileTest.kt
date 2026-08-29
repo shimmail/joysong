@@ -45,6 +45,11 @@ class ProductionProfileTest {
     fun `multipart limits accept five maximum-size refund evidence files`() {
         assertEquals("10MB", applicationProperties.getProperty("spring.servlet.multipart.max-file-size"))
         assertEquals("52MB", applicationProperties.getProperty("spring.servlet.multipart.max-request-size"))
+        assertTrue(
+            Files.readString(Path.of("deploy", "nginx", "joysong-api.conf"))
+                .lineSequence()
+                .any { it.trim() == "client_max_body_size 52m;" }
+        )
     }
 
     @Test
