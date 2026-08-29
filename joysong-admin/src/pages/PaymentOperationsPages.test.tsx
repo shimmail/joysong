@@ -752,7 +752,7 @@ describe('RefundsPage manual review operations', () => {
     expect(createObjectURL).toHaveBeenCalledWith(imageBlob);
     expect(within(dialog).getByRole('img', { name: 'receipt.jpg' })).toHaveAttribute('src', 'blob:image-preview');
 
-    await user.click(within(dialog).getByRole('button', { name: '关闭' }));
+    await user.click(within(dialog).getByRole('button', { name: /关\s*闭/ }));
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:image-preview');
   });
 
