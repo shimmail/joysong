@@ -7,6 +7,8 @@ import com.joysong.server.identity.service.IdentityAuthorizationService
 import com.joysong.server.order.dto.OrderStatusEnum
 import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.repository.OrderRepository
+import com.joysong.server.order.service.OrderContractErrorCode
+import com.joysong.server.order.service.OrderContractException
 import com.joysong.server.user.entity.AccountState
 import com.joysong.server.user.entity.UserEntity
 import com.joysong.server.user.repository.UserRepository
@@ -20,6 +22,7 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import org.springframework.data.domain.Pageable
 import java.math.BigDecimal
 import java.time.LocalDateTime
@@ -195,6 +198,47 @@ class ConsultantOrderQueryServiceTest {
         assertNull(customers.getValue("deleted-order").avatar)
         assertEquals("用户", customers.getValue("blank-order").displayName)
         assertNull(customers.getValue("blank-order").avatar)
+    }
+
+    @Test
+    fun detailRejectsRevokedConsultantBeforeLookingUpMissingOrder() {
+        every { identities.hasActiveRole("consultant-1", "CONSULTANT") } returns false
+        every { orders.findById("missing") } returns Optional.empty()
+
+        val error = assertThrows<OrderContractException> {
+            service.detail("consultant-1", "missing")
+        }
+
+        assertEquals(OrderContractErrorCode.CONSULTANT_ROLE_REQUIRED, error.errorCode)
+        verify(exactly = 1) { identities.hasActiveRole("consultant-1", "CONSULTANT") }
+        verify(exactly = 0) { orders.findById(any()) }
+    }
+
+    @Test
+    fun detailRejectsSelfAssignedOrderBeforeProjectingConversationCapabilities() {
+        val selfAssignedOrder = order("self-assigned", userId = "consultant-1")
+        every { orders.findById("self-assigned") } returns Optional.of(selfAssignedOrder)
+        every {
+            conversations.findByConversationTypeAndOrderId(
+                DmConversationEntity.ORDER_SERVICE,
+                "self-assigned"
+            )
+        } returns null
+        every { users.findByIdAnyState("consultant-1") } returns user(
+            "consultant-1",
+            "异常自指派用户",
+            "avatar.png"
+        )
+
+        val error = assertThrows<OrderContractException> {
+            service.detail("consultant-1", "self-assigned")
+        }
+
+        assertEquals(OrderContractErrorCode.CONSULTANT_ORDER_NOT_FOUND, error.errorCode)
+        verify(exactly = 0) {
+            conversations.findByConversationTypeAndOrderId(any(), any())
+        }
+        verify(exactly = 0) { users.findByIdAnyState(any()) }
     }
 
     @Test

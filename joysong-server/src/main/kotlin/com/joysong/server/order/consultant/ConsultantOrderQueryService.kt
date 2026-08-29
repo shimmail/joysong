@@ -69,9 +69,10 @@ class ConsultantOrderQueryService(
 
     @Transactional(readOnly = true)
     fun detail(consultantId: String, orderId: String): ConsultantOrderDetailResponse {
+        accessPolicy.requireActiveConsultant(consultantId)
         val order = orders.findById(orderId).orElse(null)
             ?: throw OrderContractException.consultantOrderNotFound()
-        val stage = accessPolicy.requireWorkbenchOrder(order, consultantId)
+        val stage = accessPolicy.requireWorkbenchOrderForActiveConsultant(order, consultantId)
         val hasConversation = conversations.findByConversationTypeAndOrderId(
             DmConversationEntity.ORDER_SERVICE,
             order.id

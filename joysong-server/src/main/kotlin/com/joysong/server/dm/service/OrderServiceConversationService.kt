@@ -24,8 +24,8 @@ class OrderServiceConversationService(
     fun getOrCreate(orderId: String, userId: String): DmConversationResponse {
         val order = orderRepository.findByIdForUpdate(orderId)
             ?: throw OrderContractException.serviceAccessDenied()
-        requireActivatedService(order)
         consultantAccessPolicy.requireConversationParticipant(order, userId)
+        requireActivatedService(order)
         if (order.status !in READABLE_STATUSES) {
             throw OrderContractException.serviceNotActive()
         }
@@ -87,12 +87,12 @@ class OrderServiceConversationService(
         } else {
             orderRepository.findById(orderId).orElse(null)
         } ?: throw OrderContractException.serviceAccessDenied()
+        consultantAccessPolicy.requireConversationParticipant(order, userId)
+        requireConversationMatchesOrder(conversation, order)
         requireActivatedService(order)
         if (order.status !in READABLE_STATUSES) {
             throw OrderContractException.serviceNotActive()
         }
-        consultantAccessPolicy.requireConversationParticipant(order, userId)
-        requireConversationMatchesOrder(conversation, order)
         if (order.status !in allowedStatuses) {
             throw OrderContractException.serviceReadOnly()
         }

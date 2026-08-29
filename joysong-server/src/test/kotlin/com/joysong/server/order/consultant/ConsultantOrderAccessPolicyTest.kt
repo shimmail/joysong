@@ -32,6 +32,19 @@ class ConsultantOrderAccessPolicyTest {
     }
 
     @Test
+    fun workbenchOrderRevalidatesActiveConsultantRole() {
+        every { identities.hasActiveRole("consultant-1", "CONSULTANT") } returns false
+
+        val error = assertThrows<OrderContractException> {
+            policy.requireWorkbenchOrder(order(), "consultant-1")
+        }
+
+        assertEquals(HttpStatus.FORBIDDEN, error.status)
+        assertEquals(OrderContractErrorCode.CONSULTANT_ROLE_REQUIRED, error.errorCode)
+        verify(exactly = 1) { identities.hasActiveRole("consultant-1", "CONSULTANT") }
+    }
+
+    @Test
     fun consumerParticipantDoesNotRequireConsultantRole() {
         policy.requireConversationParticipant(order(userId = "user-1"), "user-1")
         verify(exactly = 0) { identities.hasActiveRole(any(), any()) }
@@ -58,6 +71,21 @@ class ConsultantOrderAccessPolicyTest {
         assertEquals(HttpStatus.FORBIDDEN, error.status)
         assertEquals(OrderContractErrorCode.CONSULTANT_ROLE_REQUIRED, error.errorCode)
         verify(exactly = 1) { identities.hasActiveRole("shared-1", "CONSULTANT") }
+    }
+
+    @Test
+    fun selfAssignedOrderIsNotEligibleForTheConsultantWorkbench() {
+        every { identities.hasActiveRole("shared-1", "CONSULTANT") } returns true
+
+        val error = assertThrows<OrderContractException> {
+            policy.requireWorkbenchOrder(
+                order(userId = "shared-1", consultantId = "shared-1"),
+                "shared-1"
+            )
+        }
+
+        assertEquals(HttpStatus.NOT_FOUND, error.status)
+        assertEquals(OrderContractErrorCode.CONSULTANT_ORDER_NOT_FOUND, error.errorCode)
     }
 
     private fun order(

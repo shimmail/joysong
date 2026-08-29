@@ -20,9 +20,17 @@ class ConsultantOrderAccessPolicy(
         consultantId: String
     ): ConsultantOrderStage {
         requireActiveConsultant(consultantId)
+        return requireWorkbenchOrderForActiveConsultant(order, consultantId)
+    }
+
+    internal fun requireWorkbenchOrderForActiveConsultant(
+        order: OrderEntity,
+        consultantId: String
+    ): ConsultantOrderStage {
         val stage = ConsultantOrderStage.fromStatus(order.status)
         if (
             order.consultantId != consultantId ||
+            order.consultantId == order.userId ||
             order.paymentFlow != "TRAVEL_GROUND_SERVICE_ONLY" ||
             order.serviceActivatedAt == null ||
             stage == null

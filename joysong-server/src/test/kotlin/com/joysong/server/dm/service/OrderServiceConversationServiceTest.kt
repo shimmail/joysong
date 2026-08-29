@@ -22,6 +22,7 @@ import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 import org.junit.jupiter.params.provider.CsvSource
+import org.springframework.http.HttpStatus
 import java.math.BigDecimal
 import java.time.LocalDateTime
 import java.util.Optional
@@ -82,6 +83,40 @@ class OrderServiceConversationServiceTest {
         }
 
         assertEquals(OrderContractErrorCode.ORDER_SERVICE_ACCESS_DENIED, error.errorCode)
+    }
+
+    @ParameterizedTest
+    @CsvSource(
+        "PENDING_SERVICE_FEE, TRAVEL_GROUND_SERVICE_ONLY, false",
+        "SERVICE_ACTIVE, LEGACY_MEDICAL, true"
+    )
+    fun unrelatedUserCannotProbeInactiveOrLegacyOrderWhenCreatingConversation(
+        status: String,
+        paymentFlow: String,
+        hasActivationTimestamp: Boolean
+    ) {
+        val inaccessibleOrder = order(
+            status = status,
+            paymentFlow = paymentFlow,
+            activatedAt = if (hasActivationTimestamp) LocalDateTime.of(2026, 8, 22, 9, 0) else null
+        )
+        every { orderRepository.findByIdForUpdate("order-1") } returns inaccessibleOrder
+        every {
+            policy.requireConversationParticipant(inaccessibleOrder, "other-user")
+        } throws OrderContractException.serviceAccessDenied()
+
+        val error = assertThrows<OrderContractException> {
+            service.getOrCreate("order-1", "other-user")
+        }
+
+        assertEquals(HttpStatus.NOT_FOUND, error.status)
+        assertEquals(OrderContractErrorCode.ORDER_SERVICE_ACCESS_DENIED, error.errorCode)
+        verify(exactly = 1) {
+            policy.requireConversationParticipant(inaccessibleOrder, "other-user")
+        }
+        verify(exactly = 0) {
+            conversationRepository.findByConversationTypeAndOrderId(any(), any())
+        }
     }
 
     @Test
@@ -279,6 +314,44 @@ class OrderServiceConversationServiceTest {
             }
 
             assertEquals(OrderContractErrorCode.ORDER_SERVICE_NOT_ACTIVE, error.errorCode)
+        }
+    }
+
+    @Test
+    fun unrelatedUserCannotProbeUnreadableOrderThroughRead() {
+        val unreadableOrder = order(status = "UNKNOWN_STATUS")
+        every { orderRepository.findById("order-1") } returns Optional.of(unreadableOrder)
+        every {
+            policy.requireConversationParticipant(unreadableOrder, "other-user")
+        } throws OrderContractException.serviceAccessDenied()
+
+        val error = assertThrows<OrderContractException> {
+            service.requireReadAccess(conversation(), "other-user")
+        }
+
+        assertEquals(HttpStatus.NOT_FOUND, error.status)
+        assertEquals(OrderContractErrorCode.ORDER_SERVICE_ACCESS_DENIED, error.errorCode)
+        verify(exactly = 1) {
+            policy.requireConversationParticipant(unreadableOrder, "other-user")
+        }
+    }
+
+    @Test
+    fun unrelatedUserCannotProbeInvalidOrderThroughSend() {
+        val legacyOrder = order(paymentFlow = "LEGACY_MEDICAL")
+        every { orderRepository.findByIdForUpdate("order-1") } returns legacyOrder
+        every {
+            policy.requireConversationParticipant(legacyOrder, "other-user")
+        } throws OrderContractException.serviceAccessDenied()
+
+        val error = assertThrows<OrderContractException> {
+            service.requireSendAccess(conversation(), "other-user")
+        }
+
+        assertEquals(HttpStatus.NOT_FOUND, error.status)
+        assertEquals(OrderContractErrorCode.ORDER_SERVICE_ACCESS_DENIED, error.errorCode)
+        verify(exactly = 1) {
+            policy.requireConversationParticipant(legacyOrder, "other-user")
         }
     }
 

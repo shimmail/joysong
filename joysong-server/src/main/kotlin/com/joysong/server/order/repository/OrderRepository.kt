@@ -14,6 +14,7 @@ interface OrderRepository : JpaRepository<OrderEntity, String> {
     @Query("""
         SELECT o FROM OrderEntity o
         WHERE o.consultantId = :consultantId
+          AND o.consultantId <> o.userId
           AND o.paymentFlow = :paymentFlow
           AND o.serviceActivatedAt IS NOT NULL
           AND o.status = 'SERVICE_ACTIVE'
@@ -32,6 +33,7 @@ interface OrderRepository : JpaRepository<OrderEntity, String> {
     @Query("""
         SELECT o FROM OrderEntity o
         WHERE o.consultantId = :consultantId
+          AND o.consultantId <> o.userId
           AND o.paymentFlow = :paymentFlow
           AND o.serviceActivatedAt IS NOT NULL
           AND o.status IN :statuses

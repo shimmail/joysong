@@ -112,6 +112,51 @@ class ConsultantOrderRepositoryTest {
     }
 
     @Test
+    fun consultantOrderQueriesExcludeSelfAssignedOrders() {
+        orders.saveAll(
+            listOf(
+                order("active", "consultant-1", appointment = time(10)),
+                order(
+                    "active-self-assigned",
+                    "consultant-1",
+                    userId = "consultant-1",
+                    appointment = time(9)
+                ),
+                order(
+                    "history",
+                    "consultant-1",
+                    status = OrderStatusEnum.COMPLETED.value,
+                    updatedAt = time(12)
+                ),
+                order(
+                    "history-self-assigned",
+                    "consultant-1",
+                    userId = "consultant-1",
+                    status = OrderStatusEnum.COMPLETED.value,
+                    updatedAt = time(13)
+                )
+            )
+        )
+
+        val active = orders.findActiveConsultantOrders(
+            "consultant-1",
+            "TRAVEL_GROUND_SERVICE_ONLY",
+            null,
+            OffsetPageRequest(0, 10)
+        )
+        val history = orders.findConsultantHistoryOrders(
+            "consultant-1",
+            "TRAVEL_GROUND_SERVICE_ONLY",
+            setOf(OrderStatusEnum.COMPLETED.value),
+            null,
+            OffsetPageRequest(0, 10)
+        )
+
+        assertEquals(listOf("active"), active.map(OrderEntity::id))
+        assertEquals(listOf("history"), history.map(OrderEntity::id))
+    }
+
+    @Test
     fun orderServiceConversationProjectionReturnsOnlyRequestedOrderIds() {
         conversations.saveAll(
             listOf(
@@ -130,6 +175,7 @@ class ConsultantOrderRepositoryTest {
     private fun order(
         id: String,
         consultantId: String,
+        userId: String = "user-$id",
         status: String = OrderStatusEnum.SERVICE_ACTIVE.value,
         appointment: LocalDateTime? = null,
         flow: String = "TRAVEL_GROUND_SERVICE_ONLY",
@@ -138,7 +184,7 @@ class ConsultantOrderRepositoryTest {
         updatedAt: LocalDateTime? = time(9)
     ) = OrderEntity(
         id = id,
-        userId = "user-$id",
+        userId = userId,
         projectName = "项目",
         price = BigDecimal.ZERO,
         status = status,
