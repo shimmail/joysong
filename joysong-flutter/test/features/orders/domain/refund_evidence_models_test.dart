@@ -50,6 +50,19 @@ void main() {
     }
   });
 
+  test('copies source bytes so later caller mutations cannot alter a draft', () {
+    final sourceBytes = Uint8List.fromList([1, 2, 3]);
+    final draft = RefundEvidenceDraft(
+      bytes: sourceBytes,
+      fileName: 'receipt.jpg',
+      contentType: 'image/jpeg',
+    );
+
+    sourceBytes[0] = 99;
+
+    expect(draft.bytes, orderedEquals([1, 2, 3]));
+  });
+
   test('parses evidence metadata in position order and defaults missing arrays', () {
     final refund = RefundDetail.fromJson({
       ..._refundJson,
@@ -75,6 +88,50 @@ void main() {
     expect(refund.evidenceFiles.map((file) => file.fileId), ['file-1', 'file-2']);
     expect(() => refund.evidenceFiles.add(refund.evidenceFiles.first), throwsUnsupportedError);
     expect(withoutEvidence.evidenceFiles, isEmpty);
+  });
+
+  test('rejects metadata with empty fields, negative size, or invalid position', () {
+    final invalidMetadata = [
+      {
+        'fileId': '',
+        'originalName': 'receipt.jpg',
+        'contentType': 'image/jpeg',
+        'sizeBytes': 1,
+        'position': 0,
+      },
+      {
+        'fileId': 'file-1',
+        'originalName': '',
+        'contentType': 'image/jpeg',
+        'sizeBytes': 1,
+        'position': 0,
+      },
+      {
+        'fileId': 'file-1',
+        'originalName': 'receipt.jpg',
+        'contentType': '',
+        'sizeBytes': 1,
+        'position': 0,
+      },
+      {
+        'fileId': 'file-1',
+        'originalName': 'receipt.jpg',
+        'contentType': 'image/jpeg',
+        'sizeBytes': -1,
+        'position': 0,
+      },
+      {
+        'fileId': 'file-1',
+        'originalName': 'receipt.jpg',
+        'contentType': 'image/jpeg',
+        'sizeBytes': 1,
+        'position': RefundEvidenceDraft.maxCount,
+      },
+    ];
+
+    for (final metadata in invalidMetadata) {
+      expect(() => RefundEvidenceFile.fromJson(metadata), throwsFormatException);
+    }
   });
 }
 

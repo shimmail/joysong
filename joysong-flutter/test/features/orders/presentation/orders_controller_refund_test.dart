@@ -79,6 +79,22 @@ void main() {
     expect(draft.bytes, orderedEquals([1, 2, 3]));
     expect(repository.serviceFeeEvidenceFiles, same(drafts));
   });
+
+  test('unloaded order reports an error without selecting either refund API', () async {
+    final order = _order(flow: OrderPaymentFlow.travelGroundServiceOnly);
+    final repository = _RecordingOrdersRepository(order: order);
+    final controller = OrderDetailController(repository, orderId: order.id);
+
+    final success = await controller.requestRefund(
+      reason: 'Changed plans',
+      description: 'Cannot travel',
+    );
+
+    expect(success, isFalse);
+    expect(controller.errorMessage, '订单详情尚未加载，无法申请退款');
+    expect(repository.serviceFeeRefundCalls, 0);
+    expect(repository.legacyRefundCalls, 0);
+  });
 }
 
 final class _RecordingOrdersRepository implements OrdersRepository {
@@ -88,6 +104,8 @@ final class _RecordingOrdersRepository implements OrdersRepository {
   final bool failsServiceFee;
   List<RefundEvidenceDraft>? serviceFeeEvidenceFiles;
   String? legacyEvidenceUrl;
+  int serviceFeeRefundCalls = 0;
+  int legacyRefundCalls = 0;
 
   @override
   Future<Order> getOrder(String id) async => order;
@@ -100,6 +118,7 @@ final class _RecordingOrdersRepository implements OrdersRepository {
     String? reasonCode,
     List<RefundEvidenceDraft> evidenceFiles = const [],
   }) async {
+    serviceFeeRefundCalls += 1;
     serviceFeeEvidenceFiles = evidenceFiles;
     if (failsServiceFee) throw StateError('offline');
     return _refund;
@@ -112,6 +131,7 @@ final class _RecordingOrdersRepository implements OrdersRepository {
     String description = '',
     String evidenceUrl = '',
   }) async {
+    legacyRefundCalls += 1;
     legacyEvidenceUrl = evidenceUrl;
     return _refund;
   }

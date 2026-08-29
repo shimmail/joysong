@@ -176,14 +176,19 @@ final class OrderDetailController extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+    final current = _order;
+    if (current == null) {
+      _errorMessage = '订单详情尚未加载，无法申请退款';
+      notifyListeners();
+      return false;
+    }
     if (_activeAction != null) return false;
     final generation = ++_detailGeneration;
     _activeAction = OrderAction.refund;
     _errorMessage = null;
     notifyListeners();
     try {
-      final current = _order;
-      final refund = current?.isTravelGroundServiceOnly == true
+      final refund = current.isTravelGroundServiceOnly
           ? await _repository.requestServiceFeeRefund(
               orderId,
               reason: reason.trim(),
