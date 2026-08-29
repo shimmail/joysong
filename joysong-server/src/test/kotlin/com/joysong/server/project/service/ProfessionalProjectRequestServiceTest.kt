@@ -160,6 +160,31 @@ class ProfessionalProjectRequestServiceTest {
     }
 
     @Test
+    fun `institution submission does not notify when insert affects zero rows`() {
+        every { jdbcTemplate.queryForObject(match<String> { it.contains("FROM projects") }, Long::class.java, *anyVararg()) } returns 1L
+        every { jdbcTemplate.queryForObject(match<String> { it.contains("FROM institution_projects") }, Long::class.java, *anyVararg()) } returns 0L
+        every { jdbcTemplate.queryForObject(match<String> { it.contains("professional_project_requests") }, Long::class.java, *anyVararg()) } returns 0L
+        every { jdbcTemplate.update(match<String> { it.contains("INSERT INTO professional_project_requests") }, *anyVararg()) } returns 0
+
+        assertThrows<ProfessionalProjectRequestConflictException> {
+            service.submitInstitution(
+                doctorActor(),
+                "institution-1",
+                DoctorInstitutionProjectRequest(
+                    projectId = "project-1",
+                    description = "service",
+                    price = BigDecimal("99.00"),
+                    notes = "notes"
+                )
+            )
+        }
+
+        verify(exactly = 0) {
+            businessNotifications.institutionProjectApplicationSubmitted(any(), any())
+        }
+    }
+
+    @Test
     fun `blank institution overrides are stored as inheritance sentinels`() {
         every { jdbcTemplate.queryForObject(match<String> { it.contains("FROM projects") }, Long::class.java, *anyVararg()) } returns 1L
         every { jdbcTemplate.queryForObject(match<String> { it.contains("FROM institution_projects") }, Long::class.java, *anyVararg()) } returns 0L

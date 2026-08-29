@@ -647,7 +647,7 @@ class ProfessionalProjectRequestService(
 
     private fun insertRequest(snapshot: ProjectRequestSnapshot) {
         try {
-            jdbcTemplate.update(
+            val inserted = jdbcTemplate.update(
                 """
                 INSERT INTO professional_project_requests
                     (id, request_type, doctor_id, institution_id, project_id, name, category,
@@ -663,6 +663,9 @@ class ProfessionalProjectRequestService(
                 snapshot.referencePrice, snapshot.categoryTags, snapshot.price, snapshot.originalPrice, snapshot.isActive,
                 snapshot.consultationFee, snapshot.commissionRate, snapshot.institutionRate, snapshot.notes
             )
+            if (inserted != 1) {
+                throw ProfessionalProjectRequestConflictException("同一项目已有待处理申请")
+            }
         } catch (_: DuplicateKeyException) {
             throw ProfessionalProjectRequestConflictException("同一项目已有待处理申请")
         }
