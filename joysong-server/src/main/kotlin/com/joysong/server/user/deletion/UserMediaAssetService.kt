@@ -72,9 +72,15 @@ class UserMediaAssetService(
 
     fun markPending(userId: String): Int = jdbcTemplate.update(
         """
-        UPDATE user_media_assets
+        UPDATE user_media_assets uma
         SET delete_status = 'PENDING', retry_after = NULL, last_delete_error = NULL
-        WHERE owner_user_id = ? AND delete_status <> 'DELETED'
+        WHERE uma.owner_user_id = ? AND uma.delete_status <> 'DELETED'
+          AND NOT EXISTS (
+              SELECT 1
+              FROM private_files pf
+              JOIN platform_cooperation_agreements pca ON pca.agreement_file_id = pf.id
+              WHERE pf.storage_key = uma.storage_key
+          )
         """.trimIndent(),
         userId,
     )

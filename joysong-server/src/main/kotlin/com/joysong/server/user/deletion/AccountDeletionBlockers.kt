@@ -33,7 +33,10 @@ class LocalAccountDeletionBlockerService(
         if (user.role == "ADMIN") add(blocker("ADMIN_ACCOUNT", 1, "CONTACT_SUPPORT"))
         addCount(
             "IDENTITY_APPLICATION",
-            count("SELECT COUNT(*) FROM identity_applications WHERE user_id = ?", user.id),
+            count(
+                "SELECT COUNT(*) FROM identity_applications WHERE user_id = ? AND status = 'PENDING'",
+                user.id,
+            ),
             "VIEW_IDENTITY_APPLICATION",
         )
         addCount(
@@ -51,7 +54,15 @@ class LocalAccountDeletionBlockerService(
         )
         addCount(
             "PROFESSIONAL_PROFILE",
-            count("SELECT COUNT(*) FROM doctors WHERE id = ?", user.id),
+            count("SELECT COUNT(*) FROM doctors WHERE id = ? AND is_verified = 1", user.id),
+            "CONTACT_SUPPORT",
+        )
+        addCount(
+            "PLATFORM_COOPERATION_AGREEMENT",
+            count(
+                "SELECT COUNT(*) FROM platform_cooperation_agreements WHERE user_id = ? AND status <> 'TERMINATED'",
+                user.id,
+            ),
             "CONTACT_SUPPORT",
         )
         addCount(

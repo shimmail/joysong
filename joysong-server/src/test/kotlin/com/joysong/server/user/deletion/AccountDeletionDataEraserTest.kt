@@ -1,6 +1,7 @@
 package com.joysong.server.user.deletion
 
 import com.joysong.server.user.entity.UserEntity
+import com.joysong.server.user.service.AccountLifecycleGuard
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -10,6 +11,97 @@ import org.springframework.jdbc.core.JdbcTemplate
 import java.time.LocalDateTime
 
 class AccountDeletionDataEraserTest {
+    @Test
+    fun `erasure removes private data from revoked professional identity history`() {
+        val jdbcTemplate = mockk<JdbcTemplate>(relaxed = true)
+        every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 1
+        val properties = AccountDeletionProperties().apply {
+            hmacSecret = "0123456789abcdef-test"
+        }
+        val eraser = JdbcAccountDeletionDataEraser(
+            jdbcTemplate = jdbcTemplate,
+            crypto = AccountDeletionCrypto(properties),
+            userMediaAssetService = UserMediaAssetService(
+                jdbcTemplate,
+                mockk<AccountLifecycleGuard>(relaxed = true),
+            ),
+        )
+
+        eraser.erase(
+            UserEntity(id = "user-1", phone = "+8613800138000", passwordHash = "hash"),
+            LocalDateTime.parse("2026-08-29T10:00:00"),
+        )
+
+        verify(exactly = 1) {
+            jdbcTemplate.update(
+                match<String> {
+                    it.contains("DELETE FROM identity_application_documents") &&
+                        it.contains("identity_applications")
+                },
+                "user-1",
+            )
+        }
+        verify(exactly = 1) {
+            jdbcTemplate.update(
+                match<String> {
+                    it.contains("UPDATE identity_applications") &&
+                        it.contains("application_data = JSON_OBJECT()") &&
+                        it.contains("review_note = ''")
+                },
+                "user-1",
+            )
+        }
+        verify(exactly = 1) {
+            jdbcTemplate.update(
+                match<String> {
+                    it.contains("DELETE FROM doctor_institutions") &&
+                        it.contains("status <> 'APPROVED'")
+                },
+                "user-1",
+            )
+        }
+        verify(exactly = 1) {
+            jdbcTemplate.update(
+                match<String> {
+                    it.contains("DELETE FROM platform_cooperation_agreements") &&
+                        it.contains("status = 'TERMINATED'")
+                },
+                "user-1",
+            )
+        }
+        verify(exactly = 1) {
+            jdbcTemplate.update(
+                match<String> {
+                    it.contains("DELETE FROM private_files") &&
+                        it.contains("platform_cooperation_agreements")
+                },
+                "user-1",
+            )
+        }
+        verify(exactly = 1) {
+            jdbcTemplate.update(
+                match<String> {
+                    it.contains("UPDATE user_media_assets") &&
+                        it.contains("WHERE uma.owner_user_id = ?") &&
+                        it.contains("platform_cooperation_agreements")
+                },
+                "user-1",
+            )
+        }
+        verify(exactly = 1) {
+            jdbcTemplate.update(
+                match<String> {
+                    it.contains("UPDATE doctors") &&
+                        it.contains("name = ''") &&
+                        it.contains("credentials = ''") &&
+                        it.contains("is_verified = 0") &&
+                        it.contains("deleted_at = COALESCE(deleted_at, NOW())")
+                },
+                "user-1",
+            )
+        }
+    }
+
     @Test
     fun `erasure recomputes counters for every diary and comment affected by removed user content`() {
         val jdbcTemplate = mockk<JdbcTemplate>(relaxed = true)

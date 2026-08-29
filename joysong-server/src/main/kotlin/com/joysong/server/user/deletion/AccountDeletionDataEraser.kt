@@ -202,10 +202,43 @@ class JdbcAccountDeletionDataEraser(
             userId,
         )
         jdbcTemplate.update(
+            """
+            DELETE FROM identity_application_documents
+            WHERE application_id IN (SELECT id FROM identity_applications WHERE user_id = ?)
+            """.trimIndent(),
+            userId,
+        )
+        jdbcTemplate.update(
+            """
+            UPDATE identity_applications
+            SET application_data = JSON_OBJECT(), review_note = ''
+            WHERE user_id = ?
+            """.trimIndent(),
+            userId,
+        )
+        jdbcTemplate.update(
+            "DELETE FROM doctor_institutions WHERE doctor_id = ? AND status <> 'APPROVED'",
+            userId,
+        )
+        jdbcTemplate.update(
+            "DELETE FROM platform_cooperation_agreements WHERE user_id = ? AND status = 'TERMINATED'",
+            userId,
+        )
+        jdbcTemplate.update(
             "DELETE FROM institution_memberships WHERE user_id = ? AND status NOT IN ('PENDING', 'APPROVED')",
             userId,
         )
         jdbcTemplate.update("DELETE FROM user_roles WHERE user_id = ? AND status <> 'ACTIVE'", userId)
+        jdbcTemplate.update(
+            """
+            UPDATE doctors
+            SET name = '', title = '', bio = '', avatar = '', institution_id = '', institution_name = '',
+                specialties = '', credentials = '', credential_images = '', certification_tags = '',
+                contact_phone = '', is_verified = 0, deleted_at = COALESCE(deleted_at, NOW())
+            WHERE id = ?
+            """.trimIndent(),
+            userId,
+        )
     }
 
     private fun erasePrivateDrafts(userId: String) {
@@ -216,6 +249,10 @@ class JdbcAccountDeletionDataEraser(
             SET uma.delete_status = 'PENDING', uma.retry_after = NULL, uma.last_delete_error = NULL
             WHERE pf.owner_user_id = ?
               AND NOT EXISTS (SELECT 1 FROM identity_application_documents iad WHERE iad.file_id = pf.id)
+              AND NOT EXISTS (
+                  SELECT 1 FROM platform_cooperation_agreements pca
+                  WHERE pca.agreement_file_id = pf.id
+              )
             """.trimIndent(),
             userId,
         )
@@ -224,6 +261,10 @@ class JdbcAccountDeletionDataEraser(
             DELETE FROM private_files
             WHERE owner_user_id = ?
               AND NOT EXISTS (SELECT 1 FROM identity_application_documents iad WHERE iad.file_id = private_files.id)
+              AND NOT EXISTS (
+                  SELECT 1 FROM platform_cooperation_agreements pca
+                  WHERE pca.agreement_file_id = private_files.id
+              )
             """.trimIndent(),
             userId,
         )
