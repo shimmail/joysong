@@ -5,6 +5,7 @@ import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
+import 'package:joysong_flutter/features/identity/presentation/identity_pages.dart';
 import 'package:joysong_flutter/features/identity/presentation/institution_project_review_widgets.dart';
 import 'package:joysong_flutter/features/identity/presentation/professional_request_pages.dart';
 import 'package:joysong_flutter/features/messaging/domain/messaging_models.dart';
@@ -179,15 +180,17 @@ void main() {
         find.byType(InstitutionProjectReviewDetailPage, skipOffstage: false),
         findsOneWidget,
       );
-      await tester.pump();
-      expect(
-        find.byType(InstitutionProjectRequestsPage, skipOffstage: false),
-        findsOneWidget,
-      );
-      expect(
-        find.byType(InstitutionProjectReviewDetailPage, skipOffstage: false),
-        findsOneWidget,
-      );
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.byType(ManagementCenterPage), findsOneWidget);
+      expect(find.byType(InstitutionProjectRequestsPage), findsNothing);
+      expect(find.byType(InstitutionProjectReviewDetailPage), findsNothing);
+      await tester.tap(find.byTooltip('Refresh access'));
+      await tester.pumpAndSettle();
+      expect(find.byType(InstitutionProjectRequestsPage), findsNothing);
+      expect(find.byType(InstitutionProjectReviewDetailPage), findsNothing);
     },
   );
 }
