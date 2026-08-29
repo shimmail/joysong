@@ -115,11 +115,7 @@ class _HomePageState extends State<HomePage> {
               ),
               onRetry: () => controller.load(refresh: true),
             ),
-          HomeLoadStatus.empty => _HomeEmpty(
-              onRefresh: () => controller.load(refresh: true),
-              hasPartialFailures: controller.feed.hasPartialFailures,
-            ),
-          HomeLoadStatus.ready => _HomeFeedView(
+          HomeLoadStatus.empty || HomeLoadStatus.ready => _HomeFeedView(
               feed: controller.feed,
               onRefresh: () => controller.load(refresh: true),
               onOpenItem: widget.onOpenItem,
@@ -172,8 +168,15 @@ class _HomeFeedView extends StatelessWidget {
             ),
           ),
           SliverToBoxAdapter(child: _SearchEntry(onTap: onSearch)),
-          if (feed.hasPartialFailures)
+          if (feed.hasPartialFailures && !feed.isEmpty)
             const SliverToBoxAdapter(child: _PartialHomeWarning()),
+          if (feed.isEmpty)
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: _HomeEmpty(
+                hasPartialFailures: feed.hasPartialFailures,
+              ),
+            ),
           if (feed.banners.isNotEmpty)
             SliverToBoxAdapter(
               child: _BannerCarousel(
@@ -303,7 +306,8 @@ class _HomeFeedView extends StatelessWidget {
               ),
             ),
           ],
-          const SliverToBoxAdapter(child: SizedBox(height: 28)),
+          if (!feed.isEmpty)
+            const SliverToBoxAdapter(child: SizedBox(height: 28)),
         ],
       ),
     );
@@ -1258,26 +1262,21 @@ class _HomeFailure extends StatelessWidget {
 }
 
 class _HomeEmpty extends StatelessWidget {
-  const _HomeEmpty({
-    required this.onRefresh,
-    required this.hasPartialFailures,
-  });
+  const _HomeEmpty({required this.hasPartialFailures});
 
-  final Future<void> Function() onRefresh;
   final bool hasPartialFailures;
 
   @override
   Widget build(BuildContext context) {
-    return RefreshIndicator(
-      onRefresh: onRefresh,
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        children: [
-          const SizedBox(height: 180),
-          const Icon(Icons.inbox_outlined, size: 44),
-          const SizedBox(height: 12),
-          Center(
-            child: Text(
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.inbox_outlined, size: 44),
+            const SizedBox(height: 12),
+            Text(
               _isEnglish(context)
                   ? hasPartialFailures
                       ? 'Some sections are temporarily unavailable. Pull down to retry.'
@@ -1287,8 +1286,8 @@ class _HomeEmpty extends StatelessWidget {
                       : '暂时没有推荐内容，下拉刷新试试',
               textAlign: TextAlign.center,
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
