@@ -1,5 +1,5 @@
 @startuml
-title 全角色测试状态流转图
+title 单一固定管理员下的全角色测试状态流转图
 
 skinparam backgroundColor #FFFFFF
 skinparam shadowing false
@@ -17,7 +17,7 @@ skinparam note {
 
 top to bottom direction
 
-state "账号状态（所有角色共用）" as accountLifecycle {
+state "非固定管理员账号状态（平台角色 USER）" as accountLifecycle {
   [*] --> accountUnregistered
   state "未注册" as accountUnregistered
   state "ACTIVE" as accountActive
@@ -38,6 +38,9 @@ note top of accountLifecycle
   测试记录必须把四个维度分开：
   账号状态、平台角色、专业身份、机构关系。
   任一维度变化都不能自动推导其他维度。
+
+  本块适用于普通用户及承载专业身份的 USER 账号。
+  固定管理员 A-01 不进入暂停、恢复或注销分支。
 end note
 
 note right of accountSuspended
@@ -51,6 +54,11 @@ note right of accountErased
   不能画成同一账号回到 ACTIVE。
 end note
 
+note left of accountLifecycle
+  普通账号注册、首次绑定或换绑 A-01 的裸号
+  及其 +86 等价号都会被拒绝，账号状态不变。
+end note
+
 state "专业身份（法人、医生、顾问）" as professionalLifecycle {
   [*] --> roleNone
   state "无专业身份" as roleNone
@@ -61,24 +69,24 @@ state "专业身份（法人、医生、顾问）" as professionalLifecycle {
   state "专业角色 REVOKED" as roleRevoked
 
   roleNone --> rolePending : 提交申请和私有材料
-  rolePending --> roleRejected : 管理员驳回\n含代办用户取消诉求
+  rolePending --> roleRejected : 固定管理员 A-01 驳回\n含代办用户取消诉求
   roleRejected --> rolePending : 新申请和新材料
-  rolePending --> roleActive : 管理员首次批准或重认批准
-  roleActive --> roleRevokeCheck : 管理员发起撤销
+  rolePending --> roleActive : 固定管理员 A-01\n首次批准或重认批准
+  roleActive --> roleRevokeCheck : 固定管理员 A-01 发起撤销
   roleRevokeCheck --> roleActive : 存在待审关系或项目申请
   roleRevokeCheck --> roleRevoked : 前置清空并确认原因
   roleRevoked --> rolePending : 重新认证
 }
 
 note right of rolePending
-  DECISION-01：PENDING 仅由管理员 APPROVE/REJECT。
+  DECISION-01：PENDING 仅由固定管理员 A-01 APPROVE/REJECT。
   用户提出取消时，管理员驳回并记录原因，
   状态为 REJECTED，不写成 WITHDRAWN。
   此规则不适用于 JOIN/LEAVE 或项目申请。
 end note
 
 note right of roleActive
-  DECISION-02：ACTIVE 专业身份仅由管理员 REVOKE，
+  DECISION-02：ACTIVE 专业身份仅由固定管理员 A-01 REVOKE，
   是正式运营流程，不作为发布阻断。
   法人：初始化或恢复机构、法人任职、机构钱包。
   医生：初始化或恢复医生档案、医生钱包。
@@ -104,7 +112,7 @@ state "医生与顾问机构关系" as relationshipLifecycle {
   relationApproved --> leavePending : 本人申请退出
   leavePending --> relationApproved : 驳回或本人撤回
   leavePending --> relationNone : 法人批准退出
-  relationApproved --> relationNone : 管理员强制撤销单关系
+  relationApproved --> relationNone : 固定管理员 A-01\n强制撤销单关系
   relationApproved --> relationNone : 医生或顾问身份撤销\n级联该角色全部关系
 }
 
@@ -140,24 +148,65 @@ note right of allLegalMembershipsRevoked
   法人撤销不删除机构、钱包、医生、顾问、项目和历史订单。
 end note
 
-state "平台管理员角色" as administratorLifecycle {
-  [*] --> administratorEntry
-  state "管理员准备" as administratorEntry
-  state "平台角色 USER" as platformUser
-  state "平台角色 ADMIN" as platformAdmin
-  state "A-01 / ADMIN / Bootstrap 保护" as bootstrapAdmin
+state "固定管理员账号状态（产品能力）" as fixedAdminLifecycle {
+  [*] --> fixedAdmin
+  state "A-01\nACTIVE + ADMIN\n固定裸 11 位手机号" as fixedAdmin
 
-  administratorEntry --> bootstrapAdmin : 首次启动
-  administratorEntry --> platformUser : A-02 初始态
-  platformUser --> platformAdmin : A-01 正式提升 A-02
-  platformAdmin --> platformUser : 改密、退出后最终降权
-  bootstrapAdmin --> bootstrapAdmin : 禁止暂停或降权
+  fixedAdmin --> fixedAdmin : 改密\n账号属性不变、全部旧会话失效
+  fixedAdmin --> fixedAdmin : 服务端退出成功\n仅对应登录会话失效
 }
 
-note right of platformAdmin
-  A-02 在全部双管理员并发用例完成前保持 ADMIN。
-  暂停/恢复属于账号状态维度，不改变平台角色。
-  最后管理员的非 Bootstrap 场景当前无法由纯 GUI 独立构造。
+note right of fixedAdmin
+  以下产品操作全部被拒绝且不产生状态迁移：
+  - 动态新增管理员；
+  - USER / ADMIN 平台角色修改；
+  - 暂停或恢复 A-01；
+  - A-01 在线换号；
+  - 注销 A-01。
+
+  A-01 不自动获得法人、医生或顾问专业身份。
+end note
+
+state "固定管理员部署与停机运维（不是账号状态）" as adminDeploymentFlow {
+  [*] --> blankDeployment
+  state "空白隔离部署\nusers = 0" as blankDeployment
+  state "候选首次配置\nADMIN_PHONE + 临时 ADMIN_PASSWORD" as bootstrapConfigured
+  state "服务就绪\n数据库保持同一 A-01" as adminDeploymentReady
+  state "已有管理员启动校验\nADMIN_PASSWORD 为空" as existingAdminValidation
+  state "停机改号维护\n同一 userId" as offlinePhoneMigration
+  state "启动校验失败\n服务不就绪 / 数据零写入" as adminStartupRejected
+
+  blankDeployment --> bootstrapConfigured : 填写候选手机号和首次密码
+  bootstrapConfigured --> adminDeploymentReady : 校验通过并首次启动\n只创建 A-01
+  bootstrapConfigured ..> adminStartupRejected : 手机号非法或首次密码非法
+
+  adminDeploymentReady --> existingAdminValidation : 同一 ADMIN_PHONE 重启\n移除 ADMIN_PASSWORD
+  existingAdminValidation --> adminDeploymentReady : 只验证同一账号\n不重写任何字段
+  existingAdminValidation ..> adminStartupRejected : 固定账号缺失、异常或冲突
+
+  adminDeploymentReady ..> adminStartupRejected : 配置手机号漂移、异常状态或角色\n等价号冲突或第二个非注销管理员
+
+  adminDeploymentReady --> offlinePhoneMigration : 独立维护窗口停服并备份
+  offlinePhoneMigration --> adminDeploymentReady : 同一 userId 更新手机号\n同步 ADMIN_PHONE 并撤销旧会话
+  offlinePhoneMigration ..> adminStartupRejected : 只更新配置或数据库一侧\n目标号冲突或事务未满足断言
+
+  adminStartupRejected --> adminDeploymentReady : 恢复匹配的配置和数据库后重启\n失败启动未自动修复数据
+}
+
+adminDeploymentReady ..> fixedAdmin : 服务就绪时使用同一 A-01 数据行
+
+note right of offlinePhoneMigration
+  这是独立运维 Runbook，不是后台功能或角色生命周期。
+  必须停止全部后端实例，
+  锁定 guard 和用户行，更新同一 userId，
+  刷新 credentials_updated_at、撤销 refresh token，
+  再同步新的 ADMIN_PHONE；ADMIN_PASSWORD 保持为空。
+end note
+
+note right of adminStartupRejected
+  本状态只表示本次部署启动结果。
+  首次创建失败时 users 仍为 0；已有数据库启动失败时，
+  不会自动创建、修复或改写账号，数据库保持失败前原状。
 end note
 
 state "普通用户订单与安全注销" as userBusinessLifecycle {
@@ -197,9 +246,10 @@ note left of userBusinessLifecycle
 end note
 
 legend right
-  本图是全新的测试状态图，只对应 docs/test 当前流程。
+  本图只对应 docs/test 当前的单一固定管理员流程。
   图片由用户从本 PUML 源文件手动生成。
   DECISION-01/02 只约束专业身份，不替代机构关系或项目申请流程。
+  不存在 A-02、管理员升降权、双管理员或最后管理员场景。
 endlegend
 
 @enduml

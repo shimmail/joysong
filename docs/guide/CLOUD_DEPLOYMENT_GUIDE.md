@@ -35,10 +35,12 @@
 ```bash
 sudo apt update && sudo apt upgrade -y
 sudo apt install -y git nginx mysql-client certbot python3-certbot-nginx unzip curl
-sudo useradd --system --home /opt/joysong --shell /usr/sbin/nologin joysong || true
-sudo mkdir -p /opt/joysong /var/lib/joysong/uploads /var/backups/joysong
-sudo chown -R joysong:www-data /opt/joysong /var/lib/joysong/uploads
-sudo chmod 0750 /var/lib/joysong/uploads
+sudo useradd --system --user-group --home-dir /opt/joysong --shell /usr/sbin/nologin joysong || true
+sudo mkdir -p /opt/joysong
+sudo install -d -o root -g root -m 0700 /var/backups/joysong
+sudo install -d -o joysong -g www-data -m 0750 /var/lib/joysong/uploads
+sudo install -d -o joysong -g joysong -m 0700 /var/lib/joysong/private
+sudo chown -R joysong:www-data /opt/joysong
 ```
 
 安装 Java 17、Node.js 20、Flutter（仅在服务器构建 Flutter 时需要）。更推荐在 CI 构建管理端和后端制品，再上传制品到服务器；不要在生产机保留源码中的密钥文件。
@@ -120,27 +122,21 @@ cd /opt/joysong/joysong-flutter
 flutter pub get
 flutter build apk --release \
   --dart-define=APP_ENV=production \
-  --dart-define=API_BASE_URL=https://api.example.com
+  --dart-define=API_BASE_URL=https://api.example.com \
+  --dart-define=GOOGLE_SERVER_CLIENT_ID=<web-oauth-client-id>
 ```
 
-Android 发布机需要创建 `android/key.properties` 和正式 keystore。禁止把 `key.properties`、keystore、Google client secret 提交到仓库。iOS Release 构建必须在 macOS/Xcode 上完成，并配置分发证书、Provisioning Profile、Associated Domains（如启用分享链接）。
+Android 发布机需要创建 `android/key.properties` 和正式 keystore。禁止把 `key.properties`、keystore、Google client secret 提交到仓库。iOS Release 构建必须在 macOS/Xcode 上完成，并显式注入 Web 与 iOS OAuth Client ID：
 
-### 4.4 原生 Android 客户端（过渡维护）
-
-涉及文件：
-
-- `joysong-app/app/build.gradle.kts`
-- `joysong-app/local.properties`（不提交）
-- `joysong-app/app/src/main/AndroidManifest.xml`
-
-生产 `local.properties` 至少包含：
-
-```properties
-server.url=https://api.example.com/
-google.client-id=...
+```bash
+flutter build ipa --release \
+  --dart-define=APP_ENV=production \
+  --dart-define=API_BASE_URL=https://api.example.com \
+  --dart-define=GOOGLE_SERVER_CLIENT_ID=<web-oauth-client-id> \
+  --dart-define=GOOGLE_IOS_CLIENT_ID=<ios-oauth-client-id>
 ```
 
-Release 不得使用 `http://10.0.2.2:8080/`，也不得开启全局明文流量。当前项目同时维护 Flutter 和原生 Android；正式发布前必须明确 Flutter 为主客户端，或记录两套客户端的同步发布责任。
+Release 不得使用 `http://10.0.2.2:8080/`，也不得开启全局明文流量。仓库中不存在可发布的 `joysong-app` 原生 Android 工程，当前移动端发布入口仅为 `joysong-flutter`。
 
 ## 5. 服务端环境变量
 
@@ -153,12 +149,12 @@ DB_USERNAME=joysong_app
 DB_PASSWORD=<strong-random-password>
 JWT_SECRET=<at-least-32-random-characters>
 ADMIN_PHONE=<admin-phone>
-ADMIN_PASSWORD=<12-128-character-strong-password>
 GOOGLE_CLIENT_ID=<oauth-client-id>
 
 SERVER_BASE_URL=https://api.example.com
 APP_SHARE_BASE_URL=https://app.example.com/s/diary/
 UPLOAD_LOCAL_DIR=/var/lib/joysong/uploads
+UPLOAD_PRIVATE_DIR=/var/lib/joysong/private
 
 OSS_ENABLED=true
 OSS_ENDPOINT=oss-cn-hangzhou.aliyuncs.com
@@ -184,20 +180,17 @@ TRANSLATION_API_KEY=<translation-key>
 TRANSLATION_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 TRANSLATION_MODEL=qwen3.7-flash
 
-STRIPE_SECRET_KEY=sk_live_<from Stripe Dashboard Live mode>
-STRIPE_WEBHOOK_SECRET=whsec_<from the production Webhook Endpoint>
-STRIPE_SUCCESS_URL=https://app.example.com/payment/success?session_id={CHECKOUT_SESSION_ID}
-STRIPE_CANCEL_URL=https://app.example.com/payment/cancel
-STRIPE_API_BASE=https://api.stripe.com
-STRIPE_API_VERSION=
-STRIPE_WEBHOOK_TOLERANCE_SECONDS=300
-STRIPE_PRODUCT_NAME=Joysong medical service
+STRIPE_LEGACY_ENABLED=false
 PAYMENT_RECONCILIATION_ENABLED=true
 PAYMENT_RECONCILIATION_DELAY_MS=60000
 PAYMENT_RECONCILIATION_STALE_SECONDS=120
 ```
 
-### 5.1 完整可选变量索引
+`ADMIN_PHONE` 是长期保留的唯一固定管理员裸 11 位号码。只有迁移后 `users=0` 的首次启动才临时追加 `ADMIN_PASSWORD=<12-128-character-strong-password>`；创建成功后立即从 `/etc/joysong/joysong.env` 和部署平台移除，再以同一 `ADMIN_PHONE` 无密码变量重启验证。后续重启不读取该变量，再次设置也不会重置管理员密码。完整流程见[项目配置指南](CONFIGURATION_GUIDE.md#24-仅首次创建管理员的临时密码)。
+
+`UPLOAD_PRIVATE_DIR` 保存私有身份材料，只允许 Java 进程读写，不能与 `UPLOAD_LOCAL_DIR` 或 Nginx `/images/` alias 共用，并须纳入备份恢复。
+
+### 5.1 补充可选变量索引
 
 以下变量有默认值，但部署时应明确确认是否需要覆盖：
 
@@ -205,36 +198,33 @@ PAYMENT_RECONCILIATION_STALE_SECONDS=120
 |---|---|
 | `CORS_ALLOWED_ORIGINS` | 跨域来源白名单；生产只填实际 HTTPS 域名 |
 | `GOOGLE_PROXY_URL` | 仅用于 Google ID Token 公钥校验的受控代理；不要配置为通用出网代理 |
-| `AI_AGENT_PROVIDER` | 当前完整部署固定为 `qwen`；其他 enum 值不可用于部署 |
-| `AI_AGENT_API_KEY` | Agent 专用的服务端密钥 |
-| `AI_AGENT_BASE_URL` | Agent 专用的批准 HTTPS endpoint |
-| `AI_AGENT_MODEL` | Agent 最终回答模型 ID |
-| `AI_AGENT_INTENT_MODEL` | 生产必填的意图分类模型 ID；与最终回答模型分开配置 |
 | `TRANSLATION_PROVIDER` | 翻译服务 Provider，当前使用 `qwen` |
 | `TRANSLATION_API_KEY` | 翻译服务独立密钥，不回退到 Agent 密钥 |
 | `TRANSLATION_BASE_URL` | 翻译服务独立 HTTPS endpoint |
 | `TRANSLATION_MODEL` | 翻译模型 ID，推荐 `qwen3.7-flash` |
-| `STRIPE_API_BASE` / `STRIPE_API_VERSION` | Stripe API 地址和版本 |
-| `STRIPE_SUCCESS_URL` / `STRIPE_CANCEL_URL` | 支付回跳页面 |
-| `STRIPE_PRODUCT_NAME` | 支付商品名 |
-| `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` | Stripe 密钥和 webhook 签名 |
-| `STRIPE_WEBHOOK_TOLERANCE_SECONDS` | webhook 时间容忍窗口 |
 | `PAYMENT_RECONCILIATION_DELAY_MS` / `PAYMENT_RECONCILIATION_STALE_SECONDS` | 订单对账周期和过期阈值 |
 
-不要把可选变量的默认值复制到生产密钥文件；生产 profile 的 fail-closed 校验优先于开发默认值。
+AI Agent 的五项变量位于上方生产必填清单，不能移入可选配置。不要把可选变量的默认值复制到生产密钥文件；生产 profile 的 fail-closed 校验优先于开发默认值。
 
-Stripe 的环境由服务端 API key 决定：测试环境使用 `sk_test_...`，正式环境使用 `sk_live_...`。两种环境都必须提供与当前 Stripe webhook endpoint 匹配的 `STRIPE_WEBHOOK_SECRET`；不要在测试环境配置 `sk_live_...`。
+### 5.2 历史 Stripe 责任（默认空白部署不配置）
+
+空白生产部署保持 `STRIPE_LEGACY_ENABLED=false`，不得保存 Stripe Live 密钥。只有启动安全门确认存在尚未处理完的历史 Stripe 查询或退款责任，并获得运维批准后，才临时设置 `STRIPE_LEGACY_ENABLED=true`，并从 Secret Manager 注入该历史适配器需要的 `STRIPE_SECRET_KEY`、`STRIPE_WEBHOOK_SECRET`、`STRIPE_SUCCESS_URL`、`STRIPE_CANCEL_URL` 等变量。该适配器不能创建新订单；历史责任处理完毕后应关闭开关并移除密钥。
 
 ## 6. 数据库准备与迁移
 
 ```sql
 CREATE DATABASE joysong CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER 'joysong_app'@'%' IDENTIFIED BY '<strong-password>';
-GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE ON joysong.* TO 'joysong_app'@'%';
+-- 当前应用启动使用同一个账号执行 Flyway；权限只授予 joysong schema，
+-- 不授予全局权限、CREATE USER 或 GRANT OPTION。
+GRANT SELECT, INSERT, UPDATE, DELETE,
+      CREATE, ALTER, DROP, INDEX, REFERENCES,
+      CREATE ROUTINE, ALTER ROUTINE, EXECUTE
+ON joysong.* TO 'joysong_app'@'%';
 FLUSH PRIVILEGES;
 ```
 
-生产 profile 使用 Flyway，`ddl-auto=validate`，因此应用启动前必须确认迁移脚本已提交并可重复执行。不要手动修改生产表结构绕过 Flyway。首次部署后检查 `flyway_schema_history`，并记录数据库版本。
+生产 profile 使用 Flyway，`ddl-auto=validate`，且当前 Flyway 与运行时共用 `DB_USERNAME`，所以上述账号必须保留目标 schema 内的迁移权限。不要授予跨库或用户管理权限，也不要手动修改生产表结构绕过 Flyway。首次部署后检查 `flyway_schema_history`，并记录数据库版本；以后若配置独立 Flyway 账号，再把运行时账号收敛为纯 DML 权限。
 
 ## 7. systemd 运行后端
 
@@ -264,7 +254,7 @@ Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
-ReadWritePaths=/var/lib/joysong/uploads
+ReadWritePaths=/var/lib/joysong/uploads /var/lib/joysong/private
 
 [Install]
 WantedBy=multi-user.target
@@ -297,30 +287,30 @@ sudo certbot --nginx -d api.example.com -d admin.example.com -d app.example.com
 
 发布顺序：
 
-1. 备份数据库和 `/var/lib/joysong/uploads`。
+1. 备份数据库、`/var/lib/joysong/uploads` 和仅限受控人员访问的 `/var/lib/joysong/private`。
 2. 构建并上传新 jar、管理端 `dist` 和移动端制品。
 3. 先执行 `systemctl restart joysong`，确认健康检查和 Flyway 成功。
 4. 再切换 Nginx 静态文件目录；保留上一版本目录用于回滚。
 5. 执行登录、上传、图片访问、分享页和支付 webhook 冒烟测试。
 
-最低备份命令：
+最低备份命令由具备 MySQL 备份权限的 `sudo` 运维账号执行：
 
 ```bash
-mysqldump --single-transaction --routines --triggers joysong | gzip > /var/backups/joysong/joysong-$(date +%F-%H%M).sql.gz
-tar -czf /var/backups/joysong/uploads-$(date +%F-%H%M).tar.gz /var/lib/joysong/uploads
+mysqldump --single-transaction --routines --triggers joysong | gzip | sudo tee /var/backups/joysong/joysong-$(date +%F-%H%M).sql.gz >/dev/null
+sudo tar -czf /var/backups/joysong/uploads-$(date +%F-%H%M).tar.gz /var/lib/joysong/uploads
+sudo tar -czf /var/backups/joysong/private-$(date +%F-%H%M).tar.gz /var/lib/joysong/private
 ```
 
-至少保留 7 天备份，并将备份复制到另一可用区或对象存储。回滚必须同时回滚 jar、管理端静态文件和数据库迁移兼容性；不要只替换 jar。
+私有材料备份必须沿用私有目录的访问控制并加密保存。至少保留 7 天备份，并将备份复制到另一可用区或对象存储。回滚必须同时回滚 jar、管理端静态文件和数据库迁移兼容性；不要只替换 jar。
 
 ## 10. 当前正式上线阻断项
 
-- 公共“忘记密码”仍需禁止管理员账号。
-- 普通密码登录、公共注册/注销恢复路径仍需保证永不签发管理员 JWT。
-- 管理员认证错误必须统一为 401/通用错误，不能暴露角色信息。
+- 部分历史 `/api/admin/**` 端点仍只要求 authenticated，普通用户 token 可能访问全局数据；必须完成统一管理员授权收口。
+- 暂停账号的身份申请仍可能被管理员批准，必须补齐账号状态校验。
 - Flutter 真实启动链路的 401 refresh handler 尚需修复并补集成测试。
 - 验证码和手机号换绑状态需迁移 Redis，才能支持多实例。
-- 原生 Android Release 禁止明文 HTTP；当前 Flutter 与原生 Android 的主客户端策略需确定。
-- 生产域名、短信、OSS、支付、AI 数据处理协议和隐私合规尚未完成确认。
+- Alipay+ 生产网关尚未实现；新支付当前应失败关闭为 `503 / PAYMENT_PROVIDER_UNAVAILABLE`，不能作为可收款版本发布。
+- 生产域名、短信、OSS、AI 数据处理协议和隐私合规尚未完成确认。
 
 ## 11. 上线验收清单
 
@@ -330,8 +320,8 @@ tar -czf /var/backups/joysong/uploads-$(date +%F-%H%M).tar.gz /var/lib/joysong/u
 - [ ] Flyway 迁移成功且 `ddl-auto=validate`
 - [ ] API、管理端、图片、分享页全部 HTTPS
 - [ ] 管理端生产构建通过，API 同源代理正常
-- [ ] Flutter/Android Release 使用正式 HTTPS API 和正式签名
-- [ ] 登录、刷新、退出、上传、分享、短信、OSS、支付 webhook 冒烟通过
-- [ ] 数据库、上传目录和配置均有恢复演练记录
+- [ ] Flutter Android/iOS Release 使用正式 HTTPS API、OAuth Client ID 和正式签名
+- [ ] 登录、刷新、退出、上传、分享、短信和 OSS 冒烟通过；新支付在网关上线前按预期失败关闭，历史 Stripe webhook 仅在受控启用时验收
+- [ ] 数据库、公共上传、私有材料目录和配置均有恢复演练记录
 - [ ] 监控磁盘、内存、JVM、5xx、登录失败、短信和支付失败率
 - [ ] 所有“正式上线阻断项”已关闭并由另一人复核
