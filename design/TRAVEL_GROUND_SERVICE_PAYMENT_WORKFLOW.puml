@@ -13,7 +13,7 @@ start
 :创建订单并立即绑定顾问;
 :固化 currency、medicalListPriceMinor、\nplatformServiceRateBps（兼容字段）、\ntravelGroundServiceFeeMinor 和 pricingPolicyRevision;
 :订单进入 PENDING_SERVICE_FEE;
-:写入 ORDER_CREATED 系统消息\n通知用户与绑定顾问，订单详情目标;
+:写入 ORDER_CREATED 系统消息\n仅通知用户，订单详情目标;
 :确定订单支付截止时间\norderPaymentDeadline = createdAt + 30 分钟;
 :支付前锁定顾问履约资料和订单服务会话;
 
@@ -57,7 +57,7 @@ if (Alipay+ merchant / gateway 可用?) then (是)
       :订单进入 SERVICE_ACTIVE;
       :记录 serviceActivatedAt;
       :开放允许公开的顾问资料和订单服务会话;
-      :写入 ORDER_SERVICE_ACTIVATED 系统消息\n顾问打开订单服务会话，用户/医生打开订单详情;
+      :写入 ORDER_SERVICE_ACTIVATED 系统消息\n顾问打开订单服务会话，用户打开订单详情，\n医生打开专业订单详情;
     else (否：错额/错币种/重复或晚到成功)
       :保留渠道 SUCCEEDED 事实和实收金额/币种;
       :按 paymentId 唯一创建补偿工单 PENDING_REVIEW;

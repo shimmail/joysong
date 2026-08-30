@@ -12,19 +12,18 @@ import java.time.LocalDateTime
 class BusinessNotificationServiceTest {
 
     @Test
-    fun `order creation de-duplicates recipients and keeps the order target contract`() {
+    fun `order creation notifies only the user before payment`() {
         val fixture = fixture()
 
         fixture.service.orderCreated(
             orderId = "order-1",
-            userId = "shared-user",
-            consultantId = "shared-user"
+            userId = "user-1"
         )
 
         assertEquals(
             listOf(
                 Emission(
-                    userId = "shared-user",
+                    userId = "user-1",
                     type = "ORDER_CREATED",
                     title = "订单已创建",
                     content = "您的订单已创建，请及时查看订单详情。",

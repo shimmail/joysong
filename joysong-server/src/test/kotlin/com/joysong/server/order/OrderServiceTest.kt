@@ -535,7 +535,7 @@ class OrderServiceTest {
         verify(exactly = 0) { couponService.calculateDiscount(any(), any()) }
         verify(exactly = 0) { couponService.redeemCoupon(any(), any()) }
         verify(exactly = 1) {
-            businessNotificationService.orderCreated("order-new", "user-1", "consultant-1")
+            businessNotificationService.orderCreated("order-new", "user-1")
         }
     }
 

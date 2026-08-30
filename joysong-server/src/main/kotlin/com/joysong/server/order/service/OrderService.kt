@@ -223,7 +223,7 @@ class OrderService(
         )
         log.info("用户[{}]创建订单[{}]成功, 订单号: {}", userId, saved.id, orderNo)
         notifySafely("ORDER_CREATED", saved.id) {
-            businessNotificationService.orderCreated(saved.id, saved.userId, saved.consultantId)
+            businessNotificationService.orderCreated(saved.id, saved.userId)
         }
         return OrderResponse.from(saved)
     }

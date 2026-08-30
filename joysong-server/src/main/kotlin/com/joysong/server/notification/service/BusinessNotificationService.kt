@@ -37,9 +37,9 @@ class BusinessNotificationService(
             institutionId
         ).map(String::trim).filter(String::isNotEmpty).toSet()
 
-    fun orderCreated(orderId: String, userId: String, consultantId: String) =
+    fun orderCreated(orderId: String, userId: String) =
         notify(
-            recipients = listOf(userId, consultantId),
+            recipients = listOf(userId),
             type = "ORDER_CREATED",
             title = "订单已创建",
             content = "您的订单已创建，请及时查看订单详情。",
