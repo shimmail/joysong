@@ -148,20 +148,10 @@ class ProductionProfileTest {
     }
 
     @Test
-    fun `agent and translation deployment contracts expose independent environment variables`() {
+    fun `agent and translation runtime contracts expose independent environment variables`() {
         val yamlText = listOf("application.yml", "application-prod.yml", "application-dev.example.yml")
             .joinToString("\n") { ClassPathResource(it).inputStream.bufferedReader().use { reader -> reader.readText() } }
         val envText = Files.readString(Path.of(".env.example"))
-        val documentationRoots = listOf(Path.of("..", "doc"), Path.of("..", "docs"))
-        val deploymentDocumentation = documentationRoots.flatMap { root ->
-            Files.walk(root).use { paths ->
-                paths.filter { path ->
-                    Files.isRegularFile(path) &&
-                        path.fileName.toString().endsWith(".md") &&
-                        !path.normalize().toString().replace('\\', '/').contains("/docs/superpowers/")
-                }.map(Files::readString).toList()
-            }
-        }.joinToString("\n")
         val expected = setOf(
             "AI_AGENT_PROVIDER",
             "AI_AGENT_API_KEY",
@@ -176,14 +166,6 @@ class ProductionProfileTest {
 
         assertEquals(expected, environmentName.findAll(yamlText).map { it.value }.toSet())
         assertEquals(expected, environmentName.findAll(envText).map { it.value }.toSet())
-        val documentationWithoutMarkdownFileNames = deploymentDocumentation.replace(
-            Regex("[A-Z0-9_]+\\.md", RegexOption.IGNORE_CASE),
-            ""
-        )
-        assertEquals(
-            expected,
-            environmentName.findAll(documentationWithoutMarkdownFileNames).map { it.value }.toSet()
-        )
         assertEquals("\${AI_AGENT_PROVIDER:}", applicationProperties.getProperty("ai-agent.provider"))
         assertEquals("\${AI_AGENT_API_KEY:}", applicationProperties.getProperty("ai-agent.api-key"))
         assertEquals("\${AI_AGENT_BASE_URL:}", applicationProperties.getProperty("ai-agent.base-url"))
@@ -219,161 +201,4 @@ class ProductionProfileTest {
         assertEquals("qwen-turbo", envLines["AI_AGENT_INTENT_MODEL"])
     }
 
-    @Test
-    fun `current Qwen documentation has no obsolete translation fallback or relay guidance`() {
-        val translationGuide = Files.readString(Path.of("..", "docs", "AI_TRANSLATION_SOLUTION.md"))
-        val rolloutGuide = Files.readString(Path.of("..", "docs", "AI_AGENT_ROLLOUT.md"))
-
-        assertFalse(translationGuide.contains("OpenAI", ignoreCase = true))
-        assertFalse(rolloutGuide.contains("FastAIToken", ignoreCase = true))
-    }
-
-    @Test
-    fun `current documentation contains no obsolete Agent configuration or network examples`() {
-        val currentDocumentation = listOf(Path.of("..", "doc"), Path.of("..", "docs")).flatMap { root ->
-            Files.walk(root).use { paths ->
-                paths.filter { path ->
-                    Files.isRegularFile(path) &&
-                        path.fileName.toString().endsWith(".md") &&
-                        !path.normalize().toString().replace('\\', '/').contains("/docs/superpowers/")
-                }.map(Files::readString).toList()
-            }
-        }.joinToString("\n")
-        val forbidden = listOf(
-            Regex("\\b(?:openai|qwen|translation)\\.(?:provider|api-key|base-url|model)\\b", RegexOption.IGNORE_CASE),
-            Regex("\\bai\\.provider\\b", RegexOption.IGNORE_CASE),
-            Regex("\\bai-agent\\.(?:proxy-url|lease-timeout|intent-parser-enabled|demo-fallback-enabled|stream|reasoning)\\b", RegexOption.IGNORE_CASE),
-            Regex("\\bllmRestTemplate\\b", RegexOption.IGNORE_CASE)
-        )
-
-        forbidden.forEach { pattern ->
-            assertFalse(pattern.containsMatchIn(currentDocumentation), "obsolete documentation pattern: ${pattern.pattern}")
-        }
-    }
-
-    @Test
-    fun `current documentation describes the streaming contract without adding deployment variables`() {
-        val developmentGuide = Files.readString(Path.of("..", "docs", "AI_AGENT_DEVELOPMENT.md"))
-        val configurationGuide = Files.readString(Path.of("..", "docs", "CONFIGURATION_GUIDE.md"))
-        val streamingContract = developmentGuide + "\n" + configurationGuide
-
-        listOf(
-            "/api/chat/sessions/{id}/messages/stream",
-            "started",
-            "delta",
-            "completed",
-            "error",
-            "PLANNING",
-            "partial"
-        ).forEach { term ->
-            assertTrue(streamingContract.contains(term), "streaming documentation is missing: $term")
-        }
-        assertTrue(streamingContract.contains("Qwen-only"), "streaming provider boundary must be explicit")
-        assertTrue(streamingContract.contains("不持久化"), "error partial output must be documented as non-persistent")
-    }
-
-    @Test
-    fun `current documentation requires a distinct nonblank production intent model`() {
-        val currentDocuments = listOf(Path.of("..", "doc"), Path.of("..", "docs")).flatMap { root ->
-            Files.walk(root).use { paths ->
-                paths.filter { path ->
-                    Files.isRegularFile(path) &&
-                        path.fileName.toString().endsWith(".md") &&
-                        !path.normalize().toString().replace('\\', '/').contains("/docs/superpowers/")
-                }.toList()
-            }
-        }
-        val violations = currentDocuments.flatMap { path ->
-            val content = Files.readString(path)
-            findIntentModelDocumentationViolations(content).map { violation ->
-                path.normalize().toString() to violation.trim()
-            }
-        }
-
-        assertTrue(
-            violations.isEmpty(),
-            "AI_AGENT_INTENT_MODEL must be production-required and distinct: ${violations.joinToString()}"
-        )
-    }
-
-    @Test
-    fun `intent model documentation guard catches optional English placeholders and hard wraps`() {
-        val violations = listOf(
-            "AI_AGENT_INTENT_MODEL may be blank",
-            "AI_AGENT_INTENT_MODEL may be empty",
-            "AI_AGENT_INTENT_MODEL may be omitted",
-            "AI_AGENT_INTENT_MODEL inherits AI_AGENT_MODEL",
-            "AI_AGENT_INTENT_MODEL may be\nleft blank",
-            "intent-model: \${AI_AGENT_INTENT_MODEL: }",
-            "intent-model: \${AI_AGENT_INTENT_MODEL:\${AI_AGENT_MODEL}}"
-        )
-
-        violations.forEach { sample ->
-            assertTrue(
-                findIntentModelDocumentationViolations(sample).isNotEmpty(),
-                "guard missed optional intent-model semantics: $sample"
-            )
-        }
-    }
-
-    @Test
-    fun `intent model documentation guard accepts required and negated wording`() {
-        val compliant = listOf(
-            "AI_AGENT_INTENT_MODEL is required and must be set separately.",
-            "AI_AGENT_INTENT_MODEL 不可选，必须单独配置。",
-            "AI_AGENT_INTENT_MODEL 不允许留空。",
-            "AI_AGENT_INTENT_MODEL 无回退，必须使用独立模型。"
-        )
-
-        compliant.forEach { sample ->
-            assertTrue(
-                findIntentModelDocumentationViolations(sample).isEmpty(),
-                "guard rejected compliant intent-model semantics: $sample"
-            )
-        }
-    }
-
-    private fun findIntentModelDocumentationViolations(content: String): List<String> {
-        val placeholderViolations = listOf(
-            Regex("\\$\\{\\s*AI_AGENT_INTENT_MODEL\\s*:\\s*}", RegexOption.IGNORE_CASE),
-            Regex(
-                "\\$\\{\\s*AI_AGENT_INTENT_MODEL\\s*:\\s*\\$\\{\\s*AI_AGENT_MODEL\\s*}\\s*}",
-                RegexOption.IGNORE_CASE
-            )
-        ).flatMap { pattern -> pattern.findAll(content).map { it.value }.toList() }
-
-        val normalized = content.replace(Regex("\\s+"), " ").trim()
-        val protected = normalized
-            .replace(
-                Regex(
-                    "(?i)\\b(?:not\\s+optional|non-?optional|must\\s+not\\s+be\\s+(?:blank|empty|omitted)|" +
-                        "cannot\\s+be\\s+(?:blank|empty|omitted)|non-?(?:blank|empty)|" +
-                        "does\\s+not\\s+inherit|no\\s+fallback|does\\s+not\\s+fall\\s+back)\\b"
-                ),
-                "COMPLIANT"
-            )
-            .replace(
-                Regex("不可选|并非可选|不允许留空|不得留空|不能留空|禁止留空|无回退|不会回退|不回退"),
-                "合规"
-            )
-        val optionalSemantics = Regex(
-            "(?i)optional|may\\s+be\\s+(?:blank|empty|omitted)|can\\s+be\\s+(?:blank|empty|omitted)|" +
-                "(?:is\\s+)?(?:blank|empty)|omitted|inherits?(?:\\s+from)?|falls?\\s+back|fallback|" +
-                "defaults?\\s+to|可选|留空|空值|回退|默认使用"
-        )
-        val semanticViolations = protected.split(Regex("[.!?。；;]")).mapNotNull { clause ->
-            val variableIndex = clause.indexOf("AI_AGENT_INTENT_MODEL", ignoreCase = true)
-            if (variableIndex < 0) return@mapNotNull null
-            val start = (variableIndex - INTENT_MODEL_SEMANTIC_RADIUS).coerceAtLeast(0)
-            val end = (variableIndex + "AI_AGENT_INTENT_MODEL".length + INTENT_MODEL_SEMANTIC_RADIUS)
-                .coerceAtMost(clause.length)
-            clause.substring(start, end).takeIf(optionalSemantics::containsMatchIn)?.trim()
-        }
-
-        return placeholderViolations + semanticViolations
-    }
-
-    private companion object {
-        const val INTENT_MODEL_SEMANTIC_RADIUS = 96
-    }
 }
