@@ -355,7 +355,9 @@ class PaymentPersistenceService(
                     updatedOrder.id,
                     updatedOrder.userId,
                     updatedOrder.consultantId,
-                    updatedOrder.doctorId
+                    updatedOrder.doctorId,
+                    updatedOrder.projectName,
+                    updatedOrder.appointmentTime
                 )
             }
             return completed

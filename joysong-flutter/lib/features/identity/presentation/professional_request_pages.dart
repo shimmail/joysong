@@ -776,6 +776,7 @@ class InstitutionProjectRequestsPage extends StatefulWidget {
     required this.repository,
     required this.context,
     this.reviewMode = false,
+    this.initialRequestId,
     this.pickAndUploadImage,
     this.onRefreshManagementContext,
     super.key,
@@ -784,6 +785,7 @@ class InstitutionProjectRequestsPage extends StatefulWidget {
   final IdentityRepository repository;
   final ManagementContext context;
   final bool reviewMode;
+  final String? initialRequestId;
   final Future<String?> Function()? pickAndUploadImage;
   final Future<ManagementContext?> Function()? onRefreshManagementContext;
 
@@ -816,6 +818,7 @@ class _InstitutionProjectRequestsPageState
   var _loading = true;
   var _saving = false, _uploading = false, _reviewing = false;
   var _reviewAccessRevoked = false;
+  var _initialRequestHandled = false;
   late ManagementContext _currentContext;
 
   @override
@@ -904,6 +907,7 @@ class _InstitutionProjectRequestsPageState
         _loading = false;
         _error = null;
       });
+      _openInitialRequestIfVisible();
       return true;
     } catch (_) {
       if (mounted) {
@@ -927,6 +931,24 @@ class _InstitutionProjectRequestsPageState
     }
     return _currentContext.doctorId != null &&
         request.doctorId == _currentContext.doctorId;
+  }
+
+  void _openInitialRequestIfVisible() {
+    if (_initialRequestHandled) return;
+    _initialRequestHandled = true;
+    final requestId = widget.initialRequestId?.trim();
+    if (requestId == null || requestId.isEmpty) return;
+    for (final request in _requests) {
+      if (request.id != requestId) continue;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _openCreationDetail(
+            InstitutionProjectReviewItem.fromCreation(request),
+          );
+        }
+      });
+      return;
+    }
   }
 
   bool _canReview(ProfessionalProjectRequest request) {
@@ -1027,8 +1049,7 @@ class _InstitutionProjectRequestsPageState
                     ),
                     StructuredProjectDetailEditor(
                       controller: _detailContent,
-                      primaryFieldKey:
-                          const Key('institution-detail-content'),
+                      primaryFieldKey: const Key('institution-detail-content'),
                       fieldKeyPrefix: 'institution-detail',
                       enabled: !_saving && !_uploading,
                     ),
@@ -1160,53 +1181,6 @@ class _InstitutionProjectRequestsPageState
     );
   }
 
-  Widget _creationDetailMetadata(
-    BuildContext context,
-    InstitutionProjectReviewItem item,
-  ) {
-    final request = _creationRequest(item);
-    final split = request.institutionSplit;
-    final activeLabel = switch (request.isActive) {
-      true => context.localized('上架', 'Active'),
-      false => context.localized('下架', 'Inactive'),
-      null => _snapshotText(context, null),
-    };
-    final rows = [
-      '${context.localized('申请编号', 'Request ID')}：${request.id}',
-      '${context.localized('机构编号', 'Institution ID')}：${_snapshotText(context, request.institutionId)}',
-      '${context.localized('申请医生编号', 'Applicant doctor ID')}：${request.doctorId}',
-      '${context.localized('当前医生名称', 'Current doctor name')}：${_snapshotText(context, request.doctorName)}',
-      '${context.localized('当前机构名称', 'Current institution name')}：${_snapshotText(context, request.institutionName)}',
-      '${context.localized('平台项目编号', 'Platform project ID')}：${_snapshotText(context, request.projectId)}',
-      '${context.localized('当前平台项目名称', 'Current platform project name')}：${_snapshotText(context, request.projectName)}',
-      '${context.localized('项目分类', 'Category')}：${_snapshotText(context, request.category)}',
-      '${context.localized('分类标签', 'Category tags')}：${_snapshotItems(context, request.categoryTags)}',
-      '${context.localized('原价（USD）', 'Original price (USD)')}：${_formatUsd(request.originalPrice)}',
-      '${context.localized('旅游地接服务费', 'Travel ground service fee')}：${_travelGroundServiceFeeValue(request.price, request.institutionSplit?.platformRate)}',
-      '${context.localized('审批后医生项目状态', 'Doctor project status after approval')}：$activeLabel',
-      if (split != null) ...[
-        '${context.localized('面诊费（USD）', 'Consultation fee (USD)')}：${_formatUsd(split.consultationFee)}',
-        '${context.localized('顾问比例', 'Consultant rate')}：${_formatNumber(split.commissionRate)}%',
-        '${context.localized('机构比例', 'Institution rate')}：${_formatNumber(split.institutionRate)}%',
-        '${context.localized('平台比例', 'Platform rate')}：${_formatNumber(split.platformRate)}%',
-        '${context.localized('医生比例', 'Doctor rate')}：${_formatNumber(split.doctorRate)}%',
-      ],
-      '${context.localized('申请说明', 'Notes')}：${_snapshotText(context, request.notes)}',
-      '${context.localized('申请状态', 'Request status')}：${_statusLabel(request.status)}',
-      '${context.localized('审核意见', 'Review note')}：${_snapshotText(context, request.reviewNote)}',
-      '${context.localized('审核人', 'Reviewed by')}：${_snapshotText(context, request.reviewedBy)}',
-      '${context.localized('审核时间', 'Reviewed at')}：${request.reviewedAt?.toIso8601String() ?? '-'}',
-      '${context.localized('提交时间', 'Submitted at')}：${request.submittedAt.toIso8601String()}',
-      '${context.localized('更新时间', 'Updated at')}：${request.updatedAt.toIso8601String()}',
-      '${context.localized('生成平台项目', 'Resulting platform project')}：${_snapshotText(context, request.resultingProjectId)}',
-      '${context.localized('生成机构项目', 'Resulting institution project')}：${_snapshotText(context, request.resultingInstitutionProjectId)}',
-    ];
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [for (final row in rows) Text(row)],
-    );
-  }
-
   Widget _creationSummaryAction(
     BuildContext context,
     InstitutionProjectReviewItem item,
@@ -1226,7 +1200,6 @@ class _InstitutionProjectRequestsPageState
     Navigator.of(context).push<void>(MaterialPageRoute(
       builder: (_) => InstitutionProjectReviewDetailPage(
         item: item,
-        details: _creationDetailMetadata(context, item),
         actions: _canReview(request) && item.valid
             ? Align(
                 alignment: Alignment.centerRight,
@@ -1980,8 +1953,7 @@ class _DoctorProjectProfileUpdateFormPageState
             ),
             _requestField(
               _tags,
-              context.localized(
-                  '服务标签（逗号分隔）', 'Service tags (comma separated)'),
+              context.localized('服务标签（逗号分隔）', 'Service tags (comma separated)'),
               fieldKey: const Key('profile-update-tags'),
               onChanged: (_) => _editedSharedFields.add('tags'),
             ),
@@ -2109,8 +2081,7 @@ class _DoctorProjectProfileUpdateFormPageState
     final price = num.tryParse(_price.text.trim());
     final salesCount = int.tryParse(_salesCount.text.trim());
     if (price == null || salesCount == null) {
-      setState(() => _error = context.localized(
-          '请填写有效的医生项目价格与销量',
+      setState(() => _error = context.localized('请填写有效的医生项目价格与销量',
           'Enter a valid doctor project price and sales count.'));
       return;
     }
@@ -2194,8 +2165,7 @@ class _DoctorProjectProfileUpdateFormPageState
           .contains(error.errorCode)) {
         await widget.onContractConflict();
         if (!mounted) return;
-        setState(() => _error = context.localized(
-            '当前资料或待审核申请已变化，请刷新后重新申请',
+        setState(() => _error = context.localized('当前资料或待审核申请已变化，请刷新后重新申请',
             'The profile or pending request changed. Refresh and submit again.'));
       } else {
         setState(() => _error = error.message);
@@ -2310,7 +2280,8 @@ class _DoctorProjectProfileReviewPageState
 
   bool _isVisible(DoctorProjectChangeRequest request) {
     if (_isAdmin) return true;
-    return _currentContext.managedInstitutionIds.contains(request.institutionId);
+    return _currentContext.managedInstitutionIds
+        .contains(request.institutionId);
   }
 
   @override
@@ -2339,8 +2310,8 @@ class _DoctorProjectProfileReviewPageState
                   if (_error != null) ...[
                     Text(
                       _error!,
-                      style: TextStyle(
-                          color: Theme.of(context).colorScheme.error),
+                      style:
+                          TextStyle(color: Theme.of(context).colorScheme.error),
                     ),
                     TextButton(
                       onPressed: _load,
@@ -2390,8 +2361,7 @@ class _DoctorProjectProfileReviewPageState
                     !_submittingRequestIds.contains(request.id),
                 allowForce: allowForce,
                 onSubmit: (decision, note, force) async {
-                  final close =
-                      await _review(request, decision, note, force);
+                  final close = await _review(request, decision, note, force);
                   if (close && _exitAfterDetail) {
                     WidgetsBinding.instance.addPostFrameCallback((_) {
                       if (mounted) Navigator.of(context).maybePop();

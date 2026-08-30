@@ -17,7 +17,7 @@ skinparam note {
 
 top to bottom direction
 
-state "账号状态（非固定管理员账号）" as accountLifecycle {
+state "账号状态（所有角色共用）" as accountLifecycle {
   [*] --> accountUnregistered
   state "未注册" as accountUnregistered
   state "ACTIVE" as accountActive
@@ -26,8 +26,8 @@ state "账号状态（非固定管理员账号）" as accountLifecycle {
   state "ERASED" as accountErased
 
   accountUnregistered --> accountActive : 注册或验证码自动注册
-  accountActive --> accountSuspended : 管理员暂停非固定管理员账号
-  accountSuspended --> accountActive : 管理员恢复非固定管理员账号并重新登录
+  accountActive --> accountSuspended : 管理员暂停
+  accountSuspended --> accountActive : 管理员恢复并重新登录
   accountActive --> deletionPreflight : 发起注销
   deletionPreflight --> accountActive : blocker、取消或失败
   deletionPreflight --> accountErased : eligible + 二次验证 + DELETE
@@ -38,7 +38,6 @@ note top of accountLifecycle
   测试记录必须把四个维度分开：
   账号状态、平台角色、专业身份、机构关系。
   任一维度变化都不能自动推导其他维度。
-  本状态机不适用于唯一固定管理员 A-01。
 end note
 
 note right of accountSuspended
@@ -144,17 +143,21 @@ end note
 state "平台管理员角色" as administratorLifecycle {
   [*] --> administratorEntry
   state "管理员准备" as administratorEntry
-  state "A-01 / 固定 ADMIN" as fixedAdmin
+  state "平台角色 USER" as platformUser
+  state "平台角色 ADMIN" as platformAdmin
+  state "A-01 / ADMIN / Bootstrap 保护" as bootstrapAdmin
 
-  administratorEntry --> fixedAdmin : 空库首次启动
-  fixedAdmin --> fixedAdmin : 正常重启校验同一账号
+  administratorEntry --> bootstrapAdmin : 首次启动
+  administratorEntry --> platformUser : A-02 初始态
+  platformUser --> platformAdmin : A-01 正式提升 A-02
+  platformAdmin --> platformUser : 改密、退出后最终降权
+  bootstrapAdmin --> bootstrapAdmin : 禁止暂停或降权
 }
 
-note right of fixedAdmin
-  `ADMIN_PHONE` 唯一指定固定管理员 A-01。
-  动态创建、平台角色变更、暂停/恢复均不适用，
-  且服务层会拒绝这些变更；相应失败路径由自动化测试留证。
-  `ADMIN_PASSWORD` 仅用于空库首次创建，正常重启不使用也不重置密码。
+note right of platformAdmin
+  A-02 在全部双管理员并发用例完成前保持 ADMIN。
+  暂停/恢复属于账号状态维度，不改变平台角色。
+  最后管理员的非 Bootstrap 场景当前无法由纯 GUI 独立构造。
 end note
 
 state "普通用户订单与安全注销" as userBusinessLifecycle {

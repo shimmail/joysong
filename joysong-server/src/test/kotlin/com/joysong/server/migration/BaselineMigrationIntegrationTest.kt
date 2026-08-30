@@ -1,5 +1,13 @@
 package com.joysong.server.migration
 
+import com.joysong.server.doctor.entity.DoctorEntity
+import com.joysong.server.doctor.repository.DoctorRepository
+import com.joysong.server.institution.entity.InstitutionEntity
+import com.joysong.server.institution.entity.InstitutionProjectEntity
+import com.joysong.server.institution.repository.InstitutionProjectRepository
+import com.joysong.server.institution.repository.InstitutionRepository
+import com.joysong.server.project.entity.ProjectEntity
+import com.joysong.server.project.repository.ProjectRepository
 import com.joysong.server.support.WorktreeTestDatabase
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Tag
@@ -12,6 +20,7 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.testcontainers.containers.MySQLContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
+import java.math.BigDecimal
 
 @Tag("mysql-integration")
 @Testcontainers
@@ -30,8 +39,20 @@ class BaselineMigrationIntegrationTest {
     @Autowired
     private lateinit var jdbcTemplate: JdbcTemplate
 
+    @Autowired
+    private lateinit var doctorRepository: DoctorRepository
+
+    @Autowired
+    private lateinit var institutionRepository: InstitutionRepository
+
+    @Autowired
+    private lateinit var projectRepository: ProjectRepository
+
+    @Autowired
+    private lateinit var institutionProjectRepository: InstitutionProjectRepository
+
     @Test
-    fun `fresh database applies B33 baseline through V36 account lifecycle`() {
+    fun `fresh database applies B33 baseline through V38 refund evidence`() {
         val history = jdbcTemplate.query(
             """
             SELECT version, type, script
@@ -47,6 +68,8 @@ class BaselineMigrationIntegrationTest {
                 Triple("34", "SQL", "V34__harden_admin_account_lifecycle.sql"),
                 Triple("35", "SQL", "V35__snapshot_order_pricing_policy_revision.sql"),
                 Triple("36", "SQL", "V36__add_account_lifecycle_foundation.sql"),
+                Triple("37", "SQL", "V37__add_project_case_counters.sql"),
+                Triple("38", "SQL", "V38__add_refund_evidence_files.sql"),
             ),
             history,
         )
@@ -64,9 +87,235 @@ class BaselineMigrationIntegrationTest {
                 String::class.java,
             ),
         )
+        assertEquals(
+            listOf(
+                listOf("institution_projects", "int", "NO", "0"),
+                listOf("projects", "int", "NO", "0"),
+            ),
+            jdbcTemplate.query(
+                """
+                SELECT table_name, data_type, is_nullable, column_default
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE()
+                  AND column_name = 'case_count'
+                  AND table_name IN ('projects', 'institution_projects')
+                ORDER BY table_name
+                """.trimIndent(),
+            ) { rs, _ ->
+                listOf(
+                    rs.getString("table_name"),
+                    rs.getString("data_type"),
+                    rs.getString("is_nullable"),
+                    rs.getString("column_default"),
+                )
+            },
+        )
+        assertEquals(
+            listOf(
+                "institution_projects:chk_institution_projects_case_count",
+                "projects:chk_projects_case_count",
+            ),
+            jdbcTemplate.queryForList(
+                """
+                SELECT CONCAT(table_name, ':', constraint_name)
+                FROM information_schema.table_constraints
+                WHERE constraint_schema = DATABASE()
+                  AND constraint_type = 'CHECK'
+                  AND constraint_name IN (
+                    'chk_projects_case_count',
+                    'chk_institution_projects_case_count'
+                  )
+                ORDER BY table_name
+                """.trimIndent(),
+                String::class.java,
+            ),
+        )
+        assertEquals(
+            listOf("file_id"),
+            jdbcTemplate.queryForList(
+                """
+                SELECT column_name
+                FROM information_schema.key_column_usage
+                WHERE table_schema = DATABASE() AND table_name = 'refund_evidence_files'
+                  AND constraint_name = 'PRIMARY'
+                ORDER BY ordinal_position
+                """.trimIndent(),
+                String::class.java,
+            ),
+        )
+        assertEquals(
+            listOf(
+                Triple("idx_refund_evidence_refund", 1, "refund_id"),
+                Triple("PRIMARY", 0, "file_id"),
+                Triple("uk_refund_evidence_position", 0, "refund_id"),
+                Triple("uk_refund_evidence_position", 0, "position"),
+            ),
+            jdbcTemplate.query(
+                """
+                SELECT index_name, non_unique, column_name
+                FROM information_schema.statistics
+                WHERE table_schema = DATABASE() AND table_name = 'refund_evidence_files'
+                ORDER BY index_name, seq_in_index
+                """.trimIndent(),
+            ) { rs, _ -> Triple(rs.getString("index_name"), rs.getInt("non_unique"), rs.getString("column_name")) },
+        )
+        assertEquals(
+            listOf(
+                listOf("fk_refund_evidence_file", "file_id", "private_files", "id"),
+                listOf("fk_refund_evidence_refund", "refund_id", "refunds", "id"),
+            ),
+            jdbcTemplate.query(
+                """
+                SELECT constraint_name, column_name, referenced_table_name, referenced_column_name
+                FROM information_schema.key_column_usage
+                WHERE table_schema = DATABASE() AND table_name = 'refund_evidence_files'
+                  AND referenced_table_name IS NOT NULL
+                ORDER BY constraint_name, ordinal_position
+                """.trimIndent(),
+            ) { rs, _ ->
+                listOf(
+                    rs.getString("constraint_name"),
+                    rs.getString("column_name"),
+                    rs.getString("referenced_table_name"),
+                    rs.getString("referenced_column_name"),
+                )
+            },
+        )
+    }
+
+    @Test
+    fun `counter repositories atomically persist increments and institution project version`() {
+        insertCounterFixtures()
+
+        assertEquals(1, doctorRepository.incrementConsultationCount(DOCTOR_ID))
+        assertEquals(1, institutionRepository.incrementCaseCount(INSTITUTION_ID))
+        assertEquals(1, projectRepository.incrementCaseCount(PROJECT_ID))
+        assertEquals(1, institutionProjectRepository.incrementCaseCount(INSTITUTION_PROJECT_ID))
+
+        assertEquals(
+            1,
+            doctorRepository.findById(DOCTOR_ID).orElseThrow().consultationCount,
+        )
+        assertEquals(
+            1,
+            institutionRepository.findById(INSTITUTION_ID).orElseThrow().caseCount,
+        )
+        assertEquals(
+            1,
+            projectRepository.findById(PROJECT_ID).orElseThrow().caseCount,
+        )
+        institutionProjectRepository.findById(INSTITUTION_PROJECT_ID).orElseThrow().also { project ->
+            assertEquals(1, project.caseCount)
+            assertEquals(1L, project.version)
+        }
+    }
+
+    @Test
+    fun `saving stale editable entities preserves newer automatic counters`() {
+        insertCounterFixtures()
+        val staleDoctor = doctorRepository.findById(DOCTOR_ID).orElseThrow()
+        val staleInstitution = institutionRepository.findById(INSTITUTION_ID).orElseThrow()
+        val staleProject = projectRepository.findById(PROJECT_ID).orElseThrow()
+
+        jdbcTemplate.update(
+            "UPDATE doctors SET consultation_count = ? WHERE id = ?",
+            11,
+            DOCTOR_ID,
+        )
+        jdbcTemplate.update(
+            "UPDATE institutions SET case_count = ? WHERE id = ?",
+            12,
+            INSTITUTION_ID,
+        )
+        jdbcTemplate.update(
+            "UPDATE projects SET case_count = ? WHERE id = ?",
+            13,
+            PROJECT_ID,
+        )
+
+        doctorRepository.save(staleDoctor.copy(name = "Updated Doctor"))
+        institutionRepository.save(staleInstitution.copy(name = "Updated Institution"))
+        projectRepository.save(staleProject.copy(name = "Updated Project"))
+        projectRepository.flush()
+
+        assertEquals(
+            "Updated Doctor",
+            jdbcTemplate.queryForObject(
+                "SELECT name FROM doctors WHERE id = ?",
+                String::class.java,
+                DOCTOR_ID,
+            ),
+        )
+        assertEquals(
+            11,
+            jdbcTemplate.queryForObject(
+                "SELECT consultation_count FROM doctors WHERE id = ?",
+                Int::class.java,
+                DOCTOR_ID,
+            ),
+        )
+        assertEquals(
+            "Updated Institution",
+            jdbcTemplate.queryForObject(
+                "SELECT name FROM institutions WHERE id = ?",
+                String::class.java,
+                INSTITUTION_ID,
+            ),
+        )
+        assertEquals(
+            12,
+            jdbcTemplate.queryForObject(
+                "SELECT case_count FROM institutions WHERE id = ?",
+                Int::class.java,
+                INSTITUTION_ID,
+            ),
+        )
+        assertEquals(
+            "Updated Project",
+            jdbcTemplate.queryForObject(
+                "SELECT name FROM projects WHERE id = ?",
+                String::class.java,
+                PROJECT_ID,
+            ),
+        )
+        assertEquals(
+            13,
+            jdbcTemplate.queryForObject(
+                "SELECT case_count FROM projects WHERE id = ?",
+                Int::class.java,
+                PROJECT_ID,
+            ),
+        )
+    }
+
+    private fun insertCounterFixtures() {
+        jdbcTemplate.update(
+            "INSERT INTO users (id, password_hash, nickname) VALUES (?, ?, ?)",
+            DOCTOR_ID,
+            "test-password-hash",
+            "Counter Doctor",
+        )
+        doctorRepository.saveAndFlush(DoctorEntity(id = DOCTOR_ID, name = "Counter Doctor"))
+        institutionRepository.saveAndFlush(
+            InstitutionEntity(id = INSTITUTION_ID, name = "Counter Institution"),
+        )
+        projectRepository.saveAndFlush(ProjectEntity(id = PROJECT_ID, name = "Counter Project"))
+        institutionProjectRepository.saveAndFlush(
+            InstitutionProjectEntity(
+                id = INSTITUTION_PROJECT_ID,
+                institutionId = INSTITUTION_ID,
+                projectId = PROJECT_ID,
+                price = BigDecimal("100.00"),
+            ),
+        )
     }
 
     companion object {
+        private const val DOCTOR_ID = "migration-counter-doctor"
+        private const val INSTITUTION_ID = "migration-counter-institution"
+        private const val PROJECT_ID = "migration-counter-project"
+        private const val INSTITUTION_PROJECT_ID = "counter-institution-project"
+
         @Container
         @ServiceConnection
         @JvmField

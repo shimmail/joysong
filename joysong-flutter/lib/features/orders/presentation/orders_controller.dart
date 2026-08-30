@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
 import 'package:joysong_flutter/features/orders/domain/orders_repository.dart';
+import 'package:joysong_flutter/features/orders/domain/refund_evidence_models.dart';
 
 final class OrdersController extends ChangeNotifier {
   OrdersController(this._repository, {this.pageSize = 20});
@@ -105,6 +106,7 @@ final class OrderDetailController extends ChangeNotifier {
   bool _isSettlementGenerationPending = false;
   bool _isLoading = false;
   OrderAction? _activeAction;
+  bool _refundSubmissionUncertain = false;
   bool _isRemoved = false;
   bool _isDisposed = false;
   int _detailGeneration = 0;
@@ -131,6 +133,7 @@ final class OrderDetailController extends ChangeNotifier {
       final detail = await _repository.getOrder(orderId);
       if (!_isCurrent(generation)) return;
       _order = detail;
+      _refundSubmissionUncertain = false;
       _isRemoved = false;
       await _loadSupportingData(detail, generation);
     } catch (error) {
@@ -166,10 +169,23 @@ final class OrderDetailController extends ChangeNotifier {
     required String reason,
     String description = '',
     String evidenceUrl = '',
+    String? reasonCode,
+    List<RefundEvidenceDraft> evidenceFiles = const [],
   }) async {
     if (_isDisposed) return false;
     if (reason.trim().isEmpty) {
       _errorMessage = '请选择或填写退款原因';
+      notifyListeners();
+      return false;
+    }
+    final current = _order;
+    if (current == null) {
+      _errorMessage = '订单详情尚未加载，无法申请退款';
+      notifyListeners();
+      return false;
+    }
+    if (_refundSubmissionUncertain) {
+      _errorMessage = '退款申请结果待确认，请刷新订单详情后再试';
       notifyListeners();
       return false;
     }
@@ -179,23 +195,32 @@ final class OrderDetailController extends ChangeNotifier {
     _errorMessage = null;
     notifyListeners();
     try {
-      final refund = await _repository.requestRefund(
-        orderId,
-        reason: reason.trim(),
-        description: description.trim(),
-        evidenceUrl: evidenceUrl.trim(),
-      );
+      final refund = current.isTravelGroundServiceOnly
+          ? await _repository.requestServiceFeeRefund(
+              orderId,
+              reason: reason.trim(),
+              description: description.trim(),
+              reasonCode: reasonCode,
+              evidenceFiles: evidenceFiles,
+            )
+          : await _repository.requestRefund(
+              orderId,
+              reason: reason.trim(),
+              description: description.trim(),
+              evidenceUrl: evidenceUrl.trim(),
+            );
       if (!_isCurrent(generation)) return false;
+      _refundSubmissionUncertain = false;
       _refund = refund;
-      final current = _order;
-      if (current != null && refund.status == RefundStatus.pending) {
-        _order = current.copyWith(
-          status: current.isTravelGroundServiceOnly
+      final currentAfterRefund = _order;
+      if (currentAfterRefund != null && refund.status == RefundStatus.pending) {
+        _order = currentAfterRefund.copyWith(
+          status: currentAfterRefund.isTravelGroundServiceOnly
               ? OrderStatus.refundReview
               : OrderStatus.disputeMediation,
           refundStatus: RefundStatus.pending,
           serviceMessagingEnabled:
-              current.isTravelGroundServiceOnly ? false : null,
+              currentAfterRefund.isTravelGroundServiceOnly ? false : null,
         );
       }
       notifyListeners();
@@ -213,6 +238,25 @@ final class OrderDetailController extends ChangeNotifier {
       return true;
     } catch (error) {
       if (!_isCurrent(generation)) return false;
+      if (current.isTravelGroundServiceOnly) {
+        try {
+          final detail = await _repository.getOrder(orderId);
+          if (!_isCurrent(generation)) return false;
+          _order = detail;
+          _refundSubmissionUncertain = false;
+          if (_hasActiveRefund(detail)) {
+            await _loadSupportingData(detail, generation);
+            if (!_isCurrent(generation)) return false;
+            _errorMessage = null;
+            return true;
+          }
+        } catch (_) {
+          if (!_isCurrent(generation)) return false;
+          _refundSubmissionUncertain = true;
+          _errorMessage = '退款申请结果待确认，请刷新订单详情后再试';
+          return false;
+        }
+      }
       _errorMessage = _orderMessageFor(error, '退款申请失败');
       return false;
     } finally {
@@ -365,6 +409,12 @@ final class OrderDetailController extends ChangeNotifier {
         OrderStatus.pendingSettlement,
         OrderStatus.settled,
       }.contains(order.status);
+
+  bool _hasActiveRefund(Order order) => const {
+        RefundStatus.pending,
+        RefundStatus.processing,
+        RefundStatus.approved,
+      }.contains(order.refundStatus);
 
   Future<void> _loadSettlement(int generation) async {
     if (!_isCurrent(generation)) return;

@@ -19,7 +19,7 @@ internal object NotificationTextProjection {
                 "Your order has been created. View the order details."
             )
 
-            "ORDER_SERVICE_ACTIVATED" -> serviceActivatedText(notification.targetType)
+            "ORDER_SERVICE_ACTIVATED" -> serviceActivatedText(notification)
             "ORDER_COMPLETED" -> NotificationText(
                 "Order completed",
                 "The user has confirmed the order as completed."
@@ -74,6 +74,25 @@ internal object NotificationTextProjection {
             )
 
             "PROFESSIONAL_APPLICATION_REJECTED" -> professionalRejectionText(notification)
+            "INSTITUTION_PROJECT_APPLICATION_SUBMITTED" -> NotificationText(
+                "New institution project application",
+                "A new institution project application is awaiting review."
+            )
+
+            "INSTITUTION_PROJECT_APPLICATION_APPROVED" -> NotificationText(
+                "Institution project application approved",
+                "Your institution project application has been approved."
+            )
+
+            "INSTITUTION_PROJECT_APPLICATION_REJECTED" -> NotificationText(
+                "Institution project application rejected",
+                rejectionContent(
+                    notification.content,
+                    chinesePrefix = "您的机构项目申请未通过",
+                    englishPrefix = "Your institution project application was rejected"
+                )
+            )
+
             "IDENTITY_APPLICATION_APPROVED" -> NotificationText(
                 "Identity verification approved",
                 "Your identity verification application has been approved."
@@ -108,7 +127,7 @@ internal object NotificationTextProjection {
         return NotificationText(title, content)
     }
 
-    private fun serviceActivatedText(targetType: String): NotificationText? = when (targetType) {
+    private fun serviceActivatedText(notification: NotificationResponse): NotificationText? = when (notification.targetType) {
         "order" -> NotificationText(
             "Travel service started",
             "Your order service has started. View the order details."
@@ -119,7 +138,36 @@ internal object NotificationTextProjection {
             "The order service has started. Open the service conversation to follow up."
         )
 
+        "professional_doctor_orders" -> projectBookingText(notification.content)
+
         else -> null
+    }
+
+    private fun projectBookingText(source: String): NotificationText? {
+        val normalized = source.replace("\r\n", "\n").replace('\r', '\n').trim()
+        val projectPrefix = listOf("预约项目：", "预约项目:")
+            .firstOrNull { normalized.startsWith(it) }
+            ?: return null
+        val appointmentDelimiter = listOf("\n预约时间：", "\n预约时间:")
+            .mapNotNull { delimiter ->
+                normalized.lastIndexOf(delimiter)
+                    .takeIf { it >= projectPrefix.length }
+                    ?.let { index -> delimiter to index }
+            }
+            .maxByOrNull { (_, index) -> index }
+            ?: return null
+        val projectName = normalized
+            .substring(projectPrefix.length, appointmentDelimiter.second)
+            .trim()
+        val appointmentTime = normalized
+            .substring(appointmentDelimiter.second + appointmentDelimiter.first.length)
+            .trim()
+        if (projectName.isEmpty() || appointmentTime.isEmpty()) return null
+        val localizedAppointmentTime = if (appointmentTime == "待确认") "To be confirmed" else appointmentTime
+        return NotificationText(
+            "Project booking",
+            "Project: $projectName\nAppointment time: $localizedAppointmentTime"
+        )
     }
 
     private fun professionalText(

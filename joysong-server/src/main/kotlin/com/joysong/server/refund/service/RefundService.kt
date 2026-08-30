@@ -5,6 +5,7 @@ import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.repository.OrderRepository
 import com.joysong.server.order.service.OrderStatusLogService
 import com.joysong.server.refund.entity.RefundEntity
+import com.joysong.server.refund.dto.RefundDetailResponse
 import com.joysong.server.refund.entity.RefundItemEntity
 import com.joysong.server.refund.repository.RefundItemRepository
 import com.joysong.server.refund.repository.RefundRepository
@@ -13,6 +14,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.context.annotation.Lazy
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.web.multipart.MultipartFile
 import java.math.BigDecimal
 import java.time.LocalDateTime
 
@@ -23,6 +25,7 @@ class RefundService(
     private val orderStatusLogService: OrderStatusLogService,
     @Lazy private val couponService: CouponService,
     private val workflowPersistenceService: RefundWorkflowPersistenceService,
+    private val refundEvidenceFileService: RefundEvidenceFileService,
     private val refundExecutionService: RefundExecutionService? = null,
     private val settlementReversalService: SettlementReversalService? = null,
     private val refundItemRepository: RefundItemRepository? = null
@@ -67,10 +70,40 @@ class RefundService(
         return finalized.refund
     }
 
+    fun applyTravelServiceRefundWithEvidence(
+        orderId: String,
+        userId: String,
+        reason: String,
+        description: String,
+        reasonCode: String?,
+        evidenceFiles: List<MultipartFile>,
+    ): RefundDetailResponse {
+        val preparation = workflowPersistenceService.prepareTravelServiceApplicationWithEvidence(
+            orderId,
+            userId,
+            reason,
+            description,
+            reasonCode,
+            evidenceFiles,
+        )
+        return RefundDetailResponse(
+            refund = preparation.refund,
+            evidenceFiles = refundEvidenceFileService.listForRefund(preparation.refund.id),
+        )
+    }
+
     fun getRefundByOrderId(orderId: String, userId: String): RefundEntity? {
         val order = orderRepository.findById(orderId).orElse(null) ?: return null
         if (order.userId != userId) return null
         return refundRepository.findFirstByOrderIdOrderByCreatedAtDesc(orderId)
+    }
+
+    fun getRefundDetailByOrderId(orderId: String, userId: String): RefundDetailResponse? {
+        val refund = getRefundByOrderId(orderId, userId) ?: return null
+        return RefundDetailResponse(
+            refund = refund,
+            evidenceFiles = refundEvidenceFileService.listForRefund(refund.id),
+        )
     }
 
     @Transactional(rollbackFor = [Exception::class])
@@ -141,6 +174,7 @@ class RefundService(
                 "createdAt" to refund.createdAt,
                 "processedAt" to refund.processedAt,
                 "evidenceUrl" to refund.evidenceUrl,
+                "evidenceFiles" to refundEvidenceFileService.listForRefund(refund.id),
                 "refundType" to refund.refundType,
                 "refundAmount" to refund.refundAmount,
                 "userPhone" to refund.userPhone,

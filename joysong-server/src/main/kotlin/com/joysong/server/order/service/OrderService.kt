@@ -1,5 +1,6 @@
 package com.joysong.server.order.service
 
+import com.joysong.server.catalog.service.CatalogCounterCacheInvalidator
 import com.joysong.server.common.apiSlice
 import com.joysong.server.coupon.service.CouponService
 import com.joysong.server.refund.entity.RefundEntity
@@ -40,6 +41,8 @@ import java.util.UUID
 import com.joysong.server.common.money.Money
 import com.joysong.server.refund.service.RefundExecutionService
 import com.joysong.server.notification.service.BusinessNotificationService
+import com.joysong.server.user.entity.AccountState
+import com.joysong.server.user.repository.UserRepository
 
 /**
  * 订单核心业务服务
@@ -56,6 +59,7 @@ class OrderService(
     private val institutionRepository: InstitutionRepository,
     private val doctorProjectRepository: DoctorProjectRepository,
     private val doctorRepository: DoctorRepository,
+    private val userRepository: UserRepository,
     private val orderStatusLogService: OrderStatusLogService,
     private val couponService: CouponService,
     @Lazy private val settlementService: SettlementService,
@@ -68,11 +72,18 @@ class OrderService(
     private val travelGroundServicePricing: TravelGroundServicePricing,
     private val businessNotificationService: BusinessNotificationService,
     private val orderBusinessNotificationDispatcher: OrderBusinessNotificationDispatcher,
+    private val counterCacheInvalidator: CatalogCounterCacheInvalidator,
     private val refundExecutionService: RefundExecutionService? = null
 ) {
     private data class LockedBookableDoctorProject(
         val institutionProject: InstitutionProjectEntity,
         val doctorProject: DoctorProjectEntity
+    )
+
+    private data class CompletionCaseTarget(
+        val institutionId: String,
+        val projectId: String,
+        val institutionProjectId: String
     )
 
     private val secureRandom = SecureRandom()
@@ -128,6 +139,7 @@ class OrderService(
         val now = LocalDateTime.now()
 
         val institutionProjectId = request.institutionProjectId.trim()
+        lockAndRequireActiveBookingAccounts(request.doctorId, request.consultantId)
         val lockedBookability = lockAndRequireBookableDoctorProject(request.doctorId, institutionProjectId)
         val institutionProject = lockedBookability.institutionProject
         val doctorProject = lockedBookability.doctorProject
@@ -223,7 +235,7 @@ class OrderService(
         )
         log.info("用户[{}]创建订单[{}]成功, 订单号: {}", userId, saved.id, orderNo)
         notifySafely("ORDER_CREATED", saved.id) {
-            businessNotificationService.orderCreated(saved.id, saved.userId, saved.consultantId)
+            businessNotificationService.orderCreated(saved.id, saved.userId)
         }
         return OrderResponse.from(saved)
     }
@@ -231,6 +243,7 @@ class OrderService(
     @Transactional(rollbackFor = [Exception::class])
     fun quoteTravelGroundService(doctorId: String, institutionProjectId: String): TravelGroundServiceQuote {
         val locked = try {
+            lockAndRequireActiveBookingAccounts(doctorId)
             lockAndRequireBookableDoctorProject(doctorId, institutionProjectId)
         } catch (_: IllegalArgumentException) {
             throw IllegalArgumentException("DOCTOR_PROJECT_NOT_CONFIGURED")
@@ -259,6 +272,25 @@ class OrderService(
         require(doctorProject.projectId == institutionProject.projectId) { "医生项目与机构项目不一致" }
         require(doctorProject.isActive) { "所选医生服务已停用，暂不可预约" }
         return LockedBookableDoctorProject(institutionProject, doctorProject)
+    }
+
+    private fun lockAndRequireActiveBookingAccounts(doctorId: String, consultantId: String? = null) {
+        val accountsById = listOfNotNull(doctorId, consultantId)
+            .distinct()
+            .sorted()
+            .associateWith(userRepository::findByIdForUpdate)
+
+        val doctorAccount = accountsById[doctorId]
+        require(
+            doctorAccount?.accountState == AccountState.ACTIVE && doctorAccount.deletedAt == null
+        ) { "所选医生账号不可用，暂不可预约" }
+
+        consultantId?.let { id ->
+            val consultantAccount = accountsById[id]
+            require(
+                consultantAccount?.accountState == AccountState.ACTIVE && consultantAccount.deletedAt == null
+            ) { "所选医美顾问账号不可用，暂不可预约" }
+        }
     }
 
     /**
@@ -485,14 +517,17 @@ class OrderService(
             require(order.status == OrderStatusEnum.SERVICE_ACTIVE.value) {
                 "当前状态[${order.status}]不允许确认完成"
             }
+            val caseTarget = if (order.completedAt == null) completionCaseTarget(order) else null
             val now = LocalDateTime.now()
             val completed = orderRepository.save(
                 order.copy(
                     status = OrderStatusEnum.COMPLETED.value,
-                    completedAt = now,
+                    institutionProjectId = caseTarget?.institutionProjectId ?: order.institutionProjectId,
+                    completedAt = order.completedAt ?: now,
                     updatedAt = now
                 )
             )
+            caseTarget?.let(::incrementCompletionCaseCounts)
             orderStatusLogService.logTransition(
                 orderId = orderId,
                 fromStatus = OrderStatusEnum.SERVICE_ACTIVE.value,
@@ -516,16 +551,19 @@ class OrderService(
         require(currentStatus.canTransitionTo(OrderStatusEnum.COMPLETED)) {
             "当前状态[${currentStatus.value}]不允许确认完成"
         }
+        val caseTarget = if (order.completedAt == null) completionCaseTarget(order) else null
         val settlementAt = LocalDateTime.now().plusDays(30)
         val now = LocalDateTime.now()
         val updated = orderRepository.save(
             order.copy(
                 status = OrderStatusEnum.COMPLETED.value,
+                institutionProjectId = caseTarget?.institutionProjectId ?: order.institutionProjectId,
                 settlementAt = settlementAt,
-                completedAt = now,
+                completedAt = order.completedAt ?: now,
                 updatedAt = now
             )
         )
+        caseTarget?.let(::incrementCompletionCaseCounts)
         orderStatusLogService.logTransition(
             orderId = orderId,
             fromStatus = currentStatus.value,
@@ -543,6 +581,28 @@ class OrderService(
             )
         }
         return OrderResponse.from(updated)
+    }
+
+    private fun completionCaseTarget(order: OrderEntity): CompletionCaseTarget {
+        require(order.institutionId.isNotBlank()) { "ORDER_INSTITUTION_MISSING" }
+        require(order.projectId.isNotBlank()) { "ORDER_PROJECT_MISSING" }
+        val institutionProjectId = order.institutionProjectId.takeIf(String::isNotBlank)
+            ?: institutionProjectRepository.findByInstitutionIdAndProjectId(order.institutionId, order.projectId)?.id
+            ?: throw IllegalArgumentException("ORDER_INSTITUTION_PROJECT_MISSING")
+        return CompletionCaseTarget(order.institutionId, order.projectId, institutionProjectId)
+    }
+
+    private fun incrementCompletionCaseCounts(target: CompletionCaseTarget) {
+        check(institutionRepository.incrementCaseCount(target.institutionId) == 1) {
+            "ORDER_INSTITUTION_CASE_INCREMENT_FAILED"
+        }
+        check(institutionProjectRepository.incrementCaseCount(target.institutionProjectId) == 1) {
+            "ORDER_INSTITUTION_PROJECT_CASE_INCREMENT_FAILED"
+        }
+        check(projectRepository.incrementCaseCount(target.projectId) == 1) {
+            "ORDER_PROJECT_CASE_INCREMENT_FAILED"
+        }
+        counterCacheInvalidator.evictCaseCountersAfterCommit()
     }
 
     /**

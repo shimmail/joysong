@@ -3,6 +3,7 @@ package com.joysong.server.institution.repository
 import com.joysong.server.institution.entity.InstitutionProjectEntity
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Lock
+import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 import jakarta.persistence.LockModeType
@@ -28,4 +29,15 @@ interface InstitutionProjectRepository : JpaRepository<InstitutionProjectEntity,
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select p from InstitutionProjectEntity p where p.id=:id")
     fun findForUpdate(@Param("id") id: String): InstitutionProjectEntity?
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE InstitutionProjectEntity project
+        SET project.caseCount = COALESCE(project.caseCount, 0) + 1,
+            project.version = project.version + 1
+        WHERE project.id = :id AND project.deletedAt IS NULL
+        """
+    )
+    fun incrementCaseCount(@Param("id") id: String): Int
 }

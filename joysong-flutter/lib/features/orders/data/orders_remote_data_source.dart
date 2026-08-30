@@ -2,6 +2,7 @@ import 'package:joysong_flutter/core/network/api_client.dart';
 import 'package:joysong_flutter/core/network/public_media_url.dart';
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
 import 'package:joysong_flutter/features/orders/domain/payment_models.dart';
+import 'package:joysong_flutter/features/orders/domain/refund_evidence_models.dart';
 
 abstract interface class OrdersRemoteDataSource {
   Future<List<Order>> getOrders({String? status, int offset, int limit});
@@ -53,6 +54,14 @@ abstract interface class OrdersRemoteDataSource {
     required String reason,
     required String description,
     required String evidenceUrl,
+  });
+
+  Future<RefundDetail> requestServiceFeeRefund(
+    String id, {
+    required String reason,
+    required String description,
+    String? reasonCode,
+    List<RefundEvidenceDraft> evidenceFiles = const [],
   });
 
   Future<RefundDetail> getRefund(String id);
@@ -208,6 +217,47 @@ final class ApiOrdersRemoteDataSource implements OrdersRemoteDataSource {
         'description': description,
         'evidenceUrl': evidenceUrl,
       },
+      decodeData: RefundDetail.fromJson,
+    );
+    if (result == null) throw const FormatException('退款响应 data 为空');
+    return result;
+  }
+
+  @override
+  Future<RefundDetail> requestServiceFeeRefund(
+    String id, {
+    required String reason,
+    required String description,
+    String? reasonCode,
+    List<RefundEvidenceDraft> evidenceFiles = const [],
+  }) async {
+    if (evidenceFiles.length > RefundEvidenceDraft.maxCount) {
+      throw ArgumentError.value(
+        evidenceFiles.length,
+        'evidenceFiles',
+        '退款凭证最多 ${RefundEvidenceDraft.maxCount} 个',
+      );
+    }
+    for (final evidence in evidenceFiles) {
+      evidence.validate();
+    }
+    final result = await _apiClient.postMultipart<RefundDetail>(
+      'orders/$id/refund',
+      fields: {
+        'reason': reason,
+        'description': description,
+        if (reasonCode != null && reasonCode.trim().isNotEmpty)
+          'reasonCode': reasonCode.trim(),
+      },
+      files: [
+        for (final evidence in evidenceFiles)
+          MultipartFilePart(
+            fieldName: 'evidenceFiles',
+            fileName: evidence.fileName,
+            contentType: evidence.contentType,
+            bytes: evidence.bytes,
+          ),
+      ],
       decodeData: RefundDetail.fromJson,
     );
     if (result == null) throw const FormatException('退款响应 data 为空');

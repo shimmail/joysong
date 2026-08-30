@@ -2,7 +2,7 @@
 
 本项目为flutter+kotlin的安卓ios双端跨境（中英双语）医美app。
 
-对复杂任务使用多 agent，未使用的agent应及时关闭。编写时应该尽可能减少冗余代码及文件，测试完成后及时清理临时代码和文件。
+对复杂任务使用多 agent，未使用的agent应及时关闭。编写时应该尽可能减少冗余代码及文件，以高内聚，低耦合为原则。测试完成后及时清理临时代码和文件。
 
 ## Incremental Development
 
@@ -22,8 +22,10 @@
 - Admin app: `joysong-admin/`
 - Legacy or alternate app code: `joysong-app/`
 - Technical docs: `docs/`
+- 开发实施计划：D:\code\kotlin\joysong\docs\plan。命名规则为模块+时间，避免混淆
+- 相关指南文档的位置：D:\code\kotlin\joysong\docs\guide，需要持续维护
 - Additional product and API docs: `doc/`
-- 给开发人员看的uml代码及图片放在：`design/`记得随开发推进提醒我进行更新
+- 给开发人员看的uml代码放在：`design/`记得随开发推进提醒我进行更新。图片由我手动生成。
 
 ## Worktree Database Isolation
 
@@ -75,3 +77,12 @@
 - 不主动使用 Superpowers
 - 不自动调用任何 Superpowers skill
 - 按普通原生 agent 模式直接响应[reference:8]
+
+## Docs merge policy
+
+- `docs/**` 以本地 `master` 的已提交版本为准。
+- 除非用户明确要求更新文档，功能 worktree 不得新增、修改、删除 `docs/**`。
+- 合并最新 master 后，若功能分支涉及 `docs/**`，统一恢复为 master：
+  `git restore --source=master --staged --worktree -- docs/`
+- 如果主工作区的文档尚未提交，停止合并并等待用户先提交。
+- 不得使用全局 `-X theirs`，避免同时覆盖代码冲突。

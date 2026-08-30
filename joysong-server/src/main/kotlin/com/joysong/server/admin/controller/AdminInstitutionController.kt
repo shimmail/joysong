@@ -63,7 +63,8 @@ class AdminInstitutionController(
             isVerified = entity.isVerified,
             projectCount = entity.projectCount,
             doctorCount = entity.doctorCount,
-            consultationCount = entity.consultationCount
+            consultationCount = entity.consultationCount,
+            caseCount = existing.caseCount
         )))
     }
 

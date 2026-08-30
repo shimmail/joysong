@@ -34,6 +34,85 @@ class AccountDeletionDataEraserMySqlIntegrationTest {
     private lateinit var jdbcTemplate: JdbcTemplate
 
     @Test
+    fun `account erasure retains refund evidence file and active media asset`() {
+        jdbcTemplate.update(
+            "INSERT INTO users (id, phone, password_hash, nickname, role, account_state) VALUES (?, ?, 'hash', 'Refund user', 'USER', 'ACTIVE')",
+            REFUND_USER_ID,
+            "+8613800138111",
+        )
+        jdbcTemplate.update(
+            "INSERT INTO orders (id, user_id, project_name, price, status) VALUES (?, ?, 'Travel service', 400.00, 'REFUND_REVIEW')",
+            REFUND_ORDER_ID,
+            REFUND_USER_ID,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO refunds (id, order_id, user_id, amount, requested_amount_minor, reason)
+            VALUES (?, ?, ?, 400.00, 40000, 'Travel cancelled')
+            """.trimIndent(),
+            REFUND_ID,
+            REFUND_ORDER_ID,
+            REFUND_USER_ID,
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO private_files
+                (id, owner_user_id, purpose, storage_key, original_name, content_type, size_bytes, sha256)
+            VALUES (?, ?, 'REFUND_EVIDENCE', ?, 'receipt.pdf', 'application/pdf', 128, ?)
+            """.trimIndent(),
+            REFUND_FILE_ID,
+            REFUND_USER_ID,
+            REFUND_STORAGE_KEY,
+            "b".repeat(64),
+        )
+        jdbcTemplate.update(
+            """
+            INSERT INTO user_media_assets
+                (id, owner_user_id, storage_key, asset_type, storage_provider, delete_status)
+            VALUES (?, ?, ?, 'REFUND_EVIDENCE', 'LOCAL_PRIVATE', 'ACTIVE')
+            """.trimIndent(),
+            REFUND_ASSET_ID,
+            REFUND_USER_ID,
+            REFUND_STORAGE_KEY,
+        )
+        jdbcTemplate.update(
+            "INSERT INTO refund_evidence_files (file_id, refund_id, position) VALUES (?, ?, 0)",
+            REFUND_FILE_ID,
+            REFUND_ID,
+        )
+        val properties = AccountDeletionProperties().apply {
+            hmacSecret = "0123456789abcdef-test"
+        }
+        val eraser = JdbcAccountDeletionDataEraser(
+            jdbcTemplate,
+            AccountDeletionCrypto(properties),
+            UserMediaAssetService(jdbcTemplate, mockk<AccountLifecycleGuard>(relaxed = true)),
+        )
+
+        eraser.erase(
+            UserEntity(id = REFUND_USER_ID, phone = "+8613800138111", passwordHash = "hash"),
+            LocalDateTime.parse("2026-08-30T10:00:00"),
+        )
+
+        assertEquals(1L, countForRefund("SELECT COUNT(*) FROM private_files WHERE id = ?", REFUND_FILE_ID))
+        assertEquals(
+            1L,
+            countForRefund(
+                "SELECT COUNT(*) FROM refund_evidence_files WHERE refund_id = ? AND file_id = ?",
+                REFUND_ID,
+                REFUND_FILE_ID,
+            ),
+        )
+        assertEquals(
+            1L,
+            countForRefund(
+                "SELECT COUNT(*) FROM user_media_assets WHERE id = ? AND delete_status = 'ACTIVE'",
+                REFUND_ASSET_ID,
+            ),
+        )
+    }
+
+    @Test
     fun `erasure clears revoked professional identity without private file foreign key failures`() {
         seedRevokedProfessionalIdentity()
         val properties = AccountDeletionProperties().apply {
@@ -242,6 +321,9 @@ class AccountDeletionDataEraserMySqlIntegrationTest {
     private fun count(sql: String): Long =
         requireNotNull(jdbcTemplate.queryForObject(sql, Long::class.java, USER_ID))
 
+    private fun countForRefund(sql: String, vararg args: Any): Long =
+        requireNotNull(jdbcTemplate.queryForObject(sql, Long::class.java, *args))
+
     companion object {
         private const val USER_ID = "deletion-professional-user"
         private const val APPLICATION_ID = "deletion-identity-application"
@@ -256,6 +338,12 @@ class AccountDeletionDataEraserMySqlIntegrationTest {
         private const val INSTITUTION_AGREEMENT_ID = "deletion-institution-agreement"
         private const val PENDING_AGREEMENT_ID = "deletion-pending-agreement"
         private const val INSTITUTION_AGREEMENT_ASSET_ID = "deletion-institution-agreement-asset"
+        private const val REFUND_USER_ID = "deletion-refund-user"
+        private const val REFUND_ORDER_ID = "deletion-refund-order"
+        private const val REFUND_ID = "deletion-refund"
+        private const val REFUND_FILE_ID = "deletion-refund-file"
+        private const val REFUND_ASSET_ID = "deletion-refund-asset"
+        private const val REFUND_STORAGE_KEY = "deletion-refund-user/REFUND_EVIDENCE/deletion-refund-file.pdf"
 
         @Container
         @ServiceConnection

@@ -7,23 +7,23 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.springframework.jdbc.core.JdbcTemplate
+import java.time.LocalDateTime
 
 class BusinessNotificationServiceTest {
 
     @Test
-    fun `order creation de-duplicates recipients and keeps the order target contract`() {
+    fun `order creation notifies only the user before payment`() {
         val fixture = fixture()
 
         fixture.service.orderCreated(
             orderId = "order-1",
-            userId = "shared-user",
-            consultantId = "shared-user"
+            userId = "user-1"
         )
 
         assertEquals(
             listOf(
                 Emission(
-                    userId = "shared-user",
+                    userId = "user-1",
                     type = "ORDER_CREATED",
                     title = "订单已创建",
                     content = "您的订单已创建，请及时查看订单详情。",
@@ -36,39 +36,67 @@ class BusinessNotificationServiceTest {
     }
 
     @Test
-    fun `service activation gives the consultant the conversation target and other recipients the order target`() {
+    fun `service activation sends the doctor a project booking while keeping user and consultant targets`() {
         val fixture = fixture()
 
         fixture.service.orderServiceActivated(
             orderId = "order-1",
             userId = "user-1",
             consultantId = "consultant-1",
-            doctorId = "doctor-1"
+            doctorId = "doctor-1",
+            projectName = "热玛吉",
+            appointmentTime = null
         )
 
         val expected = listOf(
             Emission("user-1", "ORDER_SERVICE_ACTIVATED", "行程服务已开启", "您的订单服务已开启，请查看订单详情。", "order", "order-1"),
             Emission("consultant-1", "ORDER_SERVICE_ACTIVATED", "行程服务已开启", "订单服务已开启，请进入服务会话跟进。", "order_service_conversation", "order-1"),
-            Emission("doctor-1", "ORDER_SERVICE_ACTIVATED", "行程服务已开启", "您的订单服务已开启，请查看订单详情。", "order", "order-1")
+            Emission(
+                "doctor-1",
+                "ORDER_SERVICE_ACTIVATED",
+                "项目预约",
+                "预约项目：热玛吉\n预约时间：待确认",
+                "professional_doctor_orders",
+                "order-1"
+            )
         )
         assertEquals(expected.sortedBy(Emission::userId), fixture.emissions.sortedBy(Emission::userId))
     }
 
     @Test
-    fun `service activation gives a shared consultant the conversation target before ordinary recipient targets`() {
+    fun `doctor project booking formats appointment time for notification display`() {
+        val fixture = fixture()
+
+        fixture.service.orderServiceActivated(
+            orderId = "order-1",
+            userId = "user-1",
+            consultantId = "consultant-1",
+            doctorId = "doctor-1",
+            projectName = "超声炮",
+            appointmentTime = LocalDateTime.of(2026, 9, 15, 14, 30, 45)
+        )
+
+        val doctorEmission = fixture.emissions.single { it.userId == "doctor-1" }
+        assertEquals("预约项目：超声炮\n预约时间：2026-09-15 14:30", doctorEmission.content)
+    }
+
+    @Test
+    fun `service activation keeps a shared consultant on conversation while the doctor gets the booking`() {
         val fixture = fixture()
 
         fixture.service.orderServiceActivated(
             orderId = "order-1",
             userId = "shared-user",
             consultantId = "shared-user",
-            doctorId = "doctor-1"
+            doctorId = "doctor-1",
+            projectName = "热玛吉",
+            appointmentTime = null
         )
 
         assertEquals(
             listOf(
                 Emission("shared-user", "ORDER_SERVICE_ACTIVATED", "行程服务已开启", "订单服务已开启，请进入服务会话跟进。", "order_service_conversation", "order-1"),
-                Emission("doctor-1", "ORDER_SERVICE_ACTIVATED", "行程服务已开启", "您的订单服务已开启，请查看订单详情。", "order", "order-1")
+                Emission("doctor-1", "ORDER_SERVICE_ACTIVATED", "项目预约", "预约项目：热玛吉\n预约时间：待确认", "professional_doctor_orders", "order-1")
             ),
             fixture.emissions
         )
@@ -146,6 +174,34 @@ class BusinessNotificationServiceTest {
             ),
             fixture.emissions
         )
+    }
+
+    @Test
+    fun `institution project application lifecycle uses legal review and doctor application targets`() {
+        val fixture = fixture(legalRepresentatives = listOf("legal-1", "legal-1", "legal-2"))
+
+        fixture.service.institutionProjectApplicationSubmitted("institution-1", "request-1")
+        fixture.service.institutionProjectApplicationApproved("doctor-1", "request-2")
+        fixture.service.institutionProjectApplicationRejected("doctor-1", "request-3", " 资料不完整 ")
+
+        assertEquals(
+            listOf(
+                Emission("legal-1", "INSTITUTION_PROJECT_APPLICATION_SUBMITTED", "新的机构项目申请", "有新的机构项目申请待审核。", "institution_project_review", "request-1"),
+                Emission("legal-2", "INSTITUTION_PROJECT_APPLICATION_SUBMITTED", "新的机构项目申请", "有新的机构项目申请待审核。", "institution_project_review", "request-1"),
+                Emission("doctor-1", "INSTITUTION_PROJECT_APPLICATION_APPROVED", "机构项目申请已通过", "您的机构项目申请已通过。", "institution_project_application", "request-2"),
+                Emission("doctor-1", "INSTITUTION_PROJECT_APPLICATION_REJECTED", "机构项目申请未通过", "您的机构项目申请未通过：资料不完整", "institution_project_application", "request-3")
+            ),
+            fixture.emissions
+        )
+    }
+
+    @Test
+    fun `institution project submission with no active legal representatives creates no notifications`() {
+        val fixture = fixture()
+
+        fixture.service.institutionProjectApplicationSubmitted("institution-1", "request-1")
+
+        assertTrue(fixture.emissions.isEmpty())
     }
 
     @Test

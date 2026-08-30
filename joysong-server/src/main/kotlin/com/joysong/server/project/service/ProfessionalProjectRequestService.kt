@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.joysong.server.common.money.CurrencyCode
 import com.joysong.server.identity.service.InstitutionRelationshipReviewAuthorityOperations
 import com.joysong.server.identity.service.ManagementActor
+import com.joysong.server.notification.service.BusinessNotificationService
 import com.joysong.server.order.service.OrderSplitRatePolicy
 import org.springframework.cache.CacheManager
 import org.springframework.dao.DuplicateKeyException
@@ -45,6 +46,7 @@ class ProfessionalProjectRequestService(
     private val splitRatePolicy: OrderSplitRatePolicy,
     private val reviewAuthority: InstitutionRelationshipReviewAuthorityOperations,
     private val cacheManager: CacheManager,
+    private val businessNotifications: BusinessNotificationService,
     private val institutionProjectPayloadPolicy: InstitutionProjectPayloadPolicy = InstitutionProjectPayloadPolicy()
 ) {
     @Transactional
@@ -192,6 +194,7 @@ class ProfessionalProjectRequestService(
                 notes = notes
             )
         )
+        businessNotifications.institutionProjectApplicationSubmitted(targetInstitutionId, id)
         return ProjectRequestSubmissionResult(id, "INSTITUTION", "PENDING")
     }
 
@@ -360,6 +363,20 @@ class ProfessionalProjectRequestService(
         )
         if (updated != 1) {
             throw ProfessionalProjectRequestConflictException("项目申请已被其他审核人处理")
+        }
+        if (expectedType == "INSTITUTION") {
+            when (review.decision) {
+                "APPROVED" -> businessNotifications.institutionProjectApplicationApproved(
+                    target.doctorId,
+                    target.id
+                )
+
+                "REJECTED" -> businessNotifications.institutionProjectApplicationRejected(
+                    target.doctorId,
+                    target.id,
+                    requireNotNull(review.reviewNote)
+                )
+            }
         }
         if (review.decision == "APPROVED") evictProjectCatalogCachesAfterCommit()
         return ProjectRequestReviewResult(target.id, review.decision, resultingProjectId, resultingInstitutionProjectId)
@@ -630,7 +647,7 @@ class ProfessionalProjectRequestService(
 
     private fun insertRequest(snapshot: ProjectRequestSnapshot) {
         try {
-            jdbcTemplate.update(
+            val inserted = jdbcTemplate.update(
                 """
                 INSERT INTO professional_project_requests
                     (id, request_type, doctor_id, institution_id, project_id, name, category,
@@ -646,6 +663,9 @@ class ProfessionalProjectRequestService(
                 snapshot.referencePrice, snapshot.categoryTags, snapshot.price, snapshot.originalPrice, snapshot.isActive,
                 snapshot.consultationFee, snapshot.commissionRate, snapshot.institutionRate, snapshot.notes
             )
+            if (inserted != 1) {
+                throw ProfessionalProjectRequestConflictException("同一项目已有待处理申请")
+            }
         } catch (_: DuplicateKeyException) {
             throw ProfessionalProjectRequestConflictException("同一项目已有待处理申请")
         }

@@ -2,6 +2,8 @@ package com.joysong.server.notification.service
 
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 enum class ProfessionalApplicantRole {
     DOCTOR,
@@ -13,6 +15,7 @@ class BusinessNotificationService(
     private val notificationService: NotificationService,
     private val jdbcTemplate: JdbcTemplate
 ) {
+    private val appointmentNotificationFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 
     fun currentLegalRepresentativeIds(institutionId: String): Set<String> =
         jdbcTemplate.queryForList(
@@ -22,7 +25,9 @@ class BusinessNotificationService(
             JOIN user_roles ur ON ur.user_id = im.user_id
               AND ur.role_code = 'INSTITUTION_LEGAL_REPRESENTATIVE'
               AND ur.status = 'ACTIVE'
-            JOIN users u ON u.id = im.user_id AND u.deleted_at IS NULL
+            JOIN users u ON u.id = im.user_id
+              AND u.account_state = 'ACTIVE'
+              AND u.deleted_at IS NULL
             WHERE im.institution_id = ?
               AND im.member_role IN ('INSTITUTION_LEGAL_REPRESENTATIVE', 'LEGAL_REPRESENTATIVE')
               AND im.status = 'APPROVED'
@@ -32,9 +37,9 @@ class BusinessNotificationService(
             institutionId
         ).map(String::trim).filter(String::isNotEmpty).toSet()
 
-    fun orderCreated(orderId: String, userId: String, consultantId: String) =
+    fun orderCreated(orderId: String, userId: String) =
         notify(
-            recipients = listOf(userId, consultantId),
+            recipients = listOf(userId),
             type = "ORDER_CREATED",
             title = "订单已创建",
             content = "您的订单已创建，请及时查看订单详情。",
@@ -42,15 +47,27 @@ class BusinessNotificationService(
             targetId = orderId
         )
 
-    fun orderServiceActivated(orderId: String, userId: String, consultantId: String, doctorId: String) {
+    fun orderServiceActivated(
+        orderId: String,
+        userId: String,
+        consultantId: String,
+        doctorId: String,
+        projectName: String,
+        appointmentTime: LocalDateTime?
+    ) {
+        val appointmentLabel = appointmentTime?.format(appointmentNotificationFormatter) ?: "待确认"
         notifyCandidates(
             candidates = listOf(
-                NotificationCandidate(consultantId, "订单服务已开启，请进入服务会话跟进。", "order_service_conversation"),
-                NotificationCandidate(userId, "您的订单服务已开启，请查看订单详情。", "order"),
-                NotificationCandidate(doctorId, "您的订单服务已开启，请查看订单详情。", "order")
+                NotificationCandidate(consultantId, "行程服务已开启", "订单服务已开启，请进入服务会话跟进。", "order_service_conversation"),
+                NotificationCandidate(userId, "行程服务已开启", "您的订单服务已开启，请查看订单详情。", "order"),
+                NotificationCandidate(
+                    doctorId,
+                    "项目预约",
+                    "预约项目：${projectName.trim()}\n预约时间：$appointmentLabel",
+                    "professional_doctor_orders"
+                )
             ),
             type = "ORDER_SERVICE_ACTIVATED",
-            title = "行程服务已开启",
             targetId = orderId
         )
     }
@@ -145,6 +162,36 @@ class BusinessNotificationService(
         "${applicantRole.label}机构关系申请未通过",
         withReviewNote("您的${applicantRole.label}机构关系申请未通过", reviewNote)
     )
+
+    fun institutionProjectApplicationSubmitted(institutionId: String, requestId: String) =
+        notify(
+            recipients = currentLegalRepresentativeIds(institutionId),
+            type = "INSTITUTION_PROJECT_APPLICATION_SUBMITTED",
+            title = "新的机构项目申请",
+            content = "有新的机构项目申请待审核。",
+            targetType = "institution_project_review",
+            targetId = requestId
+        )
+
+    fun institutionProjectApplicationApproved(applicantId: String, requestId: String) =
+        notify(
+            recipients = listOf(applicantId),
+            type = "INSTITUTION_PROJECT_APPLICATION_APPROVED",
+            title = "机构项目申请已通过",
+            content = "您的机构项目申请已通过。",
+            targetType = "institution_project_application",
+            targetId = requestId
+        )
+
+    fun institutionProjectApplicationRejected(applicantId: String, requestId: String, reviewNote: String) =
+        notify(
+            recipients = listOf(applicantId),
+            type = "INSTITUTION_PROJECT_APPLICATION_REJECTED",
+            title = "机构项目申请未通过",
+            content = withReviewNote("您的机构项目申请未通过", reviewNote),
+            targetType = "institution_project_application",
+            targetId = requestId
+        )
 
     fun identityApplicationApproved(applicantId: String, applicationId: String) =
         notify(
@@ -245,16 +292,14 @@ class BusinessNotificationService(
         targetType: String,
         targetId: String
     ) = notifyCandidates(
-        recipients.map { recipientId -> NotificationCandidate(recipientId, content, targetType) },
+        recipients.map { recipientId -> NotificationCandidate(recipientId, title, content, targetType) },
         type,
-        title,
         targetId
     )
 
     private fun notifyCandidates(
         candidates: Collection<NotificationCandidate>,
         type: String,
-        title: String,
         targetId: String
     ) {
         candidates.asSequence()
@@ -262,7 +307,7 @@ class BusinessNotificationService(
             .filter { candidate -> candidate.userId.isNotEmpty() }
             .distinctBy { candidate -> candidate.userId }
             .forEach { candidate ->
-                notifyRecipient(candidate.userId, type, title, candidate.content, candidate.targetType, targetId)
+                notifyRecipient(candidate.userId, type, candidate.title, candidate.content, candidate.targetType, targetId)
             }
     }
 
@@ -310,6 +355,7 @@ class BusinessNotificationService(
 
     private data class NotificationCandidate(
         val userId: String,
+        val title: String,
         val content: String,
         val targetType: String
     )

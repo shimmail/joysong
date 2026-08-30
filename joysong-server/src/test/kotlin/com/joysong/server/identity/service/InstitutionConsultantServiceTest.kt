@@ -37,6 +37,7 @@ class InstitutionConsultantServiceTest {
             "im.member_role = 'CONSULTANT'",
             "im.status = 'APPROVED'",
             "im.revoked_at IS NULL",
+            "u.account_state = 'ACTIVE'",
             "u.deleted_at IS NULL",
             "i.deleted_at IS NULL",
             "u.nickname IS NOT NULL",

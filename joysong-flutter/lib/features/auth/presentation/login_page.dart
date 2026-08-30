@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
+import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/auth/presentation/login_strings.dart';
 import 'package:joysong_flutter/features/auth/presentation/phone_country.dart';
 
@@ -245,27 +246,8 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  Future<void> _googleLogin() async {
-    if (_isBusy || widget.onGoogleLogin == null) return;
-    if (!_hasAcceptedAgreements) {
-      setState(() => _localError = _strings.acceptAgreementError);
-      return;
-    }
-    FocusManager.instance.primaryFocus?.unfocus();
-    setState(() {
-      _isSubmitting = true;
-      _localError = null;
-    });
-    try {
-      final completed = await widget.onGoogleLogin!();
-      if (!completed && mounted) {
-        setState(() => _localError = _strings.googleLoginCancelled);
-      }
-    } catch (error) {
-      if (mounted) setState(() => _localError = _readableError(error));
-    } finally {
-      if (mounted) setState(() => _isSubmitting = false);
-    }
+  void _googleLogin() {
+    showTransientMessage(context, context.localized('开发中', 'Coming soon'));
   }
 
   void _startCountdown() {

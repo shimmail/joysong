@@ -25,7 +25,7 @@ data class DoctorEntity(
     @Column(name = "review_count") val reviewCount: Int = 0,
     val specialties: String = "",
     @Column(name = "is_verified") val isVerified: Boolean = false,
-    @Column(name = "consultation_count") val consultationCount: Int = 0,
+    @Column(name = "consultation_count", updatable = false) val consultationCount: Int = 0,
     val credentials: String = "",
     /** 医生主页公开展示图片；不属于身份认证材料，也不参与认证状态判定。 */
     @Column(name = "credential_images") val credentialImages: String = "",

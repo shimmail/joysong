@@ -514,6 +514,24 @@ final class AuthController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> updateCurrentAccountProfile(AuthUser user) async {
+    if (user.id != _currentUser?.id) return;
+
+    _currentUser = user;
+    _savedAccounts = _savedAccounts.map((account) {
+      if (account.userId != user.id) return account;
+      return SavedAccount(
+        userId: account.userId,
+        nickname: user.nickname,
+        avatar: user.avatar,
+        identifier: user.phone ?? user.email ?? account.identifier,
+        tokens: account.tokens,
+      );
+    }).toList(growable: false);
+    notifyListeners();
+    await _savedAccountStore?.save(_savedAccounts);
+  }
+
   Future<void> _runLogin(
     Future<AuthSession> Function() operation, {
     Future<void> Function(AuthSession session)? afterSuccess,

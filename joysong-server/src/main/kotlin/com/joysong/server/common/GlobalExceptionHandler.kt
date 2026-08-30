@@ -25,6 +25,7 @@ import com.joysong.server.institution.service.ProjectChangeContractException
 import com.joysong.server.article.service.ArticleNotFoundException
 import com.joysong.server.order.service.OrderManagementConflictException
 import com.joysong.server.order.service.OrderManagementNotFoundException
+import com.joysong.server.order.service.OrderContractException
 import com.joysong.server.project.service.ProfessionalProjectRequestConflictException
 import com.joysong.server.project.service.ProfessionalProjectRequestNotFoundException
 import com.joysong.server.legal.service.LegalDocumentConflictException
@@ -60,6 +61,11 @@ class GlobalExceptionHandler {
     fun handleProjectChangeContract(e: ProjectChangeContractException): ResponseEntity<BaseResponse<Nothing>> =
         ResponseEntity.status(e.status)
             .body(BaseResponse.error(e.message ?: "项目变更请求失败", e.status.value(), e.errorCode.name))
+
+    @ExceptionHandler(OrderContractException::class)
+    fun handleOrderContract(e: OrderContractException): ResponseEntity<BaseResponse<Nothing>> =
+        ResponseEntity.status(e.status)
+            .body(BaseResponse.error(e.message ?: "订单请求失败", e.status.value(), e.errorCode.name))
 
     @ExceptionHandler(HttpRequestMethodNotSupportedException::class)
     fun handleMethodNotSupported(): ResponseEntity<BaseResponse<Nothing>> =

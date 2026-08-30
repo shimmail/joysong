@@ -72,7 +72,7 @@ class AdminDoctorController(
             rating = if (actor.isAdmin) requested.rating else existing.rating,
             reviewCount = if (actor.isAdmin) requested.reviewCount else existing.reviewCount,
             isVerified = if (actor.isAdmin) requested.isVerified else existing.isVerified,
-            consultationCount = if (actor.isAdmin) requested.consultationCount else existing.consultationCount,
+            consultationCount = existing.consultationCount,
             caseCount = if (actor.isAdmin) requested.caseCount else existing.caseCount,
             institutionId = if (actor.isAdmin) requested.institutionId else existing.institutionId,
             institutionName = if (actor.isAdmin) requested.institutionName else existing.institutionName

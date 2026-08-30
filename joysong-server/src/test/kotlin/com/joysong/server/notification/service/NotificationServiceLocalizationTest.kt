@@ -252,6 +252,30 @@ class NotificationServiceLocalizationTest {
                 "The order service has started. Open the service conversation to follow up."
             ),
             NotificationCase(
+                "ORDER_SERVICE_ACTIVATED",
+                "professional_doctor_orders",
+                "项目预约",
+                "预约项目：热玛吉\n预约时间：2026-09-15 14:30",
+                "Project booking",
+                "Project: 热玛吉\nAppointment time: 2026-09-15 14:30"
+            ),
+            NotificationCase(
+                "ORDER_SERVICE_ACTIVATED",
+                "professional_doctor_orders",
+                "项目预约",
+                "预约项目：超声炮\n预约时间：待确认",
+                "Project booking",
+                "Project: 超声炮\nAppointment time: To be confirmed"
+            ),
+            NotificationCase(
+                "ORDER_SERVICE_ACTIVATED",
+                "professional_doctor_orders",
+                "项目预约",
+                "预约项目：组合项目\n预约时间：请以医生确认项目说明为准\n预约时间：2026-09-16 10:00",
+                "Project booking",
+                "Project: 组合项目\n预约时间：请以医生确认项目说明为准\nAppointment time: 2026-09-16 10:00"
+            ),
+            NotificationCase(
                 "ORDER_COMPLETED",
                 "order",
                 "订单已完成",
@@ -330,6 +354,30 @@ class NotificationServiceLocalizationTest {
                 "您的咨询师机构关系申请未通过：机构名不一致",
                 "Consultant institution relationship application rejected",
                 "Your consultant institution relationship application was rejected. Reason: 机构名不一致"
+            ),
+            NotificationCase(
+                "INSTITUTION_PROJECT_APPLICATION_SUBMITTED",
+                "institution_project_review",
+                "新的机构项目申请",
+                "有新的机构项目申请待审核。",
+                "New institution project application",
+                "A new institution project application is awaiting review."
+            ),
+            NotificationCase(
+                "INSTITUTION_PROJECT_APPLICATION_APPROVED",
+                "institution_project_application",
+                "机构项目申请已通过",
+                "您的机构项目申请已通过。",
+                "Institution project application approved",
+                "Your institution project application has been approved."
+            ),
+            NotificationCase(
+                "INSTITUTION_PROJECT_APPLICATION_REJECTED",
+                "institution_project_application",
+                "机构项目申请未通过",
+                "您的机构项目申请未通过：材料不全",
+                "Institution project application rejected",
+                "Your institution project application was rejected. Reason: 材料不全"
             ),
             NotificationCase(
                 "IDENTITY_APPLICATION_APPROVED",

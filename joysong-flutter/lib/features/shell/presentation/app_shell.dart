@@ -5,6 +5,7 @@ import 'package:joysong_flutter/core/config/app_environment.dart';
 import 'package:joysong_flutter/core/files/app_file_picker.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/network/api_client.dart';
+import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/account_security/data/account_security_api.dart';
 import 'package:joysong_flutter/features/account_security/data/account_security_repository_impl.dart';
@@ -17,11 +18,15 @@ import 'package:joysong_flutter/features/agent/domain/agent_models.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_chat_controller.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_chat_page.dart';
 import 'package:joysong_flutter/features/agent/presentation/agent_plan_controller.dart';
+import 'package:joysong_flutter/features/auth/domain/auth_models.dart';
 import 'package:joysong_flutter/features/booking/data/booking_remote_data_source.dart';
 import 'package:joysong_flutter/features/booking/data/booking_repository_impl.dart';
 import 'package:joysong_flutter/features/booking/domain/booking_repository.dart';
 import 'package:joysong_flutter/features/booking/presentation/booking_controller.dart';
 import 'package:joysong_flutter/features/booking/presentation/booking_page.dart';
+import 'package:joysong_flutter/features/consultant_orders/data/consultant_orders_remote_data_source.dart';
+import 'package:joysong_flutter/features/consultant_orders/data/consultant_orders_repository_impl.dart';
+import 'package:joysong_flutter/features/consultant_orders/domain/consultant_orders_repository.dart';
 import 'package:joysong_flutter/features/discover/data/discover_repository_impl.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
@@ -53,6 +58,7 @@ import 'package:joysong_flutter/features/orders/presentation/orders_controller.d
 import 'package:joysong_flutter/features/orders/presentation/orders_page.dart';
 import 'package:joysong_flutter/features/profile/presentation/profile_page.dart';
 import 'package:joysong_flutter/features/professional_management/data/professional_repository.dart';
+import 'package:joysong_flutter/features/professional_management/presentation/professional_pages.dart';
 import 'package:joysong_flutter/features/profile/data/profile_repository_impl.dart';
 import 'package:joysong_flutter/features/profile/domain/profile_repository.dart';
 import 'package:joysong_flutter/features/social/data/api_public_media_uploader.dart';
@@ -72,24 +78,40 @@ import 'package:joysong_flutter/features/wallet/presentation/wallet_page.dart';
 
 typedef AccountSecurityControllerFactory = AccountSecurityController Function();
 
+final class AppShellDependencies {
+  const AppShellDependencies({
+    required this.identityRepository,
+    required this.discoverRepository,
+    required this.messagingRepository,
+  });
+
+  final IdentityRepository identityRepository;
+  final DiscoverRepository discoverRepository;
+  final MessagingRepository messagingRepository;
+}
+
 class AppShell extends StatefulWidget {
   const AppShell({
     required this.agentConfig,
     this.apiClient,
+    this.dependencies,
     this.allowPreviewData = false,
     this.currentUserId = '',
     this.accountSecurityControllerFactory,
     this.onSwitchAccount,
+    this.onProfileUpdated,
     this.onLogout,
     super.key,
   });
 
   final AgentConfig agentConfig;
   final ApiClient? apiClient;
+  final AppShellDependencies? dependencies;
   final bool allowPreviewData;
   final String currentUserId;
   final AccountSecurityControllerFactory? accountSecurityControllerFactory;
   final Future<void> Function(BuildContext context)? onSwitchAccount;
+  final Future<void> Function(AuthUser user)? onProfileUpdated;
   final Future<void> Function()? onLogout;
 
   @override
@@ -107,6 +129,7 @@ class _AppShellState extends State<AppShell> {
   ProfileRepository? _profileRepository;
   BookingRepository? _bookingRepository;
   OrdersRepository? _ordersRepository;
+  ConsultantOrdersRepository? _consultantOrdersRepository;
   SocialRepository? _socialRepository;
   MessagingRepository? _messagingRepository;
   WalletRepository? _walletRepository;
@@ -135,6 +158,7 @@ class _AppShellState extends State<AppShell> {
   void didUpdateWidget(covariant AppShell oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.apiClient != widget.apiClient ||
+        oldWidget.dependencies != widget.dependencies ||
         oldWidget.agentConfig.recentMessageLimit !=
             widget.agentConfig.recentMessageLimit ||
         oldWidget.currentUserId != widget.currentUserId) {
@@ -147,6 +171,21 @@ class _AppShellState extends State<AppShell> {
     _unreadNotificationCount = 0;
     _unreadSystemNotificationCount = 0;
     _unreadActivityNotificationCount = 0;
+    final dependencies = widget.dependencies;
+    if (dependencies != null) {
+      _homeRepository = null;
+      _discoverRepository = dependencies.discoverRepository;
+      _identityRepository = dependencies.identityRepository;
+      _profileRepository = null;
+      _bookingRepository = null;
+      _ordersRepository = null;
+      _consultantOrdersRepository = null;
+      _socialRepository = null;
+      _messagingRepository = dependencies.messagingRepository;
+      _walletRepository = null;
+      _createMessagingControllers();
+      return;
+    }
     final apiClient = widget.apiClient;
     if (apiClient == null) {
       _homeRepository = null;
@@ -155,6 +194,7 @@ class _AppShellState extends State<AppShell> {
       _profileRepository = null;
       _bookingRepository = null;
       _ordersRepository = null;
+      _consultantOrdersRepository = null;
       _socialRepository = null;
       _messagingRepository = null;
       _walletRepository = null;
@@ -170,6 +210,9 @@ class _AppShellState extends State<AppShell> {
     _ordersRepository =
         OrdersRepositoryImpl(ApiOrdersRemoteDataSource(apiClient));
     _ordersController = OrdersController(_ordersRepository!);
+    _consultantOrdersRepository = ConsultantOrdersRepositoryImpl(
+      ApiConsultantOrdersRemoteDataSource(apiClient),
+    );
     _socialRepository = SocialRepositoryImpl(
       remoteDataSource: ApiSocialRemoteDataSource(apiClient),
       imagePreprocessor: const PassthroughPublicImagePreprocessor(),
@@ -185,22 +228,7 @@ class _AppShellState extends State<AppShell> {
     _walletRepository =
         WalletRepositoryImpl(ApiWalletRemoteDataSource(apiClient));
     _walletController = WalletController(_walletRepository!);
-    _notificationController = NotificationController(_messagingRepository!);
-    _notificationController!.addListener(_handleNotificationStateChanged);
-    unawaited(_notificationController!.refresh());
-    _messagingController = MessagingHubController(
-      _messagingRepository!,
-      currentUserId: widget.currentUserId,
-      preferencesStore: SecureMessagingPreferencesStore(),
-      peerLoader: (userId) async {
-        final profile = await _socialRepository!.getPublicUserProfile(userId);
-        return MessagingPeer(
-          id: profile.id,
-          name: profile.nickname,
-          avatar: profile.avatar,
-        );
-      },
-    );
+    _createMessagingControllers();
 
     final agentRepository = AgentRepositoryImpl(
       ApiAgentRemoteDataSource(apiClient: apiClient),
@@ -210,6 +238,31 @@ class _AppShellState extends State<AppShell> {
       recentMessageLimit: widget.agentConfig.recentMessageLimit,
     );
     _agentPlanController = AgentPlanController(agentRepository);
+  }
+
+  void _createMessagingControllers() {
+    final messagingRepository = _messagingRepository;
+    if (messagingRepository == null) return;
+    _notificationController = NotificationController(messagingRepository);
+    _notificationController!.addListener(_handleNotificationStateChanged);
+    unawaited(_notificationController!.refresh());
+    _messagingController = MessagingHubController(
+      messagingRepository,
+      currentUserId: widget.currentUserId,
+      preferencesStore:
+          _socialRepository == null ? null : SecureMessagingPreferencesStore(),
+      peerLoader: _socialRepository == null
+          ? null
+          : (userId) async {
+              final profile =
+                  await _socialRepository!.getPublicUserProfile(userId);
+              return MessagingPeer(
+                id: profile.id,
+                name: profile.nickname,
+                avatar: profile.avatar,
+              );
+            },
+    );
   }
 
   void _disposeControllers() {
@@ -305,6 +358,11 @@ class _AppShellState extends State<AppShell> {
           professionalRepository: widget.apiClient == null
               ? null
               : ProfessionalRepository(widget.apiClient!),
+          consultantOrdersRepository: _consultantOrdersRepository,
+          onOpenConsultantOrderServiceConversation:
+              _consultantOrdersRepository == null
+                  ? null
+                  : _openConsultantOrderServiceConversation,
           onOrders: _ordersController == null ? null : _openOrders,
           onWallet: _walletController == null ? null : _openWallet,
           onDiaries: _socialController == null ? null : _openSocial,
@@ -313,8 +371,11 @@ class _AppShellState extends State<AppShell> {
               _messagingController == null ? null : _openCustomerService,
           onAccountSecurity:
               widget.apiClient == null ? null : _openAccountSecurity,
+          onOpenDirectMessage:
+              _messagingRepository == null ? null : _openDirectMessage,
           onOpenFavorite: _discoverRepository == null ? null : _openFavorite,
           onSwitchAccount: widget.onSwitchAccount,
+          onProfileUpdated: widget.onProfileUpdated,
           onLogout: widget.onLogout,
         ),
       ];
@@ -699,7 +760,13 @@ class _AppShellState extends State<AppShell> {
     if (result.succeeded) await _ordersController?.refresh();
   }
 
-  Future<String?> _pickAndUploadReviewImage() async {
+  Future<String?> _pickAndUploadReviewImage() =>
+      _pickAndUploadPublicImage(PublicMediaPurpose.review);
+
+  Future<String?> _pickAndUploadDoctorManagementImage() =>
+      _pickAndUploadPublicImage(PublicMediaPurpose.doctorProfile);
+
+  Future<String?> _pickAndUploadPublicImage(PublicMediaPurpose purpose) async {
     final controller = _socialController;
     if (controller == null) return null;
     final selected = await const AppFilePicker().pickImage();
@@ -709,7 +776,7 @@ class _AppShellState extends State<AppShell> {
         bytes: selected.bytes,
         fileName: selected.fileName,
         mimeType: selected.mimeType,
-        purpose: PublicMediaPurpose.review,
+        purpose: purpose,
       ),
     );
     if (!result.succeeded || result.value?.trim().isEmpty != false) {
@@ -926,6 +993,8 @@ class _AppShellState extends State<AppShell> {
   Future<void> _openOrderServiceConversation(
     String orderId, {
     bool fallbackToOrdersOnFailure = false,
+    bool propagateConsultantRoleRequired = false,
+    Future<void> Function()? onConsultantRoleRequired,
   }) async {
     final repository = _messagingRepository;
     final id = orderId.trim();
@@ -936,7 +1005,24 @@ class _AppShellState extends State<AppShell> {
       await _openDmThread(
         conversation,
         orderConversationRefreshed: true,
+        onConsultantRoleRequired: onConsultantRoleRequired,
       );
+    } on ApiException catch (error) {
+      if (propagateConsultantRoleRequired &&
+          error.errorCode == 'CONSULTANT_ROLE_REQUIRED') {
+        rethrow;
+      }
+      if (!mounted) return;
+      showTransientMessage(
+        context,
+        context.localized(
+          '暂时无法打开订单沟通，请稍后重试',
+          'Unable to open this order conversation. Please try again.',
+        ),
+      );
+      if (fallbackToOrdersOnFailure) {
+        await _openOrders();
+      }
     } on Object {
       if (!mounted) return;
       showTransientMessage(
@@ -951,6 +1037,16 @@ class _AppShellState extends State<AppShell> {
       }
     }
   }
+
+  Future<void> _openConsultantOrderServiceConversation(
+    String orderId,
+    Future<void> Function() onConsultantRoleRequired,
+  ) =>
+      _openOrderServiceConversation(
+        orderId,
+        propagateConsultantRoleRequired: true,
+        onConsultantRoleRequired: onConsultantRoleRequired,
+      );
 
   Future<void> _openDiaryEditor(
     SocialController controller, {
@@ -1062,6 +1158,21 @@ class _AppShellState extends State<AppShell> {
           initialRequestId: target.id,
         );
         return;
+      case NotificationTargetKind.professionalDoctorOrders:
+        _openProfessionalDoctorOrder(target.id);
+        return;
+      case NotificationTargetKind.institutionProjectReview:
+        _openManagementCenter(
+          initialInstitutionProjectRequestId: target.id,
+          initialInstitutionProjectReviewMode: true,
+        );
+        return;
+      case NotificationTargetKind.institutionProjectApplication:
+        _openManagementCenter(
+          initialInstitutionProjectRequestId: target.id,
+          initialInstitutionProjectReviewMode: false,
+        );
+        return;
       case NotificationTargetKind.discover:
       case NotificationTargetKind.unknown:
         break;
@@ -1090,6 +1201,29 @@ class _AppShellState extends State<AppShell> {
         onOpenAi: _openAiChat,
       ),
     ));
+  }
+
+  void _openProfessionalDoctorOrder(String orderId) {
+    final apiClient = widget.apiClient;
+    if (apiClient == null) return;
+    final repository = ProfessionalRepository(apiClient);
+    final id = orderId.trim();
+    _contentNavigator.push<void>(
+      MaterialPageRoute(
+        builder: (_) => id.isEmpty
+            ? DoctorOrdersPage(
+                repository: repository,
+                onOpenDirectMessage:
+                    _messagingRepository == null ? null : _openDirectMessage,
+              )
+            : DoctorOrderDetailPage(
+                repository: repository,
+                id: id,
+                onOpenDirectMessage:
+                    _messagingRepository == null ? null : _openDirectMessage,
+              ),
+      ),
+    );
   }
 
   Future<void> _openOrderDetailById(String orderId) async {
@@ -1129,6 +1263,40 @@ class _AppShellState extends State<AppShell> {
         builder: (_) => IdentityCenterPage(
           repository: repository,
           initialApplicationId: initialApplicationId,
+        ),
+      ),
+    );
+  }
+
+  void _openManagementCenter({
+    String? initialInstitutionProjectRequestId,
+    bool? initialInstitutionProjectReviewMode,
+  }) {
+    final identityRepository = _identityRepository;
+    final discoverRepository = _discoverRepository;
+    if (identityRepository == null || discoverRepository == null) return;
+    _contentNavigator.push<void>(
+      MaterialPageRoute(
+        builder: (_) => ManagementCenterPage(
+          repository: identityRepository,
+          discoverRepository: discoverRepository,
+          consultantOrdersRepository: _consultantOrdersRepository,
+          onOpenConsultantOrderServiceConversation:
+              _consultantOrdersRepository == null
+                  ? null
+                  : _openConsultantOrderServiceConversation,
+          professionalRepository: widget.apiClient == null
+              ? null
+              : ProfessionalRepository(widget.apiClient!),
+          doctorImagePicker: _socialRepository == null
+              ? null
+              : _pickAndUploadDoctorManagementImage,
+          initialInstitutionProjectRequestId:
+              initialInstitutionProjectRequestId,
+          initialInstitutionProjectReviewMode:
+              initialInstitutionProjectReviewMode,
+          onOpenDirectMessage:
+              _messagingRepository == null ? null : _openDirectMessage,
         ),
       ),
     );
@@ -1197,6 +1365,7 @@ class _AppShellState extends State<AppShell> {
     DmConversation conversation, {
     String? title,
     bool orderConversationRefreshed = false,
+    Future<void> Function()? onConsultantRoleRequired,
   }) async {
     final repository = _messagingRepository;
     if (repository == null) {
@@ -1219,9 +1388,17 @@ class _AppShellState extends State<AppShell> {
         if (!mounted) return;
         sendEnabled = activeConversation.serviceMessagingEnabled;
         refreshSendEnabled = () async {
-          final refreshedConversation =
-              await repository.createOrderServiceConversation(orderId);
-          return refreshedConversation.serviceMessagingEnabled;
+          try {
+            final refreshedConversation =
+                await repository.createOrderServiceConversation(orderId);
+            return refreshedConversation.serviceMessagingEnabled;
+          } on ApiException catch (error) {
+            if (error.errorCode == 'CONSULTANT_ROLE_REQUIRED' &&
+                onConsultantRoleRequired != null) {
+              await onConsultantRoleRequired();
+            }
+            rethrow;
+          }
         };
       } on Object {
         if (!mounted) return;
@@ -1243,12 +1420,23 @@ class _AppShellState extends State<AppShell> {
     ]);
     if (!mounted) return;
     unawaited(_messagingController?.clearUnread(activeConversation.id));
+    final consultantRoleRequired = onConsultantRoleRequired;
     final controller = DmThreadController(
       repository: repository,
       conversationId: activeConversation.id,
       currentUserId: widget.currentUserId,
       firstMessageLimitApplies: activeConversation.firstMessageLimitApplies,
       waitingForReply: activeConversation.waitingForReply,
+      sendErrorHandler: consultantRoleRequired == null
+          ? null
+          : (error) async {
+              if (error is! ApiException ||
+                  error.errorCode != 'CONSULTANT_ROLE_REQUIRED') {
+                return false;
+              }
+              await consultantRoleRequired();
+              return true;
+            },
     );
     await _contentNavigator.push<void>(
       MaterialPageRoute(

@@ -26,6 +26,10 @@ final class AppFilePicker {
         allowedExtensions: const ['jpg', 'jpeg', 'png', 'webp', 'pdf'],
       );
 
+  Future<AppPickedFile?> pickRefundEvidence() => _pick(
+        allowedExtensions: const ['jpg', 'jpeg', 'png', 'webp', 'pdf'],
+      );
+
   Future<AppPickedFile?> _pick({
     String method = 'pickFile',
     required List<String> allowedExtensions,

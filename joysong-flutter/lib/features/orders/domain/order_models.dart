@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:joysong_flutter/features/orders/domain/money.dart';
+import 'package:joysong_flutter/features/orders/domain/refund_evidence_models.dart';
 
 enum OrderStatus {
   pendingServiceFee('PENDING_SERVICE_FEE', '待支付旅游地接服务费'),
@@ -323,6 +324,7 @@ final class RefundDetail {
     required this.description,
     required this.status,
     required this.createdAt,
+    this.evidenceFiles = const [],
     this.processedAt,
     this.rejectReason,
   });
@@ -334,11 +336,17 @@ final class RefundDetail {
   final String description;
   final RefundStatus status;
   final DateTime createdAt;
+  final List<RefundEvidenceFile> evidenceFiles;
   final DateTime? processedAt;
   final String? rejectReason;
 
   factory RefundDetail.fromJson(Object? json) {
     final map = jsonMap(json, '退款详情');
+    final parsedEvidenceFiles =
+        (map['evidenceFiles'] as List<Object?>? ?? const [])
+            .map(RefundEvidenceFile.fromJson)
+            .toList(growable: false);
+    parsedEvidenceFiles.sort((a, b) => a.position.compareTo(b.position));
     return RefundDetail(
       id: requiredString(map, 'id', '退款详情'),
       orderId: requiredString(map, 'orderId', '退款详情'),
@@ -347,6 +355,7 @@ final class RefundDetail {
       description: stringValue(map['description']),
       status: RefundStatus.fromWire(map['status']),
       createdAt: requiredLocalDateTime(map['createdAt'], '退款申请时间'),
+      evidenceFiles: List.unmodifiable(parsedEvidenceFiles),
       processedAt: localDateTime(map['processedAt']),
       rejectReason: nullableString(map['rejectReason']),
     );

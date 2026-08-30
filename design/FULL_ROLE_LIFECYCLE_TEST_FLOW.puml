@@ -1,0 +1,82 @@
+@startuml
+title 全角色最小可跑通冒烟流程
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam ArrowColor #4B5563
+skinparam activity {
+  BackgroundColor #F7F9FC
+  BorderColor #506784
+  DiamondBackgroundColor #FFF4CC
+  DiamondBorderColor #B68900
+  StartColor #2E7D32
+  EndColor #2E7D32
+}
+skinparam note {
+  BackgroundColor #FFF9E6
+  BorderColor #D6A400
+}
+
+start
+
+partition "环境与账号" {
+  :SMOKE-00\n确认隔离环境、测试短信和测试支付；\nA-01 登录管理端;
+  if (隔离条件可用？) then (是)
+    :使用虚构账号和 TEST SAMPLE 材料;
+  else (否)
+    :停止写入身份、订单和支付数据；\n记录环境阻断;
+    stop
+  endif
+
+  :SMOKE-01\nU-01 深测一次注册/登录/资料；\nL-01、D-01、C-01 只注册并确认 ACTIVE + USER;
+}
+
+partition "专业身份与机构" {
+  :SMOKE-02\nL-01 申请法人，A-01 批准；\n原子生成 I-01、法人任职和机构钱包；\nL-01 更新档案，U-01 查看公开页;
+
+  :SMOKE-03\nD-01 申请医生，A-01 批准；\nD-01 完善公开档案并 JOIN I-01；\nL-01 批准，U-01 查看医生;
+
+  :SMOKE-04\nC-01 申请顾问，A-01 批准；\nC-01 JOIN I-01，L-01 批准；\nU-01 查看顾问候选;
+}
+
+partition "项目与订单" {
+  :SMOKE-05\nD-01 提交 P-01，A-01 批准；\nD-01 提交 IPJ-01，L-01 批准；\nU-01 查看项目与 220.00 USD;
+
+  note right
+    SCOPE-01：本期不启用分账。
+    提案、配置、咨询费和收益比例均为 N/A。
+  end note
+
+  :SMOKE-06\nU-01 选择 I-01 + IPJ-01 + D-01 + C-01；\n创建未来至少 2 天的 O-01；\n核对对象、时间、价格和币种快照;
+
+  if (测试或模拟支付可用？) then (是)
+    :SMOKE-07\n以服务端支付事实进入 SERVICE_ACTIVE；\nU-01 看本人订单，D-01 看医生订单，\nA-01 看全局订单，核对 C-01 分配快照;
+  else (否)
+    :记录支付环境阻断；\nSMOKE-07 和 SMOKE-08 标记阻断;
+    stop
+  endif
+}
+
+partition "完成与评价" {
+  :SMOKE-08\nU-01 确认完成或等待系统完成；\n提交一次五星 USER-REVIEW-001；\n核对评价绑定真实订单对象;
+}
+
+if (SMOKE-00 至 SMOKE-08 核心断言均通过？) then (是)
+  :最小联调主链路通过;
+else (否)
+  :主链路失败；\n记录失败步骤、对象 ID 和证据;
+endif
+
+stop
+
+legend right
+  本图只表达默认 9 步冒烟链路。
+  驳回、重提、多机构、退出、暂停、撤销、
+  注销、并发和完整设备矩阵均为可选回归。
+
+  顾问尚无独立订单工作台和完整履约入口：
+  可判定核心交易冒烟通过，
+  不得宣称三方 GUI 履约完整闭环。
+endlegend
+
+@enduml
