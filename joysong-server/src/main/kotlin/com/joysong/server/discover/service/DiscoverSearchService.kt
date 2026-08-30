@@ -66,11 +66,14 @@ class DiscoverSearchService(
                 .take(request.limit)
         } else emptyList()
 
-        val doctorInstitutionNames = doctorRepository.findAll().associate { doctor ->
+        val publicDoctors = if (DiscoverSearchScope.DOCTOR in request.scopes) {
+            doctorRepository.findAllPublic()
+        } else emptyList()
+        val doctorInstitutionNames = publicDoctors.associate { doctor ->
             doctor.id to doctorInstitutionService.institutionsFor(doctor.id).joinToString(" ") { it.name }
         }
         val doctors = if (DiscoverSearchScope.DOCTOR in request.scopes) {
-            doctorRepository.findAll().filter { doctor ->
+            publicDoctors.filter { doctor ->
                 normalized.isBlank() || entityMatches(
                     request.query,
                     terms,
@@ -312,7 +315,7 @@ class DiscoverSearchService(
         // A doctor name already present in the database is authoritative. For an
         // unknown name, require a name immediately followed by a professional title
         // so generic requests such as "推荐医生" are not treated as a named doctor.
-        val knownDoctorRequested = doctorRepository.findAll()
+        val knownDoctorRequested = doctorRepository.findAllPublic()
             .any { it.name.length >= 2 && normalized.contains(it.name.lowercase()) }
         val namedDoctorRequested = namedDoctorPattern.findAll(query).any { match ->
             match.groupValues[1].trim().lowercase() !in genericDoctorPrefixes

@@ -41,6 +41,8 @@ import java.util.UUID
 import com.joysong.server.common.money.Money
 import com.joysong.server.refund.service.RefundExecutionService
 import com.joysong.server.notification.service.BusinessNotificationService
+import com.joysong.server.user.entity.AccountState
+import com.joysong.server.user.repository.UserRepository
 
 /**
  * 订单核心业务服务
@@ -57,6 +59,7 @@ class OrderService(
     private val institutionRepository: InstitutionRepository,
     private val doctorProjectRepository: DoctorProjectRepository,
     private val doctorRepository: DoctorRepository,
+    private val userRepository: UserRepository,
     private val orderStatusLogService: OrderStatusLogService,
     private val couponService: CouponService,
     @Lazy private val settlementService: SettlementService,
@@ -136,6 +139,7 @@ class OrderService(
         val now = LocalDateTime.now()
 
         val institutionProjectId = request.institutionProjectId.trim()
+        lockAndRequireActiveBookingAccounts(request.doctorId, request.consultantId)
         val lockedBookability = lockAndRequireBookableDoctorProject(request.doctorId, institutionProjectId)
         val institutionProject = lockedBookability.institutionProject
         val doctorProject = lockedBookability.doctorProject
@@ -239,6 +243,7 @@ class OrderService(
     @Transactional(rollbackFor = [Exception::class])
     fun quoteTravelGroundService(doctorId: String, institutionProjectId: String): TravelGroundServiceQuote {
         val locked = try {
+            lockAndRequireActiveBookingAccounts(doctorId)
             lockAndRequireBookableDoctorProject(doctorId, institutionProjectId)
         } catch (_: IllegalArgumentException) {
             throw IllegalArgumentException("DOCTOR_PROJECT_NOT_CONFIGURED")
@@ -267,6 +272,25 @@ class OrderService(
         require(doctorProject.projectId == institutionProject.projectId) { "医生项目与机构项目不一致" }
         require(doctorProject.isActive) { "所选医生服务已停用，暂不可预约" }
         return LockedBookableDoctorProject(institutionProject, doctorProject)
+    }
+
+    private fun lockAndRequireActiveBookingAccounts(doctorId: String, consultantId: String? = null) {
+        val accountsById = listOfNotNull(doctorId, consultantId)
+            .distinct()
+            .sorted()
+            .associateWith(userRepository::findByIdForUpdate)
+
+        val doctorAccount = accountsById[doctorId]
+        require(
+            doctorAccount?.accountState == AccountState.ACTIVE && doctorAccount.deletedAt == null
+        ) { "所选医生账号不可用，暂不可预约" }
+
+        consultantId?.let { id ->
+            val consultantAccount = accountsById[id]
+            require(
+                consultantAccount?.accountState == AccountState.ACTIVE && consultantAccount.deletedAt == null
+            ) { "所选医美顾问账号不可用，暂不可预约" }
+        }
     }
 
     /**

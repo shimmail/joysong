@@ -66,7 +66,7 @@ class DiscoverDetailServiceTest {
     @Test
     fun `doctor detail excludes inactive doctor project services`() {
         val doctor = DoctorEntity(id = "doctor-1", name = "Doctor")
-        every { doctorRepository.findById("doctor-1") } returns Optional.of(doctor)
+        every { doctorRepository.findPublicById("doctor-1") } returns Optional.of(doctor)
         every { doctorProjectRepository.findPublicByDoctorId("doctor-1") } returns emptyList()
         every { institutionProjectRepository.findAllById(emptyList<String>()) } returns emptyList()
         every { projectRepository.findAllById(emptyList<String>()) } returns emptyList()
@@ -90,7 +90,7 @@ class DiscoverDetailServiceTest {
             price = BigDecimal("1000"),
             caseCount = 23
         )
-        every { doctorRepository.findById("doctor-1") } returns Optional.of(
+        every { doctorRepository.findPublicById("doctor-1") } returns Optional.of(
             DoctorEntity(id = "doctor-1", name = "Doctor")
         )
         every { doctorProjectRepository.findPublicByDoctorId("doctor-1") } returns listOf(
@@ -187,7 +187,7 @@ class DiscoverDetailServiceTest {
         )
         every { diaryRepository.findPublishedByProjectId("project-1") } returns emptyList()
         every { doctorProjectRepository.findPublicByInstitutionProjectIds(listOf("ip-1")) } returns emptyList()
-        every { doctorRepository.findAllById(emptyList<String>()) } returns emptyList()
+        every { doctorRepository.findAllPublicById(emptyList<String>()) } returns emptyList()
         every { reviewRepository.findByInstitutionProjectId("ip-1") } returns emptyList()
 
         val unavailable = service.getInstitutionProjectDetail("institution-1", "project-1")!!
@@ -199,7 +199,7 @@ class DiscoverDetailServiceTest {
         val affordable = publicBinding("doctor-affordable", "ip-1", price = "700")
         val expensive = publicBinding("doctor-expensive", "ip-1", price = "900")
         every { doctorProjectRepository.findPublicByInstitutionProjectIds(listOf("ip-1")) } returns listOf(expensive, affordable)
-        every { doctorRepository.findAllById(listOf("doctor-expensive", "doctor-affordable")) } returns listOf(
+        every { doctorRepository.findAllPublicById(listOf("doctor-expensive", "doctor-affordable")) } returns listOf(
             DoctorEntity("doctor-expensive", "Expensive"),
             DoctorEntity("doctor-affordable", "Affordable")
         )
@@ -225,7 +225,7 @@ class DiscoverDetailServiceTest {
                 institutionId = "institution-2"
             )
         )
-        every { doctorRepository.findAllById(listOf(secondaryInstitutionDoctor.id)) } returns listOf(
+        every { doctorRepository.findAllPublicById(listOf(secondaryInstitutionDoctor.id)) } returns listOf(
             secondaryInstitutionDoctor
         )
 

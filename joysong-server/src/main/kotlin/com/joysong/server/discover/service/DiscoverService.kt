@@ -60,7 +60,7 @@ class DiscoverService(
 
         // 批量查询所有关联的 Doctor
         val doctorIds = doctorProjects.map { it.doctorId }.distinct()
-        val doctorMap: Map<String, DoctorEntity> = doctorRepository.findAllById(doctorIds)
+        val doctorMap: Map<String, DoctorEntity> = doctorRepository.findAllPublicById(doctorIds)
             .associateBy { it.id }
 
         return doctorProjects.mapNotNull { dp -> doctorMap[dp.doctorId]?.toResponse(dp.price) }

@@ -68,7 +68,7 @@ class DiscoverSearchServiceTest {
         every { projectRepository.findAll() } returns projects
         every { institutionRepository.findAll() } returns listOf(InstitutionEntity("institution-1", "Institution"))
         every { institutionProjectRepository.findAll() } returns offerings
-        every { doctorRepository.findAll() } returns emptyList()
+        every { doctorRepository.findAllPublic() } returns emptyList()
         every {
             doctorProjectRepository.findPublicByInstitutionProjectIds(listOf("ip-unavailable", "ip-available"))
         } returns listOf(
@@ -183,7 +183,7 @@ class DiscoverSearchServiceTest {
         } returns offerings.mapIndexed { index, offering ->
             publicBinding("doctor-$index", offering.id, offering.projectId, "100")
         }
-        every { doctorRepository.findAll() } returns doctors
+        every { doctorRepository.findAllPublic() } returns doctors
         val localService = DiscoverSearchService(
             projectRepository = projectRepository,
             institutionRepository = institutionRepository,
@@ -239,7 +239,7 @@ class DiscoverSearchServiceTest {
         } returns offerings.mapIndexed { index, offering ->
             publicBinding("doctor-$index", offering.id, offering.projectId, "100")
         }
-        every { doctorRepository.findAll() } returns emptyList()
+        every { doctorRepository.findAllPublic() } returns emptyList()
         val localService = DiscoverSearchService(
             projectRepository = projectRepository,
             institutionRepository = institutionRepository,

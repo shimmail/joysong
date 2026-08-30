@@ -752,6 +752,52 @@ class AgentWorkflowCoreTest {
     }
 
     @Test
+    fun `suspended doctor detail uses public lookups and omits the current card`() {
+        val content = "这位医生有哪些优势"
+        val doctorRepository = mockk<DoctorRepository>()
+        every { doctorRepository.findPublicById("suspended-doctor") } returns java.util.Optional.empty()
+        val completionTemplate = RestTemplate()
+        val intentTemplate = RestTemplate()
+        val completionServer = MockRestServiceServer.bindTo(completionTemplate).build()
+        val intentServer = MockRestServiceServer.bindTo(intentTemplate).build()
+        val catalog = mockk<AgentCatalogService>()
+        val fixture = chatFixture(
+            completionTemplate,
+            intentTemplate,
+            catalog,
+            doctorRepository = doctorRepository
+        )
+        val completed = slot<CompleteTurnCommand>()
+        prepareChatGeneration(
+            fixture,
+            content,
+            session(contextType = "DOCTOR", contextId = "suspended-doctor")
+        )
+        every { fixture.turnService.completeTurn(capture(completed)) } returns ChatTurnResult(
+            ChatMessageEntity(sessionId = "session-1", role = "ASSISTANT", content = "优势回答")
+        )
+        every { catalog.hasInstitutionProjectMatch(content) } returns false
+        every { catalog.contextualSearchQuery(content, emptyList()) } returns content
+        every {
+            catalog.promptEvidence(content, content, content, AgentQueryTarget.DOCTOR, "AUTO", content)
+        } returns AgentPromptEvidence()
+        intentServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess(
+                """{"choices":[{"message":{"content":"{\"intent\":\"CATALOG_QA\",\"queryTarget\":\"DOCTOR\",\"keywords\":[]}"}}]}""",
+                MediaType.APPLICATION_JSON
+            ))
+        completionServer.expect(requestTo("https://provider.test/v1/chat/completions"))
+            .andRespond(withSuccess("""{"choices":[{"message":{"content":"优势回答"}}]}""", MediaType.APPLICATION_JSON))
+
+        fixture.chat.sendMessage("session-1", "user-1", SendMessageRequest(content = content))
+
+        assertEquals(emptyList<AgentCatalogItemResponse>(), completed.captured.catalogItems)
+        verify(exactly = 2) { doctorRepository.findPublicById("suspended-doctor") }
+        verify(exactly = 0) { doctorRepository.findById("suspended-doctor") }
+        completionServer.verify()
+    }
+
+    @Test
     fun `price confirmation keeps the positively referenced entry detail`() {
         listOf(
             "Isn't this clinic more expensive?",

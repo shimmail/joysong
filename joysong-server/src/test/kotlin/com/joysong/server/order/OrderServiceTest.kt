@@ -37,6 +37,9 @@ import com.joysong.server.refund.repository.RefundRepository
 import com.joysong.server.refund.service.RefundExecutionOutcome
 import com.joysong.server.refund.service.RefundExecutionService
 import com.joysong.server.review.service.ReviewService
+import com.joysong.server.user.entity.AccountState
+import com.joysong.server.user.entity.UserEntity
+import com.joysong.server.user.repository.UserRepository
 import io.mockk.*
 import io.mockk.impl.annotations.MockK
 import jakarta.persistence.EntityManager
@@ -68,6 +71,7 @@ class OrderServiceTest {
     @MockK private lateinit var institutionRepository: InstitutionRepository
     @MockK private lateinit var doctorProjectRepository: DoctorProjectRepository
     @MockK private lateinit var doctorRepository: DoctorRepository
+    @MockK private lateinit var userRepository: UserRepository
     @MockK private lateinit var orderStatusLogService: OrderStatusLogService
     @MockK private lateinit var couponService: CouponService
     @MockK private lateinit var settlementService: SettlementService
@@ -115,6 +119,7 @@ class OrderServiceTest {
             institutionRepository,
             doctorProjectRepository,
             doctorRepository,
+            userRepository,
             orderStatusLogService,
             couponService,
             settlementService,
@@ -147,6 +152,10 @@ class OrderServiceTest {
             projectId = "project-1",
             institutionProjectId = "inst-proj-1",
             price = BigDecimal("4500.00")
+        )
+        every { userRepository.findByIdForUpdate(any()) } returns UserEntity(
+            id = "doctor-1",
+            passwordHash = "not-used"
         )
         every { institutionProjectRepository.findIdentityById(any()) } returns institutionProjectIdentity()
         every { institutionProjectRepository.findForUpdate(any()) } returns testInstitutionProject
@@ -183,6 +192,7 @@ class OrderServiceTest {
 
         assertEquals(159_960L, quote.travelGroundServiceFeeMinor)
         verifyOrder {
+            userRepository.findByIdForUpdate("doctor-1")
             institutionProjectRepository.findIdentityById("inst-proj-1")
             doctorInstitutionRelationshipService.requireActiveRelationshipForUpdate("doctor-1", "inst-1")
             institutionProjectRepository.findForUpdate("inst-proj-1")
@@ -299,6 +309,65 @@ class OrderServiceTest {
         assertEquals(450_000L, reactivated.medicalListPriceMinor)
         verify(exactly = 1) { orderRepository.save(any()) }
         verify(exactly = 1) { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `new order rejects suspended doctor account before booking locks or writes`() {
+        every { userRepository.findByIdForUpdate("doctor-1") } returns UserEntity(
+            id = "doctor-1",
+            passwordHash = "not-used",
+            accountState = AccountState.ADMIN_SUSPENDED
+        )
+
+        val error = assertThrows<IllegalArgumentException> {
+            orderService.createOrder(
+                "user-1",
+                CreateOrderRequest(
+                    projectId = "project-1",
+                    institutionProjectId = "inst-proj-1",
+                    doctorId = "doctor-1",
+                    consultantId = "consultant-1"
+                )
+            )
+        }
+
+        assertEquals("所选医生账号不可用，暂不可预约", error.message)
+        verify(exactly = 0) { institutionProjectRepository.findIdentityById(any()) }
+        verify(exactly = 0) { doctorInstitutionRelationshipService.requireActiveRelationshipForUpdate(any(), any()) }
+        verify(exactly = 0) { orderRepository.save(any()) }
+        verify(exactly = 0) { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `new order locks booking accounts in stable order and rejects suspended consultant`() {
+        every { userRepository.findByIdForUpdate("consultant-1") } returns UserEntity(
+            id = "consultant-1",
+            passwordHash = "not-used",
+            accountState = AccountState.ADMIN_SUSPENDED
+        )
+
+        val error = assertThrows<IllegalArgumentException> {
+            orderService.createOrder(
+                "user-1",
+                CreateOrderRequest(
+                    projectId = "project-1",
+                    institutionProjectId = "inst-proj-1",
+                    doctorId = "doctor-1",
+                    consultantId = "consultant-1"
+                )
+            )
+        }
+
+        assertEquals("所选医美顾问账号不可用，暂不可预约", error.message)
+        verifyOrder {
+            userRepository.findByIdForUpdate("consultant-1")
+            userRepository.findByIdForUpdate("doctor-1")
+        }
+        verify(exactly = 0) { institutionProjectRepository.findIdentityById(any()) }
+        verify(exactly = 0) { doctorInstitutionRelationshipService.requireActiveRelationshipForUpdate(any(), any()) }
+        verify(exactly = 0) { institutionConsultantService.requireApprovedConsultant(any(), any()) }
+        verify(exactly = 0) { orderRepository.save(any()) }
+        verify(exactly = 0) { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -1596,6 +1665,7 @@ class OrderServiceTest {
         institutionRepository,
         doctorProjectRepository,
         doctorRepository,
+        userRepository,
         orderStatusLogService,
         couponService,
         settlementService,

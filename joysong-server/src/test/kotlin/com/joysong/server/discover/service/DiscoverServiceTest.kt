@@ -78,13 +78,13 @@ class DiscoverServiceTest {
         every { doctorProjectRepository.findPublicByInstitutionProjectIds(listOf("ip-1")) } returns listOf(
             publicBinding("doctor-1", "ip-1", "700")
         )
-        every { doctorRepository.findAllById(listOf("doctor-1")) } returns listOf(DoctorEntity("doctor-1", "Doctor"))
+        every { doctorRepository.findAllPublicById(listOf("doctor-1")) } returns listOf(DoctorEntity("doctor-1", "Doctor"))
 
         val result = service.getDoctorsByInstitutionProject("ip-1")
 
         assertEquals(listOf("doctor-1"), result.map { it.id })
         assertEquals(BigDecimal("700"), result.single().projectPrice)
         verify(exactly = 1) { doctorProjectRepository.findPublicByInstitutionProjectIds(listOf("ip-1")) }
-        verify(exactly = 1) { doctorRepository.findAllById(listOf("doctor-1")) }
+        verify(exactly = 1) { doctorRepository.findAllPublicById(listOf("doctor-1")) }
     }
 }
