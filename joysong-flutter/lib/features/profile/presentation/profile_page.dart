@@ -6,6 +6,7 @@ import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/routing/app_router.dart';
 import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/auth/domain/auth_models.dart';
+import 'package:joysong_flutter/features/consultant_orders/domain/consultant_orders_repository.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
@@ -19,6 +20,7 @@ import 'package:joysong_flutter/features/profile/presentation/profile_support_pa
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
 import 'package:joysong_flutter/features/social/domain/social_repository.dart';
 import 'package:joysong_flutter/features/professional_management/data/professional_repository.dart';
+import 'package:joysong_flutter/features/professional_management/presentation/professional_pages.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({
@@ -27,12 +29,15 @@ class ProfilePage extends StatefulWidget {
     this.discoverRepository,
     this.socialRepository,
     this.professionalRepository,
+    this.consultantOrdersRepository,
+    this.onOpenConsultantOrderServiceConversation,
     this.onOrders,
     this.onWallet,
     this.onDiaries,
     this.onJourney,
     this.onCustomerService,
     this.onAccountSecurity,
+    this.onOpenDirectMessage,
     this.onOpenFavorite,
     this.onSwitchAccount,
     this.onProfileUpdated,
@@ -45,12 +50,16 @@ class ProfilePage extends StatefulWidget {
   final DiscoverRepository? discoverRepository;
   final SocialRepository? socialRepository;
   final ProfessionalRepository? professionalRepository;
+  final ConsultantOrdersRepository? consultantOrdersRepository;
+  final ConsultantOrderServiceConversationLauncher?
+      onOpenConsultantOrderServiceConversation;
   final VoidCallback? onOrders;
   final VoidCallback? onWallet;
   final VoidCallback? onDiaries;
   final VoidCallback? onJourney;
   final VoidCallback? onCustomerService;
   final VoidCallback? onAccountSecurity;
+  final DoctorOrderDirectMessageOpener? onOpenDirectMessage;
   final Future<void> Function(FavoriteItem item)? onOpenFavorite;
   final Future<void> Function(BuildContext context)? onSwitchAccount;
   final Future<void> Function(AuthUser user)? onProfileUpdated;
@@ -327,11 +336,15 @@ class _ProfilePageState extends State<ProfilePage> {
         builder: (_) => ManagementCenterPage(
           repository: widget.identityRepository!,
           discoverRepository: widget.discoverRepository!,
+          consultantOrdersRepository: widget.consultantOrdersRepository,
+          onOpenConsultantOrderServiceConversation:
+              widget.onOpenConsultantOrderServiceConversation,
           institutionImagePicker:
               widget.socialRepository == null ? null : _pickInstitutionImage,
           doctorImagePicker:
               widget.socialRepository == null ? null : _pickDoctorImage,
           professionalRepository: widget.professionalRepository,
+          onOpenDirectMessage: widget.onOpenDirectMessage,
         ),
       ),
     );

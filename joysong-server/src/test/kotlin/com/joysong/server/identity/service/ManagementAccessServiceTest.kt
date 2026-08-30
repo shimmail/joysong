@@ -28,6 +28,7 @@ class ManagementAccessServiceTest {
         assertTrue("ADMIN" in context.activeRoles)
         assertTrue("CONSULTANT" in context.activeRoles)
         assertTrue("institution-1" in context.consultantInstitutionIds)
+        assertTrue(context.canAccessConsultantOrderWorkbench)
         assertTrue(context.canApplyToInstitutions)
     }
 
@@ -42,6 +43,7 @@ class ManagementAccessServiceTest {
         val context = ManagementAccessService(jdbcTemplate).contextFor("admin-only", "ADMIN")
 
         assertEquals(setOf("ADMIN"), context.activeRoles.toSet())
+        assertFalse(context.canAccessConsultantOrderWorkbench)
         assertFalse(context.canApplyToInstitutions)
     }
 
@@ -120,6 +122,7 @@ class ManagementAccessServiceTest {
         assertFalse(context.canManageArticles)
         assertFalse(context.canManageSplitConfigs)
         assertFalse(context.canManageOrders)
+        assertFalse(context.canAccessConsultantOrderWorkbench)
         assertFalse(context.canManageInstitutionProjects)
         assertFalse(context.canApplyToInstitutions)
         assertFalse(context.canSubmitPlatformProjectRequests)
@@ -156,6 +159,7 @@ class ManagementAccessServiceTest {
         assertFalse(context.canManageDoctors)
         assertFalse(context.canManageInstitutionProjects)
         assertFalse(context.canManageOrders)
+        assertTrue(context.canAccessConsultantOrderWorkbench)
         assertFalse(context.canManageSplitConfigs)
         assertTrue("institution-1" in context.visibleInstitutionIds)
         assertTrue("institution-1" in context.consultantInstitutionIds)
