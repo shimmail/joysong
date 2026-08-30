@@ -113,7 +113,7 @@
    google.client-id=Web客户端ID.apps.googleusercontent.com
    ```
 
-4. 使用项目中的 [Nginx 配置模板](../joysong-server/deploy/nginx/joysong-api.conf)，替换域名、TLS 证书路径、上传目录后执行 `nginx -t`。Nginx 官方文档见 [nginx.org](https://nginx.org/en/docs/)。
+4. 使用项目中的 [Nginx 配置模板](../../joysong-server/deploy/nginx/joysong-api.conf)，替换域名、TLS 证书路径、上传目录后执行 `nginx -t`。Nginx 官方文档见 [nginx.org](https://nginx.org/en/docs/)。
 
 ## 3. 服务端必配项
 
