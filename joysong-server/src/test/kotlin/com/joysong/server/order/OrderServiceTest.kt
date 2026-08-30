@@ -1,5 +1,6 @@
 package com.joysong.server.order
 
+import com.joysong.server.catalog.service.CatalogCounterCacheInvalidator
 import com.joysong.server.coupon.service.CouponService
 import com.joysong.server.config.OrderSplitProperties
 import com.joysong.server.config.TravelGroundServicePricingProperties
@@ -77,6 +78,7 @@ class OrderServiceTest {
     @MockK private lateinit var doctorInstitutionRelationshipService: DoctorInstitutionRelationshipService
     @MockK(relaxed = true) private lateinit var businessNotificationService: BusinessNotificationService
     @MockK(relaxed = true) private lateinit var orderBusinessNotificationDispatcher: OrderBusinessNotificationDispatcher
+    @MockK(relaxed = true) private lateinit var counterCacheInvalidator: CatalogCounterCacheInvalidator
     private val institutionProjectDetailResolver = InstitutionProjectDetailResolver()
 
     private lateinit var orderService: OrderService
@@ -124,10 +126,14 @@ class OrderServiceTest {
             doctorInstitutionRelationshipService = doctorInstitutionRelationshipService,
             travelGroundServicePricing = travelGroundServicePricing(),
             businessNotificationService = businessNotificationService,
-            orderBusinessNotificationDispatcher = orderBusinessNotificationDispatcher
+            orderBusinessNotificationDispatcher = orderBusinessNotificationDispatcher,
+            counterCacheInvalidator = counterCacheInvalidator
         )
         // 默认 stub：logTransition 不做任何事
         justRun { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) }
+        every { institutionRepository.incrementCaseCount(any()) } returns 1
+        every { projectRepository.incrementCaseCount(any()) } returns 1
+        every { institutionProjectRepository.incrementCaseCount(any()) } returns 1
         every { institutionConsultantService.requireApprovedConsultant(any(), any()) } returns
             InstitutionConsultant(
                 id = "consultant-1",
@@ -898,6 +904,7 @@ class OrderServiceTest {
         verify { orderRepository.save(capture(saved)) }
         assertNotNull(saved.captured.settlementAt)
         verify { settlementService.saveSettlement("o1", saved.captured.settlementAt) }
+        verifyCaseCountersIncremented()
         verify(exactly = 1) {
             businessNotificationService.orderCompleted("o1", "consultant-1", "doctor-1", "inst-1")
         }
@@ -934,6 +941,7 @@ class OrderServiceTest {
             )
         }
         verify(exactly = 0) { settlementService.saveSettlement(any(), any()) }
+        verifyCaseCountersIncremented()
         verify(exactly = 1) {
             businessNotificationService.orderCompleted(
                 "travel-completion", "consultant-1", "doctor-1", "inst-1"
@@ -950,6 +958,58 @@ class OrderServiceTest {
         assertThrows<IllegalArgumentException> {
             orderService.confirmCompletion("o1", "user-2")
         }
+
+        verifyCaseCountersNotIncremented()
+    }
+
+    @Test
+    fun `confirmCompletion 非法状态不递增案例数`() {
+        val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.PENDING_PAYMENT.value)
+        every { orderRepository.findByIdForUpdate("o1") } returns order
+
+        assertThrows<IllegalArgumentException> {
+            orderService.confirmCompletion("o1", "user-1")
+        }
+
+        verifyCaseCountersNotIncremented()
+    }
+
+    @Test
+    fun `confirmCompletion 争议回流后再次完成不重复递增案例数`() {
+        val firstCompletedAt = LocalDateTime.of(2026, 8, 20, 10, 0)
+        val order = createTestOrder(
+            "o1",
+            "user-1",
+            status = OrderStatusEnum.DISPUTE_MEDIATION.value
+        ).copy(completedAt = firstCompletedAt)
+        every { orderRepository.findByIdForUpdate("o1") } returns order
+        every { orderRepository.save(any()) } answers { firstArg() }
+        every { settlementService.saveSettlement("o1", any()) } returns mockk()
+
+        val response = orderService.confirmCompletion("o1", "user-1")
+
+        assertEquals(OrderStatusEnum.COMPLETED.value, response.status)
+        assertEquals(firstCompletedAt, response.completedAt)
+        verifyCaseCountersNotIncremented()
+    }
+
+    @Test
+    fun `confirmCompletion 历史订单缺少机构项目ID时按机构和项目恢复关联`() {
+        val order = createTestOrder(
+            "o1",
+            "user-1",
+            status = OrderStatusEnum.PENDING_COMPLETION.value
+        ).copy(institutionProjectId = "")
+        every { orderRepository.findByIdForUpdate("o1") } returns order
+        every {
+            institutionProjectRepository.findByInstitutionIdAndProjectId("inst-1", "project-1")
+        } returns testInstitutionProject
+        every { orderRepository.save(any()) } answers { firstArg() }
+        every { settlementService.saveSettlement("o1", any()) } returns mockk()
+
+        orderService.confirmCompletion("o1", "user-1")
+
+        verifyCaseCountersIncremented()
     }
 
     // ---- 取消订单 ----
@@ -1501,9 +1561,29 @@ class OrderServiceTest {
         institutionId = "inst-1",
         consultantId = "consultant-1",
         doctorId = "doctor-1",
+        institutionProjectId = "inst-proj-1",
         verifyCode = "123456",
         orderNo = "JOY202607311200001234"
     )
+
+    private fun verifyCaseCountersIncremented() {
+        verify(exactly = 1) { institutionRepository.incrementCaseCount("inst-1") }
+        verify(exactly = 1) { projectRepository.incrementCaseCount("project-1") }
+        verify(exactly = 1) { institutionProjectRepository.incrementCaseCount("inst-proj-1") }
+        verifyOrder {
+            institutionRepository.incrementCaseCount("inst-1")
+            institutionProjectRepository.incrementCaseCount("inst-proj-1")
+            projectRepository.incrementCaseCount("project-1")
+        }
+        verify(exactly = 1) { counterCacheInvalidator.evictCaseCountersAfterCommit() }
+    }
+
+    private fun verifyCaseCountersNotIncremented() {
+        verify(exactly = 0) { institutionRepository.incrementCaseCount(any()) }
+        verify(exactly = 0) { projectRepository.incrementCaseCount(any()) }
+        verify(exactly = 0) { institutionProjectRepository.incrementCaseCount(any()) }
+        verify(exactly = 0) { counterCacheInvalidator.evictCaseCountersAfterCommit() }
+    }
 
     private fun orderService(
         businessNotificationService: BusinessNotificationService,
@@ -1530,6 +1610,7 @@ class OrderServiceTest {
         ),
         businessNotificationService = businessNotificationService,
         orderBusinessNotificationDispatcher = orderBusinessNotificationDispatcher,
+        counterCacheInvalidator = counterCacheInvalidator,
         refundExecutionService = refundExecutionService
     )
 

@@ -52,17 +52,17 @@ class DiscoverSearchServiceTest {
         val institutionProjectRepository = mockk<InstitutionProjectRepository>()
         val doctorRepository = mockk<DoctorRepository>()
         val projects = listOf(
-            ProjectEntity("project-unavailable", "Unavailable", rating = BigDecimal("5.0")),
-            ProjectEntity("project-available", "Available", rating = BigDecimal("4.0"))
+            ProjectEntity("project-unavailable", "Unavailable", rating = BigDecimal("5.0"), caseCount = 91),
+            ProjectEntity("project-available", "Available", rating = BigDecimal("4.0"), caseCount = 41)
         )
         val offerings = listOf(
             InstitutionProjectEntity(
                 id = "ip-unavailable", institutionId = "institution-1", projectId = "project-unavailable",
-                price = BigDecimal("100"), salesCount = 999
+                price = BigDecimal("100"), salesCount = 999, caseCount = 99
             ),
             InstitutionProjectEntity(
                 id = "ip-available", institutionId = "institution-1", projectId = "project-available",
-                price = BigDecimal("1000"), salesCount = 10
+                price = BigDecimal("1000"), salesCount = 10, caseCount = 13
             )
         )
         every { projectRepository.findAll() } returns projects
@@ -93,6 +93,8 @@ class DiscoverSearchServiceTest {
         assertEquals(listOf("project-available"), result.projects.map { it.id })
         assertEquals(BigDecimal("700"), result.projects.single().referencePrice)
         assertEquals(BigDecimal("700"), result.projects.single().institutionProjects.single().price)
+        assertEquals(41, result.projects.single().caseCount)
+        assertEquals(13, result.projects.single().institutionProjects.single().caseCount)
     }
 
     @Test

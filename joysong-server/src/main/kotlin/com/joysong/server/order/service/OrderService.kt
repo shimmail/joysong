@@ -1,5 +1,6 @@
 package com.joysong.server.order.service
 
+import com.joysong.server.catalog.service.CatalogCounterCacheInvalidator
 import com.joysong.server.common.apiSlice
 import com.joysong.server.coupon.service.CouponService
 import com.joysong.server.refund.entity.RefundEntity
@@ -68,11 +69,18 @@ class OrderService(
     private val travelGroundServicePricing: TravelGroundServicePricing,
     private val businessNotificationService: BusinessNotificationService,
     private val orderBusinessNotificationDispatcher: OrderBusinessNotificationDispatcher,
+    private val counterCacheInvalidator: CatalogCounterCacheInvalidator,
     private val refundExecutionService: RefundExecutionService? = null
 ) {
     private data class LockedBookableDoctorProject(
         val institutionProject: InstitutionProjectEntity,
         val doctorProject: DoctorProjectEntity
+    )
+
+    private data class CompletionCaseTarget(
+        val institutionId: String,
+        val projectId: String,
+        val institutionProjectId: String
     )
 
     private val secureRandom = SecureRandom()
@@ -485,14 +493,17 @@ class OrderService(
             require(order.status == OrderStatusEnum.SERVICE_ACTIVE.value) {
                 "当前状态[${order.status}]不允许确认完成"
             }
+            val caseTarget = if (order.completedAt == null) completionCaseTarget(order) else null
             val now = LocalDateTime.now()
             val completed = orderRepository.save(
                 order.copy(
                     status = OrderStatusEnum.COMPLETED.value,
-                    completedAt = now,
+                    institutionProjectId = caseTarget?.institutionProjectId ?: order.institutionProjectId,
+                    completedAt = order.completedAt ?: now,
                     updatedAt = now
                 )
             )
+            caseTarget?.let(::incrementCompletionCaseCounts)
             orderStatusLogService.logTransition(
                 orderId = orderId,
                 fromStatus = OrderStatusEnum.SERVICE_ACTIVE.value,
@@ -516,16 +527,19 @@ class OrderService(
         require(currentStatus.canTransitionTo(OrderStatusEnum.COMPLETED)) {
             "当前状态[${currentStatus.value}]不允许确认完成"
         }
+        val caseTarget = if (order.completedAt == null) completionCaseTarget(order) else null
         val settlementAt = LocalDateTime.now().plusDays(30)
         val now = LocalDateTime.now()
         val updated = orderRepository.save(
             order.copy(
                 status = OrderStatusEnum.COMPLETED.value,
+                institutionProjectId = caseTarget?.institutionProjectId ?: order.institutionProjectId,
                 settlementAt = settlementAt,
-                completedAt = now,
+                completedAt = order.completedAt ?: now,
                 updatedAt = now
             )
         )
+        caseTarget?.let(::incrementCompletionCaseCounts)
         orderStatusLogService.logTransition(
             orderId = orderId,
             fromStatus = currentStatus.value,
@@ -543,6 +557,28 @@ class OrderService(
             )
         }
         return OrderResponse.from(updated)
+    }
+
+    private fun completionCaseTarget(order: OrderEntity): CompletionCaseTarget {
+        require(order.institutionId.isNotBlank()) { "ORDER_INSTITUTION_MISSING" }
+        require(order.projectId.isNotBlank()) { "ORDER_PROJECT_MISSING" }
+        val institutionProjectId = order.institutionProjectId.takeIf(String::isNotBlank)
+            ?: institutionProjectRepository.findByInstitutionIdAndProjectId(order.institutionId, order.projectId)?.id
+            ?: throw IllegalArgumentException("ORDER_INSTITUTION_PROJECT_MISSING")
+        return CompletionCaseTarget(order.institutionId, order.projectId, institutionProjectId)
+    }
+
+    private fun incrementCompletionCaseCounts(target: CompletionCaseTarget) {
+        check(institutionRepository.incrementCaseCount(target.institutionId) == 1) {
+            "ORDER_INSTITUTION_CASE_INCREMENT_FAILED"
+        }
+        check(institutionProjectRepository.incrementCaseCount(target.institutionProjectId) == 1) {
+            "ORDER_INSTITUTION_PROJECT_CASE_INCREMENT_FAILED"
+        }
+        check(projectRepository.incrementCaseCount(target.projectId) == 1) {
+            "ORDER_PROJECT_CASE_INCREMENT_FAILED"
+        }
+        counterCacheInvalidator.evictCaseCountersAfterCommit()
     }
 
     /**

@@ -17,6 +17,7 @@ data class RecommendedInstitutionProjectDto(
     val coverImage: String,
     val category: String,
     val salesCount: Int,
+    val caseCount: Int = 0,
     val description: String,
     val rating: BigDecimal,
     val reviewCount: Int,

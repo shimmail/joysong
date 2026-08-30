@@ -82,6 +82,37 @@ class DiscoverDetailServiceTest {
     }
 
     @Test
+    fun `doctor detail institution project summary exposes institution project case count`() {
+        val institutionProject = InstitutionProjectEntity(
+            id = "ip-1",
+            institutionId = "institution-1",
+            projectId = "project-1",
+            price = BigDecimal("1000"),
+            caseCount = 23
+        )
+        every { doctorRepository.findById("doctor-1") } returns Optional.of(
+            DoctorEntity(id = "doctor-1", name = "Doctor")
+        )
+        every { doctorProjectRepository.findPublicByDoctorId("doctor-1") } returns listOf(
+            publicBinding("doctor-1", "ip-1")
+        )
+        every { institutionProjectRepository.findAllById(listOf("ip-1")) } returns listOf(institutionProject)
+        every { projectRepository.findAllById(listOf("project-1")) } returns listOf(
+            ProjectEntity(id = "project-1", name = "Project", caseCount = 82)
+        )
+        every { institutionRepository.findAllById(listOf("institution-1")) } returns listOf(
+            InstitutionEntity(id = "institution-1", name = "Institution")
+        )
+        every { diaryRepository.findPublishedByDoctorId("doctor-1") } returns emptyList()
+        every { doctorInstitutionService.institutionsFor("doctor-1") } returns emptyList()
+        every { reviewRepository.findByDoctorIdAndTargetType("doctor-1", "INSTITUTION") } returns emptyList()
+
+        val result = service.getDoctorDetail("doctor-1")!!
+
+        assertEquals(23, result.institutionProjects.single().caseCount)
+    }
+
+    @Test
     fun `platform project detail is omitted when no institution offering has an eligible doctor`() {
         val institutionProject = InstitutionProjectEntity(
             id = "ip-unavailable",
@@ -210,7 +241,8 @@ class DiscoverDetailServiceTest {
             id = "ip-priced",
             institutionId = "institution-1",
             projectId = "project-1",
-            price = BigDecimal("1000")
+            price = BigDecimal("1000"),
+            caseCount = 31
         )
         val unboundProject = InstitutionProjectEntity(
             id = "ip-unbound",
@@ -223,7 +255,7 @@ class DiscoverDetailServiceTest {
         every { institutionProjectRepository.findByInstitutionId("institution-1") } returns
             listOf(pricedProject, unboundProject)
         every { projectRepository.findAllById(listOf("project-1")) } returns listOf(
-            ProjectEntity("project-1", "Priced Project")
+            ProjectEntity("project-1", "Priced Project", caseCount = 74)
         )
         every {
             doctorProjectRepository.findPublicByInstitutionProjectIds(listOf("ip-priced", "ip-unbound"))
@@ -239,5 +271,6 @@ class DiscoverDetailServiceTest {
 
         assertEquals(listOf("ip-priced"), result.projects.map { it.institutionProjectId })
         assertEquals(BigDecimal("700"), result.projects.single().price)
+        assertEquals(31, result.projects.single().caseCount)
     }
 }

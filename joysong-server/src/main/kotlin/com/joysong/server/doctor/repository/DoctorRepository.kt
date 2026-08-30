@@ -18,6 +18,16 @@ interface DoctorRepository : JpaRepository<DoctorEntity, String> {
     @Query(
         """
         UPDATE DoctorEntity doctor
+        SET doctor.consultationCount = COALESCE(doctor.consultationCount, 0) + 1
+        WHERE doctor.id = :id AND doctor.deletedAt IS NULL
+        """
+    )
+    fun incrementConsultationCount(@Param("id") id: String): Int
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE DoctorEntity doctor
         SET doctor.name = :name,
             doctor.title = :title,
             doctor.bio = :bio,

@@ -149,6 +149,7 @@ class DiscoverSearchService(
                     coverImage = effective.coverImage,
                     images = effective.images,
                     salesCount = offering.salesCount,
+                    caseCount = offering.caseCount,
                     isActive = offering.isActive
                 )
             }.filterNotNull()
@@ -202,6 +203,7 @@ class DiscoverSearchService(
                 coverImage = project.coverImage, images = project.images,
                 referencePrice = offerings.minOf { it.price }, currency = project.currency,
                 slogan = project.slogan, detailContent = project.detailContent, salesCount = project.salesCount,
+                caseCount = project.caseCount,
                 rating = project.rating, reviewCount = project.reviewCount, institutionProjects = offerings
             )
         }.sortedWith(compareByDescending<ProjectWithInstitutionsResponse> { it.rating }.thenByDescending { it.reviewCount })

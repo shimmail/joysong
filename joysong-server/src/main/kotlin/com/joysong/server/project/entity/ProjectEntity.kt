@@ -28,6 +28,7 @@ data class ProjectEntity(
     @Column(name = "sales_count") val salesCount: Int = 0,
     val rating: BigDecimal = BigDecimal("4.5"),
     @Column(name = "review_count") val reviewCount: Int = 0,
+    @Column(name = "case_count", nullable = false, updatable = false) val caseCount: Int = 0,
     @Column(name = "created_at") val createdAt: LocalDateTime = LocalDateTime.now(),
     @Column(name = "updated_at") val updatedAt: LocalDateTime? = null,
     @Column(name = "deleted_at") var deletedAt: LocalDateTime? = null

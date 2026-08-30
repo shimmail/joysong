@@ -41,6 +41,9 @@ data class InstitutionProjectEntity(
     @Column(name = "review_count")
     val reviewCount: Int? = null,
 
+    @Column(name = "case_count", nullable = false, updatable = false)
+    val caseCount: Int = 0,
+
     @Column(name = "tags", length = 500)
     val tags: String? = null,
 

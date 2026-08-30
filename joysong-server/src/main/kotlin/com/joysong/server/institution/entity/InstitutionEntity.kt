@@ -34,7 +34,7 @@ data class InstitutionEntity(
     val tags: String = "",
     @Column(name = "contact_phone") val contactPhone: String = "",
     @Column(name = "business_hours") val businessHours: String = "",
-    @Column(name = "case_count") val caseCount: Int = 0,
+    @Column(name = "case_count", updatable = false) val caseCount: Int = 0,
     @Column(name = "created_at") val createdAt: LocalDateTime = LocalDateTime.now(),
     @Column(name = "updated_at") val updatedAt: LocalDateTime? = null,
     @Column(name = "deleted_at") var deletedAt: LocalDateTime? = null

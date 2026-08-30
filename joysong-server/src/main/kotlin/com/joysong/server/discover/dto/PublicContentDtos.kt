@@ -41,6 +41,7 @@ data class ProjectResponse(
     val slogan: String,
     val detailContent: String?,
     val salesCount: Int,
+    val caseCount: Int,
     val rating: BigDecimal,
     val reviewCount: Int
 )
@@ -152,6 +153,7 @@ data class InstitutionProjectResponse(
     val coverImage: String,
     val images: String,
     val salesCount: Int,
+    val caseCount: Int,
     val isActive: Boolean
 )
 
@@ -179,6 +181,7 @@ fun ProjectEntity.toResponse() = ProjectResponse(
     slogan = slogan,
     detailContent = detailContent,
     salesCount = salesCount,
+    caseCount = caseCount,
     rating = rating,
     reviewCount = reviewCount
 )
@@ -290,6 +293,7 @@ fun InstitutionProjectEntity.toResponse() = InstitutionProjectResponse(
     coverImage = coverImage.orEmpty(),
     images = images.orEmpty(),
     salesCount = salesCount,
+    caseCount = caseCount,
     isActive = isActive
 )
 
