@@ -90,10 +90,12 @@ class HomeServiceTest {
     fun `recommended projects use sales ordered query and batch load relations`() {
         val institutionProject = InstitutionProjectEntity(
             id = "ip-1", institutionId = "institution-1", projectId = "project-1",
-            price = BigDecimal("1000"), salesCount = 9
+            price = BigDecimal("1000"), salesCount = 9, caseCount = 29
         )
         every { institutionProjectRepository.findByIsActiveTrueOrderBySalesCountDesc() } returns listOf(institutionProject)
-        every { projectRepository.findAllById(listOf("project-1")) } returns listOf(ProjectEntity("project-1", "Project"))
+        every { projectRepository.findAllById(listOf("project-1")) } returns listOf(
+            ProjectEntity("project-1", "Project", caseCount = 92)
+        )
         every { institutionRepository.findAllById(listOf("institution-1")) } returns listOf(InstitutionEntity("institution-1", "Institution"))
         every { doctorProjectRepository.findPublicByInstitutionProjectIds(listOf("ip-1")) } returns listOf(
             publicBinding("doctor-1", "ip-1", "project-1", "800")
@@ -103,6 +105,7 @@ class HomeServiceTest {
 
         assertEquals(1, result.size)
         assertEquals("ip-1", result.single().institutionProjectId)
+        assertEquals(29, result.single().caseCount)
         verify(exactly = 1) { institutionProjectRepository.findByIsActiveTrueOrderBySalesCountDesc() }
         verify(exactly = 0) { institutionProjectRepository.findTop8ByIsActiveTrueOrderBySalesCountDesc() }
         verify(exactly = 0) { institutionProjectRepository.findAll() }

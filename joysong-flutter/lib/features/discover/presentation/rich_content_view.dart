@@ -222,6 +222,13 @@ List<InlineSpan> _inlineSpans(
   TapGestureRecognizer Function(Uri uri) recognizerFor,
 ) {
   final source = markup
+      .replaceAllMapped(
+        RegExp(
+          r'</\s*h([1-4])\s*>(?:\s|&nbsp;|&#0*32;|&#x0*20;)*<\s*p\b[^>]*>',
+          caseSensitive: false,
+        ),
+        (match) => '</h${match.group(1)}>',
+      )
       .replaceAll(RegExp(r'<\s*br\s*\/?>', caseSensitive: false), '\n')
       .replaceAll(
           RegExp(r'<\s*blockquote\b[^>]*>', caseSensitive: false), '\n“')

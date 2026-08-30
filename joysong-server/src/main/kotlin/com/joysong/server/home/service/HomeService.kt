@@ -103,6 +103,7 @@ class HomeService(
                 coverImage = effective.coverImage,
                 category = effective.category,
                 salesCount = ip.salesCount,
+                caseCount = ip.caseCount,
                 description = effective.description,
                 rating = effective.rating,
                 reviewCount = effective.reviewCount,

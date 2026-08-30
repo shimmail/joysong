@@ -22,6 +22,7 @@ class InstitutionConsultantService(
         WHERE im.member_role = 'CONSULTANT'
           AND im.status = 'APPROVED'
           AND im.revoked_at IS NULL
+          AND u.account_state = 'ACTIVE'
           AND u.deleted_at IS NULL
           AND i.deleted_at IS NULL
           AND u.nickname IS NOT NULL

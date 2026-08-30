@@ -537,7 +537,7 @@ class AgentCatalogServiceTest {
         assertFalse(filtered.context.contains("丙机构"))
         verify(exactly = 0) { discoverSearchService.search(any<DiscoverSearchRequest>()) }
         verify(exactly = 0) { institutionRepository.findAll() }
-        verify(exactly = 0) { doctorRepository.findAll() }
+        verify(exactly = 0) { doctorRepository.findAllPublic() }
         verify(exactly = 0) { projectRepository.findAll() }
     }
 
@@ -1082,7 +1082,7 @@ class AgentCatalogServiceTest {
         doctors: List<DoctorEntity> = emptyList()
     ) {
         every { institutionRepository.findAll() } returns institutions
-        every { doctorRepository.findAll() } returns doctors
+        every { doctorRepository.findAllPublic() } returns doctors
         every { projectRepository.findAll() } returns emptyList()
         every { institutionProjectRepository.findAll() } returns emptyList()
         every { discoverSearchService.citiesMentionedIn(any()) } returns emptyList()

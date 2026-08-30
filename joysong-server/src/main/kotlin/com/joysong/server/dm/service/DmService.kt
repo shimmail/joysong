@@ -1,5 +1,6 @@
 package com.joysong.server.dm.service
 
+import com.joysong.server.catalog.service.CatalogCounterCacheInvalidator
 import com.joysong.server.dm.dto.DmConversationResponse
 import com.joysong.server.dm.dto.DmMessageResponse
 import com.joysong.server.dm.dto.toResponse
@@ -7,6 +8,7 @@ import com.joysong.server.dm.entity.DmConversationEntity
 import com.joysong.server.dm.entity.DmMessageEntity
 import com.joysong.server.dm.repository.DmConversationRepository
 import com.joysong.server.dm.repository.DmMessageRepository
+import com.joysong.server.doctor.repository.DoctorRepository
 import com.joysong.server.identity.service.IdentityAuthorizationService
 import com.joysong.server.user.repository.UserRepository
 import org.springframework.data.domain.PageRequest
@@ -26,7 +28,9 @@ class DmService(
     private val messageRepository: DmMessageRepository,
     private val userRepository: UserRepository,
     private val identityAuthorizationService: IdentityAuthorizationService,
-    private val orderServiceConversationService: OrderServiceConversationService
+    private val orderServiceConversationService: OrderServiceConversationService,
+    private val doctorRepository: DoctorRepository,
+    private val counterCacheInvalidator: CatalogCounterCacheInvalidator
 ) {
 
     /**
@@ -134,12 +138,19 @@ class DmService(
         val conversation = conversationRepository.findByIdForUpdate(conversationId)
             ?: throw IllegalArgumentException("会话不存在")
 
+        val isFirstMessage = conversation.lastMessageAt == null
+        var consultationDoctorId: String? = null
         when (conversation.conversationType) {
             DmConversationEntity.ORDER_SERVICE ->
                 orderServiceConversationService.requireSendAccess(conversation, senderId)
             DmConversationEntity.DIRECT -> {
                 requireDirectParticipant(conversation, senderId, "无权发送消息到该会话")
                 val directReceiverId = conversation.otherParticipant(senderId)
+                consultationDoctorId = directReceiverId.takeIf { receiverId ->
+                    doctorRepository.existsById(receiverId) &&
+                        !identityAuthorizationService.hasActiveProfessionalRole(senderId) &&
+                        isFirstMessage
+                }
                 if (!identityAuthorizationService.hasActiveProfessionalRole(directReceiverId)) {
                     val receiverHasReplied = messageRepository.existsByConversationIdAndSenderId(
                         conversationId,
@@ -156,20 +167,21 @@ class DmService(
         }
 
         // 创建消息
+        val now = LocalDateTime.now()
         val message = DmMessageEntity(
             id = UUID.randomUUID().toString(),
             conversationId = conversationId,
             senderId = senderId,
             content = content,
             messageType = messageType,
-            createdAt = LocalDateTime.now()
+            createdAt = now
         )
         messageRepository.save(message)
 
         // 更新会话的 lastMessage 和 lastMessageAt
         conversation.lastMessage = if (messageType == MESSAGE_TYPE_IMAGE) IMAGE_MESSAGE_SUMMARY else content
-        conversation.lastMessageAt = LocalDateTime.now()
-        conversation.updatedAt = LocalDateTime.now()
+        conversation.lastMessageAt = now
+        conversation.updatedAt = now
 
         // 更新对方的 unread 计数
         if (conversation.userAId == senderId) {
@@ -179,6 +191,13 @@ class DmService(
         }
 
         conversationRepository.save(conversation)
+
+        consultationDoctorId?.let { doctorId ->
+            check(doctorRepository.incrementConsultationCount(doctorId) == 1) {
+                "DOCTOR_CONSULTATION_INCREMENT_FAILED"
+            }
+            counterCacheInvalidator.evictDoctorCountersAfterCommit()
+        }
 
         return message.toResponse()
     }

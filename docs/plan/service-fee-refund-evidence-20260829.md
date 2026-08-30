@@ -41,7 +41,7 @@
 
 ## 5. 数据模型
 
-新增迁移 `V37__add_refund_evidence_files.sql`，创建：
+新增迁移 `V38__add_refund_evidence_files.sql`，创建：
 
 ```sql
 CREATE TABLE refund_evidence_files (
@@ -188,12 +188,12 @@ multipart 分支只接受 `paymentFlow=TRAVEL_GROUND_SERVICE_ONLY` 的本人订�
 
 ## 11. 迁移与数据库隔离
 
-- 迁移编号固定为 `V37`，不编辑冻结的 `B33__current_schema.sql`；
+- 迁移编号固定为 `V38`，不编辑冻结的 `B33__current_schema.sql`；
 - 在 worktree 中派生 `WORKTREE_ID=worktree_service_fee_refund_evidence`；
 - 数据库名使用 `myapp_worktree_worktree_service_fee_refund_evidence`；
 - Docker Compose 项目名使用 `myapp-worktree_service_fee_refund_evidence`；
 - 迁移前打印数据库主机和数据库名；
-- 在全新空数据库验证 B33 基线后依次应用 V34 至 V37；
+- 在全新空数据库验证 B33 基线后依次应用 V34 至 V38；
 - 仅允许清理名称以 `myapp_worktree_` 开头的测试数据库。
 
 ## 12. 测试策略
@@ -210,7 +210,7 @@ multipart 分支只接受 `paymentFlow=TRAVEL_GROUND_SERVICE_ONLY` 的本人订�
 - 管理员可读取关联文件，普通用户、错误退款 ID 和任意私有文件 ID 均不可读取；
 - 账户注销清理保留已绑定退款材料；
 - 原 JSON 和历史 `evidenceUrl` 行为兼容；
-- `V37` 在新空隔离数据库上成功应用并具备预期外键、索引和约束。
+- `V38` 在新空隔离数据库上成功应用并具备预期外键、索引和约束。
 
 Flutter 重点覆盖：
 

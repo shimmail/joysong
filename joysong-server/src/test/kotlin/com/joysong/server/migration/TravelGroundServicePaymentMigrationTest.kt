@@ -2,6 +2,8 @@ package com.joysong.server.migration
 
 import com.joysong.server.dm.repository.DmConversationRepository
 import com.joysong.server.dm.service.OrderServiceConversationService
+import com.joysong.server.identity.service.IdentityAuthorizationService
+import com.joysong.server.order.consultant.ConsultantOrderAccessPolicy
 import com.joysong.server.payment.domain.PaymentStatus
 import com.joysong.server.payment.entity.PaymentEventEntity
 import com.joysong.server.payment.repository.PaymentEventRepository
@@ -56,7 +58,11 @@ import java.util.concurrent.TimeUnit
 )
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
-@Import(OrderServiceConversationService::class)
+@Import(
+    OrderServiceConversationService::class,
+    ConsultantOrderAccessPolicy::class,
+    IdentityAuthorizationService::class
+)
 class TravelGroundServicePaymentMigrationTest {
 
     @TempDir

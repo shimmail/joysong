@@ -20,7 +20,7 @@
 - 提交成功后没有增、删、换附件接口；账户注销保留已绑定退款凭证，直到另行确定合规保留政策。
 - 管理员内容接口固定为 `GET /api/admin/refunds/{refundId}/evidence/{fileId}/content`，并返回 `Cache-Control: no-store`、`X-Content-Type-Options: nosniff` 与安全 UTF-8 inline 文件名。
 - 不新增原生多选、存储权限、Word/Excel/压缩包、病毒扫描、OCR、缩略图或对象存储签名 URL。
-- 迁移固定为 `V37__add_refund_evidence_files.sql`；不编辑 `B33__current_schema.sql`，不修改 `refunds.evidence_url`。
+- 迁移固定为 `V38__add_refund_evidence_files.sql`；不编辑 `B33__current_schema.sql`，不修改 `refunds.evidence_url`。
 - 当前 worktree 为 `worktree_service_fee_refund_evidence`；隔离数据库名固定为 `myapp_worktree_worktree_service_fee_refund_evidence`，若使用 Compose，项目名固定为 `myapp-worktree_service_fee_refund_evidence`。
 - 迁移前必须打印数据库主机与数据库名；不得连接共享开发库；不得删除或重置不以 `myapp_worktree_` 开头的数据库。
 - 每项功能按 RED → GREEN → REFACTOR；先跑最小相关测试，相关测试通过后每个技术栈最多运行一次全量检查，超过 10 分钟停止，不重复运行已通过的命令。
@@ -47,7 +47,7 @@
 
 ---
 
-### Task 1: 共享私有文件内核、V37 与退款凭证持久化
+### Task 1: 共享私有文件内核、V38 与退款凭证持久化
 
 **Files:**
 - Create: `joysong-server/src/main/kotlin/com/joysong/server/common/privatefile/PrivateFileModels.kt`
@@ -55,7 +55,7 @@
 - Modify: `joysong-server/src/main/kotlin/com/joysong/server/identity/service/PrivateIdentityFileService.kt`
 - Create: `joysong-server/src/main/kotlin/com/joysong/server/refund/dto/RefundEvidenceFileResponse.kt`
 - Create: `joysong-server/src/main/kotlin/com/joysong/server/refund/service/RefundEvidenceFileService.kt`
-- Create: `joysong-server/src/main/resources/db/migration/V37__add_refund_evidence_files.sql`
+- Create: `joysong-server/src/main/resources/db/migration/V38__add_refund_evidence_files.sql`
 - Create: `joysong-server/src/test/kotlin/com/joysong/server/common/privatefile/PrivateFileStorageServiceTransactionTest.kt`
 - Create: `joysong-server/src/test/kotlin/com/joysong/server/refund/service/RefundEvidenceFileServiceTest.kt`
 - Modify: `joysong-server/src/test/kotlin/com/joysong/server/identity/service/PrivateIdentityFileServiceTransactionTest.kt`
@@ -183,7 +183,7 @@ private val refundEvidencePolicy = PrivateFilePolicy(
 
 Normalize `jpeg` as an accepted extension for `image/jpeg` without changing the stored canonical extension. Register refund files with purpose and asset type `REFUND_EVIDENCE` and storage class `LOCAL_PRIVATE`. Never expose `storageKey` from the refund service.
 
-- [ ] **Step 4: Add V37 and the JDBC association service**
+- [ ] **Step 4: Add V38 and the JDBC association service**
 
 Create the migration exactly as follows:
 
@@ -228,7 +228,7 @@ Expected: all selected tests pass; no test leaves files outside its temporary di
 
 - [ ] **Step 6: Extend and run the fresh-database migration test**
 
-Rename the existing test to `fresh database applies B33 baseline through V37 refund evidence`. Assert Flyway history contains B33 and V34–V37; assert `refund_evidence_files` has primary key `file_id`, unique key `uk_refund_evidence_position`, index `idx_refund_evidence_refund`, and both named foreign keys.
+Rename the existing test to `fresh database applies B33 baseline through V38 refund evidence`. Assert Flyway history contains B33 and V34–V38; assert `refund_evidence_files` has primary key `file_id`, unique key `uk_refund_evidence_position`, index `idx_refund_evidence_refund`, and both named foreign keys.
 
 Before running, print the resolved isolated target and then run only the migration class:
 
@@ -247,7 +247,7 @@ Expected printed name: `myapp_worktree_worktree_service_fee_refund_evidence`. Ex
 - [ ] **Step 7: Commit Task 1**
 
 ```powershell
-git -c safe.directory=D:/code/kotlin/joysong/.worktrees/worktree_service_fee_refund_evidence add joysong-server/src/main/kotlin/com/joysong/server/common/privatefile joysong-server/src/main/kotlin/com/joysong/server/identity/service/PrivateIdentityFileService.kt joysong-server/src/main/kotlin/com/joysong/server/refund/dto/RefundEvidenceFileResponse.kt joysong-server/src/main/kotlin/com/joysong/server/refund/service/RefundEvidenceFileService.kt joysong-server/src/main/resources/db/migration/V37__add_refund_evidence_files.sql joysong-server/src/test/kotlin/com/joysong/server/common/privatefile joysong-server/src/test/kotlin/com/joysong/server/refund/service/RefundEvidenceFileServiceTest.kt joysong-server/src/test/kotlin/com/joysong/server/identity/service/PrivateIdentityFileServiceTransactionTest.kt joysong-server/src/test/kotlin/com/joysong/server/migration/BaselineMigrationIntegrationTest.kt
+git -c safe.directory=D:/code/kotlin/joysong/.worktrees/worktree_service_fee_refund_evidence add joysong-server/src/main/kotlin/com/joysong/server/common/privatefile joysong-server/src/main/kotlin/com/joysong/server/identity/service/PrivateIdentityFileService.kt joysong-server/src/main/kotlin/com/joysong/server/refund/dto/RefundEvidenceFileResponse.kt joysong-server/src/main/kotlin/com/joysong/server/refund/service/RefundEvidenceFileService.kt joysong-server/src/main/resources/db/migration/V38__add_refund_evidence_files.sql joysong-server/src/test/kotlin/com/joysong/server/common/privatefile joysong-server/src/test/kotlin/com/joysong/server/refund/service/RefundEvidenceFileServiceTest.kt joysong-server/src/test/kotlin/com/joysong/server/identity/service/PrivateIdentityFileServiceTransactionTest.kt joysong-server/src/test/kotlin/com/joysong/server/migration/BaselineMigrationIntegrationTest.kt
 git -c safe.directory=D:/code/kotlin/joysong/.worktrees/worktree_service_fee_refund_evidence commit -m "feat(server): persist private refund evidence"
 ```
 
@@ -1066,6 +1066,6 @@ git -c safe.directory=D:/code/kotlin/joysong/.worktrees/worktree_service_fee_ref
 - [ ] Flutter allows repeated one-file selection, removal before submit, no edits during submit, failure retention and read-only names afterward.
 - [ ] Admin image/PDF access uses authenticated blobs, revokes every object URL, and old links accept only absolute HTTP(S).
 - [ ] Account deletion retains bound refund evidence and its active media asset.
-- [ ] V37 passes against a fresh isolated database named `myapp_worktree_worktree_service_fee_refund_evidence`.
+- [ ] V38 passes against a fresh isolated database named `myapp_worktree_worktree_service_fee_refund_evidence`.
 - [ ] Focused tests, static checks and at most one bounded full check per stack have recorded outcomes.
 - [ ] API contract, guide and PlantUML match the code; final handoff reminds the maintainer to regenerate UML images manually.

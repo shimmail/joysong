@@ -11,6 +11,16 @@ import java.time.LocalDateTime
 
 interface DmConversationRepository : JpaRepository<DmConversationEntity, String> {
     @Query("""
+        SELECT conversation.orderId
+        FROM DmConversationEntity conversation
+        WHERE conversation.conversationType = 'ORDER_SERVICE'
+          AND conversation.orderId IN :orderIds
+    """)
+    fun findOrderServiceOrderIds(
+        @Param("orderIds") orderIds: Set<String>
+    ): List<String>
+
+    @Query("""
         SELECT conversation FROM DmConversationEntity conversation
         WHERE conversation.userAId = :participantId OR conversation.userBId = :participantId
         ORDER BY conversation.lastMessageAt DESC

@@ -39,6 +39,7 @@ import com.joysong.server.project.repository.ProjectRepository
 import com.joysong.server.refund.repository.RefundItemRepository
 import com.joysong.server.refund.repository.RefundRepository
 import com.joysong.server.support.WorktreeTestDatabase
+import com.joysong.server.user.entity.AccountState
 import com.joysong.server.user.entity.UserEntity
 import com.joysong.server.user.repository.UserRepository
 import org.hamcrest.Matchers.nullValue
@@ -624,6 +625,116 @@ class TravelGroundServiceOrderFlowIntegrationTest {
     }
 
     @Test
+    fun `empty doctor id batch returns no public doctors`() {
+        assertTrue(doctorRepository.findAllPublicById(emptyList()).isEmpty())
+    }
+
+    @Test
+    fun `suspended doctor disappears from public views and new booking until reactivation`() {
+        setAccountState(fixture.doctorId, AccountState.ADMIN_SUSPENDED)
+
+        val directory = mockMvc.perform(get("/api/discover/doctors"))
+            .andExpect(status().isOk)
+            .andReturn()
+        assertTrue(fixture.doctorId !in responseDataIds(directory))
+        val search = mockMvc.perform(
+            get("/api/discover/doctors").param("query", "Travel Flow Doctor")
+        )
+            .andExpect(status().isOk)
+            .andReturn()
+        assertTrue(fixture.doctorId !in responseDataIds(search))
+        mockMvc.perform(get("/api/discover/doctors/${fixture.doctorId}"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.code").value(404))
+        mockMvc.perform(get("/api/discover/institutions/${fixture.institutionId}/doctors"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data").isEmpty)
+        mockMvc.perform(get("/api/discover/institution-projects/${fixture.institutionProjectId}/doctors"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data").isEmpty)
+        mockMvc.perform(
+            get("/api/discover/institutions/${fixture.institutionId}/projects/${fixture.projectId}")
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.hasAvailableDoctors").value(false))
+            .andExpect(jsonPath("$.data.doctors").isEmpty)
+
+        assertTrue(
+            doctorProjectRepository.findPublicByInstitutionProjectIds(listOf(fixture.institutionProjectId)).isEmpty()
+        )
+        assertTrue(doctorProjectRepository.findPublicByDoctorId(fixture.doctorId).isEmpty())
+        assertTrue(doctorProjectRepository.findActiveByInstitutionProjectId(fixture.institutionProjectId).isEmpty())
+        performCreateOrder()
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.code").value(400))
+
+        setAccountState(fixture.doctorId, AccountState.ACTIVE)
+
+        mockMvc.perform(get("/api/discover/institution-projects/${fixture.institutionProjectId}/doctors"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data[0].id").value(fixture.doctorId))
+    }
+
+    @Test
+    fun `suspended consultant disappears from public picker and new booking until reactivation`() {
+        setAccountState(fixture.consultantId, AccountState.ADMIN_SUSPENDED)
+
+        mockMvc.perform(get("/api/discover/institutions/${fixture.institutionId}/consultants"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data").isEmpty)
+        performCreateOrder()
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.code").value(400))
+
+        setAccountState(fixture.consultantId, AccountState.ACTIVE)
+
+        mockMvc.perform(get("/api/discover/institutions/${fixture.institutionId}/consultants"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.data[0].id").value(fixture.consultantId))
+    }
+
+    @Test
+    fun `consultant suspension wins before a new order without partial order writes`() {
+        val ordersBefore = countRows("orders")
+        val statusLogsBefore = countRows("order_status_logs")
+        val pool = Executors.newFixedThreadPool(2)
+        val suspensionHeld = CountDownLatch(1)
+        val releaseSuspension = CountDownLatch(1)
+        val suspensionFuture = startAccountSuspensionBlocker(
+            pool = pool,
+            userId = fixture.consultantId,
+            held = suspensionHeld,
+            release = releaseSuspension
+        )
+        var orderFuture: Future<Result<OrderResponse>>? = null
+        try {
+            assertBlockerHeld(suspensionHeld, suspensionFuture, "consultant suspension blocker")
+            orderFuture = pool.submit<Result<OrderResponse>> {
+                runCatching { orderService.createOrder(fixture.userId, orderRequest()) }
+            }
+            assertTrue(
+                awaitTableLockWaiters("users", "users"),
+                "order must wait in MySQL on the consultant account row held by suspension"
+            )
+
+            releaseSuspension.countDown()
+            suspensionFuture.get(30, TimeUnit.SECONDS).getOrThrow()
+            val orderError = orderFuture.get(30, TimeUnit.SECONDS).exceptionOrNull()
+
+            assertTrue(
+                orderError is IllegalArgumentException,
+                "order must end with the consultant-suspended business rejection; actual=${orderError?.javaClass?.name}:${orderError?.message}"
+            )
+            assertEquals("所选医美顾问账号不可用，暂不可预约", orderError?.message)
+            assertEquals(ordersBefore, countRows("orders"))
+            assertEquals(statusLogsBefore, countRows("order_status_logs"))
+        } finally {
+            releaseSuspension.countDown()
+            closeWorkers(pool, suspensionFuture, orderFuture)
+        }
+    }
+
+    @Test
     fun `deactivation approval wins before a new order without partial order writes`() {
         val requestId = submitDoctorDeactivation()
         val ordersBefore = countRows("orders")
@@ -818,6 +929,37 @@ class TravelGroundServiceOrderFlowIntegrationTest {
         consultantId = fixture.consultantId
     )
 
+    private fun setAccountState(userId: String, accountState: AccountState) {
+        val user = requireNotNull(userRepository.findByIdAnyState(userId))
+        userRepository.saveAndFlush(user.copy(accountState = accountState))
+    }
+
+    private fun startAccountSuspensionBlocker(
+        pool: ExecutorService,
+        userId: String,
+        held: CountDownLatch,
+        release: CountDownLatch
+    ): Future<Result<Unit>> = pool.submit<Result<Unit>> {
+        runCatching {
+            DriverManager.getConnection(mysql.jdbcUrl, "root", mysql.password).use { connection ->
+                connection.autoCommit = false
+                try {
+                    connection.prepareStatement(
+                        "UPDATE users SET account_state='ADMIN_SUSPENDED' WHERE id=?"
+                    ).use { statement ->
+                        statement.setString(1, userId)
+                        check(statement.executeUpdate() == 1) { "consultant account does not exist" }
+                    }
+                    held.countDown()
+                    check(release.await(15, TimeUnit.SECONDS)) { "consultant suspension blocker release timed out" }
+                    connection.commit()
+                } finally {
+                    runCatching { connection.rollback() }
+                }
+            }
+        }
+    }
+
     private fun doctorActor() = ManagementActor(
         userId = fixture.doctorId,
         isAdmin = false,
@@ -927,21 +1069,7 @@ class TravelGroundServiceOrderFlowIntegrationTest {
     }
 
     private fun createTravelOrder(): String {
-        val result = mockMvc.perform(
-            post("/api/orders")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    """
-                    {
-                      "projectId":"${fixture.projectId}",
-                      "institutionProjectId":"${fixture.institutionProjectId}",
-                      "doctorId":"${fixture.doctorId}",
-                      "consultantId":"${fixture.consultantId}"
-                    }
-                    """.trimIndent()
-                )
-                .with(authentication(principal(fixture.userId, "USER")))
-        )
+        val result = performCreateOrder()
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.code").value(200))
             .andExpect(jsonPath("$.data.status").value("PENDING_SERVICE_FEE"))
@@ -978,6 +1106,22 @@ class TravelGroundServiceOrderFlowIntegrationTest {
         assertEquals("SERVICE_ACTIVE", orderRepository.findById(orderId).orElseThrow().status)
         return orderId
     }
+
+    private fun performCreateOrder() = mockMvc.perform(
+        post("/api/orders")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(
+                """
+                {
+                  "projectId":"${fixture.projectId}",
+                  "institutionProjectId":"${fixture.institutionProjectId}",
+                  "doctorId":"${fixture.doctorId}",
+                  "consultantId":"${fixture.consultantId}"
+                }
+                """.trimIndent()
+            )
+            .with(authentication(principal(fixture.userId, "USER")))
+    )
 
     private fun applyRefund(orderId: String, reason: String): String {
         val result = mockMvc.perform(
@@ -1053,6 +1197,12 @@ class TravelGroundServiceOrderFlowIntegrationTest {
         if (!Files.exists(directory)) return 0
         return Files.walk(directory).use { paths -> paths.filter(Files::isRegularFile).count() }
     }
+
+    private fun responseDataIds(result: MvcResult): Set<String> =
+        objectMapper.readTree(result.response.contentAsString)
+            .path("data")
+            .map { it.path("id").asText() }
+            .toSet()
 
     private fun principal(userId: String, role: String) = UsernamePasswordAuthenticationToken(
         userId,

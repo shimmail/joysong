@@ -43,7 +43,7 @@ class DiscoverDetailService(
     private val doctorInstitutionService: DoctorInstitutionService
 ) {
     fun getDoctorDetail(doctorId: String): DoctorDetailDto? {
-        val doctor = doctorRepository.findById(doctorId).orElse(null) ?: return null
+        val doctor = doctorRepository.findPublicById(doctorId).orElse(null) ?: return null
 
         // 通过关联表获取医生的项目列表，优先使用 institutionProjectId
         val doctorProjects = doctorProjectRepository.findPublicByDoctorId(doctorId)
@@ -81,6 +81,7 @@ class DiscoverDetailService(
                 currency = ip.currency,
                 coverImage = effective.coverImage,
                 salesCount = ip.salesCount,
+                caseCount = ip.caseCount,
                 category = effective.category,
                 description = effective.description,
                 rating = effective.rating,
@@ -163,7 +164,7 @@ class DiscoverDetailService(
             .map { it.doctorId }
             .filter { it.isNotBlank() }
             .distinct()
-        val doctorsById = doctorRepository.findAllById(doctorIds).associateBy { it.id }
+        val doctorsById = doctorRepository.findAllPublicById(doctorIds).associateBy { it.id }
         val doctors = doctorIds.mapNotNull(doctorsById::get)
         val reviews = reviewsWithUsers(reviewRepository.findByInstitutionProjectId(ip.id))
         return InstitutionProjectDetailDto(
@@ -230,6 +231,7 @@ class DiscoverDetailService(
                 category = effective.category,
                 categoryTags = project.categoryTags,
                 salesCount = ip.salesCount,
+                caseCount = ip.caseCount,
                 rating = effective.rating,
                 reviewCount = effective.reviewCount,
                 tags = effective.tags,
@@ -271,7 +273,7 @@ class DiscoverDetailService(
             .distinct()
         if (doctorIds.isEmpty()) return emptyList()
 
-        val doctorsById = doctorRepository.findAllById(doctorIds).associateBy { it.id }
+        val doctorsById = doctorRepository.findAllPublicById(doctorIds).associateBy { it.id }
         return doctorIds.mapNotNull(doctorsById::get)
     }
 

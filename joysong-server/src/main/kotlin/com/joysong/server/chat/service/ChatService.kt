@@ -1910,7 +1910,7 @@ class ChatService(
                     }.orEmpty()
                 }
                 "DOCTOR" -> {
-                    doctorRepository.findById(contextId).orElse(null)?.let { doctor ->
+                    doctorRepository.findPublicById(contextId).orElse(null)?.let { doctor ->
                         val institutionNames = doctorInstitutionService.institutionsFor(doctor.id)
                             .joinToString("、") { it.name }
                         "【当前上下文】用户正在咨询关于「${doctor.name}」医生的问题。\n" +
@@ -2021,7 +2021,7 @@ class ChatService(
                     )
                 }.orEmpty()
 
-                "DOCTOR" -> doctorRepository.findById(normalizedId).orElse(null)?.let { doctor ->
+                "DOCTOR" -> doctorRepository.findPublicById(normalizedId).orElse(null)?.let { doctor ->
                     val institutions = doctorInstitutionService.institutionsFor(doctor.id)
                     val selectedInstitution = institutions.firstOrNull { it.id == doctor.institutionId }
                         ?: institutions.firstOrNull()
@@ -2175,7 +2175,7 @@ class ChatService(
         val scope = runCatching {
             when (contextType) {
                 "INSTITUTION" -> institutionRepository.findById(contextId).orElse(null)?.name
-                "DOCTOR" -> doctorRepository.findById(contextId).orElse(null)?.name
+                "DOCTOR" -> doctorRepository.findPublicById(contextId).orElse(null)?.name
                 "PROJECT" -> projectRepository.findById(contextId).orElse(null)?.name
                 "INSTITUTION_PROJECT" -> institutionProjectRepository.findById(contextId).orElse(null)?.let { offering ->
                     when (scopeTarget) {

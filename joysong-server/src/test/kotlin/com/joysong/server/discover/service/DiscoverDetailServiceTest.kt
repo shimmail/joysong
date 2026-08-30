@@ -66,7 +66,7 @@ class DiscoverDetailServiceTest {
     @Test
     fun `doctor detail excludes inactive doctor project services`() {
         val doctor = DoctorEntity(id = "doctor-1", name = "Doctor")
-        every { doctorRepository.findById("doctor-1") } returns Optional.of(doctor)
+        every { doctorRepository.findPublicById("doctor-1") } returns Optional.of(doctor)
         every { doctorProjectRepository.findPublicByDoctorId("doctor-1") } returns emptyList()
         every { institutionProjectRepository.findAllById(emptyList<String>()) } returns emptyList()
         every { projectRepository.findAllById(emptyList<String>()) } returns emptyList()
@@ -79,6 +79,37 @@ class DiscoverDetailServiceTest {
 
         assertEquals(0, result.institutionProjects.size)
         verify(exactly = 0) { doctorProjectRepository.findByDoctorId(any()) }
+    }
+
+    @Test
+    fun `doctor detail institution project summary exposes institution project case count`() {
+        val institutionProject = InstitutionProjectEntity(
+            id = "ip-1",
+            institutionId = "institution-1",
+            projectId = "project-1",
+            price = BigDecimal("1000"),
+            caseCount = 23
+        )
+        every { doctorRepository.findPublicById("doctor-1") } returns Optional.of(
+            DoctorEntity(id = "doctor-1", name = "Doctor")
+        )
+        every { doctorProjectRepository.findPublicByDoctorId("doctor-1") } returns listOf(
+            publicBinding("doctor-1", "ip-1")
+        )
+        every { institutionProjectRepository.findAllById(listOf("ip-1")) } returns listOf(institutionProject)
+        every { projectRepository.findAllById(listOf("project-1")) } returns listOf(
+            ProjectEntity(id = "project-1", name = "Project", caseCount = 82)
+        )
+        every { institutionRepository.findAllById(listOf("institution-1")) } returns listOf(
+            InstitutionEntity(id = "institution-1", name = "Institution")
+        )
+        every { diaryRepository.findPublishedByDoctorId("doctor-1") } returns emptyList()
+        every { doctorInstitutionService.institutionsFor("doctor-1") } returns emptyList()
+        every { reviewRepository.findByDoctorIdAndTargetType("doctor-1", "INSTITUTION") } returns emptyList()
+
+        val result = service.getDoctorDetail("doctor-1")!!
+
+        assertEquals(23, result.institutionProjects.single().caseCount)
     }
 
     @Test
@@ -156,7 +187,7 @@ class DiscoverDetailServiceTest {
         )
         every { diaryRepository.findPublishedByProjectId("project-1") } returns emptyList()
         every { doctorProjectRepository.findPublicByInstitutionProjectIds(listOf("ip-1")) } returns emptyList()
-        every { doctorRepository.findAllById(emptyList<String>()) } returns emptyList()
+        every { doctorRepository.findAllPublicById(emptyList<String>()) } returns emptyList()
         every { reviewRepository.findByInstitutionProjectId("ip-1") } returns emptyList()
 
         val unavailable = service.getInstitutionProjectDetail("institution-1", "project-1")!!
@@ -168,7 +199,7 @@ class DiscoverDetailServiceTest {
         val affordable = publicBinding("doctor-affordable", "ip-1", price = "700")
         val expensive = publicBinding("doctor-expensive", "ip-1", price = "900")
         every { doctorProjectRepository.findPublicByInstitutionProjectIds(listOf("ip-1")) } returns listOf(expensive, affordable)
-        every { doctorRepository.findAllById(listOf("doctor-expensive", "doctor-affordable")) } returns listOf(
+        every { doctorRepository.findAllPublicById(listOf("doctor-expensive", "doctor-affordable")) } returns listOf(
             DoctorEntity("doctor-expensive", "Expensive"),
             DoctorEntity("doctor-affordable", "Affordable")
         )
@@ -194,7 +225,7 @@ class DiscoverDetailServiceTest {
                 institutionId = "institution-2"
             )
         )
-        every { doctorRepository.findAllById(listOf(secondaryInstitutionDoctor.id)) } returns listOf(
+        every { doctorRepository.findAllPublicById(listOf(secondaryInstitutionDoctor.id)) } returns listOf(
             secondaryInstitutionDoctor
         )
 
@@ -210,7 +241,8 @@ class DiscoverDetailServiceTest {
             id = "ip-priced",
             institutionId = "institution-1",
             projectId = "project-1",
-            price = BigDecimal("1000")
+            price = BigDecimal("1000"),
+            caseCount = 31
         )
         val unboundProject = InstitutionProjectEntity(
             id = "ip-unbound",
@@ -223,7 +255,7 @@ class DiscoverDetailServiceTest {
         every { institutionProjectRepository.findByInstitutionId("institution-1") } returns
             listOf(pricedProject, unboundProject)
         every { projectRepository.findAllById(listOf("project-1")) } returns listOf(
-            ProjectEntity("project-1", "Priced Project")
+            ProjectEntity("project-1", "Priced Project", caseCount = 74)
         )
         every {
             doctorProjectRepository.findPublicByInstitutionProjectIds(listOf("ip-priced", "ip-unbound"))
@@ -239,5 +271,6 @@ class DiscoverDetailServiceTest {
 
         assertEquals(listOf("ip-priced"), result.projects.map { it.institutionProjectId })
         assertEquals(BigDecimal("700"), result.projects.single().price)
+        assertEquals(31, result.projects.single().caseCount)
     }
 }

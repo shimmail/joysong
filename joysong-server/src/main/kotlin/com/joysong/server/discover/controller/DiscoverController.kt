@@ -116,10 +116,10 @@ class DiscoverController(
         @RequestParam(defaultValue = "0") offset: Int,
         @RequestParam(defaultValue = "50") limit: Int
     ): ResponseEntity<BaseResponse<List<DoctorResponse>>> {
-        val result = if (query.isBlank()) doctorRepository.findAll()
+        val result = if (query.isBlank()) doctorRepository.findAllPublic()
         else {
             val escaped = query.replace("%", "\\%").replace("_", "\\_")
-            doctorRepository.findByNameContainingOrSpecialtiesContaining(escaped, escaped)
+            doctorRepository.findPublicByNameContainingOrSpecialtiesContaining(escaped, escaped)
         }
         return result.map { it.toResponse() }.apiPage(offset, limit).toCompatibilityResponse()
     }

@@ -2,6 +2,7 @@ package com.joysong.server.project.repository
 
 import com.joysong.server.project.entity.ProjectEntity
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 
@@ -13,4 +14,14 @@ interface ProjectRepository : JpaRepository<ProjectEntity, String> {
 
     @Query("SELECT p FROM ProjectEntity p WHERE p.name LIKE %:keyword% OR p.id = :keyword")
     fun searchProjects(@Param("keyword") keyword: String): List<ProjectEntity>
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE ProjectEntity project
+        SET project.caseCount = COALESCE(project.caseCount, 0) + 1
+        WHERE project.id = :id AND project.deletedAt IS NULL
+        """
+    )
+    fun incrementCaseCount(@Param("id") id: String): Int
 }

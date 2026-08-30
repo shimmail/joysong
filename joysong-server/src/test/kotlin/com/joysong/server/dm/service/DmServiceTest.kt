@@ -1,14 +1,19 @@
 package com.joysong.server.dm.service
 
+import com.joysong.server.catalog.service.CatalogCounterCacheInvalidator
 import com.joysong.server.dm.dto.toResponse
 import com.joysong.server.dm.entity.DmConversationEntity
 import com.joysong.server.dm.entity.DmMessageEntity
 import com.joysong.server.dm.repository.DmConversationRepository
 import com.joysong.server.dm.repository.DmMessageRepository
+import com.joysong.server.doctor.repository.DoctorRepository
 import com.joysong.server.identity.service.IdentityAuthorizationService
+import com.joysong.server.order.consultant.ConsultantOrderAccessPolicy
 import com.joysong.server.order.dto.OrderStatusEnum
 import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.repository.OrderRepository
+import com.joysong.server.order.service.OrderContractErrorCode
+import com.joysong.server.order.service.OrderContractException
 import com.joysong.server.user.entity.UserEntity
 import com.joysong.server.user.repository.UserRepository
 import io.mockk.Runs
@@ -31,15 +36,19 @@ import java.util.Optional
 class DmServiceTest {
     private val conversationRepository = mockk<DmConversationRepository>()
     private val messageRepository = mockk<DmMessageRepository>()
+    private val doctorRepository = mockk<DoctorRepository>(relaxed = true)
     private val userRepository = mockk<UserRepository>()
     private val identityAuthorizationService = mockk<IdentityAuthorizationService>()
     private val orderConversationService = mockk<OrderServiceConversationService>()
+    private val counterCacheInvalidator = mockk<CatalogCounterCacheInvalidator>(relaxed = true)
     private val service = DmService(
         conversationRepository,
         messageRepository,
         userRepository,
         identityAuthorizationService,
-        orderConversationService
+        orderConversationService,
+        doctorRepository,
+        counterCacheInvalidator
     )
 
     @Test
@@ -144,18 +153,102 @@ class DmServiceTest {
     }
 
     @Test
+    fun `first direct message from ordinary user to doctor increments consultation count once`() {
+        val conversation = directConversation(userAId = "user-1", userBId = "doctor-1")
+        every { conversationRepository.findByIdForUpdate(conversation.id) } returns conversation
+        every { identityAuthorizationService.hasActiveProfessionalRole("user-1") } returns false
+        every { identityAuthorizationService.hasActiveProfessionalRole("doctor-1") } returns true
+        every { doctorRepository.existsById("doctor-1") } returns true
+        every { doctorRepository.incrementConsultationCount("doctor-1") } returns 1
+        every { messageRepository.save(any()) } answers { firstArg() }
+        every { conversationRepository.save(any()) } answers { firstArg() }
+
+        service.sendMessage(conversation.id, "user-1", "首次咨询")
+        service.sendMessage(conversation.id, "user-1", "补充情况")
+
+        verify(exactly = 1) { doctorRepository.incrementConsultationCount("doctor-1") }
+        verify(exactly = 1) { counterCacheInvalidator.evictDoctorCountersAfterCommit() }
+    }
+
+    @Test
+    fun `deleted first direct message does not make the conversation count again`() {
+        val conversation = directConversation(userAId = "user-1", userBId = "doctor-1").apply {
+            lastMessageAt = LocalDateTime.of(2026, 8, 29, 12, 0)
+        }
+        every { conversationRepository.findByIdForUpdate(conversation.id) } returns conversation
+        every { identityAuthorizationService.hasActiveProfessionalRole("user-1") } returns false
+        every { identityAuthorizationService.hasActiveProfessionalRole("doctor-1") } returns true
+        every { doctorRepository.existsById("doctor-1") } returns true
+        every { messageRepository.save(any()) } answers { firstArg() }
+        every { conversationRepository.save(any()) } answers { firstArg() }
+
+        service.sendMessage(conversation.id, "user-1", "已有会话中的消息")
+
+        verify(exactly = 0) { doctorRepository.incrementConsultationCount(any()) }
+        verify(exactly = 0) { counterCacheInvalidator.evictDoctorCountersAfterCommit() }
+    }
+
+    @Test
+    fun `doctor initiated direct message does not increment consultation count`() {
+        val conversation = directConversation(userAId = "doctor-1", userBId = "user-1")
+        every { conversationRepository.findByIdForUpdate(conversation.id) } returns conversation
+        every { identityAuthorizationService.hasActiveProfessionalRole("doctor-1") } returns true
+        every { identityAuthorizationService.hasActiveProfessionalRole("user-1") } returns false
+        every { doctorRepository.existsById("user-1") } returns false
+        every { doctorRepository.existsById("doctor-1") } returns true
+        every { messageRepository.existsByConversationIdAndSenderId(conversation.id, "user-1") } returns false
+        every { messageRepository.existsByConversationIdAndSenderId(conversation.id, "doctor-1") } returns false
+        every { messageRepository.save(any()) } answers { firstArg() }
+        every { conversationRepository.save(any()) } answers { firstArg() }
+
+        service.sendMessage(conversation.id, "doctor-1", "医生主动问候")
+        service.sendMessage(conversation.id, "user-1", "用户随后回复")
+
+        verify(exactly = 0) { doctorRepository.incrementConsultationCount(any()) }
+        verify(exactly = 0) { counterCacheInvalidator.evictDoctorCountersAfterCommit() }
+    }
+
+    @Test
+    fun `ordinary user message to professional consultant does not increment consultation count`() {
+        val conversation = directConversation(userAId = "user-1", userBId = "consultant-1")
+        every { conversationRepository.findByIdForUpdate(conversation.id) } returns conversation
+        every { identityAuthorizationService.hasActiveProfessionalRole("user-1") } returns false
+        every { identityAuthorizationService.hasActiveProfessionalRole("consultant-1") } returns true
+        every { doctorRepository.existsById("consultant-1") } returns false
+        every { messageRepository.save(any()) } answers { firstArg() }
+        every { conversationRepository.save(any()) } answers { firstArg() }
+
+        service.sendMessage(conversation.id, "user-1", "普通私信")
+
+        verify(exactly = 0) { doctorRepository.incrementConsultationCount(any()) }
+    }
+
+    @Test
+    fun `order service message does not increment consultation count`() {
+        val conversation = orderConversation()
+        every { conversationRepository.findByIdForUpdate(conversation.id) } returns conversation
+        every { orderConversationService.requireSendAccess(conversation, "user-1") } just Runs
+        every { messageRepository.save(any()) } answers { firstArg() }
+        every { conversationRepository.save(any()) } answers { firstArg() }
+
+        service.sendMessage(conversation.id, "user-1", "订单服务消息")
+
+        verify(exactly = 0) { doctorRepository.incrementConsultationCount(any()) }
+    }
+
+    @Test
     fun `refund state send denial happens before message persistence`() {
         val conversation = orderConversation()
         every { conversationRepository.findByIdForUpdate(conversation.id) } returns conversation
         every {
             orderConversationService.requireSendAccess(conversation, "user-1")
-        } throws IllegalArgumentException("ORDER_SERVICE_NOT_ACTIVE")
+        } throws OrderContractException.serviceReadOnly()
 
-        val error = assertThrows<IllegalArgumentException> {
+        val error = assertThrows<OrderContractException> {
             service.sendMessage(conversation.id, "user-1", "退款期间消息")
         }
 
-        assertEquals("ORDER_SERVICE_NOT_ACTIVE", error.message)
+        assertEquals(OrderContractErrorCode.ORDER_SERVICE_READ_ONLY, error.errorCode)
         verify(exactly = 0) { messageRepository.save(any()) }
     }
 
@@ -194,13 +287,13 @@ class DmServiceTest {
         every { conversationRepository.findById(conversation.id) } returns Optional.of(conversation)
         every {
             orderConversationService.requireReadAccess(conversation, "unrelated-user")
-        } throws IllegalArgumentException("ORDER_SERVICE_ACCESS_DENIED")
+        } throws OrderContractException.serviceAccessDenied()
 
-        val error = assertThrows<IllegalArgumentException> {
+        val error = assertThrows<OrderContractException> {
             service.deleteMessage(message.id, "unrelated-user")
         }
 
-        assertEquals("ORDER_SERVICE_ACCESS_DENIED", error.message)
+        assertEquals(OrderContractErrorCode.ORDER_SERVICE_ACCESS_DENIED, error.errorCode)
         verify(exactly = 0) { messageRepository.delete(any()) }
     }
 
@@ -320,7 +413,13 @@ class DmServiceTest {
     fun `one direct and two order conversations coexist for the same participants`() {
         val created = mutableListOf<DmConversationEntity>()
         val orderRepository = mockk<OrderRepository>()
-        val scopedService = OrderServiceConversationService(orderRepository, conversationRepository)
+        val scopedIdentities = mockk<IdentityAuthorizationService>()
+        val scopedPolicy = ConsultantOrderAccessPolicy(scopedIdentities)
+        val scopedService = OrderServiceConversationService(
+            orderRepository,
+            conversationRepository,
+            scopedPolicy
+        )
         stubTarget("consultant-1")
         every { identityAuthorizationService.hasActiveRole("user-1", "CONSULTANT") } returns false
         every { identityAuthorizationService.hasActiveProfessionalRole("consultant-1") } returns true
@@ -363,6 +462,7 @@ class DmServiceTest {
                 .mapNotNull { it.orderId }
                 .toSet()
         )
+        verify(exactly = 0) { scopedIdentities.hasActiveRole(any(), any()) }
     }
 
     private fun stubTarget(userId: String) {
