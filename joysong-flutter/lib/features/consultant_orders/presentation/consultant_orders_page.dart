@@ -64,8 +64,7 @@ class _ConsultantOrdersPageState extends State<ConsultantOrdersPage>
   void didUpdateWidget(covariant ConsultantOrdersPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.repository != widget.repository ||
-        oldWidget.onConsultantRoleRequired !=
-            widget.onConsultantRoleRequired) {
+        oldWidget.onConsultantRoleRequired != widget.onConsultantRoleRequired) {
       _ordersController.dispose();
       _ordersController = _createOrdersController();
       unawaited(
@@ -108,9 +107,10 @@ class _ConsultantOrdersPageState extends State<ConsultantOrdersPage>
                     state: _ordersController.stateFor(stage),
                     onRefresh: () => _ordersController.refresh(stage),
                     onLoadMore: () => _ordersController.loadMore(stage),
+                    onRetryLoadMore: () =>
+                        _ordersController.loadMore(stage, retry: true),
                     onRetry: () => _ordersController.load(stage, force: true),
-                    onOrderSelected: (summary) =>
-                        _openOrderDetail(summary.id),
+                    onOrderSelected: (summary) => _openOrderDetail(summary.id),
                   ),
                 )
                 .toList(growable: false),
@@ -138,6 +138,7 @@ class _ConsultantOrderStageList extends StatelessWidget {
     required this.state,
     required this.onRefresh,
     required this.onLoadMore,
+    required this.onRetryLoadMore,
     required this.onRetry,
     required this.onOrderSelected,
   });
@@ -146,6 +147,7 @@ class _ConsultantOrderStageList extends StatelessWidget {
   final ConsultantOrderListState state;
   final Future<void> Function() onRefresh;
   final Future<void> Function() onLoadMore;
+  final Future<void> Function() onRetryLoadMore;
   final Future<void> Function() onRetry;
   final ValueChanged<ConsultantOrderSummary> onOrderSelected;
 
@@ -219,7 +221,7 @@ class _ConsultantOrderStageList extends StatelessWidget {
                 return _ListFooter(
                   stage: stage,
                   state: state,
-                  onRetry: onLoadMore,
+                  onRetry: onRetryLoadMore,
                 );
               }
               final summary = state.items[index];

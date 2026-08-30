@@ -153,6 +153,10 @@ void main() {
         ..enqueueListError(
           ConsultantOrderStage.active,
           const ApiException(message: 'server text', httpStatus: 503),
+        )
+        ..enqueuePage(
+          ConsultantOrderStage.active,
+          page(offset: 10, ids: const ['a3']),
         );
       final controller = ConsultantOrdersController(
         repository,
@@ -171,6 +175,23 @@ void main() {
       expect(after.status, before.status);
       expect(after.isLoadingMore, isFalse);
       expect(after.loadMoreFailure, ConsultantOrderFailure.retryRequired);
+
+      await controller.loadMore(ConsultantOrderStage.active);
+      expect(repository.listRequests, hasLength(2));
+
+      await controller.loadMore(ConsultantOrderStage.active, retry: true);
+      expect(repository.listRequests, hasLength(3));
+      expect(
+        controller
+            .stateFor(ConsultantOrderStage.active)
+            .items
+            .map((item) => item.id),
+        const ['a1', 'a2', 'a3'],
+      );
+      expect(
+        controller.stateFor(ConsultantOrderStage.active).loadMoreFailure,
+        isNull,
+      );
     });
 
     test('refresh discards an older in-flight response', () async {
@@ -199,8 +220,7 @@ void main() {
       expect(repository.listRequests.map((request) => request.offset), [0, 0]);
     });
 
-    test('refresh ignores role loss from a stale first-page request',
-        () async {
+    test('refresh ignores role loss from a stale first-page request', () async {
       final repository = FakeConsultantOrdersRepository();
       final older = repository.enqueueListCompleter(
         ConsultantOrderStage.active,
@@ -230,8 +250,7 @@ void main() {
       expect(roleRequiredCalls, 0);
     });
 
-    test('refresh ignores role loss from a stale load-more request',
-        () async {
+    test('refresh ignores role loss from a stale load-more request', () async {
       final repository = FakeConsultantOrdersRepository()
         ..enqueuePage(
           ConsultantOrderStage.active,
@@ -508,10 +527,8 @@ final class ListRequest {
 
 final class FakeConsultantOrdersRepository
     implements ConsultantOrdersRepository {
-  final Map<
-    ConsultantOrderStage,
-    Queue<Future<ConsultantOrderPage> Function()>
-  > _listResponses = {};
+  final Map<ConsultantOrderStage, Queue<Future<ConsultantOrderPage> Function()>>
+      _listResponses = {};
   final List<ListRequest> listRequests = [];
 
   void enqueuePage(ConsultantOrderStage stage, ConsultantOrderPage value) {

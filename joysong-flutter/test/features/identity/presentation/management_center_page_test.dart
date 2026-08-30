@@ -168,7 +168,8 @@ void main() {
       final initialLoad = Completer<ManagementContext>();
       final identityRepository = FakeIdentityRepository([
         managementContext(),
-      ])..blockedInitialLoad = initialLoad;
+      ])
+        ..blockedInitialLoad = initialLoad;
       final showManagement = ValueNotifier(true);
       addTearDown(showManagement.dispose);
 
@@ -283,9 +284,7 @@ void main() {
           .onConsultantRoleRequired;
       await tester.tap(find.text('测试项目'));
       await tester.pumpAndSettle();
-      final conversationButton = find.text('订单沟通');
-      await tester.ensureVisible(conversationButton);
-      await tester.pumpAndSettle();
+      final conversationButton = await revealConversationAction(tester);
       final detailPage = tester.widget<ConsultantOrderDetailPage>(
         find.byType(ConsultantOrderDetailPage),
       );
@@ -313,7 +312,7 @@ void main() {
       final detailLoad = detailController.load();
       identityRepository.blockedRefresh = refreshCompleter;
       await tester.tap(conversationButton);
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1));
 
       expect(consultantOrdersRepository.getOrdersCalls, 2);
       expect(consultantOrdersRepository.getOrderCalls, 2);
@@ -398,13 +397,11 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('测试项目'));
       await tester.pumpAndSettle();
-      final conversationButton = find.text('订单沟通');
-      await tester.ensureVisible(conversationButton);
-      await tester.pumpAndSettle();
+      final conversationButton = await revealConversationAction(tester);
 
       identityRepository.blockedRefresh = refreshCompleter;
       await tester.tap(conversationButton);
-      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1));
       expect(identityRepository.loadManagementContextCalls, 2);
 
       setHostState(() => showManagement = false);
@@ -448,8 +445,7 @@ void main() {
       final retainedRoleHandler = tester
           .widget<ConsultantOrdersPage>(find.byType(ConsultantOrdersPage))
           .onConsultantRoleRequired;
-      final callsBeforeRemoval =
-          identityRepository.loadManagementContextCalls;
+      final callsBeforeRemoval = identityRepository.loadManagementContextCalls;
 
       showManagement.value = false;
       await tester.pump();
@@ -514,6 +510,25 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+}
+
+Future<Finder> revealConversationAction(WidgetTester tester) async {
+  final detailScrollable = find.descendant(
+    of: find.byKey(const Key('consultant-order-detail-scroll')),
+    matching: find.byType(Scrollable),
+  );
+  expect(detailScrollable, findsOneWidget);
+  final conversationButton = find.byKey(
+    const Key('consultant-order-conversation-action'),
+  );
+  await tester.scrollUntilVisible(
+    conversationButton,
+    220,
+    scrollable: detailScrollable,
+  );
+  await tester.pumpAndSettle();
+  expect(conversationButton, findsOneWidget);
+  return conversationButton;
 }
 
 Widget managementApp({
@@ -583,8 +598,7 @@ ManagementContext managementContext({
       activeRoles: isConsultant ? const ['CONSULTANT'] : const [],
       managedInstitutionIds: const [],
       visibleInstitutionIds: const [],
-      canAccessConsultantOrderWorkbench:
-          canAccessConsultantOrderWorkbench,
+      canAccessConsultantOrderWorkbench: canAccessConsultantOrderWorkbench,
       canManageOrders: canManageOrders,
       canViewAffiliations: canViewAffiliations,
     );
@@ -600,8 +614,7 @@ FakeConsultantOrdersRepository fakeConsultantOrdersRepository() =>
       detail: consultantOrderDetail(),
     );
 
-ConsultantOrderSummary consultantOrderSummary() =>
-    ConsultantOrderSummary(
+ConsultantOrderSummary consultantOrderSummary() => ConsultantOrderSummary(
       id: 'order-1',
       orderNo: 'PRIVATE-order-1',
       stage: ConsultantOrderStage.active,
@@ -627,8 +640,7 @@ ConsultantOrderSummary consultantOrderSummary() =>
       readOnly: false,
     );
 
-ConsultantOrderDetail consultantOrderDetail() =>
-    ConsultantOrderDetail(
+ConsultantOrderDetail consultantOrderDetail() => ConsultantOrderDetail(
       summary: consultantOrderSummary(),
       doctor: const ConsultantOrderDoctor(id: 'doctor-1', name: '测试医生'),
       remark: '公开备注',
@@ -674,14 +686,12 @@ final class FakeIdentityRepository implements IdentityRepository {
   }
 
   @override
-  dynamic noSuchMethod(Invocation invocation) =>
-      super.noSuchMethod(invocation);
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 final class FakeDiscoverRepository implements DiscoverRepository {
   @override
-  dynamic noSuchMethod(Invocation invocation) =>
-      super.noSuchMethod(invocation);
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 final class FakeConsultantOrdersRepository

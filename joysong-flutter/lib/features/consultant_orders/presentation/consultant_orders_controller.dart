@@ -63,14 +63,14 @@ final class ConsultantOrdersController extends ChangeNotifier {
     this._repository, {
     required ConsultantRoleRequiredCallback onConsultantRoleRequired,
     this.pageSize = 20,
-  }) : _onConsultantRoleRequired = onConsultantRoleRequired,
-       _states = {
-         for (final stage in ConsultantOrderStage.values)
-           stage: const ConsultantOrderListState(),
-       },
-       _generations = {
-         for (final stage in ConsultantOrderStage.values) stage: 0,
-       };
+  })  : _onConsultantRoleRequired = onConsultantRoleRequired,
+        _states = {
+          for (final stage in ConsultantOrderStage.values)
+            stage: const ConsultantOrderListState(),
+        },
+        _generations = {
+          for (final stage in ConsultantOrderStage.values) stage: 0,
+        };
 
   final ConsultantOrdersRepository _repository;
   final ConsultantRoleRequiredCallback _onConsultantRoleRequired;
@@ -97,15 +97,18 @@ final class ConsultantOrdersController extends ChangeNotifier {
     await _loadFirstPage(stage);
   }
 
-  Future<void> refresh(ConsultantOrderStage stage) =>
-      load(stage, force: true);
+  Future<void> refresh(ConsultantOrderStage stage) => load(stage, force: true);
 
-  Future<void> loadMore(ConsultantOrderStage stage) async {
+  Future<void> loadMore(
+    ConsultantOrderStage stage, {
+    bool retry = false,
+  }) async {
     if (_disposed || _accessRevoked) return;
     final current = stateFor(stage);
     if (current.status != ConsultantOrderListStatus.ready ||
         current.isLoadingMore ||
-        !current.hasMore) {
+        !current.hasMore ||
+        current.loadMoreFailure != null && !retry) {
       return;
     }
 
@@ -217,9 +220,7 @@ final class ConsultantOrdersController extends ChangeNotifier {
   }
 
   bool _isCurrent(ConsultantOrderStage stage, int generation) =>
-      !_disposed &&
-      !_accessRevoked &&
-      generation == _generations[stage];
+      !_disposed && !_accessRevoked && generation == _generations[stage];
 
   void _notifyIfAlive() {
     if (!_disposed) notifyListeners();
@@ -257,7 +258,6 @@ List<ConsultantOrderSummary> _dedupe(
 }
 
 bool _isRoleRequired(Object error) =>
-    error is ApiException &&
-    error.errorCode == 'CONSULTANT_ROLE_REQUIRED';
+    error is ApiException && error.errorCode == 'CONSULTANT_ROLE_REQUIRED';
 
 const _unchanged = Object();

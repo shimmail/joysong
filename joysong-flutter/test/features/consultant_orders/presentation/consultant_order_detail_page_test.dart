@@ -28,6 +28,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      final conversationButton = await revealConversationAction(tester);
       expect(find.text('订单沟通'), findsOneWidget);
       for (final forbidden in [
         '确认完成',
@@ -45,15 +46,14 @@ void main() {
         expect(find.textContaining(forbidden), findsNothing);
       }
 
-      await tester.ensureVisible(find.text('订单沟通'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('订单沟通'));
+      await tester.tap(conversationButton);
       await tester.pump();
       expect(openedOrderIds, ['order-1']);
     },
   );
 
-  testWidgets('readonly history shows existing conversation but no send claim', (
+  testWidgets('readonly history shows existing conversation but no send claim',
+      (
     tester,
   ) async {
     final repository = FakeDetailRepository()
@@ -69,6 +69,7 @@ void main() {
     await tester.pumpWidget(detailApp(repository, orderId: 'history-1'));
     await tester.pumpAndSettle();
 
+    await revealConversationAction(tester);
     expect(find.text('仅可查看历史消息'), findsOneWidget);
     expect(find.text('订单沟通'), findsOneWidget);
   });
@@ -93,7 +94,8 @@ void main() {
     expect(find.text('仅可查看历史消息'), findsNothing);
   });
 
-  testWidgets('reloads canonical detail only when repository or order ID changes', (
+  testWidgets(
+      'reloads canonical detail only when repository or order ID changes', (
     tester,
   ) async {
     final firstRepository = FakeDetailRepository()
@@ -180,9 +182,8 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('订单沟通'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('订单沟通'));
+      final conversationButton = await revealConversationAction(tester);
+      await tester.tap(conversationButton);
       await tester.pump();
 
       expect(roleRequiredCalls, 1);
@@ -228,8 +229,8 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('订单沟通'));
-      await tester.tap(find.text('订单沟通'));
+      final conversationButton = await revealConversationAction(tester);
+      await tester.tap(conversationButton);
       await tester.pump();
 
       setHostState(() => showPage = false);
@@ -293,7 +294,8 @@ void main() {
     },
   );
 
-  testWidgets('other conversation failures show only local bilingual messages', (
+  testWidgets('other conversation failures show only local bilingual messages',
+      (
     tester,
   ) async {
     final chineseRepository = FakeDetailRepository()
@@ -308,9 +310,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('订单沟通'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('订单沟通'));
+    final chineseConversationButton = await revealConversationAction(tester);
+    await tester.tap(chineseConversationButton);
     await tester.pump();
     expect(find.text('订单沟通暂时不可用，请稍后重试'), findsOneWidget);
     expect(find.text('private backend wording'), findsNothing);
@@ -326,9 +327,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Order conversation'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Order conversation'));
+    final englishConversationButton = await revealConversationAction(tester);
+    await tester.tap(englishConversationButton);
     await tester.pump();
     expect(
       find.text('Order conversation is temporarily unavailable. Try again.'),
@@ -400,6 +400,25 @@ void main() {
     expect(find.text('Order conversation'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+}
+
+Future<Finder> revealConversationAction(WidgetTester tester) async {
+  final detailScrollable = find.descendant(
+    of: find.byKey(const Key('consultant-order-detail-scroll')),
+    matching: find.byType(Scrollable),
+  );
+  expect(detailScrollable, findsOneWidget);
+  final conversationButton = find.byKey(
+    const Key('consultant-order-conversation-action'),
+  );
+  await tester.scrollUntilVisible(
+    conversationButton,
+    220,
+    scrollable: detailScrollable,
+  );
+  await tester.pumpAndSettle();
+  expect(conversationButton, findsOneWidget);
+  return conversationButton;
 }
 
 Widget detailApp(

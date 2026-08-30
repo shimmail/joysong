@@ -29,6 +29,14 @@ void main() {
       );
       await tester.pump();
       tester.binding.handleAppLifecycleStateChanged(
+        AppLifecycleState.hidden,
+      );
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(
+        AppLifecycleState.inactive,
+      );
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(
         AppLifecycleState.resumed,
       );
       await tester.pumpAndSettle();
@@ -84,9 +92,8 @@ void main() {
       addTearDown(apiClient.close);
 
       await openConsultantOrderConversation(tester, apiClient);
-      final threadController = tester
-          .widget<DmThreadPage>(find.byType(DmThreadPage))
-          .controller;
+      final threadController =
+          tester.widget<DmThreadPage>(find.byType(DmThreadPage)).controller;
 
       await tester.enterText(find.byType(TextField), '发送后返回');
       await tester.tap(find.byTooltip('发送'));
@@ -102,7 +109,7 @@ void main() {
       expect(find.byType(DmThreadPage), findsNothing);
       expect(find.text('订单沟通'), findsOneWidget);
 
-      sendMessageCompleter.complete(const {
+      sendMessageCompleter.complete({
         ...sentMessageJson,
         'content': '发送后返回',
       });
@@ -140,8 +147,21 @@ Future<void> openConsultantOrderConversation(
 
   await tester.tap(find.text('我的'));
   await tester.pumpAndSettle();
-  await tester.ensureVisible(find.text('专业管理'));
-  await tester.tap(find.text('专业管理'));
+  final profileScrollable = find
+      .descendant(
+        of: find.byKey(const PageStorageKey<String>('profile')),
+        matching: find.byType(Scrollable),
+      )
+      .first;
+  expect(profileScrollable, findsOneWidget);
+  final managementEntry = find.text('专业管理');
+  await tester.scrollUntilVisible(
+    managementEntry,
+    220,
+    scrollable: profileScrollable,
+  );
+  await tester.pumpAndSettle();
+  await tester.tap(managementEntry);
   await tester.pumpAndSettle();
   final consultantOrdersEntry = find.byKey(
     const Key('management-consultant-orders'),
@@ -151,8 +171,21 @@ Future<void> openConsultantOrderConversation(
   await tester.pumpAndSettle();
   await tester.tap(find.text('测试项目'));
   await tester.pumpAndSettle();
-  await tester.ensureVisible(find.text('订单沟通'));
-  await tester.tap(find.text('订单沟通'));
+  final detailScrollable = find.descendant(
+    of: find.byKey(const Key('consultant-order-detail-scroll')),
+    matching: find.byType(Scrollable),
+  );
+  expect(detailScrollable, findsOneWidget);
+  final conversationButton = find.byKey(
+    const Key('consultant-order-conversation-action'),
+  );
+  await tester.scrollUntilVisible(
+    conversationButton,
+    220,
+    scrollable: detailScrollable,
+  );
+  await tester.pumpAndSettle();
+  await tester.tap(conversationButton);
   await tester.pumpAndSettle();
 
   expect(find.byType(DmThreadPage), findsOneWidget);

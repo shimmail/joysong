@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:collection';
 
 import 'package:flutter/material.dart';
@@ -156,10 +155,22 @@ void main() {
 
     await tester.pumpWidget(testApp(workbench(repository)));
     await tester.pumpAndSettle();
+    final listScrollable = find.descendant(
+      of: find.byKey(const Key('consultant-orders-active-list')),
+      matching: find.byType(Scrollable),
+    );
+    expect(listScrollable, findsOneWidget);
     await tester.fling(
       find.byKey(const Key('consultant-orders-active-list')),
       const Offset(0, -1600),
       3000,
+    );
+    await tester.pumpAndSettle();
+    expect(repository.listRequests, hasLength(2));
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('consultant-orders-load-more-retry-active')),
+      180,
+      scrollable: listScrollable,
     );
     await tester.pumpAndSettle();
 
@@ -173,11 +184,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('重试新增项目'), findsOneWidget);
-    final listScrollable = find.descendant(
-      of: find.byKey(const Key('consultant-orders-active-list')),
-      matching: find.byType(Scrollable),
-    );
-    expect(listScrollable, findsOneWidget);
     await tester.scrollUntilVisible(
       find.text('项目 0'),
       -300,
@@ -300,8 +306,7 @@ void main() {
   });
 }
 
-Widget workbench(FakeWorkbenchRepository repository) =>
-    ConsultantOrdersPage(
+Widget workbench(FakeWorkbenchRepository repository) => ConsultantOrdersPage(
       repository: repository,
       onOpenServiceConversation: (_) async {},
       onConsultantRoleRequired: () async {},
@@ -414,10 +419,8 @@ final class ListRequest {
 }
 
 final class FakeWorkbenchRepository implements ConsultantOrdersRepository {
-  final Map<
-    ConsultantOrderStage,
-    Queue<Future<ConsultantOrderPage> Function()>
-  > _listResponses = {};
+  final Map<ConsultantOrderStage, Queue<Future<ConsultantOrderPage> Function()>>
+      _listResponses = {};
   final List<ListRequest> listRequests = [];
 
   void enqueuePage(ConsultantOrderStage stage, ConsultantOrderPage value) {
