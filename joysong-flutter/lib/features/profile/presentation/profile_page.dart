@@ -6,6 +6,7 @@ import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/routing/app_router.dart';
 import 'package:joysong_flutter/core/transient_message.dart';
 import 'package:joysong_flutter/features/auth/domain/auth_models.dart';
+import 'package:joysong_flutter/features/consultant_orders/domain/consultant_orders_repository.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_repository.dart';
@@ -28,6 +29,8 @@ class ProfilePage extends StatefulWidget {
     this.discoverRepository,
     this.socialRepository,
     this.professionalRepository,
+    this.consultantOrdersRepository,
+    this.onOpenConsultantOrderServiceConversation,
     this.onOrders,
     this.onWallet,
     this.onDiaries,
@@ -47,6 +50,9 @@ class ProfilePage extends StatefulWidget {
   final DiscoverRepository? discoverRepository;
   final SocialRepository? socialRepository;
   final ProfessionalRepository? professionalRepository;
+  final ConsultantOrdersRepository? consultantOrdersRepository;
+  final ConsultantOrderServiceConversationLauncher?
+      onOpenConsultantOrderServiceConversation;
   final VoidCallback? onOrders;
   final VoidCallback? onWallet;
   final VoidCallback? onDiaries;
@@ -330,6 +336,9 @@ class _ProfilePageState extends State<ProfilePage> {
         builder: (_) => ManagementCenterPage(
           repository: widget.identityRepository!,
           discoverRepository: widget.discoverRepository!,
+          consultantOrdersRepository: widget.consultantOrdersRepository,
+          onOpenConsultantOrderServiceConversation:
+              widget.onOpenConsultantOrderServiceConversation,
           institutionImagePicker:
               widget.socialRepository == null ? null : _pickInstitutionImage,
           doctorImagePicker:
