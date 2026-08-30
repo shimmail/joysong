@@ -6,9 +6,12 @@ import com.joysong.server.dm.entity.DmMessageEntity
 import com.joysong.server.dm.repository.DmConversationRepository
 import com.joysong.server.dm.repository.DmMessageRepository
 import com.joysong.server.identity.service.IdentityAuthorizationService
+import com.joysong.server.order.consultant.ConsultantOrderAccessPolicy
 import com.joysong.server.order.dto.OrderStatusEnum
 import com.joysong.server.order.entity.OrderEntity
 import com.joysong.server.order.repository.OrderRepository
+import com.joysong.server.order.service.OrderContractErrorCode
+import com.joysong.server.order.service.OrderContractException
 import com.joysong.server.user.entity.UserEntity
 import com.joysong.server.user.repository.UserRepository
 import io.mockk.Runs
@@ -149,13 +152,13 @@ class DmServiceTest {
         every { conversationRepository.findByIdForUpdate(conversation.id) } returns conversation
         every {
             orderConversationService.requireSendAccess(conversation, "user-1")
-        } throws IllegalArgumentException("ORDER_SERVICE_NOT_ACTIVE")
+        } throws OrderContractException.serviceReadOnly()
 
-        val error = assertThrows<IllegalArgumentException> {
+        val error = assertThrows<OrderContractException> {
             service.sendMessage(conversation.id, "user-1", "退款期间消息")
         }
 
-        assertEquals("ORDER_SERVICE_NOT_ACTIVE", error.message)
+        assertEquals(OrderContractErrorCode.ORDER_SERVICE_READ_ONLY, error.errorCode)
         verify(exactly = 0) { messageRepository.save(any()) }
     }
 
@@ -194,13 +197,13 @@ class DmServiceTest {
         every { conversationRepository.findById(conversation.id) } returns Optional.of(conversation)
         every {
             orderConversationService.requireReadAccess(conversation, "unrelated-user")
-        } throws IllegalArgumentException("ORDER_SERVICE_ACCESS_DENIED")
+        } throws OrderContractException.serviceAccessDenied()
 
-        val error = assertThrows<IllegalArgumentException> {
+        val error = assertThrows<OrderContractException> {
             service.deleteMessage(message.id, "unrelated-user")
         }
 
-        assertEquals("ORDER_SERVICE_ACCESS_DENIED", error.message)
+        assertEquals(OrderContractErrorCode.ORDER_SERVICE_ACCESS_DENIED, error.errorCode)
         verify(exactly = 0) { messageRepository.delete(any()) }
     }
 
@@ -320,7 +323,13 @@ class DmServiceTest {
     fun `one direct and two order conversations coexist for the same participants`() {
         val created = mutableListOf<DmConversationEntity>()
         val orderRepository = mockk<OrderRepository>()
-        val scopedService = OrderServiceConversationService(orderRepository, conversationRepository)
+        val scopedIdentities = mockk<IdentityAuthorizationService>()
+        val scopedPolicy = ConsultantOrderAccessPolicy(scopedIdentities)
+        val scopedService = OrderServiceConversationService(
+            orderRepository,
+            conversationRepository,
+            scopedPolicy
+        )
         stubTarget("consultant-1")
         every { identityAuthorizationService.hasActiveRole("user-1", "CONSULTANT") } returns false
         every { identityAuthorizationService.hasActiveProfessionalRole("consultant-1") } returns true
@@ -363,6 +372,7 @@ class DmServiceTest {
                 .mapNotNull { it.orderId }
                 .toSet()
         )
+        verify(exactly = 0) { scopedIdentities.hasActiveRole(any(), any()) }
     }
 
     private fun stubTarget(userId: String) {

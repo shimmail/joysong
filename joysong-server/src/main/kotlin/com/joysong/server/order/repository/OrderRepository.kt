@@ -13,6 +13,43 @@ import java.time.LocalDateTime
 interface OrderRepository : JpaRepository<OrderEntity, String> {
     @Query("""
         SELECT o FROM OrderEntity o
+        WHERE o.consultantId = :consultantId
+          AND o.consultantId <> o.userId
+          AND o.paymentFlow = :paymentFlow
+          AND o.serviceActivatedAt IS NOT NULL
+          AND o.status = 'SERVICE_ACTIVE'
+          AND (:institutionId IS NULL OR o.institutionId = :institutionId)
+        ORDER BY CASE WHEN o.appointmentTime IS NULL THEN 1 ELSE 0 END,
+                 o.appointmentTime ASC,
+                 o.id ASC
+    """)
+    fun findActiveConsultantOrders(
+        @Param("consultantId") consultantId: String,
+        @Param("paymentFlow") paymentFlow: String,
+        @Param("institutionId") institutionId: String?,
+        pageable: Pageable
+    ): List<OrderEntity>
+
+    @Query("""
+        SELECT o FROM OrderEntity o
+        WHERE o.consultantId = :consultantId
+          AND o.consultantId <> o.userId
+          AND o.paymentFlow = :paymentFlow
+          AND o.serviceActivatedAt IS NOT NULL
+          AND o.status IN :statuses
+          AND (:institutionId IS NULL OR o.institutionId = :institutionId)
+        ORDER BY COALESCE(o.updatedAt, o.createdAt) DESC, o.id DESC
+    """)
+    fun findConsultantHistoryOrders(
+        @Param("consultantId") consultantId: String,
+        @Param("paymentFlow") paymentFlow: String,
+        @Param("statuses") statuses: Set<String>,
+        @Param("institutionId") institutionId: String?,
+        pageable: Pageable
+    ): List<OrderEntity>
+
+    @Query("""
+        SELECT o FROM OrderEntity o
         WHERE (:doctorId IS NULL OR o.doctorId = :doctorId)
           AND (:status IS NULL OR o.status = :status)
         ORDER BY o.createdAt DESC, o.id DESC

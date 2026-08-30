@@ -322,6 +322,7 @@ final class ManagementContext {
     this.canManageArticles = false,
     this.canManageSplitConfigs = false,
     this.canManageOrders = false,
+    this.canAccessConsultantOrderWorkbench = false,
     this.canApplyToInstitutions = false,
     this.canReviewInstitutionRequests = false,
     this.canSubmitPlatformProjectRequests = false,
@@ -352,6 +353,8 @@ final class ManagementContext {
       canManageArticles: _boolean(map['canManageArticles']),
       canManageSplitConfigs: _boolean(map['canManageSplitConfigs']),
       canManageOrders: _boolean(map['canManageOrders']),
+      canAccessConsultantOrderWorkbench:
+          _boolean(map['canAccessConsultantOrderWorkbench']),
       canApplyToInstitutions: _boolean(map['canApplyToInstitutions']),
       canReviewInstitutionRequests:
           _boolean(map['canReviewInstitutionRequests']),
@@ -379,6 +382,7 @@ final class ManagementContext {
   final bool canManageArticles;
   final bool canManageSplitConfigs;
   final bool canManageOrders;
+  final bool canAccessConsultantOrderWorkbench;
   final bool canApplyToInstitutions;
   final bool canReviewInstitutionRequests;
   final bool canSubmitPlatformProjectRequests;
@@ -393,6 +397,7 @@ final class ManagementContext {
       canManageArticles ||
       canManageSplitConfigs ||
       canManageOrders ||
+      canAccessConsultantOrderWorkbench ||
       canApplyToInstitutions ||
       canReviewInstitutionRequests ||
       canSubmitPlatformProjectRequests ||
