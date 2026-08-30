@@ -25,7 +25,7 @@ ACTIVE 医生或服务端权限上下文允许的机构法人可进入“专业�
 - Android 模拟器：`http://10.0.2.2:8080`
 - iOS 模拟器：`http://127.0.0.1:8080`
 - 真机：使用电脑局域网地址；生产环境必须使用 HTTPS
-- 图片 URL 由服务端直接返回完整 URL，客户端不要自行拼接 `/images`。公开媒体切换至阿里云 OSS/CDN 后仍沿用此契约；私有媒体由服务端签发短期 URL，Flutter 仅通过 `PublicMediaUrlResolver` 解析，不持有 OSS AccessKey 或 Secret。服务费退款私有凭证是明确例外：用户端只接收安全元数据，内容没有 URL，只能由管理员通过鉴权内容接口读取。
+- 图片 URL 由服务端直接返回完整 URL，客户端不要自行拼接 `/images`。公开媒体切换至阿里云 OSS/CDN 后仍沿用此契约；私有媒体由服务端签发短期 URL，Flutter 仅通过 `PublicMediaUrlResolver` 解析，不持有 OSS AccessKey 或 Secret。
 
 ## 2. 统一响应与错误处理
 
@@ -313,8 +313,6 @@ IDENTITY_APPLICATION_APPROVED, IDENTITY_APPLICATION_REJECTED
 
 响应：`data.url`。头像、日记图片、文章封面、医生主页展示证书等使用此接口。
 
-该公开媒体接口不用于新的旅游地接服务费退款凭证；服务费退款文件必须随退款 multipart 请求进入私有存储，且只向客户端返回安全元数据。
-
 多图字段目前是逗号分隔字符串，例如 `"url1,url2"`，Flutter 数据层统一转换为 `List<String>`；提交时再 `join(',')`。不得把带逗号的 URL 写入该字段。
 
 ## 9. AI Chat、Agent 与 SSE
@@ -473,78 +471,6 @@ Alipay+ 商户注册和收单参数仍在安排，仓库没有真实生产 gatew
 | POST | `/orders/{id}/refund` | `SERVICE_ACTIVE` 或 `COMPLETED` 申请整笔旅游地接服务费退款，进入人工审核 |
 | GET | `/orders/{id}/refund` | 查看退款详情 |
 | POST | `/orders/{id}/cancel-refund` | 仅在待审核阶段取消申请；按退款记录的 `originalStatus` 恢复状态与会话权限 |
-
-#### 服务费退款私有凭证
-
-Flutter 对 `paymentFlow=TRAVEL_GROUND_SERVICE_ONLY` 的退款申请固定使用 multipart，即使没有凭证也不能退回 JSON 分支：
-
-```http
-POST /api/orders/{orderId}/refund
-Authorization: Bearer <access-token>
-Content-Type: multipart/form-data
-
-reason=行程取消
-description=无法按期出行
-reasonCode=CUSTOMER_REQUEST
-evidenceFiles=@receipt.pdf;type=application/pdf
-evidenceFiles=@photo.jpg;type=image/jpeg
-```
-
-- `reason` 必填且不能为空；`description` 可省略，最多 1,000 字；`reasonCode` 可省略，服务端按 `OTHER` 处理。
-- `evidenceFiles` 是可省略的重复 part，按提交顺序保存，允许 0 到 5 个。支持 `.jpg`/`.jpeg` + `image/jpeg`、`.png` + `image/png`、`.webp` + `image/webp`、`.pdf` + `application/pdf`；每个文件最多 `10 * 1024 * 1024` 字节。服务端同时核验扩展名、声明 MIME 和 JPEG/PNG/WebP/PDF 文件签名，部署的 multipart 总请求容量必须覆盖 5 个边界文件及协议开销。
-- 退款记录、`private_files`、`refund_evidence_files` 关联和物理文件属于同一次事务。任一文件或持久化步骤失败时，整次申请失败，数据库写入回滚，且本次已经写入的物理文件会被清理；客户端不得把部分文件视为已提交。
-- 文件只写入私有目录，提交成功后冻结，没有用户增、删、换接口。账户注销仍保留已经绑定退款的凭证，直到单独批准保留/清理政策。
-
-成功仍使用统一 envelope。`evidenceFiles` 与退款字段位于 `data` 同一层，不存在额外 `refund` 包装；以下仅展示凭证相关字段：
-
-```json
-{
-  "code": 200,
-  "message": "success",
-  "data": {
-    "id": "refund-uuid",
-    "orderId": "order-uuid",
-    "evidenceUrl": "",
-    "evidenceFiles": [
-      {
-        "fileId": "file-uuid",
-        "originalName": "receipt.pdf",
-        "contentType": "application/pdf",
-        "sizeBytes": 245760,
-        "position": 0
-      }
-    ]
-  }
-}
-```
-
-`evidenceFiles` 只返回按 `position` 升序排列的 `fileId`、净化后的 `originalName`、`contentType`、`sizeBytes`、`position`；不得出现本地路径、`storageKey` 或匿名/签名 URL。`GET /api/orders/{orderId}/refund` 和管理员 `GET /api/admin/refunds` 使用相同的安全元数据字段。`evidenceUrl` 为历史兼容字段，服务费 multipart 响应固定为空字符串。
-
-管理员只能通过已认证接口读取内容：
-
-```http
-GET /api/admin/refunds/{refundId}/evidence/{fileId}/content
-Authorization: Bearer <admin-access-token>
-```
-
-服务端同时校验 `refundId` 与 `fileId` 的有效关联，成功时直接返回 image/PDF 字节而不是 JSON envelope，并设置实际 `Content-Type`、安全 UTF-8 `Content-Disposition: inline`、`Cache-Control: no-store` 和 `X-Content-Type-Options: nosniff`。管理端必须通过带认证的 blob 请求预览或下载，不能把接口路径直接暴露为匿名图片 URL。
-
-既有 `LEGACY_MEDICAL` 退款继续使用原 JSON 合同，`evidenceUrl` 字段和历史资格/金额/状态机均保持兼容：
-
-```http
-POST /api/orders/{orderId}/refund
-Authorization: Bearer <access-token>
-Content-Type: application/json
-
-{
-  "reason": "不想去了",
-  "description": "用户说明",
-  "evidenceUrl": "https://legacy.example/evidence.jpg",
-  "reasonCode": "CUSTOMER_REQUEST"
-}
-```
-
-新服务费退款凭证不得上传到 `/upload`，也不得写入或拼接 `evidenceUrl`。
 
 服务会话响应必须有 `conversationType=ORDER_SERVICE`、与请求一致的 `orderId`，以及服务端判定的 `serviceMessagingEnabled`；字段缺失或为 `false` 时 Flutter 必须禁止发送。用户和顾问都通过 `/orders/{id}/service-conversation` 获取或刷新会话权限，不得依赖仅允许订单用户访问的订单详情接口。
 
