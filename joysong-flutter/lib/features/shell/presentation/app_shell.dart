@@ -316,6 +316,8 @@ class _AppShellState extends State<AppShell> {
               _messagingController == null ? null : _openCustomerService,
           onAccountSecurity:
               widget.apiClient == null ? null : _openAccountSecurity,
+          onOpenDirectMessage:
+              _messagingRepository == null ? null : _openDirectMessage,
           onOpenFavorite: _discoverRepository == null ? null : _openFavorite,
           onSwitchAccount: widget.onSwitchAccount,
           onProfileUpdated: widget.onProfileUpdated,

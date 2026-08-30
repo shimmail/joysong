@@ -545,6 +545,7 @@ class ManagementCenterPage extends StatefulWidget {
     this.institutionImagePicker,
     this.doctorImagePicker,
     this.professionalRepository,
+    this.onOpenDirectMessage,
     super.key,
   });
 
@@ -553,6 +554,7 @@ class ManagementCenterPage extends StatefulWidget {
   final InstitutionProfileImagePicker? institutionImagePicker;
   final Future<String?> Function()? doctorImagePicker;
   final ProfessionalRepository? professionalRepository;
+  final DoctorOrderDirectMessageOpener? onOpenDirectMessage;
 
   @override
   State<ManagementCenterPage> createState() => _ManagementCenterPageState();
@@ -616,6 +618,7 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
                 institutionImagePicker: widget.institutionImagePicker,
                 doctorImagePicker: widget.doctorImagePicker,
                 professionalRepository: widget.professionalRepository,
+                onOpenDirectMessage: widget.onOpenDirectMessage,
               ),
           };
         },
@@ -634,6 +637,7 @@ class _ManagementCapabilities extends StatelessWidget {
     this.institutionImagePicker,
     this.doctorImagePicker,
     this.professionalRepository,
+    this.onOpenDirectMessage,
   });
 
   final ManagementContext context;
@@ -644,6 +648,7 @@ class _ManagementCapabilities extends StatelessWidget {
   final InstitutionProfileImagePicker? institutionImagePicker;
   final Future<String?> Function()? doctorImagePicker;
   final ProfessionalRepository? professionalRepository;
+  final DoctorOrderDirectMessageOpener? onOpenDirectMessage;
 
   @override
   Widget build(BuildContext buildContext) {
@@ -987,7 +992,10 @@ class _ManagementCapabilities extends StatelessWidget {
         professionalRepository != null) {
       Navigator.of(context).push<void>(
         MaterialPageRoute(
-          builder: (_) => DoctorOrdersPage(repository: professionalRepository!),
+          builder: (_) => DoctorOrdersPage(
+            repository: professionalRepository!,
+            onOpenDirectMessage: onOpenDirectMessage,
+          ),
         ),
       );
       return;

@@ -19,6 +19,7 @@ import 'package:joysong_flutter/features/profile/presentation/profile_support_pa
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
 import 'package:joysong_flutter/features/social/domain/social_repository.dart';
 import 'package:joysong_flutter/features/professional_management/data/professional_repository.dart';
+import 'package:joysong_flutter/features/professional_management/presentation/professional_pages.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({
@@ -33,6 +34,7 @@ class ProfilePage extends StatefulWidget {
     this.onJourney,
     this.onCustomerService,
     this.onAccountSecurity,
+    this.onOpenDirectMessage,
     this.onOpenFavorite,
     this.onSwitchAccount,
     this.onProfileUpdated,
@@ -51,6 +53,7 @@ class ProfilePage extends StatefulWidget {
   final VoidCallback? onJourney;
   final VoidCallback? onCustomerService;
   final VoidCallback? onAccountSecurity;
+  final DoctorOrderDirectMessageOpener? onOpenDirectMessage;
   final Future<void> Function(FavoriteItem item)? onOpenFavorite;
   final Future<void> Function(BuildContext context)? onSwitchAccount;
   final Future<void> Function(AuthUser user)? onProfileUpdated;
@@ -332,6 +335,7 @@ class _ProfilePageState extends State<ProfilePage> {
           doctorImagePicker:
               widget.socialRepository == null ? null : _pickDoctorImage,
           professionalRepository: widget.professionalRepository,
+          onOpenDirectMessage: widget.onOpenDirectMessage,
         ),
       ),
     );
