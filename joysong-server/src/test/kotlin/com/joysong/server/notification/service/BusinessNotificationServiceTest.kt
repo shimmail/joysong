@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.springframework.jdbc.core.JdbcTemplate
+import java.time.LocalDateTime
 
 class BusinessNotificationServiceTest {
 
@@ -36,39 +37,67 @@ class BusinessNotificationServiceTest {
     }
 
     @Test
-    fun `service activation gives the consultant the conversation target and other recipients the order target`() {
+    fun `service activation sends the doctor a project booking while keeping user and consultant targets`() {
         val fixture = fixture()
 
         fixture.service.orderServiceActivated(
             orderId = "order-1",
             userId = "user-1",
             consultantId = "consultant-1",
-            doctorId = "doctor-1"
+            doctorId = "doctor-1",
+            projectName = "热玛吉",
+            appointmentTime = null
         )
 
         val expected = listOf(
             Emission("user-1", "ORDER_SERVICE_ACTIVATED", "行程服务已开启", "您的订单服务已开启，请查看订单详情。", "order", "order-1"),
             Emission("consultant-1", "ORDER_SERVICE_ACTIVATED", "行程服务已开启", "订单服务已开启，请进入服务会话跟进。", "order_service_conversation", "order-1"),
-            Emission("doctor-1", "ORDER_SERVICE_ACTIVATED", "行程服务已开启", "您的订单服务已开启，请查看订单详情。", "order", "order-1")
+            Emission(
+                "doctor-1",
+                "ORDER_SERVICE_ACTIVATED",
+                "项目预约",
+                "预约项目：热玛吉\n预约时间：待确认",
+                "professional_doctor_orders",
+                "order-1"
+            )
         )
         assertEquals(expected.sortedBy(Emission::userId), fixture.emissions.sortedBy(Emission::userId))
     }
 
     @Test
-    fun `service activation gives a shared consultant the conversation target before ordinary recipient targets`() {
+    fun `doctor project booking formats appointment time for notification display`() {
+        val fixture = fixture()
+
+        fixture.service.orderServiceActivated(
+            orderId = "order-1",
+            userId = "user-1",
+            consultantId = "consultant-1",
+            doctorId = "doctor-1",
+            projectName = "超声炮",
+            appointmentTime = LocalDateTime.of(2026, 9, 15, 14, 30, 45)
+        )
+
+        val doctorEmission = fixture.emissions.single { it.userId == "doctor-1" }
+        assertEquals("预约项目：超声炮\n预约时间：2026-09-15 14:30", doctorEmission.content)
+    }
+
+    @Test
+    fun `service activation keeps a shared consultant on conversation while the doctor gets the booking`() {
         val fixture = fixture()
 
         fixture.service.orderServiceActivated(
             orderId = "order-1",
             userId = "shared-user",
             consultantId = "shared-user",
-            doctorId = "doctor-1"
+            doctorId = "doctor-1",
+            projectName = "热玛吉",
+            appointmentTime = null
         )
 
         assertEquals(
             listOf(
                 Emission("shared-user", "ORDER_SERVICE_ACTIVATED", "行程服务已开启", "订单服务已开启，请进入服务会话跟进。", "order_service_conversation", "order-1"),
-                Emission("doctor-1", "ORDER_SERVICE_ACTIVATED", "行程服务已开启", "您的订单服务已开启，请查看订单详情。", "order", "order-1")
+                Emission("doctor-1", "ORDER_SERVICE_ACTIVATED", "项目预约", "预约项目：热玛吉\n预约时间：待确认", "professional_doctor_orders", "order-1")
             ),
             fixture.emissions
         )

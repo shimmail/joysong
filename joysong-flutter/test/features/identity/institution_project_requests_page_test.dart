@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:joysong_flutter/core/config/app_environment.dart';
+import 'package:joysong_flutter/core/network/api_client.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
 import 'package:joysong_flutter/features/identity/domain/identity_models.dart';
@@ -10,6 +11,7 @@ import 'package:joysong_flutter/features/identity/presentation/institution_proje
 import 'package:joysong_flutter/features/identity/presentation/professional_request_pages.dart';
 import 'package:joysong_flutter/features/messaging/domain/messaging_models.dart';
 import 'package:joysong_flutter/features/messaging/domain/messaging_repository.dart';
+import 'package:joysong_flutter/features/professional_management/presentation/professional_pages.dart';
 import 'package:joysong_flutter/features/shell/presentation/app_shell.dart';
 
 void main() {
@@ -191,6 +193,64 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(InstitutionProjectRequestsPage), findsNothing);
       expect(find.byType(InstitutionProjectReviewDetailPage), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'doctor booking notification opens the matching professional order detail',
+    (tester) async {
+      const orderId = 'professional-order-route-target';
+      final apiClient = _ProfessionalOrderApiClient(orderId);
+      await tester.pumpWidget(
+        MaterialApp(
+          locale: const Locale('en'),
+          home: AppShell(
+            agentConfig: const AgentConfig(),
+            apiClient: apiClient,
+            allowPreviewData: true,
+            currentUserId: _doctorContext.userId,
+            dependencies: AppShellDependencies(
+              identityRepository: const _ProjectRequestsRepository(
+                requests: [],
+              ),
+              discoverRepository: const _UnusedDiscoverRepository(),
+              messagingRepository: _NotificationMessagingRepository(
+                const AppNotification(
+                  id: 'notification-professional-order',
+                  userId: 'doctor-user',
+                  type: 'ORDER_SERVICE_ACTIVATED',
+                  title: 'Project booking',
+                  content: 'Project: Thermage',
+                  targetType: 'professional_doctor_orders',
+                  targetId: orderId,
+                  isRead: false,
+                  createdAt: '2026-08-30T00:00:00Z',
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.forum_outlined));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('message-center-system')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(
+          const ValueKey<String>(
+            'notification-row:notification-professional-order',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final page = tester.widget<DoctorOrderDetailPage>(
+        find.byType(DoctorOrderDetailPage),
+      );
+      expect(page.id, orderId);
+      expect(apiClient.requestedPaths, ['/management/orders/$orderId']);
+      expect(find.text('Thermage appointment'), findsOneWidget);
     },
   );
 }
@@ -417,4 +477,35 @@ final class _NotificationMessagingRepository implements MessagingRepository {
   @override
   dynamic noSuchMethod(Invocation invocation) =>
       throw UnsupportedError(invocation.memberName.toString());
+}
+
+final class _ProfessionalOrderApiClient extends ApiClient {
+  _ProfessionalOrderApiClient(this.orderId)
+      : super(apiRoot: Uri.parse('https://example.test/api/'));
+
+  final String orderId;
+  final List<String> requestedPaths = [];
+
+  @override
+  Future<T?> get<T>(
+    String path, {
+    Map<String, Object?> query = const {},
+    required T Function(Object? json) decodeData,
+  }) async {
+    requestedPaths.add(path);
+    if (path != '/management/orders/$orderId') {
+      throw UnsupportedError(path);
+    }
+    return decodeData({
+      'id': orderId,
+      'orderNo': 'ORDER-20260915',
+      'projectName': 'Thermage appointment',
+      'institutionName': 'Institution One',
+      'status': 'SERVICE_ACTIVE',
+      'amount': '100.00',
+      'createdAt': '2026-08-30T10:00:00',
+      'canVerify': false,
+      'canRequestCompletion': false,
+    });
+  }
 }

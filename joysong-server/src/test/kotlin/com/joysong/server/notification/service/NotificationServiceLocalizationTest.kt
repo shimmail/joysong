@@ -252,6 +252,30 @@ class NotificationServiceLocalizationTest {
                 "The order service has started. Open the service conversation to follow up."
             ),
             NotificationCase(
+                "ORDER_SERVICE_ACTIVATED",
+                "professional_doctor_orders",
+                "项目预约",
+                "预约项目：热玛吉\n预约时间：2026-09-15 14:30",
+                "Project booking",
+                "Project: 热玛吉\nAppointment time: 2026-09-15 14:30"
+            ),
+            NotificationCase(
+                "ORDER_SERVICE_ACTIVATED",
+                "professional_doctor_orders",
+                "项目预约",
+                "预约项目：超声炮\n预约时间：待确认",
+                "Project booking",
+                "Project: 超声炮\nAppointment time: To be confirmed"
+            ),
+            NotificationCase(
+                "ORDER_SERVICE_ACTIVATED",
+                "professional_doctor_orders",
+                "项目预约",
+                "预约项目：组合项目\n预约时间：请以医生确认项目说明为准\n预约时间：2026-09-16 10:00",
+                "Project booking",
+                "Project: 组合项目\n预约时间：请以医生确认项目说明为准\nAppointment time: 2026-09-16 10:00"
+            ),
+            NotificationCase(
                 "ORDER_COMPLETED",
                 "order",
                 "订单已完成",

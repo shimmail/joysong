@@ -18,4 +18,14 @@ void main() {
           .having((target) => target.id, 'id', 'request-2'),
     );
   });
+
+  test('doctor booking target preserves professional order intent', () {
+    final target = NotificationTarget.parse(
+      'professional_doctor_orders',
+      'order-1',
+    );
+
+    expect(target.kind.name, 'professionalDoctorOrders');
+    expect(target.id, 'order-1');
+  });
 }

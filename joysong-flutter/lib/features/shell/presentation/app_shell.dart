@@ -54,6 +54,7 @@ import 'package:joysong_flutter/features/orders/presentation/orders_controller.d
 import 'package:joysong_flutter/features/orders/presentation/orders_page.dart';
 import 'package:joysong_flutter/features/profile/presentation/profile_page.dart';
 import 'package:joysong_flutter/features/professional_management/data/professional_repository.dart';
+import 'package:joysong_flutter/features/professional_management/presentation/professional_pages.dart';
 import 'package:joysong_flutter/features/profile/data/profile_repository_impl.dart';
 import 'package:joysong_flutter/features/profile/domain/profile_repository.dart';
 import 'package:joysong_flutter/features/social/data/api_public_media_uploader.dart';
@@ -1111,6 +1112,9 @@ class _AppShellState extends State<AppShell> {
           initialRequestId: target.id,
         );
         return;
+      case NotificationTargetKind.professionalDoctorOrders:
+        _openProfessionalDoctorOrder(target.id);
+        return;
       case NotificationTargetKind.institutionProjectReview:
         _openManagementCenter(
           initialInstitutionProjectRequestId: target.id,
@@ -1151,6 +1155,20 @@ class _AppShellState extends State<AppShell> {
         onOpenAi: _openAiChat,
       ),
     ));
+  }
+
+  void _openProfessionalDoctorOrder(String orderId) {
+    final apiClient = widget.apiClient;
+    if (apiClient == null) return;
+    final repository = ProfessionalRepository(apiClient);
+    final id = orderId.trim();
+    _contentNavigator.push<void>(
+      MaterialPageRoute(
+        builder: (_) => id.isEmpty
+            ? DoctorOrdersPage(repository: repository)
+            : DoctorOrderDetailPage(repository: repository, id: id),
+      ),
+    );
   }
 
   Future<void> _openOrderDetailById(String orderId) async {

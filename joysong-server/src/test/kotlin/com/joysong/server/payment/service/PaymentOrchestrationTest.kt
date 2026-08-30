@@ -784,7 +784,7 @@ class PaymentOrchestrationTest {
         }
         every { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) } returns Unit
         every {
-            businessNotificationService.orderServiceActivated(any(), any(), any(), any())
+            businessNotificationService.orderServiceActivated(any(), any(), any(), any(), any(), any())
         } throws IllegalStateException("notification persistence unavailable")
 
         val providerResult = ProviderPaymentResult(
@@ -830,7 +830,7 @@ class PaymentOrchestrationTest {
         }
         verify(exactly = 1) {
             businessNotificationService.orderServiceActivated(
-                "order-1", "user-1", "consultant-1", "doctor-1"
+                "order-1", "user-1", "consultant-1", "doctor-1", "项目", null
             )
         }
 
@@ -839,7 +839,9 @@ class PaymentOrchestrationTest {
         assertEquals(activatedAt, orderState.serviceActivatedAt)
         verify(exactly = 1) { repositories.order.save(any()) }
         verify(exactly = 1) { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) }
-        verify(exactly = 1) { businessNotificationService.orderServiceActivated(any(), any(), any(), any()) }
+        verify(exactly = 1) {
+            businessNotificationService.orderServiceActivated(any(), any(), any(), any(), any(), any())
+        }
     }
 
     @Test
@@ -847,7 +849,10 @@ class PaymentOrchestrationTest {
         val repositories = persistenceRepositories()
         val prepared = travelPayment(status = PaymentStatus.PROCESSING.name)
         var paymentState = prepared
-        var orderState = travelOrder()
+        var orderState = travelOrder().copy(
+            projectName = "热玛吉",
+            appointmentTime = LocalDateTime.of(2026, 9, 15, 14, 30)
+        )
         every { repositories.payment.findByIdForUpdate(prepared.id) } answers { paymentState }
         every { repositories.payment.save(any()) } answers {
             firstArg<PaymentEntity>().also { paymentState = it }
@@ -871,13 +876,20 @@ class PaymentOrchestrationTest {
             persistence.applyProviderResult(prepared.id, providerResult)
 
             assertEquals(OrderStatusEnum.SERVICE_ACTIVE.value, orderState.status)
-            verify(exactly = 0) { businessNotificationService.orderServiceActivated(any(), any(), any(), any()) }
+            verify(exactly = 0) {
+                businessNotificationService.orderServiceActivated(any(), any(), any(), any(), any(), any())
+            }
         }
 
         assertEquals(1, transactionManager.commits)
         verify(exactly = 1) {
             businessNotificationService.orderServiceActivated(
-                "order-1", "user-1", "consultant-1", "doctor-1"
+                "order-1",
+                "user-1",
+                "consultant-1",
+                "doctor-1",
+                "热玛吉",
+                LocalDateTime.of(2026, 9, 15, 14, 30)
             )
         }
     }
@@ -895,7 +907,7 @@ class PaymentOrchestrationTest {
         }
         every { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) } returns Unit
         every {
-            businessNotificationService.orderServiceActivated(any(), any(), any(), any())
+            businessNotificationService.orderServiceActivated(any(), any(), any(), any(), any(), any())
         } throws IllegalStateException("notification persistence unavailable")
         val transactionManager = RecordingTransactionManager()
         val persistence = PaymentPersistenceService(repositories.payment, repositories.order, repositories.log)
@@ -915,7 +927,9 @@ class PaymentOrchestrationTest {
         assertEquals(PaymentStatus.SUCCEEDED.name, result?.status)
         assertEquals(OrderStatusEnum.SERVICE_ACTIVE.value, orderState.status)
         assertEquals(1, transactionManager.commits)
-        verify(exactly = 1) { businessNotificationService.orderServiceActivated(any(), any(), any(), any()) }
+        verify(exactly = 1) {
+            businessNotificationService.orderServiceActivated(any(), any(), any(), any(), any(), any())
+        }
     }
 
     @Test
@@ -937,7 +951,9 @@ class PaymentOrchestrationTest {
             firstArg<OrderEntity>().also { orderState = it }
         }
         every { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) } returns Unit
-        every { businessNotificationService.orderServiceActivated(any(), any(), any(), any()) } answers {
+        every {
+            businessNotificationService.orderServiceActivated(any(), any(), any(), any(), any(), any())
+        } answers {
             jdbc.update("INSERT INTO notification_events (id) VALUES (1)")
             Unit
         }
@@ -945,7 +961,15 @@ class PaymentOrchestrationTest {
         val dispatcher = proxiedDispatcher(transactionManager)
         assertTrue(AopUtils.isAopProxy(dispatcher))
         val transactional = PaymentBusinessNotificationDispatcher::class.java
-            .getMethod("orderServiceActivated", String::class.java, String::class.java, String::class.java, String::class.java)
+            .getMethod(
+                "orderServiceActivated",
+                String::class.java,
+                String::class.java,
+                String::class.java,
+                String::class.java,
+                String::class.java,
+                LocalDateTime::class.java
+            )
             .getAnnotation(Transactional::class.java)
         assertNotNull(transactional)
         assertEquals(Propagation.REQUIRES_NEW, transactional.propagation)
@@ -999,7 +1023,9 @@ class PaymentOrchestrationTest {
             firstArg<OrderEntity>().also { orderState = it }
         }
         every { repositories.log.logTransition(any(), any(), any(), any(), any(), any()) } returns Unit
-        every { businessNotificationService.orderServiceActivated(any(), any(), any(), any()) } answers {
+        every {
+            businessNotificationService.orderServiceActivated(any(), any(), any(), any(), any(), any())
+        } answers {
             jdbc.update("INSERT INTO notification_events (id) VALUES (1)")
             throw IllegalStateException("notification persistence unavailable")
         }
@@ -1027,7 +1053,9 @@ class PaymentOrchestrationTest {
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM business_events", Int::class.java))
         assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM notification_events", Int::class.java))
         assertEquals(2, transactionManager.begins)
-        verify(exactly = 1) { businessNotificationService.orderServiceActivated(any(), any(), any(), any()) }
+        verify(exactly = 1) {
+            businessNotificationService.orderServiceActivated(any(), any(), any(), any(), any(), any())
+        }
     }
 
     @Test

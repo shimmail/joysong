@@ -2,6 +2,8 @@ package com.joysong.server.notification.service
 
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 enum class ProfessionalApplicantRole {
     DOCTOR,
@@ -13,6 +15,7 @@ class BusinessNotificationService(
     private val notificationService: NotificationService,
     private val jdbcTemplate: JdbcTemplate
 ) {
+    private val appointmentNotificationFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 
     fun currentLegalRepresentativeIds(institutionId: String): Set<String> =
         jdbcTemplate.queryForList(
@@ -44,15 +47,27 @@ class BusinessNotificationService(
             targetId = orderId
         )
 
-    fun orderServiceActivated(orderId: String, userId: String, consultantId: String, doctorId: String) {
+    fun orderServiceActivated(
+        orderId: String,
+        userId: String,
+        consultantId: String,
+        doctorId: String,
+        projectName: String,
+        appointmentTime: LocalDateTime?
+    ) {
+        val appointmentLabel = appointmentTime?.format(appointmentNotificationFormatter) ?: "待确认"
         notifyCandidates(
             candidates = listOf(
-                NotificationCandidate(consultantId, "订单服务已开启，请进入服务会话跟进。", "order_service_conversation"),
-                NotificationCandidate(userId, "您的订单服务已开启，请查看订单详情。", "order"),
-                NotificationCandidate(doctorId, "您的订单服务已开启，请查看订单详情。", "order")
+                NotificationCandidate(consultantId, "行程服务已开启", "订单服务已开启，请进入服务会话跟进。", "order_service_conversation"),
+                NotificationCandidate(userId, "行程服务已开启", "您的订单服务已开启，请查看订单详情。", "order"),
+                NotificationCandidate(
+                    doctorId,
+                    "项目预约",
+                    "预约项目：${projectName.trim()}\n预约时间：$appointmentLabel",
+                    "professional_doctor_orders"
+                )
             ),
             type = "ORDER_SERVICE_ACTIVATED",
-            title = "行程服务已开启",
             targetId = orderId
         )
     }
@@ -277,16 +292,14 @@ class BusinessNotificationService(
         targetType: String,
         targetId: String
     ) = notifyCandidates(
-        recipients.map { recipientId -> NotificationCandidate(recipientId, content, targetType) },
+        recipients.map { recipientId -> NotificationCandidate(recipientId, title, content, targetType) },
         type,
-        title,
         targetId
     )
 
     private fun notifyCandidates(
         candidates: Collection<NotificationCandidate>,
         type: String,
-        title: String,
         targetId: String
     ) {
         candidates.asSequence()
@@ -294,7 +307,7 @@ class BusinessNotificationService(
             .filter { candidate -> candidate.userId.isNotEmpty() }
             .distinctBy { candidate -> candidate.userId }
             .forEach { candidate ->
-                notifyRecipient(candidate.userId, type, title, candidate.content, candidate.targetType, targetId)
+                notifyRecipient(candidate.userId, type, candidate.title, candidate.content, candidate.targetType, targetId)
             }
     }
 
@@ -342,6 +355,7 @@ class BusinessNotificationService(
 
     private data class NotificationCandidate(
         val userId: String,
+        val title: String,
         val content: String,
         val targetType: String
     )

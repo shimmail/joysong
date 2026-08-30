@@ -11,6 +11,7 @@ enum NotificationTargetKind {
   professionalConsultantApplication,
   professionalDoctorRelationships,
   professionalConsultantRelationships,
+  professionalDoctorOrders,
   institutionProjectReview,
   institutionProjectApplication,
   discover,
@@ -45,6 +46,8 @@ class NotificationTarget {
             NotificationTargetKind.professionalDoctorRelationships,
           'professional_consultant_relationships' =>
             NotificationTargetKind.professionalConsultantRelationships,
+          'professional_doctor_orders' =>
+            NotificationTargetKind.professionalDoctorOrders,
           'institution_project_review' =>
             NotificationTargetKind.institutionProjectReview,
           'institution_project_application' =>
