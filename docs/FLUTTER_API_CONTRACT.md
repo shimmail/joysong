@@ -253,13 +253,10 @@ ORDER_CREATED, ORDER_SERVICE_ACTIVATED, ORDER_COMPLETED, ORDER_REFUND_REQUESTED,
 ORDER_REFUND_APPROVED, ORDER_REFUND_REJECTED, ORDER_REFUNDED, ORDER_CANCELLED,
 PROFESSIONAL_APPLICATION_SUBMITTED, PROFESSIONAL_APPLICATION_WITHDRAWN,
 PROFESSIONAL_APPLICATION_APPROVED, PROFESSIONAL_APPLICATION_REJECTED,
-IDENTITY_APPLICATION_APPROVED, IDENTITY_APPLICATION_REJECTED,
-INSTITUTION_PROJECT_APPLICATION_SUBMITTED,
-INSTITUTION_PROJECT_APPLICATION_APPROVED,
-INSTITUTION_PROJECT_APPLICATION_REJECTED
+IDENTITY_APPLICATION_APPROVED, IDENTITY_APPLICATION_REJECTED
 ```
 
-`targetType` 是导航契约，`targetId` 是对应订单、申请或关系请求 ID：`order` 和 `order_refund` 打开订单详情；`order_service_conversation` 打开订单服务会话；`identity_management` 打开身份管理；`identity_application` 聚焦身份申请历史；`professional_doctor_review`、`professional_consultant_review` 打开机构法人的对应审核队列；`professional_doctor_application`、`professional_consultant_application`、`professional_doctor_relationships`、`professional_consultant_relationships` 打开申请人自己的对应关系历史。用户支付旅游地接服务费后，医生收到的 `ORDER_SERVICE_ACTIVATED` 使用 `targetType=professional_doctor_orders`、`targetId=订单 ID`，标题为“项目预约”，正文包含预约项目名称和 `yyyy-MM-dd HH:mm` 格式的预约时间；没有预约时间时显示“待确认”。Flutter 对非空订单 ID 直接打开对应专业订单详情，对空 ID 打开专业订单列表。机构项目申请提交、批准和驳回分别使用 `INSTITUTION_PROJECT_APPLICATION_SUBMITTED`、`INSTITUTION_PROJECT_APPLICATION_APPROVED`、`INSTITUTION_PROJECT_APPLICATION_REJECTED`：法人审核入口的 `targetType` 固定为 `institution_project_review`，申请医生查看本人申请状态和审核意见的 `targetType` 固定为 `institution_project_application`，两者的 `targetId` 都是机构项目申请 ID。Flutter 必须保留该 ID；目标已失效或对当前主体不再可见时，回退到相应审核列表或新建申请表单，且不得崩溃。
+`targetType` 是导航契约，`targetId` 是对应订单、申请或关系请求 ID：`order` 和 `order_refund` 打开订单详情；`order_service_conversation` 打开订单服务会话；`identity_management` 打开身份管理；`identity_application` 聚焦身份申请历史；`professional_doctor_review`、`professional_consultant_review` 打开机构法人的对应审核队列；`professional_doctor_application`、`professional_consultant_application`、`professional_doctor_relationships`、`professional_consultant_relationships` 打开申请人自己的对应关系历史。目标已失效时，Flutter 必须回退到对应列表或管理页，且不得崩溃。
 
 普通私信与 `ORDER_SERVICE` 订单沟通统一以 `/dm/conversations` 的会话未读数为准，不再创建 `DM_NEW`，历史上已创建的此类通知也不得出现在通知列表或未读统计中。平台客服本期保持现状：仅关联到 `CS_ADMIN` 客服会话的 `DM_NEW` 继续作为通知返回；英文读取时将“客服回复”“用户咨询”投影为 `Customer service reply`、`User inquiry`，图片摘要 `[图片]` 投影为 `[Image]`，实际消息摘要保持发送者原文。
 

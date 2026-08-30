@@ -21,12 +21,60 @@ final class DoctorArticleDraft {
 
 @immutable
 final class DoctorOrder {
-  const DoctorOrder({required this.id, required this.orderNo, required this.projectName, required this.institutionName, required this.status, required this.amount, required this.createdAt, required this.canVerify, required this.canRequestCompletion});
-  final String id, orderNo, projectName, institutionName, status, amount;
+  const DoctorOrder({
+    required this.id,
+    required this.orderNo,
+    required this.userId,
+    required this.projectName,
+    required this.institutionName,
+    required this.status,
+    required this.amount,
+    required this.currency,
+    required this.quantity,
+    required this.remark,
+    required this.userPhone,
+    required this.createdAt,
+    required this.appointmentTime,
+    required this.canVerify,
+    required this.canRequestCompletion,
+  });
+
+  final String id;
+  final String orderNo;
+  final String userId;
+  final String projectName;
+  final String institutionName;
+  final String status;
+  final String amount;
+  final String currency;
+  final int quantity;
+  final String remark;
+  final String userPhone;
   final DateTime createdAt;
-  final bool canVerify, canRequestCompletion;
+  final DateTime? appointmentTime;
+  final bool canVerify;
+  final bool canRequestCompletion;
+
   factory DoctorOrder.fromJson(Object? value) {
     final map = (value as Map).cast<String, dynamic>();
-    return DoctorOrder(id: '${map['id'] ?? ''}', orderNo: '${map['orderNo'] ?? ''}', projectName: '${map['projectName'] ?? ''}', institutionName: '${map['institutionName'] ?? ''}', status: '${map['status'] ?? ''}', amount: '${map['amount'] ?? ''}', createdAt: DateTime.parse('${map['createdAt']}'), canVerify: map['canVerify'] == true, canRequestCompletion: map['canRequestCompletion'] == true);
+    final appointmentTime = '${map['appointmentTime'] ?? ''}'.trim();
+    return DoctorOrder(
+      id: '${map['id'] ?? ''}',
+      orderNo: '${map['orderNo'] ?? ''}',
+      userId: '${map['userId'] ?? ''}',
+      projectName: '${map['projectName'] ?? ''}',
+      institutionName: '${map['institutionName'] ?? ''}',
+      status: '${map['status'] ?? ''}',
+      amount: '${map['amount'] ?? ''}',
+      currency: '${map['currency'] ?? 'USD'}'.toUpperCase(),
+      quantity: (map['quantity'] as num?)?.toInt() ?? 1,
+      remark: '${map['remark'] ?? ''}',
+      userPhone: '${map['userPhone'] ?? ''}',
+      createdAt: DateTime.parse('${map['createdAt']}'),
+      appointmentTime:
+          appointmentTime.isEmpty ? null : DateTime.tryParse(appointmentTime),
+      canVerify: map['canVerify'] == true,
+      canRequestCompletion: map['canRequestCompletion'] == true,
+    );
   }
 }

@@ -81,6 +81,12 @@ class UserMediaAssetService(
               JOIN platform_cooperation_agreements pca ON pca.agreement_file_id = pf.id
               WHERE pf.storage_key = uma.storage_key
           )
+          AND NOT EXISTS (
+              SELECT 1
+              FROM private_files pf
+              JOIN refund_evidence_files ref ON ref.file_id = pf.id
+              WHERE pf.storage_key = uma.storage_key
+          )
         """.trimIndent(),
         userId,
     )

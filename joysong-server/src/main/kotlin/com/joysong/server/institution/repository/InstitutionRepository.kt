@@ -34,6 +34,16 @@ interface InstitutionRepository : JpaRepository<InstitutionEntity, String> {
     @Query(
         """
         UPDATE InstitutionEntity institution
+        SET institution.caseCount = COALESCE(institution.caseCount, 0) + 1
+        WHERE institution.id = :id AND institution.deletedAt IS NULL
+        """
+    )
+    fun incrementCaseCount(@Param("id") id: String): Int
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE InstitutionEntity institution
         SET institution.name = :name,
             institution.address = :address,
             institution.city = :city,

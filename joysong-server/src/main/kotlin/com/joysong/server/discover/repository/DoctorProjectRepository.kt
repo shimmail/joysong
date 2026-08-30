@@ -28,9 +28,11 @@ interface DoctorProjectRepository : JpaRepository<DoctorProjectEntity, DoctorPro
         value = """
             SELECT dp.* FROM doctor_projects dp
             JOIN institution_projects ip ON ip.id = dp.institution_project_id
+            JOIN users u ON u.id = dp.doctor_id
             WHERE dp.institution_project_id = :institutionProjectId
               AND dp.is_active = TRUE
               AND ip.is_active = TRUE AND ip.deleted_at IS NULL
+              AND u.account_state = 'ACTIVE' AND u.deleted_at IS NULL
               AND EXISTS (
                   SELECT 1 FROM doctor_institutions di
                   WHERE di.doctor_id = dp.doctor_id
@@ -53,9 +55,11 @@ interface DoctorProjectRepository : JpaRepository<DoctorProjectEntity, DoctorPro
                    dp.price AS price
             FROM doctor_projects dp
             JOIN institution_projects ip ON ip.id = dp.institution_project_id
+            JOIN users u ON u.id = dp.doctor_id
             WHERE dp.institution_project_id IN (:institutionProjectIds)
               AND dp.is_active = TRUE
               AND ip.is_active = TRUE AND ip.deleted_at IS NULL
+              AND u.account_state = 'ACTIVE' AND u.deleted_at IS NULL
               AND EXISTS (
                   SELECT 1 FROM doctor_institutions di
                   WHERE di.doctor_id = dp.doctor_id
@@ -79,9 +83,11 @@ interface DoctorProjectRepository : JpaRepository<DoctorProjectEntity, DoctorPro
                    dp.price AS price
             FROM doctor_projects dp
             JOIN institution_projects ip ON ip.id = dp.institution_project_id
+            JOIN users u ON u.id = dp.doctor_id
             WHERE dp.doctor_id = :doctorId
               AND dp.is_active = TRUE
               AND ip.is_active = TRUE AND ip.deleted_at IS NULL
+              AND u.account_state = 'ACTIVE' AND u.deleted_at IS NULL
               AND EXISTS (
                   SELECT 1 FROM doctor_institutions di
                   WHERE di.doctor_id = dp.doctor_id

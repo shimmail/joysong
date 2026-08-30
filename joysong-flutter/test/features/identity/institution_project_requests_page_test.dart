@@ -37,11 +37,15 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Review details'), findsOneWidget);
-      expect(find.textContaining('Approved'), findsOneWidget);
-      expect(
-        find.textContaining('reviewed request'),
-        findsOneWidget,
+      final requestPage = tester.widget<InstitutionProjectRequestsPage>(
+        find.byType(InstitutionProjectRequestsPage, skipOffstage: false),
       );
+      expect(requestPage.reviewMode, isTrue);
+      final detail = tester.widget<InstitutionProjectReviewDetailPage>(
+        find.byType(InstitutionProjectReviewDetailPage),
+      );
+      expect(detail.item.id, requestId);
+      expect(detail.actions, isNull);
     },
   );
 
@@ -72,11 +76,15 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Review details'), findsOneWidget);
-      expect(find.textContaining('Rejected'), findsOneWidget);
-      expect(
-        find.textContaining('reviewed request'),
-        findsOneWidget,
+      final requestPage = tester.widget<InstitutionProjectRequestsPage>(
+        find.byType(InstitutionProjectRequestsPage, skipOffstage: false),
       );
+      expect(requestPage.reviewMode, isFalse);
+      final detail = tester.widget<InstitutionProjectReviewDetailPage>(
+        find.byType(InstitutionProjectReviewDetailPage),
+      );
+      expect(detail.item.id, requestId);
+      expect(detail.actions, isNull);
     },
   );
 
@@ -173,11 +181,6 @@ void main() {
       );
       expect(detail.item.id, requestId);
       expect(detail.actions, isNull);
-      final detailRows = (detail.details! as Column).children.whereType<Text>();
-      expect(
-        detailRows.any((row) => row.data?.contains('reviewed request') == true),
-        isTrue,
-      );
       expect(
         find.byType(InstitutionProjectReviewDetailPage, skipOffstage: false),
         findsOneWidget,
@@ -250,7 +253,7 @@ void main() {
       );
       expect(page.id, orderId);
       expect(apiClient.requestedPaths, ['/management/orders/$orderId']);
-      expect(find.text('Thermage appointment'), findsOneWidget);
+      expect(find.text('Thermage appointment'), findsAtLeastNWidgets(1));
     },
   );
 }

@@ -1,5 +1,6 @@
 package com.joysong.server.order
 
+import com.joysong.server.catalog.service.CatalogCounterCacheInvalidator
 import com.joysong.server.coupon.service.CouponService
 import com.joysong.server.config.OrderSplitProperties
 import com.joysong.server.config.TravelGroundServicePricingProperties
@@ -36,6 +37,9 @@ import com.joysong.server.refund.repository.RefundRepository
 import com.joysong.server.refund.service.RefundExecutionOutcome
 import com.joysong.server.refund.service.RefundExecutionService
 import com.joysong.server.review.service.ReviewService
+import com.joysong.server.user.entity.AccountState
+import com.joysong.server.user.entity.UserEntity
+import com.joysong.server.user.repository.UserRepository
 import io.mockk.*
 import io.mockk.impl.annotations.MockK
 import jakarta.persistence.EntityManager
@@ -67,6 +71,7 @@ class OrderServiceTest {
     @MockK private lateinit var institutionRepository: InstitutionRepository
     @MockK private lateinit var doctorProjectRepository: DoctorProjectRepository
     @MockK private lateinit var doctorRepository: DoctorRepository
+    @MockK private lateinit var userRepository: UserRepository
     @MockK private lateinit var orderStatusLogService: OrderStatusLogService
     @MockK private lateinit var couponService: CouponService
     @MockK private lateinit var settlementService: SettlementService
@@ -77,6 +82,7 @@ class OrderServiceTest {
     @MockK private lateinit var doctorInstitutionRelationshipService: DoctorInstitutionRelationshipService
     @MockK(relaxed = true) private lateinit var businessNotificationService: BusinessNotificationService
     @MockK(relaxed = true) private lateinit var orderBusinessNotificationDispatcher: OrderBusinessNotificationDispatcher
+    @MockK(relaxed = true) private lateinit var counterCacheInvalidator: CatalogCounterCacheInvalidator
     private val institutionProjectDetailResolver = InstitutionProjectDetailResolver()
 
     private lateinit var orderService: OrderService
@@ -113,6 +119,7 @@ class OrderServiceTest {
             institutionRepository,
             doctorProjectRepository,
             doctorRepository,
+            userRepository,
             orderStatusLogService,
             couponService,
             settlementService,
@@ -124,10 +131,14 @@ class OrderServiceTest {
             doctorInstitutionRelationshipService = doctorInstitutionRelationshipService,
             travelGroundServicePricing = travelGroundServicePricing(),
             businessNotificationService = businessNotificationService,
-            orderBusinessNotificationDispatcher = orderBusinessNotificationDispatcher
+            orderBusinessNotificationDispatcher = orderBusinessNotificationDispatcher,
+            counterCacheInvalidator = counterCacheInvalidator
         )
         // 默认 stub：logTransition 不做任何事
         justRun { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) }
+        every { institutionRepository.incrementCaseCount(any()) } returns 1
+        every { projectRepository.incrementCaseCount(any()) } returns 1
+        every { institutionProjectRepository.incrementCaseCount(any()) } returns 1
         every { institutionConsultantService.requireApprovedConsultant(any(), any()) } returns
             InstitutionConsultant(
                 id = "consultant-1",
@@ -141,6 +152,10 @@ class OrderServiceTest {
             projectId = "project-1",
             institutionProjectId = "inst-proj-1",
             price = BigDecimal("4500.00")
+        )
+        every { userRepository.findByIdForUpdate(any()) } returns UserEntity(
+            id = "doctor-1",
+            passwordHash = "not-used"
         )
         every { institutionProjectRepository.findIdentityById(any()) } returns institutionProjectIdentity()
         every { institutionProjectRepository.findForUpdate(any()) } returns testInstitutionProject
@@ -177,6 +192,7 @@ class OrderServiceTest {
 
         assertEquals(159_960L, quote.travelGroundServiceFeeMinor)
         verifyOrder {
+            userRepository.findByIdForUpdate("doctor-1")
             institutionProjectRepository.findIdentityById("inst-proj-1")
             doctorInstitutionRelationshipService.requireActiveRelationshipForUpdate("doctor-1", "inst-1")
             institutionProjectRepository.findForUpdate("inst-proj-1")
@@ -293,6 +309,65 @@ class OrderServiceTest {
         assertEquals(450_000L, reactivated.medicalListPriceMinor)
         verify(exactly = 1) { orderRepository.save(any()) }
         verify(exactly = 1) { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `new order rejects suspended doctor account before booking locks or writes`() {
+        every { userRepository.findByIdForUpdate("doctor-1") } returns UserEntity(
+            id = "doctor-1",
+            passwordHash = "not-used",
+            accountState = AccountState.ADMIN_SUSPENDED
+        )
+
+        val error = assertThrows<IllegalArgumentException> {
+            orderService.createOrder(
+                "user-1",
+                CreateOrderRequest(
+                    projectId = "project-1",
+                    institutionProjectId = "inst-proj-1",
+                    doctorId = "doctor-1",
+                    consultantId = "consultant-1"
+                )
+            )
+        }
+
+        assertEquals("所选医生账号不可用，暂不可预约", error.message)
+        verify(exactly = 0) { institutionProjectRepository.findIdentityById(any()) }
+        verify(exactly = 0) { doctorInstitutionRelationshipService.requireActiveRelationshipForUpdate(any(), any()) }
+        verify(exactly = 0) { orderRepository.save(any()) }
+        verify(exactly = 0) { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `new order locks booking accounts in stable order and rejects suspended consultant`() {
+        every { userRepository.findByIdForUpdate("consultant-1") } returns UserEntity(
+            id = "consultant-1",
+            passwordHash = "not-used",
+            accountState = AccountState.ADMIN_SUSPENDED
+        )
+
+        val error = assertThrows<IllegalArgumentException> {
+            orderService.createOrder(
+                "user-1",
+                CreateOrderRequest(
+                    projectId = "project-1",
+                    institutionProjectId = "inst-proj-1",
+                    doctorId = "doctor-1",
+                    consultantId = "consultant-1"
+                )
+            )
+        }
+
+        assertEquals("所选医美顾问账号不可用，暂不可预约", error.message)
+        verifyOrder {
+            userRepository.findByIdForUpdate("consultant-1")
+            userRepository.findByIdForUpdate("doctor-1")
+        }
+        verify(exactly = 0) { institutionProjectRepository.findIdentityById(any()) }
+        verify(exactly = 0) { doctorInstitutionRelationshipService.requireActiveRelationshipForUpdate(any(), any()) }
+        verify(exactly = 0) { institutionConsultantService.requireApprovedConsultant(any(), any()) }
+        verify(exactly = 0) { orderRepository.save(any()) }
+        verify(exactly = 0) { orderStatusLogService.logTransition(any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -898,6 +973,7 @@ class OrderServiceTest {
         verify { orderRepository.save(capture(saved)) }
         assertNotNull(saved.captured.settlementAt)
         verify { settlementService.saveSettlement("o1", saved.captured.settlementAt) }
+        verifyCaseCountersIncremented()
         verify(exactly = 1) {
             businessNotificationService.orderCompleted("o1", "consultant-1", "doctor-1", "inst-1")
         }
@@ -934,6 +1010,7 @@ class OrderServiceTest {
             )
         }
         verify(exactly = 0) { settlementService.saveSettlement(any(), any()) }
+        verifyCaseCountersIncremented()
         verify(exactly = 1) {
             businessNotificationService.orderCompleted(
                 "travel-completion", "consultant-1", "doctor-1", "inst-1"
@@ -950,6 +1027,58 @@ class OrderServiceTest {
         assertThrows<IllegalArgumentException> {
             orderService.confirmCompletion("o1", "user-2")
         }
+
+        verifyCaseCountersNotIncremented()
+    }
+
+    @Test
+    fun `confirmCompletion 非法状态不递增案例数`() {
+        val order = createTestOrder("o1", "user-1", status = OrderStatusEnum.PENDING_PAYMENT.value)
+        every { orderRepository.findByIdForUpdate("o1") } returns order
+
+        assertThrows<IllegalArgumentException> {
+            orderService.confirmCompletion("o1", "user-1")
+        }
+
+        verifyCaseCountersNotIncremented()
+    }
+
+    @Test
+    fun `confirmCompletion 争议回流后再次完成不重复递增案例数`() {
+        val firstCompletedAt = LocalDateTime.of(2026, 8, 20, 10, 0)
+        val order = createTestOrder(
+            "o1",
+            "user-1",
+            status = OrderStatusEnum.DISPUTE_MEDIATION.value
+        ).copy(completedAt = firstCompletedAt)
+        every { orderRepository.findByIdForUpdate("o1") } returns order
+        every { orderRepository.save(any()) } answers { firstArg() }
+        every { settlementService.saveSettlement("o1", any()) } returns mockk()
+
+        val response = orderService.confirmCompletion("o1", "user-1")
+
+        assertEquals(OrderStatusEnum.COMPLETED.value, response.status)
+        assertEquals(firstCompletedAt, response.completedAt)
+        verifyCaseCountersNotIncremented()
+    }
+
+    @Test
+    fun `confirmCompletion 历史订单缺少机构项目ID时按机构和项目恢复关联`() {
+        val order = createTestOrder(
+            "o1",
+            "user-1",
+            status = OrderStatusEnum.PENDING_COMPLETION.value
+        ).copy(institutionProjectId = "")
+        every { orderRepository.findByIdForUpdate("o1") } returns order
+        every {
+            institutionProjectRepository.findByInstitutionIdAndProjectId("inst-1", "project-1")
+        } returns testInstitutionProject
+        every { orderRepository.save(any()) } answers { firstArg() }
+        every { settlementService.saveSettlement("o1", any()) } returns mockk()
+
+        orderService.confirmCompletion("o1", "user-1")
+
+        verifyCaseCountersIncremented()
     }
 
     // ---- 取消订单 ----
@@ -1501,9 +1630,29 @@ class OrderServiceTest {
         institutionId = "inst-1",
         consultantId = "consultant-1",
         doctorId = "doctor-1",
+        institutionProjectId = "inst-proj-1",
         verifyCode = "123456",
         orderNo = "JOY202607311200001234"
     )
+
+    private fun verifyCaseCountersIncremented() {
+        verify(exactly = 1) { institutionRepository.incrementCaseCount("inst-1") }
+        verify(exactly = 1) { projectRepository.incrementCaseCount("project-1") }
+        verify(exactly = 1) { institutionProjectRepository.incrementCaseCount("inst-proj-1") }
+        verifyOrder {
+            institutionRepository.incrementCaseCount("inst-1")
+            institutionProjectRepository.incrementCaseCount("inst-proj-1")
+            projectRepository.incrementCaseCount("project-1")
+        }
+        verify(exactly = 1) { counterCacheInvalidator.evictCaseCountersAfterCommit() }
+    }
+
+    private fun verifyCaseCountersNotIncremented() {
+        verify(exactly = 0) { institutionRepository.incrementCaseCount(any()) }
+        verify(exactly = 0) { projectRepository.incrementCaseCount(any()) }
+        verify(exactly = 0) { institutionProjectRepository.incrementCaseCount(any()) }
+        verify(exactly = 0) { counterCacheInvalidator.evictCaseCountersAfterCommit() }
+    }
 
     private fun orderService(
         businessNotificationService: BusinessNotificationService,
@@ -1516,6 +1665,7 @@ class OrderServiceTest {
         institutionRepository,
         doctorProjectRepository,
         doctorRepository,
+        userRepository,
         orderStatusLogService,
         couponService,
         settlementService,
@@ -1530,6 +1680,7 @@ class OrderServiceTest {
         ),
         businessNotificationService = businessNotificationService,
         orderBusinessNotificationDispatcher = orderBusinessNotificationDispatcher,
+        counterCacheInvalidator = counterCacheInvalidator,
         refundExecutionService = refundExecutionService
     )
 

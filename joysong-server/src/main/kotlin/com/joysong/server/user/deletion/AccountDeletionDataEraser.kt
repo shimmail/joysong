@@ -253,6 +253,10 @@ class JdbcAccountDeletionDataEraser(
                   SELECT 1 FROM platform_cooperation_agreements pca
                   WHERE pca.agreement_file_id = pf.id
               )
+              AND NOT EXISTS (
+                  SELECT 1 FROM refund_evidence_files ref
+                  WHERE ref.file_id = pf.id
+              )
             """.trimIndent(),
             userId,
         )
@@ -264,6 +268,10 @@ class JdbcAccountDeletionDataEraser(
               AND NOT EXISTS (
                   SELECT 1 FROM platform_cooperation_agreements pca
                   WHERE pca.agreement_file_id = private_files.id
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM refund_evidence_files ref
+                  WHERE ref.file_id = private_files.id
               )
             """.trimIndent(),
             userId,

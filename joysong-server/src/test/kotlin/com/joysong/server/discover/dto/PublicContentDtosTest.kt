@@ -9,8 +9,10 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import com.joysong.server.institution.entity.InstitutionProjectEntity
+import com.joysong.server.project.entity.ProjectEntity
 import org.junit.jupiter.api.Test
 import org.springframework.cache.annotation.Cacheable
+import java.math.BigDecimal
 import java.time.LocalDateTime
 
 class PublicContentDtosTest {
@@ -81,5 +83,24 @@ class PublicContentDtosTest {
 
         assertEquals("", response.coverImage)
         assertEquals("", response.images)
+    }
+
+    @Test
+    fun `project responses expose platform and institution project case counts`() {
+        val project = ProjectEntity(
+            id = "project-1",
+            name = "项目",
+            caseCount = 12
+        ).toResponse()
+        val institutionProject = InstitutionProjectEntity(
+            id = "institution-project-1",
+            institutionId = "institution-1",
+            projectId = "project-1",
+            price = BigDecimal("100.00"),
+            caseCount = 7
+        ).toResponse()
+
+        assertEquals(12, project.caseCount)
+        assertEquals(7, institutionProject.caseCount)
     }
 }

@@ -2,6 +2,7 @@ import 'package:joysong_flutter/features/orders/data/orders_remote_data_source.d
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
 import 'package:joysong_flutter/features/orders/domain/orders_repository.dart';
 import 'package:joysong_flutter/features/orders/domain/payment_models.dart';
+import 'package:joysong_flutter/features/orders/domain/refund_evidence_models.dart';
 
 final class OrdersRepositoryImpl implements OrdersRepository {
   const OrdersRepositoryImpl(this._remote);
@@ -109,6 +110,22 @@ final class OrdersRepositoryImpl implements OrdersRepository {
         reason: reason,
         description: description,
         evidenceUrl: evidenceUrl,
+      );
+
+  @override
+  Future<RefundDetail> requestServiceFeeRefund(
+    String id, {
+    required String reason,
+    required String description,
+    String? reasonCode,
+    List<RefundEvidenceDraft> evidenceFiles = const [],
+  }) =>
+      _remote.requestServiceFeeRefund(
+        id,
+        reason: reason,
+        description: description,
+        reasonCode: reasonCode,
+        evidenceFiles: evidenceFiles,
       );
 
   @override

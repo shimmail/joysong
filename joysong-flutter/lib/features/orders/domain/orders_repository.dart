@@ -1,5 +1,6 @@
 import 'package:joysong_flutter/features/orders/domain/order_models.dart';
 import 'package:joysong_flutter/features/orders/domain/payment_models.dart';
+import 'package:joysong_flutter/features/orders/domain/refund_evidence_models.dart';
 
 abstract interface class OrdersRepository {
   Future<List<Order>> getOrders({OrderStatus? status, int offset, int limit});
@@ -51,6 +52,14 @@ abstract interface class OrdersRepository {
     required String reason,
     String description,
     String evidenceUrl,
+  });
+
+  Future<RefundDetail> requestServiceFeeRefund(
+    String id, {
+    required String reason,
+    required String description,
+    String? reasonCode,
+    List<RefundEvidenceDraft> evidenceFiles = const [],
   });
 
   Future<RefundDetail> getRefund(String id);

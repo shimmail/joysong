@@ -21,9 +21,11 @@ import com.joysong.server.review.service.ReviewService
 import org.springframework.security.core.Authentication
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import org.springframework.web.server.ResponseStatusException
+import org.springframework.web.multipart.MultipartFile
 
 /**
  * 用户端订单控制器
@@ -260,8 +262,8 @@ class OrderController(
     ): Nothing = throw ResponseStatusException(HttpStatus.GONE, "LEGACY_PAYMENT_ENDPOINT_REMOVED")
 
     /** 申请退款 */
-    @PostMapping("/{id}/refund")
-    fun refundOrder(
+    @PostMapping("/{id}/refund", consumes = [MediaType.APPLICATION_JSON_VALUE])
+    fun refundOrderJson(
         @PathVariable id: String,
         @RequestBody request: RefundOrderRequest,
         authentication: Authentication
@@ -271,6 +273,32 @@ class OrderController(
             BaseResponse.success(refundService.applyRefund(
                 id, userId, request.reason, request.description, request.evidenceUrl, request.reasonCode
             ))
+        } catch (e: Exception) {
+            BaseResponse.error<Any>(e.message ?: "退款申请失败")
+        }
+    }
+
+    @PostMapping("/{id}/refund", consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
+    fun refundOrderMultipart(
+        @PathVariable id: String,
+        @RequestParam reason: String,
+        @RequestParam(required = false, defaultValue = "") description: String,
+        @RequestParam(required = false) reasonCode: String?,
+        @RequestPart(name = "evidenceFiles", required = false) evidenceFiles: List<MultipartFile>?,
+        authentication: Authentication,
+    ): BaseResponse<*> {
+        val userId = authentication.principal as String
+        return try {
+            BaseResponse.success(
+                refundService.applyTravelServiceRefundWithEvidence(
+                    id,
+                    userId,
+                    reason,
+                    description,
+                    reasonCode,
+                    evidenceFiles.orEmpty(),
+                )
+            )
         } catch (e: Exception) {
             BaseResponse.error<Any>(e.message ?: "退款申请失败")
         }
@@ -296,7 +324,7 @@ class OrderController(
     @GetMapping("/{id}/refund")
     fun getRefundDetail(@PathVariable id: String, authentication: Authentication): BaseResponse<*> {
         val userId = authentication.principal as String
-        val refund = refundService.getRefundByOrderId(id, userId)
+        val refund = refundService.getRefundDetailByOrderId(id, userId)
             ?: return BaseResponse.error<Any>("未找到退款记录", 404)
         return BaseResponse.success(refund)
     }

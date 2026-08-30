@@ -142,6 +142,7 @@ class ProjectService(
             rating = request.rating,
             reviewCount = request.reviewCount,
             salesCount = request.salesCount,
+            caseCount = existing.caseCount,
             createdAt = existing.createdAt
         )
         return projectRepository.save(entity)

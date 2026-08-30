@@ -214,6 +214,7 @@ afterEach(() => {
   cleanup();
   sessionStorage.clear();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('minor-unit money formatting', () => {
@@ -690,5 +691,237 @@ describe('RefundsPage manual review operations', () => {
     fireEvent.click(releasedRetryButton);
     await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(errorSpy).toHaveBeenCalledTimes(2));
+  });
+
+  it('refunds table and detail show new evidence count and ordered metadata', async () => {
+    mockGet.mockImplementation((url) => url === '/admin/refunds'
+      ? response([{
+          ...serviceRefund,
+          evidenceUrl: 'https://legacy.example/receipt.pdf',
+          evidenceFiles: [
+            { fileId: 'file-pdf', originalName: 'later.pdf', contentType: 'application/pdf', sizeBytes: 1048576, position: 2 },
+            { fileId: 'file-image', originalName: 'first.jpg', contentType: 'image/jpeg', sizeBytes: 1536, position: 1 },
+            { fileId: '', originalName: 'broken.png', contentType: 'image/png', sizeBytes: 10, position: 3 },
+            null,
+          ],
+        }])
+      : response([]));
+
+    render(<RefundsPage />);
+
+    const row = await screen.findByRole('row', { name: /SO-001/ });
+    expect(within(row).getByText('3')).toBeInTheDocument();
+    await userEvent.setup().click(within(row).getByRole('button', { name: /详情/ }));
+
+    const dialog = (await screen.findByText('退款详情')).closest('.ant-modal') as HTMLElement;
+    const metadata = within(dialog).getAllByTestId('refund-evidence-metadata');
+    expect(metadata).toHaveLength(2);
+    expect(metadata[0]).toHaveTextContent('first.jpg');
+    expect(metadata[0]).toHaveTextContent('image/jpeg');
+    expect(metadata[0]).toHaveTextContent('1.5 KB');
+    expect(metadata[1]).toHaveTextContent('later.pdf');
+    expect(metadata[1]).toHaveTextContent('application/pdf');
+    expect(metadata[1]).toHaveTextContent('1.0 MB');
+  });
+
+  it('authenticated evidence image preview requests a blob and revokes its object URL when detail closes', async () => {
+    const user = userEvent.setup();
+    const createObjectURL = vi.fn(() => 'blob:image-preview');
+    const revokeObjectURL = vi.fn();
+    class TestUrl extends URL {}
+    Object.assign(TestUrl, { createObjectURL, revokeObjectURL });
+    vi.stubGlobal('URL', TestUrl);
+    const imageBlob = new Blob(['image'], { type: 'image/jpeg' });
+    mockGet.mockImplementation((url) => url === '/admin/refunds'
+      ? response([{
+          ...serviceRefund,
+          evidenceFiles: [{ fileId: 'file-image', originalName: 'receipt.jpg', contentType: 'image/jpeg', sizeBytes: 12, position: 1 }],
+        }])
+      : Promise.resolve({ data: imageBlob }));
+
+    render(<RefundsPage />);
+    const row = await screen.findByRole('row', { name: /SO-001/ });
+    await user.click(within(row).getByRole('button', { name: /详情/ }));
+    const dialog = (await screen.findByText('退款详情')).closest('.ant-modal') as HTMLElement;
+    await user.click(within(dialog).getByRole('button', { name: '预览 receipt.jpg' }));
+
+    await waitFor(() => expect(mockGet).toHaveBeenCalledWith(
+      '/admin/refunds/refund-service-1/evidence/file-image/content',
+      { responseType: 'blob' },
+    ));
+    expect(createObjectURL).toHaveBeenCalledWith(imageBlob);
+    expect(within(dialog).getByRole('img', { name: 'receipt.jpg' })).toHaveAttribute('src', 'blob:image-preview');
+
+    await user.click(within(dialog).getByRole('button', { name: /关\s*闭/ }));
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:image-preview');
+  });
+
+  it('PDF preview replaces and revokes its authenticated blob URL with noopener', async () => {
+    const user = userEvent.setup();
+    const createObjectURL = vi.fn()
+      .mockReturnValueOnce('blob:pdf-preview-1')
+      .mockReturnValueOnce('blob:pdf-preview-2');
+    const revokeObjectURL = vi.fn();
+    class TestUrl extends URL {}
+    Object.assign(TestUrl, { createObjectURL, revokeObjectURL });
+    vi.stubGlobal('URL', TestUrl);
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+    const pdfBlob = new Blob(['pdf'], { type: 'application/pdf' });
+    mockGet.mockImplementation((url) => url === '/admin/refunds'
+      ? response([{
+          ...serviceRefund,
+          evidenceFiles: [{ fileId: 'file-pdf', originalName: 'receipt.pdf', contentType: 'application/pdf', sizeBytes: 12, position: 1 }],
+        }])
+      : Promise.resolve({ data: pdfBlob }));
+
+    render(<RefundsPage />);
+    const row = await screen.findByRole('row', { name: /SO-001/ });
+    await user.click(within(row).getByRole('button', { name: /详情/ }));
+    const dialog = (await screen.findByText('退款详情')).closest('.ant-modal') as HTMLElement;
+    await user.click(within(dialog).getByRole('button', { name: '预览 receipt.pdf' }));
+
+    await waitFor(() => expect(mockGet).toHaveBeenCalledWith(
+      '/admin/refunds/refund-service-1/evidence/file-pdf/content',
+      { responseType: 'blob' },
+    ));
+    expect(createObjectURL).toHaveBeenCalledWith(pdfBlob);
+    expect(openSpy).toHaveBeenCalledWith('blob:pdf-preview-1', '_blank', 'noopener,noreferrer');
+
+    await user.click(within(dialog).getByRole('button', { name: '预览 receipt.pdf' }));
+    await waitFor(() => expect(openSpy).toHaveBeenCalledTimes(2));
+    expect(openSpy).toHaveBeenLastCalledWith('blob:pdf-preview-2', '_blank', 'noopener,noreferrer');
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:pdf-preview-1');
+    expect(revokeObjectURL).not.toHaveBeenCalledWith('blob:pdf-preview-2');
+
+    await user.click(within(dialog).getByRole('button', { name: /关\s*闭/ }));
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:pdf-preview-2');
+  });
+
+  it('evidence download uses an authenticated blob and releases its temporary anchor', async () => {
+    const user = userEvent.setup();
+    const createObjectURL = vi.fn(() => 'blob:download');
+    const revokeObjectURL = vi.fn();
+    class TestUrl extends URL {}
+    Object.assign(TestUrl, { createObjectURL, revokeObjectURL });
+    vi.stubGlobal('URL', TestUrl);
+    const evidenceBlob = new Blob(['evidence'], { type: 'image/jpeg' });
+    mockGet.mockImplementation((url) => url === '/admin/refunds'
+      ? response([{
+          ...serviceRefund,
+          evidenceFiles: [{ fileId: 'file-image', originalName: 'receipt.jpg', contentType: 'image/jpeg', sizeBytes: 12, position: 1 }],
+        }])
+      : Promise.resolve({ data: evidenceBlob }));
+
+    render(<RefundsPage />);
+    const row = await screen.findByRole('row', { name: /SO-001/ });
+    await user.click(within(row).getByRole('button', { name: /详情/ }));
+    const dialog = (await screen.findByText('退款详情')).closest('.ant-modal') as HTMLElement;
+    const nativeCreateElement = document.createElement.bind(document);
+    const temporaryAnchors: HTMLAnchorElement[] = [];
+    vi.spyOn(document, 'createElement').mockImplementation((tagName) => {
+      if (tagName === 'a') {
+        const anchor = nativeCreateElement('a');
+        temporaryAnchors.push(anchor);
+        return anchor;
+      }
+      return nativeCreateElement(tagName);
+    });
+    const appendSpy = vi.spyOn(document.body, 'appendChild');
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+
+    await user.click(within(dialog).getByRole('button', { name: '下载 receipt.jpg' }));
+
+    await waitFor(() => expect(mockGet).toHaveBeenCalledWith(
+      '/admin/refunds/refund-service-1/evidence/file-image/content',
+      { responseType: 'blob' },
+    ));
+    expect(createObjectURL).toHaveBeenCalledWith(evidenceBlob);
+    expect(temporaryAnchors).toHaveLength(1);
+    const temporaryAnchor = temporaryAnchors[0];
+    if (!temporaryAnchor) throw new Error('temporary download anchor was not created');
+    expect(temporaryAnchor).not.toBeNull();
+    expect(temporaryAnchor.download).toBe('receipt.jpg');
+    expect(appendSpy).toHaveBeenCalledWith(temporaryAnchor);
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+    expect(temporaryAnchor.isConnected).toBe(false);
+    expect(document.body.querySelector('a[download="receipt.jpg"]')).toBeNull();
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:download');
+  });
+
+  it('evidence download failure shows an error without locking approve reject or retry actions', async () => {
+    const user = userEvent.setup();
+    const errorSpy = vi.spyOn(message, 'error');
+    const createObjectURL = vi.fn(() => 'blob:download-failure');
+    const revokeObjectURL = vi.fn();
+    class TestUrl extends URL {}
+    Object.assign(TestUrl, { createObjectURL, revokeObjectURL });
+    vi.stubGlobal('URL', TestUrl);
+    const evidenceBlob = new Blob(['evidence'], { type: 'image/jpeg' });
+    const retryableRefund = {
+      ...failedProcessingRefund,
+      evidenceFiles: [{ fileId: 'file-retry', originalName: 'retry.png', contentType: 'image/png', sizeBytes: 12, position: 1 }],
+    };
+    mockGet.mockImplementation((url) => url === '/admin/refunds'
+      ? response([{
+          ...serviceRefund,
+          evidenceFiles: [{ fileId: 'file-image', originalName: 'broken.jpg', contentType: 'image/jpeg', sizeBytes: 12, position: 1 }],
+        }, retryableRefund])
+      : Promise.resolve({ data: evidenceBlob }));
+
+    render(<RefundsPage />);
+    await user.selectOptions(await screen.findByRole('combobox', { name: '退款状态' }), '__all__');
+    const pendingRow = await screen.findByRole('row', { name: /SO-001/ });
+    const retryRow = screen.getByRole('row', { name: /RETRY-001/ });
+    await user.click(within(pendingRow).getByRole('button', { name: /详情/ }));
+    const dialog = (await screen.findByText('退款详情')).closest('.ant-modal') as HTMLElement;
+    const nativeCreateElement = document.createElement.bind(document);
+    const temporaryAnchors: HTMLAnchorElement[] = [];
+    vi.spyOn(document, 'createElement').mockImplementation((tagName) => {
+      if (tagName === 'a') {
+        const anchor = nativeCreateElement('a');
+        temporaryAnchors.push(anchor);
+        return anchor;
+      }
+      return nativeCreateElement(tagName);
+    });
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => { throw new Error('点击失败'); });
+    await user.click(within(dialog).getByRole('button', { name: '下载 broken.jpg' }));
+
+    await waitFor(() => expect(errorSpy).toHaveBeenCalledWith('下载凭证失败: 点击失败'));
+    expect(createObjectURL).toHaveBeenCalledWith(evidenceBlob);
+    expect(temporaryAnchors).toHaveLength(1);
+    const temporaryAnchor = temporaryAnchors[0];
+    if (!temporaryAnchor) throw new Error('temporary download anchor was not created');
+    expect(temporaryAnchor.isConnected).toBe(false);
+    expect(document.body.querySelector('a[download="broken.jpg"]')).toBeNull();
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:download-failure');
+    expect(within(pendingRow).getByRole('button', { name: /批准/ })).toBeEnabled();
+    expect(within(pendingRow).getByRole('button', { name: /拒绝/ })).toBeEnabled();
+    expect(within(retryRow).getByRole('button', { name: '重试失败项' })).toBeEnabled();
+  });
+
+  it('legacy evidence accepts at most five absolute http or https URLs and rejects data blob file javascript relative and protocol-relative values', async () => {
+    mockGet.mockImplementation((url) => url === '/admin/refunds'
+      ? response([{
+          ...serviceRefund,
+          evidenceUrl: [
+            'https://one.example/a', 'http://two.example/b', 'data:text/plain,unsafe', 'blob:https://app.example/blob',
+            'file:///tmp/unsafe', 'javascript:alert(1)', '/relative', '//protocol-relative.example/path',
+            'https://three.example/c', 'https://four.example/d', 'https://five.example/e', 'https://six.example/f',
+          ].join(','),
+        }])
+      : response([]));
+
+    render(<RefundsPage />);
+    const row = await screen.findByRole('row', { name: /SO-001/ });
+    expect(within(row).getByText('5')).toBeInTheDocument();
+    await userEvent.setup().click(within(row).getByRole('button', { name: /详情/ }));
+
+    const dialog = (await screen.findByText('退款详情')).closest('.ant-modal') as HTMLElement;
+    const legacyLinks = within(dialog).getAllByRole('link', { name: '旧版凭证（公开链接）' });
+    expect(legacyLinks).toHaveLength(5);
+    expect(legacyLinks.map(link => link.getAttribute('href'))).toEqual([
+      'https://one.example/a', 'http://two.example/b', 'https://three.example/c', 'https://four.example/d', 'https://five.example/e',
+    ]);
   });
 });

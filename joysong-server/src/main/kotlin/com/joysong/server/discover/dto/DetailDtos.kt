@@ -28,6 +28,7 @@ data class DoctorInstitutionProjectInfo(
     val currency: String = com.joysong.server.common.money.CurrencyCode.DEFAULT_CODE,
     val coverImage: String,
     val salesCount: Int,
+    val caseCount: Int = 0,
     val category: String = "",
     val description: String = "",
     val rating: BigDecimal = BigDecimal.ZERO,
@@ -80,6 +81,7 @@ data class InstitutionProjectInfo(
     val category: String,
     val categoryTags: String,
     val salesCount: Int,
+    val caseCount: Int = 0,
     val rating: BigDecimal,
     val reviewCount: Int,
     val tags: String,
@@ -122,6 +124,7 @@ data class ProjectWithInstitutionsResponse(
     val slogan: String,
     val detailContent: String?,
     val salesCount: Int,
+    val caseCount: Int = 0,
     val rating: BigDecimal,
     val reviewCount: Int,
     val institutionProjects: List<InstitutionProjectItemResponse> = emptyList()
@@ -150,5 +153,6 @@ data class InstitutionProjectItemResponse(
     val coverImage: String,
     val images: String,
     val salesCount: Int,
+    val caseCount: Int = 0,
     val isActive: Boolean
 )

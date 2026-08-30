@@ -223,11 +223,11 @@ class AgentCatalogService(
                 .map { it.doctorId }
                 .distinct()
         } else emptyList()
-        val relatedDoctors = if (relatedDoctorIds.isNotEmpty()) doctorRepository.findAllById(relatedDoctorIds) else emptyList()
+        val relatedDoctors = if (relatedDoctorIds.isNotEmpty()) doctorRepository.findAllPublicById(relatedDoctorIds) else emptyList()
         val doctorCandidates = when {
             relatedDoctors.isNotEmpty() -> relatedDoctors
             reportTarget == ReportTarget.DOCTOR && mentionedCities.isNotEmpty() &&
-                RequestedEntityType.TREATMENT !in explicitlyRequestedTypes -> doctorRepository.findAll()
+                RequestedEntityType.TREATMENT !in explicitlyRequestedTypes -> doctorRepository.findAllPublic()
             else -> unifiedSearch.doctors
         }
         val doctorInstitutionById = institutionRepository.findAll().associateBy { it.id }
@@ -500,7 +500,7 @@ class AgentCatalogService(
     private fun catalogContextKeywords(query: String): CatalogContextKeywords {
         val projects = projectRepository.findAll()
         val institutions = institutionRepository.findAll()
-        val doctors = doctorRepository.findAll()
+        val doctors = doctorRepository.findAllPublic()
         val projectMap = projects.associateBy { it.id }
         val institutionMap = institutions.associateBy { it.id }
         val effectiveOfferings = loadPublicCatalogOfferings().offerings.asSequence()

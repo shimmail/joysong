@@ -2,6 +2,8 @@ package com.joysong.server.user.controller
 
 import com.joysong.server.common.BaseResponse
 import com.joysong.server.diary.repository.DiaryRepository
+import com.joysong.server.user.entity.AccountState
+import com.joysong.server.user.entity.UserEntity
 import com.joysong.server.user.dto.UserProfileResponse
 import com.joysong.server.user.repository.UserRepository
 import org.springframework.web.bind.annotation.*
@@ -19,7 +21,7 @@ class UserProfileController(
      */
     @GetMapping("/{id}/profile")
     fun getUserProfile(@PathVariable id: String): BaseResponse<*> {
-        val user = userRepository.findById(id).orElse(null)
+        val user = findPublicUser(id)
             ?: return BaseResponse.error<Any>("用户不存在", 404)
 
         // 查询用户已发布的日记数量
@@ -47,7 +49,14 @@ class UserProfileController(
      */
     @GetMapping("/{id}/diaries")
     fun getUserDiaries(@PathVariable id: String): BaseResponse<*> {
+        if (findPublicUser(id) == null) {
+            return BaseResponse.error<Any>("用户不存在", 404)
+        }
         val diaries = diaryRepository.findPublishedByUserId(id)
         return BaseResponse.success(diaries)
     }
+
+    private fun findPublicUser(id: String): UserEntity? =
+        userRepository.findById(id).orElse(null)
+            ?.takeIf { it.accountState == AccountState.ACTIVE && it.deletedAt == null }
 }

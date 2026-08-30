@@ -117,6 +117,23 @@ class CatalogProjectDetailView extends StatelessWidget {
       images: images,
     );
     final keys = List.generate(5, (_) => GlobalKey());
+    Widget institutionProjectPreview({
+      required bool showHero,
+      required bool showGuide,
+    }) =>
+        _InstitutionProjectPreview(
+          model: preview,
+          tagFields: [for (final tag in visibleTags) tag.$1],
+          contentId: 'project:${item.id}',
+          translateDescription: eligibleDescription.isNotEmpty,
+          enableAutoTranslation: enableAutoTranslation,
+          guideKey: keys[0],
+          showHero: showHero,
+          showGuide: showGuide,
+          onViewMoreInformation: detailContent.isEmpty
+              ? null
+              : () => _showDetails(context, name, detailContent),
+        );
     void jump(int index) {
       final target = keys[index].currentContext;
       if (target == null) return;
@@ -139,16 +156,9 @@ class CatalogProjectDetailView extends StatelessWidget {
         child: CustomScrollView(slivers: [
           SliverToBoxAdapter(
             child: isInstitutionProject
-                ? _InstitutionProjectPreview(
-                    model: preview,
-                    tagFields: [for (final tag in visibleTags) tag.$1],
-                    contentId: 'project:${item.id}',
-                    translateDescription: eligibleDescription.isNotEmpty,
-                    enableAutoTranslation: enableAutoTranslation,
-                    guideKey: keys[0],
-                    onViewMoreInformation: detailContent.isEmpty
-                        ? null
-                        : () => _showDetails(context, name, detailContent),
+                ? institutionProjectPreview(
+                    showHero: true,
+                    showGuide: false,
                   )
                 : _ProjectHero(
                     images: images,
@@ -181,6 +191,13 @@ class CatalogProjectDetailView extends StatelessWidget {
             pinned: true,
             delegate: _ProjectNavDelegate(labels: labels, onTap: jump),
           ),
+          if (isInstitutionProject)
+            SliverToBoxAdapter(
+              child: institutionProjectPreview(
+                showHero: false,
+                showGuide: true,
+              ),
+            ),
           if (!isInstitutionProject)
             SliverToBoxAdapter(
               child: CatalogSection(
@@ -444,6 +461,8 @@ class _InstitutionProjectPreview extends StatelessWidget {
     required this.translateDescription,
     required this.enableAutoTranslation,
     required this.guideKey,
+    required this.showHero,
+    required this.showGuide,
     required this.onViewMoreInformation,
   });
 
@@ -453,6 +472,8 @@ class _InstitutionProjectPreview extends StatelessWidget {
   final bool translateDescription;
   final bool enableAutoTranslation;
   final Key guideKey;
+  final bool showHero;
+  final bool showGuide;
   final VoidCallback? onViewMoreInformation;
 
   @override
@@ -478,6 +499,8 @@ class _InstitutionProjectPreview extends StatelessWidget {
           images: model.images,
         ),
         guideKey: guideKey,
+        showHero: showHero,
+        showGuide: showGuide,
         priceLabel: _catalogPriceLabel(model.price, model.currency),
         detailContentReplacement: onViewMoreInformation == null
             ? null
@@ -498,27 +521,29 @@ class _InstitutionProjectPreview extends StatelessWidget {
     final slogan = model.slogan?.trim() ?? '';
     final description = model.description?.trim() ?? '';
     final translations = <_PreviewTranslation>[
-      _PreviewTranslation(key: 'name', field: 'name', source: model.name),
-      if (slogan.isNotEmpty)
+      if (showHero)
+        _PreviewTranslation(key: 'name', field: 'name', source: model.name),
+      if (showHero && slogan.isNotEmpty)
         _PreviewTranslation(key: 'slogan', field: 'slogan', source: slogan),
-      if (model.institutionName.trim().isNotEmpty)
+      if (showHero && model.institutionName.trim().isNotEmpty)
         _PreviewTranslation(
           key: 'institutionName',
           field: 'institutionName',
           source: model.institutionName,
         ),
-      if (translateDescription && description.isNotEmpty)
+      if (showGuide && translateDescription && description.isNotEmpty)
         _PreviewTranslation(
           key: 'description',
           field: 'description',
           source: description,
         ),
-      for (final tag in model.tags.indexed)
-        _PreviewTranslation(
-          key: 'tag:${tag.$1}',
-          field: tag.$1 < tagFields.length ? tagFields[tag.$1] : 'tags',
-          source: tag.$2,
-        ),
+      if (showGuide)
+        for (final tag in model.tags.indexed)
+          _PreviewTranslation(
+            key: 'tag:${tag.$1}',
+            field: tag.$1 < tagFields.length ? tagFields[tag.$1] : 'tags',
+            source: tag.$2,
+          ),
     ];
 
     late Widget Function(int index, Map<String, String> visibleText)

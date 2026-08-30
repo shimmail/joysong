@@ -12,6 +12,55 @@ import java.time.LocalDateTime
 
 class AccountDeletionDataEraserTest {
     @Test
+    fun `account erasure retains private files bound to refund evidence`() {
+        val jdbcTemplate = mockk<JdbcTemplate>(relaxed = true)
+        every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 1
+        val properties = AccountDeletionProperties().apply {
+            hmacSecret = "0123456789abcdef-test"
+        }
+        val eraser = JdbcAccountDeletionDataEraser(
+            jdbcTemplate,
+            AccountDeletionCrypto(properties),
+            UserMediaAssetService(jdbcTemplate, mockk<AccountLifecycleGuard>(relaxed = true)),
+        )
+
+        eraser.erase(
+            UserEntity(id = "user-1", phone = "+8613800138000", passwordHash = "hash"),
+            LocalDateTime.parse("2026-08-30T10:00:00"),
+        )
+
+        verify(exactly = 1) {
+            jdbcTemplate.update(
+                match<String> {
+                    it.contains("UPDATE user_media_assets uma") &&
+                        it.contains("JOIN private_files pf ON pf.storage_key") &&
+                        it.contains("ref.file_id = pf.id")
+                },
+                "user-1",
+            )
+        }
+        verify(exactly = 1) {
+            jdbcTemplate.update(
+                match<String> {
+                    it.contains("DELETE FROM private_files") &&
+                        it.contains("ref.file_id = private_files.id")
+                },
+                "user-1",
+            )
+        }
+        verify(exactly = 1) {
+            jdbcTemplate.update(
+                match<String> {
+                    it.contains("WHERE uma.owner_user_id = ?") &&
+                        it.contains("FROM private_files pf") &&
+                        it.contains("ref.file_id = pf.id")
+                },
+                "user-1",
+            )
+        }
+    }
+
+    @Test
     fun `erasure removes private data from revoked professional identity history`() {
         val jdbcTemplate = mockk<JdbcTemplate>(relaxed = true)
         every { jdbcTemplate.update(any<String>(), *anyVararg()) } returns 1
