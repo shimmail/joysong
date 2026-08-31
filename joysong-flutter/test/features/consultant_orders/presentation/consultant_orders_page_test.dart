@@ -71,6 +71,35 @@ void main() {
     expect(find.text('No in-service orders'), findsOneWidget);
   });
 
+  testWidgets('initial history stage opens and loads order history first', (
+    tester,
+  ) async {
+    final repository = FakeWorkbenchRepository()
+      ..enqueuePage(ConsultantOrderStage.history, emptyPage());
+
+    await tester.pumpWidget(
+      testApp(
+        ConsultantOrdersPage(
+          repository: repository,
+          initialStage: ConsultantOrderStage.history,
+          onOpenServiceConversation: (_) async {},
+          onConsultantRoleRequired: () async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const Key('consultant-orders-history-list')),
+      findsOneWidget,
+    );
+    expect(find.text('暂无历史订单'), findsOneWidget);
+    expect(
+      repository.listRequests.map((request) => request.stage),
+      [ConsultantOrderStage.history],
+    );
+  });
+
   testWidgets('card renders only public fields with fixed media fallbacks', (
     tester,
   ) async {

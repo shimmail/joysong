@@ -13,12 +13,14 @@ class ConsultantOrdersPage extends StatefulWidget {
     required this.repository,
     required this.onOpenServiceConversation,
     required this.onConsultantRoleRequired,
+    this.initialStage = ConsultantOrderStage.active,
     super.key,
   });
 
   final ConsultantOrdersRepository repository;
   final Future<void> Function(String orderId) onOpenServiceConversation;
   final ConsultantRoleRequiredCallback onConsultantRoleRequired;
+  final ConsultantOrderStage initialStage;
 
   @override
   State<ConsultantOrdersPage> createState() => _ConsultantOrdersPageState();
@@ -28,17 +30,19 @@ class _ConsultantOrdersPageState extends State<ConsultantOrdersPage>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
   late ConsultantOrdersController _ordersController;
-  int _selectedStageIndex = 0;
+  late int _selectedStageIndex;
 
   @override
   void initState() {
     super.initState();
     _ordersController = _createOrdersController();
+    _selectedStageIndex = widget.initialStage.index;
     _tabController = TabController(
       length: ConsultantOrderStage.values.length,
+      initialIndex: _selectedStageIndex,
       vsync: this,
     )..addListener(_handleTabChanged);
-    unawaited(_ordersController.load(ConsultantOrderStage.active));
+    unawaited(_ordersController.load(widget.initialStage));
   }
 
   ConsultantOrdersController _createOrdersController() =>

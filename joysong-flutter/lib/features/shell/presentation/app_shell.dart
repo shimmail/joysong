@@ -26,6 +26,7 @@ import 'package:joysong_flutter/features/booking/presentation/booking_controller
 import 'package:joysong_flutter/features/booking/presentation/booking_page.dart';
 import 'package:joysong_flutter/features/consultant_orders/data/consultant_orders_remote_data_source.dart';
 import 'package:joysong_flutter/features/consultant_orders/data/consultant_orders_repository_impl.dart';
+import 'package:joysong_flutter/features/consultant_orders/domain/consultant_order_models.dart';
 import 'package:joysong_flutter/features/consultant_orders/domain/consultant_orders_repository.dart';
 import 'package:joysong_flutter/features/discover/data/discover_repository_impl.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_models.dart';
@@ -1161,6 +1162,11 @@ class _AppShellState extends State<AppShell> {
       case NotificationTargetKind.professionalDoctorOrders:
         _openProfessionalDoctorOrder(target.id);
         return;
+      case NotificationTargetKind.professionalConsultantOrdersHistory:
+        _openManagementCenter(
+          initialConsultantOrderStage: ConsultantOrderStage.history,
+        );
+        return;
       case NotificationTargetKind.institutionProjectReview:
         _openManagementCenter(
           initialInstitutionProjectRequestId: target.id,
@@ -1271,6 +1277,7 @@ class _AppShellState extends State<AppShell> {
   void _openManagementCenter({
     String? initialInstitutionProjectRequestId,
     bool? initialInstitutionProjectReviewMode,
+    ConsultantOrderStage? initialConsultantOrderStage,
   }) {
     final identityRepository = _identityRepository;
     final discoverRepository = _discoverRepository;
@@ -1295,6 +1302,7 @@ class _AppShellState extends State<AppShell> {
               initialInstitutionProjectRequestId,
           initialInstitutionProjectReviewMode:
               initialInstitutionProjectReviewMode,
+          initialConsultantOrderStage: initialConsultantOrderStage,
           onOpenDirectMessage:
               _messagingRepository == null ? null : _openDirectMessage,
         ),

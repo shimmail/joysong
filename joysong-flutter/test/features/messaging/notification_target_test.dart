@@ -28,4 +28,31 @@ void main() {
     expect(target.kind.name, 'professionalDoctorOrders');
     expect(target.id, 'order-1');
   });
+
+  test('consultant completion target preserves order history intent', () {
+    final target = NotificationTarget.parse(
+      'professional_consultant_orders_history',
+      'order-2',
+    );
+
+    expect(target.kind.name, 'professionalConsultantOrdersHistory');
+    expect(target.id, 'order-2');
+  });
+
+  test('professional order targets remain order-related for translation', () {
+    for (final targetType in const [
+      'order',
+      'order_refund',
+      'order_service_conversation',
+      'professional_doctor_orders',
+      'professional_consultant_orders_history',
+    ]) {
+      expect(
+        isOrderRelatedNotificationTarget(targetType),
+        isTrue,
+        reason: targetType,
+      );
+    }
+    expect(isOrderRelatedNotificationTarget('identity_management'), isFalse);
+  });
 }

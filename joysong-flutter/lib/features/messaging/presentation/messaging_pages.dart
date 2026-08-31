@@ -211,14 +211,8 @@ class _NotificationList extends StatelessWidget {
   }
 }
 
-bool _isOrderRelatedNotification(AppNotification item) {
-  final kind = NotificationTarget.parse(
-    item.targetType,
-    item.targetId,
-  ).kind;
-  return kind == NotificationTargetKind.orderDetail ||
-      kind == NotificationTargetKind.orderServiceConversation;
-}
+bool _isOrderRelatedNotification(AppNotification item) =>
+    isOrderRelatedNotificationTarget(item.targetType);
 
 class CustomerServicePage extends StatelessWidget {
   const CustomerServicePage({

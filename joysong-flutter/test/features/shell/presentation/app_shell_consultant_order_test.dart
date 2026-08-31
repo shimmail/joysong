@@ -13,6 +13,55 @@ import 'package:joysong_flutter/features/shell/presentation/app_shell.dart';
 
 void main() {
   testWidgets(
+    'completed order notification opens consultant order history',
+    (tester) async {
+      final apiClient = ConsultantRoleApiClient(
+        withCompletionNotification: true,
+      );
+      addTearDown(apiClient.close);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          locale: const Locale('zh'),
+          supportedLocales: const [Locale('zh'), Locale('en')],
+          localizationsDelegates: const [
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          home: AppShell(
+            agentConfig: const AgentConfig(),
+            apiClient: apiClient,
+            currentUserId: 'consultant-1',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.forum_outlined));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('message-center-system')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(
+          const ValueKey<String>(
+            'notification-row:notification-order-completed',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ConsultantOrdersPage), findsOneWidget);
+      expect(
+        find.byKey(const Key('consultant-orders-history-list')),
+        findsOneWidget,
+      );
+      expect(apiClient.consultantOrderStageQueries, ['HISTORY']);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'consultant conversation permission refresh ejects through management handler',
     (tester) async {
       final apiClient = ConsultantRoleApiClient(
@@ -194,15 +243,20 @@ Future<void> openConsultantOrderConversation(
 enum ConsultantRoleFailure { entitlementRefresh, send }
 
 final class ConsultantRoleApiClient extends ApiClient {
-  ConsultantRoleApiClient({this.roleFailure, this.sendMessageCompleter})
-      : super(apiRoot: Uri.parse('https://api.example.com/api/'));
+  ConsultantRoleApiClient({
+    this.roleFailure,
+    this.sendMessageCompleter,
+    this.withCompletionNotification = false,
+  }) : super(apiRoot: Uri.parse('https://api.example.com/api/'));
 
   final ConsultantRoleFailure? roleFailure;
   final Completer<Object?>? sendMessageCompleter;
+  final bool withCompletionNotification;
 
   int managementContextCalls = 0;
   int orderConversationCalls = 0;
   int sendMessageCalls = 0;
+  final List<String> consultantOrderStageQueries = [];
 
   @override
   Future<T?> get<T>(
@@ -219,19 +273,35 @@ final class ConsultantRoleApiClient extends ApiClient {
       );
     }
     if (path == 'consultant/orders') {
-      return decodeData(consultantOrderPageJson);
+      final stage = query['stage']?.toString() ?? '';
+      consultantOrderStageQueries.add(stage);
+      return decodeData(
+        stage == 'HISTORY'
+            ? emptyConsultantOrderPageJson
+            : consultantOrderPageJson,
+      );
     }
     if (path == 'consultant/orders/order-1') {
       return decodeData(consultantOrderDetailJson);
     }
-    if (path == 'notifications' ||
-        path == 'dm/conversations' ||
+    if (path == 'notifications') {
+      return decodeData(
+        withCompletionNotification
+            ? const <Object?>[completedOrderNotificationJson]
+            : const <Object?>[],
+      );
+    }
+    if (path == 'dm/conversations' ||
         path == 'cs/conversations' ||
         path == 'dm/conversations/conversation-1/messages') {
       return decodeData(const <Object?>[]);
     }
     if (path == 'notifications/unread-counts') {
-      return decodeData(const {'total': 0, 'system': 0, 'activity': 0});
+      return decodeData({
+        'total': withCompletionNotification ? 1 : 0,
+        'system': withCompletionNotification ? 1 : 0,
+        'activity': 0,
+      });
     }
     if (path == 'user/profile') {
       return decodeData(const {
@@ -337,6 +407,25 @@ const consultantOrderPageJson = <String, Object?>{
   'offset': 0,
   'limit': 20,
   'hasMore': false,
+};
+
+const emptyConsultantOrderPageJson = <String, Object?>{
+  'items': <Object?>[],
+  'offset': 0,
+  'limit': 20,
+  'hasMore': false,
+};
+
+const completedOrderNotificationJson = <String, Object?>{
+  'id': 'notification-order-completed',
+  'userId': 'consultant-1',
+  'type': 'ORDER_COMPLETED',
+  'title': '订单已完成',
+  'content': '订单已由用户确认完成。',
+  'targetType': 'professional_consultant_orders_history',
+  'targetId': 'order-1',
+  'isRead': false,
+  'createdAt': '2026-08-31T08:00:00Z',
 };
 
 const consultantOrderDetailJson = <String, Object?>{

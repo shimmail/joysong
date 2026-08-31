@@ -12,6 +12,7 @@ enum NotificationTargetKind {
   professionalDoctorRelationships,
   professionalConsultantRelationships,
   professionalDoctorOrders,
+  professionalConsultantOrdersHistory,
   institutionProjectReview,
   institutionProjectApplication,
   discover,
@@ -48,6 +49,8 @@ class NotificationTarget {
             NotificationTargetKind.professionalConsultantRelationships,
           'professional_doctor_orders' =>
             NotificationTargetKind.professionalDoctorOrders,
+          'professional_consultant_orders_history' =>
+            NotificationTargetKind.professionalConsultantOrdersHistory,
           'institution_project_review' =>
             NotificationTargetKind.institutionProjectReview,
           'institution_project_application' =>
@@ -63,6 +66,16 @@ class NotificationTarget {
         id: targetId.trim(),
       );
 }
+
+bool isOrderRelatedNotificationTarget(String targetType) =>
+    switch (NotificationTarget.parse(targetType, '').kind) {
+      NotificationTargetKind.orderDetail ||
+      NotificationTargetKind.orderServiceConversation ||
+      NotificationTargetKind.professionalDoctorOrders ||
+      NotificationTargetKind.professionalConsultantOrdersHistory =>
+        true,
+      _ => false,
+    };
 
 bool isActivityNotificationType(String type) => const {
       'activity',

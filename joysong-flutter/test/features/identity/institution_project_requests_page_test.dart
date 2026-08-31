@@ -256,6 +256,63 @@ void main() {
       expect(find.text('Thermage appointment'), findsAtLeastNWidgets(1));
     },
   );
+
+  testWidgets(
+    'completed order notification opens the doctor professional order list',
+    (tester) async {
+      const orderId = 'professional-order-route-target';
+      final apiClient = _ProfessionalOrderApiClient(orderId);
+      await tester.pumpWidget(
+        MaterialApp(
+          locale: const Locale('en'),
+          home: AppShell(
+            agentConfig: const AgentConfig(),
+            apiClient: apiClient,
+            allowPreviewData: true,
+            currentUserId: _doctorContext.userId,
+            dependencies: AppShellDependencies(
+              identityRepository: const _ProjectRequestsRepository(
+                requests: [],
+              ),
+              discoverRepository: const _UnusedDiscoverRepository(),
+              messagingRepository: _NotificationMessagingRepository(
+                const AppNotification(
+                  id: 'notification-professional-orders',
+                  userId: 'doctor-user',
+                  type: 'ORDER_COMPLETED',
+                  title: 'Order completed',
+                  content: 'The user confirmed completion.',
+                  targetType: 'professional_doctor_orders',
+                  targetId: '',
+                  isRead: false,
+                  createdAt: '2026-08-31T00:00:00Z',
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.forum_outlined));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('message-center-system')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(
+          const ValueKey<String>(
+            'notification-row:notification-professional-orders',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(DoctorOrdersPage), findsOneWidget);
+      expect(find.byType(DoctorOrderDetailPage), findsNothing);
+      expect(apiClient.requestedPaths, ['/management/orders']);
+      expect(find.text('Professional orders'), findsOneWidget);
+      expect(find.text('Thermage appointment'), findsOneWidget);
+    },
+  );
 }
 
 Future<void> _openSystemNotification(
@@ -496,19 +553,24 @@ final class _ProfessionalOrderApiClient extends ApiClient {
     required T Function(Object? json) decodeData,
   }) async {
     requestedPaths.add(path);
-    if (path != '/management/orders/$orderId') {
-      throw UnsupportedError(path);
+    if (path == '/management/orders') {
+      return decodeData([orderJson]);
     }
-    return decodeData({
-      'id': orderId,
-      'orderNo': 'ORDER-20260915',
-      'projectName': 'Thermage appointment',
-      'institutionName': 'Institution One',
-      'status': 'SERVICE_ACTIVE',
-      'amount': '100.00',
-      'createdAt': '2026-08-30T10:00:00',
-      'canVerify': false,
-      'canRequestCompletion': false,
-    });
+    if (path == '/management/orders/$orderId') {
+      return decodeData(orderJson);
+    }
+    throw UnsupportedError(path);
   }
+
+  Map<String, Object?> get orderJson => {
+        'id': orderId,
+        'orderNo': 'ORDER-20260915',
+        'projectName': 'Thermage appointment',
+        'institutionName': 'Institution One',
+        'status': 'SERVICE_ACTIVE',
+        'amount': '100.00',
+        'createdAt': '2026-08-30T10:00:00',
+        'canVerify': false,
+        'canRequestCompletion': false,
+      };
 }

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/files/app_file_picker.dart';
 import 'package:joysong_flutter/core/localization/localization.dart';
 import 'package:joysong_flutter/core/transient_message.dart';
+import 'package:joysong_flutter/features/consultant_orders/domain/consultant_order_models.dart';
 import 'package:joysong_flutter/features/consultant_orders/domain/consultant_orders_repository.dart';
 import 'package:joysong_flutter/features/consultant_orders/presentation/consultant_orders_page.dart';
 import 'package:joysong_flutter/features/discover/domain/discover_repository.dart';
@@ -558,6 +559,7 @@ class ManagementCenterPage extends StatefulWidget {
     this.onOpenDirectMessage,
     this.initialInstitutionProjectRequestId,
     this.initialInstitutionProjectReviewMode,
+    this.initialConsultantOrderStage,
     super.key,
   });
 
@@ -572,6 +574,7 @@ class ManagementCenterPage extends StatefulWidget {
   final DoctorOrderDirectMessageOpener? onOpenDirectMessage;
   final String? initialInstitutionProjectRequestId;
   final bool? initialInstitutionProjectReviewMode;
+  final ConsultantOrderStage? initialConsultantOrderStage;
 
   @override
   State<ManagementCenterPage> createState() => _ManagementCenterPageState();
@@ -583,7 +586,7 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
   int _managementContextLoadsInFlight = 0;
   bool _disposeControllerRequested = false;
   bool _managementControllerDisposed = false;
-  bool _initialInstitutionProjectRequestOpened = false;
+  bool _initialDestinationOpened = false;
 
   Future<ManagementContext?> _refreshManagementContext() async {
     await _enterManagementContext();
@@ -663,16 +666,41 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
       ..dispose();
   }
 
-  void _openInitialInstitutionProjectRequest() {
-    if (_initialInstitutionProjectRequestOpened ||
-        widget.initialInstitutionProjectReviewMode == null) {
+  void _openInitialDestination() {
+    if (_initialDestinationOpened ||
+        (widget.initialInstitutionProjectReviewMode == null &&
+            widget.initialConsultantOrderStage == null)) {
       return;
     }
-    _initialInstitutionProjectRequestOpened = true;
     final managementContext = _controller.context;
     if (managementContext == null) return;
+    _initialDestinationOpened = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      final initialConsultantOrderStage = widget.initialConsultantOrderStage;
+      final consultantOrdersRepository = widget.consultantOrdersRepository;
+      final openConsultantOrderConversation =
+          widget.onOpenConsultantOrderServiceConversation;
+      if (initialConsultantOrderStage != null &&
+          consultantOrdersRepository != null &&
+          openConsultantOrderConversation != null) {
+        Navigator.of(context).push<void>(
+          MaterialPageRoute(
+            builder: (_) => ConsultantOrdersPage(
+              repository: consultantOrdersRepository,
+              initialStage: initialConsultantOrderStage,
+              onOpenServiceConversation: (orderId) =>
+                  openConsultantOrderConversation(
+                orderId,
+                _handleConsultantRoleRequired,
+              ),
+              onConsultantRoleRequired: _handleConsultantRoleRequired,
+            ),
+          ),
+        );
+        return;
+      }
+      if (widget.initialInstitutionProjectReviewMode == null) return;
       Navigator.of(context).push<void>(
         MaterialPageRoute(
           builder: (_) => InstitutionProjectRequestsPage(
@@ -689,7 +717,7 @@ class _ManagementCenterPageState extends State<ManagementCenterPage> {
   }
 
   Widget _buildManagementCapabilities() {
-    _openInitialInstitutionProjectRequest();
+    _openInitialDestination();
     return _ManagementCapabilities(
       context: _controller.context!,
       repository: widget.repository,

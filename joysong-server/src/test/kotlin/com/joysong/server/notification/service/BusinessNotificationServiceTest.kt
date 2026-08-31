@@ -103,18 +103,39 @@ class BusinessNotificationServiceTest {
     }
 
     @Test
-    fun `order completion merges current legal representatives without duplicate recipients`() {
-        val fixture = fixture(legalRepresentatives = listOf("consultant-1", "legal-1", "legal-1"))
+    fun `order completion routes consultants doctors and legal representatives to their own order views`() {
+        val fixture = fixture(legalRepresentatives = listOf("consultant-1", "doctor-1", "legal-1", "legal-1"))
 
         fixture.service.orderCompleted("order-1", "consultant-1", "doctor-1", "institution-1")
 
         assertEquals(
             listOf(
-                Emission("consultant-1", "ORDER_COMPLETED", "订单已完成", "订单已由用户确认完成。", "order", "order-1"),
-                Emission("doctor-1", "ORDER_COMPLETED", "订单已完成", "订单已由用户确认完成。", "order", "order-1"),
+                Emission("consultant-1", "ORDER_COMPLETED", "订单已完成", "订单已由用户确认完成。", "professional_consultant_orders_history", "order-1"),
+                Emission("doctor-1", "ORDER_COMPLETED", "订单已完成", "订单已由用户确认完成。", "professional_doctor_orders", ""),
                 Emission("legal-1", "ORDER_COMPLETED", "订单已完成", "订单已由用户确认完成。", "order", "order-1")
             ),
             fixture.emissions
+        )
+    }
+
+    @Test
+    fun `order completion keeps consultant then doctor then legal representative priority for shared recipients`() {
+        val consultantFixture = fixture(legalRepresentatives = listOf("shared-user"))
+
+        consultantFixture.service.orderCompleted("order-1", "shared-user", "shared-user", "institution-1")
+
+        assertEquals(
+            listOf(
+                Emission(
+                    "shared-user",
+                    "ORDER_COMPLETED",
+                    "订单已完成",
+                    "订单已由用户确认完成。",
+                    "professional_consultant_orders_history",
+                    "order-1"
+                )
+            ),
+            consultantFixture.emissions
         )
     }
 

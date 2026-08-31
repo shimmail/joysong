@@ -72,15 +72,36 @@ class BusinessNotificationService(
         )
     }
 
-    fun orderCompleted(orderId: String, consultantId: String, doctorId: String, institutionId: String) =
-        notify(
-            recipients = listOf(consultantId, doctorId) + currentLegalRepresentativeIds(institutionId),
+    fun orderCompleted(orderId: String, consultantId: String, doctorId: String, institutionId: String) {
+        val title = "订单已完成"
+        val content = "订单已由用户确认完成。"
+        notifyCandidates(
+            candidates = listOf(
+                NotificationCandidate(
+                    consultantId,
+                    title,
+                    content,
+                    "professional_consultant_orders_history"
+                ),
+                NotificationCandidate(
+                    doctorId,
+                    title,
+                    content,
+                    "professional_doctor_orders",
+                    targetIdOverride = ""
+                )
+            ) + currentLegalRepresentativeIds(institutionId).map { legalRepresentativeId ->
+                NotificationCandidate(
+                    legalRepresentativeId,
+                    title,
+                    content,
+                    "order"
+                )
+            },
             type = "ORDER_COMPLETED",
-            title = "订单已完成",
-            content = "订单已由用户确认完成。",
-            targetType = "order",
             targetId = orderId
         )
+    }
 
     fun orderRefundRequested(orderId: String, userId: String, consultantId: String, doctorId: String) =
         orderRefundNotification("ORDER_REFUND_REQUESTED", "退款申请已提交", "订单退款申请已提交，请查看详情。", orderId, userId, consultantId, doctorId)
@@ -307,7 +328,14 @@ class BusinessNotificationService(
             .filter { candidate -> candidate.userId.isNotEmpty() }
             .distinctBy { candidate -> candidate.userId }
             .forEach { candidate ->
-                notifyRecipient(candidate.userId, type, candidate.title, candidate.content, candidate.targetType, targetId)
+                notifyRecipient(
+                    candidate.userId,
+                    type,
+                    candidate.title,
+                    candidate.content,
+                    candidate.targetType,
+                    candidate.targetIdOverride ?: targetId
+                )
             }
     }
 
@@ -357,7 +385,8 @@ class BusinessNotificationService(
         val userId: String,
         val title: String,
         val content: String,
-        val targetType: String
+        val targetType: String,
+        val targetIdOverride: String? = null
     )
 
     private data class IdentityNotificationRole(
