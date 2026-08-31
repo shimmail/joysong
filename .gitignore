@@ -50,3 +50,6 @@ application-dev.yml
 application-prod.yml
 !joysong-server/src/main/resources/application-prod.yml
 .env
+
+# Sensitive local-only documents
+doc/支付.docx
