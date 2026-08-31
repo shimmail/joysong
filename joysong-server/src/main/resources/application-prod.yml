@@ -42,6 +42,9 @@ security:
     log-for-dev: false
 
 app:
+  # Production share links must use a trusted, explicitly configured public origin.
+  share-base-url: ${APP_SHARE_BASE_URL}
+  share-request-origin-fallback-enabled: false
   # Production is hard-disabled in code as well. These explicit values document
   # the release gate and cannot be used to opt in.
   account-deletion:

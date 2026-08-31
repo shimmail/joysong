@@ -39,7 +39,7 @@ Content-Type: application/json
 
 请求体可为空，也可传过期时间配置。
 
-返回数据包含分享链接和 token。链接格式由 `app.share.base-url` 控制。
+返回数据包含分享链接和 token。显式配置 `app.share-base-url` 时始终使用该地址；仅在 `dev` profile、该配置为空且开发回退开关启用时，才从当前 API 请求的协议与主机生成分享链接。
 
 ### 撤销分享链接
 
@@ -108,7 +108,15 @@ Flutter 启动时读取 `defaultRouteName`，解析 `/s/diary/{token}` 或 `joys
 
 ## 配置项
 
-### 本地局域网测试
+分享地址遵循以下优先级：
+
+1. 非空的 `APP_SHARE_BASE_URL` 始终优先。
+2. 仅 `dev` profile 允许在该变量为空时使用当前 API 请求 origin。
+3. `prod` 禁止请求来源回退；`APP_SHARE_BASE_URL` 缺失、为空或不是合法绝对 HTTP(S) URL 时，服务启动失败。
+
+修改配置或代理地址后应重启后端并重新点击分享。已经复制出去的旧 URL 不会自动替换域名。
+
+### 同一 Wi-Fi 真机测试
 
 如果电脑局域网 IP 是：
 
@@ -116,15 +124,13 @@ Flutter 启动时读取 `defaultRouteName`，解析 `/s/diary/{token}` 或 `joys
 192.168.2.54
 ```
 
-开发环境可配置：
+保持后端使用 `dev` profile，且不要设置 `APP_SHARE_BASE_URL`。Flutter 与分享链接共用电脑 WLAN 地址：
 
-```yaml
-app:
-  share:
-    base-url: http://192.168.2.54:8080/s/diary/
+```powershell
+flutter run --dart-define=APP_ENV=development --dart-define=API_BASE_URL=http://192.168.2.54:8080
 ```
 
-这样生成的分享链接类似：
+创建分享的 API 请求经过该地址后，后端会返回：
 
 ```text
 http://192.168.2.54:8080/s/diary/{token}
@@ -132,15 +138,38 @@ http://192.168.2.54:8080/s/diary/{token}
 
 手机需要与电脑处于同一 Wi-Fi，并且 Windows 防火墙允许访问后端端口 `8080`。
 
+手机上的 `127.0.0.1` 指向手机自身，不能用来访问电脑。`adb reverse` 只方便当前连接的 Android 设备访问开发机，也不能让其他人从外部打开分享链接。
+
+### 临时公网代理或反向隧道
+
+更换 Wi-Fi 后仍需从外部打开时，应使用能把公网 HTTPS 请求反向转发到本机 `http://127.0.0.1:8080` 的隧道，例如 Cloudflare Tunnel 或 ngrok。普通 Clash、V2Ray 等出站代理地址不是可供别人访问的分享地址。
+
+使用步骤：
+
+1. 后端以 `SPRING_PROFILES_ACTIVE=dev` 启动，保持 `APP_SHARE_BASE_URL` 未设置。
+2. 在同一台电脑上启动反向隧道，并将它指向 `http://127.0.0.1:8080`。
+3. Flutter 使用同一个公网代理 origin：
+
+```powershell
+flutter run --dart-define=APP_ENV=development --dart-define=API_BASE_URL=https://your-tunnel.example
+```
+
+4. 重新创建分享，返回地址应为 `https://your-tunnel.example/s/diary/{token}`。
+
+开发配置只信任来自本机 loopback 的转发头。如果代理运行在 Docker 或另一台机器上，不要直接扩大可信网段；优先显式设置 `APP_SHARE_BASE_URL`，或在确认代理会清洗并重写转发头后再调整可信代理范围。
+
+临时隧道必须持续运行。免费随机域名变化后，旧分享 URL 会失效；需要长期稳定分享时，应使用固定隧道域名或正式云部署。GitHub Actions 可以负责构建和发布，但不能充当持续运行的公网隧道或服务器。
+
 ### 生产环境
 
-生产环境建议使用正式域名：
+生产环境通过部署变量配置，不在代码或 YAML 中写死域名：
 
-```yaml
-app:
-  share:
-    base-url: https://app.joysong.cn/s/diary/
+```dotenv
+SPRING_PROFILES_ACTIVE=prod
+APP_SHARE_BASE_URL=https://api.example.com/s/diary/
 ```
+
+`APP_SHARE_BASE_URL` 可以使用 API 域名，也可以使用独立分享域名。使用独立域名时，必须同时配置对应 DNS、TLS、Nginx `server_name` 和 `/s/diary/` 转发。
 
 需要确保：
 
@@ -162,21 +191,7 @@ app:
 - 图片资源：OSS + CDN。
 - 数据库：RDS MySQL。
 
-Nginx 示例：
-
-```nginx
-location /s/diary/ {
-    proxy_pass http://127.0.0.1:8080;
-}
-
-location /api/public/diary-shares/ {
-    proxy_pass http://127.0.0.1:8080;
-}
-
-location /api/ {
-    proxy_pass http://127.0.0.1:8080;
-}
-```
+生产 Nginx 以 [`joysong-server/deploy/nginx/joysong-api.conf`](../joysong-server/deploy/nginx/joysong-api.conf) 为准。该模板由 `/api/` 覆盖公开 JSON 接口，并通过独立的 `/s/diary/` location 转发 HTML 分享页，避免在本文复制一份容易漂移的配置。
 
 ## 常见问题
 
@@ -206,6 +221,16 @@ location /api/ {
 - token 已过期；
 - 分享已撤销；
 - 链接中的 `{token}` 没有被真实 token 替换。
+
+### 分享链接仍然是 `127.0.0.1` 或旧域名
+
+优先检查：
+
+- 后端是否已使用 `dev` profile 重启；
+- 本地 `APP_SHARE_BASE_URL` 是否仍设置为旧值，因为显式配置始终优先；
+- Flutter 的 `API_BASE_URL` 是否确实是当前 WLAN 地址或隧道 HTTPS 地址；
+- 本机隧道是否会写入正确的转发协议和主机；
+- 修改配置后是否重新创建了分享链接。
 
 ### 点击“在 App 中打开”进入空页面
 
@@ -238,6 +263,8 @@ D:\flutter\bin\flutter.bat doctor
 - 登录用户点击分享按钮后生成 `/s/diary/{token}` 链接。
 - 电脑浏览器可打开网页分享页。
 - 同一 Wi-Fi 手机可打开局域网分享页。
+- 使用本机反向隧道时，Flutter API 与返回的分享链接使用同一个 HTTPS origin。
+- 生产环境未配置合法 `APP_SHARE_BASE_URL` 时启动失败，配置后生成的域名与 Nginx/TLS 一致。
 - 未登录浏览器访问分享页不返回 401。
 - 网页预览最多显示三张图片。
 - 点击图片可查看全部图片并循环滑动。

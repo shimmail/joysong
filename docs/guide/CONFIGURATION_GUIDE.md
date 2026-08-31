@@ -58,6 +58,9 @@ GOOGLE_CLIENT_ID=Web客户端ID.apps.googleusercontent.com
 # 唯一固定管理员，只接受 ^1\d{10}$ 的裸 11 位号码
 ADMIN_PHONE=13800138000
 
+# 生产日记分享页根地址；必须由部署环境显式提供
+APP_SHARE_BASE_URL=https://api.example.com/s/diary/
+
 # prod 中必须启用 OSS
 OSS_ENABLED=true
 OSS_ENDPOINT=oss-cn-hangzhou.aliyuncs.com
@@ -90,7 +93,6 @@ AI_AGENT_INTENT_MODEL=实际意图模型ID
 SERVER_BASE_URL=https://api.example.com
 UPLOAD_LOCAL_DIR=/var/lib/joysong/uploads
 UPLOAD_PRIVATE_DIR=/var/lib/joysong/private
-APP_SHARE_BASE_URL=https://app.example.com/s/diary/
 CORS_ALLOWED_ORIGINS=https://admin.example.com
 
 TRANSLATION_PROVIDER=qwen
@@ -107,7 +109,9 @@ GOOGLE_PROXY_URL=http://proxy.example.internal:8080
 
 `CORS_ALLOWED_ORIGINS` 必须是明确可信的 origin，多个值用英文逗号分隔，不能包含 `*`。Translation 当前不会在启动时校验 API Key；漏配时服务仍可能启动，但第一次翻译调用会失败。
 
-`UPLOAD_PRIVATE_DIR` 保存身份证明等私有材料，只允许 Java 进程读写，禁止通过 Nginx 或公共静态目录暴露，并必须纳入备份和恢复。它与公共的 `UPLOAD_LOCAL_DIR` 完全分离。`APP_SHARE_BASE_URL` 用于生成日记分享链接，应指向真实 HTTPS 分享页根路径。
+`UPLOAD_PRIVATE_DIR` 保存身份证明等私有材料，只允许 Java 进程读写，禁止通过 Nginx 或公共静态目录暴露，并必须纳入备份和恢复。它与公共的 `UPLOAD_LOCAL_DIR` 完全分离。
+
+`APP_SHARE_BASE_URL` 用于生成日记分享链接，在 `prod` 中为启动必填项。它必须是无账号信息、查询参数和片段的绝对 HTTP(S) URL，生产应指向真实 HTTPS 分享页根路径；代码不会写死域名，也不会在生产环境回退到请求 `Host`。如果使用独立分享域名，必须同步配置 DNS、TLS、Nginx `server_name` 和 `/s/diary/` 代理。
 
 ### 2.4 仅首次创建管理员的临时密码
 
@@ -313,14 +317,14 @@ flutter build ipa --release --dart-define=APP_ENV=production --dart-define=API_B
 
 ### 6.3 Nginx 与 TLS
 
-[当前 Nginx 文件](../../joysong-server/deploy/nginx/joysong-api.conf)只包含 `listen 80`、upstream、`/api/`、`/images/` 和健康检查代理，是 HTTP 骨架，不包含 `listen 443 ssl`、证书路径或 80→443 跳转。
+[当前 Nginx 文件](../../joysong-server/deploy/nginx/joysong-api.conf)包含 `listen 80`、upstream、`/api/`、`/images/`、`/s/diary/` 和健康检查代理，是 HTTP 骨架，不包含 `listen 443 ssl`、证书路径或 80→443 跳转。
 
 生产必须选择其一：
 
 1. 在云负载均衡或网关终止 TLS，再把受控内网 HTTP 转发到该模板；
 2. 自行补齐 Nginx 的 443 server block、证书与私钥、HTTP 跳转和安全策略。
 
-部署后检查 `server_name`、`/images/` alias 与 `UPLOAD_LOCAL_DIR` 一致，并先执行 `nginx -t`。在完整 TLS 配置生效前，不得把该模板视为可直接上线的 HTTPS 配置。
+部署后检查 `server_name`、`/images/` alias 与 `UPLOAD_LOCAL_DIR` 一致，确认 `APP_SHARE_BASE_URL` 对应域名的 `/s/diary/` 会进入 Spring，并先执行 `nginx -t`。在完整 TLS 配置生效前，不得把该模板视为可直接上线的 HTTPS 配置。
 
 ## 7. 本地开发
 
@@ -329,6 +333,9 @@ flutter build ipa --release --dart-define=APP_ENV=production --dart-define=API_B
 3. 使用 `SPRING_PROFILES_ACTIVE=dev` 启动服务端，仅连接本地隔离数据库。
 4. 开发环境可关闭 OSS、短信，使用本地上传和验证码日志。
 5. 启动管理端开发服务后，通过 Vite 代理访问本地 API。
+6. 本地 `APP_SHARE_BASE_URL` 可保持为空：同一 Wi-Fi 真机把 Flutter `API_BASE_URL` 指向电脑 WLAN IP；使用本机反向隧道时把它指向隧道 HTTPS origin，分享链接会自动同源。
+
+只有 `dev` profile 允许请求来源回退，且开发配置只信任本机代理传入的转发头。手机不能用 `127.0.0.1` 访问电脑；随机隧道域名变化后旧分享 URL 会失效。完整步骤见[日记分享功能开发文档](../DIARY_SHARE_FEATURE.md#配置项)。
 
 ## 8. 上线检查表
 
@@ -338,7 +345,8 @@ flutter build ipa --release --dart-define=APP_ENV=production --dart-define=API_B
 - 仅存在一个非 `ERASED` 管理员，且与 `ADMIN_PHONE` 的裸号完全一致。
 - JWT、数据库、OSS、短信和模型密钥来自密钥管理系统，仓库和证据中没有明文。
 - CORS 不含 `*`，API、管理端和 Flutter 均使用 HTTPS 域名。
-- `UPLOAD_PRIVATE_DIR` 位于持久私有目录，未被 Nginx 暴露，且已纳入备份恢复；分享链接使用正确的 `APP_SHARE_BASE_URL`。
+- `UPLOAD_PRIVATE_DIR` 位于持久私有目录，未被 Nginx 暴露，且已纳入备份恢复。
+- `APP_SHARE_BASE_URL` 是合法 HTTPS 分享页根地址，Nginx 已代理 `/s/diary/`；使用真实 token 的外网分享冒烟通过。
 - 管理端构建、Flutter 生产构建、OSS 上传、短信、Google 登录、Agent 和 Translation 已分别验证。
 - Nginx 或上游网关已真实启用 TLS；当前 HTTP 模板没有被误当成完整 HTTPS 配置。
 - 数据库备份和回滚路径已验证，任何管理员改号都同步更新数据库、会话与 `ADMIN_PHONE`。

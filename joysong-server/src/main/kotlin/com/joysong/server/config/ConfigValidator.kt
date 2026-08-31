@@ -1,5 +1,6 @@
 package com.joysong.server.config
 
+import com.joysong.server.diary.service.DiaryShareUrlPolicy
 import jakarta.annotation.PostConstruct
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
@@ -24,7 +25,10 @@ class ConfigValidator(
     @Value("\${oss.enabled:false}") private val ossEnabled: Boolean,
     @Value("\${aliyun.sms.enabled:false}") private val smsEnabled: Boolean,
     private val aiAgentProperties: AiAgentProperties,
-    @Value("\${security.verification-code.log-for-dev:false}") private val logVerificationCodeForDev: Boolean
+    @Value("\${security.verification-code.log-for-dev:false}") private val logVerificationCodeForDev: Boolean,
+    @Value("\${app.share-base-url:}") private val shareBaseUrl: String,
+    @Value("\${app.share-request-origin-fallback-enabled:false}")
+    private val shareRequestOriginFallbackEnabled: Boolean,
 ) {
     private val logger = LoggerFactory.getLogger(ConfigValidator::class.java)
 
@@ -45,8 +49,16 @@ class ConfigValidator(
         if (dbPassword.isBlank()) missing.add("DB_PASSWORD")
         if (!adminPhone.matches(Regex("^1\\d{10}$"))) missing.add("ADMIN_PHONE (valid mobile number)")
         val isProduction = environment.activeProfiles.any { it.equals("prod", ignoreCase = true) }
+        val isDevelopment = environment.activeProfiles.any { it.equals("dev", ignoreCase = true) }
         if (isProduction && !ossEnabled) missing.add("OSS_ENABLED=true")
         if (isProduction && !smsEnabled) missing.add("SMS_ENABLED=true")
+        if (isProduction && shareBaseUrl.isBlank()) missing.add("APP_SHARE_BASE_URL")
+        if (shareBaseUrl.isNotBlank() && !DiaryShareUrlPolicy.isValidBaseUrl(shareBaseUrl)) {
+            missing.add("APP_SHARE_BASE_URL (absolute HTTP(S) URL without user info, query, or fragment)")
+        }
+        if (shareRequestOriginFallbackEnabled && (!isDevelopment || isProduction)) {
+            missing.add("share request-origin fallback may only be enabled in the dev profile")
+        }
         val provider = aiAgentProperties.provider
         if (aiAgentProperties.enabled && provider != null && provider != AiAgentProvider.QWEN) {
             missing.add("AI_AGENT_PROVIDER=QWEN (required by the complete deployment)")

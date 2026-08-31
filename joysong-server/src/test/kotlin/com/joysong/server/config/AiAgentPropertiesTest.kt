@@ -268,6 +268,61 @@ class AiAgentPropertiesTest {
         assertEquals("https://dashscope.aliyuncs.com/compatible-mode/v1", properties.baseUrl)
     }
 
+    @Test
+    fun `production rejects a blank diary share base URL`() {
+        val error = assertThrows(IllegalStateException::class.java) {
+            validator(validEnabledProperties(), shareBaseUrl = "").validate()
+        }
+
+        assertTrue(error.message.orEmpty().contains("APP_SHARE_BASE_URL"))
+    }
+
+    @Test
+    fun `production rejects a non-http diary share base URL`() {
+        val error = assertThrows(IllegalStateException::class.java) {
+            validator(
+                validEnabledProperties(),
+                shareBaseUrl = "javascript://share.example.test/s/diary/"
+            ).validate()
+        }
+
+        assertTrue(error.message.orEmpty().contains("APP_SHARE_BASE_URL"))
+    }
+
+    @Test
+    fun `request origin fallback is restricted to the development profile`() {
+        val error = assertThrows(IllegalStateException::class.java) {
+            validator(
+                validEnabledProperties(),
+                profile = "prod",
+                shareRequestOriginFallbackEnabled = true,
+            ).validate()
+        }
+
+        assertTrue(error.message.orEmpty().contains("share request-origin fallback"))
+
+        validator(
+            validEnabledProperties(),
+            profile = "dev",
+            shareBaseUrl = "",
+            shareRequestOriginFallbackEnabled = true,
+        ).validate()
+    }
+
+    @Test
+    fun `request origin fallback is rejected when production and development profiles are both active`() {
+        val error = assertThrows(IllegalStateException::class.java) {
+            validator(
+                validEnabledProperties(),
+                profile = "prod",
+                additionalProfiles = arrayOf("dev"),
+                shareRequestOriginFallbackEnabled = true,
+            ).validate()
+        }
+
+        assertTrue(error.message.orEmpty().contains("share request-origin fallback"))
+    }
+
     private fun validEnabledProperties() = AiAgentProperties(
         provider = AiAgentProvider.QWEN,
         apiKey = "test-key",
@@ -278,9 +333,12 @@ class AiAgentPropertiesTest {
 
     private fun validator(
         properties: AiAgentProperties,
-        profile: String = "prod"
+        profile: String = "prod",
+        additionalProfiles: Array<String> = emptyArray(),
+        shareBaseUrl: String = "https://share.example.test/s/diary/",
+        shareRequestOriginFallbackEnabled: Boolean = false,
     ): ConfigValidator = ConfigValidator(
-        environment = MockEnvironment().apply { setActiveProfiles(profile) },
+        environment = MockEnvironment().apply { setActiveProfiles(profile, *additionalProfiles) },
         jwtSecret = "test-jwt-secret-that-is-at-least-32-characters",
         googleClientId = "test-google-client-id",
         ossAccessKeyId = "test-oss-key",
@@ -296,7 +354,9 @@ class AiAgentPropertiesTest {
         ossEnabled = true,
         smsEnabled = true,
         aiAgentProperties = properties,
-        logVerificationCodeForDev = false
+        logVerificationCodeForDev = false,
+        shareBaseUrl = shareBaseUrl,
+        shareRequestOriginFallbackEnabled = shareRequestOriginFallbackEnabled,
     )
 
     private fun Throwable?.causeChain(): String = generateSequence(this) { it.cause }

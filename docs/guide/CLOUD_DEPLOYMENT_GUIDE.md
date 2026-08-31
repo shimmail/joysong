@@ -10,8 +10,8 @@
 用户浏览器 / Flutter / Android
               |
        HTTPS:443 (Nginx)
-          /          \
-  /api、/images       管理端静态文件
+          /                         \
+ /api、/images、/s/diary/      管理端静态文件
           |
  Spring Boot :8080
           |
@@ -152,7 +152,7 @@ ADMIN_PHONE=<admin-phone>
 GOOGLE_CLIENT_ID=<oauth-client-id>
 
 SERVER_BASE_URL=https://api.example.com
-APP_SHARE_BASE_URL=https://app.example.com/s/diary/
+APP_SHARE_BASE_URL=https://api.example.com/s/diary/
 UPLOAD_LOCAL_DIR=/var/lib/joysong/uploads
 UPLOAD_PRIVATE_DIR=/var/lib/joysong/private
 
@@ -189,6 +189,8 @@ PAYMENT_RECONCILIATION_STALE_SECONDS=120
 `ADMIN_PHONE` 是长期保留的唯一固定管理员裸 11 位号码。只有迁移后 `users=0` 的首次启动才临时追加 `ADMIN_PASSWORD=<12-128-character-strong-password>`；创建成功后立即从 `/etc/joysong/joysong.env` 和部署平台移除，再以同一 `ADMIN_PHONE` 无密码变量重启验证。后续重启不读取该变量，再次设置也不会重置管理员密码。完整流程见[项目配置指南](CONFIGURATION_GUIDE.md#24-仅首次创建管理员的临时密码)。
 
 `UPLOAD_PRIVATE_DIR` 保存私有身份材料，只允许 Java 进程读写，不能与 `UPLOAD_LOCAL_DIR` 或 Nginx `/images/` alias 共用，并须纳入备份恢复。
+
+`APP_SHARE_BASE_URL` 是 `prod` 启动硬门槛，不是代码中的固定域名。它必须是无账号信息、查询参数和片段的绝对 HTTP(S) URL，生产运维要求使用 HTTPS。上例与 API 共用域名，可直接匹配当前 Nginx 模板；若改用 `app.example.com` 等独立分享域名，还必须为该域名配置 DNS、证书、`server_name` 和 `/s/diary/` 反向代理。
 
 ### 5.1 补充可选变量索引
 
@@ -272,6 +274,7 @@ sudo journalctl -u joysong -f
 
 - `server_name api.example.com`
 - `/images/` 的 `alias` 为 `/var/lib/joysong/uploads/`
+- `/s/diary/` 已转发到 Spring Boot，且 `APP_SHARE_BASE_URL` 的主机由同一个 HTTPS server block 提供
 - `client_max_body_size` 与服务端上传限制保持一致
 - 增加管理端静态站点和 SPA fallback
 
@@ -282,6 +285,8 @@ sudo certbot --nginx -d api.example.com -d admin.example.com -d app.example.com
 ```
 
 证书签发后确认 80 自动跳转 443，API、图片和分享页均不能混用 HTTP。
+
+反向代理必须覆盖客户端传入的 `Host`/转发协议相关请求头，再写入代理确认过的值。若分享页使用独立域名，应单独配置对应的 HTTPS vhost；不能只改 `APP_SHARE_BASE_URL`。
 
 ## 9. 发布、回滚和备份
 
@@ -303,6 +308,12 @@ sudo tar -czf /var/backups/joysong/private-$(date +%F-%H%M).tar.gz /var/lib/joys
 
 私有材料备份必须沿用私有目录的访问控制并加密保存。至少保留 7 天备份，并将备份复制到另一可用区或对象存储。回滚必须同时回滚 jar、管理端静态文件和数据库迁移兼容性；不要只替换 jar。
 
+### 9.1 GitHub Actions 边界
+
+当前仓库没有可直接使用的 `.github/workflows` 部署流程。后续接入 GitHub Actions 时，可以用它执行测试、构建制品并通过受控凭据发布到一台已经准备好的云服务器，但不要把 Actions runner 当作运行环境：它不能持续托管 Spring Boot，也不能替代公网服务器或本地反向隧道。
+
+在没有公网服务器的阶段，应在开发电脑上运行反向隧道完成临时真机测试；隧道停止或随机域名变化后旧分享 URL 会失效。不要在真正确定云主机、制品路径和密钥管理方式前，把不存在的 Secret 名称或未经验证的部署命令写入 workflow。
+
 ## 10. 当前正式上线阻断项
 
 - 部分历史 `/api/admin/**` 端点仍只要求 authenticated，普通用户 token 可能访问全局数据；必须完成统一管理员授权收口。
@@ -319,6 +330,7 @@ sudo tar -czf /var/backups/joysong/private-$(date +%F-%H%M).tar.gz /var/lib/joys
 - [ ] `SPRING_PROFILES_ACTIVE=prod`，生产配置校验通过
 - [ ] Flyway 迁移成功且 `ddl-auto=validate`
 - [ ] API、管理端、图片、分享页全部 HTTPS
+- [ ] `APP_SHARE_BASE_URL` 指向当前 HTTPS 分享域名，创建真实分享后 `/s/diary/{token}` 可从外网访问
 - [ ] 管理端生产构建通过，API 同源代理正常
 - [ ] Flutter Android/iOS Release 使用正式 HTTPS API、OAuth Client ID 和正式签名
 - [ ] 登录、刷新、退出、上传、分享、短信和 OSS 冒烟通过；新支付在网关上线前按预期失败关闭，历史 Stripe webhook 仅在受控启用时验收

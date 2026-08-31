@@ -6,6 +6,17 @@ spring:
   jpa:
     show-sql: true
 
+server:
+  # Trust forwarded scheme and host only from a proxy running on this machine.
+  forward-headers-strategy: native
+  tomcat:
+    remoteip:
+      internal-proxies: '127\.0\.0\.1|0:0:0:0:0:0:0:1|::1'
+      remote-ip-header: X-Forwarded-For
+      protocol-header: X-Forwarded-Proto
+      host-header: X-Forwarded-Host
+      port-header: X-Forwarded-Port
+
 oss:
   enabled: false
 
@@ -18,6 +29,9 @@ security:
     log-for-dev: true
 
 app:
+  # Empty means derive /s/diary/{token} from the API request origin.
+  share-base-url: "${APP_SHARE_BASE_URL:}"
+  share-request-origin-fallback-enabled: true
   account-deletion:
     enabled: true
     # Development-only adapter for accounts known to have no commerce data.

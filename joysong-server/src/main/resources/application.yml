@@ -146,6 +146,8 @@ order:
       service-fee-rate: 40.00  # 出行地接服务费比例
 
 app:
+  share-base-url: "${APP_SHARE_BASE_URL:}"
+  share-request-origin-fallback-enabled: false
   account-deletion:
     enabled: ${ACCOUNT_DELETION_ENABLED:false}
     allow-commerce-bypass: ${ACCOUNT_DELETION_ALLOW_COMMERCE_BYPASS:false}

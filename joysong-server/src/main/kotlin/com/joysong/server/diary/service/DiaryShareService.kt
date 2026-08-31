@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import com.joysong.server.user.service.AccountLifecycleGuard
+import java.net.URI
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.nio.charset.StandardCharsets
@@ -19,13 +20,20 @@ import java.util.UUID
 class DiaryShareService(
     private val diaryRepository: DiaryRepository,
     private val shareRepository: DiaryShareRepository,
-    @Value("\${app.share-base-url:https://app.joysong.cn/s/diary/}") private val shareBaseUrl: String,
+    @Value("\${app.share-base-url:}") private val shareBaseUrl: String,
+    @Value("\${app.share-request-origin-fallback-enabled:false}")
+    private val shareRequestOriginFallbackEnabled: Boolean,
     private val accountLifecycleGuard: AccountLifecycleGuard? = null,
 ) {
     private val random = SecureRandom()
 
     @Transactional
-    fun create(userId: String, diaryId: String, request: CreateDiaryShareRequest): Any {
+    fun create(
+        userId: String,
+        diaryId: String,
+        request: CreateDiaryShareRequest,
+        requestShareBaseUrl: String,
+    ): Any {
         accountLifecycleGuard?.requireActiveForWrite(userId)
         val diary = diaryRepository.findById(diaryId).orElse(null) ?: return error("日记不存在", 404)
         if (diary.userId != userId) return error("无权分享他人日记", 403)
@@ -40,7 +48,12 @@ class DiaryShareService(
             LocalDateTime.now().plusDays(it.toLong())
         }
         shareRepository.save(DiaryShareEntity(UUID.randomUUID().toString(), diaryId, hash(token), expiresAt))
-        return DiaryShareResponse(url(token), token, expiresAt, DiarySharePreview(diary.title, diary.authorName, diary.coverImage))
+        return DiaryShareResponse(
+            url(token, requestShareBaseUrl),
+            token,
+            expiresAt,
+            DiarySharePreview(diary.title, diary.authorName, diary.coverImage),
+        )
     }
 
     @Transactional
@@ -68,6 +81,36 @@ class DiaryShareService(
         .digest(value.toByteArray(StandardCharsets.UTF_8))
         .joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
-    private fun url(value: String): String = shareBaseUrl.trimEnd('/') + "/" + value
+    private fun url(value: String, requestShareBaseUrl: String): String {
+        val baseUrl = shareBaseUrl.takeIf(String::isNotBlank) ?: run {
+            check(shareRequestOriginFallbackEnabled) {
+                "Diary share request-origin fallback is disabled; configure app.share-base-url"
+            }
+            requestShareBaseUrl
+        }
+        return DiaryShareUrlPolicy.normalizeBaseUrl(baseUrl) + "/" + value
+    }
+
     private fun error(message: String, code: Int) = mapOf("error" to message, "code" to code)
+}
+
+internal object DiaryShareUrlPolicy {
+    fun normalizeBaseUrl(value: String): String {
+        val normalized = value.trim().trimEnd('/')
+        val uri = runCatching { URI(normalized) }.getOrNull()
+        require(
+            uri != null &&
+                uri.isAbsolute &&
+                (uri.scheme.equals("http", ignoreCase = true) || uri.scheme.equals("https", ignoreCase = true)) &&
+                !uri.host.isNullOrBlank() &&
+                uri.rawUserInfo == null &&
+                uri.rawQuery == null &&
+                uri.rawFragment == null
+        ) {
+            "Diary share base URL must be an absolute HTTP(S) URL without user info, query, or fragment"
+        }
+        return normalized
+    }
+
+    fun isValidBaseUrl(value: String): Boolean = runCatching { normalizeBaseUrl(value) }.isSuccess
 }

@@ -71,6 +71,42 @@ class ProductionProfileTest {
     }
 
     @Test
+    fun `diary share origin follows trusted proxy requests only in development`() {
+        assertEquals("native", developmentProperties.getProperty("server.forward-headers-strategy"))
+        assertEquals(
+            "127\\.0\\.0\\.1|0:0:0:0:0:0:0:1|::1",
+            developmentProperties.getProperty("server.tomcat.remoteip.internal-proxies")
+        )
+        assertEquals("\${APP_SHARE_BASE_URL:}", developmentProperties.getProperty("app.share-base-url"))
+        assertEquals(true, developmentProperties.getProperty("app.share-request-origin-fallback-enabled"))
+        assertEquals("\${APP_SHARE_BASE_URL}", properties.getProperty("app.share-base-url"))
+        assertEquals(false, properties.getProperty("app.share-request-origin-fallback-enabled"))
+    }
+
+    @Test
+    fun `production nginx routes diary share pages to the backend`() {
+        assertTrue(
+            Files.readAllLines(Path.of("deploy", "nginx", "joysong-api.conf"))
+                .any { it.trim() == "location ^~ /s/diary/ {" }
+        )
+    }
+
+    @Test
+    fun `production nginx overwrites forwarded share origin headers`() {
+        val nginx = Files.readString(Path.of("deploy", "nginx", "joysong-api.conf"))
+
+        listOf("location /api/", "location ^~ /s/diary/").forEach { location ->
+            val block = Regex(
+                "${Regex.escape(location)}\\s*\\{([^}]*)}",
+                RegexOption.DOT_MATCHES_ALL,
+            ).find(nginx)?.groupValues?.get(1).orEmpty()
+
+            assertTrue(block.contains("proxy_set_header X-Forwarded-Host \$host;"), location)
+            assertTrue(block.contains("proxy_set_header X-Forwarded-Port \$server_port;"), location)
+        }
+    }
+
+    @Test
     fun `development does not override the Stripe API key selected environment`() {
         assertNull(developmentProperties.getProperty("payment.mode"))
         assertNull(developmentProperties.getProperty("payment.stripe.enabled"))

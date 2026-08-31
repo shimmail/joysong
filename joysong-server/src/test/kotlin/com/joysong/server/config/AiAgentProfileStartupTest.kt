@@ -35,6 +35,7 @@ class AiAgentProfileStartupTest {
             "google.client-id=test-google-client-id",
             "admin.bootstrap.phone=13800000000",
             "admin.bootstrap.password=test-admin-password",
+            "app.share-base-url=https://share.example.test/s/diary/",
             "oss.enabled=true",
             "oss.endpoint=oss.example.test",
             "oss.bucket-name=test-bucket",

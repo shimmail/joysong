@@ -4,15 +4,29 @@ import com.joysong.server.common.BaseResponse
 import com.joysong.server.diary.entity.dto.CreateDiaryShareRequest
 import com.joysong.server.diary.entity.dto.PublicDiaryShareResponse
 import com.joysong.server.diary.service.DiaryShareService
+import jakarta.servlet.http.HttpServletRequest
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.Authentication
 import org.springframework.web.bind.annotation.*
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder
 
 @RestController
 class DiaryShareController(private val service: DiaryShareService) {
     @PostMapping("/api/diaries/{id}/share")
-    fun create(@PathVariable id: String, @RequestBody(required = false) request: CreateDiaryShareRequest?, authentication: Authentication): BaseResponse<*> = result(service.create(authentication.principal as String, id, request ?: CreateDiaryShareRequest()))
+    fun create(
+        @PathVariable id: String,
+        @RequestBody(required = false) request: CreateDiaryShareRequest?,
+        authentication: Authentication,
+        httpRequest: HttpServletRequest,
+    ): BaseResponse<*> = result(
+        service.create(
+            authentication.principal as String,
+            id,
+            request ?: CreateDiaryShareRequest(),
+            requestShareBaseUrl(httpRequest),
+        )
+    )
 
     @DeleteMapping("/api/diaries/{id}/share")
     fun revoke(@PathVariable id: String, authentication: Authentication): BaseResponse<*> = result(service.revoke(authentication.principal as String, id))
@@ -47,6 +61,12 @@ class DiaryShareController(private val service: DiaryShareService) {
         } else {
             BaseResponse.success<Any>(value)
         }
+
+    private fun requestShareBaseUrl(request: HttpServletRequest): String =
+        ServletUriComponentsBuilder.fromRequestUri(request)
+            .replacePath("${request.contextPath}/s/diary/")
+            .build()
+            .toUriString()
 
     private fun renderPage(token: String, diary: PublicDiaryShareResponse): String {
         val title = escapeHtml(diary.title)
