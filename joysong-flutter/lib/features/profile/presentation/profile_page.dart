@@ -148,13 +148,6 @@ class _ProfilePageState extends State<ProfilePage> {
                     context.localized('咨询服务与订单问题', 'Service and order support'),
                 onTap: widget.onCustomerService,
               ),
-              _MenuItem(
-                icon: Icons.help_center_outlined,
-                title: context.localized('帮助与反馈', 'Help & feedback'),
-                subtitle:
-                    context.localized('常见问题和客服留言', 'FAQs and customer support'),
-                onTap: _openHelp,
-              ),
               if (widget.identityRepository != null) ...[
                 _MenuItem(
                   icon: Icons.verified_user_outlined,
@@ -299,16 +292,6 @@ class _ProfilePageState extends State<ProfilePage> {
         builder: (_) => FavoritesPage(
           repository: widget.socialRepository!,
           onOpen: widget.onOpenFavorite,
-        ),
-      ),
-    );
-  }
-
-  void _openHelp() {
-    Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        builder: (_) => HelpAndFeedbackPage(
-          onCustomerService: widget.onCustomerService,
         ),
       ),
     );

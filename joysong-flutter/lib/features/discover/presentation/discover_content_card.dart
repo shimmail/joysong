@@ -501,6 +501,8 @@ class _DiaryCard extends StatelessWidget {
 }
 
 class DiaryPreviewCard extends StatelessWidget {
+  static const _projectTagMaxWidth = 136.0;
+
   const DiaryPreviewCard({
     required this.title,
     required this.content,
@@ -654,14 +656,21 @@ class DiaryPreviewCard extends StatelessWidget {
                       ),
                     ),
                     if (projectName.isNotEmpty)
-                      enableAutoTranslation && containsChineseText(projectName)
-                          ? _StableDiaryTranslation(
-                              contentId: autoTranslationContentId,
-                              field: 'projectName',
-                              source: projectName,
-                              builder: (_, visibleText) => _Tag(visibleText),
-                            )
-                          : _Tag(projectName),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(
+                          maxWidth: _projectTagMaxWidth,
+                        ),
+                        child: enableAutoTranslation &&
+                                containsChineseText(projectName)
+                            ? _StableDiaryTranslation(
+                                contentId: autoTranslationContentId,
+                                field: 'projectName',
+                                source: projectName,
+                                builder: (_, visibleText) =>
+                                    _Tag(visibleText, maxLines: 1),
+                              )
+                            : _Tag(projectName, maxLines: 1),
+                      ),
                     if (trailing != null) ...[
                       const SizedBox(width: 6),
                       trailing!,
@@ -1236,8 +1245,9 @@ class _Counter extends StatelessWidget {
 }
 
 class _Tag extends StatelessWidget {
-  const _Tag(this.value);
+  const _Tag(this.value, {this.maxLines});
   final String value;
+  final int? maxLines;
   @override
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -1245,7 +1255,12 @@ class _Tag extends StatelessWidget {
           color: Theme.of(context).colorScheme.primaryContainer,
           borderRadius: BorderRadius.circular(10),
         ),
-        child: Text(value, style: Theme.of(context).textTheme.labelSmall),
+        child: Text(
+          value,
+          maxLines: maxLines,
+          overflow: maxLines == null ? null : TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.labelSmall,
+        ),
       );
 }
 
