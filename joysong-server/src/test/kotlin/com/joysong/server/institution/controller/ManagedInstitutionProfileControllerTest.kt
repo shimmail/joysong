@@ -304,25 +304,10 @@ class ManagedInstitutionProfileControllerTest {
 
     @Test
     @WithMockUser(username = "doctor-1", roles = ["DOCTOR"])
-    fun `professional retains read access through legacy admin institution route`() {
-        val doctorActor = actor(
-            userId = "doctor-1",
-            roles = setOf("DOCTOR"),
-            doctorId = "doctor-1",
-            doctorInstitutionIds = setOf("institution-1")
-        )
-        every { accessService.actor(any()) } returns doctorActor
-        every { institutionService.findAll() } returns listOf(
-            InstitutionEntity(id = "institution-1", name = "可见机构"),
-            InstitutionEntity(id = "institution-2", name = "不可见机构")
-        )
-
+    fun `professional can no longer read through legacy admin institution route`() {
         mockMvc.perform(get("/api/admin/institutions"))
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.code").value(200))
-            .andExpect(jsonPath("$.data.length()").value(1))
-            .andExpect(jsonPath("$.data[0].id").value("institution-1"))
-            .andExpect(jsonPath("$.data[0].name").value("可见机构"))
+            .andExpect(status().isForbidden)
+            .andExpect(jsonPath("$.code").value(403))
     }
 
     private fun summary() = ManagedInstitutionSummary(

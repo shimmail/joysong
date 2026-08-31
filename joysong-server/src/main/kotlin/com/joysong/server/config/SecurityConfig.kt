@@ -56,33 +56,9 @@ class SecurityConfig(
                         "/api/management/consultant-memberships",
                         "/api/management/projects"
                     ).authenticated()
-                    .requestMatchers(HttpMethod.GET,
-                        "/api/admin/doctors",
-                        "/api/admin/institutions",
-                        "/api/admin/institutions/**",
-                        "/api/admin/articles",
-                        "/api/admin/projects",
-                        "/api/admin/institution-projects",
-                        "/api/admin/institution-project-requests",
-                        "/api/admin/institution-project-requests/profile-update-targets"
-                    ).authenticated()
-                    .requestMatchers(HttpMethod.PUT,
-                        "/api/admin/doctors/*",
-                        "/api/admin/articles/*"
-                    ).authenticated()
-                    .requestMatchers(HttpMethod.PUT, "/api/admin/institutions/*").hasRole("ADMIN")
-                    .requestMatchers(HttpMethod.POST,
-                        "/api/admin/articles",
-                        "/api/admin/institution-project-requests",
-                        "/api/admin/institution-project-requests/*/review",
-                        "/api/admin/institution-project-requests/*/withdraw"
-                    ).authenticated()
                     .requestMatchers(
                         "/api/v2/admin/institution-project-requests",
                         "/api/v2/admin/institution-project-requests/**"
-                    ).authenticated()
-                    .requestMatchers(HttpMethod.DELETE,
-                        "/api/admin/articles/*"
                     ).authenticated()
                     .requestMatchers("/api/admin/**").hasRole("ADMIN")
                     .requestMatchers("/api/cs/**").authenticated()
