@@ -138,8 +138,8 @@ class _FavoriteActionButtonState extends State<FavoriteActionButton> {
               ),
             );
           }
-          return const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 14),
+          return const SizedBox.square(
+            dimension: 48,
             child: Center(
               child: SizedBox.square(
                 dimension: 20,
