@@ -7,6 +7,8 @@ import com.joysong.server.translation.config.TranslationProperties
 import com.joysong.server.translation.service.TranslationService
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration
 import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer
@@ -37,7 +39,8 @@ class AiAgentProfileStartupTest {
             "admin.bootstrap.password=test-admin-password",
             "app.share-base-url=https://share.example.test/s/diary/",
             "oss.enabled=true",
-            "oss.endpoint=oss.example.test",
+            "oss.endpoint=https://oss-cn-hangzhou-internal.aliyuncs.com",
+            "oss.region=cn-hangzhou",
             "oss.bucket-name=test-bucket",
             "oss.access-key-id=test-oss-key",
             "oss.access-key-secret=test-oss-secret",
@@ -84,6 +87,48 @@ class AiAgentProfileStartupTest {
             .run { context ->
                 assertThat(context).hasFailed()
                 assertThat(context.startupFailure.causeChain()).contains("AI_AGENT_MODEL")
+            }
+    }
+
+    @Test
+    fun `production profile fails with a blank OSS region`() {
+        contextRunner
+            .withPropertyValues("oss.region= ")
+            .run { context ->
+                assertThat(context).hasFailed()
+                assertThat(context.startupFailure.causeChain()).contains("OSS_REGION")
+            }
+    }
+
+    @Test
+    fun `production profile fails with a non-HTTPS OSS endpoint`() {
+        contextRunner
+            .withPropertyValues("oss.endpoint=http://oss-cn-hangzhou-internal.aliyuncs.com")
+            .run { context ->
+                assertThat(context).hasFailed()
+                assertThat(context.startupFailure.causeChain()).contains("OSS_ENDPOINT")
+            }
+    }
+
+    @ParameterizedTest
+    @CsvSource(
+        delimiter = '|',
+        value = [
+            "oss.endpoint=|OSS_ENDPOINT",
+            "oss.bucket-name=|OSS_BUCKET_NAME",
+            "oss.access-key-id=|OSS_ACCESS_KEY_ID",
+            "oss.access-key-secret=|OSS_ACCESS_KEY_SECRET",
+        ],
+    )
+    fun `production profile fails when a required OSS setting is blank`(
+        propertyOverride: String,
+        expectedVariable: String,
+    ) {
+        contextRunner
+            .withPropertyValues(propertyOverride)
+            .run { context ->
+                assertThat(context).hasFailed()
+                assertThat(context.startupFailure.causeChain()).contains(expectedVariable)
             }
     }
 

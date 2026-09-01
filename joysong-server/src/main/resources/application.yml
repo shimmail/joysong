@@ -77,6 +77,7 @@ google:
 oss:
   enabled: ${OSS_ENABLED:false}
   endpoint: ${OSS_ENDPOINT:}
+  region: ${OSS_REGION:}
   access-key-id: ${OSS_ACCESS_KEY_ID:}
   access-key-secret: ${OSS_ACCESS_KEY_SECRET:}
   bucket-name: ${OSS_BUCKET_NAME:}

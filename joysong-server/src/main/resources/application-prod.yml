@@ -24,6 +24,7 @@ spring:
 oss:
   enabled: true
   endpoint: ${OSS_ENDPOINT}
+  region: ${OSS_REGION}
   bucket-name: ${OSS_BUCKET_NAME}
   public-base-url: ${OSS_PUBLIC_BASE_URL:}
   access-key-id: ${OSS_ACCESS_KEY_ID}

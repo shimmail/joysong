@@ -268,6 +268,40 @@ class AiAgentPropertiesTest {
         assertEquals("https://dashscope.aliyuncs.com/compatible-mode/v1", properties.baseUrl)
     }
 
+    @ParameterizedTest
+    @ValueSource(
+        strings = [
+            "http://oss-cn-hangzhou-internal.aliyuncs.com",
+            "oss-cn-hangzhou-internal.aliyuncs.com",
+            "https://user:secret@oss-cn-hangzhou-internal.aliyuncs.com",
+            "https://oss-cn-hangzhou-internal.aliyuncs.com?token=secret",
+            "https://oss-cn-hangzhou-internal.aliyuncs.com/#fragment",
+            "https://oss-cn-hangzhou-internal.aliyuncs.com/prefix",
+        ],
+    )
+    fun `production rejects a non-canonical HTTPS OSS endpoint`(endpoint: String) {
+        val error = assertThrows(IllegalStateException::class.java) {
+            validator(
+                validEnabledProperties(),
+                ossEndpoint = endpoint,
+            ).validate()
+        }
+
+        assertTrue(error.message.orEmpty().contains("OSS_ENDPOINT"))
+    }
+
+    @Test
+    fun `production rejects a blank OSS region`() {
+        val error = assertThrows(IllegalStateException::class.java) {
+            validator(
+                validEnabledProperties(),
+                ossRegion = " ",
+            ).validate()
+        }
+
+        assertTrue(error.message.orEmpty().contains("OSS_REGION"))
+    }
+
     @Test
     fun `production rejects a blank diary share base URL`() {
         val error = assertThrows(IllegalStateException::class.java) {
@@ -337,14 +371,17 @@ class AiAgentPropertiesTest {
         additionalProfiles: Array<String> = emptyArray(),
         shareBaseUrl: String = "https://share.example.test/s/diary/",
         shareRequestOriginFallbackEnabled: Boolean = false,
+        ossEndpoint: String = "https://oss-cn-hangzhou-internal.aliyuncs.com",
+        ossRegion: String = "cn-hangzhou",
     ): ConfigValidator = ConfigValidator(
         environment = MockEnvironment().apply { setActiveProfiles(profile, *additionalProfiles) },
         jwtSecret = "test-jwt-secret-that-is-at-least-32-characters",
         googleClientId = "test-google-client-id",
         ossAccessKeyId = "test-oss-key",
         ossAccessKeySecret = "test-oss-secret",
-        ossEndpoint = "oss.example.test",
+        ossEndpoint = ossEndpoint,
         ossBucketName = "test-bucket",
+        ossRegion = ossRegion,
         smsAccessKeyId = "test-sms-key",
         smsAccessKeySecret = "test-sms-secret",
         smsSignName = "test-sign",

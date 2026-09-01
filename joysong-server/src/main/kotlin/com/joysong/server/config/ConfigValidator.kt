@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.core.env.Environment
 import org.springframework.stereotype.Component
+import java.net.URI
 
 @Component
 class ConfigValidator(
@@ -16,6 +17,7 @@ class ConfigValidator(
     @Value("\${oss.access-key-secret:}") private val ossAccessKeySecret: String,
     @Value("\${oss.endpoint:}") private val ossEndpoint: String,
     @Value("\${oss.bucket-name:}") private val ossBucketName: String,
+    @Value("\${oss.region:}") private val ossRegion: String,
     @Value("\${aliyun.sms.access-key-id:}") private val smsAccessKeyId: String,
     @Value("\${aliyun.sms.access-key-secret:}") private val smsAccessKeySecret: String,
     @Value("\${aliyun.sms.sign-name:}") private val smsSignName: String,
@@ -35,6 +37,8 @@ class ConfigValidator(
     @PostConstruct
     fun validate() {
         val missing = mutableListOf<String>()
+        val isProduction = environment.activeProfiles.any { it.equals("prod", ignoreCase = true) }
+        val isDevelopment = environment.activeProfiles.any { it.equals("dev", ignoreCase = true) }
 
         if (jwtSecret.length < 32) missing.add("JWT_SECRET (at least 32 characters)")
         if (googleClientId.isBlank()) missing.add("GOOGLE_CLIENT_ID")
@@ -42,14 +46,16 @@ class ConfigValidator(
         if (ossEnabled && ossAccessKeySecret.isBlank()) missing.add("OSS_ACCESS_KEY_SECRET")
         if (ossEnabled && ossEndpoint.isBlank()) missing.add("OSS_ENDPOINT")
         if (ossEnabled && ossBucketName.isBlank()) missing.add("OSS_BUCKET_NAME")
+        if (ossEnabled && ossRegion.isBlank()) missing.add("OSS_REGION")
+        if (isProduction && ossEnabled && ossEndpoint.isNotBlank() && !isCanonicalHttpsUrl(ossEndpoint)) {
+            missing.add("OSS_ENDPOINT (HTTPS URL required in production)")
+        }
         if (smsEnabled && smsAccessKeyId.isBlank()) missing.add("SMS_ACCESS_KEY_ID")
         if (smsEnabled && smsAccessKeySecret.isBlank()) missing.add("SMS_ACCESS_KEY_SECRET")
         if (smsEnabled && smsSignName.isBlank()) missing.add("SMS_SIGN_NAME")
         if (smsEnabled && smsTemplateCode.isBlank()) missing.add("SMS_TEMPLATE_CODE")
         if (dbPassword.isBlank()) missing.add("DB_PASSWORD")
         if (!adminPhone.matches(Regex("^1\\d{10}$"))) missing.add("ADMIN_PHONE (valid mobile number)")
-        val isProduction = environment.activeProfiles.any { it.equals("prod", ignoreCase = true) }
-        val isDevelopment = environment.activeProfiles.any { it.equals("dev", ignoreCase = true) }
         if (isProduction && !ossEnabled) missing.add("OSS_ENABLED=true")
         if (isProduction && !smsEnabled) missing.add("SMS_ENABLED=true")
         if (isProduction && shareBaseUrl.isBlank()) missing.add("APP_SHARE_BASE_URL")
@@ -89,4 +95,14 @@ class ConfigValidator(
 
         logger.info("All required configuration values are present.")
     }
+
+    private fun isCanonicalHttpsUrl(value: String): Boolean = runCatching {
+        val uri = URI(value.trim())
+        uri.scheme.equals("https", ignoreCase = true) &&
+            !uri.host.isNullOrBlank() &&
+            uri.rawUserInfo == null &&
+            uri.rawQuery == null &&
+            uri.rawFragment == null &&
+            (uri.rawPath.isNullOrEmpty() || uri.rawPath == "/")
+    }.getOrDefault(false)
 }

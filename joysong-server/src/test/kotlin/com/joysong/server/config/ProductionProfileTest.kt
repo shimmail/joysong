@@ -64,10 +64,27 @@ class ProductionProfileTest {
     fun `production external services require environment backed configuration`() {
         assertEquals(true, properties.getProperty("oss.enabled"))
         assertEquals(true, properties.getProperty("aliyun.sms.enabled"))
+        assertEquals("\${OSS_ENDPOINT}", properties.getProperty("oss.endpoint"))
+        assertEquals("\${OSS_REGION}", properties.getProperty("oss.region"))
         assertEquals("\${OSS_BUCKET_NAME}", properties.getProperty("oss.bucket-name"))
+        assertEquals("\${OSS_ACCESS_KEY_ID}", properties.getProperty("oss.access-key-id"))
+        assertEquals("\${OSS_ACCESS_KEY_SECRET}", properties.getProperty("oss.access-key-secret"))
         assertEquals("\${SMS_SIGN_NAME}", properties.getProperty("aliyun.sms.sign-name"))
         assertTrue(properties.getProperty("aliyun.sms.template-code").toString().contains("SMS_TEMPLATE_CODE"))
         assertNull(properties.getProperty("openai.base-url"))
+    }
+
+    @Test
+    fun `OSS region and HTTPS endpoint are exposed through the environment contract`() {
+        assertEquals("\${OSS_ENDPOINT:}", applicationProperties.getProperty("oss.endpoint"))
+        assertEquals("\${OSS_REGION:}", applicationProperties.getProperty("oss.region"))
+
+        val environment = Files.readAllLines(Path.of(".env.example"))
+            .filter { it.startsWith("OSS_") }
+            .associate { it.substringBefore('=') to it.substringAfter('=', "") }
+
+        assertEquals("https://oss-cn-hangzhou.aliyuncs.com", environment["OSS_ENDPOINT"])
+        assertEquals("cn-hangzhou", environment["OSS_REGION"])
     }
 
     @Test
