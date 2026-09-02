@@ -755,21 +755,31 @@ curl --fail --head https://demo.example.com/
 8. 创建一次 RDS 手工备份，标记为 empty-with-admin-and-legal。
 9. 在部署机执行 `pwsh -File scripts/demo-data.ps1 -Action Apply -JarPath <发布JAR绝对路径> -CatalogPath <catalog-v1.json绝对路径>`，临时注入 `ADMIN_PASSWORD` 和 `DEMO_ACCOUNT_PASSWORD`。
 10. 执行同一脚本的 `Verify`，确认输出 `CATALOG_READY`、目录版本、SHA-256 和 `managed=378`。
-11. 再创建一份 final-demo-catalog 备份。
+11. 在仍持有本次临时密码的受控会话中执行 `scripts/generate-demo-acceptance-guide.ps1`，生成不入 Git 的验收人员账号说明，然后立即清除密码环境变量。
+12. 再创建一份 final-demo-catalog 备份。
 
 协议表在空库迁移后没有默认内容，必须由管理员发布。协议正文属于正式对外文案，应由有权人员提供并审阅；当前 AI 翻译不会自动生成协议的 en-US 内容，未经审阅的机器翻译不能当作正式协议发布。
 
 第 9、10 步现在使用同一个可执行入口，且目录静态解析发生在连接数据库之前。`Apply` 仅接受唯一管理员基线或完全一致的当前目录；中途失败回滚，重复执行完整目录时不写入。完整九步业务接口重放仍未实现，不能把数据库快照导入等同于接口重放验收。
 
-远程发布不能依赖脚本的仓库内默认路径：必须显式传 JAR 和目录绝对路径，并人工核对发布清单中的目录版本与 SHA-256。当前已批准目录为 `2026.08.31.1`，SHA-256 为 `60e778ef88a4c9fd36a3758fe0400a3b10876ec23e3c1c603eeed8f8c12e6c3b`。首次 Apply 后立即从会话或环境文件删除 `ADMIN_PASSWORD`；常规 API 运行时同时移除 `DEMO_ACCOUNT_PASSWORD` 并保持 `DEMO_DATA_ENABLED=false`。
+远程发布不能依赖脚本的仓库内默认路径：必须显式传 JAR 和目录绝对路径，并人工核对发布清单中的目录版本与 SHA-256。当前已批准目录为 `2026.09.02.1`，SHA-256 为 `4ab42f441f944ac594625c6775511909c47bb09e3a9240f9128adb6d9e030075`。20 个专业账号均使用 `+86` 测试号码，仅允许密码登录；Demo 环境必须保持短信关闭，避免向号码发送消息。验收说明生成后立即从会话或环境文件删除 `ADMIN_PASSWORD`；常规 API 运行时同时移除 `DEMO_ACCOUNT_PASSWORD` 并保持 `DEMO_DATA_ENABLED=false`。
 
-演示账号密码不写入本指南。最终交付时另生成一份不提交 Git 的加密测试账号清单，至少包含：
+演示账号密码不写入本指南。最终交付时使用实际部署密码生成一份不提交 Git 的测试账号说明：
+
+~~~powershell
+pwsh -File scripts/generate-demo-acceptance-guide.ps1 `
+  -CatalogPath /opt/joysong-demo/catalog/catalog-v1.json `
+  -OutputPath /var/lib/joysong-demo/secure/demo-acceptance-guide.md `
+  -DemoPublicUrl https://demo.example.com `
+  -DemoAdminUrl https://demo.example.com/admin
+~~~
+
+脚本从 `ADMIN_PHONE`、`ADMIN_PASSWORD`、`DEMO_ACCOUNT_PASSWORD` 和 catalog 读取实际值，输出：
 
 - 管理员后台地址、电话、初始密码；
-- 各角色测试账号的电话、密码和用途；
-- 专用于真实短信验收的授权手机号说明；
-- APK 版本、API 域名、数据集版本和 SHA-256；
-- 密码变更和环境下线日期。
+- 全部 20 个法人、医生和顾问账号的完整手机号、App 输入号码、密码和关联机构；
+- 上海、北京两组推荐跨角色联动步骤和越权检查；
+- API/管理后台地址、数据集版本、SHA-256 与本轮非交易边界。
 
 该清单只发给指定验收人，Demo 结束后全部轮换或销毁。
 

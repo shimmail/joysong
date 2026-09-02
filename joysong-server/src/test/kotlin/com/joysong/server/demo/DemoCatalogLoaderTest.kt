@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
@@ -39,8 +40,10 @@ class DemoCatalogLoaderTest {
         val loaded = loader.load(catalogPath())
 
         assertEquals(1, loaded.catalog.schemaVersion)
-        assertEquals("2026.08.31.1", loaded.catalog.datasetVersion)
+        assertEquals("2026.09.02.1", loaded.catalog.datasetVersion)
         assertEquals("demo-cn-v1", loaded.catalog.namespace)
+        assertEquals(20, loaded.catalog.accounts.size)
+        assertTrue(loaded.catalog.accounts.all { it.phone.matches(Regex("^\\+86\\d{11}$")) })
         assertEquals(EXPECTED_SHA256, loaded.sha256)
     }
 
@@ -107,6 +110,6 @@ class DemoCatalogLoaderTest {
     }
 
     private companion object {
-        const val EXPECTED_SHA256 = "60e778ef88a4c9fd36a3758fe0400a3b10876ec23e3c1c603eeed8f8c12e6c3b"
+        const val EXPECTED_SHA256 = "4ab42f441f944ac594625c6775511909c47bb09e3a9240f9128adb6d9e030075"
     }
 }

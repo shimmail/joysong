@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "datasetVersion": "2026.08.31.1",
+  "datasetVersion": "2026.09.02.1",
   "namespace": "demo-cn-v1",
   "sharedContent": {
     "account": {
@@ -76,7 +76,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000001",
       "code": "ACCOUNT-LEGAL-01",
-      "phone": "+999000000001",
+      "phone": "+8613900090001",
       "roleCode": "INSTITUTION_LEGAL_REPRESENTATIVE",
       "displayName": "上海演示法人甲",
       "accountState": "ACTIVE",
@@ -111,7 +111,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000002",
       "code": "ACCOUNT-LEGAL-02",
-      "phone": "+999000000002",
+      "phone": "+8613900090002",
       "roleCode": "INSTITUTION_LEGAL_REPRESENTATIVE",
       "displayName": "北京演示法人甲",
       "accountState": "ACTIVE",
@@ -146,7 +146,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000003",
       "code": "ACCOUNT-LEGAL-03",
-      "phone": "+999000000003",
+      "phone": "+8613900090003",
       "roleCode": "INSTITUTION_LEGAL_REPRESENTATIVE",
       "displayName": "深圳演示法人甲",
       "accountState": "ACTIVE",
@@ -181,7 +181,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000004",
       "code": "ACCOUNT-LEGAL-04",
-      "phone": "+999000000004",
+      "phone": "+8613900090004",
       "roleCode": "INSTITUTION_LEGAL_REPRESENTATIVE",
       "displayName": "成都演示法人甲",
       "accountState": "ACTIVE",
@@ -216,7 +216,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000005",
       "code": "ACCOUNT-DOCTOR-SH-01",
-      "phone": "+999000000005",
+      "phone": "+8613900090005",
       "roleCode": "DOCTOR",
       "displayName": "澄光演示医生甲",
       "accountState": "ACTIVE",
@@ -262,7 +262,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000006",
       "code": "ACCOUNT-DOCTOR-SH-02",
-      "phone": "+999000000006",
+      "phone": "+8613900090006",
       "roleCode": "DOCTOR",
       "displayName": "澄光演示医生乙",
       "accountState": "ACTIVE",
@@ -308,7 +308,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000007",
       "code": "ACCOUNT-DOCTOR-SH-03",
-      "phone": "+999000000007",
+      "phone": "+8613900090007",
       "roleCode": "DOCTOR",
       "displayName": "栖颜演示医生甲",
       "accountState": "ACTIVE",
@@ -354,7 +354,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000008",
       "code": "ACCOUNT-DOCTOR-SH-04",
-      "phone": "+999000000008",
+      "phone": "+8613900090008",
       "roleCode": "DOCTOR",
       "displayName": "栖颜演示医生乙",
       "accountState": "ACTIVE",
@@ -400,7 +400,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000009",
       "code": "ACCOUNT-DOCTOR-BJ-01",
-      "phone": "+999000000009",
+      "phone": "+8613900090009",
       "roleCode": "DOCTOR",
       "displayName": "和悦演示医生甲",
       "accountState": "ACTIVE",
@@ -446,7 +446,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000010",
       "code": "ACCOUNT-DOCTOR-BJ-02",
-      "phone": "+999000000010",
+      "phone": "+8613900090010",
       "roleCode": "DOCTOR",
       "displayName": "和悦演示医生乙",
       "accountState": "ACTIVE",
@@ -492,7 +492,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000011",
       "code": "ACCOUNT-DOCTOR-BJ-03",
-      "phone": "+999000000011",
+      "phone": "+8613900090011",
       "roleCode": "DOCTOR",
       "displayName": "臻序演示医生甲",
       "accountState": "ACTIVE",
@@ -538,7 +538,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000012",
       "code": "ACCOUNT-DOCTOR-BJ-04",
-      "phone": "+999000000012",
+      "phone": "+8613900090012",
       "roleCode": "DOCTOR",
       "displayName": "臻序演示医生乙",
       "accountState": "ACTIVE",
@@ -584,7 +584,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000013",
       "code": "ACCOUNT-DOCTOR-SZ-01",
-      "phone": "+999000000013",
+      "phone": "+8613900090013",
       "roleCode": "DOCTOR",
       "displayName": "青岚演示医生甲",
       "accountState": "ACTIVE",
@@ -630,7 +630,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000014",
       "code": "ACCOUNT-DOCTOR-CD-01",
-      "phone": "+999000000014",
+      "phone": "+8613900090014",
       "roleCode": "DOCTOR",
       "displayName": "云舒演示医生甲",
       "accountState": "ACTIVE",
@@ -676,7 +676,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000015",
       "code": "ACCOUNT-CONSULTANT-SH-01",
-      "phone": "+999000000015",
+      "phone": "+8613900090015",
       "roleCode": "CONSULTANT",
       "displayName": "澄光演示顾问",
       "accountState": "ACTIVE",
@@ -710,7 +710,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000016",
       "code": "ACCOUNT-CONSULTANT-SH-02",
-      "phone": "+999000000016",
+      "phone": "+8613900090016",
       "roleCode": "CONSULTANT",
       "displayName": "栖颜演示顾问",
       "accountState": "ACTIVE",
@@ -744,7 +744,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000017",
       "code": "ACCOUNT-CONSULTANT-BJ-01",
-      "phone": "+999000000017",
+      "phone": "+8613900090017",
       "roleCode": "CONSULTANT",
       "displayName": "和悦演示顾问",
       "accountState": "ACTIVE",
@@ -778,7 +778,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000018",
       "code": "ACCOUNT-CONSULTANT-BJ-02",
-      "phone": "+999000000018",
+      "phone": "+8613900090018",
       "roleCode": "CONSULTANT",
       "displayName": "臻序演示顾问",
       "accountState": "ACTIVE",
@@ -812,7 +812,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000019",
       "code": "ACCOUNT-CONSULTANT-SZ-01",
-      "phone": "+999000000019",
+      "phone": "+8613900090019",
       "roleCode": "CONSULTANT",
       "displayName": "青岚演示顾问",
       "accountState": "ACTIVE",
@@ -846,7 +846,7 @@
     {
       "id": "00000000-0000-4000-8000-000000000020",
       "code": "ACCOUNT-CONSULTANT-CD-01",
-      "phone": "+999000000020",
+      "phone": "+8613900090020",
       "roleCode": "CONSULTANT",
       "displayName": "云舒演示顾问",
       "accountState": "ACTIVE",
