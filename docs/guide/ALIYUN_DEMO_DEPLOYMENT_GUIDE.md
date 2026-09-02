@@ -25,11 +25,22 @@
 
 | 能力 | 当前状态 | 上线前处理 |
 | --- | --- | --- |
-| 一键生成主管快照、九步接口重放 | 只有已确认的设计规格，执行器和脚本尚未实现 | 先实现并验证 [demo-catalog-20260831-design.md](../plan/demo-catalog-20260831-design.md)，再导入独立 Demo 库 |
-| 公网 Demo 模拟订单支付 | 模拟网关只允许本地开发 profile，prod 明确禁用；仅改环境变量无效 | 新增受控、无真实资金能力的安全 Demo profile 和门禁后再验收；禁止把 dev profile 暴露公网 |
+| 一键主管快照 | `Apply`、只读 `Verify`、重复执行零写入和安全 `demo` profile 已实现；隔离 MySQL 8.0.39 与真实脚本入口已验证 | 可导入独立 Demo 库；完整九步接口重放仍属后续阶段 |
+| 公网 Demo 支付 | 安全 `demo` profile 已实现，但明确关闭真实支付和模拟支付 | 首次快速 Demo 不演示支付；禁止把 `dev` profile 暴露公网 |
 | 新 OSS Bucket 上传 | 当前 Java SDK 版本具备 V4 能力，但 OSS 客户端没有显式启用 V4 签名和 region；新 Bucket 已不能使用 V1 | 部署前先改造 OssConfig，强制 HTTPS、V4 和正确 region，并对新 Bucket 完成上传/删除集成测试 |
 
-因此本次可以先创建云资源并部署“HTTPS、后台、基础浏览、AI、翻译、短信”的安全基线。OSS Bucket/CDN 可以预建，但图片上传和删除必须等 V4/HTTPS 客户端改造通过后放行。完整主管 Demo 的最终放行还需要补齐演示数据执行器；若必须演示模拟支付，还需单独完成安全 Demo 支付改造。
+因此本次优先交付“HTTPS、后台、角色登录、机构/医生/项目浏览”的非交易 Demo。目录快照使用 `docs/test/catalog-v1.json`，同一 JAR 和 `scripts/demo-data.ps1` 可在本地隔离 MySQL 或远程 RDS 上执行。AI、翻译、OSS 和短信只有在各自凭据及验收完成后再逐项放行；首次快速 Demo 不依赖这些外部能力。
+
+### 1.1 最快安全交付路径
+
+1. 预创建名称以 `myapp_worktree_` 开头的独立 MySQL 8.0 数据库，并在导入前创建可恢复快照。
+2. 使用 `demo` profile 首次启动，完成 Flyway 和唯一管理员初始化；迁移前门禁会打印并核验实际主机与数据库名。
+3. 将同一提交的发布 JAR 与 `docs/test/catalog-v1.json` 一并上传，在部署机执行 `pwsh -File scripts/demo-data.ps1 -Action Apply -JarPath <发布JAR绝对路径> -CatalogPath <catalog-v1.json绝对路径>`。
+4. 再执行同一脚本的 `Verify`；成功标志为 `CATALOG_READY`、数据版本、SHA-256、`managed=378`。
+5. 正常启动远程 API 时保留 `SPRING_PROFILES_ACTIVE=demo`，并让 `DEMO_DATA_ENABLED=false`，防止每次启动自动触发目录任务。
+6. 需要撤销时恢复导入前 RDS 快照，或销毁该独立 Demo 数据库/实例；首阶段不执行对象级 Reset。
+
+2026-09-02 本地隔离验收结果：严格目录测试通过；MySQL 集成测试验证后段故障时数据库和占位文件全部回滚，随后 `Apply created=378 managed=378`、`Verify created=0 managed=378`、重复 Apply 零写入；发布 JAR 的真实 `scripts/demo-data.ps1` Apply/Verify 入口均输出 `CATALOG_READY`。这证明工具可迁移到远程 MySQL，不替代 RDS、HTTPS、管理端和 APK 的远程验收。
 
 ## 2. 推荐拓扑
 
@@ -104,8 +115,8 @@
 - OSS 当前只负责公共图片；身份材料、退款证据等私有文件仍保存在 ECS 私有目录。
 - OSS 和短信当前实现使用固定 RAM AccessKey，不支持 ECS 实例 RAM 角色或默认凭据链。
 - OSS 客户端当前没有显式设置 V4 签名和 region。阿里云自 2025-09-01 起不再允许新 Bucket 使用 V1，因此新 Demo Bucket 上传是代码级阻断项。
-- 演示数据设计尚未落地；空库首次启动只会创建管理员。
-- prod 不支持模拟支付，公网环境也禁止使用 dev profile。
+- 演示目录 Apply/Verify 和安全 `demo` profile 已落地并通过隔离 MySQL；远程 RDS 与公网冒烟仍以最新验收记录为准。
+- `demo` profile 不支持任何真实或模拟支付，公网环境禁止使用 `dev` profile。
 
 ## 4. 阿里云资源清单与命名
 
@@ -119,7 +130,7 @@
 | ECS | joysong-demo-api-01 | Ubuntu 22.04/24.04、Java 17、Nginx，单实例 |
 | 安全组 | joysong-demo-sg | 22 限运维 IP；80/443 公网；不放行 8080/3306 |
 | RDS | joysong-demo-mysql | MySQL 8.0、内网连接、自动备份 |
-| 数据库 | joysong_demo | 预创建、utf8mb4、独立账号 |
+| 数据库 | myapp_worktree_demo_202609 | 预创建、utf8mb4、独立账号；名称必须带安全前缀 |
 | OSS Bucket | joysong-demo-media-<地域>-<随机后缀> | 私有、阻止公共访问、服务端加密 |
 | CDN 域名 | img-demo.example.com | HTTPS、私有 OSS 回源授权 |
 | RAM 用户 | joysong-demo-oss-uploader | 仅目标 Bucket 的写入和删除权限 |
@@ -144,6 +155,7 @@
 ECS 需要：
 
 - Java 17 JRE；
+- PowerShell 7（仅用于执行仓库提供的跨平台 `demo-data.ps1`；标准 Ubuntu 不预装）；
 - Nginx；
 - MySQL 客户端，仅用于受控连通性检查；
 - chrony 或系统时间同步；
@@ -199,8 +211,8 @@ RDS 备份不包含 ECS 数据盘，ECS 快照也不包含 RDS；两套恢复流
 1. 创建与 ECS 同地域、同 VPC 的 RDS MySQL 8.0。
 2. 关闭或不申请公网连接地址。
 3. RDS 只选择一种最小范围入口：ECS 专用私网 IP 白名单，或在支持的地域关联专用 ECS 安全组。白名单与安全组规则按并集生效，必须清理其他白名单组，禁止 0.0.0.0/0；关联安全组时要确认组内没有无关 ECS。
-4. 预创建数据库 joysong_demo，字符集 utf8mb4。
-5. 创建 joysong_demo_app 账号，只授权 joysong_demo。
+4. 预创建数据库 `myapp_worktree_demo_202609`（实际后缀按环境命名），字符集 utf8mb4。
+5. 创建 joysong_demo_app 账号，只授权该独立 Demo 数据库。
 
 当前 Flyway 和运行时共用一个数据库账号，迁移中包含存储过程操作。该账号除 DML 外，还需要目标 schema 内的 CREATE、ALTER、DROP、INDEX、REFERENCES、CREATE ROUTINE、ALTER ROUTINE、EXECUTE 等权限，但不得拥有全局权限、CREATE USER 或 GRANT OPTION。这是当前版本的过渡性例外；后续应拆分一次性迁移凭据和长驻应用凭据，避免应用进程长期持有 DROP、ALTER 和例程权限。
 
@@ -215,9 +227,10 @@ RDS 开启 SSL。最低基线可使用 sslMode=REQUIRED 保证加密，但它不
 示例连接串：
 
 ~~~dotenv
-DB_URL=jdbc:mysql://<RDS内网地址>:3306/joysong_demo?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&sslMode=REQUIRED
+DB_URL=jdbc:mysql://<RDS内网地址>:3306/myapp_worktree_demo_202609?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&sslMode=REQUIRED
 DB_USERNAME=joysong_demo_app
 DB_PASSWORD=<数据库强密码>
+DEMO_DATABASE_NAME=myapp_worktree_demo_202609
 ~~~
 
 ### 6.3 备份与恢复
@@ -232,7 +245,7 @@ DB_PASSWORD=<数据库强密码>
 
 ~~~text
 数据库主机：<RDS内网地址>
-数据库名称：joysong_demo
+数据库名称：myapp_worktree_demo_202609
 环境：阿里云独立 Demo
 ~~~
 
@@ -364,7 +377,7 @@ AccessKey 只写入 ECS 的 root 可读环境文件。App、管理后台、Git�
 
 ### 9.1 安全构建
 
-必须从干净检出或受控 CI 构建已审阅提交，不要从包含本机忽略配置的工作目录直接打包。当前本机可能存在被 Git 忽略的 application-dev.yml，Gradle 资源处理可能把它放入 JAR。
+必须从干净检出或受控 CI 构建已审阅提交，不要从包含本机忽略配置的工作目录直接打包。`bootJar` 已排除 `application-dev.yml`、环境文件和常见密钥/证书容器格式，但发布前仍须执行下方内容扫描，防止后续构建配置回退。
 
 只生成和上传：
 
@@ -423,7 +436,7 @@ Get-FileHash build/app/outputs/flutter-apk/app-release.apk -Algorithm SHA256
 
 ~~~powershell
 $RELEASE_JAR = Get-ChildItem joysong-server\build\libs\*.jar | Where-Object Name -NotMatch '-plain\.jar$' | Select-Object -First 1
-$BLOCKED_ENTRIES = jar tf $RELEASE_JAR.FullName | Select-String 'application-dev\.yml|(^|/)\.env($|/)|\.(docx|pem|key|jks|keystore)$'
+$BLOCKED_ENTRIES = jar tf $RELEASE_JAR.FullName | Select-String 'application-dev\.yml|(^|/)\.env(?:\.[^/]+)?($|/)|\.(docx|pem|key|jks|keystore|p12|pfx)$'
 if ($BLOCKED_ENTRIES) { $BLOCKED_ENTRIES; throw '发布 JAR 含禁止文件' }
 Get-FileHash $RELEASE_JAR.FullName -Algorithm SHA256
 ~~~
@@ -435,7 +448,7 @@ Flutter APK 只能包含 API 公网地址、公开 OAuth Client ID 等客户端�
 创建 /etc/joysong-demo/joysong.env，属主 root、属组 joysong-demo、权限 0640。所有尖括号内容必须替换，不能原样启动。
 
 ~~~dotenv
-SPRING_PROFILES_ACTIVE=prod
+SPRING_PROFILES_ACTIVE=demo
 
 SERVER_ADDRESS=127.0.0.1
 SERVER_PORT=8080
@@ -453,9 +466,13 @@ SERVER_TOMCAT_REMOTEIP_PORT_HEADER=X-Forwarded-Port
 TZ=Asia/Shanghai
 JAVA_TOOL_OPTIONS=-Duser.timezone=Asia/Shanghai
 
-DB_URL=jdbc:mysql://<RDS内网地址>:3306/joysong_demo?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&sslMode=REQUIRED
+DB_URL=jdbc:mysql://<RDS内网地址>:3306/myapp_worktree_demo_202609?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&sslMode=REQUIRED
 DB_USERNAME=joysong_demo_app
 DB_PASSWORD=<数据库强密码>
+DEMO_DATABASE_NAME=myapp_worktree_demo_202609
+DEMO_DATA_ENABLED=false
+# 只在执行 Apply/Verify 命令时临时注入，不长期写入服务环境文件：
+# DEMO_ACCOUNT_PASSWORD=<12至128字符的演示账号密码>
 
 JWT_SECRET=<至少32字符的随机密钥>
 GOOGLE_CLIENT_ID=<Web OAuth Client ID>
@@ -465,21 +482,12 @@ ADMIN_PASSWORD=<仅首次空库启动时临时填写的12至128字符强密码>
 UPLOAD_LOCAL_DIR=/var/lib/joysong-demo/uploads
 UPLOAD_PRIVATE_DIR=/var/lib/joysong-demo/private
 
-OSS_ENABLED=true
-# 示例：Endpoint=https://oss-cn-hangzhou-internal.aliyuncs.com，region-id=cn-hangzhou
-OSS_ENDPOINT=https://oss-<region-id>-internal.aliyuncs.com
-# 完成第 7.1 节代码改造后，由 OssConfig 读取；例如 cn-hangzhou
-OSS_REGION=<region-id>
-OSS_BUCKET_NAME=joysong-demo-media-<region-id>-<随机后缀>
-OSS_PUBLIC_BASE_URL=https://img-demo.example.com
-OSS_ACCESS_KEY_ID=<Demo OSS RAM AccessKey ID>
-OSS_ACCESS_KEY_SECRET=<Demo OSS RAM AccessKey Secret>
-
-SMS_ENABLED=true
-SMS_ACCESS_KEY_ID=<Demo 短信 RAM AccessKey ID>
-SMS_ACCESS_KEY_SECRET=<Demo 短信 RAM AccessKey Secret>
-SMS_SIGN_NAME=<已审核的真实主体签名>
-SMS_TEMPLATE_CODE=<已审核的中性验证码模板 Code>
+OSS_ENABLED=false
+SMS_ENABLED=false
+PAYMENT_RECONCILIATION_ENABLED=false
+ALIPAY_PLUS_AUTO_PAY_ON_ORDER_CREATE_ENABLED=false
+ALIPAY_PLUS_SIMULATED_ENABLED=false
+STRIPE_LEGACY_ENABLED=false
 
 AI_AGENT_PROVIDER=qwen
 AI_AGENT_API_KEY=<Demo AI Agent Key>
@@ -504,7 +512,7 @@ sudo chmod 0640 /etc/joysong-demo/joysong.env
 
 ADMIN_PASSWORD 只用于空库首次创建管理员。管理员创建成功并确认可登录后，从环境文件删除该行并重启服务。ADMIN_PHONE 保留。
 
-不在此环境配置任何已停用支付供应商密钥。prod 会保持模拟资金流关闭；不能通过打开本地开发开关绕过。
+不在此环境配置任何支付供应商密钥。`demo` profile 会同时关闭真实和模拟资金流；不能通过打开本地开发开关绕过。
 
 ## 11. 使用 systemd 运行 Spring Boot
 
@@ -738,20 +746,22 @@ curl --fail --head https://demo.example.com/
 严格按以下顺序：
 
 1. 确认连接的是空白独立 Demo 数据库。
-2. 保留 ADMIN_PASSWORD，启动 prod。
+2. 保留 ADMIN_PASSWORD，以 `demo` profile 首次启动。
 3. Flyway 完成迁移，系统创建唯一管理员。
 4. 使用管理员电话和密码登录管理后台。
 5. 删除环境文件中的 ADMIN_PASSWORD，重启并再次登录。
 6. 在管理后台“协议与隐私”中分别创建并发布用户协议、隐私政策；每份都必须包含 zh-CN 和 en-US 两个 locale。
 7. 通过 /api/public/legal-documents/** 和 /legal/** 分别验证两个 locale，确认 App 登录前协议页不显示“暂未发布”。
 8. 创建一次 RDS 手工备份，标记为 empty-with-admin-and-legal。
-9. 演示数据执行器完成后，再应用已确认的主管快照。
-10. 执行只读校验，确认机构、医生、顾问、平台项目和机构项目数量及状态。
+9. 在部署机执行 `pwsh -File scripts/demo-data.ps1 -Action Apply -JarPath <发布JAR绝对路径> -CatalogPath <catalog-v1.json绝对路径>`，临时注入 `ADMIN_PASSWORD` 和 `DEMO_ACCOUNT_PASSWORD`。
+10. 执行同一脚本的 `Verify`，确认输出 `CATALOG_READY`、目录版本、SHA-256 和 `managed=378`。
 11. 再创建一份 final-demo-catalog 备份。
 
 协议表在空库迁移后没有默认内容，必须由管理员发布。协议正文属于正式对外文案，应由有权人员提供并审阅；当前 AI 翻译不会自动生成协议的 en-US 内容，未经审阅的机器翻译不能当作正式协议发布。
 
-当前仓库第 9、10 步尚无可执行工具。不能用手工 SQL 或临时 HTTP 接口替代并宣称“可重放”。在工具实现前，空库只有管理员和手工发布的协议，部署完成不等于主管数据 Demo 完成。
+第 9、10 步现在使用同一个可执行入口，且目录静态解析发生在连接数据库之前。`Apply` 仅接受唯一管理员基线或完全一致的当前目录；中途失败回滚，重复执行完整目录时不写入。完整九步业务接口重放仍未实现，不能把数据库快照导入等同于接口重放验收。
+
+远程发布不能依赖脚本的仓库内默认路径：必须显式传 JAR 和目录绝对路径，并人工核对发布清单中的目录版本与 SHA-256。当前已批准目录为 `2026.08.31.1`，SHA-256 为 `60e778ef88a4c9fd36a3758fe0400a3b10876ec23e3c1c603eeed8f8c12e6c3b`。首次 Apply 后立即从会话或环境文件删除 `ADMIN_PASSWORD`；常规 API 运行时同时移除 `DEMO_ACCOUNT_PASSWORD` 并保持 `DEMO_DATA_ENABLED=false`。
 
 演示账号密码不写入本指南。最终交付时另生成一份不提交 Git 的加密测试账号清单，至少包含：
 
@@ -855,8 +865,8 @@ curl --fail --head https://demo.example.com/
 ### 15.8 当前必须标记为未通过的项
 
 - [ ] OSS 新 Bucket 上传/删除：HTTPS、Signature V4、region 改造和新 Bucket 集成测试完成前不得勾选
-- [ ] 一键主管快照和九步接口重放：执行器实现并验证前不得勾选
-- [ ] 模拟订单支付：安全 Demo profile 实现并验证前不得勾选
+- [ ] 一键主管快照：隔离 MySQL Apply/Verify/重复 Apply 通过且远程导入留证后才能勾选；九步接口重放仍未实现
+- [ ] 模拟订单支付：快速 Demo 明确不包含该能力，若以后纳入必须另行设计和验收
 
 ## 16. 发布、回滚与日常运维
 
@@ -898,8 +908,8 @@ curl --fail --head https://demo.example.com/
 以下不应通过运维配置“绕过去”：
 
 1. 部署 OSS 前改造 OssConfig：显式使用 HTTPS、Signature V4 和 Bucket region，并在新私有 Bucket 上做集成测试。
-2. 实现已批准的主管快照、只读校验和真实接口重放工具。
-3. 如需模拟支付，实现专用安全 Demo profile；保持真实支付凭证为空，禁止 dev 公网运行。
+2. 在独立 RDS 上执行并留存主管快照 Apply/Verify 证据；另行实现真实接口重放工具。
+3. 如需模拟支付，在现有安全 Demo 门禁之外另做无真实资金能力的专门设计；禁止 dev 公网运行。
 4. OSS 与短信改用 ECS 实例 RAM 角色或默认凭据链，删除长期 AccessKey。
 5. 将验证码、IP 限流、管理员防爆破状态迁移到 Redis 后，才能考虑多实例。
 6. 为短信增加 BizId 持久化、送达回执或查询能力；当前只能在阿里云控制台核对。

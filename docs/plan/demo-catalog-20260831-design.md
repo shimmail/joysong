@@ -49,7 +49,7 @@
 
 ### 3.1 单一数据源
 
-仓库根目录新增 `demo/catalog-v1.json`，它是两条执行路径唯一的业务数据源。目录包含：
+仓库中的 `docs/test/catalog-v1.json` 是两条执行路径唯一的业务数据源。不要复制到第二个目录，以免同一数据集出现双源。目录包含：
 
 - `schemaVersion`：结构版本，首版为 `1`。
 - `datasetVersion`：数据版本，例如 `2026.08.31.1`。
@@ -182,11 +182,11 @@ Kotlin 快照执行器使用目录中的固定 UUID。PowerShell 接口重放脚
 
 ### 5.1 后端组件
 
-计划在 `com.joysong.server.demo` 下新增三个高内聚组件：
+在 `com.joysong.server.demo` 下维护三个高内聚组件：
 
 - `DemoCatalogModels.kt`：严格映射 JSON；拒绝未知字段。
-- `DemoCatalogService.kt`：读取、校验、应用、验证和清理固定演示图谱。
-- `DemoCatalogRunner.kt`：根据演示配置选择 `APPLY`、`VERIFY` 或 `RESET`，输出机器可识别的最终状态并结束进程。
+- `DemoCatalogService.kt`：读取、校验、应用和验证固定演示图谱。
+- `DemoCatalogRunner.kt`：首阶段根据演示配置选择 `APPLY` 或 `VERIFY`，输出机器可识别的最终状态并结束进程。
 
 配置集中放在 `application-demo.yml`。默认配置和生产配置不装配运行器，也不自动生成数据。
 
@@ -197,10 +197,24 @@ Kotlin 快照执行器使用目录中的固定 UUID。PowerShell 接口重放脚
 ```powershell
 ./scripts/demo-data.ps1 -Action Apply
 ./scripts/demo-data.ps1 -Action Verify
-./scripts/demo-data.ps1 -Action Reset
 ```
 
-脚本负责检查环境变量、解析并打印数据库主机与数据库名、传入绝对目录路径、启动后端命令行任务，以及根据退出码报告结果。日志不得打印密码、验证码、令牌、完整翻译源文或翻译响应。
+脚本负责检查环境变量、解析并打印数据库主机与数据库名、传入绝对目录路径、启动后端命令行任务，以及根据退出码报告结果。日志不得打印密码、验证码、令牌、完整翻译源文或翻译响应。本地与远程服务器使用同一入口；远程只需传入发布 JAR、当前目录文件和远程数据库环境变量。
+
+### 5.1.1 2026-09-02 快速 Demo 实施状态
+
+当前首阶段已按“尽快交付非交易 Demo”收口为：
+
+- `Apply`：只允许在唯一管理员基线的独立数据库中，以单事务写入当前目录图谱；中途失败全部回滚。
+- `Verify`：只读核对目录版本、原始字节 SHA-256、378 行受管记录、80 份隔离身份占位材料、账号密码和关键关系。
+- 重复 `Apply`：完整一致时零写入；部分数据或字段漂移时直接失败。
+- 数据库门禁：`demo` profile 在 Flyway 迁移前打印实际主机和数据库名，并要求库名以 `myapp_worktree_` 开头且与 `DEMO_DATABASE_NAME` 完全一致。
+- 外发门禁：Demo 默认关闭 OSS、短信、支付、对账、账号删除和调度任务，禁止与 `prod` 或 `dev` profile 混用。
+- 撤销：首阶段不提供对象级 `Reset`；本地销毁隔离数据库，远程使用 RDS 快照恢复或销毁独立 Demo 库/实例。这是当前更快且更低风险的撤销路径。
+
+完整的接口重放和固定验证码仍属于后续阶段；下文的 `Reset` 与重放章节保留为未来设计，不代表当前可执行能力。
+
+2026-09-02 验证记录：严格目录单测通过；MySQL 8.0.39 隔离测试覆盖后段故障全回滚、首次 Apply 378 行、只读 Verify 和重复 Apply 零写入；发布 JAR 的真实 PowerShell Apply/Verify 入口均输出 `CATALOG_READY`。远程 RDS、HTTPS、管理端和 APK 仍需独立留证。
 
 ### 5.2 安全门槛
 
@@ -248,7 +262,7 @@ Verify 读取 JSON 列出的所有固定 ID，并校验：
 
 ### 5.5 Reset
 
-Reset 不是全库重置。它只删除 `demo/catalog-v1.json` 明确列出的固定演示 ID，并按外键依赖逆序执行。
+未来的 Reset 不是全库重置。它只删除 `docs/test/catalog-v1.json` 明确列出的固定演示 ID，并按外键依赖逆序执行。
 
 目录必须枚举主管快照创建的全部从属行，包括账号角色、身份申请、机构成员关系、医生执业关系、顾问关系、钱包、项目申请和医生项目配置。主管快照不得调用会随机生成机构或关系 ID 的现有审批路径；这些业务规则由服务复用或显式校验，实际持久化全部使用目录固定 ID，保证 Reset 的删除集合完备。
 
@@ -265,7 +279,7 @@ Reset 不是全库重置。它只删除 `demo/catalog-v1.json` 明确列出的�
 
 ### 6.1 脚本和运行清单
 
-新增 `scripts/replay-demo-catalog.ps1`，读取同一份 `demo/catalog-v1.json`，以 `-BaseUrl` 指定已启动的演示后端。
+未来新增 `scripts/replay-demo-catalog.ps1` 时，读取同一份 `docs/test/catalog-v1.json`，以 `-BaseUrl` 指定已启动的演示后端。
 
 脚本按逻辑编码保存接口返回 ID：
 
@@ -437,7 +451,7 @@ CI 在全新的后端应用上下文中使用受控的兼容聊天补全模拟�
 
 首版实施预计只涉及：
 
-- 新增 `demo/catalog-v1.json`。
+- 持续维护已跟踪的 `docs/test/catalog-v1.json`，不创建第二份目录源。
 - 新增 `joysong-server` 内的演示目录模型、服务、运行器和 `application-demo.yml`。
 - 对验证码交付增加严格的 demo-only 固定码适配。
 - 新增 `scripts/demo-data.ps1` 和 `scripts/replay-demo-catalog.ps1`。

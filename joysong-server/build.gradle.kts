@@ -80,6 +80,24 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
     }
 }
 
+tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {
+    // Keep machine-local configuration available to bootRun, but never package it for release.
+    exclude(
+        "application-dev.yml",
+        "**/application-dev.yml",
+        ".env",
+        ".env.*",
+        "**/.env",
+        "**/.env.*",
+        "**/*.pem",
+        "**/*.key",
+        "**/*.jks",
+        "**/*.keystore",
+        "**/*.p12",
+        "**/*.pfx",
+    )
+}
+
 tasks.withType<Test> {
     useJUnitPlatform()
     maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceAtLeast(1)
