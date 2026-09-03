@@ -104,7 +104,8 @@ class DemoDatabaseSafetyGate(
     private companion object {
         const val SAFE_DATABASE_PREFIX = "myapp_worktree_"
         val DEMO_DISABLED_PROPERTIES = listOf(
-            "oss.enabled",
+            // Public media OSS is allowed for an isolated demo. Credentials
+            // still come from the ECS RAM role and private storage stays local.
             "aliyun.sms.enabled",
             "security.verification-code.log-for-dev",
             "payment.alipay-plus.auto-pay-on-order-create-enabled",

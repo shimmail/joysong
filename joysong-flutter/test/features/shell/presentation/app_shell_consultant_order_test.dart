@@ -96,6 +96,12 @@ void main() {
       expect(find.byType(ConsultantOrdersPage), findsNothing);
       expect(find.byType(ManagementCenterPage), findsOneWidget);
       expect(
+        tester
+            .widget<ManagementCenterPage>(find.byType(ManagementCenterPage))
+            .institutionImagePicker,
+        isNotNull,
+      );
+      expect(
         find.byKey(const Key('management-consultant-orders')),
         findsNothing,
       );

@@ -1328,6 +1328,12 @@ class _AppShellState extends State<AppShell> {
             professionalRepository: widget.apiClient == null
                 ? null
                 : ProfessionalRepository(widget.apiClient!),
+            institutionImagePicker: _socialRepository == null
+                ? null
+                : () => _pickAndUploadPublicImage(
+                      PublicMediaPurpose.institutionProfile,
+                      uploadScope,
+                    ),
             doctorImagePicker: _socialRepository == null
                 ? null
                 : () => _pickAndUploadPublicImage(
