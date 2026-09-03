@@ -19,6 +19,7 @@ import 'package:joysong_flutter/features/profile/presentation/profile_controller
 import 'package:joysong_flutter/features/profile/presentation/profile_support_pages.dart';
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
 import 'package:joysong_flutter/features/social/domain/social_repository.dart';
+import 'package:joysong_flutter/features/social/presentation/public_upload_controller.dart';
 import 'package:joysong_flutter/features/professional_management/data/professional_repository.dart';
 import 'package:joysong_flutter/features/professional_management/presentation/professional_pages.dart';
 
@@ -71,6 +72,8 @@ class ProfilePage extends StatefulWidget {
 
 class _ProfilePageState extends State<ProfilePage> {
   ProfileController? _controller;
+  final Set<PublicMediaUploadScope> _publicMediaUploadScopes =
+      <PublicMediaUploadScope>{};
 
   @override
   void initState() {
@@ -84,6 +87,11 @@ class _ProfilePageState extends State<ProfilePage> {
     if (oldWidget.profileRepository != widget.profileRepository) {
       _createController();
     }
+    if (oldWidget.socialRepository != widget.socialRepository) {
+      for (final scope in _publicMediaUploadScopes) {
+        unawaited(scope.cancelActive());
+      }
+    }
   }
 
   void _createController() {
@@ -95,6 +103,10 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   void dispose() {
+    for (final scope in _publicMediaUploadScopes) {
+      scope.dispose();
+    }
+    _publicMediaUploadScopes.clear();
     _controller?.dispose();
     super.dispose();
   }
@@ -313,24 +325,40 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  void _openManagementCenter() {
-    Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        builder: (_) => ManagementCenterPage(
-          repository: widget.identityRepository!,
-          discoverRepository: widget.discoverRepository!,
-          consultantOrdersRepository: widget.consultantOrdersRepository,
-          onOpenConsultantOrderServiceConversation:
-              widget.onOpenConsultantOrderServiceConversation,
-          institutionImagePicker:
-              widget.socialRepository == null ? null : _pickInstitutionImage,
-          doctorImagePicker:
-              widget.socialRepository == null ? null : _pickDoctorImage,
-          professionalRepository: widget.professionalRepository,
-          onOpenDirectMessage: widget.onOpenDirectMessage,
+  Future<void> _openManagementCenter() async {
+    final uploadScope = PublicMediaUploadScope();
+    _publicMediaUploadScopes.add(uploadScope);
+    try {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => ManagementCenterPage(
+            repository: widget.identityRepository!,
+            discoverRepository: widget.discoverRepository!,
+            consultantOrdersRepository: widget.consultantOrdersRepository,
+            onOpenConsultantOrderServiceConversation:
+                widget.onOpenConsultantOrderServiceConversation,
+            institutionImagePicker: widget.socialRepository == null
+                ? null
+                : () => _pickPublicProfileImage(
+                      PublicMediaPurpose.institutionProfile,
+                      uploadScope,
+                    ),
+            doctorImagePicker: widget.socialRepository == null
+                ? null
+                : () => _pickPublicProfileImage(
+                      PublicMediaPurpose.doctorProfile,
+                      uploadScope,
+                    ),
+            professionalRepository: widget.professionalRepository,
+            onOpenDirectMessage: widget.onOpenDirectMessage,
+          ),
         ),
-      ),
-    );
+      );
+    } finally {
+      uploadScope.dispose();
+      _publicMediaUploadScopes.remove(uploadScope);
+      await uploadScope.cancelActive();
+    }
   }
 
   Future<void> _openInstitutionRelationships() async {
@@ -408,36 +436,41 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  Future<String?> _pickInstitutionImage() =>
-      _pickPublicProfileImage(PublicMediaPurpose.institutionProfile);
-
-  Future<String?> _pickDoctorImage() =>
-      _pickPublicProfileImage(PublicMediaPurpose.doctorProfile);
-
-  Future<String?> _pickPublicProfileImage(PublicMediaPurpose purpose) async {
+  Future<String?> _pickPublicProfileImage(
+    PublicMediaPurpose purpose,
+    PublicMediaUploadScope uploadScope,
+  ) async {
+    final socialRepository = widget.socialRepository;
+    if (socialRepository == null) return null;
     final selected = await const AppFilePicker().pickImage();
     if (selected == null) return null;
-    String? url;
-    await for (final progress in widget.socialRepository!.uploadPublicMedia(
-      PublicMediaDraft(
-        bytes: selected.bytes,
-        fileName: selected.fileName,
-        mimeType: selected.mimeType,
-        purpose: purpose,
-        privacy: MediaPrivacy.publicContent,
-      ),
-    )) {
+    try {
+      final localPath = selected.localPath;
+      if (localPath == null) return null;
+      final progress = await uploadScope.upload(
+        socialRepository,
+        PublicMediaDraft(
+          uploadId: selected.uploadId,
+          localPath: localPath,
+          byteLength: selected.byteLength,
+          fileName: selected.fileName,
+          mimeType: selected.mimeType,
+          purpose: purpose,
+          privacy: MediaPrivacy.publicContent,
+        ),
+      );
       if (progress.stage == UploadStage.failed) {
         if (mounted) {
           showTransientMessage(context, progress.message ?? '图片上传失败');
         }
         return null;
       }
-      if (progress.stage == UploadStage.complete) {
-        url = progress.url?.trim();
-      }
+      final url =
+          progress.stage == UploadStage.complete ? progress.url?.trim() : null;
+      return url?.isEmpty == true ? null : url;
+    } finally {
+      await selected.deleteLocalFile();
     }
-    return url?.isEmpty == true ? null : url;
   }
 }
 

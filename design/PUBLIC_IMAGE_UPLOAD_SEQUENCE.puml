@@ -1,0 +1,60 @@
+@startuml PUBLIC_IMAGE_UPLOAD_SEQUENCE
+title 公共图片上传：本地处理、双并发与幂等恢复
+
+actor 用户 as User
+participant "Flutter 日记编辑器" as App
+participant "公共上传调度器\n(max=2)" as Queue
+participant "Spring Upload API" as Api
+database "public_upload_attempts" as Attempts
+collections "服务端临时文件" as Temp
+cloud "Alibaba Cloud OSS" as Oss
+database "user_media_assets" as Media
+
+User -> App: 选择图片
+App -> App: 立即压缩/旋转校正\n长边<=2048, JPEG 85
+App -> App: 保存 uploadId + localPath + 长度 + MIME
+User -> App: 点击发布
+
+loop 普通图 -> 术前图 -> 术后图
+  App -> Queue: 提交当组 pending
+  par 最多两个在途请求
+    Queue -> Api: POST /api/upload\nIdempotency-Key, X-Request-ID, 文件流
+    Api -> Temp: 流式写入 + 签名校验 + SHA-256
+    Api -> Attempts: 按 owner + uploadId 锁定/查询
+    alt 已 COMPLETE 且内容/用途相同
+      Attempts --> Api: 已有 URL
+      Api --> Queue: 200 COMPLETE, replayed=true
+    else 租约有效，其他请求正处理
+      Attempts --> Api: PENDING
+      Api --> Queue: 202 + retryAfterMs
+      Queue -> Api: GET /api/upload/status/{uploadId}
+    else uploadId 被不同内容/用途复用
+      Attempts --> Api: mismatch
+      Api --> Queue: 409 UPLOAD_ID_REUSED
+    else 首次上传、可重试失败或租约过期
+      Api -> Attempts: PENDING + 180s 租约
+      Api -> Oss: PUT 固定对象键（可重读文件）
+      Oss --> Api: ETag / 成功
+      Api -> Media: 登记公共媒体
+      Api -> Attempts: COMPLETE + URL
+      Api --> Queue: 200 COMPLETE, replayed=false
+    end
+    Api -> Temp: finally 删除
+    Queue -> App: 成功条目原位替换为 URL
+    App -> App: 删除对应手机临时文件
+  end
+end
+
+App -> Api: POST/PUT 日记（全部 URL 按选择顺序）
+alt 日记提交失败
+  Api --> App: 错误
+  App -> App: 保留已上传 URL\n再试不重传图片
+else 成功
+  Api --> App: 日记
+  App --> User: 发布成功
+end
+
+note over App, Media
+  UML 图片由维护者手动生成；仓库只维护本 .puml 源码。
+end note
+@enduml

@@ -1,6 +1,6 @@
 # JoySong 阿里云独立 HTTPS Demo 部署指南
 
-> 文档日期：2026-09-01
+> 文档日期：2026-09-03
 >
 > 适用范围：供主管安装 App、访问管理后台并验收浏览、AI 咨询、翻译、图片和短信等能力的独立演示环境
 >
@@ -27,7 +27,7 @@
 | --- | --- | --- |
 | 一键主管快照 | `Apply`、只读 `Verify`、重复执行零写入和安全 `demo` profile 已实现；隔离 MySQL 8.0.39 与真实脚本入口已验证 | 可导入独立 Demo 库；完整九步接口重放仍属后续阶段 |
 | 公网 Demo 支付 | 安全 `demo` profile 已实现，但明确关闭真实支付和模拟支付 | 首次快速 Demo 不演示支付；禁止把 `dev` profile 暴露公网 |
-| 新 OSS Bucket 上传 | 当前 Java SDK 版本具备 V4 能力，但 OSS 客户端没有显式启用 V4 签名和 region；新 Bucket 已不能使用 V1 | 部署前先改造 OssConfig，强制 HTTPS、V4 和正确 region，并对新 Bucket 完成上传/删除集成测试 |
+| 新 OSS Bucket 上传 | 代码已强制 HTTPS、Signature V4 和 region，并支持 ECS RAM Role；新 Bucket 的真实上传/删除仍需留证 | 在 Demo 专用私有 Bucket 完成集成测试与性能分层验收后才放行 |
 
 因此本次优先交付“HTTPS、后台、角色登录、机构/医生/项目浏览”的非交易 Demo。目录快照使用 `docs/test/catalog-v1.json`，同一 JAR 和 `scripts/demo-data.ps1` 可在本地隔离 MySQL 或远程 RDS 上执行。AI、翻译、OSS 和短信只有在各自凭据及验收完成后再逐项放行；首次快速 Demo 不依赖这些外部能力。
 
@@ -113,8 +113,8 @@
 - prod 启动强制要求数据库、JWT、Google Client ID、OSS、短信、分享地址和 AI Agent 配置完整。
 - 健康检查只代表 Spring 和基础数据库链路可用，不代表 OSS、短信、AI 或翻译成功。
 - OSS 当前只负责公共图片；身份材料、退款证据等私有文件仍保存在 ECS 私有目录。
-- OSS 和短信当前实现使用固定 RAM AccessKey，不支持 ECS 实例 RAM 角色或默认凭据链。
-- OSS 客户端当前没有显式设置 V4 签名和 region。阿里云自 2025-09-01 起不再允许新 Bucket 使用 V1，因此新 Demo Bucket 上传是代码级阻断项。
+- OSS 客户端支持 `ecs-ram-role` 和兼容性 `static` 模式；Demo ECS 必须优先使用实例 RAM Role，短信凭证仍按独立服务边界管理。
+- OSS 客户端已显式强制 HTTPS、Signature V4 和 region；这只是代码基础，不代表新 Demo Bucket 的真实集成与性能验收已通过。
 - 演示目录 Apply/Verify 和安全 `demo` profile 已落地并通过隔离 MySQL；远程 RDS 与公网冒烟仍以最新验收记录为准。
 - `demo` profile 不支持任何真实或模拟支付，公网环境禁止使用 `dev` profile。
 
@@ -175,6 +175,7 @@ sudo useradd --system --user-group --no-create-home --home-dir /opt/joysong-demo
 sudo install -d -o joysong-demo -g joysong-demo -m 0750 /opt/joysong-demo/releases
 sudo install -d -o root -g www-data -m 0750 /var/www/joysong-demo/releases
 sudo install -d -o joysong-demo -g joysong-demo -m 0750 /var/lib/joysong-demo/uploads
+sudo install -d -o joysong-demo -g joysong-demo -m 0700 /var/lib/joysong-demo/upload-staging
 sudo install -d -o joysong-demo -g joysong-demo -m 0700 /var/lib/joysong-demo/private
 sudo install -d -o root -g joysong-demo -m 0750 /etc/joysong-demo
 ~~~
@@ -251,16 +252,14 @@ DEMO_DATABASE_NAME=myapp_worktree_demo_202609
 
 ## 7. 配置 OSS 公共图片
 
-### 7.1 目标方案与代码前置条件
+### 7.1 目标方案与部署前验证
 
-当前 OssConfig 直接以 Endpoint、AccessKey ID 和 AccessKey Secret 构造 OSS Java SDK 客户端，没有显式配置 Signature V4 和 region。阿里云已规定新 Bucket 不再支持 Signature V1，因此创建新 Demo Bucket 后很可能出现签名错误。部署前必须先完成以下最小代码改造并测试：
+`OssConfig` 已在 Java SDK 客户端显式设置 HTTPS、`SignVersion.V4` 和 region，并可从 ECS RAM Role 获取临时凭证。部署时仍必须检查：
 
-1. 为 OSS 增加明确的 region 配置，例如 cn-hangzhou，且与 Bucket 地域一致。
-2. 使用 ClientBuilderConfiguration 显式设置 SignVersion.V4。
-3. 使用 HTTPS Endpoint，并保持证书校验开启。
-4. 在一个新建私有 Bucket 上验证 putObject 和 deleteObject。
-
-这不是可以靠环境变量完全绕过的配置问题。仅把 Endpoint 改成 HTTPS 仍不能补上 V4 的 region 和签名配置。
+1. `OSS_REGION` 与 Bucket 地域一致，Endpoint 使用 HTTPS 且与网络路径匹配。
+2. ECS 实例已绑定 `OSS_ECS_RAM_ROLE_NAME` 指定的角色，角色只能访问 Demo Bucket 的目标前缀。
+3. 在新建私有 Bucket 上验证 putObject、幂等重放和补偿 deleteObject，并留存请求 ID 与分段耗时。
+4. 关闭实例角色权限后上传应明确失败，不得退回到仓库或 APK 中的长期 AccessKey。
 
 采用“私有 OSS Bucket + CDN 私有回源授权”：
 
@@ -274,7 +273,7 @@ DEMO_DATABASE_NAME=myapp_worktree_demo_202609
 8. 按控制台给出的 CNAME 完成 DNS 解析，从手机蜂窝网络验证。
 9. 将 OSS_PUBLIC_BASE_URL 设置为 https://img-demo.example.com。
 
-完成上述 V4/HTTPS 客户端改造后，该方案与现有文件 URL 模型兼容：后端经内网写入 OSS，数据库保存 CDN 公网 URL，App 和后台通过 HTTPS 读取图片。
+该方案与现有文件 URL 模型兼容：后端经内网写入 OSS，数据库保存 CDN 公网 URL，App 和后台通过 HTTPS 读取图片。
 
 不能仅把 Bucket 设为私有后直接填写 OSS 内网地址。当前代码不会生成临时签名 URL，客户端也无法访问 internal Endpoint。
 
@@ -282,7 +281,7 @@ DEMO_DATABASE_NAME=myapp_worktree_demo_202609
 
 ### 7.2 最小 RAM 权限
 
-当前代码需要固定 AccessKey。创建只用于 Demo OSS 的 RAM 编程用户，不使用阿里云主账号 AccessKey，也不授予 OSS FullAccess。
+为 Demo ECS 创建专用实例 RAM Role，不使用阿里云主账号 AccessKey，也不授予 OSS FullAccess。
 
 示例自定义策略，替换 Bucket 名：
 
@@ -304,9 +303,7 @@ DEMO_DATABASE_NAME=myapp_worktree_demo_202609
 }
 ~~~
 
-AccessKey 只写入 ECS 的 root 可读环境文件。App、管理后台、Git、APK、测试账号文档中均不得出现。
-
-后续代码改造应切换到 ECS 实例 RAM 角色或默认凭据链，再删除长期 AccessKey；当前版本尚不支持，本文不把它列为已完成能力。
+应用通过实例元数据获取并轮换临时凭证。App、管理后台、Git、APK、环境文件和测试账号文档中均不得出现 OSS AccessKey。`static` 仅作为兼容模式，不是 Demo ECS 的默认选择。
 
 ### 7.3 公共与私有文件边界
 
@@ -480,9 +477,22 @@ ADMIN_PHONE=<管理员11位大陆手机号>
 ADMIN_PASSWORD=<仅首次空库启动时临时填写的12至128字符强密码>
 
 UPLOAD_LOCAL_DIR=/var/lib/joysong-demo/uploads
+UPLOAD_STAGING_DIR=/var/lib/joysong-demo/upload-staging
+UPLOAD_IDEMPOTENCY_CLEANUP_DELAY_MS=3600000
 UPLOAD_PRIVATE_DIR=/var/lib/joysong-demo/private
 
-OSS_ENABLED=false
+OSS_ENABLED=true
+OSS_ENDPOINT=https://oss-cn-hangzhou-internal.aliyuncs.com
+OSS_REGION=cn-hangzhou
+OSS_CREDENTIAL_MODE=ecs-ram-role
+OSS_ECS_RAM_ROLE_NAME=joysong-demo-oss-role
+OSS_BUCKET_NAME=<Demo 私有 Bucket>
+OSS_PUBLIC_BASE_URL=https://img-demo.example.com
+OSS_CONNECTION_TIMEOUT_MS=5000
+OSS_SOCKET_TIMEOUT_MS=30000
+OSS_REQUEST_TIMEOUT_MS=60000
+OSS_MAX_ERROR_RETRY=1
+OSS_MAX_CONNECTIONS=32
 SMS_ENABLED=false
 PAYMENT_RECONCILIATION_ENABLED=false
 ALIPAY_PLUS_AUTO_PAY_ON_ORDER_CREATE_ENABLED=false
@@ -551,7 +561,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/joysong-demo/uploads /var/lib/joysong-demo/private
+ReadWritePaths=/var/lib/joysong-demo/uploads /var/lib/joysong-demo/upload-staging /var/lib/joysong-demo/private
 
 [Install]
 WantedBy=multi-user.target
@@ -874,7 +884,7 @@ pwsh -File scripts/generate-demo-acceptance-guide.ps1 `
 
 ### 15.8 当前必须标记为未通过的项
 
-- [ ] OSS 新 Bucket 上传/删除：HTTPS、Signature V4、region 改造和新 Bucket 集成测试完成前不得勾选
+- [ ] OSS 新 Bucket 上传/删除：HTTPS、Signature V4、region 和 ECS RAM Role 代码基础已具备；新 Bucket 集成测试与上传性能门槛完成前不得勾选
 - [ ] 一键主管快照：隔离 MySQL Apply/Verify/重复 Apply 通过且远程导入留证后才能勾选；九步接口重放仍未实现
 - [ ] 模拟订单支付：快速 Demo 明确不包含该能力，若以后纳入必须另行设计和验收
 
@@ -891,10 +901,13 @@ pwsh -File scripts/generate-demo-acceptance-guide.ps1 `
 7. 执行第 15 节冒烟。
 8. 只在全部必需项通过后发送 APK 和账号清单。
 
+图片上传版本还要执行 `docs/plan/public-upload-performance-20260903.md` 的分层性能验收，关注单图、三图 p95、九图和 27 图压力场景，并确认幂等重放没有创建第二个 OSS 对象。
+
 ### 16.2 应用回滚
 
 - 保留至少一个已验证 JAR 和管理端 dist。
 - 应用回滚需切回上一版本软链接；后端切换后必须重启 joysong-demo，管理端切换后校验并重载 Nginx。
+- 公共上传的 V40 是向前兼容的追加表；切回旧 JAR 时保留该表，不运行 Flyway clean、逆向 SQL 或手工删表。
 - 如果新版本包含不可向后兼容迁移，必须按预先验证的数据库恢复方案处理，不能直接运行逆向 SQL。
 
 ### 16.3 数据恢复
@@ -917,10 +930,10 @@ pwsh -File scripts/generate-demo-acceptance-guide.ps1 `
 
 以下不应通过运维配置“绕过去”：
 
-1. 部署 OSS 前改造 OssConfig：显式使用 HTTPS、Signature V4 和 Bucket region，并在新私有 Bucket 上做集成测试。
+1. 在新私有 Bucket 验证已实现的 HTTPS、Signature V4、region、ECS RAM Role、幂等重放与补偿删除，并完成公共上传分层性能留证。
 2. 在独立 RDS 上执行并留存主管快照 Apply/Verify 证据；另行实现真实接口重放工具。
 3. 如需模拟支付，在现有安全 Demo 门禁之外另做无真实资金能力的专门设计；禁止 dev 公网运行。
-4. OSS 与短信改用 ECS 实例 RAM 角色或默认凭据链，删除长期 AccessKey。
+4. 短信继续单独收紧凭证管理；OSS 已支持 ECS 实例 RAM 角色，需在远端验证临时凭证轮换和权限回收。
 5. 将验证码、IP 限流、管理员防爆破状态迁移到 Redis 后，才能考虑多实例。
 6. 为短信增加 BizId 持久化、送达回执或查询能力；当前只能在阿里云控制台核对。
 7. 如需私有文件上云，实现私有 OSS 与短时授权下载，不能使用公共 CDN URL。

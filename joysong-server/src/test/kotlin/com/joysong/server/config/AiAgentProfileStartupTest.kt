@@ -42,8 +42,12 @@ class AiAgentProfileStartupTest {
             "oss.endpoint=https://oss-cn-hangzhou-internal.aliyuncs.com",
             "oss.region=cn-hangzhou",
             "oss.bucket-name=test-bucket",
+            "oss.private-bucket-name=test-private-bucket",
+            "oss.public-base-url=https://test-bucket.oss-cn-hangzhou.aliyuncs.com",
+            "oss.credential-mode=static",
             "oss.access-key-id=test-oss-key",
             "oss.access-key-secret=test-oss-secret",
+            "private-storage.mode=oss",
             "aliyun.sms.enabled=true",
             "aliyun.sms.access-key-id=test-sms-key",
             "aliyun.sms.access-key-secret=test-sms-secret",
@@ -107,6 +111,108 @@ class AiAgentProfileStartupTest {
             .run { context ->
                 assertThat(context).hasFailed()
                 assertThat(context.startupFailure.causeChain()).contains("OSS_ENDPOINT")
+            }
+    }
+
+    @Test
+    fun `production profile accepts ECS RAM role credentials without static access keys`() {
+        contextRunner
+            .withPropertyValues(
+                "oss.credential-mode=ecs-ram-role",
+                "oss.ecs-ram-role-name=joysong-demo-role",
+                "oss.access-key-id=",
+                "oss.access-key-secret=",
+            )
+            .run { context ->
+                assertThat(context).hasNotFailed()
+            }
+    }
+
+    @Test
+    fun `production profile rejects a blank ECS RAM role name`() {
+        contextRunner
+            .withPropertyValues(
+                "oss.credential-mode=ecs-ram-role",
+                "oss.ecs-ram-role-name=",
+                "oss.access-key-id=",
+                "oss.access-key-secret=",
+            )
+            .run { context ->
+                assertThat(context).hasFailed()
+                assertThat(context.startupFailure.causeChain()).contains("OSS_ECS_RAM_ROLE_NAME")
+            }
+    }
+
+    @Test
+    fun `production profile rejects an unsupported OSS credential mode`() {
+        contextRunner
+            .withPropertyValues("oss.credential-mode=workbench")
+            .run { context ->
+                assertThat(context).hasFailed()
+                assertThat(context.startupFailure.causeChain()).contains("OSS_CREDENTIAL_MODE")
+            }
+    }
+
+    @Test
+    fun `internal OSS endpoint requires an explicit public base URL`() {
+        contextRunner
+            .withPropertyValues("oss.public-base-url=")
+            .run { context ->
+                assertThat(context).hasFailed()
+                assertThat(context.startupFailure.causeChain()).contains("OSS_PUBLIC_BASE_URL")
+            }
+    }
+
+    @Test
+    fun `OSS public base URL must use HTTPS`() {
+        contextRunner
+            .withPropertyValues("oss.public-base-url=http://test-bucket.oss-cn-hangzhou.aliyuncs.com")
+            .run { context ->
+                assertThat(context).hasFailed()
+                assertThat(context.startupFailure.causeChain()).contains("OSS_PUBLIC_BASE_URL")
+            }
+    }
+
+    @Test
+    fun `private OSS storage requires a dedicated private bucket`() {
+        contextRunner
+            .withPropertyValues("oss.private-bucket-name=")
+            .run { context ->
+                assertThat(context).hasFailed()
+                assertThat(context.startupFailure.causeChain()).contains("OSS_PRIVATE_BUCKET_NAME")
+            }
+    }
+
+    @Test
+    fun `private and public media cannot share the same OSS bucket`() {
+        contextRunner
+            .withPropertyValues("oss.private-bucket-name=test-bucket")
+            .run { context ->
+                assertThat(context).hasFailed()
+                assertThat(context.startupFailure.causeChain())
+                    .contains("OSS_PRIVATE_BUCKET_NAME (must differ from OSS_BUCKET_NAME)")
+            }
+    }
+
+    @Test
+    fun `private OSS storage cannot run while OSS is disabled`() {
+        contextRunner
+            .withPropertyValues("oss.enabled=false")
+            .run { context ->
+                assertThat(context).hasFailed()
+                assertThat(context.startupFailure.causeChain())
+                    .contains("OSS_ENABLED=true (required for private OSS storage)")
+            }
+    }
+
+    @Test
+    fun `private storage rejects an unsupported mode`() {
+        contextRunner
+            .withPropertyValues("private-storage.mode=automatic")
+            .run { context ->
+                assertThat(context).hasFailed()
+                assertThat(context.startupFailure.causeChain())
+                    .contains("PRIVATE_FILE_STORAGE_MODE (local or oss)")
             }
     }
 

@@ -68,7 +68,6 @@ class DemoProfileSafetyValidator : BeanFactoryPostProcessor, EnvironmentAware {
         const val SAFE_DATABASE_PREFIX = "myapp_worktree_"
 
         val DEMO_DISABLED_PROPERTIES = listOf(
-            "oss.enabled",
             "aliyun.sms.enabled",
             "security.verification-code.log-for-dev",
             "payment.alipay-plus.auto-pay-on-order-create-enabled",

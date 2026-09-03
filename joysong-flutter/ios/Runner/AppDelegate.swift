@@ -2,8 +2,7 @@ import Flutter
 import UIKit
 
 @main
-@objc class AppDelegate: FlutterAppDelegate, UIDocumentPickerDelegate,
-  UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+@objc class AppDelegate: FlutterAppDelegate, UIDocumentPickerDelegate {
   private var pendingFileResult: FlutterResult?
 
   override func application(
@@ -17,91 +16,14 @@ import UIKit
         binaryMessenger: controller.binaryMessenger
       )
       channel.setMethodCallHandler { [weak self] call, result in
-        guard call.method == "pickFile" || call.method == "pickImage" else {
+        guard call.method == "pickFile" else {
           result(FlutterMethodNotImplemented)
           return
         }
-        if call.method == "pickImage" {
-          self?.presentImagePicker(result: result)
-        } else {
-          self?.presentFilePicker(call: call, result: result)
-        }
+        self?.presentFilePicker(call: call, result: result)
       }
     }
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
-  }
-
-  private func presentImagePicker(result: @escaping FlutterResult) {
-    guard pendingFileResult == nil else {
-      result(FlutterError(
-        code: "PICK_IN_PROGRESS",
-        message: "A file picker is already open.",
-        details: nil
-      ))
-      return
-    }
-    let picker = UIImagePickerController()
-    picker.sourceType = .photoLibrary
-    picker.mediaTypes = ["public.image"]
-    picker.delegate = self
-    pendingFileResult = result
-    window?.rootViewController?.present(picker, animated: true)
-  }
-
-  func imagePickerController(
-    _ picker: UIImagePickerController,
-    didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
-  ) {
-    guard let result = pendingFileResult else { return }
-    pendingFileResult = nil
-    picker.dismiss(animated: true)
-    do {
-      if let url = info[.imageURL] as? URL {
-        let data = try Data(contentsOf: url, options: [.mappedIfSafe])
-        guard !data.isEmpty, data.count <= 10 * 1024 * 1024 else {
-          result(FlutterError(
-            code: "FILE_TOO_LARGE",
-            message: "The selected image is empty or exceeds 10 MB.",
-            details: nil
-          ))
-          return
-        }
-        result([
-          "bytes": FlutterStandardTypedData(bytes: data),
-          "fileName": url.lastPathComponent,
-          "mimeType": mimeType(for: url.pathExtension),
-        ])
-        return
-      }
-      guard let image = info[.originalImage] as? UIImage,
-            let data = image.jpegData(compressionQuality: 0.92),
-            !data.isEmpty,
-            data.count <= 10 * 1024 * 1024 else {
-        result(FlutterError(
-          code: "FILE_UNREADABLE",
-          message: "Unable to read the selected image.",
-          details: nil
-        ))
-        return
-      }
-      result([
-        "bytes": FlutterStandardTypedData(bytes: data),
-        "fileName": "photo.jpg",
-        "mimeType": "image/jpeg",
-      ])
-    } catch {
-      result(FlutterError(
-        code: "FILE_UNREADABLE",
-        message: "Unable to read the selected image.",
-        details: nil
-      ))
-    }
-  }
-
-  func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-    pendingFileResult?(nil)
-    pendingFileResult = nil
-    picker.dismiss(animated: true)
   }
 
   private func presentFilePicker(call: FlutterMethodCall, result: @escaping FlutterResult) {

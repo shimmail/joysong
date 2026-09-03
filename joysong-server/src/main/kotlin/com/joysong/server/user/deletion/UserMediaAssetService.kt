@@ -5,6 +5,8 @@ import com.joysong.server.user.service.AccountLifecycleGuard
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.boot.context.event.ApplicationReadyEvent
+import org.springframework.context.event.EventListener
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.scheduling.annotation.Scheduled
@@ -17,7 +19,7 @@ import java.nio.file.Path
 import java.time.LocalDateTime
 import java.util.UUID
 
-enum class UserMediaStorageProvider { LOCAL_PUBLIC, OSS_PUBLIC, LOCAL_PRIVATE }
+enum class UserMediaStorageProvider { LOCAL_PUBLIC, OSS_PUBLIC, LOCAL_PRIVATE, OSS_PRIVATE }
 
 data class AccountErasedEvent(val userId: String, val requestId: String)
 
@@ -105,7 +107,7 @@ private data class PendingMediaAsset(
     val id: String,
     val ownerUserId: String,
     val storageKey: String,
-    val provider: UserMediaStorageProvider,
+    val storageProvider: String,
     val attemptCount: Int,
 )
 
@@ -115,6 +117,7 @@ class UserMediaDeletionWorker(
     @Value("\${upload.local-dir:./data/uploads}") private val publicUploadDirectory: String,
     @Value("\${upload.private-dir:./data/private}") private val privateUploadDirectory: String,
     @Value("\${oss.bucket-name:}") private val ossBucketName: String,
+    @Value("\${oss.private-bucket-name:}") private val privateOssBucketName: String,
     private val ossClientProvider: ObjectProvider<OSS>,
     private val metrics: AccountDeletionMetrics,
 ) {
@@ -130,6 +133,11 @@ class UserMediaDeletionWorker(
         findPending(limit = 50).forEach(::deleteOne)
     }
 
+    @EventListener(ApplicationReadyEvent::class)
+    fun recoverInterruptedUploads() {
+        findInterruptedUploads().forEach(::deleteOne)
+    }
+
     fun processUser(userId: String) {
         findPending(userId = userId, limit = 100).forEach(::deleteOne)
     }
@@ -140,20 +148,14 @@ class UserMediaDeletionWorker(
             """
             SELECT id, owner_user_id, storage_key, storage_provider, delete_attempt_count
             FROM user_media_assets
-            WHERE delete_status IN ('PENDING', 'FAILED')
-              AND (retry_after IS NULL OR retry_after <= NOW())$userClause
+            WHERE (
+                    (delete_status IN ('PENDING', 'FAILED') AND (retry_after IS NULL OR retry_after <= NOW()))
+                    OR (delete_status = 'UPLOAD_PENDING' AND retry_after IS NOT NULL AND retry_after <= NOW())
+                  )$userClause
             ORDER BY created_at
             LIMIT ?
             """.trimIndent()
-        val mapper = RowMapper { rs, _ ->
-                PendingMediaAsset(
-                    id = rs.getString("id"),
-                    ownerUserId = rs.getString("owner_user_id"),
-                    storageKey = rs.getString("storage_key"),
-                    provider = UserMediaStorageProvider.valueOf(rs.getString("storage_provider")),
-                    attemptCount = rs.getInt("delete_attempt_count"),
-                )
-            }
+        val mapper = pendingMediaAssetMapper()
         return if (userId == null) {
             jdbcTemplate.query(sql, mapper, limit)
         } else {
@@ -161,17 +163,45 @@ class UserMediaDeletionWorker(
         }
     }
 
+    private fun findInterruptedUploads(): List<PendingMediaAsset> = jdbcTemplate.query(
+        """
+        SELECT id, owner_user_id, storage_key, storage_provider, delete_attempt_count
+        FROM user_media_assets
+        WHERE delete_status = 'UPLOAD_PENDING'
+        ORDER BY created_at
+        """.trimIndent(),
+        pendingMediaAssetMapper(),
+    )
+
+    private fun pendingMediaAssetMapper(): RowMapper<PendingMediaAsset> = RowMapper { rs, _ ->
+        PendingMediaAsset(
+            id = rs.getString("id"),
+            ownerUserId = rs.getString("owner_user_id"),
+            storageKey = rs.getString("storage_key"),
+            storageProvider = rs.getString("storage_provider"),
+            attemptCount = rs.getInt("delete_attempt_count"),
+        )
+    }
+
     private fun deleteOne(asset: PendingMediaAsset) {
         try {
             UserMediaAssetService.validateStorageKey(asset.storageKey)
-            when (asset.provider) {
+            when (UserMediaStorageProvider.valueOf(asset.storageProvider)) {
                 UserMediaStorageProvider.LOCAL_PUBLIC -> deleteLocal(publicUploadDirectory, asset.storageKey)
                 UserMediaStorageProvider.LOCAL_PRIVATE -> deleteLocal(privateUploadDirectory, asset.storageKey)
                 UserMediaStorageProvider.OSS_PUBLIC -> {
-                    require(ossBucketName.isNotBlank()) { "OSS bucket is unavailable" }
+                    val bucketName = ossBucketName.trim()
+                    require(bucketName.isNotBlank()) { "OSS bucket is unavailable" }
                     val client = ossClientProvider.ifAvailable
                         ?: throw IllegalStateException("OSS client is unavailable")
-                    client.deleteObject(ossBucketName, asset.storageKey)
+                    client.deleteObject(bucketName, asset.storageKey)
+                }
+                UserMediaStorageProvider.OSS_PRIVATE -> {
+                    val bucketName = privateOssBucketName.trim()
+                    require(bucketName.isNotBlank()) { "Private OSS bucket is unavailable" }
+                    val client = ossClientProvider.ifAvailable
+                        ?: throw IllegalStateException("OSS client is unavailable")
+                    client.deleteObject(bucketName, asset.storageKey)
                 }
             }
             jdbcTemplate.update(

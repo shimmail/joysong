@@ -24,6 +24,11 @@ repositories {
 configurations.configureEach {
     exclude(group = "com.sun.xml.bind", module = "jaxb-core")
     exclude(group = "commons-logging", module = "commons-logging")
+    // dom4j 2.0.3 publishes these optional, pre-Java-9 parsers as Gradle runtime
+    // dependencies. pull-parser registers itself as the global JAXP SAX provider,
+    // but cannot apply the XXE protections required by the OSS SDK on Java 17.
+    exclude(group = "pull-parser", module = "pull-parser")
+    exclude(group = "xpp3", module = "xpp3")
 }
 
 dependencies {
@@ -58,6 +63,8 @@ dependencies {
 
     // 阿里云 OSS
     implementation("com.aliyun.oss:aliyun-sdk-oss:3.17.4")
+    // Refreshable ECS RAM Role credentials with IMDSv2 support.
+    implementation("com.aliyun:credentials-java:1.0.6")
 
     // 阿里云短信 SMS
     implementation("com.aliyun:dysmsapi20170525:3.0.0")

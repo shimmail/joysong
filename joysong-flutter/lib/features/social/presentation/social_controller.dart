@@ -1,7 +1,11 @@
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:joysong_flutter/core/network/api_exception.dart';
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
 import 'package:joysong_flutter/features/social/domain/social_repository.dart';
+import 'package:joysong_flutter/features/social/presentation/public_upload_controller.dart';
 
 final class SocialActionResult<T> {
   const SocialActionResult._(
@@ -16,6 +20,15 @@ final class SocialActionResult<T> {
   final bool succeeded;
   final T? value;
   final String? message;
+}
+
+final class PublicMediaBatchOperation {
+  const PublicMediaBatchOperation._(this.result, this._cancel);
+
+  final Future<SocialActionResult<void>> result;
+  final Future<void> Function() _cancel;
+
+  Future<void> cancel() => _cancel();
 }
 
 final class SocialController extends ChangeNotifier {
@@ -34,6 +47,9 @@ final class SocialController extends ChangeNotifier {
       <String, ContentTranslation>{};
   final Set<String> _showingTranslations = <String>{};
   final Map<String, Review?> _reviews = <String, Review?>{};
+  final PublicMediaUploadScope _ownedPublicMediaUploads =
+      PublicMediaUploadScope();
+  bool _disposed = false;
 
   List<Diary> _diaries = const [];
   bool _isLoadingDiaries = false;
@@ -461,25 +477,40 @@ final class SocialController extends ChangeNotifier {
   }
 
   Future<SocialActionResult<String>> uploadPublicMedia(
-    PublicMediaDraft media,
-  ) {
-    final key = 'media:upload:${identityHashCode(media)}';
+    PublicMediaDraft media, {
+    PublicMediaUploadScope? scope,
+  }) {
+    final key = 'media:upload:${media.uploadId}';
     return _guarded(key, () async {
-      await for (final progress in _repository.uploadPublicMedia(media)) {
-        if (progress.stage == UploadStage.failed) {
-          return SocialActionResult.failure(
-            progress.message ?? '图片上传失败，请重试',
-          );
-        }
-        final url = progress.url?.trim();
-        if (progress.stage == UploadStage.complete &&
-            url != null &&
-            url.isNotEmpty) {
-          return SocialActionResult.success(url);
-        }
-      }
-      return const SocialActionResult.failure('图片上传未返回可用地址');
+      final progress = await (scope ?? _ownedPublicMediaUploads).upload(
+        _repository,
+        media,
+      );
+      return _publicUploadResult(progress) ??
+          const SocialActionResult.failure('图片上传未返回可用地址');
     }, fallback: '图片上传失败，请重试');
+  }
+
+  PublicMediaBatchOperation uploadPublicMediaBatch(
+    Iterable<PublicMediaDraft> media, {
+    required void Function(PublicMediaDraft media, String url) onUploaded,
+    int maxConcurrency = 2,
+  }) {
+    if (maxConcurrency < 1) {
+      throw ArgumentError.value(
+        maxConcurrency,
+        'maxConcurrency',
+        '并发数必须大于 0',
+      );
+    }
+    final pending = List<PublicMediaDraft>.of(media, growable: false);
+    final runner = _PublicMediaBatchRunner(
+      repository: _repository,
+      pending: pending,
+      maxConcurrency: maxConcurrency,
+      onUploaded: onUploaded,
+    );
+    return PublicMediaBatchOperation._(runner.run(), runner.cancel);
   }
 
   Future<SocialActionResult<EngagementStatus>> _toggleEngagement({
@@ -519,7 +550,7 @@ final class SocialController extends ChangeNotifier {
       return const SocialActionResult.failure('操作正在进行');
     }
     _clearError();
-    notifyListeners();
+    _notify();
     try {
       final result = await action();
       return result;
@@ -533,7 +564,7 @@ final class SocialController extends ChangeNotifier {
   }
 
   bool _begin(String key) {
-    if (_busyActions.contains(key)) {
+    if (_disposed || _busyActions.contains(key)) {
       return false;
     }
     _busyActions.add(key);
@@ -542,11 +573,108 @@ final class SocialController extends ChangeNotifier {
 
   void _end(String key) {
     _busyActions.remove(key);
-    notifyListeners();
+    _notify();
   }
 
   void _clearError() {
     _errorMessage = null;
+  }
+
+  void _notify() {
+    if (!_disposed) notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _ownedPublicMediaUploads.dispose();
+    super.dispose();
+  }
+}
+
+final class _PublicMediaBatchRunner {
+  _PublicMediaBatchRunner({
+    required this.repository,
+    required this.pending,
+    required this.maxConcurrency,
+    required this.onUploaded,
+  });
+
+  final SocialRepository repository;
+  final List<PublicMediaDraft> pending;
+  final int maxConcurrency;
+  final void Function(PublicMediaDraft media, String url) onUploaded;
+  final Set<StreamIterator<PublicUploadProgress>> _active = {};
+  var _nextIndex = 0;
+  var _cancelled = false;
+  String? _failureMessage;
+
+  Future<SocialActionResult<void>> run() async {
+    if (pending.isEmpty) return const SocialActionResult.success();
+    final workerCount = math.min(maxConcurrency, pending.length);
+    await Future.wait(List.generate(workerCount, (_) => _worker()));
+    if (_cancelled) return const SocialActionResult.failure('图片上传已取消');
+    final message = _failureMessage;
+    return message == null
+        ? const SocialActionResult.success()
+        : SocialActionResult.failure(message);
+  }
+
+  Future<void> cancel() async {
+    if (_cancelled) return;
+    _cancelled = true;
+    final active = List<StreamIterator<PublicUploadProgress>>.of(_active);
+    await Future.wait(active.map((iterator) => iterator.cancel()));
+  }
+
+  Future<void> _worker() async {
+    while (!_cancelled && _failureMessage == null) {
+      if (_nextIndex >= pending.length) return;
+      final item = pending[_nextIndex];
+      _nextIndex += 1;
+      final result = await _upload(item);
+      if (_cancelled) return;
+      final url = result.value?.trim();
+      if (!result.succeeded || url == null || url.isEmpty) {
+        _failureMessage ??= result.message ?? '图片上传失败，请重试';
+        return;
+      }
+      onUploaded(item, url);
+    }
+  }
+
+  Future<SocialActionResult<String>> _upload(PublicMediaDraft media) async {
+    final iterator = StreamIterator(repository.uploadPublicMedia(media));
+    _active.add(iterator);
+    try {
+      while (!_cancelled && await iterator.moveNext()) {
+        final progress = iterator.current;
+        if (progress.stage == UploadStage.failed) {
+          return SocialActionResult.failure(
+            progress.message ?? '图片上传失败，请重试',
+          );
+        }
+        if (progress.stage == UploadStage.cancelled) {
+          return const SocialActionResult.failure('图片上传已取消');
+        }
+        final url = progress.url?.trim();
+        if (progress.stage == UploadStage.complete &&
+            url != null &&
+            url.isNotEmpty) {
+          return SocialActionResult.success(url);
+        }
+      }
+      return SocialActionResult.failure(
+        _cancelled ? '图片上传已取消' : '图片上传未返回可用地址',
+      );
+    } catch (error) {
+      return SocialActionResult.failure(
+        _cancelled ? '图片上传已取消' : _messageFor(error, '图片上传失败，请重试'),
+      );
+    } finally {
+      _active.remove(iterator);
+      await iterator.cancel();
+    }
   }
 }
 
@@ -573,6 +701,28 @@ String _favoriteKey(FavoriteTargetType type, String targetId) =>
 
 String _reportKey(ReportTargetType type, String targetId) =>
     '${type.wireValue}:$targetId';
+
+SocialActionResult<String>? _publicUploadResult(
+  PublicUploadProgress progress,
+) {
+  switch (progress.stage) {
+    case UploadStage.complete:
+      final url = progress.url?.trim();
+      return url == null || url.isEmpty
+          ? const SocialActionResult.failure('图片上传未返回可用地址')
+          : SocialActionResult.success(url);
+    case UploadStage.failed:
+      return SocialActionResult.failure(
+        progress.message ?? '图片上传失败，请重试',
+      );
+    case UploadStage.cancelled:
+      return SocialActionResult.failure(progress.message ?? '图片上传已取消');
+    case UploadStage.queued:
+    case UploadStage.uploading:
+    case UploadStage.processing:
+      return null;
+  }
+}
 
 String _messageFor(Object error, String fallback) {
   if (error is ApiException && error.message.isNotEmpty) {

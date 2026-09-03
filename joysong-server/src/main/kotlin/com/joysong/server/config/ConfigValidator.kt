@@ -18,6 +18,11 @@ class ConfigValidator(
     @Value("\${oss.endpoint:}") private val ossEndpoint: String,
     @Value("\${oss.bucket-name:}") private val ossBucketName: String,
     @Value("\${oss.region:}") private val ossRegion: String,
+    @Value("\${oss.public-base-url:}") private val ossPublicBaseUrl: String,
+    @Value("\${oss.credential-mode:static}") private val ossCredentialMode: String,
+    @Value("\${oss.ecs-ram-role-name:}") private val ossEcsRamRoleName: String,
+    @Value("\${oss.private-bucket-name:}") private val ossPrivateBucketName: String,
+    @Value("\${private-storage.mode:local}") private val privateStorageMode: String,
     @Value("\${aliyun.sms.access-key-id:}") private val smsAccessKeyId: String,
     @Value("\${aliyun.sms.access-key-secret:}") private val smsAccessKeySecret: String,
     @Value("\${aliyun.sms.sign-name:}") private val smsSignName: String,
@@ -39,16 +44,58 @@ class ConfigValidator(
         val missing = mutableListOf<String>()
         val isProduction = environment.activeProfiles.any { it.equals("prod", ignoreCase = true) }
         val isDevelopment = environment.activeProfiles.any { it.equals("dev", ignoreCase = true) }
+        val normalizedOssBucketName = ossBucketName.trim()
+        val normalizedPrivateBucketName = ossPrivateBucketName.trim()
 
         if (jwtSecret.length < 32) missing.add("JWT_SECRET (at least 32 characters)")
         if (googleClientId.isBlank()) missing.add("GOOGLE_CLIENT_ID")
-        if (ossEnabled && ossAccessKeyId.isBlank()) missing.add("OSS_ACCESS_KEY_ID")
-        if (ossEnabled && ossAccessKeySecret.isBlank()) missing.add("OSS_ACCESS_KEY_SECRET")
-        if (ossEnabled && ossEndpoint.isBlank()) missing.add("OSS_ENDPOINT")
-        if (ossEnabled && ossBucketName.isBlank()) missing.add("OSS_BUCKET_NAME")
-        if (ossEnabled && ossRegion.isBlank()) missing.add("OSS_REGION")
-        if (isProduction && ossEnabled && ossEndpoint.isNotBlank() && !isCanonicalHttpsUrl(ossEndpoint)) {
-            missing.add("OSS_ENDPOINT (HTTPS URL required in production)")
+        if (ossEnabled) {
+            if (ossEndpoint.isBlank()) missing.add("OSS_ENDPOINT")
+            if (normalizedOssBucketName.isBlank()) missing.add("OSS_BUCKET_NAME")
+            if (normalizedOssBucketName.isNotBlank() && !isValidOssBucketName(normalizedOssBucketName)) {
+                missing.add("OSS_BUCKET_NAME (valid OSS bucket name required)")
+            }
+            if (ossRegion.isBlank()) missing.add("OSS_REGION")
+            if (ossEndpoint.isNotBlank() && !isAliyunOssHttpsEndpointForRegion(ossEndpoint, ossRegion)) {
+                missing.add("OSS_ENDPOINT (Alibaba Cloud OSS HTTPS endpoint matching OSS_REGION required)")
+            }
+            if (ossPublicBaseUrl.isNotBlank() && !isHttpsBaseUrl(ossPublicBaseUrl)) {
+                missing.add("OSS_PUBLIC_BASE_URL (HTTPS URL without user info, query, or fragment required)")
+            }
+            if (isInternalOssEndpoint(ossEndpoint) && ossPublicBaseUrl.isBlank()) {
+                missing.add("OSS_PUBLIC_BASE_URL (required with an internal OSS endpoint)")
+            }
+            when (ossCredentialMode.trim().lowercase()) {
+                OSS_CREDENTIAL_MODE_STATIC -> {
+                    if (ossAccessKeyId.isBlank()) missing.add("OSS_ACCESS_KEY_ID")
+                    if (ossAccessKeySecret.isBlank()) missing.add("OSS_ACCESS_KEY_SECRET")
+                }
+
+                OSS_CREDENTIAL_MODE_ECS_RAM_ROLE -> {
+                    if (ossEcsRamRoleName.isBlank()) missing.add("OSS_ECS_RAM_ROLE_NAME")
+                }
+
+                else -> missing.add("OSS_CREDENTIAL_MODE (static or ecs-ram-role)")
+            }
+        }
+        when (privateStorageMode.trim().lowercase()) {
+            PRIVATE_STORAGE_MODE_LOCAL -> Unit
+            PRIVATE_STORAGE_MODE_OSS -> {
+                if (!ossEnabled) missing.add("OSS_ENABLED=true (required for private OSS storage)")
+                if (normalizedPrivateBucketName.isBlank()) missing.add("OSS_PRIVATE_BUCKET_NAME")
+            }
+
+            else -> missing.add("PRIVATE_FILE_STORAGE_MODE (local or oss)")
+        }
+        if (normalizedPrivateBucketName.isNotBlank() && !isValidOssBucketName(normalizedPrivateBucketName)) {
+            missing.add("OSS_PRIVATE_BUCKET_NAME (valid OSS bucket name required)")
+        }
+        if (
+            normalizedPrivateBucketName.isNotBlank() &&
+            normalizedOssBucketName.isNotBlank() &&
+            normalizedPrivateBucketName.equals(normalizedOssBucketName, ignoreCase = true)
+        ) {
+            missing.add("OSS_PRIVATE_BUCKET_NAME (must differ from OSS_BUCKET_NAME)")
         }
         if (smsEnabled && smsAccessKeyId.isBlank()) missing.add("SMS_ACCESS_KEY_ID")
         if (smsEnabled && smsAccessKeySecret.isBlank()) missing.add("SMS_ACCESS_KEY_SECRET")
@@ -96,13 +143,46 @@ class ConfigValidator(
         logger.info("All required configuration values are present.")
     }
 
-    private fun isCanonicalHttpsUrl(value: String): Boolean = runCatching {
+    private fun isAliyunOssHttpsEndpointForRegion(value: String, region: String): Boolean = runCatching {
         val uri = URI(value.trim())
+        val endpointRegion = OSS_ENDPOINT_HOST_PATTERN
+            .matchEntire(uri.host.orEmpty().lowercase())
+            ?.groupValues
+            ?.get(1)
         uri.scheme.equals("https", ignoreCase = true) &&
             !uri.host.isNullOrBlank() &&
             uri.rawUserInfo == null &&
             uri.rawQuery == null &&
             uri.rawFragment == null &&
-            (uri.rawPath.isNullOrEmpty() || uri.rawPath == "/")
+            uri.port == -1 &&
+            (uri.rawPath.isNullOrEmpty() || uri.rawPath == "/") &&
+            region.trim().isNotEmpty() &&
+            endpointRegion == region.trim().lowercase()
     }.getOrDefault(false)
+
+    private fun isValidOssBucketName(value: String): Boolean = OSS_BUCKET_NAME_PATTERN.matches(value)
+
+    private fun isHttpsBaseUrl(value: String): Boolean = runCatching {
+        val uri = URI(value.trim())
+        uri.scheme.equals("https", ignoreCase = true) &&
+            !uri.host.isNullOrBlank() &&
+            uri.rawUserInfo == null &&
+            uri.rawQuery == null &&
+            uri.rawFragment == null
+    }.getOrDefault(false)
+
+    private fun isInternalOssEndpoint(value: String): Boolean = runCatching {
+        URI(value.trim()).host?.contains("-internal.", ignoreCase = true) == true
+    }.getOrDefault(false)
+
+    private companion object {
+        const val OSS_CREDENTIAL_MODE_STATIC = "static"
+        const val OSS_CREDENTIAL_MODE_ECS_RAM_ROLE = "ecs-ram-role"
+        const val PRIVATE_STORAGE_MODE_LOCAL = "local"
+        const val PRIVATE_STORAGE_MODE_OSS = "oss"
+        val OSS_BUCKET_NAME_PATTERN = Regex("^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$")
+        val OSS_ENDPOINT_HOST_PATTERN = Regex(
+            "^oss-([a-z0-9]+(?:-[a-z0-9]+)*?)(?:-internal)?\\.aliyuncs\\.com$",
+        )
+    }
 }

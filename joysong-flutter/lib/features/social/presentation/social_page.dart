@@ -1,6 +1,5 @@
 import 'dart:async';
-
-import 'dart:typed_data';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:joysong_flutter/core/files/app_file_picker.dart';
@@ -222,12 +221,10 @@ final class _DiaryEditorPageState extends State<DiaryEditorPage> {
   late String _projectName;
   late String _doctorName;
   late String _institutionName;
-  late final List<String> _imageUrls;
-  late final List<String> _beforeImageUrls;
-  late final List<String> _afterImageUrls;
-  final List<PublicMediaDraft> _pendingImages = [];
-  final List<PublicMediaDraft> _pendingBeforeImages = [];
-  final List<PublicMediaDraft> _pendingAfterImages = [];
+  late final List<_DiaryMediaItem> _images;
+  late final List<_DiaryMediaItem> _beforeImages;
+  late final List<_DiaryMediaItem> _afterImages;
+  PublicMediaBatchOperation? _activeUploadBatch;
   bool _isSubmitting = false;
   bool _isPickingImage = false;
   ContentSafetyAssessment? _assessment;
@@ -248,9 +245,9 @@ final class _DiaryEditorPageState extends State<DiaryEditorPage> {
     _projectName = diary?.projectName ?? '';
     _doctorName = diary?.doctorName ?? '';
     _institutionName = diary?.institutionName ?? '';
-    _imageUrls = List.of(diary?.images ?? const []);
-    _beforeImageUrls = List.of(diary?.beforeImages ?? const []);
-    _afterImageUrls = List.of(diary?.afterImages ?? const []);
+    _images = _uploadedMedia(diary?.images ?? const []);
+    _beforeImages = _uploadedMedia(diary?.beforeImages ?? const []);
+    _afterImages = _uploadedMedia(diary?.afterImages ?? const []);
     _status = diary?.status.toLowerCase() == DiaryStatus.draft.wireValue
         ? DiaryStatus.draft
         : DiaryStatus.published;
@@ -258,6 +255,15 @@ final class _DiaryEditorPageState extends State<DiaryEditorPage> {
 
   @override
   void dispose() {
+    final activeUploadBatch = _activeUploadBatch;
+    _activeUploadBatch = null;
+    if (activeUploadBatch != null) unawaited(activeUploadBatch.cancel());
+    for (final group in [_images, _beforeImages, _afterImages]) {
+      for (final item in group) {
+        final draft = item.draft;
+        if (draft != null) unawaited(_deleteDraftFile(draft));
+      }
+    }
     _titleController.dispose();
     _contentController.dispose();
     _tagsController.dispose();
@@ -364,8 +370,7 @@ final class _DiaryEditorPageState extends State<DiaryEditorPage> {
                 title: Localizations.localeOf(context).languageCode == 'en'
                     ? 'Before photos'
                     : '术前照片',
-                urls: _beforeImageUrls,
-                pending: _pendingBeforeImages,
+                items: _beforeImages,
                 keyName: 'before',
               ),
               const SizedBox(height: 12),
@@ -374,8 +379,7 @@ final class _DiaryEditorPageState extends State<DiaryEditorPage> {
                 title: Localizations.localeOf(context).languageCode == 'en'
                     ? 'After photos'
                     : '术后照片',
-                urls: _afterImageUrls,
-                pending: _pendingAfterImages,
+                items: _afterImages,
                 keyName: 'after',
               ),
               const SizedBox(height: 16),
@@ -426,18 +430,17 @@ final class _DiaryEditorPageState extends State<DiaryEditorPage> {
   Widget _buildImageGroup(
     BuildContext context, {
     required String title,
-    required List<String> urls,
-    required List<PublicMediaDraft> pending,
+    required List<_DiaryMediaItem> items,
     required String keyName,
   }) {
-    final count = urls.length + pending.length;
+    final count = items.length;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Row(children: [
         Expanded(child: Text('$title ($count/9)')),
         TextButton.icon(
           key: Key('diary-add-$keyName-image'),
           onPressed:
-              _isSubmitting || count >= 9 ? null : () => _pickImageFor(pending),
+              _isSubmitting || count >= 9 ? null : () => _pickImageFor(items),
           icon: const Icon(Icons.add_photo_alternate_outlined),
           label: Text(Localizations.localeOf(context).languageCode == 'en'
               ? 'Add'
@@ -445,24 +448,24 @@ final class _DiaryEditorPageState extends State<DiaryEditorPage> {
         ),
       ]),
       Wrap(spacing: 8, runSpacing: 8, children: [
-        for (var i = 0; i < urls.length; i++)
+        for (var i = 0; i < items.length; i++)
           _DiaryImageTile(
-            label: title,
-            onRemove: () => setState(() => urls.removeAt(i)),
-          ),
-        for (var i = 0; i < pending.length; i++)
-          _DiaryImageTile(
-            label: pending[i].fileName,
-            bytes: pending[i].bytes,
-            onRemove: () => setState(() => pending.removeAt(i)),
+            label: items[i].draft?.fileName ?? title,
+            localPath: items[i].draft?.localPath,
+            onRemove: _isSubmitting ? null : () => _removeMedia(items, i),
           ),
       ]),
     ]);
   }
 
-  Future<void> _pickImageFor(List<PublicMediaDraft> target) async {
+  Future<void> _pickImageFor(List<_DiaryMediaItem> target) async {
     final selected = await (widget.imagePicker ?? _pickDiaryImage)();
-    if (selected != null && mounted) setState(() => target.add(selected));
+    if (selected == null) return;
+    if (!mounted || target.length >= 9) {
+      await _deleteDraftFile(selected);
+      return;
+    }
+    setState(() => target.add(_DiaryMediaItem.pending(selected)));
   }
 
   Future<void> _pickAssociation(DiscoverContentType type) async {
@@ -538,7 +541,7 @@ final class _DiaryEditorPageState extends State<DiaryEditorPage> {
 
   Widget _buildImages(BuildContext context) {
     final english = Localizations.localeOf(context).languageCode == 'en';
-    final count = _imageUrls.length + _pendingImages.length;
+    final count = _images.length;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -577,20 +580,13 @@ final class _DiaryEditorPageState extends State<DiaryEditorPage> {
             spacing: 8,
             runSpacing: 8,
             children: [
-              for (var index = 0; index < _imageUrls.length; index += 1)
+              for (var index = 0; index < _images.length; index += 1)
                 _DiaryImageTile(
-                  label: english ? 'Uploaded photo' : '已上传图片',
-                  onRemove: _isSubmitting
-                      ? null
-                      : () => setState(() => _imageUrls.removeAt(index)),
-                ),
-              for (var index = 0; index < _pendingImages.length; index += 1)
-                _DiaryImageTile(
-                  label: _pendingImages[index].fileName,
-                  bytes: _pendingImages[index].bytes,
-                  onRemove: _isSubmitting
-                      ? null
-                      : () => setState(() => _pendingImages.removeAt(index)),
+                  label: _images[index].draft?.fileName ??
+                      (english ? 'Uploaded photo' : '已上传图片'),
+                  localPath: _images[index].draft?.localPath,
+                  onRemove:
+                      _isSubmitting ? null : () => _removeMedia(_images, index),
                 ),
             ],
           ),
@@ -603,8 +599,12 @@ final class _DiaryEditorPageState extends State<DiaryEditorPage> {
     setState(() => _isPickingImage = true);
     try {
       final selected = await picker();
-      if (selected != null && mounted) {
-        setState(() => _pendingImages.add(selected));
+      if (selected != null) {
+        if (!mounted || _images.length >= 9) {
+          await _deleteDraftFile(selected);
+          return;
+        }
+        setState(() => _images.add(_DiaryMediaItem.pending(selected)));
       }
     } catch (_) {
       if (!mounted) return;
@@ -640,10 +640,9 @@ final class _DiaryEditorPageState extends State<DiaryEditorPage> {
         .toSet()
         .take(10)
         .toList(growable: false);
-    final uploadedUrls = List<String>.of(_imageUrls);
-    for (final image in _pendingImages) {
-      final upload = await widget.controller.uploadPublicMedia(image);
-      if (!upload.succeeded || upload.value == null) {
+    for (final group in [_images, _beforeImages, _afterImages]) {
+      final upload = await _uploadGroup(group);
+      if (!upload.succeeded || !mounted) {
         if (!mounted) return;
         setState(() => _isSubmitting = false);
         showTransientMessage(
@@ -653,15 +652,10 @@ final class _DiaryEditorPageState extends State<DiaryEditorPage> {
         );
         return;
       }
-      uploadedUrls.add(upload.value!);
     }
-    final beforeUrls =
-        await _uploadGroup(_beforeImageUrls, _pendingBeforeImages);
-    final afterUrls = await _uploadGroup(_afterImageUrls, _pendingAfterImages);
-    if (beforeUrls == null || afterUrls == null || !mounted) {
-      if (mounted) setState(() => _isSubmitting = false);
-      return;
-    }
+    final uploadedUrls = _uploadedUrls(_images);
+    final beforeUrls = _uploadedUrls(_beforeImages);
+    final afterUrls = _uploadedUrls(_afterImages);
     final existing = widget.diary;
     final SocialActionResult<Diary> result;
     if (existing == null) {
@@ -719,17 +713,41 @@ final class _DiaryEditorPageState extends State<DiaryEditorPage> {
     }
   }
 
-  Future<List<String>?> _uploadGroup(
-    List<String> existing,
-    List<PublicMediaDraft> pending,
+  Future<SocialActionResult<void>> _uploadGroup(
+    List<_DiaryMediaItem> items,
   ) async {
-    final result = List<String>.of(existing);
-    for (final image in pending) {
-      final upload = await widget.controller.uploadPublicMedia(image);
-      if (!upload.succeeded || upload.value == null) return null;
-      result.add(upload.value!);
+    final pending = items
+        .map((item) => item.draft)
+        .whereType<PublicMediaDraft>()
+        .toList(growable: false);
+    final operation = widget.controller.uploadPublicMediaBatch(
+      pending,
+      maxConcurrency: 2,
+      onUploaded: (draft, url) {
+        final index = items.indexWhere(
+          (item) => item.draft?.uploadId == draft.uploadId,
+        );
+        if (index >= 0 && mounted) {
+          setState(() => items[index] = _DiaryMediaItem.uploaded(url));
+        }
+        unawaited(_deleteDraftFile(draft));
+      },
+    );
+    _activeUploadBatch = operation;
+    try {
+      return await operation.result;
+    } finally {
+      if (identical(_activeUploadBatch, operation)) {
+        _activeUploadBatch = null;
+      }
     }
-    return result;
+  }
+
+  void _removeMedia(List<_DiaryMediaItem> items, int index) {
+    final item = items[index];
+    setState(() => items.removeAt(index));
+    final draft = item.draft;
+    if (draft != null) unawaited(_deleteDraftFile(draft));
   }
 }
 
@@ -1136,8 +1154,14 @@ class _DiaryEntityPickerPageState extends State<_DiaryEntityPickerPage> {
 Future<PublicMediaDraft?> _pickDiaryImage() async {
   final selected = await const AppFilePicker().pickImage();
   if (selected == null) return null;
+  final localPath = selected.localPath;
+  if (localPath == null || localPath.isEmpty || selected.uploadId.isEmpty) {
+    throw StateError('公共图片未生成可上传的临时文件');
+  }
   return PublicMediaDraft(
-    bytes: selected.bytes,
+    uploadId: selected.uploadId,
+    localPath: localPath,
+    byteLength: selected.byteLength,
     fileName: selected.fileName,
     mimeType: selected.mimeType,
     purpose: PublicMediaPurpose.diary,
@@ -1169,16 +1193,16 @@ class _DiaryImageTile extends StatelessWidget {
   const _DiaryImageTile({
     required this.label,
     required this.onRemove,
-    this.bytes,
+    this.localPath,
   });
 
   final String label;
-  final Uint8List? bytes;
+  final String? localPath;
   final VoidCallback? onRemove;
 
   @override
   Widget build(BuildContext context) {
-    final imageBytes = bytes;
+    final imagePath = localPath;
     return SizedBox.square(
       dimension: 88,
       child: Stack(
@@ -1186,13 +1210,13 @@ class _DiaryImageTile extends StatelessWidget {
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(10),
-            child: imageBytes == null
+            child: imagePath == null
                 ? ColoredBox(
                     color: Theme.of(context).colorScheme.surfaceContainerHigh,
                     child: const Icon(Icons.image_outlined),
                   )
-                : Image.memory(
-                    imageBytes,
+                : Image(
+                    image: _draftImageProvider(imagePath),
                     fit: BoxFit.cover,
                     errorBuilder: (_, __, ___) => const Icon(
                       Icons.broken_image_outlined,
@@ -1221,6 +1245,42 @@ class _DiaryImageTile extends StatelessWidget {
     );
   }
 }
+
+final class _DiaryMediaItem {
+  const _DiaryMediaItem.uploaded(this.url) : draft = null;
+
+  const _DiaryMediaItem.pending(this.draft) : url = null;
+
+  final String? url;
+  final PublicMediaDraft? draft;
+}
+
+List<_DiaryMediaItem> _uploadedMedia(Iterable<String> urls) =>
+    urls.map(_DiaryMediaItem.uploaded).toList(growable: true);
+
+List<String> _uploadedUrls(Iterable<_DiaryMediaItem> items) =>
+    items.map((item) => item.url).whereType<String>().toList(growable: false);
+
+Future<void> _deleteDraftFile(PublicMediaDraft draft) async {
+  final file = File(draft.localPath);
+  try {
+    await _draftImageProvider(draft.localPath).evict();
+  } on Object {
+    // A preview may never have entered the cache.
+  }
+  for (var attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      if (await file.exists()) await file.delete();
+      return;
+    } on FileSystemException {
+      if (attempt == 2) return;
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+  }
+}
+
+ImageProvider<Object> _draftImageProvider(String localPath) =>
+    ResizeImage.resizeIfNeeded(176, 176, FileImage(File(localPath)));
 
 final class _DiaryCard extends StatefulWidget {
   const _DiaryCard({

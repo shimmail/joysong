@@ -68,6 +68,7 @@ import 'package:joysong_flutter/features/social/data/social_repository_impl.dart
 import 'package:joysong_flutter/features/social/domain/social_models.dart';
 import 'package:joysong_flutter/features/social/domain/social_repository.dart';
 import 'package:joysong_flutter/features/social/presentation/diary_detail_page.dart';
+import 'package:joysong_flutter/features/social/presentation/public_upload_controller.dart';
 import 'package:joysong_flutter/features/social/presentation/social_controller.dart';
 import 'package:joysong_flutter/features/social/presentation/social_page.dart';
 import 'package:joysong_flutter/features/social/presentation/public_user_page.dart';
@@ -145,6 +146,8 @@ class _AppShellState extends State<AppShell> {
   int _unreadSystemNotificationCount = 0;
   int _unreadActivityNotificationCount = 0;
   bool _institutionConsultantPickerOpen = false;
+  final Set<PublicMediaUploadScope> _publicMediaUploadScopes =
+      <PublicMediaUploadScope>{};
 
   NavigatorState get _contentNavigator =>
       _contentNavigatorKey.currentState ?? Navigator.of(context);
@@ -168,6 +171,7 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _createDependencies() {
+    _disposePublicMediaUploadScopes();
     _disposeControllers();
     _unreadNotificationCount = 0;
     _unreadSystemNotificationCount = 0;
@@ -216,7 +220,6 @@ class _AppShellState extends State<AppShell> {
     );
     _socialRepository = SocialRepositoryImpl(
       remoteDataSource: ApiSocialRemoteDataSource(apiClient),
-      imagePreprocessor: const PassthroughPublicImagePreprocessor(),
       mediaUploader: ApiPublicMediaUploader(apiClient),
     );
     _socialController = SocialController(
@@ -284,6 +287,27 @@ class _AppShellState extends State<AppShell> {
     _walletController = null;
   }
 
+  PublicMediaUploadScope _createPublicMediaUploadScope() {
+    final scope = PublicMediaUploadScope();
+    _publicMediaUploadScopes.add(scope);
+    return scope;
+  }
+
+  Future<void> _closePublicMediaUploadScope(
+    PublicMediaUploadScope scope,
+  ) async {
+    scope.dispose();
+    _publicMediaUploadScopes.remove(scope);
+    await scope.cancelActive();
+  }
+
+  void _disposePublicMediaUploadScopes() {
+    for (final scope in _publicMediaUploadScopes) {
+      scope.dispose();
+    }
+    _publicMediaUploadScopes.clear();
+  }
+
   void _handleNotificationStateChanged() {
     final nextCount = _notificationController?.unreadCount ?? 0;
     final nextSystemCount = _notificationController?.systemUnreadCount ?? 0;
@@ -302,6 +326,7 @@ class _AppShellState extends State<AppShell> {
 
   @override
   void dispose() {
+    _disposePublicMediaUploadScopes();
     _disposeControllers();
     super.dispose();
   }
@@ -738,16 +763,25 @@ class _AppShellState extends State<AppShell> {
       );
       return;
     }
-    final draft = await _contentNavigator.push<ReviewDraft>(
-      MaterialPageRoute(
-        builder: (_) => ReviewOrderPage(
-          order: order,
-          initialReview: review,
-          enableAutoTranslation: true,
-          onPickImage: _pickAndUploadReviewImage,
+    final uploadScope = _createPublicMediaUploadScope();
+    ReviewDraft? draft;
+    try {
+      draft = await _contentNavigator.push<ReviewDraft>(
+        MaterialPageRoute(
+          builder: (_) => ReviewOrderPage(
+            order: order,
+            initialReview: review,
+            enableAutoTranslation: true,
+            onPickImage: () => _pickAndUploadPublicImage(
+              PublicMediaPurpose.review,
+              uploadScope,
+            ),
+          ),
         ),
-      ),
-    );
+      );
+    } finally {
+      await _closePublicMediaUploadScope(uploadScope);
+    }
     if (draft == null || !mounted) return;
     final result = await socialController.updateReview(review.id, draft);
     if (!mounted) return;
@@ -761,29 +795,26 @@ class _AppShellState extends State<AppShell> {
     if (result.succeeded) await _ordersController?.refresh();
   }
 
-  Future<String?> _pickAndUploadReviewImage() =>
-      _pickAndUploadPublicImage(PublicMediaPurpose.review);
-
-  Future<String?> _pickAndUploadDoctorManagementImage() =>
-      _pickAndUploadPublicImage(PublicMediaPurpose.doctorProfile);
-
-  Future<String?> _pickAndUploadPublicImage(PublicMediaPurpose purpose) async {
+  Future<String?> _pickAndUploadPublicImage(
+    PublicMediaPurpose purpose,
+    PublicMediaUploadScope uploadScope,
+  ) async {
     final controller = _socialController;
     if (controller == null) return null;
     final selected = await const AppFilePicker().pickImage();
     if (selected == null) return null;
-    final result = await controller.uploadPublicMedia(
-      PublicMediaDraft(
-        bytes: selected.bytes,
-        fileName: selected.fileName,
-        mimeType: selected.mimeType,
-        purpose: purpose,
-      ),
-    );
-    if (!result.succeeded || result.value?.trim().isEmpty != false) {
-      throw StateError(result.message ?? '图片上传失败');
+    try {
+      final result = await controller.uploadPublicMedia(
+        _publicMediaDraft(selected, purpose),
+        scope: uploadScope,
+      );
+      if (!result.succeeded || result.value?.trim().isEmpty != false) {
+        throw StateError(result.message ?? '图片上传失败');
+      }
+      return result.value!.trim();
+    } finally {
+      await selected.deleteLocalFile();
     }
-    return result.value!.trim();
   }
 
   void _showJourneyComingSoon() {
@@ -1274,40 +1305,48 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  void _openManagementCenter({
+  Future<void> _openManagementCenter({
     String? initialInstitutionProjectRequestId,
     bool? initialInstitutionProjectReviewMode,
     ConsultantOrderStage? initialConsultantOrderStage,
-  }) {
+  }) async {
     final identityRepository = _identityRepository;
     final discoverRepository = _discoverRepository;
     if (identityRepository == null || discoverRepository == null) return;
-    _contentNavigator.push<void>(
-      MaterialPageRoute(
-        builder: (_) => ManagementCenterPage(
-          repository: identityRepository,
-          discoverRepository: discoverRepository,
-          consultantOrdersRepository: _consultantOrdersRepository,
-          onOpenConsultantOrderServiceConversation:
-              _consultantOrdersRepository == null
-                  ? null
-                  : _openConsultantOrderServiceConversation,
-          professionalRepository: widget.apiClient == null
-              ? null
-              : ProfessionalRepository(widget.apiClient!),
-          doctorImagePicker: _socialRepository == null
-              ? null
-              : _pickAndUploadDoctorManagementImage,
-          initialInstitutionProjectRequestId:
-              initialInstitutionProjectRequestId,
-          initialInstitutionProjectReviewMode:
-              initialInstitutionProjectReviewMode,
-          initialConsultantOrderStage: initialConsultantOrderStage,
-          onOpenDirectMessage:
-              _messagingRepository == null ? null : _openDirectMessage,
+    final uploadScope = _createPublicMediaUploadScope();
+    try {
+      await _contentNavigator.push<void>(
+        MaterialPageRoute(
+          builder: (_) => ManagementCenterPage(
+            repository: identityRepository,
+            discoverRepository: discoverRepository,
+            consultantOrdersRepository: _consultantOrdersRepository,
+            onOpenConsultantOrderServiceConversation:
+                _consultantOrdersRepository == null
+                    ? null
+                    : _openConsultantOrderServiceConversation,
+            professionalRepository: widget.apiClient == null
+                ? null
+                : ProfessionalRepository(widget.apiClient!),
+            doctorImagePicker: _socialRepository == null
+                ? null
+                : () => _pickAndUploadPublicImage(
+                      PublicMediaPurpose.doctorProfile,
+                      uploadScope,
+                    ),
+            initialInstitutionProjectRequestId:
+                initialInstitutionProjectRequestId,
+            initialInstitutionProjectReviewMode:
+                initialInstitutionProjectReviewMode,
+            initialConsultantOrderStage: initialConsultantOrderStage,
+            onOpenDirectMessage:
+                _messagingRepository == null ? null : _openDirectMessage,
+          ),
         ),
-      ),
-    );
+      );
+    } finally {
+      await _closePublicMediaUploadScope(uploadScope);
+    }
   }
 
   void _openInstitutionRelationships(
@@ -1446,25 +1485,31 @@ class _AppShellState extends State<AppShell> {
               return true;
             },
     );
-    await _contentNavigator.push<void>(
-      MaterialPageRoute(
-        builder: (_) => DmThreadPage(
-          controller: controller,
-          currentUserId: widget.currentUserId,
-          myPeer: peers[0],
-          otherPeer: peers[1],
-          onOtherAvatarTap:
-              otherUserId.isEmpty ? null : () => _openPublicUser(otherUserId),
-          onPickImage: _pickAndUploadDmImage,
-          onTranslate: _translateDmMessage,
-          conversationType: activeConversation.conversationType,
-          sendEnabled: sendEnabled,
-          refreshSendEnabled: refreshSendEnabled,
-          title:
-              title?.trim().isNotEmpty == true ? title!.trim() : peers[1].name,
+    final uploadScope = _createPublicMediaUploadScope();
+    try {
+      await _contentNavigator.push<void>(
+        MaterialPageRoute(
+          builder: (_) => DmThreadPage(
+            controller: controller,
+            currentUserId: widget.currentUserId,
+            myPeer: peers[0],
+            otherPeer: peers[1],
+            onOtherAvatarTap:
+                otherUserId.isEmpty ? null : () => _openPublicUser(otherUserId),
+            onPickImage: () => _pickAndUploadDmImage(uploadScope),
+            onTranslate: _translateDmMessage,
+            conversationType: activeConversation.conversationType,
+            sendEnabled: sendEnabled,
+            refreshSendEnabled: refreshSendEnabled,
+            title: title?.trim().isNotEmpty == true
+                ? title!.trim()
+                : peers[1].name,
+          ),
         ),
-      ),
-    );
+      );
+    } finally {
+      await _closePublicMediaUploadScope(uploadScope);
+    }
     controller.dispose();
     await _messagingController?.refresh();
   }
@@ -1537,24 +1582,26 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  Future<String?> _pickAndUploadDmImage() async {
+  Future<String?> _pickAndUploadDmImage(
+    PublicMediaUploadScope uploadScope,
+  ) async {
     final controller = _socialController;
     if (controller == null) return null;
     try {
       final selected = await const AppFilePicker().pickImage();
       if (selected == null) return null;
-      final result = await controller.uploadPublicMedia(
-        PublicMediaDraft(
-          bytes: selected.bytes,
-          fileName: selected.fileName,
-          mimeType: selected.mimeType,
-          purpose: PublicMediaPurpose.directMessage,
-        ),
-      );
-      if (!result.succeeded || result.value?.trim().isEmpty != false) {
-        throw StateError(result.message ?? '图片上传失败');
+      try {
+        final result = await controller.uploadPublicMedia(
+          _publicMediaDraft(selected, PublicMediaPurpose.directMessage),
+          scope: uploadScope,
+        );
+        if (!result.succeeded || result.value?.trim().isEmpty != false) {
+          throw StateError(result.message ?? '图片上传失败');
+        }
+        return result.value!.trim();
+      } finally {
+        await selected.deleteLocalFile();
       }
-      return result.value!.trim();
     } on Object {
       if (mounted) {
         showTransientMessage(
@@ -1608,17 +1655,22 @@ class _AppShellState extends State<AppShell> {
       repository: repository,
       conversationId: conversation.id,
     );
-    await _contentNavigator.push<void>(
-      MaterialPageRoute(
-        builder: (_) => CustomerServiceThreadPage(
-          controller: controller,
-          currentUserId: widget.currentUserId,
-          myPeer: myPeer,
-          otherPeer: customerServicePeer,
-          onPickImage: _pickAndUploadDmImage,
+    final uploadScope = _createPublicMediaUploadScope();
+    try {
+      await _contentNavigator.push<void>(
+        MaterialPageRoute(
+          builder: (_) => CustomerServiceThreadPage(
+            controller: controller,
+            currentUserId: widget.currentUserId,
+            myPeer: myPeer,
+            otherPeer: customerServicePeer,
+            onPickImage: () => _pickAndUploadDmImage(uploadScope),
+          ),
         ),
-      ),
-    );
+      );
+    } finally {
+      await _closePublicMediaUploadScope(uploadScope);
+    }
     controller.dispose();
     await _messagingController?.refresh();
   }
@@ -1792,4 +1844,22 @@ class _KeyboardAwareBottomNavigation extends StatelessWidget {
 String? _text(Object? value) {
   final text = value?.toString().trim();
   return text == null || text.isEmpty ? null : text;
+}
+
+PublicMediaDraft _publicMediaDraft(
+  AppPickedFile selected,
+  PublicMediaPurpose purpose,
+) {
+  final localPath = selected.localPath;
+  if (localPath == null) {
+    throw StateError('公共图片缺少本地文件路径');
+  }
+  return PublicMediaDraft(
+    uploadId: selected.uploadId,
+    localPath: localPath,
+    byteLength: selected.byteLength,
+    fileName: selected.fileName,
+    mimeType: selected.mimeType,
+    purpose: purpose,
+  );
 }

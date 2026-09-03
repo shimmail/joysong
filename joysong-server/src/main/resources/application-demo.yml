@@ -22,7 +22,8 @@ spring:
       enabled: false
 
 oss:
-  enabled: false
+  # Public media may explicitly use OSS; private storage is configured independently.
+  enabled: ${OSS_ENABLED:false}
 
 aliyun:
   sms:
