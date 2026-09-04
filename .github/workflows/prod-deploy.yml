@@ -396,8 +396,6 @@ jobs:
           printf '%s\n' "$backup_output"
           backup_id="$(sed -n 's/^RDS_BACKUP_ID=//p' <<<"$backup_output")"
           [[ "$backup_id" =~ ^[A-Za-z0-9_-]+$ ]]
-          # jq variables are supplied by --arg and must not be expanded by the shell.
-          # shellcheck disable=SC2016
           jq -n \
             --arg environment prod \
             --arg tag "$PROD_TAG" \
@@ -405,8 +403,8 @@ jobs:
             --arg instanceId "$ALIYUN_PROD_RDS_INSTANCE_ID" \
             --arg backupId "$backup_id" \
             --arg createdAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            '{schemaVersion: 1, environment: $environment, tag: $tag, commit: $commit,
-              rdsInstanceId: $instanceId, rdsBackupId: $backupId, createdAt: $createdAt}' \
+            "{schemaVersion: 1, environment: \$environment, tag: \$tag, commit: \$commit,
+              rdsInstanceId: \$instanceId, rdsBackupId: \$backupId, createdAt: \$createdAt}" \
             >release/rds-backup-evidence.json
           (cd release && sha256sum rds-backup-evidence.json >>SHA256SUMS)
           echo "backup_id=$backup_id" >>"$GITHUB_OUTPUT"
