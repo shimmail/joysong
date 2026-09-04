@@ -396,6 +396,8 @@ jobs:
           printf '%s\n' "$backup_output"
           backup_id="$(sed -n 's/^RDS_BACKUP_ID=//p' <<<"$backup_output")"
           [[ "$backup_id" =~ ^[A-Za-z0-9_-]+$ ]]
+          # jq variables are supplied by --arg and must not be expanded by the shell.
+          # shellcheck disable=SC2016
           jq -n \
             --arg environment prod \
             --arg tag "$PROD_TAG" \
