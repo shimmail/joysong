@@ -830,7 +830,9 @@ main() {
       recover_public_failure "$2" "$3"
       ;;
     verify-uat-isolation)
-      (($# == 2)) && [[ "$2" == "uat" ]] || fail "verify-uat-isolation requires UAT"
+      if (($# != 2)) || [[ "$2" != "uat" ]]; then
+        fail "verify-uat-isolation requires UAT"
+      fi
       verify_uat_isolation
       ;;
     preflight)
