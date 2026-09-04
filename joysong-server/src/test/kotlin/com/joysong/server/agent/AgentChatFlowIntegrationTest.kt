@@ -26,7 +26,15 @@ import com.joysong.server.chat.entity.ChatMessageEntity
 import com.joysong.server.chat.repository.ChatMessageRepository
 import com.joysong.server.chat.repository.ChatSessionRepository
 import com.joysong.server.chat.service.ChatService
+import com.joysong.server.discover.entity.DoctorProjectEntity
+import com.joysong.server.discover.repository.DoctorProjectRepository
+import com.joysong.server.doctor.entity.DoctorEntity
+import com.joysong.server.doctor.entity.DoctorInstitutionEntity
+import com.joysong.server.doctor.repository.DoctorInstitutionRepository
+import com.joysong.server.doctor.repository.DoctorRepository
 import com.joysong.server.institution.entity.InstitutionEntity
+import com.joysong.server.institution.entity.InstitutionProjectEntity
+import com.joysong.server.institution.repository.InstitutionProjectRepository
 import com.joysong.server.institution.repository.InstitutionRepository
 import com.joysong.server.project.entity.ProjectEntity
 import com.joysong.server.project.repository.ProjectRepository
@@ -120,6 +128,18 @@ class AgentChatFlowIntegrationTest {
 
     @Autowired
     private lateinit var institutionRepository: InstitutionRepository
+
+    @Autowired
+    private lateinit var institutionProjectRepository: InstitutionProjectRepository
+
+    @Autowired
+    private lateinit var doctorRepository: DoctorRepository
+
+    @Autowired
+    private lateinit var doctorInstitutionRepository: DoctorInstitutionRepository
+
+    @Autowired
+    private lateinit var doctorProjectRepository: DoctorProjectRepository
 
     @Autowired
     private lateinit var userRepository: UserRepository
@@ -474,15 +494,58 @@ class AgentChatFlowIntegrationTest {
 
     @Test
     fun `unsafe planning output is replaced and catalog free text is not grounded`() {
-        val project = projectRepository.save(
+        val project = projectRepository.saveAndFlush(
             ProjectEntity(
-                id = "planning-safety-project",
+                id = UUID.randomUUID().toString(),
                 name = "规划安全边界项目",
                 category = "肤质管理",
                 tags = "规划安全边界",
                 description = "目录宣称恢复期1天并且无痛",
                 slogan = "目录宣称零风险且最适合你",
                 detailContent = "<p>目录宣称无需确认禁忌</p>"
+            )
+        )
+        val institution = institutionRepository.saveAndFlush(
+            InstitutionEntity(
+                id = UUID.randomUUID().toString(),
+                name = "规划安全边界机构",
+                isVerified = true
+            )
+        )
+        val doctor = doctorRepository.saveAndFlush(
+            DoctorEntity(
+                id = "user-2",
+                name = "规划安全边界医生",
+                institutionId = institution.id,
+                institutionName = institution.name,
+                isVerified = true
+            )
+        )
+        val relation = doctorInstitutionRepository.saveAndFlush(
+            DoctorInstitutionEntity(
+                id = UUID.randomUUID().toString(),
+                doctorId = doctor.id,
+                institutionId = institution.id,
+                isPrimary = true,
+                status = "APPROVED"
+            )
+        )
+        val offering = institutionProjectRepository.saveAndFlush(
+            InstitutionProjectEntity(
+                id = UUID.randomUUID().toString(),
+                institutionId = institution.id,
+                projectId = project.id,
+                price = "1000.00".toBigDecimal(),
+                isActive = true
+            )
+        )
+        val binding = doctorProjectRepository.saveAndFlush(
+            DoctorProjectEntity(
+                doctorId = doctor.id,
+                projectId = project.id,
+                institutionProjectId = offering.id,
+                price = "1000.00".toBigDecimal(),
+                isActive = true
             )
         )
         val bypassReply = "结合你可接受3天恢复和低痛偏好，A排在第一位，建议选择A"
@@ -519,6 +582,11 @@ class AgentChatFlowIntegrationTest {
                 messageRepository.findBySessionIdOrderBySequenceNoAsc(session.id).last().content
             )
         } finally {
+            doctorProjectRepository.delete(binding)
+            doctorInstitutionRepository.delete(relation)
+            institutionProjectRepository.delete(offering)
+            doctorRepository.delete(doctor)
+            institutionRepository.delete(institution)
             projectRepository.deleteById(project.id)
         }
     }

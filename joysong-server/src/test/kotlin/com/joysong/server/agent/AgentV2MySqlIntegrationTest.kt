@@ -29,8 +29,10 @@ import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabas
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection
 import org.springframework.dao.DataAccessException
+import org.springframework.core.io.ClassPathResource
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.datasource.DriverManagerDataSource
+import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.springframework.transaction.annotation.Propagation
@@ -124,17 +126,15 @@ class AgentV2MySqlIntegrationTest {
 
     @Test
     fun `already V10 agent turns schema upgrades with the turn lease column`() {
-        val upgradeFlyway = Flyway.configure()
-            .configuration(mapOf("flyway.baselineMigrationPrefix" to "DISABLED"))
-            .dataSource(upgradeMysql.jdbcUrl, upgradeMysql.username, upgradeMysql.password)
-            .locations("classpath:db/migration")
-            .target("10")
-            .load()
-        upgradeFlyway.migrate()
-
-        val upgradeJdbcTemplate = JdbcTemplate(
-            DriverManagerDataSource(upgradeMysql.jdbcUrl, upgradeMysql.username, upgradeMysql.password)
+        val upgradeDataSource = DriverManagerDataSource(
+            upgradeMysql.jdbcUrl,
+            upgradeMysql.username,
+            upgradeMysql.password
         )
+        // Build the exact agent V10 state without replaying unrelated historical application migrations.
+        ResourceDatabasePopulator(ClassPathResource("db/migration/V10__rebuild_agent_v2.sql"))
+            .execute(upgradeDataSource)
+        val upgradeJdbcTemplate = JdbcTemplate(upgradeDataSource)
         assertEquals(0, leaseColumnCount(upgradeJdbcTemplate))
         val legacySessionId = UUID.randomUUID().toString()
         val legacyTurnId = UUID.randomUUID().toString()
@@ -161,8 +161,12 @@ class AgentV2MySqlIntegrationTest {
         )
 
         Flyway.configure()
-            .dataSource(upgradeMysql.jdbcUrl, upgradeMysql.username, upgradeMysql.password)
+            .configuration(mapOf("flyway.baselineMigrationPrefix" to "DISABLED"))
+            .dataSource(upgradeDataSource)
             .locations("classpath:db/migration")
+            .baselineVersion("14")
+            .baselineOnMigrate(true)
+            .target("15")
             .load()
             .migrate()
 
